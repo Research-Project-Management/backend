@@ -96,7 +96,7 @@ export class DiagnosticsController {
     return this.diagnosticsService.lintDocument(dto);
   }
 
-  @Post('projects/:projectId/lint')
+  @Post(['projects/:projectId/lint', ':projectId/lint'])
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.REVIEWER)
   @UserRateLimit('search-replace')

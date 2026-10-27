@@ -4,7 +4,7 @@
  * Pure domain modules (document-transpiler, archive-validator) run in-process without DI ceremony.
  */
 
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ManuscriptsCoreModule } from '@/modules/manuscripts/core';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
@@ -36,10 +36,10 @@ import { ExportImportController } from './export-import.controller';
 @Module({
   imports: [
     ManuscriptsCoreModule,
-    StructureModule,
-    DocstoreModule,
+    forwardRef(() => StructureModule),
+    forwardRef(() => DocstoreModule),
     FilestoreModule,
-    ClsiModule,
+    forwardRef(() => ClsiModule),
     TemplatesModule,
   ],
   controllers: [ExportImportController],

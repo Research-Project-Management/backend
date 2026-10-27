@@ -4,12 +4,13 @@
  * and S3/disk persistence (2 adapters = a real seam!).
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Readable } from 'stream';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { IBinaryStoragePort } from '../../filestore/filestore.types';
 import {
   IDocPersistor,
   Md5MismatchError,
@@ -211,6 +212,158 @@ export class DocArchiveRepository implements IDocPersistor {
     this.inMemoryStore.delete(key);
     const filePath = this.resolveDiskPath(key);
     await fs.promises.unlink(filePath).catch(() => {});
+  }
+}
+
+/**
+ * Cold Tier document archive adapter delegating to IBinaryStoragePort (S3 or local disk)
+ * with stream-level MD5 validation and fallback to local disk DocArchiveRepository.
+ */
+@Injectable()
+export class StoragePortDocArchiveAdapter implements IDocPersistor {
+  private readonly logger = new Logger(StoragePortDocArchiveAdapter.name);
+  private readonly bucket: string;
+  private readonly diskFallback: DocArchiveRepository;
+
+  constructor(
+    @Optional()
+    @Inject(IBinaryStoragePort)
+    private readonly binaryStorage?: IBinaryStoragePort,
+    @Optional() private readonly configService?: ConfigService,
+  ) {
+    this.bucket =
+      this.configService?.get<string>('S3_BUCKET_NAME') ||
+      this.configService?.get<string>('DOCSTORE_ARCHIVE_BUCKET') ||
+      'flux-docstore-archive';
+    this.diskFallback = new DocArchiveRepository(this.configService);
+  }
+
+  public isDurableStorageConfigured(): boolean {
+    if (this.binaryStorage) {
+      return true;
+    }
+    return this.diskFallback.isDurableStorageConfigured();
+  }
+
+  private async streamToBuffer(stream: Readable): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  public async sendStream(
+    key: string,
+    stream: Readable,
+    options?: { sourceMd5?: string },
+  ): Promise<void> {
+    const buffer = await this.streamToBuffer(stream);
+    const actualMd5 = computeContentMd5(buffer);
+
+    if (options?.sourceMd5 && options.sourceMd5 !== actualMd5) {
+      throw new Md5MismatchError('MD5 mismatch when storing doc archive', {
+        key,
+        sourceMd5: options.sourceMd5,
+        actualMd5,
+      });
+    }
+
+    if (this.binaryStorage) {
+      try {
+        await this.binaryStorage.sendStream(
+          this.bucket,
+          key,
+          Readable.from(buffer),
+          {
+            sourceMd5: actualMd5,
+            contentType: 'application/json',
+          },
+        );
+        this.logger.debug(
+          `Persisted doc archive key "${key}" (${buffer.length} bytes, md5: ${actualMd5}) via IBinaryStoragePort`,
+        );
+        return;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `IBinaryStoragePort upload failed for "${key}", falling back to disk archive: ${msg}`,
+        );
+      }
+    }
+
+    await this.diskFallback.sendStream(key, Readable.from(buffer), {
+      sourceMd5: actualMd5,
+    });
+  }
+
+  public async getObjectStream(key: string): Promise<Readable> {
+    if (this.binaryStorage) {
+      try {
+        const exists = await this.binaryStorage.checkObjectExists(
+          this.bucket,
+          key,
+        );
+        if (exists) {
+          return await this.binaryStorage.getObjectStream(this.bucket, key);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `IBinaryStoragePort check failed for key "${key}": ${msg}`,
+        );
+      }
+    }
+
+    return await this.diskFallback.getObjectStream(key);
+  }
+
+  public async getObjectMd5Hash(key: string): Promise<string> {
+    if (this.binaryStorage) {
+      try {
+        const exists = await this.binaryStorage.checkObjectExists(
+          this.bucket,
+          key,
+        );
+        if (exists) {
+          const meta = await this.binaryStorage.getObjectMetadata(
+            this.bucket,
+            key,
+          );
+          if (meta?.etag) {
+            return meta.etag.replace(/"/g, '');
+          }
+          const stream = await this.binaryStorage.getObjectStream(
+            this.bucket,
+            key,
+          );
+          const buffer = await this.streamToBuffer(stream);
+          return computeContentMd5(buffer);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `IBinaryStoragePort getObjectMd5Hash failed for key "${key}": ${msg}`,
+        );
+      }
+    }
+
+    return await this.diskFallback.getObjectMd5Hash(key);
+  }
+
+  public async deleteObject(key: string): Promise<void> {
+    if (this.binaryStorage) {
+      try {
+        await this.binaryStorage.deleteObject(this.bucket, key);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `IBinaryStoragePort deleteObject notice for key "${key}": ${msg}`,
+        );
+      }
+    }
+
+    await this.diskFallback.deleteObject(key);
   }
 }
 

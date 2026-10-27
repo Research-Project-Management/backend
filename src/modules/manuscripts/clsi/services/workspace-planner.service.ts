@@ -23,6 +23,7 @@ import {
 } from '../domain/compile-fileset.planner';
 import { FileSnapshotVo } from '@/modules/manuscripts/project-history/domain/file-snapshot.vo';
 import { OverleafIncrementalWorkspace } from '../repositories/incremental-workspace.repository';
+import { SafePath } from '../domain/safe-path';
 
 @Injectable()
 export class ClsiWorkspacePlannerService {
@@ -235,15 +236,18 @@ export class ClsiWorkspacePlannerService {
           // read it directly from local scratch disk so syncFiles retains it in the manifest
           // without re-streaming from remote object storage.
           if (scratchDir) {
-            const localAssetPath = path.join(scratchDir, relPath);
             try {
+              const localAssetPath = SafePath.resolveSafePath(
+                scratchDir,
+                relPath,
+              );
               const stat = await fs.stat(localAssetPath);
               if (bf.sizeBytes && stat.size === bf.sizeBytes) {
                 out[relPath] = await fs.readFile(localAssetPath);
                 continue;
               }
             } catch {
-              // Asset not present on disk, proceed with stream fetch
+              // Asset not present on disk or unsafe path, proceed with stream fetch
             }
           }
 
@@ -369,6 +373,8 @@ export class ClsiWorkspacePlannerService {
       let candidateVersion = nextVersion;
       const maxAttempts = 3;
       let savedVersion = candidateVersion;
+      const serializedFiles = JSON.stringify(filesJson);
+      const snapshotSizeBytes = Buffer.byteLength(serializedFiles, 'utf8');
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
@@ -380,7 +386,7 @@ export class ClsiWorkspacePlannerService {
               createdById: userId || null,
               isAutomatic: true,
               files: filesJson as unknown as Prisma.InputJsonValue,
-              sizeBytes: Object.keys(filesJson).length,
+              sizeBytes: snapshotSizeBytes,
             },
           });
           savedVersion = candidateVersion;

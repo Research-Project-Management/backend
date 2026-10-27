@@ -6,6 +6,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ManuscriptNode, Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
+import { computeDocSha256 } from '@/modules/manuscripts/docstore/domain/doc-hasher';
 import {
   IStructureRepository,
   CreateNodeParams,
@@ -288,45 +289,56 @@ export class StructureRepository extends IStructureRepository {
     );
 
     const now = new Date();
-    const cleanupOps: Promise<unknown>[] = [];
+    const runCleanup = async (
+      db: Pick<
+        PrismaService,
+        'manuscriptNode' | 'manuscriptDoc' | 'manuscriptFile'
+      >,
+    ) => {
+      const ops: Promise<unknown>[] = [];
+      if (targetIds.length > 0) {
+        ops.push(
+          db.manuscriptNode.deleteMany({
+            where: { id: { in: targetIds }, projectId },
+          }),
+        );
+      }
 
-    if (targetIds.length > 0) {
-      cleanupOps.push(
-        this.prisma.manuscriptNode.deleteMany({
-          where: { id: { in: targetIds }, projectId },
-        }),
-      );
-    }
+      if (docIds.length > 0 && db.manuscriptDoc?.updateMany) {
+        ops.push(
+          db.manuscriptDoc.updateMany({
+            where: { id: { in: docIds }, projectId, deleted: false },
+            data: { deleted: true, deletedAt: now },
+          }),
+        );
+      }
 
-    if (docIds.length > 0 && this.prisma.manuscriptDoc?.updateMany) {
-      cleanupOps.push(
-        this.prisma.manuscriptDoc.updateMany({
-          where: { id: { in: docIds }, projectId, deleted: false },
-          data: { deleted: true, deletedAt: now },
-        }),
-      );
-    }
+      if (fileIds.length > 0 && db.manuscriptFile?.updateMany) {
+        ops.push(
+          db.manuscriptFile.updateMany({
+            where: { id: { in: fileIds }, projectId, deleted: false },
+            data: { deleted: true, deletedAt: now },
+          }),
+        );
+      }
 
-    if (fileIds.length > 0 && this.prisma.manuscriptFile?.updateMany) {
-      cleanupOps.push(
-        this.prisma.manuscriptFile.updateMany({
-          where: { id: { in: fileIds }, projectId, deleted: false },
-          data: { deleted: true, deletedAt: now },
-        }),
-      );
-    }
+      if (ops.length > 0) {
+        await Promise.all(ops);
+      }
+    };
 
-    if (cleanupOps.length > 0) {
+    if (
+      targetIds.length > 0 ||
+      (docIds.length > 0 && typeof this.prisma.manuscriptDoc?.updateMany === 'function') ||
+      (fileIds.length > 0 && typeof this.prisma.manuscriptFile?.updateMany === 'function')
+    ) {
       if (typeof this.prisma.$transaction === 'function') {
-        try {
-          await this.prisma.$transaction(
-            cleanupOps as Prisma.PrismaPromise<unknown>[],
-          );
-        } catch {
-          await Promise.all(cleanupOps);
-        }
+        await this.prisma.$transaction(async (tx) => {
+          const client = tx?.manuscriptNode ? tx : this.prisma;
+          await runCleanup(client);
+        });
       } else {
-        await Promise.all(cleanupOps);
+        await runCleanup(this.prisma);
       }
     }
 
@@ -417,10 +429,7 @@ export class StructureRepository extends IStructureRepository {
     const lines = rawContent.length > 0 ? rawContent.split(/\r?\n/) : [''];
     const normalizedText = lines.join('\n');
     const sizeBytes = Buffer.byteLength(normalizedText, 'utf8');
-    const { createHash } = await import('node:crypto');
-    const hash = createHash('sha256')
-      .update(`blob ${sizeBytes}\0${normalizedText}`, 'utf8')
-      .digest('hex');
+    const hash = computeDocSha256(lines);
 
     const created = await this.prisma.manuscriptDoc.create({
       data: {

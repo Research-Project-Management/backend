@@ -693,7 +693,7 @@ describe('Manuscripts P0/P1 Security, Data Integrity & Concurrency Regression Su
           userId: 'user-a',
           key: 'comment-mention-thread-99-user-a',
           templateKey: 'comment_mention',
-          type: 'comment_mention',
+          type: 'mention',
           isRead: false,
         }),
       );

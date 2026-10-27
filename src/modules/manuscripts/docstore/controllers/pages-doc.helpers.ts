@@ -345,8 +345,9 @@ export async function resolvePageFilesList(
   prisma: PrismaService,
   docstoreService: DocstoreService,
   pageId: string,
+  targetProjectId?: string,
 ) {
-  let projectId: string | null = null;
+  let projectId: string | null = targetProjectId ?? null;
   let rootDoc: ManuscriptDoc | null = null;
 
   let record = await prisma.manuscriptDoc.findUnique({
@@ -360,14 +361,30 @@ export async function resolvePageFilesList(
     });
     if (node?.doc) {
       record = node.doc;
-      projectId = node.projectId;
+      if (!targetProjectId) {
+        projectId = node.projectId;
+      }
       rootDoc = node.doc;
     } else if (node) {
+      if (targetProjectId && node.projectId !== targetProjectId) {
+        throw new NotFoundException({
+          statusCode: 404,
+          code: 'RESOURCE_NOT_FOUND',
+          message: `Document ${pageId} not found`,
+        });
+      }
       projectId = node.projectId;
     }
   }
 
   if (record) {
+    if (targetProjectId && record.projectId !== targetProjectId) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: `Document ${pageId} not found`,
+      });
+    }
     projectId = record.projectId;
     rootDoc = record;
   } else if (!projectId) {
@@ -377,6 +394,13 @@ export async function resolvePageFilesList(
     if (project) {
       projectId = project.id;
     }
+  } else if (targetProjectId && pageId !== targetProjectId) {
+    // Neither record nor node matched pageId, and pageId is not the project itself
+    throw new NotFoundException({
+      statusCode: 404,
+      code: 'RESOURCE_NOT_FOUND',
+      message: `Document ${pageId} not found`,
+    });
   }
 
   if (!projectId) {
@@ -663,7 +687,7 @@ export async function duplicateSourcePageAndNode(
       projectId: source.projectId,
       path: newTitle,
       lines: hydratedSourceLines,
-      rev: 0,
+      rev: 1,
       version: 1,
       ranges: source.ranges ?? {},
       hash: source.hash,

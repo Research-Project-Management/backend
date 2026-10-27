@@ -3,7 +3,15 @@
  * Real-time Binary Yjs CRDT Synchronization Engine (Overleaf/Yjs Parity).
  */
 
-import { Injectable, Logger, Optional, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
+import type { Server } from 'socket.io';
+import { randomUUID } from 'node:crypto';
 import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
@@ -11,9 +19,14 @@ import * as decoding from 'lib0/decoding';
 
 import { RedisCacheService } from '@/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { LineArrayEngine } from '@/modules/manuscripts/docstore/domain';
+import { LineArrayEngine, DocNotFoundError } from '@/modules/manuscripts/docstore/domain';
 import { YjsUpdateValidator } from './yjs-update-validator';
+import {
+  YjsCursorDiffEngine,
+  type YjsCursorPreservingEdit,
+} from './yjs-cursor-diff.engine';
 import { RealtimeConfigService } from '../core/realtime.config';
+import { REALTIME_EVENTS } from '../core/realtime.constant';
 import { RealtimeException } from '../core/ws-errors';
 
 export interface ActiveDocSession {
@@ -35,9 +48,21 @@ export interface SyncMessageResult {
   msgType?: number;
 }
 
+export interface YjsClusterRelayMessage {
+  instanceId: string;
+  type: 'yjs-update' | 'external-text' | 'evict';
+  projectId: string;
+  docId: string;
+  updateBase64?: string;
+  text?: string;
+}
+
 @Injectable()
-export class YjsService implements OnModuleDestroy {
+export class YjsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(YjsService.name);
+  public readonly instanceId = randomUUID();
+  private static readonly CLUSTER_CHANNEL = 'manuscript:crdt:cluster';
+  private pubSubSubscriber: any = null;
 
   // Active in-memory documents: `${projectId}:${docId}` -> ActiveDocSession
   private readonly activeDocs = new Map<string, ActiveDocSession>();
@@ -61,6 +86,7 @@ export class YjsService implements OnModuleDestroy {
   private readonly SWEEP_INTERVAL_MS = 5 * 60 * 1000;
   private sweepTimer: NodeJS.Timeout | null = null;
   private readonly validator: YjsUpdateValidator;
+  private server: Server | null = null;
 
   constructor(
     @Optional() private readonly redis?: RedisCacheService,
@@ -70,6 +96,10 @@ export class YjsService implements OnModuleDestroy {
   ) {
     this.validator = validator ?? new YjsUpdateValidator();
     this.startIdleSweeper();
+  }
+
+  public setServer(server: Server): void {
+    this.server = server;
   }
 
   private startIdleSweeper(): void {
@@ -117,17 +147,167 @@ export class YjsService implements OnModuleDestroy {
     return evictedCount;
   }
 
+  public async onModuleInit(): Promise<void> {
+    if (!this.redis || !this.redis.isReady()) return;
+    const baseClient = this.redis.getClient?.();
+    if (!baseClient || typeof baseClient.duplicate !== 'function') return;
+
+    try {
+      this.pubSubSubscriber = baseClient.duplicate();
+      this.pubSubSubscriber.on('error', (err: Error) => {
+        this.logger.warn(`Yjs Redis subscriber error: ${err.message}`);
+      });
+      this.pubSubSubscriber.on('message', (channel: string, raw: string) => {
+        if (channel !== YjsService.CLUSTER_CHANNEL) return;
+        this.handleClusterRelayRaw(raw);
+      });
+      if (typeof this.pubSubSubscriber.subscribe === 'function') {
+        await this.pubSubSubscriber.subscribe(YjsService.CLUSTER_CHANNEL);
+      }
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Failed to initialize Yjs Redis pub/sub relay: ${(err as Error)?.message}`,
+      );
+    }
+  }
+
+  public handleClusterRelayRaw(raw: string): void {
+    try {
+      const msg = JSON.parse(raw) as YjsClusterRelayMessage;
+      this.handleClusterRelayMessage(msg);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Invalid Yjs cluster relay payload: ${(err as Error)?.message}`,
+      );
+    }
+  }
+
+  public handleClusterRelayMessage(msg: YjsClusterRelayMessage): void {
+    if (!msg || msg.instanceId === this.instanceId) return;
+    const key = this.docKey(msg.projectId, msg.docId);
+    const session = this.activeDocs.get(key);
+    if (!session) return;
+
+    if (msg.type === 'evict') {
+      if (session.flushTimeout) {
+        clearTimeout(session.flushTimeout);
+        session.flushTimeout = undefined;
+      }
+      this.activeDocs.delete(key);
+      this.projectDocKeys.get(msg.projectId)?.delete(key);
+      session.doc.destroy();
+      return;
+    }
+
+    if (msg.type === 'external-text' && typeof msg.text === 'string') {
+      if (session.flushTimeout) {
+        clearTimeout(session.flushTimeout);
+        session.flushTimeout = undefined;
+      }
+      session.firstUnflushedAt = undefined;
+      session.lastFlushedRev = undefined;
+      const current = session.yText.toString();
+      let captured: Uint8Array | null = null;
+      if (current !== msg.text) {
+        const capture = (update: Uint8Array) => {
+          captured = captured ? Y.mergeUpdates([captured, update]) : update;
+        };
+        session.doc.on('update', capture);
+        try {
+          YjsCursorDiffEngine.applyEditsToYText(
+            session.doc,
+            session.yText,
+            current,
+            msg.text,
+            'cluster-relay',
+          );
+        } finally {
+          session.doc.off('update', capture);
+        }
+      }
+      session.lastFlushedText = msg.text;
+      if (captured) {
+        const encoder = encoding.createEncoder();
+        syncProtocol.writeUpdate(encoder, captured);
+        const frame = Buffer.from(encoding.toUint8Array(encoder));
+        if (this.server) {
+          this.server
+            .to(`doc:${msg.projectId}:${msg.docId}`)
+            .emit(REALTIME_EVENTS.YJS_SYNC_UPDATE, {
+              projectId: msg.projectId,
+              docId: msg.docId,
+              data: frame,
+            });
+        }
+      }
+      if (this.redis && this.redis.isReady()) {
+        void this.saveBinaryToRedis(
+          msg.projectId,
+          msg.docId,
+          session.doc,
+          session.lastFlushedRev,
+        ).catch((err: unknown) => {
+          this.logger.warn(
+            `Failed to persist external-text cluster relay Y.Doc to Redis for ${msg.projectId}:${msg.docId}: ${(err as Error)?.message}`,
+          );
+        });
+      }
+      return;
+    }
+
+    if (msg.type === 'yjs-update' && msg.updateBase64) {
+      const updateBuf = Buffer.from(msg.updateBase64, 'base64');
+      if (updateBuf.length > 0) {
+        Y.applyUpdate(session.doc, updateBuf, 'cluster-relay');
+        session.lastActiveAt = Date.now();
+      }
+    }
+  }
+
+  private publishClusterRelay(
+    payload: Omit<YjsClusterRelayMessage, 'instanceId'>,
+  ): void {
+    if (!this.redis || !this.redis.isReady()) return;
+    const client = this.redis.getClient?.();
+    if (!client || typeof client.publish !== 'function') return;
+
+    const fullMsg: YjsClusterRelayMessage = {
+      instanceId: this.instanceId,
+      ...payload,
+    };
+    Promise.resolve(
+      client.publish(YjsService.CLUSTER_CHANNEL, JSON.stringify(fullMsg)),
+    ).catch((err: unknown) => {
+      this.logger.warn(
+        `Failed to publish Yjs cluster relay message: ${(err as Error)?.message}`,
+      );
+    });
+  }
+
   public async onModuleDestroy(): Promise<void> {
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = null;
     }
 
+    if (this.pubSubSubscriber) {
+      try {
+        await this.pubSubSubscriber.quit?.();
+      } catch {
+        this.pubSubSubscriber.disconnect?.();
+      }
+      this.pubSubSubscriber = null;
+    }
+
     const keys = Array.from(this.activeDocs.keys());
     for (const key of keys) {
       const session = this.activeDocs.get(key);
       if (session) {
-        await this.evictDoc(session.projectId, session.docId).catch(() => {});
+        await this.evictDoc(session.projectId, session.docId).catch((err) =>
+          this.logger.error(
+            `Failed to flush/evict ${key} during shutdown; unsaved edits may be lost: ${(err as Error)?.message}`,
+          ),
+        );
       }
     }
     this.activeDocs.clear();
@@ -145,6 +325,14 @@ export class YjsService implements OnModuleDestroy {
     return `manuscript:crdt:bin:${projectId}:${docId}`;
   }
 
+  private redisMetaKey(projectId: string, docId: string): string {
+    return `manuscript:crdt:meta:${projectId}:${docId}`;
+  }
+
+  private redisFlushLockKey(projectId: string, docId: string): string {
+    return `lock:yjs:flush:${projectId}:${docId}`;
+  }
+
   public getRedisBinaryKey(projectId: string, docId: string): string {
     return this.redisKey(projectId, docId);
   }
@@ -156,6 +344,7 @@ export class YjsService implements OnModuleDestroy {
     if (this.redis && this.redis.isReady()) {
       try {
         await this.redis.del(this.redisKey(projectId, docId));
+        await this.redis.del(this.redisMetaKey(projectId, docId));
       } catch (err: unknown) {
         this.logger.warn(
           `Failed to delete Redis CRDT snapshot for ${projectId}:${docId}: ${(err as Error)?.message}`,
@@ -168,6 +357,7 @@ export class YjsService implements OnModuleDestroy {
     projectId: string,
     docId: string,
     doc: Y.Doc,
+    rev?: number,
   ): Promise<void> {
     if (this.redis && this.redis.isReady()) {
       const binarySnapshot = Y.encodeStateAsUpdate(doc);
@@ -176,6 +366,15 @@ export class YjsService implements OnModuleDestroy {
         Buffer.from(binarySnapshot),
         this.REDIS_SNAPSHOT_TTL_SECONDS,
       );
+      if (rev !== undefined && typeof this.redis.set === 'function') {
+        await this.redis
+          .set(
+            this.redisMetaKey(projectId, docId),
+            { rev, updatedAt: Date.now() },
+            this.REDIS_SNAPSHOT_TTL_SECONDS,
+          )
+          .catch(() => {});
+      }
     }
   }
 
@@ -201,17 +400,50 @@ export class YjsService implements OnModuleDestroy {
         const yText = doc.getText('latex');
 
         let loadedFromRedis = false;
+        let baselineDocRecord: { lines?: string[]; rev?: number; version?: number } | null = null;
         if (this.redis && this.redis.isReady()) {
           try {
             const rawBuffer = await this.redis.getBuffer(
               this.redisKey(projectId, docId),
             );
             if (rawBuffer && rawBuffer.length > 0) {
-              Y.applyUpdate(doc, rawBuffer, 'redis-init');
-              loadedFromRedis = true;
-              this.logger.debug(
-                `Hydrated Y.Doc from Redis binary cache: ${key} (${rawBuffer.length} bytes)`,
-              );
+              let redisIsStale = false;
+              if (
+                this.docstoreService &&
+                typeof this.redis.get === 'function' &&
+                typeof this.docstoreService.getDoc === 'function'
+              ) {
+                try {
+                  const meta = await this.redis.get<{ rev?: number }>(
+                    this.redisMetaKey(projectId, docId),
+                  );
+                  if (meta && typeof meta.rev === 'number') {
+                    baselineDocRecord = await this.docstoreService
+                      .getDoc(projectId, docId)
+                      .catch(() => null);
+                    if (
+                      baselineDocRecord?.rev !== undefined &&
+                      baselineDocRecord.rev > meta.rev
+                    ) {
+                      redisIsStale = true;
+                      this.logger.warn(
+                        `Discarding stale Redis Y.Doc snapshot for ${key} (redis rev=${meta.rev} < docstore rev=${baselineDocRecord.rev})`,
+                      );
+                      await this.deleteRedisSnapshot(projectId, docId);
+                    }
+                  }
+                } catch {
+                  // Ignore metadata check errors
+                }
+              }
+
+              if (!redisIsStale) {
+                Y.applyUpdate(doc, rawBuffer, 'redis-init');
+                loadedFromRedis = true;
+                this.logger.debug(
+                  `Hydrated Y.Doc from Redis binary cache: ${key} (${rawBuffer.length} bytes)`,
+                );
+              }
             }
           } catch (err: unknown) {
             this.logger.warn(
@@ -222,10 +454,21 @@ export class YjsService implements OnModuleDestroy {
 
         if (!loadedFromRedis && this.docstoreService) {
           try {
-            const rawText = await this.docstoreService.getRawDoc(
-              projectId,
-              docId,
-            );
+            let rawText: string | null = null;
+            if (baselineDocRecord && Array.isArray(baselineDocRecord.lines)) {
+              rawText = baselineDocRecord.lines.join('\n');
+            } else if (
+              typeof (this.docstoreService as any).getRawDoc === 'function'
+            ) {
+              rawText = await (this.docstoreService as any).getRawDoc(
+                projectId,
+                docId,
+              );
+            } else if (typeof this.docstoreService.getDoc === 'function') {
+              const res = await this.docstoreService.getDoc(projectId, docId);
+              baselineDocRecord = res;
+              rawText = Array.isArray(res?.lines) ? res.lines.join('\n') : '';
+            }
             if (rawText && rawText.length > 0) {
               doc.transact(() => {
                 yText.insert(0, rawText);
@@ -235,9 +478,21 @@ export class YjsService implements OnModuleDestroy {
               );
             }
           } catch (err: unknown) {
-            this.logger.debug(
-              `Docstore baseline not found for ${key}, starting with empty doc: ${(err as Error)?.message}`,
-            );
+            const isNotFound =
+              err instanceof DocNotFoundError ||
+              (err as { name?: string })?.name === 'DocNotFoundError' ||
+              (err as { message?: string })?.message?.includes('not found');
+            if (isNotFound) {
+              this.logger.debug(
+                `Docstore baseline not found for ${key}, starting with empty doc: ${(err as Error)?.message}`,
+              );
+            } else {
+              this.logger.error(
+                `Critical error hydrating Docstore baseline for ${key}: ${(err as Error)?.message}`,
+                (err as Error)?.stack,
+              );
+              throw err;
+            }
           }
         }
 
@@ -248,21 +503,34 @@ export class YjsService implements OnModuleDestroy {
           docId,
           lastActiveAt: Date.now(),
           lastFlushedText: yText.toString(),
+          ...(baselineDocRecord?.rev !== undefined
+            ? { lastFlushedRev: baselineDocRecord.rev }
+            : {}),
+          ...(baselineDocRecord?.version !== undefined
+            ? { currentVersion: baselineDocRecord.version }
+            : {}),
         };
 
-        doc.on('update', (_update: Uint8Array, origin: unknown) => {
-          if (origin === 'redis-init' || origin === 'docstore-init') return;
+        doc.on('update', (update: Uint8Array, origin: unknown) => {
+          if (
+            origin === 'redis-init' ||
+            origin === 'docstore-init' ||
+            origin === 'cluster-relay'
+          ) {
+            return;
+          }
           if (origin === 'rest-api') {
             session.lastActiveAt = Date.now();
             session.lastFlushedText = session.yText.toString();
-            void this.saveBinaryToRedis(projectId, docId, session.doc).catch(
-              (err: unknown) => {
-                this.logger.warn(
-                  `Failed to save rest-api Y.Doc update to Redis for ${key}: ${(err as Error)?.message}`,
-                );
-              },
-            );
             return;
+          }
+          if (update && update.byteLength > 0) {
+            this.publishClusterRelay({
+              type: 'yjs-update',
+              projectId,
+              docId,
+              updateBase64: Buffer.from(update).toString('base64'),
+            });
           }
           this.handleDocUpdated(projectId, docId, session);
         });
@@ -284,6 +552,31 @@ export class YjsService implements OnModuleDestroy {
     return initPromise;
   }
 
+  private assertPostApplySizeBeforeMutation(
+    doc: Y.Doc,
+    applyAction: (targetDoc: Y.Doc) => void,
+  ): void {
+    const maxDocSize = this.config?.getMaxDocumentSizeBytes() ?? 20 * 1024 * 1024;
+    let approxChars = 0;
+    for (const item of doc.share.values()) {
+      const anyItem = item as unknown as { length?: number };
+      if (typeof anyItem?.length === 'number') {
+        approxChars += anyItem.length;
+      }
+    }
+    if (
+      maxDocSize <= 1024 ||
+      approxChars * 4 > maxDocSize - 64 * 1024
+    ) {
+      const tempDoc = new Y.Doc();
+      tempDoc.getText('latex');
+      Y.applyUpdate(tempDoc, Y.encodeStateAsUpdate(doc));
+      applyAction(tempDoc);
+      this.validator.validatePostApplySize(tempDoc, maxDocSize);
+      tempDoc.destroy();
+    }
+  }
+
   public async handleSyncMessage(
     projectId: string,
     docId: string,
@@ -298,6 +591,24 @@ export class YjsService implements OnModuleDestroy {
     }
 
     try {
+      const peekDec = decoding.createDecoder(rawBytes);
+      const peekMsgType = decoding.readVarUint(peekDec);
+      if (
+        peekMsgType === syncProtocol.messageYjsUpdate ||
+        peekMsgType === syncProtocol.messageYjsSyncStep2
+      ) {
+        this.validator.validatePreApplySize(
+          session.doc,
+          rawBytes.byteLength,
+          this.config?.getMaxDocumentSizeBytes(),
+        );
+        this.assertPostApplySizeBeforeMutation(session.doc, (tempDoc) => {
+          const tempDec = decoding.createDecoder(rawBytes);
+          const tempEnc = encoding.createEncoder();
+          syncProtocol.readSyncMessage(tempDec, tempEnc, tempDoc, origin);
+        });
+      }
+
       const decoder = decoding.createDecoder(rawBytes);
       const encoder = encoding.createEncoder();
 
@@ -386,6 +697,12 @@ export class YjsService implements OnModuleDestroy {
     const rawUpdate = this.normalizeToUint8Array(update);
     if (!rawUpdate || rawUpdate.length === 0) return;
 
+    this.validator.validatePreApplySize(
+      session.doc,
+      rawUpdate.byteLength,
+      this.config?.getMaxDocumentSizeBytes(),
+    );
+
     try {
       const dec = decoding.createDecoder(rawUpdate);
       const msgType = decoding.readVarUint(dec);
@@ -394,6 +711,9 @@ export class YjsService implements OnModuleDestroy {
         msgType === syncProtocol.messageYjsUpdate
       ) {
         const innerUpdate = decoding.readVarUint8Array(dec);
+        this.assertPostApplySizeBeforeMutation(session.doc, (tempDoc) => {
+          Y.applyUpdate(tempDoc, innerUpdate, origin);
+        });
         Y.applyUpdate(session.doc, innerUpdate, origin);
         this.validator.validatePostApplySize(
           session.doc,
@@ -409,6 +729,9 @@ export class YjsService implements OnModuleDestroy {
     }
 
     try {
+      this.assertPostApplySizeBeforeMutation(session.doc, (tempDoc) => {
+        Y.applyUpdate(tempDoc, rawUpdate, origin);
+      });
       Y.applyUpdate(session.doc, rawUpdate, origin);
       this.validator.validatePostApplySize(
         session.doc,
@@ -432,6 +755,12 @@ export class YjsService implements OnModuleDestroy {
     const rawBytes = this.normalizeToUint8Array(update);
     if (!rawBytes || rawBytes.length === 0) return Buffer.alloc(0);
 
+    this.validator.validatePreApplySize(
+      session.doc,
+      rawBytes.byteLength,
+      this.config?.getMaxDocumentSizeBytes(),
+    );
+
     try {
       let updateToApply: Uint8Array = rawBytes;
       try {
@@ -449,6 +778,18 @@ export class YjsService implements OnModuleDestroy {
       } catch {
         // Direct update bytes
       }
+
+      this.assertPostApplySizeBeforeMutation(session.doc, (tempDoc) => {
+        try {
+          Y.applyUpdate(tempDoc, updateToApply, origin);
+        } catch (applyErr) {
+          if (updateToApply !== rawBytes) {
+            Y.applyUpdate(tempDoc, rawBytes, origin);
+          } else {
+            throw applyErr;
+          }
+        }
+      });
 
       try {
         Y.applyUpdate(session.doc, updateToApply, origin);
@@ -514,19 +855,13 @@ export class YjsService implements OnModuleDestroy {
     };
     session.doc.on('update', capture);
     try {
-      session.doc.transact(() => {
-        const edits = this.computeCursorPreservingEdits(current, nextText);
-        // Apply in reverse order so character offsets remain valid
-        for (let i = edits.length - 1; i >= 0; i--) {
-          const edit = edits[i];
-          if (edit.deleteLen > 0) {
-            session.yText.delete(edit.index, edit.deleteLen);
-          }
-          if (edit.insertText.length > 0) {
-            session.yText.insert(edit.index, edit.insertText);
-          }
-        }
-      }, 'rest-api');
+      YjsCursorDiffEngine.applyEditsToYText(
+        session.doc,
+        session.yText,
+        current,
+        nextText,
+        'rest-api',
+      );
     } finally {
       session.doc.off('update', capture);
     }
@@ -539,159 +874,13 @@ export class YjsService implements OnModuleDestroy {
 
   /**
    * Computes minimal cursor-preserving character edits between `current` and `nextText`.
-   * Uses line-level LCS anchoring for multi-hunk mutations so unchanged middle lines
-   * are never deleted and re-inserted (preserving collaborator Yjs RelativePositions).
+   * Delegates to pure domain engine `YjsCursorDiffEngine`.
    */
   public computeCursorPreservingEdits(
     current: string,
     nextText: string,
-  ): Array<{ index: number; deleteLen: number; insertText: string }> {
-    if (current === nextText) return [];
-
-    const trimSpanToSingleEdit = (
-      baseOffset: number,
-      oldSpan: string,
-      newSpan: string,
-    ): { index: number; deleteLen: number; insertText: string } | null => {
-      if (oldSpan === newSpan) return null;
-      let prefix = 0;
-      const maxPrefix = Math.min(oldSpan.length, newSpan.length);
-      while (prefix < maxPrefix && oldSpan[prefix] === newSpan[prefix])
-        prefix++;
-      if (
-        prefix > 0 &&
-        oldSpan.charCodeAt(prefix - 1) >= 0xd800 &&
-        oldSpan.charCodeAt(prefix - 1) <= 0xdbff
-      ) {
-        prefix--;
-      }
-
-      let suffix = 0;
-      const maxSuffix = Math.min(oldSpan.length, newSpan.length) - prefix;
-      while (
-        suffix < maxSuffix &&
-        oldSpan[oldSpan.length - 1 - suffix] ===
-          newSpan[newSpan.length - 1 - suffix]
-      ) {
-        suffix++;
-      }
-      if (
-        suffix > 0 &&
-        oldSpan.charCodeAt(oldSpan.length - suffix) >= 0xdc00 &&
-        oldSpan.charCodeAt(oldSpan.length - suffix) <= 0xdfff
-      ) {
-        suffix--;
-      }
-
-      return {
-        index: baseOffset + prefix,
-        deleteLen: oldSpan.length - prefix - suffix,
-        insertText: newSpan.slice(prefix, newSpan.length - suffix),
-      };
-    };
-
-    const oldLines = current.match(/[^\n]*\n|[^\n]+/g) ?? [];
-    const newLines = nextText.match(/[^\n]*\n|[^\n]+/g) ?? [];
-
-    // Fallback to single-span diff for very large line counts or single-line docs
-    if (
-      oldLines.length <= 1 ||
-      newLines.length <= 1 ||
-      oldLines.length * newLines.length > 400_000
-    ) {
-      const single = trimSpanToSingleEdit(0, current, nextText);
-      return single ? [single] : [];
-    }
-
-    // Trim common leading and trailing lines first
-    let startLine = 0;
-    while (
-      startLine < oldLines.length &&
-      startLine < newLines.length &&
-      oldLines[startLine] === newLines[startLine]
-    ) {
-      startLine++;
-    }
-
-    let endOld = oldLines.length;
-    let endNew = newLines.length;
-    while (
-      endOld > startLine &&
-      endNew > startLine &&
-      oldLines[endOld - 1] === newLines[endNew - 1]
-    ) {
-      endOld--;
-      endNew--;
-    }
-
-    const midOld = oldLines.slice(startLine, endOld);
-    const midNew = newLines.slice(startLine, endNew);
-    const m = midOld.length;
-    const n = midNew.length;
-
-    if (m * n > 250_000) {
-      const single = trimSpanToSingleEdit(0, current, nextText);
-      return single ? [single] : [];
-    }
-
-    // DP LCS table on middle lines
-    const dp = new Int32Array((m + 1) * (n + 1));
-    const width = n + 1;
-    for (let i = m - 1; i >= 0; i--) {
-      for (let j = n - 1; j >= 0; j--) {
-        if (midOld[i] === midNew[j]) {
-          dp[i * width + j] = 1 + dp[(i + 1) * width + (j + 1)];
-        } else {
-          const down = dp[(i + 1) * width + j];
-          const right = dp[i * width + (j + 1)];
-          dp[i * width + j] = down >= right ? down : right;
-        }
-      }
-    }
-
-    // Walk LCS anchors to partition non-matching line hunks
-    let baseCharOffset = 0;
-    for (let k = 0; k < startLine; k++) {
-      baseCharOffset += oldLines[k].length;
-    }
-
-    const edits: Array<{
-      index: number;
-      deleteLen: number;
-      insertText: string;
-    }> = [];
-    let i = 0;
-    let j = 0;
-    let hunkOldStart = 0;
-    let hunkNewStart = 0;
-    let hunkCharOffset = baseCharOffset;
-
-    const flushHunk = (oldEndIdx: number, newEndIdx: number) => {
-      if (oldEndIdx === hunkOldStart && newEndIdx === hunkNewStart) return;
-      const oldSpan = midOld.slice(hunkOldStart, oldEndIdx).join('');
-      const newSpan = midNew.slice(hunkNewStart, newEndIdx).join('');
-      const edit = trimSpanToSingleEdit(hunkCharOffset, oldSpan, newSpan);
-      if (edit) edits.push(edit);
-      hunkCharOffset += oldSpan.length;
-    };
-
-    while (i < m && j < n) {
-      if (midOld[i] === midNew[j]) {
-        flushHunk(i, j);
-        hunkCharOffset += midOld[i].length;
-        i++;
-        j++;
-        hunkOldStart = i;
-        hunkNewStart = j;
-      } else if (dp[(i + 1) * width + j] >= dp[i * width + (j + 1)]) {
-        i++;
-      } else {
-        j++;
-      }
-    }
-    flushHunk(m, n);
-
-    return edits;
+  ): YjsCursorPreservingEdit[] {
+    return YjsCursorDiffEngine.computeCursorPreservingEdits(current, nextText);
   }
 
   public async applyExternalTextAndSyncRedis(
@@ -704,6 +893,12 @@ export class YjsService implements OnModuleDestroy {
     if (inFlight) {
       await inFlight.catch(() => {});
     }
+    this.publishClusterRelay({
+      type: 'external-text',
+      projectId,
+      docId,
+      text: nextText,
+    });
     if (!this.isActive(projectId, docId)) {
       await this.deleteRedisSnapshot(projectId, docId);
       return { active: false, frame: null };
@@ -711,13 +906,25 @@ export class YjsService implements OnModuleDestroy {
     const frame = this.replaceTextIfActive(projectId, docId, nextText);
     const session = this.activeDocs.get(key);
     if (session) {
-      await this.saveBinaryToRedis(projectId, docId, session.doc).catch(
-        (err: unknown) => {
-          this.logger.warn(
-            `Failed to persist external text Y.Doc to Redis for ${projectId}:${docId}: ${(err as Error)?.message}`,
-          );
-        },
-      );
+      if (this.docstoreService) {
+        const freshDoc = await this.docstoreService
+          .getDoc(projectId, docId)
+          .catch(() => null);
+        if (freshDoc) {
+          session.lastFlushedRev = freshDoc.rev;
+          session.currentVersion = freshDoc.version;
+        }
+      }
+      await this.saveBinaryToRedis(
+        projectId,
+        docId,
+        session.doc,
+        session.lastFlushedRev,
+      ).catch((err: unknown) => {
+        this.logger.warn(
+          `Failed to persist external text Y.Doc to Redis for ${projectId}:${docId}: ${(err as Error)?.message}`,
+        );
+      });
     }
     return { active: true, frame };
   }
@@ -752,6 +959,68 @@ export class YjsService implements OnModuleDestroy {
     }
   }
 
+  private async acquireFlushLock(
+    projectId: string,
+    docId: string,
+  ): Promise<boolean> {
+    if (!this.redis || !this.redis.isReady()) return true;
+    const client = this.redis.getClient?.();
+    if (!client || typeof client.set !== 'function') return true;
+    try {
+      const lockKey = this.redisFlushLockKey(projectId, docId);
+      const res = await client.set(lockKey, this.instanceId, 'PX', 10000, 'NX');
+      return res === 'OK';
+    } catch {
+      return true;
+    }
+  }
+
+  private static readonly RELEASE_FLUSH_LOCK_LUA = `
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+      return redis.call("del", KEYS[1])
+    else
+      return 0
+    end
+  `;
+
+  private async releaseFlushLock(
+    projectId: string,
+    docId: string,
+  ): Promise<void> {
+    if (!this.redis || !this.redis.isReady()) return;
+    const client = this.redis.getClient?.() as
+      | {
+          eval?: (
+            script: string,
+            numKeys: number,
+            key: string,
+            arg: string,
+          ) => Promise<unknown>;
+          get?: (key: string) => Promise<string | null>;
+          del?: (key: string) => Promise<unknown>;
+        }
+      | undefined;
+    if (!client) return;
+    try {
+      const lockKey = this.redisFlushLockKey(projectId, docId);
+      if (typeof client.eval === 'function') {
+        await client.eval(
+          YjsService.RELEASE_FLUSH_LOCK_LUA,
+          1,
+          lockKey,
+          this.instanceId,
+        );
+        return;
+      }
+      const owner = await client.get?.(lockKey);
+      if (!owner || owner === this.instanceId) {
+        await client.del?.(lockKey);
+      }
+    } catch {
+      // Ignore lock release error
+    }
+  }
+
   private async executeFlushDoc(
     projectId: string,
     docId: string,
@@ -765,12 +1034,19 @@ export class YjsService implements OnModuleDestroy {
     const flushedTimestamp = session.firstUnflushedAt;
     const flushedText = session.yText.toString();
 
+    const hasLock = await this.acquireFlushLock(projectId, docId);
+    if (!hasLock) {
+      if (!session.flushTimeout) {
+        session.flushTimeout = setTimeout(
+          () => void this.flushDoc(projectId, docId),
+          this.FLUSH_DEBOUNCE_MS,
+        );
+      }
+      return;
+    }
+
     try {
       const tasks: Promise<unknown>[] = [];
-
-      if (this.redis && this.redis.isReady()) {
-        tasks.push(this.saveBinaryToRedis(projectId, docId, session.doc));
-      }
 
       if (this.docstoreService) {
         const lines = LineArrayEngine.textToLines(flushedText);
@@ -825,6 +1101,16 @@ export class YjsService implements OnModuleDestroy {
       }
 
       await Promise.all(tasks);
+
+      if (this.redis && this.redis.isReady()) {
+        await this.saveBinaryToRedis(
+          projectId,
+          docId,
+          session.doc,
+          session.lastFlushedRev,
+        );
+      }
+
       if (session.yText.toString() === flushedText) {
         session.firstUnflushedAt = undefined;
       } else {
@@ -849,6 +1135,8 @@ export class YjsService implements OnModuleDestroy {
           1500,
         );
       }
+    } finally {
+      await this.releaseFlushLock(projectId, docId);
     }
   }
 
@@ -885,6 +1173,11 @@ export class YjsService implements OnModuleDestroy {
     options?: { skipFlush?: boolean },
   ): Promise<void> {
     const key = this.docKey(projectId, docId);
+    const inFlight = this.inFlightFlushes.get(key);
+    if (inFlight) {
+      await inFlight.catch(() => {});
+    }
+
     const session = this.activeDocs.get(key);
     if (!session) {
       if (options?.skipFlush) {
@@ -899,11 +1192,29 @@ export class YjsService implements OnModuleDestroy {
         session.flushTimeout = undefined;
       }
       await this.deleteRedisSnapshot(projectId, docId);
+      this.publishClusterRelay({
+        type: 'evict',
+        projectId,
+        docId,
+      });
     } else {
       try {
         await this.flushDoc(projectId, docId);
       } catch {
         // Ignore flush errors on forced eviction
+      }
+      // Best-effort Redis snapshot save in case distributed lock was busy during flushDoc
+      if (
+        session.firstUnflushedAt !== undefined &&
+        this.redis &&
+        this.redis.isReady()
+      ) {
+        await this.saveBinaryToRedis(
+          projectId,
+          docId,
+          session.doc,
+          session.lastFlushedRev,
+        ).catch(() => {});
       }
       if (session.flushTimeout) {
         clearTimeout(session.flushTimeout);

@@ -94,6 +94,7 @@ export interface EngineRunOptions {
   draft?: boolean;
   syntaxOnly?: boolean;
   shellEscape?: boolean;
+  compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex';
   signal?: AbortSignal;
   onLogChunk?: (chunk: string) => void;
   env?: Record<string, string>;

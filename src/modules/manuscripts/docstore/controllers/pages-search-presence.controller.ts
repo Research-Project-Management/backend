@@ -48,6 +48,15 @@ export class PagesSearchPresenceController {
     private readonly searchReplaceService: ManuscriptSearchReplaceService,
   ) {}
 
+  private resolveProjectId(
+    project?: string | { id: string; projectId?: string } | null,
+    routeProjectId?: string,
+  ): string | undefined {
+    if (!project) return routeProjectId || undefined;
+    if (typeof project === 'string') return project;
+    return project.projectId ?? project.id ?? routeProjectId ?? undefined;
+  }
+
   // ─── 1. REAL-TIME COLLABORATION HTTP FALLBACKS & SSE STREAM ──────────────────
 
   /**
@@ -55,9 +64,14 @@ export class PagesSearchPresenceController {
    * GET /api/v1/manuscripts/docs/:pageId/presence
    */
   @Get(['docs/:pageId/collaboration/presence', 'docs/:pageId/presence'])
-  async getPresence(@Param('pageId') pageId: string) {
+  async getPresence(
+    @Param('pageId') pageId: string,
+    @ResolvedProject()
+    project?: string | { id: string; projectId?: string } | null,
+  ) {
+    const resolvedProjectId = this.resolveProjectId(project);
     const { users, realtimeAvailable } =
-      await this.presenceService.collectPresence(pageId);
+      await this.presenceService.collectPresence(pageId, resolvedProjectId);
     return { activeUsers: users, presence: users, realtimeAvailable };
   }
 
@@ -74,11 +88,20 @@ export class PagesSearchPresenceController {
     @Param('pageId') pageId: string,
     @Body() body: HeartbeatBody,
     @Req() req: AuthenticatedRequest,
+    @ResolvedProject()
+    project?: string | { id: string; projectId?: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub;
     const userName =
       req?.user?.name || req?.user?.email || body?.name || 'Collaborator';
-    return this.presenceService.recordHeartbeat(pageId, userId, userName, body);
+    const resolvedProjectId = this.resolveProjectId(project);
+    return this.presenceService.recordHeartbeat(
+      pageId,
+      userId,
+      userName,
+      body,
+      resolvedProjectId,
+    );
   }
 
   /**
@@ -90,9 +113,12 @@ export class PagesSearchPresenceController {
   async leaveRoom(
     @Param('pageId') pageId: string,
     @Req() req: AuthenticatedRequest,
+    @ResolvedProject()
+    project?: string | { id: string; projectId?: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub;
-    return this.presenceService.leaveRoom(pageId, userId);
+    const resolvedProjectId = this.resolveProjectId(project);
+    return this.presenceService.leaveRoom(pageId, userId, resolvedProjectId);
   }
 
   /**
@@ -113,6 +139,9 @@ export class PagesSearchPresenceController {
     @Param('pageId') pageId: string,
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
+    @Param('projectId') routeProjectId?: string,
+    @ResolvedProject()
+    project?: string | { id: string; projectId?: string } | null,
   ) {
     const origin =
       (Array.isArray(req.headers?.origin)
@@ -122,11 +151,13 @@ export class PagesSearchPresenceController {
         ? req.headers.Origin[0]
         : req.headers?.Origin) ||
       undefined;
+    const resolvedProjectId = this.resolveProjectId(project, routeProjectId);
     await this.presenceService.streamPresenceAndUpdates(
       pageId,
       origin,
       req.raw,
       reply,
+      resolvedProjectId,
     );
   }
 

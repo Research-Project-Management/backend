@@ -3,7 +3,7 @@
  * NestJS Module for Manuscripts Project History, Snapshots, Diff & Labels (Adaptive Modular Monolith).
  */
 
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
@@ -25,7 +25,12 @@ import {
 } from './domain';
 
 @Module({
-  imports: [PrismaModule, StructureModule, DocstoreModule, FilestoreModule],
+  imports: [
+    PrismaModule,
+    forwardRef(() => StructureModule),
+    forwardRef(() => DocstoreModule),
+    FilestoreModule,
+  ],
   controllers: [ProjectHistoryController],
   providers: [
     ProjectHistoryService,

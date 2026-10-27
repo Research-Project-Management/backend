@@ -218,7 +218,13 @@ export class StructureService {
       });
 
       if (dto.isRootDoc && dto.type === 'DOC') {
-        await this.repo.setRootDoc(projectId, node.id);
+        try {
+          await this.repo.setRootDoc(projectId, node.id);
+        } catch (rootErr: unknown) {
+          this.logger.warn(
+            `Failed to set root doc for newly created node ${node.id} in project ${projectId}: ${String(rootErr)}`,
+          );
+        }
       }
 
       this.realtimeService?.broadcastFileTreeChange(projectId, {
@@ -235,7 +241,11 @@ export class StructureService {
               deletedAt: new Date().toISOString(),
             });
           }
-        } catch {}
+        } catch (rollbackErr) {
+          this.logger.warn(
+            `Failed to soft-delete orphan backing doc ${resolvedDocId} after createNode error: ${String(rollbackErr)}`,
+          );
+        }
       }
       const errObj = err as { code?: string; message?: string } | null;
       if (errObj?.code === 'P2002' || errObj?.message?.includes('P2002')) {
@@ -461,8 +471,10 @@ export class StructureService {
         for (const docId of docIds) {
           try {
             await liveCollab.evictDoc(projectId, docId);
-          } catch {
-            // Ignore liveCollab cleanup errors
+          } catch (evictErr) {
+            this.logger.warn(
+              `Failed to evict live doc ${projectId}:${docId} during node deletion: ${String(evictErr)}`,
+            );
           }
         }
       }

@@ -10,10 +10,14 @@ export * from './domain/ssrf-guard';
 export * from './domain/latex-escape.util';
 export * from './domain/text-extensions';
 export * from './ports/live-collaboration.port';
+export * from './ports/distributed-lock.port';
+export * from './adapters';
 export * from './services/project-workspace-collector.service';
 export * from './events/manuscript-domain-event-bus.service';
 export * from './utils/pkzip-builder.util';
+export * from './utils/saga-runner';
 export {
   ManuscriptUserResolverService,
   type ResolvedManuscriptUser,
-} from '@/modules/manuscripts/docstore/services/manuscript-user-resolver.service';
+} from './services/manuscript-user-resolver.service';
+export * from './services/manuscript-page.service';

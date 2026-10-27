@@ -3,7 +3,7 @@
  * NestJS Module for Manuscripts Review Mode: Track Changes & Comments.
  */
 
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 
@@ -21,7 +21,7 @@ import {
 } from './domain';
 
 @Module({
-  imports: [PrismaModule, DocstoreModule],
+  imports: [PrismaModule, forwardRef(() => DocstoreModule)],
   controllers: [TrackChangesController],
   providers: [
     TrackChangesService,

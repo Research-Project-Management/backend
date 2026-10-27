@@ -12,7 +12,184 @@ export interface LinePatchComputation {
   mutated: boolean;
 }
 
+export interface ChangePatchStrategy {
+  accept(
+    sourceLines: readonly string[],
+    change: TrackChange,
+  ): LinePatchComputation;
+  reject(
+    sourceLines: readonly string[],
+    change: TrackChange,
+  ): LinePatchComputation;
+}
+
 export class LinePatcher {
+  /**
+   * Symmetric Dual Strategy Table for TrackChange accept/reject operations:
+   * - accept('insert') === reject('delete') === insertIfAbsent
+   * - reject('insert') === accept('delete') === removeIfNonEmptyRange / removeRange
+   */
+  public static readonly CHANGE_PATCH_STRATEGIES: Readonly<
+    Record<'insert' | 'delete', ChangePatchStrategy>
+  > = Object.freeze({
+    insert: {
+      accept: (sourceLines, change) =>
+        LinePatcher.insertIfAbsent(sourceLines, change.range, change.text, true),
+      reject: (sourceLines, change) =>
+        LinePatcher.removeIfNonEmptyRange(
+          sourceLines,
+          change.range,
+          change.text,
+        ),
+    },
+    delete: {
+      accept: (sourceLines, change) => ({
+        lines: LinePatcher.removeRange(sourceLines, change.range),
+        mutated: true,
+      }),
+      reject: (sourceLines, change) =>
+        LinePatcher.insertIfAbsent(
+          sourceLines,
+          change.range,
+          change.text,
+          false,
+        ),
+    },
+  });
+
+  /**
+   * Checks whether `text` is already present in `sourceLines` starting at `(lineIdx, startCol)`.
+   * Correctly handles single-line and multi-line `text` (including text beginning with `\n`).
+   */
+  private static isTextPresentAt(
+    sourceLines: readonly string[],
+    lineIdx: number,
+    startCol: number,
+    text: string,
+  ): boolean {
+    if (!text || lineIdx < 0 || lineIdx >= sourceLines.length) return false;
+    const currentLine = sourceLines[lineIdx] ?? '';
+    const clampedCol = Math.max(0, Math.min(startCol, currentLine.length));
+
+    if (!text.includes('\n')) {
+      return currentLine.slice(clampedCol).startsWith(text);
+    }
+
+    const parts = text.split('\n');
+    if (lineIdx + parts.length - 1 >= sourceLines.length) {
+      return false;
+    }
+
+    // First line after clampedCol must equal parts[0] exactly
+    if (currentLine.slice(clampedCol) !== parts[0]) {
+      return false;
+    }
+
+    // Middle lines must match exactly
+    for (let i = 1; i < parts.length - 1; i++) {
+      if (sourceLines[lineIdx + i] !== parts[i]) {
+        return false;
+      }
+    }
+
+    // Last line must start with the final segment
+    const lastPart = parts[parts.length - 1];
+    const targetLastLine = sourceLines[lineIdx + parts.length - 1] ?? '';
+    return targetLastLine.startsWith(lastPart);
+  }
+
+  private static insertIfAbsent(
+    sourceLines: readonly string[],
+    range: TextRangeVo | TextRangeProps,
+    text: string,
+    adjustOneBasedRange: boolean,
+  ): LinePatchComputation {
+    if (!text) {
+      return { lines: [...sourceLines], mutated: false };
+    }
+    const useOneBased =
+      range.startLine > 0 &&
+      range.startLine === sourceLines.length &&
+      (!adjustOneBasedRange || range.endLine >= range.startLine);
+    const lineIdx = LinePatcher.clampLineIndex(
+      range.startLine,
+      sourceLines.length,
+      useOneBased,
+    );
+    if (
+      LinePatcher.isTextPresentAt(sourceLines, lineIdx, range.startCol, text)
+    ) {
+      return { lines: [...sourceLines], mutated: false };
+    }
+    const targetRange =
+      adjustOneBasedRange && useOneBased
+        ? {
+            startLine: range.startLine - 1,
+            startCol: range.startCol,
+            endLine: Math.max(0, range.endLine - 1),
+            endCol: range.endCol,
+          }
+        : range;
+    return {
+      lines: LinePatcher.insertRange(sourceLines, targetRange, text),
+      mutated: true,
+    };
+  }
+
+  private static removeIfNonEmptyRange(
+    sourceLines: readonly string[],
+    range: TextRangeVo | TextRangeProps,
+    fallbackText?: string,
+  ): LinePatchComputation {
+    if (
+      range.startLine === range.endLine &&
+      range.startCol === range.endCol
+    ) {
+      if (!fallbackText) {
+        return { lines: [...sourceLines], mutated: false };
+      }
+      const useOneBased =
+        range.startLine > 0 && range.startLine === sourceLines.length;
+      const lineIdx = LinePatcher.clampLineIndex(
+        range.startLine,
+        sourceLines.length,
+        useOneBased,
+      );
+      if (
+        !LinePatcher.isTextPresentAt(
+          sourceLines,
+          lineIdx,
+          range.startCol,
+          fallbackText,
+        )
+      ) {
+        return { lines: [...sourceLines], mutated: false };
+      }
+      const parts = fallbackText.split('\n');
+      const inferredRange: TextRangeProps =
+        parts.length === 1
+          ? {
+              startLine: lineIdx,
+              startCol: range.startCol,
+              endLine: lineIdx,
+              endCol: range.startCol + fallbackText.length,
+            }
+          : {
+              startLine: lineIdx,
+              startCol: range.startCol,
+              endLine: lineIdx + parts.length - 1,
+              endCol: parts[parts.length - 1].length,
+            };
+      return {
+        lines: LinePatcher.removeRange(sourceLines, inferredRange),
+        mutated: true,
+      };
+    }
+    return {
+      lines: LinePatcher.removeRange(sourceLines, range),
+      mutated: true,
+    };
+  }
   /**
    * Resolves a raw line coordinate (supporting both 0-based and 1-based conventions)
    * and clamps it safely to `[0, linesLength - 1]`.
@@ -130,48 +307,10 @@ export class LinePatcher {
     sourceLines: readonly string[],
     change: TrackChange,
   ): LinePatchComputation {
-    if (change.type === 'insert') {
-      const range = change.range;
-      const useOneBased =
-        range.startLine > 0 &&
-        range.startLine === sourceLines.length &&
-        range.endLine >= range.startLine;
-      const lineIdx = LinePatcher.clampLineIndex(
-        range.startLine,
-        sourceLines.length,
-        useOneBased,
-      );
-      const currentLine = sourceLines[lineIdx] || '';
-      const startCol = Math.max(
-        0,
-        Math.min(range.startCol, currentLine.length),
-      );
-      if (
-        change.text &&
-        !currentLine.slice(startCol).startsWith(change.text.split('\n')[0])
-      ) {
-        return {
-          lines: LinePatcher.insertRange(
-            sourceLines,
-            useOneBased
-              ? {
-                  startLine: range.startLine - 1,
-                  startCol: range.startCol,
-                  endLine: Math.max(0, range.endLine - 1),
-                  endCol: range.endCol,
-                }
-              : range,
-            change.text,
-          ),
-          mutated: true,
-        };
-      }
-      return { lines: [...sourceLines], mutated: false };
-    }
-    return {
-      lines: LinePatcher.removeRange(sourceLines, change.range),
-      mutated: true,
-    };
+    const strategy =
+      LinePatcher.CHANGE_PATCH_STRATEGIES[change.type] ??
+      LinePatcher.CHANGE_PATCH_STRATEGIES.delete;
+    return strategy.accept(sourceLines, change);
   }
 
   /**
@@ -183,39 +322,10 @@ export class LinePatcher {
     sourceLines: readonly string[],
     change: TrackChange,
   ): LinePatchComputation {
-    if (change.type === 'insert') {
-      const range = change.range;
-      if (
-        range.startLine === range.endLine &&
-        range.startCol === range.endCol
-      ) {
-        return { lines: [...sourceLines], mutated: false };
-      }
-      return {
-        lines: LinePatcher.removeRange(sourceLines, change.range),
-        mutated: true,
-      };
-    }
-    const range = change.range;
-    const useOneBased =
-      range.startLine > 0 && range.startLine === sourceLines.length;
-    const lineIdx = LinePatcher.clampLineIndex(
-      range.startLine,
-      sourceLines.length,
-      useOneBased,
-    );
-    const currentLine = sourceLines[lineIdx] || '';
-    const startCol = Math.max(0, Math.min(range.startCol, currentLine.length));
-    if (
-      change.text &&
-      currentLine.slice(startCol).startsWith(change.text.split('\n')[0])
-    ) {
-      return { lines: [...sourceLines], mutated: false };
-    }
-    return {
-      lines: LinePatcher.insertRange(sourceLines, change.range, change.text),
-      mutated: true,
-    };
+    const strategy =
+      LinePatcher.CHANGE_PATCH_STRATEGIES[change.type] ??
+      LinePatcher.CHANGE_PATCH_STRATEGIES.delete;
+    return strategy.reject(sourceLines, change);
   }
 
   /**

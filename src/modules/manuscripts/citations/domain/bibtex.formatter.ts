@@ -98,8 +98,15 @@ export function toBibtexValue(
     return balanceBraces(str);
   }
 
+  const normalizedStr = str.replace(/([A-Za-z0-9])\s*[–—]\s*([A-Za-z0-9])/g, '$1--$2');
+
+  if (field === 'pages' || field === 'page') {
+    const normalizedPages = normalizedStr.replace(/\s*[–—]\s*/g, '--');
+    return escapeLatex(normalizedPages);
+  }
+
   if (NAME_FIELDS.has(field)) {
-    return str
+    return normalizedStr
       .split(/\s+and\s+/)
       .map((name) => {
         const literal = name.match(/^\{(.*)\}$/);
@@ -108,7 +115,7 @@ export function toBibtexValue(
       .join(' and ');
   }
 
-  const escaped = escapeLatex(str);
+  const escaped = escapeLatex(normalizedStr);
   if (TITLE_FIELDS.has(field)) {
     return protectCapitalization(escaped);
   }
@@ -139,6 +146,7 @@ export function formatBibtexName(name: {
  */
 export function sanitizeCitationKey(raw: string): string {
   return raw
+    .replace(/[đĐ]/g, 'd')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^A-Za-z0-9_:.-]/g, '');

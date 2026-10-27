@@ -18,6 +18,7 @@ import {
   ArchiveQuotaExceededException,
   MAX_SINGLE_FILE_BYTES,
   MAX_UNCOMPRESSED_PROJECT_BYTES,
+  MAX_PROJECT_ENTRY_COUNT,
 } from '../domain/archive-validator';
 
 @Injectable()
@@ -60,6 +61,19 @@ export class PkzipEngineAdapter extends IZipEnginePort {
     const cdTotalEntries = zipBuffer.readUInt16LE(eocdOffset + 10);
     const cdOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
 
+    if (cdTotalEntries === 0xffff || cdOffset === 0xffffffff) {
+      throw new InvalidZipArchiveException(
+        'ZIP64 archives are not supported.',
+      );
+    }
+
+    if (cdTotalEntries > MAX_PROJECT_ENTRY_COUNT) {
+      throw new ArchiveQuotaExceededException(
+        cdTotalEntries,
+        MAX_PROJECT_ENTRY_COUNT,
+      );
+    }
+
     let offset = cdOffset;
     let totalUncompressedBytes = 0;
     const entries: ArchiveEntryVo[] = [];
@@ -69,7 +83,9 @@ export class PkzipEngineAdapter extends IZipEnginePort {
         offset + 46 > zipBuffer.length ||
         zipBuffer.readUInt32LE(offset) !== 0x02014b50
       ) {
-        break;
+        throw new InvalidZipArchiveException(
+          `Corrupted or truncated ZIP central directory at entry ${i} of ${cdTotalEntries}.`,
+        );
       }
 
       const compressionMethod = zipBuffer.readUInt16LE(offset + 10);
@@ -128,6 +144,15 @@ export class PkzipEngineAdapter extends IZipEnginePort {
           }
           uncompressedData = Buffer.from(compressedSlice);
         } else if (compressionMethod === 8) {
+          if (
+            compressedSize > 0 &&
+            uncompressedSize > 10 * 1024 * 1024 &&
+            uncompressedSize / compressedSize > 100
+          ) {
+            throw new InvalidZipArchiveException(
+              `Suspicious compression ratio detected in entry '${fileName}' (zip bomb protection).`,
+            );
+          }
           try {
             uncompressedData = zlib.inflateRawSync(compressedSlice, {
               maxOutputLength: MAX_SINGLE_FILE_BYTES,

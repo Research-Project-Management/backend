@@ -8,24 +8,35 @@
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { LiveCollaborationPort } from '../ports/live-collaboration.port';
+import {
+  LiveCollaborationPort,
+  NOOP_LIVE_COLLABORATION,
+} from '../ports/live-collaboration.port';
 
 @Injectable()
 export class ProjectWorkspaceCollectorService {
   private readonly logger = new Logger(ProjectWorkspaceCollectorService.name);
 
-  constructor(@Optional() private readonly moduleRef?: ModuleRef) {}
+  constructor(
+    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly injectedLiveCollab?: LiveCollaborationPort,
+  ) {}
 
   /**
-   * Resolves the live collaboration port from the DI container when available.
+   * Resolves the live collaboration port from constructor DI or ModuleRef,
+   * falling back to `NOOP_LIVE_COLLABORATION` (Null Object Pattern).
    */
-  public getLiveCollaborationPort(): LiveCollaborationPort | null {
+  public getLiveCollaborationPort(): LiveCollaborationPort {
+    if (this.injectedLiveCollab) {
+      return this.injectedLiveCollab;
+    }
     try {
       return (
-        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ?? null
+        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ??
+        NOOP_LIVE_COLLABORATION
       );
     } catch {
-      return null;
+      return NOOP_LIVE_COLLABORATION;
     }
   }
 
@@ -40,7 +51,6 @@ export class ProjectWorkspaceCollectorService {
     docIds: string[] = [],
   ): Promise<string[]> {
     const live = this.getLiveCollaborationPort();
-    if (!live) return [];
 
     try {
       return await live.flushDocs(projectId, docIds);
@@ -68,7 +78,6 @@ export class ProjectWorkspaceCollectorService {
    */
   public async evictDoc(projectId: string, docId: string): Promise<void> {
     const live = this.getLiveCollaborationPort();
-    if (!live) return;
 
     try {
       await live.evictDoc(projectId, docId);

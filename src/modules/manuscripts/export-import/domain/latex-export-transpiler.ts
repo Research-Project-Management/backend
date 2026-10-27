@@ -369,8 +369,127 @@ export function resolveIncludedLatexContent(
 }
 
 /**
+ * Strategy + Registry Pattern for Document Export Formatters (Open/Closed Principle).
+ * Each concrete export format encapsulates its own conversion, file extension, and MIME type,
+ * allowing new formats (e.g. `.bib`, `.rst`, `.odt`) to be registered without modifying
+ * `transpileLatexDocumentForExport`.
+ */
+export interface ExportFormatContext {
+  rawFilename: string;
+  baseName: string;
+  content: string;
+}
+
+export interface IExportFormatStrategy {
+  readonly format: string;
+  readonly aliases?: readonly string[];
+  transpile(ctx: ExportFormatContext): ExportFormattedDocResult;
+}
+
+export class DocxExportStrategy implements IExportFormatStrategy {
+  public readonly format = 'docx';
+
+  public transpile(ctx: ExportFormatContext): ExportFormattedDocResult {
+    const docxBuffer = convertLatexToDocxBuffer(ctx.content, ctx.baseName);
+    return {
+      filename: `${ctx.baseName}.docx`,
+      mimeType:
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      content: docxBuffer.toString('base64'),
+      isBase64: true,
+      sizeBytes: docxBuffer.length,
+    };
+  }
+}
+
+export class MarkdownExportStrategy implements IExportFormatStrategy {
+  public readonly format = 'md';
+  public readonly aliases = ['markdown'] as const;
+
+  public transpile(ctx: ExportFormatContext): ExportFormattedDocResult {
+    const mdContent = convertLatexToMarkdown(ctx.content, ctx.baseName);
+    return {
+      filename: `${ctx.baseName}.md`,
+      mimeType: 'text/markdown',
+      content: mdContent,
+      isBase64: false,
+      sizeBytes: Buffer.byteLength(mdContent, 'utf8'),
+    };
+  }
+}
+
+export class HtmlExportStrategy implements IExportFormatStrategy {
+  public readonly format = 'html';
+
+  public transpile(ctx: ExportFormatContext): ExportFormattedDocResult {
+    const htmlContent = convertLatexToHtml(ctx.content, ctx.baseName);
+    return {
+      filename: `${ctx.baseName}.html`,
+      mimeType: 'text/html',
+      content: htmlContent,
+      isBase64: false,
+      sizeBytes: Buffer.byteLength(htmlContent, 'utf8'),
+    };
+  }
+}
+
+export class PlainTexExportStrategy implements IExportFormatStrategy {
+  public readonly format = 'tex';
+  public readonly aliases = ['latex'] as const;
+
+  public transpile(ctx: ExportFormatContext): ExportFormattedDocResult {
+    return {
+      filename: ctx.rawFilename,
+      mimeType: 'application/x-tex',
+      content: ctx.content,
+      isBase64: false,
+      sizeBytes: Buffer.byteLength(ctx.content, 'utf8'),
+    };
+  }
+}
+
+export class ExportFormatRegistry {
+  private readonly strategies = new Map<string, IExportFormatStrategy>();
+  private readonly fallbackStrategy: IExportFormatStrategy;
+
+  constructor(
+    initialStrategies: ReadonlyArray<IExportFormatStrategy> = [
+      new DocxExportStrategy(),
+      new MarkdownExportStrategy(),
+      new HtmlExportStrategy(),
+      new PlainTexExportStrategy(),
+    ],
+    fallbackStrategy: IExportFormatStrategy = new PlainTexExportStrategy(),
+  ) {
+    this.fallbackStrategy = fallbackStrategy;
+    for (const s of initialStrategies) {
+      this.register(s);
+    }
+  }
+
+  public register(strategy: IExportFormatStrategy): this {
+    this.strategies.set(strategy.format.toLowerCase(), strategy);
+    for (const alias of strategy.aliases ?? []) {
+      this.strategies.set(alias.toLowerCase(), strategy);
+    }
+    return this;
+  }
+
+  public resolve(format?: string): IExportFormatStrategy {
+    const key = (format || 'tex').trim().toLowerCase();
+    return this.strategies.get(key) ?? this.fallbackStrategy;
+  }
+
+  public getSupportedFormats(): string[] {
+    return Array.from(this.strategies.keys());
+  }
+}
+
+export const defaultExportFormatRegistry = new ExportFormatRegistry();
+
+/**
  * Pure transpilation of a LaTeX document (with optional child document resolution)
- * into the requested export format (tex, md, html, docx).
+ * into the requested export format (tex, md, html, docx) via `ExportFormatRegistry`.
  */
 export function transpileLatexDocumentForExport(params: {
   rawFilename: string;
@@ -378,7 +497,6 @@ export function transpileLatexDocumentForExport(params: {
   format: string;
   projectDocs?: IncludedProjectDoc[];
 }): ExportFormattedDocResult {
-  const format = (params.format || 'tex').toLowerCase();
   const rawFilename = params.rawFilename || 'document.tex';
   const baseName = rawFilename.replace(/\.[^/.]+$/, '');
   let content = params.content;
@@ -392,47 +510,12 @@ export function transpileLatexDocumentForExport(params: {
     );
   }
 
-  if (format === 'docx') {
-    const docxBuffer = convertLatexToDocxBuffer(content, baseName);
-    return {
-      filename: `${baseName}.docx`,
-      mimeType:
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      content: docxBuffer.toString('base64'),
-      isBase64: true,
-      sizeBytes: docxBuffer.length,
-    };
-  }
-
-  if (format === 'md' || format === 'markdown') {
-    const mdContent = convertLatexToMarkdown(content, baseName);
-    return {
-      filename: `${baseName}.md`,
-      mimeType: 'text/markdown',
-      content: mdContent,
-      isBase64: false,
-      sizeBytes: Buffer.byteLength(mdContent, 'utf8'),
-    };
-  }
-
-  if (format === 'html') {
-    const htmlContent = convertLatexToHtml(content, baseName);
-    return {
-      filename: `${baseName}.html`,
-      mimeType: 'text/html',
-      content: htmlContent,
-      isBase64: false,
-      sizeBytes: Buffer.byteLength(htmlContent, 'utf8'),
-    };
-  }
-
-  return {
-    filename: rawFilename,
-    mimeType: 'application/x-tex',
+  const strategy = defaultExportFormatRegistry.resolve(params.format);
+  return strategy.transpile({
+    rawFilename,
+    baseName,
     content,
-    isBase64: false,
-    sizeBytes: Buffer.byteLength(content, 'utf8'),
-  };
+  });
 }
 
 export const LatexExportTranspiler = {
@@ -443,4 +526,5 @@ export const LatexExportTranspiler = {
   convertLatexToDocxBuffer,
   resolveIncludedLatexContent,
   transpileLatexDocumentForExport,
+  defaultExportFormatRegistry,
 } as const;

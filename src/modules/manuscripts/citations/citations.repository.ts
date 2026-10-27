@@ -139,25 +139,27 @@ export class CitationsRepository
     entry: BibEntry,
     targetFilename = 'references.bib',
   ): Promise<string> {
-    return this.appendEntriesToBib(projectId, [entry], targetFilename);
+    const res = await this.appendEntriesToBib(projectId, [entry], targetFilename);
+    return res.filePath;
   }
 
   public async appendEntriesToBib(
     projectId: string,
     entries: BibEntry[],
     targetFilename = 'references.bib',
-  ): Promise<string> {
+  ): Promise<{ filePath: string; conflicts: string[] }> {
     const cleanFilename = targetFilename
       .replace(/^(\.\/)+/, '')
       .replace(/^\/+/, '');
     const cleanPath = `/${cleanFilename}`;
+    const conflicts: string[] = [];
 
     if (
       entries.length === 0 ||
       !this.structureService ||
       !this.docstoreService
     ) {
-      return cleanPath;
+      return { filePath: cleanPath, conflicts };
     }
 
     const nodes = await this.structureService.getAllNodes(projectId);
@@ -176,8 +178,22 @@ export class CitationsRepository
       const doc = await this.docstoreService.getDoc(projectId, docId);
       const currentLines = doc.lines || [];
       const currentText = currentLines.join('\n');
+
+      const entryKeyRegex = /@([a-zA-Z]+)\s*\{\s*([^,\s]+)\s*,/g;
+      const existingKeys = new Set<string>();
+      const maskedText =
+        RegexAstBibtexParser.maskCommentsPreserveLength(currentText);
+      let m: RegExpExecArray | null;
+      while ((m = entryKeyRegex.exec(maskedText)) !== null) {
+        existingKeys.add(m[2].trim().toLowerCase());
+      }
+
       let updatedText = currentText;
       for (const entry of entries) {
+        const k = entry.key.value.trim().toLowerCase();
+        if (existingKeys.has(k)) {
+          conflicts.push(entry.key.value);
+        }
         updatedText = this.upsertEntryText(
           updatedText,
           entry.key.value,
@@ -186,7 +202,7 @@ export class CitationsRepository
       }
 
       if (updatedText === currentText) {
-        return targetNode.path;
+        return { filePath: targetNode.path, conflicts };
       }
 
       const nextLines = updatedText.split('\n');
@@ -212,7 +228,7 @@ export class CitationsRepository
           .catch(() => {});
       }
 
-      return targetNode.path;
+      return { filePath: targetNode.path, conflicts };
     }
 
     let initialText = '';
@@ -229,16 +245,53 @@ export class CitationsRepository
       path: cleanPath,
       lines: entryLines,
     });
+    const createdDocId =
+      (createdDoc as { _id?: string; id?: string })._id ||
+      (createdDoc as { _id?: string; id?: string }).id;
 
-    const newNode = await this.structureService.createNode(projectId, {
-      path: cleanPath,
-      name: cleanFilename,
-      type: 'DOC',
-      docId: createdDoc._id,
-      parentId: null,
-    });
+    let newNode: ManuscriptNodeEntity;
+    try {
+      newNode = await this.structureService.createNode(projectId, {
+        path: cleanPath,
+        name: cleanFilename,
+        type: 'DOC',
+        docId: createdDocId,
+        parentId: null,
+      });
+    } catch (err) {
+      if (createdDocId) {
+        if (typeof this.docstoreService.deleteDoc === 'function') {
+          await this.docstoreService
+            .deleteDoc(projectId, createdDocId)
+            .catch(() => undefined);
+        } else if (typeof this.docstoreService.patchDoc === 'function') {
+          await this.docstoreService
+            .patchDoc(projectId, createdDocId, { deleted: true })
+            .catch(() => undefined);
+        }
+      }
+      throw err;
+    }
 
-    return newNode.path;
+    if (createdDocId) {
+      if (this.domainEventBus) {
+        await this.domainEventBus.publish({
+          type: 'manuscript.document.mutated',
+          projectId,
+          docId: createdDocId,
+          lines: entryLines,
+          version: (createdDoc as { version?: number }).version ?? 1,
+          source: 'citations',
+          occurredAt: Date.now(),
+        });
+      } else {
+        await this.liveCollab
+          ?.applyExternalText(projectId, createdDocId, entryLines.join('\n'))
+          .catch(() => {});
+      }
+    }
+
+    return { filePath: newNode.path, conflicts };
   }
 
   // ─── Library Sync (Zotero, Mendeley, Flux Library) ──────────────────────────

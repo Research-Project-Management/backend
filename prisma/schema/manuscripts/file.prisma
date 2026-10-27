@@ -1,11 +1,14 @@
 // ============================================================================
-// Manuscripts Subsystem: Binary Assets Sub-Domain
-// Self-managed domain schema: ManuscriptFile
+// Manuscripts Subsystem: Binary Assets & Linked Files Sub-Domain
+// Self-managed domain schema: ManuscriptFile, ManuscriptLinkedFile
 // ============================================================================
 
 model ManuscriptFile {
   id        String  @id @default(uuid(7)) @db.Uuid
   projectId String  @map("project_id") @db.Uuid
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_files_project_id")
+  pageId    String? @map("page_id") @db.Uuid
+  page      ManuscriptPage? @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_files_page_id")
 
   name       String @db.VarChar(255)
   mimeType   String @default("application/octet-stream") @map("mime_type") @db.VarChar(128)
@@ -23,9 +26,38 @@ model ManuscriptFile {
   node ManuscriptNode?
 
   @@index([projectId, deleted], map: "idx_manuscript_files_project_deleted")
+  @@index([pageId, deleted], map: "idx_manuscript_files_page_deleted")
   @@index([projectId, deleted, updatedAt(sort: Desc)], map: "idx_manuscript_files_proj_del_updated")
   @@index([projectId, hash], map: "idx_manuscript_files_project_hash")
   @@index([hash], map: "idx_manuscript_files_hash")
   @@index([storageKey], map: "idx_manuscript_files_storage_key")
   @@map("manuscript_files")
+}
+
+model ManuscriptLinkedFile {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_linked_files_project_id")
+  pageId      String?  @map("page_id") @db.Uuid
+  page        ManuscriptPage? @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_linked_files_page_id")
+
+  name        String   @db.VarChar(255)
+  provider    String   @db.VarChar(50) // url, project_file, library, etc.
+  url         String?  @db.Text
+  sourceProjectId  String? @map("source_project_id") @db.Uuid
+  sourceEntityPath String? @map("source_entity_path") @db.VarChar(1000)
+  targetPath       String  @map("target_path") @db.VarChar(1000)
+
+  targetDocId  String? @map("target_doc_id") @db.Uuid
+  targetFileId String? @map("target_file_id") @db.Uuid
+  lastSyncedHash String? @map("last_synced_hash") @db.VarChar(64)
+  lastSyncedAt   DateTime? @map("last_synced_at") @db.Timestamptz(6)
+  syncError      String? @map("sync_error") @db.Text
+
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([projectId, provider], map: "idx_manuscript_linked_files_project_provider")
+  @@index([pageId, provider], map: "idx_manuscript_linked_files_page_provider")
+  @@map("manuscript_linked_files")
 }

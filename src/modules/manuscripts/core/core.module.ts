@@ -11,7 +11,14 @@ import { PrismaModule } from '@/core';
 import { ManuscriptsConfigService } from './config/manuscripts.config';
 import { ProjectWorkspaceCollectorService } from './services/project-workspace-collector.service';
 import { ManuscriptDomainEventBus } from './events/manuscript-domain-event-bus.service';
-import { ManuscriptUserResolverService } from '@/modules/manuscripts/docstore/services/manuscript-user-resolver.service';
+import { ManuscriptUserResolverService } from './services/manuscript-user-resolver.service';
+import {
+  IDistributedLockPort,
+  InMemoryDistributedLockAdapter,
+} from './ports/distributed-lock.port';
+import { RedisDistributedLockAdapter } from './adapters/redis-distributed-lock.adapter';
+
+import { ManuscriptCleanupListener } from './services/manuscript-cleanup.listener';
 
 @Global()
 @Module({
@@ -21,12 +28,20 @@ import { ManuscriptUserResolverService } from '@/modules/manuscripts/docstore/se
     ProjectWorkspaceCollectorService,
     ManuscriptDomainEventBus,
     ManuscriptUserResolverService,
+    ManuscriptCleanupListener,
+    RedisDistributedLockAdapter,
+    {
+      provide: IDistributedLockPort,
+      useClass: RedisDistributedLockAdapter,
+    },
   ],
   exports: [
     ManuscriptsConfigService,
     ProjectWorkspaceCollectorService,
     ManuscriptDomainEventBus,
     ManuscriptUserResolverService,
+    IDistributedLockPort,
+    RedisDistributedLockAdapter,
   ],
 })
 export class ManuscriptsCoreModule {}

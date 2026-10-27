@@ -124,37 +124,71 @@ export class ExportImportService {
     );
   }
 
+  private static readonly DEFAULT_MAIN_TEX_FALLBACK = Buffer.from(
+    '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}',
+    'utf8',
+  );
+
+  /**
+   * Shared Template Method / Plan resolver for both buffered and streaming ZIP exports.
+   * Ensures identical fallback `main.tex` generation, PDF detection, and `arxiv-` naming.
+   */
+  private prepareExportPlan<T extends { path: string }>(
+    files: T[],
+    createFallbackEntry: (path: string, data: Buffer) => T,
+    query?: ExportZipQueryDto,
+  ): {
+    files: T[];
+    hasPdf: boolean;
+    resolvedName: string;
+  } {
+    const cleanArxiv = query?.cleanArxiv ?? false;
+    const projectName = query?.projectName;
+
+    if (files.length === 0) {
+      files.push(
+        createFallbackEntry(
+          'main.tex',
+          ExportImportService.DEFAULT_MAIN_TEX_FALLBACK,
+        ),
+      );
+    }
+
+    const hasPdf = files.some((f) => f.path.toLowerCase().endsWith('.pdf'));
+    const baseName = projectName || 'manuscript';
+    const resolvedName = cleanArxiv
+      ? projectName?.startsWith('arxiv-')
+        ? projectName
+        : `arxiv-${baseName}`
+      : baseName;
+
+    return {
+      files,
+      hasPdf,
+      resolvedName,
+    };
+  }
+
   public async exportProjectZip(
     projectId: string,
     query?: ExportZipQueryDto,
   ): Promise<ExportProjectZipOutput> {
     const includePdf = query?.includePdf ?? false;
     const cleanArxiv = query?.cleanArxiv ?? false;
-    const projectName = query?.projectName;
 
-    const files = await this.aggregator.collectProjectEntries(
+    const collected = await this.aggregator.collectProjectEntries(
       projectId,
       includePdf,
       cleanArxiv,
     );
 
-    if (files.length === 0) {
-      files.push({
-        path: 'main.tex',
-        data: Buffer.from(
-          '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}',
-          'utf8',
-        ),
-      });
-    }
+    const { files, hasPdf, resolvedName } = this.prepareExportPlan(
+      collected,
+      (entryPath, data) => ({ path: entryPath, data }),
+      query,
+    );
 
     const zipBuffer = this.zipEngine.buildZip(files);
-    const hasPdf = files.some((f) => f.path.toLowerCase().endsWith('.pdf'));
-    const resolvedName = cleanArxiv
-      ? projectName?.startsWith('arxiv-')
-        ? projectName
-        : `arxiv-${projectName || 'manuscript'}`
-      : projectName;
 
     const manifest = new ArchiveManifest({
       projectId,
@@ -176,31 +210,20 @@ export class ExportImportService {
   ): Promise<ExportProjectZipStreamOutput> {
     const includePdf = query?.includePdf ?? false;
     const cleanArxiv = query?.cleanArxiv ?? false;
-    const projectName = query?.projectName;
 
-    const files = await this.aggregator.collectLazyProjectEntries(
+    const collected = await this.aggregator.collectLazyProjectEntries(
       projectId,
       includePdf,
       cleanArxiv,
     );
 
-    if (files.length === 0) {
-      files.push({
-        path: 'main.tex',
-        data: Buffer.from(
-          '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}',
-          'utf8',
-        ),
-      });
-    }
+    const { files, hasPdf, resolvedName } = this.prepareExportPlan(
+      collected,
+      (entryPath, data) => ({ path: entryPath, data }),
+      query,
+    );
 
     const zipStream = this.zipEngine.createZipStream(files);
-    const hasPdf = files.some((f) => f.path.toLowerCase().endsWith('.pdf'));
-    const resolvedName = cleanArxiv
-      ? projectName?.startsWith('arxiv-')
-        ? projectName
-        : `arxiv-${projectName || 'manuscript'}`
-      : projectName || 'manuscript';
 
     return {
       zipStream,

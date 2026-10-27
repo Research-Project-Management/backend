@@ -10,6 +10,7 @@ import {
   HttpException,
   HttpStatus,
   OnModuleDestroy,
+  Optional,
 } from '@nestjs/common';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import {
@@ -49,7 +50,7 @@ export class CompileFairQueue implements OnModuleDestroy {
   private readonly minIntervalMs: number;
   private readonly supersedeGraceMs: number;
 
-  constructor(config?: CompileQueueConfig) {
+  constructor(@Optional() config?: CompileQueueConfig) {
     this.maxPerMinute = config?.maxCompilesPerMinute ?? 20;
     this.minIntervalMs = config?.minIntervalBetweenCompilesMs ?? 400;
     this.supersedeGraceMs = config?.supersedeGraceMs ?? 3000;

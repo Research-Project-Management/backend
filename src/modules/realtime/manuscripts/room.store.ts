@@ -182,7 +182,11 @@ export class RoomStore {
         }
 
         if (staleSockets.length > 0) {
-          await client.srem(projectKey, ...staleSockets).catch(() => {});
+          await client.srem(projectKey, ...staleSockets).catch((err) => {
+            this.logger.warn(
+              `Redis srem stale project sockets error: ${String(err)}`,
+            );
+          });
         }
 
         return results;
@@ -324,7 +328,11 @@ export class RoomStore {
         }
 
         if (staleSockets.length > 0) {
-          await client.srem(docKey, ...staleSockets).catch(() => {});
+          await client.srem(docKey, ...staleSockets).catch((err) => {
+            this.logger.warn(
+              `Redis srem stale doc sockets error: ${String(err)}`,
+            );
+          });
         }
 
         return results;

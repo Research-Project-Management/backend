@@ -7,7 +7,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import {
   IWorkspaceManager,
   WorkspaceFile,
@@ -68,22 +68,27 @@ export { LocalProcessRunner } from './sandbox/local-process.runner';
 export { DockerSandboxRunner } from './sandbox/docker-sandbox.runner';
 
 // ─────────────────────────────────────────────────────────────────
-// LaTeX Engines (LatexmkEngine & TectonicEngine)
+// LaTeX Engines (Template Method: BaseLatexEngine -> LatexmkEngine & TectonicEngine)
 // ─────────────────────────────────────────────────────────────────
 
-export class LatexmkEngine implements ILatexEngine {
-  readonly name = 'latexmk';
+/**
+ * Template Method base class for LaTeX compilation engines (`ILatexEngine`).
+ * Centralizes shell-escape sandbox enforcement, mainFile path sanitization,
+ * binary availability probing, and filesystem existence helpers so concrete
+ * engines (`LatexmkEngine`, `TectonicEngine`) satisfy Liskov Substitution.
+ */
+export abstract class BaseLatexEngine implements ILatexEngine {
+  abstract readonly name: string;
+  protected abstract readonly versionArgs: string[];
 
   constructor(
-    private readonly runner: ISandboxRunner,
-    private readonly binaryPath: string = 'latexmk',
-    private readonly defaultCompiler:
-      'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex',
+    protected readonly runner: ISandboxRunner,
+    protected readonly binaryPath: string,
   ) {}
 
   public async isAvailable(): Promise<boolean> {
     try {
-      const result = await this.runner.run(this.binaryPath, ['-v'], {
+      const result = await this.runner.run(this.binaryPath, this.versionArgs, {
         cwd: process.cwd(),
         timeoutMs: 5000,
       });
@@ -97,16 +102,6 @@ export class LatexmkEngine implements ILatexEngine {
     options: EngineRunOptions,
     compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex',
   ): Promise<EngineRunResult> {
-    const startTime = Date.now();
-    const compiler = compilerOverride || this.defaultCompiler;
-
-    let compilerFlag = '-pdf';
-    if (compiler === 'xelatex') {
-      compilerFlag = '-pdfxe';
-    } else if (compiler === 'lualatex') {
-      compilerFlag = '-pdflua';
-    }
-
     if (options.shellEscape) {
       throw new SandboxPolicyViolationException(
         'Shell escape is strictly disabled in compilation sandbox.',
@@ -114,6 +109,57 @@ export class LatexmkEngine implements ILatexEngine {
     }
 
     const safeMainFile = assertSafeMainFile(options.mainFile);
+    const normalizedOptions: EngineRunOptions = {
+      ...options,
+      compilerOverride: compilerOverride ?? options.compilerOverride,
+    };
+
+    return this.executeEngineCompile(normalizedOptions, safeMainFile);
+  }
+
+  protected abstract executeEngineCompile(
+    options: EngineRunOptions,
+    safeMainFile: string,
+  ): Promise<EngineRunResult>;
+
+  protected async fileExists(filePath: string): Promise<boolean> {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+export class LatexmkEngine extends BaseLatexEngine {
+  readonly name = 'latexmk';
+  protected readonly versionArgs = ['-v'];
+
+  constructor(
+    runner: ISandboxRunner,
+    binaryPath: string = 'latexmk',
+    private readonly defaultCompiler:
+      | 'pdflatex'
+      | 'xelatex'
+      | 'lualatex' = 'pdflatex',
+  ) {
+    super(runner, binaryPath);
+  }
+
+  protected async executeEngineCompile(
+    options: EngineRunOptions,
+    safeMainFile: string,
+  ): Promise<EngineRunResult> {
+    const startTime = Date.now();
+    const compiler = options.compilerOverride || this.defaultCompiler;
+
+    let compilerFlag = '-pdf';
+    if (compiler === 'xelatex') {
+      compilerFlag = '-pdfxe';
+    } else if (compiler === 'lualatex') {
+      compilerFlag = '-pdflua';
+    }
 
     const args: string[] = [
       compilerFlag,
@@ -162,14 +208,11 @@ export class LatexmkEngine implements ILatexEngine {
     const synctexGzPath = path.join(options.cwd, 'output.synctex.gz');
     const synctexPlainPath = path.join(options.cwd, 'output.synctex');
 
-    const [
-      initialPdfGenerated,
-      altPdfGenerated,
-      synctexGzExists,
-      synctexPlainExists,
-    ] = await Promise.all([
+    const [initialPdfGenerated, altPdfGenerated] = await Promise.all([
       this.fileExists(pdfPath),
       this.fileExists(altPdfPath),
+    ]);
+    let [synctexGzExists, synctexPlainExists] = await Promise.all([
       this.fileExists(synctexGzPath),
       this.fileExists(synctexPlainPath),
     ]);
@@ -182,7 +225,12 @@ export class LatexmkEngine implements ILatexEngine {
       } catch {}
     }
 
-    if (!pdfGenerated) {
+    if (
+      !pdfGenerated &&
+      !execResult.timedOut &&
+      execResult.exitCode !== 137 &&
+      !options.signal?.aborted
+    ) {
       const forceResult = await this.runner.run(
         this.binaryPath,
         ['-g', ...args],
@@ -203,6 +251,10 @@ export class LatexmkEngine implements ILatexEngine {
         await fs.copyFile(altPdfPath, pdfPath).catch(() => {});
         pdfGenerated = true;
       }
+      [synctexGzExists, synctexPlainExists] = await Promise.all([
+        this.fileExists(synctexGzPath),
+        this.fileExists(synctexPlainPath),
+      ]);
     }
 
     return {
@@ -214,47 +266,21 @@ export class LatexmkEngine implements ILatexEngine {
       synctexGenerated: synctexGzExists || synctexPlainExists,
     };
   }
-
-  private async fileExists(filePath: string): Promise<boolean> {
-    try {
-      await fs.access(filePath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
 }
 
-export class TectonicEngine implements ILatexEngine {
+export class TectonicEngine extends BaseLatexEngine {
   readonly name = 'tectonic';
+  protected readonly versionArgs = ['--version'];
 
-  constructor(
-    private readonly runner: ISandboxRunner,
-    private readonly binaryPath: string = 'tectonic',
-  ) {}
-
-  public async isAvailable(): Promise<boolean> {
-    try {
-      const result = await this.runner.run(this.binaryPath, ['--version'], {
-        cwd: process.cwd(),
-        timeoutMs: 5000,
-      });
-      return result.exitCode === 0;
-    } catch {
-      return false;
-    }
+  constructor(runner: ISandboxRunner, binaryPath: string = 'tectonic') {
+    super(runner, binaryPath);
   }
 
-  public async compile(options: EngineRunOptions): Promise<EngineRunResult> {
+  protected async executeEngineCompile(
+    options: EngineRunOptions,
+    safeMainFile: string,
+  ): Promise<EngineRunResult> {
     const startTime = Date.now();
-
-    if (options.shellEscape) {
-      throw new SandboxPolicyViolationException(
-        'Shell escape is strictly disabled in compilation sandbox.',
-      );
-    }
-
-    const safeMainFile = assertSafeMainFile(options.mainFile);
 
     const args: string[] = [
       '-X',
@@ -336,15 +362,6 @@ export class TectonicEngine implements ILatexEngine {
       pdfGenerated,
       synctexGenerated: synctexGzExists || synctexPlainExists,
     };
-  }
-
-  private async fileExists(filePath: string): Promise<boolean> {
-    try {
-      await fs.access(filePath);
-      return true;
-    } catch {
-      return false;
-    }
   }
 }
 
@@ -566,6 +583,8 @@ export type CompilePipelineResult =
     };
 
 export class CompilePipeline {
+  private readonly logger = new Logger(CompilePipeline.name);
+
   constructor(
     private readonly workspace: IWorkspaceManager,
     private readonly latexmkEngine: ILatexEngine,
@@ -574,6 +593,15 @@ export class CompilePipeline {
     private readonly projectLockManager: ProjectLockManager = new ProjectLockManager(),
     private readonly outputFileFinder: IOutputFileFinder = new OverleafOutputFileFinder(),
   ) {}
+
+  public async runWithProjectLock<T>(
+    projectId: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const resolvedId = projectId || 'default-project';
+    const scratchDir = this.workspace.getScratchDir(resolvedId);
+    return this.projectLockManager.runWithLock(resolvedId, scratchDir, action);
+  }
 
   public async execute(
     dto: CompilePipelineRequest,
@@ -736,62 +764,34 @@ export class CompilePipeline {
               ) {
                 const pdfStat = await fs.stat(pdfPath);
                 if (pdfStat.size > 0) {
-                  const pdfBuffer = await fs.readFile(pdfPath);
-                  const pdfBase64 = pdfBuffer.toString('base64');
-                  let logs = '';
-                  try {
-                    logs = await fs.readFile(logPath, 'utf8');
-                  } catch {}
-
-                  let synctexBase64 = '';
-                  const synctexGzPath = path.join(
+                  const harvested = await this.harvestCompileArtifacts({
                     scratchDir,
-                    'output.synctex.gz',
-                  );
-                  const synctexPlainPath = path.join(
-                    scratchDir,
-                    'output.synctex',
-                  );
-                  try {
-                    const synctexBuffer = await fs.readFile(synctexGzPath);
-                    synctexBase64 = synctexBuffer.toString('base64');
-                  } catch {
-                    try {
-                      const synctexBuffer = await fs.readFile(synctexPlainPath);
-                      synctexBase64 = synctexBuffer.toString('base64');
-                    } catch {}
-                  }
-
-                  const discoveredFiles = await this.outputFileFinder.find(
-                    scratchDir,
+                    projectId,
+                    mainFile,
                     inputFiles,
-                  );
-
-                  const diagnostics = this.logParser.parse(logs, mainFile);
+                    fallbackLogs:
+                      '[CLSI Cache] Build up to date: workspace unchanged.',
+                  });
 
                   dto.onLogChunk?.(
                     '[CLSI Cache] Build up to date: 0 source files modified. Returning cached output.',
                   );
 
-                  const overleafFiles = toOverleafOutputFiles(
-                    projectId,
-                    discoveredFiles,
-                  );
                   return {
                     success: true,
                     status: 'success',
                     compile: {
                       status: 'success',
-                      outputFiles: overleafFiles,
+                      outputFiles: harvested.overleafFiles,
                     },
-                    pdf: pdfBase64,
-                    synctex: synctexBase64 || undefined,
-                    logs:
-                      logs ||
-                      '[CLSI Cache] Build up to date: workspace unchanged.',
+                    pdf: harvested.pdfBase64,
+                    synctex: harvested.synctexBase64 || undefined,
+                    logs: harvested.logs,
                     diagnostics:
-                      diagnostics.length > 0 ? diagnostics : undefined,
-                    outputFiles: discoveredFiles,
+                      harvested.diagnostics.length > 0
+                        ? harvested.diagnostics
+                        : undefined,
+                    outputFiles: harvested.discoveredFiles,
                     durationMs: Date.now() - startTime,
                   };
                 }
@@ -826,142 +826,69 @@ export class CompilePipeline {
               : undefined,
           );
 
-          let engineToUse: ILatexEngine = this.latexmkEngine;
-          let compilerFlag: 'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex';
-
-          if (resolvedEngine === 'tectonic') {
-            engineToUse = this.tectonicEngine;
-          } else if (resolvedEngine === 'xelatex') {
-            compilerFlag = 'xelatex';
-          } else if (resolvedEngine === 'lualatex') {
-            compilerFlag = 'lualatex';
-          }
-
-          const isPrimaryAvailable = await engineToUse.isAvailable();
-          if (!isPrimaryAvailable) {
-            const isSecondaryAvailable = await (engineToUse ===
-            this.latexmkEngine
-              ? this.tectonicEngine.isAvailable()
-              : this.latexmkEngine.isAvailable());
-            if (isSecondaryAvailable) {
-              engineToUse =
-                engineToUse === this.latexmkEngine
-                  ? this.tectonicEngine
-                  : this.latexmkEngine;
-            } else {
-              const errorMsg =
-                'No supported TeX engine (latexmk or tectonic) was found in PATH or sandbox runner. Please install TeX Live (latexmk) or Tectonic, or configure CLSI_URL / Docker runner.';
-              return {
-                success: false,
+          const resolvedRunner = await this.resolveAvailableEngine(
+            resolvedEngine,
+          );
+          if (!resolvedRunner) {
+            const errorMsg =
+              'No supported TeX engine (latexmk or tectonic) was found in PATH or sandbox runner. Please install TeX Live (latexmk) or Tectonic, or configure CLSI_URL / Docker runner.';
+            return {
+              success: false,
+              status: 'failure',
+              compile: {
                 status: 'failure',
-                compile: {
-                  status: 'failure',
-                  outputFiles: [],
+                outputFiles: [],
+              },
+              error: errorMsg,
+              logs: errorMsg,
+              diagnostics: [
+                {
+                  file: mainFile,
+                  line: 1,
+                  message: errorMsg,
+                  severity: 'error',
+                  context: 'System Environment',
                 },
-                error: errorMsg,
-                logs: errorMsg,
-                diagnostics: [
-                  {
-                    file: mainFile,
-                    line: 1,
-                    message: errorMsg,
-                    severity: 'error',
-                    context: 'System Environment',
-                  },
-                ],
-                durationMs: Date.now() - startTime,
-              };
-            }
+              ],
+              durationMs: Date.now() - startTime,
+            };
           }
 
+          const { engineToUse, compilerFlag } = resolvedRunner;
           const timeoutMs = dto.timeoutMs || 240000;
           const stopOnFirstError = dto.stopOnFirstError ?? false;
 
-          let engineResult: EngineRunResult;
-          if ('compile' in engineToUse && engineToUse === this.latexmkEngine) {
-            engineResult = await this.latexmkEngine.compile(
-              {
-                cwd: scratchDir,
-                mainFile,
-                timeoutMs,
-                stopOnFirstError,
-                draft: dto.draft ?? false,
-                syntaxOnly: dto.syntaxOnly ?? false,
-                signal: dto.signal,
-                onLogChunk: dto.onLogChunk,
-              },
-              compilerFlag,
-            );
-          } else {
-            engineResult = await engineToUse.compile({
+          const engineResult = await engineToUse.compile(
+            {
               cwd: scratchDir,
               mainFile,
               timeoutMs,
               stopOnFirstError,
               draft: dto.draft ?? false,
               syntaxOnly: dto.syntaxOnly ?? false,
+              compilerOverride: compilerFlag,
               signal: dto.signal,
               onLogChunk: dto.onLogChunk,
-            });
-          }
-
-          const durationMs = Date.now() - startTime;
-
-          const discoveredFiles = await this.outputFileFinder.find(
-            scratchDir,
-            inputFiles,
+            },
+            compilerFlag,
           );
 
-          const synctexGzPath = path.join(scratchDir, 'output.synctex.gz');
-          const synctexPlainPath = path.join(scratchDir, 'output.synctex');
-
-          let pdfBase64 = '';
-          try {
-            const pdfBuffer = await fs.readFile(pdfPath);
-            pdfBase64 = pdfBuffer.toString('base64');
-          } catch {
-            // PDF not generated
-          }
-
-          let logs = engineResult.stdout || '';
+          const durationMs = Date.now() - startTime;
+          let fallbackLogs = engineResult.stdout || '';
           if (engineResult.stderr) {
-            logs += `\n${engineResult.stderr}`;
-          }
-          try {
-            const fileLog = await fs.readFile(logPath, 'utf8');
-            if (fileLog) logs = fileLog;
-          } catch {
-            // Use stdout
+            fallbackLogs += `\n${engineResult.stderr}`;
           }
 
-          let synctexBase64 = '';
-          try {
-            const synctexBuffer = await fs.readFile(synctexGzPath);
-            synctexBase64 = synctexBuffer.toString('base64');
-          } catch {
-            try {
-              const synctexBuffer = await fs.readFile(synctexPlainPath);
-              synctexBase64 = synctexBuffer.toString('base64');
-            } catch {
-              // Synctex not generated
-            }
-          }
+          const harvested = await this.harvestCompileArtifacts({
+            scratchDir,
+            projectId,
+            mainFile,
+            inputFiles,
+            fallbackLogs,
+            shellEscapeAdvisories,
+          });
 
-          const diagnostics = this.logParser.parse(logs, mainFile);
-
-          if (shellEscapeAdvisories.length > 0) {
-            for (const adv of shellEscapeAdvisories) {
-              diagnostics.push({
-                file: mainFile,
-                line: null,
-                message: `Document references '${adv}' which historically required shell-escape. Shell-escape is strictly disabled in the Flux isolated compile sandbox for security. If compiling fails, consider native LaTeX alternatives (e.g. listings package instead of minted).`,
-                severity: 'info',
-                code: 'SHELL_ESCAPE_ADVISORY',
-              });
-            }
-          }
-
-          if (engineResult.pdfGenerated && pdfBase64) {
+          if (engineResult.pdfGenerated && harvested.pdfBase64) {
             try {
               await fs.writeFile(
                 buildStatePath,
@@ -976,22 +903,21 @@ export class CompilePipeline {
               );
             } catch {}
 
-            const overleafFiles = toOverleafOutputFiles(
-              projectId,
-              discoveredFiles,
-            );
             return {
               success: true,
               status: 'success',
               compile: {
                 status: 'success',
-                outputFiles: overleafFiles,
+                outputFiles: harvested.overleafFiles,
               },
-              pdf: pdfBase64,
-              synctex: synctexBase64 || undefined,
-              logs,
-              diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
-              outputFiles: discoveredFiles,
+              pdf: harvested.pdfBase64,
+              synctex: harvested.synctexBase64 || undefined,
+              logs: harvested.logs,
+              diagnostics:
+                harvested.diagnostics.length > 0
+                  ? harvested.diagnostics
+                  : undefined,
+              outputFiles: harvested.discoveredFiles,
               durationMs,
             };
           }
@@ -1000,25 +926,24 @@ export class CompilePipeline {
             await fs.unlink(buildStatePath);
           } catch {}
 
-          const overleafFiles = toOverleafOutputFiles(
-            projectId,
-            discoveredFiles,
-          );
           return {
             success: false,
             status: 'failure',
             compile: {
               status: 'failure',
-              outputFiles: overleafFiles,
+              outputFiles: harvested.overleafFiles,
             },
             error:
-              diagnostics.find((d) => d.severity === 'error')?.message ||
-              'LaTeX compilation failed to produce a PDF',
-            pdf: pdfBase64 || undefined,
-            synctex: synctexBase64 || undefined,
-            logs,
-            diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
-            outputFiles: discoveredFiles,
+              harvested.diagnostics.find((d) => d.severity === 'error')
+                ?.message || 'LaTeX compilation failed to produce a PDF',
+            pdf: harvested.pdfBase64 || undefined,
+            synctex: harvested.synctexBase64 || undefined,
+            logs: harvested.logs,
+            diagnostics:
+              harvested.diagnostics.length > 0
+                ? harvested.diagnostics
+                : undefined,
+            outputFiles: harvested.discoveredFiles,
             durationMs,
           };
         },
@@ -1026,6 +951,10 @@ export class CompilePipeline {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error(
+        `CompilePipeline execution error for project ${projectId}: ${message}`,
+        stack,
+      );
       return {
         success: false,
         status: 'failure',
@@ -1034,9 +963,137 @@ export class CompilePipeline {
           outputFiles: [],
         },
         error: message || 'Compilation execution failed',
-        logs: stack || message || '',
+        logs: message || 'Compilation execution failed',
         durationMs: Date.now() - startTime,
       };
     }
+  }
+
+  /**
+   * Chain of Responsibility / Fallback Strategy: Resolves primary or secondary TeX engine.
+   */
+  private async resolveAvailableEngine(
+    preferred: 'pdflatex' | 'xelatex' | 'lualatex' | 'tectonic',
+  ): Promise<{
+    engineToUse: ILatexEngine;
+    compilerFlag: 'pdflatex' | 'xelatex' | 'lualatex';
+  } | null> {
+    let engineToUse: ILatexEngine = this.latexmkEngine;
+    let compilerFlag: 'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex';
+
+    if (preferred === 'tectonic') {
+      engineToUse = this.tectonicEngine;
+    } else if (preferred === 'xelatex') {
+      compilerFlag = 'xelatex';
+    } else if (preferred === 'lualatex') {
+      compilerFlag = 'lualatex';
+    }
+
+    if (await engineToUse.isAvailable()) {
+      return { engineToUse, compilerFlag };
+    }
+
+    const secondaryEngine =
+      engineToUse === this.latexmkEngine
+        ? this.tectonicEngine
+        : this.latexmkEngine;
+    if (await secondaryEngine.isAvailable()) {
+      return { engineToUse: secondaryEngine, compilerFlag };
+    }
+
+    return null;
+  }
+
+  /**
+   * Collector / Harvester Pattern: Consolidates PDF, SyncTeX, Log, Diagnostics, and Output File
+   * collection across both Cache-Hit and Full-Compile execution paths.
+   */
+  private async harvestCompileArtifacts(params: {
+    scratchDir: string;
+    projectId: string;
+    mainFile: string;
+    inputFiles: string[];
+    fallbackLogs?: string;
+    shellEscapeAdvisories?: string[];
+  }): Promise<{
+    pdfBase64: string;
+    synctexBase64: string;
+    logs: string;
+    diagnostics: CompilerDiagnostic[];
+    discoveredFiles: DiscoveredOutputFile[];
+    overleafFiles: OverleafOutputFileEntry[];
+  }> {
+    const {
+      scratchDir,
+      projectId,
+      mainFile,
+      inputFiles,
+      fallbackLogs = '',
+      shellEscapeAdvisories = [],
+    } = params;
+
+    const pdfPath = path.join(scratchDir, 'output.pdf');
+    const logPath = path.join(scratchDir, 'output.log');
+    const synctexGzPath = path.join(scratchDir, 'output.synctex.gz');
+    const synctexPlainPath = path.join(scratchDir, 'output.synctex');
+
+    const discoveredFiles = await this.outputFileFinder.find(
+      scratchDir,
+      inputFiles,
+    );
+
+    let pdfBase64 = '';
+    try {
+      const pdfBuffer = await fs.readFile(pdfPath);
+      pdfBase64 = pdfBuffer.toString('base64');
+    } catch {
+      // PDF not generated
+    }
+
+    let logs = fallbackLogs;
+    try {
+      const fileLog = await fs.readFile(logPath, 'utf8');
+      if (fileLog) logs = fileLog;
+    } catch {
+      // Use fallbackLogs
+    }
+
+    let synctexBase64 = '';
+    try {
+      const synctexBuffer = await fs.readFile(synctexGzPath);
+      synctexBase64 = synctexBuffer.toString('base64');
+    } catch {
+      try {
+        const synctexBuffer = await fs.readFile(synctexPlainPath);
+        synctexBase64 = synctexBuffer.toString('base64');
+      } catch {
+        // Synctex not generated
+      }
+    }
+
+    const diagnostics = this.logParser.parse(logs, mainFile);
+
+    if (shellEscapeAdvisories.length > 0) {
+      for (const adv of shellEscapeAdvisories) {
+        diagnostics.push({
+          file: mainFile,
+          line: null,
+          message: `Document references '${adv}' which historically required shell-escape. Shell-escape is strictly disabled in the Flux isolated compile sandbox for security. If compiling fails, consider native LaTeX alternatives (e.g. listings package instead of minted).`,
+          severity: 'info',
+          code: 'SHELL_ESCAPE_ADVISORY',
+        });
+      }
+    }
+
+    const overleafFiles = toOverleafOutputFiles(projectId, discoveredFiles);
+
+    return {
+      pdfBase64,
+      synctexBase64,
+      logs,
+      diagnostics,
+      discoveredFiles,
+      overleafFiles,
+    };
   }
 }

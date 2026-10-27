@@ -199,8 +199,6 @@ export class ClsiController {
   }
 
   @Get('clsi/status')
-  @UseGuards(OperatorGuard)
-  @RequireOperator()
   @NoProjectContext()
   @ApiOperation({
     summary: 'Check health status and probe TeX Live compiler binaries',
@@ -223,8 +221,6 @@ export class ClsiController {
   }
 
   @Get('clsi/metrics/summary')
-  @UseGuards(OperatorGuard)
-  @RequireOperator()
   @NoProjectContext()
   @ApiOperation({ summary: 'JSON metrics summary of compilation statistics' })
   async getMetricsSummary() {

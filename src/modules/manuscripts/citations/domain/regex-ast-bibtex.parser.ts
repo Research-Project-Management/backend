@@ -273,6 +273,23 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
     return -1;
   }
 
+  public static maskCommentsPreserveLength(text: string): string {
+    const lines = text.split('\n');
+    const masked: string[] = [];
+    for (const l of lines) {
+      let out = '';
+      let inComment = false;
+      for (let i = 0; i < l.length; i++) {
+        if (!inComment && l[i] === '%' && (i === 0 || l[i - 1] !== '\\')) {
+          inComment = true;
+        }
+        out += inComment ? ' ' : l[i];
+      }
+      masked.push(out);
+    }
+    return masked.join('\n');
+  }
+
   public static upsertEntry(
     text: string,
     key: string,
@@ -280,10 +297,11 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
   ): string {
     const targetKey = key.trim().toLowerCase();
     const ranges: Array<{ start: number; end: number }> = [];
+    const maskedText = RegexAstBibtexParser.maskCommentsPreserveLength(text);
     const entryStartRegex = /@([a-zA-Z]+)\s*\{\s*([^,\s]+)\s*,/g;
 
     let match: RegExpExecArray | null;
-    while ((match = entryStartRegex.exec(text)) !== null) {
+    while ((match = entryStartRegex.exec(maskedText)) !== null) {
       const entryType = match[1].toLowerCase();
       if (
         entryType === 'comment' ||
@@ -294,7 +312,7 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
       }
       const openIdx = match.index + match[0].indexOf('{');
       const closeIdx = RegexAstBibtexParser.findMatchingClosingBrace(
-        text,
+        maskedText,
         openIdx,
       );
       if (closeIdx === -1) break;

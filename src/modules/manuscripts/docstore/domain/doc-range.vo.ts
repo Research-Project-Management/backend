@@ -26,9 +26,28 @@ export interface CommentItem {
   [key: string]: unknown;
 }
 
+export interface ReviewRoundInfo {
+  status:
+    | 'draft'
+    | 'in_review'
+    | 'changes_requested'
+    | 'approved'
+    | 'submitted'
+    | 'locked';
+  roundNumber?: number;
+  requestedById?: string;
+  requestedAt?: string;
+  verdictById?: string;
+  verdictAt?: string;
+  notes?: string;
+  deadline?: string;
+  [key: string]: unknown;
+}
+
 export interface DocRanges {
   changes?: TrackChangeItem[];
   comments?: CommentItem[];
+  review?: ReviewRoundInfo;
   [key: string]: unknown;
 }
 

@@ -344,12 +344,41 @@ export class LatexProseTokenizer {
   }
 }
 
+export interface LanguageMorphologyProfile {
+  readonly baseLanguage: string;
+  readonly dictionary: Set<string>;
+  getStems(word: string): string[];
+}
+
+export class LanguageSpellProfileRegistry {
+  private readonly profiles = new Map<string, LanguageMorphologyProfile>();
+  private fallbackProfile!: LanguageMorphologyProfile;
+
+  public register(
+    profile: LanguageMorphologyProfile,
+    isFallback = false,
+  ): this {
+    this.profiles.set(profile.baseLanguage.toLowerCase(), profile);
+    if (isFallback || !this.fallbackProfile) {
+      this.fallbackProfile = profile;
+    }
+    return this;
+  }
+
+  public resolve(baseLanguage: string): LanguageMorphologyProfile {
+    return (
+      this.profiles.get(baseLanguage.toLowerCase()) ?? this.fallbackProfile
+    );
+  }
+}
+
 export class AcademicSpellEngine {
   private readonly englishDictionary: Set<string>;
   private readonly vietnameseDictionary: Set<string>;
   private readonly frenchDictionary: Set<string>;
   private readonly germanDictionary: Set<string>;
   private readonly spanishDictionary: Set<string>;
+  private readonly profileRegistry = new LanguageSpellProfileRegistry();
   private readonly lengthBuckets = new Map<
     Set<string>,
     Map<number, string[]>
@@ -367,6 +396,39 @@ export class AcademicSpellEngine {
     this.spanishDictionary = new Set<string>();
     this.tokenizer = tokenizer ?? new LatexProseTokenizer();
     this.seedDictionaries();
+    this.initLanguageProfiles();
+  }
+
+  private initLanguageProfiles(): void {
+    this.profileRegistry
+      .register(
+        {
+          baseLanguage: 'en',
+          dictionary: this.englishDictionary,
+          getStems: (word) => this.getMorphologicalStems(word),
+        },
+        true,
+      )
+      .register({
+        baseLanguage: 'vi',
+        dictionary: this.vietnameseDictionary,
+        getStems: () => [],
+      })
+      .register({
+        baseLanguage: 'fr',
+        dictionary: this.frenchDictionary,
+        getStems: (word) => this.getRomanceGermanicStems(word, 'fr'),
+      })
+      .register({
+        baseLanguage: 'de',
+        dictionary: this.germanDictionary,
+        getStems: (word) => this.getRomanceGermanicStems(word, 'de'),
+      })
+      .register({
+        baseLanguage: 'es',
+        dictionary: this.spanishDictionary,
+        getStems: (word) => this.getRomanceGermanicStems(word, 'es'),
+      });
   }
 
   public static validateCustomWord(raw: string): string {
@@ -459,18 +521,7 @@ export class AcademicSpellEngine {
   }
 
   private getDictionaryForLanguage(language: LanguageCodeVo): Set<string> {
-    switch (language.baseLanguage) {
-      case 'vi':
-        return this.vietnameseDictionary;
-      case 'fr':
-        return this.frenchDictionary;
-      case 'de':
-        return this.germanDictionary;
-      case 'es':
-        return this.spanishDictionary;
-      default:
-        return this.englishDictionary;
-    }
+    return this.profileRegistry.resolve(language.baseLanguage).dictionary;
   }
 
   public isCorrect(word: string, language: LanguageCodeVo): boolean {
@@ -479,7 +530,8 @@ export class AcademicSpellEngine {
 
     if (/^\d+$/.test(clean) || clean.length === 1) return true;
 
-    const dict = this.getDictionaryForLanguage(language);
+    const profile = this.profileRegistry.resolve(language.baseLanguage);
+    const dict = profile.dictionary;
     if (dict.has(clean)) return true;
 
     if (clean.includes('-') || clean.includes("'") || clean.includes('’')) {
@@ -492,20 +544,10 @@ export class AcademicSpellEngine {
       }
     }
 
-    const baseLang = language.baseLanguage;
-    if (baseLang === 'en') {
-      const stems = this.getMorphologicalStems(clean);
-      for (const stem of stems) {
-        if (dict.has(stem)) {
-          return true;
-        }
-      }
-    } else if (baseLang === 'fr' || baseLang === 'de' || baseLang === 'es') {
-      const stems = this.getRomanceGermanicStems(clean, baseLang);
-      for (const stem of stems) {
-        if (dict.has(stem)) {
-          return true;
-        }
+    const stems = profile.getStems(clean);
+    for (const stem of stems) {
+      if (dict.has(stem)) {
+        return true;
       }
     }
 

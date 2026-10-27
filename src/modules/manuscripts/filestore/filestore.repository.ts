@@ -150,7 +150,10 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     return this.storage.deleteObject(bucket, key);
   }
 
-  public async save(file: ManuscriptFile): Promise<ManuscriptFile> {
+  public async save(
+    file: ManuscriptFile,
+    options?: { syncStructureNode?: boolean },
+  ): Promise<ManuscriptFile> {
     const data = ManuscriptFileMapper.toPersistence(file);
 
     const upserted = await this.prisma.manuscriptFile.upsert({
@@ -181,7 +184,9 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       },
     });
 
-    await this.syncFileNode(data);
+    if (options?.syncStructureNode !== false) {
+      await this.syncFileNode(data);
+    }
 
     return ManuscriptFileMapper.toDomain(upserted);
   }

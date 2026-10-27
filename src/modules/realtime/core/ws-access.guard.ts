@@ -21,6 +21,172 @@ import { REALTIME_EVENTS } from './realtime.constant';
 import { RealtimeAccessService } from '../manuscripts/realtime-access.service';
 import { WsRateLimiter } from './ws-rate-limiter';
 
+export interface WsAccessEvaluationContext {
+  client: Socket;
+  event?: string;
+  requiredLevel: WsAccessLevel;
+  userId: string;
+  data: Record<string, any> | undefined;
+  realtimeAccess: RealtimeAccessService;
+}
+
+/**
+ * Template Assertion Helper: Centralizes decision outcome translation into WS domain exceptions.
+ */
+export function assertRealtimeAccessDecision(
+  decision: 'allowed' | 'denied' | 'unavailable',
+  deniedMessage: string,
+  requiredLevel?: WsAccessLevel,
+): void {
+  if (decision === 'unavailable') {
+    throw new RealtimeServiceUnavailableException();
+  }
+  if (decision === 'denied') {
+    if (requiredLevel === 'write') {
+      throw new RealtimeRoleInsufficientException(
+        'Insufficient role for document modification (read-only)',
+      );
+    }
+    throw new RealtimeAccessDeniedException(deniedMessage);
+  }
+}
+
+/**
+ * Chain of Responsibility Pattern: WebSocket Event Access Rule
+ */
+export interface IWsEventAccessRule {
+  readonly name: string;
+  matches(ctx: WsAccessEvaluationContext): boolean;
+  authorize(ctx: WsAccessEvaluationContext): Promise<boolean>;
+}
+
+const ProjectJoinAccessRule: IWsEventAccessRule = {
+  name: 'ProjectJoinAccessRule',
+  matches: (ctx) => ctx.event === REALTIME_EVENTS.PROJECT_JOIN,
+  authorize: async (ctx) => {
+    const projectId = ctx.data?.projectId;
+    if (!projectId) {
+      throw new RealtimeAccessDeniedException('Missing projectId');
+    }
+    const decision = await ctx.realtimeAccess.checkAccess(
+      projectId,
+      ctx.userId,
+      'member',
+    );
+    assertRealtimeAccessDecision(decision, 'Access denied to project');
+    return true;
+  },
+};
+
+const DocJoinAccessRule: IWsEventAccessRule = {
+  name: 'DocJoinAccessRule',
+  matches: (ctx) => ctx.event === REALTIME_EVENTS.DOC_JOIN,
+  authorize: async (ctx) => {
+    const projectId = ctx.data?.projectId;
+    const docId = ctx.data?.docId;
+    if (!projectId || !docId) {
+      throw new RealtimeAccessDeniedException('Missing projectId or docId');
+    }
+
+    if (ctx.client.data?.projectId !== projectId) {
+      throw new RealtimeAccessDeniedException(
+        'Must join project before joining document',
+      );
+    }
+
+    const belongs = await ctx.realtimeAccess.validateDocInProject(
+      projectId,
+      docId,
+    );
+    if (!belongs) {
+      throw new RealtimeAccessDeniedException(
+        'Document does not belong to specified project',
+      );
+    }
+
+    const decision = await ctx.realtimeAccess.checkAccess(
+      projectId,
+      ctx.userId,
+      'read',
+    );
+    assertRealtimeAccessDecision(decision, 'Access denied to document');
+    return true;
+  },
+};
+
+const ProjectChatAccessRule: IWsEventAccessRule = {
+  name: 'ProjectChatAccessRule',
+  matches: (ctx) =>
+    ctx.event === REALTIME_EVENTS.CHAT_SEND ||
+    ctx.event === REALTIME_EVENTS.CHAT_HISTORY,
+  authorize: async (ctx) => {
+    const projectId = ctx.data?.projectId;
+    if (!projectId || ctx.client.data?.projectId !== projectId) {
+      throw new RealtimeAccessDeniedException(
+        'Socket is not joined to target project',
+      );
+    }
+
+    const decision = await ctx.realtimeAccess.checkAccess(
+      projectId,
+      ctx.userId,
+      'member',
+    );
+    assertRealtimeAccessDecision(decision, 'Access denied to project chat');
+    return true;
+  },
+};
+
+const ActiveDocScopedAccessRule: IWsEventAccessRule = {
+  name: 'ActiveDocScopedAccessRule',
+  matches: () => true,
+  authorize: async (ctx) => {
+    const joinedProjectId = ctx.client.data?.projectId;
+    const joinedDocId = ctx.client.data?.activeDocId;
+
+    if (!joinedProjectId) {
+      throw new RealtimeAccessDeniedException(
+        'Socket has not joined a project',
+      );
+    }
+    if (!joinedDocId) {
+      throw new RealtimeAccessDeniedException(
+        'Socket has not joined a document',
+      );
+    }
+
+    if (ctx.data?.projectId && ctx.data.projectId !== joinedProjectId) {
+      throw new RealtimeAccessDeniedException(
+        'Event payload projectId does not match socket joined project',
+      );
+    }
+    if (ctx.data?.docId && ctx.data.docId !== joinedDocId) {
+      throw new RealtimeAccessDeniedException(
+        'Event payload docId does not match socket joined document',
+      );
+    }
+
+    const decision = await ctx.realtimeAccess.checkAccess(
+      joinedProjectId,
+      ctx.userId,
+      ctx.requiredLevel,
+    );
+    assertRealtimeAccessDecision(
+      decision,
+      'Access denied to document',
+      ctx.requiredLevel,
+    );
+    return true;
+  },
+};
+
+const DEFAULT_WS_ACCESS_RULES: readonly IWsEventAccessRule[] = [
+  ProjectJoinAccessRule,
+  DocJoinAccessRule,
+  ProjectChatAccessRule,
+  ActiveDocScopedAccessRule,
+];
+
 /**
  * Enterprise WebSocket Access Guard
  * Enforces declarative @WsAccess('read' | 'write' | 'member' | 'none') metadata,
@@ -69,138 +235,19 @@ export class WsAccessGuard implements CanActivate {
       throw new RealtimeAuthRequiredException('Authentication required');
     }
 
-    // 1. Project Join
-    if (event === REALTIME_EVENTS.PROJECT_JOIN) {
-      const projectId = data?.projectId;
-      if (!projectId) {
-        throw new RealtimeAccessDeniedException('Missing projectId');
-      }
-      const decision = await this.realtimeAccess.checkAccess(
-        projectId,
-        userId,
-        'member',
-      );
-      if (decision === 'unavailable') {
-        throw new RealtimeServiceUnavailableException();
-      }
-      if (decision === 'denied') {
-        throw new RealtimeAccessDeniedException('Access denied to project');
-      }
-      return true;
-    }
-
-    // 2. Document Join
-    if (event === REALTIME_EVENTS.DOC_JOIN) {
-      const projectId = data?.projectId;
-      const docId = data?.docId;
-      if (!projectId || !docId) {
-        throw new RealtimeAccessDeniedException('Missing projectId or docId');
-      }
-
-      // Socket must have joined project first
-      if (client.data?.projectId !== projectId) {
-        throw new RealtimeAccessDeniedException(
-          'Must join project before joining document',
-        );
-      }
-
-      // Verify document belongs to project (RT-04)
-      const belongs = await this.realtimeAccess.validateDocInProject(
-        projectId,
-        docId,
-      );
-      if (!belongs) {
-        throw new RealtimeAccessDeniedException(
-          'Document does not belong to specified project',
-        );
-      }
-
-      const decision = await this.realtimeAccess.checkAccess(
-        projectId,
-        userId,
-        'read',
-      );
-      if (decision === 'unavailable') {
-        throw new RealtimeServiceUnavailableException();
-      }
-      if (decision === 'denied') {
-        throw new RealtimeAccessDeniedException('Access denied to document');
-      }
-      return true;
-    }
-
-    // 3. Project Chat Events (chat:send, chat:history)
-    if (
-      event === REALTIME_EVENTS.CHAT_SEND ||
-      event === REALTIME_EVENTS.CHAT_HISTORY
-    ) {
-      const projectId = data?.projectId;
-      if (!projectId || client.data?.projectId !== projectId) {
-        throw new RealtimeAccessDeniedException(
-          'Socket is not joined to target project',
-        );
-      }
-
-      const decision = await this.realtimeAccess.checkAccess(
-        projectId,
-        userId,
-        'member',
-      );
-      if (decision === 'unavailable') {
-        throw new RealtimeServiceUnavailableException();
-      }
-      if (decision === 'denied') {
-        throw new RealtimeAccessDeniedException(
-          'Access denied to project chat',
-        );
-      }
-      return true;
-    }
-
-    // 4. Document-Scoped Events (update, cursor, sync:step1, sync:step2, sync:update)
-    const joinedProjectId = client.data?.projectId;
-    const joinedDocId = client.data?.activeDocId;
-
-    if (!joinedProjectId) {
-      throw new RealtimeAccessDeniedException(
-        'Socket has not joined a project',
-      );
-    }
-    if (!joinedDocId) {
-      throw new RealtimeAccessDeniedException(
-        'Socket has not joined a document',
-      );
-    }
-
-    // Verify payload targets joined context
-    if (data?.projectId && data.projectId !== joinedProjectId) {
-      throw new RealtimeAccessDeniedException(
-        'Event payload projectId does not match socket joined project',
-      );
-    }
-    if (data?.docId && data.docId !== joinedDocId) {
-      throw new RealtimeAccessDeniedException(
-        'Event payload docId does not match socket joined document',
-      );
-    }
-
-    const decision = await this.realtimeAccess.checkAccess(
-      joinedProjectId,
-      userId,
+    const evalCtx: WsAccessEvaluationContext = {
+      client,
+      event,
       requiredLevel,
-    );
+      userId,
+      data,
+      realtimeAccess: this.realtimeAccess,
+    };
 
-    if (decision === 'unavailable') {
-      throw new RealtimeServiceUnavailableException();
-    }
-
-    if (decision === 'denied') {
-      if (requiredLevel === 'write') {
-        throw new RealtimeRoleInsufficientException(
-          'Insufficient role for document modification (read-only)',
-        );
+    for (const rule of DEFAULT_WS_ACCESS_RULES) {
+      if (rule.matches(evalCtx)) {
+        return rule.authorize(evalCtx);
       }
-      throw new RealtimeAccessDeniedException('Access denied to document');
     }
 
     return true;

@@ -81,7 +81,15 @@ export function isPrivateOrReservedIPv6(ip: string): boolean {
   return false;
 }
 
-export async function assertSafeExternalUrl(rawUrl: string): Promise<URL> {
+export type SafeExternalUrlResult = URL & {
+  url: URL;
+  resolvedAddresses: string[];
+  family?: number;
+};
+
+export async function assertSafeExternalUrl(
+  rawUrl: string,
+): Promise<SafeExternalUrlResult> {
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(rawUrl);
@@ -122,6 +130,9 @@ export async function assertSafeExternalUrl(rawUrl: string): Promise<URL> {
     );
   }
 
+  let resolvedAddresses: string[] = [];
+  let family: number | undefined = ipVersion || undefined;
+
   try {
     const addresses = await lookup(hostname, { all: true });
     for (const addr of addresses) {
@@ -136,6 +147,10 @@ export async function assertSafeExternalUrl(rawUrl: string): Promise<URL> {
         );
       }
     }
+    resolvedAddresses = addresses.map((a) => a.address);
+    if (addresses.length > 0) {
+      family = addresses[0].family;
+    }
   } catch (err: unknown) {
     if (err instanceof SsrfSecurityException) throw err;
     throw new SsrfSecurityException(
@@ -143,5 +158,9 @@ export async function assertSafeExternalUrl(rawUrl: string): Promise<URL> {
     );
   }
 
-  return parsedUrl;
+  return Object.assign(parsedUrl, {
+    url: parsedUrl,
+    resolvedAddresses,
+    family,
+  });
 }

@@ -1,0 +1,40 @@
+// ============================================================================
+// Manuscripts Subsystem: Page Aggregate Root Sub-Domain
+// Self-managed domain schema: ManuscriptPage
+// ============================================================================
+
+model ManuscriptPage {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_pages_project_id")
+  rootDocId   String?  @map("root_doc_id") @db.Uuid
+  title       String   @default("Untitled") @db.VarChar(500)
+  description String?  @db.Text
+  status      String   @default("draft") @db.VarChar(50) // draft, published, archived
+
+  compiler            String   @default("pdflatex") @db.VarChar(32)
+  texLiveVersion      String   @default("2024") @map("tex_live_version") @db.VarChar(16)
+  spellCheckLanguage  String   @default("en_US") @map("spell_check_language") @db.VarChar(16)
+  pdfThumbnail        String?  @map("pdf_thumbnail") @db.Text
+  settings            Json     @default("{}")
+
+  deleted     Boolean   @default(false)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdById String?   @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations to child entities scoped under this Page
+  docs            ManuscriptDoc[]
+  nodes           ManuscriptNode[]
+  files           ManuscriptFile[]
+  snapshots       ManuscriptSnapshot[]
+  labels          ManuscriptLabel[]
+  trackChanges    ManuscriptTrackChange[]
+  commentThreads  ManuscriptCommentThread[]
+  linkedFiles     ManuscriptLinkedFile[]
+
+  @@index([projectId, deleted, updatedAt(sort: Desc)], map: "idx_manuscript_pages_project_updated")
+  @@index([projectId, deleted, title], map: "idx_manuscript_pages_project_title")
+  @@map("manuscript_pages")
+}

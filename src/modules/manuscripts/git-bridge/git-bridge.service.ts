@@ -19,7 +19,9 @@ import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.serv
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import {
   LiveCollaborationPort,
+  NOOP_LIVE_COLLABORATION,
   ManuscriptDomainEventBus,
+  SagaRunner,
 } from '@/modules/manuscripts/core';
 import { GitBridgeRepository, GitCliAdapter } from './git-bridge.repository';
 import {
@@ -41,6 +43,20 @@ import {
 } from './domain';
 
 const MAX_TOKENS = 20;
+
+export interface NodeEntryMemento {
+  readonly projectPath: string;
+  readonly existed: boolean;
+  readonly nodeId?: string;
+  readonly name?: string;
+  readonly parentId?: string | null;
+  readonly type?: 'DOC' | 'FILE' | 'FOLDER';
+  readonly docId?: string | null;
+  readonly fileId?: string | null;
+  readonly isRootDoc?: boolean;
+  readonly docLines?: string[];
+  readonly docVersion?: number;
+}
 
 async function streamToBuffer(stream: Readable): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -240,13 +256,14 @@ export class GitBridgeService {
     });
   }
 
-  private live(): LiveCollaborationPort | null {
+  private live(): LiveCollaborationPort {
     try {
       return (
-        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ?? null
+        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ??
+        NOOP_LIVE_COLLABORATION
       );
     } catch {
-      return null;
+      return NOOP_LIVE_COLLABORATION;
     }
   }
 
@@ -375,162 +392,203 @@ export class GitBridgeService {
       });
     }
 
-    // 2. Capture pre-push snapshot of affected nodes/docs for transactional rollback
-    interface PrePushEntrySnapshot {
-      projectPath: string;
-      existed: boolean;
-      nodeId?: string;
-      name?: string;
-      parentId?: string | null;
-      type?: 'DOC' | 'FILE' | 'FOLDER';
-      docId?: string | null;
-      fileId?: string | null;
-      isRootDoc?: boolean;
-      docLines?: string[];
-      docVersion?: number;
+    // 2. Flush active live Yjs docs before capturing Memento / applying push mutations
+    const live = this.live();
+    if (live && typeof this.structure.getAllNodes === 'function') {
+      const allNodes = await this.structure
+        .getAllNodes(projectId)
+        .catch(() => []);
+      const activeDocIds = allNodes
+        .filter((n) => n.docId)
+        .map((n) => n.docId as string);
+      if (activeDocIds.length > 0) {
+        await live.flushDocs(projectId, activeDocIds).catch(() => []);
+      }
     }
 
-    const prePushSnapshots = new Map<string, PrePushEntrySnapshot>();
+    // 3. Capture pre-push Memento of affected nodes/docs and execute via SagaRunner
+    const mementos = new Map<string, NodeEntryMemento>();
     for (const item of stagedChanges) {
-      if (prePushSnapshots.has(item.projectPath)) continue;
-      const existing = await this.structure
-        .getNodeByPath(projectId, item.projectPath)
-        .catch(() => null);
-      if (!existing) {
-        prePushSnapshots.set(item.projectPath, {
-          projectPath: item.projectPath,
-          existed: false,
-        });
-      } else {
-        let docLines: string[] | undefined;
-        let docVersion: number | undefined;
-        if (existing.docId) {
-          const doc = await this.docstore
-            .getDoc(projectId, existing.docId)
-            .catch(() => null);
-          if (doc) {
-            docLines = doc.lines ? [...doc.lines] : [''];
-            docVersion = doc.version;
-          }
-        }
-        prePushSnapshots.set(item.projectPath, {
-          projectPath: item.projectPath,
-          existed: true,
-          nodeId: existing.id,
-          name: existing.name,
-          parentId: existing.parentId ?? null,
-          type: existing.type,
-          docId: existing.docId ?? null,
-          fileId: existing.fileId ?? null,
-          isRootDoc: existing.isRootDoc,
-          docLines,
-          docVersion,
-        });
-      }
+      if (mementos.has(item.projectPath)) continue;
+      const memento = await this.captureEntryMemento(
+        projectId,
+        item.projectPath,
+      );
+      mementos.set(item.projectPath, memento);
     }
 
     const result: PushApplyResult = { created: [], updated: [], deleted: [] };
-    const touchedPaths: string[] = [];
+    const saga = new SagaRunner({
+      logger: this.logger,
+      contextName: `GitBridgeService.applyPush(${projectId})`,
+    });
 
     try {
       for (const item of stagedChanges) {
-        touchedPaths.push(item.projectPath);
-        if (item.status === 'D') {
-          if (await this.removeEntry(projectId, item.projectPath)) {
-            result.deleted.push(item.projectPath);
-          }
-          continue;
-        }
-        const outcome = await this.upsertEntry(
-          projectId,
-          item.projectPath,
-          item.content!,
+        const memento = mementos.get(item.projectPath)!;
+        await saga.step(
+          `applyPush:${item.status}:${item.projectPath}`,
+          async () => {
+            if (item.status === 'D') {
+              if (await this.removeEntry(projectId, item.projectPath)) {
+                result.deleted.push(item.projectPath);
+              }
+              return;
+            }
+            const outcome = await this.upsertEntry(
+              projectId,
+              item.projectPath,
+              item.content!,
+            );
+            result[outcome].push(item.projectPath);
+          },
+          async () => {
+            await this.restoreEntryMemento(projectId, memento);
+          },
         );
-        result[outcome].push(item.projectPath);
       }
       return result;
     } catch (err) {
-      // Roll back mutated/deleted docs and nodes in reverse order
-      for (const touchedPath of touchedPaths.reverse()) {
-        const snap = prePushSnapshots.get(touchedPath);
-        if (!snap) continue;
-        try {
-          const current = await this.structure
-            .getNodeByPath(projectId, touchedPath)
-            .catch(() => null);
+      await saga.compensateAll();
+      throw err;
+    }
+  }
 
-          if (!snap.existed) {
-            if (current) {
-              await this.removeEntry(projectId, touchedPath).catch(
-                () => undefined,
-              );
-            }
-            continue;
-          }
+  /**
+   * Memento Pattern: Captures the pre-mutation state of a project node/document.
+   */
+  private async captureEntryMemento(
+    projectId: string,
+    projectPath: string,
+  ): Promise<NodeEntryMemento> {
+    const existing = await this.structure
+      .getNodeByPath(projectId, projectPath)
+      .catch(() => null);
+    if (!existing) {
+      return {
+        projectPath,
+        existed: false,
+      };
+    }
 
-          if (snap.docId) {
-            await this.docstore
-              .patchDoc(projectId, snap.docId, { deleted: false })
-              .catch(() => undefined);
-            if (snap.docLines) {
-              await this.docstore
-                .updateDoc(projectId, snap.docId, {
-                  lines: snap.docLines,
-                  version: (snap.docVersion ?? 0) + 1,
-                })
-                .catch(() => undefined);
-              const bus = this.domainBus();
-              if (bus) {
-                await bus.publish({
-                  type: 'manuscript.document.mutated',
-                  projectId,
-                  docId: snap.docId,
-                  lines: snap.docLines,
-                  version: (snap.docVersion ?? 0) + 1,
-                  source: 'git-bridge',
-                  occurredAt: Date.now(),
-                });
-              } else {
-                await this.live()
-                  ?.applyExternalText(
-                    projectId,
-                    snap.docId,
-                    snap.docLines.join('\n'),
-                  )
-                  .catch(() => false);
-              }
-            }
-          }
+    let docLines: string[] | undefined;
+    let docVersion: number | undefined;
+    if (existing.docId) {
+      const doc = await this.docstore
+        .getDoc(projectId, existing.docId)
+        .catch(() => null);
+      if (doc) {
+        docLines = doc.lines ? [...doc.lines] : [''];
+        docVersion = doc.version;
+      }
+    }
 
-          if (!current && snap.name && snap.type && snap.type !== 'FOLDER') {
-            const recreated = await this.structure
-              .createNode(projectId, {
-                name: snap.name,
-                path: snap.projectPath,
-                parentId: snap.parentId ?? null,
-                type: snap.type,
-                docId: snap.docId ?? undefined,
-                fileId: snap.fileId ?? undefined,
-                isRootDoc: snap.isRootDoc,
-              })
-              .catch(() => null);
-            if (recreated && snap.isRootDoc) {
-              await this.structure
-                .setRootDoc(projectId, recreated.id)
-                .catch(() => undefined);
-            }
-          }
-        } catch (rollbackErr: unknown) {
-          const msg =
-            rollbackErr instanceof Error
-              ? rollbackErr.message
-              : String(rollbackErr);
-          this.logger.warn(
-            `Rollback failed for ${touchedPath} in project ${projectId}: ${msg}`,
-          );
+    return {
+      projectPath,
+      existed: true,
+      nodeId: existing.id,
+      name: existing.name,
+      parentId: existing.parentId ?? null,
+      type: existing.type,
+      docId: existing.docId ?? null,
+      fileId: existing.fileId ?? null,
+      isRootDoc: existing.isRootDoc,
+      docLines,
+      docVersion,
+    };
+  }
+
+  /**
+   * Memento Compensation: Restores a node/document to its captured pre-push Memento.
+   */
+  private async restoreEntryMemento(
+    projectId: string,
+    snap: NodeEntryMemento,
+  ): Promise<void> {
+    let current = await this.structure
+      .getNodeByPath(projectId, snap.projectPath)
+      .catch(() => null);
+
+    if (!snap.existed) {
+      if (current) {
+        await this.removeEntry(projectId, snap.projectPath).catch(
+          () => undefined,
+        );
+      }
+      return;
+    }
+
+    // If a failed upsert replaced the original node with a different node/doc/file at the same path,
+    // remove the newly created replacement before restoring the original Memento state.
+    if (
+      current &&
+      (current.id !== snap.nodeId ||
+        (current.docId ?? null) !== (snap.docId ?? null) ||
+        (current.fileId ?? null) !== (snap.fileId ?? null))
+    ) {
+      await this.removeEntry(projectId, snap.projectPath).catch(
+        () => undefined,
+      );
+      current = null;
+    }
+
+    if (snap.fileId) {
+      await this.filestore
+        .restoreFile?.(projectId, snap.fileId)
+        ?.catch(() => false);
+    }
+
+    if (snap.docId) {
+      await this.docstore
+        .patchDoc?.(projectId, snap.docId, { deleted: false })
+        ?.catch(() => undefined);
+      if (snap.docLines) {
+        await this.docstore
+          .updateDoc(projectId, snap.docId, {
+            lines: snap.docLines,
+            version: (snap.docVersion ?? 0) + 1,
+          })
+          .catch(() => undefined);
+        const bus = this.domainBus();
+        if (bus) {
+          await bus.publish({
+            type: 'manuscript.document.mutated',
+            projectId,
+            docId: snap.docId,
+            lines: snap.docLines,
+            version: (snap.docVersion ?? 0) + 1,
+            source: 'git-bridge',
+            occurredAt: Date.now(),
+          });
+        } else {
+          await this.live()
+            .applyExternalText(
+              projectId,
+              snap.docId,
+              snap.docLines.join('\n'),
+            )
+            .catch(() => false);
         }
       }
-      throw err;
+    }
+
+    if (!current && snap.name && snap.type && snap.type !== 'FOLDER') {
+      const recreated = await this.structure
+        .createNode(projectId, {
+          name: snap.name,
+          path: snap.projectPath,
+          parentId: snap.parentId ?? null,
+          type: snap.type,
+          docId: snap.docId ?? undefined,
+          fileId: snap.fileId ?? undefined,
+          isRootDoc: snap.isRootDoc,
+        })
+        .catch(() => null);
+      if (recreated && snap.isRootDoc) {
+        await this.structure
+          .setRootDoc(projectId, recreated.id)
+          .catch(() => undefined);
+      }
     }
   }
 

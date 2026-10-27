@@ -50,7 +50,11 @@ import {
 
 @ApiTags('Manuscripts - Project Structure & File Tree')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/v1/manuscripts/projects/:projectId/structure')
+@Controller([
+  'api/v1/manuscripts/projects/:projectId/structure',
+  'api/v1/manuscripts/pages/:projectId/structure',
+  'api/v1/manuscripts/docs/:projectId/structure',
+])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class StructureController {

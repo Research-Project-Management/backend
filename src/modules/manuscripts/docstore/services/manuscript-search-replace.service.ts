@@ -18,6 +18,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   LiveCollaborationPort,
   ManuscriptDomainEventBus,
+  NOOP_LIVE_COLLABORATION,
 } from '@/modules/manuscripts/core';
 import { buildSearchRegex, replaceInText } from '../domain';
 
@@ -42,7 +43,7 @@ export interface ReplaceDocumentsParams {
 @Injectable()
 export class ManuscriptSearchReplaceService {
   private readonly logger = new Logger(ManuscriptSearchReplaceService.name);
-  private liveCollab: LiveCollaborationPort | null | undefined;
+  private liveCollab: LiveCollaborationPort | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -50,15 +51,18 @@ export class ManuscriptSearchReplaceService {
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
+    @Optional() private readonly injectedLiveCollab?: LiveCollaborationPort,
   ) {}
 
-  private getLiveCollaboration(): LiveCollaborationPort | null {
+  private getLiveCollaboration(): LiveCollaborationPort {
+    if (this.injectedLiveCollab) return this.injectedLiveCollab;
     if (this.liveCollab !== undefined) return this.liveCollab;
     try {
       this.liveCollab =
-        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ?? null;
+        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ??
+        NOOP_LIVE_COLLABORATION;
     } catch {
-      this.liveCollab = null;
+      this.liveCollab = NOOP_LIVE_COLLABORATION;
     }
     return this.liveCollab;
   }
@@ -69,7 +73,6 @@ export class ManuscriptSearchReplaceService {
     lines: string[],
   ): Promise<boolean> {
     const live = this.getLiveCollaboration();
-    if (!live) return false;
     try {
       return await live.applyExternalText(projectId, docId, lines.join('\n'));
     } catch (err: unknown) {
@@ -116,13 +119,19 @@ export class ManuscriptSearchReplaceService {
       };
     }
 
+    let re: RegExp;
     try {
-      const re = buildSearchRegex(query, {
+      re = buildSearchRegex(query, {
         caseSensitive: body?.caseSensitive,
         wholeWord: body?.wholeWord,
         useRegex: body?.useRegex,
       });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new BadRequestException(`Invalid search pattern: ${message}`);
+    }
 
+    try {
       const where: Prisma.ManuscriptDocWhereInput = {
         projectId,
         deleted: false,
@@ -261,7 +270,11 @@ export class ManuscriptSearchReplaceService {
 
     // Make sure in-memory collaborative edits are persisted before we read.
     const candidateIds = (
-      await this.prisma.manuscriptDoc.findMany({ where, select: { id: true } })
+      await this.prisma.manuscriptDoc.findMany({
+        where,
+        select: { id: true },
+        take: 1000,
+      })
     ).map((d) => d.id);
     const live = this.getLiveCollaboration();
     if (live && candidateIds.length > 0) {
@@ -270,7 +283,8 @@ export class ManuscriptSearchReplaceService {
 
     const docs = await this.prisma.manuscriptDoc.findMany({
       where: { id: { in: candidateIds } },
-      select: { id: true, lines: true, version: true, inStorage: true },
+      select: { id: true, lines: true, version: true, rev: true, inStorage: true },
+      take: 1000,
     });
 
     let totalOccurrencesReplaced = 0;
@@ -293,8 +307,8 @@ export class ManuscriptSearchReplaceService {
         const result = await this.docstoreService.updateDoc(projectId, doc.id, {
           lines,
           version: doc.version + 1,
+          expectedRev: doc.rev,
         });
-        await this.syncLiveDoc(projectId, doc.id, lines);
         if (this.domainEventBus) {
           await this.domainEventBus.publish({
             type: 'manuscript.document.mutated',
@@ -305,6 +319,8 @@ export class ManuscriptSearchReplaceService {
             source: 'search-replace',
             occurredAt: Date.now(),
           });
+        } else {
+          await this.syncLiveDoc(projectId, doc.id, lines);
         }
         totalOccurrencesReplaced += count;
         affectedFileIds.push(doc.id);

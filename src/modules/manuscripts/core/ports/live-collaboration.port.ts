@@ -54,4 +54,43 @@ export abstract class LiveCollaborationPort {
   abstract evictDoc(projectId: string, docId: string): Promise<void>;
 }
 
+/**
+ * Null Object Pattern implementation of `LiveCollaborationPort`.
+ * Safely absorbs live collaboration calls when the WebSocket gateway is not mounted
+ * (e.g. CLI tools, isolated unit tests, or background workers), eliminating
+ * scattered `this.moduleRef?.get(LiveCollaborationPort, { strict: false })` lookups
+ * and null checks across services.
+ */
+export class NoopLiveCollaborationAdapter extends LiveCollaborationPort {
+  public readonly isNoop = true;
+
+  public async applyExternalText(
+    _projectId: string,
+    _docId: string,
+    _text: string,
+  ): Promise<boolean> {
+    return false;
+  }
+
+  public async getPresence(
+    _projectId: string,
+    _docId: string | null,
+  ): Promise<LivePresenceUser[]> {
+    return [];
+  }
+
+  public async flushDocs(
+    _projectId: string,
+    _docIds: string[],
+  ): Promise<string[]> {
+    return [];
+  }
+
+  public async evictDoc(_projectId: string, _docId: string): Promise<void> {
+    return;
+  }
+}
+
+export const NOOP_LIVE_COLLABORATION = new NoopLiveCollaborationAdapter();
+
 export const LIVE_COLLABORATION_PORT = LiveCollaborationPort;

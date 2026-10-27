@@ -12,6 +12,16 @@ import { SyncPoint, ReverseSyncPoint } from '../domain/clsi-ports';
 import { CompileLogAnalyzer } from '@/modules/manuscripts/diagnostics/domain';
 import { CompilePipelineResult } from './compile-pipeline.service';
 
+export interface RemoteCompileRequest {
+  projectId: string;
+  mainFile: string;
+  source: string;
+  mergedFiles: Record<string, string | Buffer>;
+  dto: CompileManuscriptDto;
+  engine?: string;
+  cacheKey: string;
+}
+
 @Injectable()
 export class RemoteClsiClientAdapter {
   private readonly logger = new Logger(RemoteClsiClientAdapter.name);
@@ -35,6 +45,34 @@ export class RemoteClsiClientAdapter {
 
   public isEnabled(): boolean {
     return Boolean(this.remoteClsiUrl);
+  }
+
+  /**
+   * Circuit-Breaker Decorator / Template wrapper for remote CLSI HTTP operations.
+   * Ensures accurate operation-scoped logging and consistent failure recording.
+   */
+  private async guarded<T>(
+    operationName: string,
+    fn: (baseUrl: string) => Promise<T | null>,
+  ): Promise<T | null> {
+    if (!this.remoteClsiUrl) return null;
+    if (this.circuitBreaker.isOpen()) {
+      this.logger.warn(
+        `Remote CLSI Circuit Breaker is OPEN. Fast-failing ${operationName} request to local pipeline.`,
+      );
+      return null;
+    }
+    try {
+      const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
+      return await fn(baseUrl);
+    } catch (err: unknown) {
+      this.circuitBreaker.recordFailure(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Remote CLSI ${operationName} failed: ${msg}. Falling back to local pipeline.`,
+      );
+      return null;
+    }
   }
 
   private resolveUrl(baseUrl: string, targetUrl: string): string {
@@ -93,24 +131,30 @@ export class RemoteClsiClientAdapter {
   }
 
   public async tryRemoteClsiCompile(
-    projectId: string,
-    mainFile: string,
-    source: string,
-    mergedFiles: Record<string, string | Buffer>,
-    dto: CompileManuscriptDto,
-    engine: string | undefined,
-    cacheKey: string,
+    projectIdOrRequest: string | RemoteCompileRequest,
+    mainFileArg?: string,
+    sourceArg?: string,
+    mergedFilesArg?: Record<string, string | Buffer>,
+    dtoArg?: CompileManuscriptDto,
+    engineArg?: string | undefined,
+    cacheKeyArg?: string,
   ): Promise<CompilePipelineResult | null> {
-    if (!this.remoteClsiUrl) return null;
-    if (this.circuitBreaker.isOpen()) {
-      this.logger.warn(
-        `Remote CLSI Circuit Breaker is OPEN. Fast-failing compile request to local pipeline.`,
-      );
-      return null;
-    }
+    const req: RemoteCompileRequest =
+      typeof projectIdOrRequest === 'object'
+        ? projectIdOrRequest
+        : {
+            projectId: projectIdOrRequest,
+            mainFile: mainFileArg!,
+            source: sourceArg!,
+            mergedFiles: mergedFilesArg!,
+            dto: dtoArg!,
+            engine: engineArg,
+            cacheKey: cacheKeyArg!,
+          };
 
-    try {
-      const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
+    return this.guarded<CompilePipelineResult>('compile', async (baseUrl) => {
+      const { projectId, mainFile, source, mergedFiles, dto, engine, cacheKey } =
+        req;
       const endpoints = baseUrl.endsWith('/api/clsi')
         ? [`${baseUrl}/compile`]
         : [
@@ -246,6 +290,7 @@ export class RemoteClsiClientAdapter {
         this.circuitBreaker.recordSuccess();
         return result;
       }
+
       if (response) {
         this.circuitBreaker.recordFailure(new Error(`HTTP ${response.status}`));
         this.logger.warn(
@@ -257,14 +302,8 @@ export class RemoteClsiClientAdapter {
           `Remote CLSI compile failed: ${lastError.message}. Falling back to local pipeline.`,
         );
       }
-    } catch (err: unknown) {
-      this.circuitBreaker.recordFailure(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Remote CLSI compile failed: ${msg}. Falling back to local pipeline.`,
-      );
-    }
-    return null;
+      return null;
+    });
   }
 
   public async tryRemoteForwardSync(dto: ForwardSyncDto): Promise<{
@@ -272,15 +311,7 @@ export class RemoteClsiClientAdapter {
     result?: SyncPoint;
     error?: string;
   } | null> {
-    if (!this.remoteClsiUrl) return null;
-    if (this.circuitBreaker.isOpen()) {
-      this.logger.warn(
-        `Remote CLSI Circuit Breaker is OPEN. Fast-failing compile request to local pipeline.`,
-      );
-      return null;
-    }
-    try {
-      const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
+    return this.guarded('forwardSync', async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/clsi/synctex/forward`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -288,16 +319,12 @@ export class RemoteClsiClientAdapter {
         signal: AbortSignal.timeout(10000),
       });
       if (response.ok) {
+        this.circuitBreaker.recordSuccess();
         return await response.json();
       }
-    } catch (err: unknown) {
-      this.circuitBreaker.recordFailure(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Remote CLSI forwardSync failed: ${msg}. Falling back to local.`,
-      );
-    }
-    return null;
+      this.circuitBreaker.recordFailure(new Error(`HTTP ${response.status}`));
+      return null;
+    });
   }
 
   public async tryRemoteReverseSync(dto: ReverseSyncDto): Promise<{
@@ -305,15 +332,7 @@ export class RemoteClsiClientAdapter {
     result?: ReverseSyncPoint;
     error?: string;
   } | null> {
-    if (!this.remoteClsiUrl) return null;
-    if (this.circuitBreaker.isOpen()) {
-      this.logger.warn(
-        `Remote CLSI Circuit Breaker is OPEN. Fast-failing compile request to local pipeline.`,
-      );
-      return null;
-    }
-    try {
-      const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
+    return this.guarded('reverseSync', async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/clsi/synctex/reverse`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -321,15 +340,11 @@ export class RemoteClsiClientAdapter {
         signal: AbortSignal.timeout(10000),
       });
       if (response.ok) {
+        this.circuitBreaker.recordSuccess();
         return await response.json();
       }
-    } catch (err: unknown) {
-      this.circuitBreaker.recordFailure(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Remote CLSI reverseSync failed: ${msg}. Falling back to local.`,
-      );
-    }
-    return null;
+      this.circuitBreaker.recordFailure(new Error(`HTTP ${response.status}`));
+      return null;
+    });
   }
 }

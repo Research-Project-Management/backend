@@ -410,7 +410,7 @@ export class CompileLogAnalyzer implements ILogParser {
     if (!logText || typeof logText !== 'string') return [];
 
     const diagnostics: CompilerDiagnostic[] = [];
-    const lines = logText.split('\n');
+    const lines = LogLineVo.unwrap(logText);
     const parenStack: Array<{ isFile: boolean; file?: string }> = [
       { isFile: true, file: defaultFile },
     ];
@@ -594,24 +594,39 @@ export class CompileLogAnalyzer implements ILogParser {
             .replace(/\.$/, '')
             .trim();
 
+          const fullWarnMessage = `LaTeX Warning: ${warnMsg}`;
+          const { code, suggestion } = this.generateSuggestion(
+            fullWarnMessage,
+            warnContext,
+          );
+
           diagnostics.push({
             file: activeFile,
             line: lineNum,
-            message: `LaTeX Warning: ${warnMsg}`,
+            message: fullWarnMessage,
             context: warnContext,
             severity: 'warning',
+            ...(code ? { code } : {}),
+            ...(suggestion ? { suggestion } : {}),
           });
         }
       } else if (line.match(CompileLogAnalyzer.BADBOX_REGEX)) {
         const badboxMatch = line.match(CompileLogAnalyzer.BADBOX_REGEX)!;
         if (badboxMatch[1]) {
           const lineNum = parseInt(badboxMatch[1], 10);
+          const trimmedMsg = line.trim();
+          const { code, suggestion } = this.generateSuggestion(
+            trimmedMsg,
+            line,
+          );
           diagnostics.push({
             file: activeFile,
             line: lineNum,
-            message: line.trim(),
+            message: trimmedMsg,
             context: line,
             severity: 'info',
+            ...(code ? { code } : {}),
+            ...(suggestion ? { suggestion } : {}),
           });
         }
       }
@@ -652,6 +667,14 @@ export class CompileLogAnalyzer implements ILogParser {
         code: 'FILE_NOT_FOUND',
         suggestion:
           'File, graphic, bibliography, or package not found. Verify the file path and extension.',
+      };
+    }
+
+    const explained = this.explainer?.explain(message, context);
+    if (explained) {
+      return {
+        code: explained.code,
+        suggestion: explained.suggestedFix,
       };
     }
 

@@ -5,8 +5,10 @@
  * fileset planner) are invoked directly without DI ceremony.
  */
 
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
+import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config';
 import * as os from 'os';
 import * as path from 'path';
 import { CoreModule as AppCoreModule } from '@/core';
@@ -31,14 +33,23 @@ import {
 import { ISandboxRunner } from './domain/clsi-ports';
 import {
   parseSandboxConfig,
+  buildSandboxProfileFromConfig,
   ClsiSandboxConfig,
 } from './services/sandbox/sandbox-config';
+import { CompileFairQueue } from './services/compile-fair-queue.service';
 
 export const CLSI_SANDBOX_CONFIG = Symbol('CLSI_SANDBOX_CONFIG');
 export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
 
 @Module({
-  imports: [AppCoreModule, DocstoreModule, FilestoreModule],
+  imports: [
+    AppCoreModule,
+    forwardRef(() => DocstoreModule),
+    FilestoreModule,
+    BullModule.registerQueue({
+      name: MANUSCRIPT_CLSI_QUEUE,
+    }),
+  ],
   controllers: [ClsiController],
   providers: [
     RemoteClsiClientAdapter,
@@ -93,6 +104,8 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
               sandboxConfig.image,
               `${sandboxConfig.memoryMb}m`,
               `${sandboxConfig.cpus}`,
+              undefined,
+              buildSandboxProfileFromConfig(sandboxConfig),
             )
           : new LocalProcessRunner();
       },
@@ -137,8 +150,14 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
       ) => new CompilePipeline(workspace, latexmkEngine, tectonicEngine),
       inject: [OverleafIncrementalWorkspace, LatexmkEngine, TectonicEngine],
     },
+    CompileFairQueue,
     ClsiService,
   ],
-  exports: [ClsiService, RemoteClsiClientAdapter, ClsiWorkspacePlannerService],
+  exports: [
+    ClsiService,
+    RemoteClsiClientAdapter,
+    ClsiWorkspacePlannerService,
+    BullModule,
+  ],
 })
 export class ClsiModule {}

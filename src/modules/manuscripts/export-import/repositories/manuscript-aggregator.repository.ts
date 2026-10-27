@@ -338,6 +338,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     }
 
     const wrapperPrefix = this.detectSingleWrapperFolder(entries);
+    const createdDirs = new Set<string>(['/']);
 
     for (const entry of entries) {
       let cleanRelPath = entry.path.replace(/^\/+/, '');
@@ -355,12 +356,16 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
 
       if (!baseName) continue;
 
-      if (parentDir !== '/' && parentDir !== '.') {
+      if (parentDir !== '/' && parentDir !== '.' && !createdDirs.has(parentDir)) {
         await this.structureService.mkdirp(projectId, parentDir);
+        createdDirs.add(parentDir);
       }
 
       if (entry.isDirectory) {
-        await this.structureService.mkdirp(projectId, normalizedPath);
+        if (!createdDirs.has(normalizedPath)) {
+          await this.structureService.mkdirp(projectId, normalizedPath);
+          createdDirs.add(normalizedPath);
+        }
         totalFolders++;
         continue;
       }
@@ -409,6 +414,11 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
         }
 
         if (existingNode) {
+          if (existingNode.fileId) {
+            await this.filestoreService
+              .deleteFile?.(projectId, existingNode.fileId, true)
+              .catch(() => undefined);
+          }
           await this.structureService
             .deleteNode(projectId, existingNode.id)
             .catch(() => undefined);
@@ -444,9 +454,10 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
         const mimeType = inferMimeType(entry.path);
 
         if (existingNode && existingNode.type === 'FILE') {
+          const previousFileId = existingNode.fileId;
           const file = await this.filestoreService.uploadFileFromBuffer(
             projectId,
-            normalizedPath,
+            baseName,
             entry.data,
             mimeType,
           );
@@ -473,11 +484,21 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
                 );
               }
             });
+          if (previousFileId && previousFileId !== file.id) {
+            await this.filestoreService
+              .deleteFile?.(projectId, previousFileId, true)
+              .catch(() => undefined);
+          }
           totalFiles++;
           continue;
         }
 
         if (existingNode) {
+          if (existingNode.fileId) {
+            await this.filestoreService
+              .deleteFile?.(projectId, existingNode.fileId, true)
+              .catch(() => undefined);
+          }
           await this.structureService
             .deleteNode(projectId, existingNode.id)
             .catch(() => undefined);
@@ -485,7 +506,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
 
         const file = await this.filestoreService.uploadFileFromBuffer(
           projectId,
-          normalizedPath,
+          baseName,
           entry.data,
           mimeType,
         );

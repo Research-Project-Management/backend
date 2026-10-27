@@ -47,7 +47,8 @@ export class ManuscriptsFacade {
    * Safely deletes a document from structure, docstore, and any active live collaboration session.
    */
   public async removeDocument(projectId: string, docId: string): Promise<void> {
-    await this.workspaceCollector.evictDoc(projectId, docId);
     await this.structure.deleteNode(projectId, docId).catch(() => null);
+    await this.docstore.deleteDoc?.(projectId, docId).catch(() => null);
+    await this.workspaceCollector.evictDoc(projectId, docId);
   }
 }

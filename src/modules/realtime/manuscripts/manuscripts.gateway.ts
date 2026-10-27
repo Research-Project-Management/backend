@@ -76,6 +76,30 @@ export class ManuscriptsGateway
 
   private readonly logger = new Logger(ManuscriptsGateway.name);
 
+  /**
+   * Runs a fire-and-forget Yjs persistence op. Failures are logged (never swallowed)
+   * and retried once, because a lost flush on last-user leave drops edits until the next sweep.
+   */
+  private runBackground(
+    op: 'evictDoc' | 'flushDoc',
+    projectId: string,
+    docId: string,
+    fn: () => Promise<unknown>,
+  ): void {
+    void fn().catch((firstErr: unknown) => {
+      this.logger.warn(
+        `${op} failed for ${projectId}:${docId}, retrying once: ${(firstErr as Error)?.message}`,
+      );
+      setTimeout(() => {
+        fn().catch((err: unknown) =>
+          this.logger.error(
+            `${op} retry failed for ${projectId}:${docId}; relying on idle sweep: ${(err as Error)?.message}`,
+          ),
+        );
+      }, 1000).unref?.();
+    });
+  }
+
   constructor(
     private readonly service: ManuscriptsService,
     private readonly chatService: ChatService,
@@ -86,6 +110,7 @@ export class ManuscriptsGateway
 
   public afterInit(server: Server): void {
     server.use(createWsConnectionMiddleware(this.authService));
+    this.yjs?.setServer(server);
     this.logger.log(
       'Manuscripts WebSocket Gateway initialized (/manuscripts).',
     );
@@ -133,25 +158,11 @@ export class ManuscriptsGateway
 
     if (projectId && activeDocId) {
       try {
-        await this.service.leaveDoc(projectId, activeDocId, client.id);
-        this.broadcastToDoc(
-          projectId,
-          activeDocId,
-          REALTIME_EVENTS.USER_LEFT_DOC,
-          PresenceMapper.toLeavePresence(clientData.userId, client.id),
-          client.id,
-        );
-
-        if (this.yjs) {
-          const room = this.server?.sockets?.adapter?.rooms?.get(
-            `doc:${projectId}:${activeDocId}`,
-          );
-          if (!room || room.size === 0) {
-            void this.yjs.evictDoc(projectId, activeDocId).catch(() => {});
-          } else {
-            void this.yjs.flushDoc(projectId, activeDocId).catch(() => {});
-          }
-        }
+        await this.leaveActiveDocSession(client, projectId, activeDocId, {
+          leaveSocketRoom: false,
+          broadcastLeave: true,
+          syncYjsLifecycle: true,
+        });
       } catch (err) {
         this.logger.warn(
           `Error on doc cleanup during disconnect ${client.id}: ${String(err)}`,
@@ -161,13 +172,10 @@ export class ManuscriptsGateway
 
     if (projectId) {
       try {
-        await this.service.leaveProject(projectId, client.id);
-        this.broadcastToProject(
-          projectId,
-          REALTIME_EVENTS.USER_LEFT_PROJECT,
-          PresenceMapper.toLeavePresence(clientData.userId, client.id),
-          client.id,
-        );
+        await this.leaveActiveProjectSession(client, projectId, {
+          leaveSocketRoom: false,
+          broadcastLeave: true,
+        });
       } catch (err) {
         this.logger.warn(
           `Error on project disconnect ${client.id}: ${String(err)}`,
@@ -182,6 +190,93 @@ export class ManuscriptsGateway
     this.logger.debug(`Socket disconnected: ${client.id}`);
   }
 
+  /**
+   * Mediator Pattern: Centralizes document room departure, presence cleanup,
+   * peer notification, and Yjs flush/eviction lifecycle across all disconnect/switch flows.
+   */
+  private async leaveActiveDocSession(
+    client: Socket,
+    projectId: string,
+    docId: string,
+    options: {
+      leaveSocketRoom?: boolean;
+      broadcastLeave?: boolean;
+      syncYjsLifecycle?: boolean;
+    } = {},
+  ): Promise<void> {
+    const {
+      leaveSocketRoom = true,
+      broadcastLeave = true,
+      syncYjsLifecycle = false,
+    } = options;
+    const clientData = this.getClientData(client);
+
+    await this.service.leaveDoc(projectId, docId, client.id);
+    if (leaveSocketRoom && typeof client.leave === 'function') {
+      await client.leave(`doc:${projectId}:${docId}`);
+    }
+    if (clientData.activeDocId === docId) {
+      clientData.activeDocId = null;
+    }
+
+    if (broadcastLeave) {
+      this.broadcastToDoc(
+        projectId,
+        docId,
+        REALTIME_EVENTS.USER_LEFT_DOC,
+        PresenceMapper.toLeavePresence(clientData.userId, client.id),
+        client.id,
+      );
+    }
+
+    if (syncYjsLifecycle && this.yjs) {
+      const room = this.server?.sockets?.adapter?.rooms?.get(
+        `doc:${projectId}:${docId}`,
+      );
+      if (!room || room.size === 0) {
+        this.runBackground('evictDoc', projectId, docId, () =>
+          this.yjs!.evictDoc(projectId, docId),
+        );
+      } else {
+        this.runBackground('flushDoc', projectId, docId, () =>
+          this.yjs!.flushDoc(projectId, docId),
+        );
+      }
+    }
+  }
+
+  /**
+   * Mediator Pattern: Centralizes project room departure, presence cleanup, and peer notification.
+   */
+  private async leaveActiveProjectSession(
+    client: Socket,
+    projectId: string,
+    options: {
+      leaveSocketRoom?: boolean;
+      broadcastLeave?: boolean;
+    } = {},
+  ): Promise<void> {
+    const { leaveSocketRoom = true, broadcastLeave = true } = options;
+    const clientData = this.getClientData(client);
+
+    await this.service.leaveProject(projectId, client.id);
+    if (leaveSocketRoom && typeof client.leave === 'function') {
+      await client.leave(`project:${projectId}`);
+    }
+    if (clientData.projectId === projectId) {
+      clientData.projectId = null;
+    }
+
+    if (broadcastLeave) {
+      this.broadcastToProject(
+        projectId,
+        REALTIME_EVENTS.USER_LEFT_PROJECT,
+        PresenceMapper.toLeavePresence(clientData.userId, client.id),
+        client.id,
+      );
+    }
+  }
+
   @WsAccess('member')
   @SubscribeMessage(REALTIME_EVENTS.PROJECT_JOIN)
   public async handleJoinProject(
@@ -191,6 +286,31 @@ export class ManuscriptsGateway
     try {
       const clientData = this.getClientData(client);
       const userId = clientData.userId;
+
+      const prevProjectId = clientData.projectId;
+      const prevDocId = clientData.activeDocId;
+      if (prevProjectId && prevProjectId !== dto.projectId) {
+        if (prevDocId) {
+          try {
+            await this.leaveActiveDocSession(client, prevProjectId, prevDocId, {
+              leaveSocketRoom: true,
+              broadcastLeave: true,
+              syncYjsLifecycle: true,
+            });
+          } catch {
+            // Best effort cleanup of previous doc
+          }
+          clientData.activeDocId = null;
+        }
+        try {
+          await this.leaveActiveProjectSession(client, prevProjectId, {
+            leaveSocketRoom: true,
+            broadcastLeave: true,
+          });
+        } catch {
+          // Best effort cleanup of previous project
+        }
+      }
 
       const result = await this.service.joinProject({
         projectId: dto.projectId,
@@ -239,16 +359,10 @@ export class ManuscriptsGateway
         return { success: true };
       }
 
-      await this.service.leaveProject(dto.projectId, client.id);
-      await client.leave(`project:${dto.projectId}`);
-      clientData.projectId = null;
-
-      this.broadcastToProject(
-        dto.projectId,
-        REALTIME_EVENTS.USER_LEFT_PROJECT,
-        PresenceMapper.toLeavePresence(clientData.userId, client.id),
-        client.id,
-      );
+      await this.leaveActiveProjectSession(client, dto.projectId, {
+        leaveSocketRoom: true,
+        broadcastLeave: true,
+      });
 
       return { success: true };
     } catch (err: unknown) {
@@ -282,15 +396,11 @@ export class ManuscriptsGateway
         prevDocId &&
         (prevDocId !== dto.docId || prevProjectId !== dto.projectId)
       ) {
-        await this.service.leaveDoc(prevProjectId, prevDocId, client.id);
-        await client.leave(`doc:${prevProjectId}:${prevDocId}`);
-        this.broadcastToDoc(
-          prevProjectId,
-          prevDocId,
-          REALTIME_EVENTS.USER_LEFT_DOC,
-          PresenceMapper.toLeavePresence(clientData.userId, client.id),
-          client.id,
-        );
+        await this.leaveActiveDocSession(client, prevProjectId, prevDocId, {
+          leaveSocketRoom: true,
+          broadcastLeave: true,
+          syncYjsLifecycle: true,
+        });
       }
 
       const result = await this.service.joinDoc(
@@ -303,7 +413,7 @@ export class ManuscriptsGateway
       await client.join(`doc:${dto.projectId}:${dto.docId}`);
 
       if (this.yjs) {
-        void this.yjs.getOrCreateDoc(dto.projectId, dto.docId).catch(() => {});
+        await this.yjs.getOrCreateDoc(dto.projectId, dto.docId);
       }
 
       this.broadcastToDoc(
@@ -344,28 +454,11 @@ export class ManuscriptsGateway
         return { success: true };
       }
 
-      await this.service.leaveDoc(dto.projectId, dto.docId, client.id);
-      await client.leave(`doc:${dto.projectId}:${dto.docId}`);
-      clientData.activeDocId = null;
-
-      this.broadcastToDoc(
-        dto.projectId,
-        dto.docId,
-        REALTIME_EVENTS.USER_LEFT_DOC,
-        PresenceMapper.toLeavePresence(clientData.userId, client.id),
-        client.id,
-      );
-
-      if (this.yjs) {
-        const room = this.server?.sockets?.adapter?.rooms?.get(
-          `doc:${dto.projectId}:${dto.docId}`,
-        );
-        if (!room || room.size === 0) {
-          void this.yjs.evictDoc(dto.projectId, dto.docId).catch(() => {});
-        } else {
-          void this.yjs.flushDoc(dto.projectId, dto.docId).catch(() => {});
-        }
-      }
+      await this.leaveActiveDocSession(client, dto.projectId, dto.docId, {
+        leaveSocketRoom: true,
+        broadcastLeave: true,
+        syncYjsLifecycle: true,
+      });
 
       return { success: true };
     } catch (err: unknown) {
@@ -563,6 +656,7 @@ export class ManuscriptsGateway
 
       if (updateFrame.length > 0) {
         const payload = {
+          projectId: dto.projectId,
           docId: dto.docId,
           data: updateFrame,
         };

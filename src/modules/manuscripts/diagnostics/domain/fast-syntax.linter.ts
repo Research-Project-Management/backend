@@ -104,11 +104,60 @@ interface MathScanState {
   displayMathStartLine: number;
 }
 
+/**
+ * Strategy / Pipeline Pattern: Composable line-level LaTeX Auto-Fix rule.
+ */
+export interface ILatexLineAutoFixRule {
+  readonly id: string;
+  applyLine(
+    line: string,
+    lineNum: number,
+    appliedFixes: AppliedFix[],
+  ): string;
+}
+
 export class FastSyntaxLinter {
   private readonly explainer?: ErrorExplainerLike;
+  private readonly lineAutoFixRules: ILatexLineAutoFixRule[] = [];
 
-  constructor(explainer?: ErrorExplainerLike) {
+  constructor(
+    explainer?: ErrorExplainerLike,
+    customAutoFixRules?: ILatexLineAutoFixRule[],
+  ) {
     this.explainer = explainer ?? new ErrorKnowledgeBase();
+    const defaultRules: ILatexLineAutoFixRule[] = [
+      {
+        id: 'SMART_QUOTES',
+        applyLine: (line, lineNum, fixes) =>
+          this.fixSmartQuotes(line, lineNum, fixes),
+      },
+      {
+        id: 'UNESCAPED_PERCENT',
+        applyLine: (line, lineNum, fixes) =>
+          this.fixNakedPercentages(line, lineNum, fixes),
+      },
+      {
+        id: 'NAKED_UNDERSCORE',
+        applyLine: (line, lineNum, fixes) =>
+          this.fixNakedUnderscores(line, lineNum, fixes),
+      },
+    ];
+    this.lineAutoFixRules = customAutoFixRules ?? defaultRules;
+  }
+
+  public registerAutoFixRule(rule: ILatexLineAutoFixRule): void {
+    const existingIdx = this.lineAutoFixRules.findIndex(
+      (r) => r.id === rule.id,
+    );
+    if (existingIdx >= 0) {
+      this.lineAutoFixRules[existingIdx] = rule;
+    } else {
+      this.lineAutoFixRules.push(rule);
+    }
+  }
+
+  public getAutoFixRuleIds(): string[] {
+    return this.lineAutoFixRules.map((r) => r.id);
   }
 
   public lintToReport(
@@ -199,6 +248,8 @@ export class FastSyntaxLinter {
     const unclosedEnvs: string[] = [];
 
     let inVerbatim = false;
+    let inDisplayMathBracket = false;
+    let inDisplayMathDollar = false;
 
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i] || '';
@@ -215,10 +266,33 @@ export class FastSyntaxLinter {
         continue;
       }
 
+      const wasInMathEnv = unclosedEnvs.some((e) => MATH_ENVIRONMENTS.has(e));
       this.trackEnvironmentsForAutoFix(line, unclosedEnvs);
-      line = this.fixSmartQuotes(line, lineNum, appliedFixes);
-      line = this.fixNakedPercentages(line, lineNum, appliedFixes);
-      line = this.fixNakedUnderscores(line, lineNum, appliedFixes);
+      const isInMathEnv =
+        wasInMathEnv || unclosedEnvs.some((e) => MATH_ENVIRONMENTS.has(e));
+
+      const codeOnlyBeforeRules = this.stripComment(line);
+      if (/\\\[/.test(codeOnlyBeforeRules)) inDisplayMathBracket = true;
+      const doubleDollarMatches = codeOnlyBeforeRules.match(/(?<!\\)\$\$/g);
+      const hadDisplayDollarOnLine = Boolean(
+        doubleDollarMatches && doubleDollarMatches.length > 0,
+      );
+      const wasInDisplayMath =
+        inDisplayMathBracket || inDisplayMathDollar || hadDisplayDollarOnLine;
+
+      const skipNakedUnderscore = isInMathEnv || wasInDisplayMath;
+
+      for (const rule of this.lineAutoFixRules) {
+        if (rule.id === 'NAKED_UNDERSCORE' && skipNakedUnderscore) {
+          continue;
+        }
+        line = rule.applyLine(line, lineNum, appliedFixes);
+      }
+
+      if (/\\\]/.test(codeOnlyBeforeRules)) inDisplayMathBracket = false;
+      if (doubleDollarMatches && doubleDollarMatches.length % 2 === 1) {
+        inDisplayMathDollar = !inDisplayMathDollar;
+      }
 
       fixedLines.push(line);
     }

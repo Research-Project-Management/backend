@@ -19,7 +19,9 @@ model ManuscriptNotification {
   templateKey String                     @map("template_key") @db.VarChar(100)
   type        ManuscriptNotificationType @default(mention)
   projectId   String?                    @map("project_id") @db.Uuid
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_notifications_project_id")
   docId       String?                    @map("doc_id") @db.Uuid
+  doc         ManuscriptDoc? @relation(fields: [docId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_manuscript_notifications_doc_id")
   actorId     String?                    @map("actor_id") @db.Uuid
   messageOpts Json                       @default("{}") @map("message_opts")
   isRead      Boolean                    @default(false) @map("is_read")

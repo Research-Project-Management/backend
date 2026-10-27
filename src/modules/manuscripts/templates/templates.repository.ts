@@ -20,6 +20,7 @@ import {
 } from '@prisma/client';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import { SagaRunner } from '@/modules/manuscripts/core/utils/saga-runner';
 import {
   ITemplateRepositoryPort,
   FindTemplatesFilter,
@@ -208,10 +209,16 @@ export class TemplatesRepository
         !(def && dbIdsAndSlugs.has(def.slug.toLowerCase()))
       );
     });
-    const merged = [...dbEntities, ...nonDuplicateOfficial];
+    const remaining = Math.max(0, limit - dbEntities.length);
+    const officialOffset = Math.max(0, offset - total);
+    const slicedOfficial =
+      remaining > 0
+        ? nonDuplicateOfficial.slice(officialOffset, officialOffset + remaining)
+        : [];
+    const merged = [...dbEntities, ...slicedOfficial];
 
     return {
-      templates: merged.slice(0, limit),
+      templates: merged,
       total: total + nonDuplicateOfficial.length,
     };
   }
@@ -291,10 +298,16 @@ export class TemplatesRepository
         !(def && dbIdsAndSlugs.has(def.slug.toLowerCase()))
       );
     });
-    const merged = [...dbEntities, ...nonDuplicateOfficial];
+    const remaining = Math.max(0, limit - dbEntities.length);
+    const officialOffset = Math.max(0, offset - total);
+    const slicedOfficial =
+      remaining > 0
+        ? nonDuplicateOfficial.slice(officialOffset, officialOffset + remaining)
+        : [];
+    const merged = [...dbEntities, ...slicedOfficial];
 
     return {
-      templates: merged.slice(0, limit),
+      templates: merged,
       total: total + nonDuplicateOfficial.length,
     };
   }
@@ -412,8 +425,28 @@ export class TemplatesRepository
     }
 
     if (this.structureService && this.docstoreService) {
-      for (const [filePath, content] of fileEntries) {
-        try {
+      const structureService = this.structureService;
+      const docstoreService = this.docstoreService;
+      const saga = new SagaRunner({
+        logger: this.logger,
+        contextName: `TemplatesRepository.createProjectFromTemplate(${finalProjectId})`,
+      });
+
+      // Register compensation for the Prisma project if subsequent file hydration fails critically
+      await saga.step(
+        'EnsureProjectCompensation',
+        async () => finalProjectId,
+        async (pid) => {
+          if (typeof this.prisma?.project?.delete === 'function') {
+            await this.prisma.project
+              .delete({ where: { id: pid } })
+              .catch(() => undefined);
+          }
+        },
+      );
+
+      try {
+        for (const [filePath, content] of fileEntries) {
           const normalizedPath = filePath.startsWith('/')
             ? filePath
             : `/${filePath}`;
@@ -423,7 +456,7 @@ export class TemplatesRepository
 
           if (parts.length > 0) {
             const dirPath = `/${parts.join('/')}`;
-            const dirNode = await this.structureService.mkdirp(
+            const dirNode = await structureService.mkdirp(
               finalProjectId,
               dirPath,
             );
@@ -433,27 +466,48 @@ export class TemplatesRepository
           const isRootDoc =
             normalizedPath === `/${template.mainFile.replace(/^\//, '')}`;
 
-          const createdDoc = await this.docstoreService.createDoc(
-            finalProjectId,
-            {
-              path: normalizedPath,
-              lines: content.split('\n'),
-              version: 1,
+          const createdDoc = await saga.step(
+            `CreateDoc(${normalizedPath})`,
+            async () =>
+              docstoreService.createDoc(finalProjectId, {
+                path: normalizedPath,
+                lines: content.split('\n'),
+                version: 1,
+              }),
+            async (doc) => {
+              if (doc?._id && typeof docstoreService.deleteDoc === 'function') {
+                await docstoreService.deleteDoc(finalProjectId, doc._id);
+              }
             },
           );
 
-          await this.structureService.createNode(finalProjectId, {
-            name: fileName,
-            path: normalizedPath,
-            type: 'DOC',
-            parentId: parentFolderId,
-            docId: createdDoc._id,
-            isRootDoc,
-          });
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.debug(`Could not write node/doc for ${filePath}: ${msg}`);
+          await saga.step(
+            `CreateNode(${normalizedPath})`,
+            async () =>
+              structureService.createNode(finalProjectId, {
+                name: fileName,
+                path: normalizedPath,
+                type: 'DOC',
+                parentId: parentFolderId,
+                docId: createdDoc._id,
+                isRootDoc,
+              }),
+            async (node) => {
+              if (node?.id && typeof structureService.deleteNode === 'function') {
+                await structureService.deleteNode(finalProjectId, node.id);
+              }
+            },
+          );
         }
+      } catch (err: unknown) {
+        await saga.compensateAll();
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `Template hydration failed for project ${finalProjectId}; rolled back via Saga: ${msg}`,
+        );
+        throw new InternalServerErrorException(
+          `Failed to hydrate template files for project: ${msg}`,
+        );
       }
     }
 

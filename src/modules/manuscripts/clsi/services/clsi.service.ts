@@ -10,7 +10,11 @@ import {
   NotFoundException,
   ForbiddenException,
   Optional,
+  OnModuleDestroy,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config';
 import { ConfigService } from '@nestjs/config';
 import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
@@ -54,19 +58,22 @@ import { ClsiMetrics } from '../domain/clsi.metrics';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { RemoteClsiClientAdapter } from './remote-clsi.client';
 import { ClsiWorkspacePlannerService } from './workspace-planner.service';
-import { parseSandboxConfig } from './sandbox/sandbox-config';
+import {
+  parseSandboxConfig,
+  buildSandboxProfileFromConfig,
+} from './sandbox/sandbox-config';
 
 export type ClsiCompileResult = CompilePipelineResult;
 
 @Injectable()
-export class ClsiService {
+export class ClsiService implements OnModuleDestroy {
   private readonly logger = new Logger(ClsiService.name);
   private readonly workspace: OverleafIncrementalWorkspace;
   private readonly pipeline: CompilePipeline;
   private readonly logParser: CompileLogAnalyzer;
   private readonly synctexParser: SyncTexProcessor;
   private readonly wordCounter: TexWordCounter;
-  private readonly fairQueue = new CompileFairQueue();
+  private readonly fairQueue: CompileFairQueue;
   private readonly inFlightBuilds = new Map<
     string,
     Promise<ClsiCompileResult>
@@ -81,6 +88,9 @@ export class ClsiService {
     private readonly configService: ConfigService,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly realtimeService?: RealtimeFacade,
+    @Optional()
+    @InjectQueue(MANUSCRIPT_CLSI_QUEUE)
+    private readonly compileQueue?: Queue,
     @Optional() remoteClient?: RemoteClsiClientAdapter,
     @Optional() workspacePlanner?: ClsiWorkspacePlannerService,
     @Optional() workspace?: OverleafIncrementalWorkspace,
@@ -92,7 +102,9 @@ export class ClsiService {
     @Optional() diskUsageCleaner?: DiskUsageCleaner,
     @Optional() healthCheck?: ClsiHealthCheck,
     @Optional() pipeline?: CompilePipeline,
+    @Optional() fairQueue?: CompileFairQueue,
   ) {
+    this.fairQueue = fairQueue ?? new CompileFairQueue();
     const rawMode = this.configService
       .get<string>('CLSI_SANDBOX_MODE')
       ?.toLowerCase();
@@ -168,6 +180,8 @@ export class ClsiService {
             sandboxConfig.image,
             `${sandboxConfig.memoryMb}m`,
             `${sandboxConfig.cpus}`,
+            undefined,
+            buildSandboxProfileFromConfig(sandboxConfig),
           )
         : new LocalProcessRunner()
       : undefined;
@@ -191,6 +205,10 @@ export class ClsiService {
       );
   }
 
+  public onModuleDestroy(): void {
+    this.fairQueue.onModuleDestroy();
+  }
+
   private hashSource(source: string): string {
     return crypto
       .createHash('sha256')
@@ -198,11 +216,7 @@ export class ClsiService {
       .digest('hex');
   }
 
-  public async compile(
-    dto: CompileManuscriptDto,
-    _userId?: string,
-    authorizedProjectId?: string,
-  ): Promise<ClsiCompileResult> {
+  private normalizeCompileDto(dto: CompileManuscriptDto): void {
     if (dto.compile) {
       if (dto.compile.rootResourcePath && !dto.main_file) {
         dto.main_file = dto.compile.rootResourcePath;
@@ -229,6 +243,122 @@ export class ClsiService {
         }
       }
     }
+  }
+
+  private async isQueueActive(): Promise<boolean> {
+    if (!this.compileQueue) return false;
+    if (
+      this.configService.get<string>('DISABLE_CLSI_QUEUE') === 'true' ||
+      process.env.DISABLE_CLSI_QUEUE === 'true'
+    ) {
+      return false;
+    }
+    try {
+      const workers = await this.compileQueue.getWorkers();
+      return Array.isArray(workers) && workers.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  private async queueCompileJob(
+    dto: CompileManuscriptDto,
+    userId?: string,
+    authorizedProjectId?: string,
+  ): Promise<ClsiCompileResult> {
+    if (!this.compileQueue) {
+      throw new Error('CLSI compile queue is not initialized');
+    }
+
+    const projectId =
+      authorizedProjectId || dto.projectId || dto.project_id || 'default';
+    const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
+
+    const job = await this.compileQueue.add(
+      'clsi-compile',
+      {
+        dto,
+        userId,
+        authorizedProjectId,
+      },
+      {
+        jobId: `clsi-${projectId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+        removeOnComplete: 100,
+        removeOnFail: 200,
+      },
+    );
+
+    const startTime = Date.now();
+    const pollIntervalMs = 200;
+    while (Date.now() - startTime < effectiveTimeoutMs) {
+      const state = await job.getState();
+      if (state === 'completed') {
+        const freshJob = await this.compileQueue.getJob(job.id!);
+        return freshJob?.returnvalue as ClsiCompileResult;
+      }
+      if (state === 'failed') {
+        const freshJob = await this.compileQueue.getJob(job.id!);
+        throw new Error(
+          freshJob?.failedReason || 'Job execution failed in CLSI worker',
+        );
+      }
+      await new Promise((r) => setTimeout(r, pollIntervalMs));
+    }
+
+    throw new Error(
+      `CLSI compile job ${job.id} timed out after ${effectiveTimeoutMs}ms in queue`,
+    );
+  }
+
+  public async enqueueCompile(
+    dto: CompileManuscriptDto,
+    userId?: string,
+    authorizedProjectId?: string,
+  ): Promise<{ jobId: string }> {
+    if (!this.compileQueue) {
+      throw new Error('CLSI compile queue is not initialized');
+    }
+    const projectId =
+      authorizedProjectId || dto.projectId || dto.project_id || 'default';
+    const job = await this.compileQueue.add(
+      'clsi-compile',
+      { dto, userId, authorizedProjectId },
+      {
+        jobId: `clsi-${projectId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+        removeOnComplete: 100,
+        removeOnFail: 200,
+      },
+    );
+    return { jobId: job.id! };
+  }
+
+  public async compile(
+    dto: CompileManuscriptDto,
+    userId?: string,
+    authorizedProjectId?: string,
+  ): Promise<ClsiCompileResult> {
+    this.normalizeCompileDto(dto);
+
+    if (await this.isQueueActive()) {
+      try {
+        return await this.queueCompileJob(dto, userId, authorizedProjectId);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `CLSI queue compile failed or timed out, falling back to inline fairQueue: ${msg}`,
+        );
+      }
+    }
+
+    return await this.compileInline(dto, userId, authorizedProjectId);
+  }
+
+  public async compileInline(
+    dto: CompileManuscriptDto,
+    _userId?: string,
+    authorizedProjectId?: string,
+  ): Promise<ClsiCompileResult> {
+    this.normalizeCompileDto(dto);
 
     const requestedEngine = dto.engine;
     const texLiveVersion = dto.tex_live_version || dto.texLiveVersion || '2024';
@@ -251,83 +381,101 @@ export class ClsiService {
       }
     }
     const projectId = authorizedProjectId || resolvedFromDto;
+    const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
+    const metricEngine = requestedEngine || 'pdflatex';
 
-    if (this.realtimeService && projectId) {
-      try {
-        await this.realtimeService.flushProjectBeforeCompile(projectId);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `Pre-compile flush barrier encountered an error for project ${projectId}: ${msg}`,
-        );
-      }
-    }
-
-    const plan = await this.workspacePlanner.planFiles(projectId, dto);
-    const cacheKey = `flux:clsi:compile:${this.hashSource(
-      [
-        projectId,
-        plan.fingerprint,
-        plan.mainFile,
-        requestedEngine || 'auto',
-        texLiveVersion,
-        dto.draft ?? false,
-        dto.syntax_only ?? dto.syntaxOnly ?? false,
-        dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
-      ].join('|'),
-    )}`;
-    const cacheable = !!(dto.use_cache && plan.hasMainContent);
-
-    if (cacheable && this.cache) {
-      const cached = await this.cache.get<ClsiCompileResult>(cacheKey);
-      if (cached && cached.success) {
-        this.metrics.record({
-          engine: requestedEngine || 'pdflatex',
-          durationMs: 5,
-          success: true,
-          isCached: true,
-          isTimeout: false,
-          pdfSizeBytes: cached.pdf
-            ? Buffer.byteLength(cached.pdf, 'base64')
-            : 0,
-        });
-        return cached;
-      }
-    }
-
-    if (plan.hasMainContent) {
-      const existingBuild = this.inFlightBuilds.get(cacheKey);
-      if (existingBuild) return existingBuild;
-    }
-
-    const build = this.runCompile(
+    return await this.fairQueue.schedule(
       projectId,
-      plan,
-      dto,
-      requestedEngine,
-      cacheKey,
       _userId,
-    );
-    if (!plan.hasMainContent) return build;
+      this.realtimeService,
+      async (signal, onLogChunk) => {
+        if (this.realtimeService && projectId) {
+          try {
+            await this.realtimeService.flushProjectBeforeCompile(projectId);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(
+              `Pre-compile flush barrier encountered an error for project ${projectId}: ${msg}`,
+            );
+          }
+        }
 
-    const tracked = build.finally(() => {
-      if (this.inFlightBuilds.get(cacheKey) === tracked) {
-        this.inFlightBuilds.delete(cacheKey);
-      }
-    });
-    this.inFlightBuilds.set(cacheKey, tracked);
-    return tracked;
+        const plan = await this.workspacePlanner.planFiles(projectId, dto);
+        const cacheKey = `flux:clsi:compile:${this.hashSource(
+          [
+            projectId,
+            plan.fingerprint,
+            plan.mainFile,
+            requestedEngine || 'auto',
+            texLiveVersion,
+            dto.draft ?? false,
+            dto.syntax_only ?? dto.syntaxOnly ?? false,
+            dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
+          ].join('|'),
+        )}`;
+        const cacheable = !!(dto.use_cache && plan.hasMainContent);
+
+        if (cacheable && this.cache) {
+          const cached = await this.cache.get<ClsiCompileResult>(cacheKey);
+          if (cached && cached.success) {
+            this.metrics.record({
+              engine: metricEngine,
+              durationMs: 5,
+              success: true,
+              isCached: true,
+              isTimeout: false,
+              pdfSizeBytes: cached.pdf
+                ? Buffer.byteLength(cached.pdf, 'base64')
+                : 0,
+            });
+            return cached;
+          }
+        }
+
+        if (plan.hasMainContent) {
+          const existingBuild = this.inFlightBuilds.get(cacheKey);
+          if (existingBuild) return existingBuild;
+        }
+
+        const build = this.runScheduledCompile(
+          projectId,
+          plan,
+          dto,
+          requestedEngine,
+          cacheKey,
+          effectiveTimeoutMs,
+          metricEngine,
+          texLiveVersion,
+          signal,
+          onLogChunk,
+          _userId,
+        );
+        if (!plan.hasMainContent) return await build;
+
+        const tracked = build.finally(() => {
+          if (this.inFlightBuilds.get(cacheKey) === tracked) {
+            this.inFlightBuilds.delete(cacheKey);
+          }
+        });
+        this.inFlightBuilds.set(cacheKey, tracked);
+        return await tracked;
+      },
+    );
   }
 
-  private async runCompile(
+  private async runScheduledCompile(
     projectId: string,
     plan: PlannedFileSet,
     dto: CompileManuscriptDto,
     engine: string | undefined,
     cacheKey: string,
+    effectiveTimeoutMs: number,
+    metricEngine: string,
+    texLiveVersion: string,
+    signal: AbortSignal,
+    onLogChunk: (chunk: string) => void,
     _userId?: string,
   ): Promise<ClsiCompileResult> {
-    const texLiveVersion = dto.tex_live_version || dto.texLiveVersion || '2024';
     const mainFile = plan.mainFile;
     const mergedFiles = await this.workspacePlanner.hydrateFiles(
       projectId,
@@ -352,70 +500,62 @@ export class ClsiService {
     }
 
     if (dto.force_clean || dto.forceClean) {
-      await this.workspace.cleanScratch(projectId);
+      await this.pipeline.runWithProjectLock(projectId, () =>
+        this.workspace.cleanScratch(projectId),
+      );
     }
 
-    const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
-    const metricEngine = engine || 'pdflatex';
-    return await this.fairQueue.schedule(
+    const pipelineResult: CompilePipelineResult = await this.pipeline.execute({
       projectId,
-      _userId,
-      this.realtimeService,
-      async (signal, onLogChunk) => {
-        const pipelineResult: CompilePipelineResult =
-          await this.pipeline.execute({
-            projectId,
-            mainFile,
-            engine,
-            texLiveVersion,
-            draft: dto.draft,
-            syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
-            stopOnFirstError:
-              dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
-            timeoutMs: effectiveTimeoutMs,
-            source,
-            files: mergedFiles,
-            signal,
-            onLogChunk,
-          });
+      mainFile,
+      engine,
+      texLiveVersion,
+      draft: dto.draft,
+      syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
+      stopOnFirstError:
+        dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
+      timeoutMs: effectiveTimeoutMs,
+      source,
+      files: mergedFiles,
+      signal,
+      onLogChunk,
+    });
 
-        this.metrics.record({
-          engine: metricEngine,
-          durationMs: pipelineResult.durationMs,
-          success: pipelineResult.success,
-          isCached: false,
-          isTimeout: pipelineResult.durationMs >= effectiveTimeoutMs,
-          pdfSizeBytes: pipelineResult.pdf
-            ? Buffer.byteLength(pipelineResult.pdf, 'base64')
-            : 0,
-        });
+    this.metrics.record({
+      engine: metricEngine,
+      durationMs: pipelineResult.durationMs,
+      success: pipelineResult.success,
+      isCached: false,
+      isTimeout: pipelineResult.durationMs >= effectiveTimeoutMs,
+      pdfSizeBytes: pipelineResult.pdf
+        ? Buffer.byteLength(pipelineResult.pdf, 'base64')
+        : 0,
+    });
 
-        if (
-          pipelineResult.success &&
-          this.cache &&
-          pipelineResult.pdf &&
-          pipelineResult.pdf.length <= 2 * 1024 * 1024
-        ) {
-          await this.cache.set(cacheKey, pipelineResult, 300);
-        }
+    if (
+      pipelineResult.success &&
+      this.cache &&
+      pipelineResult.pdf &&
+      pipelineResult.pdf.length <= 2 * 1024 * 1024
+    ) {
+      await this.cache.set(cacheKey, pipelineResult, 300);
+    }
 
-        this.realtimeService?.broadcastCompileProgress(projectId, {
-          status: pipelineResult.success ? 'success' : 'failed',
-          logs: pipelineResult.logs ? [pipelineResult.logs] : [],
-        });
+    this.realtimeService?.broadcastCompileProgress(projectId, {
+      status: pipelineResult.success ? 'success' : 'failed',
+      logs: pipelineResult.logs ? [pipelineResult.logs] : [],
+    });
 
-        if (pipelineResult.success) {
-          await this.workspacePlanner.recordCompileSnapshotIfEligible(
-            projectId,
-            mergedFiles,
-            metricEngine,
-            _userId,
-          );
-        }
+    if (pipelineResult.success) {
+      await this.workspacePlanner.recordCompileSnapshotIfEligible(
+        projectId,
+        mergedFiles,
+        metricEngine,
+        _userId,
+      );
+    }
 
-        return pipelineResult;
-      },
-    );
+    return pipelineResult;
   }
 
   public cancelCompile(projectId: string): boolean {
@@ -458,9 +598,6 @@ export class ClsiService {
     result?: SyncPoint;
     error?: string;
   }> {
-    const remoteRes = await this.remoteClient.tryRemoteForwardSync(dto);
-    if (remoteRes) return remoteRes;
-
     const explicitDtoProjectId = dto.projectId || dto.project_id;
     const resolvedFromDto = await this.workspacePlanner.resolveProjectId({
       projectId: dto.projectId,
@@ -485,6 +622,9 @@ export class ClsiService {
       }
     }
     const projectId = authorizedProjectId || resolvedFromDto;
+
+    const remoteRes = await this.remoteClient.tryRemoteForwardSync(dto);
+    if (remoteRes) return remoteRes;
 
     const synctexContent = await this.loadSynctexContent(
       projectId,
@@ -523,9 +663,6 @@ export class ClsiService {
     result?: ReverseSyncPoint;
     error?: string;
   }> {
-    const remoteRes = await this.remoteClient.tryRemoteReverseSync(dto);
-    if (remoteRes) return remoteRes;
-
     const explicitDtoProjectId = dto.projectId || dto.project_id;
     const resolvedFromDto = await this.workspacePlanner.resolveProjectId({
       projectId: dto.projectId,
@@ -550,6 +687,9 @@ export class ClsiService {
       }
     }
     const projectId = authorizedProjectId || resolvedFromDto;
+
+    const remoteRes = await this.remoteClient.tryRemoteReverseSync(dto);
+    if (remoteRes) return remoteRes;
 
     const synctexContent = await this.loadSynctexContent(
       projectId,
@@ -685,7 +825,9 @@ export class ClsiService {
   public async cleanProjectScratch(
     projectId: string,
   ): Promise<{ success: boolean; projectId: string }> {
-    await this.workspace.cleanScratch(projectId);
+    await this.pipeline.runWithProjectLock(projectId, () =>
+      this.workspace.cleanScratch(projectId),
+    );
     return { success: true, projectId };
   }
 

@@ -5,12 +5,14 @@
  * - RealtimeNotifierAdapter (Port: IRealtimeNotifierPort)
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '@/core';
 import {
   LiveCollaborationPort,
+  LIVE_COLLABORATION_PORT,
+  NOOP_LIVE_COLLABORATION,
   ManuscriptDomainEventBus,
 } from '@/modules/manuscripts/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
@@ -23,16 +25,115 @@ import {
   CommentThread,
   CommentReply,
   LinePatcher,
+  LinePatchComputation,
 } from '../domain';
 
 @Injectable()
 export class DocstorePatcherAdapter extends IDocstorePatcherPort {
+  private readonly liveCollab: LiveCollaborationPort;
+
   constructor(
     private readonly docstoreService: DocstoreService,
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    liveCollab?: LiveCollaborationPort,
   ) {
     super();
+    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
+  }
+
+  private getLiveCollab(): LiveCollaborationPort {
+    if (this.liveCollab !== NOOP_LIVE_COLLABORATION) {
+      return this.liveCollab;
+    }
+    try {
+      return (
+        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ??
+        NOOP_LIVE_COLLABORATION
+      );
+    } catch {
+      return NOOP_LIVE_COLLABORATION;
+    }
+  }
+
+  /**
+   * Template Method: Centralizes live-doc flushing, line-patch evaluation,
+   * conditional DB persistence (preventing no-op version increments), and domain event propagation.
+   */
+  private async executeDocPatch(
+    projectId: string,
+    docId: string,
+    computePatch: (currentLines: readonly string[]) => LinePatchComputation,
+  ): Promise<PatcherResult> {
+    const live = this.getLiveCollab();
+    await live.flushDocs(projectId, [docId]).catch(() => []);
+
+    const maxAttempts = 3;
+    let updated: Awaited<ReturnType<DocstoreService['updateDoc']>> | undefined;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const doc = await this.docstoreService.getDoc(projectId, docId);
+      const { lines, mutated } = computePatch(doc.lines);
+
+      if (!mutated) {
+        return {
+          lines,
+          newRev: doc.rev,
+        };
+      }
+
+      try {
+        updated = await this.docstoreService.updateDoc(projectId, docId, {
+          lines,
+          version: (doc.version ?? 0) + 1,
+          expectedRev: doc.rev,
+        });
+        break;
+      } catch (err: unknown) {
+        const status = (err as { status?: number })?.status;
+        const name = (err as { name?: string })?.name;
+        const isConflict =
+          status === 409 ||
+          name === 'ConflictException' ||
+          name === 'DocRevisionConflictException';
+        if (isConflict && attempt < maxAttempts - 1) {
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    if (!updated) {
+      throw new Error(`Failed to patch document ${docId} after retries.`);
+    }
+
+    if (this.domainEventBus) {
+      await this.domainEventBus.publish({
+        type: 'manuscript.document.mutated',
+        projectId,
+        docId,
+        lines: updated.doc.lines || [''],
+        rev: updated.doc.rev,
+        version: updated.doc.version,
+        source: 'track-changes',
+        occurredAt: Date.now(),
+      });
+    } else {
+      await live
+        .applyExternalText(
+          projectId,
+          docId,
+          (updated.doc.lines || ['']).join('\n'),
+        )
+        .catch(() => false);
+    }
+
+    return {
+      lines: updated.doc.lines,
+      newRev: updated.doc.rev,
+    };
   }
 
   public async applyChange(
@@ -40,64 +141,9 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
     docId: string,
     change: TrackChange,
   ): Promise<PatcherResult> {
-    try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, {
-        strict: false,
-      });
-      if (live) {
-        await live.flushDocs(projectId, [docId]).catch(() => []);
-      }
-    } catch {}
-    const doc = await this.docstoreService.getDoc(projectId, docId);
-    const { lines, mutated } = LinePatcher.computeAcceptedPatch(
-      doc.lines,
-      change,
+    return this.executeDocPatch(projectId, docId, (lines) =>
+      LinePatcher.computeAcceptedPatch(lines, change),
     );
-
-    if (!mutated) {
-      return {
-        lines,
-        newRev: doc.rev,
-      };
-    }
-
-    const updated = await this.docstoreService.updateDoc(projectId, docId, {
-      lines,
-      version: (doc.version ?? 0) + 1,
-    });
-
-    if (this.domainEventBus) {
-      await this.domainEventBus.publish({
-        type: 'manuscript.document.mutated',
-        projectId,
-        docId,
-        lines: updated.doc.lines || [''],
-        rev: updated.doc.rev,
-        version: updated.doc.version,
-        source: 'track-changes',
-        occurredAt: Date.now(),
-      });
-    } else {
-      try {
-        const live = this.moduleRef?.get(LiveCollaborationPort, {
-          strict: false,
-        });
-        if (live) {
-          await live.applyExternalText(
-            projectId,
-            docId,
-            (updated.doc.lines || ['']).join('\n'),
-          );
-        }
-      } catch {
-        // non-blocking fallback
-      }
-    }
-
-    return {
-      lines: updated.doc.lines,
-      newRev: updated.doc.rev,
-    };
   }
 
   public async revertChange(
@@ -105,54 +151,9 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
     docId: string,
     change: TrackChange,
   ): Promise<PatcherResult> {
-    try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, {
-        strict: false,
-      });
-      if (live) {
-        await live.flushDocs(projectId, [docId]).catch(() => []);
-      }
-    } catch {}
-    const doc = await this.docstoreService.getDoc(projectId, docId);
-    const { lines } = LinePatcher.computeRejectedPatch(doc.lines, change);
-
-    const updated = await this.docstoreService.updateDoc(projectId, docId, {
-      lines,
-      version: (doc.version ?? 0) + 1,
-    });
-
-    if (this.domainEventBus) {
-      await this.domainEventBus.publish({
-        type: 'manuscript.document.mutated',
-        projectId,
-        docId,
-        lines: updated.doc.lines || [''],
-        rev: updated.doc.rev,
-        version: updated.doc.version,
-        source: 'track-changes',
-        occurredAt: Date.now(),
-      });
-    } else {
-      try {
-        const live = this.moduleRef?.get(LiveCollaborationPort, {
-          strict: false,
-        });
-        if (live) {
-          await live.applyExternalText(
-            projectId,
-            docId,
-            (updated.doc.lines || ['']).join('\n'),
-          );
-        }
-      } catch {
-        // non-blocking fallback
-      }
-    }
-
-    return {
-      lines: updated.doc.lines,
-      newRev: updated.doc.rev,
-    };
+    return this.executeDocPatch(projectId, docId, (lines) =>
+      LinePatcher.computeRejectedPatch(lines, change),
+    );
   }
 
   public async applyBatchChanges(
@@ -165,75 +166,20 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
       return null;
     }
 
-    try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, {
-        strict: false,
-      });
-      if (live) {
-        await live.flushDocs(projectId, [docId]).catch(() => []);
-      }
-    } catch {}
+    return this.executeDocPatch(projectId, docId, (initialLines) => {
+      let currentLines = [...initialLines];
+      let anyMutated = false;
 
-    const doc = await this.docstoreService.getDoc(projectId, docId);
-    let currentLines = doc.lines;
-    let anyMutated = false;
-
-    for (const change of changes) {
-      if (isAccept) {
-        const res = LinePatcher.computeAcceptedPatch(currentLines, change);
-        currentLines = res.lines;
-        if (res.mutated) anyMutated = true;
-      } else {
-        const res = LinePatcher.computeRejectedPatch(currentLines, change);
+      for (const change of changes) {
+        const res = isAccept
+          ? LinePatcher.computeAcceptedPatch(currentLines, change)
+          : LinePatcher.computeRejectedPatch(currentLines, change);
         currentLines = res.lines;
         if (res.mutated) anyMutated = true;
       }
-    }
 
-    if (!anyMutated) {
-      return {
-        lines: currentLines,
-        newRev: doc.rev,
-      };
-    }
-
-    const updated = await this.docstoreService.updateDoc(projectId, docId, {
-      lines: currentLines,
-      version: (doc.version ?? 0) + 1,
+      return { lines: currentLines, mutated: anyMutated };
     });
-
-    if (this.domainEventBus) {
-      await this.domainEventBus.publish({
-        type: 'manuscript.document.mutated',
-        projectId,
-        docId,
-        lines: updated.doc.lines || [''],
-        rev: updated.doc.rev,
-        version: updated.doc.version,
-        source: 'track-changes',
-        occurredAt: Date.now(),
-      });
-    } else {
-      try {
-        const live = this.moduleRef?.get(LiveCollaborationPort, {
-          strict: false,
-        });
-        if (live) {
-          await live.applyExternalText(
-            projectId,
-            docId,
-            (updated.doc.lines || ['']).join('\n'),
-          );
-        }
-      } catch {
-        // non-blocking fallback
-      }
-    }
-
-    return {
-      lines: updated.doc.lines,
-      newRev: updated.doc.rev,
-    };
   }
 }
 
@@ -427,6 +373,18 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
             });
           }
 
+          const mentionCollaborators: Record<string, string> = {};
+          for (const [k, userId] of Object.entries(ctx.collaboratorMap)) {
+            if (
+              threadOwnerId &&
+              threadOwnerId !== reply.createdById &&
+              userId === threadOwnerId
+            ) {
+              continue;
+            }
+            mentionCollaborators[k] = userId;
+          }
+
           await manuscriptsNotifications.parseAndNotifyMentions({
             text: reply.content,
             actorId: reply.createdById || 'anonymous',
@@ -436,7 +394,7 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
             docId,
             threadId,
             commentId: reply.id,
-            collaboratorMap: ctx.collaboratorMap,
+            collaboratorMap: mentionCollaborators,
           });
         })
         .catch((err) => {
@@ -456,6 +414,10 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
       docId,
       thread: thread.toJSON(),
     });
+
+    if (!thread.isResolved) {
+      return;
+    }
 
     if (this.notificationsService?.manuscripts) {
       const manuscriptsNotifications = this.notificationsService.manuscripts;

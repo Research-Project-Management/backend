@@ -189,6 +189,8 @@ export class TrackChangesService {
       resolvedStatus,
       userId,
       now,
+      resolvedProjId,
+      docId,
     );
 
     for (const change of sorted) {
@@ -296,6 +298,10 @@ export class TrackChangesService {
       throw new ThreadNotFoundException(threadId);
     }
 
+    if (thread.isResolved === resolve) {
+      return this.toThreadDto(thread);
+    }
+
     if (resolve) {
       thread.resolve(userId);
     } else {
@@ -344,9 +350,19 @@ export class TrackChangesService {
       await this.docstorePatcher.applyChange(projectId, docId, change);
     }
 
-    const saved = await this.repository.saveChange(change);
-    this.realtimeNotifier?.notifyChangeResolved(projectId, docId, saved);
-    return saved;
+    try {
+      const saved = await this.repository.saveChange(change);
+      this.realtimeNotifier?.notifyChangeResolved(projectId, docId, saved);
+      return saved;
+    } catch (err) {
+      if (this.docstorePatcher) {
+        await this.docstorePatcher
+          .revertChange(projectId, docId, change)
+          .catch(() => undefined);
+      }
+      change.reopen();
+      throw err;
+    }
   }
 
   private async rejectChangeDirect(
@@ -370,9 +386,19 @@ export class TrackChangesService {
       await this.docstorePatcher.revertChange(projectId, docId, change);
     }
 
-    const saved = await this.repository.saveChange(change);
-    this.realtimeNotifier?.notifyChangeResolved(projectId, docId, saved);
-    return saved;
+    try {
+      const saved = await this.repository.saveChange(change);
+      this.realtimeNotifier?.notifyChangeResolved(projectId, docId, saved);
+      return saved;
+    } catch (err) {
+      if (this.docstorePatcher) {
+        await this.docstorePatcher
+          .applyChange(projectId, docId, change)
+          .catch(() => undefined);
+      }
+      change.reopen();
+      throw err;
+    }
   }
 
   public toChangeDto(change: TrackChange): TrackChangeResponseDto {

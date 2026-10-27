@@ -23,8 +23,11 @@ export class CreateLinkedFileDto {
   @IsNotEmpty()
   name!: string;
 
-  @ApiProperty({ enum: ['url', 'zotero', 'mendeley'], default: 'url' })
-  @IsEnum(['url', 'zotero', 'mendeley'])
+  @ApiProperty({
+    enum: ['url', 'zotero', 'mendeley', 'dropbox', 'github'],
+    default: 'url',
+  })
+  @IsEnum(['url', 'zotero', 'mendeley', 'dropbox', 'github'])
   provider!: LinkedFileProvider;
 
   @ApiPropertyOptional({

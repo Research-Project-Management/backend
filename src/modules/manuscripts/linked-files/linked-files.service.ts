@@ -31,13 +31,16 @@ import {
   TEXT_EXTENSIONS,
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
+  NOOP_LIVE_COLLABORATION,
   ManuscriptDomainEventBus,
+  SagaRunner,
 } from '@/modules/manuscripts/core';
 
 @Injectable()
 export class LinkedFilesService {
   private readonly logger = new Logger(LinkedFilesService.name);
   private readonly MAX_DOWNLOAD_SIZE_BYTES = 50 * 1024 * 1024; // 50MB limit
+  private readonly liveCollab: LiveCollaborationPort;
 
   constructor(
     private readonly repository: LinkedFilesRepository,
@@ -48,10 +51,12 @@ export class LinkedFilesService {
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
-    private readonly liveCollab?: LiveCollaborationPort,
+    liveCollab?: LiveCollaborationPort,
     @Optional()
     private readonly domainEventBus?: ManuscriptDomainEventBus,
-  ) {}
+  ) {
+    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
+  }
 
   private broadcastFileTreeChange(
     projectId: string,
@@ -88,40 +93,150 @@ export class LinkedFilesService {
 
       try {
         const download = await this.downloadUrl(dto.url);
+        const saga = new SagaRunner();
 
         if (isText) {
-          const textContent = download.buffer.toString('utf8');
-          const doc = await this.docstoreService!.createDoc(projectId, {
-            path: filename,
-            text: textContent,
-          });
-          docId = doc._id;
-
-          const node = await this.structureService!.createNode(projectId, {
-            name: filename,
-            type: 'DOC',
-            parentId: dto.parentFolderId || null,
-            docId,
-          });
-          nodeId = node.id;
+          saga
+            .addStep({
+              name: 'create-linked-doc',
+              execute: async () => {
+                const textContent = download.buffer.toString('utf8');
+                const doc = await this.docstoreService!.createDoc(projectId, {
+                  path: filename,
+                  text: textContent,
+                });
+                docId = doc._id;
+                return doc._id;
+              },
+              compensate: async (createdDocId) => {
+                if (createdDocId && this.docstoreService) {
+                  await this.docstoreService
+                    .deleteDoc(projectId, createdDocId, { soft: false })
+                    .catch((compErr) => {
+                      this.logger.warn(
+                        `Compensation failed deleting orphan doc ${createdDocId}: ${String(compErr)}`,
+                      );
+                    });
+                }
+              },
+            })
+            .addStep({
+              name: 'create-linked-doc-node',
+              execute: async () => {
+                const node = await this.structureService!.createNode(projectId, {
+                  name: filename,
+                  type: 'DOC',
+                  parentId: dto.parentFolderId || null,
+                  docId: docId!,
+                });
+                nodeId = node.id;
+                return node.id;
+              },
+              compensate: async (createdNodeId) => {
+                if (createdNodeId && this.structureService) {
+                  await this.structureService
+                    .deleteNode(projectId, createdNodeId)
+                    .catch((compErr) => {
+                      this.logger.warn(
+                        `Compensation failed deleting orphan node ${createdNodeId}: ${String(compErr)}`,
+                      );
+                    });
+                }
+              },
+            });
         } else {
-          const uploadedFile =
-            await this.filestoreService!.uploadFileFromBuffer(
-              projectId,
-              filename,
-              download.buffer,
-              download.mimeType,
-            );
-          fileId = uploadedFile.id;
-
-          const node = await this.structureService!.createNode(projectId, {
-            name: filename,
-            type: 'FILE',
-            parentId: dto.parentFolderId || null,
-            fileId,
-          });
-          nodeId = node.id;
+          saga
+            .addStep({
+              name: 'upload-linked-binary',
+              execute: async () => {
+                const uploadedFile =
+                  await this.filestoreService!.uploadFileFromBuffer(
+                    projectId,
+                    filename,
+                    download.buffer,
+                    download.mimeType,
+                  );
+                fileId = uploadedFile.id;
+                return uploadedFile.id;
+              },
+              compensate: async (createdFileId) => {
+                if (createdFileId && this.filestoreService) {
+                  await this.filestoreService
+                    .deleteFile(projectId, createdFileId, true)
+                    .catch((compErr) => {
+                      this.logger.warn(
+                        `Compensation failed deleting orphan file ${createdFileId}: ${String(compErr)}`,
+                      );
+                    });
+                }
+              },
+            })
+            .addStep({
+              name: 'create-linked-file-node',
+              execute: async () => {
+                const node = await this.structureService!.createNode(projectId, {
+                  name: filename,
+                  type: 'FILE',
+                  parentId: dto.parentFolderId || null,
+                  fileId: fileId!,
+                });
+                nodeId = node.id;
+                return node.id;
+              },
+              compensate: async (createdNodeId) => {
+                if (createdNodeId && this.structureService) {
+                  await this.structureService
+                    .deleteNode(projectId, createdNodeId)
+                    .catch((compErr) => {
+                      this.logger.warn(
+                        `Compensation failed deleting orphan node ${createdNodeId}: ${String(compErr)}`,
+                      );
+                    });
+                }
+              },
+            });
         }
+
+        let createdEntity!: LinkedFileEntity;
+        saga.addStep({
+          name: 'save-linked-file-entity',
+          execute: async () => {
+            createdEntity = new LinkedFileEntity({
+              id: linkedFileId,
+              projectId,
+              name: filename,
+              provider: dto.provider,
+              url: dto.url,
+              collectionId: dto.collectionId,
+              nodeId,
+              docId,
+              fileId,
+              status: 'synced',
+              lastSyncedAt: new Date(),
+              autoRefresh: dto.autoRefresh ?? false,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+            await this.repository.save(createdEntity);
+            return createdEntity.id;
+          },
+          compensate: async (savedId) => {
+            if (savedId) {
+              await this.repository
+                .delete(projectId, savedId)
+                .catch(() => undefined);
+            }
+          },
+        });
+
+        await saga.run();
+
+        this.broadcastFileTreeChange(projectId, {
+          action: 'linked-file-created',
+          node: { id: nodeId, name: filename, linkedFileId },
+        });
+
+        return this.mapToDto(createdEntity);
       } catch (err: unknown) {
         this.logger.error(
           `Failed to link URL ${dto.url}: ${(err as Error)?.message}`,
@@ -138,23 +253,98 @@ export class LinkedFilesService {
       }
 
       try {
-        await this.citationsService!.syncLibraryCollection(
-          projectId,
-          userId || 'anonymous',
-          {
-            collectionId: dto.collectionId,
-            targetFilename: filename,
-          },
-        );
+        const saga = new SagaRunner();
+        let preExistingNodeId: string | undefined;
+        let createdEntity!: LinkedFileEntity;
 
-        const existingNode = await this.structureService!.getNodeByPath(
-          projectId,
-          filename,
-        );
-        if (existingNode) {
-          nodeId = existingNode.id;
-          docId = existingNode.docId;
-        }
+        saga
+          .addStep({
+            name: 'sync-library-collection',
+            execute: async () => {
+              const beforeNode = await this.structureService
+                ?.getNodeByPath(projectId, filename)
+                .catch(() => null);
+              preExistingNodeId = beforeNode?.id;
+
+              await this.citationsService!.syncLibraryCollection(
+                projectId,
+                userId || 'anonymous',
+                {
+                  collectionId: dto.collectionId!,
+                  targetFilename: filename,
+                },
+              );
+
+              const existingNode = await this.structureService!.getNodeByPath(
+                projectId,
+                filename,
+              );
+              if (existingNode) {
+                nodeId = existingNode.id;
+                docId = existingNode.docId;
+              }
+              return { nodeId, docId };
+            },
+            compensate: async (synced) => {
+              if (
+                synced?.nodeId &&
+                synced.nodeId !== preExistingNodeId &&
+                this.structureService
+              ) {
+                await this.structureService
+                  .deleteNode(projectId, synced.nodeId)
+                  .catch(() => undefined);
+              }
+              if (
+                synced?.docId &&
+                synced?.nodeId !== preExistingNodeId &&
+                this.docstoreService
+              ) {
+                await this.docstoreService
+                  .deleteDoc(projectId, synced.docId, { soft: false })
+                  .catch(() => undefined);
+              }
+            },
+          })
+          .addStep({
+            name: 'save-linked-file-entity',
+            execute: async () => {
+              createdEntity = new LinkedFileEntity({
+                id: linkedFileId,
+                projectId,
+                name: filename,
+                provider: dto.provider,
+                url: dto.url,
+                collectionId: dto.collectionId,
+                nodeId,
+                docId,
+                fileId,
+                status: 'synced',
+                lastSyncedAt: new Date(),
+                autoRefresh: dto.autoRefresh ?? false,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              });
+              await this.repository.save(createdEntity);
+              return createdEntity.id;
+            },
+            compensate: async (savedId) => {
+              if (savedId) {
+                await this.repository
+                  .delete(projectId, savedId)
+                  .catch(() => undefined);
+              }
+            },
+          });
+
+        await saga.run();
+
+        this.broadcastFileTreeChange(projectId, {
+          action: 'linked-file-created',
+          node: { id: nodeId, name: filename, linkedFileId },
+        });
+
+        return this.mapToDto(createdEntity);
       } catch (err: unknown) {
         this.logger.error(
           `Failed to link library collection ${dto.collectionId}: ${(err as Error)?.message}`,
@@ -247,7 +437,11 @@ export class LinkedFilesService {
           } else {
             await this.liveCollab
               ?.applyExternalText(projectId, linkedFile.docId, textContent)
-              .catch(() => {});
+              .catch((err) => {
+                this.logger.warn(
+                  `Failed to sync linked-file refresh to live session ${projectId}:${linkedFile.docId}: ${String(err)}`,
+                );
+              });
           }
 
           this.eventEmitter?.emit('manuscripts.project.event', {
@@ -278,7 +472,11 @@ export class LinkedFilesService {
           if (previousFileId && previousFileId !== newFile.id) {
             await this.filestoreService
               ?.deleteFile(projectId, previousFileId, true)
-              .catch(() => {});
+              .catch((err) => {
+                this.logger.warn(
+                  `Failed to delete superseded linked file asset ${previousFileId}: ${String(err)}`,
+                );
+              });
           }
         }
       } else if (
@@ -362,7 +560,11 @@ export class LinkedFilesService {
     if (deleteNode && linkedFile.nodeId) {
       await this.structureService
         ?.deleteNode(projectId, linkedFile.nodeId)
-        .catch(() => {});
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to delete structure node ${linkedFile.nodeId} for linked file ${id}: ${String(err)}`,
+          );
+        });
     }
 
     await this.repository.delete(projectId, id);
@@ -443,7 +645,7 @@ export class LinkedFilesService {
   private async downloadUrl(
     url: string,
   ): Promise<{ buffer: Buffer; mimeType: string }> {
-    const MAX_REDIRECTS = 3;
+    const MAX_REDIRECTS = 5;
     let currentUrl = url;
     let response: Response | null = null;
 
@@ -452,15 +654,21 @@ export class LinkedFilesService {
       redirectCount <= MAX_REDIRECTS;
       redirectCount++
     ) {
-      const validatedUrl = await assertSafeExternalUrl(currentUrl);
+      const validated = await assertSafeExternalUrl(currentUrl);
+      const parsedUrl = validated.url ?? validated;
 
-      response = await fetch(validatedUrl.toString(), {
+      response = await fetch(parsedUrl.toString(), {
         redirect: 'manual',
         signal: AbortSignal.timeout(30000),
         headers: {
           'User-Agent': 'Flux-Manuscript-LinkedFiles/1.0',
+          Host: parsedUrl.host,
         },
       });
+
+      if (response.url && response.url !== parsedUrl.toString()) {
+        await assertSafeExternalUrl(response.url);
+      }
 
       if (
         response.status === 301 ||
@@ -482,12 +690,15 @@ export class LinkedFilesService {
         }
         const resolvedRedirectUrl = new URL(
           location,
-          validatedUrl.toString(),
+          parsedUrl.toString(),
         ).toString();
         await assertSafeExternalUrl(resolvedRedirectUrl);
         currentUrl = resolvedRedirectUrl;
         continue;
       }
+
+      // Re-verify DNS resolution immediately after connection to mitigate DNS rebinding TOCTOU
+      await assertSafeExternalUrl(parsedUrl.toString());
 
       break;
     }

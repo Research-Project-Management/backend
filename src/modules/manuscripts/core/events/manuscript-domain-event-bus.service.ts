@@ -11,7 +11,10 @@
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { LiveCollaborationPort } from '../ports/live-collaboration.port';
+import {
+  LiveCollaborationPort,
+  NOOP_LIVE_COLLABORATION,
+} from '../ports/live-collaboration.port';
 
 export type ManuscriptMutationSource =
   | 'rest-docstore'
@@ -47,8 +50,11 @@ export interface ManuscriptNodesDeletedEvent {
 export interface ManuscriptHistoryRestoredEvent {
   type: 'manuscript.history.restored';
   projectId: string;
-  version: number;
+  version?: number;
+  snapshotId?: string;
+  userId?: string;
   restoredDocIds: string[];
+  evictedDocIds?: string[];
   occurredAt: number;
 }
 
@@ -69,17 +75,24 @@ export class ManuscriptDomainEventBus {
     Set<ManuscriptDomainEventHandler<any>>
   >();
 
-  constructor(@Optional() private readonly moduleRef?: ModuleRef) {
+  constructor(
+    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly injectedLiveCollab?: LiveCollaborationPort,
+  ) {
     this.registerDefaultCrossContextHandlers();
   }
 
-  private resolveLiveCollaborationPort(): LiveCollaborationPort | null {
+  private resolveLiveCollaborationPort(): LiveCollaborationPort {
+    if (this.injectedLiveCollab) {
+      return this.injectedLiveCollab;
+    }
     try {
       return (
-        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ?? null
+        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ??
+        NOOP_LIVE_COLLABORATION
       );
     } catch {
-      return null;
+      return NOOP_LIVE_COLLABORATION;
     }
   }
 
@@ -94,7 +107,6 @@ export class ManuscriptDomainEventBus {
       async (event) => {
         if (event.source === 'yjs-flush') return;
         const live = this.resolveLiveCollaborationPort();
-        if (!live) return;
         await live.applyExternalText(
           event.projectId,
           event.docId,
@@ -106,11 +118,13 @@ export class ManuscriptDomainEventBus {
     this.subscribe<ManuscriptNodesDeletedEvent>(
       'manuscript.nodes.deleted',
       async (event) => {
+        if (event.deletedDocIds.length === 0) return;
         const live = this.resolveLiveCollaborationPort();
-        if (!live || event.deletedDocIds.length === 0) return;
-        for (const docId of event.deletedDocIds) {
-          await live.evictDoc(event.projectId, docId);
-        }
+        await Promise.all(
+          event.deletedDocIds.map((docId) =>
+            live.evictDoc(event.projectId, docId),
+          ),
+        );
       },
     );
 
@@ -118,7 +132,15 @@ export class ManuscriptDomainEventBus {
       'manuscript.history.restored',
       async (event) => {
         this.logger.debug(
-          `Processed manuscript.history.restored for project ${event.projectId} (v${event.version}, ${event.restoredDocIds.length} docs)`,
+          `Processed manuscript.history.restored for project ${event.projectId} (v${event.version ?? event.snapshotId}, ${event.restoredDocIds.length} docs)`,
+        );
+        // Only evict documents explicitly marked in `evictedDocIds` (e.g., docs removed by snapshot restore
+        // that were not already updated in-place via `manuscript.document.mutated` -> `applyExternalText`).
+        const docsToEvict = event.evictedDocIds ?? [];
+        if (docsToEvict.length === 0) return;
+        const live = this.resolveLiveCollaborationPort();
+        await Promise.all(
+          docsToEvict.map((docId) => live.evictDoc(event.projectId, docId)),
         );
       },
     );

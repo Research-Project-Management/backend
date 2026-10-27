@@ -2,10 +2,12 @@
  * linked-files/linked-files.repository.ts
  * Direct @Injectable() Repository for Manuscripts Linked Files.
  *
- * Encapsulates the real seam between Redis hash storage and the in-memory Map fallback.
+ * Implements write-through persistence to the Prisma `ManuscriptLinkedFile` model
+ * combined with Redis cache-aside (hash storage) and bounded in-memory LRU fallback.
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { PrismaService } from '@/core/infrastructure/database/prisma.service';
 import { RedisCacheService } from '@/core/infrastructure/redis/redis.service';
 import type Redis from 'ioredis';
 import {
@@ -25,7 +27,10 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     Map<string, LinkedFileEntity>
   >();
 
-  constructor(@Optional() private readonly redis?: RedisCacheService) {
+  constructor(
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly redis?: RedisCacheService,
+  ) {
     super();
   }
 
@@ -65,6 +70,49 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
   }
 
   public async save(entity: LinkedFileEntity): Promise<LinkedFileEntity> {
+    // 1. In-memory update
+    this.saveToMemoryStore(entity);
+
+    // 2. Write-through to Prisma DB
+    if (this.prisma) {
+      try {
+        await this.prisma.manuscriptLinkedFile.upsert({
+          where: { id: entity.id },
+          create: {
+            id: entity.id,
+            projectId: entity.projectId,
+            name: entity.name,
+            provider: entity.provider,
+            url: entity.url ?? null,
+            targetDocId: entity.docId ?? null,
+            targetFileId: entity.fileId ?? null,
+            targetPath: entity.nodeId ?? entity.name,
+            lastSyncedAt: entity.lastSyncedAt ?? null,
+            syncError: entity.errorMessage ?? null,
+            createdAt: entity.createdAt,
+            updatedAt: entity.updatedAt,
+          },
+          update: {
+            name: entity.name,
+            provider: entity.provider,
+            url: entity.url ?? null,
+            targetDocId: entity.docId ?? null,
+            targetFileId: entity.fileId ?? null,
+            targetPath: entity.nodeId ?? entity.name,
+            lastSyncedAt: entity.lastSyncedAt ?? null,
+            syncError: entity.errorMessage ?? null,
+            updatedAt: entity.updatedAt,
+          },
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Failed to persist linked file ${entity.id} to Prisma: ${msg}`,
+        );
+      }
+    }
+
+    // 3. Write-through to Redis cache
     const client = this.getRedisClient();
     if (client) {
       try {
@@ -73,14 +121,12 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
           entity.id,
           JSON.stringify(entity.toJSON()),
         );
-        return entity;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Failed to persist linked file to Redis: ${msg}`);
       }
     }
 
-    this.saveToMemoryStore(entity);
     return entity;
   }
 
@@ -88,25 +134,60 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     projectId: string,
     id: string,
   ): Promise<LinkedFileEntity | null> {
+    // 1. Redis Cache lookup
     const client = this.getRedisClient();
     if (client) {
       try {
         const raw = await client.hget(this.projectKey(projectId), id);
         if (raw) {
-          return this.deserialize(raw);
+          const entity = this.deserialize(raw);
+          this.saveToMemoryStore(entity);
+          return entity;
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        this.logger.debug(`Redis read error: ${msg}`);
+        this.logger.debug(`Redis read error in findById: ${msg}`);
       }
     }
 
+    // 2. In-memory lookup
     const projectMap = this.memoryStore.get(projectId);
-    return projectMap?.get(id) ?? null;
+    const cached = projectMap?.get(id);
+    if (cached) return cached;
+
+    // 3. Cache-aside Prisma query
+    if (this.prisma) {
+      try {
+        const record = await this.prisma.manuscriptLinkedFile.findFirst({
+          where: { projectId, id },
+        });
+        if (record) {
+          const entity = this.mapFromPrisma(record);
+          this.saveToMemoryStore(entity);
+          if (client) {
+            await client
+              .hset(
+                this.projectKey(projectId),
+                id,
+                JSON.stringify(entity.toJSON()),
+              )
+              .catch(() => {});
+          }
+          return entity;
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Prisma findById error for ${id}: ${msg}`);
+      }
+    }
+
+    return null;
   }
 
   public async findByProject(projectId: string): Promise<LinkedFileEntity[]> {
     const client = this.getRedisClient();
+
+    // 1. Redis Cache lookup
     if (client) {
       try {
         const all = await client.hgetall(this.projectKey(projectId));
@@ -119,10 +200,39 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        this.logger.debug(`Redis read error: ${msg}`);
+        this.logger.debug(`Redis read error in findByProject: ${msg}`);
       }
     }
 
+    // 2. Cache-aside Prisma query
+    if (this.prisma) {
+      try {
+        const records = await this.prisma.manuscriptLinkedFile.findMany({
+          where: { projectId },
+        });
+        if (records && records.length > 0) {
+          const list = records.map((r) => this.mapFromPrisma(r));
+          for (const entity of list) {
+            this.saveToMemoryStore(entity);
+          }
+          if (client) {
+            const map: Record<string, string> = {};
+            for (const entity of list) {
+              map[entity.id] = JSON.stringify(entity.toJSON());
+            }
+            await client.hset(this.projectKey(projectId), map).catch(() => {});
+          }
+          return list;
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `Prisma findByProject error for ${projectId}: ${msg}`,
+        );
+      }
+    }
+
+    // 3. In-memory fallback
     const projectMap = this.memoryStore.get(projectId);
     return projectMap ? Array.from(projectMap.values()) : [];
   }
@@ -132,14 +242,34 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     nodeId: string,
   ): Promise<LinkedFileEntity | null> {
     const all = await this.findByProject(projectId);
-    return all.find((item) => item.nodeId === nodeId) ?? null;
+    const found = all.find((item) => item.nodeId === nodeId);
+    if (found) return found;
+
+    if (this.prisma) {
+      try {
+        const record = await this.prisma.manuscriptLinkedFile.findFirst({
+          where: { projectId, targetPath: nodeId },
+        });
+        if (record) {
+          const entity = this.mapFromPrisma(record);
+          this.saveToMemoryStore(entity);
+          return entity;
+        }
+      } catch (err: unknown) {
+        this.logger.debug(`Prisma findByNodeId error: ${err}`);
+      }
+    }
+
+    return null;
   }
 
   public async findAllAutoRefresh(): Promise<LinkedFileEntity[]> {
+    const redisResults = new Map<string, LinkedFileEntity>();
     const client = this.getRedisClient();
+
+    // 1. Scan Redis cache
     if (client) {
       try {
-        const redisResults = new Map<string, LinkedFileEntity>();
         let cursor = '0';
         do {
           const [nextCursor, keys] = await client.scan(
@@ -162,35 +292,49 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
             }
           }
         } while (cursor !== '0');
-        for (const projectMap of this.memoryStore.values()) {
-          for (const entity of projectMap.values()) {
-            if (entity.autoRefresh) {
-              const key = `${entity.projectId}:${entity.id}`;
-              if (!redisResults.has(key)) {
-                redisResults.set(key, entity);
-              }
-            }
-          }
-        }
-        return Array.from(redisResults.values());
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.debug(`Redis scan error in findAllAutoRefresh: ${msg}`);
       }
     }
 
-    const results: LinkedFileEntity[] = [];
+    // 2. Query Prisma database
+    if (this.prisma) {
+      try {
+        const records = await this.prisma.manuscriptLinkedFile.findMany({
+          where: {
+            provider: { in: ['zotero', 'mendeley'] },
+          },
+        });
+        for (const record of records) {
+          const entity = this.mapFromPrisma(record);
+          const key = `${entity.projectId}:${entity.id}`;
+          if (!redisResults.has(key)) {
+            redisResults.set(key, entity);
+          }
+        }
+      } catch (err: unknown) {
+        this.logger.debug(`Prisma findAllAutoRefresh query notice: ${err}`);
+      }
+    }
+
+    // 3. Merge in-memory store
     for (const projectMap of this.memoryStore.values()) {
       for (const entity of projectMap.values()) {
         if (entity.autoRefresh) {
-          results.push(entity);
+          const key = `${entity.projectId}:${entity.id}`;
+          if (!redisResults.has(key)) {
+            redisResults.set(key, entity);
+          }
         }
       }
     }
-    return results;
+
+    return Array.from(redisResults.values());
   }
 
   public async delete(projectId: string, id: string): Promise<boolean> {
+    // 1. Remove from in-memory store
     const projectMap = this.memoryStore.get(projectId);
     if (projectMap) {
       projectMap.delete(id);
@@ -199,6 +343,7 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
       }
     }
 
+    // 2. Delete from Redis cache
     const client = this.getRedisClient();
     if (client) {
       try {
@@ -209,7 +354,56 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
       }
     }
 
+    // 3. Delete from Prisma DB
+    if (this.prisma) {
+      try {
+        await this.prisma.manuscriptLinkedFile.deleteMany({
+          where: { projectId, id },
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to delete linked file in Prisma: ${msg}`);
+      }
+    }
+
     return true;
+  }
+
+  private mapFromPrisma(record: {
+    id: string;
+    projectId: string;
+    name: string;
+    provider: string;
+    url: string | null;
+    targetPath: string;
+    targetDocId: string | null;
+    targetFileId: string | null;
+    lastSyncedAt: Date | null;
+    syncError: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }): LinkedFileEntity {
+    return new LinkedFileEntity({
+      id: record.id,
+      projectId: record.projectId,
+      name: record.name,
+      provider: (record.provider as 'url' | 'zotero' | 'mendeley') || 'url',
+      url: record.url,
+      nodeId: record.targetPath,
+      docId: record.targetDocId,
+      fileId: record.targetFileId,
+      status: record.syncError
+        ? 'failed'
+        : record.lastSyncedAt
+          ? 'synced'
+          : 'pending',
+      lastSyncedAt: record.lastSyncedAt,
+      errorMessage: record.syncError,
+      autoRefresh:
+        record.provider === 'zotero' || record.provider === 'mendeley',
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    });
   }
 
   private deserialize(rawJson: string): LinkedFileEntity {

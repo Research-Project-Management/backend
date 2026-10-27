@@ -6,6 +6,7 @@
 
 export * from './docstore.module';
 export * from './docstore.service';
+export { ManuscriptPageService } from '../core/services/manuscript-page.service';
 export * from './controllers';
 export * from './dto/doc.dto';
 
@@ -17,4 +18,5 @@ export { DocstoreRepository } from './repositories/docstore.repository';
 export {
   DocArchiveRepository,
   InMemoryDocArchiveRepository,
+  StoragePortDocArchiveAdapter,
 } from './repositories/doc-archive.repository';

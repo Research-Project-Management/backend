@@ -210,6 +210,12 @@ export class ProjectHistoryService {
       isAutomatic: false,
     });
 
+    this.realtimeService?.broadcastSnapshotCreated(projectId, {
+      version: newSnapshot.version,
+      summary: newSnapshot.summary,
+      label: null,
+    });
+
     return {
       restoredSnapshot: this.toDetailDto(targetSnapshot),
       newSnapshot: this.toDetailDto(newSnapshot),

@@ -6,24 +6,28 @@ import { RealtimeRateLimitedException } from './ws-errors';
 export type RealtimeEventClass =
   'cursor' | 'update' | 'chat' | 'joinLeave' | 'other';
 
+/**
+ * Lookup Table Pattern: Declarative event-to-rate-bucket classification map.
+ */
+export const EVENT_RATE_CLASS_MAP: Readonly<
+  Record<string, RealtimeEventClass>
+> = Object.freeze({
+  'doc:cursor': 'cursor',
+  'doc:update': 'update',
+  'doc:sync:step1': 'update',
+  'doc:sync:step2': 'update',
+  'doc:sync:update': 'update',
+  'project:chat:send': 'chat',
+  'project:chat:history': 'chat',
+  'chat:history': 'chat',
+  'project:join': 'joinLeave',
+  'project:leave': 'joinLeave',
+  'doc:join': 'joinLeave',
+  'doc:leave': 'joinLeave',
+});
+
 export function classifyEvent(event: string): RealtimeEventClass {
-  switch (event) {
-    case 'doc:cursor':
-      return 'cursor';
-    case 'doc:update':
-    case 'doc:sync:step2':
-    case 'doc:sync:update':
-      return 'update';
-    case 'project:chat:send':
-      return 'chat';
-    case 'project:join':
-    case 'project:leave':
-    case 'doc:join':
-    case 'doc:leave':
-      return 'joinLeave';
-    default:
-      return 'other';
-  }
+  return EVENT_RATE_CLASS_MAP[event] ?? 'other';
 }
 
 interface BucketState {

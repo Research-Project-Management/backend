@@ -163,42 +163,37 @@ export class ManuscriptsService {
     let yjsFrame: Buffer | null = null;
 
     if (this.docstoreService && (dto.lines || dto.splice)) {
-      try {
-        if (this.yjsService) {
-          await this.yjsService
-            .flushDoc(dto.projectId, dto.docId)
-            .catch(() => false);
-        }
-        if (!nextLines && dto.splice) {
-          const existing = await this.docstoreService.getDoc(
-            dto.projectId,
-            dto.docId,
-          );
-          const cloned = [...(existing.lines || [])];
-          cloned.splice(
-            dto.splice.startLine,
-            dto.splice.deleteCount,
-            ...(dto.splice.newLines || []),
-          );
-          nextLines = cloned;
-        }
-
-        if (nextLines) {
-          const updated = await this.docstoreService.updateDoc(
-            dto.projectId,
-            dto.docId,
-            {
-              lines: nextLines,
-              version: (dto.clientRev || 0) + 1,
-            },
-          );
-          serverRev = updated.rev;
-          version = updated.doc.version;
-        }
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Failed to persist DOC_UPDATE for ${dto.projectId}:${dto.docId}: ${(err as Error)?.message}`,
+      if (this.yjsService) {
+        await this.yjsService
+          .flushDoc(dto.projectId, dto.docId)
+          .catch(() => false);
+      }
+      const existing = await this.docstoreService.getDoc(
+        dto.projectId,
+        dto.docId,
+      );
+      if (!nextLines && dto.splice) {
+        const cloned = [...(existing.lines || [])];
+        cloned.splice(
+          dto.splice.startLine,
+          dto.splice.deleteCount,
+          ...(dto.splice.newLines || []),
         );
+        nextLines = cloned;
+      }
+
+      if (nextLines) {
+        const updated = await this.docstoreService.updateDoc(
+          dto.projectId,
+          dto.docId,
+          {
+            lines: nextLines,
+            version: (existing?.version ?? dto.clientRev ?? 0) + 1,
+            expectedRev: existing?.rev,
+          },
+        );
+        serverRev = updated.rev;
+        version = updated.doc.version;
       }
     }
 

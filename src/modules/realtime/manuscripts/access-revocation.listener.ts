@@ -125,16 +125,56 @@ export class AccessRevocationListener {
     const projectId = event.projectId || event.entityId;
     const userId =
       event.userId || event.targetUserId || event.metadata?.targetId;
+    const newRole =
+      event.newRole || event.role || event.metadata?.newRole || event.newValue;
 
     if (!projectId || !userId) {
       return;
     }
 
     this.logger.log(
-      `Handling project.member_updated for user ${userId} in project ${projectId}`,
+      `Handling project.member_updated for user ${userId} in project ${projectId} (newRole: ${newRole ?? 'unspecified'})`,
     );
 
     // Evict cached access decision so the next write/read operation re-evaluates permissions immediately (RT-10)
     this.realtimeAccess.evictCache(projectId, userId);
+
+    // Notify live sockets of the updated role so the frontend immediately switches to read-only if downgraded to reviewer
+    try {
+      const server = this.gateway?.server;
+      if (!server || typeof server.fetchSockets !== 'function') {
+        return;
+      }
+      const freshAccess = await this.realtimeAccess
+        .getProjectAccess(projectId, userId)
+        .catch(() => null);
+      const resolvedCanWrite =
+        freshAccess !== null
+          ? freshAccess.canWrite
+          : newRole
+            ? newRole.toLowerCase() !== 'reviewer' &&
+              newRole.toLowerCase() !== 'viewer'
+            : undefined;
+      const resolvedRole = newRole ?? freshAccess?.role;
+
+      const sockets = await server.fetchSockets();
+      for (const socket of sockets) {
+        if (
+          socket.data?.userId === userId &&
+          socket.data?.projectId === projectId
+        ) {
+          socket.emit('access:updated', {
+            projectId,
+            userId,
+            role: resolvedRole,
+            canWrite: resolvedCanWrite,
+          });
+        }
+      }
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Failed to notify sockets for updated member ${userId} in project ${projectId}: ${(err as Error)?.message}`,
+      );
+    }
   }
 }

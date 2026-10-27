@@ -9,6 +9,7 @@ import {
   Logger,
   Optional,
   BadRequestException,
+  NotFoundException,
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
@@ -28,6 +29,7 @@ export interface ActivePresenceUser {
   color: string;
   lastSeen: number;
   fileId: string | null;
+  projectId?: string | null;
   cursor?: Record<string, unknown> | null;
   lastHeartbeat?: number;
   transport?: string;
@@ -78,6 +80,7 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     }
     this.activeSseCleanups.clear();
     this.presenceCache.clear();
+    this.liveCollab = undefined;
   }
 
   private getLiveCollaboration(): LiveCollaborationPort | null {
@@ -106,14 +109,27 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     let resolved = doc?.projectId ?? null;
     if (!resolved) {
       const node = await this.prisma.manuscriptNode.findFirst({
-        where: { projectId: id },
+        where: { OR: [{ id }, { projectId: id }] },
         select: { projectId: true },
       });
       resolved = node?.projectId ?? null;
     }
 
     if (ManuscriptPresenceService.projectIdCache.size > 2000) {
-      ManuscriptPresenceService.projectIdCache.clear();
+      const now = Date.now();
+      for (const [k, v] of ManuscriptPresenceService.projectIdCache) {
+        if (v.expiresAt <= now) {
+          ManuscriptPresenceService.projectIdCache.delete(k);
+        }
+      }
+      if (ManuscriptPresenceService.projectIdCache.size > 2000) {
+        const oldestKey = ManuscriptPresenceService.projectIdCache
+          .keys()
+          .next().value;
+        if (oldestKey !== undefined) {
+          ManuscriptPresenceService.projectIdCache.delete(oldestKey);
+        }
+      }
     }
     ManuscriptPresenceService.projectIdCache.set(id, {
       projectId: resolved,
@@ -123,24 +139,52 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     return resolved;
   }
 
+  private async verifyPageInProject(
+    pageId: string,
+    authorizedProjectId?: string,
+  ): Promise<string | null> {
+    if (!authorizedProjectId) {
+      return this.resolveProjectId(pageId);
+    }
+    if (pageId === authorizedProjectId) {
+      return authorizedProjectId;
+    }
+    const resolved = await this.resolveProjectId(pageId);
+    if (!resolved || resolved !== authorizedProjectId) {
+      throw new NotFoundException(`Document ${pageId} not found in project`);
+    }
+    return resolved;
+  }
+
   /**
    * Merged presence: WebSocket sessions (authoritative, via realtime port) plus
    * HTTP-heartbeat clients (fallback transport), de-duplicated by userId.
    */
-  public async collectPresence(pageId: string): Promise<{
+  public async collectPresence(
+    pageId: string,
+    authorizedProjectId?: string,
+  ): Promise<{
     users: Array<LivePresenceUser | ActivePresenceUser>;
     realtimeAvailable: boolean;
   }> {
+    if (authorizedProjectId) {
+      await this.verifyPageInProject(pageId, authorizedProjectId);
+    }
+    const cacheKey = authorizedProjectId
+      ? `${authorizedProjectId}:${pageId}`
+      : pageId;
     const now = Date.now();
-    const cached = this.presenceCache.get(pageId);
+    const cached = this.presenceCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {
       return cached.promise;
     }
 
-    const promise = this.fetchPresence(pageId).catch((err) => {
-      this.presenceCache.delete(pageId);
-      throw err;
-    });
+    const promise = this.fetchPresence(pageId, authorizedProjectId).catch(
+      (err) => {
+        this.presenceCache.delete(cacheKey);
+        throw err;
+      },
+    );
 
     if (this.presenceCache.size >= 2000) {
       for (const [k, v] of this.presenceCache) {
@@ -149,18 +193,24 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
         }
       }
       if (this.presenceCache.size >= 2000) {
-        this.presenceCache.clear();
+        const oldestKey = this.presenceCache.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.presenceCache.delete(oldestKey);
+        }
       }
     }
 
-    this.presenceCache.set(pageId, {
+    this.presenceCache.set(cacheKey, {
       expiresAt: now + ManuscriptPresenceService.PRESENCE_CACHE_TTL_MS,
       promise,
     });
     return promise;
   }
 
-  private async fetchPresence(pageId: string): Promise<{
+  private async fetchPresence(
+    pageId: string,
+    authorizedProjectId?: string,
+  ): Promise<{
     users: Array<LivePresenceUser | ActivePresenceUser>;
     realtimeAvailable: boolean;
   }> {
@@ -173,7 +223,12 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
         ManuscriptPresenceService.HTTP_PRESENCE_TTL_MS
       ) {
         ManuscriptPresenceService.httpPresence.delete(key);
-      } else if (user.fileId === pageId) {
+      } else if (
+        user.fileId === pageId &&
+        (!authorizedProjectId ||
+          !user.projectId ||
+          user.projectId === authorizedProjectId)
+      ) {
         byUser.set(user.id, {
           ...user,
           userId: user.id,
@@ -185,7 +240,8 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
 
     const live = this.getLiveCollaboration();
     if (live) {
-      const projectId = await this.resolveProjectId(pageId);
+      const projectId =
+        authorizedProjectId ?? (await this.resolveProjectId(pageId));
       if (projectId) {
         try {
           for (const u of await live.getPresence(projectId, pageId)) {
@@ -204,20 +260,24 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     return { users: [...byUser.values()], realtimeAvailable: !!live };
   }
 
-  public recordHeartbeat(
+  public async recordHeartbeat(
     pageId: string,
     userId: string | undefined,
     userName: string,
     body?: HeartbeatBody,
-  ): { success: true } {
+    authorizedProjectId?: string,
+  ): Promise<{ success: true }> {
     if (!userId) {
       throw new BadRequestException('Authenticated user required');
+    }
+    if (authorizedProjectId) {
+      await this.verifyPageInProject(pageId, authorizedProjectId);
     }
     if (
       ManuscriptPresenceService.httpPresence.size >=
       ManuscriptPresenceService.MAX_HTTP_PRESENCE_ENTRIES
     ) {
-      // Evict expired entries or clear half
+      // Evict expired entries first, then evict the oldest entry (FIFO/LRU)
       const now = Date.now();
       for (const [k, v] of ManuscriptPresenceService.httpPresence) {
         if (now - v.lastSeen > ManuscriptPresenceService.HTTP_PRESENCE_TTL_MS) {
@@ -228,26 +288,53 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
         ManuscriptPresenceService.httpPresence.size >=
         ManuscriptPresenceService.MAX_HTTP_PRESENCE_ENTRIES
       ) {
-        ManuscriptPresenceService.httpPresence.clear();
+        const oldestKey = ManuscriptPresenceService.httpPresence
+          .keys()
+          .next().value;
+        if (oldestKey !== undefined) {
+          ManuscriptPresenceService.httpPresence.delete(oldestKey);
+        }
       }
     }
-    ManuscriptPresenceService.httpPresence.set(`${pageId}:${userId}`, {
+    const presenceKey = authorizedProjectId
+      ? `${authorizedProjectId}:${pageId}:${userId}`
+      : `${pageId}:${userId}`;
+    ManuscriptPresenceService.httpPresence.set(presenceKey, {
       id: userId,
       name: userName,
       color: body?.color || '#2563EB',
       fileId: pageId,
+      projectId: authorizedProjectId ?? null,
       cursor: body?.cursor,
       lastSeen: Date.now(),
     });
     this.presenceCache.delete(pageId);
+    if (authorizedProjectId) {
+      this.presenceCache.delete(`${authorizedProjectId}:${pageId}`);
+    }
     return { success: true };
   }
 
-  public leaveRoom(pageId: string, userId?: string): { success: true } {
+  public async leaveRoom(
+    pageId: string,
+    userId?: string,
+    authorizedProjectId?: string,
+  ): Promise<{ success: true }> {
+    if (authorizedProjectId) {
+      await this.verifyPageInProject(pageId, authorizedProjectId);
+    }
     if (userId) {
       ManuscriptPresenceService.httpPresence.delete(`${pageId}:${userId}`);
+      if (authorizedProjectId) {
+        ManuscriptPresenceService.httpPresence.delete(
+          `${authorizedProjectId}:${pageId}:${userId}`,
+        );
+      }
     }
     this.presenceCache.delete(pageId);
+    if (authorizedProjectId) {
+      this.presenceCache.delete(`${authorizedProjectId}:${pageId}`);
+    }
     return { success: true };
   }
 
@@ -263,7 +350,11 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     origin: string | undefined,
     rawRequest: { on(event: 'close', listener: () => void): void },
     reply: FastifyReply,
+    authorizedProjectId?: string,
   ): Promise<void> {
+    if (authorizedProjectId) {
+      await this.verifyPageInProject(pageId, authorizedProjectId);
+    }
     if (origin && isOriginAllowed(origin)) {
       reply.raw.setHeader('Access-Control-Allow-Origin', origin);
       reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -282,10 +373,18 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     let closed = false;
 
     const onProjectEvent = (evt: {
+      projectId?: string;
       event?: string;
       payload?: { docId?: string; version?: number };
     }) => {
       if (closed) return;
+      if (
+        authorizedProjectId &&
+        evt?.projectId &&
+        evt.projectId !== authorizedProjectId
+      ) {
+        return;
+      }
       if (
         evt?.event === 'doc:content-updated' &&
         evt.payload?.docId === pageId
@@ -299,7 +398,10 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     const tick = async () => {
       if (closed) return;
       try {
-        const { users } = await this.collectPresence(pageId);
+        const { users } = await this.collectPresence(
+          pageId,
+          authorizedProjectId,
+        );
         const key = users
           .map(
             (u: LivePresenceUser | ActivePresenceUser) =>

@@ -14,6 +14,7 @@ export interface CreateDocData {
   version?: number;
   ranges?: DocRanges;
   hash?: string;
+  tx?: unknown;
 }
 
 export interface UpdateDocData {
@@ -28,7 +29,9 @@ export interface UpdateDocData {
 export interface PatchDocData {
   deleted?: boolean;
   name?: string;
+  path?: string;
   deletedAt?: Date | null;
+  ranges?: DocRanges;
 }
 
 export abstract class IDocRepository {
@@ -57,7 +60,7 @@ export abstract class IDocRepository {
     storageKey: string,
     rev: number,
     clearLines?: boolean,
-  ): Promise<void>;
+  ): Promise<boolean>;
   abstract unarchiveDoc(
     projectId: string,
     docId: string,

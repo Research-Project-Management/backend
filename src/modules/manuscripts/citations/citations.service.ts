@@ -3,7 +3,7 @@
  * Deep Service orchestrating Citations, BibTeX, DOI/arXiv resolution & Library sync.
  */
 
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Optional, Logger } from '@nestjs/common';
 import { CitationsRepository } from './citations.repository';
 import {
   AcademicIdentifierVo,
@@ -24,6 +24,7 @@ import {
 
 @Injectable()
 export class CitationsService {
+  private readonly logger = new Logger(CitationsService.name);
   private readonly bibParser: RegexAstBibtexParser;
   private readonly identifierResolver: IIdentifierResolverPort;
 
@@ -187,16 +188,30 @@ export class CitationsService {
     const targetFile =
       dto.targetFilename || dto.targetBibFile || 'references.bib';
 
-    const lastPath = await this.repository.appendEntriesToBib(
+    const syncResult = await this.repository.appendEntriesToBib(
       projectId,
       entries,
       targetFile,
     );
 
+    const filePath =
+      typeof syncResult === 'string' ? syncResult : syncResult?.filePath;
+    const conflicts =
+      Array.isArray((syncResult as { conflicts?: string[] })?.conflicts)
+        ? (syncResult as { conflicts: string[] }).conflicts
+        : [];
+
+    if (conflicts.length > 0) {
+      this.logger.warn(
+        `[CitationSync] Detected ${conflicts.length} conflicting/overwritten citekeys in ${filePath}: ${conflicts.join(', ')}`,
+      );
+    }
+
     return {
       collectionId: dto.collectionId,
       syncedCount: entries.length,
-      filePath: lastPath,
+      filePath,
+      conflicts,
     };
   }
 

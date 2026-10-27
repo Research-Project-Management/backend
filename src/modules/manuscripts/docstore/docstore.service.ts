@@ -257,6 +257,7 @@ export class DocstoreService {
       version: dto.version ?? 0,
       ranges: dto.ranges,
       hash,
+      tx: dto.tx,
     });
 
     return this.mapToDto(doc);
@@ -274,11 +275,19 @@ export class DocstoreService {
 
     LineArrayEngine.validateLinesSize(lines);
 
-    const currentDoc = await this.docRepository.getDoc(projectId, docId);
+    let currentDoc = await this.docRepository.getDoc(projectId, docId);
     if (!currentDoc) {
       throw new DocNotFoundError(
         `Document ${docId} not found in project ${projectId}`,
       );
+    }
+
+    // If the document is currently archived in cold-tier storage, unarchive/hydrate it first
+    // so optimistic concurrency, diff comparison, and `inStorage = false` state stay consistent.
+    if (currentDoc.inStorage && currentDoc.storageKey) {
+      currentDoc = await this.getDocEntity(projectId, docId, {
+        includeDeleted: true,
+      }).catch(() => currentDoc!);
     }
 
     if (expectedRev !== undefined && currentDoc.rev !== expectedRev) {
@@ -347,8 +356,25 @@ export class DocstoreService {
       deleted: dto.deleted,
       name: dto.name ?? dto.path,
       deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : undefined,
+      ranges: dto.ranges,
     });
     return this.mapToDto(doc);
+  }
+
+  public async deleteDoc(
+    projectId: string,
+    docId: string,
+    options?: { soft?: boolean },
+  ): Promise<void> {
+    const soft = options?.soft !== false;
+    if (soft) {
+      await this.docRepository.patchDoc(projectId, docId, {
+        deleted: true,
+        deletedAt: new Date(),
+      });
+    } else {
+      await this.docRepository.destroyDoc(projectId, docId);
+    }
   }
 
   public async applySuggestionsToDoc(
@@ -404,14 +430,20 @@ export class DocstoreService {
       : true;
 
     await this.docPersistor.sendStream(key, stream, { sourceMd5 });
-    await this.docRepository.markAsArchived(
+    const archived = await this.docRepository.markAsArchived(
       projectId,
       doc.id,
       key,
       doc.rev,
       clearLines,
     );
-    this.logger.log(`Archived single document ${docId} to S3 cold tier`);
+    if (archived) {
+      this.logger.log(`Archived single document ${docId} to S3 cold tier`);
+    } else {
+      this.logger.warn(
+        `Skipped marking document ${docId} as archived due to concurrent rev modification`,
+      );
+    }
   }
 
   public async isDocDeleted(
@@ -461,14 +493,20 @@ export class DocstoreService {
       const stream = Readable.from(Buffer.from(payload, 'utf8'));
 
       await this.docPersistor.sendStream(key, stream, { sourceMd5 });
-      await this.docRepository.markAsArchived(
+      const archived = await this.docRepository.markAsArchived(
         projectId,
         doc.id,
         key,
         doc.rev,
         clearLines,
       );
-      count++;
+      if (archived) {
+        count++;
+      } else {
+        this.logger.warn(
+          `Skipped marking document ${doc.id} as archived due to concurrent rev modification`,
+        );
+      }
     }
 
     this.logger.log(

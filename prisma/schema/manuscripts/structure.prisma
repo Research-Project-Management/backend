@@ -12,6 +12,9 @@ enum ManuscriptNodeType {
 model ManuscriptNode {
   id        String  @id @default(uuid(7)) @db.Uuid
   projectId String  @map("project_id") @db.Uuid
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_nodes_project_id")
+  pageId    String? @map("page_id") @db.Uuid
+  page      ManuscriptPage? @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_nodes_page_id")
 
   parentId String?          @map("parent_id") @db.Uuid
   parent   ManuscriptNode?  @relation("NodeHierarchy", fields: [parentId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_nodes_parent_id")
@@ -36,7 +39,9 @@ model ManuscriptNode {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([projectId, path], map: "uq_manuscript_nodes_project_path")
+  @@index([pageId, path], map: "idx_manuscript_nodes_page_path")
   @@index([projectId, depth, sortOrder], map: "idx_manuscript_nodes_project_tree")
+  @@index([pageId, depth, sortOrder], map: "idx_manuscript_nodes_page_tree")
   @@index([projectId, parentId], map: "idx_manuscript_nodes_project_parent")
   @@index([projectId, type], map: "idx_manuscript_nodes_project_type")
   @@index([projectId, isRootDoc], map: "idx_manuscript_nodes_project_root")

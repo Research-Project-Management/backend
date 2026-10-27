@@ -43,6 +43,9 @@ import {
   ChangeNotFoundException,
   ThreadNotFoundException,
   ResolvedThreadException,
+  CommentThreadDomainException,
+  TrackChangeDomainException,
+  InvalidCommentReplyException,
 } from './domain';
 import { AuthenticatedRequest } from '@/core';
 
@@ -61,7 +64,12 @@ export class TrackChangesController {
     ) {
       throw new NotFoundException(error.message);
     }
-    if (error instanceof ResolvedThreadException) {
+    if (
+      error instanceof ResolvedThreadException ||
+      error instanceof CommentThreadDomainException ||
+      error instanceof TrackChangeDomainException ||
+      error instanceof InvalidCommentReplyException
+    ) {
       throw new BadRequestException(error.message);
     }
     throw error;
@@ -78,6 +86,40 @@ export class TrackChangesController {
   ): Promise<DocReviewsResponseDto> {
     try {
       return await this.trackChangesService.getDocReviews(projectId, docId);
+    } catch (err) {
+      this.handleError(err);
+    }
+  }
+
+  @Get(['threads', 'comments'])
+  @ApiOperation({
+    summary: 'Get all comment threads for a document',
+  })
+  @ApiResponse({ status: 200, type: [CommentThreadResponseDto] })
+  async getDocThreads(
+    @Param('projectId') projectId: string,
+    @Param('docId') docId: string,
+  ): Promise<CommentThreadResponseDto[]> {
+    try {
+      const reviews = await this.trackChangesService.getDocReviews(projectId, docId);
+      return reviews.threads;
+    } catch (err) {
+      this.handleError(err);
+    }
+  }
+
+  @Get('changes')
+  @ApiOperation({
+    summary: 'Get all pending track changes for a document',
+  })
+  @ApiResponse({ status: 200, type: [TrackChangeResponseDto] })
+  async getDocChanges(
+    @Param('projectId') projectId: string,
+    @Param('docId') docId: string,
+  ): Promise<TrackChangeResponseDto[]> {
+    try {
+      const reviews = await this.trackChangesService.getDocReviews(projectId, docId);
+      return reviews.changes;
     } catch (err) {
       this.handleError(err);
     }

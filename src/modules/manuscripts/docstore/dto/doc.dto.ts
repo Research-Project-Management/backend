@@ -46,6 +46,8 @@ export class CreateDocDto {
   @ApiPropertyOptional({ description: 'Initial ranges metadata' })
   @IsOptional()
   ranges?: DocRanges;
+
+  tx?: unknown;
 }
 
 export class UpdateDocDto {
@@ -99,6 +101,10 @@ export class PatchDocDto {
   @IsOptional()
   @IsString()
   path?: string;
+
+  @ApiPropertyOptional({ description: 'Ranges metadata update' })
+  @IsOptional()
+  ranges?: DocRanges;
 
   @ApiPropertyOptional({ description: 'Timestamp of deletion' })
   @IsOptional()

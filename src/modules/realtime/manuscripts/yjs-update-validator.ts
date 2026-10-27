@@ -60,6 +60,28 @@ export class YjsUpdateValidator {
   }
 
   /**
+   * Pre-validates whether applying an update would push the document beyond size limits.
+   */
+  public validatePreApplySize(
+    doc: Y.Doc,
+    incomingUpdateBytes: number,
+    maxDocumentSizeBytes: number = 20 * 1024 * 1024,
+  ): void {
+    let approxChars = 0;
+    for (const item of doc.share.values()) {
+      const anyItem = item as unknown as { length?: number };
+      if (typeof anyItem?.length === 'number') {
+        approxChars += anyItem.length;
+      }
+    }
+    if (approxChars * 4 + incomingUpdateBytes > maxDocumentSizeBytes) {
+      throw new RealtimeValidationFailedException(
+        `Update rejected: would exceed document size limit of ${maxDocumentSizeBytes} bytes`,
+      );
+    }
+  }
+
+  /**
    * Asserts that the document size following an update application remains within
    * the maximum allowed boundary (R-06).
    */

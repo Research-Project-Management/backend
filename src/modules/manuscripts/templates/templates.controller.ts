@@ -126,7 +126,8 @@ export class TemplatesController {
   }
 
   @Post('custom')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, OperatorGuard)
+  @RequireOperator()
   @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.CREATED)

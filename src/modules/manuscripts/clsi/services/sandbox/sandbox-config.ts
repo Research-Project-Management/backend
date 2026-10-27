@@ -8,6 +8,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { SandboxConfigurationException } from '../../domain/sandbox-errors';
 import {
+  DEFAULT_SANDBOX_PROFILE,
+  SandboxProfile,
+} from '../../domain/sandbox-profile';
+import {
   getRawManuscriptsEnv,
   readManuscriptsConfig,
 } from '../../../core/config/manuscripts.config';
@@ -143,4 +147,25 @@ export function parseSandboxConfig(
     isProduction,
     clientEnvAllowList,
   };
+}
+
+export function buildSandboxProfileFromConfig(
+  config: ClsiSandboxConfig,
+): SandboxProfile {
+  return Object.freeze({
+    ...DEFAULT_SANDBOX_PROFILE,
+    user: config.user,
+    tmpfs: Object.freeze({
+      mountPath: '/tmp',
+      options: `rw,noexec,nosuid,size=${config.tmpfsMb}m`,
+      sizeMb: config.tmpfsMb,
+    }),
+    memoryBytes: config.memoryMb * 1024 * 1024,
+    cpus: config.cpus,
+    pidsLimit: config.pidsLimit,
+    maxFileSizeBytes: config.maxFileSizeMb * 1024 * 1024,
+    maxOpenFiles: config.maxOpenFiles,
+    wallClockMs: config.timeoutMs,
+    runtime: config.runtime,
+  });
 }

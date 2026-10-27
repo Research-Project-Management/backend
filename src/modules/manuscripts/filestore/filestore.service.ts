@@ -82,9 +82,17 @@ export class FilestoreService {
     name: string,
     buffer: Buffer,
     mimeType?: string,
+    options?: { syncStructureNode?: boolean },
   ): Promise<ManuscriptFile> {
     const stream = Readable.from(buffer);
-    return await this.uploadFileFromStream(projectId, name, stream, mimeType);
+    return await this.uploadFileFromStream(
+      projectId,
+      name,
+      stream,
+      mimeType,
+      'manuscript-files',
+      { syncStructureNode: options?.syncStructureNode ?? false },
+    );
   }
 
   /**
@@ -96,6 +104,7 @@ export class FilestoreService {
     stream: Readable,
     mimeType?: string,
     bucketName = 'manuscript-files',
+    options?: { syncStructureNode?: boolean },
   ): Promise<ManuscriptFile> {
     const { contentHash, sizeBytes, dataStream } =
       await this.repository.hashStream(stream);
@@ -135,7 +144,12 @@ export class FilestoreService {
       bucketName,
     });
 
-    return await this.repository.save(fileEntity);
+    return await (
+      this.repository.save as (
+        f: ManuscriptFile,
+        opts?: { syncStructureNode?: boolean },
+      ) => Promise<ManuscriptFile>
+    )(fileEntity, options);
   }
 
   /**
@@ -240,6 +254,19 @@ export class FilestoreService {
         }
       }
     }
+  }
+
+  /**
+   * Restores a soft-deleted file record in the project (used for Memento/Saga rollback).
+   */
+  public async restoreFile(projectId: string, fileId: string): Promise<boolean> {
+    const file = await this.repository.findByProjectAndId(projectId, fileId);
+    if (!file) return false;
+    if (file.deleted) {
+      file.restore();
+      await this.repository.save(file);
+    }
+    return true;
   }
 
   /**

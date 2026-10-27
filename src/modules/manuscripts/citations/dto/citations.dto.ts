@@ -161,4 +161,7 @@ export class SyncLibraryResultDto {
 
   @ApiProperty()
   filePath!: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  conflicts?: string[];
 }

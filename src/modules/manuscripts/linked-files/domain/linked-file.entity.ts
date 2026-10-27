@@ -3,7 +3,12 @@
  * Domain entity representing an externally linked resource (Overleaf LinkedFiles parity).
  */
 
-export type LinkedFileProvider = 'url' | 'zotero' | 'mendeley';
+export type LinkedFileProvider =
+  | 'url'
+  | 'zotero'
+  | 'mendeley'
+  | 'dropbox'
+  | 'github';
 export type LinkedFileSyncStatus = 'synced' | 'failed' | 'pending';
 
 export interface LinkedFileProps {

@@ -128,10 +128,16 @@ export class TrackChangesRepository extends ITrackChangesRepositoryPort {
     status: ChangeStatus,
     resolvedById?: string | null,
     resolvedAt?: Date | null,
+    projectId?: string,
+    docId?: string,
   ): Promise<void> {
     if (ids.length === 0) return;
     await this.prisma.manuscriptTrackChange.updateMany({
-      where: { id: { in: ids } },
+      where: {
+        id: { in: ids },
+        ...(projectId ? { projectId } : {}),
+        ...(docId ? { docId } : {}),
+      },
       data: {
         status,
         resolvedById: resolvedById ?? null,
@@ -189,6 +195,18 @@ export class TrackChangesRepository extends ITrackChangesRepositoryPort {
         resolvedAt: thread.resolvedAt,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,
+        replies:
+          thread.replies.length > 0
+            ? {
+                create: thread.replies.map((r) => ({
+                  id: r.id,
+                  content: r.content,
+                  createdById: r.createdById,
+                  createdAt: r.createdAt,
+                  updatedAt: r.updatedAt,
+                })),
+              }
+            : undefined,
       },
       update: {
         isResolved: thread.isResolved,

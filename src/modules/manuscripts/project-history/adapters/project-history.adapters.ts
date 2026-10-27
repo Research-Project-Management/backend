@@ -5,20 +5,24 @@
  * - ManuscriptRestorerAdapter (Port: IProjectRestorerPort)
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import * as pathPosix from 'node:path/posix';
 import { Prisma } from '@prisma/client';
 import { PrismaService, mapWithConcurrency } from '@/core';
 import {
   LiveCollaborationPort,
+  LIVE_COLLABORATION_PORT,
+  NOOP_LIVE_COLLABORATION,
   ManuscriptDomainEventBus,
+  IDistributedLockPort,
 } from '@/modules/manuscripts/core';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import type { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
 import {
+  IHistoryRepositoryPort,
   IProjectCollectorPort,
   IProjectRestorerPort,
   RestoreResult,
@@ -31,14 +35,36 @@ const COLLECT_CONCURRENCY = 6;
 @Injectable()
 export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
   private readonly logger = new Logger(ManuscriptCollectorAdapter.name);
+  private readonly liveCollab: LiveCollaborationPort;
 
   constructor(
     private readonly structureService: StructureService,
     private readonly docstoreService: DocstoreService,
     private readonly filestoreService: FilestoreService,
     @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    liveCollab?: LiveCollaborationPort,
   ) {
     super();
+    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
+  }
+
+  private getLiveCollab(): LiveCollaborationPort {
+    if (this.liveCollab !== NOOP_LIVE_COLLABORATION) {
+      return this.liveCollab;
+    }
+    try {
+      if (typeof this.moduleRef?.get === 'function') {
+        return (
+          this.moduleRef.get(LiveCollaborationPort, { strict: false }) ??
+          NOOP_LIVE_COLLABORATION
+        );
+      }
+      return NOOP_LIVE_COLLABORATION;
+    } catch {
+      return NOOP_LIVE_COLLABORATION;
+    }
   }
 
   public async collectCurrentState(
@@ -46,19 +72,10 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
   ): Promise<Map<string, FileSnapshotVo>> {
     const nodes = await this.structureService.getAllNodes(projectId);
 
-    try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, {
-        strict: false,
-      });
-      if (live) {
-        const docIds = nodes
-          .filter((n) => n.docId)
-          .map((n) => n.docId as string);
-        await live.flushDocs(projectId, docIds);
-      }
-    } catch {
-      // non-blocking live flush fallback
-    }
+    const docIds = nodes.filter((n) => n.docId).map((n) => n.docId as string);
+    await this.getLiveCollab()
+      .flushDocs(projectId, docIds)
+      .catch(() => []);
 
     const filesMap = new Map<string, FileSnapshotVo>();
 
@@ -122,6 +139,7 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
 @Injectable()
 export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
   private readonly logger = new Logger(ManuscriptRestorerAdapter.name);
+  private readonly liveCollab: LiveCollaborationPort;
 
   constructor(
     private readonly structureService: StructureService,
@@ -129,39 +147,98 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    liveCollab?: LiveCollaborationPort,
+    @Optional() private readonly historyRepository?: IHistoryRepositoryPort,
   ) {
     super();
+    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
+  }
+
+  private getLiveCollab(): LiveCollaborationPort {
+    if (this.liveCollab !== NOOP_LIVE_COLLABORATION) {
+      return this.liveCollab;
+    }
+    try {
+      if (typeof this.moduleRef?.get === 'function') {
+        return (
+          this.moduleRef.get(LiveCollaborationPort, { strict: false }) ??
+          NOOP_LIVE_COLLABORATION
+        );
+      }
+      return NOOP_LIVE_COLLABORATION;
+    } catch {
+      return NOOP_LIVE_COLLABORATION;
+    }
   }
 
   public async restoreToState(
     projectId: string,
     snapshot: Snapshot,
   ): Promise<RestoreResult> {
-    try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, {
-        strict: false,
-      });
-      if (live) {
-        await live.flushDocs(projectId, []);
-      }
-    } catch (err) {
-      this.logger.warn(
-        `Failed to flush project ${projectId} prior to restore: ${err}`,
+    const lockPort =
+      typeof this.moduleRef?.get === 'function'
+        ? (() => {
+            try {
+              return this.moduleRef.get(IDistributedLockPort, {
+                strict: false,
+              });
+            } catch {
+              return undefined;
+            }
+          })()
+        : undefined;
+    const restoreAction = async () =>
+      this.executeRestoreWorkflow(projectId, snapshot);
+
+    if (lockPort) {
+      return lockPort.withLock(
+        `manuscript:restore:${projectId}`,
+        restoreAction,
+        60000,
       );
     }
+    return restoreAction();
+  }
 
+  private async executeRestoreWorkflow(
+    projectId: string,
+    snapshot: Snapshot,
+  ): Promise<RestoreResult> {
     const currentNodes = await this.structureService.getAllNodes(projectId);
+    const activeDocIds = currentNodes
+      .filter((n) => n.docId)
+      .map((n) => n.docId as string);
 
-    // Pre-Restore Safety Guard: Snapshot current state if prisma available to prevent partial restore data loss
-    if (this.prisma) {
+    await this.getLiveCollab()
+      .flushDocs(projectId, activeDocIds)
+      .catch((err) => {
+        this.logger.warn(
+          `Failed to flush project ${projectId} prior to restore: ${err}`,
+        );
+        return [];
+      });
+
+    // Pre-Restore Safety Guard: Snapshot current state if repository or prisma available to prevent partial restore data loss
+    const resolvedHistoryRepo =
+      this.historyRepository ??
+      (() => {
+        try {
+          if (typeof this.moduleRef?.get === 'function') {
+            return this.moduleRef.get(IHistoryRepositoryPort, {
+              strict: false,
+            });
+          }
+          return undefined;
+        } catch {
+          return undefined;
+        }
+      })();
+
+    if (resolvedHistoryRepo || this.prisma) {
       try {
-        const latestSnap = await this.prisma.manuscriptSnapshot.findFirst({
-          where: { projectId },
-          orderBy: { version: 'desc' },
-          select: { version: true },
-        });
-        const backupVersion = (latestSnap?.version ?? 0) + 1;
-        const backupFiles: Record<string, unknown> = {};
+        const backupFilesMap = new Map<string, FileSnapshotVo>();
         for (const node of currentNodes) {
           if (node.isFolder()) continue;
           if (node.isDoc() && node.docId) {
@@ -170,41 +247,80 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
                 projectId,
                 node.docId,
               );
-              backupFiles[node.path] = {
-                path: node.path,
-                type: 'doc',
-                docId: node.docId,
-                lines: doc.lines || [''],
-                hash: doc.hash || '',
-                isRootDoc: node.isRootDoc,
-              };
+              backupFilesMap.set(
+                node.path,
+                FileSnapshotVo.createDoc(
+                  node.path,
+                  node.docId,
+                  doc.lines || [''],
+                  doc.hash || '',
+                  node.isRootDoc,
+                ),
+              );
             } catch {
               // ignore doc fetch errors during safety backup
             }
           } else if (node.type === 'FILE' && node.fileId) {
-            backupFiles[node.path] = {
-              path: node.path,
-              type: 'file',
-              fileId: node.fileId,
-              hash: node.hash || '',
-              sizeBytes: node.sizeBytes || 0,
-            };
+            backupFilesMap.set(
+              node.path,
+              FileSnapshotVo.createFile(
+                node.path,
+                node.fileId,
+                node.hash || '',
+                node.sizeBytes || 0,
+              ),
+            );
           }
         }
-        await this.prisma.manuscriptSnapshot.create({
-          data: {
+
+        const backupSummary =
+          'Pre-restore automatic safety snapshot before restoring to v' +
+          snapshot.version;
+
+        if (resolvedHistoryRepo) {
+          const latestVersion =
+            await resolvedHistoryRepo.getLatestVersion(projectId);
+          const safetySnapshot = Snapshot.create({
+            projectId,
+            version: latestVersion + 1,
+            summary: backupSummary,
+            isAutomatic: true,
+            files: backupFilesMap,
+          });
+          await resolvedHistoryRepo.saveSnapshot(safetySnapshot);
+        } else if (this.prisma) {
+          const latestSnap = await this.prisma.manuscriptSnapshot.findFirst({
+            where: { projectId },
+            orderBy: { version: 'desc' },
+            select: { version: true },
+          });
+          const backupVersion = (latestSnap?.version ?? 0) + 1;
+          const safetySnapshot = Snapshot.create({
             projectId,
             version: backupVersion,
-            summary:
-              'Pre-restore automatic safety snapshot before restoring to v' +
-              snapshot.version,
+            summary: backupSummary,
             isAutomatic: true,
-            files:
-              Object.keys(backupFiles).length > 0
-                ? (backupFiles as Prisma.InputJsonValue)
-                : Prisma.JsonNull,
-          },
-        });
+            files: backupFilesMap,
+          });
+          const filesJson = safetySnapshot.toFilesJson();
+          const sizeBytes = Buffer.byteLength(
+            JSON.stringify(filesJson),
+            'utf8',
+          );
+          await this.prisma.manuscriptSnapshot.create({
+            data: {
+              projectId,
+              version: backupVersion,
+              summary: backupSummary,
+              isAutomatic: true,
+              files:
+                Object.keys(filesJson).length > 0
+                  ? (filesJson as unknown as Prisma.InputJsonValue)
+                  : Prisma.JsonNull,
+              sizeBytes,
+            },
+          });
+        }
       } catch (backupErr) {
         this.logger.warn(
           'Could not create pre-restore safety snapshot: ' + String(backupErr),
@@ -374,20 +490,13 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
               occurredAt: Date.now(),
             });
           } else {
-            try {
-              const live = this.moduleRef?.get(LiveCollaborationPort, {
-                strict: false,
-              });
-              if (live) {
-                await live.applyExternalText(
-                  projectId,
-                  docIdToSync,
-                  (fileVo.lines || ['']).join('\n'),
-                );
-              }
-            } catch {
-              // non-blocking fallback
-            }
+            await this.getLiveCollab()
+              .applyExternalText(
+                projectId,
+                docIdToSync,
+                (fileVo.lines || ['']).join('\n'),
+              )
+              .catch(() => false);
           }
         }
       } else if (fileVo.type === 'file' && fileVo.fileId) {

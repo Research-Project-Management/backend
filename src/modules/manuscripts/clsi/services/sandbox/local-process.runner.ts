@@ -115,6 +115,7 @@ export class LocalProcessRunner implements ISandboxRunner {
             stderr: stderr
               ? `${stderr}\nCompilation timed out or was canceled.${timeoutAdvice}`
               : `Compilation timed out or was canceled.${timeoutAdvice}`,
+            timedOut: true,
           });
           return;
         }

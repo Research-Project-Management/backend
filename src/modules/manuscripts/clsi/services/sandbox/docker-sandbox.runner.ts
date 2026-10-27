@@ -22,6 +22,7 @@ export class DockerSandboxRunner implements ISandboxRunner {
     private readonly memoryLimit: string = '1024m',
     private readonly cpuLimit: string = '1.0',
     localRunner?: ISandboxRunner,
+    private readonly defaultProfile?: SandboxProfile,
   ) {
     this.localRunner = localRunner ?? new LocalProcessRunner();
   }
@@ -41,6 +42,9 @@ export class DockerSandboxRunner implements ISandboxRunner {
   }
 
   private resolveDefaultProfile(): SandboxProfile {
+    if (this.defaultProfile) {
+      return Object.freeze({ ...this.defaultProfile });
+    }
     const parsedCpus = parseFloat(this.cpuLimit);
     return Object.freeze({
       ...DEFAULT_SANDBOX_PROFILE,

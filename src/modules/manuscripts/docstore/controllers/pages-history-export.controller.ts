@@ -2,6 +2,8 @@
  * modules/manuscripts/docstore/controllers/pages-history-export.controller.ts
  * Domain-focused controller handling Version History, Diff, Timeline, Point-in-Time At,
  * Document Export, and Compiler Incremental Sync routes.
+ * Delegates aggregate lifecycle and business logic to ProjectHistoryService,
+ * ExportImportService, DocstoreService, and ManuscriptPageService without raw Prisma queries.
  */
 
 import {
@@ -20,17 +22,18 @@ import {
   BadRequestException,
   Logger,
   UseGuards,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/identity/auth';
+import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
   ProjectAccessGuard,
   RequireRole,
   Role,
   ResolvedProject,
 } from '@/modules/project/access';
-import { Prisma, ManuscriptSnapshot } from '@prisma/client';
-import { PrismaService, AuthenticatedRequest, isUuid } from '@/core';
+import { AuthenticatedRequest, isUuid } from '@/core';
 import { createHash } from 'crypto';
 import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
@@ -38,16 +41,17 @@ import { ManuscriptUserResolverService } from '../services/manuscript-user-resol
 import { ManuscriptPageScopeRepository } from '../repositories/manuscript-page-scope.repository';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LiveCollaborationPort } from '@/modules/manuscripts/core';
-import {
-  convertLatexToDocxBuffer,
-  convertLatexToHtml,
-  convertLatexToMarkdown,
-  resolveIncludedLatexContent,
-} from '@/modules/manuscripts/export-import/domain';
+import { ManuscriptPageService } from '@/modules/manuscripts/core/services/manuscript-page.service';
+import { ExportImportService } from '@/modules/manuscripts/export-import/export-import.service';
+import { resolveIncludedLatexContent } from '@/modules/manuscripts/export-import/domain';
+import { ProjectHistoryService } from '@/modules/manuscripts/project-history/project-history.service';
+import { ProjectHistoryRepository } from '@/modules/manuscripts/project-history/project-history.repository';
 import {
   computeLineDiff,
   FileSnapshotVo,
   SnapshotNormalizer,
+  Snapshot,
+  VersionLabel,
 } from '@/modules/manuscripts/project-history/domain';
 
 @ApiTags('Manuscripts - Pages History & Export')
@@ -61,9 +65,18 @@ export class PagesHistoryExportController {
 
   constructor(
     private readonly docstoreService: DocstoreService,
-    private readonly prisma: PrismaService,
     private readonly pageScopeRepo: ManuscriptPageScopeRepository,
     private readonly userResolver: ManuscriptUserResolverService,
+    private readonly pageService: ManuscriptPageService,
+    @Optional()
+    @Inject(forwardRef(() => ProjectHistoryService))
+    private readonly projectHistoryService?: ProjectHistoryService,
+    @Optional()
+    @Inject(forwardRef(() => ProjectHistoryRepository))
+    private readonly historyRepo?: ProjectHistoryRepository,
+    @Optional()
+    @Inject(forwardRef(() => ExportImportService))
+    private readonly exportImportService?: ExportImportService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
@@ -103,20 +116,6 @@ export class PagesHistoryExportController {
     return this.userResolver.resolveUserNames(userIds);
   }
 
-  private async resolveProjectId(id: string): Promise<string | null> {
-    if (!isUuid(id)) return null;
-    const doc = await this.prisma.manuscriptDoc.findUnique({
-      where: { id },
-      select: { projectId: true },
-    });
-    if (doc?.projectId) return doc.projectId;
-    const node = await this.prisma.manuscriptNode.findFirst({
-      where: { projectId: id },
-      select: { projectId: true },
-    });
-    return node?.projectId ?? null;
-  }
-
   /** Selects the snapshot entry for a doc path using canonical SnapshotNormalizer. */
   private pickSnapshotText(
     files: Record<string, unknown>,
@@ -140,8 +139,7 @@ export class PagesHistoryExportController {
   private resolveActiveProjectId(
     project?: string | { id: string } | null,
   ): string | undefined {
-    if (!project) return undefined;
-    return typeof project === 'string' ? project : project.id;
+    return this.pageService.resolveActiveProjectId(project);
   }
 
   private async getHydratedDocLines(doc: {
@@ -150,34 +148,16 @@ export class PagesHistoryExportController {
     lines: unknown;
     inStorage?: boolean;
   }): Promise<string[]> {
-    if (doc.inStorage) {
-      try {
-        const hydrated = await this.docstoreService.getDoc(
-          doc.projectId,
-          doc.id,
-        );
-        if (Array.isArray(hydrated.lines)) {
-          return hydrated.lines;
-        }
-      } catch {
-        // Fallback to raw lines if hydration fails
-      }
-    }
-    if (Array.isArray(doc.lines)) {
-      return doc.lines as string[];
-    }
-    if (typeof doc.lines === 'string') {
-      return doc.lines.split('\n');
-    }
-    return [];
+    return this.pageService.getHydratedDocLines(doc);
   }
 
   // ─── 1. VERSION HISTORY & SNAPSHOTS ──────────────────────────────────────────
 
   /**
+   * GET /api/v1/manuscripts/pages/:pageId/versions
    * GET /api/v1/manuscripts/docs/:pageId/versions
    */
-  @Get('docs/:pageId/versions')
+  @Get(['pages/:pageId/versions', 'docs/:pageId/versions'])
   async getVersions(
     @Param('pageId') pageId: string,
     @ResolvedProject() project?: string | { id: string } | null,
@@ -192,26 +172,16 @@ export class PagesHistoryExportController {
       }
       const doc = activeProjectId
         ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
-        : await this.prisma.manuscriptDoc.findUnique({
-            where: { id: pageId },
-            select: { projectId: true },
-          });
-      const projectId = doc?.projectId || activeProjectId;
+        : null;
+      const projectId =
+        doc?.projectId ||
+        activeProjectId ||
+        (await this.pageService.resolveProjectId(pageId));
       if (!projectId || !isUuid(projectId)) return { versions: [] };
 
-      const snapshots = await this.prisma.manuscriptSnapshot.findMany({
-        where: { projectId },
-        select: {
-          id: true,
-          version: true,
-          summary: true,
-          createdById: true,
-          createdAt: true,
-          labels: true,
-        },
-        orderBy: { version: 'desc' },
-        take: 500,
-      });
+      const snapshots = this.historyRepo
+        ? await this.historyRepo.listVersions(projectId)
+        : [];
 
       const userMap = await this.resolveUserNames(
         snapshots.map((s) => s.createdById),
@@ -240,10 +210,17 @@ export class PagesHistoryExportController {
   }
 
   /**
+   * GET /api/v1/manuscripts/pages/:pageId/versions/diff
+   * GET /api/v1/manuscripts/pages/:pageId/diff
    * GET /api/v1/manuscripts/docs/:pageId/versions/diff
    * GET /api/v1/manuscripts/docs/:pageId/diff
    */
-  @Get(['docs/:pageId/versions/diff', 'docs/:pageId/diff'])
+  @Get([
+    'pages/:pageId/versions/diff',
+    'pages/:pageId/diff',
+    'docs/:pageId/versions/diff',
+    'docs/:pageId/diff',
+  ])
   async getDiff(
     @Param('pageId') pageId: string,
     @Query('from') from: string,
@@ -254,21 +231,15 @@ export class PagesHistoryExportController {
     const doc = isUuid(pageId)
       ? activeProjectId
         ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
-        : await this.prisma.manuscriptDoc.findUnique({
-            where: { id: pageId },
-            select: {
-              id: true,
-              path: true,
-              lines: true,
-              projectId: true,
-              inStorage: true,
-            },
-          })
+        : null
       : null;
 
-    const targetProjectId = activeProjectId || doc?.projectId;
+    const targetProjectId =
+      activeProjectId ||
+      doc?.projectId ||
+      (await this.pageService.resolveProjectId(pageId));
     if (!targetProjectId) {
-      throw new NotFoundException(`Document or project context not found`);
+      throw new NotFoundException('Document or project context not found');
     }
 
     const loadSnap = async (id: string) => {
@@ -309,7 +280,9 @@ export class PagesHistoryExportController {
           doc
         : doc;
 
-    const currentLines = freshDoc ? await this.getHydratedDocLines(freshDoc) : [];
+    const currentLines = freshDoc
+      ? await this.getHydratedDocLines(freshDoc)
+      : [];
     const currentText = currentLines.join('\n');
     const pick = (files: Record<string, unknown> | undefined | null) =>
       this.pickSnapshotText(files || {}, doc?.path);
@@ -340,7 +313,9 @@ export class PagesHistoryExportController {
         newStart: h.newStart,
         newLines: h.newLines,
         content: h.lines.join('\n'),
+        value: h.lines.join('\n'),
         lines: h.lines,
+        linesCount: h.lines.length,
       })),
       stats: {
         additions: result.stats.additions,
@@ -353,9 +328,13 @@ export class PagesHistoryExportController {
   }
 
   /**
+   * GET /api/v1/manuscripts/pages/:pageId/versions/:versionId
    * GET /api/v1/manuscripts/docs/:pageId/versions/:versionId
    */
-  @Get('docs/:pageId/versions/:versionId')
+  @Get([
+    'pages/:pageId/versions/:versionId',
+    'docs/:pageId/versions/:versionId',
+  ])
   async getVersionById(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
@@ -367,17 +346,9 @@ export class PagesHistoryExportController {
       const [s, doc] = await Promise.all([
         activeProjectId
           ? this.pageScopeRepo.findSnapshotInProject(activeProjectId, versionId)
-          : this.prisma.manuscriptSnapshot.findUnique({
-              where: { id: versionId },
-              include: { labels: true },
-            }),
-        isUuid(pageId)
-          ? activeProjectId
-            ? this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
-            : this.prisma.manuscriptDoc.findUnique({
-                where: { id: pageId },
-                select: { path: true, projectId: true },
-              })
+          : null,
+        isUuid(pageId) && activeProjectId
+          ? this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
           : Promise.resolve(null),
       ]);
       if (!s) return { version: null };
@@ -417,9 +388,10 @@ export class PagesHistoryExportController {
   }
 
   /**
+   * POST /api/v1/manuscripts/pages/:pageId/versions
    * POST /api/v1/manuscripts/docs/:pageId/versions
    */
-  @Post('docs/:pageId/versions')
+  @Post(['pages/:pageId/versions', 'docs/:pageId/versions'])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   async createVersion(
@@ -435,15 +407,12 @@ export class PagesHistoryExportController {
     if (isUuid(pageId)) {
       const initialDoc = projectId
         ? await this.pageScopeRepo.findDocInProject(projectId, pageId)
-        : await this.prisma.manuscriptDoc.findUnique({
-            where: { id: pageId },
-            select: {
-              id: true,
-              projectId: true,
-              path: true,
-            },
-          });
-      projectId = initialDoc?.projectId || projectId;
+        : null;
+      projectId =
+        initialDoc?.projectId ||
+        projectId ||
+        (await this.pageService.resolveProjectId(pageId)) ||
+        undefined;
       if (initialDoc?.path) {
         docPath = initialDoc.path.replace(/^\//, '') || docPath;
       }
@@ -473,53 +442,40 @@ export class PagesHistoryExportController {
       typeof body.content === 'string' ? body.content : currentContent;
 
     try {
-      const [aggOrCount, allDocs, userMap] = await Promise.all([
-        this.prisma.manuscriptSnapshot.aggregate({
-          where: { projectId },
-          _max: { version: true },
-        }),
-        this.prisma.manuscriptDoc.findMany({
-          where: { projectId, deleted: false },
-          select: {
-            id: true,
-            projectId: true,
-            path: true,
-            lines: true,
-            inStorage: true,
-          },
-        }),
+      const [latestVersion, allDocs, userMap] = await Promise.all([
+        this.historyRepo
+          ? this.historyRepo.getLatestVersion(projectId)
+          : Promise.resolve(0),
+        this.docstoreService.getAllDocs(projectId),
         this.resolveUserNames([userId]),
       ]);
-      const nextVersion = (aggOrCount?._max?.version ?? 0) + 1;
+      const nextVersion = latestVersion + 1;
 
-      const snapshotFiles: Record<string, Record<string, unknown>> = {};
+      const filesMap = new Map<string, FileSnapshotVo>();
       let addedTargetDoc = false;
       for (const d of allDocs) {
         const cleanPath = (d.path || '').replace(/^\//, '') || 'main.tex';
         const normalizedPath = `/${cleanPath}`;
         let finalText: string;
-        if (d.id === pageId) {
+        const dId = d.id || d._id;
+        if (dId === pageId) {
           finalText = content;
         } else {
-          const dLines = await this.getHydratedDocLines({
-            id: d.id,
-            projectId: d.projectId || projectId,
-            lines: d.lines,
-            inStorage: d.inStorage,
-          });
-          finalText = dLines.join('\n');
+          finalText = Array.isArray(d.lines)
+            ? d.lines.join('\n')
+            : String(d.lines || '');
         }
-        if (d.id === pageId || cleanPath === docPath) {
+        if (dId === pageId || cleanPath === docPath) {
           addedTargetDoc = true;
         }
         const vo = FileSnapshotVo.createDoc(
           normalizedPath,
-          d.id,
+          dId,
           finalText.split('\n'),
           createHash('sha256').update(finalText).digest('hex'),
           normalizedPath === '/main.tex',
         );
-        snapshotFiles[vo.path] = vo.toJSON();
+        filesMap.set(vo.path, vo);
       }
       if (!addedTargetDoc) {
         const normalizedTarget = `/${docPath.replace(/^\//, '')}`;
@@ -530,7 +486,7 @@ export class PagesHistoryExportController {
           createHash('sha256').update(content).digest('hex'),
           normalizedTarget === '/main.tex',
         );
-        snapshotFiles[vo.path] = vo.toJSON();
+        filesMap.set(vo.path, vo);
       }
 
       const resolvedUser = userId ? userMap.get(userId) : undefined;
@@ -540,43 +496,32 @@ export class PagesHistoryExportController {
         req?.user?.email?.split('@')[0] ||
         'Collaborator';
 
-      let candidateVersion = nextVersion;
-      const maxAttempts = 3;
-      let snap: ManuscriptSnapshot | null = null;
+      const snapshot = Snapshot.create({
+        projectId,
+        version: nextVersion,
+        summary: body.label || 'Manual Snapshot',
+        createdById: isUuid(userId) ? userId : null,
+        files: filesMap,
+      });
 
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        try {
-          snap = await this.prisma.manuscriptSnapshot.create({
-            data: {
-              projectId,
-              version: candidateVersion,
-              summary: body.label || 'Manual Snapshot',
-              createdById: isUuid(userId) ? userId : null,
-              files: snapshotFiles as Prisma.InputJsonValue,
-            },
-          });
-          break;
-        } catch (err: unknown) {
-          const code = (err as { code?: string })?.code;
-          if (code === 'P2002' && attempt < maxAttempts - 1) {
-            const latest = await this.prisma.manuscriptSnapshot.aggregate({
-              where: { projectId },
-              _max: { version: true },
-            });
-            candidateVersion = Math.max(
-              candidateVersion + 1,
-              (latest?._max?.version ?? 0) + 1,
-            );
-            continue;
-          }
-          throw err;
-        }
-      }
-      if (!snap) {
+      if (!this.historyRepo) {
         throw new InternalServerErrorException(
-          'Failed to create snapshot version',
+          'History repository not initialized',
         );
       }
+
+      const snap = await this.historyRepo.saveSnapshot(snapshot);
+      if (body.label && body.label.trim()) {
+        const vLabel = VersionLabel.create({
+          projectId,
+          snapshotId: snap.id,
+          version: snap.version,
+          label: body.label.trim(),
+          createdById: isUuid(userId) ? userId : null,
+        });
+        await this.historyRepo.saveLabel(vLabel).catch(() => null);
+      }
+
       return {
         version: {
           id: snap.id,
@@ -596,15 +541,20 @@ export class PagesHistoryExportController {
   }
 
   /**
+   * POST /api/v1/manuscripts/pages/:pageId/versions/:versionId/restore
    * POST /api/v1/manuscripts/docs/:pageId/versions/:versionId/restore
    */
-  @Post('docs/:pageId/versions/:versionId/restore')
+  @Post([
+    'pages/:pageId/versions/:versionId/restore',
+    'docs/:pageId/versions/:versionId/restore',
+  ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async restoreVersion(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
     @ResolvedProject() project?: string | { id: string } | null,
+    @CurrentUser('id') userId?: string,
   ) {
     if (!isUuid(versionId)) throw new BadRequestException('Invalid version ID');
     const activeProjectId = this.resolveActiveProjectId(project);
@@ -613,16 +563,12 @@ export class PagesHistoryExportController {
           activeProjectId,
           versionId,
         )
-      : await this.prisma.manuscriptSnapshot.findUnique({
-          where: { id: versionId },
-        });
+      : null;
     if (!snap) throw new NotFoundException(`Snapshot ${versionId} not found`);
 
     const files = (snap.files as Record<string, unknown>) || {};
-    const doc = isUuid(pageId)
-      ? activeProjectId
-        ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
-        : await this.prisma.manuscriptDoc.findUnique({ where: { id: pageId } })
+    const doc = isUuid(pageId) && activeProjectId
+      ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
       : null;
 
     if (doc) {
@@ -631,17 +577,67 @@ export class PagesHistoryExportController {
           'Version does not belong to this document project',
         );
       }
+
+      // Pre-restore auto-snapshot to guarantee non-destructive recovery
+      if (this.historyRepo) {
+        try {
+          const latestVersion = await this.historyRepo.getLatestVersion(
+            doc.projectId,
+          );
+          const nextVersion = latestVersion + 1;
+          const currentLines = Array.isArray(doc.lines)
+            ? (doc.lines as string[])
+            : [];
+          const currentContent = currentLines.join('\n');
+          const autoMap = new Map<string, FileSnapshotVo>();
+          const vo = FileSnapshotVo.createDoc(
+            doc.path,
+            doc.id,
+            currentLines,
+            createHash('sha256').update(currentContent).digest('hex'),
+            doc.path === '/main.tex',
+          );
+          autoMap.set(vo.path, vo);
+          await this.historyRepo.saveSnapshot(
+            Snapshot.create({
+              projectId: doc.projectId,
+              version: nextVersion,
+              summary: `Auto-snapshot before restoring version ${snap.version}`,
+              createdById: isUuid(userId) ? userId : null,
+              files: autoMap,
+            }),
+          );
+        } catch (snapErr) {
+          this.logger.warn(
+            `Failed to create pre-restore auto-snapshot: ${snapErr}`,
+          );
+        }
+      }
+
       const restoredText = this.pickSnapshotText(files, doc.path);
       const lines = restoredText.split('\n');
       await this.docstoreService.updateDoc(doc.projectId, doc.id, {
         lines,
         version: doc.version + 1,
+        expectedRev: doc.rev,
       });
       const liveSessionSynced = await this.syncLiveDoc(
         doc.projectId,
         doc.id,
         lines,
       );
+
+      this.eventEmitter?.emit('manuscripts.project.event', {
+        projectId: doc.projectId,
+        event: 'version:restored',
+        payload: {
+          docId: doc.id,
+          versionId,
+          restoredVersion: snap.version,
+          actorId: userId,
+        },
+      });
+
       return {
         success: true,
         restoredVersion: snap.version,
@@ -652,9 +648,13 @@ export class PagesHistoryExportController {
   }
 
   /**
+   * POST /api/v1/manuscripts/pages/:pageId/versions/:versionId/label
    * POST /api/v1/manuscripts/docs/:pageId/versions/:versionId/label
    */
-  @Post('docs/:pageId/versions/:versionId/label')
+  @Post([
+    'pages/:pageId/versions/:versionId/label',
+    'docs/:pageId/versions/:versionId/label',
+  ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async labelVersion(
@@ -673,33 +673,22 @@ export class PagesHistoryExportController {
           activeProjectId,
           versionId,
         )
-      : await this.prisma.manuscriptSnapshot.findUnique({
-          where: { id: versionId },
-        });
+      : null;
     if (!snap) throw new NotFoundException(`Snapshot ${versionId} not found`);
 
     const userId = req?.user?.id || req?.user?.sub || null;
 
-    await this.prisma.manuscriptLabel.upsert({
-      where: {
-        projectId_label: {
+    if (this.historyRepo) {
+      await this.historyRepo.saveLabel(
+        VersionLabel.create({
           projectId: snap.projectId,
+          snapshotId: versionId,
+          version: snap.version,
           label: labelName,
-        },
-      },
-      create: {
-        projectId: snap.projectId,
-        snapshotId: versionId,
-        version: snap.version,
-        label: labelName,
-        createdById: isUuid(userId) ? userId : null,
-      },
-      update: {
-        snapshotId: versionId,
-        version: snap.version,
-        createdById: isUuid(userId) ? userId : null,
-      },
-    });
+          createdById: isUuid(userId) ? userId : null,
+        }),
+      );
+    }
 
     return {
       version: {
@@ -712,9 +701,10 @@ export class PagesHistoryExportController {
   }
 
   /**
+   * GET /api/v1/manuscripts/pages/:pageId/timeline
    * GET /api/v1/manuscripts/docs/:pageId/timeline
    */
-  @Get('docs/:pageId/timeline')
+  @Get(['pages/:pageId/timeline', 'docs/:pageId/timeline'])
   async getTimeline(
     @Param('pageId') pageId: string,
     @ResolvedProject() project?: string | { id: string } | null,
@@ -723,11 +713,12 @@ export class PagesHistoryExportController {
     if (isUuid(pageId)) {
       const doc = projectId
         ? await this.pageScopeRepo.findDocInProject(projectId, pageId)
-        : await this.prisma.manuscriptDoc.findUnique({
-            where: { id: pageId },
-            select: { projectId: true },
-          });
-      projectId = doc?.projectId || projectId;
+        : null;
+      projectId =
+        doc?.projectId ||
+        projectId ||
+        (await this.pageService.resolveProjectId(pageId)) ||
+        undefined;
     }
 
     if (!projectId || !isUuid(projectId)) {
@@ -738,26 +729,18 @@ export class PagesHistoryExportController {
       };
     }
 
-    const snapshots = await this.prisma.manuscriptSnapshot.findMany({
-      where: { projectId },
-      select: {
-        id: true,
-        version: true,
-        summary: true,
-        createdById: true,
-        createdAt: true,
-        labels: true,
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
+    const snapshots = this.historyRepo
+      ? await this.historyRepo.listVersions(projectId)
+      : [];
 
     const userMap = await this.resolveUserNames(
       snapshots.map((s) => s.createdById),
     );
 
-    const entries = snapshots.map((s) => {
-      const authorUser = s.createdById ? userMap.get(s.createdById) : undefined;
+    const entries = snapshots.slice(0, 50).map((s) => {
+      const authorUser = s.createdById
+        ? userMap.get(s.createdById)
+        : undefined;
       return {
         id: s.id,
         version: s.version,
@@ -782,9 +765,10 @@ export class PagesHistoryExportController {
   }
 
   /**
+   * GET /api/v1/manuscripts/pages/:pageId/at
    * GET /api/v1/manuscripts/docs/:pageId/at
    */
-  @Get('docs/:pageId/at')
+  @Get(['pages/:pageId/at', 'docs/:pageId/at'])
   async getAt(
     @Param('pageId') pageId: string,
     @Query('timestamp') timestamp?: string,
@@ -796,64 +780,37 @@ export class PagesHistoryExportController {
     if (isNaN(targetTime.getTime())) targetTime = new Date();
 
     const activeProjectId = this.resolveActiveProjectId(project);
-    const doc = isUuid(pageId)
-      ? activeProjectId
-        ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
-        : await this.prisma.manuscriptDoc.findUnique({
-            where: { id: pageId },
-            select: { projectId: true, path: true },
-          })
+    const doc = isUuid(pageId) && activeProjectId
+      ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
       : null;
     if (!doc) {
       throw new NotFoundException(`Document ${pageId} not found`);
     }
 
     const normalizedPath = `/${(doc.path || '').replace(/^\//, '')}`;
-    const matchesTargetDoc = (s: { files?: unknown }) => {
-      const files = s.files as Record<string, unknown> | null;
-      if (!files || Object.keys(files).length === 0) return false;
-      const filesMap = SnapshotNormalizer.parseSnapshotFiles(files);
+    const matchesTargetDoc = (s: Snapshot) => {
+      const filesMap = s.files;
       return (
         filesMap.has(normalizedPath) ||
         (filesMap.size === 1 && filesMap.has('/main.tex'))
       );
     };
 
-    const PAGE_SIZE = 10;
-    const MAX_SCAN = 200;
-    let snap:
-      | {
-          id: string;
-          version: number;
-          createdAt: Date;
-          files: unknown;
-        }
-      | undefined;
+    const allSnaps = this.historyRepo
+      ? await this.historyRepo.listVersions(doc.projectId)
+      : [];
+    const filtered = allSnaps
+      .filter((s) => s.createdAt.getTime() <= targetTime.getTime())
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
-    for (let skip = 0; skip < MAX_SCAN; skip += PAGE_SIZE) {
-      const batch = await this.prisma.manuscriptSnapshot.findMany({
-        where: { projectId: doc.projectId, createdAt: { lte: targetTime } },
-        select: {
-          id: true,
-          version: true,
-          createdAt: true,
-          files: true,
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: PAGE_SIZE,
-      });
-      if (batch.length === 0) break;
-      snap = batch.find(matchesTargetDoc);
-      if (snap || batch.length < PAGE_SIZE) break;
-    }
+    const snap = filtered.find(matchesTargetDoc);
 
     if (!snap) {
       return { content: '', timestamp: targetTime.getTime(), found: false };
     }
     return {
       content: this.pickSnapshotText(
-        (snap.files as Record<string, unknown>) || {},
+        snap.toFilesJson() as Record<string, unknown>,
         doc.path,
       ),
       timestamp: snap.createdAt.getTime(),
@@ -866,40 +823,47 @@ export class PagesHistoryExportController {
   // ─── 2. COMPILER INCREMENTAL SYNC ─────────────────────────────────────────────
 
   /**
+   * POST /api/v1/manuscripts/pages/:rootPageId/sync-incremental
    * POST /api/v1/manuscripts/docs/:rootPageId/sync-incremental
+   * POST /api/v1/manuscripts/projects/:projectId/sync-incremental
+   * POST /api/v1/manuscripts/projects/:projectId/docs/:rootPageId/sync-incremental
    */
-  @Post('docs/:rootPageId/sync-incremental')
+  @Post([
+    'pages/:rootPageId/sync-incremental',
+    'docs/:rootPageId/sync-incremental',
+    'projects/:projectId/sync-incremental',
+    'projects/:projectId/docs/:rootPageId/sync-incremental',
+  ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async syncIncremental(
     @Param('rootPageId') rootPageId: string,
     @Body() body: { dirtyFileIds?: string[]; forceAll?: boolean },
+    @Param('projectId') routeProjectId?: string,
     @ResolvedProject() project?: string | { id: string } | null,
   ) {
-    if (!isUuid(rootPageId)) {
-      throw new BadRequestException('A valid UUID is required for rootPageId');
+    const effectiveTargetId = rootPageId || routeProjectId;
+    if (!effectiveTargetId || !isUuid(effectiveTargetId)) {
+      throw new BadRequestException('A valid UUID is required for sync-incremental');
     }
-    const activeProjectId = this.resolveActiveProjectId(project);
+    const activeProjectId = this.resolveActiveProjectId(project) || routeProjectId;
     const doc = activeProjectId
-      ? await this.pageScopeRepo.findDocInProject(activeProjectId, rootPageId)
+      ? await this.pageScopeRepo.findDocInProject(activeProjectId, effectiveTargetId)
       : null;
     const projectId =
       doc?.projectId ||
       activeProjectId ||
-      (await this.resolveProjectId(rootPageId));
+      (await this.pageService.resolveProjectId(effectiveTargetId));
     if (!projectId) {
-      throw new NotFoundException(`Document/project ${rootPageId} not found`);
+      throw new NotFoundException(`Document/project ${effectiveTargetId} not found`);
     }
 
-    // Only accept doc ids that really belong to this project.
     const requested = (body?.dirtyFileIds || []).filter((id) => isUuid(id));
-    const docs = await this.prisma.manuscriptDoc.findMany({
-      where: body?.forceAll
-        ? { projectId, deleted: false }
-        : { projectId, deleted: false, id: { in: requested } },
-      select: { id: true, version: true },
-    });
-    const docIds = docs.map((d) => d.id);
+    const allDocs = await this.docstoreService.getAllDocs(projectId);
+    const docs = body?.forceAll
+      ? allDocs
+      : allDocs.filter((d) => requested.includes(d.id || d._id));
+    const docIds = docs.map((d) => d.id || d._id);
 
     // Persist any in-memory Yjs edits so the compiler reads the latest text.
     const live = this.getLiveCollaboration();
@@ -930,9 +894,10 @@ export class PagesHistoryExportController {
   // ─── 3. DOCUMENT EXPORT ──────────────────────────────────────────────────────
 
   /**
+   * GET /api/v1/manuscripts/pages/:pageId/export
    * GET /api/v1/manuscripts/docs/:pageId/export
    */
-  @Get('docs/:pageId/export')
+  @Get(['pages/:pageId/export', 'docs/:pageId/export'])
   async exportPage(
     @Param('pageId') pageId: string,
     @Query('format') format?: string,
@@ -955,9 +920,10 @@ export class PagesHistoryExportController {
   }
 
   /**
+   * POST /api/v1/manuscripts/pages/:pageId/export
    * POST /api/v1/manuscripts/docs/:pageId/export
    */
-  @Post('docs/:pageId/export')
+  @Post(['pages/:pageId/export', 'docs/:pageId/export'])
   @HttpCode(HttpStatus.OK)
   async exportDocument(
     @Param('pageId') pageId: string,
@@ -974,9 +940,7 @@ export class PagesHistoryExportController {
     const activeProjectId = this.resolveActiveProjectId(project);
     let doc = activeProjectId
       ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
-      : await this.prisma.manuscriptDoc.findUnique({
-          where: { id: pageId },
-        });
+      : null;
     if (!doc || doc.deleted) {
       throw new NotFoundException(`Document ${pageId} not found`);
     }
@@ -993,7 +957,6 @@ export class PagesHistoryExportController {
 
     const format = (body?.format || queryFormat || 'tex').toLowerCase();
     const rawFilename = doc.path?.replace(/^\//, '') || 'document.tex';
-    const baseName = rawFilename.replace(/\.[^/.]+$/, '');
     const hydratedLines = await this.getHydratedDocLines(doc);
     let content = hydratedLines.join('\n');
 
@@ -1016,23 +979,14 @@ export class PagesHistoryExportController {
       (explicitInclude || hasIncludeMacros)
     ) {
       try {
-        const projectDocs = await this.prisma.manuscriptDoc.findMany({
-          where: { projectId: doc.projectId, deleted: false },
-          select: {
-            id: true,
-            projectId: true,
-            path: true,
-            lines: true,
-            inStorage: true,
-          },
-        });
+        const projectDocs = await this.docstoreService.getAllDocs(doc.projectId);
         if (projectDocs.length > 0) {
           const hydratedProjectDocs = await Promise.all(
             projectDocs.map(async (pd) => ({
-              id: pd.id,
+              id: pd.id || pd._id,
               path: pd.path,
               lines: await this.getHydratedDocLines({
-                id: pd.id,
+                id: pd.id || pd._id,
                 projectId: pd.projectId || doc.projectId,
                 lines: pd.lines,
                 inStorage: pd.inStorage,
@@ -1051,47 +1005,17 @@ export class PagesHistoryExportController {
       }
     }
 
-    if (format === 'docx') {
-      const docxBuffer = convertLatexToDocxBuffer(content, baseName);
-      return {
-        filename: `${baseName}.docx`,
-        mimeType:
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        content: docxBuffer.toString('base64'),
-        isBase64: true,
-        sizeBytes: docxBuffer.length,
-      };
+    if (!this.exportImportService) {
+      throw new InternalServerErrorException(
+        'ExportImportService not initialized',
+      );
     }
 
-    if (format === 'md' || format === 'markdown') {
-      const mdContent = convertLatexToMarkdown(content, baseName);
-      return {
-        filename: `${baseName}.md`,
-        mimeType: 'text/markdown',
-        content: mdContent,
-        isBase64: false,
-        sizeBytes: Buffer.byteLength(mdContent, 'utf8'),
-      };
-    }
-
-    if (format === 'html') {
-      const htmlContent = convertLatexToHtml(content, baseName);
-      return {
-        filename: `${baseName}.html`,
-        mimeType: 'text/html',
-        content: htmlContent,
-        isBase64: false,
-        sizeBytes: Buffer.byteLength(htmlContent, 'utf8'),
-      };
-    }
-
-    return {
-      filename: rawFilename,
-      mimeType: 'application/x-tex',
+    return this.exportImportService.exportDocumentFormat({
+      rawFilename,
       content,
-      isBase64: false,
-      sizeBytes: Buffer.byteLength(content, 'utf8'),
-    };
+      format,
+    });
   }
 
   /**

@@ -53,12 +53,30 @@ export class ManuscriptHistoryMapper {
     createdById: string | null;
     isAutomatic: boolean;
     createdAt: Date;
+    files?: unknown;
+    fileCount?: number;
     sizeBytes?: number;
     labels?: PrismaLabel[];
   }): Snapshot {
     const labels = record.labels
       ? record.labels.map((l) => this.toDomainLabel(l))
       : [];
+    let resolvedFileCount = record.fileCount;
+    if (resolvedFileCount === undefined) {
+      if (
+        record.files &&
+        typeof record.files === 'object' &&
+        !Array.isArray(record.files)
+      ) {
+        resolvedFileCount = Object.keys(
+          record.files as Record<string, unknown>,
+        ).length;
+      } else if (record.sizeBytes !== undefined && record.sizeBytes > 0) {
+        resolvedFileCount = record.sizeBytes;
+      } else {
+        resolvedFileCount = 1;
+      }
+    }
     return Snapshot.create({
       id: record.id,
       projectId: record.projectId,
@@ -67,10 +85,7 @@ export class ManuscriptHistoryMapper {
       createdById: record.createdById,
       isAutomatic: record.isAutomatic,
       files: new Map(),
-      fileCount:
-        record.sizeBytes !== undefined && record.sizeBytes > 0
-          ? record.sizeBytes
-          : 1,
+      fileCount: resolvedFileCount,
       labels,
       createdAt: record.createdAt,
     });
@@ -123,6 +138,8 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
+        const filesJson = snapshot.toFilesJson() as Prisma.InputJsonValue;
+        const sizeBytes = Buffer.byteLength(JSON.stringify(filesJson), 'utf8');
         const created = await this.prisma.manuscriptSnapshot.create({
           data: {
             id: snapshot.id,
@@ -131,7 +148,8 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
             summary: snapshot.summary,
             createdById: snapshot.createdById,
             isAutomatic: snapshot.isAutomatic,
-            files: snapshot.toFilesJson() as Prisma.InputJsonValue,
+            files: filesJson,
+            sizeBytes,
             createdAt: snapshot.createdAt,
           },
           include: {
@@ -197,7 +215,7 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
   public async listVersions(projectId: string): Promise<Snapshot[]> {
     const records = await this.prisma.manuscriptSnapshot.findMany({
       where: { projectId },
-      orderBy: { version: 'asc' },
+      orderBy: { version: 'desc' },
       take: 500,
       select: {
         id: true,
@@ -206,13 +224,16 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
         summary: true,
         createdById: true,
         isAutomatic: true,
+        files: true,
         sizeBytes: true,
         createdAt: true,
         labels: true,
       },
     });
 
-    return records.map((r) => ManuscriptHistoryMapper.toDomainHeader(r));
+    return records
+      .reverse()
+      .map((r) => ManuscriptHistoryMapper.toDomainHeader(r));
   }
 
   public async saveLabel(label: VersionLabel): Promise<VersionLabel> {

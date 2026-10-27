@@ -29,6 +29,8 @@ export abstract class ITrackChangesRepositoryPort {
     status: ChangeStatus,
     resolvedById?: string | null,
     resolvedAt?: Date | null,
+    projectId?: string,
+    docId?: string,
   ): Promise<void>;
 
   abstract saveCommentThread(thread: CommentThread): Promise<CommentThread>;

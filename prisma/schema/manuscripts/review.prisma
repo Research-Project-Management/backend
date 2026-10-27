@@ -14,10 +14,44 @@ enum ManuscriptChangeStatus {
   rejected
 }
 
+enum ManuscriptReviewStatus {
+  draft
+  in_review
+  changes_requested
+  approved
+  submitted
+  locked
+}
+
+model ManuscriptDocReview {
+  docId         String                 @id @map("doc_id") @db.Uuid
+  doc           ManuscriptDoc          @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_doc_review_doc_id")
+  projectId     String                 @map("project_id") @db.Uuid
+  project       Project                @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_doc_review_project_id")
+  status        ManuscriptReviewStatus @default(draft)
+  roundNumber   Int                    @default(1) @map("round_number")
+  version       Int                    @default(1)
+  requestedById String?                @map("requested_by_id") @db.Uuid
+  requestedAt   DateTime?              @map("requested_at") @db.Timestamptz(6)
+  verdictById   String?                @map("verdict_by_id") @db.Uuid
+  verdictAt     DateTime?              @map("verdict_at") @db.Timestamptz(6)
+  notes         String?                @db.Text
+  deadline      DateTime?              @db.Timestamptz(6)
+  createdAt     DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([projectId, status], map: "idx_manuscript_doc_reviews_project_status")
+  @@map("manuscript_doc_reviews")
+}
+
 model ManuscriptTrackChange {
   id           String                 @id @default(uuid(7)) @db.Uuid
   projectId    String                 @map("project_id") @db.Uuid
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_review_project_id")
+  pageId       String?                @map("page_id") @db.Uuid
+  page         ManuscriptPage?        @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_track_changes_page_id")
   docId        String                 @map("doc_id") @db.Uuid
+  doc       ManuscriptDoc @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_review_doc_id")
   type         ManuscriptChangeType
   status       ManuscriptChangeStatus @default(pending)
   text         String                 @db.Text
@@ -32,6 +66,7 @@ model ManuscriptTrackChange {
   updatedAt    DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([projectId, docId, status, createdAt], map: "idx_manuscript_changes_lookup")
+  @@index([pageId, docId, status, createdAt], map: "idx_manuscript_changes_page_lookup")
   @@index([docId, status, createdAt(sort: Desc)], map: "idx_manuscript_changes_doc_id")
   @@index([createdById], map: "idx_manuscript_changes_author")
   @@map("manuscript_track_changes")
@@ -40,7 +75,11 @@ model ManuscriptTrackChange {
 model ManuscriptCommentThread {
   id           String    @id @default(uuid(7)) @db.Uuid
   projectId    String    @map("project_id") @db.Uuid
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_review_project_id")
+  pageId       String?   @map("page_id") @db.Uuid
+  page         ManuscriptPage? @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_comment_threads_page_id")
   docId        String    @map("doc_id") @db.Uuid
+  doc       ManuscriptDoc @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_review_doc_id")
   quote        String?   @db.Text
   startLine    Int       @map("start_line")
   startCol     Int       @map("start_col")
@@ -56,6 +95,7 @@ model ManuscriptCommentThread {
   replies ManuscriptCommentReply[]
 
   @@index([projectId, docId, isResolved, createdAt], map: "idx_manuscript_comments_lookup")
+  @@index([pageId, docId, isResolved, createdAt], map: "idx_manuscript_comments_page_lookup")
   @@index([docId, isResolved, createdAt(sort: Desc)], map: "idx_manuscript_comments_doc_id")
   @@index([createdById], map: "idx_manuscript_comments_author")
   @@map("manuscript_comment_threads")

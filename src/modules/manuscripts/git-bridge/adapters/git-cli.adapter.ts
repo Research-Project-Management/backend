@@ -67,8 +67,16 @@ export class GitCliAdapter implements IGitCliPort {
 
   run(
     args: string[],
-    opts: { env?: NodeJS.ProcessEnv; cwd?: string; input?: Buffer } = {},
+    opts: {
+      env?: NodeJS.ProcessEnv;
+      cwd?: string;
+      input?: Buffer;
+      timeoutMs?: number;
+      maxOutputBytes?: number;
+    } = {},
   ): Promise<GitRunResult> {
+    const timeoutMs = opts.timeoutMs ?? 60_000;
+    const maxOutputBytes = opts.maxOutputBytes ?? 256 * 1024 * 1024;
     return new Promise((resolve, reject) => {
       const child = spawn(this.gitBin, args, {
         env: opts.env ?? this.baseEnv(),
@@ -77,16 +85,59 @@ export class GitCliAdapter implements IGitCliPort {
       });
       const out: Buffer[] = [];
       const err: Buffer[] = [];
-      child.stdout.on('data', (d: Buffer) => out.push(d));
-      child.stderr.on('data', (d: Buffer) => err.push(d));
-      child.on('error', reject);
-      child.on('close', (code) =>
+      let outBytes = 0;
+      let errBytes = 0;
+      let settled = false;
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        child.kill('SIGKILL');
+        reject(
+          new GitBridgeDomainError(
+            `git ${args[0] || ''} timed out after ${timeoutMs}ms`,
+          ),
+        );
+      }, timeoutMs);
+      timer.unref?.();
+
+      child.stdout.on('data', (d: Buffer) => {
+        outBytes += d.length;
+        if (outBytes <= maxOutputBytes) {
+          out.push(d);
+        } else if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          child.kill('SIGKILL');
+          reject(
+            new GitBridgeDomainError(
+              `git ${args[0] || ''} exceeded max output buffer (${maxOutputBytes} bytes)`,
+            ),
+          );
+        }
+      });
+      child.stderr.on('data', (d: Buffer) => {
+        errBytes += d.length;
+        if (errBytes <= maxOutputBytes) {
+          err.push(d);
+        }
+      });
+      child.on('error', (e) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(e);
+      });
+      child.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         resolve({
           code: code ?? 1,
           stdout: Buffer.concat(out),
           stderr: Buffer.concat(err).toString('utf8'),
-        }),
-      );
+        });
+      });
       if (opts.input) child.stdin.end(opts.input);
       else child.stdin.end();
     });
@@ -125,6 +176,22 @@ export class GitCliAdapter implements IGitCliPort {
     ]) {
       await this.runOk(['config', k, v], { env });
     }
+    const hooksDir = path.join(bare, 'hooks');
+    await fs.mkdir(hooksDir, { recursive: true });
+    const preReceivePath = path.join(hooksDir, 'pre-receive');
+    const preReceiveScript =
+      '#!/bin/sh\n' +
+      'while read oldrev newrev refname; do\n' +
+      `  if [ "$refname" != "${MAIN_REF}" ]; then\n` +
+      `    echo "Only ${MAIN_REF} can be pushed" >&2\n` +
+      '    exit 1\n' +
+      '  fi\n' +
+      'done\n' +
+      'exit 0\n';
+    await fs.writeFile(preReceivePath, preReceiveScript, {
+      encoding: 'utf8',
+      mode: 0o755,
+    });
   }
 
   async resolveRef(projectId: string, ref = MAIN_REF): Promise<string | null> {
@@ -229,6 +296,8 @@ export class GitCliAdapter implements IGitCliPort {
     service: GitService,
     body: Readable,
   ): Promise<GitRunResult> {
+    const timeoutMs = 120_000;
+    const maxOutputBytes = 256 * 1024 * 1024;
     return new Promise((resolve, reject) => {
       const child = spawn(
         this.gitBin,
@@ -241,23 +310,69 @@ export class GitCliAdapter implements IGitCliPort {
       );
       const out: Buffer[] = [];
       const err: Buffer[] = [];
-      child.stdout.on('data', (d: Buffer) => out.push(d));
-      child.stderr.on('data', (d: Buffer) => err.push(d));
-      child.on('error', reject);
+      let outBytes = 0;
+      let errBytes = 0;
+      let settled = false;
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        child.kill('SIGKILL');
+        reject(
+          new GitBridgeDomainError(
+            `git ${service} timed out after ${timeoutMs}ms`,
+          ),
+        );
+      }, timeoutMs);
+      timer.unref?.();
+
+      child.stdout.on('data', (d: Buffer) => {
+        outBytes += d.length;
+        if (outBytes <= maxOutputBytes) {
+          out.push(d);
+        } else if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          child.kill('SIGKILL');
+          reject(
+            new GitBridgeDomainError(
+              `git ${service} exceeded max output buffer (${maxOutputBytes} bytes)`,
+            ),
+          );
+        }
+      });
+      child.stderr.on('data', (d: Buffer) => {
+        errBytes += d.length;
+        if (errBytes <= maxOutputBytes) {
+          err.push(d);
+        }
+      });
+      child.on('error', (e) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(e);
+      });
       child.stdin.on('error', (e) =>
         this.logger.debug(`git ${service} stdin closed: ${e.message}`),
       );
       body.on('error', (e) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         child.kill();
         reject(e);
       });
-      child.on('close', (code) =>
+      child.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         resolve({
           code: code ?? 1,
           stdout: Buffer.concat(out),
           stderr: Buffer.concat(err).toString('utf8'),
-        }),
-      );
+        });
+      });
       body.pipe(child.stdin);
     });
   }

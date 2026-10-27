@@ -143,7 +143,8 @@ export class DocstoreRepository {
     );
     const sizeBytes = bytes + Math.max(0, data.lines.length - 1);
 
-    const record = await this.prisma.manuscriptDoc.create({
+    const client = (data.tx as any) ?? this.prisma;
+    const record = await client.manuscriptDoc.create({
       data: {
         projectId: data.projectId,
         path: cleanPath,
@@ -205,7 +206,14 @@ export class DocstoreRepository {
         );
       }
 
-      const resolvedRanges = data.ranges || baseDoc.ranges;
+      const resolvedRanges: DocRanges = data.ranges
+        ? {
+            ...data.ranges,
+            ...(data.ranges.review === undefined && baseDoc.ranges?.review
+              ? { review: baseDoc.ranges.review }
+              : {}),
+          }
+        : baseDoc.ranges;
       const resolvedHash = data.hash || baseDoc.hash;
 
       // Atomic compare-and-swap (CAS) via updateMany to guarantee zero TOCTOU race condition
@@ -322,6 +330,16 @@ export class DocstoreRepository {
     if (patch.name !== undefined) {
       updateData.path = patch.name.replace(/\\/g, '/').replace(/^\/+/, '');
     }
+    if (patch.ranges !== undefined) {
+      const existingRanges = (current.ranges as DocRanges) || {};
+      updateData.ranges = {
+        ...existingRanges,
+        ...patch.ranges,
+        ...(patch.ranges.review === undefined && existingRanges.review
+          ? { review: existingRanges.review }
+          : {}),
+      } as unknown as Prisma.InputJsonValue;
+    }
 
     const updated = await this.prisma.manuscriptDoc.update({
       where: { id: docId },
@@ -337,8 +355,8 @@ export class DocstoreRepository {
     storageKey: string,
     rev: number,
     clearLines = true,
-  ): Promise<void> {
-    await this.prisma.manuscriptDoc.updateMany({
+  ): Promise<boolean> {
+    const result = await this.prisma.manuscriptDoc.updateMany({
       where: {
         id: docId,
         projectId,
@@ -350,6 +368,7 @@ export class DocstoreRepository {
         ...(clearLines ? { lines: [] } : {}),
       },
     });
+    return (result?.count ?? 0) > 0;
   }
 
   public async unarchiveDoc(
@@ -364,19 +383,28 @@ export class DocstoreRepository {
     );
     const sizeBytes = bytes + Math.max(0, lines.length - 1);
 
-    const updated = await this.prisma.manuscriptDoc.update({
-      where: { id: docId },
+    await this.prisma.manuscriptDoc.updateMany({
+      where: { id: docId, projectId, inStorage: true },
       data: {
         inStorage: false,
         storageKey: null,
         lines: lines,
         ranges: (ranges || {}) as unknown as Prisma.InputJsonValue,
         sizeBytes,
-        rev: { increment: 1 },
       },
     });
 
-    return this.mapToEntity(updated);
+    const current = await this.prisma.manuscriptDoc.findFirst({
+      where: { id: docId, projectId },
+    });
+    if (current) {
+      return this.mapToEntity(current);
+    }
+
+    const fallback = await this.prisma.manuscriptDoc.findUnique({
+      where: { id: docId },
+    });
+    return this.mapToEntity(fallback!);
   }
 
   public async destroyDoc(projectId: string, docId: string): Promise<boolean> {

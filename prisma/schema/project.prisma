@@ -81,6 +81,18 @@ model Project {
   updates          ProjectUpdate[]
   integrationLinks ProjectIntegrationLink[]
   channels         Conversation[]           @relation("ProjectChannels")
+  manuscriptPages         ManuscriptPage[]
+  manuscriptDocs          ManuscriptDoc[]
+  manuscriptNodes         ManuscriptNode[]
+  manuscriptFiles         ManuscriptFile[]
+  manuscriptLinkedFiles   ManuscriptLinkedFile[]
+  manuscriptSnapshots     ManuscriptSnapshot[]
+  manuscriptLabels        ManuscriptLabel[]
+  manuscriptTrackChanges  ManuscriptTrackChange[]
+  manuscriptComments      ManuscriptCommentThread[]
+  manuscriptCustomWords   ManuscriptCustomWord[]
+  manuscriptNotifications ManuscriptNotification[]
+  manuscriptDocReviews    ManuscriptDocReview[]
 
   @@index([createdById], map: "idx_projects_created_by_id")
   @@index([identifier], map: "idx_projects_identifier")

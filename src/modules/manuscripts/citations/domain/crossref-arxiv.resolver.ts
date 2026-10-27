@@ -61,31 +61,141 @@ const CROSSREF_TYPE_MAP: Record<string, { type: string; container?: string }> =
     'posted-content': { type: 'misc', container: 'howpublished' },
   };
 
-export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
-  private readonly parser = new RegexAstBibtexParser();
+export type FetchLikeFn = (
+  url: string,
+  init?: RequestInit,
+) => Promise<Response>;
 
-  public async resolve(
+/**
+ * Decorator Pattern: Wraps a fetch implementation with timeout and transient 5xx retry.
+ */
+export function createResilientFetch(
+  baseFetch: FetchLikeFn = (url, init) => fetch(url, init),
+  options: { timeoutMs?: number; maxRetries?: number } = {},
+): FetchLikeFn {
+  const timeoutMs = options.timeoutMs ?? 8000;
+  const maxRetries = options.maxRetries ?? 1;
+
+  return async (url: string, init?: RequestInit): Promise<Response> => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const timeoutSignal =
+          typeof AbortSignal !== 'undefined' &&
+          typeof AbortSignal.timeout === 'function'
+            ? AbortSignal.timeout(timeoutMs)
+            : undefined;
+        const mergedInit: RequestInit = {
+          ...init,
+          ...(timeoutSignal && !init?.signal ? { signal: timeoutSignal } : {}),
+        };
+        const response = await baseFetch(url, mergedInit);
+        if (
+          response.status >= 500 &&
+          response.status < 600 &&
+          attempt < maxRetries
+        ) {
+          continue;
+        }
+        return response;
+      } catch (err) {
+        lastError = err;
+        if (attempt >= maxRetries) {
+          throw err;
+        }
+      }
+    }
+    throw lastError;
+  };
+}
+
+/**
+ * Chain of Responsibility Pattern: Academic Identifier Resolution Handler
+ */
+export interface IIdentifierResolutionHandler {
+  readonly name: string;
+  setNext(handler: IIdentifierResolutionHandler): IIdentifierResolutionHandler;
+  handle(identifier: AcademicIdentifierVo): Promise<BibEntry | null>;
+}
+
+export abstract class BaseIdentifierResolutionHandler
+  implements IIdentifierResolutionHandler
+{
+  public abstract readonly name: string;
+  private nextHandler?: IIdentifierResolutionHandler;
+
+  public setNext(
+    handler: IIdentifierResolutionHandler,
+  ): IIdentifierResolutionHandler {
+    this.nextHandler = handler;
+    return handler;
+  }
+
+  public async handle(
     identifier: AcademicIdentifierVo,
   ): Promise<BibEntry | null> {
-    if (identifier.isDoi()) {
-      return this.resolveDoi(identifier.clean);
+    if (this.canHandle(identifier)) {
+      const resolved = await this.tryResolve(identifier);
+      if (resolved) {
+        return resolved;
+      }
     }
-
-    if (identifier.isArxiv()) {
-      return this.resolveArxiv(identifier.clean);
+    if (this.nextHandler) {
+      return this.nextHandler.handle(identifier);
     }
-
     return null;
   }
 
-  /**
-   * Resolves DOI via CrossRef Content Negotiation or REST API.
-   */
-  private async resolveDoi(cleanDoi: string): Promise<BibEntry | null> {
+  protected abstract canHandle(identifier: AcademicIdentifierVo): boolean;
+  protected abstract tryResolve(
+    identifier: AcademicIdentifierVo,
+  ): Promise<BibEntry | null>;
+}
+
+/**
+ * Builds a citation key "<family><year><firstTitleWord>" restricted to
+ * [A-Za-z0-9_:.-]; falls back to a sanitized identifier-based key.
+ */
+export function buildResolvedCitationKey(
+  family: string | undefined,
+  year: string | undefined,
+  title: string,
+  fallback: string,
+): string {
+  const STOP = new Set(['a', 'an', 'the', 'on', 'of', 'in', 'for', 'and']);
+  const firstWord =
+    title
+      .split(/\s+/)
+      .map((w) => sanitizeCitationKey(w).replace(/[:.-]/g, '').toLowerCase())
+      .find((w) => w.length > 0 && !STOP.has(w)) || '';
+  const fam = sanitizeCitationKey(family || '')
+    .replace(/[:.-]/g, '')
+    .toLowerCase();
+  const key = `${fam}${year || ''}${firstWord}`;
+  if (fam && key) return key;
+  return sanitizeCitationKey(fallback.replace(/\//g, '_')) || 'ref';
+}
+
+export class CrossrefBibtexResolutionHandler extends BaseIdentifierResolutionHandler {
+  public readonly name = 'CrossrefBibtexContentNegotiation';
+
+  constructor(
+    private readonly fetchFn: FetchLikeFn,
+    private readonly parser = new RegexAstBibtexParser(),
+  ) {
+    super();
+  }
+
+  protected canHandle(identifier: AcademicIdentifierVo): boolean {
+    return identifier.isDoi();
+  }
+
+  protected async tryResolve(
+    identifier: AcademicIdentifierVo,
+  ): Promise<BibEntry | null> {
     try {
-      // 1. Try CrossRef Content Negotiation (returns formatted BibTeX directly)
-      const res = await fetch(
-        `https://doi.org/${encodeURIComponent(cleanDoi)}`,
+      const res = await this.fetchFn(
+        `https://doi.org/${encodeURIComponent(identifier.clean)}`,
         {
           headers: {
             Accept: 'application/x-bibtex; charset=utf-8',
@@ -102,12 +212,29 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
         }
       }
     } catch {
-      // Network failure or offline
+      // Pass to next handler in chain
     }
+    return null;
+  }
+}
 
-    // 2. Fallback: Query CrossRef REST API for JSON metadata
+export class CrossrefJsonResolutionHandler extends BaseIdentifierResolutionHandler {
+  public readonly name = 'CrossrefRestJsonApi';
+
+  constructor(private readonly fetchFn: FetchLikeFn) {
+    super();
+  }
+
+  protected canHandle(identifier: AcademicIdentifierVo): boolean {
+    return identifier.isDoi();
+  }
+
+  protected async tryResolve(
+    identifier: AcademicIdentifierVo,
+  ): Promise<BibEntry | null> {
+    const cleanDoi = identifier.clean;
     try {
-      const jsonRes = await fetch(
+      const jsonRes = await this.fetchFn(
         `https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`,
         {
           headers: { 'User-Agent': 'FluxManuscripts/1.0' },
@@ -119,7 +246,6 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
         const item = data.message;
         if (item) {
           const title = item.title?.[0] || 'Untitled Document';
-          // Publication year only; never invent one (no deposit date / current year fallback).
           const yearRaw =
             item['published-print']?.['date-parts']?.[0]?.[0] ||
             item['published-online']?.['date-parts']?.[0]?.[0] ||
@@ -127,7 +253,6 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
             item.published?.['date-parts']?.[0]?.[0];
           const year = yearRaw ? String(yearRaw) : undefined;
 
-          // Plain "Family, Given" names; organizations wrapped as {Name}
           const authors = (item.author || [])
             .map((a) => {
               if (a.family && a.given) return `${a.family}, ${a.given}`;
@@ -189,7 +314,7 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
           if (item.URL) fields.url = String(item.URL);
 
           return new BibEntry({
-            key: this.buildKey(
+            key: buildResolvedCitationKey(
               item.author?.[0]?.family || item.author?.[0]?.name,
               year,
               title,
@@ -202,18 +327,29 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
         }
       }
     } catch {
-      // Fallback
+      // Pass to next handler in chain
     }
-
     return null;
   }
+}
 
-  /**
-   * Resolves arXiv ID via arXiv export API.
-   */
-  private async resolveArxiv(cleanArxivId: string): Promise<BibEntry | null> {
+export class ArxivAtomResolutionHandler extends BaseIdentifierResolutionHandler {
+  public readonly name = 'ArxivAtomExportApi';
+
+  constructor(private readonly fetchFn: FetchLikeFn) {
+    super();
+  }
+
+  protected canHandle(identifier: AcademicIdentifierVo): boolean {
+    return identifier.isArxiv();
+  }
+
+  protected async tryResolve(
+    identifier: AcademicIdentifierVo,
+  ): Promise<BibEntry | null> {
+    const cleanArxivId = identifier.clean;
     try {
-      const res = await fetch(
+      const res = await this.fetchFn(
         `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanArxivId)}`,
       );
 
@@ -239,7 +375,6 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
           }
           const authors = rawAuthors.map(toFamilyGiven);
 
-          // Real primary category from the Atom feed (no hard-coded default)
           const primaryMatch = entryXml.match(
             /<arxiv:primary_category[^>]*\bterm="([^"]+)"/i,
           );
@@ -260,7 +395,7 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
 
           const firstFamily = authors[0]?.split(',')[0];
           return new BibEntry({
-            key: this.buildKey(
+            key: buildResolvedCitationKey(
               firstFamily,
               year,
               title,
@@ -273,34 +408,34 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
         }
       }
     } catch {
-      // Network failure
+      // Pass to next handler in chain
     }
-
     return null;
   }
+}
 
-  /**
-   * Builds a citation key "<family><year><firstTitleWord>" restricted to
-   * [A-Za-z0-9_:.-]; falls back to a sanitized identifier-based key.
-   */
-  private buildKey(
-    family: string | undefined,
-    year: string | undefined,
-    title: string,
-    fallback: string,
-  ): string {
-    const STOP = new Set(['a', 'an', 'the', 'on', 'of', 'in', 'for', 'and']);
-    const firstWord =
-      title
-        .split(/\s+/)
-        .map((w) => sanitizeCitationKey(w).replace(/[:.-]/g, '').toLowerCase())
-        .find((w) => w.length > 0 && !STOP.has(w)) || '';
-    const fam = sanitizeCitationKey(family || '')
-      .replace(/[:.-]/g, '')
-      .toLowerCase();
-    const key = `${fam}${year || ''}${firstWord}`;
-    if (fam && key) return key;
-    return sanitizeCitationKey(fallback.replace(/\//g, '_')) || 'ref';
+export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
+  private readonly headHandler: IIdentifierResolutionHandler;
+
+  constructor(
+    fetchFn: FetchLikeFn = createResilientFetch(),
+    customChainHead?: IIdentifierResolutionHandler,
+  ) {
+    if (customChainHead) {
+      this.headHandler = customChainHead;
+    } else {
+      const bibtexHandler = new CrossrefBibtexResolutionHandler(fetchFn);
+      const jsonHandler = new CrossrefJsonResolutionHandler(fetchFn);
+      const arxivHandler = new ArxivAtomResolutionHandler(fetchFn);
+      bibtexHandler.setNext(jsonHandler).setNext(arxivHandler);
+      this.headHandler = bibtexHandler;
+    }
+  }
+
+  public async resolve(
+    identifier: AcademicIdentifierVo,
+  ): Promise<BibEntry | null> {
+    return this.headHandler.handle(identifier);
   }
 }
 

@@ -41,7 +41,10 @@ import { FilestoreService } from './filestore.service';
 
 @ApiTags('Manuscripts - Filestore & Assets')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/v1/manuscripts/projects/:projectId/files')
+@Controller([
+  'api/v1/manuscripts/projects/:projectId/files',
+  'api/v1/manuscripts/projects/:projectId/filestore',
+])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class FilestoreController {
