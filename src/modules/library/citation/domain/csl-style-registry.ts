@@ -336,7 +336,28 @@ export class CslStyleRegistry {
                 .join(' and ')
             : 'Anonymous';
 
-        bibliography = `@${entryType}{${key},\n  title = {${title}},\n  author = {${bibtexAuthors}},\n  year = {${year}}\n}`;
+        const bibFields: string[] = [
+          `  title = {${title}}`,
+          `  author = {${bibtexAuthors}}`,
+          `  year = {${year}}`,
+        ];
+        if (source) {
+          const containerKey =
+            entryType === 'incollection' || entryType === 'inproceedings'
+              ? 'booktitle'
+              : 'journal';
+          bibFields.push(`  ${containerKey} = {${source}}`);
+        }
+        if (item.doi) bibFields.push(`  doi = {${item.doi}}`);
+        if (item.isbn) bibFields.push(`  isbn = {${item.isbn}}`);
+        if (item.issn) bibFields.push(`  issn = {${item.issn}}`);
+        if (item.pmid) bibFields.push(`  pmid = {${item.pmid}}`);
+        if (item.pmcid) bibFields.push(`  pmcid = {${item.pmcid}}`);
+        if (item.arxivId) {
+          bibFields.push(`  eprint = {${item.arxivId}}`);
+          bibFields.push(`  archiveprefix = {arXiv}`);
+        }
+        bibliography = `@${entryType}{${key},\n${bibFields.join(',\n')}\n}`;
       } else if (styleId === 'ris') {
         inText = title;
         bibliography = `TY  - JOUR\nTI  - ${title}\nAU  - ${firstAuthor}\nPY  - ${year}\nER  -`;

@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsString,
   IsOptional,
   IsArray,
@@ -10,6 +11,7 @@ import { Transform } from 'class-transformer';
 export class CreateNoteDto {
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   itemId?: string | null;
 
   @IsString()
@@ -22,15 +24,19 @@ export class CreateNoteDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(500000)
   contentMd?: string;
 
   @IsArray()
+  @ArrayMaxSize(100)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   @IsOptional()
   tags?: string[];
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   projectId?: string | null;
 }
 
@@ -45,10 +51,13 @@ export class UpdateNoteDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(500000)
   contentMd?: string;
 
   @IsArray()
+  @ArrayMaxSize(100)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   @IsOptional()
   tags?: string[];
 

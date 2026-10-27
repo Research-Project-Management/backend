@@ -136,14 +136,22 @@ export class CslLocaleLoaderService {
     }
   }
 
-  public async ensureTemplate(styleId: string): Promise<boolean> {
+  public async ensureTemplate(
+    styleId: string,
+    scopeId?: string,
+    rawXml?: string,
+  ): Promise<boolean> {
     this.initTemplates();
     const normalized = this.normalizeStyle(styleId);
     if (BUILTIN_SPECIAL_STYLES.has(normalized)) return true;
 
     try {
       const csl = plugins.config.get('@csl');
-      if (csl?.templates?.has(normalized)) {
+      if (
+        csl?.templates?.has(normalized) &&
+        !rawXml &&
+        (!scopeId || this.staticTemplateIds.has(normalized))
+      ) {
         if (!this.staticTemplateIds.has(normalized)) {
           this.dynamicTemplateIds.delete(normalized);
           this.dynamicTemplateIds.add(normalized);
@@ -151,28 +159,33 @@ export class CslLocaleLoaderService {
         return true;
       }
 
-      if (this.cslRepo) {
-        const xml = await this.cslRepo.fetchCslXml(normalized);
-        if (xml && csl?.templates) {
-          if (
-            !this.staticTemplateIds.has(normalized) &&
-            this.dynamicTemplateIds.size >= MAX_DYNAMIC_CSL_STYLES
-          ) {
-            const oldestId = this.dynamicTemplateIds.values().next().value;
-            if (oldestId) {
-              this.dynamicTemplateIds.delete(oldestId);
-              this.evictTemplateFromStore(csl.templates, oldestId);
-            }
+      const xml =
+        rawXml ||
+        (this.cslRepo
+          ? await this.cslRepo.fetchCslXml(normalized, scopeId)
+          : null);
+      if (!xml && csl?.templates?.has(normalized)) {
+        return true;
+      }
+      if (xml && csl?.templates) {
+        if (
+          !this.staticTemplateIds.has(normalized) &&
+          this.dynamicTemplateIds.size >= MAX_DYNAMIC_CSL_STYLES
+        ) {
+          const oldestId = this.dynamicTemplateIds.values().next().value;
+          if (oldestId) {
+            this.dynamicTemplateIds.delete(oldestId);
+            this.evictTemplateFromStore(csl.templates, oldestId);
           }
-          csl.templates.add(normalized, xml);
-          if (!this.staticTemplateIds.has(normalized)) {
-            this.dynamicTemplateIds.add(normalized);
-          }
-          this.logger.log(
-            `Dynamically registered on-demand CSL template: "${normalized}"`,
-          );
-          return true;
         }
+        csl.templates.add(normalized, xml);
+        if (!this.staticTemplateIds.has(normalized)) {
+          this.dynamicTemplateIds.add(normalized);
+        }
+        this.logger.log(
+          `Dynamically registered on-demand CSL template: "${normalized}"`,
+        );
+        return true;
       }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);

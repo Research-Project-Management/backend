@@ -142,6 +142,37 @@ export class CslStyleFormatterService {
     return escapeCitationHtml(text);
   }
 
+  public sanitizeBibtexKey(rawId?: string): string {
+    const cleaned = String(rawId || '').replace(/[\s,{}\\~#%]+/g, '');
+    return cleaned || 'ref';
+  }
+
+  public escapeBibtexValue(val: string | number): string {
+    const str = String(val ?? '');
+    let depth = 0;
+    let balanced = true;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      const prev = i > 0 ? str[i - 1] : '';
+      if (ch === '{' && prev !== '\\') {
+        depth++;
+      } else if (ch === '}' && prev !== '\\') {
+        depth--;
+        if (depth < 0) {
+          balanced = false;
+          break;
+        }
+      }
+    }
+    if (depth !== 0) {
+      balanced = false;
+    }
+    if (!balanced) {
+      return str.replace(/(?<!\\)([{}])/g, '\\$1');
+    }
+    return str;
+  }
+
   // BIBTEX & RIS FORMATTERS
 
   public resolveBibtexEntryType(cslItem: CslItemData): string {
@@ -203,6 +234,40 @@ export class CslStyleFormatterService {
     return y;
   }
 
+  private replaceBibtexFieldBalanced(
+    raw: string,
+    fieldName: string,
+    newBody: string,
+  ): string | null {
+    const fieldRegex = new RegExp(`\\b${fieldName}\\s*=\\s*\\{`, 'i');
+    const match = fieldRegex.exec(raw);
+    if (!match) return null;
+
+    const openBraceIdx = match.index + match[0].length - 1;
+    let depth = 0;
+    let closeBraceIdx = -1;
+    for (let i = openBraceIdx; i < raw.length; i++) {
+      const ch = raw[i];
+      const prev = i > 0 ? raw[i - 1] : '';
+      if (ch === '{' && prev !== '\\') {
+        depth++;
+      } else if (ch === '}' && prev !== '\\') {
+        depth--;
+        if (depth === 0) {
+          closeBraceIdx = i;
+          break;
+        }
+      }
+    }
+    if (closeBraceIdx === -1) return null;
+
+    return (
+      raw.slice(0, match.index) +
+      `${fieldName} = {${newBody}}` +
+      raw.slice(closeBraceIdx + 1)
+    );
+  }
+
   public collectBibtexSupplementPairs(
     cslItem: CslItemData,
     targetType: string,
@@ -219,7 +284,10 @@ export class CslStyleFormatterService {
     if (cslItem.page) {
       pushIf(
         'pages',
-        String(cslItem.page).replace(/^(\d+)\s*[-–—]+\s*(\d+)$/, '$1--$2'),
+        String(cslItem.page).replace(
+          /^([A-Za-z0-9]+)\s*[-–—]+\s*([A-Za-z0-9]+)$/,
+          '$1--$2',
+        ),
       );
     }
     if (cslItem.publisher) {
@@ -253,6 +321,8 @@ export class CslStyleFormatterService {
     pushIf('pmcid', cslItem.PMCID);
     pushIf('url', cslItem.URL);
     pushIf('urldate', this.formatIsoDateFromCsl(cslItem.accessed));
+    pushIf('abstract', cslItem.abstract);
+    pushIf('language', cslItem.language);
     if (Array.isArray(cslItem._keywords) && cslItem._keywords.length > 0) {
       pushIf('keywords', cslItem._keywords.join(', '));
     } else if (cslItem.keyword) {
@@ -269,6 +339,11 @@ export class CslStyleFormatterService {
     if (arxivId) {
       pushIf('eprint', arxivId);
       pushIf('archiveprefix', 'arXiv');
+      const primaryClass = (cslItem as Record<string, unknown>)
+        ._arxivPrimaryClass;
+      if (typeof primaryClass === 'string' && primaryClass.trim()) {
+        pushIf('primaryclass', primaryClass.trim());
+      }
     }
 
     return pairs;
@@ -280,6 +355,7 @@ export class CslStyleFormatterService {
     }
     const cslItem = cslInput;
     const targetType = this.resolveBibtexEntryType(cslItem);
+    const safeKey = cslItem.id ? this.sanitizeBibtexKey(cslItem.id) : undefined;
     try {
       const {
         annote: _annote,
@@ -290,9 +366,12 @@ export class CslStyleFormatterService {
       const cite = new Cite(cslForCite);
       let raw = cite.format('bibtex');
       if (raw && raw.trim().startsWith('@')) {
-        raw = raw.replace(/^@[a-zA-Z]+\{/i, `@${targetType}{`);
-        if (cslItem.id) {
-          raw = raw.replace(/^(@[a-zA-Z]+\{)[^,]+,/, `$1${cslItem.id},`);
+        raw = raw.replace(/^@[a-zA-Z]+\{/i, () => `@${targetType}{`);
+        if (safeKey) {
+          raw = raw.replace(
+            /^(@[a-zA-Z]+\{)[^,]+,/,
+            (_, prefix: string) => `${prefix}${safeKey},`,
+          );
         }
 
         if (
@@ -303,20 +382,24 @@ export class CslStyleFormatterService {
         ) {
           const formattedAuthors = this.formatBibtexCreatorList(cslItem.author);
           if (formattedAuthors) {
-            raw = /\bauthor\s*=\s*\{[^}]*\}/i.test(raw)
-              ? raw.replace(
-                  /\bauthor\s*=\s*\{[^}]*\}/i,
-                  `author = {${formattedAuthors}}`,
-                )
-              : raw.replace(
-                  /^(@[a-zA-Z]+\{[^,]+,)/,
-                  `$1\n  author = {${formattedAuthors}},`,
-                );
+            const escapedAuthors = this.escapeBibtexValue(formattedAuthors);
+            const replaced = this.replaceBibtexFieldBalanced(
+              raw,
+              'author',
+              escapedAuthors,
+            );
+            raw =
+              replaced !== null
+                ? replaced
+                : raw.replace(
+                    /^(@[a-zA-Z]+\{[^,]+,)/,
+                    (m: string) => `${m}\n  author = {${escapedAuthors}},`,
+                  );
           }
         }
 
         raw = raw.replace(
-          /(\bpages\s*=\s*\{)(\d+)\s*[-–—]+\s*(\d+)(\})/i,
+          /(\bpages\s*=\s*\{)([A-Za-z0-9]+)\s*[-–—]+\s*([A-Za-z0-9]+)(\})/i,
           '$1$2--$3$4',
         );
 
@@ -325,13 +408,27 @@ export class CslStyleFormatterService {
           cslItem,
           targetType,
         )) {
+          if (
+            fieldKey === 'howpublished' &&
+            (/\burl\s*=/i.test(raw) || Boolean(cslItem.URL))
+          ) {
+            continue;
+          }
           if (!new RegExp(`\\b${fieldKey}\\s*=`, 'i').test(raw)) {
-            extraBibFields.push(`  ${fieldKey} = {${val}},`);
+            extraBibFields.push(
+              `  ${fieldKey} = {${this.escapeBibtexValue(val)}},`,
+            );
           }
         }
 
+        if (/\burl\s*=/i.test(raw) || extraBibFields.some((f) => /^\s*url\s*=/i.test(f))) {
+          raw = raw.replace(/^\s*howpublished\s*=\s*\{\\url\{[^}]*\}\},?\r?\n?/gim, '');
+        }
+
         if (extraBibFields.length > 0) {
-          raw = raw.trim().replace(/\}\s*$/, `${extraBibFields.join('\n')}\n}`);
+          raw = raw
+            .trim()
+            .replace(/\}\s*$/, () => `${extraBibFields.join('\n')}\n}`);
         }
         return raw.trim();
       }
@@ -349,8 +446,8 @@ export class CslStyleFormatterService {
       [];
     const pushTag = (tag: string, val: unknown, customCheck?: RegExp) => {
       if (typeof val === 'string' || typeof val === 'number') {
-        const strVal = String(val);
-        if (strVal.trim() !== '') {
+        const strVal = String(val).replace(/\r?\n+/g, ' ').trim();
+        if (strVal !== '') {
           entries.push({
             tag,
             checkRegex: customCheck || new RegExp(`^${tag}\\s+-`, 'm'),
@@ -447,11 +544,26 @@ export class CslStyleFormatterService {
     const cslItem = cslInput;
     const targetRisType = this.resolveRisType(cslItem);
     try {
-      const cite = new Cite(cslItem);
+      const sanitizedCslForRis: CslItemData = {
+        ...cslItem,
+        ...(typeof cslItem.title === 'string'
+          ? { title: cslItem.title.replace(/\r?\n+/g, ' ').trim() }
+          : {}),
+        ...(typeof cslItem.abstract === 'string'
+          ? { abstract: cslItem.abstract.replace(/\r?\n+/g, ' ').trim() }
+          : {}),
+        ...(typeof cslItem.note === 'string'
+          ? { note: cslItem.note.replace(/\r?\n+/g, ' ').trim() }
+          : {}),
+        ...(typeof cslItem.annote === 'string'
+          ? { annote: cslItem.annote.replace(/\r?\n+/g, ' ').trim() }
+          : {}),
+      };
+      const cite = new Cite(sanitizedCslForRis);
       let raw = cite.format('ris');
       if (raw && raw.trim().startsWith('TY  -')) {
         raw = raw
-          .replace(/^TY\s+-\s+\S+/m, `TY  - ${targetRisType}`)
+          .replace(/^TY\s+-\s+\S+/m, () => `TY  - ${targetRisType}`)
           .replace(/^KW\s+-\s+/gm, 'KW  - ')
           .replace(
             /^SP\s+-\s+(\S+?)\s*[-–—]\s*(\S+)\s*$/m,
@@ -467,14 +579,16 @@ export class CslStyleFormatterService {
           cslItem,
         )) {
           if (!checkRegex.test(raw)) {
-            extraRisLines.push(`${tag}  - ${value}`);
+            extraRisLines.push(
+              `${tag}  - ${String(value).replace(/\r?\n+/g, ' ').trim()}`,
+            );
           }
         }
 
         if (extraRisLines.length > 0) {
           raw = raw
             .trim()
-            .replace(/ER\s*-\s*$/, `${extraRisLines.join('\n')}\nER  - `);
+            .replace(/ER\s*-\s*$/, () => `${extraRisLines.join('\n')}\nER  - `);
         }
         return raw.trim();
       }
@@ -486,29 +600,34 @@ export class CslStyleFormatterService {
   }
 
   public fallbackBibtex(item: CslItemData): string {
-    const key = item.id || `ref_${Date.now()}`;
+    const key = this.sanitizeBibtexKey(item.id || `ref_${Date.now()}`);
     const authors = this.formatBibtexCreatorList(item.author);
     const entryType = this.resolveBibtexEntryType(item);
-    const escapedTitle = (item.title || '')
-      .replace(/&/g, '\\&')
-      .replace(/%/g, '\\%')
-      .replace(/_/g, '\\_')
-      .replace(/#/g, '\\#');
+    const escapedTitle = this.escapeBibtexValue(
+      (item.title || '')
+        .replace(/&/g, '\\&')
+        .replace(/%/g, '\\%')
+        .replace(/_/g, '\\_')
+        .replace(/#/g, '\\#'),
+    );
 
     const lines = [`@${entryType}{${key},`, `  title = {${escapedTitle}},`];
-    if (authors) lines.push(`  author = {${authors}},`);
+    if (authors) lines.push(`  author = {${this.escapeBibtexValue(authors)}},`);
     if (entryType === 'article' && item['container-title']) {
-      lines.push(`  journal = {${item['container-title']}},`);
+      lines.push(
+        `  journal = {${this.escapeBibtexValue(item['container-title'])}},`,
+      );
     }
     const year = item.issued?.['date-parts']?.[0]?.[0];
-    if (year) lines.push(`  year = {${year}},`);
-    if (item.volume) lines.push(`  volume = {${item.volume}},`);
+    if (year) lines.push(`  year = {${this.escapeBibtexValue(year)}},`);
+    if (item.volume)
+      lines.push(`  volume = {${this.escapeBibtexValue(item.volume)}},`);
 
     for (const [fieldKey, val] of this.collectBibtexSupplementPairs(
       item,
       entryType,
     )) {
-      lines.push(`  ${fieldKey} = {${val}},`);
+      lines.push(`  ${fieldKey} = {${this.escapeBibtexValue(val)}},`);
     }
     lines.push('}');
     return lines.join('\n');
@@ -516,19 +635,23 @@ export class CslStyleFormatterService {
 
   public fallbackRis(item: CslItemData): string {
     const risType = this.resolveRisType(item);
-    const lines = [`TY  - ${risType}`, `TI  - ${item.title}`];
+    const cleanTitle = String(item.title || '')
+      .replace(/\r?\n+/g, ' ')
+      .trim();
+    const lines = [`TY  - ${risType}`, `TI  - ${cleanTitle}`];
     for (const a of item.author || []) {
-      lines.push(
-        `AU  - ${a.family || a.literal || ''}, ${a.given || ''}`
-          .replace(/,\s*$/, '')
-          .trim(),
-      );
+      const cleanAuthor = `${a.family || a.literal || ''}, ${a.given || ''}`
+        .replace(/\r?\n+/g, ' ')
+        .replace(/,\s*$/, '')
+        .trim();
+      lines.push(`AU  - ${cleanAuthor}`);
     }
     const year = item.issued?.['date-parts']?.[0]?.[0];
-    if (year) lines.push(`PY  - ${year}`);
+    if (year)
+      lines.push(`PY  - ${String(year).replace(/\r?\n+/g, ' ').trim()}`);
 
     for (const { tag, value } of this.collectRisSupplementTags(item)) {
-      lines.push(`${tag}  - ${value}`);
+      lines.push(`${tag}  - ${String(value).replace(/\r?\n+/g, ' ').trim()}`);
     }
     lines.push('ER  - ');
     return lines.join('\n');

@@ -96,7 +96,8 @@ export class DoiContentNegotiationService {
 
     const normalizedStyle = (styleId || 'apa').toLowerCase();
     const acceptHeader =
-      this.STYLE_ACCEPT_MAP[normalizedStyle] || 'text/bibliography; style=apa';
+      this.STYLE_ACCEPT_MAP[normalizedStyle];
+    if (!acceptHeader) return null;
     const cacheKey = `${doi}:${normalizedStyle}`;
 
     // Check cache

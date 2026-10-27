@@ -42,15 +42,20 @@ function transformAnnotationColor(value: unknown): string | undefined {
   return mapped || trimmed;
 }
 
-function transformAnnotationType(value: unknown): AnnotationType | undefined {
+export function normalizeAnnotationType(
+  value: unknown,
+): AnnotationType | undefined {
   if (typeof value !== 'string') return value as AnnotationType | undefined;
   const lower = value.trim().toLowerCase();
-  if (lower === 'box' || lower === 'area') return AnnotationType.rect;
+  if (lower === 'box' || lower === 'area' || lower === 'image')
+    return AnnotationType.rect;
   if (lower === 'strikethrough') return AnnotationType.strike;
   if (lower === 'freetext') return AnnotationType.text;
   if (lower === 'drawing' || lower === 'pen') return AnnotationType.ink;
   return lower as AnnotationType;
 }
+
+const transformAnnotationType = normalizeAnnotationType;
 
 // Create
 
@@ -65,11 +70,12 @@ export class CreateAnnotationDto {
     if (typeof obj?.pageNumber === 'number' && obj.pageNumber >= 1) {
       return obj.pageNumber - 1;
     }
-    return value;
+    return 0;
   })
   @IsInt()
   @Min(0)
-  pageIndex!: number;
+  @IsOptional()
+  pageIndex: number = 0;
 
   @IsInt()
   @Min(1)
@@ -108,22 +114,24 @@ export class CreateAnnotationDto {
     return value;
   })
   @IsString()
-  @MaxLength(10_000)
+  @MaxLength(50_000)
   @IsOptional()
   quoteText?: string;
 
   @IsString()
-  @MaxLength(10_000)
+  @MaxLength(50_000)
   @IsOptional()
   text?: string;
 
   @IsString()
-  @MaxLength(5_000)
+  @MaxLength(50_000)
   @IsOptional()
   comment?: string;
 
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(64, { each: true })
   @IsOptional()
   tags?: string[];
 
@@ -138,6 +146,8 @@ export class CreateAnnotationDto {
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 
+  @IsArray()
+  @ArrayMaxSize(500)
   @IsOptional()
   rects?: Array<unknown>;
 
@@ -160,22 +170,24 @@ export class UpdateAnnotationDto {
     return value;
   })
   @IsString()
-  @MaxLength(10_000)
+  @MaxLength(50_000)
   @IsOptional()
   quoteText?: string;
 
   @IsString()
-  @MaxLength(10_000)
+  @MaxLength(50_000)
   @IsOptional()
   text?: string;
 
   @IsString()
-  @MaxLength(5_000)
+  @MaxLength(50_000)
   @IsOptional()
   comment?: string;
 
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(64, { each: true })
   @IsOptional()
   tags?: string[];
 
@@ -190,6 +202,8 @@ export class UpdateAnnotationDto {
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 
+  @IsArray()
+  @ArrayMaxSize(500)
   @IsOptional()
   rects?: Array<unknown>;
 
@@ -221,11 +235,12 @@ export class UpsertAnnotationItemDto {
     if (typeof obj?.pageNumber === 'number' && obj.pageNumber >= 1) {
       return obj.pageNumber - 1;
     }
-    return value;
+    return 0;
   })
   @IsInt()
   @Min(0)
-  pageIndex!: number;
+  @IsOptional()
+  pageIndex: number = 0;
 
   @IsInt()
   @Min(1)
@@ -256,27 +271,34 @@ export class UpsertAnnotationItemDto {
     return value;
   })
   @IsString()
-  @MaxLength(10_000)
+  @MaxLength(50_000)
   @IsOptional()
   quoteText?: string;
 
   @IsString()
-  @MaxLength(10_000)
+  @MaxLength(50_000)
   @IsOptional()
   text?: string;
 
   @IsString()
-  @MaxLength(5_000)
+  @MaxLength(50_000)
   @IsOptional()
   comment?: string;
 
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(64, { each: true })
   @IsOptional()
   tags?: string[];
 
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
+
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsOptional()
+  rects?: Array<unknown>;
 
   /**
    * Required when `id` is provided.

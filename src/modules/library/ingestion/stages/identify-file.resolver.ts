@@ -157,12 +157,37 @@ export class IdentifyFileResolver {
 
   async resolve(
     payload: SubmissionPayload & { kind: 'FILE' },
-    scopeId?: string,
+    scopeOrContext?:
+      | string
+      | { userId?: string; projectId?: string; scopeId?: string },
   ): Promise<MetadataCandidate> {
+    const context =
+      typeof scopeOrContext === 'string'
+        ? {
+            scopeId: scopeOrContext,
+            projectId:
+              scopeOrContext && scopeOrContext !== 'user'
+                ? scopeOrContext
+                : undefined,
+          }
+        : {
+            scopeId: scopeOrContext?.scopeId,
+            userId: scopeOrContext?.userId,
+            projectId:
+              scopeOrContext?.projectId ??
+              (scopeOrContext?.scopeId &&
+              scopeOrContext.scopeId !== 'user' &&
+              scopeOrContext.scopeId !== scopeOrContext?.userId
+                ? scopeOrContext.scopeId
+                : undefined),
+          };
     let extractedMetadata: ExtractedPdfMetadata = {};
     let fileBuffer: Buffer | undefined;
 
-    const rawFilenameDoi = payload.filename?.match(
+    const filenameWithoutPdf = payload.filename
+      ? payload.filename.replace(/\.pdf$/i, '')
+      : undefined;
+    const rawFilenameDoi = filenameWithoutPdf?.match(
       /10\.\d{4,9}[/_@][-._;()/:A-Za-z0-9]+/,
     )?.[0];
     const filenameDoi = rawFilenameDoi
@@ -171,9 +196,15 @@ export class IdentifyFileResolver {
           .replace(/[.,;:)\]]+$/, '')
       : undefined;
 
-    const filenameArxivId = payload.filename?.match(
-      /(?:arxiv[:_.-]*)?([0-2]\d{3}\.\d{4,5}(?:v\d+)?)/i,
+    const explicitArxivMatch = payload.filename?.match(
+      /arxiv[:_.-]*((?:\d{2})(?:0[1-9]|1[0-2])\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[a-z]{2})?\/\d{7}(?:v\d+)?)/i,
     )?.[1];
+    const bareArxivMatch = !explicitArxivMatch
+      ? payload.filename?.match(
+          /(?:^|[^0-9])(?!(?:19|20)\d{2}\.)(\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}(?:v\d+)?)(?=$|[^0-9])/i,
+        )?.[1]
+      : undefined;
+    const filenameArxivId = explicitArxivMatch || bareArxivMatch;
 
     if (
       this.storagePort?.readOwnedFile &&
@@ -183,7 +214,8 @@ export class IdentifyFileResolver {
       try {
         const fileRecord = await this.storagePort.readOwnedFile({
           fileId: payload.fileId,
-          projectId: scopeId && scopeId !== 'user' ? scopeId : undefined,
+          userId: context.userId,
+          projectId: context.projectId,
         });
         if (fileRecord?.buffer) {
           fileBuffer = fileRecord.buffer;
@@ -208,8 +240,17 @@ export class IdentifyFileResolver {
             }
           }
 
+          const needsDocumentFallback =
+            Object.keys(extractedMetadata).length === 0 ||
+            (!extractedMetadata.isSelfSufficient &&
+              !extractedMetadata.doi &&
+              !extractedMetadata.arxivId &&
+              !extractedMetadata.isbn &&
+              (!extractedMetadata.title ||
+                extractedMetadata.title === 'Uploaded Document'));
+
           if (
-            Object.keys(extractedMetadata).length === 0 &&
+            needsDocumentFallback &&
             this.extractionGateway?.extractDocumentFromBuffer
           ) {
             const extractedDoc =
@@ -217,8 +258,20 @@ export class IdentifyFileResolver {
                 fileRecord.buffer,
                 { headerOnly: true, maxPages: 3 },
               );
-            extractedMetadata = ((extractedDoc?.metadata ||
+            const docMeta = ((extractedDoc?.metadata ||
               extractedDoc) as unknown as ExtractedPdfMetadata) || {};
+            if (Object.keys(extractedMetadata).length === 0) {
+              extractedMetadata = docMeta;
+            } else {
+              extractedMetadata = {
+                ...extractedMetadata,
+                ...Object.fromEntries(
+                  Object.entries(docMeta).filter(
+                    ([, v]) => v !== undefined && v !== null && v !== '',
+                  ),
+                ),
+              };
+            }
           }
 
           if (

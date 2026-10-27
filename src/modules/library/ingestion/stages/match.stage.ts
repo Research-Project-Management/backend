@@ -5,7 +5,11 @@ import {
   calculateTitleSimilarity,
   tokenizeTitleWords,
 } from '@/modules/library/ingestion/domain/deduplication.domain';
-import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
+import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+  isPlaceholderItemTitle,
+} from '@/modules/library/core';
 import {
   IWorkflowStage,
   MatchStageInput,
@@ -102,7 +106,7 @@ export class MatchStage implements IWorkflowStage<
       if (matchResult.exactMatch) {
         const existingTitle = matchResult.exactMatch.title?.trim();
         const isGenericTitle = (t?: string): boolean =>
-          !t || t.length <= 5 || /^untitled(\s+document)?$/i.test(t);
+          !t || t.length <= 5 || isPlaceholderItemTitle(t);
 
         const titlesConflict =
           Boolean(proposedTitle) &&

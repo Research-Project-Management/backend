@@ -1,4 +1,12 @@
 import { CreatorCreditInput } from '@/modules/library/core/types/bibliographic.types';
+import { libraryConfig } from '@/modules/library/core/config/library.config';
+
+export const LIBRARY_INGESTION_QUEUE_STANDARD =
+  libraryConfig().ingestion.standardQueue;
+
+export const LIBRARY_INGESTION_QUEUE = LIBRARY_INGESTION_QUEUE_STANDARD;
+
+export const LIBRARY_INGESTION_JOB = 'process_ingestion_run';
 
 export interface IngestionStage {
   id: string;

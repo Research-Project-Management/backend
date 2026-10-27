@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
+import {
+  IdentifyStage,
+  applyUserOverridesToCandidate,
+} from '@/modules/library/ingestion/stages/identify.stage';
 import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
 import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
 import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
@@ -240,50 +243,82 @@ export class PipelineService {
     });
 
     // Stage 1: IDENTIFY & NORMALIZE
-    const { initialCandidates: normalizedCandidates } =
-      await session.executeStep(
-        'IDENTIFY',
-        async () => {
-          const identifiedCandidates = await this.identify.execute({
-            runId,
-            payload: envelope.payload,
-            scopeId,
-          });
-          const overrides = sanitizeOverrides(envelope.overrides);
-          const candidates = identifiedCandidates.map((candidate) => ({
-            ...candidate,
-            normalizedMetadata: this.normalizer.normalize({
-              ...candidate.normalizedMetadata,
-              ...overrides,
-            }),
-          }));
+    const {
+      initialCandidates: normalizedCandidates,
+      sanitizedOverrides,
+    } = await session.executeStep(
+      'IDENTIFY',
+      async () => {
+        const identifiedCandidates = await this.identify.execute({
+          runId,
+          payload: envelope.payload,
+          scopeId,
+          userId: resolvedScope.userId,
+          projectId: resolvedScope.projectId,
+        });
+        const overrides = sanitizeOverrides(envelope.overrides);
+        const candidates = identifiedCandidates.map((candidate) =>
+          applyUserOverridesToCandidate(candidate, overrides, this.normalizer),
+        );
 
-          if (candidates.length === 0) {
-            throw new BadRequestException(
-              'No valid bibliographic metadata could be identified from input',
-            );
-          }
+        if (candidates.length === 0) {
+          throw new BadRequestException(
+            'No valid bibliographic metadata could be identified from input',
+          );
+        }
 
-          return {
-            initialCandidates: candidates,
-            sanitizedOverrides: overrides,
-          };
-        },
-        {
-          outputSnapshot: (res) => ({
-            candidateCount: res.initialCandidates.length,
-          }),
-        },
-      );
+        return {
+          initialCandidates: candidates,
+          sanitizedOverrides: overrides,
+        };
+      },
+      {
+        outputSnapshot: (res) => ({
+          candidateCount: res.initialCandidates.length,
+        }),
+      },
+    );
 
     // Stage 2: ENRICH (Crossref, OpenAlex, PubMed, arXiv)
     const enrichedCandidates = await session.executeStep(
       'ENRICH',
-      async () =>
-        this.enrich.execute({
+      async () => {
+        const results = await this.enrich.execute({
           scopeId,
           candidates: normalizedCandidates,
-        }),
+        });
+
+        // Resilient URL Fallback: If a URL had a direct identifier (skipping HTML scrape in IDENTIFY)
+        // and external providers failed or returned nothing in ENRICH, fall back to HTML scraping.
+        if (
+          envelope.payload.kind === 'URL' &&
+          !results.some((c) => c.sourceKind === 'PROVIDER') &&
+          (!normalizedCandidates[0]?.normalizedMetadata?.title ||
+            normalizedCandidates[0]?.normalizedMetadata?.title ===
+              'Untitled Document') &&
+          this.identify.resolveUrlFallback
+        ) {
+          try {
+            const scrapedFallback = await this.identify.resolveUrlFallback(
+              envelope.payload,
+              scopeId,
+            );
+            if (scrapedFallback) {
+              results.push(
+                applyUserOverridesToCandidate(
+                  scrapedFallback,
+                  sanitizedOverrides,
+                  this.normalizer,
+                ),
+              );
+            }
+          } catch {
+            // Non-critical fallback scrape
+          }
+        }
+
+        return results;
+      },
       {
         outputSnapshot: (res) => ({
           candidateCount: res.length,
@@ -439,6 +474,7 @@ export class PipelineService {
               resolvedScope.projectId,
               targetItemId,
               decision.proposedItem?.notes,
+              existingRec,
             );
 
             if (envelope.collectionIds && envelope.collectionIds.length > 0) {
@@ -539,15 +575,19 @@ export class PipelineService {
             tagIds: envelope.tagIds,
             userId: resolvedScope.userId,
             source: this.mapPayloadToSource(envelope.payload.kind),
-            fileId: uploadedFileIdentifier,
             filename: uploadedFilename,
+            skipPreMatch: true,
           },
         });
       },
       {
         outputSnapshot: (res) => ({ itemId: res?.id }),
         compensate: async (item) => {
-          if (item?.id && this.catalogGateway?.deleteItem) {
+          const wasPreExisting = Boolean(
+            (item as { __wasPreExistingMatch?: boolean } | null | undefined)
+              ?.__wasPreExistingMatch,
+          );
+          if (item?.id && !wasPreExisting && this.catalogGateway?.deleteItem) {
             this.logger.warn(
               `[SAGA_COMPENSATION] Rolling back committed item ${item.id} for run ${runId}`,
             );

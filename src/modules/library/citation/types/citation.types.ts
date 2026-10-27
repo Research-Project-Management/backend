@@ -75,7 +75,7 @@ export interface FormattedCitationResult {
   itemId?: string;
   formattedText?: string;
   inText?: string;
-  bibliography?: string;
+  bibliography: string;
   bibliographyHtml?: string;
   source?: 'publisher' | 'csl-engine' | (string & {});
 }

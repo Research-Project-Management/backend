@@ -68,9 +68,9 @@ export class CitationService {
   /**
    * Search across 10,000+ CSL styles from official repository.
    */
-  async searchStyles(query: string = '', limit: number = 30) {
+  async searchStyles(query: string = '', limit: number = 30, scopeId?: string) {
     if (!this.cslRepo) return [];
-    return this.cslRepo.searchStyles(query, limit);
+    return this.cslRepo.searchStyles(query, limit, scopeId);
   }
 
   /**
@@ -80,8 +80,16 @@ export class CitationService {
     if (!this.cslRepo) {
       throw new BadRequestException('CSL repository service unavailable');
     }
-    const meta = await this.cslRepo.registerCustomStyle(cslXml, title, scopeId);
-    await this.cslEngine.ensureTemplate(meta.id);
+    const sanitizedTitle =
+      typeof title === 'string'
+        ? title.replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, 200)
+        : undefined;
+    const meta = await this.cslRepo.registerCustomStyle(
+      cslXml,
+      sanitizedTitle || undefined,
+      scopeId,
+    );
+    await this.cslEngine.ensureTemplate(meta.id, scopeId, cslXml);
     const validCategory = (
       meta.category &&
       ['author-date', 'numeric', 'label', 'raw'].includes(meta.category)
@@ -94,6 +102,13 @@ export class CitationService {
       category: validCategory,
     });
     return meta;
+  }
+
+  /**
+   * Alias for registering a custom CSL XML stylesheet.
+   */
+  async uploadCustomStyle(cslXml: string, title?: string, scopeId?: string) {
+    return this.registerCustomStyle(cslXml, title, scopeId);
   }
 
   /**
@@ -311,7 +326,7 @@ export class CitationService {
     // Tier 1: Official In-Process CSL Engine (Instant, Offline-capable, Consistent with library metadata)
     if (this.cslEngine) {
       try {
-        await this.cslEngine.ensureTemplate(styleId);
+        await this.cslEngine.ensureTemplate(styleId, projectId || userId);
         const cslItem = CslJsonMapper.toCsl(item);
         const engineRes = this.cslEngine.format(cslItem, styleId, index);
         if (engineRes && engineRes.bibliography) {
@@ -387,25 +402,38 @@ export class CitationService {
     // Primary Tier: Use official CSL Engine to format the entire batch together
     // This correctly resolves author-date grouping, numeric collapsing [1]-[3], and A-Z / numeric sorting!
     if (this.cslEngine && items.length > 0) {
-      await this.cslEngine.ensureTemplate(styleId);
+      const scopeId = projectId || userId;
       try {
+        await this.cslEngine.ensureTemplate(styleId, scopeId);
         const cslItems = items.map((it) => CslJsonMapper.toCsl(it));
         const batchRes = this.cslEngine.formatBatchAsync
-          ? await this.cslEngine.formatBatchAsync(cslItems, styleId)
+          ? await this.cslEngine.formatBatchAsync(cslItems, styleId, scopeId)
           : this.cslEngine.formatBatch(cslItems, styleId);
         combinedInText = batchRes.combinedInText;
         bibliographyText = batchRes.bibliographyText;
         bibliographyHtml = batchRes.bibliographyHtml;
 
-        for (const single of batchRes.citations) {
+        for (let idx = 0; idx < batchRes.citations.length; idx++) {
+          const single = batchRes.citations[idx];
+          const formattedSingle: FormattedCitationResult = {
+            styleId: batchRes.styleId || styleId,
+            inText: single.inText,
+            bibliography: single.bibliography,
+            bibliographyHtml: single.bibliographyHtml,
+            source: 'csl-engine',
+          };
+          const rawItemId = cslItems[idx]?._itemId;
+          const origItemId: string | undefined =
+            typeof rawItemId === 'string' && rawItemId.length > 0
+              ? rawItemId
+              : typeof items[idx]?.id === 'string'
+                ? items[idx].id
+                : undefined;
+          if (origItemId) {
+            citationMap.set(origItemId, formattedSingle);
+          }
           if (single.id) {
-            citationMap.set(single.id, {
-              styleId: batchRes.styleId || styleId,
-              inText: single.inText,
-              bibliography: single.bibliography,
-              bibliographyHtml: single.bibliographyHtml,
-              source: 'csl-engine',
-            });
+            citationMap.set(single.id, formattedSingle);
           }
         }
       } catch (err: unknown) {
@@ -417,50 +445,53 @@ export class CitationService {
     }
 
     // Secondary Tier: Fill in any missing items that were not formatted by CslEngine
-    for (let index = 0; index < items.length; index++) {
-      const item = items[index];
-      if (citationMap.has(item.id)) continue;
+    const missingEntries = items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => !citationMap.has(item.id));
 
-      let formatted: FormattedCitationResult | undefined;
+    await Promise.all(
+      missingEntries.map(async ({ item, index }) => {
+        let formatted: FormattedCitationResult | undefined;
 
-      // Fallback to publisher DOI content negotiation
-      if (
-        item.doi &&
-        this.doiService &&
-        styleId !== 'bibtex' &&
-        styleId !== 'ris'
-      ) {
-        try {
-          const doiCitation = await this.doiService.resolveCitation(
-            item.doi,
-            styleId,
-          );
-          if (doiCitation) {
-            formatted = {
+        // Fallback to publisher DOI content negotiation
+        if (
+          item.doi &&
+          this.doiService &&
+          styleId !== 'bibtex' &&
+          styleId !== 'ris'
+        ) {
+          try {
+            const doiCitation = await this.doiService.resolveCitation(
+              item.doi,
               styleId,
-              inText:
-                doiCitation.inText ||
-                `(${item.contributors?.[0]?.lastName || 'Anonymous'}, ${item.year || 'n.d.'})`,
-              bibliography: doiCitation.bibliography,
-              bibliographyHtml: doiCitation.bibliographyHtml,
-              source: 'publisher',
-            };
+            );
+            if (doiCitation) {
+              formatted = {
+                styleId,
+                inText:
+                  doiCitation.inText ||
+                  `(${item.contributors?.[0]?.lastName || 'Anonymous'}, ${item.year || 'n.d.'})`,
+                bibliography: doiCitation.bibliography,
+                bibliographyHtml: doiCitation.bibliographyHtml,
+                source: 'publisher',
+              };
+            }
+          } catch {
+            // ignore
           }
-        } catch {
-          // ignore
         }
-      }
 
-      if (!formatted) {
-        formatted = this.formatItem(
-          item as unknown as CitationItemInput,
-          styleId,
-          index + 1,
-        );
-      }
+        if (!formatted) {
+          formatted = this.formatItem(
+            item as unknown as CitationItemInput,
+            styleId,
+            index + 1,
+          );
+        }
 
-      citationMap.set(item.id, formatted);
-    }
+        citationMap.set(item.id, formatted);
+      }),
+    );
 
     const citations = itemIds.map((id) => ({
       itemId: id,
@@ -471,7 +502,9 @@ export class CitationService {
       },
     }));
 
-    if (!combinedInText && citations.length > 0) {
+    const hasFallbackMerge = missingEntries.length > 0;
+
+    if ((!combinedInText || hasFallbackMerge) && citations.length > 0) {
       const isNumeric = [
         'ieee',
         'nature',
@@ -487,7 +520,7 @@ export class CitationService {
         : `(${inTexts.join('; ')})`;
     }
 
-    if (!bibliographyText && citations.length > 0) {
+    if ((!bibliographyText || hasFallbackMerge) && citations.length > 0) {
       bibliographyText = citations
         .map((c) => c.citation?.bibliography)
         .filter(Boolean)

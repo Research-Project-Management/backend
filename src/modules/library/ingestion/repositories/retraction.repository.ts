@@ -1,11 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { Prisma, Item } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { isUUID } from 'class-validator';
 import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,
+  TransactionHelpers,
 } from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
+import { ItemsMapper } from '@/modules/library/catalog';
 import {
   RetractionDetails,
   RetractionNature,
@@ -53,7 +56,10 @@ const RETRACTION_IDENTIFIER_FILTER = {
 
 @Injectable()
 export class RetractionRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly libraryTx?: TransactionService,
+  ) {}
 
   private getScopeWhere(userId: string, projectId?: string) {
     const normalizedProjectId = normalizeProjectScopeId(projectId);
@@ -198,72 +204,118 @@ export class RetractionRepository {
       retractionCheckedAt: checkedAt.toISOString(),
     };
 
-    const updated = await this.prisma.item.update({
-      where: { id: itemId },
-      data: {
-        metadata: metadataObj as unknown as Prisma.InputJsonValue,
-        retractionCheckedAt: checkedAt,
-        version: { increment: 1 },
-      },
-    });
+    const runUpdate = async (
+      client: Prisma.TransactionClient,
+      helpers?: TransactionHelpers,
+    ) => {
+      const updated = await client.item.update({
+        where: { id: itemId },
+        data: {
+          metadata: metadataObj as unknown as Prisma.InputJsonValue,
+          retractionCheckedAt: checkedAt,
+          version: { increment: 1 },
+        },
+      });
+      const domainUpdated = updated ? ItemsMapper.toDomain(updated) : updated;
 
-    if (updated && (existing?.userId || updated.userId)) {
-      const effectiveUserId = existing?.userId || updated.userId;
-      const effectiveProjectId = normalizeProjectScopeId(
-        existing?.projectId ?? updated.projectId,
-      );
-      try {
-        const seqRecord = effectiveProjectId
-          ? await this.prisma.syncSequence?.upsert({
-              where: { projectId: effectiveProjectId },
-              create: {
-                projectId: effectiveProjectId,
-                currentSequence: BigInt(1),
-              },
-              update: { currentSequence: { increment: BigInt(1) } },
-              select: { currentSequence: true },
-            })
-          : await this.prisma.syncSequence?.upsert({
-              where: { userId: effectiveUserId },
-              create: {
-                userId: effectiveUserId,
-                currentSequence: BigInt(1),
-              },
-              update: { currentSequence: { increment: BigInt(1) } },
-              select: { currentSequence: true },
-            });
-        const seq = seqRecord?.currentSequence ?? BigInt(1);
-        await this.prisma.libraryChange?.create({
-          data: {
-            seq,
-            userId: effectiveUserId,
-            projectId: effectiveProjectId ?? null,
+      if (updated && (existing?.userId || updated.userId)) {
+        const effectiveUserId = existing?.userId || updated.userId;
+        const effectiveProjectId = normalizeProjectScopeId(
+          existing?.projectId ?? updated.projectId,
+        );
+        const eventScope = {
+          userId: effectiveUserId,
+          projectId: effectiveProjectId ?? null,
+        };
+        if (helpers) {
+          await helpers.appendChange(eventScope, {
             entityType: 'Item',
             entityId: itemId,
             action: 'update',
             version: updated.version,
-            data: updated as unknown as Prisma.InputJsonValue,
-          },
-        });
-        if (statusChanged) {
-          await this.prisma.outboxEvent?.create({
+            data: domainUpdated as unknown as Prisma.InputJsonValue,
+          });
+          if (statusChanged) {
+            await helpers.publishOutbox(
+              eventScope,
+              itemId,
+              LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+              {
+                ...(domainUpdated as unknown as Record<string, unknown>),
+                updatedFields: ['isRetracted', 'retractionCheckedAt'],
+                source: 'retraction_watch',
+              },
+            );
+          }
+          return updated;
+        }
+        try {
+          const seqRecord = effectiveProjectId
+            ? await client.syncSequence?.upsert({
+                where: { projectId: effectiveProjectId },
+                create: {
+                  projectId: effectiveProjectId,
+                  currentSequence: BigInt(1),
+                },
+                update: { currentSequence: { increment: BigInt(1) } },
+                select: { currentSequence: true },
+              })
+            : await client.syncSequence?.upsert({
+                where: { userId: effectiveUserId },
+                create: {
+                  userId: effectiveUserId,
+                  currentSequence: BigInt(1),
+                },
+                update: { currentSequence: { increment: BigInt(1) } },
+                select: { currentSequence: true },
+              });
+          const seq = seqRecord?.currentSequence ?? BigInt(1);
+          await client.libraryChange?.create({
             data: {
+              seq,
               userId: effectiveUserId,
               projectId: effectiveProjectId ?? null,
-              aggregateId: itemId,
-              eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-              payload: updated as unknown as Prisma.InputJsonValue,
-              status: 'PENDING',
-              retryCount: 0,
+              entityType: 'Item',
+              entityId: itemId,
+              action: 'update',
+              version: updated.version,
+              data: domainUpdated as unknown as Prisma.InputJsonValue,
             },
           });
+          if (statusChanged) {
+            await client.outboxEvent?.create({
+              data: {
+                userId: effectiveUserId,
+                projectId: effectiveProjectId ?? null,
+                aggregateId: itemId,
+                eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+                payload: {
+                  ...(domainUpdated as unknown as Record<string, unknown>),
+                  updatedFields: ['isRetracted', 'retractionCheckedAt'],
+                  source: 'retraction_watch',
+                } as unknown as Prisma.InputJsonValue,
+                status: 'PENDING',
+                retryCount: 0,
+              },
+            });
+          }
+        } catch {
+          // Non-critical changelog write in standalone repository context
         }
-      } catch {
-        // Non-critical changelog write in standalone repository context
       }
-    }
 
-    return updated;
+      return updated;
+    };
+
+    if (this.libraryTx) {
+      return this.libraryTx.executeInTransaction((tx, helpers) =>
+        runUpdate(tx, helpers),
+      );
+    }
+    if (typeof this.prisma.$transaction === 'function') {
+      return this.prisma.$transaction((tx) => runUpdate(tx));
+    }
+    return runUpdate(this.prisma as unknown as Prisma.TransactionClient);
   }
 
   async findRetractedItems(userId: string, projectId?: string) {

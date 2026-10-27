@@ -4,6 +4,7 @@ import {
   LIBRARY_REDIS_KEYS,
   normalizeProjectScopeId,
 } from '@/modules/library/core';
+import { ItemCacheCoordinator } from '@/modules/library/catalog';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import {
@@ -36,6 +37,7 @@ export class RetractionService {
     private readonly retractionDb: RetractionDatabaseService,
     private readonly syncService: RetractionSyncService,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 
   private async invalidateRetractionCache(
@@ -43,7 +45,16 @@ export class RetractionService {
     userId: string,
     projectId?: string,
   ): Promise<void> {
-    if (!this.cache || itemIds.length === 0) return;
+    if (itemIds.length === 0) return;
+    if (this.cacheCoordinator) {
+      await this.cacheCoordinator.invalidateForWrite({
+        userId,
+        projectId,
+        itemIds,
+      });
+      return;
+    }
+    if (!this.cache) return;
     try {
       const validProjectId = normalizeProjectScopeId(projectId);
       const scopeId = validProjectId || userId;
@@ -196,34 +207,47 @@ export class RetractionService {
     let newlyRetracted = 0;
     const updatedItemIds: string[] = [];
 
-    for (const item of items) {
-      if (item.isRetracted && item.retractionNature === 'manual') {
-        continue;
-      }
-      try {
-        const result = await this.scanner.lookup(item.doi, item.pmid);
-        const now = new Date();
-        if (result.status === 'retracted') {
-          if (!item.isRetracted) {
-            newlyRetracted++;
+    const scannableItems = items.filter(
+      (item) => !(item.isRetracted && item.retractionNature === 'manual'),
+    );
+    const CONCURRENCY_LIMIT = 5;
+
+    for (let i = 0; i < scannableItems.length; i += CONCURRENCY_LIMIT) {
+      const batch = scannableItems.slice(i, i + CONCURRENCY_LIMIT);
+      await Promise.all(
+        batch.map(async (item) => {
+          try {
+            const result = await this.scanner.lookup(item.doi, item.pmid);
+            const now = new Date();
+            if (result.status === 'retracted') {
+              if (!item.isRetracted) {
+                newlyRetracted++;
+              }
+              await this.repo.updateItemRetraction(
+                item.id,
+                true,
+                result.details.nature,
+                result.details,
+                now,
+              );
+              updatedItemIds.push(item.id);
+            } else if (result.status === 'clean') {
+              await this.repo.updateItemRetraction(
+                item.id,
+                false,
+                null,
+                null,
+                now,
+              );
+              updatedItemIds.push(item.id);
+            }
+            // unknown: leave stored status untouched
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`Error scanning item ${item.id}: ${msg}`);
           }
-          await this.repo.updateItemRetraction(
-            item.id,
-            true,
-            result.details.nature,
-            result.details,
-            now,
-          );
-          updatedItemIds.push(item.id);
-        } else if (result.status === 'clean') {
-          await this.repo.updateItemRetraction(item.id, false, null, null, now);
-          updatedItemIds.push(item.id);
-        }
-        // unknown: leave stored status untouched
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Error scanning item ${item.id}: ${msg}`);
-      }
+        }),
+      );
     }
 
     if (updatedItemIds.length > 0) {

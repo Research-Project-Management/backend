@@ -64,3 +64,5 @@ export async function disambiguateCitationKey(
   }
   return `${cleanKey}-${counter}`;
 }
+
+export { disambiguateCitationKey as disambiguate };

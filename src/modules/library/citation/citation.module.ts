@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
 import { CatalogModule } from '@/modules/library/catalog/catalog.module';
+import { IngestionModule } from '@/modules/library/ingestion/ingestion.module';
 import { CitationFacade, CITATION_FACADE } from './citation.facade';
 
 // Presentation
@@ -39,7 +40,7 @@ import { CslStyleRegistry } from './domain/csl-style-registry';
  * - PDF Annotation Baking
  */
 @Module({
-  imports: [CoreModule, CatalogModule],
+  imports: [CoreModule, CatalogModule, IngestionModule],
   controllers: [CitationController, ExportsController],
   providers: [
     CitationFacade,

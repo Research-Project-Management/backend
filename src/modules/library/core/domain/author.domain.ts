@@ -117,13 +117,16 @@ export function isNoiseAuthorName(raw?: string | null): boolean {
   const trimmed = raw.trim();
   if (!trimmed) return true;
 
-  // Single non-word character or too short non-alphabetic
-  if (trimmed.length <= 1 && !/[a-zA-Z]/.test(trimmed)) return true;
+  // Single non-letter character or too short non-alphabetic
+  if (trimmed.length <= 1 && !/\p{L}/u.test(trimmed)) return true;
+
+  // Reject explicit N/A placeholder, while preserving real surnames "Na" and "Nil"
+  if (/^(?:n\/a|n\.a\.|undefined|null)$/i.test(trimmed)) return true;
 
   // Collapse non-alpha characters to match against known noise blacklist
   // Handles letter-spaced headers: "A B S T R A C T", "A BSTRACT", "I N T R O D U C T I O N"
   const collapsed = trimmed.toLowerCase().replace(/[^a-z]/g, '');
-  if (NOISE_AUTHOR_WORDS.has(collapsed)) return true;
+  if (collapsed && NOISE_AUTHOR_WORDS.has(collapsed)) return true;
 
   const lower = trimmed.toLowerCase();
 
@@ -659,6 +662,9 @@ export function isPlausibleAuthorName(name?: string | null): boolean {
   return tokens.every(
     (t) =>
       /^\p{Lu}/u.test(t) ||
+      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
+        t,
+      ) ||
       PREFIX_PARTICLES.has(t.toLowerCase()) ||
       !/\p{L}/u.test(t),
   );
@@ -703,5 +709,3 @@ export function splitConcatenatedAuthors(raw: string, minTokens = 6): string[] {
   }
   return names.length >= 2 ? names : [input];
 }
-
-export { extractCreatorString, mergeCanonicalCreators } from './creator-normalizer.domain';

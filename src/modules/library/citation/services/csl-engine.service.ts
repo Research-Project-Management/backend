@@ -71,6 +71,7 @@ export class CslEngineService implements OnModuleInit {
     string,
     { result: EngineCitationResult; expiresAt: number }
   >();
+  private readonly cslItemFingerprintCache = new WeakMap<object, string>();
   private readonly maxCacheEntries = 2000;
   constructor(
     @Optional()
@@ -84,7 +85,125 @@ export class CslEngineService implements OnModuleInit {
     private readonly formatter: CslStyleFormatterService = new CslStyleFormatterService(),
   ) {}
 
-  private getCacheKey(
+  private getOrComputeContentFingerprint(cslItem: CslItemData): string {
+    if (cslItem && typeof cslItem === 'object') {
+      const cached = this.cslItemFingerprintCache.get(cslItem);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+
+    const formatDateSig = (d?: {
+      'date-parts'?: Array<Array<number | string>>;
+      literal?: string;
+      raw?: string;
+      circa?: boolean | string | number;
+      season?: number | string;
+    }) => {
+      if (!d) return '';
+      const dp = Array.isArray(d['date-parts'])
+        ? d['date-parts']
+            .map((p) => (Array.isArray(p) ? p.join('-') : ''))
+            .join('/')
+        : '';
+      return `${dp}:${d.literal || ''}:${d.raw || ''}:${d.season ?? ''}:${d.circa ? 'c' : ''}`;
+    };
+    const date = formatDateSig(cslItem.issued);
+    const accessed = formatDateSig(cslItem.accessed);
+    const submitted = formatDateSig(cslItem.submitted);
+    const ver =
+      cslItem.version ||
+      (typeof cslItem._version === 'string' ? cslItem._version : '') ||
+      '';
+    const updated =
+      typeof cslItem._updatedAt === 'string' ||
+      typeof cslItem._updatedAt === 'number'
+        ? String(cslItem._updatedAt)
+        : '';
+    const formatNamesSig = (list?: CslName[]) =>
+      Array.isArray(list) && list.length > 0
+        ? list
+            .map(
+              (n) =>
+                `${n.family || ''}:${n.given || ''}:${n.literal || ''}:${n.suffix || ''}`,
+            )
+            .join(';')
+        : '';
+    const authorSig = formatNamesSig(cslItem.author);
+    const editorSig = formatNamesSig(cslItem.editor);
+    const translatorSig = formatNamesSig(cslItem.translator);
+    const rec = cslItem as Record<string, unknown>;
+    const extendedCreatorSigs = (
+      [
+        'director',
+        'composer',
+        'interviewer',
+        'recipient',
+        'reviewed-author',
+        'collection-editor',
+        'container-author',
+        'contributor',
+      ] as const
+    )
+      .map((role) => formatNamesSig(rec[role] as CslName[] | undefined))
+      .join('|');
+    const contentFingerprint = [
+      cslItem.type || '',
+      cslItem.title || '',
+      cslItem['title-short'] || '',
+      authorSig,
+      editorSig,
+      translatorSig,
+      extendedCreatorSigs,
+      cslItem['container-title'] || '',
+      cslItem['container-title-short'] || '',
+      cslItem['collection-title'] || '',
+      cslItem['collection-number'] ?? '',
+      cslItem.volume ?? '',
+      cslItem['number-of-volumes'] ?? '',
+      cslItem.issue ?? '',
+      cslItem.number ?? '',
+      cslItem.edition ?? '',
+      cslItem.page || '',
+      cslItem['number-of-pages'] ?? '',
+      cslItem.section || '',
+      String(rec['chapter-number'] ?? rec.chapter ?? ''),
+      cslItem.DOI || '',
+      cslItem.ISBN || '',
+      cslItem.ISSN || '',
+      cslItem.URL || '',
+      accessed,
+      submitted,
+      cslItem.publisher || '',
+      cslItem['publisher-place'] || '',
+      cslItem.genre || '',
+      cslItem.medium || String(rec.medium ?? ''),
+      cslItem.status || '',
+      cslItem.version || '',
+      cslItem.language || '',
+      cslItem.abstract || '',
+      cslItem.keyword || '',
+      cslItem.note || '',
+      cslItem.annote || '',
+      cslItem.PMID || '',
+      cslItem.PMCID || '',
+      cslItem['event-title'] || '',
+      cslItem['event-place'] || '',
+      cslItem.authority || '',
+      cslItem.archive || '',
+      cslItem['archive-location'] || cslItem.archive_location || '',
+      cslItem['call-number'] || '',
+      cslItem.rights || '',
+    ].join('|');
+
+    const fullDigest = `${date}::${ver}::${updated}::${contentFingerprint}`;
+    if (cslItem && typeof cslItem === 'object') {
+      this.cslItemFingerprintCache.set(cslItem, fullDigest);
+    }
+    return fullDigest;
+  }
+
+  public buildCacheKey(
     cslItem: CslItemData,
     style: string,
     index?: number,
@@ -95,17 +214,16 @@ export class CslEngineService implements OnModuleInit {
       cslItem.DOI ||
       cslItem.title ||
       '';
-    const date = cslItem.issued?.['date-parts']?.[0]?.[0] || '';
-    const ver =
-      cslItem.version ||
-      (typeof cslItem._version === 'string' ? cslItem._version : '') ||
-      '';
-    const updated =
-      typeof cslItem._updatedAt === 'string' ||
-      typeof cslItem._updatedAt === 'number'
-        ? String(cslItem._updatedAt)
-        : '';
-    return `${rawId}::${style}::${date}::${ver}::${updated}${index !== undefined ? `::${index}` : ''}`;
+    const digest = this.getOrComputeContentFingerprint(cslItem);
+    return `${rawId}::${style}::${digest}${index !== undefined ? `::${index}` : ''}`;
+  }
+
+  private getCacheKey(
+    cslItem: CslItemData,
+    style: string,
+    index?: number,
+  ): string {
+    return this.buildCacheKey(cslItem, style, index);
   }
 
   private getCached(key: string): EngineCitationResult | null {
@@ -151,8 +269,12 @@ export class CslEngineService implements OnModuleInit {
     return this.loader.isStyleSupported(styleId);
   }
 
-  public async ensureTemplate(styleId: string): Promise<boolean> {
-    return this.loader.ensureTemplate(styleId);
+  public async ensureTemplate(
+    styleId: string,
+    scopeId?: string,
+    rawXml?: string,
+  ): Promise<boolean> {
+    return this.loader.ensureTemplate(styleId, scopeId, rawXml);
   }
 
   public initTemplates(): void {
@@ -167,36 +289,55 @@ export class CslEngineService implements OnModuleInit {
     cslItem: CslItemData,
     styleId: string = 'apa',
     index: number = 1,
+    scopeId?: string,
   ): Promise<EngineCitationResult> {
-    await this.ensureTemplate(styleId);
+    await this.ensureTemplate(styleId, scopeId);
     return this.format(cslItem, styleId, index);
   }
 
   public async formatBatchAsync(
     cslItems: CslItemData[],
     styleId: string = 'apa',
+    scopeId?: string,
   ) {
-    await this.ensureTemplate(styleId);
+    await this.ensureTemplate(styleId, scopeId);
     const normalizedStyle = this.normalizeStyle(styleId);
     if (
-      normalizedStyle !== 'bibtex' &&
-      normalizedStyle !== 'ris' &&
-      normalizedStyle !== 'tcvn' &&
-      normalizedStyle !== 'tcvn-numeric' &&
-      normalizedStyle !== 'auto' &&
-      normalizedStyle !== 'auto-numeric'
+      cslItems.length === 0 ||
+      normalizedStyle === 'bibtex' ||
+      normalizedStyle === 'ris' ||
+      normalizedStyle === 'tcvn' ||
+      normalizedStyle === 'tcvn-numeric' ||
+      normalizedStyle === 'auto' ||
+      normalizedStyle === 'auto-numeric'
     ) {
-      for (let i = 0; i < cslItems.length; i++) {
-        if (
-          i > 0 &&
-          i % CslEngineService.EVENT_LOOP_YIELD_BATCH_SIZE === 0
-        ) {
-          await new Promise((resolve) => setImmediate(resolve));
-        }
-        this.format(cslItems[i], normalizedStyle, i + 1);
-      }
+      return this.formatBatch(cslItems, styleId);
     }
-    return this.formatBatch(cslItems, styleId);
+
+    const preformattedCitations: Array<{
+      id: string;
+      inText: string;
+      bibliography: string;
+      bibliographyHtml?: string;
+    }> = [];
+
+    for (let i = 0; i < cslItems.length; i++) {
+      if (
+        i > 0 &&
+        i % CslEngineService.EVENT_LOOP_YIELD_BATCH_SIZE === 0
+      ) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      const single = this.format(cslItems[i], normalizedStyle, i + 1);
+      preformattedCitations.push({
+        id: cslItems[i].id,
+        inText: single.inText,
+        bibliography: single.bibliography,
+        bibliographyHtml: single.bibliographyHtml,
+      });
+    }
+
+    return this.formatBatch(cslItems, styleId, preformattedCitations);
   }
 
   public format(
@@ -252,8 +393,10 @@ export class CslEngineService implements OnModuleInit {
       );
     }
 
+    let citeInstance: CiteInstance | null = null;
     try {
-      const cite = new Cite(cslItem);
+      citeInstance = new Cite(cslItem);
+      const cite = citeInstance;
       let bibliography = cite
         .format('bibliography', { template: normalizedStyle, lang: 'en-US' })
         .trim();
@@ -334,7 +477,7 @@ export class CslEngineService implements OnModuleInit {
         });
       }
 
-      const cite = new Cite(cslItem);
+      const cite = citeInstance ?? new Cite(cslItem);
       return this.setCache(cacheKey, {
         styleId: normalizedStyle,
         inText: cite
@@ -362,6 +505,12 @@ export class CslEngineService implements OnModuleInit {
   public formatBatch(
     cslItems: CslItemData[],
     styleId: string = 'apa',
+    preformattedCitations?: Array<{
+      id: string;
+      inText: string;
+      bibliography: string;
+      bibliographyHtml?: string;
+    }>,
   ): {
     styleId: string;
     combinedInText: string;
@@ -436,15 +585,17 @@ export class CslEngineService implements OnModuleInit {
       );
     }
 
-    const citations = cslItems.map((item, idx) => {
-      const single = this.format(item, normalizedStyle, idx + 1);
-      return {
-        id: item.id,
-        inText: single.inText,
-        bibliography: single.bibliography,
-        bibliographyHtml: single.bibliographyHtml,
-      };
-    });
+    const citations =
+      preformattedCitations ??
+      cslItems.map((item, idx) => {
+        const single = this.format(item, normalizedStyle, idx + 1);
+        return {
+          id: item.id,
+          inText: single.inText,
+          bibliography: single.bibliography,
+          bibliographyHtml: single.bibliographyHtml,
+        };
+      });
 
     const buildFallbackCombinedInText = () => {
       const isNumeric = NUMERIC_STYLE_TOKENS.some((s) =>

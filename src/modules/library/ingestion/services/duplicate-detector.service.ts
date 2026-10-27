@@ -18,7 +18,7 @@ import {
 } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
 import { TransactionService } from '@/modules/library/sync';
-import { ItemsMapper } from '@/modules/library/catalog/catalog.facade';
+import { ItemsMapper, ItemCacheCoordinator } from '@/modules/library/catalog';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   DuplicateClusterResult,
@@ -40,6 +40,12 @@ import {
   normalizePmid,
   normalizeIsbn,
 } from '@/modules/library/core';
+import {
+  RawDuplicateCluster,
+  mapCandidateToClusterItem,
+  collectExactIdentifierClusters,
+  collectFuzzyTitleYearAuthorClusters,
+} from '@/modules/library/ingestion/domain/duplicate-clustering.helper';
 
 export function asMetaObject(val: unknown): Record<string, unknown> {
   return val && typeof val === 'object' && !Array.isArray(val)
@@ -78,6 +84,8 @@ export class DuplicateDetectorService {
     private readonly libraryTx?: TransactionService,
     @Optional()
     private readonly cache?: RedisCacheService,
+    @Optional()
+    private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 
   normalizeScopeProjectId(
@@ -334,50 +342,85 @@ export class DuplicateDetectorService {
             userId: String(userId),
             projectId: effectiveProjectId,
           };
-          for (const item of items) {
-            const meta = { ...asMetaObject(item.metadata) };
-            const existingDismissed = Array.isArray(meta.dismissedDuplicateIds)
-              ? (meta.dismissedDuplicateIds as string[])
-              : [];
-            const peerIds = uniqueIds.filter((id) => id !== item.id);
-            meta.dismissedDuplicateIds = Array.from(
-              new Set([...existingDismissed, ...peerIds]),
-            );
+          const updatedResults = await Promise.all(
+            items.map(async (item) => {
+              const meta = { ...asMetaObject(item.metadata) };
+              const existingDismissed = Array.isArray(meta.dismissedDuplicateIds)
+                ? (meta.dismissedDuplicateIds as string[])
+                : [];
+              const peerIds = uniqueIds.filter((id) => id !== item.id);
+              meta.dismissedDuplicateIds = Array.from(
+                new Set([...existingDismissed, ...peerIds]),
+              );
 
-            const updated = await tx.item.update({
-              where: { id: item.id },
-              data: {
-                metadata: meta as Prisma.InputJsonValue,
-                version: { increment: 1 },
-              },
-            });
-
-            if (helpers) {
-              await helpers.appendChange(eventScope, {
-                entityType: 'Item',
-                entityId: item.id,
-                action: 'update',
-                version: updated.version,
-                data: updated,
+              const updated = await tx.item.update({
+                where: { id: item.id },
+                data: {
+                  metadata: meta as Prisma.InputJsonValue,
+                  version: { increment: 1 },
+                },
               });
-              await helpers.publishOutbox(
-                eventScope,
-                item.id,
-                LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-                {
+
+              return { item, updated, dismissedDuplicateIds: meta.dismissedDuplicateIds };
+            }),
+          );
+
+          if (helpers && updatedResults.length > 0) {
+            const changeEntries = updatedResults.map(({ item, updated }) => ({
+              entityType: 'Item' as const,
+              entityId: item.id,
+              action: 'update' as const,
+              version: updated.version,
+              data: ItemsMapper.toDomain({
+                ...item,
+                ...updated,
+              } as unknown as Parameters<typeof ItemsMapper.toDomain>[0]),
+            }));
+            const outboxEvents = updatedResults.map(
+              ({ item, dismissedDuplicateIds }) => ({
+                aggregateId: item.id,
+                eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+                payload: {
                   itemId: item.id,
                   userId: String(userId),
                   projectId: effectiveProjectId,
-                  dismissedDuplicateIds: meta.dismissedDuplicateIds,
+                  dismissedDuplicateIds,
                 },
-              );
+              }),
+            );
+
+            if (helpers.appendChangesBatch) {
+              await helpers.appendChangesBatch(eventScope, changeEntries);
+            } else {
+              for (const entry of changeEntries) {
+                await helpers.appendChange(eventScope, entry);
+              }
+            }
+
+            if (helpers.publishOutboxBatch) {
+              await helpers.publishOutboxBatch(eventScope, outboxEvents);
+            } else {
+              for (const ev of outboxEvents) {
+                await helpers.publishOutbox(
+                  eventScope,
+                  ev.aggregateId,
+                  ev.eventType,
+                  ev.payload,
+                );
+              }
             }
           }
         },
       );
     }
 
-    if (this.cache) {
+    if (this.cacheCoordinator) {
+      await this.cacheCoordinator.invalidateForWrite({
+        userId: String(userId),
+        projectId: effectiveProjectId,
+        itemIds: uniqueIds,
+      });
+    } else if (this.cache) {
       try {
         const scopeKey = effectiveProjectId
           ? `proj:${effectiveProjectId}`
@@ -419,65 +462,10 @@ export class DuplicateDetectorService {
         )
       : [];
 
-    const getItemAuthors = (
-      item: DuplicateCandidateItem & { authors?: string[] },
-    ): string[] => {
-      const fromContributors = extractContributorAuthors(item);
-      return fromContributors.length > 0
-        ? fromContributors
-        : item.authors || [];
-    };
-
-    const mapToClusterItem = (
-      m: DuplicateCandidateItem,
-      hydratedRaw?: Record<string, unknown>,
-    ): DuplicateClusterItem => {
-      const source = hydratedRaw ? { ...m, ...hydratedRaw } : m;
-      const domainProjected = (hydratedRaw &&
-      Array.isArray(hydratedRaw.creators) &&
-      Array.isArray(hydratedRaw.tags) &&
-      typeof hydratedRaw.createdAt === 'string'
-        ? hydratedRaw
-        : ItemsMapper.toDomain({
-            ...source,
-            itemType: this.resolveItemType(source),
-            authors: getItemAuthors(
-              source as unknown as DuplicateCandidateItem & {
-                authors?: string[];
-              },
-            ),
-          })) as unknown as DuplicateClusterItem;
-
-      return {
-        ...domainProjected,
-        id: m.id,
-        title: domainProjected.title || m.title,
-        itemType:
-          domainProjected.itemType ||
-          this.resolveItemType(m) ||
-          'journalArticle',
-        doi: (domainProjected.doi || m.doi) ?? undefined,
-        year: domainProjected.year ?? m.year ?? undefined,
-        authors:
-          Array.isArray(domainProjected.authors) &&
-          domainProjected.authors.length > 0
-            ? domainProjected.authors
-            : getItemAuthors(m),
-        citationKey:
-          (domainProjected.citationKey || m.citationKey) ?? undefined,
-      };
-    };
-
     const candidateById = new Map<string, DuplicateCandidateItem>(
       items.map((it) => [it.id, it]),
     );
-    const rawClusters: Array<{
-      clusterId: string;
-      matchReason: DuplicateClusterResult['matchReason'];
-      confidence: number;
-      recommendedMasterId: string;
-      rawGroup: DuplicateCandidateItem[];
-    }> = [];
+    const rawClusters: RawDuplicateCluster[] = [];
     const groupedItemIds = new Set<string>();
 
     // Tier 0: Ingestion-Suspect Pairs
@@ -519,141 +507,25 @@ export class DuplicateDetectorService {
     }
 
     // Tier 1: Exact Academic Identifiers (DOI, arXiv, PMID, ISBN)
-    const clusterByIdentifier = (
-      idType: string,
-      getIdFn: (it: DuplicateCandidateItem) => string | null | undefined,
-      matchReason: 'EXACT_DOI' | 'EXACT_ARXIV' | 'EXACT_PMID' | 'EXACT_ISBN',
-    ) => {
-      const map = new Map<string, DuplicateCandidateItem[]>();
-      for (const item of items) {
-        if (groupedItemIds.has(item.id)) continue;
-        const clean = String(getIdFn(item) || '')
-          .toLowerCase()
-          .trim();
-        if (!clean) continue;
-        const existing = map.get(clean) || [];
-        existing.push(item);
-        map.set(clean, existing);
-      }
-
-      map.forEach((matchedItems, idVal) => {
-        if (matchedItems.length <= 1) return;
-        const visitedInBucket = new Set<string>();
-
-        for (let i = 0; i < matchedItems.length; i++) {
-          const seed = matchedItems[i];
-          if (visitedInBucket.has(seed.id) || groupedItemIds.has(seed.id)) {
-            continue;
-          }
-
-          const compatibleGroup: DuplicateCandidateItem[] = [seed];
-          for (let j = i + 1; j < matchedItems.length; j++) {
-            const candidate = matchedItems[j];
-            if (
-              visitedInBucket.has(candidate.id) ||
-              groupedItemIds.has(candidate.id)
-            ) {
-              continue;
-            }
-            if (
-              compatibleGroup.every((existing) =>
-                this.areCompatibleIdentifierDuplicates(
-                  candidate,
-                  existing,
-                  idType,
-                ),
-              )
-            ) {
-              compatibleGroup.push(candidate);
-              visitedInBucket.add(candidate.id);
-            }
-          }
-
-          if (compatibleGroup.length > 1) {
-            visitedInBucket.add(seed.id);
-            compatibleGroup.forEach((m) => groupedItemIds.add(m.id));
-            rawClusters.push({
-              clusterId: `${idType}-${idVal.replace(/[^a-z0-9]/g, '-').substring(0, 32)}`,
-              matchReason,
-              confidence: 1.0,
-              recommendedMasterId:
-                this.computeRecommendedMasterId(compatibleGroup),
-              rawGroup: compatibleGroup,
-            });
-          }
-        }
-      });
-    };
-
-    const idSpecs: Array<['doi' | 'arxivId' | 'pmid' | 'isbn', (val?: string | null) => string | undefined, 'EXACT_DOI' | 'EXACT_ARXIV' | 'EXACT_PMID' | 'EXACT_ISBN']> = [
-      ['doi', normalizeDoi, 'EXACT_DOI'],
-      ['arxivId', (val) => normalizeArxivId(val, { stripVersion: true }), 'EXACT_ARXIV'],
-      ['pmid', normalizePmid, 'EXACT_PMID'],
-      ['isbn', normalizeIsbn, 'EXACT_ISBN'],
-    ];
-    for (const [field, normFn, reason] of idSpecs) {
-      clusterByIdentifier(
-        field,
-        (it) => normFn((getEffectiveItemField(it, field) as string | undefined) || undefined),
-        reason,
-      );
-    }
+    collectExactIdentifierClusters({
+      items,
+      groupedItemIds,
+      rawClusters,
+      getEffectiveItemField: (it, f) => getEffectiveItemField(it, f),
+      areCompatibleIdentifierDuplicates: (a, b, idType) =>
+        this.areCompatibleIdentifierDuplicates(a, b, idType),
+      computeRecommendedMasterId: (grp) => this.computeRecommendedMasterId(grp),
+    });
 
     // Tier 2: Fuzzy Title + Year (+/-1) + First Author
-    const fuzzyBuckets = new Map<string, DuplicateCandidateItem[]>();
-    for (const item of items) {
-      if (groupedItemIds.has(item.id)) continue;
-      if (normalizeTitleForDedupe(item.title).length < 5) continue;
-      const bucketKey = generateDedupeBucketKey(
-        item.title,
-        getItemAuthors(item),
-      );
-      const bucket = fuzzyBuckets.get(bucketKey) || [];
-      bucket.push(item);
-      fuzzyBuckets.set(bucketKey, bucket);
-    }
-
-    fuzzyBuckets.forEach((bucket, key) => {
-      if (bucket.length <= 1) return;
-      const visited = new Set<string>();
-
-      for (let i = 0; i < bucket.length; i++) {
-        const itemA = bucket[i];
-        if (visited.has(itemA.id) || groupedItemIds.has(itemA.id)) continue;
-
-        const group = [itemA];
-        for (let j = i + 1; j < bucket.length; j++) {
-          const itemB = bucket[j];
-          if (visited.has(itemB.id) || groupedItemIds.has(itemB.id)) continue;
-          if (this.isDismissedPair(itemA, itemB)) continue;
-          if (this.hasConflictingTier2BibliographicEvidence(itemA, itemB)) {
-            continue;
-          }
-
-          const yearMatch =
-            itemA.year == null ||
-            itemB.year == null ||
-            Math.abs(itemA.year - itemB.year) <= 1;
-          if (
-            yearMatch &&
-            calculateTitleSimilarity(itemA.title, itemB.title) >= 0.88
-          ) {
-            group.push(itemB);
-            visited.add(itemB.id);
-          }
-        }
-
-        if (group.length > 1) {
-          group.forEach((g) => groupedItemIds.add(g.id));
-          rawClusters.push({
-            clusterId: `fuzzy-${key.replace(/[^a-z0-9]/g, '-').substring(0, 24)}-${itemA.id.substring(0, 8)}`,
-            matchReason: 'FUZZY_TITLE_YEAR_AUTHOR',
-            confidence: 0.85,
-            recommendedMasterId: this.computeRecommendedMasterId(group),
-            rawGroup: group,
-          });
-        }
-      }
+    collectFuzzyTitleYearAuthorClusters({
+      items,
+      groupedItemIds,
+      rawClusters,
+      isDismissedPair: (a, b) => this.isDismissedPair(a, b),
+      hasConflictingTier2BibliographicEvidence: (a, b) =>
+        this.hasConflictingTier2BibliographicEvidence(a, b),
+      computeRecommendedMasterId: (grp) => this.computeRecommendedMasterId(grp),
     });
 
     const hydratedRawById = new Map<string, Record<string, unknown>>();
@@ -684,7 +556,17 @@ export class DuplicateDetectorService {
 
     return rawClusters.map((rc) => {
       const mappedItems = rc.rawGroup.map((m) =>
-        mapToClusterItem(m, hydratedRawById.get(m.id)),
+        mapCandidateToClusterItem(
+          m,
+          (it) =>
+            this.resolveItemType(
+              it as {
+                itemType?: string | null;
+                metadata?: Record<string, unknown> | null;
+              },
+            ),
+          hydratedRawById.get(m.id),
+        ),
       );
       return {
         clusterId: rc.clusterId,

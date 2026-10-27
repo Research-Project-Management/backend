@@ -4,7 +4,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { CoreModule as AppCoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
 
-import { LIBRARY_OUTBOX_QUEUE } from './types/outbox.constants';
+import { LIBRARY_OUTBOX_QUEUE } from './domain/outbox.domain';
 import { OutboxQueueConsumer } from './services/outbox-queue.consumer';
 import { TransactionService } from './services/transaction.service';
 import { ChangeLogRepository } from './repositories/changelog.repository';

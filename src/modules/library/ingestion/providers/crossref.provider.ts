@@ -1,12 +1,9 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { Injectable, Optional } from '@nestjs/common';
 import {
-  MetadataProvider,
   MetadataRequest,
   ProviderCapability,
   ProviderName,
   ProviderResult,
-  QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeDoi,
@@ -14,22 +11,20 @@ import {
   normalizeIssn,
   cleanBibliographicText,
   cleanAbstractText,
-  titleSimilarity,
   TITLE_MATCH_THRESHOLD,
   AcademicHttpClient,
   LibraryConfigService,
   libraryConfig,
-} from '@/modules/library/core';
-import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import { getAcademicContactEmail } from '@/modules/library/core/constants/academic-client.constants';
-import {
   CSL_TYPE_TO_ITEM_TYPE,
   normalizePageRange,
 } from '@/modules/library/core';
+import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
+import { getAcademicContactEmail } from '@/modules/library/core/constants/academic-client.constants';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+import { AbstractAcademicProvider } from './abstract-academic.provider';
 
 @Injectable()
-export class CrossRefProvider implements MetadataProvider {
+export class CrossRefProvider extends AbstractAcademicProvider {
   readonly id: ProviderName = 'CrossRef';
   readonly capabilities: ProviderCapability = {
     queryTypes: ['DOI', 'TITLE'],
@@ -38,12 +33,12 @@ export class CrossRefProvider implements MetadataProvider {
     maxConcurrency: 2,
   };
 
-  private readonly logger = new Logger(CrossRefProvider.name);
-
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
-  ) {}
+  ) {
+    super(httpClient);
+  }
 
   private get mailto(): string {
     return (
@@ -61,16 +56,7 @@ export class CrossRefProvider implements MetadataProvider {
       'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
       Accept: 'application/json',
     };
-    if (this.httpClient) {
-      const { response } = await this.httpClient.request(url, { headers, signal });
-      return response;
-    }
-    return fetch(url, { headers, signal });
-  }
-
-  supports(input: QueryType | MetadataRequest): boolean {
-    const type = typeof input === 'string' ? input : input?.queryType;
-    return type ? this.capabilities.queryTypes.includes(type) : false;
+    return this.executeHttpFetch(url, signal, headers);
   }
 
   async resolve(
@@ -105,10 +91,7 @@ export class CrossRefProvider implements MetadataProvider {
     }
 
     if (!response.ok) {
-      const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterMs = retryAfterHeader
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : undefined;
+      const retryAfterMs = this.parseRetryAfterHeader(response);
       throw new ProviderFetchError(
         `CrossRef API HTTP ${response.status} for DOI: ${doi}`,
         response.status,
@@ -148,10 +131,7 @@ export class CrossRefProvider implements MetadataProvider {
     if (response.status === 404) return null;
 
     if (!response.ok) {
-      const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterMs = retryAfterHeader
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : undefined;
+      const retryAfterMs = this.parseRetryAfterHeader(response);
       throw new ProviderFetchError(
         `CrossRef search HTTP ${response.status} for title: ${cleanTitle}`,
         response.status,
@@ -177,21 +157,18 @@ export class CrossRefProvider implements MetadataProvider {
     } | null;
     const items = payload?.message?.items || [];
 
-    let best: Record<string, unknown> | undefined;
-    let bestScore = 0;
-    for (const candidate of items) {
-      const candTitle = Array.isArray(candidate.title)
-        ? String(candidate.title[0] ?? '')
-        : typeof candidate.title === 'string'
-          ? candidate.title
-          : '';
-      const score = titleSimilarity(cleanTitle, candTitle);
-      if (score > bestScore) {
-        best = candidate;
-        bestScore = score;
-      }
-    }
-    if (!best || bestScore < TITLE_MATCH_THRESHOLD) {
+    const { bestMatch: best, bestScore } = this.rankBestTitleCandidate(
+      items,
+      cleanTitle,
+      (candidate) =>
+        Array.isArray(candidate.title)
+          ? String(candidate.title[0] ?? '')
+          : typeof candidate.title === 'string'
+            ? candidate.title
+            : '',
+      TITLE_MATCH_THRESHOLD,
+    );
+    if (!best) {
       this.logger.debug(
         `CrossRef title search rejected for "${cleanTitle}" (best similarity ${bestScore.toFixed(2)})`,
       );
@@ -216,7 +193,10 @@ export class CrossRefProvider implements MetadataProvider {
       : typeof rawTitle === 'string'
         ? rawTitle
         : 'Untitled';
-    const baseTitle = cleanBibliographicText(rawTitleStr) || 'Untitled';
+    const baseTitle =
+      rawTitleStr && rawTitleStr !== 'Untitled'
+        ? cleanBibliographicText(rawTitleStr) || ''
+        : '';
 
     const rawSubtitle = Array.isArray(message.subtitle)
       ? typeof message.subtitle[0] === 'string'
@@ -231,7 +211,7 @@ export class CrossRefProvider implements MetadataProvider {
       baseTitle !== 'Untitled' &&
       !baseTitle.toLowerCase().includes(subtitle.toLowerCase())
         ? `${baseTitle.replace(/[\s:]+$/, '')}: ${subtitle}`
-        : baseTitle;
+        : baseTitle || undefined;
 
     const authors: string[] = [];
     const creators: Array<{
@@ -430,10 +410,6 @@ export class CrossRefProvider implements MetadataProvider {
         : undefined;
     const proceedingsTitle = cleanBibliographicText(rawProceedingsStr);
 
-    const rawVersion = createHash('md5')
-      .update(JSON.stringify(message))
-      .digest('hex');
-
     // Extract institution object/array (used by CrossRef for dissertation, report, posted-content, dataset)
     let institutionName: string | undefined;
     let institutionPlace: string | undefined;
@@ -575,7 +551,7 @@ export class CrossRefProvider implements MetadataProvider {
     const explicitShortTitle = cleanBibliographicText(rawShortTitle);
     const shortTitle =
       explicitShortTitle ||
-      (subtitle && title !== baseTitle && baseTitle !== 'Untitled'
+      (subtitle && title && title !== baseTitle && baseTitle
         ? baseTitle
         : undefined);
 
@@ -608,8 +584,13 @@ export class CrossRefProvider implements MetadataProvider {
         ? reportNumberStr
         : undefined;
 
-    return {
-      provider: this.id,
+    return this.buildProviderResult({
+      identifier: doi || title || 'crossref',
+      rawPayload: message,
+      confidenceScore: isDirectDoi ? 0.99 : 0.85,
+      canonicalId: doi ? `doi:${doi}` : `crossref:${title}`,
+      sourceUrl: rawUrl,
+      isOpenAccess,
       metadata: {
         doi: doi || undefined,
         title,
@@ -672,20 +653,7 @@ export class CrossRefProvider implements MetadataProvider {
         keywords: keywords.length ? keywords : undefined,
         itemType,
         libraryCatalog: 'DOI.org (Crossref)',
-        provenance: {
-          originProvider: this.id,
-          resolvedAt: new Date().toISOString(),
-          canonicalId: doi ? `doi:${doi}` : `crossref:${title}`,
-          canonicalUrl: rawUrl,
-          confidenceScore: isDirectDoi ? 0.99 : 0.85,
-          rawSnapshotHash: rawVersion,
-          isOpenAccess,
-        },
       },
-      confidence: isDirectDoi ? 0.99 : 0.85,
-      identifier: doi || title,
-      fetchedAt: new Date().toISOString(),
-      rawVersion,
-    };
+    });
   }
 }

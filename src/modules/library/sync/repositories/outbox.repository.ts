@@ -21,6 +21,18 @@ export class OutboxRepository {
     return tx || this.prisma;
   }
 
+  private normalizeUserId(userId?: string | null): string {
+    const trimmed = (userId || '').trim();
+    if (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        trimmed,
+      )
+    ) {
+      return trimmed;
+    }
+    return '00000000-0000-0000-0000-000000000000';
+  }
+
   async publishOutboxBatch(
     events: PublishOutboxInput[],
     tx?: Prisma.TransactionClient,
@@ -30,7 +42,7 @@ export class OutboxRepository {
 
     const data: Prisma.OutboxEventCreateManyInput[] = events.map((ev) => ({
       id: randomUUID(),
-      userId: ev.userId || '',
+      userId: this.normalizeUserId(ev.userId),
       projectId: ev.projectId || null,
       aggregateId: ev.aggregateId,
       eventType: ev.eventType,
@@ -119,6 +131,7 @@ export class OutboxRepository {
     id: string,
     workerId: string,
     leaseMs: number = 60000,
+    ignoreSchedule = false,
   ): Promise<boolean> {
     const now = new Date();
     const claimResult = await this.prisma.outboxEvent.updateMany({
@@ -127,7 +140,9 @@ export class OutboxRepository {
         OR: [
           {
             status: OutboxStatus.PENDING,
-            OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
+            ...(ignoreSchedule
+              ? {}
+              : { OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }] }),
           },
           { status: OutboxStatus.PROCESSING, leaseExpiresAt: { lte: now } },
         ],

@@ -5,6 +5,7 @@ import {
 } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import { ParsedBibtexEntry } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { ItemProvenancePolicy } from '@/modules/library/core';
 
 export function buildEvidenceFields(
   rawMetadata: Record<string, unknown>,
@@ -63,6 +64,85 @@ export function createCandidate(params: {
     },
     normalizedMetadata: normalized,
     confidenceScore: params.confidenceScore,
+  };
+}
+
+/**
+ * Applies explicit user overrides onto an identified MetadataCandidate so that both
+ * `normalizedMetadata` AND `fields` (`FieldEvidence`) carry `UserOverride` provenance
+ * (`confidence: 1.0`, `isUserOverride: true`) and survive downstream reconciliation.
+ */
+export function applyUserOverridesToCandidate(
+  candidate: MetadataCandidate,
+  overrides: Record<string, unknown> | undefined,
+  normalizer: NormalizationPolicy,
+): MetadataCandidate {
+  if (!overrides || Object.keys(overrides).length === 0) {
+    return candidate;
+  }
+
+  // Clear coupled aliases from base candidate metadata before merging overrides so stale candidate
+  // alias values (e.g. `journal` when user overrode `publicationTitle`) cannot survive normalization.
+  const baseMetaClean: Record<string, unknown> = {
+    ...(candidate.normalizedMetadata || {}),
+  };
+  const explicitOverrideKeys = new Set<string>();
+  const coupledOverrideKeys = new Set<string>();
+
+  for (const [key, rawVal] of Object.entries(overrides)) {
+    if (rawVal === undefined || rawVal === null) continue;
+    explicitOverrideKeys.add(key);
+    for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(key)) {
+      if (!(alias in overrides)) {
+        delete baseMetaClean[alias];
+      }
+      coupledOverrideKeys.add(alias);
+    }
+  }
+
+  const mergedNormalized = normalizer.normalize({
+    ...baseMetaClean,
+    ...overrides,
+  });
+  const nowIso = new Date().toISOString();
+  const updatedFields: Record<string, FieldEvidence> = {
+    ...(candidate.fields || {}),
+  };
+
+  for (const key of explicitOverrideKeys) {
+    const rawVal = overrides[key];
+    const normVal =
+      (mergedNormalized as Record<string, unknown>)[key] ?? rawVal;
+    updatedFields[key] = {
+      path: key,
+      value: rawVal,
+      normalizedValue: normVal,
+      confidence: 1.0,
+      sourceProvider: 'UserOverride',
+      retrievedAt: nowIso,
+      isUserOverride: true,
+    };
+  }
+
+  for (const aliasKey of coupledOverrideKeys) {
+    if (explicitOverrideKeys.has(aliasKey)) continue;
+    const aliasVal = (mergedNormalized as Record<string, unknown>)[aliasKey];
+    if (aliasVal === undefined || aliasVal === null) continue;
+    updatedFields[aliasKey] = {
+      path: aliasKey,
+      value: aliasVal,
+      normalizedValue: aliasVal,
+      confidence: 1.0,
+      sourceProvider: 'UserOverride',
+      retrievedAt: nowIso,
+      isUserOverride: true,
+    };
+  }
+
+  return {
+    ...candidate,
+    fields: updatedFields,
+    normalizedMetadata: mergedNormalized,
   };
 }
 

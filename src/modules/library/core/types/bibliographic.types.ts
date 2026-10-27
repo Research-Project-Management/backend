@@ -5,6 +5,14 @@
 import type { Prisma } from '@prisma/client';
 import type { TransactionHelpers } from '../ports/unit-of-work.port';
 
+export enum IngestionSource {
+  Manual = 'Manual',
+  DOI = 'DOI',
+  FileImport = 'FileImport',
+  BrowserExtension = 'BrowserExtension',
+  PDF = 'PDF',
+}
+
 // Creator & Contributor Roles
 export type CreatorType =
   | 'author'
@@ -113,34 +121,91 @@ export const VENUE_FIELD_MAP: Record<string, string> = {
   videoRecordingFormat: 'videoRecordingFormat',
 };
 
-export const ITEM_COLUMN_METADATA_FIELDS = [
+export const VENUE_TYPE_SPECIFIC_FIELDS = [
+  'proceedingsTitle',
+  'bookTitle',
+  'dictionaryTitle',
+  'encyclopediaTitle',
+  'websiteTitle',
+  'blogTitle',
+  'forumTitle',
+  'programTitle',
+  'seriesTitle',
+] as const;
+
+export const PRISMA_ITEM_SCALAR_COLUMNS = ['title', 'itemType', 'year', 'citationKey', 'doi', 'publicationTitle', 'abstract', 'url', 'firstAuthor'] as const;
+
+export const INTERNAL_SYSTEM_AND_TELEMETRY_KEYS = [
+  'ingestionStatus', 'extractionStatus', 'enrichmentStatus', 'matchStatus', 'confidenceScore',
+  'verificationScore', 'qualityScore', 'isVerified', 'isSelfSufficient', 'isFilenameTitle',
+  'matchedSignals', 'missingFields', 'engineUsed', 'wafKind', 'statusCode', 'provenance',
+  'fieldProvenance', 'contentHash', 'sourceUrl', 'pdfUrl', 'fileUrl', 'openAccessPdfUrl',
+  'demotedToExtra', 'demotedExtraLines', '__demotedExtraLines', 'dismissedDuplicateIds',
+  'mergedDuplicateIds', 'mergedCitationKeys', 'mergedFromIds', 'mergedIntoId', 'mergeHistory',
+  'retraction', 'retractionDetails', 'isRetracted', 'retractionNature', 'retractionCheckedAt',
+  'retractionStatus', 'retractionDate', 'retractionReasons', 'retractionNoticeDoi',
+  'retractionSource', 'isMyPublication', 'myPublicationNote', 'myPublicationAddedAt', 'openAccessLicense',
+] as const;
+
+export const CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS = [
   'title',
-  'itemType',
-  'doi',
-  'url',
-  'abstract',
-  'publicationTitle',
-  'volume',
-  'issue',
-  'pages',
-  'date',
   'year',
+  'doi',
+  'DOI',
+  'abstract',
+  'abstractNote',
+  'itemType',
+  'type',
+  'publicationTitle',
+  'journal',
+  'publicationDate',
+  'date',
   'publisher',
   'place',
-  'isbn',
-  'issn',
-  'language',
-  'edition',
+  'volume',
+  'issue',
+  'section',
+  'partNumber',
+  'partTitle',
+  'pages',
   'series',
+  'seriesTitle',
+  'seriesText',
   'seriesNumber',
-  'accessDate',
+  'issn',
+  'ISSN',
+  'isbn',
+  'ISBN',
+  'pmid',
+  'PMID',
+  'pmcid',
+  'PMCID',
+  'url',
+  'language',
+  'journalAbbr',
+  'journalAbbreviation',
+  'shortTitle',
+  'rights',
+  'license',
+  'citationKey',
+  'citeKey',
+  'libraryCatalog',
   'archive',
   'archiveLocation',
   'callNumber',
-  'rights',
-  'section',
-  'citationKey',
+  'accessedAt',
+  'accessDate',
+  'extra',
+  'arxivId',
+  'archiveId',
+  'archiveID',
+  'citationCount',
+  'referenceCount',
+  'openAccessPdfUrl',
 ] as const;
+
+export const ITEM_COLUMN_METADATA_FIELDS =
+  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS;
 
 export interface CreateItemData {
   title: string;
@@ -571,122 +636,6 @@ export interface ItemDetail {
   [key: string]: unknown;
 }
 
-export interface QualityAuditCandidateItem {
-  id: string;
-  title: string;
-  doi: string | null;
-  abstract: string | null;
-  year: number | null;
-  contributors: Array<{ id: string }>;
-  publicationTitle: string | null;
-}
+export * from './bibliographic-conversion.types';
 
-export interface DuplicateCandidateItem {
-  id: string;
-  title: string;
-  itemType?: string | null;
-  type?: string | null;
-  doi: string | null;
-  arxivId?: string | null;
-  isbn: string | null;
-  issn: string | null;
-  pmid: string | null;
-  citationKey: string | null;
-  year: number | null;
-  metadata?: Record<string, unknown> | null;
-  contributors: Array<{
-    fullName: string;
-    firstName: string | null;
-    lastName: string | null;
-    orderIndex: number;
-  }>;
-}
-
-export interface NoteEntity {
-  id: string;
-  projectId?: string | null;
-  itemId?: string | null;
-  title: string;
-  contentJson?: unknown;
-  contentMd?: string | null;
-  tags?: string[];
-  createdById?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  deletedAt?: Date | null;
-}
-
-export interface CreateNoteData {
-  projectId?: string;
-  itemId?: string | null;
-  title?: string;
-  contentJson?: Record<string, unknown> | null;
-  contentMd?: string;
-  tags?: string[];
-  createdById?: string;
-}
-
-// Item Type Conversion Types
-export interface ItemTypeConversionFieldDiff {
-  key: string;
-  label: string;
-  sourceValue: unknown;
-  targetValue: unknown;
-  status: 'preserved' | 'mapped' | 'cleared';
-  baseSemantic?: string;
-}
-
-export interface ItemTypeConversionRoleDiff {
-  creatorId?: string;
-  name: string;
-  sourceRole: string;
-  targetRole: string;
-  changed: boolean;
-}
-
-export interface FieldMappingChange {
-  fromField: string;
-  toField: string;
-  value: unknown;
-  rule: 'direct' | 'base-semantic' | 'special-rule';
-}
-
-export interface DroppedField {
-  field: string;
-  label: string;
-  value: unknown;
-}
-
-export interface CreatorRoleChange {
-  creator: Record<string, unknown>;
-  fromRole: string;
-  toRole: string;
-  reason: 'preserved' | 'primary-fallback' | 'secondary-fallback';
-}
-
-export interface TypeConversionPreview {
-  sourceType: string;
-  targetType: string;
-  preservedFields: string[];
-  mappedFields: FieldMappingChange[];
-  droppedFields: DroppedField[];
-  newAvailableFields: string[];
-  creatorChanges: CreatorRoleChange[];
-  projectedItem: Record<string, unknown>;
-  unmappedRetained: Record<string, unknown>;
-  hasLoss: boolean;
-}
-
-export interface ConvertTypeOptions {
-  expectedVersion?: number;
-  retainUnmappedInExtra?: boolean;
-}
-
-export const ITEM_TRANSFORMER_PORT = Symbol('ITEM_TRANSFORMER_PORT');
-
-/** Transaction context passed to write methods for composing operations within a parent transaction. */
-export interface ItemTransactionContext<TTx = Prisma.TransactionClient> {
-  tx: TTx;
-  helpers: TransactionHelpers;
-}
 

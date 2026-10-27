@@ -13,11 +13,8 @@ import { ItemService } from '../../../src/modules/library/catalog/services/items
 import { ItemQueryService } from '../../../src/modules/library/catalog/services/item-query.service';
 import { QueryRepository } from '../../../src/modules/library/catalog/repositories/query.repository';
 import { TagsService } from '../../../src/modules/library/catalog/services/tags.service';
-import {
-  DuplicateService,
-  DuplicateDetectorService,
-  DuplicateMergerService,
-} from '../../../src/modules/library/ingestion/services/duplicate.service';
+import { DuplicateDetectorService } from '../../../src/modules/library/ingestion/services/duplicate-detector.service';
+import { DuplicateMergerService } from '../../../src/modules/library/ingestion/services/duplicate-merger.service';
 import { ExportsService } from '../../../src/modules/library/citation/services/exports.service';
 import { CitationService } from '../../../src/modules/library/citation/services/citation.service';
 import {
@@ -1429,9 +1426,8 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
           .fn()
           .mockResolvedValue(syntheticItems),
       };
-      const duplicateService = new DuplicateService(
-        new DuplicateDetectorService(catalogGatewayMock as never),
-        new DuplicateMergerService({} as never, catalogGatewayMock as never),
+      const duplicateService = new DuplicateDetectorService(
+        catalogGatewayMock as never,
       );
 
       const startMs = performance.now();

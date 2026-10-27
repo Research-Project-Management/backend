@@ -191,7 +191,7 @@ export const DOUBLE_ENCODED_TAG_REGEX =
 
 /** Inline formatting tags that must be removed WITHOUT inserting whitespace. */
 export const INLINE_FORMAT_TAG_REGEX =
-  /<\/?(?:jats:|mml:|html:)?(?:i|b|u|em|strong|sub|sup|sc|scp|span|small|tt|italic|bold|underline|font|smallcaps)\b[^>]*>/gi;
+  /<\/?(?:jats:|mml:|html:)?(?:i|b|u|em|strong|sub|sup|sc|scp|span|small|tt|italic|bold|underline|font|smallcaps)\b(?:\s[^<>]*)?>/gi;
 
 export const LATEX_SPECIAL_MACROS: Array<[RegExp, string]> = [
   [/\{\\ss\}|\\ss\b/g, 'ß'],

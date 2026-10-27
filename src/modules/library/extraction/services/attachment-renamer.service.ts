@@ -21,6 +21,7 @@ import {
   TransactionHelpers,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
+import { ItemCacheCoordinator } from '@/modules/library/catalog';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import type {
   RenameAttachmentDto,
@@ -45,6 +46,8 @@ export class AttachmentRenamerService {
     private readonly cache?: RedisCacheService,
     @Optional()
     private readonly libraryTx?: TransactionService,
+    @Optional()
+    private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 
   private async invalidateAttachmentCache(
@@ -52,6 +55,14 @@ export class AttachmentRenamerService {
     userId: string,
     projectId?: string,
   ): Promise<void> {
+    if (this.cacheCoordinator) {
+      await this.cacheCoordinator.invalidateForWrite({
+        userId,
+        projectId,
+        itemIds: [itemId],
+      });
+      return;
+    }
     if (!this.cache) return;
     try {
       const validProjectId = normalizeProjectScopeId(projectId);
@@ -153,28 +164,29 @@ export class AttachmentRenamerService {
       return { attachment, oldFilename, newFilename };
     }
 
-    const updated = await this.repo.renameAttachment(
-      attachmentId,
-      newFilename,
-      attachment.fileId ?? undefined,
-    );
-
     const effectiveProjectId =
       validProjectId ||
       (attachment.item as { projectId?: string | null } | undefined)
         ?.projectId ||
       undefined;
 
+    let updated: Awaited<ReturnType<typeof this.repo.renameAttachment>>;
     if (typeof this.libraryTx?.executeInTransaction === 'function') {
-      await this.libraryTx.executeInTransaction(
-        async (_tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+      updated = await this.libraryTx.executeInTransaction(
+        async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          const renamed = await this.repo.renameAttachment(
+            attachmentId,
+            newFilename,
+            attachment.fileId ?? undefined,
+            tx,
+          );
           const eventScope = { userId, projectId: effectiveProjectId };
           await helpers.appendChange(eventScope, {
             entityType: 'Attachment',
             entityId: attachmentId,
             action: 'update',
             version: 1,
-            data: updated ?? {
+            data: renamed ?? {
               id: attachmentId,
               itemId: attachment.itemId,
               filename: newFilename,
@@ -184,7 +196,7 @@ export class AttachmentRenamerService {
             eventScope,
             attachmentId,
             'library.attachment.updated',
-            updated ?? {
+            renamed ?? {
               id: attachmentId,
               itemId: attachment.itemId,
               filename: newFilename,
@@ -200,7 +212,14 @@ export class AttachmentRenamerService {
               filename: newFilename,
             },
           );
+          return renamed;
         },
+      );
+    } else {
+      updated = await this.repo.renameAttachment(
+        attachmentId,
+        newFilename,
+        attachment.fileId ?? undefined,
       );
     }
 
@@ -325,47 +344,97 @@ export class AttachmentRenamerService {
     }
 
     if (updatesToPersist.length > 0) {
-      await this.repo.batchRename(updatesToPersist);
-
       if (typeof this.libraryTx?.executeInTransaction === 'function') {
         await this.libraryTx.executeInTransaction(
-          async (_tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+            await this.repo.batchRename(updatesToPersist, tx);
             const eventScope = { userId, projectId: validProjectId };
-            for (const u of updatesToPersist) {
-              const scope = { userId, projectId: u.projectId || validProjectId };
-              await helpers.appendChange(scope, {
-                entityType: 'Attachment',
-                entityId: u.id,
-                action: 'update',
-                version: 1,
-                data: {
-                  id: u.id,
-                  itemId: u.itemId,
-                  filename: u.filename,
-                },
-              });
-              await helpers.publishOutbox(
-                scope,
-                u.id,
-                'library.attachment.updated',
-                {
-                  id: u.id,
-                  itemId: u.itemId,
-                  filename: u.filename,
-                },
-              );
+            const changeEntries = updatesToPersist.map((u) => ({
+              userId,
+              projectId: u.projectId || validProjectId,
+              entityType: 'Attachment',
+              entityId: u.id,
+              action: 'update' as const,
+              version: 1,
+              data: {
+                id: u.id,
+                itemId: u.itemId,
+                filename: u.filename,
+              },
+            }));
+
+            if (helpers.appendChangesBatch) {
+              await helpers.appendChangesBatch(changeEntries);
+            } else {
+              for (const u of updatesToPersist) {
+                const scope = { userId, projectId: u.projectId || validProjectId };
+                await helpers.appendChange(scope, {
+                  entityType: 'Attachment',
+                  entityId: u.id,
+                  action: 'update',
+                  version: 1,
+                  data: {
+                    id: u.id,
+                    itemId: u.itemId,
+                    filename: u.filename,
+                  },
+                });
+              }
             }
-            const uniqueItems = new Set(updatesToPersist.map((u) => u.itemId));
-            for (const itemId of uniqueItems) {
-              await helpers.publishOutbox(
-                eventScope,
-                itemId,
-                LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-                { id: itemId },
-              );
+
+            const uniqueItems = Array.from(
+              new Set(updatesToPersist.map((u) => u.itemId)),
+            );
+            const outboxEvents = [
+              ...updatesToPersist.map((u) => ({
+                userId,
+                projectId: u.projectId || validProjectId,
+                aggregateId: u.id,
+                eventType: 'library.attachment.updated',
+                payload: {
+                  id: u.id,
+                  itemId: u.itemId,
+                  filename: u.filename,
+                },
+              })),
+              ...uniqueItems.map((itemId) => ({
+                userId,
+                projectId: validProjectId,
+                aggregateId: itemId,
+                eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+                payload: { id: itemId },
+              })),
+            ];
+
+            if (helpers.publishOutboxBatch) {
+              await helpers.publishOutboxBatch(outboxEvents);
+            } else {
+              for (const u of updatesToPersist) {
+                const scope = { userId, projectId: u.projectId || validProjectId };
+                await helpers.publishOutbox(
+                  scope,
+                  u.id,
+                  'library.attachment.updated',
+                  {
+                    id: u.id,
+                    itemId: u.itemId,
+                    filename: u.filename,
+                  },
+                );
+              }
+              for (const itemId of uniqueItems) {
+                await helpers.publishOutbox(
+                  eventScope,
+                  itemId,
+                  LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+                  { id: itemId },
+                );
+              }
             }
           },
         );
+      } else {
+        await this.repo.batchRename(updatesToPersist);
       }
 
       const uniqueRenamedItemIds = new Map<string, string | undefined>();

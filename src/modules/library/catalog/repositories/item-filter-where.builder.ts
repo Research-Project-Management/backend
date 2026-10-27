@@ -1,6 +1,22 @@
 import { Prisma, ReadStatus } from '@prisma/client';
 import { isUUID } from 'class-validator';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  AcademicSearchQueryEngine,
+  ScopeSpecification,
+  CompositeSpecification,
+  AndSpecification,
+  OrSpecification,
+  NotSpecification,
+} from '@/modules/library/core';
+
+export {
+  ScopeSpecification,
+  CompositeSpecification,
+  AndSpecification,
+  OrSpecification,
+  NotSpecification,
+};
 
 export const isUuid = (val: unknown): val is string =>
   typeof val === 'string' && isUUID(val);
@@ -71,35 +87,76 @@ export function buildItemSearchCondition(
     return clauses;
   }
 
+  const extractedIds = AcademicSearchQueryEngine.extractIdentifiers(trimmed);
+  const normalizedIsbnCandidate = extractedIds.cleanIsbn;
+  const normalizedArxivCandidate =
+    extractedIds.cleanArxivBase || extractedIds.cleanArxiv;
+  const normalizedPmidCandidate = extractedIds.cleanPmid;
+  const normalizedPmcidCandidate = extractedIds.cleanPmcid;
+  const normalizedDoiCandidate = extractedIds.cleanDoi;
+  const normalizedIssnCandidate = extractedIds.cleanIssn;
+
   const baseClauses: Prisma.ItemWhereInput[] = [
     { title: { contains: trimmed, mode: 'insensitive' } },
     { publicationTitle: { contains: trimmed, mode: 'insensitive' } },
     { abstract: { contains: trimmed, mode: 'insensitive' } },
-    { doi: { contains: trimmed, mode: 'insensitive' } },
+    {
+      doi: {
+        contains: normalizedDoiCandidate || trimmed,
+        mode: 'insensitive',
+      },
+    },
     { citationKey: { contains: trimmed, mode: 'insensitive' } },
     ...(numericYear !== null ? [{ year: numericYear }] : []),
     {
       metadata: {
         path: ['isbn'],
-        string_contains: trimmed,
+        string_contains: normalizedIsbnCandidate || trimmed,
       },
     },
+    ...(normalizedIsbnCandidate && normalizedIsbnCandidate !== trimmed
+      ? [
+          {
+            metadata: {
+              path: ['isbn'],
+              string_contains: trimmed,
+            },
+          },
+        ]
+      : []),
     {
       metadata: {
         path: ['issn'],
-        string_contains: trimmed,
+        string_contains: normalizedIssnCandidate || trimmed,
       },
     },
     {
       metadata: {
         path: ['pmid'],
-        string_contains: trimmed,
+        string_contains: normalizedPmidCandidate || trimmed,
       },
     },
+    ...(normalizedPmcidCandidate
+      ? [
+          {
+            metadata: {
+              path: ['pmcid'],
+              string_contains: normalizedPmcidCandidate,
+            },
+          },
+        ]
+      : [
+          {
+            metadata: {
+              path: ['pmcid'],
+              string_contains: trimmed,
+            },
+          },
+        ]),
     {
       metadata: {
         path: ['arxivId'],
-        string_contains: trimmed,
+        string_contains: normalizedArxivCandidate || trimmed,
       },
     },
     {
@@ -162,9 +219,47 @@ export function buildItemSearchCondition(
   return baseClauses.slice(0, -1);
 }
 
+export class ItemWhereSpecification extends CompositeSpecification<
+  Record<string, unknown>,
+  Prisma.ItemWhereInput
+> {
+  constructor(
+    private readonly clause: Prisma.ItemWhereInput,
+    private readonly predicate?: (item: Record<string, unknown>) => boolean,
+  ) {
+    super();
+  }
+
+  toPrismaWhere(): Prisma.ItemWhereInput {
+    return this.clause;
+  }
+
+  isSatisfiedBy(item: Record<string, unknown>): boolean {
+    return this.predicate ? this.predicate(item) : true;
+  }
+}
+
+function composeAndSpecifications(
+  specs: ItemWhereSpecification[],
+): Prisma.ItemWhereInput[] {
+  if (specs.length === 0) return [];
+  if (specs.length === 1) return [specs[0].toPrismaWhere()];
+  const combined = specs
+    .slice(1)
+    .reduce<
+       CompositeSpecification<Record<string, unknown>, Prisma.ItemWhereInput>
+    >((acc, spec) => acc.and(spec) as CompositeSpecification<Record<string, unknown>, Prisma.ItemWhereInput>, specs[0])
+    .toPrismaWhere();
+  if (combined && Array.isArray(combined.AND)) {
+    return combined.AND as Prisma.ItemWhereInput[];
+  }
+  return [combined];
+}
+
 /**
  * Builds a shared CatalogItem WHERE clause from the common filter options.
- * Used by both findMany and count to avoid duplicated logic.
+ * Uses CompositeSpecification / AndSpecification so multiple tag or state predicates
+ * compose into `{ AND: [...] }` without overwriting each other.
  */
 export function buildItemWhereClause(
   userId: string,
@@ -172,12 +267,17 @@ export function buildItemWhereClause(
 ): Prisma.ItemWhereInput {
   const view = options.view ?? 'all';
   const validProjectId = normalizeProjectScopeId(options.projectId);
-  const where: Prisma.ItemWhereInput =
-    validProjectId && isUuid(validProjectId)
-      ? { projectId: validProjectId }
-      : { userId, projectId: null };
+  const scopeSpec = new ScopeSpecification(
+    userId,
+    validProjectId && isUuid(validProjectId) ? validProjectId : null,
+  );
+  const where: Prisma.ItemWhereInput = {
+    ...(scopeSpec.toPrismaWhere() as Prisma.ItemWhereInput),
+  };
 
-  const andConditions: Prisma.ItemWhereInput[] = [];
+  const andSpecs: ItemWhereSpecification[] = [];
+  const stateSpecs: ItemWhereSpecification[] = [];
+  const tagSpecs: ItemWhereSpecification[] = [];
 
   if (view === 'trash') {
     where.deletedAt = { not: null };
@@ -186,40 +286,56 @@ export function buildItemWhereClause(
     if (view === 'unfiled') {
       where.collectionItems = { none: {} };
     } else if (view === 'my-publications' || view === 'publications') {
-      andConditions.push({
-        OR: [
-          { metadata: { path: ['isMyPublication'], equals: true } },
-          { publications: { some: { userId } } },
-        ],
-      });
+      andSpecs.push(
+        new ItemWhereSpecification({
+          OR: [
+            { metadata: { path: ['isMyPublication'], equals: true } },
+            { publications: { some: { userId } } },
+          ],
+        }),
+      );
     } else if (view === 'starred') {
-      where.states = { some: { userId, isStarred: true } };
+      stateSpecs.push(
+        new ItemWhereSpecification({
+          states: { some: { userId, isStarred: true } },
+        }),
+      );
     } else if (view === 'retracted') {
-      andConditions.push({
-        metadata: { path: ['isRetracted'], equals: true },
-      });
+      andSpecs.push(
+        new ItemWhereSpecification({
+          metadata: { path: ['isRetracted'], equals: true },
+        }),
+      );
     }
   }
 
   if (options.isRetracted !== undefined && view !== 'retracted') {
     if (options.isRetracted) {
-      andConditions.push({
-        metadata: { path: ['isRetracted'], equals: true },
-      });
+      andSpecs.push(
+        new ItemWhereSpecification({
+          metadata: { path: ['isRetracted'], equals: true },
+        }),
+      );
     } else {
-      andConditions.push({
-        NOT: { metadata: { path: ['isRetracted'], equals: true } },
-      });
+      andSpecs.push(
+        new ItemWhereSpecification({
+          NOT: { metadata: { path: ['isRetracted'], equals: true } },
+        }),
+      );
     }
   }
 
   if (options.onlyFlagged) {
-    where.states = {
-      some: {
-        userId,
-        isStarred: true,
-      },
-    };
+    stateSpecs.push(
+      new ItemWhereSpecification({
+        states: {
+          some: {
+            userId,
+            isStarred: true,
+          },
+        },
+      }),
+    );
   }
 
   if (options.hasFile !== undefined) {
@@ -251,7 +367,11 @@ export function buildItemWhereClause(
   }
 
   if (options.tagId) {
-    where.itemTags = { some: { tagId: options.tagId } };
+    tagSpecs.push(
+      new ItemWhereSpecification({
+        itemTags: { some: { tagId: options.tagId } },
+      }),
+    );
   }
 
   if (options.tag) {
@@ -260,16 +380,26 @@ export function buildItemWhereClause(
       .map((t) => t.trim())
       .filter(Boolean);
     if (tagNames.length > 0) {
-      where.itemTags = {
-        some: {
-          tag: {
-            OR: tagNames.map((name) => ({
-              name: { equals: name, mode: 'insensitive' as const },
-            })),
+      tagSpecs.push(
+        new ItemWhereSpecification({
+          itemTags: {
+            some: {
+              tag: {
+                OR: tagNames.map((name) => ({
+                  name: { equals: name, mode: 'insensitive' as const },
+                })),
+              },
+            },
           },
-        },
-      };
+        }),
+      );
     }
+  }
+
+  if (tagSpecs.length === 1) {
+    where.itemTags = tagSpecs[0].toPrismaWhere().itemTags;
+  } else if (tagSpecs.length > 1) {
+    andSpecs.push(...tagSpecs);
   }
 
   const itemType = options.itemType || options.type;
@@ -298,38 +428,49 @@ export function buildItemWhereClause(
     const validStatuses: ReadStatus[] = ['unread', 'reading', 'completed'];
     const statuses = options.readStatus
       .split(',')
-      .map((s) => s.trim() === 'read' ? 'completed' : s.trim())
+      .map((s) => (s.trim() === 'read' ? 'completed' : s.trim()))
       .filter((s): s is ReadStatus => validStatuses.includes(s as ReadStatus));
     if (statuses.length > 0) {
       if (statuses.length === 1 && statuses[0] === 'unread') {
-        andConditions.push({
-          OR: [
-            { states: { none: { userId } } },
-            { states: { some: { userId, readStatus: 'unread' } } },
-          ],
-        });
+        andSpecs.push(
+          new ItemWhereSpecification({
+            OR: [
+              { states: { none: { userId } } },
+              { states: { some: { userId, readStatus: 'unread' } } },
+            ],
+          }),
+        );
       } else {
-        const existingSome =
-          where.states && typeof where.states === 'object' && 'some' in where.states && where.states.some
-            ? (where.states.some as Prisma.StateWhereInput)
-            : {};
-        where.states = {
-          some: {
-            ...existingSome,
-            userId,
-            readStatus: statuses.length > 1 ? { in: statuses } : statuses[0],
-          },
-        };
+        stateSpecs.push(
+          new ItemWhereSpecification({
+            states: {
+              some: {
+                userId,
+                readStatus:
+                  statuses.length > 1 ? { in: statuses } : statuses[0],
+              },
+            },
+          }),
+        );
       }
     }
   }
 
-  if (options.search) {
-    andConditions.push({
-      OR: buildItemSearchCondition(options.search, options.searchMode),
-    });
+  if (stateSpecs.length === 1) {
+    where.states = stateSpecs[0].toPrismaWhere().states;
+  } else if (stateSpecs.length > 1) {
+    andSpecs.push(...stateSpecs);
   }
 
+  if (options.search) {
+    andSpecs.push(
+      new ItemWhereSpecification({
+        OR: buildItemSearchCondition(options.search, options.searchMode),
+      }),
+    );
+  }
+
+  const andConditions = composeAndSpecifications(andSpecs);
   if (andConditions.length > 0) {
     where.AND = andConditions;
   }

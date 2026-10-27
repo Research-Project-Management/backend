@@ -104,7 +104,7 @@ export function stripXmlAndHtmlTags(text: string): string {
   out = convertSubSupTagsToUnicode(out);
   out = out.replace(INLINE_FORMAT_TAG_REGEX, '');
   return out
-    .replace(/<\/?[a-zA-Z0-9_:-]+(?:\s+[^>]*?)?\/?>/g, ' ')
+    .replace(/<\/?[a-zA-Z][a-zA-Z0-9:_-]*(?:\s[^<>]*)?\/?>/g, ' ')
     .replace(/\s+([.,;:!?])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
@@ -169,7 +169,7 @@ export function convertAcademicHtmlToMarkdown(raw: string): string {
         return label;
       },
     )
-    .replace(/<[^>]+>/g, '')
+    .replace(/<\/?[a-zA-Z][a-zA-Z0-9:_-]*(?:\s[^<>]*)?\/?>/g, '')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
@@ -430,18 +430,18 @@ export function cleanAbstractText(text?: string | null): string | undefined {
   // (inline formatting tags are dropped without inserting whitespace)
   cleaned = cleaned.replace(INLINE_FORMAT_TAG_REGEX, '');
   cleaned = cleaned
-    .replace(/<\/?[a-zA-Z0-9_:-]+(?:\s+[^>]*?)?\/?>/g, ' ')
+    .replace(/<\/?[a-zA-Z][a-zA-Z0-9:_-]*(?:\s[^<>]*)?\/?>/g, ' ')
     .replace(/[ \t]+([.,;:!?])/g, '$1');
   cleaned = decodeHtmlEntities(cleaned);
   cleaned = stripLatexBraces(cleaned);
 
   // 2. Remove leading "Abstract" or "ABSTRACT" headings and prefixes
   cleaned = cleaned.replace(
-    /^(?:abstract|summary|résumé|synopsis|overview)\s*[:.—\-–\u2014\u2013]?\s*/i,
+    /^(?:abstract|summary|résumé|synopsis|overview)\b\s*(?:[:.—\-–\u2014\u2013]\s*|\s+(?=[A-Z]))/i,
     '',
   );
   cleaned = cleaned.replace(
-    /^(?:graphical\s+abstract|highlights?)\s*[:.—\-–\u2014\u2013]?\s*/i,
+    /^(?:graphical\s+abstract|highlights?)\b\s*(?:[:.—\-–\u2014\u2013]\s*|\r?\n+)/i,
     '',
   );
   cleaned = cleaned.replace(
@@ -463,13 +463,13 @@ export function cleanAbstractText(text?: string | null): string | undefined {
 
   // 4. Remove trailing author contribution / footnote / correspondence noise
   cleaned = cleaned.replace(
-    /(?:(?:\n\s*|\.\s+|\s+)[*†‡§\d]*\s*(?:Equal contribution|Corresponding author|Correspondence to|Author ordering|Listing order|These authors contributed equally|Work performed while|Supported in part by|This work was supported by|Electronic address:[\s\S]*$|Email:[\s\S]*$)[\s\S]*$)/i,
+    /(?:(?:\n\s*|\.\s+)[*†‡§\d]*\s*(?:Equal contribution|Corresponding author|Correspondence to|Author ordering|Listing order|These authors contributed equally|Work performed while|Supported in part by|This work was supported by|Electronic address\s*:|E-?mail\s*:)[\s\S]*$)/i,
     '.',
   );
 
   // 5. Remove trailing publication metadata, index terms, PACS numbers, keywords
   cleaned = cleaned.replace(
-    /(?:\n\s*|\s+)(?:ACM Reference [Ff]ormat|Index Terms|Keywords|Key\s*words|Additional Key Words and Phrases|PACS numbers?|Subject classification|MSC classes?)[—:\-\s]+[\s\S]*$/i,
+    /(?:\n\s*|\.\s+)(?:ACM Reference [Ff]ormat|Index Terms|Keywords|Key\s*words|Additional Key Words and Phrases|PACS numbers?|Subject classification|MSC classes?)\s*[:—\-–]\s*[\s\S]*$/i,
     '',
   );
 

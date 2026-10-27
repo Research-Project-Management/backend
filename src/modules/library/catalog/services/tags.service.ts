@@ -166,7 +166,7 @@ export class TagsService {
     },
     projectId?: ProjectId | string,
   ) {
-    if (data.name) {
+    if (data.name !== undefined) {
       const cleanName = cleanSingleTag(data.name);
       if (!cleanName) {
         throw new BadRequestException(
@@ -192,9 +192,16 @@ export class TagsService {
           throw new NotFoundException(`Tag ${tagId} not found`);
         }
 
+        if (updated.id !== tagId) {
+          await helpers.recordTombstone(eventScope, {
+            entityType: 'Tag',
+            entityId: tagId,
+          });
+        }
+
         await helpers.appendChange(eventScope, {
           entityType: 'Tag',
-          entityId: tagId,
+          entityId: updated.id,
           action: 'update',
           version: 1,
           data: updated,
@@ -202,7 +209,7 @@ export class TagsService {
 
         await helpers.publishOutbox(
           eventScope,
-          tagId,
+          updated.id,
           'library.tag.updated',
           updated,
         );
@@ -271,6 +278,8 @@ export class TagsService {
           effectiveProjectId,
         );
         if (deletedTagIds.length > 0) {
+          const deletedAt = new Date();
+          const deletedIso = deletedAt.toISOString();
           await helpers.recordTombstonesBatch(
             eventScope,
             deletedTagIds.map((tagId) => ({
@@ -278,7 +287,18 @@ export class TagsService {
               entityId: tagId,
             })),
           );
-          const deletedAt = new Date();
+          if (helpers.appendChangesBatch) {
+            await helpers.appendChangesBatch(
+              eventScope,
+              deletedTagIds.map((tagId) => ({
+                entityType: 'Tag',
+                entityId: tagId,
+                action: 'delete',
+                version: 0,
+                data: { id: tagId, deletedAt: deletedIso },
+              })),
+            );
+          }
           await helpers.publishOutboxBatch(
             eventScope,
             deletedTagIds.map((tagId) => ({
@@ -448,12 +468,9 @@ export class TagsService {
       return;
     }
 
-    const synced = await executeSync(tx);
-    if (synced) {
-      void Promise.resolve().then(() =>
-        this.invalidateTagsCache(userId, projectId, itemId),
-      );
-    }
+    // When `tx` is passed from an outer transaction, cache invalidation is handled
+    // by the outer caller after the transaction commits.
+    await executeSync(tx);
   }
 
   async mergeTagsToItem(

@@ -288,8 +288,10 @@ export class AcademicRegexCatalog {
         // Sort descending by score. If tied, favor earlier occurrence (e.g. header over body)
         scoredCandidates.sort((a, b) => b.score - a.score || a.index - b.index);
         const bestCandidate = scoredCandidates[0];
-        result.doi = bestCandidate.doi;
-        result.matchedSignatures.push('DOI_ISO26324');
+        if (bestCandidate.score >= 0) {
+          result.doi = bestCandidate.doi;
+          result.matchedSignatures.push('DOI_ISO26324');
+        }
         result.candidateDois = scoredCandidates.map((c) => ({
           doi: c.doi,
           score: c.score,

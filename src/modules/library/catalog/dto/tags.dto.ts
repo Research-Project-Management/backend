@@ -2,6 +2,7 @@ import {
   IsString,
   IsNotEmpty,
   IsOptional,
+  MinLength,
   MaxLength,
   IsEnum,
   IsInt,
@@ -14,6 +15,7 @@ import { TagType } from '@prisma/client';
 export class CreateTagDto {
   @IsString()
   @IsNotEmpty()
+  @MinLength(1)
   @MaxLength(100)
   name!: string;
 
@@ -35,12 +37,15 @@ export class CreateTagDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   projectId?: string;
 }
 
 export class UpdateTagDto {
   @IsString()
   @IsOptional()
+  @IsNotEmpty()
+  @MinLength(1)
   @MaxLength(100)
   name?: string;
 
@@ -62,5 +67,6 @@ export class UpdateTagDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   projectId?: string;
 }

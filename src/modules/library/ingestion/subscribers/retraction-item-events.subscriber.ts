@@ -1,7 +1,11 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { LIBRARY_EVENT_TYPES } from '@/modules/library/core';
+import {
+  LIBRARY_EVENT_TYPES,
+  ReconcileExtractedCandidatePayload,
+} from '@/modules/library/core';
 import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
+import { MetadataResolverService } from '@/modules/library/ingestion/services/metadata-resolver.service';
 
 const IDENTIFIER_FIELD_GROUPS = ['doi', 'pmid', 'fields', 'metadata'];
 
@@ -9,7 +13,25 @@ const IDENTIFIER_FIELD_GROUPS = ['doi', 'pmid', 'fields', 'metadata'];
 export class RetractionItemEventsSubscriber {
   private readonly logger = new Logger(RetractionItemEventsSubscriber.name);
 
-  constructor(@Optional() private readonly retraction?: RetractionService) {}
+  constructor(
+    @Optional() private readonly retraction?: RetractionService,
+    @Optional() private readonly metadataResolver?: MetadataResolverService,
+  ) {}
+
+  @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_METADATA_EXTRACTED, { async: true })
+  async handleAttachmentMetadataExtracted(
+    event: ReconcileExtractedCandidatePayload,
+  ): Promise<void> {
+    if (!this.metadataResolver || !event?.itemId || !event?.userId) return;
+    try {
+      await this.metadataResolver.reconcileExtractedCandidate(event);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Single-authority reconciliation after extraction skipped for item ${event.itemId}: ${message}`,
+      );
+    }
+  }
 
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_UPDATED, { async: true })
   async handleItemUpdated(event: {
@@ -25,10 +47,12 @@ export class RetractionItemEventsSubscriber {
     if (!itemId || !userId) return;
 
     const updatedFields = event.payload?.updatedFields;
+    const source = (event.payload as { source?: string } | undefined)?.source;
     if (
-      Array.isArray(updatedFields) &&
-      (updatedFields.includes('retractionCheckedAt') ||
-        updatedFields.includes('isRetracted'))
+      source === 'retraction_watch' ||
+      (Array.isArray(updatedFields) &&
+        (updatedFields.includes('retractionCheckedAt') ||
+          updatedFields.includes('isRetracted')))
     ) {
       return;
     }

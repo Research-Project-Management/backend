@@ -3,6 +3,11 @@ import { Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
 import { ConfigurationException } from '@/modules/library/core/errors/domain.exception';
+import {
+  normalizeExactMatchCandidateInput,
+  buildExactMatchOrClauses,
+  evaluateExactMatchSpecifications,
+} from '@/modules/library/catalog/domain/match-specifications.domain';
 
 const isUuid = (val: unknown): val is string =>
   typeof val === 'string' && isUUID(val);
@@ -263,104 +268,34 @@ export class ItemMatchQueryRepository {
 
     const activeClient = this.getClient(client);
 
-    // 1–4. Exact identifier match (DOI, arXiv ID, PMID, ISBN) in a single query
-    const cleanDoi = criteria.doi?.trim()
-      ? criteria.doi.trim().toLowerCase()
-      : '';
-    const cleanArxiv = criteria.arxivId?.trim() ? criteria.arxivId.trim() : '';
-    const baseArxiv = cleanArxiv ? cleanArxiv.replace(/v\d+$/i, '') : '';
-    const cleanPmid = criteria.pmid?.trim() ? criteria.pmid.trim() : '';
-    const cleanIsbn = criteria.isbn?.trim()
-      ? criteria.isbn.replace(/[-\s]/g, '').trim()
-      : '';
-
-    const exactOrConditions: Prisma.ItemWhereInput[] = [];
-    if (cleanDoi) {
-      exactOrConditions.push({
-        doi: { equals: cleanDoi, mode: 'insensitive' },
-      });
-    }
-    if (cleanArxiv) {
-      exactOrConditions.push(
-        { metadata: { path: ['arxivId'], equals: cleanArxiv } },
-        { metadata: { path: ['arxivId'], equals: baseArxiv } },
-      );
-    }
-    if (cleanPmid) {
-      exactOrConditions.push({
-        metadata: { path: ['pmid'], equals: cleanPmid },
-      });
-    }
-    if (cleanIsbn) {
-      exactOrConditions.push({
-        metadata: { path: ['isbn'], equals: cleanIsbn },
-      });
-    }
+    // 1–4. Exact identifier match (DOI, arXiv ID, PMID, ISBN) via Specification Pattern
+    const matchInput = normalizeExactMatchCandidateInput(criteria);
+    const exactOrConditions = buildExactMatchOrClauses(matchInput);
 
     if (exactOrConditions.length > 0) {
-      const match = await activeClient.item.findFirst({
+      const match = (await activeClient.item.findFirst({
         where: {
           ...scopeWhere,
           OR: exactOrConditions,
         },
-        select: { id: true, title: true, doi: true, metadata: true },
-      });
+        select: {
+          id: true,
+          title: true,
+          doi: true,
+          metadata: true,
+        },
+      })) as {
+        id: string;
+        title: string;
+        doi?: string | null;
+        metadata?: unknown;
+        identifiers?: Array<{ type?: string; value?: string }>;
+      } | null;
       if (match) {
-        const meta =
-          match.metadata &&
-          typeof match.metadata === 'object' &&
-          !Array.isArray(match.metadata)
-            ? (match.metadata as Record<string, unknown>)
-            : {};
-        if (
-          cleanDoi &&
-          (!match.doi || match.doi.trim().toLowerCase() === cleanDoi)
-        ) {
+        const evaluated = evaluateExactMatchSpecifications(matchInput, match);
+        if (evaluated) {
           return {
-            exactMatch: {
-              id: match.id,
-              title: match.title,
-              matchReason: 'DOI_EXACT',
-              evidence: { doi: cleanDoi },
-            },
-            candidateItems: [],
-          };
-        }
-        if (
-          cleanArxiv &&
-          (!meta.arxivId ||
-            meta.arxivId === cleanArxiv ||
-            meta.arxivId === baseArxiv)
-        ) {
-          return {
-            exactMatch: {
-              id: match.id,
-              title: match.title,
-              matchReason: 'ARXIV_EXACT',
-              evidence: { arxivId: cleanArxiv },
-            },
-            candidateItems: [],
-          };
-        }
-        if (cleanPmid && (!meta.pmid || meta.pmid === cleanPmid)) {
-          return {
-            exactMatch: {
-              id: match.id,
-              title: match.title,
-              matchReason: 'PMID_EXACT',
-              evidence: { pmid: cleanPmid },
-            },
-            candidateItems: [],
-          };
-        }
-        if (cleanIsbn) {
-          return {
-            exactMatch: {
-              id: match.id,
-              title: match.title,
-              matchReason: 'ISBN_EXACT',
-              evidence: { isbn: cleanIsbn },
-            },
+            exactMatch: evaluated,
             candidateItems: [],
           };
         }

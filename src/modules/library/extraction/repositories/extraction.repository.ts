@@ -5,10 +5,12 @@ import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain'
 import {
   resolveOrCreateTags,
   deriveFirstAuthor,
-} from '@/modules/library/catalog/catalog.facade';
+  disambiguateCitationKey,
+} from '@/modules/library/catalog';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 import {
   EntityNotFoundException,
+  isPlaceholderItemTitle,
   normalizeProjectScopeId,
 } from '@/modules/library/core';
 
@@ -20,16 +22,10 @@ export class ExtractionRepository {
     return tx ?? this.prisma;
   }
 
-  async claimPendingOrRetryable(
-    attachmentId: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async claimPendingOrRetryable(attachmentId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.attachment.updateMany({
-      where: {
-        id: attachmentId,
-        extractionStatus: { in: ['PENDING', 'FAILED_RETRYABLE'] },
-      },
+      where: { id: attachmentId, extractionStatus: { in: ['PENDING', 'FAILED_RETRYABLE'] } },
       data: {
         extractionStatus: 'PROCESSING',
         extractionAttempts: { increment: 1 },
@@ -38,18 +34,10 @@ export class ExtractionRepository {
     });
   }
 
-  async claimStaleProcessing(
-    attachmentId: string,
-    staleCutoff: Date,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async claimStaleProcessing(attachmentId: string, staleCutoff: Date, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.attachment.updateMany({
-      where: {
-        id: attachmentId,
-        extractionStatus: 'PROCESSING',
-        extractionStartedAt: { lt: staleCutoff },
-      },
+      where: { id: attachmentId, extractionStatus: 'PROCESSING', extractionStartedAt: { lt: staleCutoff } },
       data: {
         extractionStatus: 'PROCESSING',
         extractionAttempts: { increment: 1 },
@@ -58,35 +46,20 @@ export class ExtractionRepository {
     });
   }
 
-  async findUniqueAttachment<
-    I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude,
-  >(
+  async findUniqueAttachment<I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude>(
     attachmentId: string,
-    options?: {
-      select?: Prisma.AttachmentSelect;
-      include?: Prisma.Subset<I, Prisma.AttachmentInclude>;
-    },
+    options?: { select?: Prisma.AttachmentSelect; include?: Prisma.Subset<I, Prisma.AttachmentInclude> },
     tx?: Prisma.TransactionClient,
   ): Promise<Prisma.AttachmentGetPayload<{ include: I }> | null> {
     const client = this.getClient(tx);
     return client.attachment.findUnique({
       where: { id: attachmentId },
       ...options,
-    }) as unknown as Promise<Prisma.AttachmentGetPayload<{
-      include: I;
-    }> | null>;
+    }) as unknown as Promise<Prisma.AttachmentGetPayload<{ include: I }> | null>;
   }
 
-  async updateAttachmentFileId(
-    attachmentId: string,
-    fileId: string,
-    tx?: Prisma.TransactionClient,
-  ) {
-    const client = this.getClient(tx);
-    return client.attachment.update({
-      where: { id: attachmentId },
-      data: { fileId },
-    });
+  async updateAttachmentFileId(attachmentId: string, fileId: string, tx?: Prisma.TransactionClient) {
+    return this.getClient(tx).attachment.update({ where: { id: attachmentId }, data: { fileId } });
   }
 
   async saveMetadataSourceRecord(
@@ -175,35 +148,104 @@ export class ExtractionRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    let mergedMetadata = data.metadata;
+    const freshItem = await client.item.findUnique({
+      where: { id: itemId },
+      select: {
+        userId: true, projectId: true, citationKey: true,
+        title: true, doi: true, abstract: true, year: true,
+        publicationTitle: true, itemType: true, metadata: true,
+      },
+    });
 
-    if (
-      data.metadata &&
-      typeof data.metadata === 'object' &&
-      !Array.isArray(data.metadata)
-    ) {
-      const freshItem = await client.item.findUnique({
-        where: { id: itemId },
-        select: { metadata: true },
-      });
-      const freshestMeta =
-        freshItem?.metadata &&
-        typeof freshItem.metadata === 'object' &&
-        !Array.isArray(freshItem.metadata)
-          ? (freshItem.metadata as Record<string, unknown>)
-          : {};
-      mergedMetadata = {
-        ...freshestMeta,
-        ...(data.metadata as Record<string, unknown>),
-      } as Prisma.InputJsonValue;
+    const sanitizedData: Prisma.ItemUpdateInput = { ...data };
+    let disambiguatedCitKey: string | undefined;
+    const freshestMeta =
+      freshItem?.metadata && typeof freshItem.metadata === 'object' && !Array.isArray(freshItem.metadata)
+        ? (freshItem.metadata as Record<string, unknown>) : {};
+    const freshFieldProv =
+      freshestMeta.fieldProvenance && typeof freshestMeta.fieldProvenance === 'object' && !Array.isArray(freshestMeta.fieldProvenance)
+        ? (freshestMeta.fieldProvenance as Record<string, { source?: string; isUserOverride?: boolean }>) : {};
+    const freshLockedSet = new Set<string>([
+      ...(Array.isArray(freshestMeta.lockedFields) ? (freshestMeta.lockedFields as string[]) : []),
+      ...Object.entries(freshFieldProv)
+        .filter(([, v]) => v?.isUserOverride === true || v?.source === 'UserOverride' || v?.source === 'manual')
+        .map(([k]) => k),
+    ]);
+    if (freshItem) {
+      const isFreshPlaceholder = isPlaceholderItemTitle(freshItem.title);
+      if (sanitizedData.title !== undefined && (!isFreshPlaceholder || freshLockedSet.has('title'))) delete sanitizedData.title;
+      if (sanitizedData.doi !== undefined && (freshItem.doi || freshLockedSet.has('doi'))) delete sanitizedData.doi;
+      if (sanitizedData.abstract !== undefined && (freshItem.abstract || freshLockedSet.has('abstract') || freshLockedSet.has('abstractNote'))) delete sanitizedData.abstract;
+      if (sanitizedData.year !== undefined && (freshItem.year || freshLockedSet.has('year'))) delete sanitizedData.year;
+      if (sanitizedData.publicationTitle !== undefined && (freshItem.publicationTitle || freshLockedSet.has('publicationTitle'))) delete sanitizedData.publicationTitle;
+      if (sanitizedData.itemType !== undefined && freshLockedSet.has('itemType')) delete sanitizedData.itemType;
+      const freshCitKey = String(freshItem.citationKey || '').trim();
+      if (sanitizedData.citationKey !== undefined) {
+        if (freshLockedSet.has('citationKey') || (freshCitKey && !/^anon/i.test(freshCitKey))) {
+          delete sanitizedData.citationKey;
+        } else if (typeof sanitizedData.citationKey === 'string' && sanitizedData.citationKey.trim()) {
+          disambiguatedCitKey =
+            (await disambiguateCitationKey(
+              client,
+              sanitizedData.citationKey.trim(),
+              { userId: freshItem.userId, projectId: normalizeProjectScopeId(freshItem.projectId) },
+              itemId,
+            )) ?? undefined;
+          sanitizedData.citationKey = disambiguatedCitKey;
+        }
+      }
+    }
+
+    let mergedMetadata = sanitizedData.metadata;
+    if (sanitizedData.metadata && typeof sanitizedData.metadata === 'object' && !Array.isArray(sanitizedData.metadata)) {
+      const isFreshMetaTitlePlaceholder = isPlaceholderItemTitle(freshestMeta.title);
+      const incomingMeta = { ...(sanitizedData.metadata as Record<string, unknown>) };
+      const freshCitKey = String(freshItem?.citationKey || '').trim();
+      if (freshLockedSet.has('citationKey') || (freshCitKey && !/^anon/i.test(freshCitKey))) {
+        delete incomingMeta.citationKey;
+      } else if (disambiguatedCitKey) {
+        incomingMeta.citationKey = disambiguatedCitKey;
+      }
+      for (const [k, v] of Object.entries(incomingMeta)) {
+        if (k === 'fieldProvenance') {
+          incomingMeta[k] = {
+            ...(v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}),
+            ...freshFieldProv,
+          };
+          continue;
+        }
+        const hasFreshVal =
+          freshestMeta[k] !== undefined && freshestMeta[k] !== null && freshestMeta[k] !== '' &&
+          !(Array.isArray(freshestMeta[k]) && (freshestMeta[k] as unknown[]).length === 0);
+        if (
+          freshLockedSet.has(k) ||
+          (k !== 'referenceCount' &&
+            !(k === 'title' && isFreshMetaTitlePlaceholder) &&
+            !(k === 'citationKey' && (!freshestMeta.citationKey || /^anon/i.test(String(freshestMeta.citationKey)))) &&
+            hasFreshVal)
+        ) {
+          incomingMeta[k] = freshestMeta[k];
+        } else {
+          incomingMeta[k] = v;
+        }
+      }
+      mergedMetadata = { ...freshestMeta, ...incomingMeta } as Prisma.InputJsonValue;
     }
 
     return client.item.update({
       where: { id: itemId },
       data: {
-        ...data,
+        ...sanitizedData,
         ...(mergedMetadata !== undefined ? { metadata: mergedMetadata } : {}),
         version: { increment: 1 },
+      },
+      include: {
+        contributors: { orderBy: { orderIndex: 'asc' } },
+        itemTags: { include: { tag: true } },
+        attachments: { where: { deletedAt: null }, include: { revisions: true } },
+        notesList: { where: { deletedAt: null } },
+        collectionItems: { include: { collection: true } },
+        identifiers: true,
       },
     });
   }
@@ -259,6 +301,7 @@ export class ExtractionRepository {
   async createContributors(
     data: Prisma.ContributorCreateManyInput[],
     tx?: Prisma.TransactionClient,
+    options?: { skipVersionIncrement?: boolean },
   ) {
     const client = this.getClient(tx);
     const result = await client.contributor.createMany({
@@ -274,7 +317,7 @@ export class ExtractionRepository {
           where: { id: itemId },
           data: {
             firstAuthor,
-            version: { increment: 1 },
+            ...(options?.skipVersionIncrement ? {} : { version: { increment: 1 } }),
           },
         });
       }
@@ -488,14 +531,8 @@ export class ExtractionRepository {
     return revision;
   }
 
-  async countItemTags(
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-  ): Promise<number> {
-    const client = this.getClient(tx);
-    return client.itemTag.count({
-      where: { itemId },
-    });
+  async countItemTags(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
+    return this.getClient(tx).itemTag.count({ where: { itemId } });
   }
 
   async syncItemTags(
@@ -504,6 +541,7 @@ export class ExtractionRepository {
       itemId: string;
       rawTags: string[];
       projectId?: string | null;
+      skipVersionIncrement?: boolean;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
@@ -522,11 +560,7 @@ export class ExtractionRepository {
     if (resolvedTags.length > 0) {
       if (client.itemTag?.createMany) {
         await client.itemTag.createMany({
-          data: resolvedTags.map((t) => ({
-            tagId: t.id,
-            itemId: params.itemId,
-            type: 'automatic',
-          })),
+          data: resolvedTags.map((t) => ({ tagId: t.id, itemId: params.itemId, type: 'automatic' })),
           skipDuplicates: true,
         });
       } else if (client.itemTag?.upsert) {
@@ -539,12 +573,11 @@ export class ExtractionRepository {
         }
       }
 
-      // Merge tags & keywords into item metadata
       const existingItem = await client.item.findUnique({
         where: { id: params.itemId },
         select: { metadata: true },
       });
-      const meta = ((existingItem?.metadata as Record<string, unknown>) || {});
+      const meta = (existingItem?.metadata as Record<string, unknown>) || {};
       const existingTags = Array.isArray(meta.tags) ? (meta.tags as string[]) : [];
       const existingKeywords = Array.isArray(meta.keywords)
         ? (meta.keywords as string[])
@@ -555,12 +588,8 @@ export class ExtractionRepository {
       await client.item.update({
         where: { id: params.itemId },
         data: {
-          version: { increment: 1 },
-          metadata: {
-            ...meta,
-            tags: mergedTags,
-            keywords: mergedKeywords,
-          },
+          ...(params.skipVersionIncrement ? {} : { version: { increment: 1 } }),
+          metadata: { ...meta, tags: mergedTags, keywords: mergedKeywords },
         },
       });
     }
@@ -568,14 +597,8 @@ export class ExtractionRepository {
     return normalized;
   }
 
-  async countItemNotes(
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-  ): Promise<number> {
-    const client = this.getClient(tx);
-    return client.note.count({
-      where: { itemId, deletedAt: null },
-    });
+  async countItemNotes(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
+    return this.getClient(tx).note.count({ where: { itemId, deletedAt: null } });
   }
 
   async createItemNotes(
@@ -584,6 +607,7 @@ export class ExtractionRepository {
       itemId: string;
       notes: Array<{ content: string; type?: string }>;
       projectId?: string | null;
+      skipVersionIncrement?: boolean;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
@@ -600,12 +624,8 @@ export class ExtractionRepository {
     for (const n of params.notes) {
       const cleanContent = n.content.trim();
       if (!cleanContent || existingContents.has(cleanContent)) continue;
-
-      const title = n.type
-        ? `Extracted Note (${n.type})`
-        : 'Extracted Document Note';
+      const title = n.type ? `Extracted Note (${n.type})` : 'Extracted Document Note';
       const contentJson = buildTipTapDocFromText(cleanContent);
-
       toCreate.push({
         userId: params.userId,
         createdById: params.userId,
@@ -633,11 +653,47 @@ export class ExtractionRepository {
         where: { id: params.itemId },
         data: {
           noteCount: { increment: createdCount },
-          version: { increment: 1 },
+          ...(params.skipVersionIncrement ? {} : { version: { increment: 1 } }),
         },
       });
     }
 
     return createdCount;
+  }
+
+  async syncExtractedIdentifiers(
+    itemId: string,
+    identifiers: Array<{ type: string; value: string; canonicalUri: string }>,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (identifiers.length === 0) return;
+    const client = this.getClient(tx) as unknown as {
+      itemIdentifier?: {
+        upsert?: (args: {
+          where: { itemId_type: { itemId: string; type: string } };
+          update: { value: string; canonicalUri: string };
+          create: {
+            itemId: string;
+            type: string;
+            value: string;
+            canonicalUri: string;
+          };
+        }) => Promise<unknown>;
+      };
+    };
+    if (!client.itemIdentifier?.upsert) return;
+    await Promise.all(
+      identifiers.map((idObj) => {
+        const canonicalType =
+          idObj.type === 'arxivId' || idObj.type.toLowerCase() === 'arxivid'
+            ? 'arxiv'
+            : idObj.type;
+        return client.itemIdentifier!.upsert!({
+          where: { itemId_type: { itemId, type: canonicalType } },
+          update: { value: idObj.value, canonicalUri: idObj.canonicalUri },
+          create: { itemId, ...idObj, type: canonicalType },
+        });
+      }),
+    );
   }
 }

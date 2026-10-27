@@ -30,6 +30,7 @@ import {
   CreateAnnotationDto,
   UpdateAnnotationDto,
   BatchAnnotationsDto,
+  normalizeAnnotationType,
 } from '@/modules/library/extraction/dto/annotations.dto';
 import { ProjectAccessGuard, ProjectRoles, ProjectRole } from '@/modules/project/access';
 import { AnnotationsService } from '@/modules/library/extraction/services/annotations.service';
@@ -78,7 +79,12 @@ export class AnnotationsController {
       }
     }
 
-    if (type !== undefined && !Object.values(AnnotationType).includes(type)) {
+    const normalizedType =
+      type !== undefined ? normalizeAnnotationType(type) : undefined;
+    if (
+      normalizedType !== undefined &&
+      !Object.values(AnnotationType).includes(normalizedType)
+    ) {
       throw new BadRequestException(
         `type must be one of: ${Object.values(AnnotationType).join(', ')}`,
       );
@@ -89,7 +95,7 @@ export class AnnotationsController {
         userId,
         attachmentId,
         pageIndex,
-        type,
+        normalizedType,
         projectId,
       );
     }
@@ -98,7 +104,7 @@ export class AnnotationsController {
       userId,
       attachmentId,
       pageIndex,
-      type,
+      normalizedType,
     );
   }
 

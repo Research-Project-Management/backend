@@ -33,6 +33,7 @@ import { StateService } from './services/state.service';
 import { SavedSearchesService } from './services/saved-searches.service';
 import { ZoteroSchemaValidatorService } from './services/zotero-schema-validator.service';
 import { NotesService } from './services/notes.service';
+import { LibraryBootstrapService } from './services/library-bootstrap.service';
 
 // Engines & Mappers
 import { TreeEngine } from './domain/tree.engine';
@@ -94,6 +95,7 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     SavedSearchesService,
     ZoteroSchemaValidatorService,
     NotesService,
+    LibraryBootstrapService,
 
     // Engines & Mappers
     TreeEngine,
@@ -113,6 +115,6 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     SavedSearchesRepository,
     NotesRepository,
   ],
-  exports: [CATALOG_FACADE, CatalogFacade],
+  exports: [CATALOG_FACADE, CatalogFacade, ItemCacheCoordinator],
 })
 export class CatalogModule {}

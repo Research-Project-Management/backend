@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Optional } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
 import { UpdateStateDto } from '@/modules/library/catalog/dto/state.dto';
@@ -35,8 +35,10 @@ export class StateService {
     @Optional()
     private readonly itemExistencePort?: ItemQueryService,
     @Optional()
+    @Inject(RedisCacheService)
     cacheOrCoordinator?: RedisCacheService | ItemCacheCoordinator,
     @Optional()
+    @Inject(ItemCacheCoordinator)
     injectedCoordinator?: ItemCacheCoordinator,
   ) {
     if (injectedCoordinator) {
@@ -319,71 +321,73 @@ export class StateService {
       userStateByUser.set(us.userId, list);
     }
 
-    for (const [userId, states] of userStateByUser.entries()) {
-      const maxRating = Math.max(...states.map((s) => s.rating || 0));
-      const isStarred = states.some((s) => Boolean(s.isStarred));
-      const isCompleted = states.some((s) => s.readStatus === 'completed');
-      const isReading = states.some((s) => s.readStatus === 'reading');
-      const readStatus = isCompleted
-        ? 'completed'
-        : isReading
-          ? 'reading'
-          : 'unread';
+    await Promise.all(
+      Array.from(userStateByUser.entries()).map(([userId, states]) => {
+        const maxRating = Math.max(...states.map((s) => s.rating || 0));
+        const isStarred = states.some((s) => Boolean(s.isStarred));
+        const isCompleted = states.some((s) => s.readStatus === 'completed');
+        const isReading = states.some((s) => s.readStatus === 'reading');
+        const readStatus = isCompleted
+          ? 'completed'
+          : isReading
+            ? 'reading'
+            : 'unread';
 
-      const latestReadAt = states
-        .map((s) => s.lastReadAt)
-        .filter((d): d is Date => d !== null)
-        .sort((a, b) => b.getTime() - a.getTime())[0];
+        const latestReadAt = states
+          .map((s) => s.lastReadAt)
+          .filter((d): d is Date => d !== null)
+          .sort((a, b) => b.getTime() - a.getTime())[0];
 
-      const latestOpenedAt = states
-        .map((s) => s.lastOpenedAt)
-        .filter((d): d is Date => d !== null)
-        .sort((a, b) => b.getTime() - a.getTime())[0];
+        const latestOpenedAt = states
+          .map((s) => s.lastOpenedAt)
+          .filter((d): d is Date => d !== null)
+          .sort((a, b) => b.getTime() - a.getTime())[0];
 
-      const maxCurrentPage = Math.max(...states.map((s) => s.currentPage || 1));
-      const statesWithScroll = states.filter((s) => s.scrollPosition !== null);
-      statesWithScroll.sort((a, b) => {
-        const readA = a.lastReadAt ? a.lastReadAt.getTime() : 0;
-        const readB = b.lastReadAt ? b.lastReadAt.getTime() : 0;
-        if (readB !== readA) return readB - readA;
+        const maxCurrentPage = Math.max(...states.map((s) => s.currentPage || 1));
+        const statesWithScroll = states.filter((s) => s.scrollPosition !== null);
+        statesWithScroll.sort((a, b) => {
+          const readA = a.lastReadAt ? a.lastReadAt.getTime() : 0;
+          const readB = b.lastReadAt ? b.lastReadAt.getTime() : 0;
+          if (readB !== readA) return readB - readA;
 
-        const openA = a.lastOpenedAt ? a.lastOpenedAt.getTime() : 0;
-        const openB = b.lastOpenedAt ? b.lastOpenedAt.getTime() : 0;
-        if (openB !== openA) return openB - openA;
+          const openA = a.lastOpenedAt ? a.lastOpenedAt.getTime() : 0;
+          const openB = b.lastOpenedAt ? b.lastOpenedAt.getTime() : 0;
+          if (openB !== openA) return openB - openA;
 
-        return (b.currentPage || 1) - (a.currentPage || 1);
-      });
-      const latestScroll = statesWithScroll[0]?.scrollPosition;
+          return (b.currentPage || 1) - (a.currentPage || 1);
+        });
+        const latestScroll = statesWithScroll[0]?.scrollPosition;
 
-      await tx.state.upsert({
-        where: {
-          userId_itemId: {
+        return tx.state.upsert({
+          where: {
+            userId_itemId: {
+              userId,
+              itemId: targetItemId,
+            },
+          },
+          create: {
             userId,
             itemId: targetItemId,
+            isStarred,
+            rating: maxRating,
+            readStatus,
+            currentPage: maxCurrentPage,
+            scrollPosition: latestScroll ?? Prisma.JsonNull,
+            lastOpenedAt: latestOpenedAt || null,
+            lastReadAt: latestReadAt || null,
           },
-        },
-        create: {
-          userId,
-          itemId: targetItemId,
-          isStarred,
-          rating: maxRating,
-          readStatus,
-          currentPage: maxCurrentPage,
-          scrollPosition: latestScroll ?? Prisma.JsonNull,
-          lastOpenedAt: latestOpenedAt || null,
-          lastReadAt: latestReadAt || null,
-        },
-        update: {
-          isStarred,
-          rating: maxRating,
-          readStatus,
-          currentPage: maxCurrentPage,
-          scrollPosition: latestScroll ?? undefined,
-          lastOpenedAt: latestOpenedAt || undefined,
-          lastReadAt: latestReadAt || undefined,
-        },
-      });
-    }
+          update: {
+            isStarred,
+            rating: maxRating,
+            readStatus,
+            currentPage: maxCurrentPage,
+            scrollPosition: latestScroll ?? undefined,
+            lastOpenedAt: latestOpenedAt || undefined,
+            lastReadAt: latestReadAt || undefined,
+          },
+        });
+      }),
+    );
 
     await tx.state.deleteMany({
       where: { itemId: { in: cleanSourceIds } },

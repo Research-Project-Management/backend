@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma } from '@prisma/client';
-import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { PrismaService } from '@/core';
@@ -51,8 +50,11 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     });
   });
 
-  describe('DuplicateService (Detection, Advisory Lock, & Auto-Cluster Resolution)', () => {
-    let service: DuplicateService;
+  describe('DuplicateDetectorService & DuplicateMergerService (Detection, Advisory Lock, & Auto-Cluster Resolution)', () => {
+    let service: {
+      detectDuplicates: DuplicateDetectorService['detectDuplicates'];
+      mergeDuplicates: DuplicateMergerService['mergeDuplicates'];
+    };
     let mockPrisma: any;
     let mockLibraryTx: any;
     let mockBibliographyFacade: jest.Mocked<ICatalogFacade>;
@@ -137,7 +139,8 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
-          DuplicateService,
+          DuplicateDetectorService,
+          DuplicateMergerService,
 
           { provide: PrismaService, useValue: mockPrisma },
           { provide: TransactionService, useValue: mockLibraryTx },
@@ -147,7 +150,12 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         ],
       }).compile();
 
-      service = module.get<DuplicateService>(DuplicateService);
+      const detector = module.get<DuplicateDetectorService>(DuplicateDetectorService);
+      const merger = module.get<DuplicateMergerService>(DuplicateMergerService);
+      service = {
+        detectDuplicates: detector.detectDuplicates.bind(detector),
+        mergeDuplicates: merger.mergeDuplicates.bind(merger),
+      };
     });
 
     it('should detect duplicate items via exact normalized DOI', async () => {

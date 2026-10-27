@@ -3,63 +3,25 @@ import {
   BASE_FIELD_MAPPINGS,
   REVERSE_BASE_FIELD_MAPPINGS,
 } from '@/modules/library/core/types/schema.constants';
+import {
+  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
+  PRISMA_ITEM_SCALAR_COLUMNS,
+  INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
+} from '@/modules/library/core/types/bibliographic.types';
+import {
+  getEffectiveBaseFieldMap,
+  getEffectiveReverseBaseFieldMap,
+} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
 
-export const ITEM_COLUMN_METADATA_FIELDS = new Set([
-  'title',
-  'year',
-  'doi',
-  'DOI',
-  'abstract',
-  'abstractNote',
-  'itemType',
-  'type',
-  'publicationTitle',
-  'journal',
-  'publicationDate',
-  'date',
-  'publisher',
-  'place',
-  'volume',
-  'issue',
-  'section',
-  'partNumber',
-  'partTitle',
-  'pages',
-  'series',
-  'seriesTitle',
-  'seriesText',
-  'seriesNumber',
-  'issn',
-  'ISSN',
-  'isbn',
-  'ISBN',
-  'pmid',
-  'PMID',
-  'pmcid',
-  'PMCID',
-  'url',
-  'language',
-  'journalAbbr',
-  'journalAbbreviation',
-  'shortTitle',
-  'rights',
-  'license',
-  'citationKey',
-  'citeKey',
-  'libraryCatalog',
-  'archive',
-  'archiveLocation',
-  'callNumber',
-  'accessedAt',
-  'accessDate',
-  'extra',
-  'arxivId',
-  'archiveId',
-  'archiveID',
-  'citationCount',
-  'referenceCount',
-  'openAccessPdfUrl',
-]);
+export {
+  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
+  PRISMA_ITEM_SCALAR_COLUMNS,
+  INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
+};
+
+export const ITEM_COLUMN_METADATA_FIELDS = new Set<string>(
+  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
+);
 
 export {
   FIELD_ALIASES,
@@ -72,14 +34,20 @@ export function resolveBaseColumnForField(
   itemType: string,
   fieldKey: string,
 ): string | undefined {
-  return REVERSE_BASE_FIELD_MAPPINGS[itemType]?.[fieldKey];
+  return (
+    getEffectiveReverseBaseFieldMap(itemType)?.[fieldKey] ??
+    REVERSE_BASE_FIELD_MAPPINGS[itemType]?.[fieldKey]
+  );
 }
 
 export function resolveTypeSpecificFieldForBase(
   itemType: string,
   baseColumn: string,
 ): string | undefined {
-  return BASE_FIELD_MAPPINGS[itemType]?.[baseColumn];
+  return (
+    getEffectiveBaseFieldMap(itemType)?.[baseColumn] ??
+    BASE_FIELD_MAPPINGS[itemType]?.[baseColumn]
+  );
 }
 
 export const TYPE_SPECIFIC_EXTRA_FIELDS = [

@@ -1,11 +1,17 @@
 import { Prisma } from '@prisma/client';
 import { SavedSearchOperator } from '@/modules/library/catalog/types/saved-search.types';
+import { AcademicSearchQueryEngine } from '@/modules/library/core';
+
+function normalizeSavedSearchJsonValue(jsonKey: string, val: string): string {
+  return AcademicSearchQueryEngine.normalizeFieldTargetValue(jsonKey, val);
+}
 
 export function evalJsonField(
   jsonKey: string,
   operator: string,
   val: string,
 ): Prisma.ItemWhereInput | null {
+  const effectiveVal = normalizeSavedSearchJsonValue(jsonKey, val);
   if (operator === 'isPresent') {
     return { metadata: { path: [jsonKey], not: Prisma.JsonNull } };
   }
@@ -17,17 +23,17 @@ export function evalJsonField(
       ],
     };
   }
-  if (operator === 'is' || operator === 'contains') {
-    return { metadata: { path: [jsonKey], string_contains: val } };
+  if (operator === 'is' || operator === 'equals' || operator === 'contains') {
+    return { metadata: { path: [jsonKey], string_contains: effectiveVal } };
   }
-  if (operator === 'isNot' || operator === 'doesNotContain') {
-    return { NOT: { metadata: { path: [jsonKey], string_contains: val } } };
+  if (operator === 'isNot' || operator === 'not_equals' || operator === 'doesNotContain') {
+    return { NOT: { metadata: { path: [jsonKey], string_contains: effectiveVal } } };
   }
   if (operator === 'beginsWith') {
-    return { metadata: { path: [jsonKey], string_starts_with: val } };
+    return { metadata: { path: [jsonKey], string_starts_with: effectiveVal } };
   }
   if (operator === 'endsWith') {
-    return { metadata: { path: [jsonKey], string_ends_with: val } };
+    return { metadata: { path: [jsonKey], string_ends_with: effectiveVal } };
   }
   return null;
 }
@@ -45,10 +51,10 @@ export function evalStringField(
   if (operator === 'isAbsent') {
     return { OR: [{ [fieldName]: null }, { [fieldName]: '' }] };
   }
-  if (operator === 'is') {
+  if (operator === 'is' || operator === 'equals') {
     return { [fieldName]: { equals: val, mode: 'insensitive' } };
   }
-  if (operator === 'isNot') {
+  if (operator === 'isNot' || operator === 'not_equals') {
     return { NOT: { [fieldName]: { equals: val, mode: 'insensitive' } } };
   }
   if (operator === 'contains') {

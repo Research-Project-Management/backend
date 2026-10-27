@@ -213,15 +213,6 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
               updatedItems.push(item);
             } else {
               skippedUnverified++;
-              await this.repo.updateItemRetraction(
-                item.id,
-                Boolean(item.isRetracted),
-                (typeof item.retractionNature === 'string'
-                  ? item.retractionNature
-                  : null) as Parameters<typeof this.repo.updateItemRetraction>[2],
-                null,
-                now,
-              );
               scanned++;
             }
           } catch (err: unknown) {
@@ -256,8 +247,15 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
         }
         for (const scopeKey of scopesToInvalidate) {
           tasks.push(
+            this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(scopeKey)),
             this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeKey)),
             this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeKey)),
+            this.cache.delPattern(
+              LIBRARY_REDIS_KEYS.searchItemsPattern(scopeKey),
+            ),
+            this.cache.delPattern(
+              LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeKey),
+            ),
           );
         }
         await Promise.all(tasks);

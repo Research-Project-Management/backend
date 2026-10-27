@@ -82,8 +82,8 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
     try {
       const result = await handler();
 
-      // 3. Mark completed with retention TTL
-      await this.markCompleted(key, retentionTtlSeconds);
+      // 3. Mark completed with retention TTL (verified by ownerToken)
+      await this.markCompleted(key, retentionTtlSeconds, ownerToken);
 
       return {
         executed: true,
@@ -119,12 +119,6 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
         if (client) {
           const raw = await client.get(key);
           if (raw) {
-            if (raw.startsWith('COMPLETED:')) {
-              return true;
-            }
-            if (raw.startsWith('PROCESSING:')) {
-              return false;
-            }
             const parsed = JSON.parse(raw) as { status?: string };
             return parsed.status === 'completed';
           }
@@ -208,14 +202,6 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
           // Key already exists — inspect current status
           const existingRaw = await client.get(key);
           if (existingRaw) {
-            if (existingRaw.startsWith('COMPLETED:')) {
-              this.setMemoryEntry(key, 'completed', 86400);
-              return { acquired: false, reason: 'ALREADY_COMPLETED' };
-            }
-            if (existingRaw.startsWith('PROCESSING:')) {
-              this.setMemoryEntry(key, 'processing', leaseTtlSeconds);
-              return { acquired: false, reason: 'IN_FLIGHT' };
-            }
             try {
               const existing = JSON.parse(existingRaw) as { status?: string };
               if (existing.status === 'completed') {
@@ -259,19 +245,50 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
   private async markCompleted(
     key: string,
     retentionTtlSeconds: number,
+    ownerToken?: string,
   ): Promise<void> {
     const completedPayload = JSON.stringify({
       status: 'completed',
+      ownerToken,
       completedAt: Date.now(),
     });
 
-    this.setMemoryEntry(key, 'completed', retentionTtlSeconds);
+    const memEntry = this.memoryStore.get(key);
+    if (
+      !memEntry ||
+      !ownerToken ||
+      !memEntry.ownerToken ||
+      memEntry.ownerToken === ownerToken
+    ) {
+      this.setMemoryEntry(key, 'completed', retentionTtlSeconds, ownerToken);
+    }
 
     if (this.redis && this.redis.isReady()) {
       const client = this.redis.getClient();
       if (client) {
         try {
-          await client.set(key, completedPayload, 'EX', retentionTtlSeconds);
+          if (ownerToken && client.eval) {
+            const luaScript = `
+              local val = redis.call('GET', KEYS[1])
+              if not val then
+                return redis.call('SET', KEYS[1], ARGV[2], 'EX', tonumber(ARGV[3]))
+              end
+              if string.find(val, 'PROCESSING:' .. ARGV[1] .. ':', 1, true) then
+                return redis.call('SET', KEYS[1], ARGV[2], 'EX', tonumber(ARGV[3]))
+              end
+              return nil
+            `;
+            await client.eval(
+              luaScript,
+              1,
+              key,
+              ownerToken,
+              completedPayload,
+              String(retentionTtlSeconds),
+            );
+          } else {
+            await client.set(key, completedPayload, 'EX', retentionTtlSeconds);
+          }
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
           this.logger.warn(

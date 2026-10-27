@@ -1,4 +1,4 @@
-﻿import { Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { IngestionValidationException } from '@/modules/library/ingestion/types/ingestion.errors';
 import { normalizeDoi } from '@/modules/library/core';
 

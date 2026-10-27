@@ -160,7 +160,11 @@ export class AnnotationNormalizer {
       return AnnotationType.highlight;
     }
     const normalized = type.trim().toLowerCase();
-    if (normalized === 'box' || normalized === 'area') {
+    if (
+      normalized === 'box' ||
+      normalized === 'area' ||
+      normalized === 'image'
+    ) {
       return AnnotationType.rect;
     }
     if (normalized === 'strike' || normalized === 'strikethrough') {

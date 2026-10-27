@@ -475,11 +475,20 @@ export function generateCitationKey(metadata: {
   citationKey?: string | null;
   creators?: Array<{
     lastName?: string | null;
+    family?: string | null;
     fullName?: string | null;
     name?: string | null;
     fieldMode?: number | null;
   }> | null;
-  authors?: string[] | null;
+  authors?: Array<
+    | string
+    | {
+        lastName?: string | null;
+        family?: string | null;
+        fullName?: string | null;
+        name?: string | null;
+      }
+  > | null;
   year?: number | string | null;
   publicationDate?: string | null;
   date?: string | null;
@@ -493,12 +502,28 @@ export function generateCitationKey(metadata: {
   const firstCreator = metadata.creators?.[0];
   const firstAuthor = metadata.authors?.[0];
 
-  if (firstCreator?.lastName) {
-    family = firstCreator.lastName;
+  if (firstCreator?.lastName || firstCreator?.family) {
+    family = (firstCreator.lastName || firstCreator.family || '').trim();
+
   } else if (firstCreator?.fullName || firstCreator?.name) {
     const raw = (firstCreator.fullName || firstCreator.name || '').trim();
     const parts = raw.split(/\s+/);
     family = parts[parts.length - 1] || 'anon';
+  } else if (
+    firstAuthor &&
+    typeof firstAuthor === 'object' &&
+    (firstAuthor.lastName ||
+      firstAuthor.family ||
+      firstAuthor.fullName ||
+      firstAuthor.name)
+  ) {
+    if (firstAuthor.lastName || firstAuthor.family) {
+      family = (firstAuthor.lastName || firstAuthor.family || '').trim();
+    } else {
+      const raw = (firstAuthor.fullName || firstAuthor.name || '').trim();
+      const parts = raw.split(/\s+/);
+      family = parts[parts.length - 1] || 'anon';
+    }
   } else if (typeof firstAuthor === 'string' && firstAuthor.trim()) {
     const raw = firstAuthor.trim();
     if (raw.includes(',')) {
@@ -512,7 +537,7 @@ export function generateCitationKey(metadata: {
   const cleanFamily =
     family
       .replace(/[đĐ]/g, 'd')
-      .normalize('NFD')
+      .normalize('NFKD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '') || 'anon';
@@ -524,7 +549,7 @@ export function generateCitationKey(metadata: {
 
   const rawTitle = (metadata.title || '')
     .replace(/[đĐ]/g, 'd')
-    .normalize('NFD')
+    .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
   const words = rawTitle.match(/[a-z0-9]{3,}/g) || [];

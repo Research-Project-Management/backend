@@ -8,7 +8,7 @@ import { Job } from 'bullmq';
 import {
   LIBRARY_OUTBOX_QUEUE,
   LIBRARY_OUTBOX_JOB,
-} from '@/modules/library/sync/types/outbox.constants';
+} from '@/modules/library/sync/domain/outbox.domain';
 import { OutboxWorker } from './outbox.worker';
 
 @Processor(LIBRARY_OUTBOX_QUEUE, { concurrency: 5 })

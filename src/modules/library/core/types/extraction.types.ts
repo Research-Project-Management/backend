@@ -178,6 +178,7 @@ export interface ExtractedPdfMetadata {
   keywords?: string[];
   notes?: Array<{ content: string; type?: string }>;
   journal?: string;
+  publicationTitle?: string;
   bookTitle?: string;
   conferenceName?: string;
   volume?: string;

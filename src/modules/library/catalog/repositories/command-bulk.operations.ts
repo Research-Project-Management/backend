@@ -54,7 +54,40 @@ export class CommandBulkOperations {
       }
     }
 
-    return Array.from(paths);
+    const candidateFileIds = Array.from(paths);
+    if (candidateFileIds.length === 0) return [];
+
+    if (typeof client.attachment.findMany === 'function') {
+      const activeRefs = await client.attachment.findMany({
+        where: {
+          fileId: { in: candidateFileIds },
+          itemId: { notIn: itemIds },
+          deletedAt: null,
+        },
+        select: { fileId: true },
+      });
+      const referencedSet = new Set(
+        (activeRefs || [])
+          .map((r) => r.fileId)
+          .filter((f): f is string => Boolean(f)),
+      );
+      return candidateFileIds.filter((fid) => !referencedSet.has(fid));
+    }
+
+    const safePaths: string[] = [];
+    for (const fileId of candidateFileIds) {
+      const remainingRefs = await client.attachment.count({
+        where: {
+          fileId,
+          itemId: { notIn: itemIds },
+          deletedAt: null,
+        },
+      });
+      if (remainingRefs === 0) {
+        safePaths.push(fileId);
+      }
+    }
+    return safePaths;
   }
 
   public static async softDeleteMany(
@@ -217,12 +250,7 @@ export class CommandBulkOperations {
       await Promise.all(
         succeededIds.flatMap((id) => {
           const itemDeletedAt = restorableMap.get(id)?.deletedAt;
-          const cascadeCutoff = itemDeletedAt
-            ? new Date(itemDeletedAt.getTime() - 2000)
-            : undefined;
-          const deletedFilter = cascadeCutoff
-            ? { gte: cascadeCutoff }
-            : { not: null };
+          const deletedFilter = itemDeletedAt ? { gte: itemDeletedAt } : { not: null };
           return [
             client.note?.updateMany?.({
               where: { itemId: id, deletedAt: deletedFilter },

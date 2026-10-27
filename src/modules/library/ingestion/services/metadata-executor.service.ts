@@ -1,5 +1,8 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { CircuitBreaker } from '@/modules/library/core';
+import {
+  CircuitBreaker,
+  ResilienceRegistryService,
+} from '@/modules/library/core';
 import {
   MetadataProvider,
   MetadataRequest,
@@ -156,9 +159,13 @@ export class MetadataExecutorService {
 
   constructor(
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
+    @Optional() private readonly resilienceRegistry?: ResilienceRegistryService,
   ) {}
 
   public getCircuitBreaker(providerName: ProviderName): CircuitBreaker {
+    if (this.resilienceRegistry) {
+      return this.resilienceRegistry.getCircuitBreaker(providerName);
+    }
     let cb = this.circuitBreakers.get(providerName);
     if (!cb) {
       cb = new CircuitBreaker({ name: providerName });

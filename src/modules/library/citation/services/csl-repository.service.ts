@@ -294,11 +294,12 @@ export class CslRepositoryService implements OnModuleInit {
   public async searchStyles(
     query: string = '',
     limit: number = 30,
+    scopeId?: string,
   ): Promise<CslStyleMetadata[]> {
     const q = query.trim().toLowerCase();
 
     // 1. Get custom user styles from cache if any
-    const customStyles = await this.getCustomStyles();
+    const customStyles = await this.getCustomStyles(scopeId);
 
     // 2. If query is empty, return popular presets + any custom styles
     if (!q) {
@@ -387,12 +388,12 @@ export class CslRepositoryService implements OnModuleInit {
         if (scoped && typeof scoped === 'string' && scoped.includes('<style')) {
           return scoped;
         }
+      } else {
+        const customCached = await this.redisCache.get<string>(`csl:xml:custom:${normalized}`);
+        if (customCached && typeof customCached === 'string' && customCached.includes('<style')) {
+          return customCached;
+        }
       }
-      const customCached = await this.redisCache.get<string>(`csl:xml:custom:${normalized}`);
-      if (customCached && typeof customCached === 'string' && customCached.includes('<style')) {
-        return customCached;
-      }
-      const cacheKey = `csl:xml:${normalized}`;
       const cached = await this.redisCache.get<string>(cacheKey);
       if (cached && typeof cached === 'string' && cached.includes('<style')) {
         return cached;
@@ -499,7 +500,13 @@ export class CslRepositoryService implements OnModuleInit {
     const titleMatch = cslXml.match(/<title>([^<]+)<\/title>/i);
     const idMatch = cslXml.match(/<id>([^<]+)<\/id>/i);
 
-    const title = customTitle || titleMatch?.[1]?.trim() || 'Custom CSL Style';
+    const rawTitle = customTitle || titleMatch?.[1]?.trim() || 'Custom CSL Style';
+    const title =
+      rawTitle
+        .replace(/<[^>]*>/g, '')
+        .replace(/[<>]/g, '')
+        .trim()
+        .slice(0, 200) || 'Custom CSL Style';
     const rawId = idMatch?.[1]?.trim() || `custom-${Date.now()}`;
     const slug = rawId
       .replace(/^https?:\/\/www\.zotero\.org\/styles\//i, '')

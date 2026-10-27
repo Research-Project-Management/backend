@@ -81,8 +81,44 @@ export const EXTRA_FALLBACK_CSL_STRING_KEYS: Record<string, keyof CslItemData> =
 };
 
 const INSTITUTIONAL_PATTERN =
-  /(organization|consortium|association|institute|university|laboratory|committee|team|group|corporation|inc\.|llc|agency|department|ministry|academy|bureau|council|center|centre|foundation|society|openai|google|microsoft|meta|deepmind|who|unesco|ieee|acm|đại học|học viện|viện|trung tâm|bộ giáo dục|bộ y tế|bộ khoa học|tổng cục|cục|sở|ngân hàng|ban quản lý|hội đồng|liên minh)/i;
-const DEGREE_REGEX = /^(?:(?:p?gs|ts(?:kh)?|ths|cn|ks|bs|dr|prof|ph\.?d)\.?\s*)+/gi;
+  /(?:^|[\s,;(])(?:\b(?:organization|consortium|association|institute|university|laboratory|committee|team|group|corporation|inc\.|llc|agency|department|ministry|academy|bureau|council|center|centre|foundation|society|openai|google|microsoft|meta|deepmind|who|unesco|ieee|acm)\b|(?:đại học|học viện|viện|trung tâm|bộ giáo dục|bộ y tế|bộ khoa học|bộ|trường|tổng cục|cục|sở|ngân hàng|ban quản lý|hội đồng|liên minh))(?=$|[\s,;.)])/i;
+const DEGREE_REGEX =
+  /^(?:(?:p?gs|ts(?:kh)?|ths|cn|ks|bs|dr|prof|ph\.?d)(?:\.|\b)\s*)+/gi;
+
+const MONTH_MAP: Record<string, number> = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+};
+
+const SEASON_MAP: Record<string, number> = {
+  spring: 1,
+  summer: 2,
+  autumn: 3,
+  fall: 3,
+  winter: 4,
+};
 
 export class CslNameMapper {
   private static isVnParts(parts: string[]): boolean {
@@ -95,14 +131,165 @@ export class CslNameMapper {
     );
   }
 
+  private static parseSingleDateParts(raw: string): {
+    parts?: number[];
+    season?: number | string;
+    circa?: boolean;
+  } | null {
+    let s = raw.trim();
+    if (!s) return null;
+
+    let circa = false;
+    if (/^(?:c\.|ca\.?|circa)\s*/i.test(s) || /\?$/.test(s)) {
+      circa = true;
+      s = s
+        .replace(/^(?:c\.|ca\.?|circa)\s*/i, '')
+        .replace(/\?$/, '')
+        .trim();
+    }
+
+    // Check season + year e.g. "Spring 2020" or "2020 Spring"
+    const seasonMatch =
+      s.match(/^(spring|summer|autumn|fall|winter)\s+(\d{4})$/i) ||
+      s.match(/^(\d{4})\s+(spring|summer|autumn|fall|winter)$/i);
+    if (seasonMatch) {
+      const isYearFirst = /^\d{4}$/.test(seasonMatch[1]);
+      const year = Number(isYearFirst ? seasonMatch[1] : seasonMatch[2]);
+      const seasonStr = (
+        isYearFirst ? seasonMatch[2] : seasonMatch[1]
+      ).toLowerCase();
+      return {
+        parts: [year],
+        season: SEASON_MAP[seasonStr] ?? seasonStr,
+        ...(circa ? { circa: true } : {}),
+      };
+    }
+
+    // Check Month Year / Day Month Year / Month Day, Year
+    // e.g. "March 2020", "15 March 2020", "Mar 15, 2020", "2020 March 15"
+    const dmyMatch = s.match(/^(\d{1,2})\s+([A-Za-z]+)\.?,?\s+(\d{4})$/);
+    if (dmyMatch) {
+      const day = Number(dmyMatch[1]);
+      const month = MONTH_MAP[dmyMatch[2].toLowerCase()];
+      const year = Number(dmyMatch[3]);
+      if (month && day >= 1 && day <= 31) {
+        return {
+          parts: [year, month, day],
+          ...(circa ? { circa: true } : {}),
+        };
+      }
+    }
+
+    const mdyMatch = s.match(/^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$/);
+    if (mdyMatch) {
+      const month = MONTH_MAP[mdyMatch[1].toLowerCase()];
+      const day = Number(mdyMatch[2]);
+      const year = Number(mdyMatch[3]);
+      if (month && day >= 1 && day <= 31) {
+        return {
+          parts: [year, month, day],
+          ...(circa ? { circa: true } : {}),
+        };
+      }
+    }
+
+    const myMatch =
+      s.match(/^([A-Za-z]+)\.?,?\s+(\d{4})$/) ||
+      s.match(/^(\d{4})\s+([A-Za-z]+)\.?$/);
+    if (myMatch) {
+      const isYearFirst = /^\d{4}$/.test(myMatch[1]);
+      const year = Number(isYearFirst ? myMatch[1] : myMatch[2]);
+      const monthToken = (isYearFirst ? myMatch[2] : myMatch[1]).toLowerCase();
+      const month = MONTH_MAP[monthToken];
+      if (month) {
+        return {
+          parts: [year, month],
+          ...(circa ? { circa: true } : {}),
+        };
+      }
+    }
+
+    // ISO or slash-separated date: YYYY, YYYY-MM, YYYY-MM-DD, YYYY/MM/DD, YYYY/MM/DD/
+    const isoMatch = s.match(
+      /^(\d{4})(?:[-/](\d{1,2})(?:[-/](\d{1,2}))?)?(?:T|\s|\/|$)/,
+    );
+    if (isoMatch) {
+      const year = Number(isoMatch[1]);
+      const parts: number[] = [year];
+      if (isoMatch[2] !== undefined) {
+        const month = Number(isoMatch[2]);
+        if (month >= 1 && month <= 12) {
+          parts.push(month);
+          if (isoMatch[3] !== undefined) {
+            const day = Number(isoMatch[3]);
+            if (day >= 1 && day <= 31) {
+              parts.push(day);
+            }
+          }
+        }
+      }
+      return {
+        parts,
+        ...(circa ? { circa: true } : {}),
+      };
+    }
+
+    if (circa) {
+      const anyYear = s.match(/\b(\d{4})\b/);
+      if (anyYear) {
+        return { parts: [Number(anyYear[1])], circa: true };
+      }
+    }
+
+    return null;
+  }
+
   public static parseCslDate(dateStr: string): CslDate | undefined {
     if (!dateStr) return undefined;
-    const match = dateStr.trim().match(/^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?/);
-    if (!match) return undefined;
-    const parts: number[] = [Number(match[1])];
-    if (match[2]) parts.push(Number(match[2]));
-    if (match[3]) parts.push(Number(match[3]));
-    return { 'date-parts': [parts] };
+    const trimmed = dateStr.trim();
+    if (!trimmed) return undefined;
+
+    // 1. Year range: "2019-2020" or "2019/2020" or "2019–2020"
+    const yearRangeMatch = trimmed.match(/^(\d{4})\s*[-/–—]\s*(\d{4})$/);
+    if (yearRangeMatch) {
+      return {
+        'date-parts': [[Number(yearRangeMatch[1])], [Number(yearRangeMatch[2])]],
+      };
+    }
+
+    // 2. Full or partial ISO date range: "2020-03-15/2020-04-01" or "2020-03/2020-04"
+    if (trimmed.includes('/')) {
+      const slashParts = trimmed.split('/').map((p) => p.trim()).filter(Boolean);
+      if (
+        slashParts.length === 2 &&
+        /^\d{4}[-/]\d{1,2}/.test(slashParts[0]) &&
+        /^\d{4}[-/]\d{1,2}/.test(slashParts[1])
+      ) {
+        const start = this.parseSingleDateParts(slashParts[0]);
+        const end = this.parseSingleDateParts(slashParts[1]);
+        if (start?.parts && end?.parts) {
+          return {
+            'date-parts': [start.parts, end.parts],
+          };
+        }
+      }
+    }
+
+    // 3. Single date (ISO, slash-separated, Month name, Season, Circa)
+    const single = this.parseSingleDateParts(trimmed);
+    if (single?.parts) {
+      const res: CslDate = { 'date-parts': [single.parts] };
+      if (single.season !== undefined) res.season = single.season;
+      if (single.circa) res.circa = true;
+      return res;
+    }
+
+    // 4. Circa without a parseable year -> fallback literal
+    if (/^(?:c\.|ca\.?|circa)\b/i.test(trimmed)) {
+      return { literal: trimmed };
+    }
+
+    return undefined;
   }
 
   public static formatCslName(contrib: ContributorLike): CslName {
@@ -137,7 +324,8 @@ export class CslNameMapper {
           firstParts.length >= 1 &&
           lastParts.length === 1 &&
           VIETNAMESE_FAMILY_NAMES.has(firstParts[0].toLowerCase()) &&
-          !VIETNAMESE_FAMILY_NAMES.has(lastParts[0].toLowerCase())
+          !VIETNAMESE_FAMILY_NAMES.has(lastParts[0].toLowerCase()) &&
+          this.isVnParts([...firstParts, ...lastParts])
         ) {
           return attachShort(this.parseStringName(`${rawFirst} ${rawLast}`));
         }
@@ -169,9 +357,40 @@ export class CslNameMapper {
     }
 
     if (trimmed.includes(',')) {
-      const parts = trimmed.split(',').map((p) => p.trim());
+      const parts = trimmed
+        .split(',')
+        .map((p) => p.trim())
+        .filter(Boolean);
+      const family = parts[0] || 'Anonymous';
+      if (
+        parts.length >= 3 &&
+        /^(?:jr\.?|sr\.?|ii|iii|iv|v)$/i.test(parts[parts.length - 1])
+      ) {
+        const suffix = parts.pop()!;
+        return {
+          family,
+          given: parts.slice(1).join(' ') || undefined,
+          suffix,
+        };
+      }
+      if (parts.length === 2) {
+        const givenTokens = parts[1].split(/\s+/);
+        if (
+          givenTokens.length >= 2 &&
+          /^(?:jr\.?|sr\.?|ii|iii|iv|v)$/i.test(
+            givenTokens[givenTokens.length - 1],
+          )
+        ) {
+          const suffix = givenTokens.pop()!;
+          return {
+            family,
+            given: givenTokens.join(' ') || undefined,
+            suffix,
+          };
+        }
+      }
       return {
-        family: parts[0] || 'Anonymous',
+        family,
         given: parts.slice(1).join(' ') || undefined,
       };
     }
@@ -202,7 +421,11 @@ export class CslNameMapper {
       const suffix = parts.pop()!;
       const fam = parts.pop() || 'Anonymous';
       const giv = parts.join(' ');
-      return { family: fam, given: giv ? `${giv} ${suffix}` : suffix };
+      return {
+        family: fam,
+        given: giv || undefined,
+        suffix,
+      };
     }
 
     const parsedCreator = parseCreatorString(trimmed, 0, 'author');

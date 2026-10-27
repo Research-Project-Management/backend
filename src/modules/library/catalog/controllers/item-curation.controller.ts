@@ -261,13 +261,30 @@ export class ItemCurationController {
   async markMyPublication(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
+    @Body()
+    body?: {
+      contributorId?: string | null;
+      isPublic?: boolean;
+      openAccessLicense?: string | null;
+      includeAttachments?: boolean;
+      includeNotes?: boolean;
+      authorshipConfirmed?: boolean;
+      projectId?: string;
+    },
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
-    const item = projectId
-      ? await this.itemService.setMyPublication(userId, id, true, { projectId })
-      : await this.itemService.setMyPublication(userId, id, true);
+    const projectId = normalizeProjectScopeId(
+      paramProjectId || queryProjectId || body?.projectId,
+    );
+    const options = {
+      ...(body || {}),
+      ...(projectId ? { projectId } : {}),
+    };
+    const item =
+      Object.keys(options).length > 0
+        ? await this.itemService.setMyPublication(userId, id, true, options)
+        : await this.itemService.setMyPublication(userId, id, true);
     return { success: true, data: item, item };
   }
 

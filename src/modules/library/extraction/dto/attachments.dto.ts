@@ -4,11 +4,16 @@ import {
   IsNumber,
   IsArray,
   IsBoolean,
+  Matches,
 } from 'class-validator';
 import type {
   LinkMode,
   AttachmentType,
 } from '@/modules/library/extraction/types/attachments.types';
+
+export const SAFE_ATTACHMENT_URL_REGEX = /^(?:https?:\/\/|\/api\/(?!\/))/i;
+const SAFE_ATTACHMENT_URL_MSG =
+  'Attachment URL must use http://, https://, or a relative /api/... path';
 
 export class CreateAttachmentDto {
   @IsString()
@@ -16,6 +21,7 @@ export class CreateAttachmentDto {
 
   @IsOptional()
   @IsString()
+  @Matches(SAFE_ATTACHMENT_URL_REGEX, { message: SAFE_ATTACHMENT_URL_MSG })
   url?: string;
 
   @IsOptional()

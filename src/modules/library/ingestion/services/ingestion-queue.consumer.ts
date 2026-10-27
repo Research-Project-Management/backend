@@ -8,7 +8,7 @@ import { Job } from 'bullmq';
 import {
   LIBRARY_INGESTION_QUEUE_STANDARD,
   LIBRARY_INGESTION_JOB,
-} from '@/modules/library/ingestion/types/queue.constants';
+} from '@/modules/library/ingestion/types/ingestion.types';
 import { QueuedIngestionJob } from './queue.service';
 import { PipelineService } from './pipeline.service';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';

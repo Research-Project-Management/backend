@@ -1,6 +1,9 @@
 import { Injectable, Inject, Optional } from '@nestjs/common';
 import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
-import { calculateMetadataQualityScore } from '@/modules/library/ingestion/domain/metadata.validator';
+import {
+  calculateMetadataQualityScore,
+  diagnoseBibliographicQualityIssues,
+} from '@/modules/library/ingestion/domain/metadata.validator';
 
 export interface CompletenessAnalysis {
   score: number; // 0 - 100
@@ -90,32 +93,25 @@ export class QualityService {
     }> = [];
 
     for (const it of items) {
-      const evaluation = calculateMetadataQualityScore(
-        it as unknown as Record<string, unknown>,
-      );
-      const issues: string[] = [];
+      const { evaluation, issues, isHealthy } =
+        diagnoseBibliographicQualityIssues(
+          it as unknown as Record<string, unknown>,
+        );
 
-      if (!evaluation.hasTitle || (it.title && it.title.length <= 3)) {
-        issues.push('missing_title');
-      }
-      if (!evaluation.hasAuthors) {
+      if (issues.includes('missing_authors')) {
         missingAuthors += 1;
-        issues.push('missing_authors');
       }
-      if (!evaluation.hasYear || (it.year && it.year <= 1900)) {
+      if (issues.includes('missing_year')) {
         missingYear += 1;
-        issues.push('missing_year');
       }
-      if (!evaluation.hasDoi) {
+      if (issues.includes('missing_doi')) {
         missingDoi += 1;
-        issues.push('missing_doi');
       }
-      if (!evaluation.hasAbstract) {
+      if (issues.includes('missing_abstract')) {
         missingAbstract += 1;
-        issues.push('missing_abstract');
       }
 
-      if (issues.length === 0) {
+      if (isHealthy) {
         healthyItems += 1;
       } else {
         flaggedItems.push({
@@ -135,6 +131,7 @@ export class QualityService {
       totalItems: items.length,
       healthyItems,
       averageQualityScore,
+      healthScorePercentage: averageQualityScore,
       missingDoiCount: missingDoi,
       missingYearCount: missingYear,
       missingAuthorsCount: missingAuthors,

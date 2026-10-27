@@ -3,10 +3,8 @@ import { QueryRepository } from '@/modules/library/catalog/repositories/query.re
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import {
-  DuplicateService,
   DuplicateDetectorService,
-  DuplicateMergerService,
-} from '@/modules/library/ingestion/services/duplicate.service';
+} from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { QualityService } from '@/modules/library/ingestion/services/quality.service';
 import { Permission, Role } from '@/modules/project/access';
 
@@ -313,12 +311,8 @@ describe('Wave 14 — Backend Authority Contracts (Permissions, Duplicates Hydra
         ]),
       };
 
-      const duplicateService = new DuplicateService(
-        new DuplicateDetectorService(mockCatalogGateway as never),
-        new DuplicateMergerService({} as never, mockCatalogGateway as never),
-      );
-
-      const clusters = await duplicateService.detectDuplicates(userId);
+      const duplicateDetector = new DuplicateDetectorService(mockCatalogGateway as never);
+      const clusters = await duplicateDetector.detectDuplicates(userId);
       expect(clusters).toHaveLength(1);
       expect(clusters[0].recommendedMasterId).toBeDefined();
       expect([itemAId, itemBId]).toContain(clusters[0].recommendedMasterId);

@@ -27,12 +27,13 @@ import {
   harmonizeZoteroFields,
   mergeCanonicalCreators,
   SsrfGuardService,
+  ItemProvenancePolicy,
+  isPlaceholderItemTitle,
 } from '@/modules/library/core';
+import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/deduplication.domain';
+import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 import { TransactionService } from '@/modules/library/sync';
-import {
-  parseAcademicFeedXml,
-  ParsedAcademicFeed,
-} from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
+import { ParsedAcademicFeed } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 import { createHash, randomUUID } from 'crypto';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { PrismaService } from '@/core';
@@ -289,8 +290,48 @@ export class UrlCaptureService {
         harmonized.extraFields &&
         typeof harmonized.extraFields === 'object' &&
         !Array.isArray(harmonized.extraFields)
-          ? (harmonized.extraFields as Record<string, unknown>)
-          : canonicalExtraFields;
+          ? { ...(harmonized.extraFields as Record<string, unknown>) }
+          : { ...canonicalExtraFields };
+
+      const baselineHarmonized = harmonizeZoteroFields<Record<string, unknown>>(
+        {
+          ...canonicalExtraFields,
+          ...passthroughFields,
+          itemType,
+          extraFields: canonicalExtraFields,
+        },
+        { itemType, syncExtraFields: false },
+      );
+
+      const userOverriddenRecord: Record<string, unknown> = {};
+      for (const dtoField of [
+        'title',
+        'abstract',
+        'doi',
+        'year',
+        'publicationTitle',
+      ] as const) {
+        const dtoVal = dto[dtoField];
+        const baselineVal =
+          baselineHarmonized[dtoField] ??
+          canonical[dtoField] ??
+          canonicalExtraFields[dtoField];
+        if (
+          dtoVal !== undefined &&
+          dtoVal !== null &&
+          dtoVal !== '' &&
+          String(dtoVal).trim() !== String(baselineVal ?? '').trim()
+        ) {
+          userOverriddenRecord[dtoField] = dtoVal;
+        }
+      }
+      if (Object.keys(userOverriddenRecord).length > 0) {
+        ItemProvenancePolicy.applyManualEditLocks({
+          existingMeta: syncedExtraFields,
+          dataRecord: userOverriddenRecord,
+          updatedMetadata: syncedExtraFields,
+        });
+      }
 
       const title =
         dto.title ||
@@ -399,16 +440,58 @@ export class UrlCaptureService {
             },
           );
           if (match?.exactMatch) {
-            this.logger.warn(
-              `URL capture matched existing item ${match.exactMatch.id} (${match.exactMatch.matchReason})`,
-            );
-            if (!(dto as unknown as Record<string, unknown>).allowDuplicate) {
-              throw new ConflictException({
-                message:
-                  'An item with this DOI/identifier already exists in your library',
-                existingItemId: match.exactMatch.id,
-                matchReason: match.exactMatch.matchReason,
-              });
+            const existingTitle = match.exactMatch.title?.trim();
+            const proposedTitle = itemData.title?.trim();
+            const isGeneric = (t?: string) =>
+              !t || t.length <= 5 || isPlaceholderItemTitle(t);
+            const titlesConflict =
+              Boolean(proposedTitle) &&
+              Boolean(existingTitle) &&
+              !isGeneric(proposedTitle) &&
+              !isGeneric(existingTitle) &&
+              calculateTitleSimilarity(
+                proposedTitle ?? '',
+                existingTitle ?? '',
+              ) < 0.5;
+
+            if (!titlesConflict) {
+              this.logger.warn(
+                `URL capture matched existing item ${match.exactMatch.id} (${match.exactMatch.matchReason})`,
+              );
+              if (
+                this.catalogGateway?.getItem &&
+                this.catalogGateway?.updateItem
+              ) {
+                try {
+                  const existing = await this.catalogGateway.getItem(
+                    targetUserId,
+                    match.exactMatch.id,
+                    projectId,
+                  );
+                  const patch = buildEnrichmentPatch(
+                    existing as unknown as Record<string, unknown>,
+                    itemData as unknown as Record<string, unknown>,
+                  );
+                  if (Object.keys(patch).length > 0) {
+                    await this.catalogGateway.updateItem(
+                      targetUserId,
+                      match.exactMatch.id,
+                      patch,
+                      { projectId },
+                    );
+                  }
+                } catch {
+                  // Non-critical additive enrichment on duplicate URL capture
+                }
+              }
+              if (!(dto as unknown as Record<string, unknown>).allowDuplicate) {
+                throw new ConflictException({
+                  message:
+                    'An item with this DOI/identifier already exists in your library',
+                  existingItemId: match.exactMatch.id,
+                  matchReason: match.exactMatch.matchReason,
+                });
+              }
             }
           }
         } catch (err: unknown) {
@@ -462,7 +545,12 @@ export class UrlCaptureService {
         this.extractionGateway?.captureWebSnapshot
       ) {
         await this.extractionGateway
-          .captureWebSnapshot(itemData.url, createdItem.id, targetUserId)
+          .captureWebSnapshot(
+            itemData.url,
+            createdItem.id,
+            targetUserId,
+            projectId,
+          )
           .catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
             this.logger.warn(
@@ -486,44 +574,54 @@ export class UrlCaptureService {
       retentionDays <= 0
         ? new Date()
         : new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
-    if (
-      this.repo.findExpiredCapturePreviews &&
-      this.storagePort?.deleteFile
-    ) {
+    if (this.repo.findExpiredCapturePreviews) {
+      let expiredIds: string[] = [];
       try {
         const expiredList = await this.repo.findExpiredCapturePreviews(cutoff);
-        for (const p of expiredList) {
-          if (p.claimedAt) continue;
-          const meta =
-            p.canonicalMetadata &&
-            typeof p.canonicalMetadata === 'object' &&
-            !Array.isArray(p.canonicalMetadata)
-              ? (p.canonicalMetadata as Record<string, unknown>)
-              : {};
-          const extra =
-            meta.extraFields &&
-            typeof meta.extraFields === 'object' &&
-            !Array.isArray(meta.extraFields)
-              ? (meta.extraFields as Record<string, unknown>)
-              : {};
-          const scraped =
-            meta.scrapedData &&
-            typeof meta.scrapedData === 'object' &&
-            !Array.isArray(meta.scrapedData)
-              ? (meta.scrapedData as Record<string, unknown>)
-              : {};
-          const pdfFileId =
-            (typeof scraped.pdfFileId === 'string' && scraped.pdfFileId) ||
-            (typeof meta.pdfFileId === 'string' && meta.pdfFileId) ||
-            (typeof extra.pdfFileId === 'string' && extra.pdfFileId) ||
-            (typeof extra.fileId === 'string' && extra.fileId) ||
-            (typeof meta.fileId === 'string' && meta.fileId);
-          if (pdfFileId) {
-            await this.storagePort.deleteFile(pdfFileId).catch(() => undefined);
+        if (!Array.isArray(expiredList) || expiredList.length === 0) {
+          return 0;
+        }
+        expiredIds = expiredList
+          .map((p) => p?.id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+        if (this.storagePort?.deleteFile) {
+          for (const p of expiredList) {
+            if (p.claimedAt) continue;
+            const meta =
+              p.canonicalMetadata &&
+              typeof p.canonicalMetadata === 'object' &&
+              !Array.isArray(p.canonicalMetadata)
+                ? (p.canonicalMetadata as Record<string, unknown>)
+                : {};
+            const extra =
+              meta.extraFields &&
+              typeof meta.extraFields === 'object' &&
+              !Array.isArray(meta.extraFields)
+                ? (meta.extraFields as Record<string, unknown>)
+                : {};
+            const scraped =
+              meta.scrapedData &&
+              typeof meta.scrapedData === 'object' &&
+              !Array.isArray(meta.scrapedData)
+                ? (meta.scrapedData as Record<string, unknown>)
+                : {};
+            const pdfFileId =
+              (typeof scraped.pdfFileId === 'string' && scraped.pdfFileId) ||
+              (typeof meta.pdfFileId === 'string' && meta.pdfFileId) ||
+              (typeof extra.pdfFileId === 'string' && extra.pdfFileId) ||
+              (typeof extra.fileId === 'string' && extra.fileId) ||
+              (typeof meta.fileId === 'string' && meta.fileId);
+            if (pdfFileId) {
+              await this.storagePort.deleteFile(pdfFileId).catch(() => undefined);
+            }
           }
         }
       } catch {
         // Ignore blob cleanup errors during preview sweep
+      }
+      if (expiredIds.length > 0) {
+        return this.repo.deleteExpiredCapturePreviews(cutoff, expiredIds);
       }
     }
     return this.repo.deleteExpiredCapturePreviews(cutoff);

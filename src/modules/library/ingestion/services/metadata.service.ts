@@ -112,7 +112,26 @@ export class MetadataService implements MetadataPort {
       classified.type,
       classified.clean,
     );
-    const cacheKey = this.cache.buildKey(classified.type, canonicalId);
+    const cacheHintParts: string[] = [];
+    if (classified.type === 'TITLE') {
+      if (request.authorHint && String(request.authorHint).trim()) {
+        cacheHintParts.push(
+          `a:${String(request.authorHint).trim().toLowerCase()}`,
+        );
+      }
+      if (
+        request.yearHint !== undefined &&
+        request.yearHint !== null &&
+        String(request.yearHint).trim()
+      ) {
+        cacheHintParts.push(`y:${String(request.yearHint).trim()}`);
+      }
+    }
+    const cacheCanonicalId =
+      cacheHintParts.length > 0
+        ? `${canonicalId}|${cacheHintParts.join('|')}`
+        : canonicalId;
+    const cacheKey = this.cache.buildKey(classified.type, cacheCanonicalId);
     const cacheOutcome = request.forceRefresh
       ? 'refresh'
       : this.cache.available
@@ -166,7 +185,11 @@ export class MetadataService implements MetadataPort {
 
     // 7. Enrichment (if authoritative found results)
     if (candidateResults.length > 0 && tiers.enrichment.length > 0) {
-      const primaryAuthoritativeTitle = candidateResults[0]?.metadata?.title;
+      const primaryMeta = candidateResults[0]?.metadata;
+      const primaryAuthoritativeTitle = primaryMeta?.title;
+      const primaryDoi = primaryMeta?.doi ? normalizeDoi(primaryMeta.doi) : undefined;
+      const isPreprintDoi = (d?: string) =>
+        Boolean(d && /^10\.(?:48550\/arxiv\.|1101\/|21203\/|26434\/|20944\/)/i.test(d));
       const enrichmentProviders = tiers.enrichment
         .map((id) => this.providerMap.get(id))
         .filter(
@@ -188,13 +211,33 @@ export class MetadataService implements MetadataPort {
       for (const execResult of enrichmentExecs) {
         allExecutions.push(execResult);
         if (execResult.status === 'found' && execResult.result) {
+          const enrichedMeta = execResult.result.metadata;
           // Guard against enrichment provider returning a different work (e.g. a paper citing the arXiv preprint)
-          const enrichedTitle = execResult.result.metadata?.title;
+          const enrichedTitle = enrichedMeta?.title;
           if (
             primaryAuthoritativeTitle &&
             enrichedTitle &&
             !this.isTitleSimilar(primaryAuthoritativeTitle, enrichedTitle) &&
             !this.isTitleSimilar(enrichedTitle, primaryAuthoritativeTitle)
+          ) {
+            continue;
+          }
+          const enrichedDoi = enrichedMeta?.doi
+            ? normalizeDoi(enrichedMeta.doi)
+            : undefined;
+          if (
+            primaryDoi &&
+            enrichedDoi &&
+            primaryDoi !== enrichedDoi &&
+            !isPreprintDoi(primaryDoi) &&
+            !isPreprintDoi(enrichedDoi)
+          ) {
+            continue;
+          }
+          if (
+            primaryMeta?.year &&
+            enrichedMeta?.year &&
+            Math.abs(Number(primaryMeta.year) - Number(enrichedMeta.year)) > 3
           ) {
             continue;
           }
@@ -371,16 +414,44 @@ export class MetadataService implements MetadataPort {
   private isTitleSimilar(query: string, candidateTitle: string): boolean {
     const qTokens = query
       .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/[đĐ]/g, 'd')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(
+        /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu,
+        ' $& ',
+      )
       .split(/\s+/)
-      .filter((t) => t.length > 2);
+      .filter(
+        (t) =>
+          t.length > 2 ||
+          /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
+            t,
+          ),
+      );
     const cTokens = candidateTitle
       .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/[đĐ]/g, 'd')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(
+        /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu,
+        ' $& ',
+      )
       .split(/\s+/)
-      .filter((t) => t.length > 2);
+      .filter(
+        (t) =>
+          t.length > 2 ||
+          /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
+            t,
+          ),
+      );
 
-    if (qTokens.length === 0 || cTokens.length === 0) return true;
+    if (qTokens.length === 0 || cTokens.length === 0) return false;
 
     let matches = 0;
     for (const qt of qTokens) {
@@ -397,8 +468,15 @@ export class MetadataService implements MetadataPort {
     // word-pair overlap to agree as well.
     const bigrams = (title: string): Set<string> => {
       const words = title
+        .replace(/[đĐ]/g, 'd')
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(
+          /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu,
+          ' $& ',
+        )
         .split(/\s+/)
         .filter(Boolean);
       const pairs = new Set<string>();

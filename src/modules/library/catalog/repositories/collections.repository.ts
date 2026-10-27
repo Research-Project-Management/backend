@@ -277,46 +277,84 @@ export class CollectionsRepository {
         itemIds = Array.from(new Set(links.map((l) => l.itemId)));
       }
       if (itemIds.length > 0) {
-        deletedItemIds = itemIds;
         const validProjectId = normalizeProjectScopeId(projectId);
-        await client.item.updateMany({
-          where: {
-            ...(validProjectId
-              ? { projectId: validProjectId }
-              : { userId, projectId: null }),
-            id: { in: itemIds },
-            deletedAt: null,
-          },
-          data: {
-            deletedAt: now,
-            version: { increment: 1 },
-          },
-        });
+        const itemScopeWhere: Prisma.ItemWhereInput = validProjectId
+          ? { projectId: validProjectId }
+          : { userId, projectId: null };
 
-        await client.note?.updateMany?.({
-          where: {
-            itemId: { in: itemIds },
-            deletedAt: null,
-          },
-          data: { deletedAt: now },
-        });
+        let orphanItemIds = itemIds;
+        if (typeof client.item?.findMany === 'function') {
+          const orphanItems = await client.item.findMany({
+            where: {
+              ...itemScopeWhere,
+              id: { in: itemIds },
+              deletedAt: null,
+              collectionItems: {
+                none: {
+                  collectionId: { notIn: targetCollectionIds },
+                  collection: { deletedAt: null },
+                },
+              },
+            },
+            select: { id: true },
+          });
+          orphanItemIds = orphanItems.map((i: { id: string }) => i.id);
+        }
 
-        await client.attachment?.updateMany?.({
-          where: {
-            itemId: { in: itemIds },
-            deletedAt: null,
-          },
-          data: { deletedAt: now },
-        });
+        deletedItemIds = orphanItemIds;
+        if (orphanItemIds.length > 0) {
+          await client.item.updateMany({
+            where: {
+              ...itemScopeWhere,
+              id: { in: orphanItemIds },
+              deletedAt: null,
+              collectionItems: {
+                none: {
+                  collectionId: { notIn: targetCollectionIds },
+                  collection: { deletedAt: null },
+                },
+              },
+            },
+            data: {
+              deletedAt: now,
+              version: { increment: 1 },
+            },
+          });
 
-        await client.annotation?.updateMany?.({
-          where: {
-            attachment: { itemId: { in: itemIds } },
-            deletedAt: null,
-          },
-          data: { deletedAt: now },
-        });
+          await client.note?.updateMany?.({
+            where: {
+              itemId: { in: orphanItemIds },
+              deletedAt: null,
+            },
+            data: { deletedAt: now },
+          });
+
+          await client.attachment?.updateMany?.({
+            where: {
+              itemId: { in: orphanItemIds },
+              deletedAt: null,
+            },
+            data: { deletedAt: now },
+          });
+
+          await client.annotation?.updateMany?.({
+            where: {
+              attachment: { itemId: { in: orphanItemIds } },
+              deletedAt: null,
+            },
+            data: { deletedAt: now },
+          });
+        }
       }
+
+      await client.collectionItem?.deleteMany?.({
+        where: {
+          collectionId:
+            targetCollectionIds.length === 1
+              ? targetCollectionIds[0]
+              : { in: targetCollectionIds },
+        },
+      });
 
       const result = await client.collection.updateMany({
         where: {
@@ -331,6 +369,9 @@ export class CollectionsRepository {
       });
       return result.count > 0;
     } else {
+      await client.collectionItem?.deleteMany?.({
+        where: { collectionId: id },
+      });
       await client.collection.updateMany({
         where: { ...scopeWhere, parentId: id, deletedAt: null },
         data: { parentId: null },
@@ -555,6 +596,41 @@ export class CollectionsRepository {
     });
 
     return Array.from(new Set(items.map((i: { itemId: string }) => i.itemId)));
+  }
+
+  /**
+   * Retrieves unique item IDs belonging exclusively to the specified collections (not in any other active collection).
+   */
+  async findExclusiveItemIdsByCollections(
+    userId: string,
+    candidateItemIds: string[],
+    allCollectionIds: string[],
+    tx?: Prisma.TransactionClient,
+    projectId?: string,
+  ): Promise<string[]> {
+    if (!candidateItemIds || candidateItemIds.length === 0) return [];
+    const client = this.getClient(tx);
+    if (typeof client.item?.findMany !== 'function') return candidateItemIds;
+    const validProjectId = this.resolveProjectScopeId(projectId);
+
+    const items = await client.item.findMany({
+      where: {
+        ...(validProjectId
+          ? { projectId: validProjectId }
+          : { userId, projectId: null }),
+        id: { in: candidateItemIds },
+        deletedAt: null,
+        collectionItems: {
+          none: {
+            collectionId: { notIn: allCollectionIds },
+            collection: { deletedAt: null },
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    return items.map((i: { id: string }) => i.id);
   }
 
   private get _collectionItemsMarker(): undefined {

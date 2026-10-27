@@ -21,6 +21,35 @@ export interface ReResolveMetadataOptions {
   projectId?: string;
 }
 
+export interface ReconcileExtractedCandidatePayload {
+  userId: string;
+  projectId?: string;
+  itemId: string;
+  attachmentId: string;
+  extractedMetadata: {
+    title?: string;
+    doi?: string;
+    arxivId?: string;
+    pmid?: string | number;
+    isbn?: string;
+    issn?: string;
+    abstract?: string;
+    year?: number;
+    publicationTitle?: string;
+    authors?: string[];
+    creators?: unknown[];
+    [key: string]: unknown;
+  };
+  discoveredIdentifiers?: Array<{
+    type: string;
+    value: string;
+    canonicalUri?: string;
+  }>;
+  isOcrExtracted?: boolean;
+  engineUsed?: string;
+  qualityScore?: number;
+}
+
 export interface IIngestionFacade {
   submitIngestion(
     envelope: IngestionSubmissionEnvelope,
@@ -49,4 +78,12 @@ export interface IIngestionFacade {
     options?: ReResolveMetadataOptions,
     projectId?: string,
   ): Promise<unknown>;
+  reconcileExtractedCandidate?(
+    payload: ReconcileExtractedCandidatePayload,
+  ): Promise<{
+    updated: boolean;
+    updatedFields: string[];
+    rejectedCitedDoi?: string;
+    enrichedFromRegistry?: boolean;
+  }>;
 }

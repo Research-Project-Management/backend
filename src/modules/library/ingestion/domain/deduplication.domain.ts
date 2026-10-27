@@ -1,6 +1,7 @@
 /**
  * Pure domain utility functions for curation, deduplication, and similarity matching.
  */
+import { isVietnameseName } from '@/modules/library/core';
 
 const GREEK_UNICODE_TO_LATIN: Record<string, string> = {
   α: ' alpha ',
@@ -93,7 +94,7 @@ function cleanAcademicTitleForDedupe(raw?: string | null): string {
 export function normalizeTitleForDedupe(title?: string | null): string {
   if (!title) return '';
   return cleanAcademicTitleForDedupe(title)
-    .replace(/[^a-z0-9]/g, '')
+    .replace(/[^\p{L}\p{N}]/gu, '')
     .trim();
 }
 
@@ -113,6 +114,9 @@ export function extractFirstAuthorFamily(authors?: string[] | null): string {
   let familyRaw = '';
   if (firstRaw.includes(',')) {
     familyRaw = firstRaw.split(',')[0].trim();
+  } else if (isVietnameseName(firstRaw)) {
+    const parts = firstRaw.split(/\s+/);
+    familyRaw = parts[0] || '';
   } else {
     const parts = firstRaw.split(/\s+/);
     familyRaw = parts[parts.length - 1] || '';
@@ -122,7 +126,7 @@ export function extractFirstAuthorFamily(authors?: string[] | null): string {
     .replace(/ae/g, 'a')
     .replace(/oe/g, 'o')
     .replace(/ue/g, 'u')
-    .replace(/[^a-z0-9-]/g, '')
+    .replace(/[^\p{L}\p{N}-]/gu, '')
     .trim();
 }
 
@@ -194,10 +198,21 @@ export function tokenizeTitleWords(str?: string | null): string[] {
     'during',
   ]);
   return cleanAcademicTitleForDedupe(str)
-    .replace(/[^\w\s]/g, ' ') // Replace punctuation & LaTeX symbols with space
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(
+      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu,
+      ' $& ',
+    )
     .trim()
     .split(/\s+/)
-    .filter((w) => w.length > 1 && !STOPWORDS.has(w));
+    .filter(
+      (w) =>
+        (w.length > 1 ||
+          /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
+            w,
+          )) &&
+        !STOPWORDS.has(w),
+    );
 }
 
 /**

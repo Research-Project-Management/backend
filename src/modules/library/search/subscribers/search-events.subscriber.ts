@@ -38,7 +38,6 @@ export class SearchEventsSubscriber {
       try {
         await this.searchService.indexAttachmentPages(
           payload.attachmentId,
-          payload.itemId || event.aggregateId,
           payload.pages,
         );
       } catch (err: unknown) {
@@ -85,17 +84,13 @@ export class SearchEventsSubscriber {
     const attachmentId =
       rawPayload?.attachmentId ||
       (event && 'aggregateId' in event ? event.aggregateId : undefined);
-    const itemId = rawPayload?.itemId || '';
     const pages = Array.isArray(rawPayload?.pages) ? rawPayload.pages : [];
+    if (pages.length === 0) return;
 
     if (!attachmentId) return;
 
     try {
-      await this.searchService.indexAttachmentPages(
-        attachmentId,
-        itemId,
-        pages,
-      );
+      await this.searchService.indexAttachmentPages(attachmentId, pages);
     } catch (err: unknown) {
       this.logger.error(
         `[SearchEvents] Failed to index extracted pages for attachment ${attachmentId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -107,13 +102,25 @@ export class SearchEventsSubscriber {
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_PURGED, { async: true })
   async handleItemDeletedOrPurged(event: DomainEventEnvelope): Promise<void> {
     const payload = event?.payload as
-      | { id?: string; itemId?: string }
+      | {
+          id?: string;
+          itemId?: string;
+          reason?: string;
+          mergedIntoId?: string;
+          primaryId?: string;
+        }
       | undefined;
     const itemId = event?.aggregateId || payload?.id || payload?.itemId;
     if (!itemId) return;
 
+    const isMergedDuplicate = Boolean(
+      payload?.reason === 'merged_into' ||
+        payload?.mergedIntoId ||
+        payload?.primaryId,
+    );
+
     const cleanupTasks: Promise<unknown>[] = [];
-    if (this.searchRepo) {
+    if (this.searchRepo && !isMergedDuplicate) {
       cleanupTasks.push(
         this.searchRepo
           .deleteFullTextIndexByItemId(itemId)

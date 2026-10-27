@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import zlib from 'zlib';
 import { promisify } from 'util';
-import { SubmissionPayload } from '@/modules/library/ingestion/types/submission.types';
+import {
+  SubmissionPayload,
+  RecordFormat,
+} from '@/modules/library/ingestion/types/submission.types';
 import {
   MetadataCandidate,
   FieldEvidence,
@@ -20,6 +23,7 @@ import {
 import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
 import { XmlLegacyFormatsParser } from '@/modules/library/ingestion/parsers/xml-legacy-formats.parser';
+import { BibliographyFormatRegistry } from '@/modules/library/ingestion/parsers/bibliography-format.registry';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
@@ -36,6 +40,7 @@ import {
   createCandidate,
   buildEvidenceFields,
   mapBibtexToRawRecord,
+  applyUserOverridesToCandidate,
 } from './candidate-builder.helper';
 import { IdentifyFileResolver, cleanPdfTitle } from './identify-file.resolver';
 import { IdentifyUrlResolver } from './identify-url.resolver';
@@ -50,6 +55,7 @@ export {
   createCandidate,
   buildEvidenceFields,
   mapBibtexToRawRecord,
+  applyUserOverridesToCandidate,
 } from './candidate-builder.helper';
 
 @Injectable()
@@ -62,6 +68,7 @@ export class IdentifyStage implements IWorkflowStage<
 
   private readonly cslParser: CslParser;
   private readonly xmlLegacyParser: XmlLegacyFormatsParser;
+  private readonly formatRegistry: BibliographyFormatRegistry;
 
   constructor(
     private readonly doiParser: DoiParser,
@@ -79,16 +86,38 @@ export class IdentifyStage implements IWorkflowStage<
     private readonly urlResolver?: IdentifyUrlResolver,
     @Optional()
     xmlLegacyParser?: XmlLegacyFormatsParser,
+    @Optional()
+    formatRegistry?: BibliographyFormatRegistry,
   ) {
     this.cslParser = cslParser ?? new CslParser();
     this.xmlLegacyParser = xmlLegacyParser ?? new XmlLegacyFormatsParser();
+    this.formatRegistry =
+      formatRegistry ??
+      new BibliographyFormatRegistry(
+        this.bibtexParser,
+        this.risParser,
+        this.cslParser,
+        this.xmlLegacyParser,
+      );
+  }
+
+  detectRecordFormat(
+    content: string,
+    hintFormat?: string,
+  ): RecordFormat | null {
+    return this.formatRegistry.detectRecordFormat(content, hintFormat);
   }
 
   /**
    * Executes identification and initial format translation into candidate envelopes.
    */
   async execute(input: IdentifyStageInput): Promise<MetadataCandidate[]> {
-    const { runId: _runId, payload, scopeId } = input;
+    const { runId: _runId, payload, scopeId, userId, projectId } = input;
+    const context = {
+      scopeId,
+      userId,
+      projectId: projectId ?? (scopeId && scopeId !== 'user' && scopeId !== userId ? scopeId : undefined),
+    };
     const candidates: MetadataCandidate[] = [];
 
     switch (payload.kind) {
@@ -102,93 +131,21 @@ export class IdentifyStage implements IWorkflowStage<
       }
 
       case 'RECORD': {
-        const recordContent = await this.resolveRecordContent(payload);
-        const format = (payload.format || '').toUpperCase();
-
-        if (format === 'BIBTEX') {
-          const parsedList = this.bibtexParser.parse(recordContent);
-          for (const item of parsedList) {
-            candidates.push(
-              this.createCandidate({
-                sourceKind: 'RECORD',
-                sourceName: 'BibTeX',
-                sourceRecordId: item.citationKey || item.doi,
-                rawMetadata: this.mapBibtexToRaw(item),
-                confidenceScore: 0.95,
-              }),
-            );
-          }
-        } else if (format === 'RIS') {
-          const parsedList = this.risParser.parse(recordContent);
-          for (const item of parsedList) {
-            candidates.push(
-              this.createCandidate({
-                sourceKind: 'RECORD',
-                sourceName: 'RIS',
-                sourceRecordId: item.doi || item.citationKey,
-                rawMetadata: item,
-                confidenceScore: 0.95,
-              }),
-            );
-          }
-        } else if (
-          format === 'CSL_JSON' ||
-          format === 'JSON' ||
-          (payload.format as string) === 'csl_json'
-        ) {
-          const parsedList = this.cslParser
-            ? this.cslParser.parse(recordContent)
-            : [];
-          for (const item of parsedList) {
-            candidates.push(
-              this.createCandidate({
-                sourceKind: 'RECORD',
-                sourceName: 'CSL_JSON',
-                sourceRecordId: item.citationKey || item.doi,
-                rawMetadata: item,
-                confidenceScore: 0.95,
-              }),
-            );
-          }
-        } else if (format === 'REFER') {
-          const parsedList = this.risParser.parse(recordContent);
-          for (const item of parsedList) {
-            candidates.push(
-              this.createCandidate({
-                sourceKind: 'RECORD',
-                sourceName: payload.format,
-                sourceRecordId: item.doi || item.citationKey,
-                rawMetadata: item,
-                confidenceScore: 0.9,
-              }),
-            );
-          }
-        } else if (
-          format === 'ENDNOTE_XML' ||
-          format === 'MODS' ||
-          format === 'ZOTERO_RDF' ||
-          format === 'RDF' ||
-          format === 'MEDLINE' ||
-          format === 'NBIB' ||
-          format === 'CSV'
-        ) {
-          const detectedFormat =
-            this.xmlLegacyParser.detectFormat(recordContent, format) || format;
-          const parsedList = this.xmlLegacyParser.parse(
-            recordContent,
-            detectedFormat,
+        const recordContent = await this.resolveRecordContent(payload, context);
+        const envelopes = await this.formatRegistry.parseEnvelopes(
+          recordContent,
+          payload.format,
+        );
+        for (const env of envelopes) {
+          candidates.push(
+            this.createCandidate({
+              sourceKind: 'RECORD',
+              sourceName: env.sourceName,
+              sourceRecordId: env.sourceRecordId,
+              rawMetadata: env.rawMetadata,
+              confidenceScore: env.confidenceScore,
+            }),
           );
-          for (const item of parsedList) {
-            candidates.push(
-              this.createCandidate({
-                sourceKind: 'RECORD',
-                sourceName: detectedFormat,
-                sourceRecordId: item.doi || item.citationKey || item.pmid,
-                rawMetadata: item as unknown as Record<string, unknown>,
-                confidenceScore: 0.93,
-              }),
-            );
-          }
         }
         break;
       }
@@ -200,7 +157,7 @@ export class IdentifyStage implements IWorkflowStage<
       }
 
       case 'FILE': {
-        const candidate = await this.resolveFileCandidate(payload, scopeId);
+        const candidate = await this.resolveFileCandidate(payload, scopeId, context);
         if (candidate) candidates.push(candidate);
         break;
       }
@@ -314,12 +271,17 @@ export class IdentifyStage implements IWorkflowStage<
 
   private async resolveRecordContent(
     payload: SubmissionPayload & { kind: 'RECORD' },
+    context?: { userId?: string; projectId?: string; scopeId?: string },
   ): Promise<string> {
     let content = payload.content || '';
     if (payload.isOffloaded && payload.fileId && this.storagePort?.readOwnedFile) {
       try {
         const file = await this.storagePort.readOwnedFile({
           fileId: payload.fileId,
+          ...(context?.userId ? { userId: context.userId } : {}),
+          ...(context?.userId && context?.projectId
+            ? { projectId: context.projectId }
+            : {}),
         });
         if (file?.buffer) {
           const decompressed = await gunzipAsync(file.buffer, {
@@ -348,12 +310,21 @@ export class IdentifyStage implements IWorkflowStage<
     return this.urlResolver.resolve(payload, scopeId);
   }
 
+  async resolveUrlFallback(
+    payload: SubmissionPayload & { kind: 'URL' },
+    scopeId?: string,
+  ): Promise<MetadataCandidate | null> {
+    if (!this.urlResolver) return null;
+    return this.urlResolver.resolve(payload, scopeId, { forceScrape: true });
+  }
+
   private async resolveFileCandidate(
     payload: SubmissionPayload & { kind: 'FILE' },
     scopeId?: string,
+    context?: { userId?: string; projectId?: string; scopeId?: string },
   ): Promise<MetadataCandidate | null> {
     if (!this.fileResolver) return null;
-    return this.fileResolver.resolve(payload, scopeId);
+    return this.fileResolver.resolve(payload, context ?? scopeId);
   }
 
   cleanPdfTitle(

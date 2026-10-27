@@ -1,6 +1,7 @@
 import { Module, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { CoreModule } from '@/core';
 import { CatalogModule } from '@/modules/library/catalog/catalog.module';
+import { SearchModule } from '@/modules/library/search/search.module';
 import {
   LibraryCoreModule,
   IOutboxRegistry,
@@ -19,7 +20,6 @@ import { ExtractionFacade, EXTRACTION_FACADE } from './extraction.facade';
 // Services
 import { AttachmentsService } from './services/attachments.service';
 import { AttachmentRenamerService } from './services/attachment-renamer.service';
-import { AttachmentThumbnailService } from './services/attachment-thumbnail.service';
 import { WebSnapshotService } from './services/web-snapshot.service';
 import { OcrPreprocessorService } from './services/ocr-preprocessor.service';
 import { OcrWorkerPoolService } from './services/ocr-worker-pool.service';
@@ -47,7 +47,7 @@ import { ItemLifecycleSubscriber } from './subscribers/item-lifecycle.subscriber
 import { AnnotationNormalizer } from './domain/annotation.normalizer';
 
 @Module({
-  imports: [CoreModule, LibraryCoreModule, CatalogModule],
+  imports: [CoreModule, LibraryCoreModule, CatalogModule, SearchModule],
   controllers: [
     AttachmentStorageController,
     AttachmentController,
@@ -70,7 +70,6 @@ import { AnnotationNormalizer } from './domain/annotation.normalizer';
     // Services
     AttachmentsService,
     AttachmentRenamerService,
-    AttachmentThumbnailService,
     WebSnapshotService,
     OcrPreprocessorService,
     OcrWorkerPoolService,

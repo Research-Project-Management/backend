@@ -5,26 +5,72 @@ import {
   MetadataConflictDetail,
 } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import {
-  SOURCE_WEIGHTS,
-  resolveProviderFieldWeight,
-  selectAuthoritativeCreatorVariant,
-  mergeReconciledTagArrays,
   mergeReconciledNotesArrays,
+  resolveFieldReconciliationStrategy,
+  WeightedFieldVariant,
   finalizeReconciledBibliographicMetadata,
 } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
+import {
+  resolveFieldAliases,
+  resolveBidirectionalBaseFields,
+  resolveProviderFieldWeight,
+} from '@/modules/library/core';
+
+export const ALIAS_EVIDENCE_FALLBACK_KEYS: Readonly<Record<string, readonly string[]>> = {
+  publicationTitle: ['publicationTitle', 'journal', 'venue', 'proceedingsTitle', 'conferenceName', 'bookTitle', 'websiteTitle', 'reporter', 'code'],
+  journal: ['journal', 'publicationTitle', 'venue'],
+  abstract: ['abstract', 'abstractNote'],
+  abstractNote: ['abstractNote', 'abstract'],
+  authors: ['authors', 'creators'],
+  creators: ['creators', 'authors'],
+  arxivId: ['arxivId', 'archiveId', 'archiveID'],
+  archiveId: ['archiveId', 'arxivId', 'archiveID'],
+  journalAbbreviation: ['journalAbbreviation', 'journalAbbr'],
+  journalAbbr: ['journalAbbr', 'journalAbbreviation'],
+  publicationDate: ['publicationDate', 'date', 'dateDecided', 'dateEnacted', 'issueDate', 'filingDate'],
+  date: ['date', 'publicationDate', 'dateDecided', 'dateEnacted', 'issueDate', 'filingDate'],
+  publisher: ['publisher', 'university', 'institution', 'repository', 'issuingAuthority', 'court'],
+  place: ['place', 'eventPlace', 'country'],
+  eventPlace: ['eventPlace', 'place'],
+  issue: ['issue', 'number', 'reportNumber', 'docketNumber', 'publicLawNumber', 'patentNumber'],
+  number: ['number', 'issue', 'reportNumber', 'docketNumber', 'publicLawNumber', 'patentNumber'],
+  numPages: ['numPages', 'numberOfPages'],
+  numberOfPages: ['numberOfPages', 'numPages'],
+  authority: ['authority', 'issuingAuthority', 'court'],
+  issuingAuthority: ['issuingAuthority', 'authority'],
+  doi: ['doi', 'DOI'],
+  isbn: ['isbn', 'ISBN'],
+  issn: ['issn', 'ISSN'],
+  pmid: ['pmid', 'PMID'],
+  pmcid: ['pmcid', 'PMCID'],
+  url: ['url', 'URL'],
+  rights: ['rights', 'license'],
+  license: ['license', 'rights'],
+};
+
+interface AnnotatedFieldEvidence extends FieldEvidence {
+  readonly __isAlreadyWeighted?: boolean;
+}
 
 export class ReconciliationPolicy {
-  /**
-   * Global fallback provider priority scores for ingestion-pipeline reconciliation,
-   * derived from the unified SOURCE_WEIGHTS & FIELD_AUTHORITY_WEIGHTS hierarchy.
-   */
-  private static readonly PROVIDER_PRIORITY: Record<string, number> =
-    Object.fromEntries(
-      Object.entries(SOURCE_WEIGHTS).map(([k, v]) => [k, Math.round(v * 100)]),
-    );
-
-  private static getProviderPriority(provider: string, field?: string): number {
-    return resolveProviderFieldWeight(provider, field) * 100;
+  private static getProviderPriority(
+    provider: string,
+    field?: string,
+    isAlreadyWeighted?: boolean,
+    isUserOverride?: boolean,
+  ): number {
+    if (
+      isUserOverride ||
+      provider === 'UserOverride' ||
+      provider === 'user' ||
+      provider === 'manual'
+    ) {
+      return 1000;
+    }
+    if (isAlreadyWeighted) {
+      return 100;
+    }
+    return resolveProviderFieldWeight(provider, field ?? '') * 100;
   }
 
   /**
@@ -42,11 +88,25 @@ export class ReconciliationPolicy {
       };
     }
 
-    // Collect all field variants across candidates
-    const fieldMap = new Map<string, FieldEvidence[]>();
+    // Collect all field variants across candidates after alias & base-field harmonization
+    const fieldMap = new Map<string, AnnotatedFieldEvidence[]>();
 
     for (const candidate of candidates) {
-      for (const [key, evidence] of Object.entries(candidate.fields)) {
+      if (!candidate?.fields || typeof candidate.fields !== 'object') {
+        continue;
+      }
+      const isAlreadyWeighted =
+        candidate.sourceName === 'EnrichedProvider' ||
+        (candidate as { source?: string; sourceProvider?: string }).source ===
+          'EnrichedProvider' ||
+        (candidate as { source?: string; sourceProvider?: string })
+          .sourceProvider === 'EnrichedProvider';
+
+      const harmonizedMeta: Record<string, unknown> = {};
+      const fieldEvidences = candidate.fields;
+      let fallbackEvidence: FieldEvidence | undefined;
+
+      for (const [key, evidence] of Object.entries(fieldEvidences)) {
         if (
           !evidence ||
           evidence.normalizedValue === undefined ||
@@ -54,8 +114,70 @@ export class ReconciliationPolicy {
         ) {
           continue;
         }
+        if (
+          !fallbackEvidence &&
+          !evidence.isUserOverride &&
+          evidence.sourceProvider !== 'UserOverride'
+        ) {
+          fallbackEvidence = evidence;
+        }
+        harmonizedMeta[key] = evidence.normalizedValue;
+      }
+
+      if (!fallbackEvidence) {
+        fallbackEvidence = Object.values(fieldEvidences).find(
+          (ev): ev is FieldEvidence =>
+            Boolean(ev) &&
+            ev.normalizedValue !== undefined &&
+            ev.normalizedValue !== null,
+        );
+      }
+      if (!fallbackEvidence) {
+        continue;
+      }
+
+      const candType = String(
+        harmonizedMeta.itemType ||
+          candidate.normalizedMetadata?.itemType ||
+          'journalArticle',
+      );
+      resolveFieldAliases(harmonizedMeta);
+      resolveBidirectionalBaseFields(harmonizedMeta, candType, undefined, false);
+      if (
+        harmonizedMeta.abstractNote !== undefined &&
+        harmonizedMeta.abstract === undefined
+      ) {
+        harmonizedMeta.abstract = harmonizedMeta.abstractNote;
+      }
+
+      for (const [key, normVal] of Object.entries(harmonizedMeta)) {
+        if (normVal === undefined || normVal === null || normVal === '') {
+          continue;
+        }
+        let baseEv = fieldEvidences[key];
+        if (!baseEv) {
+          const fallbackKeys = ALIAS_EVIDENCE_FALLBACK_KEYS[key] || [];
+          for (const fk of fallbackKeys) {
+            if (fieldEvidences[fk]) {
+              baseEv = fieldEvidences[fk];
+              break;
+            }
+          }
+        }
+        const effectiveBase = baseEv || fallbackEvidence;
+        const evidenceToPush: AnnotatedFieldEvidence =
+          effectiveBase.path === key &&
+          effectiveBase.normalizedValue === normVal &&
+          !isAlreadyWeighted
+            ? effectiveBase
+            : {
+                ...effectiveBase,
+                path: key,
+                normalizedValue: normVal,
+                ...(isAlreadyWeighted ? { __isAlreadyWeighted: true } : {}),
+              };
         const existing = fieldMap.get(key) || [];
-        existing.push(evidence);
+        existing.push(evidenceToPush);
         fieldMap.set(key, existing);
       }
     }
@@ -65,9 +187,15 @@ export class ReconciliationPolicy {
     const conflicts: MetadataConflictDetail[] = [];
     const proposedItem: Record<string, unknown> = {};
 
+    const stripInternalAnnotation = (ev: AnnotatedFieldEvidence): FieldEvidence => {
+      if (!('__isAlreadyWeighted' in ev)) return ev;
+      const { __isAlreadyWeighted: _, ...clean } = ev;
+      return clean;
+    };
+
     for (const [field, evidences] of fieldMap.entries()) {
       if (evidences.length === 1) {
-        selectedFields[field] = evidences[0];
+        selectedFields[field] = stripInternalAnnotation(evidences[0]);
         proposedItem[field] = evidences[0].normalizedValue;
         rejectedFields[field] = [];
         continue;
@@ -78,80 +206,80 @@ export class ReconciliationPolicy {
         const priorityA = ReconciliationPolicy.getProviderPriority(
           a.sourceProvider,
           field,
+          a.__isAlreadyWeighted,
+          a.isUserOverride,
         );
         const priorityB = ReconciliationPolicy.getProviderPriority(
           b.sourceProvider,
           field,
+          b.__isAlreadyWeighted,
+          b.isUserOverride,
         );
         const scoreA = a.confidence * priorityA;
         const scoreB = b.confidence * priorityB;
-        return scoreB - scoreA;
+        if (scoreB !== scoreA) {
+          return scoreB - scoreA;
+        }
+        // Tie-breaker for two EnrichedProvider fields: use actual provider field weight
+        return (
+          resolveProviderFieldWeight(b.sourceProvider, field) -
+          resolveProviderFieldWeight(a.sourceProvider, field)
+        );
       });
 
       const best = sorted[0];
 
-      // Special handling for array fields: Union tags/keywords and notes across providers
-      if (field === 'tags' || field === 'keywords' || field === 'labels') {
-        const mergedArray = mergeReconciledTagArrays(
-          evidences.map((ev) => ev.normalizedValue),
-        );
+      const strategy = resolveFieldReconciliationStrategy(field);
+      const weightedVariants: WeightedFieldVariant[] = sorted.map((ev, idx) => ({
+        candidate: {
+          id: `${ev.sourceProvider}:${field}:${idx}`,
+          sourceProvider: ev.sourceProvider,
+          confidenceScore: ev.confidence,
+          metadata: { [field]: ev.normalizedValue } as never,
+          fetchedAt: ev.retrievedAt || new Date().toISOString(),
+        },
+        val: ev.normalizedValue,
+        effectiveWeight:
+          (ev.confidence *
+            ReconciliationPolicy.getProviderPriority(
+              ev.sourceProvider,
+              field,
+              ev.__isAlreadyWeighted,
+              ev.isUserOverride,
+            )) /
+          100,
+      }));
+      const outcome = strategy.reconcileField(field, weightedVariants);
+
+      if (!outcome.detectConflicts) {
+        const resolvedVal =
+          field === 'notes'
+            ? mergeReconciledNotesArrays(
+                evidences.map((ev) => ev.normalizedValue),
+                true,
+              )
+            : outcome.value;
         selectedFields[field] = {
-          ...best,
-          normalizedValue: mergedArray,
+          ...stripInternalAnnotation(best),
+          normalizedValue: resolvedVal,
         };
-        proposedItem[field] = mergedArray;
+        proposedItem[field] = resolvedVal;
         rejectedFields[field] = [];
         continue;
       }
 
-      if (field === 'notes') {
-        const mergedNotes = mergeReconciledNotesArrays(
-          evidences.map((ev) => ev.normalizedValue),
-          true,
-        );
-        selectedFields[field] = {
-          ...best,
-          normalizedValue: mergedNotes,
-        };
-        proposedItem[field] = mergedNotes;
-        rejectedFields[field] = [];
-        continue;
-      }
+      const winningEvidence =
+        sorted.find(
+          (ev) =>
+            ev.sourceProvider === outcome.assertion.sourceProvider &&
+            ev.normalizedValue === outcome.value,
+        ) ?? best;
 
-      if (field === 'extraFields') {
-        const mergedExtra: Record<string, unknown> = {};
-        for (const ev of [...sorted].reverse()) {
-          if (ev.normalizedValue && typeof ev.normalizedValue === 'object') {
-            Object.assign(mergedExtra, ev.normalizedValue);
-          }
-        }
-        selectedFields[field] = {
-          ...best,
-          normalizedValue: mergedExtra,
-        };
-        proposedItem[field] = mergedExtra;
-        rejectedFields[field] = [];
-        continue;
-      }
-
-      if (field === 'creators' || field === 'authors') {
-        const bestWithContent = selectAuthoritativeCreatorVariant(
-          sorted.map((e) => ({
-            ev: e,
-            sourceProvider: e.sourceProvider,
-            val: e.normalizedValue,
-          })),
-        ).ev;
-
-        selectedFields[field] = bestWithContent;
-        proposedItem[field] = bestWithContent.normalizedValue;
-        rejectedFields[field] = sorted.filter((e) => e !== bestWithContent);
-        continue;
-      }
-
-      selectedFields[field] = best;
-      proposedItem[field] = best.normalizedValue;
-      rejectedFields[field] = sorted.slice(1);
+      selectedFields[field] = stripInternalAnnotation(winningEvidence);
+      proposedItem[field] = outcome.value;
+      rejectedFields[field] = sorted
+        .filter((e) => e !== winningEvidence)
+        .map(stripInternalAnnotation);
 
       // Conflict detection for non-array values with differing string representations
       if (typeof best.normalizedValue !== 'object') {
@@ -179,7 +307,89 @@ export class ReconciliationPolicy {
       }
     }
 
-    finalizeReconciledBibliographicMetadata(proposedItem);
+    finalizeReconciledBibliographicMetadata(
+      proposedItem,
+      candidates.map((c) => ({
+        sourceProvider:
+          (c as { sourceProvider?: string }).sourceProvider || c.sourceName,
+        metadata:
+          (c.normalizedMetadata as unknown as Record<string, unknown>) ??
+          (c.fields as unknown as Record<string, unknown>),
+      })),
+    );
+    for (const dateKey of ['publicationDate', 'date'] as const) {
+      if (
+        selectedFields[dateKey] &&
+        proposedItem[dateKey] !== undefined &&
+        selectedFields[dateKey].normalizedValue !== proposedItem[dateKey]
+      ) {
+        selectedFields[dateKey] = {
+          ...selectedFields[dateKey],
+          normalizedValue: proposedItem[dateKey],
+        };
+      }
+    }
+
+    const fieldProvenance: Record<
+      string,
+      {
+        source: string;
+        sourceProvider: string;
+        confidence: number;
+        verified: boolean;
+        isUserOverride?: boolean;
+        lockedByUser?: boolean;
+      }
+    > = {};
+    const userOverrideFieldKeys = new Set<string>();
+    for (const [fKey, fEv] of Object.entries(selectedFields)) {
+      if (!fEv || fKey === 'extraFields' || fKey === 'notes') continue;
+      const isUser =
+        Boolean(fEv.isUserOverride) ||
+        fEv.sourceProvider === 'UserOverride' ||
+        fEv.sourceProvider === 'user' ||
+        fEv.sourceProvider === 'manual';
+      if (isUser) {
+        userOverrideFieldKeys.add(fKey);
+      }
+      fieldProvenance[fKey] = {
+        source: fEv.sourceProvider,
+        sourceProvider: fEv.sourceProvider,
+        confidence: fEv.confidence,
+        verified: fEv.confidence >= 0.7 || isUser,
+        ...(isUser ? { isUserOverride: true, lockedByUser: true } : {}),
+      };
+    }
+
+    const existingExtra =
+      proposedItem.extraFields &&
+      typeof proposedItem.extraFields === 'object' &&
+      !Array.isArray(proposedItem.extraFields)
+        ? (proposedItem.extraFields as Record<string, unknown>)
+        : {};
+    const existingFieldProv =
+      existingExtra.fieldProvenance &&
+      typeof existingExtra.fieldProvenance === 'object' &&
+      !Array.isArray(existingExtra.fieldProvenance)
+        ? (existingExtra.fieldProvenance as Record<string, unknown>)
+        : {};
+    const existingLocked = Array.isArray(existingExtra.lockedFields)
+      ? (existingExtra.lockedFields as string[])
+      : [];
+    const mergedLockedFields = Array.from(
+      new Set([...existingLocked, ...userOverrideFieldKeys]),
+    );
+
+    proposedItem.extraFields = {
+      ...existingExtra,
+      fieldProvenance: {
+        ...fieldProvenance,
+        ...existingFieldProv,
+      },
+      ...(mergedLockedFields.length > 0
+        ? { lockedFields: mergedLockedFields }
+        : {}),
+    };
 
     return {
       selectedFields,

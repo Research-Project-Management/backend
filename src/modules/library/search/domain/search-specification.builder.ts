@@ -1,5 +1,5 @@
-import { ISpecification } from './specification.interface';
 import {
+  ISpecification,
   ScopeSpecification,
   ActiveItemsSpecification,
   ItemTypeSpecification,

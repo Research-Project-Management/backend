@@ -276,7 +276,7 @@ function parseFeedAuthors(rawAuthors: string[]): {
     const pieces =
       commaParts.length > 2 || /\band\b/i.test(cleaned)
         ? cleaned
-            .split(/\s+and\s+|;\s*|\s*,\s*(?=[A-Z][a-z]+\s+[A-Z])/g)
+            .split(/\s+and\s+|;\s*|\s*,\s*(?=\p{Lu}\p{Ll}+\s+\p{Lu})/gu)
             .map((s) => s.trim())
             .filter(Boolean)
         : [cleaned];

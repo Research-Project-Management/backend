@@ -2,6 +2,8 @@ import { Injectable, Inject, Optional } from '@nestjs/common';
 import { Prisma, AttachmentExtractionStatus } from '@prisma/client';
 import { PrismaService, RedisCacheService } from '@/core';
 import { CatalogFacade } from './catalog/catalog.facade';
+import { ItemCacheCoordinator } from './catalog/services/item-cache.coordinator';
+import { ItemsMapper } from './catalog/domain/items.mapper';
 import { SearchFacade } from './search/search.facade';
 import { CitationFacade } from './citation/citation.facade';
 import { ExtractionFacade } from './extraction/extraction.facade';
@@ -10,11 +12,13 @@ import { ExportLibraryDto } from './citation/dto/exports.dto';
 import { ExportResult } from './citation/types/exports.types';
 import {
   ExtractedPdfDocument,
+  harmonizeZoteroFields,
   LIBRARY_EVENT_TYPES,
   LIBRARY_REDIS_KEYS,
   normalizeProjectScopeId,
   UNIT_OF_WORK,
   IUnitOfWork,
+  ItemProvenancePolicy,
 } from './core';
 
 export interface LibraryItemSummary {
@@ -98,6 +102,8 @@ export const LIBRARY_FACADE = 'LIBRARY_FACADE';
  */
 @Injectable()
 export class LibraryFacade implements ILibraryFacade {
+  private readonly itemCacheCoordinator: ItemCacheCoordinator;
+
   constructor(
     private readonly catalogFacade: CatalogFacade,
     private readonly extractionFacade: ExtractionFacade,
@@ -110,7 +116,12 @@ export class LibraryFacade implements ILibraryFacade {
     @Optional()
     @Inject(UNIT_OF_WORK)
     private readonly uow?: IUnitOfWork,
-  ) {}
+    @Optional()
+    itemCacheCoordinator?: ItemCacheCoordinator,
+  ) {
+    this.itemCacheCoordinator =
+      itemCacheCoordinator ?? new ItemCacheCoordinator(cache);
+  }
 
   async listCollections(
     userId: string,
@@ -276,13 +287,15 @@ export class LibraryFacade implements ILibraryFacade {
       },
     });
 
-    if (this.cache && existing.itemId) {
-      await Promise.all([
-        this.cache.del(LIBRARY_REDIS_KEYS.item(existing.itemId)),
-        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(existing.itemId)),
-        this.cache.del(`library:item:${existing.itemId}:attachments`),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(existing.itemId)),
-      ]);
+    if (existing.itemId && this.itemCacheCoordinator) {
+      await this.itemCacheCoordinator.invalidateItemCache(
+        existing.itemId,
+        undefined,
+        undefined,
+        { skipScopeInvalidation: true },
+      );
+    } else if (existing.itemId && this.cache) {
+      await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(existing.itemId));
     }
   }
 
@@ -293,7 +306,13 @@ export class LibraryFacade implements ILibraryFacade {
     if (!this.prisma || !itemId) return;
     const existing = await this.prisma.item.findUnique({
       where: { id: itemId },
-      select: { id: true, userId: true, projectId: true, metadata: true },
+      select: {
+        id: true,
+        userId: true,
+        projectId: true,
+        itemType: true,
+        metadata: true,
+      },
     });
     if (!existing) return;
 
@@ -305,9 +324,77 @@ export class LibraryFacade implements ILibraryFacade {
         : {};
 
     const validProjectId = normalizeProjectScopeId(existing.projectId);
+    const effectiveItemType = String(existing.itemType || 'journalArticle');
+    const rawPatch = { ...aiMetadataPatch };
+    delete rawPatch.citationKey;
+    delete rawPatch.citeKey;
+    delete rawPatch.mergedCitationKeys;
+
+    const BIBLIOGRAPHIC_PATCH_KEYS = new Set([
+      'doi',
+      'DOI',
+      'isbn',
+      'ISBN',
+      'issn',
+      'ISSN',
+      'pmid',
+      'PMID',
+      'pmcid',
+      'PMCID',
+      'arxivid',
+      'arxivId',
+      'archiveid',
+      'archiveID',
+      'archiveId',
+      'journalabbr',
+      'journalAbbr',
+      'journalAbbreviation',
+      'abstract',
+      'abstractNote',
+      'journal',
+      'publicationTitle',
+      'venue',
+      'proceedingsTitle',
+      'bookTitle',
+      'university',
+      'institution',
+      'date',
+      'publicationDate',
+      'year',
+      'title',
+    ]);
+    const hasBibliographicFields = Object.keys(rawPatch).some((k) =>
+      BIBLIOGRAPHIC_PATCH_KEYS.has(k),
+    );
+    const sanitizedPatch = hasBibliographicFields
+      ? harmonizeZoteroFields(rawPatch, {
+          itemType: effectiveItemType,
+          syncExtraFields: false,
+          syncLegacyAliases: false,
+        })
+      : rawPatch;
+    for (const transientAlias of [
+      'DOI',
+      'ISBN',
+      'ISSN',
+      'PMID',
+      'PMCID',
+      'archiveID',
+      'citeKey',
+      'URL',
+    ]) {
+      delete sanitizedPatch[transientAlias];
+    }
+
+    const { filteredPatch, updatedFieldProvenance } =
+      ItemProvenancePolicy.filterAiMetadataPatch(currentMeta, sanitizedPatch);
+
     const mergedMetadata = {
       ...currentMeta,
-      ...aiMetadataPatch,
+      ...filteredPatch,
+      ...(updatedFieldProvenance
+        ? { fieldProvenance: updatedFieldProvenance }
+        : {}),
     } as Prisma.InputJsonValue;
 
     if (this.uow && existing.userId) {
@@ -320,6 +407,7 @@ export class LibraryFacade implements ILibraryFacade {
             version: { increment: 1 },
           },
         });
+        const domainUpdated = ItemsMapper.toDomain(updated);
         const eventScope = {
           userId: existing.userId,
           projectId: validProjectId,
@@ -329,13 +417,13 @@ export class LibraryFacade implements ILibraryFacade {
           entityId: itemId,
           action: 'update',
           version: updated.version ?? 1,
-          data: updated,
+          data: domainUpdated,
         });
         await helpers.publishOutbox(
           eventScope,
           itemId,
           LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-          updated,
+          domainUpdated,
         );
       });
     } else {
@@ -348,56 +436,14 @@ export class LibraryFacade implements ILibraryFacade {
       });
     }
 
-    if (this.cache) {
-      const scopeId = validProjectId || existing.userId;
-      const tasks: Promise<unknown>[] = [
-        this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
-        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
-      ];
-      if (scopeId) {
-        tasks.push(
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeId)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeId)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(scopeId)),
-          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(scopeId)),
-        );
-      }
-      if (validProjectId) {
-        const projScopeKey = `proj:${validProjectId}`;
-        tasks.push(
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(projScopeKey)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(projScopeKey)),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.searchFacetsPattern(projScopeKey),
-          ),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.searchItemsPattern(projScopeKey),
-          ),
-          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(projScopeKey)),
-          ...(existing.userId
-            ? [
-                this.cache.delPattern(
-                  LIBRARY_REDIS_KEYS.itemsPattern(existing.userId),
-                ),
-                this.cache.delPattern(
-                  LIBRARY_REDIS_KEYS.countsPattern(existing.userId),
-                ),
-                this.cache.delPattern(
-                  LIBRARY_REDIS_KEYS.searchFacetsPattern(existing.userId),
-                ),
-                this.cache.delPattern(
-                  LIBRARY_REDIS_KEYS.searchItemsPattern(existing.userId),
-                ),
-                this.cache.del(
-                  LIBRARY_REDIS_KEYS.searchVersion(existing.userId),
-                ),
-              ]
-            : []),
-        );
-      }
-      await Promise.all(tasks);
+    if (this.itemCacheCoordinator) {
+      await this.itemCacheCoordinator.invalidateItemCache(
+        itemId,
+        existing.userId,
+        validProjectId,
+      );
+    } else if (this.cache) {
+      await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId));
     }
   }
 }

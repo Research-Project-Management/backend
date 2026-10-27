@@ -1,10 +1,6 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import crypto from 'crypto';
-import zlib from 'zlib';
-import { promisify } from 'util';
-
-const gzipAsync = promisify(zlib.gzip);
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
@@ -13,8 +9,6 @@ import {
   OutboxDispatchHandler,
   LIBRARY_EVENT_TYPES,
   normalizeProjectScopeId,
-  parseCreatorString,
-  isNoiseAuthorName,
   extractFileIdFromUrl,
   ExtractionProcessException,
 } from '@/modules/library/core';
@@ -25,6 +19,7 @@ import {
 import { AttachmentStorageException } from '@/modules/library/extraction/types/attachments.types';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
+import { ItemCacheCoordinator } from '@/modules/library/catalog';
 import { ReferenceMatcherService } from './reference-matcher.service';
 import { ExtractionMetadataSynchronizer } from './extraction-metadata.synchronizer';
 
@@ -68,10 +63,17 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     },
     @Optional()
     metadataSync?: ExtractionMetadataSynchronizer,
+    @Optional()
+    private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {
     this.metadataSync =
       metadataSync ??
-      new ExtractionMetadataSynchronizer(this.extractionRepo, this.libraryTx, this.storagePort);
+      new ExtractionMetadataSynchronizer(
+        this.extractionRepo,
+        this.libraryTx,
+        this.storagePort,
+        this.cacheCoordinator,
+      );
   }
 
   async handle(event: OutboxEvent, signal?: AbortSignal): Promise<void> {
@@ -105,9 +107,16 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       });
 
       if (execResult.skipped) {
+        if (execResult.reason === 'IN_FLIGHT') {
+          throw new ExtractionProcessException(
+            `Extraction in-flight for event ${event.id}; retrying later`,
+            { eventId: event.id, attachmentId },
+          );
+        }
         this.logger.debug(
-          `[AttachmentExtraction] Skipping duplicate or active extraction for event ${event.id} (${execResult.reason})`,
+          `[AttachmentExtraction] Skipping already completed extraction for event ${event.id} (${execResult.reason})`,
         );
+        return;
       }
       return;
     }
@@ -169,8 +178,14 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         return;
       }
 
+      if (existing.extractionStatus === 'PROCESSING') {
+        throw new ExtractionProcessException(
+          `Attachment ${attachmentId} is currently PROCESSING; retrying later`,
+          { eventId: event.id, attachmentId },
+        );
+      }
       this.logger.debug(
-        `[AttachmentExtraction] Attachment ${attachmentId} status is ${existing.extractionStatus} (claim count: 0). Skipping duplicate or active extraction.`,
+        `[AttachmentExtraction] Attachment ${attachmentId} status is ${existing.extractionStatus} (claim count: 0). Skipping redundant extraction.`,
       );
       return;
     }
@@ -218,7 +233,11 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       }
 
       // 2. Storage-first reading via Storage Port
-      const storageFile = await this.storagePort.readOwnedFile({ fileId });
+      const storageFile = await this.storagePort.readOwnedFile({
+        fileId,
+        userId: attachment.item?.userId,
+        projectId: attachment.item?.projectId ?? undefined,
+      });
       const rawBuffer =
         storageFile?.buffer ||
         (Buffer.isBuffer(storageFile) ? storageFile : null);
@@ -404,6 +423,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         attachment,
         doc,
         extractionResult,
+        { skipOutboxPublish: true },
       );
 
       const effectiveUserId =
@@ -422,7 +442,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       if (doc.references && doc.references.length > 0 && scopeId) {
         try {
           await this.linkInLibraryCitations(
-            scopeId,
+            { userId: effectiveUserId, projectId: effectiveProjectId },
             attachment.itemId,
             doc.references,
           );
@@ -436,13 +456,110 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       // 7. Update status to READY on completion
       await this.extractionRepo.markReady(attachment.id);
 
-      // 8. Publish ITEM_UPDATED outbox event / domain event for SearchEventsSubscriber & Retraction checks
+      // 8. Invalidate all relevant Redis keys BEFORE publishing ITEM_UPDATED or emitting ATTACHMENT_METADATA_EXTRACTED
+      // so downstream listeners (e.g. SearchEventsSubscriber, RetractionWatch, MetadataResolverService) read fresh item state & version
+      if (this.cacheCoordinator) {
+        try {
+          await this.cacheCoordinator.invalidateForWrite({
+            userId: effectiveUserId,
+            projectId: effectiveProjectId,
+            itemIds: [attachment.itemId],
+          });
+        } catch (cacheErr: unknown) {
+          const msg =
+            cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
+          this.logger.warn(
+            `Failed to invalidate Redis caches via ItemCacheCoordinator after extraction for item ${attachment.itemId}: ${msg}`,
+          );
+        }
+      } else if (this.cache) {
+        try {
+          const invalidationTasks: Promise<unknown>[] = [
+            this.cache.del(LIBRARY_REDIS_KEYS.item(attachment.itemId)),
+            this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(attachment.itemId)),
+            this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(attachment.itemId)),
+            this.cache.del(`library:item:${attachment.itemId}:attachments`),
+            this.cache.del(`library:item:${attachment.itemId}:notes`),
+            this.cache.delPattern(
+              LIBRARY_REDIS_KEYS.itemPattern(attachment.itemId),
+            ),
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
+            this.cache.del(LIBRARY_REDIS_KEYS.counts(scopeId)),
+            this.cache.del(`library:counts:user:${effectiveUserId}`),
+            this.cache.del(LIBRARY_REDIS_KEYS.tags(scopeId)),
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(scopeId)),
+            this.cache.delPattern(
+              LIBRARY_REDIS_KEYS.searchItemsPattern(scopeId),
+            ),
+            this.cache.delPattern(
+              LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeId),
+            ),
+            this.cache.del(LIBRARY_REDIS_KEYS.savedSearches(scopeId)),
+          ];
+          if (effectiveProjectId) {
+            invalidationTasks.push(
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.itemsPattern(`proj:${effectiveProjectId}`),
+              ),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.itemsPattern(effectiveUserId),
+              ),
+              this.cache.del(`library:counts:proj:${effectiveProjectId}`),
+              this.cache.del(
+                LIBRARY_REDIS_KEYS.tags(`proj:${effectiveProjectId}`),
+              ),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.tagsPattern(`proj:${effectiveProjectId}`),
+              ),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.tagsPattern(effectiveUserId),
+              ),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.searchItemsPattern(
+                  `proj:${effectiveProjectId}`,
+                ),
+              ),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.searchFacetsPattern(
+                  `proj:${effectiveProjectId}`,
+                ),
+              ),
+              this.cache.del(
+                LIBRARY_REDIS_KEYS.savedSearches(effectiveUserId),
+              ),
+            );
+          }
+          await Promise.all(invalidationTasks);
+        } catch (cacheErr: unknown) {
+          const msg =
+            cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
+          this.logger.warn(
+            `Failed to invalidate Redis caches after extraction for item ${attachment.itemId}: ${msg}`,
+          );
+        }
+      }
+
+      // 9. Publish ITEM_UPDATED outbox event / domain event for SearchEventsSubscriber & Retraction checks
       const itemUpdatedPayload = {
         itemId: attachment.itemId,
         userId: effectiveUserId,
         projectId: effectiveProjectId,
         attachmentId: attachment.id,
       };
+      const existingMetaObj =
+        attachment.item?.metadata &&
+        typeof attachment.item.metadata === 'object' &&
+        !Array.isArray(attachment.item.metadata)
+          ? (attachment.item.metadata as Record<string, unknown>)
+          : {};
+      const discoveredNewIdentifier = Boolean(
+        (doc.metadata?.doi && !attachment.item?.doi) ||
+          (doc.metadata?.arxivId &&
+            !(attachment.item as Record<string, unknown> | null)?.arxivId &&
+            !existingMetaObj.arxivId) ||
+          (doc.metadata?.pmid && !existingMetaObj.pmid) ||
+          (doc.metadata?.isbn && !existingMetaObj.isbn),
+      );
       let outboxPublished = false;
       if (this.libraryTx?.executeInTransaction) {
         try {
@@ -477,52 +594,35 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         });
       }
 
-      // 9. Invalidate all relevant Redis keys after extraction completes
-      if (this.cache) {
-        try {
-          const invalidationTasks: Promise<unknown>[] = [
-            this.cache.del(LIBRARY_REDIS_KEYS.item(attachment.itemId)),
-            this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(attachment.itemId)),
-            this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(attachment.itemId)),
-            this.cache.del(`library:item:${attachment.itemId}:attachments`),
-            this.cache.del(`library:item:${attachment.itemId}:notes`),
-            this.cache.delPattern(
-              LIBRARY_REDIS_KEYS.itemPattern(attachment.itemId),
-            ),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-            this.cache.del(LIBRARY_REDIS_KEYS.counts(scopeId)),
-            this.cache.del(`library:counts:user:${effectiveUserId}`),
-            this.cache.del(LIBRARY_REDIS_KEYS.tags(scopeId)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(scopeId)),
-          ];
-          if (effectiveProjectId) {
-            invalidationTasks.push(
-              this.cache.delPattern(
-                LIBRARY_REDIS_KEYS.itemsPattern(`proj:${effectiveProjectId}`),
-              ),
-              this.cache.delPattern(
-                LIBRARY_REDIS_KEYS.itemsPattern(effectiveUserId),
-              ),
-              this.cache.del(`library:counts:proj:${effectiveProjectId}`),
-              this.cache.del(
-                LIBRARY_REDIS_KEYS.tags(`proj:${effectiveProjectId}`),
-              ),
-              this.cache.delPattern(
-                LIBRARY_REDIS_KEYS.tagsPattern(`proj:${effectiveProjectId}`),
-              ),
-              this.cache.delPattern(
-                LIBRARY_REDIS_KEYS.tagsPattern(effectiveUserId),
-              ),
-            );
-          }
-          await Promise.all(invalidationTasks);
-        } catch (cacheErr: unknown) {
-          const msg =
-            cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
-          this.logger.warn(
-            `Failed to invalidate Redis caches after extraction for item ${attachment.itemId}: ${msg}`,
-          );
-        }
+      if (
+        this.eventEmitter &&
+        (discoveredNewIdentifier ||
+          (doc.metadata?.title && !existingMetaObj.isVerified))
+      ) {
+        this.eventEmitter.emit(LIBRARY_EVENT_TYPES.ATTACHMENT_METADATA_EXTRACTED, {
+          userId: effectiveUserId,
+          projectId: effectiveProjectId,
+          itemId: attachment.itemId,
+          attachmentId: attachment.id,
+          extractedMetadata: {
+            title: doc.metadata?.title,
+            doi: doc.metadata?.doi,
+            arxivId: doc.metadata?.arxivId,
+            pmid: doc.metadata?.pmid,
+            isbn: doc.metadata?.isbn,
+            issn: doc.metadata?.issn,
+            abstract: doc.metadata?.abstract,
+            year: doc.metadata?.year,
+            publicationTitle:
+              (doc.metadata as Record<string, unknown> | null)?.publicationTitle ||
+              doc.metadata?.journal,
+            authors: doc.metadata?.authors,
+            creators: doc.metadata?.creators,
+          },
+          isOcrDerived: Boolean(
+            doc.ocrProvenance && doc.ocrProvenance.totalOcrPages > 0,
+          ),
+        });
       }
 
       this.logger.log(

@@ -21,6 +21,8 @@ export interface IdentifyStageInput {
   runId: string;
   payload: IngestionSubmissionEnvelope['payload'];
   scopeId?: string;
+  userId?: string;
+  projectId?: string;
 }
 
 export interface EnrichStageInput {

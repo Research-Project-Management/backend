@@ -8,6 +8,7 @@ import {
 import { shouldRunWorkerConsumers } from '@/core';
 import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
+import { redactFeedUrl } from '@/modules/library/ingestion/services/feed-retrieval.service';
 import { FeedsRepository } from '@/modules/library/ingestion/repositories/feeds.repository';
 
 export interface CircuitBreakerState {
@@ -134,7 +135,7 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
       if (timeSinceLastFailure > this.RESET_TIMEOUT_MS) {
         cb.lastFailureTime = now;
         this.logger.log(
-          `Circuit Breaker for "${feedUrl}" entered HALF-OPEN state. Testing single probe...`,
+          `Circuit Breaker for "${redactFeedUrl(feedUrl)}" entered HALF-OPEN state. Testing single probe...`,
         );
         return true;
       }
@@ -147,7 +148,9 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
     const cb = this.circuitBreakers.get(feedUrl);
     if (cb) {
       if (cb.isOpen) {
-        this.logger.log(`Circuit Breaker for "${feedUrl}" recovered: CLOSED.`);
+        this.logger.log(
+          `Circuit Breaker for "${redactFeedUrl(feedUrl)}" recovered: CLOSED.`,
+        );
       }
       this.circuitBreakers.delete(feedUrl);
     }
@@ -166,7 +169,7 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
     if (cb.failures >= this.FAILURE_THRESHOLD && !cb.isOpen) {
       cb.isOpen = true;
       this.logger.warn(
-        `🚨 Circuit Breaker TRIPPED for "${feedUrl}" (${cb.failures} consecutive failures: ${reason}). Silencing for 12 hours to protect worker threads.`,
+        `🚨 Circuit Breaker TRIPPED for "${redactFeedUrl(feedUrl)}" (${cb.failures} consecutive failures: ${reason}). Silencing for 12 hours to protect worker threads.`,
       );
     }
 
@@ -195,7 +198,9 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
           chunk.map(async (feed) => {
             if (this.isShuttingDown) return;
             if (!this.canExecute(feed.url)) {
-              this.logger.debug(`Skipping feed "${feed.url}" — Circuit Breaker is OPEN.`);
+              this.logger.debug(
+                `Skipping feed "${redactFeedUrl(feed.url)}" — Circuit Breaker is OPEN.`,
+              );
               return;
             }
 
@@ -205,7 +210,9 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
               await this.feedsRepo?.markFeedPollSuccess(feed.id);
             } catch (fetchErr: unknown) {
               const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-              this.logger.warn(`Failed background fetch for feed "${feed.url}": ${errMsg}`);
+              this.logger.warn(
+                `Failed background fetch for feed "${redactFeedUrl(feed.url)}": ${errMsg}`,
+              );
               this.recordFailure(feed.url, errMsg);
               await this.feedsRepo?.markFeedPollFailure(feed.id);
             }

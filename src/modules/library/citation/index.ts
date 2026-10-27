@@ -9,6 +9,7 @@ export * from './controllers/exports.controller';
 export * from './domain/csl-json.mapper';
 export * from './domain/csl-style-registry';
 export * from './domain/exports.domain';
+export * from './domain/export-format.strategies';
 export * from './domain/citation.domain';
 
 // Services

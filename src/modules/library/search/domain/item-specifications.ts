@@ -1,11 +1,32 @@
 import {
+  ISpecification,
   CompositeSpecification,
+  AndSpecification,
+  OrSpecification,
+  NotSpecification,
   QueryCriteria,
-} from './specification.interface';
-import { ScopeSpecification } from '@/modules/library/core';
+  ScopeSpecification,
+  AcademicSearchQueryEngine,
+  NormalizedSearchIdentifiers,
+  extractSearchQueryIdentifiers,
+} from '@/modules/library/core';
 
-export { CompositeSpecification, ScopeSpecification };
-export type { QueryCriteria };
+export {
+  CompositeSpecification,
+  AndSpecification,
+  OrSpecification,
+  NotSpecification,
+  ScopeSpecification,
+  extractSearchQueryIdentifiers,
+};
+export type { ISpecification, QueryCriteria, NormalizedSearchIdentifiers };
+
+/**
+ * Sanitizes search input to prevent SQL injection or tsquery syntax breaking.
+ */
+export function sanitizeSearchQuery(query?: string): string {
+  return AcademicSearchQueryEngine.sanitizeTsQuery(query);
+}
 
 /**
  * ActiveItemsSpecification: Filters out soft-deleted items.
@@ -142,52 +163,77 @@ export class TextSearchSpecification extends CompositeSpecification {
   toPrismaWhere(): QueryCriteria {
     if (!this.query) return {};
 
-    return {
-      OR: [
-        { title: { contains: this.query, mode: 'insensitive' } },
-        { abstract: { contains: this.query, mode: 'insensitive' } },
-        { doi: { contains: this.query, mode: 'insensitive' } },
-        { citationKey: { contains: this.query, mode: 'insensitive' } },
-        {
-          contributors: {
-            some: {
-              OR: [
-                { fullName: { contains: this.query, mode: 'insensitive' } },
-                { lastName: { contains: this.query, mode: 'insensitive' } },
-              ],
-            },
+    const ids = extractSearchQueryIdentifiers(this.query);
+    const orClauses: Record<string, unknown>[] = [
+      { title: { contains: this.query, mode: 'insensitive' } },
+      { abstract: { contains: this.query, mode: 'insensitive' } },
+      { doi: { contains: ids.cleanDoi || this.query, mode: 'insensitive' } },
+      { citationKey: { contains: this.query, mode: 'insensitive' } },
+      {
+        contributors: {
+          some: {
+            OR: [
+              { fullName: { contains: this.query, mode: 'insensitive' } },
+              { lastName: { contains: this.query, mode: 'insensitive' } },
+            ],
           },
         },
-        {
-          notesList: {
-            some: {
-              deletedAt: null,
-              OR: [
-                { title: { contains: this.query, mode: 'insensitive' } },
-                { contentMd: { contains: this.query, mode: 'insensitive' } },
-              ],
-            },
+      },
+      {
+        notesList: {
+          some: {
+            deletedAt: null,
+            OR: [
+              { title: { contains: this.query, mode: 'insensitive' } },
+              { contentMd: { contains: this.query, mode: 'insensitive' } },
+            ],
           },
         },
-        {
-          attachments: {
-            some: {
-              deletedAt: null,
-              annotations: {
-                some: {
-                  deletedAt: null,
-                  OR: [
-                    {
-                      quoteText: { contains: this.query, mode: 'insensitive' },
+      },
+      {
+        attachments: {
+          some: {
+            deletedAt: null,
+            annotations: {
+              some: {
+                deletedAt: null,
+                OR: [
+                  {
+                    quoteText: {
+                      contains: this.query,
+                      mode: 'insensitive',
                     },
-                    { comment: { contains: this.query, mode: 'insensitive' } },
-                  ],
+                  },
+                  { comment: { contains: this.query, mode: 'insensitive' } },
+                ],
+              },
+            },
+          },
+        },
+      },
+      {
+        attachments: {
+          some: {
+            deletedAt: null,
+            fullTextIndex: {
+              some: {
+                textContent: {
+                  contains: this.query,
+                  mode: 'insensitive',
                 },
               },
             },
           },
         },
-      ],
+      },
+    ];
+
+    orClauses.push(
+      ...AcademicSearchQueryEngine.buildMetadataIdentifierOrClauses(ids),
+    );
+
+    return {
+      OR: orClauses,
     };
   }
 
@@ -195,11 +241,13 @@ export class TextSearchSpecification extends CompositeSpecification {
     if (!this.query) return true;
     if (!item || typeof item !== 'object') return false;
     const q = this.query.toLowerCase();
+    const ids = extractSearchQueryIdentifiers(this.query);
     const rec = item as Record<string, unknown>;
     if (typeof rec.title === 'string' && rec.title.toLowerCase().includes(q)) return true;
     if (typeof rec.abstract === 'string' && rec.abstract.toLowerCase().includes(q)) return true;
     if (typeof rec.doi === 'string' && rec.doi.toLowerCase().includes(q)) return true;
     if (typeof rec.citationKey === 'string' && rec.citationKey.toLowerCase().includes(q)) return true;
+    if (AcademicSearchQueryEngine.matchesItemIdentifiersInMemory(rec, ids)) return true;
     if (Array.isArray(rec.contributors)) {
       const contributors = rec.contributors as Array<{
         fullName?: unknown;
@@ -240,19 +288,28 @@ export class TextSearchSpecification extends CompositeSpecification {
           quoteText?: unknown;
           comment?: unknown;
         } | null>;
+        fullTextIndex?: Array<{
+          textContent?: unknown;
+        } | null>;
       } | null>;
       if (
         attachments.some(
           (a) =>
             !a?.deletedAt &&
-            Array.isArray(a?.annotations) &&
-            a.annotations.some(
-              (ann) =>
-                !ann?.deletedAt &&
-                ((ann?.quoteText &&
-                  String(ann.quoteText).toLowerCase().includes(q)) ||
-                  (ann?.comment && String(ann.comment).toLowerCase().includes(q))),
-            ),
+            ((Array.isArray(a?.annotations) &&
+              a.annotations.some(
+                (ann) =>
+                  !ann?.deletedAt &&
+                  ((ann?.quoteText &&
+                    String(ann.quoteText).toLowerCase().includes(q)) ||
+                    (ann?.comment && String(ann.comment).toLowerCase().includes(q))),
+              )) ||
+              (Array.isArray(a?.fullTextIndex) &&
+                a.fullTextIndex.some(
+                  (fti) =>
+                    fti?.textContent &&
+                    String(fti.textContent).toLowerCase().includes(q),
+                ))),
         )
       ) {
         return true;

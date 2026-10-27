@@ -11,12 +11,13 @@ import { TagsService } from './tags.service';
 @Injectable()
 export class ItemCacheCoordinator {
   private readonly logger = new Logger(ItemCacheCoordinator.name);
+  private readonly isTestEnv = libraryConfig().app.isTest;
 
   /**
    * Adds ±10% jitter to cache TTL to prevent cache stampedes / thundering herds.
    */
   withJitter(ttlSeconds: number): number {
-    if (libraryConfig().app.isTest) {
+    if (this.isTestEnv) {
       return ttlSeconds;
     }
     return Math.max(1, Math.floor(ttlSeconds * (0.9 + Math.random() * 0.2)));
@@ -35,7 +36,9 @@ export class ItemCacheCoordinator {
     itemId: string,
     projectId?: string,
   ): Promise<void> {
-    return this.invalidateItemCache(itemId, userId, projectId);
+    return this.invalidateItemCache(itemId, userId, projectId, {
+      skipScopeInvalidation: true,
+    });
   }
 
   /**
@@ -53,13 +56,21 @@ export class ItemCacheCoordinator {
         LIBRARY_REDIS_KEYS.item(id),
         LIBRARY_REDIS_KEYS.itemDetails(id),
         LIBRARY_REDIS_KEYS.itemFulltext(id),
-        `${LIBRARY_REDIS_KEYS.item(id)}:attachments`,
-        `${LIBRARY_REDIS_KEYS.item(id)}:notes`,
+        LIBRARY_REDIS_KEYS.itemAttachments(id),
+        LIBRARY_REDIS_KEYS.itemNotes(id),
       ];
       if (userId) {
-        keysToDelete.push(`${LIBRARY_REDIS_KEYS.item(id)}:u:${userId}`);
+        keysToDelete.push(LIBRARY_REDIS_KEYS.itemUserOverlay(id, userId));
       }
-      await Promise.all(keysToDelete.map((k) => this.cache!.del(k)));
+      const deletionTasks: Promise<unknown>[] = keysToDelete.map((k) =>
+        this.cache!.del(k),
+      );
+      if (typeof this.cache.delPattern === 'function') {
+        deletionTasks.push(
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
+        );
+      }
+      await Promise.all(deletionTasks);
       if (!options?.skipScopeInvalidation && userId) {
         await this.invalidateScopeListCache(userId, projectId);
       }
@@ -96,14 +107,15 @@ export class ItemCacheCoordinator {
       const validProjectId = normalizeProjectScopeId(projectId);
       const tasks: Promise<unknown>[] = [
         this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(userId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(userId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(`u:${userId}`)),
+        this.cache.del(LIBRARY_REDIS_KEYS.savedSearches(userId)),
         this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
         this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
         this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(userId)),
         this.invalidateCounts(userId),
       ];
-      if (this.tagsService) {
-        tasks.push(this.tagsService.invalidateTagsCache(userId, validProjectId));
-      }
       if (validProjectId) {
         tasks.push(
           this.cache.delPattern(
@@ -112,6 +124,19 @@ export class ItemCacheCoordinator {
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.itemsPattern(validProjectId),
           ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.tagsPattern(`proj:${validProjectId}`),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.tagsPattern(validProjectId),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.collectionsPattern(validProjectId),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.collectionsPattern(`proj:${validProjectId}`),
+          ),
+          this.cache.del(LIBRARY_REDIS_KEYS.savedSearches(validProjectId)),
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.searchFacetsPattern(validProjectId),
           ),
@@ -148,14 +173,23 @@ export class ItemCacheCoordinator {
       for (const id of uniqueIds) {
         keysToDelete.push(
           LIBRARY_REDIS_KEYS.item(id),
-          `${LIBRARY_REDIS_KEYS.item(id)}:u:${userId}`,
+          LIBRARY_REDIS_KEYS.itemUserOverlay(id, userId),
           LIBRARY_REDIS_KEYS.itemDetails(id),
           LIBRARY_REDIS_KEYS.itemFulltext(id),
-          `${LIBRARY_REDIS_KEYS.item(id)}:attachments`,
-          `${LIBRARY_REDIS_KEYS.item(id)}:notes`,
+          LIBRARY_REDIS_KEYS.itemAttachments(id),
+          LIBRARY_REDIS_KEYS.itemNotes(id),
         );
       }
-      const directKeyDeletions = keysToDelete.map((k) => this.cache!.del(k));
+      const directKeyDeletions: Promise<unknown>[] = keysToDelete.map((k) =>
+        this.cache!.del(k),
+      );
+      if (typeof this.cache.delPattern === 'function') {
+        for (const id of uniqueIds) {
+          directKeyDeletions.push(
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
+          );
+        }
+      }
 
       const uniqueScopes = new Set<string>();
       const validBaseProject = normalizeProjectScopeId(projectId);

@@ -85,6 +85,7 @@ export interface TransactionHelpers {
       projectId?: string | null;
     }>,
   ): Promise<string[]>;
+  onAfterCommit?(callback: () => Promise<void> | void): void;
 }
 
 export const UNIT_OF_WORK = Symbol('UNIT_OF_WORK');

@@ -34,7 +34,7 @@ export class TokenBucketRateLimiter {
    */
   public getAvailableTokens(): number {
     this.refill();
-    return Math.floor(this.tokens);
+    return Math.max(0, Math.floor(this.tokens));
   }
 
   /**
@@ -52,6 +52,7 @@ export class TokenBucketRateLimiter {
 
   /**
    * Acquires `count` tokens, waiting asynchronously if tokens are exhausted.
+   * Reserves virtual token deficit atomically so concurrent callers queue fairly without burst stampedes.
    * Can be cancelled cooperatively via `signal`.
    */
   public async acquire(count = 1, signal?: AbortSignal): Promise<void> {
@@ -65,11 +66,14 @@ export class TokenBucketRateLimiter {
       return;
     }
 
-    // Calculate wait time needed for required tokens
-    const missing = count - this.tokens;
+    // Reserve tokens up-front (allowing this.tokens to go negative as virtual debt)
+    // so concurrent callers calculate staggered wait times rather than waking up simultaneously.
+    this.refill();
+    this.tokens -= count;
+    const deficit = Math.max(0, -this.tokens);
     const waitMs = Math.max(
       10,
-      Math.ceil((missing / this.refillRatePerSec) * 1000),
+      Math.ceil((deficit / this.refillRatePerSec) * 1000),
     );
 
     this.logger.debug(
@@ -81,6 +85,9 @@ export class TokenBucketRateLimiter {
 
       const onAbort = () => {
         if (timer) clearTimeout(timer);
+        // Refund the reserved tokens on abort
+        this.refill();
+        this.tokens = Math.min(this.capacity, this.tokens + count);
         const reason =
           signal?.reason instanceof Error
             ? signal.reason
@@ -101,7 +108,6 @@ export class TokenBucketRateLimiter {
           signal.removeEventListener('abort', onAbort);
         }
         this.refill();
-        this.tokens = Math.max(0, this.tokens - count);
         resolve();
       }, waitMs);
     });

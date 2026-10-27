@@ -20,11 +20,12 @@ import { LibraryItemSource } from '@/modules/library/core';
 import {
   CATALOG_FACADE,
   ICatalogFacade,
+  CatalogItemSummary,
 } from '@/modules/library/core/ports/catalog.port';
 export { CATALOG_FACADE };
-export type { ICatalogFacade };
-export type CatalogItemSummary = ItemDetail;
-export { ItemsMapper } from './domain/items.mapper';
+export type { ICatalogFacade, CatalogItemSummary };
+import { ItemsMapper } from './domain/items.mapper';
+export { ItemsMapper };
 export {
   resolveOrCreateTags,
   deriveFirstAuthor,
@@ -35,7 +36,7 @@ export {
  * Directly communicates with clean, modular services.
  */
 @Injectable()
-export class CatalogFacade {
+export class CatalogFacade implements ICatalogFacade {
   constructor(
     private readonly queryService: ItemQueryService,
     private readonly itemService: ItemService,
@@ -46,12 +47,25 @@ export class CatalogFacade {
     private readonly notesService: NotesService,
   ) {}
 
-  async getItem(
+  async getItem<T = ItemDetail>(
     userId: string,
     itemId: string,
     projectId?: string,
-  ): Promise<ItemDetail | null> {
-    return this.queryService.findById(userId, itemId, projectId);
+  ): Promise<T | null> {
+    const raw = await this.queryService.findById(userId, itemId, projectId);
+    return raw ? (ItemsMapper.toDomain(raw) as unknown as T) : null;
+  }
+
+  async getItemSummary<T = CatalogItemSummary>(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<T | null> {
+    return (await this.queryService.findSummaryById(
+      userId,
+      itemId,
+      projectId,
+    )) as T | null;
   }
 
   async itemExists(
@@ -62,9 +76,28 @@ export class CatalogFacade {
     return this.queryService.exists(userId, itemId, projectId);
   }
 
-  async createItem(
+  async getTags<T = unknown>(
     userId: string,
-    data: CreateItemData,
+    options?: { includeInactive?: boolean; projectId?: string },
+  ): Promise<T[]> {
+    return (await this.tagsService.getTags(userId, options)) as unknown as T[];
+  }
+
+  async getItemState<T = unknown>(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<T | null> {
+    return (await this.stateService.getState(
+      userId,
+      itemId,
+      projectId,
+    )) as unknown as T | null;
+  }
+
+  async createItem<T = ItemDetail, D = CreateItemData>(
+    userId: string,
+    data: D,
     options?: {
       expectedVersion?: number;
       suppressIndexing?: boolean;
@@ -74,24 +107,29 @@ export class CatalogFacade {
       correlationId?: string;
     },
     projectId?: string,
-  ): Promise<ItemDetail> {
-    return this.itemService.createItem(userId, data, options, projectId);
+  ): Promise<T> {
+    return (await this.itemService.createItem(
+      userId,
+      data as CreateItemData,
+      options,
+      projectId,
+    )) as unknown as T;
   }
 
-  async updateItem(
+  async updateItem<T = ItemDetail, D = UpdateItemData>(
     userId: string,
     itemId: string,
-    data: UpdateItemData,
+    data: D,
     options?: { expectedVersion?: number; projectId?: string },
-  ): Promise<ItemDetail> {
-    return this.itemService.updateItem(
+  ): Promise<T> {
+    return (await this.itemService.updateItem(
       userId,
       itemId,
       options?.expectedVersion,
-      data,
+      data as UpdateItemData,
       undefined,
       options?.projectId,
-    );
+    )) as unknown as T;
   }
 
   async deleteItem(
@@ -108,12 +146,13 @@ export class CatalogFacade {
     );
   }
 
-  async findByIds(
+  async findByIds<T = ItemDetail>(
     userId: string,
     itemIds: string[],
     projectId?: string,
-  ): Promise<ItemDetail[]> {
-    return this.queryService.findByIds(userId, itemIds, projectId);
+  ): Promise<T[]> {
+    const raw = await this.queryService.findByIds(userId, itemIds, projectId);
+    return ItemsMapper.toDomainList(raw) as unknown as T[];
   }
 
   async countItems(
@@ -123,35 +162,50 @@ export class CatalogFacade {
     return this.queryService.count(userId, options || { view: 'all' });
   }
 
-  async findMany(
+  async findMany<T = ItemDetail>(
     userId: string,
     options?: Record<string, unknown>,
-  ): Promise<ItemDetail[]> {
-    return this.queryService.findMany(userId, options || {});
+  ): Promise<T[]> {
+    return (await this.queryService.findMany(
+      userId,
+      options || {},
+    )) as unknown as T[];
+  }
+
+  async validateItemType(type: string): Promise<boolean> {
+    return this.typesService.isValidItemType(type);
+  }
+
+  getPrimaryCreatorType(itemType: string): string {
+    return this.typesService.getPrimaryCreatorType(itemType);
   }
 
   getOrderedFields(itemType: string): ItemFieldDefinition[] {
     return this.typesService.getOrderedFields(itemType);
   }
 
-  async findQualityAuditItems(
+  async findQualityAuditItems<T = QualityAuditCandidateItem>(
     userId: string,
     limit?: number,
     projectId?: string,
-  ): Promise<QualityAuditCandidateItem[]> {
-    return this.queryService.findQualityAuditItems(userId, limit, projectId);
-  }
-
-  async findDuplicateCandidateItems(
-    userId: string,
-    limit?: number,
-    projectId?: string,
-  ): Promise<DuplicateCandidateItem[]> {
-    return this.queryService.findDuplicateCandidateItems(
+  ): Promise<T[]> {
+    return (await this.queryService.findQualityAuditItems(
       userId,
       limit,
       projectId,
-    );
+    )) as unknown as T[];
+  }
+
+  async findDuplicateCandidateItems<T = DuplicateCandidateItem>(
+    userId: string,
+    limit?: number,
+    projectId?: string,
+  ): Promise<T[]> {
+    return (await this.queryService.findDuplicateCandidateItems(
+      userId,
+      limit,
+      projectId,
+    )) as unknown as T[];
   }
 
   async mergeItems(

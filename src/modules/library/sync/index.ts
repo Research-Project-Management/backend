@@ -9,9 +9,6 @@ export * from './domain/outbox.domain';
 // DTOs
 export * from './dto/sync-query.dto';
 
-// Types
-export * from './types/outbox.constants';
-
 // Repositories
 export * from './repositories/changelog.repository';
 export * from './repositories/outbox.repository';

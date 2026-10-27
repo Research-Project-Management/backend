@@ -189,13 +189,38 @@ export function sanitizeItemTitle(title?: string | null): string {
   return cleaned;
 }
 
-function tokenizeTitleForSimilarity(title: string): string[] {
+export function normalizeAcademicTitle(title: string): string {
   return (decodeHtmlEntities(title) || title)
+    .replace(/[đĐ]/g, 'd')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/<[^>]+>/g, ' ')
-    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function tokenizeAcademicTitle(title: string): string[] {
+  return tokenizeTitleForSimilarity(title);
+}
+
+function tokenizeTitleForSimilarity(title: string): string[] {
+  const normalized = (decodeHtmlEntities(title) || title)
+    .replace(/[đĐ]/g, 'd')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ');
+
+  // Expand CJK ideograph runs into individual characters so CJK titles without spaces tokenize accurately
+  const expanded = normalized.replace(
+    /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu,
+    ' $& ',
+  );
+
+  return expanded
     .split(/\s+/)
     .filter((t) => t.length > 0 && !TITLE_SIMILARITY_STOPWORDS.has(t));
 }
@@ -289,3 +314,21 @@ export function repairFragmentedTitle(
   const collapsed = collapseFragmentedSmallCapsTokens(title);
   return collapsed !== title ? collapsed : undefined;
 }
+
+/**
+ * Checks whether an item title is empty or a generic system/PDF placeholder
+ * (e.g. "Untitled Document", "Uploaded Document", "Untitled", raw filename "*.pdf", or raw DOI).
+ */
+export function isPlaceholderItemTitle(title?: unknown): boolean {
+  if (typeof title !== 'string') return true;
+  const trimmed = title.trim();
+  if (!trimmed) return true;
+  return (
+    /^(untitled(\s+(document|record))?|uploaded\s+document|document)$/i.test(
+      trimmed,
+    ) ||
+    /\.pdf$/i.test(trimmed) ||
+    /^10\.\d{4,9}\//.test(trimmed)
+  );
+}
+

@@ -17,7 +17,7 @@ import { IngestionStatus } from '@prisma/client';
 import {
   LIBRARY_INGESTION_QUEUE,
   LIBRARY_INGESTION_JOB,
-} from '@/modules/library/ingestion/types/queue.constants';
+} from '@/modules/library/ingestion/types/ingestion.types';
 
 export interface QueuedIngestionJob {
   runId: string;

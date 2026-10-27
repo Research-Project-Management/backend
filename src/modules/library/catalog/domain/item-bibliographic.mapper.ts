@@ -2,6 +2,7 @@ import { cleanAbstractText, splitAuthorString } from '@/modules/library/core';
 import { resolveCanonicalArxivCategory } from '@/modules/library/core/domain/tag.domain';
 import {
   getEffectiveBaseFieldMap,
+  getPrimaryCreatorRoleForType,
   resolveBidirectionalBaseFields,
   resolveCanonicalCreatorRole,
   resolveFieldAliases,
@@ -202,10 +203,12 @@ export function mapCreatorsPartial(it: MutableItemPayload): void {
   }
 
   if (Array.isArray(it.creators) && it.creators.length > 0) {
-    const authorCreators = it.creators.filter(
-      (c: CreatorCreditInput) => (c.creatorType || 'author') === 'author',
-    );
-    it.authors = (authorCreators.length > 0 ? authorCreators : it.creators)
+    const primaryRole = getPrimaryCreatorRoleForType(it.itemType);
+    const primaryCreators = it.creators.filter((c: CreatorCreditInput) => {
+      const role = c.creatorType || 'author';
+      return role === 'author' || role === primaryRole;
+    });
+    it.authors = primaryCreators
       .map(
         (c: CreatorCreditInput) =>
           c.fullName ||
@@ -281,11 +284,20 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     it.conferenceName = toStr(extraFields.conferenceName);
   }
 
-  if (it.abstract || extraFields.abstract || extraFields.abstractNote) {
+  if (
+    it.abstract ||
+    it.abstractNote ||
+    extraFields.abstract ||
+    extraFields.abstractNote
+  ) {
     const rawAbstract = toStr(
-      it.abstract || extraFields.abstract || extraFields.abstractNote,
+      it.abstract ||
+        it.abstractNote ||
+        extraFields.abstract ||
+        extraFields.abstractNote,
     );
-    it.abstract = cleanAbstractText(rawAbstract) ?? (it.abstract || null);
+    it.abstract =
+      cleanAbstractText(rawAbstract) ?? (it.abstract || it.abstractNote || null);
   }
   it.abstractNote = it.abstract ?? null;
 
@@ -304,7 +316,8 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
   for (const field of ['volume', 'issue', 'pages', 'edition'] as const) {
     if (it[field] !== undefined && it[field] !== null) {
       const str = toStr(it[field]).trim();
-      it[field] = str === '0' || str === '' ? null : str;
+      it[field] =
+        str === '' || (field === 'edition' && str === '0') ? null : str;
     }
   }
 
@@ -339,7 +352,6 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     const canonicalCleanId = cleanArxivId.replace(/v\d+$/i, '');
     if (it.itemType === 'preprint') {
       it.archiveId = `arXiv:${canonicalCleanId}`;
-      it.repository = it.repository || 'arXiv';
     }
 
     const existingExtra = typeof it.extra === 'string' ? it.extra.trim() : '';
@@ -425,8 +437,9 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
       it.arxivId ||
       it.archiveId ||
       it.archiveID ||
-      (it.doi && toStr(it.doi).includes('arXiv')) ||
-      (it.publicationTitle && /arxiv/i.test(it.publicationTitle)),
+      (it.doi && /arxiv/i.test(toStr(it.doi))) ||
+      (it.publicationTitle && /arxiv/i.test(it.publicationTitle)) ||
+      (it.publisher && /arxiv/i.test(toStr(it.publisher))),
     );
     it.genre = it.genre || it.type || 'Preprint';
     const cleanArxivNum = it.arxivId
@@ -441,15 +454,20 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
       (cleanArxivNum ? `arXiv:${cleanArxivNum}` : '') ||
       '';
     delete it.archiveID;
+    const hadExplicitPubTitle = Boolean(
+      it.publicationTitle && toStr(it.publicationTitle).trim(),
+    );
+    const hadExplicitPublisher = Boolean(
+      it.publisher && toStr(it.publisher).trim(),
+    );
     it.repository =
       it.repository ||
-      (it.publisher && !/^arxiv$/i.test(toStr(it.publisher).trim())
-        ? (it.publisher as string)
-        : '') ||
+      (hadExplicitPublisher ? toStr(it.publisher).trim() : '') ||
       (isArxiv ? 'arXiv' : '') ||
+      it.publicationTitle ||
       '';
-    it.publicationTitle = it.repository || '';
-    delete it.publisher;
+    it.publicationTitle = hadExplicitPubTitle ? it.publicationTitle : '';
+    it.publisher = hadExplicitPublisher ? it.publisher : '';
     delete it.journal;
   } else if (it.itemType === 'thesis') {
     it.thesisType =
@@ -483,7 +501,7 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
       it.filingDate;
     if (dateCandidate) {
       const yearMatch = toStr(dateCandidate).match(
-        /(?:^|[^\d])(1[7-9]\d{2}|20\d{2})(?:[^\d]|$)/,
+        /(?:^|[^\d])(1\d{3}|20\d{2})(?:[^\d]|$)/,
       );
       if (yearMatch) {
         it.year = parseInt(yearMatch[1], 10);
@@ -497,22 +515,6 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
   it.publicationDate =
     it.publicationDate || it.date || (it.year ? String(it.year) : '');
   it.date = it.date || it.publicationDate || (it.year ? String(it.year) : '');
-  it.abstract = it.abstract || it.abstractNote || '';
-  it.abstractNote = it.abstract;
-  it.journalAbbreviation = it.journalAbbreviation || it.journalAbbr || '';
-  delete it.journalAbbr;
-  it.accessDate =
-    it.accessDate ||
-    (it.accessedAt
-      ? it.accessedAt instanceof Date
-        ? it.accessedAt.toISOString()
-        : toStr(it.accessedAt)
-      : '');
-  delete it.accessedAt;
-  it.citationKey = it.citationKey || it.citeKey || '';
-  delete it.citeKey;
-  it.url = it.url || (it.URL as string | undefined) || '';
-  delete it.URL;
 
   if (Array.isArray(it.identifiers)) {
     const idTypeToField: Record<string, keyof MutableItemPayload> = {
@@ -532,6 +534,25 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     }
   }
 
+  resolveFieldAliases(it, [extraFields], true);
+
+  it.abstract = it.abstract || it.abstractNote || '';
+  it.abstractNote = it.abstract;
+  it.journalAbbreviation = it.journalAbbreviation || '';
+  delete it.journalAbbr;
+  it.accessDate =
+    it.accessDate ||
+    (it.accessedAt
+      ? it.accessedAt instanceof Date
+        ? it.accessedAt.toISOString()
+        : toStr(it.accessedAt)
+      : '');
+  delete it.accessedAt;
+  it.citationKey = it.citationKey || '';
+  delete it.citeKey;
+  it.url = it.url || '';
+  delete it.URL;
+
   for (const [lowerKey, upperKey] of [
     ['doi', 'DOI'],
     ['isbn', 'ISBN'],
@@ -539,11 +560,7 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     ['pmid', 'PMID'],
     ['pmcid', 'PMCID'],
   ] as const) {
-    if (!it[lowerKey] && (extraFields[lowerKey] || extraFields[upperKey])) {
-      it[lowerKey] = toStr(extraFields[lowerKey] || extraFields[upperKey]);
-    }
-    const canonicalVal =
-      (it[lowerKey] as string) || (it[upperKey] as string) || '';
+    const canonicalVal = toStr(it[lowerKey] || it[upperKey]);
     it[lowerKey] = canonicalVal;
     it[upperKey] = canonicalVal;
   }
@@ -619,7 +636,7 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
       {
         type: 'pmcid',
         val: it.pmcid,
-        uri: (v) => `https://pmc.ncbi.nlm.nih.gov/articles/${v}/`,
+        uri: (v) => `https://www.ncbi.nlm.nih.gov/pmc/articles/${v}/`,
       },
       { type: 'isbn', val: it.isbn, uri: (v) => `urn:isbn:${v}` },
       { type: 'issn', val: it.issn, uri: (v) => `urn:issn:${v}` },

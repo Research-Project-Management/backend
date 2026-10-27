@@ -47,6 +47,23 @@ export function generateExportFilename(
 }
 
 /**
+ * Escapes and sanitizes a value for CSV output (RFC 4180 + formula injection defense).
+ */
+export function escapeCsvField(val: unknown): string {
+  if (val === null || val === undefined) return '""';
+  const str =
+    typeof val === 'string'
+      ? val
+      : typeof val === 'number' || typeof val === 'boolean'
+        ? String(val)
+        : '';
+  const needsFormulaGuard =
+    /^[=+\-@\t\r]/.test(str) && !/^-\d+(\.\d+)?$/.test(str);
+  const safeStr = needsFormulaGuard ? `'${str}` : str;
+  return `"${safeStr.replace(/"/g, '""')}"`;
+}
+
+/**
  * Serializes a list of items into standard RFC 4180 CSV string.
  */
 export function formatCsvExport(items: CsvExportItem[]): string {
@@ -63,28 +80,17 @@ export function formatCsvExport(items: CsvExportItem[]): string {
     'url',
   ];
 
-  const escapeCsv = (val: unknown): string => {
-    if (val === null || val === undefined) return '""';
-    const str =
-      typeof val === 'string'
-        ? val
-        : typeof val === 'number' || typeof val === 'boolean'
-          ? String(val)
-          : '';
-    return `"${str.replace(/"/g, '""')}"`;
-  };
-
   const rows = items.map((it) => [
-    escapeCsv(it.id),
-    escapeCsv(it.title || ''),
-    escapeCsv((it.authors || []).join('; ')),
+    escapeCsvField(it.id),
+    escapeCsvField(it.title || ''),
+    escapeCsvField((it.authors || []).join('; ')),
     it.year ?? '',
-    escapeCsv(it.publicationTitle || ''),
-    escapeCsv(it.publisher || ''),
-    escapeCsv(it.doi || ''),
-    escapeCsv(it.itemType || ''),
-    escapeCsv(it.citationKey || ''),
-    escapeCsv(it.url || ''),
+    escapeCsvField(it.publicationTitle || ''),
+    escapeCsvField(it.publisher || ''),
+    escapeCsvField(it.doi || ''),
+    escapeCsvField(it.itemType || ''),
+    escapeCsvField(it.citationKey || ''),
+    escapeCsvField(it.url || ''),
   ]);
 
   return [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');

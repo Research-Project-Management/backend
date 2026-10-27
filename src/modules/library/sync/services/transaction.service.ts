@@ -9,7 +9,7 @@ import { OutboxRepository } from '@/modules/library/sync/repositories/outbox.rep
 import {
   LIBRARY_OUTBOX_JOB,
   LIBRARY_OUTBOX_QUEUE,
-} from '@/modules/library/sync/types/outbox.constants';
+} from '@/modules/library/sync/domain/outbox.domain';
 import {
   IUnitOfWork,
   TransactionHelpers,
@@ -52,10 +52,14 @@ export class TransactionService implements IUnitOfWork {
     options?: { maxWait?: number; timeout?: number },
   ): Promise<T> {
     const pendingOutboxEvents: Array<{ id: string; eventType: string }> = [];
+    const postCommitCallbacks: Array<() => Promise<void> | void> = [];
 
     const result = await this.prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {
         const helpers: TransactionHelpers = {
+          onAfterCommit: (callback: () => Promise<void> | void) => {
+            postCommitCallbacks.push(callback);
+          },
           appendChange: async (
             scope: { userId?: string; projectId?: string | null },
             entry: AppendChangeEntry,
@@ -125,9 +129,16 @@ export class TransactionService implements IUnitOfWork {
             eventType: string,
             payload: unknown,
           ) => {
+            const rawUserId = (scope.userId || '').trim();
+            const normalizedUserId =
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                rawUserId,
+              )
+                ? rawUserId
+                : '00000000-0000-0000-0000-000000000000';
             const event = await tx.outboxEvent.create({
               data: {
-                userId: scope.userId,
+                userId: normalizedUserId,
                 projectId: scope.projectId || null,
                 aggregateId,
                 eventType,
@@ -180,7 +191,13 @@ export class TransactionService implements IUnitOfWork {
             const data: Prisma.OutboxEventCreateManyInput[] =
               normalizedEvents.map((ev) => ({
                 id: randomUUID(),
-                userId: ev.userId || '',
+                userId:
+                  ev.userId &&
+                  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                    ev.userId.trim(),
+                  )
+                    ? ev.userId.trim()
+                    : '00000000-0000-0000-0000-000000000000',
                 projectId: ev.projectId || null,
                 aggregateId: ev.aggregateId,
                 eventType: ev.eventType,
@@ -214,8 +231,26 @@ export class TransactionService implements IUnitOfWork {
       },
     );
 
+    if (postCommitCallbacks.length > 0) {
+      for (const cb of postCommitCallbacks) {
+        try {
+          await cb();
+        } catch (cbErr: unknown) {
+          this.logger.warn(
+            `Post-commit hook failed: ${cbErr instanceof Error ? cbErr.message : String(cbErr)}`,
+          );
+        }
+      }
+    }
+
     if (pendingOutboxEvents.length > 0) {
-      void this.dispatchPostCommitOutboxNotifications(pendingOutboxEvents);
+      void this.dispatchPostCommitOutboxNotifications(
+        pendingOutboxEvents,
+      ).catch((err: unknown) => {
+        this.logger.warn(
+          `Post-commit outbox notification failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     }
 
     return result;
@@ -251,7 +286,13 @@ export class TransactionService implements IUnitOfWork {
     }
 
     if (this.outboxWorker) {
-      void this.outboxWorker.notifyEvents(events.map((e) => e.id));
+      void this.outboxWorker
+        .notifyEvents(events.map((e) => e.id))
+        .catch((err: unknown) => {
+          this.logger.warn(
+            `Outbox worker notifyEvents failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
     }
   }
   async getChangesSince(

@@ -3,11 +3,8 @@ import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { DuplicatePolicy } from '@/modules/library/ingestion/policies/duplicate.policy';
-import {
-  DuplicateService,
-  DuplicateDetectorService,
-  DuplicateMergerService,
-} from '@/modules/library/ingestion/services/duplicate.service';
+import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
+import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
@@ -494,9 +491,8 @@ ER  -
         ]),
       };
 
-      const dupService = new DuplicateService(
-        new DuplicateDetectorService(mockCatalogGateway as never),
-        new DuplicateMergerService({} as never, mockCatalogGateway as never),
+      const dupService = new DuplicateDetectorService(
+        mockCatalogGateway as never,
       );
       const clusters = await dupService.detectDuplicates('user-1');
 
@@ -625,17 +621,10 @@ ER  -
         reassignContentToItem: jest.fn().mockResolvedValue(undefined),
       };
 
-      const dupService = new DuplicateService(
-        new DuplicateDetectorService(
-          mockCatalogGateway as never,
-          undefined,
-          mockLibraryTx as never,
-        ),
-        new DuplicateMergerService(
-          mockLibraryTx as never,
-          mockCatalogGateway as never,
-          mockExtractionGateway as never,
-        ),
+      const dupService = new DuplicateMergerService(
+        mockLibraryTx as never,
+        mockCatalogGateway as never,
+        mockExtractionGateway as never,
       );
 
       await dupService.mergeDuplicates('user-1', {
@@ -853,7 +842,7 @@ ER  -
 
       // Only item-only-source should be linked to tag-target (item-shared already has tag-target)
       expect(mockTx.itemTag.createMany).toHaveBeenCalledWith({
-        data: [{ itemId: 'item-only-source', tagId: 'tag-target' }],
+        data: [{ itemId: 'item-only-source', tagId: 'tag-target', type: 'manual' }],
         skipDuplicates: true,
       });
       expect(mockTx.tag.delete).toHaveBeenCalledWith({

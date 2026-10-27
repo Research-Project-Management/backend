@@ -17,6 +17,7 @@ import {
   extractFileIdFromUrl,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
+import { ItemCacheCoordinator } from '@/modules/library/catalog';
 import { CreateAttachmentInput } from '@/modules/library/extraction/types/attachments.types';
 import {
   validateAttachmentInvariants,
@@ -37,7 +38,6 @@ import {
   ProjectId,
 } from '@/modules/library/core/types/branded.types';
 import { AttachmentRenamerService } from './attachment-renamer.service';
-import { AttachmentThumbnailService } from './attachment-thumbnail.service';
 
 export type { CreateAttachmentInput };
 
@@ -57,9 +57,9 @@ export class AttachmentsService {
     @Optional()
     private readonly renamerService?: AttachmentRenamerService,
     @Optional()
-    private readonly thumbnailService?: AttachmentThumbnailService,
-    @Optional()
     private readonly cache?: RedisCacheService,
+    @Optional()
+    private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 
   private async assertItemExists(
@@ -95,18 +95,26 @@ export class AttachmentsService {
     }
 
     const userId = input.userId || 'system';
-    await this.assertItemExists(userId, targetItemId, projectId);
+    const effectiveProjectId = normalizeProjectScopeId(
+      projectId || input.projectId,
+    );
+    await this.assertItemExists(userId, targetItemId, effectiveProjectId);
 
     let resolvedFileId = input.fileId || extractFileIdFromUrl(input.url);
+
+    if (resolvedFileId && this.storagePort?.assertFileAccess) {
+      await this.storagePort.assertFileAccess(
+        resolvedFileId,
+        userId !== 'system' ? userId : undefined,
+        effectiveProjectId,
+      );
+    }
 
     // Content-Addressable Storage (CAS) Deduplication:
     // If incoming upload has a valid fileHash, reuse existing storage blob if available within the same user/project scope
     let storageKey = input.storageKey;
     let deduplicated = false;
     if (input.fileHash && input.fileHash.trim().length >= 32) {
-      const effectiveProjectId = normalizeProjectScopeId(
-        projectId || input.projectId,
-      );
       const existingWithHash = await this.repo.findFirst({
         fileHash: input.fileHash.trim(),
         storageKey: { not: null },
@@ -132,7 +140,23 @@ export class AttachmentsService {
             : `/api/v1/library/files/${resolvedFileId}/content`
           : '';
 
-    const sizeBigInt = input.size !== undefined ? BigInt(input.size) : 0n;
+    let sizeBigInt = 0n;
+    if (input.size !== undefined && input.size !== null) {
+      if (typeof input.size === 'bigint') {
+        if (input.size < 0n) {
+          throw new BadRequestException('Attachment size must be non-negative');
+        }
+        sizeBigInt = input.size;
+      } else {
+        const numericSize = Number(input.size);
+        if (!Number.isFinite(numericSize) || numericSize < 0) {
+          throw new BadRequestException(
+            'Attachment size must be a valid non-negative integer',
+          );
+        }
+        sizeBigInt = BigInt(Math.max(0, Math.trunc(numericSize)));
+      }
+    }
 
     let resolvedLinkMode = input.linkMode;
     if (!resolvedLinkMode) {
@@ -210,19 +234,28 @@ export class AttachmentsService {
 
         const eventScope = { userId, projectId: projectId || undefined };
 
+        const serializedAttachment = {
+          ...attachment,
+          size: Number(attachment.size),
+          revisions: attachment.revisions?.map((rev) => ({
+            ...rev,
+            sizeBytes: Number(rev.sizeBytes),
+          })),
+        };
+
         await helpers.appendChange(eventScope, {
           entityType: 'Attachment',
           entityId: attachment.id,
           action: 'create',
           version: 1,
-          data: attachment,
+          data: serializedAttachment,
         });
 
         await helpers.publishOutbox(
           eventScope,
           attachment.id,
           'library.attachment.created',
-          attachment,
+          serializedAttachment,
         );
 
         if (attachment.mimeType === 'application/pdf') {
@@ -256,7 +289,16 @@ export class AttachmentsService {
     userId: string,
     projectId?: string,
   ): Promise<void> {
-    if (!this.cache || !itemId) return;
+    if (!itemId) return;
+    if (this.cacheCoordinator) {
+      await this.cacheCoordinator.invalidateForWrite({
+        userId,
+        projectId,
+        itemIds: [itemId],
+      });
+      return;
+    }
+    if (!this.cache) return;
     try {
       const validProjectId = normalizeProjectScopeId(projectId);
       const scopeId = validProjectId || userId;
@@ -589,27 +631,20 @@ export class AttachmentsService {
     attachmentId: string,
     projectId?: string,
   ): Promise<{ buffer: Buffer; mimeType: string }> {
-    const { attachment } = await this.getItemAttachment(
-      userId,
-      undefined,
-      attachmentId,
-      projectId,
-    );
-
-    if (!attachment) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    const { attachment } = await this.getItemAttachment(userId, undefined, attachmentId, projectId);
+    if (!attachment) throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    if (!attachment.fileId || !this.storagePort) {
+      throw new NotFoundException(`No PDF binary available for attachment ${attachmentId}`);
     }
-
-    if (!this.thumbnailService) {
-      throw new NotFoundException('Thumbnail service unavailable');
-    }
-
-    return this.thumbnailService.getThumbnail(
+    const thumbBuffer = await this.storagePort.ensurePdfThumbnail({
+      fileId: attachment.fileId,
       userId,
-      attachmentId,
-      attachment.fileId,
       projectId,
-    );
+    });
+    if (!thumbBuffer) {
+      throw new NotFoundException(`Failed to generate thumbnail for attachment ${attachmentId}`);
+    }
+    return { buffer: thumbBuffer, mimeType: 'image/webp' };
   }
 
   async renameAttachment(
@@ -618,20 +653,10 @@ export class AttachmentsService {
     dto: RenameAttachmentDto,
     projectId?: ProjectId | string,
   ) {
-    const renamerService =
+    const renamer =
       this.renamerService ??
-      new AttachmentRenamerService(
-        this.repo,
-        this.catalogGateway,
-        this.cache,
-        this.libraryTx,
-      );
-    return renamerService.renameAttachment(
-      userId,
-      attachmentId,
-      dto,
-      projectId,
-    );
+      new AttachmentRenamerService(this.repo, this.catalogGateway, this.cache, this.libraryTx);
+    return renamer.renameAttachment(userId, attachmentId, dto, projectId);
   }
 
   async batchRenameAttachments(
@@ -640,22 +665,12 @@ export class AttachmentsService {
     projectId?: string,
   ): Promise<{
     renamedCount: number;
-    results: Array<{
-      attachmentId: string;
-      itemId: string;
-      oldFilename: string;
-      newFilename: string;
-    }>;
+    results: Array<{ attachmentId: string; itemId: string; oldFilename: string; newFilename: string }>;
   }> {
-    const renamerService =
+    const renamer =
       this.renamerService ??
-      new AttachmentRenamerService(
-        this.repo,
-        this.catalogGateway,
-        this.cache,
-        this.libraryTx,
-      );
-    return renamerService.batchRenameAttachments(userId, dto, projectId);
+      new AttachmentRenamerService(this.repo, this.catalogGateway, this.cache, this.libraryTx);
+    return renamer.batchRenameAttachments(userId, dto, projectId);
   }
 
   async resolveItemUrl(
@@ -663,25 +678,15 @@ export class AttachmentsService {
     userId: UserId | string,
     projectId?: ProjectId | string,
   ): Promise<string> {
-    const item = this.catalogGateway
-      ? await this.catalogGateway.getItem(userId, itemId, projectId)
-      : null;
-    if (!item) {
-      throw new NotFoundException(`Item ${itemId} not found`);
-    }
+    const item = this.catalogGateway ? await this.catalogGateway.getItem(userId, itemId, projectId) : null;
+    if (!item) throw new NotFoundException(`Item ${itemId} not found`);
     const directUrl = typeof item.url === 'string' ? item.url : undefined;
     const fieldsUrl =
-      item.fields && typeof item.fields === 'object' && 'url' in item.fields
-        ? typeof item.fields.url === 'string'
-          ? item.fields.url
-          : undefined
+      item.fields && typeof item.fields === 'object' && 'url' in item.fields && typeof item.fields.url === 'string'
+        ? item.fields.url
         : undefined;
     const itemUrl = directUrl || fieldsUrl;
-    if (!itemUrl) {
-      throw new BadRequestException(
-        'No URL found on this item to capture a snapshot.',
-      );
-    }
+    if (!itemUrl) throw new BadRequestException('No URL found on this item to capture a snapshot.');
     return itemUrl;
   }
 
@@ -690,31 +695,20 @@ export class AttachmentsService {
     attachmentId: string,
     projectId?: string,
   ): Promise<{ status: string; attachmentId: string; message: string }> {
-    const attachment = await this.repo.findUnique(attachmentId, {
-      item: true,
-    });
-
+    const attachment = await this.repo.findUnique(attachmentId, { item: true });
     const isAuthorized =
       attachment &&
       (projectId && projectId !== 'user'
         ? attachment.item.projectId === projectId
         : attachment.item.userId === userId && !attachment.item.projectId);
-
-    if (!isAuthorized) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
-    }
-
+    if (!isAuthorized) throw new NotFoundException(`Attachment ${attachmentId} not found`);
     if (
       attachment.mimeType !== 'application/pdf' &&
       !attachment.filename?.toLowerCase().endsWith('.pdf')
     ) {
-      throw new BadRequestException(
-        `Attachment ${attachmentId} is not a PDF file`,
-      );
+      throw new BadRequestException(`Attachment ${attachmentId} is not a PDF file`);
     }
-
-    const eventScope =
-      projectId && projectId !== 'user' ? { projectId, userId } : { userId };
+    const eventScope = projectId && projectId !== 'user' ? { projectId, userId } : { userId };
 
     return this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
@@ -724,7 +718,6 @@ export class AttachmentsService {
           extractionLastError: null,
         };
         await this.repo.update(attachmentId, updateData, tx);
-
         await helpers.publishOutbox(
           eventScope,
           attachment.id,
@@ -733,11 +726,9 @@ export class AttachmentsService {
             attachmentId: attachment.id,
             itemId: attachment.itemId,
             userId,
-            projectId:
-              projectId && projectId !== 'user' ? projectId : undefined,
+            projectId: projectId && projectId !== 'user' ? projectId : undefined,
           },
         );
-
         return {
           status: 'PENDING',
           attachmentId: attachment.id,

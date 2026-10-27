@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsArray,
   IsObject,
+  ArrayMaxSize,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
@@ -36,6 +37,7 @@ export class FormatBatchCitationDto {
   @ApiProperty({ description: 'Array of item metadata' })
   @IsArray()
   @IsNotEmpty()
+  @ArrayMaxSize(500)
   items!: CitationItemInput[];
 
   @ApiPropertyOptional({

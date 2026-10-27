@@ -13,6 +13,7 @@ import { QualityService } from '@/modules/library/ingestion/services/quality.ser
 import {
   MergeDuplicatesDto,
   DismissDuplicatesDto,
+  UndoMergeDuplicatesDto,
 } from '@/modules/library/ingestion/dto/curation.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -61,6 +62,23 @@ export class CurationController {
     return this.duplicateMerger.mergeDuplicates(
       userId,
       dto,
+      effectiveProjectId,
+    );
+  }
+
+  @Post(['undo-merge', 'duplicates/undo-merge'])
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  async undoMergeDuplicates(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UndoMergeDuplicatesDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId =
+      paramProjectId || queryProjectId || dto?.projectId;
+    return this.duplicateMerger.undoMerge(
+      userId,
+      dto.primaryItemId,
       effectiveProjectId,
     );
   }

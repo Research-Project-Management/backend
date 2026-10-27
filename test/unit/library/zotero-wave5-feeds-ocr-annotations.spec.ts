@@ -10,11 +10,8 @@ import { CommandRepository } from '@/modules/library/catalog/repositories/comman
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
-import {
-  DuplicateService,
-  DuplicateDetectorService,
-  DuplicateMergerService,
-} from '@/modules/library/ingestion/services/duplicate.service';
+import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
+import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { OcrProvider } from '@/modules/library/extraction/providers/ocr.provider';
 import { OcrSandwichPdfService } from '@/modules/library/extraction/services/ocr-sandwich-pdf.service';
 import { FullTextProvider } from '@/modules/library/search/services/full-text.provider';
@@ -635,16 +632,9 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
         ),
       } as unknown as TransactionService;
 
-      const duplicateService = new DuplicateService(
-        new DuplicateDetectorService(
-          mockCatalogGateway as never,
-          undefined,
-          mockTxService,
-        ),
-        new DuplicateMergerService(
-          mockTxService,
-          mockCatalogGateway as never,
-        ),
+      const duplicateService = new DuplicateMergerService(
+        mockTxService,
+        mockCatalogGateway as never,
       );
 
       await duplicateService.mergeDuplicates(USER_A, {

@@ -5,10 +5,8 @@ export * from './search.facade';
 export * from './controllers/search.controller';
 
 // Domain
-export * from './domain/specification.interface';
 export * from './domain/item-specifications';
 export * from './domain/search-specification.builder';
-export * from './domain/search.domain';
 
 // DTOs
 export * from './dto/search.dto';

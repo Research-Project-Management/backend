@@ -2,12 +2,14 @@ import { ItemMetadata } from './metadata.types';
 
 export interface FieldEvidence {
   path: string;
-  value: unknown;
+  value?: unknown;
+  rawValue?: unknown;
   normalizedValue: unknown;
   confidence: number;
   sourceProvider: string;
   retrievedAt: string;
   warnings?: string[];
+  isUserOverride?: boolean;
 }
 
 export interface MetadataCandidate {
@@ -15,6 +17,7 @@ export interface MetadataCandidate {
   sourceKind:
     'IDENTIFIER' | 'RECORD' | 'URL' | 'FILE' | 'PROVIDER' | 'CONNECTOR';
   sourceName: string; // Crossref, OpenAlex, PubMed, BibTeX, RIS, etc.
+  sourceProvider?: string;
   sourceRecordId?: string;
   retrievedAt: string;
   schemaVersion: string;

@@ -13,15 +13,17 @@ import {
   ExportItemRecord,
 } from '@/modules/library/citation/repositories/exports.repository';
 import { CitationService } from './citation.service';
-import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { ExportLibraryDto } from '@/modules/library/citation/dto/exports.dto';
 import { PdfBakerService } from './pdf-baker.service';
 import {
   ExportResult,
   BurnableAnnotation,
 } from '@/modules/library/citation/types/exports.types';
-import { CitationItemInput } from '@/modules/library/citation/types/citation.types';
-import { formatCsvExport } from '@/modules/library/citation/domain/exports.domain';
+import {
+  resolveExportFormatStrategy,
+  toCitationItemInput,
+  formatItemsAsBibtex,
+} from '@/modules/library/citation/domain/export-format.strategies';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import {
   extractItemCitationAliases,
@@ -71,7 +73,12 @@ export class ExportsService {
       const collection = await this.exportsRepo.findCollection(
         dto.collectionId,
       );
-      if (collection?.projectId) {
+      if (!collection) {
+        throw new NotFoundException(
+          `Collection ${dto.collectionId} not found or access denied`,
+        );
+      }
+      if (collection.projectId) {
         const member = await this.exportsRepo.findProjectMember(
           collection.projectId,
           userId,
@@ -83,7 +90,6 @@ export class ExportsService {
         }
         scopeWhere = { projectId: collection.projectId, deletedAt: null };
       } else if (
-        collection &&
         'userId' in collection &&
         collection.userId &&
         collection.userId !== userId
@@ -122,166 +128,19 @@ export class ExportsService {
     }
 
     const timestamp = new Date().toISOString().split('T')[0];
-
-    switch (dto.format) {
-      case 'bibtex': {
-        return {
-          format: 'bibtex',
-          filename: `library-export-${timestamp}.bib`,
-          mimeType: 'application/x-bibtex',
-          content: this.formatItemsAsBibtex(items),
-          itemCount: items.length,
-          truncated,
-        };
-      }
-
-      case 'ris': {
-        const entries = items.map((it) => {
-          const res = this.citationService.formatItem(
-            this.toCitationItemInput(it),
-            'ris',
-          );
-          return res.bibliography;
-        });
-
-        return {
-          format: 'ris',
-          filename: `library-export-${timestamp}.ris`,
-          mimeType: 'application/x-research-info-systems',
-          content: entries.join('\n'),
-          itemCount: items.length,
-          truncated,
-        };
-      }
-
-      case 'csl-json':
-      case 'csl_json': {
-        const cslList = items.map((it) => CslJsonMapper.toCsl(it));
-
-        return {
-          format: 'csl-json',
-          filename: `library-export-${timestamp}.json`,
-          mimeType: 'application/json',
-          content: JSON.stringify(cslList, null, 2),
-          itemCount: items.length,
-          truncated,
-        };
-      }
-
-      case 'csv': {
-        const csvItems = items.map((it) => {
-          const csl = CslJsonMapper.toCsl(it);
-          return {
-            id: it.id,
-            title: it.title,
-            authors: CslJsonMapper.getAuthorNames(it),
-            year: it.year,
-            publicationTitle: it.publicationTitle,
-            publisher: csl.publisher || undefined,
-            doi: it.doi || csl.DOI || null,
-            itemType: it.itemType,
-            citationKey:
-              it.citationKey ||
-              (typeof csl['citation-key'] === 'string'
-                ? csl['citation-key']
-                : null),
-            url: it.url,
-          };
-        });
-
-        return {
-          format: 'csv',
-          filename: `library-export-${timestamp}.csv`,
-          mimeType: 'text/csv',
-          content: formatCsvExport(csvItems),
-          itemCount: items.length,
-          truncated,
-        };
-      }
-
-      case 'markdown': {
-        const mdLines = [`# Library Export (${timestamp})\n`];
-        items.forEach((it, idx) => {
-          const auth =
-            CslJsonMapper.getAuthorNames(it).join(', ') || 'Unknown Authors';
-          const yr = it.year ? ` (${it.year})` : '';
-          mdLines.push(`${idx + 1}. **${it.title}** — *${auth}*${yr}`);
-          if (it.publicationTitle)
-            mdLines.push(`   *Published in:* ${it.publicationTitle}`);
-          if (it.doi)
-            mdLines.push(`   *DOI:* [${it.doi}](https://doi.org/${it.doi})`);
-          mdLines.push('');
-        });
-
-        return {
-          format: 'markdown',
-          filename: `library-export-${timestamp}.md`,
-          mimeType: 'text/markdown',
-          content: mdLines.join('\n'),
-          itemCount: items.length,
-          truncated,
-        };
-      }
-
-      default:
-        throw new BadRequestException(
-          `Unsupported export format: ${(dto as { format: string }).format}`,
-        );
-    }
-  }
-
-  private toCitationItemInput(
-    it: ExportItemRecord,
-    overrideKey?: string,
-  ): CitationItemInput {
-    const csl = CslJsonMapper.toCsl(it);
-    const effectiveKey =
-      overrideKey ||
-      it.citationKey ||
-      (typeof csl['citation-key'] === 'string'
-        ? csl['citation-key']
-        : undefined);
-    return {
-      ...(it as unknown as Record<string, unknown>),
-      id: effectiveKey || it.id,
-      itemType: it.itemType ?? 'journalArticle',
-      title: it.title,
-      authors: CslJsonMapper.getAuthorNames(it),
-      publicationTitle: it.publicationTitle ?? csl['container-title'],
-      publisher: csl.publisher,
-      year: it.year ?? undefined,
-      volume: csl.volume !== undefined ? String(csl.volume) : undefined,
-      issue: csl.issue !== undefined ? String(csl.issue) : undefined,
-      pages: csl.page,
-      doi: it.doi || csl.DOI || undefined,
-      isbn: csl.ISBN || undefined,
-      issn: csl.ISSN || undefined,
-      pmid: csl.PMID || undefined,
-      pmcid: csl.PMCID || undefined,
-      arxivId: typeof csl._arxivId === 'string' ? csl._arxivId : undefined,
-      edition: csl.edition !== undefined ? String(csl.edition) : undefined,
-      place: csl['publisher-place'] || undefined,
-      series: csl['collection-title'] || undefined,
-      url: it.url ?? csl.URL ?? undefined,
-      abstract: it.abstract ?? csl.abstract ?? undefined,
-      citationKey: effectiveKey,
-      contributors: it.contributors,
-      creators: it.contributors,
-      metadata: it.metadata,
-      updatedAt: it.updatedAt ?? undefined,
-      version: it.version ?? undefined,
-    };
-  }
-
-  private formatItemsAsBibtex(items: ExportItemRecord[]): string {
-    const entries = items.map((it) => {
-      const res = this.citationService.formatItem(
-        this.toCitationItemInput(it),
-        'bibtex',
+    const strategy = resolveExportFormatStrategy(dto.format);
+    if (!strategy) {
+      throw new BadRequestException(
+        `Unsupported export format: ${(dto as { format: string }).format}`,
       );
-      return res.bibliography;
+    }
+
+    return strategy.exportItems({
+      items,
+      timestamp,
+      truncated,
+      citationFormatter: this.citationService,
     });
-    return entries.join('\n\n');
   }
 
   async exportBundle(
@@ -333,7 +192,7 @@ export class ExportsService {
       2000,
     );
 
-    const bibtexContent = this.formatItemsAsBibtex(items);
+    const bibtexContent = formatItemsAsBibtex(items, this.citationService);
 
     const files: Array<{
       itemId: string;
@@ -387,6 +246,17 @@ export class ExportsService {
     base64: string;
   }> {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
+    if (effectiveProjectId && userId && this.exportsRepo.findProjectMember) {
+      const member = await this.exportsRepo.findProjectMember(
+        effectiveProjectId,
+        userId,
+      );
+      if (!member) {
+        throw new NotFoundException(
+          `Project ${effectiveProjectId} not found or access denied`,
+        );
+      }
+    }
     const item = await this.exportsRepo.findItemById(
       userId,
       itemId,
@@ -542,7 +412,7 @@ export class ExportsService {
 
     const entries = emittedEntries.map(({ item: it, emitCiteKey }) => {
       const res = this.citationService.formatItem(
-        this.toCitationItemInput(it, emitCiteKey),
+        toCitationItemInput(it, emitCiteKey),
         'bibtex',
       );
       return res.bibliography;

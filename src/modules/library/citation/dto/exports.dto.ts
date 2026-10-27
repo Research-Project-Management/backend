@@ -1,4 +1,11 @@
-import { IsString, IsOptional, IsArray, IsNumber, IsBoolean } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsArray,
+  IsNumber,
+  IsBoolean,
+  ArrayMaxSize,
+} from 'class-validator';
 import { ExportFormatType } from '@/modules/library/citation/types/exports.types';
 
 export type { ExportFormatType };
@@ -13,6 +20,7 @@ export class ExportLibraryDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(500)
   itemIds?: string[];
 
   @IsOptional()

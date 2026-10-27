@@ -1,13 +1,10 @@
 import { parseMedlineDate, enrichFromEuropePmc } from './pubmed.helper';
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { Injectable, Optional } from '@nestjs/common';
 import {
-  MetadataProvider,
   MetadataRequest,
   ProviderCapability,
   ProviderName,
   ProviderResult,
-  QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeDoi,
@@ -18,19 +15,19 @@ import {
   AcademicHttpClient,
   LibraryConfigService,
   libraryConfig,
+  normalizePageRange,
+  parseCreatorString,
+  normalizeAcademicTags,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,
 } from '@/modules/library/core/constants/academic-client.constants';
-import { normalizePageRange,
-  parseCreatorString,
-  normalizeAcademicTags,
-} from '@/modules/library/core';
+import { AbstractAcademicProvider } from './abstract-academic.provider';
 
 @Injectable()
-export class PubMedProvider implements MetadataProvider {
+export class PubMedProvider extends AbstractAcademicProvider {
   readonly id: ProviderName = 'PubMed';
   readonly capabilities: ProviderCapability = {
     queryTypes: ['PMID'],
@@ -39,12 +36,12 @@ export class PubMedProvider implements MetadataProvider {
     maxConcurrency: 2,
   };
 
-  private readonly logger = new Logger(PubMedProvider.name);
-
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
-  ) {}
+  ) {
+    super(httpClient);
+  }
 
   private get eutilsBaseUrl(): string {
     const base =
@@ -66,11 +63,6 @@ export class PubMedProvider implements MetadataProvider {
       this.configService?.providers.ncbiApiKey ??
       libraryConfig().providers.ncbiApiKey
     );
-  }
-
-  supports(input: QueryType | MetadataRequest): boolean {
-    const type = typeof input === 'string' ? input : input?.queryType;
-    return type ? this.capabilities.queryTypes.includes(type) : false;
   }
 
   async resolve(
@@ -124,12 +116,7 @@ export class PubMedProvider implements MetadataProvider {
       Accept: '*/*',
     };
 
-    let response: Response;
-    if (this.httpClient) {
-      ({ response } = await this.httpClient.request(url, { headers, signal }));
-    } else {
-      response = await fetch(url, { headers, signal });
-    }
+    const response = await this.executeHttpFetch(url, signal, headers);
 
     if (response.status === 404) return null;
     if (!response.ok) return null;
@@ -162,12 +149,7 @@ export class PubMedProvider implements MetadataProvider {
       Accept: 'application/json',
     };
 
-    let response: Response;
-    if (this.httpClient) {
-      ({ response } = await this.httpClient.request(url, { headers, signal }));
-    } else {
-      response = await fetch(url, { headers, signal });
-    }
+    const response = await this.executeHttpFetch(url, signal, headers);
 
     if (response.status === 404) return null;
 
@@ -183,10 +165,7 @@ export class PubMedProvider implements MetadataProvider {
     }
 
     if (!response.ok) {
-      const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterMs = retryAfterHeader
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : undefined;
+      const retryAfterMs = this.parseRetryAfterHeader(response);
       throw new ProviderFetchError(
         `PubMed API HTTP ${response.status} for PMID: ${cleanPmid}`,
         response.status,
@@ -366,16 +345,20 @@ export class PubMedProvider implements MetadataProvider {
       ? `https://www.ncbi.nlm.nih.gov/pmc/articles/${resolvedPmcid}/pdf/`
       : undefined;
 
-    const rawVersion = createHash('md5')
-      .update(JSON.stringify(data))
-      .digest('hex');
-
     const canonicalUrl = isPmc
       ? `https://www.ncbi.nlm.nih.gov/pmc/articles/${resolvedPmcid || id}/`
       : `https://pubmed.ncbi.nlm.nih.gov/${resolvedPmid || id}/`;
 
-    return {
-      provider: this.id,
+    return this.buildProviderResult({
+      identifier: resolvedPmid || resolvedPmcid || id,
+      rawPayload: data,
+      confidenceScore: 0.98,
+      canonicalId: isPmc
+        ? `pmc:${resolvedPmcid || id}`
+        : `pmid:${resolvedPmid || id}`,
+      sourceUrl: canonicalUrl,
+      isOpenAccess: Boolean(resolvedPmcid),
+      openAccessPdfUrl,
       metadata: {
         title,
         shortTitle,
@@ -402,24 +385,8 @@ export class PubMedProvider implements MetadataProvider {
         itemType: 'journalArticle',
         url: canonicalUrl,
         libraryCatalog: 'PubMed',
-        provenance: {
-          originProvider: this.id,
-          resolvedAt: new Date().toISOString(),
-          canonicalId: isPmc
-            ? `pmc:${resolvedPmcid || id}`
-            : `pmid:${resolvedPmid || id}`,
-          canonicalUrl,
-          confidenceScore: 0.98,
-          rawSnapshotHash: rawVersion,
-          isOpenAccess: Boolean(resolvedPmcid),
-          openAccessPdfUrl,
-        },
       },
-      confidence: 0.98,
-      identifier: resolvedPmid || resolvedPmcid || id,
-      fetchedAt: new Date().toISOString(),
-      rawVersion,
-    };
+    });
   }
 
   private transformPayload(
@@ -512,10 +479,6 @@ export class PubMedProvider implements MetadataProvider {
       }
     }
 
-    const rawVersion = createHash('md5')
-      .update(JSON.stringify(item))
-      .digest('hex');
-
     const canonicalUrl = `https://pubmed.ncbi.nlm.nih.gov/${cleanPmid}/`;
 
     const fullJournalName =
@@ -543,8 +506,14 @@ export class PubMedProvider implements MetadataProvider {
       ? `https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/pdf/`
       : undefined;
 
-    return {
-      provider: this.id,
+    return this.buildProviderResult({
+      identifier: cleanPmid,
+      rawPayload: item,
+      confidenceScore: 0.97,
+      canonicalId: `pmid:${cleanPmid}`,
+      sourceUrl: canonicalUrl,
+      isOpenAccess: Boolean(pmcid),
+      openAccessPdfUrl,
       metadata: {
         title,
         authors,
@@ -566,22 +535,8 @@ export class PubMedProvider implements MetadataProvider {
         itemType: 'journalArticle',
         url: canonicalUrl,
         libraryCatalog: 'PubMed',
-        provenance: {
-          originProvider: this.id,
-          resolvedAt: new Date().toISOString(),
-          canonicalId: `pmid:${cleanPmid}`,
-          canonicalUrl,
-          confidenceScore: 0.97,
-          rawSnapshotHash: rawVersion,
-          isOpenAccess: Boolean(pmcid),
-          openAccessPdfUrl,
-        },
       },
-      confidence: 0.97,
-      identifier: cleanPmid,
-      fetchedAt: new Date().toISOString(),
-      rawVersion,
-    };
+    });
   }
 
   private async enrichFromPubmedXml(
@@ -602,12 +557,7 @@ export class PubMedProvider implements MetadataProvider {
         'User-Agent': getAcademicUserAgent('PubMed'),
         Accept: 'application/xml, text/xml, */*',
       };
-      let response: Response;
-      if (this.httpClient) {
-        ({ response } = await this.httpClient.request(url, { headers, signal }));
-      } else {
-        response = await fetch(url, { headers, signal });
-      }
+      const response = await this.executeHttpFetch(url, signal, headers);
       let xml = '';
       if (response.ok) {
         xml = await response.text();

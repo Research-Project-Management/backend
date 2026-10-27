@@ -1,12 +1,9 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { Injectable, Optional } from '@nestjs/common';
 import {
-  MetadataProvider,
   MetadataRequest,
   ProviderCapability,
   ProviderName,
   ProviderResult,
-  QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   cleanBibliographicText,
@@ -23,6 +20,7 @@ import {
 } from '@/modules/library/core';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
+import { AbstractAcademicProvider } from './abstract-academic.provider';
 
 /**
  * Semantic Scholar Graph API Provider.
@@ -32,7 +30,7 @@ import { DomainRateLimiterService } from '@/modules/library/ingestion/services/d
  * Operates with 0đ cost on the public open access tier.
  */
 @Injectable()
-export class SemanticScholarProvider implements MetadataProvider {
+export class SemanticScholarProvider extends AbstractAcademicProvider {
   readonly id: ProviderName = 'SemanticScholar';
   readonly capabilities: ProviderCapability = {
     queryTypes: ['DOI', 'ARXIV', 'PMID', 'TITLE'],
@@ -41,27 +39,22 @@ export class SemanticScholarProvider implements MetadataProvider {
     maxConcurrency: 3,
   };
 
-  private readonly logger = new Logger(SemanticScholarProvider.name);
-
   private readonly FIELDS =
     'title,authors,year,publicationDate,venue,publicationVenue,journal,publicationTypes,abstract,openAccessPdf,citationCount,referenceCount,influentialCitationCount,tldr,externalIds,url';
 
   constructor(
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
-    private readonly httpClient?: AcademicHttpClient,
+    httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
-  ) {}
+  ) {
+    super(httpClient);
+  }
 
   private get baseUrl(): string {
     const base =
       this.configService?.providers.semanticScholarBaseUrl ??
       libraryConfig().providers.semanticScholarBaseUrl;
     return base.endsWith('/paper') ? base : `${base}/paper`;
-  }
-
-  supports(input: QueryType | MetadataRequest): boolean {
-    const type = typeof input === 'string' ? input : input?.queryType;
-    return type ? this.capabilities.queryTypes.includes(type) : false;
   }
 
   async resolve(
@@ -92,7 +85,6 @@ export class SemanticScholarProvider implements MetadataProvider {
       identifier = pmid;
       isSpecificId = true;
     } else {
-      // Title search fallback
       targetUrl = `${this.baseUrl}/search?query=${encodeURIComponent(rawQuery)}&limit=1&fields=${this.FIELDS}`;
     }
 
@@ -100,40 +92,21 @@ export class SemanticScholarProvider implements MetadataProvider {
       await this.rateLimiter.acquire('semanticscholar', signal);
     }
 
-    let response: Response;
-    try {
-      const headers = {
-        'User-Agent': getAcademicUserAgent('SemanticScholar'),
-        Accept: 'application/json',
-      };
-      if (this.httpClient) {
-        ({ response } = await this.httpClient.request(targetUrl, {
-          headers,
-          signal,
-        }));
-      } else {
-        response = await fetch(targetUrl, { headers, signal });
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.debug(`Semantic Scholar fetch failed non-fatally: ${msg}`);
-      return null;
-    }
+    const headers = {
+      'User-Agent': getAcademicUserAgent('SemanticScholar'),
+      Accept: 'application/json',
+    };
 
-    if (response.status === 404) return null;
-    if (!response.ok) {
-      this.logger.debug(
-        `Semantic Scholar returned HTTP ${response.status} for query: ${identifier}`,
-      );
-      return null;
-    }
-
-    let payload: Record<string, unknown> | null = null;
-    try {
-      payload = (await response.json()) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
+    const payload = await this.fetchJsonWithResilience<Record<string, unknown>>(
+      targetUrl,
+      signal,
+      headers,
+      {
+        contextLabel: `query: ${identifier}`,
+        swallowNetworkError: true,
+      },
+    );
+    if (!payload) return null;
 
     const paper = isSpecificId
       ? payload
@@ -271,16 +244,19 @@ export class SemanticScholarProvider implements MetadataProvider {
         : undefined) ||
       (doi ? `https://doi.org/${doi}` : undefined);
 
-    const rawVersion = createHash('md5')
-      .update(JSON.stringify({ title: cleanTitle, venue, year, doi, arxivId }))
-      .digest('hex');
-
-    return {
-      provider: this.id,
-      confidence: isSpecificId ? 0.92 : 0.85,
+    return this.buildProviderResult({
       identifier,
-      fetchedAt: new Date().toISOString(),
-      rawVersion,
+      confidenceScore: isSpecificId ? 0.92 : 0.85,
+      rawPayload: { title: cleanTitle, venue, year, doi, arxivId },
+      retrievalMethod: 'api',
+      sourceUrl: canonicalUrl,
+      canonicalId: doi
+        ? `doi:${doi}`
+        : arxivId
+          ? `arxiv:${arxivId}`
+          : `s2:${identifier}`,
+      isOpenAccess: Boolean(openAccessUrl),
+      openAccessPdfUrl: openAccessUrl,
       metadata: {
         itemType,
         title: cleanTitle,
@@ -309,6 +285,6 @@ export class SemanticScholarProvider implements MetadataProvider {
         url: canonicalUrl,
         libraryCatalog: 'Semantic Scholar',
       },
-    };
+    });
   }
 }

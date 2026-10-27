@@ -12,10 +12,13 @@ import {
   ICatalogFacade,
   EXTRACTION_FACADE,
   IExtractionFacade,
+  ReconcileExtractedCandidatePayload,
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
   normalizeIsbn,
+  isPlaceholderItemTitle,
+  titleSimilarity,
 } from '@/modules/library/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import {
@@ -23,7 +26,10 @@ import {
   MetadataPort,
   QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { buildReResolvePatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import {
+  buildEnrichmentPatch,
+  buildReResolvePatch,
+} from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 import { UrlMetadataScraperService } from './url-metadata-scraper.service';
 
 export interface ReResolveMetadataOptions {
@@ -98,6 +104,16 @@ export class MetadataResolverService {
       throw new NotFoundException(`Item "${itemId}" not found in library`);
     }
 
+    const existingExtra: Record<string, unknown> = {
+      ...(((existingItem as unknown as { metadata?: Record<string, unknown> }).metadata &&
+      typeof (existingItem as unknown as { metadata?: Record<string, unknown> }).metadata === 'object'
+        ? (existingItem as unknown as { metadata?: Record<string, unknown> }).metadata
+        : {}) as Record<string, unknown>),
+      ...((existingItem.extraFields && typeof existingItem.extraFields === 'object'
+        ? existingItem.extraFields
+        : {}) as Record<string, unknown>),
+    };
+
     // Determine query & queryType
     let query: string | undefined;
     let queryType: QueryType | undefined;
@@ -120,25 +136,25 @@ export class MetadataResolverService {
     } else if (existingItem.doi) {
       query = normalizeDoi(existingItem.doi) || existingItem.doi;
       queryType = 'DOI';
-    } else if (existingItem.extraFields?.arxivId || existingItem.arxivId) {
-      const candArxiv =
-        existingItem.extraFields?.arxivId ?? existingItem.arxivId;
+    } else if (existingExtra.arxivId || existingItem.arxivId) {
+      const candArxiv = existingExtra.arxivId ?? existingItem.arxivId;
       const rawArxiv =
         typeof candArxiv === 'string' || typeof candArxiv === 'number'
           ? String(candArxiv)
           : '';
       query = normalizeArxivId(rawArxiv) || rawArxiv;
       queryType = 'ARXIV';
-    } else if (existingItem.extraFields?.pmid || existingItem.pmid) {
-      const candPmid = existingItem.extraFields?.pmid ?? existingItem.pmid;
+    } else if (existingExtra.pmid || existingItem.pmid) {
+      const candPmid = existingExtra.pmid ?? existingItem.pmid;
       const rawPmid =
         typeof candPmid === 'string' || typeof candPmid === 'number'
           ? String(candPmid)
           : '';
       query = normalizePmid(rawPmid) || rawPmid;
       queryType = 'PMID';
-    } else if (existingItem.isbn) {
-      query = normalizeIsbn(existingItem.isbn) || existingItem.isbn;
+    } else if (existingItem.isbn || typeof existingExtra.isbn === 'string') {
+      const rawIsbn = existingItem.isbn || String(existingExtra.isbn);
+      query = normalizeIsbn(rawIsbn) || rawIsbn;
       queryType = 'ISBN';
     } else if (
       existingItem.title &&
@@ -178,6 +194,105 @@ export class MetadataResolverService {
         item: existingItem,
         updatedFields: [],
       };
+    }
+
+    if (queryType === 'TITLE') {
+      const extractSurnames = (itemObj: Record<string, unknown>): string[] => {
+        const out: string[] = [];
+        const creators = Array.isArray(itemObj.creators)
+          ? itemObj.creators
+          : Array.isArray(itemObj.contributors)
+            ? itemObj.contributors
+            : [];
+        for (const c of creators) {
+          if (c && typeof c === 'object') {
+            const cObj = c as {
+              lastName?: string;
+              fullName?: string;
+              name?: string;
+            };
+            const raw = (
+              cObj.lastName ||
+              (cObj.fullName || cObj.name || '').trim().split(/\s+/).pop() ||
+              ''
+            )
+              .replace(/[đĐ]/g, 'd')
+              .normalize('NFKD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .toLowerCase()
+              .replace(/[^\p{L}\p{N}]/gu, '');
+            if (raw.length >= 2) out.push(raw);
+          } else if (typeof c === 'string') {
+            const parts = c.trim().split(/\s+/);
+            const raw = (
+              c.includes(',') ? c.split(',')[0] : parts[parts.length - 1] || ''
+            )
+              .replace(/[đĐ]/g, 'd')
+              .normalize('NFKD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .toLowerCase()
+              .replace(/[^\p{L}\p{N}]/gu, '');
+            if (raw.length >= 2) out.push(raw);
+          }
+        }
+        if (out.length === 0 && Array.isArray(itemObj.authors)) {
+          for (const a of itemObj.authors) {
+            if (typeof a === 'string' && a.trim()) {
+              const parts = a.trim().split(/\s+/);
+              const raw = (
+                a.includes(',')
+                  ? a.split(',')[0]
+                  : parts[parts.length - 1] || ''
+              )
+                .replace(/[đĐ]/g, 'd')
+                .normalize('NFKD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^\p{L}\p{N}]/gu, '');
+              if (raw.length >= 2) out.push(raw);
+            }
+          }
+        }
+        return out;
+      };
+
+      const existingSurnames = extractSurnames(
+        existingItem as unknown as Record<string, unknown>,
+      );
+      const resolvedSurnames = extractSurnames(
+        resolved.metadata as unknown as Record<string, unknown>,
+      );
+
+      if (existingSurnames.length > 0 && resolvedSurnames.length > 0) {
+        const resolvedSet = new Set(resolvedSurnames);
+        const sharesAuthor = existingSurnames.some((s) => resolvedSet.has(s));
+        if (!sharesAuthor) {
+          return {
+            success: false,
+            message: `Resolved candidate for title "${query}" rejected due to author mismatch with existing item.`,
+            itemId,
+            item: existingItem,
+            updatedFields: [],
+          };
+        }
+      } else if (
+        existingSurnames.length === 0 &&
+        existingItem.year &&
+        resolved.metadata.year
+      ) {
+        if (
+          Math.abs(Number(existingItem.year) - Number(resolved.metadata.year)) >
+          1
+        ) {
+          return {
+            success: false,
+            message: `Resolved candidate for title "${query}" rejected due to publication year mismatch (${existingItem.year} vs ${resolved.metadata.year}).`,
+            itemId,
+            item: existingItem,
+            updatedFields: [],
+          };
+        }
+      }
     }
 
     const { updateData, updatedFields } = buildReResolvePatch(
@@ -298,5 +413,202 @@ export class MetadataResolverService {
       oaPdfAttached,
       oaPdfUrl: candidateOaPdfUrl || undefined,
     };
+  }
+
+  /**
+   * Single Metadata Authority reconciliation for Pass-2 / OCR / Extraction-discovered metadata.
+   * Ensures any DOI/arXiv/PMID/ISBN discovered by deep PDF extraction or OCR goes through:
+   * 1. External registry resolution (Crossref/arXiv/PubMed)
+   * 2. Page-1 Citation Trap Disambiguation Guard (titleSimilarity >= 0.4 against credible PDF title)
+   * 3. Authority-aware field upgrade & UserOverride lock preservation (`buildEnrichmentPatch`)
+   */
+  async reconcileExtractedCandidate(
+    payload: ReconcileExtractedCandidatePayload,
+  ): Promise<{ updated: boolean; updatedFields: string[]; rejectedCitedDoi?: string }> {
+    if (!this.catalogGateway || !this.metadataService) {
+      return { updated: false, updatedFields: [] };
+    }
+
+    const { userId, projectId, itemId, extractedMetadata } = payload;
+    const existingItem = await this.catalogGateway
+      .getItem(userId, itemId, projectId || undefined)
+      .catch(() => null);
+    if (!existingItem) {
+      return { updated: false, updatedFields: [] };
+    }
+
+    const cleanDoi =
+      typeof extractedMetadata.doi === 'string'
+        ? normalizeDoi(extractedMetadata.doi) || extractedMetadata.doi.trim()
+        : undefined;
+    const cleanArxiv =
+      typeof extractedMetadata.arxivId === 'string'
+        ? normalizeArxivId(extractedMetadata.arxivId) ||
+          extractedMetadata.arxivId.trim()
+        : undefined;
+    const cleanPmid =
+      typeof extractedMetadata.pmid === 'string' ||
+      typeof extractedMetadata.pmid === 'number'
+        ? normalizePmid(extractedMetadata.pmid) ||
+          String(extractedMetadata.pmid).trim()
+        : undefined;
+    const cleanIsbn =
+      typeof extractedMetadata.isbn === 'string'
+        ? normalizeIsbn(extractedMetadata.isbn) ||
+          extractedMetadata.isbn.trim()
+        : undefined;
+
+    let query: string | undefined;
+    let queryType: QueryType | undefined;
+    if (cleanDoi) {
+      query = cleanDoi;
+      queryType = 'DOI';
+    } else if (cleanArxiv) {
+      query = cleanArxiv;
+      queryType = 'ARXIV';
+    } else if (cleanPmid) {
+      query = cleanPmid;
+      queryType = 'PMID';
+    } else if (cleanIsbn) {
+      query = cleanIsbn;
+      queryType = 'ISBN';
+    }
+
+    if (!query || !queryType) {
+      return { updated: false, updatedFields: [] };
+    }
+
+    const resolved = await this.metadataService
+      .resolve({
+        query,
+        queryType,
+        forceRefresh: false,
+        scopeId: projectId || 'user',
+      })
+      .catch(() => null);
+
+    if (!resolved?.metadata) {
+      return { updated: false, updatedFields: [] };
+    }
+
+    const existingExtra: Record<string, unknown> = {
+      ...(((existingItem as unknown as { metadata?: Record<string, unknown> }).metadata &&
+      typeof (existingItem as unknown as { metadata?: Record<string, unknown> }).metadata === 'object'
+        ? (existingItem as unknown as { metadata?: Record<string, unknown> }).metadata
+        : {}) as Record<string, unknown>),
+      ...((existingItem.extraFields && typeof existingItem.extraFields === 'object'
+        ? existingItem.extraFields
+        : {}) as Record<string, unknown>),
+    };
+
+    // Page-1 Citation Disambiguation Guard:
+    // Verify that the extracted DOI/identifier does not belong to a cited paper on page 1.
+    const pdfTitle = String(
+      (typeof extractedMetadata.title === 'string'
+        ? extractedMetadata.title
+        : '') ||
+        (!isPlaceholderItemTitle(existingItem.title) &&
+        existingExtra.isFilenameTitle !== true
+          ? existingItem.title
+          : '') ||
+        '',
+    ).trim();
+    const isCrediblePdfTitle =
+      pdfTitle.length >= 10 &&
+      !isPlaceholderItemTitle(pdfTitle) &&
+      !/^manuscript$/i.test(pdfTitle) &&
+      !/^\d{4}\s*\d{4,5}(v\d+)?$/i.test(pdfTitle) &&
+      !/^arxiv/i.test(pdfTitle);
+
+    if (isCrediblePdfTitle && resolved.metadata.title) {
+      const sim = titleSimilarity(resolved.metadata.title, pdfTitle);
+      if (sim < 0.4) {
+        this.logger.warn(
+          `[SingleAuthorityReconcile] Page-1 Citation Trap Blocked for item ${itemId}: Extracted ${queryType}="${query}" resolved to "${resolved.metadata.title}", which conflicts with PDF title "${pdfTitle}" (similarity=${(sim * 100).toFixed(0)}%).`,
+        );
+
+        const rejectedCitedDoi = cleanDoi || query;
+        const currentDoiNorm = existingItem.doi
+          ? normalizeDoi(existingItem.doi) || existingItem.doi.trim().toLowerCase()
+          : '';
+        const lockedFields = Array.isArray(existingExtra.lockedFields)
+          ? (existingExtra.lockedFields as string[])
+          : [];
+        const provenance =
+          existingExtra.fieldProvenance && typeof existingExtra.fieldProvenance === 'object'
+            ? (existingExtra.fieldProvenance as Record<string, { locked?: boolean }>)
+            : {};
+        const isDoiLocked =
+          lockedFields.includes('doi') || provenance.doi?.locked === true;
+
+        if (
+          cleanDoi &&
+          currentDoiNorm &&
+          currentDoiNorm === cleanDoi.toLowerCase() &&
+          !isDoiLocked
+        ) {
+          const nextExtra = { ...existingExtra, rejectedCitedDoi };
+          delete nextExtra.doi;
+          await this.catalogGateway
+            .updateItem(
+              userId,
+              itemId,
+              {
+                doi: null,
+                extraFields: nextExtra,
+                __isSystemUpdate: true,
+                __updateSource: 'ingestion.citation_trap_guard',
+              },
+              {
+                expectedVersion: existingItem.version,
+                projectId: projectId || undefined,
+              },
+            )
+            .catch(() => undefined);
+        }
+
+        return {
+          updated: false,
+          updatedFields: [],
+          rejectedCitedDoi,
+        };
+      }
+    }
+
+    const sourceProvider =
+      (resolved.metadata as { sourceProvider?: string }).sourceProvider ||
+      (queryType === 'ARXIV' ? 'arXiv' : queryType === 'PMID' ? 'PubMed' : 'CrossRef');
+    const proposedPayload: Record<string, unknown> = {
+      ...(resolved.metadata as unknown as Record<string, unknown>),
+      sourceProvider,
+      extraFields: {
+        ...((resolved.metadata.extraFields as Record<string, unknown>) || {}),
+        engineUsed: sourceProvider,
+        isVerified: true,
+      },
+    };
+
+    const enrichPatch = buildEnrichmentPatch(
+      existingItem as unknown as Record<string, unknown>,
+      proposedPayload,
+    );
+    const updatedFields = Object.keys(enrichPatch).filter(
+      (k) => !k.startsWith('__'),
+    );
+    if (updatedFields.length === 0) {
+      return { updated: false, updatedFields: [] };
+    }
+
+    await this.catalogGateway.updateItem(
+      userId,
+      itemId,
+      enrichPatch,
+      {
+        expectedVersion: existingItem.version,
+        projectId: projectId || undefined,
+      },
+    );
+
+    return { updated: true, updatedFields };
   }
 }

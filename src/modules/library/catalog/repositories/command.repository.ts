@@ -30,8 +30,17 @@ import {
   buildCommandCreateInput,
   buildCommandUpdateInput,
   buildMyPublicationMetadata,
+  disambiguateCitationKey,
+  syncCreatedIdentifiers,
+  syncUpdatedIdentifiers,
 } from '@/modules/library/catalog/domain/command-payload.builder';
 import { CommandBulkOperations } from './command-bulk.operations';
+import {
+  sanitizeUpdateCollectionIds,
+  putItemRelationInClient,
+  removeItemRelationInClient,
+  setMyPublicationInClient,
+} from './command-relations.helper';
 export {
   isUuid,
   cleanSingleIdentifier,
@@ -63,7 +72,7 @@ export class CommandRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
-    const { createData } = await buildCommandCreateInput(
+    const { createData, identifiersToCreate } = await buildCommandCreateInput(
       userId,
       data,
       client,
@@ -72,21 +81,22 @@ export class CommandRepository {
     const item = await client.item.create({
       data: createData,
       include: {
-        collectionItems: {
-          include: { collection: true },
-        },
-        itemTags: {
-          include: { tag: true },
-        },
-        contributors: {
-          orderBy: { orderIndex: 'asc' },
-        },
+        collectionItems: { include: { collection: true } },
+        itemTags: { include: { tag: true } },
+        contributors: { orderBy: { orderIndex: 'asc' } },
         attachments: true,
-        notesList: {
-          where: { deletedAt: null },
-        },
-      },
+        notesList: { where: { deletedAt: null } },
+        states: { where: { userId }, take: 1 },
+        identifiers: true,
+      } as unknown as Prisma.ItemInclude,
     });
+    if (
+      identifiersToCreate.length > 0 &&
+      (!Array.isArray((item as { identifiers?: unknown[] }).identifiers) ||
+        (item as { identifiers?: unknown[] }).identifiers!.length === 0)
+    ) {
+      await syncCreatedIdentifiers(client as never, item.id, identifiersToCreate);
+    }
     return item;
   }
   async update(
@@ -114,20 +124,35 @@ export class CommandRepository {
       },
       include: {
         notesList: { where: { deletedAt: null } },
-      },
+        contributors: { orderBy: { orderIndex: 'asc' } },
+        identifiers: true,
+      } as unknown as Prisma.ItemInclude,
     });
     if (!existing) {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
+    if (expectedVersion !== undefined && existing.version !== expectedVersion) {
+      throw new VersionMismatchException({
+        aggregateType: 'CatalogItem',
+        entityId: id,
+        currentVersion: existing.version,
+        providedVersion: expectedVersion,
+      });
+    }
+    const sanitizedData = await sanitizeUpdateCollectionIds({
+      client,
+      userId,
+      validProjectId,
+      existingProjectId: existing.projectId,
+      data,
+    });
+    const { updateData, cleanIds, rawTags } = buildCommandUpdateInput(
+      userId,
+      existing,
+      sanitizedData,
+      { skipVersionIncrement: expectedVersion !== undefined },
+    );
     if (expectedVersion !== undefined) {
-      if (existing.version !== expectedVersion) {
-        throw new VersionMismatchException({
-          aggregateType: 'CatalogItem',
-          entityId: id,
-          currentVersion: existing.version,
-          providedVersion: expectedVersion,
-        });
-      }
       const affected = await client.item.updateMany({
         where: {
           id,
@@ -152,85 +177,29 @@ export class CommandRepository {
         });
       }
     }
-    let sanitizedData = data;
-    if (data.collectionIds !== undefined || data.collectionId !== undefined) {
-      const candidateColIds = Array.from(
-        new Set(
-          [
-            ...(Array.isArray(data.collectionIds) ? data.collectionIds : []),
-            ...(data.collectionId && typeof data.collectionId === 'string'
-              ? [data.collectionId.trim()]
-              : []),
-          ].filter(
-            (cid): cid is string =>
-              typeof cid === 'string' && cid.trim().length > 0,
-          ),
-        ),
+    await syncUpdatedIdentifiers(client as never, id, cleanIds, existing);
+    if (
+      typeof updateData.citationKey === 'string' &&
+      updateData.citationKey.trim() &&
+      updateData.citationKey.trim().toLowerCase() !==
+        (existing.citationKey ?? '').trim().toLowerCase()
+    ) {
+      updateData.citationKey = await disambiguateCitationKey(
+        client,
+        updateData.citationKey.trim(),
+        { userId, projectId: validProjectId ?? existing.projectId },
+        id,
       );
-      if (candidateColIds.length > 0 && client.collection) {
-        const targetProjectId = validProjectId ?? existing.projectId;
-        const validCols = await client.collection.findMany({
-          where: targetProjectId
-            ? {
-                id: { in: candidateColIds },
-                projectId: targetProjectId,
-                deletedAt: null,
-              }
-            : {
-                id: { in: candidateColIds },
-                userId,
-                projectId: null,
-                deletedAt: null,
-              },
-          select: { id: true },
-        });
-        if (Array.isArray(validCols)) {
-          const validColSet = new Set(validCols.map((c) => c.id));
-          sanitizedData = {
-            ...data,
-            ...(data.collectionIds !== undefined
-              ? {
-                  collectionIds: candidateColIds.filter((cid) =>
-                    validColSet.has(cid),
-                  ),
-                }
-              : {}),
-            ...(data.collectionId !== undefined
-              ? {
-                  collectionId:
-                    data.collectionId &&
-                    validColSet.has(data.collectionId.trim())
-                      ? data.collectionId.trim()
-                      : null,
-                }
-              : {}),
-          };
-        }
-      }
     }
-    const { updateData, rawTags } = buildCommandUpdateInput(
-      userId,
-      existing,
-      sanitizedData,
-      { skipVersionIncrement: expectedVersion !== undefined },
-    );
     const itemRelationsInclude = {
-      collectionItems: {
-        include: { collection: true },
-      },
-      itemTags: {
-        include: { tag: true },
-      },
-      contributors: {
-        orderBy: { orderIndex: 'asc' as const },
-      },
-      attachments: {
-        include: { revisions: true },
-      },
-      notesList: {
-        where: { deletedAt: null },
-      },
-    };
+      collectionItems: { include: { collection: true } },
+      itemTags: { include: { tag: true } },
+      contributors: { orderBy: { orderIndex: 'asc' as const } },
+      attachments: { include: { revisions: true } },
+      notesList: { where: { deletedAt: null } },
+      states: { where: { userId }, take: 1 },
+      identifiers: true,
+    } as unknown as Prisma.ItemInclude;
     const hasTagSync = Boolean(rawTags && Array.isArray(rawTags));
     const updated = await client.item.update({
       where: { id },
@@ -413,12 +382,7 @@ export class CommandRepository {
         });
       }
     }
-    const cascadeCutoff = existing.deletedAt
-      ? new Date(existing.deletedAt.getTime() - 2000)
-      : undefined;
-    const deletedFilter = cascadeCutoff
-      ? { gte: cascadeCutoff }
-      : { not: null };
+    const deletedFilter = existing.deletedAt ? { gte: existing.deletedAt } : { not: null };
 
     await Promise.all([
       client.note?.updateMany?.({
@@ -630,57 +594,14 @@ export class CommandRepository {
     },
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    const targetItemId = relation.targetItemId;
-    if (
-      !targetItemId ||
-      !isUuid(itemId) ||
-      !isUuid(targetItemId) ||
-      itemId === targetItemId
-    ) {
-      return;
-    }
-    const client = this.getClient(tx);
-    const source = await client.item.findUnique({
-      where: { id: itemId },
-      select: { userId: true },
-    });
-    if (!source) return;
-    const rawType = String(relation.relationType || '').trim().toLowerCase();
-    const validRelationTypes = new Set<string>([
-      'cites', 'cited_by', 'replicates', 'extends', 'is_preprint_of',
-      'is_published_version_of', 'is_translation_of', 'supplements',
-      'related', 'rebuts', 'uses_dataset', 'survey_of',
-    ]);
-    const relationType: RelationType = validRelationTypes.has(rawType)
-      ? (rawType as RelationType)
-      : RelationType.related;
-    const description = relation.description || '';
-    await client.itemRelation.upsert({
-      where: {
-        sourceItemId_targetItemId_relationType: {
-          sourceItemId: itemId,
-          targetItemId,
-          relationType,
-        },
-      },
-      create: { sourceItemId: itemId, targetItemId, relationType, description },
-      update: { description },
-    });
+    return putItemRelationInClient(this.getClient(tx), itemId, relation);
   }
   async removeRelation(
     itemId: string,
     targetItemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    if (!isUuid(itemId) || !isUuid(targetItemId)) return;
-    await this.getClient(tx).itemRelation.deleteMany({
-      where: {
-        OR: [
-          { sourceItemId: itemId, targetItemId },
-          { sourceItemId: targetItemId, targetItemId: itemId },
-        ],
-      },
-    });
+    return removeItemRelationInClient(this.getClient(tx), itemId, targetItemId);
   }
   async setMyPublication(
     userId: string,
@@ -697,42 +618,12 @@ export class CommandRepository {
     },
     tx?: Prisma.TransactionClient,
   ) {
-    if (!isUuid(id) || !isUuid(userId)) {
-      throw new NotFoundException(`CatalogItem ${id} not found`);
-    }
-    const validProjectId = normalizeProjectScopeId(options?.projectId);
-    const scopeWhere = validProjectId
-      ? { projectId: validProjectId }
-      : { userId, projectId: null };
-    const client = this.getClient(tx);
-    const existing = await client.item.findFirst({
-      where: { id, ...scopeWhere, deletedAt: null },
-    });
-    if (!existing) throw new NotFoundException(`CatalogItem ${id} not found`);
-    if (isMyPublication) {
-      const updatePayload = {
-        ...(options?.contributorId !== undefined && { contributorId: options.contributorId }),
-        ...(options?.isPublic !== undefined && { isPublic: options.isPublic }),
-        ...(options?.openAccessLicense !== undefined && { openAccessLicense: options.openAccessLicense }),
-      };
-      await client.userPublication.upsert({
-        where: { userId_itemId: { userId, itemId: id } },
-        create: { userId, itemId: id, ...updatePayload },
-        update: updatePayload,
-      });
-    } else {
-      await client.userPublication.deleteMany({ where: { userId, itemId: id } });
-    }
-    const metadataObj = buildMyPublicationMetadata(existing.metadata, isMyPublication, options);
-    return client.item.update({
-      where: { id },
-      data: { metadata: metadataObj as Prisma.InputJsonValue, version: { increment: 1 } },
-      include: {
-        collectionItems: { include: { collection: true } },
-        itemTags: { include: { tag: true } },
-        contributors: { orderBy: { orderIndex: 'asc' } },
-        attachments: true,
-      },
-    });
+    return setMyPublicationInClient(
+      this.getClient(tx),
+      userId,
+      id,
+      isMyPublication,
+      options,
+    );
   }
 }

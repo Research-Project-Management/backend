@@ -32,6 +32,7 @@ export const LIBRARY_EVENT_TYPES = {
   ATTACHMENT_REVISION_ADDED: 'library.attachment.revision_added',
   ATTACHMENT_DELETED: 'library.attachment.deleted',
   ATTACHMENT_PAGES_EXTRACTED: 'library.attachment.pages.extracted',
+  ATTACHMENT_METADATA_EXTRACTED: 'library.attachment.metadata_extracted',
 
   // Annotations
   ANNOTATION_CREATED: 'library.annotation.created',

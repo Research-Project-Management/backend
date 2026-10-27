@@ -77,7 +77,7 @@ export class TagsRepository {
   async create(
     userId: string,
     name: string,
-    color = '#3b82f6',
+    color?: string,
     type: TagType = TagType.manual,
     projectId?: string | null,
     tx?: Prisma.TransactionClient,
@@ -85,6 +85,7 @@ export class TagsRepository {
     const client = this.getClient(tx);
     const effectiveProjectId = normalizeProjectScopeId(projectId);
     const resolvedType = type || TagType.manual;
+    const defaultColor = color ?? '#3b82f6';
 
     if (effectiveProjectId) {
       const existingProjectTag = await client.tag.findFirst({
@@ -94,7 +95,7 @@ export class TagsRepository {
         },
       });
       if (existingProjectTag) {
-        if (color && existingProjectTag.color !== color) {
+        if (color !== undefined && existingProjectTag.color !== color) {
           return client.tag.update({
             where: { id: existingProjectTag.id },
             data: { color },
@@ -109,7 +110,7 @@ export class TagsRepository {
             userId,
             createdById: userId,
             name,
-            color,
+            color: defaultColor,
             type: resolvedType,
             projectId: effectiveProjectId,
           },
@@ -140,7 +141,7 @@ export class TagsRepository {
     });
 
     if (existingPersonalTag) {
-      if (color && existingPersonalTag.color !== color) {
+      if (color !== undefined && existingPersonalTag.color !== color) {
         return client.tag.update({
           where: { id: existingPersonalTag.id },
           data: { color },
@@ -155,7 +156,7 @@ export class TagsRepository {
           userId,
           createdById: userId,
           name,
-          color,
+          color: defaultColor,
           type: resolvedType,
           projectId: null,
         },
@@ -247,22 +248,23 @@ export class TagsRepository {
       if (conflictingTag) {
         const sourceLinks = await client.itemTag.findMany({
           where: { tagId: tag.id },
-          select: { itemId: true },
+          select: { itemId: true, type: true },
         });
         const targetLinks = await client.itemTag.findMany({
           where: { tagId: conflictingTag.id },
           select: { itemId: true },
         });
         const targetItemIds = new Set(targetLinks.map((l) => l.itemId));
-        const missingItemIds = sourceLinks
-          .map((l) => l.itemId)
-          .filter((itemId) => !targetItemIds.has(itemId));
+        const missingLinks = sourceLinks.filter(
+          (l) => !targetItemIds.has(l.itemId),
+        );
 
-        if (missingItemIds.length > 0) {
+        if (missingLinks.length > 0) {
           await client.itemTag.createMany({
-            data: missingItemIds.map((itemId) => ({
+            data: missingLinks.map((l) => ({
               tagId: conflictingTag.id,
-              itemId,
+              itemId: l.itemId,
+              type: l.type ?? tag.type ?? TagType.manual,
             })),
             skipDuplicates: true,
           });

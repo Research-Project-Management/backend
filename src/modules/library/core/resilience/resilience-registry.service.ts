@@ -162,7 +162,7 @@ export class ResilienceRegistryService {
       statuses[name] = {
         state: breaker.getState(),
         failureCount: breaker.getFailures(),
-        canExecute: breaker.canExecute(),
+        canExecute: breaker.peekCanExecute(),
       };
     }
     return statuses;

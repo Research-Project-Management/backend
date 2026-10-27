@@ -108,6 +108,9 @@ export class PipelineBatchExecutor {
     const byEvidenceRef = new Map<string, MetadataCandidate[]>();
     const byDoi = new Map<string, MetadataCandidate[]>();
     const byTitle = new Map<string, MetadataCandidate[]>();
+    const byArxivId = new Map<string, MetadataCandidate[]>();
+    const byPmid = new Map<string, MetadataCandidate[]>();
+    const byIsbn = new Map<string, MetadataCandidate[]>();
 
     for (const ec of enrichedCandidates) {
       if (ec.sourceKind !== 'PROVIDER') continue;
@@ -127,6 +130,24 @@ export class PipelineBatchExecutor {
         const list = byTitle.get(ecTitle) || [];
         list.push(ec);
         byTitle.set(ecTitle, list);
+      }
+      const ecArxiv = ec.normalizedMetadata?.arxivId?.trim().toLowerCase();
+      if (ecArxiv) {
+        const list = byArxivId.get(ecArxiv) || [];
+        list.push(ec);
+        byArxivId.set(ecArxiv, list);
+      }
+      const ecPmid = ec.normalizedMetadata?.pmid?.trim().toLowerCase();
+      if (ecPmid) {
+        const list = byPmid.get(ecPmid) || [];
+        list.push(ec);
+        byPmid.set(ecPmid, list);
+      }
+      const ecIsbn = ec.normalizedMetadata?.isbn?.trim().toLowerCase();
+      if (ecIsbn) {
+        const list = byIsbn.get(ecIsbn) || [];
+        list.push(ec);
+        byIsbn.set(ecIsbn, list);
       }
     }
 
@@ -156,12 +177,27 @@ export class PipelineBatchExecutor {
       const candDoiKey = initialCand.normalizedMetadata?.doi
         ?.trim()
         .toLowerCase();
+      const candArxivKey = initialCand.normalizedMetadata?.arxivId
+        ?.trim()
+        .toLowerCase();
+      const candPmidKey = initialCand.normalizedMetadata?.pmid
+        ?.trim()
+        .toLowerCase();
+      const candIsbnKey = initialCand.normalizedMetadata?.isbn
+        ?.trim()
+        .toLowerCase();
       const candYearKey = initialCand.normalizedMetadata?.year
         ? String(initialCand.normalizedMetadata.year)
         : '';
       const candidateKey = candDoiKey
         ? `doi:${candDoiKey}`
-        : `title:${itemTitle.trim().toLowerCase()}|year:${candYearKey}`;
+        : candArxivKey
+          ? `arxiv:${candArxivKey}`
+          : candPmidKey
+            ? `pmid:${candPmidKey}`
+            : candIsbnKey
+              ? `isbn:${candIsbnKey}`
+              : `title:${itemTitle.trim().toLowerCase()}|year:${candYearKey}`;
 
       const alreadyCommitted =
         committedRecordKeys.get(candidateKey) ||
@@ -200,6 +236,30 @@ export class PipelineBatchExecutor {
           if (titleMatches) titleMatches.forEach((m) => matchedSet.add(m));
         }
 
+        const candArxiv = initialCand.normalizedMetadata?.arxivId
+          ?.trim()
+          .toLowerCase();
+        if (candArxiv) {
+          const arxivMatches = byArxivId.get(candArxiv);
+          if (arxivMatches) arxivMatches.forEach((m) => matchedSet.add(m));
+        }
+
+        const candPmid = initialCand.normalizedMetadata?.pmid
+          ?.trim()
+          .toLowerCase();
+        if (candPmid) {
+          const pmidMatches = byPmid.get(candPmid);
+          if (pmidMatches) pmidMatches.forEach((m) => matchedSet.add(m));
+        }
+
+        const candIsbn = initialCand.normalizedMetadata?.isbn
+          ?.trim()
+          .toLowerCase();
+        if (candIsbn) {
+          const isbnMatches = byIsbn.get(candIsbn);
+          if (isbnMatches) isbnMatches.forEach((m) => matchedSet.add(m));
+        }
+
         const candidatesForRecord = [initialCand, ...Array.from(matchedSet)];
         const itemDecision = await this.reconcile.execute(candidatesForRecord);
         const matchRes = await this.match.execute({
@@ -208,17 +268,8 @@ export class PipelineBatchExecutor {
         });
 
         if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
-          createdItemIds.push(matchRes.targetItemId);
-          duplicates++;
-          committedRecordKeys.set(candidateKey, {
-            itemId: matchRes.targetItemId,
-            status: 'DUPLICATE',
-          });
-          progressItems.push({
-            title: itemTitle,
-            status: 'DUPLICATE',
-            itemId: matchRes.targetItemId,
-            candidateKey,
+          await this.sideEffects.scanRetraction(itemDecision.proposedItem, {
+            localOnly: true,
           });
 
           if (this.catalogGateway) {
@@ -249,6 +300,7 @@ export class PipelineBatchExecutor {
                 resolvedScope.projectId,
                 matchRes.targetItemId,
                 itemDecision.proposedItem?.notes,
+                existingRec,
               );
             } catch {
               // Non-critical additive enrichment on duplicate
@@ -257,15 +309,30 @@ export class PipelineBatchExecutor {
 
           // Ensure duplicate items are assigned to target envelope collections
           if (envelope.collectionIds && envelope.collectionIds.length > 0) {
-            for (const colId of envelope.collectionIds) {
-              await this.sideEffects.assignItemToCollection(
-                resolvedScope.userId,
-                colId,
-                matchRes.targetItemId,
-                resolvedScope.projectId,
-              );
-            }
+            await Promise.all(
+              envelope.collectionIds.map((colId) =>
+                this.sideEffects.assignItemToCollection(
+                  resolvedScope.userId,
+                  colId,
+                  matchRes.targetItemId!,
+                  resolvedScope.projectId,
+                ),
+              ),
+            );
           }
+
+          createdItemIds.push(matchRes.targetItemId);
+          duplicates++;
+          committedRecordKeys.set(candidateKey, {
+            itemId: matchRes.targetItemId,
+            status: 'DUPLICATE',
+          });
+          progressItems.push({
+            title: itemTitle,
+            status: 'DUPLICATE',
+            itemId: matchRes.targetItemId,
+            candidateKey,
+          });
         } else {
           if (matchRes.matchType === 'PROBABLE' && matchRes.targetItemId) {
             await this.repo
@@ -297,6 +364,7 @@ export class PipelineBatchExecutor {
               tagIds: envelope.tagIds,
               userId: resolvedScope.userId,
               source: mapPayloadToSource(envelope.payload.kind),
+              skipPreMatch: true,
             },
           });
           if (created?.id) {

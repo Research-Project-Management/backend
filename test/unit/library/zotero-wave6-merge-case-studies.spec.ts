@@ -1,9 +1,6 @@
 import { Prisma, AnnotationType } from '@prisma/client';
-import {
-  DuplicateService,
-  DuplicateDetectorService,
-  DuplicateMergerService,
-} from '@/modules/library/ingestion/services/duplicate.service';
+import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
+import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { CatalogFacade } from '@/modules/library/catalog/catalog.facade';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { StateService } from '@/modules/library/catalog/services/state.service';
@@ -38,19 +35,22 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     catalogGateway?: ICatalogFacade,
     extractionGateway?: IExtractionFacade,
   ) =>
-    new DuplicateService(
-      new DuplicateDetectorService(catalogGateway, undefined, txService),
-      new DuplicateMergerService(
-        txService,
-        catalogGateway,
-        extractionGateway,
-      ),
-    );
+  {
+    const detector = new DuplicateDetectorService(catalogGateway, undefined, txService);
+    const merger = new DuplicateMergerService(txService, catalogGateway, extractionGateway);
+    return {
+      computeRecommendedMasterId: detector.computeRecommendedMasterId.bind(detector),
+      dismissDuplicates: detector.dismissDuplicates.bind(detector),
+      detectDuplicates: detector.detectDuplicates.bind(detector),
+      mergeDuplicates: merger.mergeDuplicates.bind(merger),
+      undoMerge: merger.undoMerge.bind(merger),
+    };
+  };
 
   const createMockTxService = (mockTx: Record<string, unknown>) => {
     mockTx.itemMetadata = {
       findFirst: jest.fn(async () => null),
-      update: jest.fn(async () => ({})),
+      update: jest.fn(async ({ where, data }: any) => { if (data?.deletedAt) deletedAttachmentIds.push(where.id); return { id: where?.id }; }),
       deleteMany: jest.fn(async () => ({ count: 0 })),
       ...(mockTx.itemMetadata as Record<string, unknown> | undefined),
     };
@@ -72,11 +72,39 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
           ) => Promise<T>,
         ) => {
           const helpers: TransactionHelpers = {
-            appendChangesBatch: jest.fn().mockResolvedValue(1),
-            recordTombstonesBatch: jest.fn().mockResolvedValue(1),
+            appendChangesBatch: jest.fn(async (scopeOrEntries: unknown, entries?: unknown[]) => {
+              const list = Array.isArray(scopeOrEntries)
+                ? scopeOrEntries
+                : (entries || []).map((e: unknown) => ({ scope: scopeOrEntries, change: e }));
+              changes.push(...list);
+              return list.length;
+            }) as any,
+            recordTombstonesBatch: jest.fn(async (scopeOrEntries: unknown, entries?: unknown[]) => {
+              const list = Array.isArray(scopeOrEntries)
+                ? scopeOrEntries
+                : (entries || []).map((e: unknown) => ({ scope: scopeOrEntries, tombstone: e }));
+              tombstones.push(...list);
+              return list.length;
+            }) as any,
             removeTombstone: jest.fn().mockResolvedValue(1),
             removeTombstonesBatch: jest.fn().mockResolvedValue(1),
-            publishOutboxBatch: jest.fn().mockResolvedValue([]),
+            publishOutboxBatch: jest.fn(async (scopeOrEvents: unknown, events?: Array<Record<string, unknown>>) => {
+              const list = Array.isArray(scopeOrEvents)
+                ? scopeOrEvents.map((ev: Record<string, unknown>) => ({
+                    scope: { userId: ev.userId, projectId: ev.projectId },
+                    aggregateId: String(ev.aggregateId),
+                    eventType: String(ev.eventType),
+                    payload: ev.payload,
+                  }))
+                : (events || []).map((ev: Record<string, unknown>) => ({
+                    scope: scopeOrEvents,
+                    aggregateId: String(ev.aggregateId),
+                    eventType: String(ev.eventType),
+                    payload: ev.payload,
+                  }));
+              outboxEvents.push(...list);
+              return list.map((_: unknown, idx: number) => `outbox-${idx}`);
+            }) as any,
             appendChange: jest.fn(async (scope, change) => {
               changes.push({ scope, change });
             }) as any,
@@ -277,7 +305,10 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
             deletedAttachmentIds.push(where.id);
             return { id: where.id };
           }),
-          update: jest.fn(async () => ({})),
+          update: jest.fn(async ({ where, data }: { where: { id: string }; data?: { deletedAt?: Date | null } }) => {
+            if (data?.deletedAt) deletedAttachmentIds.push(where.id);
+            return { id: where.id };
+          }),
           updateMany: jest.fn(async () => ({ count: 0 })),
         },
         annotation: {
@@ -1707,7 +1738,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
           scope: projectId,
           by: userId,
         })),
-      } as unknown as DuplicateService;
+      } as unknown as DuplicateDetectorService & DuplicateMergerService;
 
       const mockQualityService = {
         getQualityAudit: jest.fn(),

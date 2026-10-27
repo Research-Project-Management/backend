@@ -9,6 +9,7 @@ import {
   formatAttachmentFilename,
   DEFAULT_RENAME_PATTERN,
   RenamerItemMetadata,
+  isPlaceholderItemTitle,
 } from '@/modules/library/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
@@ -100,8 +101,26 @@ export class PipelineSideEffectsService {
     filename?: string,
     size?: number,
     parentMetadata?: Record<string, unknown> | null,
+    options?: { rethrowOnError?: boolean },
   ): Promise<void> {
     if (!fileId || !this.extractionGateway?.createAttachment) return;
+    if (parentMetadata) {
+      const existingAttachments = Array.isArray(parentMetadata.attachments)
+        ? (parentMetadata.attachments as Array<{
+            fileId?: string | null;
+            url?: string | null;
+          }>)
+        : [];
+      const alreadyHasFile = existingAttachments.some(
+        (att) =>
+          att &&
+          (att.fileId === fileId ||
+            (typeof att.url === 'string' && att.url.includes(fileId))),
+      );
+      if (alreadyHasFile) {
+        return;
+      }
+    }
     try {
       const fallbackFilename = filename || 'document.pdf';
       let resolvedFilename = fallbackFilename;
@@ -112,10 +131,7 @@ export class PipelineSideEffectsService {
             ? parentMetadata.title.trim()
             : '';
         const isGenericTitle =
-          !rawTitle ||
-          /^(uploaded document|untitled|untitled document|untitled record|document)$/i.test(
-            rawTitle,
-          ) ||
+          isPlaceholderItemTitle(rawTitle) ||
           (parentMetadata.extraFields &&
             typeof parentMetadata.extraFields === 'object' &&
             (parentMetadata.extraFields as Record<string, unknown>)
@@ -208,6 +224,9 @@ export class PipelineSideEffectsService {
       this.logger.warn(
         `[ATTACHMENT] Failed to attach file ${fileId} to item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
       );
+      if (options?.rethrowOnError) {
+        throw err;
+      }
     }
   }
 
@@ -319,6 +338,7 @@ export class PipelineSideEffectsService {
             snapshotTargetUrl,
             itemId,
             userId,
+            projectId,
           );
           capturedSnapshot = true;
           this.logger.log(
@@ -350,21 +370,37 @@ export class PipelineSideEffectsService {
       return;
     }
 
-    // If CommitStage already persisted notes via buildCommandCreateInput (notesList / notes / noteCount),
-    // skip creating duplicate note rows.
     const existingNotes = Array.isArray(createdItem?.notes)
       ? createdItem.notes
       : Array.isArray(createdItem?.notesList)
         ? createdItem.notesList
         : [];
     if (
-      existingNotes.length > 0 ||
-      (typeof createdItem?.noteCount === 'number' && createdItem.noteCount > 0)
+      existingNotes.length === 0 &&
+      typeof createdItem?.noteCount === 'number' &&
+      createdItem.noteCount > 0
     ) {
       return;
     }
 
     const seenContents = new Set<string>();
+    for (const existingNote of existingNotes) {
+      if (typeof existingNote === 'string' && existingNote.trim()) {
+        seenContents.add(existingNote.trim().toLowerCase());
+      } else if (existingNote && typeof existingNote === 'object') {
+        const rec = existingNote as Record<string, unknown>;
+        const txt = rec.contentMd ?? rec.content ?? rec.note;
+        if (typeof txt === 'string' && txt.trim()) {
+          seenContents.add(txt.trim().toLowerCase());
+        }
+      }
+    }
+    const notesToCreate: Array<{
+      contentMd: string;
+      title: string;
+      noteSource: string;
+    }> = [];
+
     for (const noteItem of notes) {
       const rawContent =
         typeof noteItem === 'object' && noteItem !== null
@@ -388,25 +424,37 @@ export class PipelineSideEffectsService {
       const trimmed = noteContent.trim();
       if (!trimmed || seenContents.has(trimmed.toLowerCase())) continue;
       seenContents.add(trimmed.toLowerCase());
-
-      try {
-        await this.catalogGateway.createNote(userId, {
-          itemId,
-          contentMd: trimmed,
-          title: noteSource || 'Imported Note',
-          projectId,
-          createdById: userId,
-        });
-        this.logger.log(
-          `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
-        );
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `[NOTE] Failed to create note for item ${itemId}: ${msg}`,
-        );
-      }
+      notesToCreate.push({
+        contentMd: trimmed,
+        title: noteSource || 'Imported Note',
+        noteSource,
+      });
     }
+
+    const createNote = this.catalogGateway?.createNote?.bind(this.catalogGateway);
+    if (!createNote) return;
+
+    await Promise.all(
+      notesToCreate.map(async ({ contentMd, title, noteSource }) => {
+        try {
+          await createNote(userId, {
+            itemId,
+            contentMd,
+            title,
+            projectId,
+            createdById: userId,
+          });
+          this.logger.log(
+            `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
+          );
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `[NOTE] Failed to create note for item ${itemId}: ${msg}`,
+          );
+        }
+      }),
+    );
   }
 
   async handleBlockedSubmission(params: {

@@ -1,12 +1,9 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { Injectable, Optional } from '@nestjs/common';
 import {
-  MetadataProvider,
   MetadataRequest,
   ProviderCapability,
   ProviderName,
   ProviderResult,
-  QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeDoi,
@@ -14,20 +11,20 @@ import {
   normalizePmid,
   normalizePmcid,
   normalizeIsbn,
-  normalizeAcademicTags,
   cleanAbstractText,
   cleanBibliographicText,
-  titleSimilarity,
   TITLE_MATCH_THRESHOLD,
   AcademicHttpClient,
   LibraryConfigService,
   libraryConfig,
+  normalizePageRange,
+  parseCreatorString,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import { normalizePageRange, parseCreatorString } from '@/modules/library/core';
+import { AbstractAcademicProvider } from './abstract-academic.provider';
 
 @Injectable()
-export class OpenAlexProvider implements MetadataProvider {
+export class OpenAlexProvider extends AbstractAcademicProvider {
   readonly id: ProviderName = 'OpenAlex';
   readonly capabilities: ProviderCapability = {
     queryTypes: ['DOI', 'TITLE', 'ARXIV', 'PMID'],
@@ -36,13 +33,14 @@ export class OpenAlexProvider implements MetadataProvider {
     maxConcurrency: 2,
   };
 
-  private readonly logger = new Logger(OpenAlexProvider.name);
   private readonly BASE_URL = 'https://api.openalex.org/works';
 
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
-  ) {}
+  ) {
+    super(httpClient);
+  }
 
   private get mailto(): string {
     return (
@@ -67,16 +65,7 @@ export class OpenAlexProvider implements MetadataProvider {
       'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
       Accept: 'application/json',
     };
-    if (this.httpClient) {
-      const { response } = await this.httpClient.request(url, { headers, signal });
-      return response;
-    }
-    return fetch(url, { headers, signal });
-  }
-
-  supports(input: QueryType | MetadataRequest): boolean {
-    const type = typeof input === 'string' ? input : input?.queryType;
-    return type ? this.capabilities.queryTypes.includes(type) : false;
+    return this.executeHttpFetch(url, signal, headers);
   }
 
   async resolve(
@@ -124,10 +113,7 @@ export class OpenAlexProvider implements MetadataProvider {
     const response = await this.executeFetch(url, signal);
     if (response.status === 404) return null;
     if (!response.ok) {
-      const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterMs = retryAfterHeader
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : undefined;
+      const retryAfterMs = this.parseRetryAfterHeader(response);
       throw new ProviderFetchError(
         `OpenAlex API HTTP ${response.status} for PMCID: ${pmcid}`,
         response.status,
@@ -183,10 +169,7 @@ export class OpenAlexProvider implements MetadataProvider {
     if (response.status === 404) return null;
 
     if (!response.ok) {
-      const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterMs = retryAfterHeader
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : undefined;
+      const retryAfterMs = this.parseRetryAfterHeader(response);
       throw new ProviderFetchError(
         `OpenAlex API HTTP ${response.status} for PMID: ${pmid}`,
         response.status,
@@ -232,10 +215,7 @@ export class OpenAlexProvider implements MetadataProvider {
     if (response.status === 404) return null;
 
     if (!response.ok) {
-      const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterMs = retryAfterHeader
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : undefined;
+      const retryAfterMs = this.parseRetryAfterHeader(response);
       throw new ProviderFetchError(
         `OpenAlex arXiv lookup HTTP ${response.status} for ${cleanArxiv}`,
         response.status,
@@ -280,10 +260,7 @@ export class OpenAlexProvider implements MetadataProvider {
     if (response.status === 404) return null;
 
     if (!response.ok) {
-      const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterMs = retryAfterHeader
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : undefined;
+      const retryAfterMs = this.parseRetryAfterHeader(response);
       throw new ProviderFetchError(
         `OpenAlex API HTTP ${response.status} for DOI: ${doi}`,
         response.status,
@@ -326,10 +303,7 @@ export class OpenAlexProvider implements MetadataProvider {
     if (response.status === 404) return null;
 
     if (!response.ok) {
-      const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterMs = retryAfterHeader
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : undefined;
+      const retryAfterMs = this.parseRetryAfterHeader(response);
       throw new ProviderFetchError(
         `OpenAlex search HTTP ${response.status} for title: ${cleanTitle}`,
         response.status,
@@ -353,17 +327,14 @@ export class OpenAlexProvider implements MetadataProvider {
     const payload = json as { results?: Array<Record<string, unknown>> } | null;
     const results = payload?.results || [];
 
-    let item: Record<string, unknown> | undefined;
-    let bestScore = 0;
-    for (const candidate of results) {
-      if (typeof candidate.title !== 'string') continue;
-      const score = titleSimilarity(cleanTitle, candidate.title);
-      if (score > bestScore) {
-        item = candidate;
-        bestScore = score;
-      }
-    }
-    if (!item || bestScore < TITLE_MATCH_THRESHOLD) {
+    const { bestMatch: item, bestScore } = this.rankBestTitleCandidate(
+      results,
+      cleanTitle,
+      (candidate) =>
+        typeof candidate.title === 'string' ? candidate.title : undefined,
+      TITLE_MATCH_THRESHOLD,
+    );
+    if (!item) {
       this.logger.debug(
         `OpenAlex title search rejected for "${cleanTitle}" (best similarity ${bestScore.toFixed(2)})`,
       );
@@ -387,7 +358,7 @@ export class OpenAlexProvider implements MetadataProvider {
         : typeof item.display_name === 'string'
           ? item.display_name
           : '';
-    const title = cleanBibliographicText(rawTitle) || 'Untitled Paper';
+    const title = cleanBibliographicText(rawTitle) || undefined;
 
     const authors: string[] = [];
     let firstAuthorInstitution: string | undefined;
@@ -510,10 +481,6 @@ export class OpenAlexProvider implements MetadataProvider {
     const openAccessPdfUrl =
       openAccess?.oa_url || primLoc?.pdf_url || undefined;
 
-    const rawVersion = createHash('md5')
-      .update(JSON.stringify(item))
-      .digest('hex');
-
     const canonicalUrl =
       (doi ? `https://doi.org/${doi}` : undefined) ||
       primLoc?.landing_page_url ||
@@ -557,7 +524,8 @@ export class OpenAlexProvider implements MetadataProvider {
           ? item.referenced_works.length
           : undefined;
 
-    const itemIdStr = typeof item.id === 'string' ? item.id : title;
+    const itemIdStr =
+      typeof item.id === 'string' ? item.id : title || identifier;
 
     // OpenAlex keywords/concepts/primary_topic are machine-generated topical guesses,
     // NOT author-provided or publisher-curated taxonomy tags (unlike Zotero's Crossref/arXiv/PubMed tags).
@@ -625,8 +593,14 @@ export class OpenAlexProvider implements MetadataProvider {
         : sourceName || undefined
       : undefined;
 
-    return {
-      provider: this.id,
+    return this.buildProviderResult({
+      identifier: doi || identifier,
+      rawPayload: item,
+      confidenceScore: confidence,
+      canonicalId: doi ? `doi:${doi}` : `openalex:${itemIdStr}`,
+      sourceUrl: canonicalUrl,
+      isOpenAccess: Boolean(openAccess?.is_oa),
+      openAccessPdfUrl,
       metadata: {
         title,
         authors,
@@ -667,22 +641,8 @@ export class OpenAlexProvider implements MetadataProvider {
         tags: keywords.length ? keywords : undefined,
         openAccessPdfUrl,
         libraryCatalog: 'OpenAlex',
-        provenance: {
-          originProvider: this.id,
-          resolvedAt: new Date().toISOString(),
-          canonicalId: doi ? `doi:${doi}` : `openalex:${itemIdStr}`,
-          canonicalUrl,
-          confidenceScore: confidence,
-          rawSnapshotHash: rawVersion,
-          isOpenAccess: Boolean(openAccess?.is_oa),
-          openAccessPdfUrl,
-        },
       },
-      confidence,
-      identifier: doi || identifier,
-      fetchedAt: new Date().toISOString(),
-      rawVersion,
-    };
+    });
   }
 
   private decodeInvertedIndex(index: Record<string, number[]>): string {

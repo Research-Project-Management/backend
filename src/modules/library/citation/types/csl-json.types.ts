@@ -14,9 +14,11 @@ export interface CslName {
 }
 
 export interface CslDate {
-  'date-parts': Array<Array<number | string>>;
+  'date-parts'?: Array<Array<number | string>>;
   raw?: string;
   literal?: string;
+  circa?: boolean | string | number;
+  season?: number | string;
 }
 
 export interface CslItemData {

@@ -51,6 +51,7 @@ export interface CslSourceItem {
   contributors?: ContributorLike[] | null; creators?: ContributorLike[] | null;
   tags?: unknown[] | string | null; keywords?: unknown[] | string | null;
   itemTags?: Array<{ tag?: { name?: string | null } | null; name?: string | null }> | null;
+  identifiers?: Array<{ type?: string | null; value?: string | null }> | null;
   extraFields?: Record<string, unknown> | null; metadata?: unknown; extra?: string | null;
 }
 
@@ -254,19 +255,48 @@ export class CslJsonMapper {
     const numPagesVal = getStrOrNum('numPages', 'numberOfPages');
     if (numPagesVal !== undefined) csl['number-of-pages'] = numPagesVal;
 
-    const doiVal = getStr('doi', 'DOI');
-    const isbnVal = getStr('isbn', 'ISBN');
-    const issnVal = getStr('issn', 'ISSN');
-    const pmidVal = getStr('pmid', 'PMID');
-    const pmcidVal = getStr('pmcid', 'PMCID');
-    const arxivVal = getStr('arxivId');
+    const getIdent = (...types: string[]): string | undefined => {
+      if (!Array.isArray(item.identifiers)) return undefined;
+      for (const t of types) {
+        const match = item.identifiers.find(
+          (ident) => ident?.type?.toLowerCase() === t.toLowerCase() && ident?.value?.trim(),
+        );
+        if (match?.value) return match.value.trim();
+      }
+      return undefined;
+    };
 
-    if (doiVal) csl.DOI = doiVal;
+    const doiVal = getStr('doi', 'DOI') || getIdent('doi');
+    const isbnVal = getStr('isbn', 'ISBN') || getIdent('isbn');
+    const issnVal = getStr('issn', 'ISSN') || getIdent('issn');
+    const pmidVal = getStr('pmid', 'PMID') || getIdent('pmid');
+    const pmcidVal = getStr('pmcid', 'PMCID') || getIdent('pmcid', 'pmc');
+    const arxivVal = getStr('arxivId', 'archiveID', 'archiveId') || getIdent('arxiv', 'arxivid');
+
+    if (doiVal) {
+      csl.DOI = doiVal
+        .replace(/^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)/i, '')
+        .trim();
+    }
     if (isbnVal) csl.ISBN = isbnVal;
     if (issnVal) csl.ISSN = issnVal;
-    if (pmidVal) csl.PMID = pmidVal;
-    if (pmcidVal) csl.PMCID = pmcidVal;
-    if (arxivVal) csl._arxivId = arxivVal;
+    if (pmidVal) csl.PMID = pmidVal.replace(/^pmid:\s*/i, '').trim();
+    if (pmcidVal) {
+      const cleanPmc = pmcidVal.replace(/^(?:pmcid|pmc):\s*/i, '').trim();
+      csl.PMCID = /^PMC/i.test(cleanPmc) ? cleanPmc.toUpperCase() : `PMC${cleanPmc}`;
+    }
+    if (arxivVal) {
+      csl._arxivId = arxivVal;
+      const primaryClassCandidate = getStr(
+        'primaryClass',
+        'arxivPrimaryClass',
+        'arxivCategory',
+      );
+      if (primaryClassCandidate) {
+        (csl as Record<string, unknown>)._arxivPrimaryClass =
+          primaryClassCandidate;
+      }
+    }
     if (item.url) csl.URL = item.url;
     if (item.abstract) csl.abstract = item.abstract;
 
@@ -342,7 +372,8 @@ export class CslJsonMapper {
     const rawExtraStr = getStr('extra');
     if (rawExtraStr) {
       this.parseExtraCslVariables(rawExtraStr, csl);
-    } else if (arxivVal) {
+    }
+    if (arxivVal && !csl.note && !csl.number) {
       csl.note = `arXiv: ${arxivVal}`;
     }
 

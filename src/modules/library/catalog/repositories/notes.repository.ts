@@ -198,13 +198,6 @@ export class NotesRepository {
         });
       }
 
-      if (typeof client.note?.update === 'function') {
-        return client.note.update({
-          where: { id },
-          data: updatePayload,
-        });
-      }
-
       return (
         (await client.note.findFirst?.({
           where: { id, ...scopeWhere, deletedAt: null },
@@ -297,13 +290,28 @@ export class NotesRepository {
     content: string,
     source?: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string | null,
   ): Promise<void> {
     const trimmed = content.trim();
     if (!trimmed) return;
     const client = this.getClient(tx);
+
+    let effectiveProjectId = normalizeProjectScopeId(projectId) ?? null;
+    if (!effectiveProjectId && typeof client.item?.findFirst === 'function') {
+      const parentItem = await client.item.findFirst({
+        where: { id: itemId, deletedAt: null },
+        select: { projectId: true },
+      });
+      if (parentItem?.projectId) {
+        effectiveProjectId = parentItem.projectId;
+      }
+    }
+
     const existing = await client.note.findFirst({
       where: {
-        userId,
+        ...(effectiveProjectId
+          ? { projectId: effectiveProjectId }
+          : { userId, projectId: null }),
         itemId,
         contentMd: trimmed,
         deletedAt: null,
@@ -314,6 +322,7 @@ export class NotesRepository {
     await client.note.create({
       data: {
         userId,
+        projectId: effectiveProjectId,
         itemId,
         title: source ? `Imported Note (${source})` : 'Imported Note',
         contentMd: trimmed,

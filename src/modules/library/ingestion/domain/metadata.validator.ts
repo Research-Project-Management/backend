@@ -19,7 +19,12 @@ export function validateMetadata(metadata: unknown): ItemMetadata | null {
 
   const raw = metadata as ItemMetadata;
   const title = raw.title?.trim();
-  if (!title) return null;
+  if (
+    !title ||
+    /^untitled(\s+paper|\s+document|\s+record|\s+arxiv\s+paper)?$/i.test(title)
+  ) {
+    return null;
+  }
 
   const normalized: ItemMetadata = {
     ...raw,
@@ -55,10 +60,114 @@ export function validateMetadata(metadata: unknown): ItemMetadata | null {
   return normalized;
 }
 
+export interface IBibliographicQualityRule {
+  readonly id:
+    | 'title'
+    | 'authors'
+    | 'year'
+    | 'identifier'
+    | 'doi'
+    | 'context'
+    | 'abstract';
+  readonly fieldKey?: string;
+  readonly issueCode?: string;
+  readonly weight: number;
+  isSatisfied(item: Record<string, unknown>): boolean;
+}
+
+export const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] = [
+  {
+    id: 'title',
+    fieldKey: 'title',
+    issueCode: 'missing_title',
+    weight: 25,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return typeof item.title === 'string' && item.title.trim().length > 3;
+    },
+  },
+  {
+    id: 'authors',
+    fieldKey: 'authors',
+    issueCode: 'missing_authors',
+    weight: 25,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return Boolean(
+        (Array.isArray(item.creators) && item.creators.length > 0) ||
+          (Array.isArray(item.authors) && item.authors.length > 0) ||
+          (Array.isArray(item.contributors) && item.contributors.length > 0),
+      );
+    },
+  },
+  {
+    id: 'year',
+    fieldKey: 'year',
+    issueCode: 'missing_year',
+    weight: 15,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      if (typeof item.year === 'number') {
+        return item.year > 1900;
+      }
+      if (typeof item.year === 'string' && item.year.trim().length > 0) {
+        const parsed = parseInt(item.year.trim(), 10);
+        return !Number.isNaN(parsed) && parsed > 1900;
+      }
+      return Boolean(item.publicationDate || item.date);
+    },
+  },
+  {
+    id: 'identifier',
+    fieldKey: 'identifier',
+    weight: 15,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return Boolean(
+        item.doi ||
+          item.isbn ||
+          item.issn ||
+          item.arxivId ||
+          item.pmid ||
+          item.pmcid ||
+          item.url,
+      );
+    },
+  },
+  {
+    id: 'doi',
+     issueCode: 'missing_doi',
+    weight: 0,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return Boolean(item.doi && String(item.doi).trim().length > 0);
+    },
+  },
+  {
+    id: 'context',
+    weight: 10,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return Boolean(
+        item.publicationTitle ||
+          item.journal ||
+          item.publisher ||
+          item.bookTitle ||
+          item.proceedingsTitle ||
+          item.conferenceName,
+      );
+    },
+  },
+  {
+    id: 'abstract',
+    fieldKey: 'abstract',
+    issueCode: 'missing_abstract',
+    weight: 10,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return Boolean(item.abstract || item.abstractNote);
+    },
+  },
+];
+
 export interface MetadataQualityEvaluation {
   score: number; // 0 - 100
   level: 'complete' | 'adequate' | 'minimal';
   missingKeyFields: string[];
+  issues: string[];
   presentFieldsCount: number;
   hasTitle: boolean;
   hasAuthors: boolean;
@@ -77,83 +186,36 @@ export function calculateMetadataQualityScore(
   options?: { typeSpecificKeys?: string[] },
 ): MetadataQualityEvaluation {
   const missingKeyFields: string[] = [];
+  const issues: string[] = [];
   let presentCount = 0;
   let totalScore = 0;
 
-  // 1. Title (25 pts)
-  const hasTitle = Boolean(
-    typeof item.title === 'string' && item.title.trim().length > 0,
-  );
-  if (hasTitle) {
-    totalScore += 25;
-    presentCount++;
-  } else {
-    missingKeyFields.push('title');
+  const satisfiedById = new Map<IBibliographicQualityRule['id'], boolean>();
+
+  for (const rule of BIBLIOGRAPHIC_QUALITY_RULES) {
+    const satisfied = rule.isSatisfied(item);
+    satisfiedById.set(rule.id, satisfied);
+
+    if (satisfied) {
+      if (rule.weight > 0) {
+        const effectiveWeight =
+          rule.id === 'abstract' && options?.typeSpecificKeys?.length
+            ? 5
+            : rule.weight;
+        totalScore += effectiveWeight;
+        presentCount++;
+      }
+    } else {
+      if (rule.fieldKey) {
+        missingKeyFields.push(rule.fieldKey);
+      }
+      if (rule.issueCode) {
+        issues.push(rule.issueCode);
+      }
+    }
   }
 
-  // 2. Creators / Authors (25 pts)
-  const hasAuthors = Boolean(
-    (Array.isArray(item.creators) && item.creators.length > 0) ||
-      (Array.isArray(item.authors) && item.authors.length > 0) ||
-      (Array.isArray(item.contributors) && item.contributors.length > 0),
-  );
-  if (hasAuthors) {
-    totalScore += 25;
-    presentCount++;
-  } else {
-    missingKeyFields.push('authors');
-  }
-
-  // 3. Date / Year (15 pts)
-  const hasYear = Boolean(item.year || item.publicationDate || item.date);
-  if (hasYear) {
-    totalScore += 15;
-    presentCount++;
-  } else {
-    missingKeyFields.push('year');
-  }
-
-  // 4. Identifier (15 pts)
-  const hasDoi = Boolean(item.doi);
-  const hasIdentifier = Boolean(
-    hasDoi ||
-      item.isbn ||
-      item.issn ||
-      item.arxivId ||
-      item.pmid ||
-      item.url,
-  );
-  if (hasIdentifier) {
-    totalScore += 15;
-    presentCount++;
-  } else {
-    missingKeyFields.push('identifier');
-  }
-
-  // 5. Context / Venue (10 pts)
-  const hasContext = Boolean(
-    item.publicationTitle ||
-      item.journal ||
-      item.publisher ||
-      item.bookTitle ||
-      item.proceedingsTitle ||
-      item.conferenceName,
-  );
-  if (hasContext) {
-    totalScore += 10;
-    presentCount++;
-  }
-
-  // 6. Abstract (5 pts, or +10 bonus when no type-specific keys are evaluated)
-  const hasAbstract = Boolean(item.abstract || item.abstractNote);
-  if (hasAbstract) {
-    totalScore += options?.typeSpecificKeys?.length ? 5 : 10;
-    presentCount++;
-  } else {
-    missingKeyFields.push('abstract');
-  }
-
-  // 7. Optional type-specific fields (5 pts)
+  // Optional type-specific fields (5 pts)
   if (options?.typeSpecificKeys && options.typeSpecificKeys.length > 0) {
     let extraFields: Record<string, unknown> = {};
     if (item.extraFields && typeof item.extraFields === 'object') {
@@ -187,14 +249,31 @@ export function calculateMetadataQualityScore(
     score,
     level,
     missingKeyFields,
+    issues,
     presentFieldsCount: presentCount,
-    hasTitle,
-    hasAuthors,
-    hasYear,
-    hasIdentifier,
-    hasDoi,
-    hasContext,
-    hasAbstract,
+    hasTitle: Boolean(satisfiedById.get('title')),
+    hasAuthors: Boolean(satisfiedById.get('authors')),
+    hasYear: Boolean(satisfiedById.get('year')),
+    hasIdentifier: Boolean(satisfiedById.get('identifier')),
+    hasDoi: Boolean(satisfiedById.get('doi')),
+    hasContext: Boolean(satisfiedById.get('context')),
+    hasAbstract: Boolean(satisfiedById.get('abstract')),
   };
 }
 
+export function diagnoseBibliographicQualityIssues(
+  item: Record<string, unknown>,
+  existingEvaluation?: MetadataQualityEvaluation,
+): {
+  evaluation: MetadataQualityEvaluation;
+  issues: string[];
+  isHealthy: boolean;
+} {
+  const evaluation =
+    existingEvaluation ?? calculateMetadataQualityScore(item);
+  return {
+    evaluation,
+    issues: evaluation.issues,
+    isHealthy: evaluation.issues.length === 0,
+  };
+}

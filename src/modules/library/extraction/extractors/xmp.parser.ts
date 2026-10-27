@@ -108,12 +108,16 @@ export class XmpParser {
       const prismDate = rawPacket.match(
         /<prism:publicationDate>([^<]+)<\/prism:publicationDate>/i,
       )?.[1];
-      const xmpDate = rawPacket.match(
-        /<xmp:CreateDate>([^<]+)<\/xmp:CreateDate>/i,
+      const prismCoverDate = rawPacket.match(
+        /<prism:coverDate>([^<]+)<\/prism:coverDate>/i,
       )?.[1];
-      const dcDate = rawPacket.match(/<dc:date>([^<]+)<\/dc:date>/i)?.[1];
+      const dcDateLi = rawPacket.match(
+        /<dc:date>[\s\S]*?<rdf:li[^>]*>([\s\S]*?)<\/rdf:li>[\s\S]*?<\/dc:date>/i,
+      )?.[1];
+      const dcDateFlat = rawPacket.match(/<dc:date>([^<]+)<\/dc:date>/i)?.[1];
+      const dcDate = dcDateLi || dcDateFlat;
 
-      const chosenDate = prismDate || dcDate || xmpDate;
+      const chosenDate = prismDate || prismCoverDate || dcDate;
       if (chosenDate) {
         metadata.publicationDate = chosenDate.trim();
         const yearMatch = chosenDate.match(/(\d{4})/);

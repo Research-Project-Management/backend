@@ -9,133 +9,35 @@ import {
 import {
   ALL_RECONCILABLE_METADATA_FIELDS,
   resolveBidirectionalBaseFields,
+  resolveFieldAliases,
 } from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
 import { parseCreatorString } from '@/modules/library/core/domain/author.domain';
+import { normalizeArxivId } from '@/modules/library/core/domain/identifier.domain';
+import {
+  selectAuthoritativeCreatorVariant,
+  mergeReconciledTagArrays,
+  mergeReconciledNotesArrays,
+  mergeReconciledExtraText,
+  resolveFieldReconciliationStrategy,
+  WeightedFieldVariant,
+} from '@/modules/library/ingestion/domain/field-reconciliation.strategies';
 
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+export {
+  selectAuthoritativeCreatorVariant,
+  mergeReconciledTagArrays,
+  mergeReconciledNotesArrays,
+  mergeReconciledExtraText,
+  resolveFieldReconciliationStrategy,
+};
+export type { WeightedFieldVariant };
 
 export {
   SOURCE_WEIGHTS,
   FIELD_AUTHORITY_WEIGHTS,
   FIELD_AUTHORITY,
   resolveProviderFieldWeight,
-} from '../constants/source-weights.catalog';
-import {
-  FIELD_AUTHORITY_WEIGHTS,
-  resolveProviderFieldWeight,
-} from '../constants/source-weights.catalog';
-
-const AUTHORITATIVE_CREATOR_PROVIDERS = new Set([
-  'crossref',
-  'pubmed',
-  'arxiv',
-  'enrichedprovider',
-]);
-
-/**
- * Selects the best creator/author list variant, preferring complete lists from
- * authoritative publisher registries (CrossRef, PubMed, arXiv, EnrichedProvider)
- * over shorter/truncated lists from local extraction.
- */
-export function selectAuthoritativeCreatorVariant<
-  T extends { sourceProvider?: string; val: unknown },
->(sortedVariants: T[]): T {
-  const firstNonEmpty =
-    sortedVariants.find((v) => Array.isArray(v.val) && v.val.length > 0) ||
-    sortedVariants[0];
-  const authoritative = sortedVariants.find(
-    (v) =>
-      AUTHORITATIVE_CREATOR_PROVIDERS.has(
-        (v.sourceProvider || '').toLowerCase(),
-      ) &&
-      Array.isArray(v.val) &&
-      v.val.length > 0,
-  );
-  if (
-    authoritative &&
-    Array.isArray(authoritative.val) &&
-    Array.isArray(firstNonEmpty?.val) &&
-    authoritative.val.length > firstNonEmpty.val.length
-  ) {
-    return authoritative;
-  }
-  return firstNonEmpty;
-}
-
-/**
- * Unions and normalizes academic tags/keywords/labels across multiple candidate arrays.
- */
-export function mergeReconciledTagArrays(arrays: unknown[]): string[] {
-  const candidateTags: string[] = [];
-  for (const arr of arrays) {
-    if (Array.isArray(arr)) {
-      for (const t of arr) {
-        if (typeof t === 'string' && t.trim()) {
-          candidateTags.push(t.trim());
-        }
-      }
-    }
-  }
-  return normalizeAcademicTags(candidateTags);
-}
-
-/**
- * Deduplicates notes across multiple candidate arrays by case-insensitive content text.
- */
-export function mergeReconciledNotesArrays(
-  arrays: unknown[],
-  normalizeToObject = false,
-): unknown[] {
-  const seen = new Set<string>();
-  const merged: unknown[] = [];
-  for (const arr of arrays) {
-    if (!Array.isArray(arr)) continue;
-    for (const item of arr) {
-      const noteObj =
-        item && typeof item === 'object'
-          ? (item as Record<string, unknown>)
-          : null;
-      const rawNoteContent =
-        noteObj?.content ?? noteObj?.contentMd ?? noteObj?.note;
-      const text =
-        typeof item === 'string'
-          ? item.trim()
-          : typeof rawNoteContent === 'string'
-            ? rawNoteContent.trim()
-            : '';
-      const dedupeKey = text
-        ? text.toLowerCase()
-        : normalizeToObject
-          ? ''
-          : JSON.stringify(item);
-      if (dedupeKey && !seen.has(dedupeKey)) {
-        seen.add(dedupeKey);
-        if (normalizeToObject) {
-          merged.push(
-            typeof item === 'string'
-              ? { content: text }
-              : {
-                  content: text,
-                  ...(typeof noteObj?.title === 'string' && noteObj.title.trim()
-                    ? { title: noteObj.title.trim() }
-                    : {}),
-                  ...(typeof noteObj?.source === 'string' &&
-                  noteObj.source.trim()
-                    ? { source: noteObj.source.trim() }
-                    : {}),
-                  ...(Array.isArray(noteObj?.tags) && noteObj.tags.length > 0
-                    ? { tags: noteObj.tags as string[] }
-                    : {}),
-                },
-          );
-        } else {
-          merged.push(item);
-        }
-      }
-    }
-  }
-  return merged;
-}
+} from '@/modules/library/core';
+import { resolveProviderFieldWeight } from '@/modules/library/core';
 
 /**
  * Shared post-reconciliation cleanup for resolved bibliographic metadata:
@@ -159,6 +61,43 @@ export function finalizeReconciledBibliographicMetadata(
   }
 
   const itemType = String(resolved.itemType);
+  const resolvedYearNum =
+    typeof resolved.year === 'number'
+      ? resolved.year
+      : typeof resolved.year === 'string' && /^\d{4}$/.test(resolved.year.trim())
+        ? Number(resolved.year.trim())
+        : undefined;
+  if (resolvedYearNum && resolvedYearNum >= 1000 && resolvedYearNum <= 2999) {
+    const yearStr = String(resolvedYearNum);
+    for (const dateKey of ['publicationDate', 'date'] as const) {
+      const rawDate = resolved[dateKey];
+      if (typeof rawDate === 'string' && rawDate.trim()) {
+        const matchYear = rawDate.match(/\b(19\d{2}|20\d{2})\b/);
+        if (matchYear && matchYear[1] !== yearStr) {
+          const matchingCandDate = _candidates
+            ?.map((c) => {
+              const meta = c.metadata ?? (c as Record<string, unknown>);
+              const candVal = meta?.[dateKey];
+              if (typeof candVal === 'string') return candVal;
+              if (
+                candVal &&
+                typeof candVal === 'object' &&
+                typeof (candVal as { normalizedValue?: unknown }).normalizedValue === 'string'
+              ) {
+                return (candVal as { normalizedValue: string }).normalizedValue;
+              }
+              return undefined;
+            })
+            .find(
+              (d) =>
+                typeof d === 'string' &&
+                d.match(/\b(19\d{2}|20\d{2})\b/)?.[1] === yearStr,
+            );
+          resolved[dateKey] = matchingCandDate ?? yearStr;
+        }
+      }
+    }
+  }
   resolveBidirectionalBaseFields(resolved, itemType, undefined, false);
 
   if (itemType === 'journalArticle') {
@@ -168,19 +107,20 @@ export function finalizeReconciledBibliographicMetadata(
       resolved.publicationTitle = resolved.journal;
     }
   } else if (itemType === 'preprint') {
-    const rawArxivCandidate = String(
-      resolved.arxivId ||
-        (/^arxiv:/i.test(String(resolved.archiveId || ''))
-          ? resolved.archiveId
-          : '') ||
-        (typeof resolved.doi === 'string' &&
-        /^10\.48550\/arxiv\./i.test(resolved.doi)
-          ? resolved.doi.replace(/^10\.48550\/arxiv\./i, '')
-          : ''),
-    )
-      .replace(/^arxiv:\s*/i, '')
-      .replace(/v\d+$/i, '')
-      .trim();
+    const rawArxivCandidate =
+      normalizeArxivId(
+        String(
+          resolved.arxivId ||
+            (/^arxiv:/i.test(String(resolved.archiveId || ''))
+              ? resolved.archiveId
+              : '') ||
+            (typeof resolved.doi === 'string' &&
+            /^10\.48550\/arxiv\./i.test(resolved.doi)
+              ? resolved.doi.replace(/^10\.48550\/arxiv\./i, '')
+              : ''),
+        ),
+        { stripVersion: true },
+      ) || '';
     const isValidArxivId =
       /^\d{4}\.\d{4,5}$/.test(rawArxivCandidate) ||
       /^[a-z-]+(?:\.[a-z]{2})?\/\d{7}$/i.test(rawArxivCandidate);
@@ -243,7 +183,11 @@ export function finalizeReconciledBibliographicMetadata(
       lastName?: string;
     }>;
     const authorsList = resolved.authors as unknown[] | undefined;
-    if (!authorsList || authorsList.length === 0) {
+    if (
+      !authorsList ||
+      authorsList.length === 0 ||
+      authorsList.length !== creatorsList.length
+    ) {
       const authorCreators = creatorsList.filter(
         (c) => c.creatorType === 'author' || !c.creatorType,
       );
@@ -271,11 +215,6 @@ export function finalizeReconciledBibliographicMetadata(
 
 @Injectable()
 export class MetadataReconciliationService {
-  /**
-   * Field authority weighting matrix — evidence-based per-provider, per-field confidence scores.
-   */
-  private readonly FIELD_AUTHORITY_WEIGHTS = FIELD_AUTHORITY_WEIGHTS;
-
   /**
    * Reconciles multiple metadata candidates from different providers into a single,
    * high-integrity ItemMetadata object with field-level assertions and conflict audit.
@@ -311,6 +250,18 @@ export class MetadataReconciliationService {
 
     const resolved: Partial<ItemMetadata> = {};
 
+    const normalizedCandidates: MetadataCandidate[] = candidates.map((cand) => {
+      if (!cand?.metadata || typeof cand.metadata !== 'object') return cand;
+      const clonedMeta: Record<string, unknown> = { ...cand.metadata };
+      const candType = String(clonedMeta.itemType || 'journalArticle');
+      resolveFieldAliases(clonedMeta);
+      resolveBidirectionalBaseFields(clonedMeta, candType, undefined, false);
+      return {
+        ...cand,
+        metadata: clonedMeta as ItemMetadata,
+      };
+    });
+
     const dynamicCandidateKeys = new Set<string>([
       'title',
       'authors',
@@ -330,7 +281,7 @@ export class MetadataReconciliationService {
       ...ALL_RECONCILABLE_METADATA_FIELDS,
       ...Object.keys(userOverrides || {}),
     ]);
-    for (const cand of candidates) {
+    for (const cand of normalizedCandidates) {
       if (cand?.metadata && typeof cand.metadata === 'object') {
         for (const k of Object.keys(cand.metadata)) {
           dynamicCandidateKeys.add(k);
@@ -357,13 +308,9 @@ export class MetadataReconciliationService {
         continue;
       }
 
-      const fieldVariants: {
-        candidate: MetadataCandidate;
-        val: unknown;
-        effectiveWeight: number;
-      }[] = [];
+      const fieldVariants: WeightedFieldVariant[] = [];
 
-      for (const cand of candidates) {
+      for (const cand of normalizedCandidates) {
         const val = cand.metadata[field];
         if (val !== undefined && val !== null && val !== '') {
           if (Array.isArray(val) && val.length === 0) continue;
@@ -386,83 +333,12 @@ export class MetadataReconciliationService {
 
       fieldVariants.sort((a, b) => b.effectiveWeight - a.effectiveWeight);
 
-      if (field === 'extraFields') {
-        const merged = fieldVariants
-          .slice()
-          .reverse()
-          .reduce<Record<string, unknown>>(
-            (accumulator, variant) => ({
-              ...accumulator,
-              ...(variant.val as Record<string, unknown>),
-            }),
-            {},
-          );
-        resolved.extraFields = merged;
-        assertions.push({
-          field,
-          value: this.cloneValue(merged),
-          sourceProvider: fieldVariants[0].candidate.sourceProvider,
-          confidenceScore: Number(fieldVariants[0].effectiveWeight.toFixed(3)),
-          isUserOverride: false,
-          timestamp: new Date().toISOString(),
-        });
-        continue;
-      }
+      const strategy = resolveFieldReconciliationStrategy(field);
+      const outcome = strategy.reconcileField(field, fieldVariants);
+      (resolved as Record<string, unknown>)[field] = outcome.value;
+      assertions.push(outcome.assertion);
 
-      if (field === 'tags' || field === 'labels' || field === 'keywords') {
-        const values = mergeReconciledTagArrays(
-          fieldVariants.map((variant) => variant.val),
-        );
-        (resolved as Record<string, unknown>)[field] = values;
-        assertions.push({
-          field,
-          value: [...values],
-          sourceProvider: fieldVariants[0].candidate.sourceProvider,
-          confidenceScore: Number(fieldVariants[0].effectiveWeight.toFixed(3)),
-          isUserOverride: false,
-          timestamp: new Date().toISOString(),
-        });
-        continue;
-      }
-
-      if (field === 'notes') {
-        const unique = mergeReconciledNotesArrays(
-          fieldVariants.map((variant) => variant.val),
-          false,
-        );
-        resolved.notes = unique as ItemMetadata['notes'];
-        assertions.push({
-          field,
-          value: this.cloneValue(unique),
-          sourceProvider: fieldVariants[0].candidate.sourceProvider,
-          confidenceScore: Number(fieldVariants[0].effectiveWeight.toFixed(3)),
-          isUserOverride: false,
-          timestamp: new Date().toISOString(),
-        });
-        continue;
-      }
-
-      let winner = fieldVariants[0];
-      if (field === 'creators' || field === 'authors') {
-        winner = selectAuthoritativeCreatorVariant(
-          fieldVariants.map((v) => ({
-            ...v,
-            sourceProvider: v.candidate.sourceProvider,
-          })),
-        );
-      }
-
-      resolved[field] = this.cloneValue(winner.val);
-      assertions.push({
-        field,
-        value: this.cloneValue(winner.val),
-        sourceProvider: winner.candidate.sourceProvider,
-        confidenceScore: Number(winner.effectiveWeight.toFixed(3)),
-        isUserOverride: false,
-        timestamp: new Date().toISOString(),
-      });
-
-      if (fieldVariants.length > 1) {
+      if (outcome.detectConflicts && fieldVariants.length > 1) {
         const conflict = this.detectFieldConflict(field, fieldVariants);
         if (conflict) {
           conflicts.push(conflict);

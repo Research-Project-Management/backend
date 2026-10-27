@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { QueueService } from './queue.service';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
@@ -208,18 +214,61 @@ export class IngestionRunReporterService {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
 
-    await this.repo.updateRunStatus(scope, runId, IngestionStatus.PENDING);
+    const retryableStatuses = new Set<string>([
+      IngestionStatus.FAILED_RETRYABLE,
+      IngestionStatus.FAILED_FINAL,
+      IngestionStatus.STALLED,
+    ]);
+    if (!retryableStatuses.has(String(run.status))) {
+      if (run.status === IngestionStatus.RUNNING) {
+        throw new ConflictException(
+          `Ingestion run '${runId}' is currently RUNNING and cannot be retried`,
+        );
+      }
+      throw new BadRequestException(
+        `Ingestion run '${runId}' with status '${String(run.status)}' cannot be retried`,
+      );
+    }
+
+    await this.repo.updateRunStatus(scope, runId, IngestionStatus.PENDING, {
+      previousStatus: run.status,
+    });
+
+    const resolvedProjectId =
+      projectId && projectId !== 'user' && projectId !== userIdOrScopeId
+        ? projectId
+        : (run.projectId ?? undefined);
+    const resolvedUserId = run.userId || userIdOrScopeId;
+    const queueTargetScope = resolvedProjectId || resolvedUserId || effectiveScopeId;
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
     if (envelope && typeof envelope === 'object') {
-      void this.queue.enqueue(runId, effectiveScopeId, {
-        ...envelope,
-        ...(projectId
-          ? { userId: userIdOrScopeId, projectId }
-          : { projectId: effectiveScopeId }),
-      });
+      void this.queue
+        .enqueue(runId, queueTargetScope, {
+          ...envelope,
+          userId: resolvedUserId,
+          projectId: resolvedProjectId,
+        })
+        .catch(async (enqueueErr: unknown) => {
+          const errMsg =
+            enqueueErr instanceof Error
+              ? enqueueErr.message
+              : String(enqueueErr);
+          this.logger.error(
+            `Failed to enqueue retried ingestion run ${runId}: ${errMsg}`,
+          );
+          await this.repo
+            .updateRunStatus(scope, runId, IngestionStatus.FAILED_RETRYABLE, {
+              lastError: `Failed to enqueue retry run: ${errMsg}`,
+            })
+            .catch((repoErr: unknown) => {
+              this.logger.error(
+                `Failed to revert run ${runId} to FAILED_RETRYABLE after queue failure: ${repoErr instanceof Error ? repoErr.message : String(repoErr)}`,
+              );
+            });
+        });
       this.logger.log(
-        `Retry initiated and re-enqueued for run ${runId} (scope: ${effectiveScopeId})`,
+        `Retry initiated and re-enqueued for run ${runId} (scope: ${queueTargetScope})`,
       );
     } else {
       this.logger.warn(

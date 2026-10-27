@@ -1,12 +1,9 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { createHash } from 'crypto';
 import {
-  MetadataProvider,
   MetadataRequest,
   ProviderCapability,
   ProviderName,
   ProviderResult,
-  QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeArxivId,
@@ -21,11 +18,11 @@ import {
   LibraryConfigService,
   libraryConfig,
 } from '@/modules/library/core';
-import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
+import { AbstractAcademicProvider } from './abstract-academic.provider';
 
 @Injectable()
-export class ArxivProvider implements MetadataProvider {
+export class ArxivProvider extends AbstractAcademicProvider {
   readonly id: ProviderName = 'arXiv';
   readonly capabilities: ProviderCapability = {
     queryTypes: ['ARXIV'],
@@ -35,20 +32,17 @@ export class ArxivProvider implements MetadataProvider {
   };
 
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
-  ) {}
+  ) {
+    super(httpClient);
+  }
 
   private get baseUrl(): string {
     return (
       this.configService?.providers.arxivBaseUrl ??
       libraryConfig().providers.arxivBaseUrl
     );
-  }
-
-  supports(input: QueryType | MetadataRequest): boolean {
-    const type = typeof input === 'string' ? input : input?.queryType;
-    return type ? this.capabilities.queryTypes.includes(type) : false;
   }
 
   async resolve(
@@ -65,39 +59,13 @@ export class ArxivProvider implements MetadataProvider {
       Accept: 'application/atom+xml, application/xml, text/xml',
     };
 
-    let response: Response;
-    if (this.httpClient) {
-      ({ response } = await this.httpClient.request(url, { headers, signal }));
-    } else {
-      response = await fetch(url, { headers, signal });
-    }
-
-    if (response.status === 404) return null;
-
-    if (!response.ok) {
-      const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterMs = retryAfterHeader
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : undefined;
-      throw new ProviderFetchError(
-        `arXiv API HTTP ${response.status} for id: ${cleanId}`,
-        response.status,
-        retryAfterMs,
-      );
-    }
-
-    let xmlText: string;
-    try {
-      xmlText = await response.text();
-    } catch {
-      throw new ProviderFetchError(
-        `Failed to read arXiv XML response for id: ${cleanId}`,
-        undefined,
-        undefined,
-        false,
-        true,
-      );
-    }
+    const xmlText = await this.fetchTextWithResilience(
+      url,
+      signal,
+      headers,
+      `id: ${cleanId}`,
+    );
+    if (!xmlText) return null;
 
     return this.parseAtomXml(xmlText, cleanId);
   }
@@ -112,8 +80,8 @@ export class ArxivProvider implements MetadataProvider {
 
     const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/i);
     const title = titleMatch
-      ? cleanBibliographicText(titleMatch[1]) || 'Untitled arXiv Paper'
-      : 'Untitled arXiv Paper';
+      ? cleanBibliographicText(titleMatch[1]) || undefined
+      : undefined;
 
     const authors: string[] = [];
     const authorMatches = entry.matchAll(
@@ -232,14 +200,19 @@ export class ArxivProvider implements MetadataProvider {
     const pdfUrl = `https://arxiv.org/pdf/${cleanId}.pdf`;
     const canonicalUrl = `https://arxiv.org/abs/${cleanId}`;
 
-    const rawVersion = createHash('md5').update(xml).digest('hex');
-
     const creators = authors.map((authorName, authorIndex) =>
       parseCreatorString(authorName, authorIndex, 'author'),
     );
 
-    return {
-      provider: this.id,
+    return this.buildProviderResult({
+      identifier: cleanId,
+      confidenceScore: 0.95,
+      rawPayload: xml,
+      retrievalMethod: 'api',
+      sourceUrl: canonicalUrl,
+      canonicalId: `arxiv:${cleanId}`,
+      isOpenAccess: true,
+      openAccessPdfUrl: pdfUrl,
       metadata: {
         arxivId: cleanId,
         doi,
@@ -279,21 +252,7 @@ export class ArxivProvider implements MetadataProvider {
           ...(journal ? { journalRef: journal } : {}),
           ...(publishedDoi ? { publishedDoi } : {}),
         },
-        provenance: {
-          originProvider: this.id,
-          resolvedAt: new Date().toISOString(),
-          canonicalId: `arxiv:${cleanId}`,
-          canonicalUrl,
-          confidenceScore: 0.95,
-          rawSnapshotHash: rawVersion,
-          isOpenAccess: true,
-          openAccessPdfUrl: pdfUrl,
-        },
       },
-      confidence: 0.95,
-      identifier: cleanId,
-      fetchedAt: new Date().toISOString(),
-      rawVersion,
-    };
+    });
   }
 }

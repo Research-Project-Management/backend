@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Inject,
   NotFoundException,
   ForbiddenException,
   Optional,
@@ -20,7 +21,6 @@ import {
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
-import { disambiguateCitationKey } from '@/modules/library/catalog/domain/citation-key.engine';
 
 interface CslItemData {
   id?: string;
@@ -73,9 +73,13 @@ export class ItemCurationService {
     private readonly query: QueryRepository,
     private readonly command: CommandRepository,
     private readonly libraryTx: TransactionService,
-    @Optional() cacheOrCoordinator?: RedisCacheService | ItemCacheCoordinator,
+    @Optional()
+    @Inject(RedisCacheService)
+    cacheOrCoordinator?: RedisCacheService | ItemCacheCoordinator,
     @Optional() private readonly itemQueryService?: ItemQueryService,
-    @Optional() injectedCoordinator?: ItemCacheCoordinator,
+    @Optional()
+    @Inject(ItemCacheCoordinator)
+    injectedCoordinator?: ItemCacheCoordinator,
   ) {
     if (injectedCoordinator) {
       this.cacheCoordinator = injectedCoordinator;
@@ -215,6 +219,11 @@ export class ItemCurationService {
       );
     }
 
+    const candidatesToImport: Array<{
+      source: ImportSourceItem;
+      createData: CreateItemData;
+    }> = [];
+
     for (const source of sourceItems) {
       const isDuplicate =
         Boolean(
@@ -229,55 +238,7 @@ export class ItemCurationService {
       }
 
       const createData = buildImportItemPayload(source, userId);
-
-      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-        if (source.citationKey) {
-          const disambiguated = await disambiguateCitationKey(
-            tx,
-            source.citationKey,
-            { userId, projectId },
-          );
-          if (disambiguated) {
-            createData.citationKey = disambiguated;
-          }
-        }
-
-        const item = await this.command.create(
-          userId,
-          createData,
-          tx,
-          projectId,
-        );
-
-        await helpers.appendChange(
-          { userId, projectId },
-          {
-            entityType: 'Item',
-            entityId: item.id,
-            action: 'create',
-            version: item.version,
-            data: item,
-          },
-        );
-
-        const payload = buildItemCreatedOutboxPayload({
-          itemId: item.id,
-          userId,
-          projectId,
-          title: item.title,
-          source: 'external_sync',
-          doi: item.doi,
-        });
-
-        await helpers.publishOutbox(
-          { userId, projectId },
-          item.id,
-          LIBRARY_EVENT_TYPES.ITEM_CREATED,
-          payload,
-        );
-
-        return ItemsMapper.toDomain(item);
-      });
+      candidatesToImport.push({ source, createData });
 
       if (source.doi?.trim()) {
         existingDois.add(source.doi.trim().toLowerCase());
@@ -288,8 +249,79 @@ export class ItemCurationService {
       if (source.title?.trim()) {
         existingTitles.add(source.title.trim().toLowerCase());
       }
+    }
 
-      importedCount++;
+    if (candidatesToImport.length > 0) {
+      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        const changeEntries: Array<{
+          entityType: 'Item';
+          entityId: string;
+          action: 'create';
+          version: number;
+          data: unknown;
+        }> = [];
+        const outboxEvents: Array<{
+          aggregateId: string;
+          eventType: string;
+          payload: unknown;
+        }> = [];
+
+        for (const { createData } of candidatesToImport) {
+          const item = await this.command.create(
+            userId,
+            createData,
+            tx,
+            projectId,
+          );
+
+          const domainItem = ItemsMapper.toDomain(item);
+          changeEntries.push({
+            entityType: 'Item',
+            entityId: item.id,
+            action: 'create',
+            version: item.version,
+            data: domainItem,
+          });
+
+          const payload = buildItemCreatedOutboxPayload({
+            itemId: item.id,
+            userId,
+            projectId,
+            title: item.title,
+            source: 'external_sync',
+            doi: item.doi,
+          });
+
+          outboxEvents.push({
+            aggregateId: item.id,
+            eventType: LIBRARY_EVENT_TYPES.ITEM_CREATED,
+            payload,
+          });
+
+          importedCount++;
+        }
+
+        if (helpers.appendChangesBatch) {
+          await helpers.appendChangesBatch({ userId, projectId }, changeEntries);
+        } else {
+          for (const entry of changeEntries) {
+            await helpers.appendChange({ userId, projectId }, entry);
+          }
+        }
+
+        if (helpers.publishOutboxBatch) {
+          await helpers.publishOutboxBatch({ userId, projectId }, outboxEvents);
+        } else {
+          for (const ev of outboxEvents) {
+            await helpers.publishOutbox(
+              { userId, projectId },
+              ev.aggregateId,
+              ev.eventType,
+              ev.payload,
+            );
+          }
+        }
+      });
     }
 
     if (importedCount > 0) {
@@ -392,10 +424,78 @@ export interface ImportSourceItem {
 }
 
 export function buildImportItemPayload(
-  source: ImportSourceItem,
+  rawSource: ImportSourceItem,
   userId: string,
 ): CreateItemData {
-  const primaryAttachment = source.attachments?.[0];
+  const unpacked = ItemsMapper.toDomain(rawSource) as Record<string, unknown>;
+  const source: ImportSourceItem = {
+    ...unpacked,
+    ...rawSource,
+    publicationDate:
+      rawSource.publicationDate ??
+      (unpacked.publicationDate as string | null | undefined) ??
+      (unpacked.date as string | null | undefined),
+    publisher:
+      rawSource.publisher ?? (unpacked.publisher as string | null | undefined),
+    place: rawSource.place ?? (unpacked.place as string | null | undefined),
+    volume: rawSource.volume ?? (unpacked.volume as string | null | undefined),
+    issue: rawSource.issue ?? (unpacked.issue as string | null | undefined),
+    section:
+      rawSource.section ?? (unpacked.section as string | null | undefined),
+    partNumber:
+      rawSource.partNumber ??
+      (unpacked.partNumber as string | null | undefined),
+    partTitle:
+      rawSource.partTitle ?? (unpacked.partTitle as string | null | undefined),
+    pages: rawSource.pages ?? (unpacked.pages as string | null | undefined),
+    series: rawSource.series ?? (unpacked.series as string | null | undefined),
+    seriesTitle:
+      rawSource.seriesTitle ??
+      (unpacked.seriesTitle as string | null | undefined),
+    seriesText:
+      rawSource.seriesText ??
+      (unpacked.seriesText as string | null | undefined),
+    issn: rawSource.issn ?? (unpacked.issn as string | null | undefined),
+    isbn: rawSource.isbn ?? (unpacked.isbn as string | null | undefined),
+    pmid: rawSource.pmid ?? (unpacked.pmid as string | null | undefined),
+    pmcid: rawSource.pmcid ?? (unpacked.pmcid as string | null | undefined),
+    arxivId:
+      rawSource.arxivId ?? (unpacked.arxivId as string | null | undefined),
+    language:
+      rawSource.language ?? (unpacked.language as string | null | undefined),
+    journalAbbr:
+      rawSource.journalAbbr ??
+      (unpacked.journalAbbreviation as string | null | undefined) ??
+      (unpacked.journalAbbr as string | null | undefined),
+    shortTitle:
+      rawSource.shortTitle ??
+      (unpacked.shortTitle as string | null | undefined),
+    rights: rawSource.rights ?? (unpacked.rights as string | null | undefined),
+    license:
+      rawSource.license ?? (unpacked.license as string | null | undefined),
+    libraryCatalog:
+      rawSource.libraryCatalog ??
+      (unpacked.libraryCatalog as string | null | undefined),
+    archive:
+      rawSource.archive ?? (unpacked.archive as string | null | undefined),
+    archiveLocation:
+      rawSource.archiveLocation ??
+      (unpacked.archiveLocation as string | null | undefined),
+    callNumber:
+      rawSource.callNumber ??
+      (unpacked.callNumber as string | null | undefined),
+    extra: rawSource.extra ?? (unpacked.extra as string | null | undefined),
+    citationCount:
+      rawSource.citationCount ??
+      (unpacked.citationCount as number | null | undefined),
+    referenceCount:
+      rawSource.referenceCount ??
+      (unpacked.referenceCount as number | null | undefined),
+    openAccessPdfUrl:
+      rawSource.openAccessPdfUrl ??
+      (unpacked.openAccessPdfUrl as string | null | undefined),
+  };
+  const primaryAttachment = rawSource.attachments?.[0];
   const resolvedFileId = primaryAttachment?.fileId
     ? String(primaryAttachment.fileId)
     : source.fileId
@@ -485,6 +585,9 @@ export function buildImportItemPayload(
     archiveLocation: source.archiveLocation ?? undefined,
     callNumber: source.callNumber ?? undefined,
     extra: source.extra ?? undefined,
+    extraFields:
+      (unpacked.extraFields as Record<string, unknown> | undefined) ??
+      undefined,
     arxivId: source.arxivId ?? undefined,
     citationCount: source.citationCount ?? undefined,
     referenceCount: source.referenceCount ?? undefined,

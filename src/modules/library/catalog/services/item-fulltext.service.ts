@@ -94,8 +94,15 @@ export class ItemFulltextService {
     ) {
       let payload = matchedRecord.rawPayload as Record<string, unknown>;
 
+      const hasHydratedContent =
+        payload.sections !== undefined ||
+        payload.plainText !== undefined ||
+        payload.markdown !== undefined ||
+        payload.references !== undefined;
+
       if (
         payload.isOffloaded === true &&
+        !hasHydratedContent &&
         typeof payload.fileId === 'string' &&
         this.storagePort
       ) {

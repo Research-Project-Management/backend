@@ -26,6 +26,8 @@ export const DEFAULT_BROWSER_FETCH_HEADERS: Record<string, string> = {
 /** Thrown when a redirect hop targets an unsafe destination. */
 export class UnsafeRedirectError extends Error {}
 
+export type SafeUrlResult = URL & { resolvedIps?: string[] };
+
 @Injectable()
 export class SsrfGuardService {
   private readonly logger = new Logger(SsrfGuardService.name);
@@ -41,7 +43,7 @@ export class SsrfGuardService {
   async assertSafeUrl(
     rawUrl: string,
     options: SsrfGuardOptions = {},
-  ): Promise<URL> {
+  ): Promise<SafeUrlResult> {
     let url: URL;
     try {
       url = new URL(rawUrl);
@@ -113,10 +115,11 @@ export class SsrfGuardService {
           `Direct access to private or reserved IP address '${rawHostname}' is forbidden.`,
         );
       }
-      return url;
+      return Object.assign(url, { resolvedIps: [rawHostname] });
     }
 
     // Resolve all DNS records (A and AAAA)
+    let resolvedIps: string[] = [];
     try {
       const addresses = await lookup(rawHostname, { all: true });
       if (!addresses || addresses.length === 0) {
@@ -134,6 +137,7 @@ export class SsrfGuardService {
             `Host '${rawHostname}' resolves to a private or reserved IP address.`,
           );
         }
+        resolvedIps.push(record.address);
       }
     } catch (err: unknown) {
       if (
@@ -147,7 +151,7 @@ export class SsrfGuardService {
       throw new BadRequestException(`Unable to resolve host '${rawHostname}'.`);
     }
 
-    return url;
+    return Object.assign(url, { resolvedIps });
   }
 
   /**
@@ -162,9 +166,10 @@ export class SsrfGuardService {
       validateUrl?: (url: string) => Promise<unknown>;
       beforeHop?: (url: string, signal?: AbortSignal | null) => Promise<void>;
     } = {},
-  ): Promise<{ response: Response; finalUrl: string }> {
+  ): Promise<{ response: Response; finalUrl: string; resolvedIps?: string[] }> {
     const maxRedirects = options.maxRedirects ?? 5;
     let currentUrl = startUrl;
+    let lastResolvedIps: string[] | undefined;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
       if (options.beforeHop) {
@@ -184,7 +189,11 @@ export class SsrfGuardService {
       const location = isRedirect ? res.headers?.get?.('location') : null;
 
       if (!location) {
-        return { response: res, finalUrl: currentUrl };
+        return {
+          response: res,
+          finalUrl: currentUrl,
+          ...(lastResolvedIps ? { resolvedIps: lastResolvedIps } : {}),
+        };
       }
 
       try {
@@ -215,7 +224,15 @@ export class SsrfGuardService {
       }
 
       if (options.validateUrl) {
-        await options.validateUrl(nextUrl);
+        const validated = await options.validateUrl(nextUrl);
+        if (
+          validated &&
+          typeof validated === 'object' &&
+          'resolvedIps' in validated &&
+          Array.isArray((validated as { resolvedIps?: unknown }).resolvedIps)
+        ) {
+          lastResolvedIps = (validated as { resolvedIps: string[] }).resolvedIps;
+        }
       }
 
       currentUrl = nextUrl;
@@ -247,13 +264,23 @@ export class SsrfGuardService {
     options: SsrfGuardOptions & {
       beforeHop?: (url: string, signal?: AbortSignal | null) => Promise<void>;
     } = {},
-  ): Promise<{ response: Response; finalUrl: string }> {
-    await this.assertSafeUrl(rawUrl, options);
-    return SsrfGuardService.executeSafeRedirectFetch(rawUrl, init, {
+  ): Promise<{ response: Response; finalUrl: string; resolvedIps?: string[] }> {
+    const initialSafe = await this.assertSafeUrl(rawUrl, options);
+    let lastResolvedIps = initialSafe.resolvedIps;
+
+    const result = await SsrfGuardService.executeSafeRedirectFetch(rawUrl, init, {
       maxRedirects: options.maxRedirects,
-      validateUrl: (nextUrl) => this.assertSafeUrl(nextUrl, options),
+      validateUrl: async (nextUrl) => {
+        const safeHop = await this.assertSafeUrl(nextUrl, options);
+        lastResolvedIps = safeHop.resolvedIps;
+        return safeHop;
+      },
       beforeHop: options.beforeHop,
     });
+    return {
+      ...result,
+      ...(lastResolvedIps ? { resolvedIps: lastResolvedIps } : {}),
+    };
   }
 
   /**
@@ -328,10 +355,28 @@ export class SsrfGuardService {
     }
 
     // IPv6 Checks
+    return this.isPrivateIPv6(normalized);
+  }
+
+  /**
+   * Checks if an IPv6 address is loopback, unspecified, link-local, unique-local,
+   * Teredo, 6to4, NAT64, documentation, multicast, or embeds a private IPv4 address.
+   */
+  isPrivateIPv6(normalized: string): boolean {
     if (normalized === '::1' || normalized === '::') return true;
 
     // Discard prefix (100::/64 RFC 6666)
     if (normalized.startsWith('100:')) return true;
+
+    // Teredo tunneling (2001:0000::/32 or 2001::/32 RFC 4380)
+    if (
+      normalized === '2001::' ||
+      normalized.startsWith('2001::') ||
+      /^2001:0{1,4}:/i.test(normalized) ||
+      /^2001:0{1,4}$/i.test(normalized)
+    ) {
+      return true;
+    }
 
     // Documentation prefix (2001:db8::/32 RFC 3849)
     if (normalized.startsWith('2001:db8:') || normalized.startsWith('2001:0db8:')) return true;
@@ -352,6 +397,11 @@ export class SsrfGuardService {
           }
         }
       }
+    }
+
+    // NAT64 Local-Use Translation Prefix (64:ff9b:1::/48 RFC 8215)
+    if (/^0*64:ff9b:0*1(?::|$)/i.test(normalized)) {
+      return true;
     }
 
     // NAT64 Well-Known Prefix (64:ff9b::/96 RFC 6052)

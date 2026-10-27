@@ -1,12 +1,9 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { createHash } from 'crypto';
 import {
-  MetadataProvider,
   MetadataRequest,
   ProviderCapability,
   ProviderName,
   ProviderResult,
-  QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeIsbn,
@@ -14,13 +11,13 @@ import {
   AcademicHttpClient,
   LibraryConfigService,
   libraryConfig,
+  parseCreatorString,
 } from '@/modules/library/core';
-import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
-import { parseCreatorString } from '@/modules/library/core';
+import { AbstractAcademicProvider } from './abstract-academic.provider';
 
 @Injectable()
-export class OpenLibraryProvider implements MetadataProvider {
+export class OpenLibraryProvider extends AbstractAcademicProvider {
   readonly id: ProviderName = 'OpenLibrary';
   readonly capabilities: ProviderCapability = {
     queryTypes: ['ISBN'],
@@ -30,35 +27,17 @@ export class OpenLibraryProvider implements MetadataProvider {
   };
 
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
-  ) {}
+  ) {
+    super(httpClient);
+  }
 
   private get baseUrl(): string {
     return (
       this.configService?.providers.openLibraryBaseUrl ??
       libraryConfig().providers.openLibraryBaseUrl
     );
-  }
-
-  supports(input: QueryType | MetadataRequest): boolean {
-    const type = typeof input === 'string' ? input : input?.queryType;
-    return type ? this.capabilities.queryTypes.includes(type) : false;
-  }
-
-  private async executeFetch(
-    url: string,
-    options?: RequestInit,
-  ): Promise<{ response: Response; attempts: number }> {
-    if (this.httpClient) {
-      const res = await this.httpClient.request(url, {
-        signal: options?.signal ?? undefined,
-        headers: options?.headers as Record<string, string> | undefined,
-      });
-      return { response: res.response, attempts: 1 };
-    }
-    const response = await fetch(url, options);
-    return { response, attempts: 1 };
   }
 
   async resolve(
@@ -76,39 +55,9 @@ export class OpenLibraryProvider implements MetadataProvider {
       Accept: 'application/json',
     };
 
-    const { response } = await this.executeFetch(url, {
-      headers,
-      signal,
-    });
-
-    if (response.status === 404) return null;
-
-    if (!response.ok) {
-      const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterMs = retryAfterHeader
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : undefined;
-      throw new ProviderFetchError(
-        `OpenLibrary API HTTP ${response.status} for ISBN: ${cleanIsbn}`,
-        response.status,
-        retryAfterMs,
-      );
-    }
-
-    let json: unknown;
-    try {
-      json = await response.json();
-    } catch {
-      throw new ProviderFetchError(
-        `Failed to parse OpenLibrary JSON for ISBN: ${cleanIsbn}`,
-        undefined,
-        undefined,
-        false,
-        true,
-      );
-    }
-
-    const payload = json as Record<string, Record<string, unknown>> | null;
+    const payload = await this.fetchJsonWithResilience<
+      Record<string, Record<string, unknown>>
+    >(url, signal, headers, { contextLabel: `ISBN: ${cleanIsbn}` });
     const item = payload?.[bibKey];
     if (!item) return null;
 
@@ -206,10 +155,6 @@ export class OpenLibraryProvider implements MetadataProvider {
     const numberOfPages =
       pages && !Number.isNaN(Number(pages)) ? Number(pages) : undefined;
 
-    const rawVersion = createHash('md5')
-      .update(JSON.stringify(item))
-      .digest('hex');
-
     const rawUrl = typeof item.url === 'string' ? item.url : undefined;
     const canonicalUrl = rawUrl || `https://openlibrary.org/isbn/${cleanIsbn}`;
 
@@ -217,8 +162,14 @@ export class OpenLibraryProvider implements MetadataProvider {
       parseCreatorString(name, idx, 'author'),
     );
 
-    return {
-      provider: this.id,
+    return this.buildProviderResult({
+      identifier: cleanIsbn,
+      confidenceScore: 0.95,
+      rawPayload: item,
+      retrievalMethod: 'api',
+      sourceUrl: canonicalUrl,
+      canonicalId: `isbn:${cleanIsbn}`,
+      isOpenAccess: false,
       metadata: {
         title,
         ...(shortTitle ? { shortTitle } : {}),
@@ -243,20 +194,7 @@ export class OpenLibraryProvider implements MetadataProvider {
           ...(place ? { place } : {}),
           ...(edition ? { edition } : {}),
         },
-        provenance: {
-          originProvider: this.id,
-          resolvedAt: new Date().toISOString(),
-          canonicalId: `isbn:${cleanIsbn}`,
-          canonicalUrl,
-          confidenceScore: 0.95,
-          rawSnapshotHash: rawVersion,
-          isOpenAccess: false,
-        },
       },
-      confidence: 0.95,
-      identifier: cleanIsbn,
-      fetchedAt: new Date().toISOString(),
-      rawVersion,
-    };
+    });
   }
 }

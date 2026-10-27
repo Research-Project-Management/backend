@@ -117,13 +117,7 @@ export function resolveCanonicalCreatorRole(
       }
 
       if (strictForType) {
-        if (lower === 'author') {
-          return getPrimaryCreatorRoleForType(itemType);
-        }
-        return (
-          validTypeMap.get('contributor') ||
-          getPrimaryCreatorRoleForType(itemType)
-        );
+        return getPrimaryCreatorRoleForType(itemType);
       }
     }
   }
@@ -250,6 +244,22 @@ export function getEffectiveBaseFieldMap(
     ...supplemental,
     ...schemaMap,
   };
+}
+
+/**
+ * Returns the reverse mapping (type-specific-field -> base-field) for `itemType`.
+ */
+export function getEffectiveReverseBaseFieldMap(
+  itemType?: string,
+): Record<string, string> {
+  const forward = getEffectiveBaseFieldMap(itemType);
+  const reverse: Record<string, string> = {};
+  for (const [base, mapped] of Object.entries(forward)) {
+    if (mapped) {
+      reverse[mapped] = base;
+    }
+  }
+  return reverse;
 }
 
 /**
@@ -388,6 +398,29 @@ export function resolveBidirectionalBaseFields(
   }
 }
 
+export function extractExtraKeyValues(
+  extraStr?: string | null,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!extraStr || typeof extraStr !== 'string') return result;
+  for (const match of extraStr.matchAll(
+    /\{:\s*([a-zA-Z_][a-zA-Z0-9_.\s-]*?)\s*:\s*([^}]+?)\s*\}/g,
+  )) {
+    const key = match[1].trim().toLowerCase().replace(/[\s_]+/g, '-');
+    result[key] = match[2].trim();
+  }
+  for (const line of extraStr.split(/\r?\n/)) {
+    const m = line.trim().match(/^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/);
+    if (m) {
+      const key = m[1].trim().toLowerCase().replace(/[\s_]+/g, '-');
+      if (!result[key]) {
+        result[key] = m[2].trim();
+      }
+    }
+  }
+  return result;
+}
+
 export interface HarmonizeZoteroFieldsOptions {
   itemType?: string;
   syncExtraFields?: boolean;
@@ -441,6 +474,32 @@ export function harmonizeZoteroFields<T extends Record<string, unknown>>(
         : 'journalArticle');
 
   const syncLegacyAliases = options?.syncLegacyAliases ?? false;
+
+  // 0. Extract CSL braced & line-based identifiers/metadata from `extra` if present
+  if (typeof clone.extra === 'string' && clone.extra.trim()) {
+    const extraKv = extractExtraKeyValues(clone.extra);
+    const kvToCanonical: ReadonlyArray<readonly [readonly string[], string]> = [
+      [['doi'], 'doi'],
+      [['isbn'], 'isbn'],
+      [['issn'], 'issn'],
+      [['pmid'], 'pmid'],
+      [['pmcid', 'pmc'], 'pmcid'],
+      [['arxiv', 'arxivid', 'arxiv-id'], 'arxivId'],
+      [['citation-key', 'citationkey', 'citekey'], 'citationKey'],
+      [['original-date'], 'originalDate'],
+      [['status'], 'status'],
+    ];
+    for (const [kvKeys, targetField] of kvToCanonical) {
+      if (!isNonEmptyValue(clone[targetField])) {
+        for (const k of kvKeys) {
+          if (extraKv[k]) {
+            clone[targetField] = extraKv[k];
+            break;
+          }
+        }
+      }
+    }
+  }
 
   // 1. Synchronize aliases across top-level and extraSources
   resolveFieldAliases(clone, sources, syncLegacyAliases);
@@ -553,3 +612,58 @@ export const ALL_RECONCILABLE_METADATA_FIELDS: ReadonlyArray<string> = (() => {
   }
   return Array.from(fieldSet);
 })();
+
+/**
+ * Merges plain-text Zotero `Extra` blocks in priority order, preserving unique `Key: Value`
+ * entries and free-form lines without duplicating keys already provided by a higher-trust source.
+ */
+export function mergeZoteroExtraTextWithStatus(
+  existingText: string,
+  ...incomingVariants: unknown[]
+): { merged: string; addedNewLine: boolean } {
+  const lines: string[] = [];
+  const seenLinesLower = new Set<string>();
+  const seenKeysCompact = new Set<string>();
+  let addedNewLine = false;
+
+  const ingest = (raw: unknown, isExisting: boolean) => {
+    if (typeof raw !== 'string' || !raw.trim()) return;
+    for (const rawLine of raw.split(/\r?\n/)) {
+      const trimmed = rawLine.trim();
+      if (!trimmed) continue;
+      const lowerLine = trimmed.toLowerCase();
+      if (seenLinesLower.has(lowerLine)) continue;
+
+      const kvMatch = trimmed.match(
+        /^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/,
+      );
+      if (kvMatch) {
+        const compactKey = kvMatch[1]
+          .trim()
+          .toLowerCase()
+          .replace(/[\s_-]+/g, '');
+        if (seenKeysCompact.has(compactKey)) continue;
+        seenKeysCompact.add(compactKey);
+      }
+
+      seenLinesLower.add(lowerLine);
+      lines.push(trimmed);
+      if (!isExisting) addedNewLine = true;
+    }
+  };
+
+  ingest(existingText, true);
+  for (const variant of incomingVariants) {
+    ingest(variant, false);
+  }
+
+  return { merged: lines.join('\n'), addedNewLine };
+}
+
+export function mergeZoteroExtraTextLines(variants: unknown[]): string {
+  const [first, ...rest] = variants;
+  return mergeZoteroExtraTextWithStatus(
+    typeof first === 'string' ? first : '',
+    ...(typeof first === 'string' ? rest : variants),
+  ).merged;
+}

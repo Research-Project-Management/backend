@@ -5,7 +5,10 @@ import {
   parseCreatorString,
   cleanBibliographicText,
 } from '@/modules/library/core';
-import { resolveCanonicalCreatorRole } from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
+import {
+  resolveCanonicalCreatorRole,
+  getPrimaryCreatorRoleForType,
+} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
 
 function cleanCreatorString(val: unknown): string | undefined {
   if (val === undefined || val === null) return undefined;
@@ -113,6 +116,7 @@ export function normalizeCreators(
 
   const hasStructuredCreators =
     Array.isArray(creatorsInput) && creatorsInput.length > 0;
+  const primaryRole = getPrimaryCreatorRoleForType(itemType);
 
   if (hasStructuredCreators) {
     for (const c of creatorsInput) {
@@ -121,14 +125,22 @@ export function normalizeCreators(
     }
   }
 
-  if (!hasStructuredCreators && Array.isArray(authorsInput)) {
-    for (const a of authorsInput) {
+  if (Array.isArray(authorsInput) && authorsInput.length > 0) {
+    const existingList = [...list];
+    list.length = 0;
+    for (const a of authorsInput as unknown[]) {
+      if (a && typeof a === 'object') {
+        const obj = a as CreatorInput;
+        append({ ...obj, creatorType: obj.creatorType || primaryRole });
+        continue;
+      }
+      if (typeof a !== 'string') continue;
       for (const author of splitAuthorString(a)) {
         const cleanA = cleanCreatorString(author);
         if (!cleanA) continue;
-        const parsed = parseCreatorString(cleanA, 0, 'author');
+        const parsed = parseCreatorString(cleanA, 0, primaryRole);
         append({
-          creatorType: 'author',
+          creatorType: primaryRole,
           name: parsed.fullName,
           fullName: parsed.fullName,
           firstName: parsed.firstName,
@@ -137,6 +149,50 @@ export function normalizeCreators(
         });
       }
     }
+    const parsedAuthors = [...list];
+    list.length = 0;
+
+    if (!hasStructuredCreators) {
+      list.push(...parsedAuthors);
+    } else if (parsedAuthors.length > 0) {
+      const isPrimaryRole = (role?: string) => {
+        const r = (role || 'author').toLowerCase();
+        return r === 'author' || r === primaryRole.toLowerCase();
+      };
+      const existingPrimary = existingList.filter((c) =>
+        isPrimaryRole(c.creatorType),
+      );
+      const existingNonPrimary = existingList.filter(
+        (c) => !isPrimaryRole(c.creatorType),
+      );
+      const existingPrimaryNames = new Set(
+        existingPrimary.map((c) => (c.fullName || c.name || '').toLowerCase()),
+      );
+      const parsedAuthorNames = new Set(
+        parsedAuthors.map((c) => (c.fullName || c.name || '').toLowerCase()),
+      );
+      const allExistingInParsed =
+        existingPrimary.length > 0 &&
+        existingPrimary.every((c) =>
+          parsedAuthorNames.has((c.fullName || c.name || '').toLowerCase()),
+        );
+      if (existingPrimary.length === 0) {
+        list.push(...parsedAuthors, ...existingNonPrimary);
+      } else if (allExistingInParsed) {
+        list.push(...existingPrimary);
+        for (const pa of parsedAuthors) {
+          if (!existingPrimaryNames.has((pa.fullName || pa.name || '').toLowerCase())) {
+            list.push(pa);
+          }
+        }
+        list.push(...existingNonPrimary);
+      } else {
+        // `authors` was overridden with new primary authors: replace primary creators while keeping non-primary contributors
+        list.push(...parsedAuthors, ...existingNonPrimary);
+      }
+    } else {
+      list.push(...existingList);
+    }
   }
 
   const hasStructuredEditors =
@@ -144,7 +200,13 @@ export function normalizeCreators(
     creatorsInput.some((c) => c && c.creatorType === 'editor');
 
   if (!hasStructuredEditors && Array.isArray(editorsInput)) {
-    for (const editor of editorsInput) {
+    for (const editor of editorsInput as unknown[]) {
+      if (editor && typeof editor === 'object') {
+        const obj = editor as CreatorInput;
+        append({ ...obj, creatorType: 'editor' });
+        continue;
+      }
+      if (typeof editor !== 'string') continue;
       for (const singleEditor of splitAuthorString(editor)) {
         const cleanEditor = cleanCreatorString(singleEditor);
         if (!cleanEditor) continue;
@@ -161,5 +223,14 @@ export function normalizeCreators(
     }
   }
 
-  return list;
+  const seen = new Set<string>();
+  const deduped: CreatorInput[] = [];
+  for (const c of list) {
+    const key = `${(c.creatorType || 'author').toLowerCase()}::${(c.fullName || c.name || '').toLowerCase()}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(c);
+    }
+  }
+  return deduped;
 }

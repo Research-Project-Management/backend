@@ -170,6 +170,8 @@ export interface MetadataRequest {
   scopeId?: string;
   forceRefresh?: boolean;
   signal?: AbortSignal;
+  authorHint?: string;
+  yearHint?: number | string;
 }
 
 // Canonical Metadata Service Interface

@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Inject,
   Logger,
   NotFoundException,
   Optional,
@@ -41,8 +42,10 @@ export class NotesService {
     @Optional()
     private readonly itemQuery?: ItemQueryService,
     @Optional()
+    @Inject(RedisCacheService)
     cacheOrCoordinator?: RedisCacheService | ItemCacheCoordinator,
     @Optional()
+    @Inject(ItemCacheCoordinator)
     injectedCoordinator?: ItemCacheCoordinator,
   ) {
     if (injectedCoordinator) {
@@ -271,8 +274,16 @@ export class NotesService {
     content: string,
     source?: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string | null,
   ): Promise<void> {
-    return this.repo.createLiteratureNote(userId, itemId, content, source, tx);
+    return this.repo.createLiteratureNote(
+      userId,
+      itemId,
+      content,
+      source,
+      tx,
+      projectId,
+    );
   }
 
   async extractNotesFromAnnotations(

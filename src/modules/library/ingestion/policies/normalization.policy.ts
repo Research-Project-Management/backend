@@ -22,59 +22,27 @@ import {
   normalizePageRange,
   stripLatexBraces,
   convertAcademicHtmlToMarkdown,
+  INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
 } from '@/modules/library/core';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { resolveBidirectionalBaseFields } from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
+import {
+  resolveBidirectionalBaseFields,
+  getEffectiveBaseFieldMap,
+  extractExtraKeyValues,
+} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
 import { normalizeCreators } from './creator-normalization.policy';
 
 export { normalizeCreators };
 
-const SPECIALLY_NORMALIZED_KEYS = new Set([
-  'title',
-  'shortTitle',
-  'itemType',
-  'doi',
-  'DOI',
-  'arxivId',
-  'archiveID',
-  'archiveId',
-  'pmid',
-  'PMID',
-  'pmcid',
-  'PMCID',
-  'isbn',
-  'ISBN',
-  'issn',
-  'ISSN',
-  'year',
-  'publicationDate',
-  'date',
-  'accessedAt',
-  'accessDate',
-  'creators',
-  'authors',
-  'editors',
-  'contributors',
-  'publicationTitle',
-  'publisher',
-  'volume',
-  'issue',
-  'pages',
-  'abstract',
-  'abstractNote',
-  'url',
-  'URL',
-  'openAccessPdfUrl',
-  'tags',
-  'keywords',
-  'labels',
-  'notes',
-  'extra',
-  'extraFields',
-  'citationCount',
-  'referenceCount',
-  'numberOfPages',
-  'pageCount',
+const SPECIALLY_NORMALIZED_KEYS = new Set<string>([
+  ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
+  'title', 'shortTitle', 'itemType', 'doi', 'DOI', 'arxivId', 'archiveID', 'archiveId',
+  'pmid', 'PMID', 'pmcid', 'PMCID', 'isbn', 'ISBN', 'issn', 'ISSN', 'year',
+  'publicationDate', 'date', 'accessedAt', 'accessDate', 'creators', 'authors',
+  'editors', 'contributors', 'publicationTitle', 'publisher', 'volume', 'issue',
+  'pages', 'abstract', 'abstractNote', 'url', 'URL', 'openAccessPdfUrl', 'tags',
+  'keywords', 'labels', 'notes', 'extra', 'extraFields', 'citationCount',
+  'referenceCount', 'numberOfPages', 'pageCount',
 ]);
 
 const SCHEMA_DRIVEN_STRING_FIELDS: string[] = Array.from(
@@ -132,8 +100,11 @@ export class NormalizationPolicy {
       }
     }
 
+    const extraKv =
+      typeof raw.extra === 'string' ? extractExtraKeyValues(raw.extra) : {};
+
     const baseMapForType = result.itemType
-      ? (SCHEMA_V42_DATA.baseFieldMappings?.[result.itemType] ?? {})
+      ? getEffectiveBaseFieldMap(result.itemType)
       : {};
 
     // 1. Title (Only set if present in candidate or mapped base title field like caseName / nameOfAct / subject)
@@ -166,7 +137,7 @@ export class NormalizationPolicy {
     }
 
     // 3. DOI
-    const rawDoi = raw.doi ?? getRawVal('DOI') ?? getRawVal('doi');
+    const rawDoi = raw.doi ?? getRawVal('DOI') ?? getRawVal('doi') ?? extraKv.doi;
     if (rawDoi) {
       const cleanDoi = this.cleanString(rawDoi);
       if (cleanDoi) {
@@ -179,7 +150,10 @@ export class NormalizationPolicy {
       raw.arxivId ??
       getRawVal('archiveID') ??
       getRawVal('archiveId') ??
-      getRawVal('arxivId');
+      getRawVal('arxivId') ??
+      extraKv.arxiv ??
+      extraKv.arxivid ??
+      extraKv['arxiv-id'];
     if (rawArxiv) {
       const cleanArxiv = this.cleanString(rawArxiv);
       if (cleanArxiv) {
@@ -190,22 +164,30 @@ export class NormalizationPolicy {
         }
       }
     }
-    const rawPmid = raw.pmid ?? getRawVal('PMID') ?? getRawVal('pmid');
+    const rawPmid =
+      raw.pmid ?? getRawVal('PMID') ?? getRawVal('pmid') ?? extraKv.pmid;
     if (rawPmid) {
       const cleanPmid = this.cleanString(rawPmid);
       if (cleanPmid) result.pmid = normalizePmid(cleanPmid) || cleanPmid;
     }
-    const rawPmcid = raw.pmcid ?? getRawVal('PMCID') ?? getRawVal('pmcid');
+    const rawPmcid =
+      raw.pmcid ??
+      getRawVal('PMCID') ??
+      getRawVal('pmcid') ??
+      extraKv.pmcid ??
+      extraKv.pmc;
     if (rawPmcid) {
       const cleanPmcid = this.cleanString(rawPmcid);
       if (cleanPmcid) result.pmcid = normalizePmcid(cleanPmcid) || cleanPmcid;
     }
-    const rawIsbn = raw.isbn ?? getRawVal('ISBN') ?? getRawVal('isbn');
+    const rawIsbn =
+      raw.isbn ?? getRawVal('ISBN') ?? getRawVal('isbn') ?? extraKv.isbn;
     if (rawIsbn) {
       const cleanIsbn = this.cleanString(rawIsbn);
       if (cleanIsbn) result.isbn = normalizeIsbn(cleanIsbn) || cleanIsbn;
     }
-    const rawIssn = raw.issn ?? getRawVal('ISSN') ?? getRawVal('issn');
+    const rawIssn =
+      raw.issn ?? getRawVal('ISSN') ?? getRawVal('issn') ?? extraKv.issn;
     if (rawIssn) {
       const cleanIssn = this.cleanString(rawIssn);
       if (cleanIssn) result.issn = normalizeIssn(cleanIssn) || cleanIssn;
@@ -297,6 +279,12 @@ export class NormalizationPolicy {
     );
     if (publisher) result.publisher = publisher;
 
+    const mappedPlaceKey = baseMapForType.place;
+    const placeVal = this.cleanString(
+      raw.place || (mappedPlaceKey ? getRawVal(mappedPlaceKey) : undefined),
+    );
+    if (placeVal) result.place = placeVal;
+
     const mappedVolumeKey = baseMapForType.volume;
     const volume = this.cleanString(
       raw.volume || (mappedVolumeKey ? getRawVal(mappedVolumeKey) : undefined),
@@ -305,7 +293,11 @@ export class NormalizationPolicy {
 
     const mappedIssueKey = baseMapForType.issue || baseMapForType.number;
     const issue = this.cleanString(
-      raw.issue || (mappedIssueKey ? getRawVal(mappedIssueKey) : undefined),
+      raw.issue !== undefined && raw.issue !== null && raw.issue !== ''
+        ? raw.issue
+        : mappedIssueKey
+          ? getRawVal(mappedIssueKey)
+          : undefined,
     );
     if (issue) result.issue = issue;
 
@@ -489,7 +481,14 @@ export class NormalizationPolicy {
       if (cleanLicense) result.license = cleanLicense;
     }
     if (raw.extra) {
-      const cleanExtra = this.cleanString(raw.extra);
+      const cleanExtra =
+        typeof raw.extra === 'string' && raw.extra.includes('\n')
+          ? raw.extra
+              .split(/\r?\n/)
+              .map((line) => this.cleanString(line))
+              .filter(Boolean)
+              .join('\n')
+          : this.cleanString(raw.extra);
       if (cleanExtra) result.extra = cleanExtra;
     }
     if (raw.extraFields && typeof raw.extraFields === 'object') {
@@ -520,7 +519,28 @@ export class NormalizationPolicy {
 
     if (Array.isArray(raw.editors)) {
       const editors = raw.editors
-        .map((editor: unknown) => this.cleanString(editor))
+        .map((editor: unknown) => {
+          if (editor && typeof editor === 'object') {
+            const edObj = editor as {
+              firstName?: unknown;
+              lastName?: unknown;
+              fullName?: unknown;
+              name?: unknown;
+            };
+            return (
+              this.cleanString(edObj.fullName) ||
+              this.cleanString(edObj.name) ||
+              [
+                this.cleanString(edObj.firstName),
+                this.cleanString(edObj.lastName),
+              ]
+                .filter(Boolean)
+                .join(' ') ||
+              undefined
+            );
+          }
+          return this.cleanString(editor);
+        })
         .filter((editor: string | undefined): editor is string =>
           Boolean(editor),
         );
@@ -540,65 +560,17 @@ export class NormalizationPolicy {
     if (raw.fileUrl) result.fileUrl = this.cleanString(raw.fileUrl);
     if (raw.pdfUrl) result.pdfUrl = this.cleanString(raw.pdfUrl);
 
-    const canonicalFields = new Set([
-      'title',
-      'shortTitle',
-      'itemType',
-      'doi',
-      'arxivId',
-      'pmid',
-      'pmcid',
-      'isbn',
-      'issn',
-      'year',
-      'publicationDate',
-      'date',
-      'accessedAt',
-      'creators',
-      'authors',
-      'editors',
-      'publicationTitle',
-      'journal',
-      'publisher',
-      'volume',
-      'issue',
-      'pages',
-      'abstract',
-      'abstractNote',
-      'url',
-      'openAccessPdfUrl',
-      'tags',
-      'keywords',
-      'labels',
-      'notes',
-      'citationKey',
-      'language',
-      'rights',
-      'license',
-      'extra',
-      'extraFields',
-      'fileId',
-      'filename',
-      'fileUrl',
-      'pdfUrl',
-      'type',
-      'place',
-      'section',
-      'partNumber',
-      'partTitle',
-      'series',
-      'seriesTitle',
-      'seriesText',
-      'seriesNumber',
-      'edition',
-      'repository',
-      'journalAbbr',
-      'archive',
-      'archiveLocation',
-      'libraryCatalog',
-      'callNumber',
-      'citationCount',
-      'referenceCount',
+    const canonicalFields = new Set<string>([
+      ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
+      'title', 'shortTitle', 'itemType', 'doi', 'arxivId', 'pmid', 'pmcid', 'isbn', 'issn',
+      'year', 'publicationDate', 'date', 'accessedAt', 'creators', 'authors', 'editors',
+      'publicationTitle', 'journal', 'publisher', 'volume', 'issue', 'pages', 'abstract',
+      'abstractNote', 'url', 'openAccessPdfUrl', 'tags', 'keywords', 'labels', 'notes',
+      'citationKey', 'language', 'rights', 'license', 'extra', 'extraFields', 'fileId',
+      'filename', 'fileUrl', 'pdfUrl', 'type', 'place', 'section', 'partNumber', 'partTitle',
+      'series', 'seriesTitle', 'seriesText', 'seriesNumber', 'edition', 'repository',
+      'journalAbbr', 'archive', 'archiveLocation', 'libraryCatalog', 'callNumber',
+      'citationCount', 'referenceCount',
     ]);
     const preservedFields = Object.fromEntries(
       Object.entries(raw).filter(

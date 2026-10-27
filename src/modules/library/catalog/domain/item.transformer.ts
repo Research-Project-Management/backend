@@ -16,6 +16,7 @@ import {
   ItemFieldDefinition,
   CreatorTypeDefinition,
 } from '@/modules/library/core/types/schema.types';
+import { applyStructuralTypeConversionRules } from './type-conversion-rules.domain';
 
 export interface IItemTransformerPort {
   getItemFieldValue(item: Record<string, unknown>, key: string): unknown;
@@ -224,6 +225,7 @@ export class ItemTransformer implements IItemTransformerPort {
       ]),
     );
     for (const k of persistentAcademicKeys) {
+      if (k === 'itemType' || k === 'type') continue;
       const val = this.getItemFieldValue(item, k);
       if (val !== undefined && val !== null && val !== '') {
         const canonicalKey = FIELD_ALIASES[k]
@@ -256,50 +258,18 @@ export class ItemTransformer implements IItemTransformerPort {
     const newExtraFields: Record<string, unknown> = {
       ...((item.extraFields as Record<string, unknown> | undefined) || {}),
     };
+    delete newExtraFields.itemType;
+    delete newExtraFields.type;
 
-    if (sourceType === 'book' && targetType === 'bookSection') {
-      if (sourceValues.title) {
-        projectedItem.bookTitle = sourceValues.title;
-        projectedItem.title = '';
-        mappedFields.push({
-          fromField: 'title',
-          toField: 'bookTitle',
-          value: sourceValues.title,
-          rule: 'special-rule',
-        });
-        delete sourceValues.title;
-      }
-      delete projectedItem.shortTitle;
-      delete sourceValues.shortTitle;
-    } else if (sourceType === 'bookSection' && targetType === 'book') {
-      if (sourceValues.bookTitle) {
-        const chapterTitle = sourceValues.title;
-        projectedItem.title = sourceValues.bookTitle;
-        mappedFields.push({
-          fromField: 'bookTitle',
-          toField: 'title',
-          value: sourceValues.bookTitle,
-          rule: 'special-rule',
-        });
-        delete sourceValues.bookTitle;
-        delete sourceValues.title;
-
-        if (chapterTitle) {
-          droppedFields.push({
-            field: 'sectionTitle',
-            label: 'Section Title',
-            value: chapterTitle,
-          });
-          unmappedRetained.sectionTitle = chapterTitle;
-          if (options.retainUnmappedInExtra !== false) {
-            newExtraFields[`__unmapped_${sourceType}_sectionTitle`] =
-              chapterTitle;
-          }
-        }
-      }
-      delete projectedItem.shortTitle;
-      delete sourceValues.shortTitle;
-    }
+    applyStructuralTypeConversionRules(sourceType, targetType, {
+      sourceValues,
+      projectedItem,
+      mappedFields,
+      droppedFields,
+      unmappedRetained,
+      newExtraFields,
+      retainUnmappedInExtra: options.retainUnmappedInExtra !== false,
+    });
 
     for (const [sField, val] of Object.entries(sourceValues)) {
       const matchedTargetKey = this.findMatchingTargetField(
@@ -325,6 +295,8 @@ export class ItemTransformer implements IItemTransformerPort {
           projectedItem[resolved.targetField] = val;
           const dbCol = FIELD_ALIASES[resolved.targetField];
           if (dbCol) projectedItem[dbCol] = val;
+          delete projectedItem[sField];
+          delete newExtraFields[sField];
           mappedFields.push({
             fromField: sField,
             toField: resolved.targetField,
@@ -366,6 +338,13 @@ export class ItemTransformer implements IItemTransformerPort {
             if (dbCol) projectedItem[dbCol] = val;
             preservedFields.push(sField);
           } else {
+            delete projectedItem[sField];
+            delete newExtraFields[sField];
+            const aliasKey = FIELD_ALIASES[sField] || REVERSE_FIELD_ALIASES[sField];
+            if (aliasKey) {
+              delete projectedItem[aliasKey];
+              delete newExtraFields[aliasKey];
+            }
             droppedFields.push({
               field: sField,
               label: String(sourceLabelMap.get(sField) || sField),
@@ -381,6 +360,34 @@ export class ItemTransformer implements IItemTransformerPort {
       }
     }
 
+    if (
+      projectedItem.metadata &&
+      typeof projectedItem.metadata === 'object' &&
+      !Array.isArray(projectedItem.metadata)
+    ) {
+      const cleanedMeta: Record<string, unknown> = {
+        ...(projectedItem.metadata as Record<string, unknown>),
+      };
+      for (const dropped of droppedFields) {
+        delete cleanedMeta[dropped.field];
+        const aliasKey =
+          FIELD_ALIASES[dropped.field] || REVERSE_FIELD_ALIASES[dropped.field];
+        if (aliasKey) delete cleanedMeta[aliasKey];
+      }
+      for (const mapped of mappedFields) {
+        if (mapped.fromField !== mapped.toField) {
+          delete cleanedMeta[mapped.fromField];
+          const aliasKey =
+            FIELD_ALIASES[mapped.fromField] ||
+            REVERSE_FIELD_ALIASES[mapped.fromField];
+          if (aliasKey && aliasKey !== mapped.toField) {
+            delete cleanedMeta[aliasKey];
+          }
+        }
+      }
+      projectedItem.metadata = cleanedMeta;
+    }
+
     projectedItem.extraFields = newExtraFields;
 
     if (options.retainUnmappedInExtra !== false && droppedFields.length > 0) {
@@ -393,15 +400,24 @@ export class ItemTransformer implements IItemTransformerPort {
       ) {
         extraLines.push(currentExtra.trim());
       }
+      const existingLineSet = new Set(
+        extraLines
+          .flatMap((block) => block.split(/\r?\n/))
+          .map((l) => l.trim().toLowerCase())
+          .filter(Boolean),
+      );
       for (const dropped of droppedFields) {
         if (
           (typeof dropped.value === 'string' && dropped.value !== '') ||
           typeof dropped.value === 'number' ||
           typeof dropped.value === 'boolean'
         ) {
-          extraLines.push(
-            `${dropped.label || dropped.field}: ${String(dropped.value)}`,
-          );
+          const candidateLine = `${dropped.label || dropped.field}: ${String(dropped.value)}`;
+          const candidateLower = candidateLine.trim().toLowerCase();
+          if (!existingLineSet.has(candidateLower)) {
+            existingLineSet.add(candidateLower);
+            extraLines.push(candidateLine);
+          }
         }
       }
       if (extraLines.length > 0) {
@@ -414,37 +430,66 @@ export class ItemTransformer implements IItemTransformerPort {
         .getValidCreatorTypes(targetType)
         .map((c: CreatorTypeDefinition) => c.creatorType),
     );
+    const sourcePrimaryCreator =
+      this.typesService.getPrimaryCreatorType(sourceType);
     const targetPrimaryCreator =
       this.typesService.getPrimaryCreatorType(targetType);
+    const allPrimaryCreatorRoles = new Set([
+      'author',
+      'director',
+      'interviewer',
+      'podcaster',
+      'inventor',
+      'programmer',
+      'artist',
+      'cartographer',
+      'composer',
+      'performer',
+      'presenter',
+      'sponsor',
+      sourcePrimaryCreator,
+    ]);
     const creatorChanges: CreatorRoleChange[] = [];
 
-    const projectedCreators = (
-      (Array.isArray(item.creators) ? item.creators : []) as Array<
-        Record<string, unknown>
-      >
-    ).map((c: Record<string, unknown>, index: number) => {
-      const fromRole = (c.creatorType as string) || 'author';
-      let toRole: string = fromRole;
-      let reason: 'preserved' | 'primary-fallback' | 'secondary-fallback' =
-        'preserved';
+    const rawSourceCreators = (
+      Array.isArray(item.creators) && item.creators.length > 0
+        ? item.creators
+        : Array.isArray(item.contributors)
+          ? item.contributors
+          : []
+    ) as Array<Record<string, unknown>>;
 
-      if (!validCreatorRoles.has(fromRole)) {
-        if (index === 0 && validCreatorRoles.has(targetPrimaryCreator)) {
-          toRole = targetPrimaryCreator;
-          reason = 'primary-fallback';
-        } else if (validCreatorRoles.has('contributor')) {
-          toRole = 'contributor';
-          reason = 'secondary-fallback';
-        } else {
-          toRole = targetPrimaryCreator;
-          reason = 'primary-fallback';
+    const projectedCreators = rawSourceCreators.map(
+      (c: Record<string, unknown>, index: number) => {
+        const fromRole =
+          (c.creatorType as string) || (c.role as string) || 'author';
+        let toRole: string = fromRole;
+        let reason: 'preserved' | 'primary-fallback' | 'secondary-fallback' =
+          'preserved';
+
+        if (!validCreatorRoles.has(fromRole)) {
+          if (
+            (allPrimaryCreatorRoles.has(fromRole) || index === 0) &&
+            validCreatorRoles.has(targetPrimaryCreator)
+          ) {
+            toRole = targetPrimaryCreator;
+            reason = 'primary-fallback';
+          } else if (validCreatorRoles.has('contributor')) {
+            toRole = 'contributor';
+            reason = 'secondary-fallback';
+          } else {
+            toRole = targetPrimaryCreator;
+            reason = 'primary-fallback';
+          }
         }
-      }
 
-      creatorChanges.push({ creator: c, fromRole, toRole, reason });
-      return { ...c, creatorType: toRole };
-    });
+        creatorChanges.push({ creator: c, fromRole, toRole, reason });
+        return { ...c, creatorType: toRole, role: toRole };
+      },
+    );
 
+    projectedItem.itemType = targetType;
+    projectedItem.type = targetType;
     projectedItem.creators = projectedCreators;
 
     const hasLoss =

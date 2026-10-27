@@ -4,9 +4,11 @@ export * from './core.module';
 export * from './config/library.config';
 
 // Domain
+export * from './domain/specification.domain';
 export * from './domain/scope.specification';
 export * from './domain/identifier.domain';
 export * from './domain/author.domain';
+export * from './domain/creator-normalizer.domain';
 export * from './domain/author-particles.lexicon';
 export * from './domain/academic-item-types.domain';
 export * from './domain/academic-title.domain';
@@ -19,6 +21,9 @@ export * from './domain/sort-index.domain';
 export * from './domain/tiptap.domain';
 export * from './domain/zotero-field-harmonizer.domain';
 export * from './domain/renamer.domain';
+export * from './domain/source-weights.catalog';
+export * from './domain/item-provenance.domain';
+export * from './domain/academic-search-query.domain';
 
 // Constants
 export * from './constants/academic-client.constants';

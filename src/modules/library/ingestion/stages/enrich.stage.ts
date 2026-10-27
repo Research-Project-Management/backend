@@ -8,11 +8,13 @@ import {
   MetadataPort,
 } from '@/modules/library/ingestion/types/metadata.types';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { ALIAS_EVIDENCE_FALLBACK_KEYS } from '@/modules/library/ingestion/policies/reconciliation.policy';
 import { randomUUID } from 'crypto';
 import {
   IWorkflowStage,
   EnrichStageInput,
 } from '@/modules/library/ingestion/types/workflow-stage.types';
+import { isPlaceholderItemTitle } from '@/modules/library/core';
 
 @Injectable()
 export class EnrichStage implements IWorkflowStage<
@@ -47,13 +49,19 @@ export class EnrichStage implements IWorkflowStage<
     }
 
     const enrichedCandidates = [...candidates];
-    const seenQueries = new Set<string>();
+    const seenQueries = new Map<
+      string,
+      {
+        candidates: MetadataCandidate[];
+        query: string;
+      }
+    >();
     const isBulkRecordBatch =
       candidates.length > 1 &&
       candidates.every((c) => c.sourceKind === 'RECORD');
 
     const pendingTasks: Array<{
-      candidate: MetadataCandidate;
+      candidates: MetadataCandidate[];
       query: string;
     }> = [];
 
@@ -62,10 +70,7 @@ export class EnrichStage implements IWorkflowStage<
       const extra = (meta.extraFields || {}) as Record<string, unknown>;
       const isFilenameTitle = extra.isFilenameTitle === true;
       const hasTitle = Boolean(
-        !isFilenameTitle &&
-        meta.title &&
-        meta.title !== 'Untitled Document' &&
-        meta.title !== 'Uploaded Document',
+        !isFilenameTitle && !isPlaceholderItemTitle(meta.title),
       );
       const hasAuthors = Boolean(
         (meta.authors && meta.authors.length > 0) ||
@@ -172,20 +177,21 @@ export class EnrichStage implements IWorkflowStage<
         continue;
       }
 
-      const title = meta.title?.trim();
+      const title =
+        typeof meta.title === 'string' ? meta.title.trim() : undefined;
       const isCredibleTitle =
         !isFilenameTitle &&
         Boolean(title) &&
         title!.length >= 10 &&
+        !isPlaceholderItemTitle(title) &&
         !/\.(pdf|eps|png|jpe?g|svg)$/i.test(title!) &&
-        !/^(uploaded document|untitled|document)$/i.test(title!) &&
         !/noname\s+manuscript/i.test(title!) &&
         !/\(will\s+be\s+inserted\s+by\s+the\s+editor\)/i.test(title!) &&
         !/^\d{4}\s*\d{4,5}(v\d+)?$/i.test(title!);
       const isSyntheticArxivDoi = Boolean(
-        doi && /^10\.48550\/arxiv\./i.test(doi.trim()),
+        typeof doi === 'string' && /^10\.48550\/arxiv\./i.test(doi.trim()),
       );
-      const query =
+      const rawQuery =
         (isSyntheticArxivDoi && arxivId ? arxivId : doi) ||
         arxivId ||
         pmid ||
@@ -193,15 +199,19 @@ export class EnrichStage implements IWorkflowStage<
         (isCredibleTitle ? title : undefined) ||
         url;
 
+      if (!rawQuery) continue;
+      const query = String(rawQuery).trim();
       if (!query) continue;
 
-      const normalizedQueryKey = query.trim().toLowerCase();
-      if (seenQueries.has(normalizedQueryKey)) {
+      const normalizedQueryKey = query.toLowerCase();
+      const existingTask = seenQueries.get(normalizedQueryKey);
+      if (existingTask) {
+        existingTask.candidates.push(candidate);
         continue;
       }
-      seenQueries.add(normalizedQueryKey);
-
-      pendingTasks.push({ candidate, query });
+      const newTask = { candidates: [candidate], query };
+      seenQueries.set(normalizedQueryKey, newTask);
+      pendingTasks.push(newTask);
     }
 
     if (pendingTasks.length === 0) {
@@ -217,7 +227,9 @@ export class EnrichStage implements IWorkflowStage<
         const currentIndex = taskIndex++;
         const task = pendingTasks[currentIndex];
         if (!task) break;
-        const { candidate, query } = task;
+        const { candidates: taskCandidates, query } = task;
+        const primaryCandidate = taskCandidates[0];
+        if (!primaryCandidate) continue;
 
         try {
           const resolved = await metadataService.resolve({
@@ -230,7 +242,7 @@ export class EnrichStage implements IWorkflowStage<
             // paper by different authors must never replace the uploaded paper's record.
             if (
               resolved.queryType === 'TITLE' &&
-              !this.sharesAuthors(candidate, resolved.metadata)
+              !this.sharesAuthors(primaryCandidate, resolved.metadata)
             ) {
               this.logger.warn(
                 `Rejected title-only enrichment for "${query}": resolved authors do not match the uploaded document.`,
@@ -243,12 +255,23 @@ export class EnrichStage implements IWorkflowStage<
               : rawMetadata;
 
             const fields: Record<string, FieldEvidence> = {};
+            const provenanceMap = resolved.provenance || {};
 
             for (const [fieldName, propertyValue] of Object.entries(
               normalized,
             )) {
               if (propertyValue !== undefined && propertyValue !== null) {
-                const provenance = resolved.provenance[fieldName];
+                let provenance = provenanceMap[fieldName];
+                if (!provenance) {
+                  const fallbackKeys =
+                    ALIAS_EVIDENCE_FALLBACK_KEYS[fieldName] || [];
+                  for (const fk of fallbackKeys) {
+                    if (provenanceMap[fk]) {
+                      provenance = provenanceMap[fk];
+                      break;
+                    }
+                  }
+                }
                 fields[fieldName] = {
                   path: fieldName,
                   value: rawMetadata[fieldName as keyof typeof rawMetadata],
@@ -264,18 +287,20 @@ export class EnrichStage implements IWorkflowStage<
               }
             }
 
-            enrichedCandidates.push({
-              candidateId: randomUUID(),
-              sourceKind: 'PROVIDER',
-              sourceName: 'EnrichedProvider',
-              sourceRecordId: resolved.canonicalId,
-              rawEvidenceRef: candidate.candidateId,
-              retrievedAt: resolved.resolvedAt,
-              schemaVersion: '1.0.0',
-              fields,
-              normalizedMetadata: normalized,
-              confidenceScore: 0.95,
-            });
+            for (const matchedCandidate of taskCandidates) {
+              enrichedCandidates.push({
+                candidateId: randomUUID(),
+                sourceKind: 'PROVIDER',
+                sourceName: 'EnrichedProvider',
+                sourceRecordId: resolved.canonicalId,
+                rawEvidenceRef: matchedCandidate.candidateId,
+                retrievedAt: resolved.resolvedAt,
+                schemaVersion: '1.0.0',
+                fields: { ...fields },
+                normalizedMetadata: { ...normalized },
+                confidenceScore: 0.95,
+              });
+            }
           }
         } catch (caughtError: unknown) {
           const errorMessage =
@@ -294,21 +319,33 @@ export class EnrichStage implements IWorkflowStage<
     return enrichedCandidates;
   }
 
+  private static extractSurnameToken(rawName: string): string {
+    const trimmed = rawName.trim();
+    if (!trimmed) return '';
+    if (trimmed.includes(',')) {
+      return trimmed.split(',')[0].trim().split(/\s+/).pop() ?? '';
+    }
+    return trimmed.split(/\s+/).pop() ?? '';
+  }
+
   private static authorLastNames(authors: unknown): Set<string> {
     const names = new Set<string>();
     if (!Array.isArray(authors)) return names;
     for (const author of authors) {
       let last = '';
       if (typeof author === 'string') {
-        last = author.trim().split(/\s+/).pop() ?? '';
+        last = EnrichStage.extractSurnameToken(author);
       } else if (author && typeof author === 'object') {
         const a = author as Record<string, unknown>;
-        last = String(
-          a.lastName ?? a.family ?? a.name ?? a.fullName ?? '',
-        )
-          .trim()
-          .split(/\s+/)
-          .pop() as string;
+        if (typeof a.lastName === 'string' && a.lastName.trim()) {
+          last = a.lastName.trim().split(/\s+/).pop() ?? '';
+        } else if (typeof a.family === 'string' && a.family.trim()) {
+          last = a.family.trim().split(/\s+/).pop() ?? '';
+        } else {
+          last = EnrichStage.extractSurnameToken(
+            String(a.name ?? a.fullName ?? ''),
+          );
+        }
       }
       last = last
         .normalize('NFKD')

@@ -4,7 +4,7 @@ import { LibraryCoreModule } from '@/modules/library/core/core.module';
 import { CatalogModule } from '@/modules/library/catalog/catalog.module';
 import { ExtractionModule } from '@/modules/library/extraction/extraction.module';
 import { BullModule } from '@nestjs/bullmq';
-import { LIBRARY_INGESTION_QUEUE_STANDARD } from './types/queue.constants';
+import { LIBRARY_INGESTION_QUEUE_STANDARD } from './types/ingestion.types';
 import { shouldRunWorkerConsumers } from '@/core';
 
 // Facade
@@ -68,6 +68,7 @@ import { BibtexParser } from './parsers/bibtex.parser';
 import { RisParser } from './parsers/ris.parser';
 import { CslParser } from './parsers/csl.parser';
 import { XmlLegacyFormatsParser } from './parsers/xml-legacy-formats.parser';
+import { BibliographyFormatRegistry } from './parsers/bibliography-format.registry';
 import { NormalizationPolicy } from './policies/normalization.policy';
 import { ReconciliationPolicy } from './policies/reconciliation.policy';
 import { DuplicatePolicy } from './policies/duplicate.policy';
@@ -153,6 +154,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     RisParser,
     CslParser,
     XmlLegacyFormatsParser,
+    BibliographyFormatRegistry,
     { provide: NormalizationPolicy, useClass: NormalizationPolicy },
     { provide: ReconciliationPolicy, useClass: ReconciliationPolicy },
     { provide: DuplicatePolicy, useClass: DuplicatePolicy },
@@ -227,6 +229,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     RetractionSyncService,
     RetractionItemEventsSubscriber,
   ],
-  exports: [INGESTION_FACADE, IngestionFacade],
+  exports: [INGESTION_FACADE, IngestionFacade, METADATA_PORT],
 })
 export class IngestionModule {}

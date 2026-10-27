@@ -44,6 +44,7 @@ export interface IExtractionFacade {
     url: string,
     itemId: string,
     userId: string,
+    projectId?: string,
   ): Promise<AttachmentEntity>;
   reassignContentToItem(
     duplicateItemIds: string[],

@@ -7,6 +7,7 @@ import {
   IsInt,
   Min,
   Max,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
@@ -28,18 +29,22 @@ export type SavedSearchSortBy = (typeof SAVED_SEARCH_SORT_BY_VALUES)[number];
 
 export class CreateSavedSearchDto {
   @IsString()
+  @MaxLength(255)
   name!: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   description?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   icon?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   color?: string;
 
   @IsObject()
@@ -67,14 +72,17 @@ export class CreateSavedSearchDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   projectId?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   targetScope?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   scope?: string;
 
   @IsOptional()
@@ -91,18 +99,22 @@ export class CreateSavedSearchDto {
 export class UpdateSavedSearchDto {
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   name?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   description?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   icon?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   color?: string;
 
   @IsOptional()
@@ -131,10 +143,12 @@ export class UpdateSavedSearchDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   targetScope?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   scope?: string;
 
   @IsOptional()
@@ -158,14 +172,17 @@ export class PreviewSavedSearchDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   sortBy?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(10)
   sortOrder?: 'asc' | 'desc';
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   projectId?: string;
 }
 
@@ -181,10 +198,12 @@ export class ExecuteSavedSearchQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(1000)
   page?: number;
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   cursor?: string;
 
   @IsOptional()
@@ -197,5 +216,6 @@ export class ExecuteSavedSearchQueryDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   projectId?: string;
 }

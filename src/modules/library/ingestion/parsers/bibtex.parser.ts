@@ -85,17 +85,26 @@ export class BibtexParser {
           fields: extractedFields,
         };
         rawEntriesByIndex.push(entryInfo);
-        if (cKey) {
+        if (cKey && !rawEntriesByKey.has(cKey.toLowerCase())) {
           rawEntriesByKey.set(cKey.toLowerCase(), entryInfo);
         }
       }
 
       return data.map((csl: CslItem, idx: number) => {
         const citationKey = csl['citation-key'] || csl.id || undefined;
+        const indexedRaw = rawEntriesByIndex[idx];
         const rawEntry =
+          (indexedRaw &&
+          (!citationKey ||
+            !indexedRaw.citationKey ||
+            indexedRaw.citationKey.toLowerCase() ===
+              String(citationKey).toLowerCase())
+            ? indexedRaw
+            : undefined) ||
           (citationKey
             ? rawEntriesByKey.get(String(citationKey).toLowerCase())
-            : undefined) || rawEntriesByIndex[idx];
+            : undefined) ||
+          indexedRaw;
         return buildParsedBibtexEntry(
           citationKey,
           rawEntry?.rawType || '',

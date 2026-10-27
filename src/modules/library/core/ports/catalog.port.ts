@@ -12,6 +12,7 @@ import {
 } from '@/modules/library/core/types/bibliographic.types';
 
 export const CATALOG_FACADE = 'CATALOG_FACADE';
+export type CatalogItemSummary = ItemDetail;
 
 export interface ICatalogFacade {
   getItem<T = ItemDetail>(

@@ -145,53 +145,87 @@ export class RisParser {
         });
 
         const rawEditors: string[] = [];
+        const seenEditorKeys = new Set<string>();
+        const registerEditor = (
+          firstName?: string,
+          lastName?: string,
+          fullName?: string,
+          displayStr?: string,
+          fieldMode?: number,
+        ) => {
+          const cleanLast = (lastName || '').trim();
+          const cleanFirst = (firstName || '').trim();
+          const cleanFull = (
+            fullName ||
+            (cleanFirst && cleanLast
+              ? `${cleanFirst} ${cleanLast}`
+              : cleanLast || cleanFirst)
+          ).trim();
+          if (!cleanLast && !cleanFirst && !cleanFull) return;
+
+          const normKey = `${cleanLast.toLowerCase()}|${cleanFirst.toLowerCase()}|${cleanFull.toLowerCase()}`;
+          const altFull =
+            cleanLast && cleanFirst
+              ? `${cleanLast}, ${cleanFirst}`.toLowerCase()
+              : cleanFull.toLowerCase();
+          if (seenEditorKeys.has(normKey) || seenEditorKeys.has(altFull)) {
+            return;
+          }
+          seenEditorKeys.add(normKey);
+          seenEditorKeys.add(altFull);
+          seenEditorKeys.add(cleanFull.toLowerCase());
+
+          rawEditors.push((displayStr || cleanFull).trim());
+          creators.push({
+            firstName: cleanFirst || undefined,
+            lastName: cleanLast || undefined,
+            fullName: cleanFull,
+            creatorType: 'editor',
+            ...(fieldMode === 1 ? { fieldMode: 1 } : {}),
+          });
+        };
+
         (csl.editor || []).forEach((e: CslRisPerson) => {
           const family = e.family?.trim() || '';
           const given = e.given?.trim() || '';
+          const literal = e.literal?.trim() || '';
           const fullName =
-            e.literal?.trim() ||
+            literal ||
             (family && given ? `${given} ${family}` : family || given);
 
           if (fullName) {
-            rawEditors.push(fullName);
-            creators.push({
-              firstName: given || undefined,
-              lastName: family || undefined,
+            registerEditor(
+              given || undefined,
+              family || undefined,
               fullName,
-              creatorType: 'editor',
-              ...(e.literal && !family && !given ? { fieldMode: 1 } : {}),
-            });
+              fullName,
+              literal && !family && !given ? 1 : undefined,
+            );
           }
         });
 
         for (const edStr of rawRec?.rawEditors || []) {
-          if (
-            edStr &&
-            !rawEditors.some(
-              (existing) => existing.toLowerCase() === edStr.toLowerCase(),
-            )
-          ) {
-            rawEditors.push(edStr);
-            const parsed = parseCreatorString(
-              edStr,
-              creators.length,
-              'editor',
-            );
-            creators.push({
-              lastName: parsed.lastName,
-              firstName: parsed.firstName || undefined,
-              fullName: parsed.fullName,
-              creatorType: 'editor',
-              ...(parsed.fieldMode === 1 ? { fieldMode: 1 } : {}),
-            });
-          }
+          const cleanEdStr = edStr?.trim();
+          if (!cleanEdStr) continue;
+          const parsed = parseCreatorString(
+            cleanEdStr,
+            creators.length,
+            'editor',
+          );
+          registerEditor(
+            parsed.firstName || undefined,
+            parsed.lastName || undefined,
+            parsed.fullName || cleanEdStr,
+            cleanEdStr,
+            parsed.fieldMode === 1 ? 1 : undefined,
+          );
         }
 
         const rawKeywords: string[] = [...(rawRec?.rawTags || [])];
-        if (rawKeywords.length === 0 && csl.keyword) {
+        if (csl.keyword) {
           if (Array.isArray(csl.keyword)) {
             rawKeywords.push(
-              ...csl.keyword.map((k: string) => k.trim()).filter(Boolean),
+              ...csl.keyword.map((k: string) => String(k).trim()).filter(Boolean),
             );
           } else if (typeof csl.keyword === 'string') {
             rawKeywords.push(csl.keyword.trim());
@@ -199,13 +233,34 @@ export class RisParser {
         }
         const tags = normalizeAcademicTags(rawKeywords);
 
+        const dateParts = csl.issued?.['date-parts']?.[0];
         let year =
-          csl.issued?.['date-parts']?.[0]?.[0] != null
-            ? Number(csl.issued['date-parts'][0][0])
-            : undefined;
+          dateParts?.[0] != null ? Number(dateParts[0]) : undefined;
         if (!year || Number.isNaN(year)) {
           year = rawRec?.year;
         }
+
+        let cslPubDate: string | undefined;
+        if (Array.isArray(dateParts) && dateParts[0] != null && !Number.isNaN(Number(dateParts[0]))) {
+          const yStr = String(dateParts[0]).padStart(4, '0');
+          const mNum = dateParts[1] != null ? Number(dateParts[1]) : undefined;
+          const dNum = dateParts[2] != null ? Number(dateParts[2]) : undefined;
+          if (mNum && mNum >= 1 && mNum <= 12) {
+            const mStr = String(mNum).padStart(2, '0');
+            if (dNum && dNum >= 1 && dNum <= 31) {
+              cslPubDate = `${yStr}-${mStr}-${String(dNum).padStart(2, '0')}`;
+            } else {
+              cslPubDate = `${yStr}-${mStr}`;
+            }
+          } else {
+            cslPubDate = yStr;
+          }
+        }
+        const rawPubDate = rawRec?.publicationDate;
+        const publicationDate =
+          rawPubDate && (!cslPubDate || rawPubDate.length >= cslPubDate.length)
+            ? rawPubDate
+            : cslPubDate || (year ? String(year) : undefined);
 
         let itemType = this.mapCslTypeToItemType(csl.type || 'article-journal');
         const rawRisType = rawRec?.itemType;
@@ -295,7 +350,7 @@ export class RisParser {
           creators,
           editors: rawEditors.length > 0 ? rawEditors : undefined,
           year,
-          publicationDate: year ? String(year) : undefined,
+          publicationDate,
           journal: rawT2,
           publicationTitle: rawT2,
           journalAbbr:
@@ -362,8 +417,8 @@ export class RisParser {
     if (csl.page && !String(csl.page).includes('-')) {
       return true;
     }
-    // Check if the block contains non-standard/type-specific RIS tags or multiline continuations
-    return /^(?:ST|ED|A2|Y2|J2|JA|T2|BT|INST|CY|AD|LA|M1|M3|U1|C3|AN|C2|UR|L1|ET|CN|CA|C1|L4|T3|SE|KW|RN|N1|AB|N2)\s*-/m.test(
+    // Check if the block contains non-standard/type-specific RIS tags, dates with month/day, or multiline continuations
+    return /^(?:ST|ED|A2|PY|Y1|DA|Y2|J2|JA|T2|BT|INST|CY|AD|LA|M1|M3|U1|C3|AN|C2|UR|L1|ET|CN|CA|C1|L4|T3|SE|KW|RN|N1|AB|N2)\s*-/m.test(
       block,
     );
   }

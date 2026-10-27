@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { TypesService } from './types.service';
 import {
   SchemaValidationResult,
@@ -9,19 +9,21 @@ import {
 import {
   FIELD_ALIASES,
   REVERSE_FIELD_ALIASES,
-  BASE_FIELD_MAPPINGS,
-  REVERSE_BASE_FIELD_MAPPINGS,
-  SCHEMA_V42_DATA,
 } from '@/modules/library/core/types/schema.constants';
 import {
   CreatorCreditInput,
   ITEM_COLUMN_METADATA_FIELDS,
+  INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
+  getEffectiveBaseFieldMap,
+  getEffectiveReverseBaseFieldMap,
   getValidCreatorMapForType,
 } from '@/modules/library/core';
 
 const SYSTEM_AND_TELEMETRY_KEYS = new Set([
+  ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
   'id',
-  'projectId',  'userId',
+  'projectId',
+  'userId',
   'createdById',
   'uploadedById',
   'createdAt',
@@ -33,6 +35,7 @@ const SYSTEM_AND_TELEMETRY_KEYS = new Set([
   'silent',
   'provenance',
   'fieldProvenance',
+  'lockedFields',
   'ingestionStatus',
   'verificationScore',
   'isVerified',
@@ -41,9 +44,21 @@ const SYSTEM_AND_TELEMETRY_KEYS = new Set([
   'isSelfSufficient',
   'qualityScore',
   'engineUsed',
+  'disambiguationWarning',
+  'rejectedCitedDoi',
+  'promptUploadPdf',
+  'sourceProvider',
+  'source',
+  'sources',
+  'originProvider',
+  'canonicalId',
+  'canonicalUrl',
+  'resolvedAt',
+  'warnings',
   'dismissedDuplicateIds',
   'mergedFromIds',
-  'crossrefEnriched',  'isRetracted',
+  'crossrefEnriched',
+  'isRetracted',
   'retractionNature',
   'retractionDetails',
   'retractionCheckedAt',
@@ -54,18 +69,28 @@ const SYSTEM_AND_TELEMETRY_KEYS = new Set([
   'readStatus',
   'rating',
   'lastReadAt',
+  'isStarred',
+  'isFavorite',
+  'demotedToExtra',
+  'demotedExtraLines',
+  '__demotedExtraLines',
+  '__isSystemUpdate',
+  '__updateSource',
 ]);
 
 const UNIVERSAL_FIELDS = new Set([
   ...SYSTEM_AND_TELEMETRY_KEYS,
-  ...SCHEMA_V42_DATA.distinctFieldKeys,
   ...ITEM_COLUMN_METADATA_FIELDS,
   ...Object.keys(FIELD_ALIASES),
   ...Object.values(FIELD_ALIASES),
   'creators',
   'authors',
+  'author',
   'editors',
   'contributors',
+  'metadata',
+  'relations',
+  'seeAlso',
   'tags',
   'labels',
   'itemTags',
@@ -88,10 +113,7 @@ const UNIVERSAL_FIELDS = new Set([
   'extraFields',
   'URL',
   'numberOfPages',
-  'chapter',
-  'chapterNumber',
-  'formatType',
-  'priorityDate',
+  'numPages',
   'journalRef',
   'primaryCategory',
   'categories',
@@ -203,14 +225,16 @@ export class ZoteroSchemaValidatorService {
         .getOrderedFields(itemType)
         .map((f: ItemFieldDefinition) => f.key),
     );
-    const typeBaseMap = BASE_FIELD_MAPPINGS[itemType] || {};
-    const typeReverseBaseMap = REVERSE_BASE_FIELD_MAPPINGS[itemType] || {};
+    const typeBaseMap = getEffectiveBaseFieldMap(itemType);
+    const typeReverseBaseMap = getEffectiveReverseBaseFieldMap(itemType);
+    const mappedMediumField = typeBaseMap.medium;
 
     const cleanFields: Record<string, unknown> = {};
     const demotedToExtra: Record<string, unknown> = {};
     const warnings: string[] = [];
 
     const extraLines: string[] = [];
+    const demotedExtraLines: string[] = [];
     if (typeof data.extra === 'string' && data.extra.trim()) {
       extraLines.push(data.extra.trim());
     }
@@ -221,7 +245,13 @@ export class ZoteroSchemaValidatorService {
         continue;
       }
 
-      if (SYSTEM_AND_TELEMETRY_KEYS.has(key) || UNIVERSAL_FIELDS.has(key)) {
+      if (
+        SYSTEM_AND_TELEMETRY_KEYS.has(key) ||
+        UNIVERSAL_FIELDS.has(key) ||
+        (key === 'type' &&
+          typeof value === 'string' &&
+          value.trim().toLowerCase() === itemType.toLowerCase())
+      ) {
         cleanFields[key] = value;
         continue;
       }
@@ -239,7 +269,10 @@ export class ZoteroSchemaValidatorService {
         canonicalAlias && validFields.has(canonicalAlias),
       );
       const isValidMappedBase = Boolean(
-        mappedBase && validFields.has(mappedBase),
+        (mappedBase && validFields.has(mappedBase)) ||
+          (key === 'type' &&
+            mappedMediumField &&
+            validFields.has(mappedMediumField)),
       );
 
       if (isValidDirect || isValidAlias || isValidMappedBase) {
@@ -262,12 +295,34 @@ export class ZoteroSchemaValidatorService {
         if (!extraLines.some((l) => l.startsWith(`${key}:`))) {
           extraLines.push(line);
         }
+        if (!demotedExtraLines.some((l) => l.startsWith(`${key}:`))) {
+          demotedExtraLines.push(line);
+        }
       }
+    }
+
+    // Map single string `author` into `authors: [author]` if `creators`/`contributors`/`authors` are not provided
+    if (
+      typeof cleanFields.author === 'string' &&
+      cleanFields.author.trim() &&
+      cleanFields.creators === undefined &&
+      cleanFields.contributors === undefined &&
+      cleanFields.authors === undefined
+    ) {
+      cleanFields.authors = [cleanFields.author.trim()];
+    }
+
+    if (demotedExtraLines.length > 0) {
+      cleanFields.demotedExtraLines = demotedExtraLines;
+      cleanFields.demotedToExtra = demotedToExtra;
     }
 
     // Only emit `extra` when the client sent it or fields were demoted into it; otherwise
     // an empty string would wipe the stored extra on every PATCH.
-    if (data.extra !== undefined || extraLines.length > 0) {
+    if (data.extra !== undefined) {
+      cleanFields.extra =
+        data.extra === null || data.extra === '' ? '' : extraLines.join('\n');
+    } else if (extraLines.length > 0) {
       cleanFields.extra = extraLines.join('\n');
     }
 
@@ -281,7 +336,10 @@ export class ZoteroSchemaValidatorService {
     const itemType = this.validateItemType(
       rawType ||
         (rawData.itemType as string | undefined) ||
-        (rawData.type as string | undefined),
+        (typeof rawData.type === 'string' &&
+        this.typesService.isValidItemType(rawData.type.trim())
+          ? rawData.type.trim()
+          : undefined),
     );
 
     let creators = rawData.creators as CreatorCreditInput[] | undefined;
@@ -295,17 +353,28 @@ export class ZoteroSchemaValidatorService {
       changes = harm.changes;
     }
 
-    const rawTypeFieldVal =
-      typeof rawData.type === 'string' &&
-      rawData.type.trim().toLowerCase() !== itemType.toLowerCase() &&
-      !this.typesService.isValidItemType(rawData.type.trim())
-        ? rawData.type.trim()
-        : undefined;
+    const hasExplicitItemType = Boolean(
+      rawType || typeof rawData.itemType === 'string',
+    );
+    let resolvedTypeVal: string | null | undefined = itemType;
+    if (rawData.type === null) {
+      resolvedTypeVal = null;
+    } else if (typeof rawData.type === 'string') {
+      const trimmedType = rawData.type.trim();
+      if (trimmedType === '') {
+        resolvedTypeVal = '';
+      } else if (
+        trimmedType.toLowerCase() !== itemType.toLowerCase() &&
+        (hasExplicitItemType || !this.typesService.isValidItemType(trimmedType))
+      ) {
+        resolvedTypeVal = trimmedType;
+      }
+    }
 
     const dataWithCreators: Record<string, unknown> = {
       ...rawData,
       itemType,
-      type: rawTypeFieldVal ?? itemType,
+      type: resolvedTypeVal,
       ...(rawData.creators !== undefined ? { creators } : {}),
     };
 

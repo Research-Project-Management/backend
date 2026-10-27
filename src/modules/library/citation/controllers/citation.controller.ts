@@ -7,6 +7,7 @@ import {
   Query,
   UseGuards,
   NotFoundException,
+  BadRequestException,
   Header,
 } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -40,10 +41,7 @@ export class CitationController {
     ProjectRole.CONTRIBUTOR,
     ProjectRole.REVIEWER,
   )
-  @Header(
-    'Cache-Control',
-    'public, max-age=86400, stale-while-revalidate=604800',
-  )
+  @Header('Cache-Control', 'private, max-age=3600')
   getStyles() {
     return this.citationService.getAvailableStyles();
   }
@@ -59,13 +57,20 @@ export class CitationController {
     ProjectRole.REVIEWER,
   )
   async searchStyles(
+    @CurrentUser('id') userId: string,
     @Query('q') query?: string,
     @Query('limit') limit?: string,
+    @Param('projectId') projectId?: string,
   ) {
-    const numLimit = limit ? parseInt(limit, 10) : 30;
+    const parsedLimit = limit ? parseInt(limit, 10) : 30;
+    const numLimit =
+      Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? Math.min(parsedLimit, 200)
+        : 30;
     const styles = await this.citationService.searchStyles(
       query || '',
       numLimit,
+      projectId || userId,
     );
     return {
       total: styles.length,
@@ -168,15 +173,17 @@ export class CitationController {
     ProjectRole.CONTRIBUTOR,
     ProjectRole.REVIEWER,
   )
-  @Header(
-    'Cache-Control',
-    'private, max-age=3600, stale-while-revalidate=86400',
-  )
+  @Header('Cache-Control', 'private, max-age=3600')
   async getDoiReference(
     @CurrentUser('id') userId: string,
     @Param('doi') doi: string,
   ) {
-    const cleanDoi = decodeURIComponent(doi);
+    let cleanDoi: string;
+    try {
+      cleanDoi = decodeURIComponent(doi);
+    } catch {
+      throw new BadRequestException('Malformed DOI URI parameter');
+    }
     const result = await this.citationService.resolveAcademicQuery(
       cleanDoi,
       cleanDoi,
@@ -203,7 +210,11 @@ export class CitationController {
     @Query('query') query: string,
     @Query('rows') rows?: string,
   ) {
-    const numRows = rows ? parseInt(rows, 10) : 5;
+    const parsedRows = rows ? parseInt(rows, 10) : 5;
+    const numRows =
+      Number.isFinite(parsedRows) && parsedRows > 0
+        ? Math.min(parsedRows, 100)
+        : 5;
     return this.citationService.searchCrossRef(query, numRows);
   }
 
@@ -218,10 +229,7 @@ export class CitationController {
     ProjectRole.CONTRIBUTOR,
     ProjectRole.REVIEWER,
   )
-  @Header(
-    'Cache-Control',
-    'private, max-age=3600, stale-while-revalidate=86400',
-  )
+  @Header('Cache-Control', 'private, max-age=3600')
   async getItemCitation(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
@@ -231,7 +239,9 @@ export class CitationController {
     @Param('projectId') routeProjectId?: string,
   ) {
     const styleId = normalizeCitationStyleId(style);
-    const numIndex = index ? parseInt(index, 10) : 1;
+    const parsedIndex = index ? parseInt(index, 10) : 1;
+    const numIndex =
+      Number.isFinite(parsedIndex) && parsedIndex > 0 ? parsedIndex : 1;
     const projectId = queryProjectId || routeProjectId;
     const res = await this.citationService.formatItemById(
       userId,

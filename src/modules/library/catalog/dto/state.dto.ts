@@ -1,10 +1,12 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEnum,
   IsInt,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   Max,
 } from 'class-validator';
@@ -37,7 +39,9 @@ export class UpdateStateDto {
 
 export class GetBatchStatesDto {
   @IsArray()
+  @ArrayMaxSize(500)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   @IsOptional()
   itemIds?: string[];
 }

@@ -30,6 +30,7 @@ import {
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
+import { LibraryBootstrapService } from '@/modules/library/catalog/services/library-bootstrap.service';
 
 export interface RequestWithAccessHint {
   role?: string;
@@ -489,7 +490,10 @@ export class ItemsController {
 @Controller(['api/v1/library', 'api/v1/projects/:projectId/library'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class LibraryPermissionsController {
-  constructor(private readonly queryService: ItemQueryService) {}
+  constructor(
+    private readonly queryService: ItemQueryService,
+    private readonly bootstrapService?: LibraryBootstrapService,
+  ) {}
 
   private extractAccessHint(req?: RequestWithAccessHint) {
     if (!req) return undefined;
@@ -499,6 +503,92 @@ export class LibraryPermissionsController {
       permissionOverrides: ctx?.permissionOverrides,
       effectivePermissions: ctx?.effectivePermissions || req.permissions,
     };
+  }
+
+  @Get('bootstrap')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary:
+      'Consolidated single-request workspace bootstrap for personal or project library',
+  })
+  async getLibraryBootstrap(
+    @CurrentUser('id') userId: string,
+    @Query() query?: ItemsListQuery & { includeItems?: string | boolean },
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Req() req?: RequestWithAccessHint,
+  ) {
+    const projectId = normalizeProjectScopeId(
+      paramProjectId || queryProjectId || query?.projectId,
+    );
+    const includeItems =
+      query?.includeItems !== 'false' && query?.includeItems !== false;
+    const effectiveOrderBy = query?.orderBy ?? query?.sortBy;
+    const effectiveOrderDirection = query?.orderDirection ?? query?.sortOrder;
+    const effectiveFromYear = query?.fromYear ?? query?.year;
+    const effectiveToYear = query?.toYear ?? query?.year;
+    const effectiveTag =
+      query?.tag ??
+      (Array.isArray(query?.tags) && query.tags.length > 0
+        ? query.tags.join(',')
+        : undefined);
+    const effectiveHasFile = query?.hasFile ?? query?.hasPdf;
+    const effectiveOnlyFlagged =
+      query?.onlyFlagged ?? query?.isFavorite ?? query?.isStarred;
+    const effectiveView =
+      query?.view ?? (query?.unfiled ? 'unfiled' : undefined);
+    const effectiveReadStatus =
+      query?.readStatus ??
+      (query?.isRead === true
+        ? 'completed'
+        : query?.isRead === false
+          ? 'unread'
+          : undefined);
+
+    return this.bootstrapService?.getBootstrap(
+      userId,
+      {
+        projectId,
+        includeItems,
+        view: effectiveView,
+        collectionId: query?.collectionId,
+        tagId: query?.tagId,
+        search: query?.search,
+        ...(query?.searchMode !== undefined ? { searchMode: query.searchMode } : {}),
+        cursor: query?.cursor,
+        limit: query?.limit,
+        ...(query?.page !== undefined ? { page: query.page } : {}),
+        ...(effectiveOrderBy !== undefined ? { orderBy: effectiveOrderBy } : {}),
+        ...(effectiveOrderDirection !== undefined
+          ? { orderDirection: effectiveOrderDirection }
+          : {}),
+        ...(query?.itemType !== undefined ? { itemType: query.itemType } : {}),
+        ...(query?.type !== undefined ? { type: query.type } : {}),
+        ...(effectiveFromYear !== undefined ? { fromYear: effectiveFromYear } : {}),
+        ...(effectiveToYear !== undefined ? { toYear: effectiveToYear } : {}),
+        ...(effectiveReadStatus !== undefined
+          ? { readStatus: effectiveReadStatus }
+          : {}),
+        ...(effectiveHasFile !== undefined ? { hasFile: effectiveHasFile } : {}),
+        ...(query?.hasNotes !== undefined ? { hasNotes: query.hasNotes } : {}),
+        ...(effectiveOnlyFlagged !== undefined
+          ? { onlyFlagged: effectiveOnlyFlagged }
+          : {}),
+        ...(query?.isRetracted !== undefined
+          ? { isRetracted: query.isRetracted }
+          : {}),
+        ...(effectiveTag !== undefined ? { tag: effectiveTag } : {}),
+        ...(query?.collectionIds !== undefined
+          ? { collectionIds: query.collectionIds }
+          : {}),
+        ...(query?.includeSubcollections !== undefined
+          ? { includeSubcollections: query.includeSubcollections }
+          : {}),
+        ...(query?.recursive !== undefined ? { recursive: query.recursive } : {}),
+        ...(query?.fields !== undefined ? { fields: query.fields } : {}),
+      },
+      this.extractAccessHint(req),
+    );
   }
 
   @Get('permissions')

@@ -6,7 +6,11 @@ import {
   SchemaRegistrySnapshot,
 } from '@/modules/library/core/types/schema.types';
 import { SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
-import { normalizeCanonicalItemType } from '@/modules/library/core';
+import {
+  normalizeCanonicalItemType,
+  getEffectiveBaseFieldMap,
+  getEffectiveReverseBaseFieldMap,
+} from '@/modules/library/core';
 
 @Injectable()
 export class TypesService {
@@ -82,12 +86,18 @@ export class TypesService {
 
   getBaseFieldMapping(itemType: string): Record<string, string> {
     const normalized = this.normalizeTypeKey(itemType);
-    return this.snapshot.baseFieldMappings[normalized] || {};
+    return {
+      ...getEffectiveBaseFieldMap(normalized),
+      ...(this.snapshot.baseFieldMappings[normalized] || {}),
+    };
   }
 
   getReverseBaseFieldMapping(itemType: string): Record<string, string> {
     const normalized = this.normalizeTypeKey(itemType);
-    return this.snapshot.reverseBaseFieldMappings[normalized] || {};
+    return {
+      ...getEffectiveReverseBaseFieldMap(normalized),
+      ...(this.snapshot.reverseBaseFieldMappings[normalized] || {}),
+    };
   }
 
   getBaseFieldFor(itemType: string, fieldKey: string): string | undefined {

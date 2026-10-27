@@ -23,7 +23,11 @@ import { PipelineService } from './pipeline.service';
 import { QueueService } from './queue.service';
 import { UrlCaptureService } from './url-capture.service';
 import { ConfirmCapturedUrlDto } from '@/modules/library/ingestion/dto/capture-url.dto';
-import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
+import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+  ReconcileExtractedCandidatePayload,
+} from '@/modules/library/core';
 import { createHash, randomUUID } from 'crypto';
 import zlib from 'zlib';
 import { promisify } from 'util';
@@ -251,7 +255,31 @@ export class IngestionService {
     // for bounded concurrency and worker resilience (unless direct synchronous execution is requested).
     const shouldEnqueue = options?.enqueue ?? true;
     if (shouldEnqueue) {
-      void this.queue.enqueue(runId, projectId, envelopeToPersist);
+      void this.queue
+        .enqueue(runId, projectId, envelopeToPersist)
+        .catch(async (enqueueErr: unknown) => {
+          const errMsg =
+            enqueueErr instanceof Error
+              ? enqueueErr.message
+              : String(enqueueErr);
+          this.logger.error(
+            `Failed to enqueue ingestion run ${runId}: ${errMsg}`,
+          );
+          await this.repo
+            .updateRunStatus(
+              { userId: envelope.userId, projectId: envelope.projectId },
+              runId,
+              IngestionStatus.FAILED_RETRYABLE,
+              {
+                lastError: `Failed to enqueue ingestion run: ${errMsg}`,
+              },
+            )
+            .catch((repoErr: unknown) => {
+              this.logger.error(
+                `Failed to mark run ${runId} as FAILED_RETRYABLE after queue failure: ${repoErr instanceof Error ? repoErr.message : String(repoErr)}`,
+              );
+            });
+        });
     }
 
     this.submissionCountSinceLastGc++;
@@ -649,5 +677,11 @@ export class IngestionService {
       options,
       projectId,
     );
+  }
+
+  async reconcileExtractedCandidate(
+    payload: ReconcileExtractedCandidatePayload,
+  ): Promise<{ updated: boolean; updatedFields: string[]; rejectedCitedDoi?: string }> {
+    return this.metadataResolver.reconcileExtractedCandidate(payload);
   }
 }

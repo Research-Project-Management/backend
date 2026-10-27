@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { SearchService } from './services/search.service';
 import { SearchItemsQueryDto } from './dto/search.dto';
-import { CatalogItemSummary } from '../catalog/catalog.facade';
+import { CatalogItemSummary } from '@/modules/library/core';
 
 export const SEARCH_FACADE = 'SEARCH_FACADE';
 
@@ -31,6 +31,10 @@ export interface ISearchFacade {
     localIndexed: boolean;
     error?: string;
   }>;
+  indexAttachmentPages?(
+    attachmentId: string,
+    pages: Array<{ pageIndex: number; textContent: string }>,
+  ): Promise<void>;
 }
 
 @Injectable()
@@ -78,5 +82,12 @@ export class SearchFacade implements ISearchFacade {
       const errMsg = err instanceof Error ? err.message : String(err);
       return { localIndexed: false, error: errMsg };
     }
+  }
+
+  async indexAttachmentPages(
+    attachmentId: string,
+    pages: Array<{ pageIndex: number; textContent: string }>,
+  ): Promise<void> {
+    await this.searchService.indexAttachmentPages(attachmentId, pages);
   }
 }

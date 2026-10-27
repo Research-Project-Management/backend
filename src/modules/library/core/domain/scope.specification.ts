@@ -1,3 +1,9 @@
+import {
+  CompositeSpecification,
+  ISpecification,
+  QueryCriteria,
+} from './specification.domain';
+
 /**
  * Scope normalization and user/project resolution helpers.
  *
@@ -41,51 +47,24 @@ export function normalizeProjectScopeId(
   return isProjectScopeId(projectId) ? projectId.trim() : undefined;
 }
 
-export interface IScopeSpecificationOperand {
-  toPrismaWhere(): Record<string, unknown>;
-  isSatisfiedBy?: (item: unknown) => boolean;
-}
-
-class CompositeScopeSpecification implements IScopeSpecificationOperand {
-  constructor(
-    private readonly left: IScopeSpecificationOperand,
-    private readonly right: IScopeSpecificationOperand,
-  ) {}
-
-  toPrismaWhere(): Record<string, unknown> {
-    return {
-      AND: [this.left.toPrismaWhere(), this.right.toPrismaWhere()],
-    };
-  }
-
-  isSatisfiedBy(item: unknown): boolean {
-    const leftValid =
-      typeof this.left.isSatisfiedBy === 'function'
-        ? this.left.isSatisfiedBy(item)
-        : true;
-    const rightValid =
-      typeof this.right.isSatisfiedBy === 'function'
-        ? this.right.isSatisfiedBy(item)
-        : true;
-    return leftValid && rightValid;
-  }
-
-  and(other: IScopeSpecificationOperand): CompositeScopeSpecification {
-    return new CompositeScopeSpecification(this, other);
-  }
-}
+export type IScopeSpecificationOperand = ISpecification<unknown, QueryCriteria>;
 
 /**
  * ScopeSpecification: Enforces user & project scope isolation.
  * Resolves to projectId for user projects, or userId for personal user library.
  */
-export class ScopeSpecification implements IScopeSpecificationOperand {
+export class ScopeSpecification extends CompositeSpecification<
+  unknown,
+  QueryCriteria
+> {
   constructor(
     public readonly userId: string,
     public readonly projectId?: string | null,
-  ) {}
+  ) {
+    super();
+  }
 
-  toPrismaWhere(): Record<string, unknown> {
+  toPrismaWhere(): QueryCriteria {
     if (isProjectScopeId(this.projectId)) {
       return { projectId: this.projectId.trim() };
     }
@@ -99,9 +78,5 @@ export class ScopeSpecification implements IScopeSpecificationOperand {
       return rec.projectId === this.projectId.trim();
     }
     return rec.userId === this.userId && (!rec.projectId || rec.projectId === null);
-  }
-
-  and(other: IScopeSpecificationOperand): CompositeScopeSpecification {
-    return new CompositeScopeSpecification(this, other);
   }
 }

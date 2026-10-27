@@ -14,11 +14,13 @@ import {
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
+  REVERSE_FIELD_ALIASES,
 } from '@/modules/library/catalog/types/items.constants';
 import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
+  ItemProvenancePolicy,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 
@@ -61,6 +63,7 @@ export class ItemTypeConversionService {
     options: ConvertTypeOptions = {},
     projectId?: string,
     tx?: Prisma.TransactionClient,
+    helpers?: TransactionHelpers,
   ) {
     const rawExisting = await this.query.findById(
       userId,
@@ -72,6 +75,20 @@ export class ItemTypeConversionService {
       throw new NotFoundException(`Item ${itemId} not found in user library`);
     }
     const existing = ItemsMapper.toDomain<ItemDetail>(rawExisting);
+    if (rawExisting.itemType === 'preprint' && rawExisting.publicationTitle == null) {
+      const rawMeta =
+        rawExisting.metadata &&
+        typeof rawExisting.metadata === 'object' &&
+        !Array.isArray(rawExisting.metadata)
+          ? (rawExisting.metadata as Record<string, unknown>)
+          : {};
+      if (rawMeta.publicationTitle == null) {
+        delete (existing as unknown as Record<string, unknown>).publicationTitle;
+      }
+      if (rawMeta.publisher == null) {
+        delete (existing as unknown as Record<string, unknown>).publisher;
+      }
+    }
 
     const preview = this.previewTypeConversion(existing, targetType, {
       retainUnmappedInExtra: options.retainUnmappedInExtra ?? true,
@@ -88,13 +105,38 @@ export class ItemTypeConversionService {
 
     const effectiveProjectId =
       normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
+    const eventScope = {
+      userId,
+      projectId: effectiveProjectId,
+    };
+
+    const recordConversionEvents = async (
+      res: { version: number; [key: string]: unknown },
+      activeHelpers?: TransactionHelpers,
+    ) => {
+      if (!activeHelpers) return;
+      const domainRes = ItemsMapper.toDomain(res);
+      await activeHelpers.appendChange(eventScope, {
+        entityType: 'Item',
+        entityId: itemId,
+        action: 'update',
+        version: res.version,
+        data: domainRes,
+      });
+      await activeHelpers.publishOutbox(
+        eventScope,
+        itemId,
+        LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+        domainRes,
+      );
+    };
 
     const updated =
       !tx && this.libraryTx
         ? await this.libraryTx.executeInTransaction(
             async (
               innerTx: Prisma.TransactionClient,
-              helpers: TransactionHelpers,
+              innerHelpers: TransactionHelpers,
             ) => {
               const res = await this.command.update(
                 userId,
@@ -104,42 +146,28 @@ export class ItemTypeConversionService {
                 innerTx,
                 projectId,
               );
-              const eventScope = {
-                userId,
-                projectId: effectiveProjectId,
-              };
-              await helpers.appendChange(eventScope, {
-                entityType: 'Item',
-                entityId: itemId,
-                action: 'update',
-                version: res.version,
-                data: res,
-              });
-              await helpers.publishOutbox(
-                eventScope,
-                itemId,
-                LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-                res,
-              );
+              await recordConversionEvents(res, innerHelpers);
               return res;
             },
           )
-        : await this.command.update(
-            userId,
-            itemId,
-            options.expectedVersion,
-            updatePayload,
-            tx,
-            projectId,
-          );
+        : await (async () => {
+            const res = await this.command.update(
+              userId,
+              itemId,
+              options.expectedVersion,
+              updatePayload,
+              tx,
+              projectId,
+            );
+            await recordConversionEvents(res, helpers);
+            return res;
+          })();
 
-    if (!tx) {
-      await this.cacheCoordinator?.invalidateItemCache(
-        itemId,
-        userId,
-        effectiveProjectId,
-      );
-    }
+    await this.cacheCoordinator?.invalidateItemCache(
+      itemId,
+      userId,
+      effectiveProjectId,
+    );
 
     return {
       success: true,
@@ -160,6 +188,35 @@ export function buildTypeConversionUpdatePayload(
   const dynamicExtraFields: Record<string, unknown> = {
     ...((projected.extraFields as Record<string, unknown> | undefined) || {}),
   };
+  delete dynamicExtraFields.itemType;
+  delete dynamicExtraFields.type;
+
+  const droppedSet = new Set(
+    preview.droppedFields.map((d) => d.field.toLowerCase()),
+  );
+  const mappedOutSet = new Set(
+    preview.mappedFields
+      .filter((m) => m.fromField.toLowerCase() !== m.toField.toLowerCase())
+      .map((m) => m.fromField.toLowerCase()),
+  );
+
+  for (const dropped of preview.droppedFields) {
+    delete dynamicExtraFields[dropped.field];
+    const aliasKey =
+      FIELD_ALIASES[dropped.field] || REVERSE_FIELD_ALIASES[dropped.field];
+    if (aliasKey) delete dynamicExtraFields[aliasKey];
+  }
+  for (const mapped of preview.mappedFields) {
+    if (mapped.fromField !== mapped.toField) {
+      delete dynamicExtraFields[mapped.fromField];
+      const aliasKey =
+        FIELD_ALIASES[mapped.fromField] ||
+        REVERSE_FIELD_ALIASES[mapped.fromField];
+      if (aliasKey && aliasKey !== mapped.toField) {
+        delete dynamicExtraFields[aliasKey];
+      }
+    }
+  }
 
   for (const field of targetFields) {
     const val = transformer.getItemFieldValue(projected, field.key);
@@ -174,22 +231,47 @@ export function buildTypeConversionUpdatePayload(
     }
   }
 
+  const metadataPatch: Record<string, unknown> = {};
+  for (const dropped of preview.droppedFields) {
+    metadataPatch[dropped.field] = null;
+    const aliasKey =
+      FIELD_ALIASES[dropped.field] || REVERSE_FIELD_ALIASES[dropped.field];
+    if (aliasKey) metadataPatch[aliasKey] = null;
+  }
+  for (const mapped of preview.mappedFields) {
+    if (mapped.fromField !== mapped.toField) {
+      metadataPatch[mapped.fromField] = null;
+      const aliasKey =
+        FIELD_ALIASES[mapped.fromField] ||
+        REVERSE_FIELD_ALIASES[mapped.fromField];
+      if (aliasKey && aliasKey !== mapped.toField) {
+        metadataPatch[aliasKey] = null;
+      }
+    }
+  }
+
+  const { fieldProvenance, lockedFields } =
+    ItemProvenancePolicy.transferConversionProvenance(existing, preview);
+
+  metadataPatch.fieldProvenance = fieldProvenance;
+  metadataPatch.lockedFields = lockedFields;
+
   const updatePayload: Record<string, unknown> = {
+    __isSystemUpdate: true,
     itemType: targetType,
     type: targetType,
     creators: projected.creators ?? existing.creators,
+    contributors: projected.creators ?? existing.contributors ?? existing.creators,
     extraFields: dynamicExtraFields,
+    ...(projected.extra !== undefined ? { extra: projected.extra } : {}),
+    metadata: metadataPatch,
   };
-
-  const droppedSet = new Set(
-    preview.droppedFields.map((d) => d.field.toLowerCase()),
-  );
 
   for (const col of ITEM_COLUMN_METADATA_FIELDS) {
     if (FIELD_ALIASES[col] && FIELD_ALIASES[col] !== col) continue;
 
     const colLower = col.toLowerCase();
-    if (droppedSet.has(colLower)) {
+    if (droppedSet.has(colLower) || mappedOutSet.has(colLower)) {
       updatePayload[col] = null;
     } else {
       const val =

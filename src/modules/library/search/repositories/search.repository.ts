@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
+import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
 import { RedisCacheService } from '@/core';
 import { Prisma } from '@prisma/client';
@@ -9,9 +10,20 @@ import {
   FacetResult,
 } from '@/modules/library/search/types/search.types';
 import { SearchSpecificationBuilder } from '@/modules/library/search/domain/search-specification.builder';
-import { TextSearchSpecification } from '@/modules/library/search/domain/item-specifications';
-import { sanitizeSearchQuery } from '@/modules/library/search/domain/search.domain';
-import { isProjectScopeId } from '@/modules/library/core';
+import {
+  TextSearchSpecification,
+  sanitizeSearchQuery,
+} from '@/modules/library/search/domain/item-specifications';
+import { isProjectScopeId, LIBRARY_REDIS_KEYS } from '@/modules/library/core';
+import {
+  isValidUuid,
+  sanitizeUuidSearchOptions,
+  buildSearchItemsCacheKey,
+  buildSearchFacetCacheKey,
+  aggregateFacetGroups,
+  buildSearchFtsMatchingIdsSql,
+  buildSearchFtsSqlQuery,
+} from './search-sql.helper';
 
 export type { SearchOptions, FacetResult };
 
@@ -36,6 +48,19 @@ export class SearchRepository implements OnModuleInit {
     return isProjectScopeId(projectId);
   }
 
+  private sanitizeUuidOptions(options: SearchOptions): SearchOptions {
+    return sanitizeUuidSearchOptions(options);
+  }
+
+  private buildSearchCacheKey(
+    userId: string,
+    options: SearchOptions,
+    queryText: string | undefined,
+    limit: number,
+  ): string {
+    return buildSearchItemsCacheKey(userId, options, queryText, limit);
+  }
+
   /**
    * Builds the base Prisma WHERE clause for non-text filters using Specification Pattern.
    * Text search is handled separately via raw FTS or ILIKE fallback.
@@ -46,7 +71,7 @@ export class SearchRepository implements OnModuleInit {
   ): Prisma.ItemWhereInput {
     return SearchSpecificationBuilder.baseFromOptions(
       userId,
-      options,
+      this.sanitizeUuidOptions(options),
     ).toPrismaWhere();
   }
 
@@ -63,32 +88,26 @@ export class SearchRepository implements OnModuleInit {
     options: SearchOptions,
     tx?: Prisma.TransactionClient,
   ) {
+    if (
+      (options.collectionId && !isValidUuid(options.collectionId)) ||
+      (options.tagId && !isValidUuid(options.tagId)) ||
+      (this.isProjectScope(options.projectId) &&
+        !isValidUuid(options.projectId.trim())) ||
+      (options.cursor && !isValidUuid(options.cursor))
+    ) {
+      return { items: [], nextCursor: undefined, hasNextPage: false };
+    }
+
     const limit = Math.min(options.limit ?? 20, 100);
     const queryText = options.q?.trim();
 
     if (!tx && this.cache) {
-      const scopeKey = this.isProjectScope(options.projectId)
-        ? `proj:${options.projectId}`
-        : `user:${userId}`;
-      const normalizedCacheInput = {
-        q: queryText || '',
-        cursor: options.cursor || '',
+      const cacheKey = this.buildSearchCacheKey(
+        userId,
+        options,
+        queryText,
         limit,
-        projectId: options.projectId || '',
-        collectionId: options.collectionId || '',
-        tagId: options.tagId || '',
-        itemType: Array.isArray(options.itemType)
-          ? [...options.itemType].sort()
-          : options.itemType || '',
-        yearFrom: options.yearFrom ?? null,
-        yearTo: options.yearTo ?? null,
-        sortBy: options.sortBy || '',
-        sortOrder: options.sortOrder || '',
-      };
-      const filterHash = createHash('sha256')
-        .update(JSON.stringify(normalizedCacheInput))
-        .digest('hex');
-      const cacheKey = `library:search:items:${scopeKey}:${filterHash}`;
+      );
 
       return this.cache.wrap(
         cacheKey,
@@ -138,94 +157,22 @@ export class SearchRepository implements OnModuleInit {
     limit: number,
     tx?: Prisma.TransactionClient,
   ) {
-    // Build structured filters as SQL fragment
-    const hasProject = this.isProjectScope(options.projectId);
-    const baseFilters: string[] = [
-      hasProject
-        ? `project_id = $1::uuid`
-        : `user_id = $1::uuid AND project_id IS NULL`,
-      `deleted_at IS NULL`,
-      `search_vector @@ plainto_tsquery('english', $2)`,
-    ];
-    const params: unknown[] = [
-      hasProject ? options.projectId : userId,
+    const built = buildSearchFtsSqlQuery({
+      userId,
+      options,
       queryText,
-    ];
-    let paramIdx = 3;
-
-    if (options.itemType) {
-      if (Array.isArray(options.itemType)) {
-        if (options.itemType.length === 1) {
-          baseFilters.push(`"type" = $${paramIdx++}`);
-          params.push(options.itemType[0]);
-        } else if (options.itemType.length > 1) {
-          baseFilters.push(`"type" = ANY($${paramIdx++}::text[])`);
-          params.push(options.itemType);
-        }
-      } else {
-        baseFilters.push(`"type" = $${paramIdx++}`);
-        params.push(options.itemType);
-      }
-    }
-    if (options.yearFrom) {
-      baseFilters.push(`year >= $${paramIdx++}`);
-      params.push(options.yearFrom);
-    }
-    if (options.yearTo) {
-      baseFilters.push(`year <= $${paramIdx++}`);
-      params.push(options.yearTo);
-    }
-    // Collection and tag filters via subquery
-    if (options.collectionId) {
-      baseFilters.push(
-        `EXISTS (SELECT 1 FROM "collection_items" ci WHERE ci.item_id = "items".id AND ci.collection_id = $${paramIdx++}::uuid)`,
-      );
-      params.push(options.collectionId);
-    }
-    if (options.tagId) {
-      baseFilters.push(
-        `EXISTS (SELECT 1 FROM "item_tags" it WHERE it.item_id = "items".id AND it.tag_id = $${paramIdx++}::uuid)`,
-      );
-      params.push(options.tagId);
+      limit,
+    });
+    if (!built) {
+      return { items: [], nextCursor: undefined, hasNextPage: false };
     }
 
-    const whereClause = baseFilters.join(' AND ');
-
-    // ORDER BY: relevance when FTS, otherwise dateAdded
-    const orderExpr =
-      options.sortBy === 'year'
-        ? `year ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST, id DESC`
-        : options.sortBy === 'title'
-          ? `title ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST, id DESC`
-          : options.sortBy === 'relevance' || !options.sortBy
-            ? `ts_rank(search_vector, plainto_tsquery('english', $2)) DESC, created_at DESC, id DESC`
-            : `created_at ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'}, id DESC`;
-
-    let cursorCte = '';
-    let cursorFilter = '';
-    if (options.cursor) {
-      const cursorParam = paramIdx++;
-      params.push(options.cursor);
-      cursorCte = `, cursor_pos AS (
-        SELECT _row_num FROM search_results WHERE id = $${cursorParam}::uuid
-      )`;
-      cursorFilter = `WHERE _row_num > COALESCE((SELECT _row_num FROM cursor_pos), 0)`;
-    }
-
-    params.push(limit + 1);
-    const limitParam = paramIdx++;
-
-    const rows = await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(
-      `WITH search_results AS (
-         SELECT id, ROW_NUMBER() OVER (ORDER BY ${orderExpr}) AS _row_num
-         FROM "items"
-         WHERE ${whereClause}
-       )${cursorCte}
-       SELECT id FROM search_results
-       ${cursorFilter}
-       ORDER BY _row_num ASC
-       LIMIT $${limitParam}`,
-      ...params,
+    const client = this.getClient(tx);
+    const rawRunner =
+      typeof client.$queryRawUnsafe === 'function' ? client : this.prisma;
+    const rows = await rawRunner.$queryRawUnsafe<Array<{ id: string }>>(
+      built.sql,
+      ...built.params,
     );
 
     let hasNextPage = false;
@@ -243,7 +190,6 @@ export class SearchRepository implements OnModuleInit {
     }
 
     // Fetch full records with relations in original ranked order
-    const client = this.getClient(tx);
     const items = await client.item.findMany({
       where: { id: { in: ids } },
       include: {
@@ -285,11 +231,13 @@ export class SearchRepository implements OnModuleInit {
           ? [{ title: options.sortOrder || 'asc' }, { id: 'desc' }]
           : [{ createdAt: options.sortOrder || 'desc' }, { id: 'desc' }];
 
-    const items = await client.item.findMany({
+    return client.item.findMany({
       where,
       orderBy,
       take: limit + 1,
-      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
+      ...(options.cursor && isValidUuid(options.cursor)
+        ? { cursor: { id: options.cursor }, skip: 1 }
+        : {}),
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
         attachments: { take: 5 },
@@ -297,18 +245,18 @@ export class SearchRepository implements OnModuleInit {
         collectionItems: { include: { collection: true } },
         states: { where: { userId }, take: 1 },
       },
+    }).then((items) => {
+      let hasNextPage = false;
+      let nextCursor: string | undefined;
+
+      if (items.length > limit) {
+        hasNextPage = true;
+        items.pop();
+        nextCursor = items[items.length - 1]?.id;
+      }
+
+      return { items, nextCursor, hasNextPage };
     });
-
-    let hasNextPage = false;
-    let nextCursor: string | undefined;
-
-    if (items.length > limit) {
-      hasNextPage = true;
-      items.pop();
-      nextCursor = items[items.length - 1]?.id;
-    }
-
-    return { items, nextCursor, hasNextPage };
   }
 
   async countSearchItems(
@@ -316,6 +264,15 @@ export class SearchRepository implements OnModuleInit {
     options: SearchOptions,
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
+    if (
+      (options.collectionId && !isValidUuid(options.collectionId)) ||
+      (options.tagId && !isValidUuid(options.tagId)) ||
+      (this.isProjectScope(options.projectId) &&
+        !isValidUuid(options.projectId.trim()))
+    ) {
+      return 0;
+    }
+
     const client = this.getClient(tx);
     const q = options.q?.trim();
     const ftsSanitized = sanitizeSearchQuery(q);
@@ -324,18 +281,24 @@ export class SearchRepository implements OnModuleInit {
     if (q) {
       if (ftsSanitized && this.hasFtsColumn()) {
         try {
-          const hasProject = this.isProjectScope(options.projectId);
-          const scopeSql = hasProject
-            ? `project_id = $1::uuid`
-            : `user_id = $1::uuid AND project_id IS NULL`;
-          const ftsRows = await this.prisma.$queryRawUnsafe<
-            Array<{ id: string }>
-          >(
-            `SELECT id FROM "items" WHERE ${scopeSql} AND deleted_at IS NULL AND search_vector @@ plainto_tsquery('english', $2) LIMIT 5000`,
-            hasProject ? options.projectId : userId,
-            ftsSanitized,
-          );
-          textWhere = { id: { in: ftsRows.map((r) => r.id) } };
+          const builtIds = buildSearchFtsMatchingIdsSql({
+            userId,
+            options,
+            queryText: ftsSanitized,
+            limit: 5000,
+          });
+          if (!builtIds) {
+            textWhere = this.buildTextWhereIlike(q);
+          } else {
+            const rawRunner =
+              typeof client.$queryRawUnsafe === 'function'
+                ? client
+                : this.prisma;
+            const ftsRows = await rawRunner.$queryRawUnsafe<
+              Array<{ id: string }>
+            >(builtIds.sql, ...builtIds.params);
+            textWhere = { id: { in: ftsRows.map((r) => r.id) } };
+          }
         } catch {
           textWhere = this.buildTextWhereIlike(q);
         }
@@ -360,24 +323,7 @@ export class SearchRepository implements OnModuleInit {
     options: SearchOptions,
     tx?: Prisma.TransactionClient,
   ): Promise<FacetResult> {
-    // 1. Check Facet Cache (Cache-Aside)
-    const scopeKey = this.isProjectScope(options.projectId)
-      ? `proj:${options.projectId}`
-      : `user:${userId}`;
-    const filterHash = createHash('md5')
-      .update(
-        JSON.stringify({
-          q: options.q?.trim() || '',
-          projectId: options.projectId,
-          collectionId: options.collectionId,
-          tagId: options.tagId,
-          itemType: options.itemType,
-          yearFrom: options.yearFrom,
-          yearTo: options.yearTo,
-        }),
-      )
-      .digest('hex');
-    const cacheKey = `library:search:facets:${scopeKey}:${filterHash}`;
+    const cacheKey = buildSearchFacetCacheKey(userId, options);
 
     if (this.cache) {
       try {
@@ -391,6 +337,15 @@ export class SearchRepository implements OnModuleInit {
       }
     }
 
+    if (
+      (options.collectionId && !isValidUuid(options.collectionId)) ||
+      (options.tagId && !isValidUuid(options.tagId)) ||
+      (this.isProjectScope(options.projectId) &&
+        !isValidUuid(options.projectId.trim()))
+    ) {
+      return { itemTypes: {}, years: {}, tags: {} };
+    }
+
     const client = this.getClient(tx);
     const q = options.q?.trim();
     const ftsSanitized = sanitizeSearchQuery(q);
@@ -399,18 +354,24 @@ export class SearchRepository implements OnModuleInit {
     if (q) {
       if (ftsSanitized && this.hasFtsColumn()) {
         try {
-          const hasProject = this.isProjectScope(options.projectId);
-          const scopeSql = hasProject
-            ? `project_id = $1::uuid`
-            : `user_id = $1::uuid AND project_id IS NULL`;
-          const ftsRows = await this.prisma.$queryRawUnsafe<
-            Array<{ id: string }>
-          >(
-            `SELECT id FROM "items" WHERE ${scopeSql} AND deleted_at IS NULL AND search_vector @@ plainto_tsquery('english', $2) LIMIT 5000`,
-            hasProject ? options.projectId : userId,
-            ftsSanitized,
-          );
-          textWhere = { id: { in: ftsRows.map((r) => r.id) } };
+          const builtIds = buildSearchFtsMatchingIdsSql({
+            userId,
+            options,
+            queryText: ftsSanitized,
+            limit: 5000,
+          });
+          if (!builtIds) {
+            textWhere = this.buildTextWhereIlike(q);
+          } else {
+            const rawRunner =
+              typeof client.$queryRawUnsafe === 'function'
+                ? client
+                : this.prisma;
+            const ftsRows = await rawRunner.$queryRawUnsafe<
+              Array<{ id: string }>
+            >(builtIds.sql, ...builtIds.params);
+            textWhere = { id: { in: ftsRows.map((r) => r.id) } };
+          }
         } catch {
           textWhere = this.buildTextWhereIlike(q);
         }
@@ -442,29 +403,11 @@ export class SearchRepository implements OnModuleInit {
       }),
     ]);
 
-    const itemTypes: Record<string, number> = {};
-    for (const g of typeGroups || []) {
-      if (g.itemType) {
-        itemTypes[g.itemType] = (g._count as { _all?: number })?._all ?? 1;
-      }
-    }
-
-    const years: Record<number, number> = {};
-    for (const g of yearGroups || []) {
-      if (g.year != null) {
-        years[Number(g.year)] = (g._count as { _all?: number })?._all ?? 1;
-      }
-    }
-
-    const tags: Record<string, number> = {};
-    for (const t of tagItems || []) {
-      const tagName = t?.tag?.name;
-      if (tagName) {
-        tags[tagName] = (tags[tagName] || 0) + 1;
-      }
-    }
-
-    const facetResult: FacetResult = { itemTypes, years, tags };
+    const facetResult: FacetResult = aggregateFacetGroups({
+      typeGroups,
+      yearGroups,
+      tagItems,
+    });
 
     // 3. Cache computed facet result (TTL: 120 seconds)
     if (this.cache) {
@@ -482,8 +425,8 @@ export class SearchRepository implements OnModuleInit {
   async invalidateFacets(scopeId: string): Promise<void> {
     if (this.cache) {
       await Promise.all([
-        this.cache.delPattern('library:search:facets:*' + scopeId + '*'),
-        this.cache.delPattern('library:search:items:*' + scopeId + '*'),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(scopeId)),
       ]);
     }
   }

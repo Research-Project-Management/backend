@@ -395,8 +395,6 @@ export const NOISE_AUTHOR_WORDS = new Set([
   'copyright',
   'unknown',
   'none',
-  'na',
-  'nil',
   'etal',
   'others',
   'andothers',

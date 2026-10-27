@@ -92,11 +92,13 @@ export class ExtractionFacade implements IExtractionFacade {
     url: string,
     itemId: string,
     userId: string,
+    projectId?: string,
   ): Promise<AttachmentEntity> {
     const res = await this.webSnapshotService.captureAndAttach(
       url,
       itemId,
       userId,
+      projectId ? { projectId } : undefined,
     );
     return res.attachment;
   }

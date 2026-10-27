@@ -1,10 +1,13 @@
 import {
+  ArrayMaxSize,
   IsArray,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  Min,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
@@ -88,32 +91,42 @@ export class UpdateCollectionDto {
 
 export class AssignItemsToCollectionDto {
   @IsArray()
+  @ArrayMaxSize(500)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   @IsOptional()
   itemIds?: string[];
 }
 
 export class MoveItemsDto {
   @IsArray()
+  @ArrayMaxSize(500)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   @IsOptional()
   itemIds?: string[];
 }
 
 export class ReorderCollectionItemDto {
   @IsString()
+  @MaxLength(100)
   id!: string;
 
   @IsString()
+  @MaxLength(100)
   @IsOptional()
   parentId?: string | null;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
   orderIndex?: number;
 }
 
 export class ReorderCollectionsDto {
   @IsArray()
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => ReorderCollectionItemDto)
   collections!: ReorderCollectionItemDto[];
@@ -121,6 +134,8 @@ export class ReorderCollectionsDto {
 
 export class BulkDetachItemsDto {
   @IsArray()
+  @ArrayMaxSize(500)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   itemIds!: string[];
 }

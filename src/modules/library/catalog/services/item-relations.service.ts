@@ -18,6 +18,7 @@ import {
   normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
+import { ItemCacheCoordinator } from './item-cache.coordinator';
 
 @Injectable()
 export class ItemRelationsService {
@@ -28,6 +29,7 @@ export class ItemRelationsService {
     private readonly command: CommandRepository,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly libraryTx?: TransactionService,
+    @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 
   private async invalidateRelationCaches(
@@ -35,7 +37,16 @@ export class ItemRelationsService {
     userId?: string,
     projectId?: string,
   ): Promise<void> {
-    if (!this.cache || itemIds.length === 0) return;
+    if (itemIds.length === 0) return;
+    if (this.cacheCoordinator && userId) {
+      await this.cacheCoordinator.invalidateBulkItemsCache(
+        itemIds,
+        userId,
+        projectId,
+      );
+      return;
+    }
+    if (!this.cache) return;
     const uniqueIds = Array.from(new Set(itemIds.filter(Boolean)));
     try {
       const validProjectId = normalizeProjectScopeId(projectId);
@@ -172,13 +183,15 @@ export class ItemRelationsService {
     if (this.libraryTx && resolvedTargets.length > 0) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
-          for (const { targetItem, relation } of resolvedTargets) {
-            await this.command.putRelation(sourceItemId, relation, tx);
-            linkedRelations.push({
-              ...relation,
-              targetTitle: targetItem.title,
-            });
-          }
+          await Promise.all(
+            resolvedTargets.map(async ({ targetItem, relation }) => {
+              await this.command.putRelation(sourceItemId, relation, tx);
+              linkedRelations.push({
+                ...relation,
+                targetTitle: targetItem.title,
+              });
+            }),
+          );
           await helpers.appendChange(eventScope, {
             entityType: 'Item',
             entityId: sourceItemId,
@@ -200,13 +213,15 @@ export class ItemRelationsService {
         },
       );
     } else {
-      for (const { targetItem, relation } of resolvedTargets) {
-        await this.command.putRelation(sourceItemId, relation);
-        linkedRelations.push({
-          ...relation,
-          targetTitle: targetItem.title,
-        });
-      }
+      await Promise.all(
+        resolvedTargets.map(async ({ targetItem, relation }) => {
+          await this.command.putRelation(sourceItemId, relation);
+          linkedRelations.push({
+            ...relation,
+            targetTitle: targetItem.title,
+          });
+        }),
+      );
     }
 
     await this.invalidateRelationCaches(
@@ -225,22 +240,6 @@ export class ItemRelationsService {
           ? `Linked "${sourceItem.title}" to "${linkedRelations[0].targetTitle}"`
           : `Linked ${linkedRelations.length} item(s) to "${sourceItem.title}"`,
     };
-  }
-
-  async addRelation(
-    userId: string,
-    itemId: string,
-    relatedItemId: string,
-    relationType?: string,
-    note?: string,
-    projectId?: string,
-  ) {
-    return this.linkItems(
-      userId,
-      itemId,
-      { targetItemId: relatedItemId, relationType, note },
-      projectId,
-    );
   }
 
   async unlinkItems(
@@ -301,14 +300,5 @@ export class ItemRelationsService {
       unlinked: true,
       message: `Removed relation between "${sourceItem.title}" and "${targetItemId}"`,
     };
-  }
-
-  async removeRelation(
-    userId: string,
-    itemId: string,
-    relatedItemId: string,
-    projectId?: string,
-  ) {
-    return this.unlinkItems(userId, itemId, relatedItemId, projectId);
   }
 }

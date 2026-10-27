@@ -6,7 +6,10 @@ import {
 import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
 import { IngestionVerifierService } from '@/modules/library/ingestion/services/ingestion-verifier.service';
 import { IWorkflowStage } from '@/modules/library/ingestion/types/workflow-stage.types';
-import { titleSimilarity } from '@/modules/library/core';
+import {
+  isPlaceholderItemTitle,
+  titleSimilarity,
+} from '@/modules/library/core';
 
 @Injectable()
 export class ReconcileStage implements IWorkflowStage<
@@ -31,7 +34,7 @@ export class ReconcileStage implements IWorkflowStage<
       if (!cand.fields || Object.keys(cand.fields).length === 0) {
         cand.fields = {};
         for (const [k, v] of Object.entries(cand.normalizedMetadata || {})) {
-          if (v !== undefined && v !== null && k !== 'extraFields') {
+          if (v !== undefined && v !== null) {
             cand.fields[k] = {
               path: k,
               value: v,
@@ -69,9 +72,8 @@ export class ReconcileStage implements IWorkflowStage<
       const fileTitle = fileCandidate.normalizedMetadata.title;
       const isCrediblePdfTitle =
         fileTitle.trim().length >= 10 &&
-        !/^(untitled|document|uploaded document|manuscript)$/i.test(
-          fileTitle.trim(),
-        ) &&
+        !isPlaceholderItemTitle(fileTitle) &&
+        !/^manuscript$/i.test(fileTitle.trim()) &&
         !/^\d{4}\s*\d{4,5}(v\d+)?$/i.test(fileTitle.trim()) &&
         !/^arxiv/i.test(fileTitle.trim());
 
@@ -103,7 +105,17 @@ export class ReconcileStage implements IWorkflowStage<
 
         if (citationTrapRejectedDoi) {
           if (fileCandidate.normalizedMetadata) {
-            delete fileCandidate.normalizedMetadata.doi;
+            if (
+              !activeCandidates.some(
+                (c) =>
+                  c !== fileCandidate &&
+                  c.normalizedMetadata?.doi &&
+                  c.normalizedMetadata.doi.toLowerCase() ===
+                    citationTrapRejectedDoi!.toLowerCase(),
+              )
+            ) {
+              delete fileCandidate.normalizedMetadata.doi;
+            }
             fileCandidate.normalizedMetadata.extraFields = {
               ...(fileCandidate.normalizedMetadata.extraFields || {}),
               disambiguationWarning:
@@ -112,7 +124,17 @@ export class ReconcileStage implements IWorkflowStage<
             };
           }
           if (fileCandidate.fields?.doi) {
-            delete fileCandidate.fields.doi;
+            if (
+              !activeCandidates.some(
+                (c) =>
+                  c !== fileCandidate &&
+                  c.normalizedMetadata?.doi &&
+                  c.normalizedMetadata.doi.toLowerCase() ===
+                    citationTrapRejectedDoi!.toLowerCase(),
+              )
+            ) {
+              delete fileCandidate.fields.doi;
+            }
           }
         }
       }
@@ -125,7 +147,22 @@ export class ReconcileStage implements IWorkflowStage<
 
     const proposed = decision.proposedItem;
     if (citationTrapRejectedDoi) {
-      delete proposed.doi;
+      const survivingMatchesProposedDoi = activeCandidates.some(
+        (c) =>
+          c !== fileCandidate &&
+          c.normalizedMetadata?.doi &&
+          proposed.doi &&
+          c.normalizedMetadata.doi.toLowerCase() ===
+            String(proposed.doi).toLowerCase(),
+      );
+      if (
+        !survivingMatchesProposedDoi &&
+        (!proposed.doi ||
+          String(proposed.doi).toLowerCase() ===
+            citationTrapRejectedDoi.toLowerCase())
+      ) {
+        delete proposed.doi;
+      }
       proposed.extraFields = {
         ...(proposed.extraFields || {}),
         disambiguationWarning:
@@ -181,8 +218,8 @@ export class ReconcileStage implements IWorkflowStage<
         verificationScore: verifyResult.verificationScore,
         isVerified: verifyResult.isVerified,
         fieldProvenance: {
-          ...(proposed.extraFields?.fieldProvenance || {}),
           ...verifyResult.fieldProvenance,
+          ...(proposed.extraFields?.fieldProvenance || {}),
         },
         matchedSignals: verifyResult.matchedSignals,
         missingFields: verifyResult.missingFields,
@@ -220,8 +257,8 @@ export class ReconcileStage implements IWorkflowStage<
         verificationScore: verifyResult.verificationScore,
         isVerified: verifyResult.isVerified,
         fieldProvenance: {
-          ...(proposed.extraFields?.fieldProvenance || {}),
           ...verifyResult.fieldProvenance,
+          ...(proposed.extraFields?.fieldProvenance || {}),
         },
         matchedSignals: verifyResult.matchedSignals,
         missingFields: verifyResult.missingFields,
@@ -245,8 +282,8 @@ export class ReconcileStage implements IWorkflowStage<
       verificationScore: verifyResult.verificationScore,
       isVerified: verifyResult.isVerified,
       fieldProvenance: {
-        ...(proposed.extraFields?.fieldProvenance || {}),
         ...verifyResult.fieldProvenance,
+        ...(proposed.extraFields?.fieldProvenance || {}),
       },
       matchedSignals: verifyResult.matchedSignals,
       missingFields: verifyResult.missingFields,

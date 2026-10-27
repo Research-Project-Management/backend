@@ -25,7 +25,7 @@ jest.mock('@mozilla/readability', () => ({
 
 import { fromPartial, fromAny } from '@total-typescript/shoehorn';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
-import { AttachmentThumbnailService } from '@/modules/library/extraction/services/attachment-thumbnail.service';
+
 import { WebSnapshotService } from '@/modules/library/extraction/services/web-snapshot.service';
 import { AttachmentController } from '@/modules/library/extraction/controllers/attachments.controller';
 import { AttachmentStorageController } from '@/modules/library/extraction/controllers/attachment-storage.controller';
@@ -321,8 +321,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
         mockTx,
         { itemExists: jest.fn().mockResolvedValue(true) } as any,
         mockStoragePort,
-        undefined,
-        new AttachmentThumbnailService(mockStoragePort),
       );
 
       mockRepo.findFirst.mockResolvedValue({
@@ -352,8 +350,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
         mockTx,
         { itemExists: jest.fn().mockResolvedValue(true) } as any,
         mockStoragePort,
-        undefined,
-        new AttachmentThumbnailService(mockStoragePort),
       );
 
       mockRepo.findFirst.mockResolvedValue({

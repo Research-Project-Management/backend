@@ -4,6 +4,7 @@ import {
 import { resolveCanonicalCreatorRole } from './zotero-field-harmonizer.domain';
 import {
   isNoiseAuthorName,
+  isInstitutionName,
   splitAuthorString,
   parseCreatorString,
 } from './author.domain';
@@ -145,7 +146,7 @@ export function mergeCanonicalCreators(
     }
     const c = rawC as CreatorCreditInput & Record<string, unknown>;
     const creatorType = resolveCanonicalCreatorRole(
-      c.creatorType || primaryRole,
+      c.creatorType || (c.role as string | undefined) || primaryRole,
       { itemType: input.itemType },
     );
     const cFieldMode =
@@ -166,15 +167,30 @@ export function mergeCanonicalCreators(
 
     const rawName = extractCreatorString(c);
     if (rawName) {
-      const parts =
-        c.firstName || c.lastName ? [rawName] : splitAuthorString(rawName);
+      const hasExplicitFields =
+        Boolean(c.firstName) ||
+        Boolean(c.lastName) ||
+        cFieldMode === 1 ||
+        Boolean(c.fullName) ||
+        Boolean(c.name);
+      const shouldSplitObjName =
+        !hasExplicitFields ||
+        rawName.includes(';') ||
+        (rawName.includes(',') &&
+          !/,\s*(?:Jr\.?|Sr\.?|II|III|IV|V|Esq\.?)$/i.test(rawName));
+      const parts = shouldSplitObjName ? splitAuthorString(rawName) : [rawName];
       for (const p of parts) {
+        const useSingleField =
+          cFieldMode === 1 ||
+          (!c.firstName &&
+            !c.lastName &&
+            (isInstitutionName(p) || /\s+(?:and|&)\s+/i.test(p)));
         append(
           p,
           creatorType,
           c.firstName || undefined,
-          c.lastName || undefined,
-          cFieldMode,
+          c.lastName || (useSingleField ? p : undefined),
+          useSingleField ? 1 : cFieldMode,
           cShortName,
           cOrderIndex,
         );

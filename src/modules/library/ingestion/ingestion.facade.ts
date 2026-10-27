@@ -14,6 +14,7 @@ import { RetractionCheckResult } from './types/retraction.types';
 import {
   INGESTION_FACADE,
   IIngestionFacade,
+  ReconcileExtractedCandidatePayload,
 } from '@/modules/library/core/ports/ingestion.port';
 export { INGESTION_FACADE };
 export type { IIngestionFacade };
@@ -23,7 +24,7 @@ export type { IIngestionFacade };
  * Shields ingestion pipelines, curation/dedup algorithms, and retraction checks.
  */
 @Injectable()
-export class IngestionFacade {
+export class IngestionFacade implements IIngestionFacade {
   constructor(
     private readonly ingestionService: IngestionService,
     private readonly duplicateDetector: DuplicateDetectorService,
@@ -87,5 +88,11 @@ export class IngestionFacade {
       options,
       projectId,
     );
+  }
+
+  async reconcileExtractedCandidate(
+    payload: ReconcileExtractedCandidatePayload,
+  ): Promise<{ updated: boolean; updatedFields: string[]; rejectedCitedDoi?: string }> {
+    return this.ingestionService.reconcileExtractedCandidate(payload);
   }
 }

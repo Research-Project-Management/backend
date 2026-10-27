@@ -9,7 +9,7 @@ import {
   Header,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/identity/auth';
+import { JwtAuthGuard, Public } from '@/modules/identity/auth';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 
@@ -23,6 +23,7 @@ export class TypeController {
     private readonly schemaValidator: ZoteroSchemaValidatorService,
   ) {}
 
+  @Public()
   @Get()
   @Header(
     'Cache-Control',
@@ -43,6 +44,7 @@ export class TypeController {
     };
   }
 
+  @Public()
   @Get('schema')
   @Header(
     'Cache-Control',
@@ -56,6 +58,7 @@ export class TypeController {
     };
   }
 
+  @Public()
   @Get(':itemType')
   @Header(
     'Cache-Control',
@@ -74,6 +77,7 @@ export class TypeController {
     };
   }
 
+  @Public()
   @Post('validate')
   validateItemPayload(
     @Body() body: { itemType: string; data: Record<string, unknown> },

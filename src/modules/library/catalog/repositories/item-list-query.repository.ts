@@ -11,7 +11,6 @@ import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import {
   ItemFilterOptions,
   buildItemWhereClause,
-  buildItemSearchCondition,
 } from './item-filter-where.builder';
 
 const isUuid = (val: unknown): val is string =>
@@ -157,6 +156,7 @@ export class ItemListQueryRepository {
       attachments: {
         where: { deletedAt: null },
       },
+      identifiers: true,
       ...(shouldIncludeNotes
         ? {
             notesList: {
@@ -175,50 +175,17 @@ export class ItemListQueryRepository {
       (await this.resolveTargetCollectionIds(userId, options, client));
 
     if (view === 'recent' && effectiveUserId) {
-      const validProjectId = normalizeProjectScopeId(options.projectId);
-      const itemScopeWhere: Prisma.ItemWhereInput =
-        validProjectId && isUuid(validProjectId)
-          ? { projectId: validProjectId }
-          : { userId, projectId: null };
+      const recentItemWhere = this.buildWhereClause(userId, {
+        ...options,
+        targetCollectionIds,
+        view: 'all',
+      });
 
       const userStates = await client.state.findMany({
         where: {
           userId: effectiveUserId,
           lastReadAt: { not: null },
-          item: {
-            ...itemScopeWhere,
-            deletedAt: null,
-            ...(options.search
-              ? {
-                  OR: buildItemSearchCondition(options.search),
-                }
-              : {}),
-            ...(targetCollectionIds && targetCollectionIds.length > 0
-              ? {
-                  collectionItems: {
-                    some: {
-                      collectionId:
-                        targetCollectionIds.length === 1
-                          ? targetCollectionIds[0]
-                          : { in: targetCollectionIds },
-                    },
-                  },
-                }
-              : options.collectionId
-                ? {
-                    collectionItems: {
-                      some: { collectionId: options.collectionId },
-                    },
-                  }
-                : {}),
-            ...(options.tagId
-              ? {
-                  itemTags: {
-                    some: { tagId: options.tagId },
-                  },
-                }
-              : {}),
-          },
+          item: recentItemWhere,
         },
         orderBy: { lastReadAt: 'desc' },
         take: limit + 1,
@@ -312,50 +279,17 @@ export class ItemListQueryRepository {
 
     const effectiveUserId = options.userId || userId;
     if (view === 'recent' && effectiveUserId) {
-      const validProjectId = normalizeProjectScopeId(options.projectId);
-      const itemScopeWhere: Prisma.ItemWhereInput =
-        validProjectId && isUuid(validProjectId)
-          ? { projectId: validProjectId }
-          : { userId, projectId: null };
+      const recentItemWhere = this.buildWhereClause(userId, {
+        ...options,
+        targetCollectionIds,
+        view: 'all',
+      });
 
       return client.state.count({
         where: {
           userId: effectiveUserId,
           lastReadAt: { not: null },
-          item: {
-            ...itemScopeWhere,
-            deletedAt: null,
-            ...(options.search
-              ? {
-                  OR: buildItemSearchCondition(options.search),
-                }
-              : {}),
-            ...(targetCollectionIds && targetCollectionIds.length > 0
-              ? {
-                  collectionItems: {
-                    some: {
-                      collectionId:
-                        targetCollectionIds.length === 1
-                          ? targetCollectionIds[0]
-                          : { in: targetCollectionIds },
-                    },
-                  },
-                }
-              : options.collectionId
-                ? {
-                    collectionItems: {
-                      some: { collectionId: options.collectionId },
-                    },
-                  }
-                : {}),
-            ...(options.tagId
-              ? {
-                  itemTags: {
-                    some: { tagId: options.tagId },
-                  },
-                }
-              : {}),
-          },
+          item: recentItemWhere,
         },
       });
     }
@@ -516,5 +450,29 @@ export class ItemListQueryRepository {
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     }));
+  }
+
+  async findUserFeedSubscriptions(client: PrismaClientOrTx, userId: string) {
+    if (!isUuid(userId)) return [];
+    try {
+      return await client.feedSubscription.findMany({
+        where: { userId },
+        include: {
+          feed: {
+            select: {
+              id: true,
+              url: true,
+              title: true,
+              siteUrl: true,
+              description: true,
+              lastFetchedAt: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    } catch {
+      return [];
+    }
   }
 }

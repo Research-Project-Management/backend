@@ -19,6 +19,7 @@ export class IdentifyUrlResolver {
   async resolve(
     payload: SubmissionPayload & { kind: 'URL' },
     scopeId?: string,
+    options?: { forceScrape?: boolean },
   ): Promise<MetadataCandidate> {
     const classified = QueryClassifier.classify(payload.url);
     let extractedRaw: Record<string, unknown> = { url: payload.url };
@@ -38,8 +39,8 @@ export class IdentifyUrlResolver {
       extractedRaw.doi || extractedRaw.arxivId || extractedRaw.pmid,
     );
 
-    // Zotero-style: Only scrape HTML if the URL lacks an embedded identifier
-    if (!hasDirectIdentifier && this.urlScraper) {
+    // Zotero-style: Only scrape HTML if the URL lacks an embedded identifier (or when fallback forceScrape is requested)
+    if ((!hasDirectIdentifier || options?.forceScrape) && this.urlScraper) {
       try {
         const scraped = await this.urlScraper.scrape(payload.url, {
           scopeId,

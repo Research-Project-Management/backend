@@ -6,6 +6,7 @@ import {
   CreateItemData,
   CreatorCreditInput,
   ItemDetail,
+  INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
   mergeCanonicalCreators,
   cleanAbstractText,
   cleanCommentText,
@@ -13,11 +14,14 @@ import {
   getEffectiveBaseFieldMap,
   harmonizeZoteroFields,
   generateCitationKey,
+  isPlaceholderItemTitle,
 } from '@/modules/library/core';
+import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/deduplication.domain';
 import {
   IWorkflowStage,
   CommitStageInput,
 } from '@/modules/library/ingestion/types/workflow-stage.types';
+import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 
 export type LibraryItemSource =
   | 'WEB_CAPTURE'
@@ -35,6 +39,7 @@ export interface CommitStageOptions {
   source?: LibraryItemSource;
   fileId?: string;
   filename?: string;
+  skipPreMatch?: boolean;
 }
 
 function normalizeAccessedAt(
@@ -51,6 +56,7 @@ function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
 }
 
 const EXCLUDED_RAW_METADATA_KEYS = new Set([
+  ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
   'title',
   'abstract',
   'abstractNote',
@@ -212,15 +218,25 @@ export function toItemData(
     publicationDate: resolvedPubDate,
     publicationTitle:
       effectiveType === 'preprint'
-        ? undefined
+        ? (harmonized.repository ??
+          harmonized.publicationTitle ??
+          harmonized.journal)
         : (harmonized.publicationTitle ?? harmonized.journal),
     journal: effectiveType === 'preprint' ? undefined : metadata.journal,
     journalAbbr:
       effectiveType === 'preprint' ? undefined : harmonized.journalAbbr,
     publisher:
       effectiveType === 'preprint'
-        ? (harmonized.repository ?? metadata.repository ?? harmonized.publisher)
+        ? (harmonized.repository ??
+          harmonized.publisher ??
+          harmonized.publicationTitle)
         : harmonized.publisher,
+    repository:
+      effectiveType === 'preprint'
+        ? (harmonized.repository ??
+          harmonized.publisher ??
+          harmonized.publicationTitle)
+        : harmonized.repository,
     place: harmonized.place,
     volume:
       effectiveType === 'preprint'
@@ -245,7 +261,9 @@ export function toItemData(
     abstract: cleanAbstractText(harmonized.abstract) ?? undefined,
     url: harmonized.url,
     citationKey: harmonized.citationKey || generateCitationKey(metadata),
-    shortTitle: metadata.shortTitle,
+    shortTitle:
+      metadata.shortTitle ??
+      (syncedExtraFields.shortTitle as string | undefined),
     creators: mergeCreators(metadata, primaryRole),
     tags: rawTags,
     labels: rawTags,
@@ -260,13 +278,23 @@ export function toItemData(
     openAccessPdfUrl: metadata.openAccessPdfUrl || undefined,
     attachments:
       (metadata.attachments as CreateItemData['attachments']) || undefined,
-    language: metadata.language,
-    rights: harmonized.rights,
-    license: harmonized.license,
-    archive: metadata.archive,
-    archiveLocation: metadata.archiveLocation,
-    libraryCatalog: metadata.libraryCatalog,
-    callNumber: metadata.callNumber,
+    language:
+      metadata.language ?? (syncedExtraFields.language as string | undefined),
+    rights:
+      harmonized.rights ?? (syncedExtraFields.rights as string | undefined),
+    license:
+      harmonized.license ?? (syncedExtraFields.license as string | undefined),
+    archive:
+      metadata.archive ?? (syncedExtraFields.archive as string | undefined),
+    archiveLocation:
+      metadata.archiveLocation ??
+      (syncedExtraFields.archiveLocation as string | undefined),
+    libraryCatalog:
+      metadata.libraryCatalog ??
+      (syncedExtraFields.libraryCatalog as string | undefined),
+    callNumber:
+      metadata.callNumber ??
+      (syncedExtraFields.callNumber as string | undefined),
     accessedAt: normalizeAccessedAt(
       metadata.accessedAt ??
         (typeof extraFields.accessDate === 'string' ||
@@ -276,7 +304,7 @@ export function toItemData(
     ),
     citationCount: metadata.citationCount ?? null,
     referenceCount: metadata.referenceCount ?? null,
-    extra: metadata.extra,
+    extra: metadata.extra ?? (syncedExtraFields.extra as string | undefined),
     extraFields: syncedExtraFields,
     notes: consolidatedNotes,
     collectionId: options?.collectionIds?.[0] || null,
@@ -343,6 +371,51 @@ export class CommitStage implements IWorkflowStage<
       createData.projectId = effectiveProjectId;
     }
 
+    if (
+      !actualOptions?.skipPreMatch &&
+      (createData.doi || createData.arxivId) &&
+      this.catalogGateway?.findMatchCandidates
+    ) {
+      try {
+        const preMatch = await this.catalogGateway.findMatchCandidates(
+          { userId: effectiveUserId, projectId: effectiveProjectId },
+          {
+            doi: createData.doi,
+            arxivId: createData.arxivId,
+          },
+        );
+        const existingId = preMatch?.exactMatch?.id;
+        const existingTitle = preMatch?.exactMatch?.title?.trim();
+        const proposedTitle = createData.title?.trim();
+        const isGeneric = (t?: string) =>
+          !t || t.length <= 5 || isPlaceholderItemTitle(t);
+        const titlesConflict =
+          Boolean(proposedTitle) &&
+          Boolean(existingTitle) &&
+          !isGeneric(proposedTitle) &&
+          !isGeneric(existingTitle) &&
+          calculateTitleSimilarity(proposedTitle ?? '', existingTitle ?? '') <
+            0.5;
+        if (existingId && !titlesConflict) {
+          const existingItem = await this.catalogGateway.getItem(
+            effectiveUserId,
+            existingId,
+            effectiveProjectId,
+          );
+          if (existingItem) {
+            return await this.enrichMatchedExistingItem(
+              effectiveUserId,
+              effectiveProjectId,
+              existingItem,
+              createData,
+            );
+          }
+        }
+      } catch {
+        // Fall through to standard creation
+      }
+    }
+
     try {
       return await this.catalogGateway.createItem(effectiveUserId, createData, {
         projectId: effectiveProjectId,
@@ -384,12 +457,57 @@ export class CommitStage implements IWorkflowStage<
               effectiveProjectId,
             );
             if (existing) {
-              return existing;
+              return await this.enrichMatchedExistingItem(
+                effectiveUserId,
+                effectiveProjectId,
+                existing,
+                createData,
+              );
             }
           }
         }
       }
       throw err;
     }
+  }
+
+  private async enrichMatchedExistingItem(
+    userId: string,
+    projectId: string | undefined,
+    existingItem: ItemDetail,
+    createData: CreateItemData,
+  ): Promise<ItemDetail> {
+    const markPreExisting = (target: ItemDetail): ItemDetail => {
+      if (target && typeof target === 'object') {
+        Object.defineProperty(target, '__wasPreExistingMatch', {
+          value: true,
+          enumerable: false,
+          configurable: true,
+        });
+      }
+      return target;
+    };
+
+    if (!this.catalogGateway?.updateItem) {
+      return markPreExisting(existingItem);
+    }
+    try {
+      const patch = buildEnrichmentPatch(
+        existingItem as unknown as Record<string, unknown>,
+        createData as unknown as Record<string, unknown>,
+      );
+      if (Object.keys(patch).length > 0) {
+        const updated = await this.catalogGateway.updateItem(
+          userId,
+          existingItem.id,
+          patch,
+          { projectId },
+        );
+        return markPreExisting(updated ?? existingItem);
+      }
+    } catch {
+      // Non-critical additive enrichment on pre-match or P2002 race
+    }
+    return markPreExisting(existingItem);
   }
 }

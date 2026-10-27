@@ -167,6 +167,7 @@ export function cleanSingleTag(rawTag: string): string | null {
   if (!tag) return null;
 
   // 2. Strip disambiguation suffixes & field header prefixes
+  // 2. Strip field header prefixes (preserve parenthetical disambiguation)
   tag = stripDisambiguationSuffix(tag);
   tag = stripTagPrefixes(tag);
   if (!tag) return null;
@@ -197,7 +198,7 @@ export function cleanSingleTag(rawTag: string): string | null {
     /^www\./i.test(tag) ||
     /^downloaded\s+(?:from|on|by)\b/i.test(tag) ||
     /@/.test(tag) ||
-    /\.(?:com|org|net|edu|gov|io|ai|dev|de|uk|fr|cn)\b/i.test(tag)
+    /\.(?:com|org|net|edu|gov|de|uk|fr|cn)\b/i.test(tag)
   ) {
     return null;
   }
@@ -210,7 +211,15 @@ export function cleanSingleTag(rawTag: string): string | null {
   }
 
   // 7. Length & character sanity checks
-  if (tag.length < 2 || tag.length > MAX_TAG_LENGTH) return null;
+  if (tag.length > MAX_TAG_LENGTH) return null;
+  if (
+    tag.length < 2 &&
+    !/^[\p{Lu}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]$/u.test(
+      tag,
+    )
+  ) {
+    return null;
+  }
   if (!/[\p{L}\p{N}]/u.test(tag)) return null;
   if (/^[\p{P}\p{S}\s]+$/u.test(tag)) return null;
 
@@ -300,6 +309,12 @@ export function normalizeAcademicTags(
  * Resolves the canonical arXiv primary category code (e.g. `cs.LG`, `stat.ML`, `math.PR`)
  * for structured Extra field formatting: `arXiv:<id> [<primaryCategory>]`.
  */
+export function normalizeTags(
+  rawTags?: (TagInput | null | undefined)[] | null,
+): string[] {
+  return normalizeAcademicTags(rawTags);
+}
+
 export function resolveCanonicalArxivCategory(
   arxivId?: string | null,
   tags?: unknown[],

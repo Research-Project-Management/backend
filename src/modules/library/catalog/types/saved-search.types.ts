@@ -77,8 +77,10 @@ export type SavedSearchField =
 
 export type SavedSearchOperator =
   | 'is'
+  | 'equals'
   | 'isNot'
   | 'is_not'
+  | 'not_equals'
   | 'contains'
   | 'doesNotContain'
   | 'does_not_contain'

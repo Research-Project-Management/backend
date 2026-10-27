@@ -55,6 +55,28 @@ export class QueryRepository {
     return tx ?? this.prisma;
   }
 
+  private buildItemDetailInclude(userId: string, includeContent: boolean) {
+    return {
+      identifiers: true,
+      contributors: { orderBy: { orderIndex: 'asc' as const } },
+      collectionItems: { include: { collection: true } },
+      itemTags: { include: { tag: true } },
+      states: { where: { userId }, take: 1 },
+      ...(includeContent
+        ? {
+            notesList: { where: { deletedAt: null } },
+            attachments: {
+              where: { deletedAt: null },
+              include: {
+                revisions: true,
+                annotations: { where: { deletedAt: null } },
+              },
+            },
+          }
+        : {}),
+    };
+  }
+
   async findById(
     userId: string,
     id: string,
@@ -62,8 +84,14 @@ export class QueryRepository {
     tx?: Prisma.TransactionClient,
     includeContent: boolean = true,
     includeDeleted: boolean = false,
+    visitedIds?: Set<string>,
   ): Promise<ItemDetail | null> {
     if (!isUuid(id) || !isUuid(userId)) return null;
+    const seen = visitedIds ?? new Set<string>();
+    if (seen.has(id) || seen.size >= 5) {
+      return null;
+    }
+    seen.add(id);
     const client = this.getClient(tx);
 
     const validProjectId = normalizeProjectScopeId(projectId);
@@ -78,37 +106,7 @@ export class QueryRepository {
         ...scopeWhere,
         ...(includeDeleted ? {} : { deletedAt: null }),
       },
-      include: {
-        contributors: {
-          orderBy: { orderIndex: 'asc' },
-        },
-        collectionItems: {
-          include: { collection: true },
-        },
-        itemTags: {
-          include: { tag: true },
-        },
-        states: {
-          where: { userId },
-          take: 1,
-        },
-        ...(includeContent
-          ? {
-              notesList: {
-                where: { deletedAt: null },
-              },
-              attachments: {
-                where: { deletedAt: null },
-                include: {
-                  revisions: true,
-                  annotations: {
-                    where: { deletedAt: null },
-                  },
-                },
-              },
-            }
-          : {}),
-      },
+      include: this.buildItemDetailInclude(userId, includeContent),
     });
 
     if (!item) {
@@ -127,7 +125,7 @@ export class QueryRepository {
           typeof tombstoneMeta?.mergedIntoId === 'string'
             ? tombstoneMeta.mergedIntoId
             : undefined;
-        if (targetId && isUuid(targetId) && targetId !== id) {
+        if (targetId && isUuid(targetId) && !seen.has(targetId)) {
           return this.findById(
             userId,
             targetId,
@@ -135,6 +133,7 @@ export class QueryRepository {
             tx,
             includeContent,
             false,
+            seen,
           );
         }
       }
@@ -172,37 +171,7 @@ export class QueryRepository {
           ? { collectionItems: { some: { collectionId } } }
           : {}),
       },
-      include: {
-        contributors: {
-          orderBy: { orderIndex: 'asc' },
-        },
-        collectionItems: {
-          include: { collection: true },
-        },
-        itemTags: {
-          include: { tag: true },
-        },
-        states: {
-          where: { userId },
-          take: 1,
-        },
-        ...(includeContent
-          ? {
-              notesList: {
-                where: { deletedAt: null },
-              },
-              attachments: {
-                where: { deletedAt: null },
-                include: {
-                  revisions: true,
-                  annotations: {
-                    where: { deletedAt: null },
-                  },
-                },
-              },
-            }
-          : {}),
-      },
+      include: this.buildItemDetailInclude(userId, includeContent),
     });
   }
 
@@ -570,140 +539,58 @@ export class QueryRepository {
     return result;
   }
 
-  async findSummaryById(
-    userId: string,
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-    projectId?: string,
-  ): Promise<ItemSummary | null> {
-    return this.listRepo.findSummaryById(
-      this.getClient(tx),
-      userId,
-      itemId,
-      projectId,
-    );
+  async findSummaryById(userId: string, itemId: string, tx?: Prisma.TransactionClient, projectId?: string): Promise<ItemSummary | null> {
+    return this.listRepo.findSummaryById(this.getClient(tx), userId, itemId, projectId);
   }
 
-  async findSummariesByIds(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-    tx?: Prisma.TransactionClient,
-  ): Promise<ItemSummary[]> {
+  async findSummariesByIds(userId: string, itemIds: string[], projectId?: string, tx?: Prisma.TransactionClient): Promise<ItemSummary[]> {
     const validProjectId = normalizeProjectScopeId(projectId);
-    return this.listRepo.findSummariesByIds(
-      this.getClient(tx),
-      userId,
-      itemIds,
-      validProjectId && isUuid(validProjectId) ? validProjectId : undefined,
-    );
+    return this.listRepo.findSummariesByIds(this.getClient(tx), userId, itemIds, validProjectId && isUuid(validProjectId) ? validProjectId : undefined);
   }
 
-  async getRelations(
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-  ): Promise<Record<string, unknown>[]> {
+  async getRelations(itemId: string, tx?: Prisma.TransactionClient): Promise<Record<string, unknown>[]> {
     return this.relationsRepo.getRelations(this.getClient(tx), itemId);
   }
 
-  async findQualityAuditItems(
-    userId?: string,
-    limit: number = 2000,
-    projectId?: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async findQualityAuditItems(userId?: string, limit: number = 2000, projectId?: string, tx?: Prisma.TransactionClient) {
     const validProjectId = normalizeProjectScopeId(projectId);
-    return this.matchRepo.findQualityAuditItems(
-      this.getClient(tx),
-      userId,
-      limit,
-      validProjectId && isUuid(validProjectId) ? validProjectId : undefined,
-    );
+    return this.matchRepo.findQualityAuditItems(this.getClient(tx), userId, limit, validProjectId && isUuid(validProjectId) ? validProjectId : undefined);
   }
 
-  async findDuplicateCandidateItems(
-    userId?: string,
-    limit: number = 5000,
-    projectId?: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async findDuplicateCandidateItems(userId?: string, limit: number = 5000, projectId?: string, tx?: Prisma.TransactionClient) {
     const validProjectId = normalizeProjectScopeId(projectId);
-    return this.matchRepo.findDuplicateCandidateItems(
-      this.getClient(tx),
-      userId,
-      limit,
-      validProjectId && isUuid(validProjectId) ? validProjectId : undefined,
-    );
+    return this.matchRepo.findDuplicateCandidateItems(this.getClient(tx), userId, limit, validProjectId && isUuid(validProjectId) ? validProjectId : undefined);
   }
 
-  async findProjectWithMembers(
-    projectId: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async findProjectWithMembers(projectId: string, tx?: Prisma.TransactionClient) {
     return this.matchRepo.findProjectWithMembers(this.getClient(tx), projectId);
   }
 
   async findDuplicatesInProject(
     projectId: string,
-    criteriaList: Array<{
-      doi?: string | null;
-      citationKey?: string | null;
-      title?: string | null;
-    }>,
+    criteriaList: Array<{ doi?: string | null; citationKey?: string | null; title?: string | null }>,
     tx?: Prisma.TransactionClient,
   ) {
-    return this.matchRepo.findDuplicatesInProject(
-      this.getClient(tx),
-      projectId,
-      criteriaList,
-    );
+    return this.matchRepo.findDuplicatesInProject(this.getClient(tx), projectId, criteriaList);
   }
 
-  async findByCitationKey(
-    userId: string,
-    citationKey: string,
-    projectId?: string,
-    tx?: Prisma.TransactionClient,
-  ) {
-    return this.matchRepo.findByCitationKey(
-      this.getClient(tx),
-      userId,
-      citationKey,
-      projectId,
-    );
+  async findByCitationKey(userId: string, citationKey: string, projectId?: string, tx?: Prisma.TransactionClient) {
+    return this.matchRepo.findByCitationKey(this.getClient(tx), userId, citationKey, projectId);
   }
 
-  async findByCitationKeys(
-    userId: string,
-    citationKeys: string[],
-    projectId?: string,
-    tx?: Prisma.TransactionClient,
-  ) {
-    return this.matchRepo.findByCitationKeys(
-      this.getClient(tx),
-      userId,
-      citationKeys,
-      projectId,
-    );
+  async findByCitationKeys(userId: string, citationKeys: string[], projectId?: string, tx?: Prisma.TransactionClient) {
+    return this.matchRepo.findByCitationKeys(this.getClient(tx), userId, citationKeys, projectId);
   }
 
   async findMatchCandidates(
     scope: { userId?: string; projectId?: string | null },
-    criteria: {
-      doi?: string | null;
-      arxivId?: string | null;
-      pmid?: string | null;
-      isbn?: string | null;
-      year?: number | null;
-      titleWords?: string[];
-      titlePrefix?: string;
-    },
+    criteria: { doi?: string | null; arxivId?: string | null; pmid?: string | null; isbn?: string | null; year?: number | null; titleWords?: string[]; titlePrefix?: string },
     tx?: Prisma.TransactionClient,
   ): Promise<MatchCandidateResult> {
-    return this.matchRepo.findMatchCandidates(
-      this.getClient(tx),
-      scope,
-      criteria,
-    );
+    return this.matchRepo.findMatchCandidates(this.getClient(tx), scope, criteria);
+  }
+
+  async findUserFeedSubscriptions(userId: string, tx?: Prisma.TransactionClient) {
+    return this.listRepo.findUserFeedSubscriptions(this.getClient(tx), userId);
   }
 }

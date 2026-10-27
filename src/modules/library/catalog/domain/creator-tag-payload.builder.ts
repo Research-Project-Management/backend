@@ -5,18 +5,12 @@ import {
   cleanSingleTag,
   buildTipTapDocFromText,
   parseCreatorString,
-  splitAuthorString,
-  isNoiseAuthorName,
-  resolveCanonicalCreatorRole,
+  getPrimaryCreatorRoleForType,
   mergeCanonicalCreators,
-  normalizeDoi,
-  normalizeArxivId,
-  normalizePmid,
-  normalizePmcid,
-  normalizeIsbn,
-  normalizeIssn,
-  cleanBannedString,
+  INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
   convertAcademicHtmlToMarkdown,
+  ItemProvenancePolicy,
+  ManualLockMutationInput,
 } from '@/modules/library/core';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
@@ -38,21 +32,55 @@ export function resolveExtraPlainText(
   extraInput?: string | null,
   existingExtra?: string | null,
   patches?: Record<string, unknown> | null,
+  demotedExtraLines?: string[] | null,
 ): string | undefined {
-  const rawCandidate =
-    (extraInput !== undefined && extraInput !== null
-      ? extraInput
-      : existingExtra) ?? '';
+  const hasDemotedLines =
+    Array.isArray(demotedExtraLines) && demotedExtraLines.length > 0;
+  const demotedJoined = hasDemotedLines
+    ? demotedExtraLines!.join('\n').trim()
+    : '';
+  const isDemotedOnlyExtra =
+    hasDemotedLines &&
+    typeof extraInput === 'string' &&
+    extraInput.trim() === demotedJoined &&
+    Boolean(existingExtra && existingExtra.trim());
+
+  const rawCandidate = isDemotedOnlyExtra
+    ? existingExtra!
+    : (extraInput !== undefined && extraInput !== null
+        ? extraInput
+        : existingExtra) ?? '';
   const cleanRaw = typeof rawCandidate === 'string' ? rawCandidate.trim() : '';
-  if (!patches || Object.keys(patches).length === 0) {
-    return cleanRaw || undefined;
-  }
-  const patchLookup = new Map<string, unknown>();
-  for (const [pKey, pVal] of Object.entries(patches)) {
-    if (!pKey.startsWith('__')) {
-      patchLookup.set(pKey.toLowerCase(), pVal);
+
+  const normalizeExtraKey = (k: string) =>
+    k.trim().toLowerCase().replace(/[\s_-]+/g, '');
+  const patchLookup = new Map<string, { originalKey: string; val: unknown }>();
+  for (const [pKey, pVal] of Object.entries(patches || {})) {
+    if (!pKey.startsWith('__') && pVal !== undefined) {
+      patchLookup.set(normalizeExtraKey(pKey), {
+        originalKey: pKey,
+        val: pVal,
+      });
     }
   }
+  if (hasDemotedLines) {
+    for (const dLine of demotedExtraLines!) {
+      const cIdx = dLine.indexOf(':');
+      if (cIdx !== -1) {
+        const k = dLine.slice(0, cIdx).trim();
+        const v = dLine.slice(cIdx + 1).trim();
+        const normK = normalizeExtraKey(k);
+        if (normK && !patchLookup.has(normK)) {
+          patchLookup.set(normK, { originalKey: k, val: v });
+        }
+      }
+    }
+  }
+
+  if (patchLookup.size === 0) {
+    return cleanRaw || undefined;
+  }
+  const matchedKeys = new Set<string>();
   const updatedLines: string[] = [];
   for (const line of cleanRaw.split('\n')) {
     const colonIndex = line.indexOf(':');
@@ -61,9 +89,10 @@ export function resolveExtraPlainText(
       continue;
     }
     const linePrefix = line.slice(0, colonIndex).trim();
-    const lineKey = linePrefix.toLowerCase();
+    const lineKey = normalizeExtraKey(linePrefix);
     if (patchLookup.has(lineKey)) {
-      const val = patchLookup.get(lineKey);
+      matchedKeys.add(lineKey);
+      const { val } = patchLookup.get(lineKey)!;
       if (
         (typeof val === 'string' && val !== '') ||
         typeof val === 'number' ||
@@ -75,30 +104,46 @@ export function resolveExtraPlainText(
       updatedLines.push(line);
     }
   }
+
+  if (hasDemotedLines) {
+    for (const dLine of demotedExtraLines!) {
+      const cIdx = dLine.indexOf(':');
+      if (cIdx !== -1) {
+        const k = normalizeExtraKey(dLine.slice(0, cIdx));
+        if (!matchedKeys.has(k)) {
+          matchedKeys.add(k);
+          updatedLines.push(dLine);
+        }
+      } else if (dLine.trim() && !updatedLines.includes(dLine.trim())) {
+        updatedLines.push(dLine.trim());
+      }
+    }
+  }
+
   return updatedLines.join('\n').trim() || undefined;
 }
 const IGNORED_SYSTEM_KEYS = new Set([
+  ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
   'id', 'userId', 'projectId', 'createdById', 'uploadedById',
   'createdAt', 'updatedAt', 'deletedAt', 'version', '_version',
-  'expectedVersion', 'isDeleted', 'silent', 'creators', 'authors',
+  'expectedVersion', 'isDeleted', 'silent', 'creators', 'authors', 'author',
   'contributors', 'editors', 'tags', 'labels', 'itemTags', 'zoteroTags',
   'keywords', 'keywordsList', 'attachments', 'primaryFile', 'filename',
   'notes', 'notesList', 'collectionId', 'collectionIds', 'collections',
   'collectionItems', 'userStates', 'states', 'readStatus', 'rating',
-  'lastReadAt', 'extraFields', 'fileId', 'fileUrl', 'size', 'mimeType',
-  'hasFile', 'attachmentCount', 'noteCount', 'firstAuthor', 'outgoingRel',
-  'incomingRel', 'relations', 'seeAlso', 'identifiers', 'ingestionRuns',
-  'itemMetadata', 'publications', 'crossrefEnriched',  'isRetracted', 'retraction', 'retractionStatus', 'retractionDate',
-  'retractionNature', 'retractionReasons', 'retractionNoticeDoi',
-  'retractionDetails', 'retractionCheckedAt', 'isMyPublication',
-  'publicationConfirmedAt', 'ingestionStatus', 'extractionStatus',
-  'verificationScore', 'isVerified', 'matchedSignals', 'missingFields',
-  'isSelfSufficient', 'qualityScore', 'engineUsed', 'provenance',
-  'fieldProvenance', 'sourceProvider', 'source', 'sources', 'confidenceScore',
-  'originProvider', 'canonicalId', 'canonicalUrl', 'resolvedAt', 'warnings',
-  'disambiguationWarning', 'rejectedCitedDoi', 'wafKind', 'promptUploadPdf',
-  'dismissedDuplicateIds', 'mergedCitationKeys', 'mergedFromIds',
+  'lastReadAt', 'isStarred', 'isFavorite', 'metadata', 'extraFields',
+  'fileId', 'size', 'mimeType', 'hasFile', 'attachmentCount', 'noteCount',
+  'firstAuthor', 'outgoingRel', 'incomingRel', 'relations', 'seeAlso',
+  'identifiers', 'ingestionRuns', 'itemMetadata', 'publications',
+  'crossrefEnriched', 'publicationConfirmedAt', 'sourceProvider',
+  'source', 'sources', 'originProvider', 'canonicalId', 'canonicalUrl',
+  'resolvedAt', 'warnings', 'disambiguationWarning', 'rejectedCitedDoi',
+  'promptUploadPdf', 'lockedFields', '__isSystemUpdate', '__updateSource',
 ]);
+export type RecordManualLockInput = ManualLockMutationInput;
+export function applyManualEditProvenanceLocks(input: RecordManualLockInput): void {
+  ItemProvenancePolicy.applyManualEditLocks(input);
+}
 export function extractNonColumnExtraFields(
   data?: Record<string, unknown> | null,
   existingExtraFields?: Record<string, unknown> | null,
@@ -402,170 +447,25 @@ export function prepareAttachmentsToCreate(
   }
   return result;
 }
-export interface ResolvedTag {
-  id: string;
-  type: TagType;
-}
-export function buildTagTypeMap(
-  rawTagList: (TagInput | null | undefined)[],
-): Map<string, TagType> {
-  const tagTypeMap = new Map<string, TagType>();
-  if (!Array.isArray(rawTagList)) return tagTypeMap;
-  for (const rt of rawTagList) {
-    if (typeof rt === 'object' && rt !== null) {
-      const tagName = (rt.name || rt.tag || '').trim();
-      if (!tagName) continue;
-      const typeVal =
-        'type' in rt ? (rt as { type?: unknown }).type : undefined;
-      let resolvedType: TagType | undefined;
-      if (
-        typeVal === 1 ||
-        typeVal === 'automatic' ||
-        typeVal === TagType.automatic
-      ) {
-        resolvedType = TagType.automatic;
-      } else if (
-        typeVal === 0 ||
-        typeVal === 'manual' ||
-        typeVal === TagType.manual
-      ) {
-        resolvedType = TagType.manual;
-      }
-      if (resolvedType) {
-        tagTypeMap.set(tagName.toLowerCase(), resolvedType);
-        const normalized = cleanSingleTag(tagName);
-        if (normalized) {
-          tagTypeMap.set(normalized.toLowerCase(), resolvedType);
-        }
-      }
-    }
-  }
-  return tagTypeMap;
-}
-export async function resolveOrCreateTags(
-  client: Prisma.TransactionClient | PrismaService,
-  userId: string,
-  rawTagList: (TagInput | null | undefined)[],
-  defaultTagType: TagType = TagType.manual,
-  projectId?: string | null,
-): Promise<ResolvedTag[]> {
-  const normalizedTagNames = normalizeAcademicTags(rawTagList).slice(0, 30);
-  if (normalizedTagNames.length === 0) return [];
-  const effectiveProjectId =
-    projectId &&
-    projectId !== 'user' &&
-    projectId !== 'me' &&
-    projectId !== 'personal' &&
-    isUuid(projectId)
-      ? projectId
-      : null;
-  const scopeWhere: Prisma.TagWhereInput = effectiveProjectId
-    ? { projectId: effectiveProjectId }
-    : { userId, projectId: null };
-  const tagTypeMap = buildTagTypeMap(rawTagList);
-  const tagOrFilter = normalizedTagNames.map((name) => ({
-    name: { equals: name, mode: 'insensitive' as const },
-  }));
-  const preExistingTags =
-    (await client.tag.findMany({
-      where: {
-        ...scopeWhere,
-        OR: tagOrFilter,
-      },
-      select: { id: true, name: true, type: true },
-    })) || [];
-  const existingLowerNames = new Set(
-    preExistingTags
-      .map((t: { id: string; name?: string }) =>
-        typeof t.name === 'string' ? t.name.toLowerCase() : '',
-      )
-      .filter(Boolean),
-  );
-  const missingTagNames = normalizedTagNames.filter(
-    (name) => !existingLowerNames.has(name.toLowerCase()),
-  );
-  if (missingTagNames.length > 0) {
-    await client.tag.createMany({
-      data: missingTagNames.map((name) => ({
-        userId,
-        createdById: userId,
-        name,
-        type: tagTypeMap.get(name.toLowerCase()) || defaultTagType,
-        projectId: effectiveProjectId,
-      })),
-      skipDuplicates: true,
-    });
-  }
-  const allMatchingTags =
-    missingTagNames.length > 0
-      ? (await client.tag.findMany({
-          where: {
-            ...scopeWhere,
-            OR: tagOrFilter,
-          },
-          select: { id: true, name: true, type: true },
-        })) || preExistingTags
-      : preExistingTags;
-  const dedupedByLower = new Map<string, ResolvedTag>();
-  for (const t of allMatchingTags as Array<{
-    id: string;
-    name?: string;
-    type?: TagType;
-  }>) {
-    const key = typeof t.name === 'string' ? t.name.toLowerCase() : t.id;
-    if (!dedupedByLower.has(key)) {
-      dedupedByLower.set(key, {
-        id: t.id,
-        type: tagTypeMap.get(key) || t.type || defaultTagType,
-      });
-    }
-  }
-  return Array.from(dedupedByLower.values());
-}
-export async function syncTagsForCatalogItem(
-  client: Prisma.TransactionClient | PrismaService,
-  userId: string,
-  itemId: string,
-  rawTags: (TagInput | null | undefined)[],
-  defaultTagType: TagType = TagType.manual,
-  projectId?: string | null,
-): Promise<void> {
-  const normalizedTagsList = normalizeAcademicTags(rawTags);
-  if (normalizedTagsList.length === 0) {
-    await client.itemTag.deleteMany({ where: { itemId } });
-    return;
-  }
-  const resolvedTags = await resolveOrCreateTags(
-    client,
-    userId,
-    rawTags,
-    defaultTagType,
-    projectId,
-  );
-  if (resolvedTags.length === 0) {
-    await client.itemTag.deleteMany({ where: { itemId } });
-    return;
-  }
-  await client.itemTag.deleteMany({
-    where: {
-      itemId,
-      tagId: { notIn: resolvedTags.map((t) => t.id) },
-    },
-  });
-  await client.itemTag.createMany({
-    data: resolvedTags.map((t) => ({
-      tagId: t.id,
-      itemId,
-      type: t.type,
-    })),
-    skipDuplicates: true,
-  });
-}
+export type { ResolvedTag } from './tag-payload.builder';
+export {
+  buildTagTypeMap,
+  resolveOrCreateTags,
+  syncTagsForCatalogItem,
+} from './tag-payload.builder';
 export function deriveFirstAuthor(data: {
   contributors?: Array<Record<string, unknown> | CreatorCreditInput>;
   creators?: Array<Record<string, unknown> | CreatorCreditInput>;
   authors?: Array<string | Record<string, unknown>>;
+  author?: string;
+  editors?: Array<string | Record<string, unknown>>;
 }): string | null {
+  const formatResult = (name: string, count: number): string | null => {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    return (count > 1 ? `${trimmed} et al.` : trimmed).slice(0, 255);
+  };
+
   const structured =
     data.contributors && data.contributors.length > 0
       ? data.contributors
@@ -573,31 +473,46 @@ export function deriveFirstAuthor(data: {
         ? data.creators
         : null;
   if (structured) {
-    const c0 = structured[0] as Record<string, unknown>;
-    const authorName =
-      (c0.lastName as string) ||
-      (c0.fullName as string) ||
-      (c0.name as string) ||
-      '';
+    const isAuthorRole = (c: Record<string, unknown>) => {
+      const role = String(c.creatorType || c.role || 'author').trim().toLowerCase();
+      return role === 'author' || role === 'creator' || role === '';
+    };
+    const isNonEditorRole = (c: Record<string, unknown>) => {
+      const role = String(c.creatorType || c.role || 'author').trim().toLowerCase();
+      return role !== 'editor' && role !== 'serieseditor';
+    };
+
+    const preferredPool = structured.filter((c) => isAuthorRole(c as Record<string, unknown>));
+    const nonEditorPool = preferredPool.length > 0 ? preferredPool : structured.filter((c) => isNonEditorRole(c as Record<string, unknown>));
+    const effectivePool = nonEditorPool.length > 0 ? nonEditorPool : structured;
+
+    const c0 = effectivePool[0] as Record<string, unknown>;
+    const rawLast = (c0.lastName as string) || '';
+    const rawFull = (c0.fullName as string) || (c0.name as string) || '';
+    let authorName = rawLast;
+    if (!authorName && rawFull) {
+      const parsed = parseCreatorString(rawFull, 0);
+      authorName = parsed.lastName || parsed.fullName || rawFull;
+    }
     if (!authorName) return null;
-    return structured.length > 1 ? `${authorName} et al.` : authorName;
+    return formatResult(authorName, effectivePool.length);
   }
-  if (data.authors && data.authors.length > 0) {
-    const firstAuthor = data.authors[0] as
-      | string
-      | { name?: string; fullName?: string; lastName?: string }
-      | undefined;
+  const authorList =
+    data.authors && data.authors.length > 0
+      ? data.authors
+      : typeof data.author === 'string' && data.author.trim()
+        ? [data.author.trim()]
+        : data.editors && data.editors.length > 0
+          ? data.editors
+          : null;
+  if (authorList && authorList.length > 0) {
+    const firstAuthor = authorList[0] as string | { name?: string; fullName?: string; lastName?: string } | undefined;
     const authorStr: string =
-      typeof firstAuthor === 'string'
-        ? firstAuthor
-        : firstAuthor?.name ||
-          firstAuthor?.fullName ||
-          firstAuthor?.lastName ||
-          '';
+      typeof firstAuthor === 'string' ? firstAuthor : firstAuthor?.name || firstAuthor?.fullName || firstAuthor?.lastName || '';
     const parsed0 = parseCreatorString(authorStr, 0);
     const authorName = parsed0.lastName || parsed0.fullName;
     if (!authorName) return null;
-    return data.authors.length > 1 ? `${authorName} et al.` : authorName;
+    return formatResult(authorName, authorList.length);
   }
   return null;
 }
@@ -606,9 +521,11 @@ export function prepareContributorsToCreate(
     contributors?: CreatorCreditInput[];
     creators?: CreatorCreditInput[];
     authors?: string[];
+    author?: string;
     editors?: string[];
   },
   itemType?: string,
+  existingContributors?: Array<Record<string, unknown> | CreatorCreditInput> | null,
 ): Array<{
   creatorType: string;
   fieldMode?: number;
@@ -618,18 +535,86 @@ export function prepareContributorsToCreate(
   shortName?: string;
   orderIndex: number;
 }> | null {
+  const effectiveAuthors =
+    data.authors !== undefined
+      ? data.authors
+      : typeof data.author === 'string' && data.author.trim()
+        ? [data.author.trim()]
+        : undefined;
+
   if (
     data.contributors === undefined &&
     data.creators === undefined &&
-    data.authors === undefined &&
+    effectiveAuthors === undefined &&
     data.editors === undefined
   ) {
     return null;
   }
+
+  let baseContributors = data.contributors;
+  let baseCreators = data.creators;
+
+  if (
+    baseContributors === undefined &&
+    baseCreators === undefined &&
+    Array.isArray(existingContributors) &&
+    existingContributors.length > 0
+  ) {
+    const primaryRoleLower = getPrimaryCreatorRoleForType(itemType).toLowerCase();
+    const getRoleLower = (c: Record<string, unknown> | CreatorCreditInput) =>
+      String(
+        (c as Record<string, unknown>).creatorType ||
+          (c as Record<string, unknown>).role ||
+          'author',
+      )
+        .trim()
+        .toLowerCase();
+    const isEditor = (c: Record<string, unknown> | CreatorCreditInput) =>
+      getRoleLower(c) === 'editor';
+    const isPrimary = (c: Record<string, unknown> | CreatorCreditInput) => {
+      const r = getRoleLower(c);
+      return r === 'author' || r === primaryRoleLower;
+    };
+
+    if (data.editors !== undefined && effectiveAuthors === undefined) {
+      baseContributors = existingContributors.filter(
+        (c) => !isEditor(c),
+      ) as CreatorCreditInput[];
+    } else if (effectiveAuthors !== undefined && data.editors === undefined) {
+      const preservedNonPrimary = existingContributors.filter(
+        (c) => !isPrimary(c),
+      ) as CreatorCreditInput[];
+      if (preservedNonPrimary.length > 0) {
+        const mergedAuthors =
+          mergeCanonicalCreators({
+            authors: effectiveAuthors,
+            itemType,
+          }) || [];
+        const mergedAll =
+          mergeCanonicalCreators({
+            contributors: [...mergedAuthors, ...preservedNonPrimary],
+            itemType,
+          }) || [];
+        return mergedAll.map((c, index) => ({
+          creatorType: c.creatorType || 'author',
+          fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
+          firstName: c.firstName || '',
+          lastName: c.lastName || '',
+          fullName:
+            c.fullName ||
+            c.name ||
+            `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+          shortName: c.shortName || '',
+          orderIndex: index,
+        }));
+      }
+    }
+  }
+
   const merged = mergeCanonicalCreators({
-    contributors: data.contributors,
-    creators: data.creators,
-    authors: data.authors,
+    contributors: baseContributors,
+    creators: baseCreators,
+    authors: effectiveAuthors,
     editors: data.editors,
     itemType,
   });

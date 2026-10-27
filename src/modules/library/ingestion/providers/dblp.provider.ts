@@ -1,12 +1,9 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { Injectable, Optional } from '@nestjs/common';
 import {
-  MetadataProvider,
   MetadataRequest,
   ProviderCapability,
   ProviderName,
   ProviderResult,
-  QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   cleanBibliographicText,
@@ -19,6 +16,7 @@ import {
 } from '@/modules/library/core';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
+import { AbstractAcademicProvider } from './abstract-academic.provider';
 
 /**
  * DBLP Computer Science Bibliography Provider.
@@ -28,7 +26,7 @@ import { DomainRateLimiterService } from '@/modules/library/ingestion/services/d
  * NeurIPS, ICML, ICLR, CVPR, ICCV, ECCV, ACL, EMNLP, IEEE, and ACM conferences.
  */
 @Injectable()
-export class DblpProvider implements MetadataProvider {
+export class DblpProvider extends AbstractAcademicProvider {
   readonly id: ProviderName = 'DBLP';
   readonly capabilities: ProviderCapability = {
     queryTypes: ['DOI', 'TITLE'],
@@ -37,24 +35,19 @@ export class DblpProvider implements MetadataProvider {
     maxConcurrency: 2,
   };
 
-  private readonly logger = new Logger(DblpProvider.name);
-
   constructor(
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
-    private readonly httpClient?: AcademicHttpClient,
+    httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
-  ) {}
+  ) {
+    super(httpClient);
+  }
 
   private get baseUrl(): string {
     return (
       this.configService?.providers.dblpBaseUrl ??
       libraryConfig().providers.dblpBaseUrl
     );
-  }
-
-  supports(input: QueryType | MetadataRequest): boolean {
-    const type = typeof input === 'string' ? input : input?.queryType;
-    return type ? this.capabilities.queryTypes.includes(type) : false;
   }
 
   async resolve(
@@ -74,37 +67,21 @@ export class DblpProvider implements MetadataProvider {
       await this.rateLimiter.acquire('dblp', signal);
     }
 
-    let response: Response;
-    try {
-      const headers = {
-        'User-Agent': getAcademicUserAgent('Dblp'),
-        Accept: 'application/json, text/json',
-      };
-      if (this.httpClient) {
-        ({ response } = await this.httpClient.request(url, { headers, signal }));
-      } else {
-        response = await fetch(url, { headers, signal });
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.debug(`DBLP fetch skipped/failed non-fatally: ${message}`);
-      return null;
-    }
+    const headers = {
+      'User-Agent': getAcademicUserAgent('Dblp'),
+      Accept: 'application/json, text/json',
+    };
 
-    if (response.status === 404) return null;
-    if (!response.ok) {
-      this.logger.debug(
-        `DBLP returned HTTP ${response.status} for query: ${searchQuery}`,
-      );
-      return null;
-    }
-
-    let payload: Record<string, unknown> | null = null;
-    try {
-      payload = (await response.json()) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
+    const payload = await this.fetchJsonWithResilience<Record<string, unknown>>(
+      url,
+      signal,
+      headers,
+      {
+        contextLabel: `query: ${searchQuery}`,
+        swallowNetworkError: true,
+      },
+    );
+    if (!payload) return null;
 
     const hits = (
       payload as {
@@ -201,16 +178,13 @@ export class DblpProvider implements MetadataProvider {
           ? info.url
           : undefined;
 
-    const rawVersion = createHash('md5')
-      .update(JSON.stringify({ title: cleanTitle, venue, year, doi }))
-      .digest('hex');
-
-    return {
-      provider: this.id,
-      confidence: isDoiQuery ? 0.9 : 0.85,
+    return this.buildProviderResult({
       identifier,
-      fetchedAt: new Date().toISOString(),
-      rawVersion,
+      confidenceScore: isDoiQuery ? 0.9 : 0.85,
+      rawPayload: { title: cleanTitle, venue, year, doi },
+      retrievalMethod: 'api',
+      sourceUrl: url,
+      canonicalId: doi ? `doi:${doi}` : `dblp:${identifier}`,
       metadata: {
         itemType,
         title: cleanTitle,
@@ -227,6 +201,6 @@ export class DblpProvider implements MetadataProvider {
         issue,
         url,
       },
-    };
+    });
   }
 }

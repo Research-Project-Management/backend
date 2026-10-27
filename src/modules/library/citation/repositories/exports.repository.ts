@@ -9,7 +9,10 @@ export const EXPORT_MAX_ITEMS = 1000;
 export const EXPORT_CHUNK_SIZE = 200;
 
 export type ExportItemRecord = Prisma.ItemGetPayload<{
-  include: { contributors: { orderBy: { orderIndex: 'asc' } } };
+  include: {
+    contributors: { orderBy: { orderIndex: 'asc' } };
+    identifiers?: boolean;
+  };
 }>;
 
 /**
@@ -38,6 +41,7 @@ export class ExportsRepository {
         where,
         include: {
           contributors: { orderBy: { orderIndex: 'asc' } },
+          identifiers: true,
         },
         orderBy: { createdAt: 'desc' },
         take,
@@ -97,6 +101,7 @@ export class ExportsRepository {
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
         attachments: { where: { deletedAt: null } },
+        identifiers: true,
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       ...(take ? { take } : {}),
@@ -120,6 +125,7 @@ export class ExportsRepository {
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
         attachments: { where: { deletedAt: null } },
+        identifiers: true,
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take,
@@ -139,6 +145,7 @@ export class ExportsRepository {
       },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
+        identifiers: true,
         attachments: {
           include: {
             annotations: {
@@ -158,6 +165,7 @@ export class ExportsRepository {
       where: scopeWhere,
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
+        identifiers: true,
       },
       take,
     });
@@ -189,6 +197,7 @@ export class ExportsRepository {
         },
         include: {
           contributors: { orderBy: { orderIndex: 'asc' } },
+          identifiers: true,
         },
         take: Math.min(500, MAX_RESULTS - collectedById.size),
       });

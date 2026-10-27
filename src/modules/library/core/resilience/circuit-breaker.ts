@@ -88,6 +88,24 @@ export class CircuitBreaker {
     return false;
   }
 
+  /**
+   * Side-effect-free inspection of whether a request can currently execute.
+   * Unlike `canExecute()`, this does not consume a `halfOpenAttempts` probe slot.
+   */
+  public peekCanExecute(): boolean {
+    const currentState = this.getState();
+
+    if (currentState === 'CLOSED') {
+      return true;
+    }
+
+    if (currentState === 'HALF_OPEN') {
+      return this.halfOpenAttempts < this.halfOpenMaxAttempts;
+    }
+
+    return false;
+  }
+
   public recordSuccess(): void {
     if (this.state === 'HALF_OPEN') {
       this.logger.log(

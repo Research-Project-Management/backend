@@ -27,6 +27,7 @@ import {
   CompletePresignDto,
   InitiateMultipartDto,
   CompleteMultipartDto,
+  SAFE_ATTACHMENT_URL_REGEX,
 } from '@/modules/library/extraction/dto/attachments.dto';
 import { MAX_SAFE_HTTP_PAYLOAD_BYTES } from '@/modules/library/core';
 
@@ -346,8 +347,14 @@ export class AttachmentStorageController {
     }
 
     if (attachment.url) {
+      const trimmedUrl = attachment.url.trim();
+      if (!SAFE_ATTACHMENT_URL_REGEX.test(trimmedUrl)) {
+        throw new BadRequestException(
+          'Unsafe or unsupported attachment redirect URL scheme',
+        );
+      }
       return {
-        url: attachment.url,
+        url: trimmedUrl,
         expiresIn: 3600,
         filename: attachment.filename || 'attachment.pdf',
         mimeType: attachment.mimeType || 'application/pdf',
@@ -443,7 +450,13 @@ export class AttachmentStorageController {
     }
 
     if (attachment.url) {
-      return res.redirect(attachment.url, 302);
+      const trimmedUrl = attachment.url.trim();
+      if (!SAFE_ATTACHMENT_URL_REGEX.test(trimmedUrl)) {
+        throw new BadRequestException(
+          'Unsafe or unsupported attachment redirect URL scheme',
+        );
+      }
+      return res.redirect(trimmedUrl, 302);
     }
 
     throw new NotFoundException(

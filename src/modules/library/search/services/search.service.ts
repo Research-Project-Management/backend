@@ -107,12 +107,8 @@ export class SearchService {
 
   async indexAttachmentPages(
     attachmentId: string,
-    itemIdOrPages: string | PageTextExtraction[],
-    maybePages?: PageTextExtraction[],
+    pages: PageTextExtraction[],
   ): Promise<void> {
-    const pages = Array.isArray(itemIdOrPages)
-      ? itemIdOrPages
-      : (maybePages ?? []);
     await this.fullText.indexAttachmentPages(attachmentId, pages);
   }
 

@@ -22,19 +22,14 @@ import {
 import { TransactionService } from '@/modules/library/sync';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/curation.dto';
+import { PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/curation.types';
 import {
-  PrismaMergeAuditTrail,
-  ALLOWED_MERGE_METADATA_FIELDS,
-} from '@/modules/library/ingestion/types/curation.types';
-import {
-  buildMergeAuditTrail,
   invalidateMergedItemsCache,
+  recordMergedAssetSyncEventsInTx,
+  softDeleteDuplicatesAndRecordOutboxInTx,
 } from '@/modules/library/ingestion/domain/duplicate-merge.helper';
 import { UserId, ProjectId } from '@/modules/library/core/types/branded.types';
-import {
-  asMetaObject,
-  getEffectiveItemField,
-} from './duplicate-detector.service';
+import { asMetaObject } from './duplicate-detector.service';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { deriveFirstAuthor } from '@/modules/library/catalog/catalog.facade';
 
@@ -46,15 +41,44 @@ import {
   RETRACTION_SURVIVAL_KEYS,
   rewireMergedItemRelations,
   consolidateUserPublications,
-  syncMergedContributors,
+  syncMergedIdentifiersInTx,
+  applyMergedUpdatesAndClearDuplicateCitationKeyCollision,
 } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
+import {
+  AuditSnapshotBuilder,
+  DuplicateMergeStepContext,
+  executeDuplicateMergePipeline,
+} from '@/modules/library/ingestion/domain/duplicate-merge.steps';
+import {
+  DuplicateMergeMemento,
+  MasterPreMergeSnapshot,
+  MergedDuplicateSnapshot,
+  capturePreMergeRelationsInTx,
+  attachCapturedMergeStepRelations,
+  createDuplicateMergeMemento,
+  serializeMergeMemento,
+  parseMergeMemento,
+  buildMasterRestoreData,
+  recordMergeMementoInTx,
+  executeUndoDuplicateMergeInTx,
+} from '@/modules/library/ingestion/domain/duplicate-merge.memento';
+import { ItemsMapper, ItemCacheCoordinator } from '@/modules/library/catalog';
 
-export type { ContributorShape };
+export type {
+  ContributorShape,
+  DuplicateMergeMemento,
+  MasterPreMergeSnapshot,
+  MergedDuplicateSnapshot,
+};
 export {
   SYSTEM_RESERVED_MERGE_KEYS,
   TOP_LEVEL_ITEM_COLUMNS,
   IDENTIFIER_META_KEYS,
   RETRACTION_SURVIVAL_KEYS,
+  createDuplicateMergeMemento,
+  serializeMergeMemento,
+  parseMergeMemento,
+  buildMasterRestoreData,
 };
 
 @Injectable()
@@ -76,37 +100,9 @@ export class DuplicateMergerService {
     private readonly storagePort?: IStoragePort,
     @Optional()
     private readonly cache?: RedisCacheService,
+    @Optional()
+    private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
-
-  async rewireMergedItemRelations(
-    tx: Prisma.TransactionClient,
-    primaryId: string,
-    uniqueDupIds: string[],
-  ): Promise<void> {
-    return rewireMergedItemRelations(tx, primaryId, uniqueDupIds);
-  }
-
-  async consolidateUserPublications(
-    tx: Prisma.TransactionClient,
-    primaryId: string,
-    uniqueDupIds: string[],
-  ): Promise<void> {
-    return consolidateUserPublications(tx, primaryId, uniqueDupIds);
-  }
-
-  async syncMergedContributors(
-    tx: Prisma.TransactionClient,
-    primaryId: string,
-    chosenContributors: ContributorShape[] | string[] | undefined,
-    duplicates: Array<{ contributors?: unknown }>,
-  ): Promise<void> {
-    return syncMergedContributors(
-      tx,
-      primaryId,
-      chosenContributors,
-      duplicates,
-    );
-  }
 
   async mergeDuplicates(
     userId: UserId | string,
@@ -215,11 +211,23 @@ export class DuplicateMergerService {
           }),
           tx.attachment?.findMany?.({
             where: { itemId: { in: uniqueDupIds } },
-            select: { id: true, itemId: true },
+            select: { id: true, itemId: true, attachmentType: true },
           }),
         ]);
         const initialNotes = rawInitialNotes || [];
         const initialAttachments = rawInitialAttachments || [];
+
+        const { primaryRelations, duplicateRelationsById } =
+          await capturePreMergeRelationsInTx({
+            tx,
+            primary: primary as Record<string, unknown> & { id: string },
+            duplicates: duplicates as Array<
+              Record<string, unknown> & { id: string }
+            >,
+            uniqueDupIds,
+            initialNotes,
+            initialAttachments,
+          });
 
         if (this.extractionGateway?.reassignContentToItem) {
           const orphaned = await this.extractionGateway.reassignContentToItem(
@@ -236,321 +244,80 @@ export class DuplicateMergerService {
           await this.catalogGateway.mergeItems(tx, uniqueDupIds, primary.id);
         }
 
-        const survivingNotes = initialNotes.length > 0 ? ((await tx.note?.findMany?.({
-          where: { id: { in: initialNotes.map((n) => n.id) } },
-        })) || []) : [];
-        const survivingNoteMap = new Map(survivingNotes.map((n) => [n.id, n]));
+        await recordMergedAssetSyncEventsInTx({
+          tx,
+          helpers,
+          eventScope: { userId: String(userId), projectId: effectiveProjectId },
+          initialNotes,
+          initialAttachments,
+        });
 
-        for (const initNote of initialNotes) {
-          const survivor = survivingNoteMap.get(initNote.id);
-          if (survivor && !survivor.deletedAt) {
-            await helpers.appendChange(eventScope, {
-              entityType: 'Note',
-              entityId: survivor.id,
-              action: 'update',
-              version: 1,
-              data: survivor,
-            });
-          } else {
-            await helpers.recordTombstone(eventScope, {
-              entityType: 'Note',
-              entityId: initNote.id,
-            });
-            await helpers.appendChange(eventScope, {
-              entityType: 'Note',
-              entityId: initNote.id,
-              action: 'delete',
-              version: 0,
-            });
-          }
-        }
-
-        const survivingAttachments = initialAttachments.length > 0 ? ((await tx.attachment?.findMany?.({
-          where: { id: { in: initialAttachments.map((a) => a.id) } },
-        })) || []) : [];
-        const survivingAttachmentMap = new Map(
-          survivingAttachments.map((a) => [a.id, a]),
-        );
-
-        for (const initAtt of initialAttachments) {
-          const survivor = survivingAttachmentMap.get(initAtt.id);
-          if (survivor && !survivor.deletedAt) {
-            await helpers.appendChange(eventScope, {
-              entityType: 'Attachment',
-              entityId: survivor.id,
-              action: 'update',
-              version: 1,
-              data: survivor,
-            });
-          } else {
-            await helpers.recordTombstone(eventScope, {
-              entityType: 'Attachment',
-              entityId: initAtt.id,
-            });
-            await helpers.appendChange(eventScope, {
-              entityType: 'Attachment',
-              entityId: initAtt.id,
-              action: 'delete',
-              version: 0,
-            });
-          }
-        }
-
-        await this.rewireMergedItemRelations(tx, primary.id, uniqueDupIds);
-        await this.consolidateUserPublications(tx, primary.id, uniqueDupIds);
-
-        const [existingPrimaryMeta, dupMetas] = await Promise.all([
-          tx.itemMetadata.findFirst({
-            where: { itemId: primary.id },
-          }),
-          tx.itemMetadata?.findMany
-            ? tx.itemMetadata.findMany({
-                where: { itemId: { in: uniqueDupIds } },
-                select: { id: true, rawPayload: true },
-              })
-            : Promise.resolve([]),
-        ]);
-        const extractOffloadedFileId = (rawPayload: unknown): string | null => {
-          if (
-            rawPayload &&
-            typeof rawPayload === 'object' &&
-            !Array.isArray(rawPayload)
-          ) {
-            const rec = rawPayload as Record<string, unknown>;
-            if (
-              rec.isOffloaded === true &&
-              typeof rec.fileId === 'string' &&
-              rec.fileId.length > 0
-            ) {
-              return rec.fileId;
-            }
-          }
-          return null;
-        };
-
-        if (existingPrimaryMeta) {
-          for (const dm of dupMetas) {
-            const fid = extractOffloadedFileId(dm.rawPayload);
-            if (fid) offloadedFileIdsToDelete.push(fid);
-          }
-          await tx.itemMetadata.deleteMany({
-            where: { itemId: { in: uniqueDupIds } },
-          });
-        } else {
-          const firstDupMeta =
-            dupMetas[0] ??
-            (await tx.itemMetadata.findFirst({
-              where: { itemId: { in: uniqueDupIds } },
-            }));
-          if (firstDupMeta) {
-            for (const dm of dupMetas) {
-              if (dm.id === firstDupMeta.id) continue;
-              const fid = extractOffloadedFileId(dm.rawPayload);
-              if (fid) offloadedFileIdsToDelete.push(fid);
-            }
-            await tx.itemMetadata.update({
-              where: { id: firstDupMeta.id },
-              data: { itemId: primary.id },
-            });
-            await tx.itemMetadata.deleteMany({
-              where: {
-                itemId: { in: uniqueDupIds },
-                id: { not: firstDupMeta.id },
-              },
-            });
-          }
-        }
-
-        // Provenance & Alias Citation Keys
-        const primaryMeta = { ...asMetaObject(primary.metadata) };
-        const extraIsObject =
-          primaryMeta.extra !== null &&
-          typeof primaryMeta.extra === 'object' &&
-          !Array.isArray(primaryMeta.extra);
-        const extraObj: Record<string, unknown> | undefined = extraIsObject
-          ? { ...(primaryMeta.extra as Record<string, unknown>) }
-          : undefined;
-
-        const existingAliases: string[] = [
-          ...(Array.isArray(primaryMeta.mergedCitationKeys)
-            ? (primaryMeta.mergedCitationKeys as string[])
-            : []),
-          ...(extraObj && Array.isArray(extraObj.mergedCitationKeys)
-            ? (extraObj.mergedCitationKeys as string[])
-            : []),
-        ];
-        const dupCitationKeys = duplicates
-          .flatMap((d) => {
-            const dMeta = asMetaObject(d.metadata);
-            const dAliases = Array.isArray(dMeta.mergedCitationKeys)
-              ? (dMeta.mergedCitationKeys as string[])
-              : [];
-            return [d.citationKey, ...dAliases];
-          })
-          .filter((k): k is string =>
-            Boolean(k?.trim() && k !== primary.citationKey),
-          );
-        const mergedAliases = Array.from(
-          new Set([...existingAliases, ...dupCitationKeys]),
-        );
-        primaryMeta.mergedCitationKeys = mergedAliases;
-        if (extraObj) extraObj.mergedCitationKeys = mergedAliases;
-
-        const rawSelections = dto.fieldSelections || {};
-        const {
-          authors: selectedAuthors,
-          creators: selectedCreators,
-          contributors: selectedContributors,
-          ...scalarSelections
-        } = rawSelections;
-
-        await this.syncMergedContributors(
+        const preMergeItemRelations = await rewireMergedItemRelations(
           tx,
           primary.id,
-          (selectedContributors || selectedAuthors || selectedCreators) as
-            | ContributorShape[]
-            | string[]
-            | undefined,
-          duplicates,
+          uniqueDupIds,
+        );
+        const preMergePubs = await consolidateUserPublications(
+          tx,
+          primary.id,
+          uniqueDupIds,
         );
 
-        // Automatic Field Backfilling
+        const primaryMeta = { ...asMetaObject(primary.metadata) };
+        const rawSelections = dto.fieldSelections || {};
+        const {
+          authors: _selectedAuthors,
+          creators: _selectedCreators,
+          contributors: _selectedContributors,
+          ...scalarSelections
+        } = rawSelections;
         const backfillFields: Record<string, unknown> = {};
-        for (const field of ALLOWED_MERGE_METADATA_FIELDS) {
-          if (field === 'extra' || scalarSelections[field] !== undefined) {
-            continue;
-          }
-          if (
-            getEffectiveItemField(primary, field, primaryMeta) === undefined
-          ) {
-            for (const dup of duplicates) {
-              const dupVal = getEffectiveItemField(dup, field);
-              if (dupVal !== undefined) {
-                backfillFields[field] = dupVal;
-                break;
-              }
-            }
-          }
-        }
 
-        for (const idKey of IDENTIFIER_META_KEYS) {
-          if (
-            primaryMeta[idKey] === undefined ||
-            primaryMeta[idKey] === null ||
-            primaryMeta[idKey] === ''
-          ) {
-            const topOnPrimary = getEffectiveItemField(
-              primary,
-              idKey,
-              primaryMeta,
-            );
-            if (topOnPrimary !== undefined) {
-              primaryMeta[idKey] = topOnPrimary;
-            } else {
-              for (const dup of duplicates) {
-                const candidateVal = getEffectiveItemField(dup, idKey);
-                if (candidateVal !== undefined) {
-                  primaryMeta[idKey] = candidateVal;
-                  backfillFields[idKey] = candidateVal;
-                  break;
-                }
-              }
-            }
-          }
-        }
-
-        // Non-destructively merge Zotero string `extra` lines
-        if (scalarSelections.extra === undefined) {
-          const extraLines: string[] = [];
-          const seenLinesLower = new Set<string>();
-          const pushExtraLines = (rawExtra: unknown) => {
-            if (typeof rawExtra !== 'string' || !rawExtra.trim()) return;
-            for (const line of rawExtra.split(/\r?\n/)) {
-              const trimmed = line.trim();
-              if (!trimmed) continue;
-              const lower = trimmed.toLowerCase();
-              if (!seenLinesLower.has(lower)) {
-                seenLinesLower.add(lower);
-                extraLines.push(trimmed);
-              }
-            }
-          };
-
-          pushExtraLines(primaryMeta.extra);
-          pushExtraLines((primary as unknown as Record<string, unknown>).extra);
-          for (const dup of duplicates) {
-            pushExtraLines(asMetaObject(dup.metadata).extra);
-            pushExtraLines((dup as unknown as Record<string, unknown>).extra);
-          }
-
-          if (extraLines.length > 0 && !extraObj) {
-            primaryMeta.extra = extraLines.join('\n');
-          } else if (extraObj) {
-            primaryMeta.extra = extraObj;
-          }
-        }
-
-        // Preserve My Publications & Retraction warnings across merge
-        let mergedIsRetracted = Boolean(
-          (primary as { isRetracted?: boolean }).isRetracted ||
-            primaryMeta.isRetracted,
-        );
-        for (const dup of duplicates) {
-          const dupMeta = asMetaObject(dup.metadata);
-          if (dupMeta.isMyPublication === true) {
-            primaryMeta.isMyPublication = true;
-            for (const pubKey of [
-              'publicationConfirmedAt',
-              'openAccessLicense',
-              'isPublicPublication',
-            ] as const) {
-              if (
-                primaryMeta[pubKey] === undefined &&
-                dupMeta[pubKey] !== undefined
-              ) {
-                primaryMeta[pubKey] = dupMeta[pubKey];
-              }
-            }
-          }
-
-          if (
-            (dup as { isRetracted?: boolean }).isRetracted ||
-            dupMeta.isRetracted ||
-            dupMeta.retraction ||
-            dupMeta.retractionNature ||
-            dupMeta.retractionDetails
-          ) {
-            mergedIsRetracted = true;
-            primaryMeta.isRetracted = true;
-            for (const rKey of RETRACTION_SURVIVAL_KEYS) {
-              if (!primaryMeta[rKey] && dupMeta[rKey] !== undefined) {
-                primaryMeta[rKey] = dupMeta[rKey];
-              }
-            }
-          } else if (
-            !primaryMeta.retractionCheckedAt &&
-            dupMeta.retractionCheckedAt
-          ) {
-            primaryMeta.retractionCheckedAt = dupMeta.retractionCheckedAt;
-          }
-        }
-
-        const currentHistory = Array.isArray(primaryMeta.mergeHistory)
-          ? (primaryMeta.mergeHistory as unknown[])
-          : [];
-        primaryMeta.mergeHistory = [
-          ...currentHistory,
-          {
-            mergedAt: now.toISOString(),
-            duplicateItemIds: uniqueDupIds,
-            backfilledFields: Object.keys(backfillFields),
+        const pipelineCtx: DuplicateMergeStepContext = {
+          tx,
+          primary: primary as Record<string, unknown> & {
+            id: string;
+            citationKey?: string | null;
+            metadata?: unknown;
           },
-        ];
+          duplicates: duplicates as Array<
+            Record<string, unknown> & {
+              id: string;
+              citationKey?: string | null;
+              doi?: string | null;
+              metadata?: unknown;
+              contributors?: unknown;
+            }
+          >,
+          uniqueDupIds,
+          rawSelections,
+          scalarSelections,
+          primaryMeta,
+          backfillFields,
+          offloadedFileIdsToDelete,
+          now,
+        };
+        await executeDuplicateMergePipeline(pipelineCtx);
+        attachCapturedMergeStepRelations({
+          primaryId: primary.id,
+          duplicates,
+          primaryRelations,
+          duplicateRelationsById,
+          preMergeItemRelations,
+          preMergePubs,
+          capturedPrimaryItemMetadata: pipelineCtx.capturedPrimaryItemMetadata,
+          capturedDuplicateItemMetadata: pipelineCtx.capturedDuplicateItemMetadata,
+        });
 
-        const primaryContributors = (await tx.contributor?.findMany?.({
-          where: { itemId: primary.id },
-          orderBy: { orderIndex: 'asc' },
-        })) || (primary as { contributors?: Array<Record<string, unknown>> }).contributors || [];
+        const primaryContributors =
+          pipelineCtx.syncedContributors ??
+          (await tx.contributor?.findMany?.({
+            where: { itemId: primary.id },
+            orderBy: { orderIndex: 'asc' },
+          })) ??
+          (primary as { contributors?: Array<Record<string, unknown>> })
+            .contributors ??
+          [];
         const derivedFirstAuthor = deriveFirstAuthor({
           contributors: primaryContributors,
           creators: Array.isArray(primaryMeta.creators)
@@ -570,21 +337,53 @@ export class DuplicateMergerService {
           }) : Promise.resolve(undefined),
         ]);
 
-        const combinedUpdates = { ...backfillFields, ...scalarSelections };
-        const topLevelData: Record<string, unknown> = {
-          itemType: effectiveMergedItemType,
-          ...(derivedFirstAuthor ? { firstAuthor: derivedFirstAuthor } : {}),
-          ...(noteCount !== undefined ? { noteCount } : {}),
-          ...(attachmentCount !== undefined ? { attachmentCount, hasFile: attachmentCount > 0 } : {}),
-          // isRetracted is not an Item column; it is persisted via primaryMeta.isRetracted above.
-        };
-        for (const [key, val] of Object.entries(combinedUpdates)) {
-          if (TOP_LEVEL_ITEM_COLUMNS.has(key)) {
-            topLevelData[key] = val;
-          } else {
-            primaryMeta[key] = val;
-          }
-        }
+        const { topLevelData } =
+          await applyMergedUpdatesAndClearDuplicateCitationKeyCollision({
+            tx,
+            primary: primary as Record<string, unknown>,
+            duplicates: duplicates as Array<Record<string, unknown>>,
+            effectiveMergedItemType,
+            derivedFirstAuthor,
+            noteCount,
+            attachmentCount,
+            backfillFields,
+            scalarSelections,
+            primaryMeta,
+          });
+
+        await syncMergedIdentifiersInTx({
+          tx,
+          primaryId: primary.id,
+          uniqueDupIds,
+          primaryMeta,
+          topLevelData,
+          primaryDoi: primary.doi,
+        });
+
+        const mergeMemento = createDuplicateMergeMemento({
+          primary: primary as Record<string, unknown> & { id: string },
+          duplicates: duplicates as Array<
+            Record<string, unknown> & { id: string }
+          >,
+          uniqueDupIds,
+          mergedMetadataFields: Object.keys(backfillFields),
+          reassignedNoteIds: initialNotes.map((n) => n.id),
+          reassignedAttachmentIds: initialAttachments.map((a) => a.id),
+          mergedCreatorCount: Array.isArray(primaryContributors)
+            ? primaryContributors.length
+            : 0,
+          primaryRelations,
+          duplicateRelationsById,
+          now,
+        });
+        await recordMergeMementoInTx({
+          tx,
+          userId: String(userId),
+          projectId: effectiveProjectId,
+          primaryId: primary.id,
+          primaryMeta,
+          memento: mergeMemento,
+        });
 
         const updatedPrimary = await tx.item.update({
           where: { id: primary.id },
@@ -593,14 +392,6 @@ export class DuplicateMergerService {
             metadata: primaryMeta as Prisma.InputJsonValue,
             version: { increment: 1 },
           },
-        });
-
-        await helpers.appendChange(eventScope, {
-          entityType: 'Item',
-          entityId: updatedPrimary.id,
-          action: 'update',
-          version: updatedPrimary.version,
-          data: updatedPrimary,
         });
 
         await helpers.publishOutbox(
@@ -616,44 +407,16 @@ export class DuplicateMergerService {
           },
         );
 
-        for (const dup of duplicates) {
-          const dupMeta = {
-            ...asMetaObject(dup.metadata),
-            mergedIntoId: primary.id,
-            mergedAt: now.toISOString(),
-          };
-          const softDeleted = await tx.item.update({
-            where: { id: dup.id },
-            data: {
-              deletedAt: now,
-              metadata: dupMeta,
-              version: { increment: 1 },
-            },
-          });
-
-          await helpers.recordTombstone(eventScope, {
-            entityType: 'Item',
-            entityId: dup.id,
-          });
-          await helpers.appendChange(eventScope, {
-            entityType: 'Item',
-            entityId: dup.id,
-            action: 'delete',
-            version: softDeleted.version,
-            data: softDeleted,
-          });
-          await helpers.publishOutbox(
-            eventScope,
-            dup.id,
-            'library.item.merged_into',
-            {
-              duplicateId: dup.id,
-              primaryId: primary.id,
-              userId,
-              projectId: effectiveProjectId,
-            },
-          );
-        }
+        await softDeleteDuplicatesAndRecordOutboxInTx({
+          tx,
+          helpers,
+          eventScope: { userId: String(userId), projectId: effectiveProjectId },
+          primaryId: primary.id,
+          duplicates: duplicates as Array<{ id: string; metadata?: unknown }>,
+          userId: String(userId),
+          effectiveProjectId,
+          now,
+        });
 
         if (this.ingestionRepo) {
           try {
@@ -677,7 +440,16 @@ export class DuplicateMergerService {
         });
 
         const finalPrimary = reloadedPrimary ?? updatedPrimary;
-        const audit: PrismaMergeAuditTrail = buildMergeAuditTrail({
+        await helpers.appendChange(eventScope, {
+          entityType: 'Item',
+          entityId: primary.id,
+          action: 'update',
+          version: updatedPrimary.version,
+          data: ItemsMapper.toDomain(
+            finalPrimary as unknown as Parameters<typeof ItemsMapper.toDomain>[0],
+          ),
+        });
+        const audit: PrismaMergeAuditTrail = AuditSnapshotBuilder.build({
           primary,
           duplicates,
           uniqueDupIds,
@@ -716,32 +488,74 @@ export class DuplicateMergerService {
       }
     }
 
-    if (
-      offloadedFileIdsToDelete.length > 0 &&
-      this.storagePort?.deleteFile
-    ) {
-      for (const fid of offloadedFileIdsToDelete) {
-        try {
-          await this.storagePort.deleteFile(fid);
-        } catch (delErr: unknown) {
-          const msg =
-            delErr instanceof Error ? delErr.message : String(delErr);
-          this.logger.warn(
-            `Failed to delete offloaded duplicate ItemMetadata blob ${fid}: ${msg}`,
-          );
-        }
-      }
+    // Retain offloadedFileIdsToDelete blobs in storagePort so undoMerge can restore ItemMetadata Claim Check payloads intact.
+
+    if (this.cacheCoordinator) {
+      await this.cacheCoordinator.invalidateForWrite({
+        userId: String(userId),
+        projectId: effectiveProjectId,
+        itemIds: [primary.id, ...uniqueDupIds],
+      });
+    } else {
+      await invalidateMergedItemsCache({
+        cache: this.cache,
+        logger: this.logger,
+        primaryId: primary.id,
+        uniqueDupIds,
+        userId: String(userId),
+        effectiveProjectId,
+      });
     }
 
-    await invalidateMergedItemsCache({
-      cache: this.cache,
-      logger: this.logger,
-      primaryId: primary.id,
-      uniqueDupIds,
-      userId: String(userId),
-      effectiveProjectId,
-    });
-
     return txResult;
+  }
+
+  /**
+   * Reverses a prior duplicate merge using the GoF Memento pattern (`DuplicateMergeMemento`).
+   * Restores soft-deleted duplicate items (`deletedAt: null`), rolls back the master item's
+   * pre-merge scalar fields and metadata from `memento.beforeMaster`, and emits sync/outbox events.
+   */
+  async undoMerge(
+    userId: UserId | string,
+    primaryItemId: string,
+    scope?: { userId?: string; projectId?: string | null } | string,
+  ): Promise<{ restoredPrimaryId: string; restoredDuplicateIds: string[] }> {
+    if (!primaryItemId || !primaryItemId.trim()) {
+      throw new BadRequestException('primaryItemId is required to undo merge');
+    }
+
+    const rawProjectId =
+      typeof scope === 'object' && scope !== null ? scope.projectId : scope;
+    const effectiveProjectId = normalizeProjectScopeId(rawProjectId);
+
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) =>
+        executeUndoDuplicateMergeInTx({
+          tx,
+          helpers,
+          userId: String(userId),
+          primaryItemId,
+          effectiveProjectId,
+        }),
+    );
+
+    if (this.cacheCoordinator) {
+      await this.cacheCoordinator.invalidateForWrite({
+        userId: String(userId),
+        projectId: effectiveProjectId,
+        itemIds: [result.restoredPrimaryId, ...result.restoredDuplicateIds],
+      });
+    } else {
+      await invalidateMergedItemsCache({
+        cache: this.cache,
+        logger: this.logger,
+        primaryId: result.restoredPrimaryId,
+        uniqueDupIds: result.restoredDuplicateIds,
+        userId: String(userId),
+        effectiveProjectId,
+      });
+    }
+
+    return result;
   }
 }

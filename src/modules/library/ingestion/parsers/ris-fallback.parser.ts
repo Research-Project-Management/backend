@@ -134,6 +134,47 @@ export function buildTypeSpecificFields(params: {
   };
 }
 
+export function parseRisDateString(value: string): {
+  year?: number;
+  publicationDate?: string;
+} {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return {};
+
+  // Match RIS slash or dash format: YYYY/MM/DD/other, YYYY/MM//, YYYY-MM-DD, etc.
+  const slashOrDash = trimmed.match(
+    /^(\d{4})(?:[-/](\d{1,2})?(?:[-/](\d{1,2})?)?)?/,
+  );
+  if (slashOrDash) {
+    const year = parseInt(slashOrDash[1], 10);
+    const mRaw = slashOrDash[2] ? parseInt(slashOrDash[2], 10) : undefined;
+    const dRaw = slashOrDash[3] ? parseInt(slashOrDash[3], 10) : undefined;
+    const validMonth = mRaw && mRaw >= 1 && mRaw <= 12 ? mRaw : undefined;
+    const validDay =
+      validMonth && dRaw && dRaw >= 1 && dRaw <= 31 ? dRaw : undefined;
+    if (validMonth && validDay) {
+      return {
+        year,
+        publicationDate: `${year}-${String(validMonth).padStart(2, '0')}-${String(validDay).padStart(2, '0')}`,
+      };
+    }
+    if (validMonth) {
+      return {
+        year,
+        publicationDate: `${year}-${String(validMonth).padStart(2, '0')}`,
+      };
+    }
+    return { year, publicationDate: String(year) };
+  }
+
+  const yearMatch = trimmed.match(/\b(19|20)\d{2}\b/);
+  if (yearMatch) {
+    const year = parseInt(yearMatch[0], 10);
+    return { year, publicationDate: String(year) };
+  }
+  return {};
+}
+
 export interface FallbackRisRecord {
   itemType: string;
   rawAuthors: string[];
@@ -143,6 +184,7 @@ export interface FallbackRisRecord {
   title?: string;
   shortTitle?: string;
   year?: number;
+  publicationDate?: string;
   accessedAt?: string;
   publicationTitle?: string;
   journal?: string;
@@ -252,25 +294,38 @@ export class RisFallbackParser {
       switch (tag) {
         case 'TI':
         case 'T1':
-          currentRecord.title = value;
+          if ( value ) currentRecord.title = value;
           break;
         case 'ST':
-          currentRecord.shortTitle = value;
+          if ( value ) currentRecord.shortTitle = value;
           break;
         case 'AU':
         case 'A1':
-          currentRecord.rawAuthors.push(value);
+          if (value) currentRecord.rawAuthors.push(value);
           break;
         case 'ED':
         case 'A2':
-          if (!currentRecord.rawEditors) currentRecord.rawEditors = [];
-          currentRecord.rawEditors.push(value);
+          if (value) {
+            if (!currentRecord.rawEditors) currentRecord.rawEditors = [];
+            currentRecord.rawEditors.push(value);
+          }
           break;
         case 'PY':
         case 'Y1':
         case 'DA': {
-          const yearMatch = value.match(/\b(19|20)\d{2}\b/);
-          if (yearMatch) currentRecord.year = parseInt(yearMatch[0], 10);
+          const parsedDate = parseRisDateString(value);
+          if (parsedDate.year && !currentRecord.year) {
+            currentRecord.year = parsedDate.year;
+          }
+          if (parsedDate.publicationDate) {
+            if (
+              !currentRecord.publicationDate ||
+              parsedDate.publicationDate.length >
+                currentRecord.publicationDate.length
+            ) {
+              currentRecord.publicationDate = parsedDate.publicationDate;
+            }
+          }
           break;
         }
         case 'Y2':
@@ -425,8 +480,13 @@ export class RisFallbackParser {
 
   static finalizeRecord(record: FallbackRisRecord): RisItem {
     const creators: CreatorInput[] = [];
+    const cleanRawAuthors: string[] = [];
     for (let i = 0; i < record.rawAuthors.length; i++) {
-      const parsed = parseCreatorString(record.rawAuthors[i], i, 'author');
+      const rawAuth = record.rawAuthors[i]?.trim();
+      if (!rawAuth) continue;
+      const parsed = parseCreatorString(rawAuth, creators.length, 'author');
+      if (!parsed.lastName && !parsed.firstName && !parsed.fullName) continue;
+      cleanRawAuthors.push(rawAuth);
       creators.push({
         lastName: parsed.lastName,
         firstName: parsed.firstName || undefined,
@@ -436,13 +496,18 @@ export class RisFallbackParser {
       });
     }
 
+    const cleanRawEditors: string[] = [];
+    const seenEditorKeys = new Set<string>();
     if (record.rawEditors && record.rawEditors.length > 0) {
       for (let i = 0; i < record.rawEditors.length; i++) {
-        const parsed = parseCreatorString(
-          record.rawEditors[i],
-          creators.length,
-          'editor',
-        );
+        const rawEd = record.rawEditors[i]?.trim();
+        if (!rawEd) continue;
+        const parsed = parseCreatorString(rawEd, creators.length, 'editor');
+        if (!parsed.lastName && !parsed.firstName && !parsed.fullName) continue;
+        const normKey = `${(parsed.lastName || '').toLowerCase()}|${(parsed.firstName || '').toLowerCase()}|${(parsed.fullName || '').toLowerCase()}`;
+        if (seenEditorKeys.has(normKey)) continue;
+        seenEditorKeys.add(normKey);
+        cleanRawEditors.push(rawEd);
         creators.push({
           lastName: parsed.lastName,
           firstName: parsed.firstName || undefined,
@@ -487,19 +552,19 @@ export class RisFallbackParser {
     });
 
     const doi = record.doi ? normalizeDoi(record.doi) || record.doi : undefined;
+    const publicationDate =
+      record.publicationDate ||
+      (record.year ? String(record.year) : undefined);
 
     return {
       itemType: record.itemType,
       title: record.title || 'Untitled Reference',
       shortTitle: record.shortTitle,
-      authors: record.rawAuthors,
+      authors: cleanRawAuthors,
       creators,
-      editors:
-        record.rawEditors && record.rawEditors.length > 0
-          ? record.rawEditors
-          : undefined,
+      editors: cleanRawEditors.length > 0 ? cleanRawEditors : undefined,
       year: record.year,
-      publicationDate: record.year ? String(record.year) : undefined,
+      publicationDate,
       journal: record.publicationTitle,
       publicationTitle: record.publicationTitle,
       journalAbbr: record.journalAbbr,

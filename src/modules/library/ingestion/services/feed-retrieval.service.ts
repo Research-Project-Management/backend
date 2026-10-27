@@ -19,6 +19,22 @@ import {
   type CachedFeedWithItems,
 } from '@/modules/library/ingestion/repositories/feeds.repository';
 
+export function redactFeedUrl(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.username = '';
+    parsed.password = '';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return rawUrl
+      .replace(/\/\/[^/@]+@/, '//')
+      .split(/[?#]/)[0];
+  }
+}
+
 @Injectable()
 export class FeedRetrievalService {
   private readonly logger = new Logger(FeedRetrievalService.name);
@@ -73,7 +89,7 @@ export class FeedRetrievalService {
         ) {
           if (forceRefresh) {
             this.logger.log(
-              `User requested refresh for "${trimmed}", serving virtualized snapshot from shared DB pool (last fetched at ${cachedFeed.lastFetchedAt.toISOString()}) to protect server IP.`,
+              `User requested refresh for "${redactFeedUrl(trimmed)}", serving virtualized snapshot from shared DB pool (last fetched at ${cachedFeed.lastFetchedAt.toISOString()}) to protect server IP.`,
             );
           }
           return this.feedsRepo.mapCachedFeedToParsedFeed(cachedFeed);
@@ -147,7 +163,7 @@ export class FeedRetrievalService {
         throw err;
       }
       this.logger.warn(
-        `Direct fetch failed for feed "${trimmed}": ${err instanceof Error ? err.message : String(err)}. Attempting search fallback...`,
+        `Direct fetch failed for feed "${redactFeedUrl(trimmed)}": ${err instanceof Error ? err.message : String(err)}. Attempting search fallback...`,
       );
       return this.fallbackSearchFeed(trimmed);
     }
@@ -159,7 +175,7 @@ export class FeedRetrievalService {
       this.feedsRepo
     ) {
       this.logger.log(
-        `Feed "${trimmed}" returned 304 Not Modified. Reusing existing articles.`,
+        `Feed "${redactFeedUrl(trimmed)}" returned 304 Not Modified. Reusing existing articles.`,
       );
       await this.feedsRepo.markFeedPollSuccess(existingFeedRecord.id, 304);
       return this.feedsRepo.mapCachedFeedToParsedFeed(existingFeedRecord);
@@ -167,7 +183,7 @@ export class FeedRetrievalService {
 
     if (!response.ok || response.status === 403 || response.status === 503) {
       this.logger.warn(
-        `Feed returned HTTP ${response.status} (likely Cloudflare / Bot Protection) for "${trimmed}". Initiating academic search fallback...`,
+        `Feed returned HTTP ${response.status} (likely Cloudflare / Bot Protection) for "${redactFeedUrl(trimmed)}". Initiating academic search fallback...`,
       );
       return this.fallbackSearchFeed(trimmed);
     }
@@ -179,7 +195,7 @@ export class FeedRetrievalService {
       xml.includes('cf-browser-verification')
     ) {
       this.logger.warn(
-        `Feed URL "${trimmed}" returned HTML Cloudflare challenge page. Initiating academic search fallback...`,
+        `Feed URL "${redactFeedUrl(trimmed)}" returned HTML Cloudflare challenge page. Initiating academic search fallback...`,
       );
       return this.fallbackSearchFeed(trimmed);
     }
@@ -214,22 +230,23 @@ export class FeedRetrievalService {
   private async fallbackSearchFeed(
     feedUrl: string,
   ): Promise<ParsedAcademicFeed> {
+    const redactedUrl = redactFeedUrl(feedUrl);
     try {
       let filter = '';
       let searchFeedTitle = 'Academic Search Feed';
 
-      if (/biorxiv\.org/i.test(feedUrl)) {
+      if (/biorxiv\.org/i.test(redactedUrl)) {
         filter = 'prefix:10.1101';
         searchFeedTitle = 'bioRxiv Preprints';
-      } else if (/medrxiv\.org/i.test(feedUrl)) {
+      } else if (/medrxiv\.org/i.test(redactedUrl)) {
         filter = 'prefix:10.1101';
         searchFeedTitle = 'medRxiv Preprints';
-      } else if (/mdpi\.com/i.test(feedUrl)) {
+      } else if (/mdpi\.com/i.test(redactedUrl)) {
         filter = 'prefix:10.3390';
         searchFeedTitle = 'MDPI Open Access';
       } else {
         try {
-          const parsedUrl = new URL(feedUrl);
+          const parsedUrl = new URL(redactedUrl);
           const domain = parsedUrl.hostname.replace(/^www\./, '');
           searchFeedTitle = `${domain} Feed`;
         } catch {
@@ -239,13 +256,14 @@ export class FeedRetrievalService {
 
       const crossrefUrl = filter
         ? `https://api.crossref.org/works?filter=${filter}&rows=30&sort=published&order=desc`
-        : `https://api.crossref.org/works?query=${encodeURIComponent(feedUrl)}&rows=30&sort=published&order=desc`;
+        : `https://api.crossref.org/works?query=${encodeURIComponent(redactedUrl)}&rows=30&sort=published&order=desc`;
 
       const fallbackRes = await fetch(crossrefUrl, {
         headers: {
           'User-Agent': 'FluxAcademicBot/1.0 (mailto:admin@flux.app)',
           Accept: 'application/json',
         },
+        signal: AbortSignal.timeout(15000),
       });
 
       if (!fallbackRes.ok) {
@@ -342,7 +360,7 @@ export class FeedRetrievalService {
       };
     } catch (err: unknown) {
       this.logger.error(
-        `Academic search fallback failed for ${feedUrl}: ${err instanceof Error ? err.message : String(err)}`,
+        `Academic search fallback failed for ${redactedUrl}: ${err instanceof Error ? err.message : String(err)}`,
       );
       throw new BadRequestException(
         `Failed to fetch feed and academic search fallback was unable to retrieve articles: ${err instanceof Error ? err.message : String(err)}`,

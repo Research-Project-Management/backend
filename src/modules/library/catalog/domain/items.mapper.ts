@@ -32,22 +32,9 @@ const NON_COLUMN_LOWER_SET = new Set(
 );
 
 const IGNORED_EXTRA_FIELD_PROMOTION_KEYS = new Set([
-  'comment',
-  'comments',
-  'notes',
-  'provenance',
-  '_rawExtra',
-  'DOI',
-  'ISBN',
-  'ISSN',
-  'PMID',
-  'PMCID',
-  'archiveID',
-  'journalAbbr',
-  'accessedAt',
-  'citeKey',
-  'labels',
-  'keywordsList',
+  'comment', 'comments', 'notes', 'provenance', '_rawExtra', 'DOI', 'ISBN',
+  'ISSN', 'PMID', 'PMCID', 'archiveID', 'journalAbbr', 'accessedAt',
+  'citeKey', 'labels', 'keywordsList',
 ]);
 
 function escapeHtmlText(str: string): string {
@@ -74,7 +61,12 @@ export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
       ) {
         continue;
       }
-      if (value !== undefined && value !== null && it[key] === undefined) {
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== '' &&
+        (it[key] === undefined || it[key] === null || it[key] === '')
+      ) {
         it[key] = value;
       }
     }
@@ -84,6 +76,28 @@ export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
   it.type = it.type || it.itemType || 'journalArticle';
 
   let extraFields: Record<string, unknown> = {};
+  const unmappedRetainedLowerSet = new Set<string>();
+  const collectUnmappedKeys = (obj?: Record<string, unknown> | null) => {
+    if (!obj || typeof obj !== 'object') return;
+    for (const k of Object.keys(obj)) {
+      if (k.startsWith('__unmapped_')) {
+        const rest = k.slice('__unmapped_'.length);
+        const underscoreIdx = rest.indexOf('_');
+        const fieldName =
+          underscoreIdx >= 0 ? rest.slice(underscoreIdx + 1) : rest;
+        if (fieldName) {
+          const lower = fieldName.toLowerCase();
+          unmappedRetainedLowerSet.add(lower);
+          unmappedRetainedLowerSet.add(lower.replace(/[\s_-]+/g, ''));
+        }
+      }
+    }
+  };
+  collectUnmappedKeys(metaObj);
+  collectUnmappedKeys(
+    it.extraFields && typeof it.extraFields === 'object' ? it.extraFields : null,
+  );
+
   if (it.extraFields && typeof it.extraFields === 'object') {
     extraFields = { ...it.extraFields };
   } else {
@@ -93,7 +107,9 @@ export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
     } else if (typeof it.extra === 'string' && it.extra.trim()) {
       const remainingLines: string[] = [];
       for (const line of it.extra.split(/\r?\n/)) {
-        const match = line.match(/^([a-zA-Z0-9_\s]+):\s*(.+)$/);
+        const match = line.match(
+          /^\s*([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/,
+        );
         if (!match) {
           remainingLines.push(line);
           continue;
@@ -101,11 +117,21 @@ export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
         const rawKey = match[1].trim();
         const val = match[2].trim();
         const camelKey = rawKey
-          .replace(/\s+([a-zA-Z])/g, (_: string, c: string) => c.toUpperCase())
+          .replace(/[\s_-]+([a-zA-Z0-9])/g, (_: string, c: string) =>
+            c.toUpperCase(),
+          )
           .replace(/^[A-Z]/, (c: string) => c.toLowerCase());
         const lowerKey = camelKey.toLowerCase();
+        const rawLower = rawKey.toLowerCase();
+        const compactKey = rawLower.replace(/[\s_-]+/g, '');
 
-        if (/^citations?(\s*count)?$/i.test(rawKey)) {
+        if (
+          unmappedRetainedLowerSet.has(lowerKey) ||
+          unmappedRetainedLowerSet.has(rawLower) ||
+          unmappedRetainedLowerSet.has(compactKey)
+        ) {
+          remainingLines.push(line);
+        } else if (/^citations?(\s*count)?$/i.test(rawKey)) {
           const num = parseInt(val.replace(/,/g, ''), 10);
           if (!isNaN(num)) extraFields.citationCount = num;
         } else if (/^comments?$/i.test(rawKey)) {
@@ -146,7 +172,8 @@ export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
     if (
       v !== undefined &&
       v !== null &&
-      it[k] === undefined &&
+      v !== '' &&
+      (it[k] === undefined || it[k] === null || it[k] === '') &&
       !IGNORED_EXTRA_FIELD_PROMOTION_KEYS.has(k)
     ) {
       it[k] = v;
@@ -532,7 +559,9 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
           content: text,
           contentMd: text,
           note:
-            typeof n.note === 'string' && n.note ? n.note : `<p>${text}</p>`,
+            typeof n.note === 'string' && n.note
+              ? n.note
+              : `<p>${escapeHtmlText(text)}</p>`,
           itemType: 'note',
         };
       })
@@ -578,9 +607,7 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
   item: T | null | undefined,
   toDomainFn: <U>(it: U) => U,
   userId?: string,
-):
-  | (T & { readStatus: string; rating: number; lastReadAt: string | null })
-  | null {
+): (T & { readStatus: string; rating: number; lastReadAt: string | null }) | null {
   if (!item) return null;
   interface StateRecordLike {
     userId?: string;
@@ -594,13 +621,11 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
     Array.isArray(normalized.states) && normalized.states.length > 0
       ? (normalized.states as StateRecordLike[])
       : null;
-
   const userState = statesArr
     ? userId
       ? statesArr.find((s) => !s.userId || s.userId === userId)
       : statesArr[0]
     : undefined;
-
   const { states: _states, ...rest } = normalized;
   return {
     ...rest,
@@ -615,28 +640,24 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
         ? userState.lastReadAt.toISOString()
         : String(userState.lastReadAt)
       : null,
-  } as unknown as T & {
-    readStatus: string;
-    rating: number;
-    lastReadAt: string | null;
-  };
+  } as unknown as T & { readStatus: string; rating: number; lastReadAt: string | null };
 }
 
 export class ItemsMapper {
-  static toDomain<T = unknown>(raw: T): T {
+  static toDomain<T = unknown>(raw: T, visited: WeakSet<object> = new WeakSet()): T {
     if (!raw || typeof raw !== 'object') return raw;
+    if (visited.has(raw as object)) {
+      return { ...(raw as Record<string, unknown>) } as unknown as T;
+    }
+    visited.add(raw as object);
     const it = { ...(raw as Record<string, unknown>) } as MutableItemPayload;
-
     unpackMetadataAndExtraPartial(it);
     const primaryPdf = mapAttachmentsAndPrimaryFilePartial(it);
     mapCreatorsPartial(it);
     mapTagsCollectionsNotesPartial(it);
     harmonizeDomainMetadataAndIdentifiersPartial(it);
     finalizePrimaryFilePartial(it, primaryPdf);
-    mapPublicationsAndRelationsPartial(it, (target) =>
-      ItemsMapper.toDomain(target),
-    );
-
+    mapPublicationsAndRelationsPartial(it, (target) => ItemsMapper.toDomain(target, visited));
     return it as unknown as T;
   }
 
@@ -648,13 +669,7 @@ export class ItemsMapper {
   static mapFlattenedState<T extends Record<string, unknown>>(
     item: T | null | undefined,
     userId?: string,
-  ):
-    | (T & { readStatus: string; rating: number; lastReadAt: string | null })
-    | null {
-    return mapFlattenedStateHelper(
-      item,
-      (it) => ItemsMapper.toDomain(it),
-      userId,
-    );
+  ): (T & { readStatus: string; rating: number; lastReadAt: string | null }) | null {
+    return mapFlattenedStateHelper(item, (it) => ItemsMapper.toDomain(it), userId);
   }
 }
