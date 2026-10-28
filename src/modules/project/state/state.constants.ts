@@ -72,7 +72,7 @@ export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
     name: 'Cancelled',
     description:
       'Project permanently discontinued or terminated due to feasibility constraints or policy decisions.',
-    color: '#9ca3af',
+    color: '#ef4444',
     sequence: 7,
     isDefault: false,
   },

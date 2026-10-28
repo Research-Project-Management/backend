@@ -54,8 +54,8 @@ RUN pnpm prune --prod || pnpm install --prod --ignore-scripts
 FROM node:22-alpine AS runner
 WORKDIR /app
 
-# Minimal runtime packages: libc6-compat (for Prisma engines), dumb-init (PID 1), curl (healthcheck)
-RUN apk add --no-cache libc6-compat dumb-init curl
+# Minimal runtime packages: libc6-compat (for Prisma engines), dumb-init (PID 1), curl (healthcheck), git (for GitBridge CLI adapter)
+RUN apk add --no-cache libc6-compat dumb-init curl git
 
 ENV NODE_ENV=production
 ENV PORT=3000

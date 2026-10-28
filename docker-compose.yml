@@ -108,11 +108,15 @@ services:
       REDIS_CACHE_URL: "redis://redis:6379"
       REDIS_QUEUE_URL: "redis://redis:6379"
       CLSI_URL: http://flux_clsi:3013
+      CLSI_SANDBOX_MODE: remote
+      CLSI_SCRATCH_DIR: /tmp/clsi-scratch
       CLIENT_URL: ${CLIENT_URL}
       ORIGINS: ${ORIGINS}
       TRUSTED_EXTRACTION_ENABLED: "true"
       TRUSTED_EXTRACTION_SHADOW_MODE: "${TRUSTED_SHADOW_MODE:-false}"
       TRUSTED_EXTRACTION_CANARY_PERCENT: "100"
+    volumes:
+      - flux_clsi_scratch:/tmp/clsi-scratch
     depends_on:
       db:
         condition: service_healthy
@@ -148,7 +152,7 @@ services:
     restart: "no"
     command: ["node", "dist/worker.js"]
     volumes:
-      - ./dist:/app/dist
+      - flux_clsi_scratch:/tmp/clsi-scratch
     env_file:
       - .env
     environment:
@@ -159,6 +163,8 @@ services:
       REDIS_CACHE_URL: "redis://redis:6379"
       REDIS_QUEUE_URL: "redis://redis:6379"
       CLSI_URL: http://flux_clsi:3013
+      CLSI_SANDBOX_MODE: remote
+      CLSI_SCRATCH_DIR: /tmp/clsi-scratch
       SKIP_MIGRATIONS: "true"
       TRUSTED_EXTRACTION_ENABLED: "true"
       TRUSTED_EXTRACTION_SHADOW_MODE: "${TRUSTED_SHADOW_MODE:-false}"
@@ -215,6 +221,7 @@ services:
         max-file: "3"
     volumes:
       - flux_latex_tectonic_cache:/root/.cache/Tectonic
+      - flux_clsi_scratch:/tmp/clsi-scratch
     networks:
       flux_network:
         aliases:
@@ -259,7 +266,11 @@ volumes:
     name: flux_redis_data
     driver: local
   flux_latex_tectonic_cache:
-    external: true
+    name: flux_latex_tectonic_cache
+    driver: local
+  flux_clsi_scratch:
+    name: flux_clsi_scratch
+    driver: local
 
 networks:
   flux_network:
