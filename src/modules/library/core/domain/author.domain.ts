@@ -17,8 +17,11 @@ import {
   PARTICLE_SURNAME_REGEX,
   VIETNAMESE_DIACRITICS_REGEX,
   VIETNAMESE_FAMILY_NAMES,
+  VIETNAMESE_COMPOUND_SURNAMES,
   VIETNAMESE_MIDDLE_NAMES,
   NOISE_AUTHOR_WORDS,
+  AMBIGUOUS_UNACCENTED_VN_SURNAMES,
+  VN_SYLLABLE_REGEX,
 } from './author-particles.lexicon';
 
 export type { ParsedCreator };
@@ -29,7 +32,10 @@ export type { ParsedCreator };
  */
 export function isInstitutionName(name?: string | null): boolean {
   if (!name || typeof name !== 'string') return false;
-  return INSTITUTION_REGEX.test(name);
+  return (
+    INSTITUTION_REGEX.test(name) ||
+    /\b(?:hospital|clinic|infirmary|health\s+system)\b/i.test(name)
+  );
 }
 
 /**
@@ -48,7 +54,7 @@ export function isVancouverName(raw?: string | null): boolean {
   const surname = tokens.slice(0, -1);
   let hasCore = false;
   for (const t of surname) {
-    if (PREFIX_PARTICLES.has(t)) continue;
+    if (PREFIX_PARTICLES.has(t.toLowerCase())) continue;
     if (!/^\p{Lu}[\p{L}'’-]*$/u.test(t) || !/\p{Ll}/u.test(t)) return false;
     hasCore = true;
   }
@@ -84,28 +90,23 @@ export function isVietnameseName(raw?: string | null): boolean {
     return true;
   }
 
-  // If unaccented, guard against European names sharing short tokens (e.g. "Le Caille", "May Do")
-  if (['le', 'mai', 'ha', 'do', 'la', 'to'].includes(firstLower)) {
-    if (
-      tokens.length >= 3 &&
-      VIETNAMESE_MIDDLE_NAMES.has(tokens[1].toLowerCase())
-    ) {
-      return true;
+  // Unaccented 2-token names: reject ambiguous 2-3 letter non-diacritic surnames (e.g. "Ma Smith", "Can Yaman", "Ho Lee", "Vi Kim", "An Lee")
+  // and require both tokens to follow valid Vietnamese syllable phonotactics
+  if (tokens.length === 2) {
+    if (AMBIGUOUS_UNACCENTED_VN_SURNAMES.has(firstLower)) {
+      return false;
     }
-    if (
-      tokens.length === 2 &&
-      VIETNAMESE_MIDDLE_NAMES.has(tokens[1].toLowerCase())
-    ) {
-      return true;
-    }
-    return false;
+    return VN_SYLLABLE_REGEX.test(tokens[0]) && VN_SYLLABLE_REGEX.test(tokens[1]);
   }
 
-  // Unequivocal Vietnamese surnames (Nguyen, Tran, Pham, Dang, Bui, Huynh, Doan, Trinh, Duong...)
-  const isPlausibleVnSyllable = (tok: string) =>
-    /^[A-Za-z]{2,8}$/.test(tok) && !/[bcdfghjklmnpqrstvwxyz]{3,}/i.test(tok);
+  // If unaccented >= 3 tokens with an ambiguous short surname, require a known Vietnamese middle name
+  if (AMBIGUOUS_UNACCENTED_VN_SURNAMES.has(firstLower)) {
+    if (!VIETNAMESE_MIDDLE_NAMES.has(tokens[1].toLowerCase())) {
+      return false;
+    }
+  }
 
-  return tokens.every(isPlausibleVnSyllable);
+  return tokens.every((tok) => VN_SYLLABLE_REGEX.test(tok));
 }
 
 /**
@@ -192,9 +193,13 @@ export function isNoiseAuthorName(raw?: string | null): boolean {
     return true;
   }
 
-  // Clinical / Medical / Imaging department or hospital terms
+  // Clinical / Medical / Imaging department or hospital affiliation lines
   if (
-    /\b(?:hospital|clinic|infirmary|imaging|health\s+system)\b/i.test(lower)
+    /\bimaging\b/i.test(lower) ||
+    (/\b(?:hospital|clinic|infirmary|health\s+system)\b/i.test(lower) &&
+      /(?:,|\b(?:department|dept\.?|division|section|unit|ward|service|branch|affiliated|school|faculty|center\s+for|centre\s+for|laboratory)\b)/i.test(
+        lower,
+      ))
   ) {
     return true;
   }
@@ -211,8 +216,18 @@ export function cleanAuthorName(raw?: string | null): string {
 
   let cleaned = stripXmlAndHtmlTags(raw);
   cleaned = decodeHtmlEntities(cleaned);
+  cleaned = cleaned.replace(
+    /\\(?:textbf|textit|emph|textrm|textsc|textsf|texttt|bf|it|rm|sc)\b\s*/g,
+    '',
+  );
   cleaned = stripLatexBraces(cleaned);
   cleaned = cleaned.trim().normalize('NFC');
+
+  // Strip trailing "et al." or "and others" before further cleaning
+  cleaned = cleaned.replace(
+    /(?:[,;]\s*|\s+)\b(?:et\s+al\.?|and\s+others)\s*$/i,
+    '',
+  );
 
   // Strip emails: e.g. <user@domain.com> or user@domain.com
   cleaned = cleaned.replace(/<[^>]+@[^>]+>/g, ' ');
@@ -296,7 +311,12 @@ export function splitAuthorString(input: string): string[] {
     .filter(Boolean);
   const result: string[] = [];
 
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    const line = rawLine
+      .replace(/(?:[,;]\s*|\s+)\b(?:et\s+al\.?|and\s+others)\s*$/i, '')
+      .trim();
+    if (!line) continue;
+
     // 1. Semicolons are unequivocal delimiters in academic metadata
     if (line.includes(';')) {
       const parts = line
@@ -502,8 +522,15 @@ export function parseCreatorString(
     }
 
     const vnTokens = workingName.split(/\s+/);
-    const lastName = vnTokens[0];
-    const firstName = vnTokens.slice(1).join(' ');
+    const isCompoundSurname =
+      vnTokens.length >= 3 &&
+      VIETNAMESE_COMPOUND_SURNAMES.has(
+        `${vnTokens[0]} ${vnTokens[1]}`.toLowerCase(),
+      );
+    const lastName = isCompoundSurname
+      ? `${vnTokens[0]} ${vnTokens[1]}`
+      : vnTokens[0];
+    const firstName = vnTokens.slice(isCompoundSurname ? 2 : 1).join(' ');
     return {
       orderIndex,
       creatorType,
@@ -577,13 +604,13 @@ export function parseCreatorString(
     GENERATIONAL_SUFFIX_REGEX.test(tokens[tokens.length - 1])
   ) {
     splitIndex = tokens.length - 2;
-  } else if (
-    tokens.length >= 3 &&
-    PREFIX_PARTICLES.has(tokens[tokens.length - 2].toLowerCase())
+  }
+  if (
+    splitIndex > 1 &&
+    PREFIX_PARTICLES.has(tokens[splitIndex - 1].toLowerCase())
   ) {
     // Surname particles attach to the surname: "Vincent van Gogh", "Jean La Fontaine",
-    // "Juan de la Cruz", "Ludwig van der Rohe", or multi-part "Johannes Diderik Van Der Waals".
-    splitIndex = tokens.length - 2;
+    // "Juan de la Cruz", "Ludwig van der Rohe", "Robert van der Graaff Jr.".
     while (
       splitIndex > 1 &&
       PREFIX_PARTICLES.has(tokens[splitIndex - 1].toLowerCase())
@@ -691,7 +718,7 @@ export function splitConcatenatedAuthors(raw: string, minTokens = 6): string[] {
 
   const isCap = (t: string) => /^\p{Lu}/u.test(t);
   const isInitial = (t: string) => /^\p{Lu}\.?$/u.test(t);
-  const isParticle = (t: string) => PREFIX_PARTICLES.has(t);
+  const isParticle = (t: string) => PREFIX_PARTICLES.has(t.toLowerCase());
 
   if (!tokens.every((t) => isCap(t) || isParticle(t))) return [input];
 

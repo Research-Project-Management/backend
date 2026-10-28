@@ -82,6 +82,12 @@ export class LayoutHeuristicExtractor {
       for (const item of rawItems) {
         if (!item.str || !item.str.trim()) continue;
         const transform = item.transform || [12, 0, 0, 12, 0, 0];
+        if (
+          Math.abs(transform[1] || 0) > Math.abs(transform[0] || 0) &&
+          Math.abs(transform[2] || 0) > Math.abs(transform[3] || 0)
+        ) {
+          continue;
+        }
         const fontSize = Math.abs(transform[0]) || Math.abs(transform[3]) || 12;
         const x = Math.round(transform[4] || 0);
         if (fontSize <= 11.5) {
@@ -104,6 +110,12 @@ export class LayoutHeuristicExtractor {
         if (!item.str || !item.str.trim()) continue;
         const text = item.str;
         const transform = item.transform || [12, 0, 0, 12, 0, 0];
+        if (
+          Math.abs(transform[1] || 0) > Math.abs(transform[0] || 0) &&
+          Math.abs(transform[2] || 0) > Math.abs(transform[3] || 0)
+        ) {
+          continue;
+        }
         const fontSize = Math.abs(transform[0]) || Math.abs(transform[3]) || 12;
         const x = Math.round(transform[4] || 0);
         const y = Math.round(transform[5] || 0);
@@ -163,7 +175,7 @@ export class LayoutHeuristicExtractor {
 
       const candidateLines = lines.filter((l) => {
         const isNoiseHeader =
-          /^(arxiv\s*:\s*[a-z0-9\-./]+|proceedings of|ieee|volume|vol\.|accepted|submitted|published|journal of|springer|elsevier|nature|biorxiv)/i.test(
+          /^(arxiv\s*:\s*[a-z0-9\-./]+|proceedings of|ieee|volume|vol\.|accepted(\s+manuscript)?|submitted|published|journal\s+(of|pre-proof)|springer|elsevier|nature|biorxiv|downloaded\s+from|authorized\s+licensed\s+use|research\s+article|original\s+article|review\s+article|open\s+access|short\s+communication)/i.test(
             l.text,
           ) ||
           /^(\d{1,2}\s+[a-z]{3,9}\s+\d{4}|\d{4}\s*[-/]\s*\d{1,2})/i.test(
@@ -220,6 +232,17 @@ export class LayoutHeuristicExtractor {
         const line = candidateLines[i];
         if (/^(abstract|summary)\b/i.test(line.text)) {
           abstractStartIndex = i;
+          break;
+        }
+        if (
+          /^(1\.?\s*introduction|i\.?\s*introduction|introduction|keywords|index\s+terms)\b/i.test(
+            line.text,
+          ) ||
+          (line.text.length > 130 &&
+            /\b(the|this|that|these|those|we|our|is|are|was|were|have|has|can|will|propose|present|introduce|demonstrate|show|study|investigate|analyze|describe|discuss|however|moreover|furthermore|therefore)\b/i.test(
+              line.text,
+            ))
+        ) {
           break;
         }
 

@@ -3,23 +3,48 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '@/core';
 import { Prisma, LibraryChange, Tombstone, OutboxStatus } from '@prisma/client';
-import { randomUUID } from 'crypto';
+import { uuidv7 } from '@/modules/library/core';
 import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
-import { OutboxRepository } from '@/modules/library/sync/repositories/outbox.repository';
 import {
   LIBRARY_OUTBOX_JOB,
   LIBRARY_OUTBOX_QUEUE,
 } from '@/modules/library/sync/domain/outbox.domain';
 import {
   IUnitOfWork,
-  TransactionHelpers,
+  TransactionHelpers as CoreTransactionHelpers,
   AppendChangeEntry,
   AppendChangeInput,
   RecordTombstoneEntry,
   RecordTombstoneInput,
-  PublishOutboxInput,
 } from '@/modules/library/core/ports/unit-of-work.port';
+import {
+  OutboxRepository,
+  PublishOutboxInput,
+  OutboxPublishInput,
+} from '@/modules/library/sync/repositories/outbox.repository';
 import { OutboxWorker } from './outbox.worker';
+
+export interface TransactionHelpers extends Omit<CoreTransactionHelpers, 'publishOutbox' | 'publishOutboxBatch'> {
+  publishOutbox(
+    scope: { userId: string; projectId?: string | null; dedupeKey?: string | null },
+    aggregateId: string,
+    eventType: string,
+    payload: unknown,
+    options?: { dedupeKey?: string | null },
+  ): Promise<Prisma.OutboxEventGetPayload<object>>;
+  publishOutboxBatch(
+    scopeOrEvents:
+      | { userId: string; projectId?: string | null }
+      | PublishOutboxInput[],
+    events?: Array<{
+      aggregateId: string;
+      eventType: string;
+      payload: unknown;
+      projectId?: string | null;
+      dedupeKey?: string | null;
+    }>,
+  ): Promise<string[]>;
+}
 
 export type {
   AppendChangeEntry,
@@ -27,7 +52,7 @@ export type {
   RecordTombstoneEntry,
   RecordTombstoneInput,
   PublishOutboxInput,
-  TransactionHelpers,
+  OutboxPublishInput,
 };
 
 @Injectable()
@@ -124,10 +149,15 @@ export class TransactionService implements IUnitOfWork {
             return this.changeLogRepo.removeTombstonesBatch(scope, entityType, entityIds, tx);
           },
           publishOutbox: async (
-            scope: { userId: string; projectId?: string | null },
+            scope: {
+              userId: string;
+              projectId?: string | null;
+              dedupeKey?: string | null;
+            },
             aggregateId: string,
             eventType: string,
             payload: unknown,
+            options?: { dedupeKey?: string | null },
           ) => {
             const rawUserId = (scope.userId || '').trim();
             const normalizedUserId =
@@ -136,6 +166,15 @@ export class TransactionService implements IUnitOfWork {
               )
                 ? rawUserId
                 : '00000000-0000-0000-0000-000000000000';
+            const dedupeKey =
+              options?.dedupeKey ??
+              scope.dedupeKey ??
+              (payload &&
+              typeof payload === 'object' &&
+              !Array.isArray(payload) &&
+              typeof (payload as Record<string, unknown>).dedupeKey === 'string'
+                ? ((payload as Record<string, unknown>).dedupeKey as string)
+                : null);
             const event = await tx.outboxEvent.create({
               data: {
                 userId: normalizedUserId,
@@ -143,6 +182,7 @@ export class TransactionService implements IUnitOfWork {
                 aggregateId,
                 eventType,
                 payload: payload ?? {},
+                dedupeKey: dedupeKey ?? null,
                 status: OutboxStatus.PENDING,
                 retryCount: 0,
               },
@@ -159,6 +199,7 @@ export class TransactionService implements IUnitOfWork {
               eventType: string;
               payload: unknown;
               projectId?: string | null;
+              dedupeKey?: string | null;
             }>,
           ) => {
             const normalizedEvents: PublishOutboxInput[] = Array.isArray(
@@ -174,6 +215,7 @@ export class TransactionService implements IUnitOfWork {
                   aggregateId: ev.aggregateId,
                   eventType: ev.eventType,
                   payload: ev.payload,
+                  dedupeKey: ev.dedupeKey ?? null,
                 }));
             if (normalizedEvents.length === 0) return [];
             if (this.outboxRepo) {
@@ -190,7 +232,7 @@ export class TransactionService implements IUnitOfWork {
             }
             const data: Prisma.OutboxEventCreateManyInput[] =
               normalizedEvents.map((ev) => ({
-                id: randomUUID(),
+                id: uuidv7(),
                 userId:
                   ev.userId &&
                   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -202,6 +244,7 @@ export class TransactionService implements IUnitOfWork {
                 aggregateId: ev.aggregateId,
                 eventType: ev.eventType,
                 payload: (ev.payload as Prisma.InputJsonValue) ?? {},
+                dedupeKey: ev.dedupeKey ?? null,
                 status: OutboxStatus.PENDING,
                 retryCount: 0,
               }));

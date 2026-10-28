@@ -166,7 +166,10 @@ export const BIBTEX_TYPE_MAP: Record<string, string> = {
  */
 export function cleanBibtexField(text?: string): string {
   if (!text) return '';
-  return stripLatexBraces(text).replace(/\s+/g, ' ').trim();
+  return stripLatexBraces(text)
+    .replace(/\\([#%&_{}])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function mapBibtexTypeToItemType(bibtexType: string): string {
@@ -194,6 +197,7 @@ export function extractStructuredBibtexPersons(
   let depth = 0;
   let lastPos = 0;
   const str = rawField.trim();
+  const andRe = /\s+and\s+/iy;
   for (let i = 0; i < str.length; i++) {
     if (str[i] === '\\') {
       i++;
@@ -202,8 +206,8 @@ export function extractStructuredBibtexPersons(
     if (str[i] === '{') depth++;
     else if (str[i] === '}') depth = Math.max(0, depth - 1);
     else if (depth === 0) {
-      const sub = str.slice(i);
-      const andMatch = sub.match(/^\s+and\s+/i);
+      andRe.lastIndex = i;
+      const andMatch = andRe.exec(str);
       if (andMatch) {
         tokens.push(str.slice(lastPos, i).trim());
         i += andMatch[0].length - 1;
@@ -331,27 +335,29 @@ export function buildParsedBibtexEntry(
     'editor',
   );
 
-  const authors: string[] = csl
-    ? structuredRawAuthors.length > 0
+  const authors: string[] =
+    structuredRawAuthors.length > 0
       ? structuredRawAuthors.map((a) => a.fullName)
-      : mapCslPersonListToStrings(csl.author)
-    : rawFields.author
-      ? rawFields.author
-          .split(/\s+and\s+/i)
-          .map((a) => a.trim())
-          .filter((a) => Boolean(a) && !isOthersToken(a))
-      : [];
+      : csl
+        ? mapCslPersonListToStrings(csl.author)
+        : rawFields.author
+          ? rawFields.author
+              .split(/\s+and\s+/i)
+              .map((a) => cleanBibtexField(a))
+              .filter((a) => Boolean(a) && !isOthersToken(a))
+          : [];
 
-  const editors: string[] = csl
-    ? structuredRawEditors.length > 0
+  const editors: string[] =
+    structuredRawEditors.length > 0
       ? structuredRawEditors.map((e) => e.fullName)
-      : mapCslPersonListToStrings(csl.editor)
-    : rawFields.editor
-      ? rawFields.editor
-          .split(/\s+and\s+/i)
-          .map((e) => e.trim())
-          .filter((e) => Boolean(e) && !isOthersToken(e))
-      : [];
+      : csl
+        ? mapCslPersonListToStrings(csl.editor)
+        : rawFields.editor
+          ? rawFields.editor
+              .split(/\s+and\s+/i)
+              .map((e) => cleanBibtexField(e))
+              .filter((e) => Boolean(e) && !isOthersToken(e))
+          : [];
 
   const creators = csl
     ? [
@@ -455,7 +461,10 @@ export function buildParsedBibtexEntry(
   let fileUrl: string | undefined;
   const rawFile = rawFields.file || rawFields.pdf;
   if (rawFile) {
-    const cleanFile = rawFile.replace(/^:([^:]+):.*$/, '$1').trim();
+    const firstFileEntry = rawFile.split(/(?<!\\);/)[0]?.trim() || rawFile.trim();
+    const jabrefMatch = firstFileEntry.match(/^[^:]*:(.+):[^:]*$/);
+    const extractedPath = jabrefMatch ? jabrefMatch[1] : firstFileEntry;
+    const cleanFile = extractedPath.replace(/\\:/g, ':').trim();
     if (cleanFile) fileUrl = cleanFile;
   }
 

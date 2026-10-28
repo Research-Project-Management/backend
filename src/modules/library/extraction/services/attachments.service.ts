@@ -203,6 +203,9 @@ export class AttachmentsService {
           size: sizeBigInt,
           fileHash: input.fileHash ?? '',
           fileId: resolvedFileId,
+          ...(input.metadata && Object.keys(input.metadata).length > 0
+            ? { metadata: input.metadata as Prisma.InputJsonValue }
+            : {}),
           revisions: {
             create: {
               revisionNumber: 1,
@@ -237,6 +240,7 @@ export class AttachmentsService {
         const serializedAttachment = {
           ...attachment,
           size: Number(attachment.size),
+          fileSize: Number(attachment.size),
           revisions: attachment.revisions?.map((rev) => ({
             ...rev,
             sizeBytes: Number(rev.sizeBytes),
@@ -272,7 +276,7 @@ export class AttachmentsService {
           );
         }
 
-        return attachment;
+        return serializedAttachment;
       },
     ).then(async (attachment) => {
       await this.invalidateAttachmentItemCache(
@@ -348,9 +352,16 @@ export class AttachmentsService {
     projectId?: ProjectId | string,
   ) {
     await this.assertItemExists(userId, itemId, projectId);
-
-    const attachments = await this.repo.findManyByItemId(itemId);
-
+    const rawAttachments = await this.repo.findManyByItemId(itemId);
+    const attachments = rawAttachments.map((att) => ({
+      ...att,
+      size: Number(att.size),
+      fileSize: Number(att.size),
+      revisions: att.revisions?.map((rev) => ({
+        ...rev,
+        sizeBytes: Number(rev.sizeBytes),
+      })),
+    }));
     return { attachments, total: attachments.length };
   }
 
@@ -367,19 +378,21 @@ export class AttachmentsService {
     const where: Prisma.AttachmentWhereInput = {
       id: attachmentId,
       item: scopeItemWhere,
+      ...(itemId ? { itemId } : {}),
     };
-    if (itemId) {
-      where.itemId = itemId;
-    }
-
-    const attachment = await this.repo.findFirst(where, {
+    const raw = await this.repo.findFirst(where, {
       revisions: { orderBy: { revisionNumber: 'desc' } },
     });
-
-    if (!attachment) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
-    }
-
+    if (!raw) throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    const attachment = {
+      ...raw,
+      size: Number(raw.size),
+      fileSize: Number(raw.size),
+      revisions: raw.revisions?.map((rev) => ({
+        ...rev,
+        sizeBytes: Number(rev.sizeBytes),
+      })),
+    };
     return { attachment };
   }
 
@@ -388,71 +401,47 @@ export class AttachmentsService {
     attachmentId: AttachmentId | string,
     projectId?: ProjectId | string,
   ) {
-    if (!attachmentId) {
-      throw new BadRequestException('Attachment ID is required');
-    }
-
+    if (!attachmentId) throw new BadRequestException('Attachment ID is required');
     const scopeItemWhere =
       projectId && projectId !== 'user'
         ? { projectId, deletedAt: null }
         : { userId, projectId: null, deletedAt: null };
-
     const attachment = await this.repo.findFirst(
-      {
-        id: attachmentId,
-        item: scopeItemWhere,
-      },
+      { id: attachmentId, item: scopeItemWhere },
       { item: true, revisions: true },
     );
-
-    if (!attachment) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
-    }
-
+    if (!attachment) throw new NotFoundException(`Attachment ${attachmentId} not found`);
     const fileIdsToDelete = new Set<string>();
-    const mainFileId =
-      attachment.fileId || extractFileIdFromUrl(attachment.url);
-    if (mainFileId) {
-      fileIdsToDelete.add(mainFileId);
-    }
+    const mainFileId = attachment.fileId || extractFileIdFromUrl(attachment.url);
+    if (mainFileId) fileIdsToDelete.add(mainFileId);
     if (Array.isArray(attachment.revisions)) {
       for (const rev of attachment.revisions) {
         const revFileId = rev.fileId || extractFileIdFromUrl(rev.url);
-        if (revFileId) {
-          fileIdsToDelete.add(revFileId);
-        }
+        if (revFileId) fileIdsToDelete.add(revFileId);
       }
     }
-
-    const effectiveProjectId =
-      projectId || attachment.item?.projectId || undefined;
-
+    const effectiveProjectId = projectId || attachment.item?.projectId || undefined;
     const result = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const eventScope = { userId, projectId: effectiveProjectId };
-
         await this.repo.delete(attachment.id, tx);
-
         await helpers.appendChange(eventScope, {
           entityType: 'Attachment',
           entityId: attachment.id,
           action: 'delete',
           version: 1,
-          data: { id: attachment.id },
+          data: { id: attachment.id, itemId: attachment.itemId },
         });
-
         await helpers.recordTombstone?.(eventScope, {
           entityType: 'Attachment',
           entityId: attachment.id,
         });
-
         await helpers.publishOutbox(
           eventScope,
           attachment.id,
           'library.attachment.deleted',
-          { attachmentId: attachment.id, projectId: effectiveProjectId },
+          { attachmentId: attachment.id, itemId: attachment.itemId, projectId: effectiveProjectId },
         );
-
         return { success: true };
       },
     );
@@ -655,7 +644,13 @@ export class AttachmentsService {
   ) {
     const renamer =
       this.renamerService ??
-      new AttachmentRenamerService(this.repo, this.catalogGateway, this.cache, this.libraryTx);
+      new AttachmentRenamerService(
+        this.repo,
+        this.catalogGateway,
+        this.cache,
+        this.libraryTx,
+        this.cacheCoordinator,
+      );
     return renamer.renameAttachment(userId, attachmentId, dto, projectId);
   }
 
@@ -669,7 +664,13 @@ export class AttachmentsService {
   }> {
     const renamer =
       this.renamerService ??
-      new AttachmentRenamerService(this.repo, this.catalogGateway, this.cache, this.libraryTx);
+      new AttachmentRenamerService(
+        this.repo,
+        this.catalogGateway,
+        this.cache,
+        this.libraryTx,
+        this.cacheCoordinator,
+      );
     return renamer.batchRenameAttachments(userId, dto, projectId);
   }
 

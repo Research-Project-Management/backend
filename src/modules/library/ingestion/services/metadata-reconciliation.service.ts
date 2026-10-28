@@ -11,207 +11,35 @@ import {
   resolveBidirectionalBaseFields,
   resolveFieldAliases,
 } from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
-import { parseCreatorString } from '@/modules/library/core/domain/author.domain';
-import { normalizeArxivId } from '@/modules/library/core/domain/identifier.domain';
 import {
   selectAuthoritativeCreatorVariant,
+  countFullGivenNames,
   mergeReconciledTagArrays,
   mergeReconciledNotesArrays,
   mergeReconciledExtraText,
   resolveFieldReconciliationStrategy,
   WeightedFieldVariant,
-} from '@/modules/library/ingestion/domain/field-reconciliation.strategies';
-
-export {
-  selectAuthoritativeCreatorVariant,
-  mergeReconciledTagArrays,
-  mergeReconciledNotesArrays,
-  mergeReconciledExtraText,
-  resolveFieldReconciliationStrategy,
-};
-export type { WeightedFieldVariant };
-
-export {
+  finalizeReconciledBibliographicMetadata,
   SOURCE_WEIGHTS,
   FIELD_AUTHORITY_WEIGHTS,
   FIELD_AUTHORITY,
   resolveProviderFieldWeight,
-} from '@/modules/library/core';
-import { resolveProviderFieldWeight } from '@/modules/library/core';
+} from '@/modules/library/ingestion/policies/reconciliation.policy';
 
-/**
- * Shared post-reconciliation cleanup for resolved bibliographic metadata:
- * - Default `title` and `itemType`
- * - Bidirectional Zotero base-field harmonization (`publicationTitle` <-> `journal`, etc.)
- * - Canonical `preprint` vs. non-arXiv publisher DOI cleanup (`arXiv` repository/DOI vs. stripping stale journal fields)
- * - Bidirectional `creators` <-> `authors` synchronization
- */
-export function finalizeReconciledBibliographicMetadata(
-  resolved: Record<string, unknown>,
-  _candidates?: Array<{
-    sourceProvider?: string;
-    metadata?: Record<string, unknown>;
-  }>,
-): void {
-  if (!resolved.title) {
-    resolved.title = 'Untitled Document';
-  }
-  if (!resolved.itemType || typeof resolved.itemType !== 'string') {
-    resolved.itemType = 'journalArticle';
-  }
-
-  const itemType = String(resolved.itemType);
-  const resolvedYearNum =
-    typeof resolved.year === 'number'
-      ? resolved.year
-      : typeof resolved.year === 'string' && /^\d{4}$/.test(resolved.year.trim())
-        ? Number(resolved.year.trim())
-        : undefined;
-  if (resolvedYearNum && resolvedYearNum >= 1000 && resolvedYearNum <= 2999) {
-    const yearStr = String(resolvedYearNum);
-    for (const dateKey of ['publicationDate', 'date'] as const) {
-      const rawDate = resolved[dateKey];
-      if (typeof rawDate === 'string' && rawDate.trim()) {
-        const matchYear = rawDate.match(/\b(19\d{2}|20\d{2})\b/);
-        if (matchYear && matchYear[1] !== yearStr) {
-          const matchingCandDate = _candidates
-            ?.map((c) => {
-              const meta = c.metadata ?? (c as Record<string, unknown>);
-              const candVal = meta?.[dateKey];
-              if (typeof candVal === 'string') return candVal;
-              if (
-                candVal &&
-                typeof candVal === 'object' &&
-                typeof (candVal as { normalizedValue?: unknown }).normalizedValue === 'string'
-              ) {
-                return (candVal as { normalizedValue: string }).normalizedValue;
-              }
-              return undefined;
-            })
-            .find(
-              (d) =>
-                typeof d === 'string' &&
-                d.match(/\b(19\d{2}|20\d{2})\b/)?.[1] === yearStr,
-            );
-          resolved[dateKey] = matchingCandDate ?? yearStr;
-        }
-      }
-    }
-  }
-  resolveBidirectionalBaseFields(resolved, itemType, undefined, false);
-
-  if (itemType === 'journalArticle') {
-    if (resolved.publicationTitle && !resolved.journal) {
-      resolved.journal = resolved.publicationTitle;
-    } else if (resolved.journal && !resolved.publicationTitle) {
-      resolved.publicationTitle = resolved.journal;
-    }
-  } else if (itemType === 'preprint') {
-    const rawArxivCandidate =
-      normalizeArxivId(
-        String(
-          resolved.arxivId ||
-            (/^arxiv:/i.test(String(resolved.archiveId || ''))
-              ? resolved.archiveId
-              : '') ||
-            (typeof resolved.doi === 'string' &&
-            /^10\.48550\/arxiv\./i.test(resolved.doi)
-              ? resolved.doi.replace(/^10\.48550\/arxiv\./i, '')
-              : ''),
-        ),
-        { stripVersion: true },
-      ) || '';
-    const isValidArxivId =
-      /^\d{4}\.\d{4,5}$/.test(rawArxivCandidate) ||
-      /^[a-z-]+(?:\.[a-z]{2})?\/\d{7}$/i.test(rawArxivCandidate);
-    const isNonArxivDoi = Boolean(
-      typeof resolved.doi === 'string' &&
-        resolved.doi.trim() &&
-        !/^10\.48550\/arxiv\./i.test(resolved.doi.trim()),
-    );
-    if (isValidArxivId && !isNonArxivDoi) {
-      resolved.repository = resolved.repository || 'arXiv';
-      resolved.archive = resolved.archive || 'arXiv';
-      resolved.arxivId = rawArxivCandidate;
-      resolved.archiveId = `arXiv:${rawArxivCandidate}`;
-      resolved.doi = `10.48550/arXiv.${rawArxivCandidate}`;
-    } else {
-      resolved.repository =
-        resolved.repository ||
-        resolved.institution ||
-        resolved.publicationTitle ||
-        resolved.journal ||
-        resolved.publisher;
-    }
-    delete resolved.publicationTitle;
-    delete resolved.journal;
-    delete resolved.proceedingsTitle;
-    delete resolved.conferenceName;
-    delete resolved.bookTitle;
-    delete resolved.series;
-    delete resolved.volume;
-    delete resolved.issue;
-    delete resolved.pages;
-    delete resolved.journalAbbr;
-    delete resolved.journalAbbreviation;
-    delete resolved.issn;
-    delete resolved.isbn;
-    if (resolved.extraFields && typeof resolved.extraFields === 'object') {
-      const ef = resolved.extraFields as Record<string, unknown>;
-      delete ef.publicationTitle;
-      delete ef.journal;
-      delete ef.proceedingsTitle;
-      delete ef.conferenceName;
-      delete ef.bookTitle;
-      delete ef.series;
-      delete ef.volume;
-      delete ef.issue;
-      delete ef.pages;
-      delete ef.journalAbbr;
-      delete ef.journalAbbreviation;
-      delete ef.issn;
-      delete ef.isbn;
-    }
-  }
-
-  if (Array.isArray(resolved.creators) && resolved.creators.length > 0) {
-    const creatorsList = resolved.creators as Array<{
-      creatorType?: string;
-      fullName?: string;
-      name?: string;
-      firstName?: string;
-      lastName?: string;
-    }>;
-    const authorsList = resolved.authors as unknown[] | undefined;
-    if (
-      !authorsList ||
-      authorsList.length === 0 ||
-      authorsList.length !== creatorsList.length
-    ) {
-      const authorCreators = creatorsList.filter(
-        (c) => c.creatorType === 'author' || !c.creatorType,
-      );
-      const effectiveList =
-        authorCreators.length > 0 ? authorCreators : creatorsList;
-      resolved.authors = effectiveList
-        .map(
-          (c) =>
-            c.fullName ||
-            c.name ||
-            `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-        )
-        .filter(Boolean);
-    }
-  } else if (Array.isArray(resolved.authors) && resolved.authors.length > 0) {
-    if (!Array.isArray(resolved.creators) || resolved.creators.length === 0) {
-      resolved.creators = (resolved.authors as string[])
-        .map((authorName: string, idx: number) =>
-          parseCreatorString(authorName, idx, 'author'),
-        )
-        .filter((c): c is NonNullable<typeof c> => c !== null);
-    }
-  }
-}
+export {
+  selectAuthoritativeCreatorVariant,
+  countFullGivenNames,
+  mergeReconciledTagArrays,
+  mergeReconciledNotesArrays,
+  mergeReconciledExtraText,
+  resolveFieldReconciliationStrategy,
+  finalizeReconciledBibliographicMetadata,
+  SOURCE_WEIGHTS,
+  FIELD_AUTHORITY_WEIGHTS,
+  FIELD_AUTHORITY,
+  resolveProviderFieldWeight,
+};
+export type { WeightedFieldVariant };
 
 @Injectable()
 export class MetadataReconciliationService {
@@ -321,10 +149,17 @@ export class MetadataReconciliationService {
           );
           const effectiveWeight = cand.confidenceScore * providerWeight;
 
+          const isCandUserOverride =
+            Boolean((cand as { isUserOverride?: boolean }).isUserOverride) ||
+            cand.sourceProvider === 'UserOverride' ||
+            cand.sourceProvider === 'user' ||
+            cand.sourceProvider === 'manual';
+
           fieldVariants.push({
             candidate: cand,
             val,
-            effectiveWeight,
+            effectiveWeight: isCandUserOverride ? 10.0 : effectiveWeight,
+            isUserOverride: isCandUserOverride,
           });
         }
       }

@@ -381,5 +381,5 @@ export const REVERSE_FIELD_ALIASES: Record<string, string> = {
   journalAbbr: 'journalAbbreviation',
   accessedAt: 'accessDate',
   rights: 'license',
-  citationKey: 'citationKey',
+  citationKey: 'citeKey',
 };

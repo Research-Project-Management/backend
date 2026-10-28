@@ -131,7 +131,7 @@ export class ChangeLogRepository {
           action: 'delete',
         },
         orderBy: { seq: 'desc' },
-        select: { id: true, seq: true },
+        select: { id: true, seq: true, data: true },
       });
       if (existingDeleteChange && client.libraryChange?.update) {
         const newerChange = await client.libraryChange.findFirst({
@@ -145,11 +145,17 @@ export class ChangeLogRepository {
           select: { id: true },
         });
         if (!newerChange) {
+          const nextData =
+            entry.data !== undefined && entry.data !== null
+              ? (entry.data as Prisma.InputJsonValue)
+              : existingDeleteChange.data != null
+                ? (existingDeleteChange.data as Prisma.InputJsonValue)
+                : Prisma.DbNull;
           return client.libraryChange.update({
             where: { id: existingDeleteChange.id },
             data: {
               version: entry.version,
-              data: (entry.data as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+              data: nextData,
             },
           });
         }
@@ -210,7 +216,10 @@ export class ChangeLogRepository {
     for (const group of byScope.values()) {
       const { userId, projectId } = group.scope;
       const deleteEntries = group.items.filter((it) => it.action === 'delete');
-      const existingDeleteByKey = new Map<string, string>();
+      const existingDeleteByKey = new Map<
+        string,
+        { id: string; data: unknown }
+      >();
 
       if (deleteEntries.length > 0 && client.libraryChange?.findMany) {
         const entityIds = Array.from(
@@ -229,6 +238,7 @@ export class ChangeLogRepository {
             entityId: true,
             action: true,
             seq: true,
+            data: true,
           },
         });
         const seenKeys = new Set<string>();
@@ -236,8 +246,8 @@ export class ChangeLogRepository {
           const k = `${ch.entityType}:${ch.entityId}`;
           if (!seenKeys.has(k)) {
             seenKeys.add(k);
-            if (ch.action === undefined || ch.action === 'delete') {
-              existingDeleteByKey.set(k, ch.id);
+            if (ch.action === 'delete') {
+              existingDeleteByKey.set(k, { id: ch.id, data: ch.data });
             }
           }
         }
@@ -246,17 +256,23 @@ export class ChangeLogRepository {
       const itemsNeedingNewRow: AppendChangeInput[] = [];
       const updatePromises: Promise<unknown>[] = [];
       for (const entry of group.items) {
-        const existingId =
+        const existingMatch =
           entry.action === 'delete'
             ? existingDeleteByKey.get(`${entry.entityType}:${entry.entityId}`)
             : undefined;
-        if (existingId && client.libraryChange?.update) {
+        if (existingMatch && client.libraryChange?.update) {
+          const nextData =
+            entry.data !== undefined && entry.data !== null
+              ? (entry.data as Prisma.InputJsonValue)
+              : existingMatch.data != null
+                ? (existingMatch.data as Prisma.InputJsonValue)
+                : Prisma.DbNull;
           updatePromises.push(
             client.libraryChange.update({
-              where: { id: existingId },
+              where: { id: existingMatch.id },
               data: {
                 version: entry.version,
-                data: (entry.data as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+                data: nextData,
               },
             }),
           );
@@ -317,7 +333,11 @@ export class ChangeLogRepository {
 
     // Check if a 'delete' LibraryChange was already recorded for this entity in the same scope
     // and is still the latest change (no newer create/update occurred since).
-    let existingDeleteChange: { id: string; seq: bigint } | null = null;
+    let existingDeleteChange: {
+      id: string;
+      seq: bigint;
+      data?: unknown;
+    } | null = null;
     if (client.libraryChange?.findFirst) {
       const candidate = await client.libraryChange.findFirst({
         where: {
@@ -328,7 +348,7 @@ export class ChangeLogRepository {
           action: 'delete',
         },
         orderBy: { seq: 'desc' },
-        select: { id: true, seq: true },
+        select: { id: true, seq: true, data: true },
       });
       if (candidate) {
         const newerChange = await client.libraryChange.findFirst({
@@ -362,7 +382,18 @@ export class ChangeLogRepository {
           entityId: entry.entityId,
           action: 'delete',
           version: 0,
-          data: Prisma.JsonNull,
+          data: Prisma.DbNull,
+        },
+      });
+    } else if (
+      existingDeleteChange &&
+      existingDeleteChange.data == null &&
+      client.libraryChange?.update
+    ) {
+      await client.libraryChange.update({
+        where: { id: existingDeleteChange.id },
+        data: {
+          data: Prisma.DbNull,
         },
       });
     }
@@ -498,7 +529,7 @@ export class ChangeLogRepository {
           const k = `${ch.entityType}:${ch.entityId}`;
           if (!seenKeys.has(k)) {
             seenKeys.add(k);
-            if (ch.action === undefined || ch.action === 'delete') {
+            if (ch.action === 'delete') {
               existingDeleteSeqByKey.set(k, ch.seq);
             }
           }
@@ -506,18 +537,11 @@ export class ChangeLogRepository {
       }
 
       const itemsNeedingSeq = group.items.filter(
-        (entry) =>
-          !existingDeleteSeqByKey.has(`${entry.entityType}:${entry.entityId}`),
+        (entry) => !existingDeleteSeqByKey.has(`${entry.entityType}:${entry.entityId}`),
       );
-      const allocatedSeqs =
-        itemsNeedingSeq.length > 0
-          ? await this.allocateSequenceBatch(
-              group.scope,
-              itemsNeedingSeq.length,
-              tx,
-            )
-          : [];
-
+      const allocatedSeqs = itemsNeedingSeq.length > 0
+        ? await this.allocateSequenceBatch(group.scope, itemsNeedingSeq.length, tx)
+        : [];
       let allocIdx = 0;
       const deletedAt = new Date();
       const createRows: Prisma.TombstoneCreateManyInput[] = [];
@@ -527,7 +551,6 @@ export class ChangeLogRepository {
         const k = `${entry.entityType}:${entry.entityId}`;
         const existingSeq = existingDeleteSeqByKey.get(k);
         const seq = existingSeq ?? allocatedSeqs[allocIdx++];
-
         createRows.push({
           userId: userId || null,
           projectId: projectId || null,
@@ -537,7 +560,6 @@ export class ChangeLogRepository {
           deletedAt,
           deletedById: entry.deletedById ?? null,
         });
-
         if (existingSeq === undefined) {
           missingChangeRows.push({
             seq,
@@ -547,36 +569,26 @@ export class ChangeLogRepository {
             entityId: entry.entityId,
             action: 'delete',
             version: 0,
-            data: Prisma.JsonNull,
+            data: Prisma.DbNull,
           });
         }
       }
 
       if (missingChangeRows.length > 0) {
         if (client.libraryChange?.createMany) {
-          await client.libraryChange.createMany({
-            data: missingChangeRows,
-          });
+          await client.libraryChange.createMany({ data: missingChangeRows });
         } else if (client.libraryChange?.create) {
-          for (const row of missingChangeRows) {
-            await client.libraryChange.create({ data: row });
-          }
+          for (const row of missingChangeRows) await client.libraryChange.create({ data: row });
         }
       }
-
       if (client.tombstone?.createMany) {
-        const res = await client.tombstone.createMany({
-          data: createRows,
-        });
+        const res = await client.tombstone.createMany({ data: createRows });
         totalRecorded += res.count;
       } else {
-        for (const row of createRows) {
-          await client.tombstone.create({ data: row });
-        }
+        for (const row of createRows) await client.tombstone.create({ data: row });
         totalRecorded += createRows.length;
       }
     }
-
     return totalRecorded;
   }
 

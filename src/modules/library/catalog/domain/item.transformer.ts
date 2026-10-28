@@ -98,6 +98,49 @@ export class ItemTransformer implements IItemTransformerPort {
         }
       }
     }
+    const candidateSuffixes = new Set<string>([
+      lowerKey,
+      ...(alias ? [alias.toLowerCase()] : []),
+    ]);
+    let unmappedVal: unknown;
+    let unmappedSuffix: string | undefined;
+    for (const container of [item.extraFields, item.metadata]) {
+      if (!container || typeof container !== 'object' || Array.isArray(container)) {
+        continue;
+      }
+      for (const [k, v] of Object.entries(container as Record<string, unknown>)) {
+        if (v === undefined || v === null || v === '') continue;
+        const m = k.match(/^__unmapped_[^_]+_(.+)$/i);
+        if (m && m[1] && candidateSuffixes.has(m[1].toLowerCase())) {
+          unmappedVal = v;
+          unmappedSuffix = m[1];
+          break;
+        }
+      }
+      if (unmappedVal !== undefined) break;
+    }
+
+    if (typeof item.extra === 'string' && item.extra.trim()) {
+      const targetNorms = new Set<string>();
+      for (const s of candidateSuffixes) {
+        targetNorms.add(s.replace(/[\s_-]+/g, ''));
+      }
+      if (unmappedSuffix) {
+        targetNorms.add(unmappedSuffix.toLowerCase().replace(/[\s_-]+/g, ''));
+      }
+      for (const rawLine of item.extra.split(/\r?\n/)) {
+        const kv = rawLine.trim().match(/^([A-Za-z_][A-Za-z0-9._\s-]{0,40}?)\s*:\s*(.+)$/);
+        if (!kv || !kv[1] || !kv[2]) continue;
+        const kNorm = kv[1].trim().toLowerCase().replace(/[\s_-]+/g, '');
+        if (targetNorms.has(kNorm)) {
+          return kv[2].trim();
+        }
+      }
+    }
+
+    if (unmappedVal !== undefined) {
+      return unmappedVal;
+    }
     return undefined;
   }
 
@@ -166,6 +209,8 @@ export class ItemTransformer implements IItemTransformerPort {
         mappedFields: [],
         droppedFields: [],
         newAvailableFields: [],
+        schemaUnsupportedFields: [],
+        schemaUnsupportedFieldLabels: [],
         creatorChanges: (
           (Array.isArray(item.creators) ? item.creators : []) as Array<
             Record<string, unknown>
@@ -190,11 +235,15 @@ export class ItemTransformer implements IItemTransformerPort {
     const sourceLabelMap = new Map(
       sourceFields.map((f: ItemFieldDefinition) => [f.key, f.label]),
     );
+    const targetLabelMap = new Map(
+      targetFields.map((f: ItemFieldDefinition) => [f.key, f.label]),
+    );
 
     const preservedFields: string[] = [];
     const mappedFields: FieldMappingChange[] = [];
     const droppedFields: DroppedField[] = [];
     const unmappedRetained: Record<string, unknown> = {};
+    const recoveredExtraLineNorms = new Set<string>();
 
     const projectedItem: Record<string, unknown> = {
       ...item,
@@ -210,10 +259,12 @@ export class ItemTransformer implements IItemTransformerPort {
       }
     }
 
+    const sourceBaseMap = this.typesService.getBaseFieldMapping(sourceType);
     const persistentAcademicKeys = Array.from(
       new Set([
         ...ITEM_COLUMN_METADATA_FIELDS,
         ...Object.keys(FIELD_ALIASES),
+        ...targetFields.map((f: ItemFieldDefinition) => f.key),
         'title',
         'abstract',
         'abstractNote',
@@ -231,6 +282,19 @@ export class ItemTransformer implements IItemTransformerPort {
         const canonicalKey = FIELD_ALIASES[k]
           ? k
           : REVERSE_FIELD_ALIASES[k] || k;
+        const baseKey = FIELD_ALIASES[k] || k;
+        const mappedSourceField =
+          sourceBaseMap[k] ||
+          sourceBaseMap[baseKey] ||
+          sourceBaseMap[canonicalKey] ||
+          (baseKey === 'issue' ? sourceBaseMap.number : undefined);
+        if (
+          mappedSourceField &&
+          mappedSourceField !== canonicalKey &&
+          sourceValues[mappedSourceField] !== undefined
+        ) {
+          continue;
+        }
         if (
           sourceValues[canonicalKey] === undefined &&
           sourceValues[k] === undefined
@@ -270,6 +334,49 @@ export class ItemTransformer implements IItemTransformerPort {
       newExtraFields,
       retainUnmappedInExtra: options.retainUnmappedInExtra !== false,
     });
+    if (projectedItem.shortTitle === undefined) {
+      delete newExtraFields.shortTitle;
+    }
+
+    const removeRecoveredUnmappedField = (keys: string[]) => {
+      const lowerSet = new Set<string>();
+      for (const k of keys) {
+        if (!k) continue;
+        lowerSet.add(k.toLowerCase());
+        recoveredExtraLineNorms.add(k.toLowerCase().replace(/[\s_-]+/g, ''));
+        const lbl = targetLabelMap.get(k) || sourceLabelMap.get(k);
+        if (lbl) recoveredExtraLineNorms.add(String(lbl).toLowerCase().replace(/[\s_-]+/g, ''));
+        const alias = FIELD_ALIASES[k] || REVERSE_FIELD_ALIASES[k];
+        if (alias) {
+          lowerSet.add(alias.toLowerCase());
+          recoveredExtraLineNorms.add(alias.toLowerCase().replace(/[\s_-]+/g, ''));
+          const aliasLbl = targetLabelMap.get(alias) || sourceLabelMap.get(alias);
+          if (aliasLbl) recoveredExtraLineNorms.add(String(aliasLbl).toLowerCase().replace(/[\s_-]+/g, ''));
+        }
+      }
+      for (const efKey of Object.keys(newExtraFields)) {
+        const m = efKey.match(/^__unmapped_[^_]+_(.+)$/i);
+        if (m && m[1] && lowerSet.has(m[1].toLowerCase())) {
+          delete newExtraFields[efKey];
+          const suffix = m[1];
+          recoveredExtraLineNorms.add(suffix.toLowerCase().replace(/[\s_-]+/g, ''));
+          const lbl =
+            targetLabelMap.get(suffix) ||
+            sourceLabelMap.get(suffix) ||
+            keys.map((k) => targetLabelMap.get(k) || sourceLabelMap.get(k)).find(Boolean);
+          if (lbl) {
+            recoveredExtraLineNorms.add(String(lbl).toLowerCase().replace(/[\s_-]+/g, ''));
+          }
+        }
+      }
+    };
+
+    for (const mapped of mappedFields) {
+      removeRecoveredUnmappedField([mapped.fromField, mapped.toField]);
+    }
+    for (const tField of targetFields) {
+      removeRecoveredUnmappedField([tField.key]);
+    }
 
     for (const [sField, val] of Object.entries(sourceValues)) {
       const matchedTargetKey = this.findMatchingTargetField(
@@ -280,6 +387,7 @@ export class ItemTransformer implements IItemTransformerPort {
         projectedItem[matchedTargetKey] = val;
         const dbCol = FIELD_ALIASES[matchedTargetKey];
         if (dbCol) projectedItem[dbCol] = val;
+        removeRecoveredUnmappedField([sField, matchedTargetKey]);
         preservedFields.push(matchedTargetKey);
       } else {
         const resolved = this.typesService.resolveBaseFieldMapping(
@@ -297,6 +405,7 @@ export class ItemTransformer implements IItemTransformerPort {
           if (dbCol) projectedItem[dbCol] = val;
           delete projectedItem[sField];
           delete newExtraFields[sField];
+          removeRecoveredUnmappedField([sField, resolved.targetField]);
           mappedFields.push({
             fromField: sField,
             toField: resolved.targetField,
@@ -385,10 +494,40 @@ export class ItemTransformer implements IItemTransformerPort {
           }
         }
       }
+      for (const mk of Object.keys(cleanedMeta)) {
+        const m = mk.match(/^__unmapped_[^_]+_(.+)$/i);
+        if (
+          m &&
+          m[1] &&
+          recoveredExtraLineNorms.has(
+            m[1].toLowerCase().replace(/[\s_-]+/g, ''),
+          )
+        ) {
+          delete cleanedMeta[mk];
+        }
+      }
       projectedItem.metadata = cleanedMeta;
     }
 
     projectedItem.extraFields = newExtraFields;
+
+    if (
+      recoveredExtraLineNorms.size > 0 &&
+      typeof projectedItem.extra === 'string' &&
+      projectedItem.extra.trim()
+    ) {
+      const filteredLines = projectedItem.extra
+        .split(/\r?\n/)
+        .filter((line) => {
+          const kv = line
+            .trim()
+            .match(/^([A-Za-z_][A-Za-z0-9._\s-]{0,40}?)\s*:\s*(.+)$/);
+          if (!kv || !kv[1]) return true;
+          const kNorm = kv[1].trim().toLowerCase().replace(/[\s_-]+/g, '');
+          return !recoveredExtraLineNorms.has(kNorm);
+        });
+      projectedItem.extra = filteredLines.join('\n').trim();
+    }
 
     if (options.retainUnmappedInExtra !== false && droppedFields.length > 0) {
       const extraLines: string[] = [];
@@ -512,6 +651,43 @@ export class ItemTransformer implements IItemTransformerPort {
         return val === undefined || val === null || val === '';
       });
 
+    const alwaysPreservedCoreFields = new Set([
+      'title',
+      'abstract',
+      'abstractNote',
+      'date',
+      'year',
+      'url',
+      'doi',
+      'DOI',
+      'extra',
+      'citationKey',
+    ]);
+    const schemaUnsupportedFieldDefs = sourceFields.filter(
+      (sf: ItemFieldDefinition) => {
+        if (alwaysPreservedCoreFields.has(sf.key)) return false;
+        if (this.findMatchingTargetField(sf.key, targetFields)) return false;
+        const resolved = this.typesService.resolveBaseFieldMapping(
+          sourceType,
+          targetType,
+          sf.key,
+        );
+        if (
+          resolved?.targetField &&
+          targetFieldKeys.has(resolved.targetField)
+        ) {
+          return false;
+        }
+        return true;
+      },
+    );
+    const schemaUnsupportedFields = schemaUnsupportedFieldDefs.map(
+      (sf: ItemFieldDefinition) => sf.key,
+    );
+    const schemaUnsupportedFieldLabels = schemaUnsupportedFieldDefs.map(
+      (sf: ItemFieldDefinition) => String(sf.label || sf.key),
+    );
+
     return {
       sourceType,
       targetType,
@@ -519,6 +695,8 @@ export class ItemTransformer implements IItemTransformerPort {
       mappedFields,
       droppedFields,
       newAvailableFields,
+      schemaUnsupportedFields,
+      schemaUnsupportedFieldLabels,
       creatorChanges,
       projectedItem,
       unmappedRetained,

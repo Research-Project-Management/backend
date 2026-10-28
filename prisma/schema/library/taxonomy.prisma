@@ -17,7 +17,7 @@ model Collection {
   sortOrder   Int          @default(0) @map("sort_order")
   createdById String?      @map("created_by_id") @db.Uuid
   parentId    String?      @map("parent_id") @db.Uuid
-  parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children    Collection[] @relation("CollectionHierarchy")
   userId      String       @map("user_id") @db.Uuid
   projectId   String?      @map("project_id") @db.Uuid
@@ -29,10 +29,11 @@ model Collection {
   collectionItems CollectionItem[]
 
   @@index([parentId])
-  @@index([userId, parentId, sortOrder, deletedAt])
+  @@index([userId, projectId, deletedAt, parentId, sortOrder])
   @@index([userId, projectId, deletedAt, createdAt])
-  @@index([projectId, parentId, deletedAt])
+  @@index([projectId, deletedAt, parentId, sortOrder])
   @@index([projectId, deletedAt, createdAt])
+  @@index([deletedAt])
   @@map("collections")
 }
 
@@ -59,12 +60,14 @@ model Tag {
   userId      String    @map("user_id") @db.Uuid
   projectId   String?   @map("project_id") @db.Uuid
   createdById String?   @map("created_by_id") @db.Uuid
+  version     Int       @default(1)
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   itemTags    ItemTag[]
 
   @@unique([userId, name, projectId])
+  @@index([userId, projectId, name])
   @@index([projectId, name])
   @@map("tags")
 }
@@ -104,9 +107,8 @@ model SavedSearch {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([userId, deletedAt])
   @@index([userId, projectId, deletedAt, isPinned(sort: Desc), name])
   @@index([projectId, deletedAt, isPinned(sort: Desc), name])
-  @@index([projectId, deletedAt])
+  @@index([deletedAt])
   @@map("saved_searches")
 }

@@ -549,6 +549,7 @@ export class UrlCaptureProvider {
       creatorType?: string;
     }>;
     tags?: string[];
+    keywords?: string[];
   }): string {
     const normalizedCreators = (meta.creators || [])
       .map(
@@ -557,7 +558,8 @@ export class UrlCaptureProvider {
       )
       .sort()
       .join(';');
-    const normalizedTags = (meta.tags || []).slice().sort().join(',');
+    const rawTags = meta.tags ?? meta.keywords ?? [];
+    const normalizedTags = rawTags.slice().sort().join(',');
     const canonicalString = `${meta.title || ''}|${meta.doi || ''}|${meta.year || ''}|${meta.publicationTitle || ''}|${meta.url || ''}|${meta.itemType || ''}|${normalizedCreators}|${normalizedTags}`;
     return createHash('sha256').update(canonicalString).digest('hex');
   }

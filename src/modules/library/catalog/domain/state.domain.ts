@@ -82,3 +82,93 @@ export function toStateResponse(
     lastReadAt: formatStateDate(state?.lastReadAt),
   };
 }
+
+export interface MergeableUserItemState {
+  userId: string;
+  itemId: string;
+  isStarred?: boolean | null;
+  rating?: number | null;
+  readStatus?: string | null;
+  currentPage?: number | null;
+  scrollPosition?: unknown;
+  lastOpenedAt?: Date | null;
+  lastReadAt?: Date | null;
+}
+
+export interface PreferredMergedState {
+  isStarred: boolean;
+  maxRating: number | null;
+  readStatus: 'completed' | 'reading' | 'skimmed' | 'unread';
+  maxCurrentPage: number | null;
+  latestScroll: unknown;
+  latestOpenedAt: Date | null;
+  latestReadAt: Date | null;
+}
+
+export function pickPreferredMergedState(
+  states: ReadonlyArray<MergeableUserItemState>,
+): PreferredMergedState {
+  const positiveRatings = states
+    .map((s) => s.rating)
+    .filter((r): r is number => typeof r === 'number' && r > 0);
+  const maxRating: number | null =
+    positiveRatings.length > 0
+      ? Math.max(...positiveRatings)
+      : states.length > 0 && states.every((s) => s.rating === 0)
+        ? 0
+        : null;
+  const isStarred = states.some((s) => Boolean(s.isStarred));
+  const isCompleted = states.some((s) => s.readStatus === 'completed');
+  const isReading = states.some((s) => s.readStatus === 'reading');
+  const isSkimmed = states.some((s) => s.readStatus === 'skimmed');
+  const readStatus = isCompleted
+    ? 'completed'
+    : isReading
+      ? 'reading'
+      : isSkimmed
+        ? 'skimmed'
+        : 'unread';
+
+  const latestReadAt =
+    states
+      .map((s) => s.lastReadAt)
+      .filter((d): d is Date => d instanceof Date)
+      .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+
+  const latestOpenedAt =
+    states
+      .map((s) => s.lastOpenedAt)
+      .filter((d): d is Date => d instanceof Date)
+      .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+
+  const validPages = states
+    .map((s) => s.currentPage)
+    .filter((p): p is number => typeof p === 'number' && p > 0);
+  const maxCurrentPage =
+    validPages.length > 0 ? Math.max(...validPages) : null;
+  const statesWithScroll = states.filter(
+    (s) => s.scrollPosition !== null && s.scrollPosition !== undefined,
+  );
+  statesWithScroll.sort((a, b) => {
+    const readA = a.lastReadAt ? a.lastReadAt.getTime() : 0;
+    const readB = b.lastReadAt ? b.lastReadAt.getTime() : 0;
+    if (readB !== readA) return readB - readA;
+
+    const openA = a.lastOpenedAt ? a.lastOpenedAt.getTime() : 0;
+    const openB = b.lastOpenedAt ? b.lastOpenedAt.getTime() : 0;
+    if (openB !== openA) return openB - openA;
+
+    return (b.currentPage || 1) - (a.currentPage || 1);
+  });
+  const latestScroll = statesWithScroll[0]?.scrollPosition;
+
+  return {
+    isStarred,
+    maxRating,
+    readStatus,
+    maxCurrentPage,
+    latestScroll,
+    latestOpenedAt,
+    latestReadAt,
+  };
+}

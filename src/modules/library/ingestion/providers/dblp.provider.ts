@@ -63,10 +63,6 @@ export class DblpProvider extends AbstractAcademicProvider {
     const searchQuery = isDoiQuery && cleanDoi ? `doi:${cleanDoi}` : rawQuery;
     const url = `${this.baseUrl}?q=${encodeURIComponent(searchQuery)}&format=json&h=3`;
 
-    if (this.rateLimiter) {
-      await this.rateLimiter.acquire('dblp', signal);
-    }
-
     const headers = {
       'User-Agent': getAcademicUserAgent('Dblp'),
       Accept: 'application/json, text/json',
@@ -97,13 +93,39 @@ export class DblpProvider extends AbstractAcademicProvider {
     if (!hits) return null;
 
     const hitList = Array.isArray(hits) ? hits : [hits];
-    if (hitList.length === 0) return null;
+    const hitInfos = hitList
+      .map((h) => h?.info)
+      .filter((info): info is Record<string, unknown> =>
+        Boolean(info && info.title),
+      );
+    if (hitInfos.length === 0) return null;
 
-    const firstHit = hitList[0]?.info;
-    if (!firstHit || !firstHit.title) return null;
+    let matchedHit: Record<string, unknown> | null = null;
+    if (isDoiQuery && cleanDoi) {
+      matchedHit =
+        hitInfos.find((info) => {
+          const hitDoi =
+            typeof info.doi === 'string' ? normalizeDoi(info.doi) : undefined;
+          return hitDoi && hitDoi.toLowerCase() === cleanDoi.toLowerCase();
+        }) ?? null;
+    } else {
+      const { bestMatch } = this.rankBestTitleCandidate(
+        hitInfos,
+        rawQuery,
+        (info) => {
+          const raw =
+            typeof info.title === 'string'
+              ? info.title
+              : (info.title as { text?: string })?.text || '';
+          return raw.replace(/\.$/, '').trim();
+        },
+      );
+      matchedHit = bestMatch;
+    }
+    if (!matchedHit) return null;
 
     return this.mapHitToProviderResult(
-      firstHit,
+      matchedHit,
       isDoiQuery ? cleanDoi || rawQuery : rawQuery,
       isDoiQuery,
     );
@@ -163,8 +185,39 @@ export class DblpProvider extends AbstractAcademicProvider {
       typeof info.venue === 'string' ? info.venue.trim() : undefined;
     const isConference =
       rawType.includes('conference') || rawType.includes('workshop');
+    const isBookSection =
+      rawType.includes('parts in books or collections') ||
+      rawType.includes('book chapter');
+    const isThesis =
+      rawType.includes('phd') ||
+      rawType.includes('master') ||
+      rawType.includes('dissertation') ||
+      (rawType.includes('books and theses') &&
+        /thesis|dissertation|phd|habil/i.test(
+          `${venue || ''} ${toStr(info.note)}`,
+        ));
+    const isBook =
+      !isThesis &&
+      (rawType.includes('books and theses') ||
+        rawType === 'book' ||
+        rawType === 'editorship');
+    const isPreprint =
+      rawType.includes('informal') ||
+      rawType.includes('other publications') ||
+      rawType.includes('preprint') ||
+      /^corr$/i.test(venue || '');
 
-    const itemType = isConference ? 'conferencePaper' : 'journalArticle';
+    const itemType = isConference
+      ? 'conferencePaper'
+      : isBookSection
+        ? 'bookSection'
+        : isThesis
+          ? 'thesis'
+          : isBook
+            ? 'book'
+            : isPreprint
+              ? 'preprint'
+              : 'journalArticle';
     const doi =
       typeof info.doi === 'string' ? normalizeDoi(info.doi) : undefined;
     const pagesStr = toStr(info.pages);
@@ -192,10 +245,12 @@ export class DblpProvider extends AbstractAcademicProvider {
         authors: authorNames,
         year,
         doi,
-        journal: !isConference ? venue : undefined,
-        publicationTitle: venue,
+        journal: itemType === 'journalArticle' ? venue : undefined,
+        publicationTitle: itemType === 'preprint' ? undefined : venue,
         proceedingsTitle: isConference ? venue : undefined,
         conferenceName: isConference ? venue : undefined,
+        ...(isBookSection && venue ? { bookTitle: venue } : {}),
+        ...(isPreprint ? { repository: venue || 'CoRR' } : {}),
         pages,
         volume,
         issue,

@@ -74,7 +74,10 @@ export class SsrfGuardService {
       );
     }
 
-    const rawHostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const rawHostname = url.hostname
+      .toLowerCase()
+      .replace(/^\[|\]$/g, '')
+      .replace(/\.+$/, '');
     if (!rawHostname) {
       throw new BadRequestException('URL must have a valid hostname.');
     }

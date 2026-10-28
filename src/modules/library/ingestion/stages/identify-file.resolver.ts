@@ -220,6 +220,7 @@ export class IdentifyFileResolver {
         if (fileRecord?.buffer) {
           fileBuffer = fileRecord.buffer;
 
+          let ranTrustedExtraction = false;
           if (this.extractionGateway?.extractTrustedMetadata) {
             try {
               const trusted =
@@ -227,6 +228,7 @@ export class IdentifyFileResolver {
                   fileRecord.buffer,
                   payload.filename,
                 );
+              ranTrustedExtraction = true;
               if (trusted?.metadata) {
                 extractedMetadata = {
                   ...(trusted.metadata as unknown as ExtractedPdfMetadata),
@@ -256,7 +258,13 @@ export class IdentifyFileResolver {
             const extractedDoc =
               await this.extractionGateway.extractDocumentFromBuffer(
                 fileRecord.buffer,
-                { headerOnly: true, maxPages: 3 },
+                {
+                  headerOnly: true,
+                  maxPages: 3,
+                  ...(ranTrustedExtraction
+                    ? { skipTrustedExtraction: true }
+                    : {}),
+                },
               );
             const docMeta = ((extractedDoc?.metadata ||
               extractedDoc) as unknown as ExtractedPdfMetadata) || {};

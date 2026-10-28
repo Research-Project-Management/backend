@@ -153,6 +153,17 @@ export class AcademicSearchQueryEngine {
         }
         continue;
       }
+      if (ch === '?') {
+        const isGroupModifier =
+          groupStack.length > 0 &&
+          groupStack[groupStack.length - 1].startIndex === i - 1;
+        if (!isGroupModifier) {
+          for (const openGroup of groupStack) {
+            openGroup.hasQuantifierInside = true;
+          }
+        }
+        continue;
+      }
       if (ch === ')') {
         const closedGroup = groupStack.pop();
         const nextCh = pattern[i + 1];
@@ -162,16 +173,22 @@ export class AcademicSearchQueryEngine {
           if (closedGroup.hasQuantifierInside) {
             return false;
           }
-          // Check if quantified group has alternation with shared prefix characters
+          // Check if quantified group has alternation with shared prefix characters or overlapping classes
           const groupBody = pattern
             .slice(closedGroup.startIndex + 1, i)
-            .replace(/^\?:|\?=/, '');
+            .replace(/^\?(?::|=|!|<=|<!|<[^>]+>)/, '');
           if (groupBody.includes('|')) {
             const branches = groupBody.split('|').map((b) => b.trim());
             const firstChars = new Set<string>();
             for (const branch of branches) {
               const lead = branch[0] || '';
-              if (lead === '.' || firstChars.has(lead)) {
+              if (
+                !lead ||
+                lead === '.' ||
+                lead === '[' ||
+                lead === '\\' ||
+                firstChars.has(lead)
+              ) {
                 return false;
               }
               firstChars.add(lead);
@@ -215,39 +232,87 @@ export class AcademicSearchQueryEngine {
   }
 
   /**
-   * Builds Prisma `OR` metadata JSONB clauses for normalized identifiers (ISBN, arXiv, PMID, PMCID, ISSN).
+   * Builds Prisma `OR` metadata JSONB + relational `ItemIdentifier` clauses for normalized identifiers.
    */
   static buildMetadataIdentifierOrClauses(
     ids: NormalizedSearchIdentifiers,
   ): Array<Record<string, unknown>> {
     const clauses: Array<Record<string, unknown>> = [];
-    if (ids.cleanIsbn) {
+    if (ids.cleanDoi) {
       clauses.push({
-        metadata: { path: ['isbn'], string_contains: ids.cleanIsbn },
-      });
-    }
-    if (ids.cleanArxivBase || ids.cleanArxiv) {
-      clauses.push({
-        metadata: {
-          path: ['arxivId'],
-          string_contains: ids.cleanArxivBase || ids.cleanArxiv!,
+        identifiers: {
+          some: {
+            type: 'doi',
+            value: { contains: ids.cleanDoi, mode: 'insensitive' },
+          },
         },
       });
     }
+    if (ids.cleanIsbn) {
+      clauses.push(
+        { metadata: { path: ['isbn'], string_contains: ids.cleanIsbn } },
+        {
+          identifiers: {
+            some: {
+              type: 'isbn',
+              value: { contains: ids.cleanIsbn, mode: 'insensitive' },
+            },
+          },
+        },
+      );
+    }
+    if (ids.cleanArxivBase || ids.cleanArxiv) {
+      const arxivVal = ids.cleanArxivBase || ids.cleanArxiv!;
+      clauses.push(
+        { metadata: { path: ['arxivId'], string_contains: arxivVal } },
+        {
+          identifiers: {
+            some: {
+              type: 'arxiv',
+              value: { contains: arxivVal, mode: 'insensitive' },
+            },
+          },
+        },
+      );
+    }
     if (ids.cleanPmid) {
-      clauses.push({
-        metadata: { path: ['pmid'], string_contains: ids.cleanPmid },
-      });
+      clauses.push(
+        { metadata: { path: ['pmid'], string_contains: ids.cleanPmid } },
+        {
+          identifiers: {
+            some: {
+              type: 'pmid',
+              value: { contains: ids.cleanPmid, mode: 'insensitive' },
+            },
+          },
+        },
+      );
     }
     if (ids.cleanPmcid) {
-      clauses.push({
-        metadata: { path: ['pmcid'], string_contains: ids.cleanPmcid },
-      });
+      clauses.push(
+        { metadata: { path: ['pmcid'], string_contains: ids.cleanPmcid } },
+        {
+          identifiers: {
+            some: {
+              type: 'pmcid',
+              value: { contains: ids.cleanPmcid, mode: 'insensitive' },
+            },
+          },
+        },
+      );
     }
     if (ids.cleanIssn) {
-      clauses.push({
-        metadata: { path: ['issn'], string_contains: ids.cleanIssn },
-      });
+      clauses.push(
+        { metadata: { path: ['issn'], string_contains: ids.cleanIssn } },
+        {
+          identifiers: {
+            some: {
+              type: 'issn',
+              value: { contains: ids.cleanIssn, mode: 'insensitive' },
+            },
+          },
+        },
+      );
     }
     return clauses;
   }
@@ -265,6 +330,54 @@ export class AcademicSearchQueryEngine {
       item.doi.toLowerCase().includes(ids.cleanDoi.toLowerCase())
     ) {
       return true;
+    }
+    if (Array.isArray(item.identifiers)) {
+      for (const rawIdent of item.identifiers) {
+        if (!rawIdent || typeof rawIdent !== 'object') continue;
+        const ident = rawIdent as { type?: string; value?: string };
+        const t = (ident.type || '').trim().toLowerCase();
+        const v = (ident.value || '').trim();
+        if (!v) continue;
+        if (
+          ids.cleanDoi &&
+          t === 'doi' &&
+          v.toLowerCase().includes(ids.cleanDoi.toLowerCase())
+        ) {
+          return true;
+        }
+        if (ids.cleanIsbn && t === 'isbn') {
+          const normIsbn =
+            normalizeIsbn(v) || v.replace(/[-\s]/g, '').toUpperCase();
+          if (normIsbn.includes(ids.cleanIsbn.toUpperCase())) return true;
+        }
+        if (
+          (ids.cleanArxivBase || ids.cleanArxiv) &&
+          (t === 'arxiv' || t === 'arxivid') &&
+          v
+            .toLowerCase()
+            .includes((ids.cleanArxivBase || ids.cleanArxiv)!.toLowerCase())
+        ) {
+          return true;
+        }
+        if (ids.cleanPmid && t === 'pmid') {
+          const normPmid = normalizePmid(v) || v;
+          if (normPmid === ids.cleanPmid) return true;
+        }
+        if (
+          ids.cleanPmcid &&
+          (t === 'pmcid' || t === 'pmc') &&
+          v.toUpperCase().includes(ids.cleanPmcid.toUpperCase())
+        ) {
+          return true;
+        }
+        if (
+          ids.cleanIssn &&
+          t === 'issn' &&
+          v.toUpperCase().includes(ids.cleanIssn.toUpperCase())
+        ) {
+          return true;
+        }
+      }
     }
     const meta =
       item.metadata &&

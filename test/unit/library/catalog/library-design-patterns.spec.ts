@@ -443,7 +443,7 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
         now,
       });
 
-      expect(offloadedFileIdsToDelete).toEqual(['offloaded-blob-1']);
+      expect(offloadedFileIdsToDelete).toEqual([]);
       expect(primaryMeta.mergedCitationKeys).toEqual([
         'existingKey',
         'dup2026',

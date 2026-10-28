@@ -1,4 +1,5 @@
 import { resolveProviderFieldWeight } from './source-weights.catalog';
+import { isPlaceholderItemTitle } from './academic-title.domain';
 import { TypeConversionPreview } from '@/modules/library/core/types/bibliographic.types';
 
 export interface FieldProvenanceRecord {
@@ -31,12 +32,17 @@ const TRACKED_MANUAL_LOCK_KEYS = [
   'itemType',
   'publicationTitle',
   'journal',
+  'venue',
   'journalAbbr',
+  'journalAbbreviation',
   'publisher',
   'place',
   'volume',
   'issue',
+  'number',
   'pages',
+  'numPages',
+  'numberOfPages',
   'edition',
   'series',
   'seriesTitle',
@@ -48,16 +54,21 @@ const TRACKED_MANUAL_LOCK_KEYS = [
   'year',
   'publicationDate',
   'date',
+  'accessDate',
+  'accessedAt',
   'doi',
   'isbn',
   'issn',
   'pmid',
   'pmcid',
   'arxivId',
+  'archiveId',
+  'archiveID',
   'abstract',
   'abstractNote',
   'url',
   'citationKey',
+  'citeKey',
   'language',
   'rights',
   'license',
@@ -71,6 +82,8 @@ const TRACKED_MANUAL_LOCK_KEYS = [
   'authors',
   'editors',
   'tags',
+  'keywords',
+  'labels',
 ] as const;
 
 export const COUPLED_METADATA_ALIASES: Readonly<
@@ -78,18 +91,30 @@ export const COUPLED_METADATA_ALIASES: Readonly<
 > = {
   publicationTitle: ['journal', 'venue'],
   journal: ['publicationTitle', 'venue'],
+  venue: ['publicationTitle', 'journal'],
   abstract: ['abstractNote'],
   abstractNote: ['abstract'],
-  publicationDate: ['date'],
-  date: ['publicationDate'],
-  creators: ['authors'],
-  authors: ['creators'],
+  year: ['date', 'publicationDate'],
+  publicationDate: ['date', 'year'],
+  date: ['publicationDate', 'year'],
+  creators: ['authors', 'contributors'],
+  authors: ['creators', 'contributors'],
+  contributors: ['creators', 'authors'],
   arxivId: ['archiveId', 'archiveID'],
   archiveId: ['arxivId', 'archiveID'],
+  archiveID: ['arxivId', 'archiveId'],
   journalAbbr: ['journalAbbreviation'],
   journalAbbreviation: ['journalAbbr'],
   numPages: ['numberOfPages'],
   numberOfPages: ['numPages'],
+  rights: ['license'],
+  license: ['rights'],
+  citationKey: ['citeKey'],
+  citeKey: ['citationKey'],
+  accessDate: ['accessedAt'],
+  accessedAt: ['accessDate'],
+  issue: ['number'],
+  number: ['issue'],
   tags: ['keywords', 'labels'],
   keywords: ['tags', 'labels'],
   labels: ['tags', 'keywords'],
@@ -197,7 +222,13 @@ export class ItemProvenancePolicy {
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         const entry = { ...(v as FieldProvenanceRecord) };
         provenanceMap[k] = entry;
-        if (entry.isUserOverride === true || entry.source === 'UserOverride') {
+        if (
+          entry.isUserOverride === true ||
+          entry.source === 'UserOverride' ||
+          entry.source === 'manual' ||
+          entry.lockedByUser === true ||
+          entry.locked === true
+        ) {
           lockedSet.add(k);
         }
       }
@@ -308,7 +339,9 @@ export class ItemProvenancePolicy {
       if (
         fieldProv.isUserOverride === true ||
         fieldProv.source === 'UserOverride' ||
-        fieldProv.source === 'manual'
+        fieldProv.source === 'manual' ||
+        fieldProv.lockedByUser === true ||
+        fieldProv.locked === true
       ) {
         return 1.0;
       }
@@ -344,12 +377,24 @@ export class ItemProvenancePolicy {
     } = {},
   ): boolean {
     const aliases = options.aliases ?? [];
+    const allAliases = [...aliases, ...this.getCoupledFieldAliases(fieldKey)];
+    const meta = extractMetaContainer(itemOrMeta);
+    const rawVal =
+      meta[fieldKey] !== undefined
+        ? meta[fieldKey]
+        : (asPlainRecord(itemOrMeta)?.[fieldKey] ??
+          allAliases.map((a) => meta[a]).find((v) => v !== undefined));
+    const hasNonEmpty =
+      options.hasNonEmptyExisting !== undefined
+        ? options.hasNonEmptyExisting
+        : rawVal !== undefined
+          ? isMeaningfullyNonEmpty(rawVal)
+          : true;
+    if (!hasNonEmpty) return true;
+
     if (this.isFieldLocked(itemOrMeta, fieldKey, aliases)) {
       return false;
     }
-
-    const hasNonEmpty = options.hasNonEmptyExisting ?? true;
-    if (!hasNonEmpty) return true;
 
     const existingAuth = this.getFieldAuthority(
       itemOrMeta,
@@ -383,7 +428,23 @@ export class ItemProvenancePolicy {
     );
     delete updatedMetadata.__isSystemUpdate;
     delete updatedMetadata.__updateSource;
-    if (isSystemUpdate) return;
+    if (isSystemUpdate) {
+      const explicitMetaPatch = asPlainRecord(dataRecord.metadata);
+      if (explicitMetaPatch) {
+        if (Array.isArray(explicitMetaPatch.lockedFields)) {
+          updatedMetadata.lockedFields = explicitMetaPatch.lockedFields;
+          dataRecord.lockedFields = explicitMetaPatch.lockedFields;
+          delete dataExtra.lockedFields;
+        }
+        const explicitProv = asPlainRecord(explicitMetaPatch.fieldProvenance);
+        if (explicitProv) {
+          updatedMetadata.fieldProvenance = explicitProv;
+          dataRecord.fieldProvenance = explicitProv;
+          delete dataExtra.fieldProvenance;
+        }
+      }
+      return;
+    }
 
     const { lockedSet, provenanceMap } =
       this.extractProvenanceState(existingMeta);
@@ -400,32 +461,103 @@ export class ItemProvenancePolicy {
       };
     };
 
+    const unlockFieldAndAliases = (fieldKey: string) => {
+      lockedSet.delete(fieldKey);
+      delete provenanceMap[fieldKey];
+      for (const coupledAlias of this.getCoupledFieldAliases(fieldKey)) {
+        lockedSet.delete(coupledAlias);
+        delete provenanceMap[coupledAlias];
+      }
+    };
+
+    const isClearedValue = (val: unknown): boolean => {
+      if (val === null) return true;
+      if (typeof val === 'string') return val.trim().length === 0;
+      if (Array.isArray(val)) return val.length === 0;
+      return false;
+    };
+
+    const normalizeCompare = (val: unknown): string => {
+      if (val === undefined || val === null) return '';
+      if (
+        typeof val === 'string' ||
+        typeof val === 'number' ||
+        typeof val === 'boolean'
+      ) {
+        return String(val).trim();
+      }
+      if (typeof val === 'object') {
+        try {
+          return JSON.stringify(val);
+        } catch {
+          return '';
+        }
+      }
+      return '';
+    };
+
+    const isSameReference = existingMeta === updatedMetadata;
+    const getExistingFieldValue = (fieldKey: string): unknown => {
+      if (isSameReference) return undefined;
+      if (existingMeta[fieldKey] !== undefined) return existingMeta[fieldKey];
+      for (const alias of this.getCoupledFieldAliases(fieldKey)) {
+        if (existingMeta[alias] !== undefined) return existingMeta[alias];
+      }
+      return undefined;
+    };
+
+    const handleCandidateField = (fieldKey: string, rawVal: unknown) => {
+      if (rawVal === undefined) return;
+      if (isClearedValue(rawVal)) {
+        unlockFieldAndAliases(fieldKey);
+        return;
+      }
+      const prevVal = getExistingFieldValue(fieldKey);
+      if (
+        prevVal !== undefined &&
+        normalizeCompare(prevVal) === normalizeCompare(rawVal)
+      ) {
+        return;
+      }
+      recordManualLock(fieldKey);
+      for (const coupledAlias of this.getCoupledFieldAliases(fieldKey)) {
+        recordManualLock(coupledAlias);
+      }
+    };
+
+    const handledKeys = new Set<string>();
     for (const key of TRACKED_MANUAL_LOCK_KEYS) {
       if (dataRecord[key] !== undefined || dataExtra[key] !== undefined) {
-        recordManualLock(key);
-        for (const coupledAlias of this.getCoupledFieldAliases(key)) {
-          recordManualLock(coupledAlias);
-        }
+        handledKeys.add(key);
+        const rawVal =
+          dataRecord[key] !== undefined ? dataRecord[key] : dataExtra[key];
+        handleCandidateField(key, rawVal);
       }
     }
 
     for (const [efKey, efVal] of Object.entries(dataExtra)) {
       if (
         efVal !== undefined &&
+        !handledKeys.has(efKey) &&
         efKey !== 'fieldProvenance' &&
         efKey !== 'lockedFields' &&
+        efKey !== 'isFilenameTitle' &&
         !efKey.startsWith('__')
       ) {
-        recordManualLock(efKey);
-        for (const coupledAlias of this.getCoupledFieldAliases(efKey)) {
-          recordManualLock(coupledAlias);
-        }
+        handleCandidateField(efKey, efVal);
       }
     }
 
     if (lockedSet.size > 0) {
       updatedMetadata.fieldProvenance = provenanceMap;
       updatedMetadata.lockedFields = Array.from(lockedSet);
+    } else {
+      if (Object.keys(provenanceMap).length > 0) {
+        updatedMetadata.fieldProvenance = provenanceMap;
+      } else {
+        delete updatedMetadata.fieldProvenance;
+      }
+      delete updatedMetadata.lockedFields;
     }
   }
 
@@ -446,19 +578,48 @@ export class ItemProvenancePolicy {
     for (const dropped of preview.droppedFields) {
       lockedSet.delete(dropped.field);
       delete provenanceMap[dropped.field];
+      for (const alias of this.getCoupledFieldAliases(dropped.field)) {
+        lockedSet.delete(alias);
+        delete provenanceMap[alias];
+      }
     }
 
     for (const mapped of preview.mappedFields) {
       if (mapped.fromField !== mapped.toField) {
-        if (
-          provenanceMap[mapped.fromField] !== undefined &&
-          provenanceMap[mapped.toField] === undefined
-        ) {
-          provenanceMap[mapped.toField] = provenanceMap[mapped.fromField];
+        const fromProv =
+          provenanceMap[mapped.fromField] ??
+          this.getCoupledFieldAliases(mapped.fromField)
+            .map((a) => provenanceMap[a])
+            .find((p) => p !== undefined);
+        if (fromProv !== undefined && provenanceMap[mapped.toField] === undefined) {
+          provenanceMap[mapped.toField] = fromProv;
+          for (const toAlias of this.getCoupledFieldAliases(mapped.toField)) {
+            if (provenanceMap[toAlias] === undefined) {
+              provenanceMap[toAlias] = fromProv;
+            }
+          }
         }
-        if (lockedSet.has(mapped.fromField)) {
+        delete provenanceMap[mapped.fromField];
+        const toCoupledSet = new Set(this.getCoupledFieldAliases(mapped.toField));
+        for (const fromAlias of this.getCoupledFieldAliases(mapped.fromField)) {
+          if (fromAlias !== mapped.toField && !toCoupledSet.has(fromAlias)) {
+            delete provenanceMap[fromAlias];
+          }
+        }
+        const wasLocked =
+          lockedSet.has(mapped.fromField) ||
+          this.getCoupledFieldAliases(mapped.fromField).some((a) => lockedSet.has(a));
+        if (wasLocked) {
           lockedSet.add(mapped.toField);
+          for (const toAlias of this.getCoupledFieldAliases(mapped.toField)) {
+            lockedSet.add(toAlias);
+          }
           lockedSet.delete(mapped.fromField);
+          for (const fromAlias of this.getCoupledFieldAliases(mapped.fromField)) {
+            if (fromAlias !== mapped.toField && !toCoupledSet.has(fromAlias)) {
+              lockedSet.delete(fromAlias);
+            }
+          }
         }
       }
     }
@@ -485,29 +646,25 @@ export class ItemProvenancePolicy {
     updatedFieldProvenance?: Record<string, FieldProvenanceRecord>;
   } {
     const { provenanceMap } = this.extractProvenanceState(currentMeta);
-    const hasExistingProvenanceObj = Boolean(
-      currentMeta.fieldProvenance &&
-        typeof currentMeta.fieldProvenance === 'object' &&
-        !Array.isArray(currentMeta.fieldProvenance),
-    );
 
     const filteredPatch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(sanitizedPatch)) {
       if (k === 'lockedFields' || k === 'fieldProvenance') continue;
+      if (!isMeaningfullyNonEmpty(v)) continue;
+      if (k === 'title' && isPlaceholderItemTitle(String(v))) continue;
       if (this.isFieldLocked(currentMeta, k)) continue;
 
       const isAiSpecificKey = k.startsWith('ai') || k.startsWith('llm');
-      if (!isAiSpecificKey && hasExistingProvenanceObj) {
+      if (!isAiSpecificKey) {
         const coupled = this.getCoupledFieldAliases(k);
         const existingVal =
           currentMeta[k] !== undefined
             ? currentMeta[k]
-            : coupled.map((alias) => currentMeta[alias]).find((val) => val !== undefined);
+            : coupled
+                .map((alias) => currentMeta[alias])
+                .find((val) => val !== undefined);
         const hasNonEmptyExisting = isMeaningfullyNonEmpty(existingVal);
-        const hasTrackedProvenance = Boolean(
-          provenanceMap[k] || coupled.some((alias) => Boolean(provenanceMap[alias])),
-        );
-        if (hasNonEmptyExisting && hasTrackedProvenance) {
+        if (hasNonEmptyExisting) {
           const existingAuth = this.getFieldAuthority(currentMeta, k, true);
           if (existingAuth >= 0.7) {
             continue;
@@ -516,7 +673,7 @@ export class ItemProvenancePolicy {
       }
 
       filteredPatch[k] = v;
-      if (hasExistingProvenanceObj && !isAiSpecificKey) {
+      if (!isAiSpecificKey) {
         provenanceMap[k] = {
           source: 'AIMetadata',
           sourceProvider: 'AIMetadata',
@@ -528,9 +685,8 @@ export class ItemProvenancePolicy {
 
     return {
       filteredPatch,
-      updatedFieldProvenance: hasExistingProvenanceObj
-        ? provenanceMap
-        : undefined,
+      updatedFieldProvenance:
+        Object.keys(provenanceMap).length > 0 ? provenanceMap : undefined,
     };
   }
 }

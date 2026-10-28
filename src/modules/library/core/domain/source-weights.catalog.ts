@@ -361,5 +361,5 @@ export function resolveProviderFieldWeight(
     }
   }
 
-  return 0.75;
+  return 0.45;
 }

@@ -49,8 +49,22 @@ function escapeHtmlText(str: string): string {
 export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
   const metaObj = parseJsonObject(it.metadata);
   const hasRelationalItemTags = Array.isArray(it.itemTags);
+  const hasRelationalPublications = Array.isArray(it.publications);
+  const rawMetaExtraFields =
+    metaObj &&
+    metaObj.extraFields &&
+    typeof metaObj.extraFields === 'object' &&
+    !Array.isArray(metaObj.extraFields)
+      ? (metaObj.extraFields as Record<string, unknown>)
+      : null;
   if (metaObj) {
     for (const [key, value] of Object.entries(metaObj)) {
+      if (key === 'extraFields' || key === 'metadata') {
+        continue;
+      }
+      if (hasRelationalPublications && key === 'isMyPublication') {
+        continue;
+      }
       if (
         hasRelationalItemTags &&
         (key === 'tags' ||
@@ -94,16 +108,23 @@ export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
     }
   };
   collectUnmappedKeys(metaObj);
+  collectUnmappedKeys(rawMetaExtraFields);
   collectUnmappedKeys(
     it.extraFields && typeof it.extraFields === 'object' ? it.extraFields : null,
   );
 
   if (it.extraFields && typeof it.extraFields === 'object') {
-    extraFields = { ...it.extraFields };
+    extraFields = {
+      ...(rawMetaExtraFields || {}),
+      ...it.extraFields,
+    };
   } else {
+    if (rawMetaExtraFields) {
+      extraFields = { ...rawMetaExtraFields };
+    }
     const parsedExtraJson = parseJsonObject(it.extra);
     if (parsedExtraJson) {
-      extraFields = { ...parsedExtraJson };
+      extraFields = { ...extraFields, ...parsedExtraJson };
     } else if (typeof it.extra === 'string' && it.extra.trim()) {
       const remainingLines: string[] = [];
       for (const line of it.extra.split(/\r?\n/)) {
@@ -194,15 +215,21 @@ export function mapAttachmentsAndPrimaryFilePartial(
         (attMeta.title as string | undefined) ||
         normalized.filename ||
         '';
+      if (normalized.size !== undefined && normalized.size !== null) {
+        normalized.size = Number(normalized.size);
+        (normalized as Record<string, unknown>).fileSize = normalized.size;
+      }
+      if (Array.isArray(normalized.revisions)) {
+        normalized.revisions = normalized.revisions.map((rev) => ({
+          ...rev,
+          ...(rev?.sizeBytes !== undefined && rev?.sizeBytes !== null
+            ? { sizeBytes: Number(rev.sizeBytes) }
+            : {}),
+          ...(normalized.fileId ? { url: getFileContentPath(normalized.fileId) } : {}),
+        }));
+      }
       if (normalized.fileId) {
-        const canonicalUrl = getFileContentPath(normalized.fileId);
-        normalized.url = canonicalUrl;
-        if (Array.isArray(normalized.revisions)) {
-          normalized.revisions = normalized.revisions.map((rev) => ({
-            ...rev,
-            url: canonicalUrl,
-          }));
-        }
+        normalized.url = getFileContentPath(normalized.fileId);
       }
       return normalized;
     });
@@ -301,15 +328,21 @@ export function finalizePrimaryFilePartial(
   }
 }
 
+const PRISMA_TO_DTO_RELATION: Record<string, string> = {
+  CITES: 'cites', CITED_BY: 'isCitedBy', SUPPLEMENT_TO: 'supplementTo',
+  SUPPLEMENTED_BY: 'isSupplementedBy', RELATED: 'related', CONTINUES: 'continues',
+  CONTINUED_BY: 'isContinuedBy', PART_OF: 'partOf',
+};
+
 export function mapPublicationsAndRelationsPartial(
   it: MutableItemPayload,
   toDomainFn: <T>(item: T) => T,
 ): void {
   const metaObj = parseJsonObject(it.metadata);
-  if (it.isMyPublication === undefined) {
-    it.isMyPublication =
-      (Array.isArray(it.publications) && it.publications.length > 0) ||
-      Boolean(metaObj?.isMyPublication);
+  if (Array.isArray(it.publications)) {
+    it.isMyPublication = it.publications.length > 0;
+  } else if (it.isMyPublication === undefined) {
+    it.isMyPublication = Boolean(metaObj?.isMyPublication);
   } else {
     it.isMyPublication = Boolean(it.isMyPublication);
   }
@@ -317,27 +350,31 @@ export function mapPublicationsAndRelationsPartial(
   const combinedRelations: Array<Record<string, unknown>> = [];
   if (Array.isArray(it.outgoingRel)) {
     for (const rel of it.outgoingRel) {
+      const peer = rel.targetItem ?? rel.toItem;
+      const rawRelType = typeof rel.relationType === 'string' ? rel.relationType : 'related';
       combinedRelations.push({
         id: rel.id,
-        targetItemId: rel.targetItemId,
-        relationType: rel.relationType || 'related',
+        targetItemId: rel.targetItemId ?? rel.toItemId,
+        relationType: PRISMA_TO_DTO_RELATION[rawRelType] ?? rawRelType,
         direction: 'outgoing',
         description: rel.description || '',
         linkedAt: rel.createdAt,
-        targetItem: rel.targetItem ? toDomainFn(rel.targetItem) : undefined,
+        targetItem: peer ? toDomainFn(peer) : undefined,
       });
     }
   }
   if (Array.isArray(it.incomingRel)) {
     for (const rel of it.incomingRel) {
+      const peer = rel.sourceItem ?? rel.fromItem;
+      const rawRelType = typeof rel.relationType === 'string' ? rel.relationType : 'related';
       combinedRelations.push({
         id: rel.id,
-        targetItemId: rel.sourceItemId,
-        relationType: rel.relationType || 'related',
+        targetItemId: rel.sourceItemId ?? rel.fromItemId,
+        relationType: PRISMA_TO_DTO_RELATION[rawRelType] ?? rawRelType,
         direction: 'incoming',
         description: rel.description || '',
         linkedAt: rel.createdAt,
-        targetItem: rel.sourceItem ? toDomainFn(rel.sourceItem) : undefined,
+        targetItem: peer ? toDomainFn(peer) : undefined,
       });
     }
   }
@@ -401,6 +438,12 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
     }
     if (it.rating === undefined && typeof active?.rating === 'number') {
       it.rating = active.rating;
+    }
+    if (it.currentPage === undefined) it.currentPage = typeof active?.currentPage === 'number' ? active.currentPage : null;
+    if (it.lastReadPage === undefined) it.lastReadPage = typeof active?.currentPage === 'number' ? active.currentPage : null;
+    if (it.scrollPosition === undefined) it.scrollPosition = typeof active?.scrollPosition === 'number' ? active.scrollPosition : null;
+    if (it.lastOpenedAt === undefined) {
+      it.lastOpenedAt = active?.lastOpenedAt ? (active.lastOpenedAt instanceof Date ? active.lastOpenedAt.toISOString() : String(active.lastOpenedAt)) : null;
     }
     if (!it.lastReadAt) {
       const stateWithReadAt = it.states.find((u) => u?.lastReadAt);
@@ -635,6 +678,14 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
         : Boolean(normalized.isStarred),
     readStatus: userState?.readStatus ?? 'unread',
     rating: userState?.rating ?? 0,
+    currentPage: (userState?.currentPage as number | null | undefined) ?? null,
+    lastReadPage: (userState?.currentPage as number | null | undefined) ?? null,
+    scrollPosition: (userState?.scrollPosition as number | null | undefined) ?? null,
+    lastOpenedAt: userState?.lastOpenedAt
+      ? userState.lastOpenedAt instanceof Date
+        ? userState.lastOpenedAt.toISOString()
+        : String(userState.lastOpenedAt)
+      : null,
     lastReadAt: userState?.lastReadAt
       ? userState.lastReadAt instanceof Date
         ? userState.lastReadAt.toISOString()
@@ -644,13 +695,30 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
 }
 
 export class ItemsMapper {
-  static toDomain<T = unknown>(raw: T, visited: WeakSet<object> = new WeakSet()): T {
+  static toDomain<T = unknown>(
+    raw: T,
+    visitedOrUserId: WeakSet<object> | string = new WeakSet(),
+  ): T {
     if (!raw || typeof raw !== 'object') return raw;
+    const visited =
+      visitedOrUserId instanceof WeakSet ? visitedOrUserId : new WeakSet<object>();
+    const userId =
+      typeof visitedOrUserId === 'string' && visitedOrUserId
+        ? visitedOrUserId
+        : undefined;
     if (visited.has(raw as object)) {
       return { ...(raw as Record<string, unknown>) } as unknown as T;
     }
     visited.add(raw as object);
     const it = { ...(raw as Record<string, unknown>) } as MutableItemPayload;
+    if (userId && Array.isArray(it.states) && it.states.length > 1) {
+      const matchedState = it.states.find(
+        (s) => !s?.userId || s.userId === userId,
+      );
+      if (matchedState) {
+        it.states = [matchedState];
+      }
+    }
     unpackMetadataAndExtraPartial(it);
     const primaryPdf = mapAttachmentsAndPrimaryFilePartial(it);
     mapCreatorsPartial(it);

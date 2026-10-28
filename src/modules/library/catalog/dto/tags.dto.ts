@@ -39,6 +39,10 @@ export class CreateTagDto {
   @IsOptional()
   @MaxLength(100)
   projectId?: string;
+
+  @IsOptional()
+  @IsInt()
+  expectedVersion?: number;
 }
 
 export class UpdateTagDto {
@@ -69,4 +73,8 @@ export class UpdateTagDto {
   @IsOptional()
   @MaxLength(100)
   projectId?: string;
+
+  @IsOptional()
+  @IsInt()
+  expectedVersion?: number;
 }

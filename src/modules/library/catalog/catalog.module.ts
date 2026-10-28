@@ -3,10 +3,8 @@ import { CoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
 
 // Controllers
-import {
-  ItemsController,
-  LibraryPermissionsController,
-} from './controllers/items.controller';
+import { ItemsController } from './controllers/items.controller';
+import { LibraryPermissionsController } from './controllers/library-workspace.controller';
 import { ItemCurationController } from './controllers/item-curation.controller';
 import { CollectionsController } from './controllers/collections.controller';
 import { TagController } from './controllers/tags.controller';

@@ -139,6 +139,18 @@ export class MetadataService implements MetadataPort {
         : 'disabled';
 
     // 4. Cache read (unless forceRefresh)
+    const reqAny = request as {
+      includeCitations?: boolean;
+      includeReferences?: boolean;
+      policy?: { includeCitations?: boolean; includeReferences?: boolean };
+    };
+    const wantsCitations = Boolean(
+      reqAny.includeCitations ?? reqAny.policy?.includeCitations,
+    );
+    const wantsReferences = Boolean(
+      reqAny.includeReferences ?? reqAny.policy?.includeReferences,
+    );
+
     if (!request.forceRefresh) {
       const cached = await this.cache.get(cacheKey);
       if (cached === false) {
@@ -151,13 +163,26 @@ export class MetadataService implements MetadataPort {
         return null;
       }
       if (cached && typeof cached === 'object') {
-        this.logResolution({
-          queryType: classified.type,
-          outcome: 'found',
-          cacheOutcome: 'hit',
-          durationMs: Date.now() - startedAt,
-        });
-        return { ...cached, cached: true };
+        const cachedMeta = (cached.metadata || {}) as Record<string, unknown>;
+        const cachedRecord = cached as unknown as Record<string, unknown>;
+        const missingRequestedCitations =
+          wantsCitations &&
+          cachedMeta.citations === undefined &&
+          cachedRecord.citations === undefined;
+        const missingRequestedReferences =
+          wantsReferences &&
+          cachedMeta.references === undefined &&
+          cachedRecord.references === undefined;
+
+        if (!missingRequestedCitations && !missingRequestedReferences) {
+          this.logResolution({
+            queryType: classified.type,
+            outcome: 'found',
+            cacheOutcome: 'hit',
+            durationMs: Date.now() - startedAt,
+          });
+          return { ...cached, cached: true };
+        }
       }
     }
 

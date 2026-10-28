@@ -11,11 +11,16 @@ import {
   ContributorShape,
   IDENTIFIER_META_KEYS,
   RETRACTION_SURVIVAL_KEYS,
+  SYSTEM_RESERVED_MERGE_KEYS,
   syncMergedContributors,
 } from './duplicate-merge.domain';
 import { buildMergeAuditTrail } from './duplicate-merge.helper';
 import { deriveFirstAuthor } from '@/modules/library/catalog';
-import { ItemProvenancePolicy, FieldProvenanceRecord } from '@/modules/library/core';
+import {
+  ItemProvenancePolicy,
+  FieldProvenanceRecord,
+  isPlaceholderItemTitle,
+} from '@/modules/library/core';
 
 export interface DuplicateMergeStepContext {
   tx: Prisma.TransactionClient;
@@ -41,6 +46,7 @@ export interface DuplicateMergeStepContext {
   offloadedFileIdsToDelete: string[];
   capturedPrimaryItemMetadata?: Array<Record<string, unknown>>;
   capturedDuplicateItemMetadata?: Array<Record<string, unknown>>;
+  reassignedItemMetadata?: Array<{ id: string; previousItemId: string }>;
   syncedContributors?: Array<Record<string, unknown>>;
   now: Date;
 }
@@ -50,38 +56,20 @@ export interface IDuplicateMergeStep {
   execute(context: DuplicateMergeStepContext): Promise<void> | void;
 }
 
-function extractOffloadedFileId(rawPayload: unknown): string | null {
-  if (
-    rawPayload &&
-    typeof rawPayload === 'object' &&
-    !Array.isArray(rawPayload)
-  ) {
-    const rec = rawPayload as Record<string, unknown>;
-    if (
-      rec.isOffloaded === true &&
-      typeof rec.fileId === 'string' &&
-      rec.fileId.length > 0
-    ) {
-      return rec.fileId;
-    }
-  }
-  return null;
-}
-
 export class ItemMetadataConsolidationMergeStep
   implements IDuplicateMergeStep
 {
   readonly stepName = 'ITEM_METADATA_CONSOLIDATION';
 
   async execute(ctx: DuplicateMergeStepContext): Promise<void> {
-    const { tx, primary, uniqueDupIds, offloadedFileIdsToDelete } = ctx;
+    const { tx, primary, uniqueDupIds } = ctx;
     const [primaryMetaRows, dupMetas] = await Promise.all([
-      tx.itemMetadata.findMany
+      tx.itemMetadata?.findMany
         ? tx.itemMetadata.findMany({
             where: { itemId: primary.id },
           })
         : (async () => {
-            const first = await tx.itemMetadata.findFirst({
+            const first = await tx.itemMetadata?.findFirst?.({
               where: { itemId: primary.id },
             });
             return first ? [first] : [];
@@ -106,48 +94,67 @@ export class ItemMetadataConsolidationMergeStep
       ...(m as unknown as Record<string, unknown>),
     }));
 
-    if (resolvedPrimaryMetas.length > 0) {
-      if (dupMetas.length > 0) {
-        ctx.capturedDuplicateItemMetadata = dupMetas as unknown as Array<
-          Record<string, unknown>
-        >;
-      }
-      for (const dm of dupMetas) {
-        const fid = extractOffloadedFileId(dm.rawPayload);
-        if (fid) offloadedFileIdsToDelete.push(fid);
-      }
-      await tx.itemMetadata.deleteMany({
-        where: { itemId: { in: uniqueDupIds } },
-      });
-    } else {
-      const firstDupMeta =
-        dupMetas[0] ??
-        (tx.itemMetadata.findFirst
-          ? await tx.itemMetadata.findFirst({
-              where: { itemId: { in: uniqueDupIds } },
-            })
-          : null);
-      if (firstDupMeta) {
-        ctx.capturedDuplicateItemMetadata = (
-          dupMetas.length > 0 ? dupMetas : [firstDupMeta]
-        ) as unknown as Array<Record<string, unknown>>;
-        for (const dm of dupMetas) {
-          if (dm.id === firstDupMeta.id) continue;
-          const fid = extractOffloadedFileId(dm.rawPayload);
-          if (fid) offloadedFileIdsToDelete.push(fid);
+    const resolvedDupMetas =
+      dupMetas.length > 0
+        ? dupMetas
+        : tx.itemMetadata?.findFirst
+          ? await (async () => {
+              const firstDup = await tx.itemMetadata.findFirst({
+                where: { itemId: { in: uniqueDupIds } },
+              });
+              return firstDup ? [firstDup] : [];
+            })()
+          : [];
+
+    if (resolvedDupMetas.length > 0) {
+      ctx.capturedDuplicateItemMetadata = resolvedDupMetas.map((m) => ({
+        ...(m as unknown as Record<string, unknown>),
+      }));
+    }
+
+    const coveredProviders = new Set<string>(
+      resolvedPrimaryMetas
+        .map((m) =>
+          typeof (m as { sourceProvider?: unknown }).sourceProvider === 'string'
+            ? (m as { sourceProvider: string }).sourceProvider.trim().toLowerCase()
+            : '',
+        )
+        .filter(Boolean),
+    );
+
+    const reassignedList: Array<{ id: string; previousItemId: string }> = [];
+    for (const dm of resolvedDupMetas) {
+      const dmRec = dm as {
+        id?: string;
+        itemId?: string;
+        sourceProvider?: string;
+      };
+      if (!dmRec.id) continue;
+      const providerKey =
+        typeof dmRec.sourceProvider === 'string' && dmRec.sourceProvider.trim()
+          ? dmRec.sourceProvider.trim().toLowerCase()
+          : '';
+      const shouldReassign =
+        providerKey.length > 0
+          ? !coveredProviders.has(providerKey)
+          : resolvedPrimaryMetas.length === 0 && reassignedList.length === 0;
+
+      if (shouldReassign) {
+        if (providerKey) coveredProviders.add(providerKey);
+        reassignedList.push({
+          id: dmRec.id,
+          previousItemId: dmRec.itemId || uniqueDupIds[0],
+        });
+        if (typeof tx.itemMetadata?.update === 'function') {
+          await tx.itemMetadata.update({
+            where: { id: dmRec.id },
+            data: { itemId: primary.id },
+          });
         }
-        await tx.itemMetadata.update({
-          where: { id: firstDupMeta.id },
-          data: { itemId: primary.id },
-        });
-        await tx.itemMetadata.deleteMany({
-          where: {
-            itemId: { in: uniqueDupIds },
-            id: { not: firstDupMeta.id },
-          },
-        });
       }
     }
+
+    ctx.reassignedItemMetadata = reassignedList;
   }
 }
 
@@ -200,8 +207,8 @@ export class MetadataAndCreatorBackfillMergeStep
     primaryMeta.mergedCitationKeys = mergedAliases;
     if (extraObj) extraObj.mergedCitationKeys = mergedAliases;
 
-    const chosenContributors = (rawSelections.contributors ||
-      rawSelections.authors ||
+    const chosenContributors = (rawSelections.contributors ??
+      rawSelections.authors ??
       rawSelections.creators) as ContributorShape[] | string[] | undefined;
 
     const syncedContributors = await syncMergedContributors(
@@ -209,11 +216,19 @@ export class MetadataAndCreatorBackfillMergeStep
       primary.id,
       chosenContributors,
       duplicates,
+      primary,
+      primaryMeta,
     );
-    if (syncedContributors.length > 0) {
+    if (Array.isArray(chosenContributors) && chosenContributors.length === 0) {
+      ctx.syncedContributors = [];
+      backfillFields.firstAuthor = null;
+    } else if (syncedContributors.length > 0) {
       ctx.syncedContributors = syncedContributors;
       const derivedAuthor = deriveFirstAuthor({
         contributors: syncedContributors,
+        itemType: String(
+          scalarSelections.itemType || primary.itemType || primary.type || '',
+        ),
       });
       if (derivedAuthor) {
         backfillFields.firstAuthor = derivedAuthor;
@@ -222,6 +237,39 @@ export class MetadataAndCreatorBackfillMergeStep
 
     const { lockedSet: primaryLockedSet, provenanceMap: primaryProvenance } =
       ItemProvenancePolicy.extractProvenanceState(primaryMeta);
+
+    const createManualProvenance = (): FieldProvenanceRecord => ({
+      ...ItemProvenancePolicy.createUserOverrideRecord(),
+      lockedByUser: true,
+      isFilenameTitle: false,
+    });
+
+    for (const [selKey, selVal] of Object.entries(scalarSelections)) {
+      if (
+        selVal === undefined ||
+        selKey === 'extraFields' ||
+        selKey === 'metadata' ||
+        SYSTEM_RESERVED_MERGE_KEYS.has(selKey)
+      ) {
+        continue;
+      }
+      if (selVal === '' || selVal === null) {
+        primaryLockedSet.delete(selKey);
+        delete primaryProvenance[selKey];
+        for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(selKey)) {
+          primaryLockedSet.delete(alias);
+          delete primaryProvenance[alias];
+        }
+        continue;
+      }
+      const manualProv = createManualProvenance();
+      primaryProvenance[selKey] = manualProv;
+      primaryLockedSet.add(selKey);
+      for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(selKey)) {
+        primaryProvenance[alias] = { ...manualProv };
+        primaryLockedSet.add(alias);
+      }
+    }
 
     const isDupFieldUserLocked = (
       dupMeta: Record<string, unknown>,
@@ -232,14 +280,23 @@ export class MetadataAndCreatorBackfillMergeStep
       if (field === 'extra' || scalarSelections[field] !== undefined) {
         continue;
       }
+
+      const sortedDupsForField = [...duplicates].sort(
+        (a, b) =>
+          ItemProvenancePolicy.getFieldAuthority(b, field, true) -
+          ItemProvenancePolicy.getFieldAuthority(a, field, true),
+      );
+
       // 1. If a duplicate has a user-locked override on this field and primary does NOT have it locked, promote the duplicate's user-curated value
       if (!primaryLockedSet.has(field)) {
         let promotedFromLockedDup = false;
-        for (const dup of duplicates) {
+        for (const dup of sortedDupsForField) {
           const dupMeta = asMetaObject(dup.metadata);
           const lockCheck = isDupFieldUserLocked(dupMeta, field);
           if (lockCheck.locked) {
-            const dupVal = getEffectiveItemField(dup, field, dupMeta);
+            const dupVal = getEffectiveItemField(dup, field, dupMeta, {
+              excludeGenericsFromSpecificTarget: true,
+            });
             if (dupVal !== undefined) {
               backfillFields[field] = dupVal;
               primaryLockedSet.add(field);
@@ -254,12 +311,61 @@ export class MetadataAndCreatorBackfillMergeStep
         if (promotedFromLockedDup) continue;
       }
 
-      // 2. Standard backfill when primary is empty
-      if (getEffectiveItemField(primary, field, primaryMeta) === undefined) {
-        for (const dup of duplicates) {
+      const isPreprintVenueString = (v: unknown): boolean =>
+        typeof v === 'string' &&
+        /^(?:arxiv(?:\.org)?|corr|biorxiv|medrxiv|chemrxiv|techrxiv|ssrn|research\s+square|osf\s+preprints|hal|zenodo)(?:\s+preprints?|\s+e-?prints?)?$/i.test(
+          v.trim(),
+        );
+
+      const existingPrimaryVal = getEffectiveItemField(
+        primary,
+        field,
+        primaryMeta,
+        { excludeGenericsFromSpecificTarget: true },
+      );
+      const isPrimaryPlaceholderTitle =
+        field === 'title' &&
+        !primaryLockedSet.has('title') &&
+        (isPlaceholderItemTitle(String(primary.title || '')) ||
+          primaryMeta.isFilenameTitle === true ||
+          primaryProvenance.title?.isFilenameTitle === true);
+      const isPrimaryPreprintVenue =
+        (field === 'publicationTitle' || field === 'journal') &&
+        !primaryLockedSet.has('publicationTitle') &&
+        !primaryLockedSet.has('journal') &&
+        isPreprintVenueString(existingPrimaryVal);
+
+      // 2. Standard backfill when primary is empty OR upgrade when primary has placeholder title / preprint venue
+      if (
+        existingPrimaryVal === undefined ||
+        isPrimaryPlaceholderTitle ||
+        isPrimaryPreprintVenue
+      ) {
+        const primaryFieldAuth = isPrimaryPreprintVenue
+          ? ItemProvenancePolicy.getFieldAuthority(primary, field, true)
+          : 0;
+        for (const dup of sortedDupsForField) {
           const dupMeta = asMetaObject(dup.metadata);
-          const dupVal = getEffectiveItemField(dup, field, dupMeta);
+          const dupVal = getEffectiveItemField(dup, field, dupMeta, {
+            excludeGenericsFromSpecificTarget: true,
+          });
           if (dupVal !== undefined) {
+            if (
+              field === 'title' &&
+              (isPlaceholderItemTitle(String(dupVal)) ||
+                dupMeta.isFilenameTitle === true)
+            ) {
+              continue;
+            }
+            if (isPrimaryPreprintVenue) {
+              if (isPreprintVenueString(dupVal)) continue;
+              const dupFieldAuth = ItemProvenancePolicy.getFieldAuthority(
+                dup,
+                field,
+                true,
+              );
+              if (dupFieldAuth < primaryFieldAuth) continue;
+            }
             backfillFields[field] = dupVal;
             const dupProvMap =
               dupMeta.fieldProvenance &&
@@ -267,13 +373,16 @@ export class MetadataAndCreatorBackfillMergeStep
               !Array.isArray(dupMeta.fieldProvenance)
                 ? (dupMeta.fieldProvenance as Record<string, unknown>)
                 : {};
-            if (
-              dupProvMap[field] &&
-              typeof dupProvMap[field] === 'object' &&
-              primaryProvenance[field] === undefined
-            ) {
-              primaryProvenance[field] =
-                dupProvMap[field] as FieldProvenanceRecord;
+            if (dupProvMap[field] && typeof dupProvMap[field] === 'object') {
+              if (
+                primaryProvenance[field] === undefined ||
+                isPrimaryPlaceholderTitle ||
+                isPrimaryPreprintVenue
+              ) {
+                primaryProvenance[field] = {
+                  ...(dupProvMap[field] as FieldProvenanceRecord),
+                };
+              }
             }
             break;
           }
@@ -281,7 +390,34 @@ export class MetadataAndCreatorBackfillMergeStep
       }
     }
 
+    if (
+      scalarSelections.title !== undefined ||
+      backfillFields.title !== undefined
+    ) {
+      primaryMeta.isFilenameTitle = false;
+      if (
+        primaryProvenance.title &&
+        typeof primaryProvenance.title === 'object'
+      ) {
+        primaryProvenance.title = {
+          ...primaryProvenance.title,
+          isFilenameTitle: false,
+        };
+      }
+    }
+
     for (const idKey of IDENTIFIER_META_KEYS) {
+      if (scalarSelections[idKey] !== undefined) {
+        if (scalarSelections[idKey] === '' || scalarSelections[idKey] === null) {
+          delete primaryMeta[idKey];
+          for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(idKey)) {
+            delete primaryMeta[alias];
+          }
+        } else {
+          primaryMeta[idKey] = scalarSelections[idKey];
+        }
+        continue;
+      }
       if (
         primaryMeta[idKey] === undefined ||
         primaryMeta[idKey] === null ||
@@ -291,7 +427,12 @@ export class MetadataAndCreatorBackfillMergeStep
         if (topOnPrimary !== undefined) {
           primaryMeta[idKey] = topOnPrimary;
         } else {
-          for (const dup of duplicates) {
+          const sortedDupsForId = [...duplicates].sort(
+            (a, b) =>
+              ItemProvenancePolicy.getFieldAuthority(b, idKey, true) -
+              ItemProvenancePolicy.getFieldAuthority(a, idKey, true),
+          );
+          for (const dup of sortedDupsForId) {
             const dupMeta = asMetaObject(dup.metadata);
             const candidateVal = getEffectiveItemField(dup, idKey, dupMeta);
             if (candidateVal !== undefined) {
@@ -314,10 +455,10 @@ export class MetadataAndCreatorBackfillMergeStep
       }
     }
 
-    if (primaryLockedSet.size > 0) {
+    if (primaryLockedSet.size > 0 || Array.isArray(primaryMeta.lockedFields)) {
       primaryMeta.lockedFields = Array.from(primaryLockedSet);
     }
-    if (Object.keys(primaryProvenance).length > 0) {
+    if (Object.keys(primaryProvenance).length > 0 || primaryMeta.fieldProvenance !== undefined) {
       primaryMeta.fieldProvenance = primaryProvenance;
     }
 

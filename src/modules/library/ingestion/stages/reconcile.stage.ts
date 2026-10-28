@@ -9,6 +9,7 @@ import { IWorkflowStage } from '@/modules/library/ingestion/types/workflow-stage
 import {
   isPlaceholderItemTitle,
   titleSimilarity,
+  hasAuthorAndYearCorroboration,
 } from '@/modules/library/core';
 
 @Injectable()
@@ -89,7 +90,14 @@ export class ReconcileStage implements IWorkflowStage<
               cand.normalizedMetadata.title,
               fileTitle,
             );
-            if (sim < 0.4) {
+            const corroboratedByAuthorAndYear = hasAuthorAndYearCorroboration(
+              fileCandidate.normalizedMetadata as unknown as Record<
+                string,
+                unknown
+              >,
+              cand.normalizedMetadata as unknown as Record<string, unknown>,
+            );
+            if (sim < 0.4 && !corroboratedByAuthorAndYear) {
               citationTrapRejectedDoi =
                 cand.normalizedMetadata.doi ||
                 fileCandidate.normalizedMetadata?.doi;

@@ -9,6 +9,9 @@ import {
   SsrfGuardService,
   ExternalProviderException,
   readSafeResponseText,
+  parseCreatorString,
+  getAcademicUserAgent,
+  AcademicHttpClient,
 } from '@/modules/library/core';
 import {
   parseAcademicFeedXml,
@@ -18,6 +21,7 @@ import {
   FeedsRepository,
   type CachedFeedWithItems,
 } from '@/modules/library/ingestion/repositories/feeds.repository';
+import { CrossRefProvider } from '@/modules/library/ingestion/providers/crossref.provider';
 
 export function redactFeedUrl(rawUrl: string): string {
   if (!rawUrl || typeof rawUrl !== 'string') return '';
@@ -46,6 +50,8 @@ export class FeedRetrievalService {
   constructor(
     @Optional() private readonly feedsRepo?: FeedsRepository,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
+    @Optional() private readonly crossRefProvider?: CrossRefProvider,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
   ) {}
 
   /**
@@ -58,6 +64,7 @@ export class FeedRetrievalService {
   async fetchAcademicFeed(
     feedUrl: string,
     forceRefresh = false,
+    userId?: string,
   ): Promise<ParsedAcademicFeed> {
     if (!feedUrl || typeof feedUrl !== 'string') {
       throw new BadRequestException('A valid feed URL is required');
@@ -92,7 +99,8 @@ export class FeedRetrievalService {
               `User requested refresh for "${redactFeedUrl(trimmed)}", serving virtualized snapshot from shared DB pool (last fetched at ${cachedFeed.lastFetchedAt.toISOString()}) to protect server IP.`,
             );
           }
-          return this.feedsRepo.mapCachedFeedToParsedFeed(cachedFeed);
+          const mapped = this.feedsRepo.mapCachedFeedToParsedFeed(cachedFeed);
+          return this.hydrateReadStates(mapped, userId);
         }
       } catch (err: unknown) {
         this.logger.warn(
@@ -103,16 +111,47 @@ export class FeedRetrievalService {
 
     const existingPromise = this.inflightFeedRequests.get(trimmed);
     if (existingPromise) {
-      return existingPromise;
+      const res = await existingPromise;
+      return this.hydrateReadStates(res, userId);
     }
 
     const fetchPromise = this.executeFetchAndPersistFeed(trimmed);
     this.inflightFeedRequests.set(trimmed, fetchPromise);
 
     try {
-      return await fetchPromise;
+      const res = await fetchPromise;
+      return this.hydrateReadStates(res, userId);
     } finally {
       this.inflightFeedRequests.delete(trimmed);
+    }
+  }
+
+  private async hydrateReadStates(
+    feed: ParsedAcademicFeed,
+    userId?: string,
+  ): Promise<ParsedAcademicFeed> {
+    if (
+      !userId ||
+      !this.feedsRepo?.findReadItemIdsForUser ||
+      !Array.isArray(feed.entries) ||
+      feed.entries.length === 0
+    ) {
+      return feed;
+    }
+    try {
+      const readSet = await this.feedsRepo.findReadItemIdsForUser(
+        userId,
+        feed.entries.map((e) => e.id).filter(Boolean),
+      );
+      return {
+        ...feed,
+        entries: feed.entries.map((e) => ({
+          ...e,
+          isRead: readSet.has(e.id),
+        })),
+      };
+    } catch {
+      return feed;
     }
   }
 
@@ -132,8 +171,7 @@ export class FeedRetrievalService {
     }
 
     const headers: Record<string, string> = {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 (compatible; FluxAcademicReader/1.0; +https://zotero.org)',
+      'User-Agent': getAcademicUserAgent('FeedReader'),
       Accept:
         'application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml, */*;q=0.8',
     };
@@ -211,12 +249,18 @@ export class FeedRetrievalService {
       response.headers.get('last-modified') || undefined;
     if (this.feedsRepo) {
       try {
-        await this.feedsRepo.persistFetchedFeedAndItems({
+        const persisted = await this.feedsRepo.persistFetchedFeedAndItems({
           feedUrl: trimmed,
           parsed: parsedFeed,
           etag: etagHeader,
           lastModified: lastModifiedHeader,
         });
+        if (persisted?.items && persisted.items.length === parsedFeed.entries.length) {
+          parsedFeed.entries = parsedFeed.entries.map((e, idx) => ({
+            ...e,
+            id: persisted.items[idx]?.id || e.id,
+          }));
+        }
       } catch (err: unknown) {
         this.logger.warn(
           `Failed to persist feed to database: ${err instanceof Error ? err.message : String(err)}`,
@@ -254,26 +298,15 @@ export class FeedRetrievalService {
         }
       }
 
-      const crossrefUrl = filter
-        ? `https://api.crossref.org/works?filter=${filter}&rows=30&sort=published&order=desc`
-        : `https://api.crossref.org/works?query=${encodeURIComponent(redactedUrl)}&rows=30&sort=published&order=desc`;
-
-      const fallbackRes = await fetch(crossrefUrl, {
-        headers: {
-          'User-Agent': 'FluxAcademicBot/1.0 (mailto:admin@flux.app)',
-          Accept: 'application/json',
+      const provider =
+        this.crossRefProvider ?? new CrossRefProvider(this.httpClient);
+      const items = await provider.searchRecentWorks(
+        {
+          ...(filter ? { filter } : { query: redactedUrl }),
+          rows: 30,
         },
-        signal: AbortSignal.timeout(15000),
-      });
-
-      if (!fallbackRes.ok) {
-        throw new ExternalProviderException(
-          `Academic registry search responded with HTTP ${fallbackRes.status}`,
-        );
-      }
-
-      const json = await fallbackRes.json();
-      const items = json?.message?.items;
+        AbortSignal.timeout(15000),
+      );
       if (!Array.isArray(items) || items.length === 0) {
         throw new ExternalProviderException(
           'No articles found in fallback academic registry',
@@ -328,15 +361,12 @@ export class FeedRetrievalService {
             url: item.URL || (doi ? `https://doi.org/${doi}` : undefined),
             pdfUrl:
               item.link?.find((l) => l['content-type'] === 'application/pdf')
-                ?.URL || (doi ? `https://doi.org/${doi}` : undefined),
+                ?.URL || undefined,
             doi,
             authors,
-            creators: authors.map((name: string) => ({
-              firstName: '',
-              lastName: name,
-              fullName: name,
-              creatorType: 'author' as const,
-            })),
+            creators: authors.map((name: string, cIdx: number) =>
+              parseCreatorString(name, cIdx, 'author'),
+            ),
             abstract: item.abstract?.replace(/<[^>]+>/g, '').trim() || undefined,
             publicationTitle: journal,
             volume: item.volume || undefined,

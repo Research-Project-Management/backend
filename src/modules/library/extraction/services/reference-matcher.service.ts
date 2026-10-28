@@ -4,6 +4,7 @@ import {
   normalizeDoi,
   normalizeArxivId,
 } from '@/modules/library/core/domain/identifier.domain';
+import { normalizeAcademicTitle } from '@/modules/library/core/domain/academic-title.domain';
 
 export interface ExtractedReferenceCandidate {
   title?: string;
@@ -41,10 +42,7 @@ export class ReferenceMatcherService {
   constructor(private readonly extractionRepo: ExtractionRepository) {}
 
   public static normalizeTitleKey(title: string): string {
-    return title
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '')
-      .trim();
+    return normalizeAcademicTitle(title).replace(/\s+/g, '');
   }
 
   public static extractQuotedOrCleanedTitle(

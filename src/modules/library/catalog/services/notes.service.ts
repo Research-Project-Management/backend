@@ -25,6 +25,7 @@ import {
   TransactionHelpers,
   normalizeProjectScopeId,
   ConfigurationException,
+  LIBRARY_EVENT_TYPES,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
@@ -43,18 +44,13 @@ export class NotesService {
     private readonly itemQuery?: ItemQueryService,
     @Optional()
     @Inject(RedisCacheService)
-    cacheOrCoordinator?: RedisCacheService | ItemCacheCoordinator,
+    private readonly cache?: RedisCacheService,
     @Optional()
     @Inject(ItemCacheCoordinator)
-    injectedCoordinator?: ItemCacheCoordinator,
+    cacheCoordinator?: ItemCacheCoordinator,
   ) {
-    if (injectedCoordinator) {
-      this.cacheCoordinator = injectedCoordinator;
-    } else if (cacheOrCoordinator instanceof ItemCacheCoordinator) {
-      this.cacheCoordinator = cacheOrCoordinator;
-    } else {
-      this.cacheCoordinator = new ItemCacheCoordinator(cacheOrCoordinator);
-    }
+    this.cacheCoordinator =
+      cacheCoordinator ?? new ItemCacheCoordinator(this.cache);
   }
 
   private async invalidateNoteItemCaches(
@@ -123,7 +119,7 @@ export class NotesService {
         await helpers.publishOutbox(
           eventScope,
           note.id,
-          'library.note.created',
+          LIBRARY_EVENT_TYPES.NOTE_CREATED,
           note,
         );
 
@@ -186,7 +182,7 @@ export class NotesService {
         await helpers.publishOutbox(
           eventScope,
           updated.id,
-          'library.note.updated',
+          LIBRARY_EVENT_TYPES.NOTE_UPDATED,
           updated,
         );
 
@@ -234,15 +230,29 @@ export class NotesService {
         if (isDeleted) {
           const eventScope = { userId, projectId: deletedProjectId };
 
+          await helpers.appendChange(eventScope, {
+            entityType: 'Note',
+            entityId: id,
+            action: 'delete',
+            version: existing?.version ?? 1,
+            data: { id, itemId: deletedItemId },
+          });
+
           await helpers.recordTombstone(eventScope, {
             entityType: 'Note',
             entityId: id,
           });
 
-          await helpers.publishOutbox(eventScope, id, 'library.note.deleted', {
+          await helpers.publishOutbox(
+            eventScope,
             id,
-            deletedAt: new Date(),
-          });
+            LIBRARY_EVENT_TYPES.NOTE_DELETED,
+            {
+              id,
+              itemId: deletedItemId,
+              deletedAt: new Date(),
+            },
+          );
         }
 
         return isDeleted;
@@ -348,7 +358,9 @@ export class NotesService {
           effectiveProjectId,
         );
         return {
+          ...(updatedNote as unknown as Record<string, unknown>),
           success: true,
+          noteId: updatedNote.id,
           totalExtracted: annotations.length,
           literatureNote: updatedNote,
         } as ExtractLiteratureNoteResult;
@@ -366,9 +378,20 @@ export class NotesService {
     });
 
     return {
+      ...(note as unknown as Record<string, unknown>),
       success: true,
+      noteId: note.id,
       totalExtracted: annotations.length,
       literatureNote: note,
     } as ExtractLiteratureNoteResult;
+  }
+
+  async extractNoteFromAnnotations(
+    userId: string,
+    itemId: string,
+    options?: FormatNoteOptions,
+    projectId?: string,
+  ) {
+    return this.extractNotesFromAnnotations(userId, itemId, options, projectId);
   }
 }

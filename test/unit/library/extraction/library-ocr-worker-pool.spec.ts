@@ -43,4 +43,14 @@ describe('OcrWorkerPoolService', () => {
     expect((service as any).scheduler).toBeUndefined();
     expect((service as any).workers).toEqual([]);
   });
+
+  it('skips recyclePool when expectedScheduler does not match current (undefined) scheduler', async () => {
+    const staleScheduler: any = { terminate: jest.fn() };
+    (service as any).scheduler = undefined;
+    const executeSpy = jest.spyOn(service as any, 'executePoolRecycle');
+
+    await service.recyclePool(staleScheduler);
+
+    expect(executeSpy).not.toHaveBeenCalled();
+  });
 });

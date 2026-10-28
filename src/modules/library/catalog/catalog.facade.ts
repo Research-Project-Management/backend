@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ItemService } from './services/items.service';
 import { ItemQueryService } from './services/item-query.service';
+import { ItemCurationService } from './services/item-curation.service';
 import { CollectionsService } from './services/collections.service';
 import { TagsService } from './services/tags.service';
 import { TypesService } from './services/types.service';
@@ -45,6 +46,8 @@ export class CatalogFacade implements ICatalogFacade {
     private readonly typesService: TypesService,
     private readonly stateService: StateService,
     private readonly notesService: NotesService,
+    @Optional()
+    private readonly curationService?: ItemCurationService,
   ) {}
 
   async getItem<T = ItemDetail>(
@@ -280,6 +283,34 @@ export class CatalogFacade implements ICatalogFacade {
     },
   ) {
     return this.queryService.findMatchCandidates(scope, criteria);
+  }
+
+  async findAttachmentByFileId(
+    fileId: string,
+  ): Promise<{ id: string; itemId: string; metadata?: unknown } | null> {
+    if (!this.curationService) return null;
+    return this.curationService.findAttachmentByFileId(fileId);
+  }
+
+  async updateAttachmentProcessingStatus(
+    attachmentId: string,
+    status: string,
+    metadataPatch?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.curationService) return;
+    await this.curationService.updateAttachmentProcessingStatus(
+      attachmentId,
+      status,
+      metadataPatch,
+    );
+  }
+
+  async updateItemAiMetadata(
+    itemId: string,
+    aiMetadataPatch: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.curationService) return;
+    await this.curationService.updateItemAiMetadata(itemId, aiMetadataPatch);
   }
 }
 

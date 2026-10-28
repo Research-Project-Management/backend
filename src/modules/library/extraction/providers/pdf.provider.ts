@@ -40,7 +40,11 @@ export class PdfProvider {
 
   async extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: { maxPages?: number; headerOnly?: boolean },
+    options?: {
+      maxPages?: number;
+      headerOnly?: boolean;
+      skipTrustedExtraction?: boolean;
+    },
   ): Promise<ExtractedPdfDocument> {
     const pages: Array<{
       pageIndex: number;
@@ -74,7 +78,7 @@ export class PdfProvider {
       let trustedResult: TrustedExtractionResult | undefined;
       const localStart = performance.now();
 
-      if (this.trustedExtractor) {
+      if (this.trustedExtractor && !options?.skipTrustedExtraction) {
         try {
           trustedResult = await this.trustedExtractor.extract(
             buffer,
@@ -93,8 +97,9 @@ export class PdfProvider {
       let combinedText = '';
       const unpdfExtractedMetadata: ExtractedPdfMetadata = {};
 
-      // 3. Extract metadata from header stream first using safe regex before any parsing
-      const headerExtractedMetadata = this.extractMetadataFromBuffer(buffer);
+      // 3. Extract metadata from buffer using pdf-lib + safe decoded fallback
+      const headerExtractedMetadata =
+        await this.extractMetadataFromBufferAsync(buffer);
 
       // 4. Reuse pre-parsed PDF document proxy (or fallback to getDocumentProxy)
       try {
@@ -431,6 +436,82 @@ export class PdfProvider {
       engineUsed: trustedResult?.provenance?.engineUsed,
     };
 
+    const trustedProvObj = trustedResult?.provenance as
+      | {
+          fieldProvenance?: Record<
+            string,
+            { source: string; confidence: number; extractedAt?: string }
+          >;
+          rawMatches?: {
+            fieldProvenance?: Record<
+              string,
+              { source: string; confidence: number; extractedAt?: string }
+            >;
+          };
+        }
+      | undefined;
+    const mergedFieldProvenance: Record<
+      string,
+      { source: string; confidence: number; extractedAt?: string }
+    > = {
+      ...(trustedProvObj?.fieldProvenance ??
+        trustedProvObj?.rawMatches?.fieldProvenance ??
+        {}),
+    };
+    const nowIso = new Date().toISOString();
+    for (const key of Object.keys(metadata) as Array<keyof ExtractedPdfMetadata>) {
+      if (
+        key === 'rawText' ||
+        key === 'isSelfSufficient' ||
+        key === 'qualityScore' ||
+        key === 'engineUsed' ||
+        key === 'numberOfPages' ||
+        metadata[key] === undefined
+      ) {
+        continue;
+      }
+      if (mergedFieldProvenance[key]) continue;
+      if (trustedResult?.metadata?.[key] !== undefined) {
+        mergedFieldProvenance[key] = {
+          source: trustedResult.provenance?.engineUsed || 'ACADEMIC_REGEX',
+          confidence: 0.85,
+          extractedAt: nowIso,
+        };
+      } else if (
+        (unpdfExtractedMetadata as Record<string, unknown>)[key] !== undefined ||
+        (headerExtractedMetadata as Record<string, unknown>)[key] !== undefined
+      ) {
+        mergedFieldProvenance[key] = {
+          source: 'XMP_BINARY',
+          confidence: 0.9,
+          extractedAt: nowIso,
+        };
+      } else if (
+        (textExtractedMetadata as Record<string, unknown>)[key] !== undefined
+      ) {
+        mergedFieldProvenance[key] = {
+          source: 'ACADEMIC_REGEX',
+          confidence: 0.85,
+          extractedAt: nowIso,
+        };
+      }
+    }
+    if (metadata.creators && !mergedFieldProvenance.creators) {
+      mergedFieldProvenance.creators = mergedFieldProvenance.authors || {
+        source: trustedResult?.provenance?.engineUsed || 'ACADEMIC_REGEX',
+        confidence: 0.85,
+        extractedAt: nowIso,
+      };
+    }
+    (
+      metadata as ExtractedPdfMetadata & {
+        fieldProvenance?: Record<
+          string,
+          { source: string; confidence: number; extractedAt?: string }
+        >;
+      }
+    ).fieldProvenance = mergedFieldProvenance;
+
     let searchablePdfBuffer: Buffer | undefined;
 
     if (ocrPageResults.length > 0 && this.ocrProvider?.generateSearchablePdf) {
@@ -502,56 +583,14 @@ export class PdfProvider {
     }
   }
 
+  async extractMetadataFromBufferAsync(
+    buffer: Buffer,
+  ): Promise<ExtractedPdfMetadata> {
+    return this.textMetadataExtractor.extractMetadataFromBufferAsync(buffer);
+  }
+
   extractMetadataFromBuffer(buffer: Buffer): ExtractedPdfMetadata {
-    if (!buffer || buffer.length === 0) {
-      return {};
-    }
-
-    try {
-      const rawHeaderStream = buffer.subarray(0, 32768).toString('latin1');
-      const extractedMetadataResult: ExtractedPdfMetadata = {};
-
-      const doiMatchResult = rawHeaderStream.match(
-        /10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/,
-      );
-      if (doiMatchResult) {
-        extractedMetadataResult.doi = doiMatchResult[0].replace(
-          /[.,;)\]]+$/,
-          '',
-        );
-      }
-
-      const arxivMatchResult = rawHeaderStream.match(
-        /arXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?|[a-zA-Z-]+(?:\.[a-zA-Z-]+)?\/\d{7}(?:v\d+)?)(?:\s*\[([a-zA-Z-]+(?:\.[a-zA-Z-]+)?)\])?/i,
-      );
-      if (arxivMatchResult) {
-        extractedMetadataResult.arxivId = arxivMatchResult[1];
-        if (arxivMatchResult[2]) {
-          extractedMetadataResult.primaryCategory = arxivMatchResult[2];
-        }
-      }
-
-      const titleMatchResult = rawHeaderStream.match(/\/Title\s*\(([^)]+)\)/);
-      if (titleMatchResult && titleMatchResult[1]) {
-        extractedMetadataResult.title = titleMatchResult[1].trim();
-      }
-
-      const authorMatchResult = rawHeaderStream.match(/\/Author\s*\(([^)]+)\)/);
-      if (authorMatchResult && authorMatchResult[1]) {
-        extractedMetadataResult.authors = [authorMatchResult[1].trim()];
-      }
-
-      const dateMatchResult = rawHeaderStream.match(
-        /\/CreationDate\s*\(D:(\d{4})/,
-      );
-      if (dateMatchResult && dateMatchResult[1]) {
-        extractedMetadataResult.year = parseInt(dateMatchResult[1], 10);
-      }
-
-      return extractedMetadataResult;
-    } catch {
-      return {};
-    }
+    return this.textMetadataExtractor.extractMetadataFromBuffer(buffer);
   }
 
   extractFromText(text: string): string | null {

@@ -400,3 +400,11 @@ export const NOISE_AUTHOR_WORDS = new Set([
   'andothers',
   'visualgeometrygroup',
 ]);
+
+export const AMBIGUOUS_UNACCENTED_VN_SURNAMES = new Set([
+  'le', 'mai', 'ha', 'do', 'la', 'to', 'ma', 'ho', 'ly', 'chu', 'can', 'vi',
+  'an', 'ta', 'cu', 'ba', 'ca', 'vo', 'vu', 'au', 'lo', 'no', 'ro', 'so', 'po',
+]);
+
+export const VN_SYLLABLE_REGEX =
+  /^(?:ng|nh|tr|ch|gh|gi|kh|ph|qu|th|[bcdghklmnpstvx])?[aeiouy]+(?:ng|nh|ch|[cmnpt])?$/i;

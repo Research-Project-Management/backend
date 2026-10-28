@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';
 import { AssignItemsToCollectionDto } from '@/modules/library/catalog/dto/collections.dto';
+import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
 import { normalizeParentId } from '@/modules/library/catalog/domain/collections.domain';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import {
@@ -67,32 +68,41 @@ export async function executeAssignItemsToCollection(
   dto: AssignItemsToCollectionDto,
   projectId?: string,
 ): Promise<{ ids: string[]; count: number }> {
-  const collection = await repo.findById(
-    userId,
-    collectionId,
-    undefined,
-    projectId,
-  );
-  if (!collection) {
-    throw new NotFoundException(`Collection not found: ${collectionId}`);
-  }
   const ids = dto.itemIds || [];
-  if (ids.length === 0) return { ids: [], count: 0 };
   const validProjectId = normalizeProjectScopeId(projectId);
   const scopeWhere = validProjectId
     ? { projectId: validProjectId }
     : { userId, projectId: null };
-  const validItemIds = await repo.findValidItemIds(ids, scopeWhere);
-  const validIdSet = new Set(validItemIds);
-  const invalidIds = ids.filter((id) => !validIdSet.has(id));
-  if (invalidIds.length > 0) {
-    throw new BadRequestException(
-      `One or more items do not belong to library: ${invalidIds.join(', ')}`,
+
+  const validateInClient = async (tx?: Prisma.TransactionClient) => {
+    const collection = await repo.findById(
+      userId,
+      collectionId,
+      tx,
+      projectId,
     );
-  }
+    if (!collection) {
+      throw new NotFoundException(`Collection not found: ${collectionId}`);
+    }
+    if (ids.length === 0) return false;
+    const validItemIds = await repo.findValidItemIds(ids, scopeWhere, tx);
+    const validIdSet = new Set(validItemIds);
+    const invalidIds = ids.filter((id) => !validIdSet.has(id));
+    if (invalidIds.length > 0) {
+      throw new BadRequestException(
+        `One or more items do not belong to library: ${invalidIds.join(', ')}`,
+      );
+    }
+    return true;
+  };
+
   if (libraryTx?.executeInTransaction) {
+    let assigned = false;
     await libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+        const shouldProceed = await validateInClient(tx);
+        if (!shouldProceed) return;
+        assigned = true;
         await repo.addItemsToCollection(
           userId,
           collectionId,
@@ -121,7 +131,10 @@ export async function executeAssignItemsToCollection(
         );
       },
     );
+    if (!assigned) return { ids: [], count: 0 };
   } else {
+    const shouldProceed = await validateInClient();
+    if (!shouldProceed) return { ids: [], count: 0 };
     await repo.addItemsToCollection(
       userId,
       collectionId,
@@ -155,4 +168,225 @@ export async function transferCollectionItemMembershipsInTx(
   await tx.collectionItem.deleteMany({
     where: { itemId: { in: sourceItemIds } },
   });
+}
+
+export async function executeDeleteCollectionWithCascade(
+  repo: CollectionsRepository,
+  tree: TreeEngine,
+  libraryTx: TransactionService | undefined,
+  userId: string,
+  collectionId: string,
+  strategy: CollectionDeleteStrategy = 'orphan',
+  projectId?: string,
+): Promise<{ effectiveProjectId?: string; affectedItemIds: string[] }> {
+  const resolveCascadeTargets = async (tx?: Prisma.TransactionClient) => {
+    const existing = await repo.findById(userId, collectionId, tx, projectId);
+    if (!existing) {
+      throw new NotFoundException(`Collection not found: ${collectionId}`);
+    }
+    const effectiveProjectId =
+      normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
+    let affectedItemIds = await repo.findItemIdsByCollection(
+      userId,
+      collectionId,
+      tx,
+      undefined,
+      effectiveProjectId,
+    );
+    let descendantIds: string[] = [];
+    if (strategy === 'cascade') {
+      const allCollections = await repo.findAll?.(
+        userId,
+        effectiveProjectId,
+        tx,
+      );
+      descendantIds = tree.getDescendantIds(allCollections || [], collectionId);
+      if (descendantIds.length > 0) {
+        const effectiveTx =
+          tx && Object.keys(tx as Record<string, unknown>).length > 0
+            ? tx
+            : undefined;
+        const descendantItemLists = repo.findItemIdsByCollections
+          ? [
+              await repo.findItemIdsByCollections(
+                userId,
+                descendantIds,
+                effectiveTx,
+                undefined,
+                effectiveProjectId,
+              ),
+            ]
+          : await Promise.all(
+              descendantIds.map((descId) =>
+                repo.findItemIdsByCollection(
+                  userId,
+                  descId,
+                  effectiveTx,
+                  undefined,
+                  effectiveProjectId,
+                ),
+              ),
+            );
+        affectedItemIds = Array.from(
+          new Set([...affectedItemIds, ...descendantItemLists.flat()]),
+        );
+      }
+    }
+    const deletedCollectionIds =
+      strategy === 'cascade' && descendantIds.length > 0
+        ? Array.from(new Set([collectionId, ...descendantIds]))
+        : [collectionId];
+    let deletedItemIds = strategy === 'cascade' ? affectedItemIds : [];
+    if (
+      strategy === 'cascade' &&
+      deletedItemIds.length > 0 &&
+      repo.findExclusiveItemIdsByCollections
+    ) {
+      deletedItemIds = await repo.findExclusiveItemIdsByCollections(
+        userId,
+        deletedItemIds,
+        deletedCollectionIds,
+        tx,
+        effectiveProjectId,
+      );
+    }
+    return {
+      effectiveProjectId,
+      affectedItemIds,
+      deletedCollectionIds,
+      deletedItemIds,
+      preResolvedDelete:
+        strategy === 'cascade'
+          ? {
+              targetCollectionIds: deletedCollectionIds,
+              itemIds: deletedItemIds,
+            }
+          : undefined,
+    };
+  };
+
+  if (libraryTx?.executeInTransaction) {
+    return libraryTx.executeInTransaction(
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+        const {
+          effectiveProjectId,
+          affectedItemIds,
+          deletedCollectionIds,
+          deletedItemIds,
+          preResolvedDelete,
+        } = await resolveCascadeTargets(tx);
+        if (preResolvedDelete) {
+          await repo.delete(
+            userId,
+            collectionId,
+            strategy,
+            tx,
+            projectId,
+            preResolvedDelete,
+          );
+        } else {
+          await repo.delete(userId, collectionId, strategy, tx, projectId);
+        }
+        const eventScope = { userId, projectId: effectiveProjectId };
+        if (
+          deletedCollectionIds.length > 1 &&
+          helpers.recordTombstonesBatch &&
+          helpers.appendChangesBatch
+        ) {
+          const deletedColIso = new Date().toISOString();
+          await helpers.recordTombstonesBatch(
+            eventScope,
+            deletedCollectionIds.map((cId) => ({
+              entityType: 'Collection',
+              entityId: cId,
+            })),
+          );
+          await helpers.appendChangesBatch(
+            eventScope,
+            deletedCollectionIds.map((cId) => ({
+              entityType: 'Collection',
+              entityId: cId,
+              action: 'delete',
+              version: 0,
+              data: { id: cId, deletedAt: deletedColIso },
+            })),
+          );
+        } else {
+          for (const cId of deletedCollectionIds) {
+            await helpers.recordTombstone(eventScope, {
+              entityType: 'Collection',
+              entityId: cId,
+            });
+          }
+        }
+        if (deletedItemIds.length > 0) {
+          const deletedIso = new Date().toISOString();
+          await helpers.recordTombstonesBatch(
+            eventScope,
+            deletedItemIds.map((itId) => ({
+              entityType: 'Item',
+              entityId: itId,
+            })),
+          );
+          await helpers.appendChangesBatch(
+            eventScope,
+            deletedItemIds.map((itId) => ({
+              entityType: 'Item',
+              entityId: itId,
+              action: 'delete',
+              version: 0,
+              data: { id: itId, deletedAt: deletedIso },
+            })),
+          );
+          if (helpers.publishOutboxBatch) {
+            await helpers.publishOutboxBatch(
+              eventScope,
+              deletedItemIds.map((itId) => ({
+                aggregateId: itId,
+                eventType: LIBRARY_EVENT_TYPES.ITEM_DELETED,
+                payload: {
+                  id: itId,
+                  itemId: itId,
+                  deletedAt: deletedIso,
+                  projectId: effectiveProjectId,
+                },
+              })),
+            );
+          } else {
+            for (const itId of deletedItemIds) {
+              await helpers.publishOutbox(
+                eventScope,
+                itId,
+                LIBRARY_EVENT_TYPES.ITEM_DELETED,
+                {
+                  id: itId,
+                  itemId: itId,
+                  deletedAt: deletedIso,
+                  projectId: effectiveProjectId,
+                },
+              );
+            }
+          }
+        }
+        await helpers.publishOutbox(
+          eventScope,
+          collectionId,
+          LIBRARY_EVENT_TYPES.COLLECTION_DELETED,
+          {
+            id: collectionId,
+            strategy,
+            deletedAt: new Date(),
+            projectId: effectiveProjectId,
+            deletedCollectionIds,
+            deletedItemIds,
+          },
+        );
+        return { effectiveProjectId, affectedItemIds };
+      },
+    );
+  }
+
+  const { effectiveProjectId, affectedItemIds } = await resolveCascadeTargets();
+  await repo.delete(userId, collectionId, strategy, undefined, projectId);
+  return { effectiveProjectId, affectedItemIds };
 }

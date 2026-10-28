@@ -77,8 +77,10 @@ export class ItemMatchQueryRepository {
         abstract: true,
         year: true,
         contributors: {
-          where: { creatorType: 'author' },
-          select: { id: true },
+          select: { id: true, creatorType: true },
+        },
+        identifiers: {
+          select: { type: true, value: true, canonicalUri: true },
         },
         metadata: true,
       },
@@ -113,12 +115,15 @@ export class ItemMatchQueryRepository {
         metadata: true,
         citationKey: true,
         year: true,
+        identifiers: {
+          select: { type: true, value: true, canonicalUri: true },
+        },
         contributors: {
-          where: { creatorType: 'author' },
           select: {
             fullName: true,
             firstName: true,
             lastName: true,
+            creatorType: true,
             orderIndex: true,
           },
           orderBy: { orderIndex: 'asc' },
@@ -207,6 +212,9 @@ export class ItemMatchQueryRepository {
         collectionItems: { include: { collection: true } },
         attachments: { include: { revisions: true } },
         notesList: { where: { deletedAt: null } },
+        identifiers: {
+          select: { type: true, value: true, canonicalUri: true },
+        },
       },
     });
   }
@@ -238,6 +246,9 @@ export class ItemMatchQueryRepository {
         collectionItems: { include: { collection: true } },
         attachments: { include: { revisions: true } },
         notesList: { where: { deletedAt: null } },
+        identifiers: {
+          select: { type: true, value: true, canonicalUri: true },
+        },
       },
     });
   }
@@ -283,13 +294,16 @@ export class ItemMatchQueryRepository {
           title: true,
           doi: true,
           metadata: true,
+          identifiers: {
+            select: { type: true, value: true, canonicalUri: true },
+          },
         },
       })) as {
         id: string;
         title: string;
         doi?: string | null;
         metadata?: unknown;
-        identifiers?: Array<{ type?: string; value?: string }>;
+        identifiers?: Array<{ type?: string; value?: string; canonicalUri?: string | null }>;
       } | null;
       if (match) {
         const evaluated = evaluateExactMatchSpecifications(matchInput, match);

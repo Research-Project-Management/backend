@@ -7,6 +7,7 @@ import {
   BadRequestException,
   HttpCode,
   HttpStatus,
+  Optional,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
@@ -14,6 +15,8 @@ import { FastifyRequest } from 'fastify';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { libraryConfig } from '@/modules/library/core';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
+import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
+import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 
 export interface BenchmarkPayloadDto {
   base64Pdf?: string;
@@ -23,9 +26,16 @@ export interface BenchmarkPayloadDto {
 @ApiTags('Library Extraction Telemetry')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/library/extraction')
+@Controller([
+  'api/v1/library/extraction',
+  'api/v1/projects/:projectId/library/extraction',
+])
 export class ExtractionTelemetryController {
-  constructor(private readonly trustedExtractor: TrustedExtractionService) {}
+  constructor(
+    private readonly trustedExtractor: TrustedExtractionService,
+    @Optional() private readonly ocrWorkerPool?: OcrWorkerPoolService,
+    @Optional() private readonly extractionRepo?: ExtractionRepository,
+  ) {}
 
   /**
    * Returns operational telemetry and engine metrics for dashboards.
@@ -35,10 +45,25 @@ export class ExtractionTelemetryController {
     summary:
       'Get operational telemetry and in-process extraction engine metrics',
   })
-  getTelemetry() {
+  async getTelemetry() {
     const slmConfigured = Boolean(libraryConfig().mextract.apiUrl);
+    const ocrPool = this.ocrWorkerPool?.getPoolStatus() ?? {
+      initialized: false,
+      destroyed: false,
+      activeWorkers: 0,
+      configuredConcurrency: libraryConfig().ocr.concurrency || 1,
+      defaultLanguages: ['vie', 'eng'],
+    };
+    const attachmentStatusCounts = this.extractionRepo
+      ? await this.extractionRepo.getExtractionStatusBreakdown()
+      : {};
+    const totalAttachments = Object.values(attachmentStatusCounts).reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+
     return {
-      status: 'UP',
+      status: ocrPool.destroyed ? 'DEGRADED' : 'UP',
       architecture: 'Zero-Docker In-Process Academic Extraction Engine',
       version: '1.0.0',
       flags: {
@@ -58,6 +83,11 @@ export class ExtractionTelemetryController {
           'LAYOUT_HEURISTIC',
           'MEXTRACT_SLM',
         ],
+        ocrWorkerPool: ocrPool,
+        attachments: {
+          total: totalAttachments,
+          byStatus: attachmentStatusCounts,
+        },
       },
     };
   }

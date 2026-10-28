@@ -31,6 +31,8 @@ import {
   attachCapturedMergeStepRelations,
   restoreMasterRelationsInTx,
   restoreDuplicateRelationsInTx,
+  restoreMergeRelationsInTx,
+  syncRestoredItemCountsInTx,
 } from './duplicate-merge-relations.memento';
 
 export type {
@@ -52,6 +54,7 @@ export {
   attachCapturedMergeStepRelations,
   restoreMasterRelationsInTx,
   restoreDuplicateRelationsInTx,
+  restoreMergeRelationsInTx,
 };
 
 export interface DuplicateMergeMemento {
@@ -65,6 +68,10 @@ export interface DuplicateMergeMemento {
     noteIds?: string[];
     attachmentIds?: string[];
   };
+  readonly reassignedItemMetadata?: Array<{
+    id: string;
+    previousItemId: string;
+  }>;
   readonly mergedMetadataFields?: string[];
   readonly mergedCreatorCount?: number;
 }
@@ -80,6 +87,7 @@ export function createDuplicateMergeMemento(params: {
   mergedMetadataFields?: string[];
   reassignedNoteIds?: string[];
   reassignedAttachmentIds?: string[];
+  reassignedItemMetadata?: Array<{ id: string; previousItemId: string }>;
   mergedCreatorCount?: number;
   primaryRelations?: PreMergeItemRelations;
   duplicateRelationsById?: Record<string, PreMergeItemRelations>;
@@ -93,6 +101,7 @@ export function createDuplicateMergeMemento(params: {
     mergedMetadataFields = [],
     reassignedNoteIds = [],
     reassignedAttachmentIds = [],
+    reassignedItemMetadata,
     mergedCreatorCount = 0,
     primaryRelations,
     duplicateRelationsById,
@@ -141,7 +150,8 @@ export function createDuplicateMergeMemento(params: {
     masterItemRelations !== undefined ||
       masterUserPublications !== undefined ||
       masterUserStates !== undefined ||
-      masterItemMetadata !== undefined,
+      masterItemMetadata !== undefined ||
+      (reassignedItemMetadata && reassignedItemMetadata.length > 0),
   );
 
   const mergedDuplicates: MergedDuplicateSnapshot[] = duplicates.map((dup) => {
@@ -176,6 +186,14 @@ export function createDuplicateMergeMemento(params: {
           : attachments !== undefined
             ? attachments.length
             : undefined;
+    const dupNoteCount =
+      typeof dup.noteCount === 'number'
+        ? dup.noteCount
+        : noteIds !== undefined
+          ? noteIds.length
+          : Array.isArray(dup.notesList)
+            ? dup.notesList.length
+            : undefined;
     const dupHasFile =
       typeof dup.hasFile === 'boolean'
         ? dup.hasFile
@@ -190,6 +208,7 @@ export function createDuplicateMergeMemento(params: {
       ...(dup.doi !== undefined ? { doi: dup.doi as string | null } : {}),
       ...(dupHasFile !== undefined ? { hasFile: dupHasFile } : {}),
       ...(dupAttCount !== undefined ? { attachmentCount: dupAttCount } : {}),
+      ...(dupNoteCount !== undefined ? { noteCount: dupNoteCount } : {}),
       metadata: { ...asPlainObject(dup.metadata) },
       ...(attachmentIds !== undefined ? { attachmentIds: [...attachmentIds] } : {}),
       ...(attachments !== undefined ? { attachments: [...attachments] } : {}),
@@ -216,6 +235,9 @@ export function createDuplicateMergeMemento(params: {
       noteIds: [...reassignedNoteIds],
       attachmentIds: [...reassignedAttachmentIds],
     },
+    ...(reassignedItemMetadata !== undefined
+      ? { reassignedItemMetadata: [...reassignedItemMetadata] }
+      : {}),
     mergedMetadataFields: [...mergedMetadataFields],
     mergedCreatorCount,
   };
@@ -229,11 +251,7 @@ export function parseMergeMemento(rawSnapshot: unknown): DuplicateMergeMemento |
   if (!rawSnapshot) return null;
   let parsed: unknown = rawSnapshot;
   if (typeof rawSnapshot === 'string') {
-    try {
-      parsed = JSON.parse(rawSnapshot);
-    } catch {
-      return null;
-    }
+    try { parsed = JSON.parse(rawSnapshot); } catch { return null; }
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
 
@@ -242,22 +260,33 @@ export function parseMergeMemento(rawSnapshot: unknown): DuplicateMergeMemento |
     typeof rec.masterItemId === 'string' && rec.masterItemId.trim()
       ? rec.masterItemId.trim()
       : typeof (rec.beforeMaster as Record<string, unknown> | undefined)?.id === 'string'
-        ? String((rec.beforeMaster as Record<string, unknown>).id).trim()
-        : '';
+        ? String((rec.beforeMaster as Record<string, unknown>).id).trim() : '';
 
   const rawDupIds = Array.isArray(rec.mergedDuplicateIds)
     ? rec.mergedDuplicateIds
     : Array.isArray(rec.duplicateItemIds)
       ? rec.duplicateItemIds
       : Array.isArray(rec.mergedDuplicates)
-        ? (rec.mergedDuplicates as Array<Record<string, unknown>>).map((d) => d?.id)
-        : [];
+        ? (rec.mergedDuplicates as Array<Record<string, unknown>>).map((d) => d?.id) : [];
 
   const mergedDuplicateIds = rawDupIds
     .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     .map((id) => id.trim());
-
   if (!masterItemId && mergedDuplicateIds.length === 0) return null;
+
+  const extractSnapRelations = (raw: Record<string, unknown>) => ({
+    ...(raw.metadata && typeof raw.metadata === 'object' ? { metadata: { ...asPlainObject(raw.metadata) } } : {}),
+    ...(asStringArray(raw.attachmentIds) !== undefined ? { attachmentIds: asStringArray(raw.attachmentIds) } : {}),
+    ...(extractAttachments(raw.attachments) !== undefined ? { attachments: extractAttachments(raw.attachments) } : {}),
+    ...(asStringArray(raw.tagIds) !== undefined ? { tagIds: asStringArray(raw.tagIds) } : {}),
+    ...(asStringArray(raw.collectionIds) !== undefined ? { collectionIds: asStringArray(raw.collectionIds) } : {}),
+    ...(extractContributors(raw.contributors) !== undefined ? { contributors: extractContributors(raw.contributors) } : {}),
+    ...(extractIdentifiers(raw.identifiers) !== undefined ? { identifiers: extractIdentifiers(raw.identifiers) } : {}),
+    ...(extractItemRelations(raw.itemRelations) !== undefined ? { itemRelations: extractItemRelations(raw.itemRelations) } : {}),
+    ...(extractUserPublications(raw.userPublications) !== undefined ? { userPublications: extractUserPublications(raw.userPublications) } : {}),
+    ...(extractUserStates(raw.userStates) !== undefined ? { userStates: extractUserStates(raw.userStates) } : {}),
+    ...(extractItemMetadata(raw.itemMetadata) !== undefined ? { itemMetadata: extractItemMetadata(raw.itemMetadata) } : {}),
+  });
 
   const beforeMasterRaw = asPlainObject(rec.beforeMaster);
   const beforeMaster: MasterItemSnapshot | undefined =
@@ -265,58 +294,31 @@ export function parseMergeMemento(rawSnapshot: unknown): DuplicateMergeMemento |
       ? {
           id: typeof beforeMasterRaw.id === 'string' ? beforeMasterRaw.id : masterItemId,
           ...beforeMasterRaw,
-          ...(beforeMasterRaw.metadata && typeof beforeMasterRaw.metadata === 'object'
-            ? { metadata: { ...asPlainObject(beforeMasterRaw.metadata) } }
-            : {}),
-          ...(asStringArray(beforeMasterRaw.attachmentIds) !== undefined ? { attachmentIds: asStringArray(beforeMasterRaw.attachmentIds) } : {}),
-          ...(extractAttachments(beforeMasterRaw.attachments) !== undefined ? { attachments: extractAttachments(beforeMasterRaw.attachments) } : {}),
-          ...(asStringArray(beforeMasterRaw.tagIds) !== undefined ? { tagIds: asStringArray(beforeMasterRaw.tagIds) } : {}),
-          ...(asStringArray(beforeMasterRaw.collectionIds) !== undefined ? { collectionIds: asStringArray(beforeMasterRaw.collectionIds) } : {}),
-          ...(extractContributors(beforeMasterRaw.contributors) !== undefined ? { contributors: extractContributors(beforeMasterRaw.contributors) } : {}),
-          ...(extractIdentifiers(beforeMasterRaw.identifiers) !== undefined ? { identifiers: extractIdentifiers(beforeMasterRaw.identifiers) } : {}),
-          ...(extractItemRelations(beforeMasterRaw.itemRelations) !== undefined ? { itemRelations: extractItemRelations(beforeMasterRaw.itemRelations) } : {}),
-          ...(extractUserPublications(beforeMasterRaw.userPublications) !== undefined ? { userPublications: extractUserPublications(beforeMasterRaw.userPublications) } : {}),
-          ...(extractUserStates(beforeMasterRaw.userStates) !== undefined ? { userStates: extractUserStates(beforeMasterRaw.userStates) } : {}),
-          ...(extractItemMetadata(beforeMasterRaw.itemMetadata) !== undefined ? { itemMetadata: extractItemMetadata(beforeMasterRaw.itemMetadata) } : {}),
+          ...extractSnapRelations(beforeMasterRaw),
         }
       : undefined;
 
   const mergedDuplicates: MergedDuplicateSnapshot[] | undefined = Array.isArray(rec.mergedDuplicates)
     ? (rec.mergedDuplicates as Array<Record<string, unknown>>)
         .filter((d) => d && typeof d.id === 'string')
-        .map((d) => {
-          const attachmentIds = asStringArray(d.attachmentIds);
-          const attachments = extractAttachments(d.attachments);
-          const noteIds = asStringArray(d.noteIds);
-          const tagIds = asStringArray(d.tagIds);
-          const collectionIds = asStringArray(d.collectionIds);
-          const identifiers = extractIdentifiers(d.identifiers);
-          const contributors = extractContributors(d.contributors);
-          const itemRelations = extractItemRelations(d.itemRelations);
-          const userPublications = extractUserPublications(d.userPublications);
-          const userStates = extractUserStates(d.userStates);
-          const itemMetadata = extractItemMetadata(d.itemMetadata);
-          return {
-            id: String(d.id),
-            ...(typeof d.title === 'string' ? { title: d.title } : {}),
-            ...(d.citationKey !== undefined ? { citationKey: d.citationKey as string | null } : {}),
-            ...(d.doi !== undefined ? { doi: d.doi as string | null } : {}),
-            ...(typeof d.hasFile === 'boolean' ? { hasFile: d.hasFile } : {}),
-            ...(typeof d.attachmentCount === 'number' ? { attachmentCount: d.attachmentCount } : {}),
-            ...(d.metadata && typeof d.metadata === 'object' ? { metadata: { ...asPlainObject(d.metadata) } } : {}),
-            ...(attachmentIds !== undefined ? { attachmentIds } : {}),
-            ...(attachments !== undefined ? { attachments } : {}),
-            ...(noteIds !== undefined ? { noteIds } : {}),
-            ...(tagIds !== undefined ? { tagIds } : {}),
-            ...(collectionIds !== undefined ? { collectionIds } : {}),
-            ...(identifiers !== undefined ? { identifiers } : {}),
-            ...(contributors !== undefined ? { contributors } : {}),
-            ...(itemRelations !== undefined ? { itemRelations } : {}),
-            ...(userPublications !== undefined ? { userPublications } : {}),
-            ...(userStates !== undefined ? { userStates } : {}),
-            ...(itemMetadata !== undefined ? { itemMetadata } : {}),
-          };
-        })
+        .map((d) => ({
+          id: String(d.id),
+          ...(typeof d.title === 'string' ? { title: d.title } : {}),
+          ...(d.citationKey !== undefined ? { citationKey: d.citationKey as string | null } : {}),
+          ...(d.doi !== undefined ? { doi: d.doi as string | null } : {}),
+          ...(typeof d.hasFile === 'boolean' ? { hasFile: d.hasFile } : {}),
+          ...(typeof d.attachmentCount === 'number' ? { attachmentCount: d.attachmentCount } : {}),
+          ...(typeof d.noteCount === 'number' ? { noteCount: d.noteCount } : {}),
+          ...(asStringArray(d.noteIds) !== undefined ? { noteIds: asStringArray(d.noteIds) } : {}),
+          ...(Array.isArray(d.notesList) ? { notesList: d.notesList as Array<Record<string, unknown>> } : {}),
+          ...extractSnapRelations(d),
+        }))
+    : undefined;
+
+  const reassignedItemMetadata = Array.isArray(rec.reassignedItemMetadata)
+    ? (rec.reassignedItemMetadata as Array<Record<string, unknown>>)
+        .filter((m) => m && typeof m.id === 'string' && typeof m.previousItemId === 'string')
+        .map((m) => ({ id: String(m.id), previousItemId: String(m.previousItemId) }))
     : undefined;
 
   return {
@@ -324,22 +326,17 @@ export function parseMergeMemento(rawSnapshot: unknown): DuplicateMergeMemento |
     masterItemId,
     mergedDuplicateIds,
     mergedAt:
-      typeof rec.mergedAt === 'string'
-        ? rec.mergedAt
-        : typeof rec.timestamp === 'string'
-          ? rec.timestamp
-          : new Date().toISOString(),
+      typeof rec.mergedAt === 'string' ? rec.mergedAt
+        : typeof rec.timestamp === 'string' ? rec.timestamp : new Date().toISOString(),
     beforeMaster,
     mergedDuplicates,
     reassignedAssetIds:
       rec.reassignedAssetIds && typeof rec.reassignedAssetIds === 'object'
-        ? (rec.reassignedAssetIds as DuplicateMergeMemento['reassignedAssetIds'])
-        : undefined,
+        ? (rec.reassignedAssetIds as DuplicateMergeMemento['reassignedAssetIds']) : undefined,
+    ...(reassignedItemMetadata !== undefined ? { reassignedItemMetadata } : {}),
     mergedMetadataFields: Array.isArray(rec.mergedMetadataFields)
       ? (rec.mergedMetadataFields as string[])
-      : Array.isArray(rec.backfilledFields)
-        ? (rec.backfilledFields as string[])
-        : undefined,
+      : Array.isArray(rec.backfilledFields) ? (rec.backfilledFields as string[]) : undefined,
     mergedCreatorCount: typeof rec.mergedCreatorCount === 'number' ? rec.mergedCreatorCount : undefined,
   };
 }
@@ -379,6 +376,14 @@ export function buildMasterRestoreData(
   return { scalarData, restoredMetadata: currentMeta };
 }
 
+type OptionalAuditTx = Prisma.TransactionClient & {
+  duplicateMergeAudit?: {
+    create?: (args: Record<string, unknown>) => Promise<unknown>;
+    findFirst?: (args: Record<string, unknown>) => Promise<{ id?: string; masterItemId?: string; snapshotJson?: unknown } | null>;
+    delete?: (args: Record<string, unknown>) => Promise<unknown>;
+  };
+};
+
 export async function recordMergeMementoInTx(params: {
   tx: Prisma.TransactionClient;
   userId: string;
@@ -389,20 +394,23 @@ export async function recordMergeMementoInTx(params: {
 }): Promise<void> {
   const { tx, userId, projectId, primaryId, primaryMeta, memento } = params;
   const serialized = serializeMergeMemento(memento);
+  const existingStack = Array.isArray(primaryMeta.mergeMementoStack)
+    ? [...(primaryMeta.mergeMementoStack as unknown[])]
+    : primaryMeta.lastMergeMemento
+      ? [primaryMeta.lastMergeMemento]
+      : [];
+  existingStack.push(serialized);
+  primaryMeta.mergeMementoStack = existingStack;
   primaryMeta.lastMergeMemento = serialized;
-
-  const dynamicTx = tx as unknown as {
-    duplicateMergeAudit?: {
-      create?: (args: { data: Record<string, unknown> }) => Promise<unknown>;
-    };
-  };
-  if (typeof dynamicTx.duplicateMergeAudit?.create === 'function') {
-    await dynamicTx.duplicateMergeAudit.create({
+  const auditClient = (tx as OptionalAuditTx).duplicateMergeAudit;
+  if (typeof auditClient?.create === 'function') {
+    await auditClient.create({
       data: {
         userId,
         projectId: projectId ?? null,
         masterItemId: primaryId,
-        snapshotJson: serialized,
+        mergedDuplicateIds: memento.mergedDuplicateIds,
+        snapshotJson: serialized as Prisma.InputJsonValue,
       },
     });
   }
@@ -416,47 +424,51 @@ export async function executeUndoDuplicateMergeInTx(params: {
   effectiveProjectId?: string;
 }): Promise<{ restoredPrimaryId: string; restoredDuplicateIds: string[] }> {
   const { tx, helpers, userId, primaryItemId, effectiveProjectId } = params;
-  const dynamicTx = tx as unknown as {
-    duplicateMergeAudit?: {
-      findFirst?: (args: {
-        where: Record<string, unknown>;
-        orderBy?: Record<string, 'asc' | 'desc'>;
-      }) => Promise<{ id?: string; masterItemId?: string; snapshotJson?: unknown; mementoSnapshot?: unknown } | null>;
-      delete?: (args: { where: { id: string } }) => Promise<unknown>;
-    };
-  };
-
-  const auditWhere = {
-    masterItemId: primaryItemId,
-    userId,
-    ...(effectiveProjectId ? { projectId: effectiveProjectId } : {}),
-  };
-
-  const rawAuditRecord =
-    typeof dynamicTx.duplicateMergeAudit?.findFirst === 'function'
-      ? await dynamicTx.duplicateMergeAudit.findFirst({
-          where: auditWhere,
+  const auditClient = (tx as OptionalAuditTx).duplicateMergeAudit;
+  const auditRecord =
+    typeof auditClient?.findFirst === 'function'
+      ? await auditClient.findFirst({
+          where: {
+            masterItemId: primaryItemId,
+            userId,
+            ...(effectiveProjectId !== undefined ? { projectId: effectiveProjectId } : {}),
+          },
           orderBy: { createdAt: 'desc' },
         })
       : null;
 
   const masterItem = await tx.item?.findUnique?.({ where: { id: primaryItemId } });
   const masterMeta = asPlainObject(masterItem?.metadata);
-  const rawAuditPayload = rawAuditRecord?.snapshotJson ?? rawAuditRecord?.mementoSnapshot;
+  const rawStack = Array.isArray(masterMeta.mergeMementoStack)
+    ? [...(masterMeta.mergeMementoStack as unknown[])]
+    : [];
+  const topStackEntry =
+    rawStack.length > 0 ? rawStack.pop() : masterMeta.lastMergeMemento;
   const memento =
-    parseMergeMemento(rawAuditPayload) ??
+    parseMergeMemento(auditRecord?.snapshotJson) ??
+    parseMergeMemento(topStackEntry) ??
     parseMergeMemento(masterMeta.lastMergeMemento);
 
   if (!memento) {
     throw new NotFoundException(`No reversible merge memento found for item ${primaryItemId}`);
   }
 
-  // Pop the consumed audit record from the audit stack
-  if (rawAuditRecord?.id && typeof dynamicTx.duplicateMergeAudit?.delete === 'function') {
-    await dynamicTx.duplicateMergeAudit.delete({ where: { id: rawAuditRecord.id } });
+  let previousAuditRecord: { snapshotJson?: unknown } | null = null;
+  if (auditRecord?.id && typeof auditClient?.delete === 'function') {
+    await auditClient.delete({ where: { id: auditRecord.id } });
+    if (typeof auditClient?.findFirst === 'function') {
+      previousAuditRecord = await auditClient.findFirst({
+        where: {
+          masterItemId: primaryItemId,
+          userId,
+          ...(effectiveProjectId !== undefined ? { projectId: effectiveProjectId } : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
   }
 
-  const restoredMasterId = memento.masterItemId || primaryItemId;
+  const restoredMasterId = auditRecord?.masterItemId || memento.masterItemId || primaryItemId;
   const duplicateSnapshots = memento.mergedDuplicates ?? [];
   const duplicateIdsToRestore = Array.from(
     new Set([...memento.mergedDuplicateIds, ...duplicateSnapshots.map((d) => d.id)]),
@@ -465,16 +477,13 @@ export async function executeUndoDuplicateMergeInTx(params: {
   const eventScope = { userId, projectId: effectiveProjectId };
   const { scalarData, restoredMetadata } = buildMasterRestoreData(memento, masterItem?.metadata);
 
-  // If a prior merge audit record remains on the stack, restore it as lastMergeMemento
-  if (rawAuditRecord?.id && typeof dynamicTx.duplicateMergeAudit?.findFirst === 'function') {
-    const prevAuditRecord = await dynamicTx.duplicateMergeAudit.findFirst({
-      where: auditWhere,
-      orderBy: { createdAt: 'desc' },
-    });
-    const prevSnapshot = prevAuditRecord?.snapshotJson ?? prevAuditRecord?.mementoSnapshot;
-    if (prevAuditRecord && prevAuditRecord.id !== rawAuditRecord.id && prevSnapshot !== undefined) {
-      restoredMetadata.lastMergeMemento = prevSnapshot;
-    }
+  if (previousAuditRecord?.snapshotJson) {
+    restoredMetadata.lastMergeMemento = previousAuditRecord.snapshotJson;
+  } else if (rawStack.length > 0) {
+    restoredMetadata.mergeMementoStack = rawStack;
+    restoredMetadata.lastMergeMemento = rawStack[rawStack.length - 1];
+  } else {
+    delete restoredMetadata.mergeMementoStack;
   }
 
   const updatedMaster = await tx.item.update({
@@ -482,7 +491,9 @@ export async function executeUndoDuplicateMergeInTx(params: {
     data: { ...scalarData, metadata: restoredMetadata as Prisma.InputJsonValue, version: { increment: 1 } },
   });
 
-  await restoreMasterRelationsInTx(tx, restoredMasterId, memento.beforeMaster);
+  await restoreMasterRelationsInTx(tx, restoredMasterId, memento.beforeMaster, {
+    skipCountRecalc: duplicateIdsToRestore.length > 0,
+  });
 
   const enrichedMaster = updatedMaster
     ? {
@@ -512,53 +523,68 @@ export async function executeUndoDuplicateMergeInTx(params: {
 
   const snapshotByDupId = new Map(duplicateSnapshots.map((snap) => [snap.id, snap]));
 
-  const restoredDupItems = await Promise.all(
-    duplicateIdsToRestore.map(async (dupId) => {
-      const snap = snapshotByDupId.get(dupId);
-      const dupRestoreMeta: Record<string, unknown> = { ...(snap?.metadata ?? {}) };
-      delete dupRestoreMeta.mergedIntoId;
-      delete dupRestoreMeta.mergedAt;
+  const restoredDupItems: Array<{
+    dupId: string;
+    snap: MergedDuplicateSnapshot | undefined;
+    restoredDup: Record<string, unknown> | null | undefined;
+  }> = [];
+  for (const dupId of duplicateIdsToRestore) {
+    const snap = snapshotByDupId.get(dupId);
+    const dupRestoreMeta: Record<string, unknown> = { ...(snap?.metadata ?? {}) };
+    delete dupRestoreMeta.mergedIntoId;
+    delete dupRestoreMeta.mergedAt;
 
-      const restoredAttCount =
-        typeof snap?.attachmentCount === 'number'
-          ? snap.attachmentCount
-          : Array.isArray(snap?.attachmentIds)
-            ? snap.attachmentIds.length
-            : Array.isArray(snap?.attachments)
-              ? snap.attachments.length
-              : undefined;
-      const restoredHasFile =
-        typeof snap?.hasFile === 'boolean'
-          ? snap.hasFile
-          : restoredAttCount !== undefined
-            ? restoredAttCount > 0
+    const restoredAttCount =
+      typeof snap?.attachmentCount === 'number'
+        ? snap.attachmentCount
+        : Array.isArray(snap?.attachmentIds)
+          ? snap.attachmentIds.length
+          : Array.isArray(snap?.attachments)
+            ? snap.attachments.length
             : undefined;
+    const restoredNoteCount =
+      typeof snap?.noteCount === 'number'
+        ? snap.noteCount
+        : Array.isArray(snap?.noteIds)
+          ? snap.noteIds.length
+          : Array.isArray(snap?.notesList)
+            ? snap.notesList.length
+            : undefined;
+    const restoredHasFile =
+      typeof snap?.hasFile === 'boolean'
+        ? snap.hasFile
+        : restoredAttCount !== undefined
+          ? restoredAttCount > 0
+          : undefined;
 
-      const restoredDup = await tx.item.update({
-        where: { id: dupId },
-        data: {
-          deletedAt: null,
-          ...(snap?.title !== undefined ? { title: snap.title } : {}),
-          ...(snap?.citationKey !== undefined ? { citationKey: snap.citationKey } : {}),
-          ...(snap?.doi !== undefined ? { doi: snap.doi } : {}),
-          ...(restoredHasFile !== undefined ? { hasFile: restoredHasFile } : {}),
-          ...(restoredAttCount !== undefined ? { attachmentCount: restoredAttCount } : {}),
-          ...(Object.keys(dupRestoreMeta).length > 0 ? { metadata: dupRestoreMeta as Prisma.InputJsonValue } : {}),
-          version: { increment: 1 },
-        },
-      });
+    const restoredDup = await tx.item.update({
+      where: { id: dupId },
+      data: {
+        deletedAt: null,
+        ...(snap?.title !== undefined ? { title: snap.title } : {}),
+        ...(snap?.citationKey !== undefined ? { citationKey: snap.citationKey } : {}),
+        ...(snap?.doi !== undefined ? { doi: snap.doi } : {}),
+        ...(restoredHasFile !== undefined ? { hasFile: restoredHasFile } : {}),
+        ...(restoredAttCount !== undefined ? { attachmentCount: restoredAttCount } : {}),
+        ...(restoredNoteCount !== undefined ? { noteCount: restoredNoteCount } : {}),
+        ...(Object.keys(dupRestoreMeta).length > 0 ? { metadata: dupRestoreMeta as Prisma.InputJsonValue } : {}),
+        version: { increment: 1 },
+      },
+    });
 
-      await restoreDuplicateRelationsInTx(
-        tx,
-        restoredMasterId,
-        dupId,
-        snap,
-        duplicateIdsToRestore.length === 1 ? memento.reassignedAssetIds : undefined,
-      );
+    restoredDupItems.push({ dupId, snap, restoredDup });
+  }
 
-      return { dupId, snap, restoredDup };
-    }),
-  );
+  const countByItemId = await restoreMergeRelationsInTx({
+    tx,
+    restoredMasterId,
+    beforeMaster: memento.beforeMaster,
+    duplicateIdsToRestore,
+    snapshotByDupId,
+    reassignedAssetIds: memento.reassignedAssetIds,
+    reassignedItemMetadata: memento.reassignedItemMetadata,
+    skipMasterRestore: true,
+  });
 
   if (duplicateIdsToRestore.length > 0) {
     if (helpers.removeTombstonesBatch) {
@@ -625,14 +651,33 @@ export async function executeUndoDuplicateMergeInTx(params: {
     }
 
     const changeEntries = restoredDupItems.map(({ dupId, snap, restoredDup }) => {
+      const counts = countByItemId.get(dupId);
       const enrichedDup = restoredDup
         ? {
             ...restoredDup,
+            ...(counts?.hasFile !== undefined ? { hasFile: counts.hasFile } : {}),
+            ...(counts?.attachmentCount !== undefined ? { attachmentCount: counts.attachmentCount } : {}),
+            ...(counts?.noteCount !== undefined ? { noteCount: counts.noteCount } : {}),
             ...(snap?.contributors !== undefined
               ? { contributors: snap.contributors }
               : {}),
             ...(snap?.identifiers !== undefined
               ? { identifiers: snap.identifiers }
+              : {}),
+            ...(snap?.notesList !== undefined
+              ? { notesList: snap.notesList }
+              : {}),
+            ...(snap?.attachments !== undefined
+              ? { attachments: snap.attachments }
+              : {}),
+            ...(snap?.tagIds !== undefined
+              ? { tagIds: snap.tagIds, itemTags: snap.tagIds.map((tagId) => ({ tagId })) }
+              : {}),
+            ...(snap?.collectionIds !== undefined
+              ? {
+                  collectionIds: snap.collectionIds,
+                  collectionItems: snap.collectionIds.map((collectionId) => ({ collectionId })),
+                }
               : {}),
           }
         : { id: dupId };

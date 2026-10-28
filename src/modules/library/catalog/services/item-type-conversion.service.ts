@@ -21,6 +21,7 @@ import {
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
   ItemProvenancePolicy,
+  getEffectiveBaseFieldMap,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 
@@ -101,6 +102,7 @@ export class ItemTypeConversionService {
       preview,
       targetFields,
       this.transformer,
+      { retainUnmappedInExtra: options.retainUnmappedInExtra ?? true },
     );
 
     const effectiveProjectId =
@@ -183,6 +185,7 @@ export function buildTypeConversionUpdatePayload(
   preview: TypeConversionPreview,
   targetFields: ItemFieldDefinition[],
   transformer: ItemTransformer,
+  options?: { retainUnmappedInExtra?: boolean },
 ): Record<string, unknown> {
   const projected = preview.projectedItem;
   const dynamicExtraFields: Record<string, unknown> = {
@@ -191,6 +194,7 @@ export function buildTypeConversionUpdatePayload(
   delete dynamicExtraFields.itemType;
   delete dynamicExtraFields.type;
 
+  const targetFieldKeySet = new Set(targetFields.map((f) => f.key));
   const droppedSet = new Set(
     preview.droppedFields.map((d) => d.field.toLowerCase()),
   );
@@ -201,19 +205,21 @@ export function buildTypeConversionUpdatePayload(
   );
 
   for (const dropped of preview.droppedFields) {
-    delete dynamicExtraFields[dropped.field];
+    dynamicExtraFields[dropped.field] = null;
     const aliasKey =
       FIELD_ALIASES[dropped.field] || REVERSE_FIELD_ALIASES[dropped.field];
-    if (aliasKey) delete dynamicExtraFields[aliasKey];
+    if (aliasKey && !targetFieldKeySet.has(aliasKey)) {
+      dynamicExtraFields[aliasKey] = null;
+    }
   }
   for (const mapped of preview.mappedFields) {
     if (mapped.fromField !== mapped.toField) {
-      delete dynamicExtraFields[mapped.fromField];
+      dynamicExtraFields[mapped.fromField] = null;
       const aliasKey =
         FIELD_ALIASES[mapped.fromField] ||
         REVERSE_FIELD_ALIASES[mapped.fromField];
       if (aliasKey && aliasKey !== mapped.toField) {
-        delete dynamicExtraFields[aliasKey];
+        dynamicExtraFields[aliasKey] = null;
       }
     }
   }
@@ -236,7 +242,9 @@ export function buildTypeConversionUpdatePayload(
     metadataPatch[dropped.field] = null;
     const aliasKey =
       FIELD_ALIASES[dropped.field] || REVERSE_FIELD_ALIASES[dropped.field];
-    if (aliasKey) metadataPatch[aliasKey] = null;
+    if (aliasKey && !targetFieldKeySet.has(aliasKey)) {
+      metadataPatch[aliasKey] = null;
+    }
   }
   for (const mapped of preview.mappedFields) {
     if (mapped.fromField !== mapped.toField) {
@@ -248,6 +256,48 @@ export function buildTypeConversionUpdatePayload(
         metadataPatch[aliasKey] = null;
       }
     }
+  }
+
+  const existingRec = existing as unknown as Record<string, unknown>;
+  const existingMetaRec =
+    existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)
+      ? (existing.metadata as Record<string, unknown>)
+      : {};
+  const existingExtraRec =
+    existing.extraFields && typeof existing.extraFields === 'object' && !Array.isArray(existing.extraFields)
+      ? (existing.extraFields as Record<string, unknown>)
+      : {};
+
+  if (options?.retainUnmappedInExtra === false) {
+    for (const container of [existingMetaRec, existingExtraRec, dynamicExtraFields]) {
+      for (const k of Object.keys(container)) {
+        if (/^__unmapped_/i.test(k)) {
+          dynamicExtraFields[k] = null;
+          metadataPatch[k] = null;
+        }
+      }
+    }
+    for (const dropped of preview.droppedFields) {
+      const unmappedKey = `__unmapped_${preview.sourceType}_${dropped.field}`;
+      dynamicExtraFields[unmappedKey] = null;
+      metadataPatch[unmappedKey] = null;
+    }
+  } else {
+    for (const k of new Set([...Object.keys(existingMetaRec), ...Object.keys(existingExtraRec)])) {
+      if (/^__unmapped_/i.test(k) && dynamicExtraFields[k] === undefined) {
+        dynamicExtraFields[k] = null;
+        metadataPatch[k] = null;
+      }
+    }
+  }
+
+  const hadShortTitle = Boolean(
+    existingRec.shortTitle || existingMetaRec.shortTitle || existingExtraRec.shortTitle,
+  );
+  const projectedShortTitle = transformer.getItemFieldValue(projected, 'shortTitle');
+  if (hadShortTitle && (projectedShortTitle === undefined || projectedShortTitle === null || projectedShortTitle === '')) {
+    dynamicExtraFields.shortTitle = null;
+    metadataPatch.shortTitle = null;
   }
 
   const { fieldProvenance, lockedFields } =
@@ -267,6 +317,7 @@ export function buildTypeConversionUpdatePayload(
     metadata: metadataPatch,
   };
 
+  const targetBaseMap = getEffectiveBaseFieldMap(targetType);
   for (const col of ITEM_COLUMN_METADATA_FIELDS) {
     if (FIELD_ALIASES[col] && FIELD_ALIASES[col] !== col) continue;
 
@@ -274,11 +325,18 @@ export function buildTypeConversionUpdatePayload(
     if (droppedSet.has(colLower) || mappedOutSet.has(colLower)) {
       updatePayload[col] = null;
     } else {
+      const mappedTargetField =
+        targetBaseMap[col] ||
+        (col === 'issue' ? targetBaseMap.number : undefined);
       const val =
         transformer.getItemFieldValue(projected, col) ??
-        (existing as unknown as Record<string, unknown>)[col];
-      if (val !== undefined) {
+        (mappedTargetField
+          ? transformer.getItemFieldValue(projected, mappedTargetField)
+          : undefined);
+      if (val !== undefined && val !== null && val !== '') {
         updatePayload[col] = val;
+      } else if (col !== 'title' && col !== 'itemType') {
+        updatePayload[col] = null;
       }
     }
   }

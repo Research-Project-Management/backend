@@ -45,6 +45,7 @@ import {
   IngestionRunReporterService,
   IngestionRunProgressResult,
 } from './ingestion-run-reporter.service';
+import { isRetryableIngestionError } from '@/modules/library/ingestion/domain/ingestion-error.classifier';
 
 const gzipAsync = promisify(zlib.gzip);
 
@@ -108,7 +109,7 @@ export class IngestionService {
    */
   async submit(
     envelope: IngestionSubmissionEnvelope,
-    options?: { enqueue?: boolean },
+    options?: { enqueue?: boolean; skipAsyncDispatch?: boolean },
   ): Promise<IngestionAcceptedResult> {
     if (!envelope.userId) {
       throw new BadRequestException(
@@ -124,7 +125,7 @@ export class IngestionService {
     // 1. Idempotency Check & Atomic Claim
     if (idempotencyKey) {
       const existingRun = await this.repo.findRunByIdempotencyKey(
-        { userId: envelope.userId, projectId: envelope.projectId },
+        { userId: envelope.userId, projectId: envelope.projectId ?? null },
         idempotencyKey,
       );
 
@@ -220,10 +221,10 @@ export class IngestionService {
           err.code === 'P2002') ||
         (err instanceof Error && err.message.includes('Unique constraint'));
 
-      // If a concurrent request inserted with the exact same (userId, idempotencyKey), Prisma throws P2002
+      // If a concurrent request inserted with the exact same (userId, projectId, idempotencyKey), Prisma throws P2002
       if (idempotencyKey && isP2002) {
         const raceRun = await this.repo.findRunByIdempotencyKey(
-          { userId: envelope.userId, projectId: envelope.projectId },
+          { userId: envelope.userId, projectId: envelope.projectId ?? null },
           idempotencyKey,
         );
         if (raceRun) {
@@ -253,7 +254,8 @@ export class IngestionService {
 
     // 3. Return the durable run immediately and dispatch to IngestionQueueService
     // for bounded concurrency and worker resilience (unless direct synchronous execution is requested).
-    const shouldEnqueue = options?.enqueue ?? true;
+    const shouldEnqueue =
+      (options?.enqueue ?? true) && !options?.skipAsyncDispatch;
     if (shouldEnqueue) {
       void this.queue
         .enqueue(runId, projectId, envelopeToPersist)
@@ -352,7 +354,10 @@ export class IngestionService {
     const projectId = command.projectId || command.userId || '';
     const envelope = this.mapCommandToEnvelope(projectId, command);
 
-    const submissionRes = await this.submit(envelope, { enqueue: false });
+    const submissionRes = await this.submit(envelope, {
+      enqueue: false,
+      skipAsyncDispatch: true,
+    });
     const runId = submissionRes.runId;
 
     if (
@@ -397,15 +402,25 @@ export class IngestionService {
       this.logger.error(
         `Ingestion pipeline failed for run ${runId}: ${errMsg}`,
       );
-      await this.repo
-        .updateRunStatus(projectId, runId, IngestionStatus.FAILED_FINAL, {
-          lastError: errMsg,
-        })
-        .catch((repoErr: unknown) => {
-          this.logger.error(
-            `Failed to update run status to FAILED_FINAL for run ${runId}: ${repoErr instanceof Error ? repoErr.message : String(repoErr)}`,
-          );
-        });
+      const alreadyTransitioned = Boolean(
+        (err as { __runStatusTransitioned?: boolean } | null | undefined)
+          ?.__runStatusTransitioned,
+      );
+      if (!alreadyTransitioned) {
+        const isRetryable = this.isRetryableIngestionError(err, envelope);
+        const targetStatus = isRetryable
+          ? IngestionStatus.FAILED_RETRYABLE
+          : IngestionStatus.FAILED_FINAL;
+        await this.repo
+          .updateRunStatus(projectId, runId, targetStatus, {
+            lastError: errMsg,
+          })
+          .catch((repoErr: unknown) => {
+            this.logger.error(
+              `Failed to update run status to ${targetStatus} for run ${runId}: ${repoErr instanceof Error ? repoErr.message : String(repoErr)}`,
+            );
+          });
+      }
 
       return {
         runId,
@@ -428,7 +443,8 @@ export class IngestionService {
     return {
       runId,
       status:
-        updatedRun?.status === IngestionStatus.FAILED_FINAL
+        updatedRun?.status === IngestionStatus.FAILED_FINAL ||
+        updatedRun?.status === IngestionStatus.FAILED_RETRYABLE
           ? 'failed'
           : 'completed',
       itemId,
@@ -437,6 +453,13 @@ export class IngestionService {
       item,
       errorMessage: updatedRun?.lastError ?? undefined,
     };
+  }
+
+  private isRetryableIngestionError(
+    err: unknown,
+    envelope?: IngestionSubmissionEnvelope,
+  ): boolean {
+    return isRetryableIngestionError(err, envelope, this.pipeline);
   }
 
   private mapCommandToEnvelope(
@@ -562,13 +585,32 @@ export class IngestionService {
         );
     }
 
+    const rawOverrides =
+      'overrides' in command &&
+      command.overrides &&
+      typeof command.overrides === 'object'
+        ? (command.overrides as Record<string, unknown>)
+        : undefined;
+    const overrideCollectionIds = Array.isArray(rawOverrides?.collectionIds)
+      ? (rawOverrides.collectionIds as string[])
+      : typeof rawOverrides?.collectionId === 'string' &&
+          rawOverrides.collectionId.trim()
+        ? [rawOverrides.collectionId.trim()]
+        : undefined;
+    const overrideTagIds = Array.isArray(rawOverrides?.tagIds)
+      ? (rawOverrides.tagIds as string[])
+      : undefined;
+
     return {
       projectId,
       userId: command.userId,
       idempotencyKey: command.idempotencyKey,
       payload,
-      collectionIds: command.collectionId ? [command.collectionId] : undefined,
-      overrides: 'overrides' in command ? command.overrides : undefined,
+      collectionIds: command.collectionId
+        ? [command.collectionId]
+        : overrideCollectionIds,
+      tagIds: overrideTagIds,
+      overrides: rawOverrides,
     };
   }
 

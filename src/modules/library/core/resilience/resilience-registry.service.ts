@@ -32,12 +32,53 @@ export class ResilienceRegistryService {
     'openlibrary',
   ]);
 
+  private static readonly HOST_TO_PROVIDER_MAP: Record<string, string> = {
+    'export.arxiv.org': 'arxiv',
+    'arxiv.org': 'arxiv',
+    arxiv: 'arxiv',
+    'api.crossref.org': 'crossref',
+    crossref: 'crossref',
+    'eutils.ncbi.nlm.nih.gov': 'pubmed',
+    'api.ncbi.nlm.nih.gov': 'pubmed',
+    'www.ebi.ac.uk': 'pubmed',
+    pubmed: 'pubmed',
+    'api.semanticscholar.org': 'semantic-scholar',
+    semanticscholar: 'semantic-scholar',
+    'semantic-scholar': 'semantic-scholar',
+    'api.openalex.org': 'openalex',
+    openalex: 'openalex',
+    'api.unpaywall.org': 'unpaywall',
+    unpaywall: 'unpaywall',
+    'dblp.org': 'dblp',
+    'dblp.uni-trier.de': 'dblp',
+    dblp: 'dblp',
+    'openlibrary.org': 'openlibrary',
+    openlibrary: 'openlibrary',
+    'doi.org': 'doi-org',
+    'dx.doi.org': 'doi-org',
+    'doi-org': 'doi-org',
+  };
+
   private readonly breakers = new Map<string, CircuitBreaker>();
   private readonly limiters = new Map<string, TokenBucketRateLimiter>();
   private readonly dynamicHostLastUsed = new Map<string, number>();
 
   constructor() {
     this.registerDefaults();
+  }
+
+  /**
+   * Normalizes provider names and known academic hostnames to canonical registry keys.
+   */
+  public normalizeKey(key: string): string {
+    const cleaned = (key || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^(https?:\/\/)/i, '')
+      .replace(/\/.*$/, '')
+      .replace(/:\d+$/, '')
+      .replace(/\.+$/, '');
+    return ResilienceRegistryService.HOST_TO_PROVIDER_MAP[cleaned] ?? cleaned;
   }
 
   private touchDynamicHost(name: string): void {
@@ -89,9 +130,10 @@ export class ResilienceRegistryService {
    * Retrieves or initializes a Circuit Breaker for the given provider name.
    */
   public getCircuitBreaker(
-    name: string,
+    rawName: string,
     options?: CircuitBreakerOptions,
   ): CircuitBreaker {
+    const name = this.normalizeKey(rawName);
     const now = Date.now();
     const lastUsed = this.dynamicHostLastUsed.get(name);
     if (
@@ -118,9 +160,10 @@ export class ResilienceRegistryService {
    * Retrieves or initializes a Rate Limiter for the given provider name.
    */
   public getRateLimiter(
-    name: string,
+    rawName: string,
     options?: RateLimiterOptions,
   ): TokenBucketRateLimiter {
+    const name = this.normalizeKey(rawName);
     const now = Date.now();
     const lastUsed = this.dynamicHostLastUsed.get(name);
     if (

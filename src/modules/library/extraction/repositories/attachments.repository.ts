@@ -54,7 +54,7 @@ export class AttachmentsRepository {
   async findManyByItemId(itemId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.attachment.findMany({
-      where: { itemId },
+      where: { itemId, deletedAt: null },
       include: {
         revisions: { orderBy: { revisionNumber: 'desc' } },
       },
@@ -283,6 +283,10 @@ export class AttachmentsRepository {
         where: { itemId: { in: cleanSourceIds } },
         data: { itemId: targetItemId },
       });
+      await Promise.all([
+        this.syncItemAttachmentCounts(targetItemId, tx),
+        ...cleanSourceIds.map((srcId) => this.syncItemAttachmentCounts(srcId, tx)),
+      ]);
       return [];
     }
 
@@ -295,8 +299,6 @@ export class AttachmentsRepository {
 
     const survivingByHash = new Map<string, (typeof sortedAttachments)[0]>();
     const survivingByUrl = new Map<string, (typeof sortedAttachments)[0]>();
-    const survivingFileIds = new Set<string>();
-    const deletedCandidateFileIds = new Set<string>();
     let hasPrimaryPdf = false;
 
     for (const att of sortedAttachments) {
@@ -327,16 +329,23 @@ export class AttachmentsRepository {
         const annotIdsToMove: string[] = [];
         const extractQuote = (a: { quoteText?: string | null; textSelection?: string | null }) =>
           (a.quoteText ?? a.textSelection ?? '').trim().toLowerCase();
+        const extractComment = (a: { comment?: string | null }) =>
+          (a.comment ?? '').trim();
 
         for (const dupAnn of dupAnnots) {
           const dupQuote = extractQuote(dupAnn as { quoteText?: string | null; textSelection?: string | null });
+          const dupComment = extractComment(dupAnn as { comment?: string | null });
           const isIdentical = survivorAnnots.some((sa) => {
             const saQuote = extractQuote(sa as { quoteText?: string | null; textSelection?: string | null });
+            const saComment = extractComment(sa as { comment?: string | null });
+            const commentsCompatible =
+              dupComment.length === 0 || dupComment === saComment;
             return (
               sa.pageIndex === dupAnn.pageIndex &&
               sa.type === dupAnn.type &&
               dupQuote.length > 0 &&
-              saQuote === dupQuote
+              saQuote === dupQuote &&
+              commentsCompatible
             );
           });
 
@@ -349,12 +358,18 @@ export class AttachmentsRepository {
         }
 
         if (duplicateAnnotIdsToDelete.length > 0) {
-          await client.annotation.deleteMany({ where: { id: { in: duplicateAnnotIdsToDelete } } });
+          await client.annotation.updateMany({
+            where: { id: { in: duplicateAnnotIdsToDelete } },
+            data: { deletedAt: new Date(), version: { increment: 1 } },
+          });
         }
         if (annotIdsToMove.length > 0) {
           await client.annotation.updateMany({
             where: { id: { in: annotIdsToMove } },
-            data: { attachmentId: existingSurvivor.id },
+            data: {
+              attachmentId: existingSurvivor.id,
+              version: { increment: 1 },
+            },
           });
         }
         if (client.fullTextIndex?.updateMany) {
@@ -390,15 +405,6 @@ export class AttachmentsRepository {
       // Surviving attachment: register hash/url and enforce single primary_pdf
       if (hashKey) survivingByHash.set(hashKey, att);
       if (urlKey) survivingByUrl.set(urlKey, att);
-      if (att.fileId) survivingFileIds.add(att.fileId);
-      const survivorRevisions = (
-        att as { revisions?: Array<{ fileId?: string | null }> }
-      ).revisions;
-      if (Array.isArray(survivorRevisions)) {
-        for (const rev of survivorRevisions) {
-          if (rev.fileId) survivingFileIds.add(rev.fileId);
-        }
-      }
 
       const isPrimaryPdf = att.attachmentType === 'primary_pdf';
       let nextAttachmentType = att.attachmentType;
@@ -428,11 +434,7 @@ export class AttachmentsRepository {
 
     await Promise.all([this.syncItemAttachmentCounts(targetItemId, tx), ...cleanSourceIds.map((srcId) => this.syncItemAttachmentCounts(srcId, tx))]);
 
-    const orphanedFileIds = Array.from(deletedCandidateFileIds).filter(
-      (fid) => !survivingFileIds.has(fid),
-    );
-
-    return orphanedFileIds;
+    return [];
   }
 
   async updateLinkedFile(
@@ -651,11 +653,31 @@ export class AttachmentsRepository {
     return (await this.getClient(tx).attachment.deleteMany({ where: { itemId } })).count;
   }
 
-  async softDeleteByItemId(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
-    return (await this.getClient(tx).attachment.updateMany({ where: { itemId, deletedAt: null }, data: { deletedAt: new Date() } })).count;
+  async softDeleteByItemId(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const count = (
+      await this.getClient(tx).attachment.updateMany({
+        where: { itemId, deletedAt: null },
+        data: { deletedAt: new Date() },
+      })
+    ).count;
+    await this.syncItemAttachmentCounts(itemId, tx);
+    return count;
   }
 
-  async restoreByItemId(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
-    return (await this.getClient(tx).attachment.updateMany({ where: { itemId, deletedAt: { not: null } }, data: { deletedAt: null } })).count;
+  async restoreByItemId(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const count = (
+      await this.getClient(tx).attachment.updateMany({
+        where: { itemId, deletedAt: { not: null } },
+        data: { deletedAt: null },
+      })
+    ).count;
+    await this.syncItemAttachmentCounts(itemId, tx);
+    return count;
   }
 }

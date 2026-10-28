@@ -199,7 +199,7 @@ export class MetadataExecutorService {
     callerSignal?: AbortSignal,
   ): Promise<ProviderExecutionResult> {
     const circuitBreaker = this.getCircuitBreaker(provider.id);
-    if (!circuitBreaker.canExecute()) {
+    if (!circuitBreaker.peekCanExecute()) {
       this.logger.warn(
         `[CircuitBreaker] Short-circuiting call to provider ${provider.id} (State: ${circuitBreaker.getState()})`,
       );
@@ -230,6 +230,10 @@ export class MetadataExecutorService {
       let shouldRetry = false;
       let retryDelay = 0;
       let retryStatus: ProviderExecutionStatus = 'unavailable';
+      const attemptFailureSeqBefore =
+        typeof circuitBreaker.getFailureSequence === 'function'
+          ? circuitBreaker.getFailureSequence()
+          : 0;
 
       let releaseGlobal: (() => void) | undefined;
       let releaseProvider: (() => void) | undefined;
@@ -400,15 +404,24 @@ export class MetadataExecutorService {
         }
       }
 
+      const attemptFailureSeqAfter =
+        typeof circuitBreaker.getFailureSequence === 'function'
+          ? circuitBreaker.getFailureSequence()
+          : 0;
+      const alreadyRecordedByInnerBreaker =
+        attemptFailureSeqAfter > attemptFailureSeqBefore;
+
       if (execResult) {
         if (
           execResult.status === 'found' ||
-          execResult.status === 'not_found'
+          execResult.status === 'not_found' ||
+          execResult.status === 'invalid_payload'
         ) {
           circuitBreaker.recordSuccess();
         } else if (
-          execResult.status === 'unavailable' ||
-          execResult.status === 'timeout'
+          (execResult.status === 'unavailable' ||
+            execResult.status === 'timeout') &&
+          !alreadyRecordedByInnerBreaker
         ) {
           circuitBreaker.recordFailure(true);
         }
@@ -464,7 +477,9 @@ export class MetadataExecutorService {
           ? errObj.message
           : '';
 
-    if (statusCode === 404) return 'not_found';
+    if (statusCode === 404 || /\b404\b|not[\s_-]*found/i.test(errMessage)) {
+      return 'not_found';
+    }
     if (statusCode === 429 || /rate\s*limit/i.test(errMessage))
       return 'rate_limited';
     if (statusCode === 401 || statusCode === 403) return 'configuration_error';
@@ -481,7 +496,15 @@ export class MetadataExecutorService {
       return 'unavailable';
     }
 
-    if (statusCode === 400) return 'invalid_payload';
+    if (
+      statusCode === 400 ||
+      statusCode === 422 ||
+      /\b(?:400|422)\b|bad[\s_-]*request|invalid.*(?:payload|query|identifier|doi|arxiv|pmid|isbn)/i.test(
+        errMessage,
+      )
+    ) {
+      return 'invalid_payload';
+    }
 
     return 'unavailable';
   }

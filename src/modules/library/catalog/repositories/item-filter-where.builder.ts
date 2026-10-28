@@ -96,6 +96,20 @@ export function buildItemSearchCondition(
   const normalizedDoiCandidate = extractedIds.cleanDoi;
   const normalizedIssnCandidate = extractedIds.cleanIssn;
 
+  const relationalIdentTerms = Array.from(
+    new Set(
+      [
+        trimmed,
+        normalizedDoiCandidate,
+        normalizedIsbnCandidate,
+        normalizedIssnCandidate,
+        normalizedArxivCandidate,
+        normalizedPmidCandidate,
+        normalizedPmcidCandidate,
+      ].filter((v): v is string => Boolean(v && v.trim())),
+    ),
+  );
+
   const baseClauses: Prisma.ItemWhereInput[] = [
     { title: { contains: trimmed, mode: 'insensitive' } },
     { publicationTitle: { contains: trimmed, mode: 'insensitive' } },
@@ -108,6 +122,11 @@ export function buildItemSearchCondition(
     },
     { citationKey: { contains: trimmed, mode: 'insensitive' } },
     ...(numericYear !== null ? [{ year: numericYear }] : []),
+    ...relationalIdentTerms.map((term) => ({
+      identifiers: {
+        some: { value: { contains: term, mode: 'insensitive' as const } },
+      },
+    })),
     {
       metadata: {
         path: ['isbn'],

@@ -213,6 +213,9 @@ export class RetractionScannerProvider {
             ...(Array.isArray(message?.['update-to']) ? message['update-to'] : []),
           ];
           if (Array.isArray(updateTo) && updateTo.length > 0) {
+            let bestNotice: RetractionDetails | null = null;
+            let bestRank = 0;
+
             for (const update of updateTo) {
               const updateType = (update.type || '').toLowerCase();
               const updateNoticeUrl = update.doi
@@ -237,38 +240,42 @@ export class RetractionScannerProvider {
                 };
               }
               if (
-                updateType === 'expression_of_concern' ||
-                updateType === 'expression-of-concern' ||
-                updateType === 'concern'
+                (updateType === 'expression_of_concern' ||
+                  updateType === 'expression-of-concern' ||
+                  updateType === 'concern') &&
+                bestRank < 2
               ) {
-                return {
-                  retraction: {
-                    nature: 'expression_of_concern',
-                    reason:
-                      update.label || 'Publisher issued expression of concern',
-                    noticeUrl: updateNoticeUrl,
-                    date: update.updated?.['date-time'] || undefined,
-                    source: 'crossref',
-                  },
-                  isVerifiedClean: false,
+                bestRank = 2;
+                bestNotice = {
+                  nature: 'expression_of_concern',
+                  reason:
+                    update.label || 'Publisher issued expression of concern',
+                  noticeUrl: updateNoticeUrl,
+                  date: update.updated?.['date-time'] || undefined,
+                  source: 'crossref',
+                };
+              } else if (
+                (updateType === 'correction' ||
+                  updateType === 'erratum' ||
+                  updateType === 'corrigendum') &&
+                bestRank < 1
+              ) {
+                bestRank = 1;
+                bestNotice = {
+                  nature: 'correction',
+                  reason: update.label || 'Publisher issued correction',
+                  noticeUrl: updateNoticeUrl,
+                  date: update.updated?.['date-time'] || undefined,
+                  source: 'crossref',
                 };
               }
-              if (
-                updateType === 'correction' ||
-                updateType === 'erratum' ||
-                updateType === 'corrigendum'
-              ) {
-                return {
-                  retraction: {
-                    nature: 'correction',
-                    reason: update.label || 'Publisher issued correction',
-                    noticeUrl: updateNoticeUrl,
-                    date: update.updated?.['date-time'] || undefined,
-                    source: 'crossref',
-                  },
-                  isVerifiedClean: false,
-                };
-              }
+            }
+
+            if (bestNotice) {
+              return {
+                retraction: bestNotice,
+                isVerifiedClean: false,
+              };
             }
           }
 

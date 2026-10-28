@@ -533,5 +533,117 @@ describe('Vietnamese & Cultural Citation Engine', () => {
       expect(batchResult.bibliographyText).toContain('Brown, A.');
       expect(batchResult.bibliographyText).toContain('Smith, J.');
     });
+
+    it('does not misclassify foreign authors with short ASCII surnames (Chu, Ma, Le, Do) as Vietnamese in TCVN', () => {
+      const { TcvnCitationFormatterService } = require('@/modules/library/citation/services/tcvn-citation-formatter.service');
+      expect(
+        TcvnCitationFormatterService.isVietnameseAuthor({
+          family: 'Chu',
+          given: 'Michael',
+        }),
+      ).toBe(false);
+      expect(
+        TcvnCitationFormatterService.isVietnameseAuthor({
+          family: 'Ma',
+          given: 'Wei',
+        }),
+      ).toBe(false);
+      expect(
+        TcvnCitationFormatterService.isVietnameseAuthor({
+          family: 'Le',
+          given: 'Jean',
+        }),
+      ).toBe(false);
+      expect(
+        TcvnCitationFormatterService.isVietnameseAuthor({
+          family: 'Le',
+          given: 'Van An',
+        }),
+      ).toBe(true);
+    });
+
+    it('preserves itemId in formatTcvnBatch when TCVN sorting reorders Vietnamese before foreign items', () => {
+      const items: CslItemData[] = [
+        {
+          id: 'smith2020',
+          _itemId: 'uuid-foreign-1',
+          type: 'article-journal',
+          title: 'English Paper First in Input',
+          author: [{ family: 'Smith', given: 'John' }],
+          issued: { 'date-parts': [[2020]] },
+        },
+        {
+          id: 'nguyen2024',
+          _itemId: 'uuid-vn-2',
+          type: 'article-journal',
+          title: 'Bài báo tiếng Việt đứng sau trong mảng đầu vào',
+          author: [{ family: 'Nguyễn', given: 'Văn An' }],
+          issued: { 'date-parts': [[2024]] },
+        },
+      ];
+
+      const batchRes = engine.formatBatch(items, 'tcvn');
+      expect(batchRes.citations[0].id).toBe('nguyen2024');
+      expect((batchRes.citations[0] as any).itemId).toBe('uuid-vn-2');
+      expect(batchRes.citations[1].id).toBe('smith2020');
+      expect((batchRes.citations[1] as any).itemId).toBe('uuid-foreign-1');
+    });
+
+    it('extracts multiple citation key alias lines, parses comma-containing institutions and month ranges, and escapes BibTeX special characters safely', () => {
+      const { extractItemCitationAliases } = require('@/modules/library/citation/domain/citation-key-resolver.domain');
+      const { CslStyleFormatterService } = require('@/modules/library/citation/services/csl-style-formatter.service');
+      const { TcvnCitationFormatterService } = require('@/modules/library/citation/services/tcvn-citation-formatter.service');
+
+      const aliases = extractItemCitationAliases({
+        id: 'item-1',
+        citationKey: 'primary2024',
+        extra: 'Citation Key: legacy2023\ntex.ids: alt2022a, alt2022b',
+      } as any);
+      expect(aliases).toEqual(
+        expect.arrayContaining(['primary2024', 'legacy2023', 'alt2022a', 'alt2022b']),
+      );
+
+      expect(
+        CslJsonMapper.parseStringName('University of California, Berkeley'),
+      ).toEqual({
+        literal: 'University of California, Berkeley',
+      });
+
+      expect(CslJsonMapper.parseCslDate('May–June 2023')).toEqual({
+        'date-parts': [
+          [2023, 5],
+          [2023, 6],
+        ],
+      });
+
+      const styleFormatter = new CslStyleFormatterService(
+        new TcvnCitationFormatterService(),
+      );
+      expect(
+        styleFormatter.escapeBibtexValue(
+          '50% gain in R&D #1_test with $\\alpha_1$',
+          'title',
+        ),
+      ).toBe('50\\% gain in R\\&D \\#1\\_test with $\\alpha_1$');
+      expect(
+        styleFormatter.escapeBibtexValue(
+          'https://example.com/a_b?x=1&y=2#sec',
+          'url',
+        ),
+      ).toBe('https://example.com/a_b?x=1&y=2#sec');
+
+      const supplement = Object.fromEntries(
+        styleFormatter.collectBibtexSupplementPairs(
+          {
+            id: 'art1',
+            type: 'article-journal',
+            issue: '4',
+            number: 'ART-99',
+          },
+          'article',
+        ),
+      );
+      expect(supplement.number).toBe('4');
+    });
   });
 });

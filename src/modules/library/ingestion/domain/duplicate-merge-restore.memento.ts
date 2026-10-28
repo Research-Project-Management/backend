@@ -1,25 +1,56 @@
-import { Prisma, RelationType } from '@prisma/client';
+import { AttachmentType, Prisma, RelationType } from '@prisma/client';
 import type {
   MasterItemSnapshot,
   MergedDuplicateSnapshot,
 } from './duplicate-merge-relations.memento';
 
+export async function syncRestoredItemCountsInTx(
+  tx: Prisma.TransactionClient,
+  itemId: string,
+): Promise<{ hasFile?: boolean; attachmentCount?: number; noteCount?: number }> {
+  const hasAttCount = typeof tx.attachment?.count === 'function';
+  const hasNoteCount = typeof tx.note?.count === 'function';
+  if (!hasAttCount && !hasNoteCount) return {};
+
+  const countData: {
+    hasFile?: boolean;
+    attachmentCount?: number;
+    noteCount?: number;
+  } = {};
+  if (hasAttCount) {
+    const liveAttCount = await tx.attachment.count({
+      where: { itemId, deletedAt: null },
+    });
+    countData.hasFile = liveAttCount > 0;
+    countData.attachmentCount = liveAttCount;
+  }
+  if (hasNoteCount) {
+    const liveNoteCount = await tx.note.count({
+      where: { itemId, deletedAt: null },
+    });
+    countData.noteCount = liveNoteCount;
+  }
+  if (typeof tx.item?.updateMany === 'function') {
+    await tx.item.updateMany({
+      where: { id: itemId },
+      data: countData,
+    });
+  } else if (typeof tx.item?.update === 'function') {
+    await tx.item.update({
+      where: { id: itemId },
+      data: countData,
+    });
+  }
+  return countData;
+}
+
 export async function restoreMasterRelationsInTx(
   tx: Prisma.TransactionClient,
   restoredMasterId: string,
   beforeMaster?: MasterItemSnapshot,
+  options?: { skipCountRecalc?: boolean },
 ): Promise<void> {
   if (!beforeMaster) return;
-  const dynTx = tx as unknown as {
-    state?: {
-      deleteMany?: (args: Record<string, unknown>) => Promise<unknown>;
-      createMany?: (args: Record<string, unknown>) => Promise<unknown>;
-    };
-    itemIdentifier?: {
-      deleteMany?: (args: Record<string, unknown>) => Promise<unknown>;
-      upsert?: (args: Record<string, unknown>) => Promise<unknown>;
-    };
-  };
 
   if (Array.isArray(beforeMaster.tagIds)) {
     if (typeof tx.itemTag?.deleteMany === 'function') {
@@ -94,8 +125,8 @@ export async function restoreMasterRelationsInTx(
   }
 
   if (Array.isArray(beforeMaster.identifiers)) {
-    if (typeof dynTx.itemIdentifier?.deleteMany === 'function') {
-      await dynTx.itemIdentifier.deleteMany({
+    if (typeof tx.itemIdentifier?.deleteMany === 'function') {
+      await tx.itemIdentifier.deleteMany({
         where: {
           itemId: restoredMasterId,
           ...(beforeMaster.identifiers.length > 0
@@ -104,10 +135,10 @@ export async function restoreMasterRelationsInTx(
         },
       });
     }
-    if (typeof dynTx.itemIdentifier?.upsert === 'function') {
+    if (typeof tx.itemIdentifier?.upsert === 'function') {
       for (const ident of beforeMaster.identifiers) {
         const canonicalUri = ident.canonicalUri ?? ident.value;
-        await dynTx.itemIdentifier.upsert({
+        await tx.itemIdentifier.upsert({
           where: { itemId_type: { itemId: restoredMasterId, type: ident.type } },
           update: { value: ident.value, canonicalUri },
           create: {
@@ -172,14 +203,14 @@ export async function restoreMasterRelationsInTx(
   }
 
   if (Array.isArray(beforeMaster.userStates)) {
-    if (typeof dynTx.state?.deleteMany === 'function') {
-      await dynTx.state.deleteMany({ where: { itemId: restoredMasterId } });
+    if (typeof tx.state?.deleteMany === 'function') {
+      await tx.state.deleteMany({ where: { itemId: restoredMasterId } });
     }
     if (
       beforeMaster.userStates.length > 0 &&
-      typeof dynTx.state?.createMany === 'function'
+      typeof tx.state?.createMany === 'function'
     ) {
-      await dynTx.state.createMany({
+      await tx.state.createMany({
         data: beforeMaster.userStates.map((s) => ({
           userId: s.userId,
           itemId: restoredMasterId,
@@ -188,7 +219,13 @@ export async function restoreMasterRelationsInTx(
           readStatus: s.readStatus ?? 'unread',
           currentPage: s.currentPage ?? null,
           ...(s.scrollPosition !== undefined
-            ? { scrollPosition: s.scrollPosition }
+            ? { scrollPosition: s.scrollPosition as Prisma.InputJsonValue }
+            : {}),
+          ...(s.lastOpenedAt !== undefined
+            ? { lastOpenedAt: s.lastOpenedAt ? new Date(s.lastOpenedAt) : null }
+            : {}),
+          ...(s.lastReadAt !== undefined
+            ? { lastReadAt: s.lastReadAt ? new Date(s.lastReadAt) : null }
             : {}),
         })),
         skipDuplicates: true,
@@ -217,21 +254,55 @@ export async function restoreMasterRelationsInTx(
   }
 
   if (Array.isArray(beforeMaster.attachments) && beforeMaster.attachments.length > 0) {
-    const dynAttTx = tx as unknown as {
-      attachment?: {
-        update?: (args: Record<string, unknown>) => Promise<unknown>;
-      };
-    };
-    if (typeof dynAttTx.attachment?.update === 'function') {
+    if (typeof tx.attachment?.update === 'function') {
       for (const att of beforeMaster.attachments) {
         if (att.id && typeof att.attachmentType === 'string' && att.attachmentType.length > 0) {
-          await dynAttTx.attachment.update({
+          await tx.attachment.update({
             where: { id: att.id },
-            data: { attachmentType: att.attachmentType },
+            data: { attachmentType: att.attachmentType as AttachmentType },
           });
         }
       }
     }
+  }
+
+  const masterAnnots = [
+    ...(Array.isArray(beforeMaster.annotations) ? beforeMaster.annotations : []),
+    ...(Array.isArray(beforeMaster.attachments)
+      ? beforeMaster.attachments.flatMap((a) =>
+          Array.isArray(a.annotations) ? a.annotations : [],
+        )
+      : []),
+  ];
+  if (masterAnnots.length > 0) {
+    const seenIds = new Set<string>();
+    for (const ann of masterAnnots) {
+      if (!ann?.id || !ann?.attachmentId || seenIds.has(ann.id)) continue;
+      seenIds.add(ann.id);
+      const restoreData = {
+        attachmentId: ann.attachmentId,
+        deletedAt: ann.deletedAt ? new Date(ann.deletedAt) : null,
+      };
+      if (typeof tx.annotation?.updateMany === 'function') {
+        await tx.annotation.updateMany({
+          where: { id: ann.id },
+          data: restoreData,
+        });
+      } else if (typeof tx.annotation?.update === 'function') {
+        try {
+          await tx.annotation.update({
+            where: { id: ann.id },
+            data: restoreData,
+          });
+        } catch {
+          // Ignore missing annotation (e.g. P2025) during undo restoration
+        }
+      }
+    }
+  }
+
+  if (!options?.skipCountRecalc) {
+    await syncRestoredItemCountsInTx(tx, restoredMasterId);
   }
 }
 
@@ -241,21 +312,8 @@ export async function restoreDuplicateRelationsInTx(
   dupId: string,
   snap: MergedDuplicateSnapshot | undefined,
   fallbackAssets?: { noteIds?: string[]; attachmentIds?: string[] },
+  options?: { skipCountRecalc?: boolean },
 ): Promise<void> {
-  const dynTx = tx as unknown as {
-    itemAttachment?: {
-      updateMany?: (args: Record<string, unknown>) => Promise<unknown>;
-    };
-    itemCollection?: {
-      createMany?: (args: Record<string, unknown>) => Promise<unknown>;
-    };
-    itemIdentifier?: {
-      createMany?: (args: Record<string, unknown>) => Promise<unknown>;
-      upsert?: (args: Record<string, unknown>) => Promise<unknown>;
-    };
-    state?: { createMany?: (args: Record<string, unknown>) => Promise<unknown> };
-  };
-
   const attachmentIds = snap?.attachmentIds ?? fallbackAssets?.attachmentIds;
   if (Array.isArray(attachmentIds) && attachmentIds.length > 0) {
     const where = { id: { in: attachmentIds }, itemId: restoredMasterId };
@@ -265,34 +323,61 @@ export async function restoreDuplicateRelationsInTx(
         where: { id: { in: attachmentIds }, deletedAt: { not: null } },
         data: { itemId: dupId, deletedAt: null },
       });
-    } else if (typeof dynTx.itemAttachment?.updateMany === 'function') {
-      await dynTx.itemAttachment.updateMany({ where, data: { itemId: dupId } });
-      await dynTx.itemAttachment.updateMany({
-        where: { id: { in: attachmentIds }, deletedAt: { not: null } },
-        data: { itemId: dupId, deletedAt: null },
-      });
     }
   }
 
   if (Array.isArray(snap?.attachments) && snap.attachments.length > 0) {
-    const dynAttTx = tx as unknown as {
-      attachment?: {
-        update?: (args: Record<string, unknown>) => Promise<unknown>;
-        updateMany?: (args: Record<string, unknown>) => Promise<unknown>;
-      };
-    };
     for (const att of snap.attachments) {
       if (att.id && typeof att.attachmentType === 'string' && att.attachmentType.length > 0) {
-        if (typeof dynAttTx.attachment?.update === 'function') {
-          await dynAttTx.attachment.update({
+        if (typeof tx.attachment?.update === 'function') {
+          await tx.attachment.update({
             where: { id: att.id },
-            data: { itemId: dupId, deletedAt: null, attachmentType: att.attachmentType },
+            data: {
+              itemId: dupId,
+              deletedAt: null,
+              attachmentType: att.attachmentType as AttachmentType,
+            },
           });
-        } else if (typeof dynAttTx.attachment?.updateMany === 'function') {
-          await dynAttTx.attachment.updateMany({
+        } else if (typeof tx.attachment?.updateMany === 'function') {
+          await tx.attachment.updateMany({
             where: { id: att.id },
-            data: { attachmentType: att.attachmentType },
+            data: { attachmentType: att.attachmentType as AttachmentType },
           });
+        }
+      }
+    }
+  }
+
+  const dupAnnots = [
+    ...(Array.isArray(snap?.annotations) ? snap.annotations : []),
+    ...(Array.isArray(snap?.attachments)
+      ? snap.attachments.flatMap((a) =>
+          Array.isArray(a.annotations) ? a.annotations : [],
+        )
+      : []),
+  ];
+  if (dupAnnots.length > 0) {
+    const seenIds = new Set<string>();
+    for (const ann of dupAnnots) {
+      if (!ann?.id || !ann?.attachmentId || seenIds.has(ann.id)) continue;
+      seenIds.add(ann.id);
+      const restoreData = {
+        attachmentId: ann.attachmentId,
+        deletedAt: ann.deletedAt ? new Date(ann.deletedAt) : null,
+      };
+      if (typeof tx.annotation?.updateMany === 'function') {
+        await tx.annotation.updateMany({
+          where: { id: ann.id },
+          data: restoreData,
+        });
+      } else if (typeof tx.annotation?.update === 'function') {
+        try {
+          await tx.annotation.update({
+            where: { id: ann.id },
+            data: restoreData,
+          });
+        } catch {
+          // Ignore missing annotation (e.g. P2025) during undo restoration
         }
       }
     }
@@ -328,8 +413,6 @@ export async function restoreDuplicateRelationsInTx(
     }));
     if (typeof tx.collectionItem?.createMany === 'function') {
       await tx.collectionItem.createMany({ data, skipDuplicates: true });
-    } else if (typeof dynTx.itemCollection?.createMany === 'function') {
-      await dynTx.itemCollection.createMany({ data, skipDuplicates: true });
     }
   }
 
@@ -340,11 +423,11 @@ export async function restoreDuplicateRelationsInTx(
       value: ident.value,
       canonicalUri: ident.canonicalUri ?? ident.value,
     }));
-    if (typeof dynTx.itemIdentifier?.createMany === 'function') {
-      await dynTx.itemIdentifier.createMany({ data, skipDuplicates: true });
-    } else if (typeof dynTx.itemIdentifier?.upsert === 'function') {
+    if (typeof tx.itemIdentifier?.createMany === 'function') {
+      await tx.itemIdentifier.createMany({ data, skipDuplicates: true });
+    } else if (typeof tx.itemIdentifier?.upsert === 'function') {
       for (const row of data) {
-        await dynTx.itemIdentifier.upsert({
+        await tx.itemIdentifier.upsert({
           where: { itemId_type: { itemId: dupId, type: row.type } },
           update: { value: row.value, canonicalUri: row.canonicalUri },
           create: row,
@@ -417,9 +500,9 @@ export async function restoreDuplicateRelationsInTx(
   if (
     Array.isArray(snap?.userStates) &&
     snap.userStates.length > 0 &&
-    typeof dynTx.state?.createMany === 'function'
+    typeof tx.state?.createMany === 'function'
   ) {
-    await dynTx.state.createMany({
+    await tx.state.createMany({
       data: snap.userStates.map((s) => ({
         userId: s.userId,
         itemId: dupId,
@@ -428,7 +511,13 @@ export async function restoreDuplicateRelationsInTx(
         readStatus: s.readStatus ?? 'unread',
         currentPage: s.currentPage ?? null,
         ...(s.scrollPosition !== undefined
-          ? { scrollPosition: s.scrollPosition }
+          ? { scrollPosition: s.scrollPosition as Prisma.InputJsonValue }
+          : {}),
+        ...(s.lastOpenedAt !== undefined
+          ? { lastOpenedAt: s.lastOpenedAt ? new Date(s.lastOpenedAt) : null }
+          : {}),
+        ...(s.lastReadAt !== undefined
+          ? { lastReadAt: s.lastReadAt ? new Date(s.lastReadAt) : null }
           : {}),
       })),
       skipDuplicates: true,
@@ -438,27 +527,117 @@ export async function restoreDuplicateRelationsInTx(
   if (
     Array.isArray(snap?.itemMetadata) &&
     snap.itemMetadata.length > 0 &&
-    typeof tx.itemMetadata?.createMany === 'function'
+    (typeof tx.itemMetadata?.update === 'function' ||
+      typeof tx.itemMetadata?.createMany === 'function')
   ) {
     const metaIds = snap.itemMetadata
       .map((m) => m.id)
       .filter((id): id is string => Boolean(id));
     if (
       metaIds.length > 0 &&
-      typeof tx.itemMetadata?.deleteMany === 'function'
+      typeof tx.itemMetadata?.update === 'function' &&
+      typeof tx.itemMetadata?.createMany !== 'function'
     ) {
-      await tx.itemMetadata.deleteMany({
-        where: { id: { in: metaIds }, itemId: restoredMasterId },
+      for (const mId of metaIds) {
+        await tx.itemMetadata.update({
+          where: { id: mId },
+          data: { itemId: dupId },
+        });
+      }
+    } else if (typeof tx.itemMetadata?.createMany === 'function') {
+      if (
+        metaIds.length > 0 &&
+        typeof tx.itemMetadata?.deleteMany === 'function'
+      ) {
+        await tx.itemMetadata.deleteMany({
+          where: { id: { in: metaIds }, itemId: restoredMasterId },
+        });
+      }
+      await tx.itemMetadata.createMany({
+        data: snap.itemMetadata.map((m) => ({
+          ...(m.id ? { id: m.id } : {}),
+          itemId: dupId,
+          sourceProvider: m.sourceProvider ?? 'unknown',
+          rawPayload: (m.rawPayload ?? {}) as Prisma.InputJsonValue,
+        })),
+        skipDuplicates: true,
       });
     }
-    await tx.itemMetadata.createMany({
-      data: snap.itemMetadata.map((m) => ({
-        ...(m.id ? { id: m.id } : {}),
-        itemId: dupId,
-        sourceProvider: m.sourceProvider ?? 'unknown',
-        rawPayload: (m.rawPayload ?? {}) as Prisma.InputJsonValue,
-      })),
-      skipDuplicates: true,
+  }
+
+  if (!options?.skipCountRecalc) {
+    await syncRestoredItemCountsInTx(tx, dupId);
+  }
+}
+
+export async function restoreMergeRelationsInTx(params: {
+  tx: Prisma.TransactionClient;
+  restoredMasterId: string;
+  beforeMaster?: MasterItemSnapshot;
+  duplicateIdsToRestore: string[];
+  snapshotByDupId: ReadonlyMap<string, MergedDuplicateSnapshot>;
+  reassignedAssetIds?: { noteIds?: string[]; attachmentIds?: string[] };
+  reassignedItemMetadata?: Array<{ id: string; previousItemId: string }>;
+  skipMasterRestore?: boolean;
+}): Promise<Map<string, { hasFile?: boolean; attachmentCount?: number; noteCount?: number }>> {
+  const {
+    tx,
+    restoredMasterId,
+    beforeMaster,
+    duplicateIdsToRestore,
+    snapshotByDupId,
+    reassignedAssetIds,
+    reassignedItemMetadata,
+    skipMasterRestore,
+  } = params;
+
+  if (!skipMasterRestore) {
+    await restoreMasterRelationsInTx(tx, restoredMasterId, beforeMaster, {
+      skipCountRecalc: duplicateIdsToRestore.length > 0,
     });
   }
+
+  if (
+    Array.isArray(reassignedItemMetadata) &&
+    reassignedItemMetadata.length > 0 &&
+    typeof tx.itemMetadata?.update === 'function'
+  ) {
+    for (const entry of reassignedItemMetadata) {
+      if (entry?.id && entry?.previousItemId) {
+        try {
+          await tx.itemMetadata.update({
+            where: { id: entry.id },
+            data: { itemId: entry.previousItemId },
+          });
+        } catch {
+          // Ignore if already restored by restoreDuplicateRelationsInTx
+        }
+      }
+    }
+  }
+
+  const countByItemId = new Map<
+    string,
+    { hasFile?: boolean; attachmentCount?: number; noteCount?: number }
+  >();
+  for (const dupId of duplicateIdsToRestore) {
+    const snap = snapshotByDupId.get(dupId);
+    await restoreDuplicateRelationsInTx(
+      tx,
+      restoredMasterId,
+      dupId,
+      snap,
+      duplicateIdsToRestore.length === 1 ? reassignedAssetIds : undefined,
+      { skipCountRecalc: true },
+    );
+    const dupCounts = await syncRestoredItemCountsInTx(tx, dupId);
+    countByItemId.set(dupId, dupCounts);
+  }
+
+  if (duplicateIdsToRestore.length > 0) {
+    const masterCounts = await syncRestoredItemCountsInTx(tx, restoredMasterId);
+    countByItemId.set(restoredMasterId, masterCounts);
+  }
+
+  return countByItemId;
 }

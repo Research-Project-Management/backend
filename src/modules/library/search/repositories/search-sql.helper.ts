@@ -4,7 +4,7 @@ import {
   SearchOptions,
   FacetResult,
 } from '@/modules/library/search/types/search.types';
-import { isProjectScopeId } from '@/modules/library/core';
+import { isProjectScopeId, LIBRARY_REDIS_KEYS } from '@/modules/library/core';
 import { extractSearchQueryIdentifiers } from '@/modules/library/search/domain/item-specifications';
 
 export const isValidUuid = (val: unknown): val is string =>
@@ -49,6 +49,7 @@ export function buildSearchItemsCacheKey(
   options: SearchOptions,
   queryText: string | undefined,
   limit: number,
+  version: string = '1',
 ): string {
   const scopeKey = isProjectScopeId(options.projectId)
     ? `proj:${options.projectId}:u:${userId}`
@@ -68,22 +69,24 @@ export function buildSearchItemsCacheKey(
     yearTo: options.yearTo ?? null,
     sortBy: options.sortBy || '',
     sortOrder: options.sortOrder || '',
+    version,
   };
   const filterHash = createHash('sha256')
     .update(JSON.stringify(normalizedCacheInput))
     .digest('hex');
-  return `library:search:items:${scopeKey}:${filterHash}`;
+  return LIBRARY_REDIS_KEYS.searchItems(scopeKey, version, filterHash);
 }
 
 export function buildSearchFacetCacheKey(
   userId: string,
   options: SearchOptions,
+  version: string = '1',
 ): string {
   const sanitized = sanitizeUuidSearchOptions(options);
   const scopeKey = isProjectScopeId(sanitized.projectId)
     ? `proj:${sanitized.projectId}`
     : `user:${userId}`;
-  const filterHash = createHash('md5')
+  const filterHash = createHash('sha256')
     .update(
       JSON.stringify({
         q: sanitized.q?.trim() || '',
@@ -93,10 +96,11 @@ export function buildSearchFacetCacheKey(
         itemType: sanitized.itemType,
         yearFrom: sanitized.yearFrom,
         yearTo: sanitized.yearTo,
+        version,
       }),
     )
     .digest('hex');
-  return `library:search:facets:${scopeKey}:${filterHash}`;
+  return LIBRARY_REDIS_KEYS.searchFacets(scopeKey, version, filterHash);
 }
 
 export function aggregateFacetGroups(params: {
@@ -129,120 +133,83 @@ export function aggregateFacetGroups(params: {
   return { itemTypes, years, tags };
 }
 
-export function buildSearchFtsMatchingIdsSql(params: {
-  userId: string;
+export function buildFtsWhereClause(params: {
+  hasProject: boolean;
   options: SearchOptions;
   queryText: string;
-  limit?: number;
-}): { sql: string; params: unknown[] } | null {
-  const { userId, options, queryText, limit = 5000 } = params;
-  const hasProject = isProjectScopeId(options.projectId);
-  const scopeParamVal = hasProject ? options.projectId!.trim() : userId;
-  if (!isValidUuid(scopeParamVal)) {
-    return null;
-  }
-
+}): { whereClause: string; sqlParams: unknown[]; nextParamIdx: number } | null {
+  const { hasProject, options, queryText } = params;
   const rawQuery = options.q?.trim() || queryText;
   const ids = extractSearchQueryIdentifiers(rawQuery);
-  const sqlParams: unknown[] = [scopeParamVal, queryText];
+  const sqlParams: unknown[] = [queryText];
   let paramIdx = 3;
 
   const textOrClauses: string[] = [
     `search_vector @@ plainto_tsquery('english', $2)`,
-    `EXISTS (SELECT 1 FROM "attachments" a JOIN "full_text_index" fti ON fti.attachment_id = a.id WHERE a.item_id = "items".id AND a.deleted_at IS NULL AND to_tsvector('english', COALESCE(fti.text_content, '')) @@ plainto_tsquery('english', $2))`,
+    `EXISTS (SELECT 1 FROM "attachments" a JOIN "full_text_indexes" fti ON fti.attachment_id = a.id WHERE a.item_id = "items".id AND a.deleted_at IS NULL AND to_tsvector('english', COALESCE(fti.text_content, '')) @@ plainto_tsquery('english', $2))`,
   ];
 
-  if (ids.cleanDoi) {
-    textOrClauses.push(`LOWER(COALESCE(doi, '')) LIKE $${paramIdx++}`);
-    sqlParams.push(`%${ids.cleanDoi.toLowerCase()}%`);
-  }
-  if (ids.cleanIsbn) {
-    textOrClauses.push(`COALESCE(metadata->>'isbn', '') LIKE $${paramIdx++}`);
-    sqlParams.push(`%${ids.cleanIsbn}%`);
-  }
-  if (ids.cleanArxivBase || ids.cleanArxiv) {
-    textOrClauses.push(
-      `LOWER(COALESCE(metadata->>'arxivId', '')) LIKE $${paramIdx++}`,
-    );
-    sqlParams.push(`%${(ids.cleanArxivBase || ids.cleanArxiv)!.toLowerCase()}%`);
-  }
-  if (ids.cleanPmid) {
-    textOrClauses.push(`COALESCE(metadata->>'pmid', '') LIKE $${paramIdx++}`);
-    sqlParams.push(`%${ids.cleanPmid}%`);
-  }
-  if (ids.cleanPmcid) {
-    textOrClauses.push(
-      `UPPER(COALESCE(metadata->>'pmcid', '')) LIKE $${paramIdx++}`,
-    );
-    sqlParams.push(`%${ids.cleanPmcid.toUpperCase()}%`);
-  }
-  if (ids.cleanIssn) {
-    textOrClauses.push(
-      `UPPER(COALESCE(metadata->>'issn', '')) LIKE $${paramIdx++}`,
-    );
-    sqlParams.push(`%${ids.cleanIssn.toUpperCase()}%`);
-  }
-
-  const scopeSql = hasProject
-    ? `project_id = $1::uuid`
-    : `user_id = $1::uuid AND project_id IS NULL`;
-
-  const sql = `SELECT id FROM "items" WHERE ${scopeSql} AND deleted_at IS NULL AND (${textOrClauses.join(' OR ')}) LIMIT ${Math.max(1, Math.floor(limit))}`;
-  return { sql, params: sqlParams };
-}
-
-export function buildSearchFtsSqlQuery(params: {
-  userId: string;
-  options: SearchOptions;
-  queryText: string;
-  limit: number;
-}): { sql: string; params: unknown[] } | null {
-  const { userId, options, queryText, limit } = params;
-  const hasProject = isProjectScopeId(options.projectId);
-  const scopeParamVal = hasProject ? options.projectId!.trim() : userId;
-  if (!isValidUuid(scopeParamVal)) {
-    return null;
-  }
-
-  const rawQuery = options.q?.trim() || queryText;
-  const ids = extractSearchQueryIdentifiers(rawQuery);
-  const sqlParams: unknown[] = [scopeParamVal, queryText];
-  let paramIdx = 3;
-
-  const textOrClauses: string[] = [
-    `search_vector @@ plainto_tsquery('english', $2)`,
-    `EXISTS (SELECT 1 FROM "attachments" a JOIN "full_text_index" fti ON fti.attachment_id = a.id WHERE a.item_id = "items".id AND a.deleted_at IS NULL AND to_tsvector('english', COALESCE(fti.text_content, '')) @@ plainto_tsquery('english', $2))`,
-  ];
+  const pushIdentifierMatch = (
+    jsonOrColExpr: string,
+    likeVal: string,
+    identType?: string,
+  ) => {
+    const pIdx = paramIdx++;
+    sqlParams.push(likeVal);
+    if (identType) {
+      const typeIdx = paramIdx++;
+      sqlParams.push(identType);
+      textOrClauses.push(
+        `(${jsonOrColExpr} LIKE $${pIdx} OR EXISTS (SELECT 1 FROM "item_identifiers" ii WHERE ii."item_id" = "items"."id" AND LOWER(ii."type") = $${typeIdx} AND LOWER(ii."value") LIKE LOWER($${pIdx})))`,
+      );
+    } else {
+      textOrClauses.push(
+        `(${jsonOrColExpr} LIKE $${pIdx} OR EXISTS (SELECT 1 FROM "item_identifiers" ii WHERE ii."item_id" = "items"."id" AND LOWER(ii."value") LIKE LOWER($${pIdx})))`,
+      );
+    }
+  };
 
   if (ids.cleanDoi) {
-    textOrClauses.push(`LOWER(COALESCE(doi, '')) LIKE $${paramIdx++}`);
-    sqlParams.push(`%${ids.cleanDoi.toLowerCase()}%`);
+    pushIdentifierMatch(
+      `LOWER(COALESCE(doi, ''))`,
+      `%${ids.cleanDoi.toLowerCase()}%`,
+      'doi',
+    );
   }
   if (ids.cleanIsbn) {
-    textOrClauses.push(`COALESCE(metadata->>'isbn', '') LIKE $${paramIdx++}`);
-    sqlParams.push(`%${ids.cleanIsbn}%`);
+    pushIdentifierMatch(
+      `COALESCE(metadata->>'isbn', '')`,
+      `%${ids.cleanIsbn}%`,
+      'isbn',
+    );
   }
   if (ids.cleanArxivBase || ids.cleanArxiv) {
-    textOrClauses.push(
-      `LOWER(COALESCE(metadata->>'arxivId', '')) LIKE $${paramIdx++}`,
+    pushIdentifierMatch(
+      `LOWER(COALESCE(metadata->>'arxivId', ''))`,
+      `%${(ids.cleanArxivBase || ids.cleanArxiv)!.toLowerCase()}%`,
+      'arxiv',
     );
-    sqlParams.push(`%${(ids.cleanArxivBase || ids.cleanArxiv)!.toLowerCase()}%`);
   }
   if (ids.cleanPmid) {
-    textOrClauses.push(`COALESCE(metadata->>'pmid', '') LIKE $${paramIdx++}`);
-    sqlParams.push(`%${ids.cleanPmid}%`);
+    pushIdentifierMatch(
+      `COALESCE(metadata->>'pmid', '')`,
+      `%${ids.cleanPmid}%`,
+      'pmid',
+    );
   }
   if (ids.cleanPmcid) {
-    textOrClauses.push(
-      `UPPER(COALESCE(metadata->>'pmcid', '')) LIKE $${paramIdx++}`,
+    pushIdentifierMatch(
+      `UPPER(COALESCE(metadata->>'pmcid', ''))`,
+      `%${ids.cleanPmcid.toUpperCase()}%`,
+      'pmcid',
     );
-    sqlParams.push(`%${ids.cleanPmcid.toUpperCase()}%`);
   }
   if (ids.cleanIssn) {
-    textOrClauses.push(
-      `UPPER(COALESCE(metadata->>'issn', '')) LIKE $${paramIdx++}`,
+    pushIdentifierMatch(
+      `UPPER(COALESCE(metadata->>'issn', ''))`,
+      `%${ids.cleanIssn.toUpperCase()}%`,
+      'issn',
     );
-    sqlParams.push(`%${ids.cleanIssn.toUpperCase()}%`);
   }
 
   const baseFilters: string[] = [
@@ -294,7 +261,52 @@ export function buildSearchFtsSqlQuery(params: {
     sqlParams.push(options.tagId);
   }
 
-  const whereClause = baseFilters.join(' AND ');
+  return {
+    whereClause: baseFilters.join(' AND '),
+    sqlParams,
+    nextParamIdx: paramIdx,
+  };
+}
+
+export function buildSearchFtsMatchingIdsSql(params: {
+  userId: string;
+  options: SearchOptions;
+  queryText: string;
+  limit?: number;
+}): { sql: string; params: unknown[] } | null {
+  const { userId, options, queryText, limit = 5000 } = params;
+  const hasProject = isProjectScopeId(options.projectId);
+  const scopeParamVal = hasProject ? options.projectId!.trim() : userId;
+  if (!isValidUuid(scopeParamVal)) {
+    return null;
+  }
+
+  const builtWhere = buildFtsWhereClause({ hasProject, options, queryText });
+  if (!builtWhere) return null;
+
+  const sql = `SELECT id FROM "items" WHERE ${builtWhere.whereClause} LIMIT ${Math.max(1, Math.floor(limit))}`;
+  return { sql, params: [scopeParamVal, ...builtWhere.sqlParams] };
+}
+
+export function buildSearchFtsSqlQuery(params: {
+  userId: string;
+  options: SearchOptions;
+  queryText: string;
+  limit: number;
+}): { sql: string; params: unknown[] } | null {
+  const { userId, options, queryText, limit } = params;
+  const hasProject = isProjectScopeId(options.projectId);
+  const scopeParamVal = hasProject ? options.projectId!.trim() : userId;
+  if (!isValidUuid(scopeParamVal)) {
+    return null;
+  }
+
+  const builtWhere = buildFtsWhereClause({ hasProject, options, queryText });
+  if (!builtWhere) return null;
+
+  const sqlParams: unknown[] = [scopeParamVal, ...builtWhere.sqlParams];
+  let paramIdx = builtWhere.nextParamIdx;
+  const whereClause = builtWhere.whereClause;
   const orderExpr =
     options.sortBy === 'year'
       ? `year ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST, id DESC`

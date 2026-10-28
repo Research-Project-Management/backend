@@ -83,9 +83,11 @@ export class UpdateCollectionDto {
   parentId?: string | null;
 
   @IsOptional()
+  @IsInt()
   expectedVersion?: number;
 
   @IsOptional()
+  @IsInt()
   version?: number;
 }
 

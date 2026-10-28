@@ -109,13 +109,16 @@ export class PipelineSideEffectsService {
         ? (parentMetadata.attachments as Array<{
             fileId?: string | null;
             url?: string | null;
+            size?: number | null;
+            extractedText?: string | null;
           }>)
         : [];
       const alreadyHasFile = existingAttachments.some(
         (att) =>
           att &&
           (att.fileId === fileId ||
-            (typeof att.url === 'string' && att.url.includes(fileId))),
+            (typeof att.url === 'string' && att.url.includes(fileId))) &&
+          (att.size == null || att.size > 0 || Boolean(att.extractedText)),
       );
       if (alreadyHasFile) {
         return;

@@ -34,7 +34,9 @@ export class CircuitBreaker {
   private readonly logger = new Logger(CircuitBreaker.name);
   private state: CircuitState = 'CLOSED';
   private consecutiveFailures = 0;
+  private failureSequence = 0;
   private lastFailureTime = 0;
+  private lastStateChangeTime = 0;
   private halfOpenAttempts = 0;
 
   public readonly name: string;
@@ -55,18 +57,36 @@ export class CircuitBreaker {
   }
 
   public getState(): CircuitState {
+    const now = Date.now();
     if (this.state === 'OPEN') {
-      const now = Date.now();
       if (now - this.lastFailureTime >= this.resetTimeoutMs) {
         this.transitionTo('HALF_OPEN');
         this.halfOpenAttempts = 0;
+      }
+    } else if (this.state === 'HALF_OPEN') {
+      if (
+        this.lastStateChangeTime > 0 &&
+        now - this.lastStateChangeTime >= this.resetTimeoutMs
+      ) {
+        this.halfOpenAttempts = 0;
+        this.lastStateChangeTime = now;
       }
     }
     return this.state;
   }
 
+  public releaseHalfOpenProbe(): void {
+    if (this.state === 'HALF_OPEN' && this.halfOpenAttempts > 0) {
+      this.halfOpenAttempts--;
+    }
+  }
+
   public getFailures(): number {
     return this.consecutiveFailures;
+  }
+
+  public getFailureSequence(): number {
+    return this.failureSequence;
   }
 
   public canExecute(): boolean {
@@ -121,6 +141,7 @@ export class CircuitBreaker {
     if (!isOutage) return;
 
     this.consecutiveFailures++;
+    this.failureSequence++;
     this.lastFailureTime = Date.now();
 
     if (this.state === 'HALF_OPEN') {
@@ -159,7 +180,20 @@ export class CircuitBreaker {
       this.recordSuccess();
       return result;
     } catch (err: unknown) {
-      this.recordFailure(true);
+      const status =
+        (err as { status?: number; statusCode?: number } | null)?.status ??
+        (err as { status?: number; statusCode?: number } | null)?.statusCode;
+      const errMessage = err instanceof Error ? err.message : String(err ?? '');
+      const isClientError =
+        status === 400 ||
+        status === 404 ||
+        /\bHTTP\s+(?:400|404)\b/i.test(errMessage) ||
+        /\bstatus(?:\s+code)?\s*(?:=|:)?\s*(?:400|404)\b/i.test(errMessage);
+      if (isClientError) {
+        this.releaseHalfOpenProbe();
+      } else {
+        this.recordFailure(true);
+      }
       if (fallback) {
         const errorObj = err instanceof Error ? err : new Error(String(err));
         return fallback(errorObj);
@@ -172,6 +206,7 @@ export class CircuitBreaker {
     this.state = 'CLOSED';
     this.consecutiveFailures = 0;
     this.lastFailureTime = 0;
+    this.lastStateChangeTime = 0;
     this.halfOpenAttempts = 0;
   }
 
@@ -179,6 +214,7 @@ export class CircuitBreaker {
     if (this.state === newState) return;
     const oldState = this.state;
     this.state = newState;
+    this.lastStateChangeTime = Date.now();
     if (this.onStateChange) {
       try {
         this.onStateChange(oldState, newState);

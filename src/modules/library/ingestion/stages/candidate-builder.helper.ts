@@ -21,7 +21,10 @@ export function buildEvidenceFields(
     ) {
       fields[fieldName] = {
         path: fieldName,
-        value: rawMetadata[fieldName],
+        value:
+          rawMetadata[fieldName] !== undefined
+            ? rawMetadata[fieldName]
+            : normalizedMetadata[fieldName],
         normalizedValue: normalizedMetadata[fieldName],
         confidence: defaultConfidence,
         sourceProvider: sourceName,

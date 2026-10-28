@@ -7,8 +7,9 @@ describe('DblpProvider', () => {
   let originalFetch: typeof global.fetch;
 
   beforeEach(() => {
-    rateLimiter = new DomainRateLimiterService();
-    rateLimiter.bypassDelay = true;
+    rateLimiter = new DomainRateLimiterService(undefined, {
+      bypassDelay: true,
+    });
     provider = new DblpProvider(rateLimiter);
     originalFetch = global.fetch;
   });

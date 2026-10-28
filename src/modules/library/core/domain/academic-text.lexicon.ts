@@ -629,7 +629,7 @@ export const TITLE_SIMILARITY_STOPWORDS = new Set([
 export const TITLE_MATCH_THRESHOLD = 0.85;
 
 export const BOT_CHALLENGE_TITLE_RE =
-  /client challenge|just a moment|attention required|access denied|are you a robot|verify you are human|captcha|security check|ddos-guard|please wait|cloudflare|bot verification|request blocked|unusual traffic/i;
+  /client challenge|just a moment|attention required|access denied|are you a robot|verify you are human|bot verification|security check|ddos-guard|please wait|request blocked|unusual traffic|cloudflare\s*challenge|\|\s*cloudflare\b|^cloudflare\b|^captcha\b|captcha\s*(?:challenge|verification|check)/i;
 
 export const BOT_CHALLENGE_HTML_RE =
   /cf-challenge|_cf_chl|challenge-platform|perimeterx|px-captcha|datadome|captcha-delivery|cf-browser-verification/i;

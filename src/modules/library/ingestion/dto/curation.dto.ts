@@ -4,7 +4,23 @@ import {
   ArrayNotEmpty,
   IsOptional,
   IsObject,
+  IsIn,
 } from 'class-validator';
+
+export class UpdateReviewCaseStatusDto {
+  @IsIn(['OPEN', 'PENDING', 'APPROVED', 'REJECTED', 'DISMISSED', 'RESOLVED'])
+  status!:
+    | 'OPEN'
+    | 'PENDING'
+    | 'APPROVED'
+    | 'REJECTED'
+    | 'DISMISSED'
+    | 'RESOLVED';
+
+  @IsOptional()
+  @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
+  projectId?: string;
+}
 
 export class MergeDuplicatesDto {
   @IsUUID(undefined, { message: 'primaryItemId must be a valid UUID' })

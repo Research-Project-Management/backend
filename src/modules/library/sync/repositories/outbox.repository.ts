@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { OutboxStatus, OutboxEvent, Prisma } from '@prisma/client';
-import { randomUUID } from 'crypto';
-import { PublishOutboxInput } from '@/modules/library/core/ports/unit-of-work.port';
+import { uuidv7 } from '@/modules/library/core';
+import { PublishOutboxInput as CorePublishOutboxInput } from '@/modules/library/core/ports/unit-of-work.port';
 
-export type { PublishOutboxInput };
+export interface OutboxPublishInput extends CorePublishOutboxInput {
+  dedupeKey?: string | null;
+}
+
+export type PublishOutboxInput = OutboxPublishInput;
 
 export interface ClaimedOutboxEvent {
   event: OutboxEvent;
@@ -41,12 +45,13 @@ export class OutboxRepository {
     const client = this.getClient(tx);
 
     const data: Prisma.OutboxEventCreateManyInput[] = events.map((ev) => ({
-      id: randomUUID(),
+      id: uuidv7(),
       userId: this.normalizeUserId(ev.userId),
       projectId: ev.projectId || null,
       aggregateId: ev.aggregateId,
       eventType: ev.eventType,
       payload: (ev.payload as Prisma.InputJsonValue) ?? {},
+      dedupeKey: ev.dedupeKey ?? null,
       status: OutboxStatus.PENDING,
       retryCount: 0,
     }));
@@ -271,7 +276,8 @@ export class OutboxRepository {
       SET status = 'PROCESSING'::"OutboxStatus",
           claimed_at = ${now},
           lease_expires_at = ${newLeaseExpiresAt},
-          claimed_by = ${workerId}
+          claimed_by = ${workerId},
+          updated_at = ${now}
       FROM candidates c
       WHERE e.id = c.id
       RETURNING 
@@ -375,5 +381,62 @@ export class OutboxRepository {
       oldestPendingCreatedAt: oldest?.createdAt ?? null,
       processingCount: processing,
     };
+  }
+
+  async findIdempotencyRecord(idempotencyKey: string, userId = 'system') {
+    if (!this.prisma?.idempotencyRecord?.findUnique) return null;
+    const normalizedUserId = this.normalizeUserId(userId);
+    return this.prisma.idempotencyRecord.findUnique({
+      where: {
+        userId_idempotencyKey: {
+          userId: normalizedUserId,
+          idempotencyKey,
+        },
+      },
+    });
+  }
+
+  async upsertIdempotencyRecord(
+    idempotencyKey: string,
+    status: string,
+    expiresAt: Date,
+    userId = 'system',
+  ) {
+    if (!this.prisma?.idempotencyRecord?.upsert) return null;
+    const normalizedUserId = this.normalizeUserId(userId);
+    return this.prisma.idempotencyRecord.upsert({
+      where: {
+        userId_idempotencyKey: {
+          userId: normalizedUserId,
+          idempotencyKey,
+        },
+      },
+      create: {
+        userId: normalizedUserId,
+        idempotencyKey,
+        status,
+        expiresAt,
+      },
+      update: {
+        status,
+        expiresAt,
+      },
+    });
+  }
+
+  async deleteIdempotencyRecords(
+    idempotencyKey: string,
+    statuses?: string[],
+    userId = 'system',
+  ) {
+    if (!this.prisma?.idempotencyRecord?.deleteMany) return;
+    const normalizedUserId = this.normalizeUserId(userId);
+    await this.prisma.idempotencyRecord.deleteMany({
+      where: {
+        userId: normalizedUserId,
+        idempotencyKey,
+        ...(statuses && statuses.length > 0 ? { status: { in: statuses } } : {}),
+      },
+    });
   }
 }

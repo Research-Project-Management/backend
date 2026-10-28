@@ -9,6 +9,8 @@ import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
+import { CatalogFacade } from '@/modules/library/catalog/catalog.facade';
+import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
 import { LibraryFacade } from '@/modules/library/library.facade';
 import { LIBRARY_EVENT_TYPES } from '@/modules/library/core';
 
@@ -425,14 +427,27 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
         ),
       };
 
-      const facade = new LibraryFacade(
-        {} as never,
-        {} as never,
-        {} as never,
-        {} as never,
-        mockPrisma as never,
-        cache,
+      const curationService = new ItemCurationService(
+        new QueryRepository(mockPrisma as never),
+        new CommandRepository(mockPrisma as never),
         mockUow as never,
+        cache,
+      );
+      const catalogFacade = new CatalogFacade(
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        curationService,
+      );
+      const facade = new LibraryFacade(
+        catalogFacade,
+        {} as never,
+        {} as never,
+        {} as never,
       );
 
       await facade.updateItemAiMetadata(mockItemId, { aiSummary: 'Summary' });

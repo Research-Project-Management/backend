@@ -78,6 +78,9 @@ export class IngestionSubmissionDto {
 
   // Identifier fields
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
   @IsIn(['DOI', 'PMID', 'ARXIV', 'ISBN'])
   identifierType?: IdentifierType;
 

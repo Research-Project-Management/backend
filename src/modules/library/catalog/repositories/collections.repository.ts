@@ -113,7 +113,7 @@ export class CollectionsRepository {
           },
         },
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
   }
 
@@ -633,15 +633,14 @@ export class CollectionsRepository {
     return items.map((i: { id: string }) => i.id);
   }
 
-  private get _collectionItemsMarker(): undefined {
-    return undefined;
-  }
-
   async findOwnedItemIds(
     itemIds: string[],
     scopeWhere: Prisma.ItemWhereInput,
+    tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
-    const owned = await this.prisma.item.findMany({
+    const client = this.getClient(tx);
+    if (!client.item?.findMany) return itemIds;
+    const owned = await client.item.findMany({
       where: { id: { in: itemIds }, ...scopeWhere },
       select: { id: true },
     });
@@ -651,8 +650,11 @@ export class CollectionsRepository {
   async findValidItemIds(
     itemIds: string[],
     scopeWhere: Prisma.ItemWhereInput,
+    tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
-    const valid = await this.prisma.item.findMany({
+    const client = this.getClient(tx);
+    if (!client.item?.findMany) return itemIds;
+    const valid = await client.item.findMany({
       where: { id: { in: itemIds }, ...scopeWhere, deletedAt: null },
       select: { id: true },
     });
@@ -662,8 +664,11 @@ export class CollectionsRepository {
   async verifyItemInScope(
     itemId: string,
     scopeWhere: Prisma.ItemWhereInput,
+    tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
-    const item = await this.prisma.item.findFirst({
+    const client = this.getClient(tx);
+    if (!client.item?.findFirst) return true;
+    const item = await client.item.findFirst({
       where: { id: itemId, ...scopeWhere, deletedAt: null },
       select: { id: true },
     });

@@ -33,6 +33,10 @@ import {
   buildEnrichmentPatch,
   mapPayloadToSource,
 } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import {
+  isNonRetryableIngestionError,
+  isRetryableIngestionError,
+} from '@/modules/library/ingestion/domain/ingestion-error.classifier';
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import { PipelineBatchExecutor } from './pipeline-batch.executor';
 import { UrlCaptureService } from './url-capture.service';
@@ -65,10 +69,17 @@ function getSubmissionPayloadLabel(
 function getSubmissionPayloadSize(
   payload: IngestionSubmissionEnvelope['payload'],
 ): number {
-  if ('size' in payload && typeof payload.size === 'number') {
-    return payload.size;
+  return 'size' in payload && typeof payload.size === 'number' ? payload.size : 0;
+}
+
+function markErrStatusTransitioned(err: unknown): void {
+  if (err && typeof err === 'object') {
+    Object.defineProperty(err, '__runStatusTransitioned', {
+      value: true,
+      enumerable: false,
+      configurable: true,
+    });
   }
-  return 0;
 }
 
 @Injectable()
@@ -130,6 +141,23 @@ export class PipelineService {
   }
 
   /**
+   * Determines whether an ingestion error is permanently non-retryable
+   * (e.g., 4xx validation error, empty/malformed bibliographic metadata).
+   */
+  isNonRetryableError(err: unknown): boolean {
+    return isNonRetryableIngestionError(err);
+  }
+
+  /**
+   * Determines whether an ingestion error is transient/retryable (e.g., network
+   * timeout, rate limit, 5xx upstream failure, transient DB connection drop).
+   */
+  isRetryableError(err: unknown): boolean {
+    if (this.isNonRetryableError(err)) return false;
+    return isRetryableIngestionError(err);
+  }
+
+  /**
    * Executes the multi-stage ingestion pipeline.
    */
   async executePipeline(
@@ -138,24 +166,40 @@ export class PipelineService {
     envelope: IngestionSubmissionEnvelope,
     options?: { isFinalAttempt?: boolean },
   ): Promise<void> {
-    const isFinalAttempt =
-      options?.isFinalAttempt ?? envelope?.isFinalAttempt ?? true;
+    const explicitFinalAttempt = options?.isFinalAttempt ?? envelope?.isFinalAttempt;
     let succeeded = false;
+    let caughtError: unknown = null;
     try {
       await this.executePipelineStages(runId, scopeId, envelope, {
-        isFinalAttempt,
+        isFinalAttempt: explicitFinalAttempt ?? true,
       });
       succeeded = true;
+    } catch (err: unknown) {
+      caughtError = err;
+      const nonRetryable = this.isNonRetryableError(err);
+      const retryable = !nonRetryable && this.isRetryableError(err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (explicitFinalAttempt === false && nonRetryable) {
+        await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.FAILED_FINAL, {
+          lastError: errMsg,
+          completedAt: new Date(),
+        }).catch(() => undefined);
+      } else if (explicitFinalAttempt === undefined && retryable) {
+        await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.FAILED_RETRYABLE, {
+          lastError: errMsg,
+        }).catch(() => undefined);
+      }
+      markErrStatusTransitioned(err);
+      throw err;
     } finally {
-      if (succeeded || isFinalAttempt) {
+      const nonRetryable = caughtError ? this.isNonRetryableError(caughtError) : false;
+      const retryable = caughtError && !nonRetryable ? this.isRetryableError(caughtError) : false;
+      if (succeeded || explicitFinalAttempt === true || nonRetryable || (explicitFinalAttempt === undefined && !retryable)) {
         await this.cleanupOffloadedPayload(envelope);
       }
-      if (
-        Date.now() - this.lastGcRunAt >
-        PipelineService.GC_THROTTLE_INTERVAL_MS
-      ) {
+      if (Date.now() - this.lastGcRunAt > PipelineService.GC_THROTTLE_INTERVAL_MS) {
         this.lastGcRunAt = Date.now();
-        await this.runTerminalMaintenanceGc(envelope);
+        void this.runTerminalMaintenanceGc(envelope);
       }
     }
   }
@@ -188,7 +232,7 @@ export class PipelineService {
   ): Promise<void> {
     try {
       if (this.urlCapture?.cleanupExpiredPreviews) {
-        await this.urlCapture.cleanupExpiredPreviews(0).catch(() => undefined);
+        await this.urlCapture.cleanupExpiredPreviews(7).catch(() => undefined);
       }
       await this.repo.purgeOldRuns(7).catch(() => undefined);
     } catch {
@@ -403,6 +447,9 @@ export class PipelineService {
       await session.executeStep(
         'ENRICH_EXISTING',
         async () => {
+          await this.sideEffects.scanRetraction(decision.proposedItem, {
+            localOnly: true,
+          });
           let patchedFields: string[] = [];
           if (this.catalogGateway) {
             const existing = await this.catalogGateway.getItem(
@@ -543,31 +590,14 @@ export class PipelineService {
       return;
     }
 
-    // PROBABLE fuzzy match → Non-blocking duplicate suspect review record
-    if (matchResult.matchType === 'PROBABLE' && matchResult.targetItemId) {
-      await this.repo.createReviewCase(resolvedScope, runId, {
-        targetItemId: matchResult.targetItemId,
-        reason: `Probable match with existing item "${matchResult.targetItemTitle}"`,
-        evidence: {
-          matchReason: matchResult.matchReason,
-          confidence: matchResult.confidence,
-          details: matchResult.evidence,
-        } as unknown as Prisma.InputJsonValue,
-        options: {
-          proposedMetadata: decision.proposedItem,
-        } as unknown as Prisma.InputJsonValue,
-        assignedToId: resolvedScope.userId,
-      });
-    }
-
     // Retraction Check: Auto-scan against Retraction Watch & Crossref before commit
     await this.sideEffects.scanRetraction(decision.proposedItem);
 
     // Stage 6: COMMIT (Create new Item via CommitStage with Saga Compensation)
     const createdItem = await session.executeStep(
       'COMMIT',
-      async () => {
-        return this.commit.execute({
+      async () =>
+        this.commit.execute({
           scopeId: resolvedScope.projectId || resolvedScope.userId,
           item: decision.proposedItem,
           options: {
@@ -578,15 +608,17 @@ export class PipelineService {
             filename: uploadedFilename,
             skipPreMatch: true,
           },
-        });
-      },
+        }),
       {
         outputSnapshot: (res) => ({ itemId: res?.id }),
         compensate: async (item) => {
-          const wasPreExisting = Boolean(
-            (item as { __wasPreExistingMatch?: boolean } | null | undefined)
-              ?.__wasPreExistingMatch,
-          );
+          const wasPreExisting =
+            Boolean(
+              (item as { __wasPreExistingMatch?: boolean } | null | undefined)
+                ?.__wasPreExistingMatch,
+            ) ||
+            matchResult.matchType === 'EXACT' ||
+            Boolean(matchResult.targetItemId && item?.id === matchResult.targetItemId);
           if (item?.id && !wasPreExisting && this.catalogGateway?.deleteItem) {
             this.logger.warn(
               `[SAGA_COMPENSATION] Rolling back committed item ${item.id} for run ${runId}`,
@@ -602,6 +634,24 @@ export class PipelineService {
     );
 
     try {
+      // PROBABLE fuzzy match → Non-blocking duplicate suspect review record (after COMMIT succeeds)
+      if (matchResult.matchType === 'PROBABLE' && matchResult.targetItemId) {
+        await this.repo.createReviewCase(resolvedScope, runId, {
+          targetItemId: matchResult.targetItemId,
+          reason: `Probable match with existing item "${matchResult.targetItemTitle}"`,
+          evidence: {
+            matchReason: matchResult.matchReason,
+            confidence: matchResult.confidence,
+            details: matchResult.evidence,
+            ...(createdItem?.id ? { createdItemId: createdItem.id } : {}),
+          } as unknown as Prisma.InputJsonValue,
+          options: {
+            proposedMetadata: decision.proposedItem,
+          } as unknown as Prisma.InputJsonValue,
+          assignedToId: resolvedScope.userId,
+        });
+      }
+
       if (createdItem?.id) {
         await this.sideEffects.attachFile(
           resolvedScope.userId,

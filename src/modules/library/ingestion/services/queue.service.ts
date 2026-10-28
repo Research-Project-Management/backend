@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { shouldRunWorkerConsumers } from '@/core';
 import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 import { PipelineService } from './pipeline.service';
@@ -18,6 +19,7 @@ import {
   LIBRARY_INGESTION_QUEUE,
   LIBRARY_INGESTION_JOB,
 } from '@/modules/library/ingestion/types/ingestion.types';
+import { isRetryableIngestionError } from '@/modules/library/ingestion/domain/ingestion-error.classifier';
 
 export interface QueuedIngestionJob {
   runId: string;
@@ -80,6 +82,16 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
+    if (this.bullQueue && !shouldRunWorkerConsumers()) {
+      this.logger.debug(
+        'Skipping orphaned ingestion run recovery on API-only pod while BullMQ is active.',
+      );
+      return;
+    }
+    await this.recoverOrphanedRuns();
+  }
+
+  async recoverOrphanedRuns(): Promise<void> {
     try {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
       const orphanedRuns = await this.repo.findOrphanedRuns(tenMinutesAgo, {
@@ -324,6 +336,16 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Classifies whether a pipeline error is retryable vs permanently fatal.
+   */
+  private isRetryablePipelineError(
+    err: unknown,
+    envelope?: IngestionSubmissionEnvelope,
+  ): boolean {
+    return isRetryableIngestionError(err, envelope, this.pipeline);
+  }
+
+  /**
    * Executes an individual ingestion run through PipelineService.
    */
   private async executeJob(job: QueuedIngestionJob): Promise<void> {
@@ -343,7 +365,9 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
             `Failed to set RUNNING status for run ${runId}: ${msg}`,
           );
         });
-      await this.pipeline.executePipeline(runId, projectId, envelope);
+      await this.pipeline.executePipeline(runId, projectId, envelope, {
+        isFinalAttempt: envelope?.isFinalAttempt,
+      });
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.log(
         `[QUEUE_DONE] Run ${runId} completed successfully in ${elapsed}s`,
@@ -354,17 +378,28 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(
         `[QUEUE_ERROR] Run ${runId} failed after ${elapsed}s: ${msg}`,
       );
-      await this.repo
-        .updateRunStatus(projectId, runId, IngestionStatus.FAILED_FINAL, {
-          lastError: msg || 'Ingestion pipeline execution failed',
-        })
-        .catch((updateErr: unknown) => {
-          const updateMsg =
-            updateErr instanceof Error ? updateErr.message : String(updateErr);
-          this.logger.error(
-            `Failed to update run status for failed run ${runId}: ${updateMsg}`,
-          );
-        });
+      const alreadyTransitioned = Boolean(
+        (err as { __runStatusTransitioned?: boolean } | null | undefined)
+          ?.__runStatusTransitioned,
+      );
+      if (!alreadyTransitioned) {
+        const targetStatus = this.isRetryablePipelineError(err, envelope)
+          ? IngestionStatus.FAILED_RETRYABLE
+          : IngestionStatus.FAILED_FINAL;
+        await this.repo
+          .updateRunStatus(projectId, runId, targetStatus, {
+            lastError: msg || 'Ingestion pipeline execution failed',
+          })
+          .catch((updateErr: unknown) => {
+            const updateMsg =
+              updateErr instanceof Error
+                ? updateErr.message
+                : String(updateErr);
+            this.logger.error(
+              `Failed to update run status for failed run ${runId}: ${updateMsg}`,
+            );
+          });
+      }
     } finally {
       this.runningRunIds.delete(runId);
       this.activeCount--;

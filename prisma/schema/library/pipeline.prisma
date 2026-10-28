@@ -48,7 +48,7 @@ model IngestionRun {
   updatedAt       DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // 1. Atomic Idempotency Constraint at Database Engine Level
-  @@unique([userId, idempotencyKey])
+  @@unique([userId, projectId, idempotencyKey])
 
   // 2. Query Optimization for User History
   @@index([userId, startedAt(sort: Desc)])
@@ -79,7 +79,6 @@ model CapturePreview {
   expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([tokenHash])
   @@index([userId, expiresAt])
   @@index([expiresAt])
   @@map("capture_previews")

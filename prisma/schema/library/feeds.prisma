@@ -84,7 +84,6 @@ model FeedItemReadState {
   readAt           DateTime  @default(now()) @map("read_at") @db.Timestamptz(6)
 
   @@unique([userId, itemId])
-  @@index([userId])
   @@index([itemId])
   @@map("feed_item_read_states")
 }

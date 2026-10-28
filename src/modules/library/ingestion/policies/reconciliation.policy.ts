@@ -5,16 +5,38 @@ import {
   MetadataConflictDetail,
 } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import {
+  selectAuthoritativeCreatorVariant,
+  countFullGivenNames,
+  mergeReconciledTagArrays,
   mergeReconciledNotesArrays,
+  mergeReconciledExtraText,
   resolveFieldReconciliationStrategy,
   WeightedFieldVariant,
   finalizeReconciledBibliographicMetadata,
-} from '@/modules/library/ingestion/services/metadata-reconciliation.service';
+} from '@/modules/library/ingestion/domain/field-reconciliation.strategies';
 import {
   resolveFieldAliases,
   resolveBidirectionalBaseFields,
   resolveProviderFieldWeight,
+  SOURCE_WEIGHTS,
+  FIELD_AUTHORITY_WEIGHTS,
+  FIELD_AUTHORITY,
 } from '@/modules/library/core';
+
+export {
+  selectAuthoritativeCreatorVariant,
+  countFullGivenNames,
+  mergeReconciledTagArrays,
+  mergeReconciledNotesArrays,
+  mergeReconciledExtraText,
+  resolveFieldReconciliationStrategy,
+  finalizeReconciledBibliographicMetadata,
+  SOURCE_WEIGHTS,
+  FIELD_AUTHORITY_WEIGHTS,
+  FIELD_AUTHORITY,
+  resolveProviderFieldWeight,
+};
+export type { WeightedFieldVariant };
 
 export const ALIAS_EVIDENCE_FALLBACK_KEYS: Readonly<Record<string, readonly string[]>> = {
   publicationTitle: ['publicationTitle', 'journal', 'venue', 'proceedingsTitle', 'conferenceName', 'bookTitle', 'websiteTitle', 'reporter', 'code'],
@@ -67,7 +89,12 @@ export class ReconciliationPolicy {
     ) {
       return 1000;
     }
-    if (isAlreadyWeighted) {
+    if (
+      isAlreadyWeighted &&
+      (!provider ||
+        provider === 'EnrichedProvider' ||
+        provider === 'MetadataResolution')
+    ) {
       return 100;
     }
     return resolveProviderFieldWeight(provider, field ?? '') * 100;
@@ -165,15 +192,26 @@ export class ReconciliationPolicy {
           }
         }
         const effectiveBase = baseEv || fallbackEvidence;
+        const resolvedProvider =
+          (effectiveBase.sourceProvider &&
+          effectiveBase.sourceProvider !== 'EnrichedProvider' &&
+          effectiveBase.sourceProvider !== 'MetadataResolution'
+            ? effectiveBase.sourceProvider
+            : (effectiveBase as { source?: string }).source) ||
+          effectiveBase.sourceProvider ||
+          (candidate as { sourceProvider?: string }).sourceProvider ||
+          candidate.sourceName;
         const evidenceToPush: AnnotatedFieldEvidence =
           effectiveBase.path === key &&
           effectiveBase.normalizedValue === normVal &&
+          effectiveBase.sourceProvider === resolvedProvider &&
           !isAlreadyWeighted
             ? effectiveBase
             : {
                 ...effectiveBase,
                 path: key,
                 normalizedValue: normVal,
+                sourceProvider: resolvedProvider,
                 ...(isAlreadyWeighted ? { __isAlreadyWeighted: true } : {}),
               };
         const existing = fieldMap.get(key) || [];
@@ -230,38 +268,54 @@ export class ReconciliationPolicy {
       const best = sorted[0];
 
       const strategy = resolveFieldReconciliationStrategy(field);
-      const weightedVariants: WeightedFieldVariant[] = sorted.map((ev, idx) => ({
-        candidate: {
-          id: `${ev.sourceProvider}:${field}:${idx}`,
-          sourceProvider: ev.sourceProvider,
-          confidenceScore: ev.confidence,
-          metadata: { [field]: ev.normalizedValue } as never,
-          fetchedAt: ev.retrievedAt || new Date().toISOString(),
-        },
-        val: ev.normalizedValue,
-        effectiveWeight:
-          (ev.confidence *
-            ReconciliationPolicy.getProviderPriority(
-              ev.sourceProvider,
-              field,
-              ev.__isAlreadyWeighted,
-              ev.isUserOverride,
-            )) /
-          100,
-      }));
+      const weightedVariants: WeightedFieldVariant[] = sorted.map((ev, idx) => {
+        const isEvUserOverride =
+          Boolean(ev.isUserOverride) ||
+          ev.sourceProvider === 'UserOverride' ||
+          ev.sourceProvider === 'user' ||
+          ev.sourceProvider === 'manual';
+        return {
+          candidate: {
+            id: `${ev.sourceProvider}:${field}:${idx}`,
+            sourceProvider: ev.sourceProvider,
+            confidenceScore: ev.confidence,
+            metadata: { [field]: ev.normalizedValue } as never,
+            fetchedAt: ev.retrievedAt || new Date().toISOString(),
+          },
+          val: ev.normalizedValue,
+          effectiveWeight:
+            (ev.confidence *
+              ReconciliationPolicy.getProviderPriority(
+                ev.sourceProvider,
+                field,
+                ev.__isAlreadyWeighted,
+                ev.isUserOverride,
+              )) /
+            100,
+          isUserOverride: isEvUserOverride,
+        };
+      });
       const outcome = strategy.reconcileField(field, weightedVariants);
 
       if (!outcome.detectConflicts) {
+        const isBestUserOverride =
+          Boolean(best.isUserOverride) ||
+          best.sourceProvider === 'UserOverride' ||
+          best.sourceProvider === 'user' ||
+          best.sourceProvider === 'manual';
         const resolvedVal =
           field === 'notes'
             ? mergeReconciledNotesArrays(
-                evidences.map((ev) => ev.normalizedValue),
+                (isBestUserOverride ? [best] : evidences).map(
+                  (ev) => ev.normalizedValue,
+                ),
                 true,
               )
             : outcome.value;
         selectedFields[field] = {
           ...stripInternalAnnotation(best),
           normalizedValue: resolvedVal,
+          ...(outcome.assertion.isUserOverride ? { isUserOverride: true } : {}),
         };
         proposedItem[field] = resolvedVal;
         rejectedFields[field] = [];
@@ -317,15 +371,20 @@ export class ReconciliationPolicy {
           (c.fields as unknown as Record<string, unknown>),
       })),
     );
-    for (const dateKey of ['publicationDate', 'date'] as const) {
+    for (const syncKey of [
+      'publicationDate',
+      'date',
+      'authors',
+      'creators',
+    ] as const) {
       if (
-        selectedFields[dateKey] &&
-        proposedItem[dateKey] !== undefined &&
-        selectedFields[dateKey].normalizedValue !== proposedItem[dateKey]
+        selectedFields[syncKey] &&
+        proposedItem[syncKey] !== undefined &&
+        selectedFields[syncKey].normalizedValue !== proposedItem[syncKey]
       ) {
-        selectedFields[dateKey] = {
-          ...selectedFields[dateKey],
-          normalizedValue: proposedItem[dateKey],
+        selectedFields[syncKey] = {
+          ...selectedFields[syncKey],
+          normalizedValue: proposedItem[syncKey],
         };
       }
     }

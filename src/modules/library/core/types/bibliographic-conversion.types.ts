@@ -100,6 +100,8 @@ export interface TypeConversionPreview {
   mappedFields: FieldMappingChange[];
   droppedFields: DroppedField[];
   newAvailableFields: string[];
+  schemaUnsupportedFields?: string[];
+  schemaUnsupportedFieldLabels?: string[];
   creatorChanges: CreatorRoleChange[];
   projectedItem: Record<string, unknown>;
   unmappedRetained: Record<string, unknown>;

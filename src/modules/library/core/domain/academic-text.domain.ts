@@ -102,12 +102,30 @@ export function stripXmlAndHtmlTags(text: string): string {
     out = out.replace(DOUBLE_ENCODED_TAG_REGEX, '<$1>');
   }
   out = convertSubSupTagsToUnicode(out);
+
+  const mathPlaceholders: string[] = [];
+  if (/[$\\]/.test(out)) {
+    out = out.replace(MATH_BLOCK_REGEX, (match) => {
+      const idx = mathPlaceholders.length;
+      mathPlaceholders.push(match);
+      return `@@MATH_TAG_GUARD_${idx}@@`;
+    });
+  }
+
   out = out.replace(INLINE_FORMAT_TAG_REGEX, '');
-  return out
+  out = out
     .replace(/<\/?[a-zA-Z][a-zA-Z0-9:_-]*(?:\s[^<>]*)?\/?>/g, ' ')
     .replace(/\s+([.,;:!?])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
+
+  if (mathPlaceholders.length > 0) {
+    out = out.replace(
+      /@@MATH_TAG_GUARD_(\d+)@@/g,
+      (m, idxStr: string) => mathPlaceholders[Number(idxStr)] ?? m,
+    );
+  }
+  return out;
 }
 
 /**
@@ -127,7 +145,7 @@ export function convertAcademicHtmlToMarkdown(raw: string): string {
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
-  return raw
+  const transformed = raw
     .replace(/\r\n/g, '\n')
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -149,8 +167,43 @@ export function convertAcademicHtmlToMarkdown(raw: string): string {
     )
     .replace(
       /<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi,
-      (_, c: string) => `> ${c.trim()}\n\n`,
+      (_, c: string) => {
+        const inner = c
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<\/p>\s*<p[^>]*>/gi, '\n')
+          .replace(/<\/?p[^>]*>/gi, '')
+          .trim();
+        const quoted = inner
+          .split(/\r?\n/)
+          .map((line) => `> ${line.trim()}`)
+          .join('\n');
+        return `${quoted}\n\n`;
+      },
     )
+    .replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner: string) => {
+      let itemIndex = 0;
+      const items: string[] = [];
+      inner.replace(
+        /<li[^>]*>([\s\S]*?)<\/li>/gi,
+        (__, itemContent: string) => {
+          itemIndex += 1;
+          items.push(`${itemIndex}. ${itemContent.trim()}`);
+          return '';
+        },
+      );
+      return `\n\n${items.join('\n')}\n\n`;
+    })
+    .replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner: string) => {
+      const items: string[] = [];
+      inner.replace(
+        /<li[^>]*>([\s\S]*?)<\/li>/gi,
+        (__, itemContent: string) => {
+          items.push(`- ${itemContent.trim()}`);
+          return '';
+        },
+      );
+      return `\n\n${items.join('\n')}\n\n`;
+    })
     .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, c: string) => `- ${c.trim()}\n`)
     .replace(/<\/?(ul|ol)[^>]*>/gi, '\n')
     .replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, c: string) => `${c.trim()}\n\n`)
@@ -169,15 +222,9 @@ export function convertAcademicHtmlToMarkdown(raw: string): string {
         return label;
       },
     )
-    .replace(/<\/?[a-zA-Z][a-zA-Z0-9:_-]*(?:\s[^<>]*)?\/?>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&amp;/gi, '&')
-    .replace(/&mdash;/gi, '—')
-    .replace(/&ndash;/gi, '–')
+    .replace(/<\/?[a-zA-Z][a-zA-Z0-9:_-]*(?:\s[^<>]*)?\/?>/g, '');
+
+  return decodeHtmlEntities(transformed)
     .split('\n')
     .map((line) => line.trimEnd())
     .join('\n')
@@ -207,6 +254,11 @@ function decodeLatexOutsideMath(segment: string): string {
       const comb = LATEX_COMBINING_MAP[cmd];
       return comb ? (ch + comb).normalize('NFC') : ch;
     },
+  );
+  // Strip LaTeX text-formatting command names before removing braces
+  s = s.replace(
+    /\\(?:textbf|textit|emph|textsc|textsf|texttt|textrm|text|mathrm|mathbf|mathit|bf|it|rm|sc)\b\s*/g,
+    '',
   );
   return s.replace(/[{}]/g, '');
 }
@@ -487,8 +539,8 @@ export function cleanAbstractText(text?: string | null): string | undefined {
     /(?:(?:Copyright\s*)?(?:\(c\)|©)\s*(?:19|20)\d{2}\s*(?:Oxford University Press|Cambridge University Press|Informa UK|Taylor & Francis))[\s\S]*$/i,
     // Creative Commons licenses
     /(?:This article is distributed under the terms of the Creative Commons|Licensed under a Creative Commons)[\s\S]*$/i,
-    // IEEE / ACM
-    /(?:Copyright\s*(?:\(c\)|©)?\s*(?:19|20)\d{2}|©\s*(?:19|20)\d{2}\s*(?:IEEE|ACM))[\s\S]*$/i,
+    // IEEE / ACM / explicit copyright statements (requires ©/(c), "by", "all rights reserved", or publisher name so prose like "Copyright 1998" is preserved)
+    /(?:Copyright\s*(?:\(c\)|©)\s*(?:19|20)\d{2}|Copyright\s+(?:19|20)\d{2}\s+(?:by\b|IEEE\b|ACM\b|Elsevier\b|Springer\b|Wiley\b|Oxford\b|Cambridge\b|Taylor\b|Informa\b|The\s+Authors?\b|All\s+rights\s+reserved\b)|©\s*(?:19|20)\d{2}\s*(?:IEEE|ACM|by\b))[\s\S]*$/i,
     /\b\d{4}-\d{3}[\dX]\s*(?:\(c\)|©)?\s*\d{4}\s*IEEE[\s\S]*$/i,
   ];
 

@@ -1,4 +1,9 @@
-import { ItemMetadata, isInstitutionName } from '@/modules/library/core';
+import {
+  ItemMetadata,
+  isInstitutionName,
+  isNoiseAuthorName,
+} from '@/modules/library/core';
+import { isValidIsbnChecksum } from '@/modules/library/core/domain/identifier.domain';
 import { QualityScoreBreakdown } from '@/modules/library/extraction/types/trusted-extraction.types';
 
 export interface EvaluationResult {
@@ -21,7 +26,7 @@ export class MetadataQualityGate {
   private static readonly WEIGHT_VENUE = 0.1;
 
   private static readonly GARBAGE_TITLE_REGEX =
-    /^(untitled|document|microsoft word|manuscript|proceedings of the|submitted to|accepted at|\d{4}\.\d{4,5})/i;
+    /^(untitled|document|microsoft word|manuscript|proceedings of the|submitted to|accepted at|journal pre-proof|accepted manuscript|author guidelines|camera-ready|supplementary material|powerpoint presentation|latex template|https?:\/\/|\d{4}\.\d{4,5})/i;
 
   private static evaluateTitle(title?: string): number {
     if (!title || typeof title !== 'string') return 0.0;
@@ -65,7 +70,14 @@ export class MetadataQualityGate {
       if (!name || typeof name !== 'string') return false;
       const t = name.trim();
       if (t.length < 2 || /^\d+$/.test(t)) return false;
-      if (isInstitutionName(t) && !t.includes(',')) return false;
+      if (
+        /^(admin|administrator|user|owner|author|default|root|guest|unknown|test)$/i.test(
+          t,
+        )
+      ) {
+        return false;
+      }
+      if (isInstitutionName(t) || isNoiseAuthorName(t)) return false;
       return true;
     });
 
@@ -82,7 +94,7 @@ export class MetadataQualityGate {
     if (doi && /^10\.\d{4,9}\/\S+$/i.test(doi)) return 1.0;
     if (arxivId && /^\d{4}\.\d{4,5}/.test(arxivId)) return 1.0;
     if (pmid && /^\d{7,9}$/.test(pmid)) return 1.0;
-    if (isbn && (isbn.length === 10 || isbn.length === 13)) return 1.0;
+    if (isbn && isValidIsbnChecksum(isbn)) return 1.0;
     return 0.0;
   }
 

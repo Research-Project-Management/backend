@@ -45,8 +45,23 @@ export const LIBRARY_REDIS_KEYS = {
   countsByScope: (scopeId: string) => `library:counts:*${scopeId}*`,
 
   // Search & Facets Cache
+  searchItems: (scopeKey: string, version: string, filterHash: string) =>
+    `library:search:items:${scopeKey}:v${version}:${filterHash}`,
+  searchFacets: (scopeKey: string, version: string, filterHash: string) =>
+    `library:search:facets:${scopeKey}:v${version}:${filterHash}`,
   searchFacetsPattern: (scopeId: string) =>
     `library:search:facets:*${scopeId}*`,
   searchItemsPattern: (scopeId: string) => `library:search:items:*${scopeId}*`,
   searchVersion: (scopeKey: string) => `library:search:version:${scopeKey}`,
+
+  // Citation & CSL Styles Cache
+  doiNegotiation: (format: string, doi: string) =>
+    format === 'meta'
+      ? `library:doi-cn:meta:${doi}`
+      : `library:doi-cn:cite:${format}:${doi}`,
+  cslStyleXml: (styleName: string, scopeId?: string) =>
+    scopeId ? `csl:xml:${scopeId}:${styleName}` : `csl:xml:${styleName}`,
+  cslCustomStylesList: (scopeId?: string) =>
+    scopeId ? `csl:${scopeId}:custom-styles-list` : 'csl:custom-styles-list',
+  cslStylesCatalogIndex: () => 'csl:catalog:styles-index',
 };

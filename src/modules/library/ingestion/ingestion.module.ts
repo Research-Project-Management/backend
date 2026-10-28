@@ -144,7 +144,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     WebFetchLadderService,
     {
       provide: WEB_FETCH_PORT,
-      useClass: WebFetchLadderService,
+      useExisting: WebFetchLadderService,
     },
     ...ingestionWorkerProviders,
 

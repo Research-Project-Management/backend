@@ -14,6 +14,7 @@ import { ItemCacheCoordinator } from './item-cache.coordinator';
 import {
   validateCollectionReorderNoCycle,
   executeAssignItemsToCollection,
+  executeDeleteCollectionWithCascade,
   transferCollectionItemMembershipsInTx,
 } from '@/modules/library/catalog/domain/collection-membership.helper';
 @Injectable()
@@ -251,15 +252,6 @@ export class CollectionsService {
     dto: UpdateCollectionDto,
     projectId?: string,
   ) {
-    const existing = await this.repo.findById(
-      userId,
-      collectionId,
-      undefined,
-      projectId,
-    );
-    if (!existing) {
-      throw new NotFoundException(`Collection not found: ${collectionId}`);
-    }
     const hasParentIdChange = dto.parentId !== undefined;
     const rawParentId = hasParentIdChange ? normalizeParentId(dto.parentId) : undefined;
     let cleanName: string | undefined = undefined;
@@ -283,12 +275,22 @@ export class CollectionsService {
         : {}),
       ...(hasParentIdChange ? { parentId: rawParentId } : {}),
     };
-    const effectiveProjectId =
-      normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
     const expectedVersion = dto.expectedVersion ?? dto.version;
+    let effectiveProjectId = normalizeProjectScopeId(projectId) ?? undefined;
     const collection = this.libraryTx
       ? await this.libraryTx.executeInTransaction(
           async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+            const existing = await this.repo.findById(
+              userId,
+              collectionId,
+              tx,
+              projectId,
+            );
+            if (!existing) {
+              throw new NotFoundException(`Collection not found: ${collectionId}`);
+            }
+            effectiveProjectId =
+              normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
             if (hasParentIdChange && rawParentId) {
               await this.validateParentNoCycle(
                 userId,
@@ -324,6 +326,17 @@ export class CollectionsService {
           },
         )
       : await (async () => {
+          const existing = await this.repo.findById(
+            userId,
+            collectionId,
+            undefined,
+            projectId,
+          );
+          if (!existing) {
+            throw new NotFoundException(`Collection not found: ${collectionId}`);
+          }
+          effectiveProjectId =
+            normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
           if (hasParentIdChange && rawParentId) {
             await this.validateParentNoCycle(
               userId,
@@ -341,7 +354,7 @@ export class CollectionsService {
             expectedVersion,
           );
         })();
-    await this.invalidateCollectionsCache(userId, projectId);
+    await this.invalidateCollectionsCache(userId, effectiveProjectId ?? projectId);
     return { collection };
   }
   async deleteCollection(
@@ -350,149 +363,33 @@ export class CollectionsService {
     strategy: CollectionDeleteStrategy = 'orphan',
     projectId?: string,
   ) {
-    const existing = await this.repo.findById(
-      userId,
-      collectionId,
-      undefined,
-      projectId,
-    );
-    if (!existing) {
-      throw new NotFoundException(`Collection not found: ${collectionId}`);
-    }
-    const effectiveProjectId =
-      normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
-    let affectedItemIds = await this.repo.findItemIdsByCollection(
-      userId,
-      collectionId,
-      undefined,
-      undefined,
-      effectiveProjectId,
-    );
-    let descendantIds: string[] = [];
-    if (strategy === 'cascade') {
-      const allCollections = await this.repo.findAll?.(
+    const { effectiveProjectId, affectedItemIds } =
+      await executeDeleteCollectionWithCascade(
+        this.repo,
+        this.tree,
+        this.libraryTx,
         userId,
-        effectiveProjectId,
-      );
-      descendantIds = this.tree.getDescendantIds(
-        allCollections || [],
         collectionId,
+        strategy,
+        projectId,
       );
-      if (descendantIds.length > 0) {
-        const descendantItemLists = this.repo.findItemIdsByCollections
-          ? [await this.repo.findItemIdsByCollections(userId, descendantIds, undefined, undefined, effectiveProjectId)]
-          : await Promise.all(
-          descendantIds.map((descId) =>
-            this.repo.findItemIdsByCollection(
-              userId,
-              descId,
-              undefined,
-              undefined,
-              effectiveProjectId,
-            ),
-          ),
-        );
-        affectedItemIds = Array.from(
-          new Set([...affectedItemIds, ...descendantItemLists.flat()]),
-        );
-      }
-    }
-    const deletedCollectionIds =
-      strategy === 'cascade' && descendantIds.length > 0
-        ? Array.from(new Set([collectionId, ...descendantIds]))
-        : [collectionId];
-    let deletedItemIds = strategy === 'cascade' ? affectedItemIds : [];
-    if (
-      strategy === 'cascade' &&
-      deletedItemIds.length > 0 &&
-      this.repo.findExclusiveItemIdsByCollections
-    ) {
-      deletedItemIds = await this.repo.findExclusiveItemIdsByCollections(
-        userId,
-        deletedItemIds,
-        deletedCollectionIds,
-        undefined,
-        effectiveProjectId,
-      );
-    }
-    const preResolvedDelete =
-      strategy === 'cascade'
-        ? {
-            targetCollectionIds: deletedCollectionIds,
-            itemIds: deletedItemIds,
-          }
-        : undefined;
-    if (this.libraryTx?.executeInTransaction) {
-      await this.libraryTx.executeInTransaction(
-        async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
-          if (preResolvedDelete) {
-            await this.repo.delete(userId, collectionId, strategy, tx, projectId, preResolvedDelete);
-          } else {
-            await this.repo.delete(userId, collectionId, strategy, tx, projectId);
-          }
-          const eventScope = { userId, projectId: effectiveProjectId };
-          if (deletedCollectionIds.length > 1 && helpers.recordTombstonesBatch && helpers.appendChangesBatch) {
-            const deletedColIso = new Date().toISOString();
-            await helpers.recordTombstonesBatch(eventScope, deletedCollectionIds.map((cId) => ({ entityType: 'Collection', entityId: cId })));
-            await helpers.appendChangesBatch(eventScope, deletedCollectionIds.map((cId) => ({ entityType: 'Collection', entityId: cId, action: 'delete', version: 0, data: { id: cId, deletedAt: deletedColIso } })));
-          } else for (const cId of deletedCollectionIds) {
-            await helpers.recordTombstone(eventScope, { entityType: 'Collection', entityId: cId });
-          }
-          if (deletedItemIds.length > 0) {
-            const deletedIso = new Date().toISOString();
-            await helpers.recordTombstonesBatch(eventScope, deletedItemIds.map((itId) => ({ entityType: 'Item', entityId: itId })));
-            await helpers.appendChangesBatch(eventScope, deletedItemIds.map((itId) => ({ entityType: 'Item', entityId: itId, action: 'delete', version: 0, data: { id: itId, deletedAt: deletedIso } })));
-            if (helpers.publishOutboxBatch) {
-              await helpers.publishOutboxBatch(
-                eventScope,
-                deletedItemIds.map((itId) => ({
-                  aggregateId: itId,
-                  eventType: LIBRARY_EVENT_TYPES.ITEM_DELETED,
-                  payload: { id: itId, itemId: itId, deletedAt: deletedIso, projectId: effectiveProjectId },
-                })),
-              );
-            } else {
-              for (const itId of deletedItemIds) {
-                await helpers.publishOutbox(eventScope, itId, LIBRARY_EVENT_TYPES.ITEM_DELETED, {
-                  id: itId,
-                  itemId: itId,
-                  deletedAt: deletedIso,
-                  projectId: effectiveProjectId,
-                });
-              }
-            }
-          }
-          await helpers.publishOutbox(eventScope, collectionId, LIBRARY_EVENT_TYPES.COLLECTION_DELETED, {
-            id: collectionId,
-            strategy,
-            deletedAt: new Date(),
-            projectId: effectiveProjectId,
-            deletedCollectionIds,
-            deletedItemIds,
-          });
-        },
-      );
-    } else {
-      await this.repo.delete(userId, collectionId, strategy, undefined, projectId);
-    }
     await this.invalidateCollectionsCache(userId, effectiveProjectId, affectedItemIds);
     return { success: true };
   }
   async moveItems(userId: string, collectionId: string, itemIds: string[], projectId?: string) {
-    if (collectionId !== 'unfiled') {
-      const collection = await this.repo.findById(userId, collectionId, undefined, projectId);
-      if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
-    }
     const destinationCollectionId = collectionId === 'unfiled' ? null : collectionId;
     const validProjectId = normalizeProjectScopeId(projectId);
     const scopeWhere = validProjectId ? { projectId: validProjectId } : { userId, projectId: null };
-    const ownedItemIds = await this.repo.findOwnedItemIds(itemIds, scopeWhere);
-    if (ownedItemIds.length === 0) {
-      return { message: 'No owned items to move', count: 0, targetCollectionId: destinationCollectionId };
-    }
+    let ownedItemIds: string[] = [];
     if (this.libraryTx?.executeInTransaction) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          if (collectionId !== 'unfiled') {
+            const collection = await this.repo.findById(userId, collectionId, tx, projectId);
+            if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
+          }
+          ownedItemIds = await this.repo.findOwnedItemIds(itemIds, scopeWhere, tx);
+          if (ownedItemIds.length === 0) return;
           await this.repo.moveItems(userId, destinationCollectionId, ownedItemIds, tx, validProjectId);
           const eventScope = { userId, projectId: validProjectId };
           const eventType =
@@ -515,7 +412,18 @@ export class CollectionsService {
         },
       );
     } else {
+      if (collectionId !== 'unfiled') {
+        const collection = await this.repo.findById(userId, collectionId, undefined, projectId);
+        if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
+      }
+      ownedItemIds = await this.repo.findOwnedItemIds(itemIds, scopeWhere);
+      if (ownedItemIds.length === 0) {
+        return { message: 'No owned items to move', count: 0, targetCollectionId: destinationCollectionId };
+      }
       await this.repo.moveItems(userId, destinationCollectionId, ownedItemIds, undefined, validProjectId);
+    }
+    if (ownedItemIds.length === 0) {
+      return { message: 'No owned items to move', count: 0, targetCollectionId: destinationCollectionId };
     }
     await this.invalidateCollectionsCache(userId, projectId, ownedItemIds);
     return { message: 'Items moved successfully', count: ownedItemIds.length, targetCollectionId: destinationCollectionId };
@@ -634,21 +542,38 @@ export class CollectionsService {
     }
     return { success: true, count };
   }
+  async assignItems(
+    userId: string,
+    collectionId: string,
+    dto: AssignItemsToCollectionDto | string[],
+    projectId?: string,
+  ) {
+    const payload = Array.isArray(dto) ? { itemIds: dto } : dto;
+    return this.assignItemsToCollection(userId, collectionId, payload, projectId);
+  }
+  async removeItems(
+    userId: string,
+    collectionId: string,
+    itemIds: string[],
+    projectId?: string,
+  ) {
+    return this.detachItemsFromCollection(userId, collectionId, itemIds, projectId);
+  }
   async detachItemFromCollection(
     userId: string,
     collectionId: string,
     itemId: string,
     projectId?: string,
   ) {
-    const collection = await this.repo.findById(userId, collectionId, undefined, projectId);
-    if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
     const validProjectId = normalizeProjectScopeId(projectId);
     const scopeWhere = validProjectId ? { projectId: validProjectId } : { userId, projectId: null };
-    const itemExists = await this.repo.verifyItemInScope(itemId, scopeWhere);
-    if (!itemExists) throw new NotFoundException(`Item not found in library: ${itemId}`);
     if (this.libraryTx?.executeInTransaction) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          const collection = await this.repo.findById(userId, collectionId, tx, projectId);
+          if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
+          const itemExists = await this.repo.verifyItemInScope(itemId, scopeWhere, tx);
+          if (!itemExists) throw new NotFoundException(`Item not found in library: ${itemId}`);
           await this.repo.removeItemFromCollection(userId, collectionId, itemId, tx);
           const eventScope = { userId, projectId: validProjectId };
           await helpers.recordTombstone(eventScope, {
@@ -664,6 +589,10 @@ export class CollectionsService {
         },
       );
     } else {
+      const collection = await this.repo.findById(userId, collectionId, undefined, projectId);
+      if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
+      const itemExists = await this.repo.verifyItemInScope(itemId, scopeWhere);
+      if (!itemExists) throw new NotFoundException(`Item not found in library: ${itemId}`);
       await this.repo.removeItemFromCollection(userId, collectionId, itemId);
     }
     await this.invalidateCollectionsCache(userId, projectId, [itemId]);
@@ -676,12 +605,12 @@ export class CollectionsService {
     projectId?: string,
   ) {
     if (!itemIds || itemIds.length === 0) return { success: true, count: 0 };
-    const collection = await this.repo.findById(userId, collectionId, undefined, projectId);
-    if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
     const validProjectId = normalizeProjectScopeId(projectId);
     if (this.libraryTx?.executeInTransaction) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          const collection = await this.repo.findById(userId, collectionId, tx, projectId);
+          if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
           await this.repo.removeItems(collectionId, itemIds, tx);
           const eventScope = { userId, projectId: validProjectId };
           await helpers.recordTombstone(eventScope, {
@@ -697,6 +626,8 @@ export class CollectionsService {
         },
       );
     } else {
+      const collection = await this.repo.findById(userId, collectionId, undefined, projectId);
+      if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
       await this.repo.removeItems(collectionId, itemIds);
     }
     await this.invalidateCollectionsCache(userId, projectId, itemIds);

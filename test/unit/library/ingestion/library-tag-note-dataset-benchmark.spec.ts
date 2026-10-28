@@ -4251,7 +4251,7 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
         );
         expect(bibtexOut).toContain('keywords = {');
         for (const expectedTag of record.expectedCleanTags) {
-          expect(bibtexOut).toContain(expectedTag);
+          expect(bibtexOut.replace(/\\([#%&_{}])/g, '$1')).toContain(expectedTag);
         }
         expect(bibtexOut).toContain('annote = {');
 
@@ -4311,7 +4311,7 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
       const csvLines = csvOut.split('\r\n');
       expect(csvLines).toHaveLength(LARGE_SCALE_BENCHMARK_CORPUS.length + 1);
       expect(csvLines[0]).toBe(
-        'id,title,authors,year,publicationTitle,publisher,doi,itemType,citationKey,url',
+        'id,title,authors,year,publicationTitle,publisher,doi,itemType,citationKey,url,abstract,volume,issue,pages,isbn,issn,pmid,arxivId',
       );
     });
   });

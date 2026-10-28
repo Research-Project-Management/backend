@@ -16,6 +16,7 @@ import {
 } from '@/modules/library/citation/types/citation.types';
 import {
   CATALOG_FACADE,
+  METADATA_PORT,
   ICatalogFacade,
   AcademicHttpClient,
 } from '@/modules/library/core';
@@ -46,7 +47,7 @@ export class CitationService {
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway?: ICatalogFacade,
     @Optional()
-    @Inject('METADATA_PORT')
+    @Inject(METADATA_PORT)
     private readonly metadataPort?: {
       resolve: (req: {
         query: string;
@@ -422,7 +423,24 @@ export class CitationService {
             bibliographyHtml: single.bibliographyHtml,
             source: 'csl-engine',
           };
-          const rawItemId = cslItems[idx]?._itemId;
+          const explicitSingleItemId = (single as { itemId?: string }).itemId;
+          const matchedCsl = single.id
+            ? cslItems.find((c) => c.id === single.id)
+            : undefined;
+          const matchedItem = single.id
+            ? items.find(
+                (it) => it.id === single.id || it.citationKey === single.id,
+              )
+            : undefined;
+          const rawItemId =
+            (typeof explicitSingleItemId === 'string' && explicitSingleItemId
+              ? explicitSingleItemId
+              : undefined) ??
+            (typeof matchedCsl?._itemId === 'string' && matchedCsl._itemId
+              ? matchedCsl._itemId
+              : undefined) ??
+            matchedItem?.id ??
+            cslItems[idx]?._itemId;
           const origItemId: string | undefined =
             typeof rawItemId === 'string' && rawItemId.length > 0
               ? rawItemId

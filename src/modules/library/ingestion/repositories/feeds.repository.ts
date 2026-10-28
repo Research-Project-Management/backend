@@ -1,5 +1,7 @@
 import { Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
+import { parseCreatorString } from '@/modules/library/core';
 import type { ParsedAcademicFeed } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 
 export interface FeedSubscriptionRecord {
@@ -233,6 +235,24 @@ export class FeedsRepository {
         ? new Date(now - cleanupUnreadAfter * dayMs)
         : null;
 
+    const retentionConditions: Prisma.FeedItemWhereInput[] = [];
+    if (readCutoff) {
+      retentionConditions.push({
+        OR: [
+          { readStates: { none: { userId } } },
+          { readStates: { some: { userId, readAt: { gte: readCutoff } } } },
+        ],
+      });
+    }
+    if (unreadCutoff) {
+      retentionConditions.push({
+        OR: [
+          { readStates: { some: { userId } } },
+          { publishedAt: { gte: unreadCutoff } },
+        ],
+      });
+    }
+
     const rawItems = await this.prisma.feedItem.findMany({
       where: {
         feedId,
@@ -241,6 +261,7 @@ export class FeedsRepository {
           : readStatus === 'unread'
             ? { readStates: { none: { userId } } }
             : {}),
+        ...(retentionConditions.length > 0 ? { AND: retentionConditions } : {}),
       },
       include: {
         readStates: {
@@ -277,12 +298,11 @@ export class FeedsRepository {
   async resolveFeedItemUuid(rawItemId: string): Promise<string | null> {
     if (!rawItemId || typeof rawItemId !== 'string') return null;
     const trimmed = rawItemId.trim();
-    if (isUuid(trimmed)) return trimmed;
-    if (!this.prisma) return null;
-
+    if (!this.prisma?.feedItem?.findFirst) return isUuid(trimmed) ? trimmed : null;
     const found = await this.prisma.feedItem.findFirst({
       where: {
         OR: [
+          ...(isUuid(trimmed) ? [{ id: trimmed }] : []),
           { guid: trimmed },
           { url: trimmed },
           { doi: trimmed },
@@ -291,83 +311,68 @@ export class FeedsRepository {
       },
       select: { id: true },
     });
-
-    return found?.id || null;
+    return found?.id || (isUuid(trimmed) ? trimmed : null);
   }
 
   async resolveFeedItemUuids(rawItemIds: string[]): Promise<string[]> {
     if (!Array.isArray(rawItemIds) || rawItemIds.length === 0) return [];
     const uniqueRaw = Array.from(
-      new Set(
-        rawItemIds
-          .filter((id): id is string => typeof id === 'string')
-          .map((id) => id.trim())
-          .filter(Boolean),
-      ),
+      new Set(rawItemIds.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean)),
     ).slice(0, 200);
-
     const directUuids: string[] = [];
     const nonUuids: string[] = [];
     for (const id of uniqueRaw) {
-      if (isUuid(id)) {
-        directUuids.push(id);
-      } else {
-        nonUuids.push(id);
-      }
+      if (isUuid(id)) directUuids.push(id);
+      else nonUuids.push(id);
     }
-
-    if (nonUuids.length === 0 || !this.prisma) {
-      return directUuids;
-    }
-
+    if (nonUuids.length === 0 || !this.prisma) return directUuids;
     const foundItems = await this.prisma.feedItem.findMany({
       where: {
-        OR: [
-          { guid: { in: nonUuids } },
-          { url: { in: nonUuids } },
-          { doi: { in: nonUuids } },
-          { arxivId: { in: nonUuids } },
-        ],
+        OR: [{ guid: { in: nonUuids } }, { url: { in: nonUuids } }, { doi: { in: nonUuids } }, { arxivId: { in: nonUuids } }],
       },
       select: { id: true },
       take: 200,
     });
-
-    return Array.from(
-      new Set([...directUuids, ...foundItems.map((it) => it.id)]),
-    );
+    return Array.from(new Set([...directUuids, ...foundItems.map((it) => it.id)]));
   }
 
-  async setItemReadState(
-    userId: string,
-    canonicalItemId: string,
-    isRead: boolean,
-  ): Promise<void> {
+  async setItemReadState(userId: string, canonicalItemId: string, isRead: boolean): Promise<void> {
     if (!this.prisma) return;
+    let resolvedId = canonicalItemId;
+    if (!isUuid(canonicalItemId)) {
+      const found = await this.resolveFeedItemUuid(canonicalItemId);
+      if (!found) return;
+      resolvedId = found;
+    }
     if (isRead) {
       await this.prisma.feedItemReadState.upsert({
-        where: {
-          userId_itemId: { userId, itemId: canonicalItemId },
-        },
-        create: {
-          userId,
-          itemId: canonicalItemId,
-        },
-        update: {
-          readAt: new Date(),
-        },
+        where: { userId_itemId: { userId, itemId: resolvedId } },
+        create: { userId, itemId: resolvedId },
+        update: { readAt: new Date() },
       });
     } else {
-      await this.prisma.feedItemReadState.deleteMany({
-        where: { userId, itemId: canonicalItemId },
-      });
+      await this.prisma.feedItemReadState.deleteMany({ where: { userId, itemId: resolvedId } });
     }
   }
 
-  async markManyItemsRead(
-    userId: string,
-    canonicalItemIds: string[],
-  ): Promise<void> {
+  async markItemRead(userId: string, feedItemId: string, isRead = true): Promise<void> {
+    const resolvedId = await this.resolveFeedItemUuid(feedItemId);
+    if (!resolvedId) return;
+    await this.setItemReadState(userId, resolvedId, isRead);
+  }
+
+  async findReadItemIdsForUser(userId: string, itemIds: string[]): Promise<Set<string>> {
+    if (!this.prisma?.feedItemReadState?.findMany || itemIds.length === 0) return new Set();
+    const validIds = itemIds.filter((id) => isUuid(id));
+    if (validIds.length === 0) return new Set();
+    const states = await this.prisma.feedItemReadState.findMany({
+      where: { userId, itemId: { in: validIds } },
+      select: { itemId: true },
+    });
+    return new Set(states.map((s) => s.itemId));
+  }
+
+  async markManyItemsRead(userId: string, canonicalItemIds: string[]): Promise<void> {
     if (!this.prisma || canonicalItemIds.length === 0) return;
     await this.prisma.feedItemReadState.createMany({
       data: canonicalItemIds.map((itemId) => ({ userId, itemId })),
@@ -377,69 +382,52 @@ export class FeedsRepository {
 
   async findActiveFeedsForPolling(take = 100) {
     if (!this.prisma) return [];
-    return this.prisma.feed.findMany({
-      where: { errorCount: { lt: 5 } },
+    const feeds = await this.prisma.feed.findMany({
+      where: { errorCount: { lt: 5 }, subscriptions: { some: {} } },
       orderBy: { lastFetchedAt: { sort: 'asc', nulls: 'first' } },
-      select: {
-        id: true,
-        url: true,
-        lastFetchedAt: true,
-      },
+      select: { id: true, url: true, lastFetchedAt: true, refreshInterval: true },
       take,
+    });
+    const now = Date.now();
+    return feeds.filter((feed) => {
+      if (!feed.lastFetchedAt) return true;
+      const intervalSec = typeof feed.refreshInterval === 'number' && feed.refreshInterval > 0 ? feed.refreshInterval : 7200;
+      return now - new Date(feed.lastFetchedAt).getTime() >= intervalSec * 1000;
     });
   }
 
   async markFeedPollSuccess(feedId: string, status?: number): Promise<void> {
     if (!this.prisma) return;
-    await this.prisma.feed
-      .update({
-        where: { id: feedId },
-        data: {
-          errorCount: 0,
-          lastFetchedAt: new Date(),
-          ...(status !== undefined ? { lastStatus: status } : {}),
-        },
-      })
-      .catch(() => {});
+    await this.prisma.feed.update({
+      where: { id: feedId },
+      data: { errorCount: 0, lastFetchedAt: new Date(), ...(status !== undefined ? { lastStatus: status } : {}) },
+    }).catch(() => {});
   }
 
   async markFeedPollFailure(feedId: string): Promise<void> {
     if (!this.prisma) return;
-    await this.prisma.feed
-      .update({
-        where: { id: feedId },
-        data: { errorCount: { increment: 1 } },
-      })
-      .catch(() => {});
+    await this.prisma.feed.update({
+      where: { id: feedId },
+      data: { errorCount: { increment: 1 } },
+    }).catch(() => {});
   }
 
   async findFeedsWithRetentionPreferences(take = 500) {
     if (!this.prisma) return [];
     return this.prisma.feed.findMany({
-      select: {
-        id: true,
-        subscriptions: {
-          select: {
-            cleanupReadAfter: true,
-            cleanupUnreadAfter: true,
-          },
-        },
-      },
+      select: { id: true, subscriptions: { select: { cleanupReadAfter: true, cleanupUnreadAfter: true } } },
       take,
     });
   }
 
-  async deleteFeedItemsOlderThan(
-    cutoffDate: Date,
-    feedId?: string,
-  ): Promise<number> {
+  async deleteFeedItemsOlderThan(cutoffDate: Date, feedId?: string, readStatus?: 'read' | 'unread'): Promise<number> {
     if (!this.prisma) return 0;
-    const res = await this.prisma.feedItem.deleteMany({
-      where: {
-        ...(feedId ? { feedId } : {}),
-        publishedAt: { lt: cutoffDate },
-      },
-    });
+    const whereClause: Prisma.FeedItemWhereInput = {
+      ...(feedId ? { feedId } : {}),
+      publishedAt: { lt: cutoffDate },
+      ...(readStatus === 'read' ? { readStates: { some: {} } } : readStatus === 'unread' ? { readStates: { none: {} } } : {}),
+    };
+    const res = await this.prisma.feedItem.deleteMany({ where: whereClause });
     return res.count;
   }
 
@@ -448,18 +436,19 @@ export class FeedsRepository {
     parsed: ParsedAcademicFeed;
     etag?: string;
     lastModified?: string;
-  }): Promise<void> {
+  }): Promise<CachedFeedWithItems | void> {
     if (!this.prisma) return;
     const prismaClient = this.prisma;
     const { feedUrl, parsed, etag, lastModified } = params;
+    const resolvedSiteUrl = parsed.siteUrl || parsed.feedUrl || undefined;
 
     const feed = await this.prisma.feed.upsert({
       where: { url: feedUrl },
       create: {
         url: feedUrl,
         title: parsed.feedTitle || 'Academic Feed',
-        siteUrl: undefined,
-        description: undefined,
+        siteUrl: resolvedSiteUrl,
+        description: parsed.description || undefined,
         etag,
         lastModified,
         lastFetchedAt: new Date(),
@@ -468,6 +457,8 @@ export class FeedsRepository {
       },
       update: {
         title: parsed.feedTitle || undefined,
+        ...(resolvedSiteUrl ? { siteUrl: resolvedSiteUrl } : {}),
+        ...(parsed.description ? { description: parsed.description } : {}),
         etag: etag || undefined,
         lastModified: lastModified || undefined,
         lastFetchedAt: new Date(),
@@ -480,10 +471,11 @@ export class FeedsRepository {
 
     const boundedEntries = parsed.entries.slice(0, 100);
     const UPSERT_CHUNK_SIZE = 15;
+    const persistedItems: CachedFeedWithItems['items'] = [];
     for (let i = 0; i < boundedEntries.length; i += UPSERT_CHUNK_SIZE) {
       const chunk = boundedEntries.slice(i, i + UPSERT_CHUNK_SIZE);
-      await Promise.all(
-        chunk.map((entry) => {
+      const chunkRes = await Promise.all(
+        chunk.map(async (entry) => {
           const guid = (
             entry.doi ||
             entry.arxivId ||
@@ -492,7 +484,7 @@ export class FeedsRepository {
             entry.title ||
             ''
           ).trim();
-          if (!guid || !entry.title) return Promise.resolve();
+          if (!guid || !entry.title) return null;
 
           const publishedDate = entry.publicationDate
             ? new Date(entry.publicationDate)
@@ -501,11 +493,68 @@ export class FeedsRepository {
             ? new Date()
             : publishedDate;
 
-          const authorsJson = Array.isArray(entry.authors)
-            ? entry.authors.map((a: string) => ({ name: a }))
-            : [];
+          const authorsJson =
+            Array.isArray(entry.creators) && entry.creators.length > 0
+              ? entry.creators.map((c, cIdx) => {
+                  const needsReparse =
+                    !c.firstName &&
+                    c.lastName &&
+                    c.lastName.includes(' ') &&
+                    c.fieldMode !== 1;
+                  const resolved = needsReparse
+                    ? parseCreatorString(
+                        c.lastName,
+                        cIdx,
+                        c.creatorType || 'author',
+                      )
+                    : c;
+                  const displayName =
+                    resolved.fullName ||
+                    [resolved.firstName, resolved.lastName]
+                      .filter(Boolean)
+                      .join(' ') ||
+                    entry.authors?.[cIdx] ||
+                    '';
+                  return {
+                    name: displayName,
+                    firstName: resolved.firstName,
+                    lastName: resolved.lastName,
+                    fullName: resolved.fullName || displayName,
+                    ...(resolved.fieldMode !== undefined
+                      ? { fieldMode: resolved.fieldMode }
+                      : {}),
+                    creatorType: resolved.creatorType || 'author',
+                  };
+                })
+              : Array.isArray(entry.authors)
+                ? entry.authors.map((a: string, cIdx: number) => {
+                    const parsedCreator = parseCreatorString(a, cIdx, 'author');
+                    return {
+                      name: a,
+                      firstName: parsedCreator.firstName,
+                      lastName: parsedCreator.lastName,
+                      fullName: parsedCreator.fullName || a,
+                      ...(parsedCreator.fieldMode !== undefined
+                        ? { fieldMode: parsedCreator.fieldMode }
+                        : {}),
+                      creatorType: parsedCreator.creatorType || 'author',
+                    };
+                  })
+                : [];
 
-          return prismaClient.feedItem
+          const bibMeta = {
+            ...(entry.pmid ? { pmid: entry.pmid } : {}),
+            ...(entry.pmcid ? { pmcid: entry.pmcid } : {}),
+            ...(entry.publicationTitle ? { publicationTitle: entry.publicationTitle } : {}),
+            ...(entry.volume ? { volume: entry.volume } : {}),
+            ...(entry.issue ? { issue: entry.issue } : {}),
+            ...(entry.pages ? { pages: entry.pages } : {}),
+            ...(Array.isArray(entry.keywords) && entry.keywords.length > 0 ? { keywords: entry.keywords } : {}),
+            ...(entry.itemType ? { itemType: entry.itemType } : {}),
+          };
+          const serializedComments = Object.keys(bibMeta).length > 0 ? JSON.stringify(bibMeta) : undefined;
+
+          const saved = await prismaClient.feedItem
             .upsert({
               where: {
                 feedId_guid: {
@@ -525,7 +574,7 @@ export class FeedsRepository {
                 authors: authorsJson,
                 abstract: entry.abstract,
                 license: entry.rights,
-                comments: undefined,
+                comments: serializedComments,
                 publishedAt: validPublishedAt,
               },
               update: {
@@ -538,12 +587,27 @@ export class FeedsRepository {
                 authors: authorsJson,
                 abstract: entry.abstract || undefined,
                 license: entry.rights || undefined,
+                ...(serializedComments ? { comments: serializedComments } : {}),
               },
             })
-            .catch(() => {});
+            .catch(() => null);
+          if (saved && typeof saved.id === 'string') {
+            entry.id = saved.id;
+            return saved;
+          }
+          return null;
         }),
       );
+      for (const item of chunkRes) {
+        if (item) persistedItems.push(item);
+      }
     }
+    return {
+      id: feed.id,
+      url: feed.url || feedUrl,
+      title: feed.title || parsed.feedTitle || 'Academic Feed',
+      items: persistedItems,
+    };
   }
 
   mapCachedFeedToParsedFeed(cachedFeed: CachedFeedWithItems): ParsedAcademicFeed {
@@ -552,11 +616,72 @@ export class FeedsRepository {
       feedTitle: cachedFeed.title,
       feedUrl: cachedFeed.url,
       entries: (cachedFeed.items || []).map((it) => {
-        const authors = Array.isArray(it.authors)
-          ? (it.authors as Array<string | { name?: string }>).map((a) =>
-              typeof a === 'string' ? a : a.name || '',
-            )
+        let extraMeta: {
+          pmid?: string;
+          pmcid?: string;
+          publicationTitle?: string;
+          volume?: string;
+          issue?: string;
+          pages?: string;
+          keywords?: string[];
+          itemType?: string;
+        } = {};
+        if (typeof it.comments === 'string' && it.comments.trim().startsWith('{')) {
+          try {
+            extraMeta = JSON.parse(it.comments) as typeof extraMeta;
+          } catch {
+            extraMeta = {};
+          }
+        }
+        type StoredAuthorRecord =
+          | string
+          | {
+              name?: string;
+              firstName?: string;
+              lastName?: string;
+              fullName?: string;
+              fieldMode?: number;
+              creatorType?: 'author' | 'editor' | 'translator' | 'contributor';
+            };
+        const rawAuthors = Array.isArray(it.authors)
+          ? (it.authors as StoredAuthorRecord[])
           : [];
+        const authors = rawAuthors
+          .map((a) =>
+            typeof a === 'string'
+              ? a
+              : a.name ||
+                a.fullName ||
+                [a.firstName, a.lastName].filter(Boolean).join(' ') ||
+                '',
+          )
+          .filter(Boolean);
+        const creators = rawAuthors
+          .map((a, idx) => {
+            if (typeof a === 'string') {
+              return parseCreatorString(a, idx, 'author');
+            }
+            if (
+              a.firstName ||
+              a.fieldMode === 1 ||
+              (a.lastName && !a.lastName.includes(' '))
+            ) {
+              const display =
+                a.fullName ||
+                a.name ||
+                [a.firstName, a.lastName].filter(Boolean).join(' ');
+              return {
+                firstName: a.firstName || '',
+                lastName: a.lastName || display,
+                fullName: display,
+                ...(a.fieldMode !== undefined ? { fieldMode: a.fieldMode } : {}),
+                creatorType: a.creatorType || ('author' as const),
+              };
+            }
+            const rawName = a.name || a.fullName || a.lastName || '';
+            return parseCreatorString(rawName, idx, a.creatorType || 'author');
+          })
+          .filter((c) => Boolean(c.lastName || c.fullName));
         return {
           id: it.id,
           title: it.title,
@@ -564,25 +689,32 @@ export class FeedsRepository {
           pdfUrl: it.pdfUrl || undefined,
           doi: it.doi || undefined,
           arxivId: it.arxivId || undefined,
+          pmid: extraMeta.pmid || undefined,
+          pmcid: extraMeta.pmcid || undefined,
           primaryCategory: it.primaryCategory || undefined,
           authors,
-          creators: authors.map((name) => ({
-            firstName: '',
-            lastName: name,
-            fullName: name,
-            creatorType: 'author' as const,
-          })),
+          creators,
           abstract: it.abstract || undefined,
-          publicationTitle: cachedFeed.title,
+          publicationTitle: extraMeta.publicationTitle || cachedFeed.title,
+          volume: extraMeta.volume || undefined,
+          issue: extraMeta.issue || undefined,
+          pages: extraMeta.pages || undefined,
           publicationDate: it.publishedAt
             ? it.publishedAt.toISOString()
             : undefined,
           year: it.publishedAt
             ? new Date(it.publishedAt).getFullYear()
             : null,
-          keywords: it.primaryCategory ? [it.primaryCategory] : [],
+          keywords:
+            Array.isArray(extraMeta.keywords) && extraMeta.keywords.length > 0
+              ? extraMeta.keywords
+              : it.primaryCategory
+                ? [it.primaryCategory]
+                : [],
           rights: it.license || undefined,
-          itemType: it.arxivId ? 'preprint' : 'journalArticle',
+          itemType:
+            (extraMeta.itemType as 'preprint' | 'journalArticle') ||
+            (it.arxivId ? 'preprint' : 'journalArticle'),
         };
       }),
     };

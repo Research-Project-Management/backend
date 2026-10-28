@@ -142,8 +142,61 @@ const IGNORED_SYSTEM_KEYS = new Set([
 ]);
 export type RecordManualLockInput = ManualLockMutationInput;
 export function applyManualEditProvenanceLocks(input: RecordManualLockInput): void {
-  ItemProvenancePolicy.applyManualEditLocks(input);
+  const hasExplicitLocks =
+    Array.isArray(input.dataRecord.lockedFields) ||
+    input.dataRecord.lockedFields === null ||
+    Array.isArray(input.dataExtra.lockedFields) ||
+    input.dataExtra.lockedFields === null;
+  const effectiveExistingMeta = hasExplicitLocks
+    ? {
+        ...input.existingMeta,
+        lockedFields: Array.isArray(input.updatedMetadata.lockedFields)
+          ? input.updatedMetadata.lockedFields
+          : [],
+        fieldProvenance:
+          input.updatedMetadata.fieldProvenance ?? input.existingMeta.fieldProvenance,
+      }
+    : input.existingMeta;
+  ItemProvenancePolicy.applyManualEditLocks({
+    ...input,
+    existingMeta: effectiveExistingMeta,
+  });
+  if (hasExplicitLocks) {
+    const rawExplicit =
+      Array.isArray(input.dataRecord.lockedFields) || input.dataRecord.lockedFields === null
+        ? input.dataRecord.lockedFields
+        : input.dataExtra.lockedFields;
+    const explicitSet = new Set(
+      Array.isArray(rawExplicit)
+        ? (rawExplicit as unknown[]).filter(
+            (f): f is string => typeof f === 'string' && f.trim().length > 0,
+          )
+        : [],
+    );
+    input.updatedMetadata.lockedFields = Array.from(explicitSet);
+    if (
+      input.updatedMetadata.fieldProvenance &&
+      typeof input.updatedMetadata.fieldProvenance === 'object'
+    ) {
+      const prov = { ...(input.updatedMetadata.fieldProvenance as Record<string, unknown>) };
+      for (const [k, v] of Object.entries(prov)) {
+        if (!explicitSet.has(k) && v && typeof v === 'object') {
+          const rec = v as Record<string, unknown>;
+          if (rec.isUserOverride === true || rec.source === 'UserOverride') {
+            delete prov[k];
+          }
+        }
+      }
+      input.updatedMetadata.fieldProvenance = prov;
+    }
+  }
 }
+const NON_COLUMN_SYMMETRIC_ALIASES: Readonly<Record<string, string>> = {
+  numPages: 'numberOfPages',
+  numberOfPages: 'numPages',
+  authority: 'issuingAuthority',
+  issuingAuthority: 'authority',
+};
 export function extractNonColumnExtraFields(
   data?: Record<string, unknown> | null,
   existingExtraFields?: Record<string, unknown> | null,
@@ -159,6 +212,10 @@ export function extractNonColumnExtraFields(
         !FIELD_ALIASES[key]
       ) {
         result[key] = value;
+        const pairedKey = NON_COLUMN_SYMMETRIC_ALIASES[key];
+        if (pairedKey && source[pairedKey] === undefined) {
+          result[pairedKey] = value;
+        }
       }
     }
   };
@@ -294,7 +351,13 @@ export function prepareAttachmentsToCreate(
         (typeof att.mimeType === 'string' && att.mimeType.trim()) ||
         (typeof att.contentType === 'string' && att.contentType.trim()) ||
         'application/pdf';
-      const size = typeof att.size === 'number' ? att.size : 0;
+      const rawSize =
+        typeof att.size === 'number'
+          ? att.size
+          : typeof att.fileSize === 'number'
+            ? att.fileSize
+            : 0;
+      const size = rawSize;
       const fileUrl =
         typeof att.url === 'string' && att.url.trim()
           ? att.url.trim()
@@ -405,7 +468,7 @@ export function prepareAttachmentsToCreate(
                     revisionNumber: 1,
                     url: fileUrl,
                     sizeBytes: size,
-                    fileHash: (att.fileHash as string) || '',
+                    fileHash: (att.fileHash as string) || null,
                   },
                 ],
               },
@@ -439,7 +502,7 @@ export function prepareAttachmentsToCreate(
             revisionNumber: 1,
             url: fileUrl,
             sizeBytes: size,
-            fileHash: '',
+            fileHash: null,
           },
         ],
       },
@@ -459,6 +522,7 @@ export function deriveFirstAuthor(data: {
   authors?: Array<string | Record<string, unknown>>;
   author?: string;
   editors?: Array<string | Record<string, unknown>>;
+  itemType?: string;
 }): string | null {
   const formatResult = (name: string, count: number): string | null => {
     const trimmed = name.trim();
@@ -466,6 +530,7 @@ export function deriveFirstAuthor(data: {
     return (count > 1 ? `${trimmed} et al.` : trimmed).slice(0, 255);
   };
 
+  const primaryRoleLower = getPrimaryCreatorRoleForType(data.itemType).toLowerCase();
   const structured =
     data.contributors && data.contributors.length > 0
       ? data.contributors
@@ -475,7 +540,7 @@ export function deriveFirstAuthor(data: {
   if (structured) {
     const isAuthorRole = (c: Record<string, unknown>) => {
       const role = String(c.creatorType || c.role || 'author').trim().toLowerCase();
-      return role === 'author' || role === 'creator' || role === '';
+      return role === 'author' || role === primaryRoleLower || role === 'creator' || role === '';
     };
     const isNonEditorRole = (c: Record<string, unknown>) => {
       const role = String(c.creatorType || c.role || 'author').trim().toLowerCase();
@@ -551,6 +616,7 @@ export function prepareContributorsToCreate(
     return null;
   }
 
+  const primaryRole = getPrimaryCreatorRoleForType(itemType);
   let baseContributors = data.contributors;
   let baseCreators = data.creators;
 
@@ -560,7 +626,7 @@ export function prepareContributorsToCreate(
     Array.isArray(existingContributors) &&
     existingContributors.length > 0
   ) {
-    const primaryRoleLower = getPrimaryCreatorRoleForType(itemType).toLowerCase();
+    const primaryRoleLower = primaryRole.toLowerCase();
     const getRoleLower = (c: Record<string, unknown> | CreatorCreditInput) =>
       String(
         (c as Record<string, unknown>).creatorType ||
@@ -586,17 +652,23 @@ export function prepareContributorsToCreate(
       ) as CreatorCreditInput[];
       if (preservedNonPrimary.length > 0) {
         const mergedAuthors =
-          mergeCanonicalCreators({
-            authors: effectiveAuthors,
-            itemType,
-          }) || [];
+          mergeCanonicalCreators(
+            {
+              authors: effectiveAuthors,
+              itemType,
+            },
+            primaryRole,
+          ) || [];
         const mergedAll =
-          mergeCanonicalCreators({
-            contributors: [...mergedAuthors, ...preservedNonPrimary],
-            itemType,
-          }) || [];
+          mergeCanonicalCreators(
+            {
+              contributors: [...mergedAuthors, ...preservedNonPrimary],
+              itemType,
+            },
+            primaryRole,
+          ) || [];
         return mergedAll.map((c, index) => ({
-          creatorType: c.creatorType || 'author',
+          creatorType: c.creatorType || primaryRole,
           fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
           firstName: c.firstName || '',
           lastName: c.lastName || '',
@@ -611,18 +683,21 @@ export function prepareContributorsToCreate(
     }
   }
 
-  const merged = mergeCanonicalCreators({
-    contributors: baseContributors,
-    creators: baseCreators,
-    authors: effectiveAuthors,
-    editors: data.editors,
-    itemType,
-  });
+  const merged = mergeCanonicalCreators(
+    {
+      contributors: baseContributors,
+      creators: baseCreators,
+      authors: effectiveAuthors,
+      editors: data.editors,
+      itemType,
+    },
+    primaryRole,
+  );
   if (!merged || merged.length === 0) {
     return [];
   }
   return merged.map((c, index) => ({
-    creatorType: c.creatorType || 'author',
+    creatorType: c.creatorType || primaryRole,
     fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
     firstName: c.firstName || '',
     lastName: c.lastName || '',

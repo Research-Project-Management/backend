@@ -163,15 +163,6 @@ export class NotesRepository {
     };
 
     if (effectiveExpectedVersion !== undefined) {
-      if (existing.version !== effectiveExpectedVersion) {
-        throw new VersionMismatchException({
-          aggregateType: 'Note',
-          entityId: id,
-          currentVersion: existing.version,
-          providedVersion: effectiveExpectedVersion,
-        });
-      }
-
       const affected = await client.note.updateMany({
         where: {
           id,
@@ -244,21 +235,32 @@ export class NotesRepository {
     const existing = await client.note.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
-    if (expectedVersion !== undefined) {
-      if (existing && existing.version !== expectedVersion) {
-        throw new VersionMismatchException({
-          aggregateType: 'Note',
-          entityId: id,
-          currentVersion: existing.version,
-          providedVersion: expectedVersion,
-        });
-      }
-    }
 
     const result = await client.note.updateMany({
-      where: { id, ...scopeWhere, deletedAt: null },
-      data: { deletedAt: new Date() },
+      where: {
+        id,
+        ...scopeWhere,
+        deletedAt: null,
+        ...(expectedVersion !== undefined ? { version: expectedVersion } : {}),
+      },
+      data: {
+        deletedAt: new Date(),
+        version: { increment: 1 },
+      },
     });
+
+    if (result.count === 0 && expectedVersion !== undefined && existing) {
+      const fresh = await client.note.findUnique?.({
+        where: { id },
+        select: { version: true },
+      });
+      throw new VersionMismatchException({
+        aggregateType: 'Note',
+        entityId: id,
+        currentVersion: fresh?.version ?? existing.version,
+        providedVersion: expectedVersion,
+      });
+    }
 
     if (result.count > 0 && existing?.itemId) {
       await this.syncItemNoteCount(existing.itemId, tx);
@@ -273,13 +275,15 @@ export class NotesRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     if (sourceItemIds.length === 0) return;
+    const cleanSourceIds = sourceItemIds.filter((id) => id !== targetItemId);
+    if (cleanSourceIds.length === 0) return;
     const client = this.getClient(tx);
     await client.note.updateMany({
-      where: { itemId: { in: sourceItemIds } },
+      where: { itemId: { in: cleanSourceIds } },
       data: { itemId: targetItemId },
     });
     await Promise.all([
-      ...sourceItemIds.map((sourceId) => this.syncItemNoteCount(sourceId, tx)),
+      ...cleanSourceIds.map((sourceId) => this.syncItemNoteCount(sourceId, tx)),
       this.syncItemNoteCount(targetItemId, tx),
     ]);
   }

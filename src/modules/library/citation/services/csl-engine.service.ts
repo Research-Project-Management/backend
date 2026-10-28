@@ -134,66 +134,26 @@ export class CslEngineService implements OnModuleInit {
     const translatorSig = formatNamesSig(cslItem.translator);
     const rec = cslItem as Record<string, unknown>;
     const extendedCreatorSigs = (
-      [
-        'director',
-        'composer',
-        'interviewer',
-        'recipient',
-        'reviewed-author',
-        'collection-editor',
-        'container-author',
-        'contributor',
-      ] as const
-    )
-      .map((role) => formatNamesSig(rec[role] as CslName[] | undefined))
-      .join('|');
+      ['director', 'composer', 'interviewer', 'recipient', 'reviewed-author', 'collection-editor', 'container-author', 'contributor'] as const
+    ).map((role) => formatNamesSig(rec[role] as CslName[] | undefined)).join('|');
     const contentFingerprint = [
-      cslItem.type || '',
-      cslItem.title || '',
-      cslItem['title-short'] || '',
-      authorSig,
-      editorSig,
-      translatorSig,
-      extendedCreatorSigs,
-      cslItem['container-title'] || '',
-      cslItem['container-title-short'] || '',
-      cslItem['collection-title'] || '',
-      cslItem['collection-number'] ?? '',
-      cslItem.volume ?? '',
-      cslItem['number-of-volumes'] ?? '',
-      cslItem.issue ?? '',
-      cslItem.number ?? '',
-      cslItem.edition ?? '',
-      cslItem.page || '',
-      cslItem['number-of-pages'] ?? '',
-      cslItem.section || '',
+      cslItem.type || '', cslItem.title || '', cslItem['title-short'] || '',
+      authorSig, editorSig, translatorSig, extendedCreatorSigs,
+      cslItem['container-title'] || '', cslItem['container-title-short'] || '',
+      cslItem['collection-title'] || '', cslItem['collection-number'] ?? '',
+      cslItem.volume ?? '', cslItem['number-of-volumes'] ?? '', cslItem.issue ?? '',
+      cslItem.number ?? '', cslItem.edition ?? '', cslItem.page || '',
+      cslItem['number-of-pages'] ?? '', cslItem.section || '',
       String(rec['chapter-number'] ?? rec.chapter ?? ''),
-      cslItem.DOI || '',
-      cslItem.ISBN || '',
-      cslItem.ISSN || '',
-      cslItem.URL || '',
-      accessed,
-      submitted,
-      cslItem.publisher || '',
-      cslItem['publisher-place'] || '',
-      cslItem.genre || '',
-      cslItem.medium || String(rec.medium ?? ''),
-      cslItem.status || '',
-      cslItem.version || '',
-      cslItem.language || '',
-      cslItem.abstract || '',
-      cslItem.keyword || '',
-      cslItem.note || '',
-      cslItem.annote || '',
-      cslItem.PMID || '',
-      cslItem.PMCID || '',
-      cslItem['event-title'] || '',
-      cslItem['event-place'] || '',
-      cslItem.authority || '',
-      cslItem.archive || '',
-      cslItem['archive-location'] || cslItem.archive_location || '',
-      cslItem['call-number'] || '',
-      cslItem.rights || '',
+      cslItem.DOI || '', cslItem.ISBN || '', cslItem.ISSN || '', cslItem.URL || '',
+      accessed, submitted, cslItem.publisher || '', cslItem['publisher-place'] || '',
+      cslItem.genre || '', cslItem.medium || String(rec.medium ?? ''),
+      cslItem.status || '', cslItem.version || '', cslItem.language || '',
+      cslItem.abstract || '', cslItem.keyword || '', cslItem.note || '',
+      cslItem.annote || '', cslItem.PMID || '', cslItem.PMCID || '',
+      cslItem['event-title'] || '', cslItem['event-place'] || '', cslItem.authority || '',
+      cslItem.archive || '', cslItem['archive-location'] || cslItem.archive_location || '',
+      cslItem['call-number'] || '', cslItem.rights || '',
     ].join('|');
 
     const fullDigest = `${date}::${ver}::${updated}::${contentFingerprint}`;
@@ -585,66 +545,141 @@ export class CslEngineService implements OnModuleInit {
       );
     }
 
-    const citations =
-      preformattedCitations ??
-      cslItems.map((item, idx) => {
-        const single = this.format(item, normalizedStyle, idx + 1);
-        return {
-          id: item.id,
-          inText: single.inText,
-          bibliography: single.bibliography,
-          bibliographyHtml: single.bibliographyHtml,
-        };
-      });
+    let cachedList:
+      | Array<{ id: string; inText: string; bibliography: string; bibliographyHtml?: string }>
+      | undefined;
+    const getFallbackCitation = (idx: number) => {
+      if (preformattedCitations?.[idx]) return preformattedCitations[idx];
+      const item = cslItems[idx];
+      const single = this.format(item, normalizedStyle, idx + 1);
+      return {
+        id: item.id,
+        inText: single.inText,
+        bibliography: single.bibliography,
+        bibliographyHtml: single.bibliographyHtml,
+      };
+    };
+    const buildAllFallbackCitations = () =>
+      (cachedList ??=
+        preformattedCitations ?? cslItems.map((_, idx) => getFallbackCitation(idx)));
 
-    const buildFallbackCombinedInText = () => {
-      const isNumeric = NUMERIC_STYLE_TOKENS.some((s) =>
-        normalizedStyle.includes(s),
-      );
-      if (isNumeric) {
-        return `[${cslItems.map((_, i) => i + 1).join(', ')}]`;
-      }
-      const inTexts = citations
-        .map((c) => c.inText.replace(/^\(|\)$/g, ''))
-        .filter(Boolean);
+    const buildFallbackCombinedInText = (fallbackList: Array<{ inText: string }>) => {
+      const isNumeric = NUMERIC_STYLE_TOKENS.some((s) => normalizedStyle.includes(s));
+      if (isNumeric) return `[${cslItems.map((_, i) => i + 1).join(', ')}]`;
+      const inTexts = fallbackList.map((c) => c.inText.replace(/^\(|\)$/g, '')).filter(Boolean);
       return `(${inTexts.join('; ')})`;
     };
 
+    const isNumericStyle = NUMERIC_STYLE_TOKENS.some((s) => normalizedStyle.includes(s));
+    const applyBatchYearDisambiguation = (
+      list: Array<{ id: string; inText: string; bibliography: string; bibliographyHtml?: string }>,
+    ) => {
+      if (isNumericStyle || cslItems.length < 2) return list;
+      const groups = new Map<string, number[]>();
+      cslItems.forEach((item, idx) => {
+        const firstAuthor = (item.author?.[0]?.family || item.author?.[0]?.literal || '').trim().toLowerCase();
+        const yearRaw = item.issued?.['date-parts']?.[0]?.[0];
+        const yearStr = yearRaw !== undefined && yearRaw !== null ? String(yearRaw).trim() : '';
+        if (!firstAuthor || !/^\d{4}$/.test(yearStr)) return;
+        const key = `${firstAuthor}::${yearStr}`;
+        const arr = groups.get(key) ?? [];
+        arr.push(idx);
+        groups.set(key, arr);
+      });
+
+      const cloned = list.map((c) => ({ ...c }));
+      for (const [key, indices] of groups.entries()) {
+        if (indices.length < 2) continue;
+        const yearStr = key.split('::')[1];
+        indices.forEach((itemIdx, pos) => {
+          const suffix = String.fromCharCode(97 + (pos % 26));
+          const suffixedYear = `${yearStr}${suffix}`;
+          const entry = cloned[itemIdx];
+          if (!entry) return;
+          const alreadyHasSuffixRe = new RegExp(`\\b${yearStr}[a-z]\\b`);
+          if (!alreadyHasSuffixRe.test(entry.inText)) {
+            entry.inText = entry.inText.replace(new RegExp(`\\b${yearStr}\\b`), suffixedYear);
+          }
+          if (!alreadyHasSuffixRe.test(entry.bibliography)) {
+            entry.bibliography = entry.bibliography.replace(
+              new RegExp(`(\\(\\s*${yearStr}|\\b${yearStr})\\b`),
+              (m) => `${m}${suffix}`,
+            );
+          }
+          if (entry.bibliographyHtml && !alreadyHasSuffixRe.test(entry.bibliographyHtml)) {
+            entry.bibliographyHtml = entry.bibliographyHtml.replace(
+              new RegExp(`(\\(\\s*${yearStr}|\\b${yearStr})\\b`),
+              (m) => `${m}${suffix}`,
+            );
+          }
+        });
+      }
+      return cloned;
+    };
+
     try {
+      if (preformattedCitations && preformattedCitations.length === cslItems.length) {
+        const batchCitations = applyBatchYearDisambiguation(preformattedCitations);
+        const bibliographyText = batchCitations.map((c) => c.bibliography).filter(Boolean).join('\n\n');
+        const bibliographyHtml = batchCitations.map((c) => c.bibliographyHtml || '').filter(Boolean).join('\n');
+        return {
+          styleId: normalizedStyle,
+          combinedInText: buildFallbackCombinedInText(batchCitations),
+          citations: batchCitations,
+          bibliographyText,
+          bibliographyHtml,
+        };
+      }
+
       const cite = new Cite(cslItems);
-      const bibliographyText = cite
-        .format('bibliography', { template: normalizedStyle, lang: 'en-US' })
-        .trim();
+      const bibliographyText = cite.format('bibliography', { template: normalizedStyle, lang: 'en-US' }).trim();
       const bibliographyHtml = cite
-        .format('bibliography', {
-          template: normalizedStyle,
-          lang: 'en-US',
-          format: 'html',
-        })
+        .format('bibliography', { template: normalizedStyle, lang: 'en-US', format: 'html' })
         .trim();
+
+      const batchCitations = applyBatchYearDisambiguation(
+        cslItems.map((item, idx) => {
+          const tryFormatEntry = (type: string, format?: string): string => {
+            try {
+              return cite.format(type, { template: normalizedStyle, lang: 'en-US', ...(format ? { format } : {}), entry: item.id }).trim();
+            } catch {
+              return '';
+            }
+          };
+          const cit = tryFormatEntry('citation');
+          const bib = tryFormatEntry('bibliography');
+          const bibHtml = tryFormatEntry('bibliography', 'html');
+          const fallback = !cit || !bib || !bibHtml ? getFallbackCitation(idx) : undefined;
+          const itemInText = cit || fallback?.inText || '';
+          const rawBib = bib || fallback?.bibliography || '';
+          const itemBib = normalizedStyle === 'ieee' && bib ? rawBib.replace(/[\u201C\u201D]/g, '"') : rawBib;
+          const itemBibHtml = bibHtml || fallback?.bibliographyHtml;
+          return { id: item.id, inText: itemInText, bibliography: itemBib, bibliographyHtml: itemBibHtml };
+        }),
+      );
 
       let combinedInText = '';
       try {
-        combinedInText = cite
-          .format('citation', { template: normalizedStyle, lang: 'en-US' })
-          .trim();
+        combinedInText = cite.format('citation', { template: normalizedStyle, lang: 'en-US' }).trim();
       } catch {
-        combinedInText = buildFallbackCombinedInText();
+        combinedInText = buildFallbackCombinedInText(batchCitations);
       }
 
       return {
         styleId: normalizedStyle,
         combinedInText,
-        citations,
+        citations: batchCitations,
         bibliographyText,
         bibliographyHtml,
       };
     } catch {
+      const citations = buildAllFallbackCitations();
+      const disambiguatedFallback = applyBatchYearDisambiguation(citations);
       return {
         styleId: normalizedStyle,
-        combinedInText: buildFallbackCombinedInText(),
-        citations,
-        bibliographyText: citations.map((c) => c.bibliography).join('\n\n'),
+        combinedInText: buildFallbackCombinedInText(disambiguatedFallback),
+        citations: disambiguatedFallback,
+        bibliographyText: disambiguatedFallback.map((c) => c.bibliography).join('\n\n'),
         bibliographyHtml: '',
       };
     }

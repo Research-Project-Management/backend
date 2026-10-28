@@ -52,6 +52,7 @@ export * from './events/library-events';
 export * from './ports/catalog.port';
 export * from './ports/extraction.port';
 export * from './ports/ingestion.port';
+export * from './ports/event-bus.port';
 export * from './ports/unit-of-work.port';
 export * from './ports/outbox.port';
 export * from './ports/idempotent-consumer.port';
@@ -63,3 +64,4 @@ export * from './resilience/resilience-registry.service';
 
 // Streaming & OS Buffer Protection
 export * from './utils/stream-buffer.util';
+export * from './utils/uuidv7.util';

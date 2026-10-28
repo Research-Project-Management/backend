@@ -1,6 +1,29 @@
 import { IdentifierScheme } from '@/modules/library/core/types/bibliographic.types';
+import { parseCreatorString } from './author.domain';
 
 // Identifier Normalization
+
+function hasBalancedOuterPair(
+  str: string,
+  openChar: string,
+  closeChar: string,
+): boolean {
+  if (!str.startsWith(openChar) || !str.endsWith(closeChar) || str.length < 2) {
+    return false;
+  }
+  let depth = 0;
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === openChar) depth++;
+    else if (str[i] === closeChar) depth--;
+    if (depth === 0 && i < str.length - 1) {
+      return false;
+    }
+    if (depth < 0) {
+      return false;
+    }
+  }
+  return depth === 0;
+}
 
 export function stripSurroundingPunctuation(raw: string): string {
   let clean = raw.trim();
@@ -11,26 +34,31 @@ export function stripSurroundingPunctuation(raw: string): string {
     clean = clean.replace(/[.,;:]+$/, '').trim();
     // Strip matching outer parentheses, brackets, angle brackets, or quotes
     if (
-      (clean.startsWith('(') && clean.endsWith(')')) ||
-      (clean.startsWith('[') && clean.endsWith(']')) ||
+      hasBalancedOuterPair(clean, '(', ')') ||
+      hasBalancedOuterPair(clean, '[', ']') ||
       (clean.startsWith('<') && clean.endsWith('>')) ||
       (clean.startsWith('"') && clean.endsWith('"')) ||
       (clean.startsWith("'") && clean.endsWith("'"))
     ) {
       clean = clean.slice(1, -1).trim();
     }
+    const openParens = (clean.match(/\(/g) || []).length;
+    const closeParens = (clean.match(/\)/g) || []).length;
+    const openBrackets = (clean.match(/\[/g) || []).length;
+    const closeBrackets = (clean.match(/\]/g) || []).length;
+
     // Strip unbalanced trailing closing parens/brackets
-    if (clean.endsWith(')') && !clean.includes('(')) {
+    if (clean.endsWith(')') && closeParens > openParens) {
       clean = clean.slice(0, -1).trim();
     }
-    if (clean.endsWith(']') && !clean.includes('[')) {
+    if (clean.endsWith(']') && closeBrackets > openBrackets) {
       clean = clean.slice(0, -1).trim();
     }
     // Strip unbalanced leading opening parens/brackets
-    if (clean.startsWith('(') && !clean.includes(')')) {
+    if (clean.startsWith('(') && openParens > closeParens) {
       clean = clean.slice(1).trim();
     }
-    if (clean.startsWith('[') && !clean.includes(']')) {
+    if (clean.startsWith('[') && openBrackets > closeBrackets) {
       clean = clean.slice(1).trim();
     }
   }
@@ -83,13 +111,22 @@ export function normalizeDoi(doi?: string | null): string | undefined {
     return `10.18653/v1/${aclMatch[1].replace(/[.,;:]+$/, '')}`;
   }
 
-  // Embedded /doi/, /article/, /chapter/, or /book/ in publisher URLs
-  const embeddedMatch = clean.match(
-    /^https?:\/\/[^/]+(?:\/[^/]+)*\/(?:doi\/|article\/|chapter\/|book\/)(?:abs\/|full\/|epdf\/|pdf\/)?(10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+?)(?:\/(?:full|abstract|pdf|epdf|html|fulltext|meta))?(?:\.pdf)?\/?(?:[?#].*)?$/i,
-  );
-  if (embeddedMatch && embeddedMatch[1]) {
-    clean = embeddedMatch[1];
-  } else {
+  // Embedded /doi/, /article/, /chapter/, or /book/ in publisher URLs (linear-time, ReDoS-safe)
+  let extractedFromEmbeddedUrl = false;
+  if (/^https?:\/\/[^/?#]+\//i.test(clean)) {
+    const withoutQueryHash = clean.replace(/[?#].*$/, '');
+    const embeddedMatch = withoutQueryHash.match(
+      /\/(?:doi|article|chapter|book)\/(?:abs\/|full\/|epdf\/|pdf\/)?(10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+)/i,
+    );
+    if (embeddedMatch && embeddedMatch[1]) {
+      clean = embeddedMatch[1]
+        .replace(/\/+$/, '')
+        .replace(/\.(?:pdf|html)$/i, '')
+        .replace(/\/(?:full|abstract|pdf|epdf|html|fulltext|meta)\/?$/i, '');
+      extractedFromEmbeddedUrl = true;
+    }
+  }
+  if (!extractedFromEmbeddedUrl) {
     clean = clean.replace(/^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)/i, '');
   }
 
@@ -223,30 +260,122 @@ export function normalizeIsbn(
 ): string | undefined {
   if (!isbn || typeof isbn !== 'string') return undefined;
   const stripped = stripSurroundingPunctuation(isbn);
-  const digits = stripped
-    .replace(/^(?:urn:isbn:|isbn(?:-1[03])?:?\s*)/i, '')
-    .replace(/[-\s]/g, '')
-    .toUpperCase();
-  if (/^(?:978|979)\d{10}$/.test(digits) || /^\d{9}[\dX]$/.test(digits)) {
-    if (options?.strictChecksum && !isValidIsbnChecksum(digits)) {
-      return undefined;
+  const validateCandidate = (rawDigits: string): string | undefined => {
+    const digits = rawDigits.replace(/[-\s]/g, '').toUpperCase();
+    if (/^(?:978|979)\d{10}$/.test(digits) || /^\d{9}[\dX]$/.test(digits)) {
+      if (options?.strictChecksum && !isValidIsbnChecksum(digits)) {
+        return undefined;
+      }
+      if (options?.toIsbn13 && digits.length === 10) {
+        return convertIsbn10To13(digits);
+      }
+      return digits;
     }
-    if (options?.toIsbn13 && digits.length === 10) {
-      return convertIsbn10To13(digits);
+    return undefined;
+  };
+
+  const direct = validateCandidate(
+    stripped.replace(/^(?:urn:isbn:|isbn(?:-1[03])?:?\s*)/i, ''),
+  );
+  if (direct) return direct;
+
+  if (
+    /^(?:https?:\/\/|doi:|10\.\d{4,9}\/|arxiv:|pmid:|pmcid?:|urn:issn:|e?-?issn\b)/i.test(
+      stripped,
+    )
+  ) {
+    return undefined;
+  }
+
+  const segments = stripped
+    .split(/[\r\n;,|/]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const seg of segments) {
+    const withoutQualifiers = stripSurroundingPunctuation(
+      seg
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/\[[^\]]*\]/g, ' ')
+        .replace(
+          /\b(?:urn:isbn:|isbn(?:-1[03])?:?|hardcover|paperback|pbk|hbk|ebk|ebook|e-book|print|electronic|online|cloth|alk\.?\s*paper)\b/gi,
+          ' ',
+        ),
+    );
+    const cleanedSeg = validateCandidate(withoutQualifiers);
+    if (cleanedSeg) return cleanedSeg;
+
+    const tokenMatch = withoutQualifiers.match(
+      /(?:^|[^\d])(97[89][-\s]?(?:\d[-\s]?){9}\d|(?:\d[-\s]?){9}[\dXx])(?:$|[^\d])/i,
+    );
+    if (tokenMatch) {
+      const matched = validateCandidate(tokenMatch[1]);
+      if (matched) return matched;
     }
-    return digits;
   }
   return undefined;
 }
 
+/**
+ * Validates ISSN (ISO 3297 modulo-11) check digit.
+ */
+export function isValidIssnChecksum(clean: string): boolean {
+  if (!clean || typeof clean !== 'string') return false;
+  const digits = clean.replace(/[-\s]/g, '').toUpperCase();
+  if (!/^\d{7}[\dX]$/.test(digits)) return false;
+  let sum = 0;
+  for (let i = 0; i < 7; i++) {
+    sum += (8 - i) * parseInt(digits[i], 10);
+  }
+  const check = digits[7] === 'X' ? 10 : parseInt(digits[7], 10);
+  sum += check;
+  return sum % 11 === 0;
+}
+
 export function normalizeIssn(issn?: string | null): string | undefined {
   if (!issn || typeof issn !== 'string') return undefined;
-  const clean = stripSurroundingPunctuation(issn)
-    .replace(/^(?:urn:issn:|issn:?\s*)/i, '')
+  const stripped = stripSurroundingPunctuation(issn);
+  const direct = stripped
+    .replace(/^(?:urn:issn:|e?-?issn:?\s*)/i, '')
     .replace(/[-\s]/g, '')
     .toUpperCase();
-  if (/^\d{7}[\dX]$/.test(clean)) {
-    return `${clean.slice(0, 4)}-${clean.slice(4)}`;
+  if (/^\d{7}[\dX]$/.test(direct)) {
+    return `${direct.slice(0, 4)}-${direct.slice(4)}`;
+  }
+
+  if (
+    /^(?:https?:\/\/|doi:|10\.\d{4,9}\/|arxiv:|pmid:|pmcid?:|urn:isbn:|isbn\b)/i.test(
+      stripped,
+    )
+  ) {
+    return undefined;
+  }
+
+  const segments = stripped
+    .split(/[\r\n;,|/]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const seg of segments) {
+    const withoutQualifiers = stripSurroundingPunctuation(
+      seg
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/\[[^\]]*\]/g, ' ')
+        .replace(
+          /\b(?:urn:issn:|e?-?issn:?|p-issn:?|print|electronic|online|linking)\b/gi,
+          ' ',
+        ),
+    );
+    const cand = withoutQualifiers.replace(/[-\s]/g, '').toUpperCase();
+    if (/^\d{7}[\dX]$/.test(cand)) {
+      return `${cand.slice(0, 4)}-${cand.slice(4)}`;
+    }
+    if (!/\d{9,}/.test(cand)) {
+      const m = withoutQualifiers.match(
+        /(?:^|[^\d-])(\d{4})[-\s](\d{3}[\dXx])(?:$|[^\d-])/i,
+      );
+      if (m) {
+        return `${m[1]}-${m[2].toUpperCase()}`;
+      }
+    }
   }
   return undefined;
 }
@@ -372,12 +501,13 @@ export function deriveDirectPdfUrl(rawUrl: string): string | undefined {
     return url;
   }
 
-  // 2. arXiv: https://arxiv.org/abs/1706.03762 or https://arxiv.org/html/1706.03762
+  // 2. arXiv: https://arxiv.org/abs/1706.03762, https://arxiv.org/abs/hep-th/9901001, or https://arxiv.org/html/1706.03762
   const arxivMatch = url.match(
-    /(?:arxiv\.org\/(?:abs|html)\/|arxiv:)([\d.]+v?\d*)/i,
+    /(?:arxiv\.org\/(?:abs|html)\/|arxiv:)((?:[a-z-]+(?:\.[a-z]{2})?\/\d{7}|\d{4}\.\d{4,5})v?\d*)/i,
   );
   if (arxivMatch) {
     const cleanArxivId = normalizeArxivId(arxivMatch[1]);
+    if (!cleanArxivId) return undefined;
     return `https://arxiv.org/pdf/${cleanArxivId}.pdf`;
   }
 
@@ -498,17 +628,48 @@ export function generateCitationKey(metadata: {
     return metadata.citationKey.trim();
   }
 
+  const extractFirstNonStopwordToken = (str: string): string => {
+    const normalized = str
+      .replace(/[đĐ]/g, 'd')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    const tokens = normalized.match(/[a-z0-9]+/g) || [];
+    return (
+      tokens.find((t) => !CITATION_KEY_STOPWORDS.has(t)) || tokens[0] || 'anon'
+    );
+  };
+
+  const resolveFamilyFromRawString = (raw: string): string => {
+    const trimmed = raw.trim();
+    if (!trimmed) return 'anon';
+    const parsed = parseCreatorString(trimmed);
+    if (parsed.fieldMode === 1) {
+      return extractFirstNonStopwordToken(
+        parsed.lastName || parsed.fullName || trimmed,
+      );
+    }
+    return parsed.lastName || 'anon';
+  };
+
   let family = 'anon';
   const firstCreator = metadata.creators?.[0];
   const firstAuthor = metadata.authors?.[0];
 
-  if (firstCreator?.lastName || firstCreator?.family) {
+  if (firstCreator?.fieldMode === 1) {
+    const rawSingle = (
+      firstCreator.lastName ||
+      firstCreator.family ||
+      firstCreator.fullName ||
+      firstCreator.name ||
+      ''
+    ).trim();
+    family = extractFirstNonStopwordToken(rawSingle);
+  } else if (firstCreator?.lastName || firstCreator?.family) {
     family = (firstCreator.lastName || firstCreator.family || '').trim();
-
   } else if (firstCreator?.fullName || firstCreator?.name) {
     const raw = (firstCreator.fullName || firstCreator.name || '').trim();
-    const parts = raw.split(/\s+/);
-    family = parts[parts.length - 1] || 'anon';
+    family = resolveFamilyFromRawString(raw);
   } else if (
     firstAuthor &&
     typeof firstAuthor === 'object' &&
@@ -517,21 +678,23 @@ export function generateCitationKey(metadata: {
       firstAuthor.fullName ||
       firstAuthor.name)
   ) {
-    if (firstAuthor.lastName || firstAuthor.family) {
+    if ((firstAuthor as { fieldMode?: number | null }).fieldMode === 1) {
+      const rawSingle = (
+        firstAuthor.lastName ||
+        firstAuthor.family ||
+        firstAuthor.fullName ||
+        firstAuthor.name ||
+        ''
+      ).trim();
+      family = extractFirstNonStopwordToken(rawSingle);
+    } else if (firstAuthor.lastName || firstAuthor.family) {
       family = (firstAuthor.lastName || firstAuthor.family || '').trim();
     } else {
       const raw = (firstAuthor.fullName || firstAuthor.name || '').trim();
-      const parts = raw.split(/\s+/);
-      family = parts[parts.length - 1] || 'anon';
+      family = resolveFamilyFromRawString(raw);
     }
   } else if (typeof firstAuthor === 'string' && firstAuthor.trim()) {
-    const raw = firstAuthor.trim();
-    if (raw.includes(',')) {
-      family = raw.split(',')[0].trim();
-    } else {
-      const parts = raw.split(/\s+/);
-      family = parts[parts.length - 1] || 'anon';
-    }
+    family = resolveFamilyFromRawString(firstAuthor);
   }
 
   const cleanFamily =

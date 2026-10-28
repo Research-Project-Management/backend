@@ -78,6 +78,32 @@ export class CrossRefProvider extends AbstractAcademicProvider {
     return this.searchByTitle(query, signal);
   }
 
+  async searchRecentWorks(
+    params: { filter?: string; query?: string; rows?: number },
+    signal?: AbortSignal,
+  ): Promise<Array<Record<string, unknown>>> {
+    const rows = params.rows ?? 30;
+    const baseQuery = params.filter
+      ? `filter=${params.filter}&rows=${rows}&sort=published&order=desc`
+      : `query=${encodeURIComponent(params.query ?? '')}&rows=${rows}&sort=published&order=desc`;
+    const url = `https://api.crossref.org/works?${baseQuery}&mailto=${encodeURIComponent(this.mailto)}`;
+
+    const response = await this.executeFetch(url, signal);
+    if (!response.ok) {
+      const retryAfterMs = this.parseRetryAfterHeader(response);
+      throw new ProviderFetchError(
+        `Academic registry search responded with HTTP ${response.status}`,
+        response.status,
+        retryAfterMs,
+      );
+    }
+
+    const json = (await response.json()) as {
+      message?: { items?: Array<Record<string, unknown>> };
+    } | null;
+    return Array.isArray(json?.message?.items) ? json.message.items : [];
+  }
+
   private async resolveByDoi(
     doi: string,
     signal?: AbortSignal,
@@ -288,9 +314,18 @@ export class CrossRefProvider extends AbstractAcademicProvider {
       { 'date-parts'?: number[][] } | undefined;
     const issued = message.issued as { 'date-parts'?: number[][] } | undefined;
 
-    const dateParts = [issued, pubPrint, pubOnline]
+    const candidateDateParts = [pubPrint, pubOnline, issued]
       .map((d) => d?.['date-parts']?.[0])
-      .find((parts) => Array.isArray(parts) && !!parts[0]);
+      .filter((parts): parts is number[] => Array.isArray(parts) && !!parts[0]);
+    const dateParts = candidateDateParts.reduce<number[] | undefined>(
+      (best, curr) => {
+        if (!best) return curr;
+        const bestLen = best.filter((p) => p != null).length;
+        const currLen = curr.filter((p) => p != null).length;
+        return currLen > bestLen ? curr : best;
+      },
+      undefined,
+    );
     if (dateParts && dateParts[0]) {
       year = Number(dateParts[0]);
       const y = String(dateParts[0]).padStart(4, '0');
@@ -514,12 +549,18 @@ export class CrossRefProvider extends AbstractAcademicProvider {
     );
 
     const links = Array.isArray(message.link) ? message.link : [];
-    const isOpenAccess = links.some(
-      (l) =>
-        l &&
-        typeof l === 'object' &&
-        (l as Record<string, unknown>)['content-type'] === 'application/pdf',
-    );
+    const isOpenAccess = links.some((l) => {
+      if (!l || typeof l !== 'object') return false;
+      const linkObj = l as Record<string, unknown>;
+      if (linkObj['content-type'] !== 'application/pdf') return false;
+      const intendedApp =
+        typeof linkObj['intended-application'] === 'string'
+          ? linkObj['intended-application'].toLowerCase()
+          : '';
+      return (
+        intendedApp !== 'text-mining' && intendedApp !== 'similarity-checking'
+      );
+    });
     const language =
       typeof message.language === 'string' && message.language.trim()
         ? message.language.trim()

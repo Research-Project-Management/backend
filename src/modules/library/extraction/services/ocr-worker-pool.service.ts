@@ -41,6 +41,22 @@ export class OcrWorkerPoolService
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
+  getPoolStatus(): {
+    initialized: boolean;
+    destroyed: boolean;
+    activeWorkers: number;
+    configuredConcurrency: number;
+    defaultLanguages: string[];
+  } {
+    return {
+      initialized: Boolean(this.scheduler && this.workers.length > 0),
+      destroyed: this.isDestroyed,
+      activeWorkers: this.workers.length,
+      configuredConcurrency: this.concurrency,
+      defaultLanguages: this.defaultLanguages,
+    };
+  }
+
   get concurrency(): number {
     const parsed =
       this.configService?.ocr.concurrency ?? libraryConfig().ocr.concurrency;
@@ -319,11 +335,7 @@ export class OcrWorkerPoolService
   private recyclePromise?: Promise<void>;
 
   async recyclePool(expectedScheduler?: Scheduler): Promise<void> {
-    if (
-      expectedScheduler &&
-      this.scheduler &&
-      this.scheduler !== expectedScheduler
-    ) {
+    if (expectedScheduler && this.scheduler !== expectedScheduler) {
       return;
     }
     if (this.recyclePromise) {

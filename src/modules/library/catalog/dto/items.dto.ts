@@ -394,6 +394,13 @@ export class CreateItemDto {
   @MaxLength(100, { each: true })
   collectionIds?: string[] | null;
 
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsString({ each: true })
+  @MaxLength(100, { each: true })
+  collections?: string[] | null;
+
   // Type-specific field aliases/direct inputs supported across 37 item types
   @IsOptional() @IsString() @MaxLength(1000) edition?: string;
   @IsOptional() @IsString() @MaxLength(255) numPages?: string;
@@ -511,8 +518,16 @@ export class CreateItemDto {
   @IsOptional() @IsBoolean() isMyPublication?: boolean;
   @IsOptional() @IsBoolean() isRetracted?: boolean;
   @IsOptional() @IsString() @MaxLength(255) retractionNature?: string;
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @IsString({ each: true }) @MaxLength(500, { each: true }) retractionReason?: string[];
+  @IsOptional() @IsString() @MaxLength(100) retractionDate?: string;
+  @IsOptional() @IsString() @MaxLength(512) retractionNoticeDoi?: string;
   @IsOptional() retractionDetails?: Record<string, unknown> | null;
   @IsOptional() @IsString() @MaxLength(100) retractionCheckedAt?: string;
+  @IsOptional() identifiers?: Record<string, unknown> | Array<Record<string, unknown>>;
+  @IsOptional() @IsArray() @ArrayMaxSize(500) @IsString({ each: true }) @MaxLength(100, { each: true }) lockedFields?: string[];
+  @IsOptional() fieldProvenance?: Record<string, unknown>;
+  @IsOptional() @IsBoolean() isFilenameTitle?: boolean;
+  @IsOptional() @IsArray() @ArrayMaxSize(500) @IsString({ each: true }) @MaxLength(2000, { each: true }) demotedExtraLines?: string[];
   @IsOptional() metadata?: Record<string, unknown>;
   @IsOptional() relations?: Record<string, unknown>;
   @IsOptional() @IsArray() @ArrayMaxSize(500) @IsString({ each: true }) @MaxLength(255, { each: true }) seeAlso?: string[];
@@ -526,6 +541,7 @@ export class CreateItemDto {
     url?: string;
     fileId?: string | null;
     fileHash?: string | null;
+    size?: number;
     fileSize?: number;
     mimeType?: string;
     linkMode?: string;

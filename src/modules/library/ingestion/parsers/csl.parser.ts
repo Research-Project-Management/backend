@@ -209,13 +209,13 @@ export class CslParser {
       let cleanedExtraNote = note;
       if (note) {
         if (!pmid) {
-          const m = note.match(/\bPMID\s*:\s*(\d{4,10})\b/i);
+          const m = note.match(/\bPMID\s*:\s*(\d{1,10})\b/i);
           if (m) pmid = m[1];
         }
         if (!pmcid) {
           const m =
             note.match(/\bPMCID\s*:\s*(PMC\d+)\b/i) ||
-            note.match(/\b(PMC\d{4,12})\b/i);
+            note.match(/\b(PMC\d{1,12})\b/i);
           if (m) pmcid = m[1].toUpperCase();
         }
         if (!arxivId) {
@@ -229,7 +229,7 @@ export class CslParser {
           .filter(
             (l) =>
               Boolean(l) &&
-              !/^(?:PMID\s*:\s*\d{4,10}|PMCID\s*:\s*PMC\d+|arXiv\s*:\s*[^\s,;]+(?:\s*\[[^\]]+\])?)$/i.test(
+              !/^(?:PMID\s*:\s*\d{1,10}|PMCID\s*:\s*PMC\d+|arXiv\s*:\s*[^\s,;]+(?:\s*\[[^\]]+\])?)$/i.test(
                 l,
               ),
           );
@@ -456,11 +456,17 @@ export class CslParser {
   private extractKeywords(raw: unknown): string[] | undefined {
     if (Array.isArray(raw)) {
       const list = normalizeAcademicTags(
-        raw.map((k) =>
-          typeof k === 'string' || typeof k === 'object'
-            ? (k as string)
-            : String(k),
-        ),
+        raw.map((k) => {
+          if (typeof k === 'string') return k;
+          if (typeof k === 'object' && k !== null) {
+            const obj = k as Record<string, unknown>;
+            const val = obj.name ?? obj.keyword ?? obj.value ?? obj.tag ?? '';
+            return typeof val === 'string' || typeof val === 'number'
+              ? String(val)
+              : '';
+          }
+          return k != null ? String(k) : '';
+        }),
       );
       return list.length > 0 ? list : undefined;
     }

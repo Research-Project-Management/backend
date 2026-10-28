@@ -1,11 +1,11 @@
-import { ExportItemRecord } from '@/modules/library/citation/repositories/exports.repository';
+import { ExportItemRecord } from './export-item.types';
 import {
   ExportFormatType,
   ExportResult,
 } from '@/modules/library/citation/types/exports.types';
 import { CitationItemInput } from '@/modules/library/citation/types/citation.types';
 import { CslJsonMapper } from './csl-json.mapper';
-import { formatCsvExport } from './exports.domain';
+import { escapeCsvField, formatCsvExport } from './exports.domain';
 
 export interface ICitationFormatterPort {
   formatItem(
@@ -143,7 +143,18 @@ export class CslJsonExportStrategy implements IExportFormatStrategy {
   }): ExportResult {
     const { items, timestamp, truncated } = params;
     const cslList = items.map((it) => {
-      const rawCsl = CslJsonMapper.toCsl(it);
+      const rawCsl = { ...CslJsonMapper.toCsl(it) };
+      const arxivId =
+        typeof rawCsl._arxivId === 'string' ? rawCsl._arxivId.trim() : '';
+      if (arxivId) {
+        const existingNote =
+          typeof rawCsl.note === 'string' ? rawCsl.note.trim() : '';
+        if (!existingNote) {
+          rawCsl.note = `arXiv: ${arxivId}`;
+        } else if (!/arxiv\s*:/i.test(existingNote)) {
+          rawCsl.note = `${existingNote}\narXiv: ${arxivId}`;
+        }
+      }
       const cleaned: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(rawCsl)) {
         if (!k.startsWith('_')) {
@@ -167,7 +178,7 @@ export class CslJsonExportStrategy implements IExportFormatStrategy {
 export class CsvExportStrategy implements IExportFormatStrategy {
   readonly format: ExportFormatType = 'csv';
   readonly extension = 'csv';
-  readonly mimeType = 'text/csv';
+  readonly mimeType = 'text/csv; charset=utf-8';
 
   exportItems(params: {
     items: ExportItemRecord[];
@@ -175,31 +186,11 @@ export class CsvExportStrategy implements IExportFormatStrategy {
     truncated?: boolean;
   }): ExportResult {
     const { items, timestamp, truncated } = params;
-    const csvItems = items.map((it) => {
-      const csl = CslJsonMapper.toCsl(it);
-      return {
-        id: it.id,
-        title: it.title,
-        authors: CslJsonMapper.getAuthorNames(it),
-        year: it.year,
-        publicationTitle: it.publicationTitle,
-        publisher: csl.publisher || undefined,
-        doi: it.doi || csl.DOI || null,
-        itemType: it.itemType,
-        citationKey:
-          it.citationKey ||
-          (typeof csl['citation-key'] === 'string'
-            ? csl['citation-key']
-            : null),
-        url: it.url,
-      };
-    });
-
     return {
       format: 'csv',
       filename: `library-export-${timestamp}.csv`,
       mimeType: this.mimeType,
-      content: formatCsvExport(csvItems),
+      content: formatCsvExport(items),
       itemCount: items.length,
       truncated,
     };

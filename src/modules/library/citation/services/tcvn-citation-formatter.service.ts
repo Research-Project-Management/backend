@@ -22,6 +22,13 @@ export class TcvnCitationFormatterService {
   private static readonly ACADEMIC_DEGREES_REGEX =
     /^(?:(?:p?gs|ts(?:kh)?|ths|cn|ks|bs|dr|prof|ph\.?d)\.?\s*)+/gi;
 
+  private static readonly AMBIGUOUS_ASCII_SURNAMES = new Set([
+    'le', 'do', 'ha', 'ma', 'la', 'to', 'chu', 'an', 'ton', 'au',
+    'ho', 'vo', 'vu', 'ly', 'ta', 'vi', 'cu', 'ba',
+  ]);
+  private static readonly VN_GIVEN_SYLLABLES_REGEX =
+    /\b(?:van|thi|huu|duc|minh|quoc|gia|ngoc|thanh|hoang|xuan|thu|anh|tuan|hung|dung|nam|son|hai|long|linh|lan|huong|trang|thao|phuong|quynh|vy|khanh|khoa|kiet|phat|dat|loc|tai|phuc|cuong|thinh|vu|viet|tinh|tam|dinh|quang|trong|cong|kim|bao|hong|thuy|manh|tien|dac|ba|chi|binh|tuyet|ngan|hien|hieu|nghia|nhan|phat|phong|phuc|phuoc|quyen|sinh|tan|thang|thien|thuan|toan|tri|trung|tu|tuyen|uyen|vinh|yen)\b/i;
+
   public static stripAcademicDegrees(text: string): string {
     return (text || '').trim().replace(this.ACADEMIC_DEGREES_REGEX, '').trim();
   }
@@ -31,10 +38,25 @@ export class TcvnCitationFormatterService {
     if (author.literal) return hasVietnameseDiacritics(author.literal);
     const cleanFamily = this.stripAcademicDegrees(author.family || '');
     const cleanGiven = this.stripAcademicDegrees(author.given || '');
-    if (hasVietnameseDiacritics(`${cleanFamily} ${cleanGiven}`.trim())) {
+    const full = `${cleanFamily} ${cleanGiven}`.trim();
+    if (hasVietnameseDiacritics(full)) {
       return true;
     }
-    return TcvnCitationFormatterService.VN_SURNAMES_REGEX.test(cleanFamily);
+    if (!TcvnCitationFormatterService.VN_SURNAMES_REGEX.test(cleanFamily)) {
+      return false;
+    }
+    const firstFamilyToken = cleanFamily.split(/\s+/)[0]?.toLowerCase() || '';
+    if (TcvnCitationFormatterService.AMBIGUOUS_ASCII_SURNAMES.has(firstFamilyToken)) {
+      const restTokens = [
+        ...cleanFamily.split(/\s+/).slice(1),
+        ...cleanGiven.split(/\s+/),
+      ]
+        .filter(Boolean)
+        .join(' ');
+      if (!restTokens) return false;
+      return TcvnCitationFormatterService.VN_GIVEN_SYLLABLES_REGEX.test(restTokens);
+    }
+    return true;
   }
 
   public static getVietnameseSortKey(author?: CslName | null): {
@@ -302,8 +324,13 @@ export class TcvnCitationFormatterService {
     );
     const citations = sorted.map((item, idx) => {
       const single = this.formatTcvn(item, isNumeric, idx + 1);
+      const itemId =
+        typeof item._itemId === 'string' && item._itemId
+          ? item._itemId
+          : String(item.id ?? '');
       return {
         id: item.id,
+        itemId,
         inText: single.inText,
         bibliography: single.bibliography,
         bibliographyHtml: single.bibliographyHtml,

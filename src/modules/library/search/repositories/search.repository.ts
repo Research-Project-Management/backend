@@ -30,6 +30,8 @@ export type { SearchOptions, FacetResult };
 @Injectable()
 export class SearchRepository implements OnModuleInit {
   private readonly logger = new Logger(SearchRepository.name);
+  private static readonly MAX_SCOPE_VERSIONS = 1000;
+  private readonly scopeVersions = new Map<string, string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -48,6 +50,64 @@ export class SearchRepository implements OnModuleInit {
     return isProjectScopeId(projectId);
   }
 
+  private resolveScopeId(userId: string, options?: SearchOptions): string {
+    return this.isProjectScope(options?.projectId)
+      ? options!.projectId.trim()
+      : userId;
+  }
+
+  private setLocalScopeVersion(scopeId: string, version: string): void {
+    if (this.scopeVersions.has(scopeId)) {
+      this.scopeVersions.delete(scopeId);
+    } else if (this.scopeVersions.size >= SearchRepository.MAX_SCOPE_VERSIONS) {
+      const oldestKey = this.scopeVersions.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.scopeVersions.delete(oldestKey);
+      }
+    }
+    this.scopeVersions.set(scopeId, version);
+  }
+
+  private getScopeVersion(scopeId: string): string {
+    return this.scopeVersions.get(scopeId) || '1';
+  }
+
+  async resolveScopeVersion(scopeId: string): Promise<string> {
+    const normalizedScope = (scopeId || '').trim();
+    if (!normalizedScope) return '1';
+
+    if (this.cache?.get) {
+      try {
+        const versionKey = LIBRARY_REDIS_KEYS.searchVersion(normalizedScope);
+        const redisVer = await this.cache.get<string>(versionKey);
+        if (
+          (typeof redisVer === 'string' || typeof redisVer === 'number') &&
+          String(redisVer).trim().length > 0
+        ) {
+          const resolved = String(redisVer).trim();
+          this.setLocalScopeVersion(normalizedScope, resolved);
+          return resolved;
+        }
+        if (redisVer === null || redisVer === undefined) {
+          const hadLocal = this.scopeVersions.has(normalizedScope);
+          const prevVer =
+            parseInt(this.scopeVersions.get(normalizedScope) || '1', 10) || 1;
+          const nextVer = hadLocal ? String(prevVer + 1) : '1';
+          this.setLocalScopeVersion(normalizedScope, nextVer);
+          await this.cache.set?.(versionKey, nextVer, 86400);
+          return nextVer;
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Scope version lookup fallback: ${errMsg}`);
+      }
+    }
+
+    const fallbackVer = this.scopeVersions.get(normalizedScope) || '1';
+    this.setLocalScopeVersion(normalizedScope, fallbackVer);
+    return fallbackVer;
+  }
+
   private sanitizeUuidOptions(options: SearchOptions): SearchOptions {
     return sanitizeUuidSearchOptions(options);
   }
@@ -57,8 +117,9 @@ export class SearchRepository implements OnModuleInit {
     options: SearchOptions,
     queryText: string | undefined,
     limit: number,
+    version: string = '1',
   ): string {
-    return buildSearchItemsCacheKey(userId, options, queryText, limit);
+    return buildSearchItemsCacheKey(userId, options, queryText, limit, version);
   }
 
   /**
@@ -102,18 +163,36 @@ export class SearchRepository implements OnModuleInit {
     const queryText = options.q?.trim();
 
     if (!tx && this.cache) {
+      const scopeId = this.resolveScopeId(userId, options);
+      const version = await this.resolveScopeVersion(scopeId);
       const cacheKey = this.buildSearchCacheKey(
         userId,
         options,
         queryText,
         limit,
+        version,
       );
 
-      return this.cache.wrap(
-        cacheKey,
-        () => this.executeSearchItems(userId, options, queryText, limit, tx),
-        60, // 60s TTL for fast navigation & debounced typing
+      if (typeof this.cache.wrap === 'function') {
+        return this.cache.wrap(
+          cacheKey,
+          () => this.executeSearchItems(userId, options, queryText, limit, tx),
+          60, // 60s TTL for fast navigation & debounced typing
+        );
+      }
+      const cached = await this.cache.get?.(cacheKey);
+      if (cached && typeof cached === 'object' && 'items' in cached) {
+        return cached as Awaited<ReturnType<typeof this.executeSearchItems>>;
+      }
+      const fresh = await this.executeSearchItems(
+        userId,
+        options,
+        queryText,
+        limit,
+        tx,
       );
+      await this.cache.set?.(cacheKey, fresh, 60);
+      return fresh;
     }
 
     return this.executeSearchItems(userId, options, queryText, limit, tx);
@@ -194,10 +273,11 @@ export class SearchRepository implements OnModuleInit {
       where: { id: { in: ids } },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        attachments: { take: 5 },
+        attachments: { where: { deletedAt: null }, take: 5 },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
         states: { where: { userId }, take: 1 },
+        identifiers: true,
       },
     });
 
@@ -240,10 +320,11 @@ export class SearchRepository implements OnModuleInit {
         : {}),
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        attachments: { take: 5 },
+        attachments: { where: { deletedAt: null }, take: 5 },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
         states: { where: { userId }, take: 1 },
+        identifiers: true,
       },
     }).then((items) => {
       let hasNextPage = false;
@@ -318,17 +399,27 @@ export class SearchRepository implements OnModuleInit {
     return client.item.count({ where });
   }
 
+  async getFacets(
+    userId: string,
+    options: SearchOptions,
+    tx?: Prisma.TransactionClient,
+  ): Promise<FacetResult> {
+    return this.computeFacets(userId, options, tx);
+  }
+
   async computeFacets(
     userId: string,
     options: SearchOptions,
     tx?: Prisma.TransactionClient,
   ): Promise<FacetResult> {
-    const cacheKey = buildSearchFacetCacheKey(userId, options);
+    const scopeId = this.resolveScopeId(userId, options);
+    const version = await this.resolveScopeVersion(scopeId);
+    const cacheKey = buildSearchFacetCacheKey(userId, options, version);
 
     if (this.cache) {
       try {
         const cached = await this.cache.get<FacetResult>(cacheKey);
-        if (cached) {
+        if (cached && typeof cached === 'object' && 'itemTypes' in cached) {
           return cached;
         }
       } catch (err: unknown) {
@@ -423,10 +514,35 @@ export class SearchRepository implements OnModuleInit {
   }
 
   async invalidateFacets(scopeId: string): Promise<void> {
+    const normalizedScope = (scopeId || '').trim();
+    if (!normalizedScope) return;
+    let baseVer = Number(this.scopeVersions.get(normalizedScope) || '1') || 1;
+    if (this.cache?.get) {
+      try {
+        const redisVer = await this.cache.get<string>(
+          LIBRARY_REDIS_KEYS.searchVersion(normalizedScope),
+        );
+        const parsedRedis = Number(redisVer);
+        if (Number.isFinite(parsedRedis) && parsedRedis > baseVer) {
+          baseVer = parsedRedis;
+        }
+      } catch {
+        // Non-fatal fallback to local version
+      }
+    }
+    const nextVer = String(baseVer + 1);
+    this.setLocalScopeVersion(normalizedScope, nextVer);
+
     if (this.cache) {
+      const versionKey = LIBRARY_REDIS_KEYS.searchVersion(normalizedScope);
       await Promise.all([
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(scopeId)),
+        this.cache.delPattern?.(
+          LIBRARY_REDIS_KEYS.searchFacetsPattern(normalizedScope),
+        ),
+        this.cache.delPattern?.(
+          LIBRARY_REDIS_KEYS.searchItemsPattern(normalizedScope),
+        ),
+        this.cache.set?.(versionKey, nextVer, 86400),
       ]);
     }
   }
@@ -493,6 +609,32 @@ export class SearchRepository implements OnModuleInit {
   }
 
   // EventHandler Index Cleanup Operations
+  async refreshItemSearchIndex(
+    itemId: string,
+    scopeId?: string,
+  ): Promise<{ indexed: boolean; scopeId?: string }> {
+    let resolvedScope = scopeId;
+    if (itemId && this.prisma?.item?.findUnique) {
+      const item = await this.prisma.item.findUnique({
+        where: { id: itemId },
+        select: { id: true, userId: true, projectId: true, deletedAt: true },
+      });
+      if (!item || item.deletedAt !== null) {
+        if (resolvedScope) {
+          await this.invalidateFacets(resolvedScope);
+        }
+        return { indexed: false, scopeId: resolvedScope };
+      }
+      resolvedScope = resolvedScope || item.projectId || item.userId;
+    }
+
+    if (resolvedScope) {
+      await this.invalidateFacets(resolvedScope);
+    }
+
+    return { indexed: Boolean(itemId), scopeId: resolvedScope };
+  }
+
   async deleteFullTextIndexByItemId(itemId: string): Promise<void> {
     await this.prisma.fullTextIndex.deleteMany({
       where: { attachment: { itemId } },

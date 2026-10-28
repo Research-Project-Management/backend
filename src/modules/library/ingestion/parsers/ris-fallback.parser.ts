@@ -52,17 +52,16 @@ export function extractIdentifiersFromText(
   val: string,
   isPubMedDb?: boolean,
 ): { pmid?: string; pmcid?: string; arxivId?: string } {
-  const pmcMatch = val.match(/\b(PMC\d{5,12})\b/i);
+  const pmcMatch = val.match(/\b(PMC\d{1,12})\b/i);
   const pmcid = pmcMatch ? pmcMatch[1].toUpperCase() : undefined;
 
   let pmid: string | undefined;
-  const pmidMatch = val.match(/PMID[:\s]*(\d{5,10})\b/i);
+  const pmidMatch = val.match(/PMID[:\s]*(\d{1,10})\b/i);
   if (pmidMatch) {
     pmid = pmidMatch[1];
   } else if (
     tag === 'AN' &&
-    (isPubMedDb || /^\d{7,9}$/.test(val)) &&
-    /^\d{6,10}$/.test(val)
+    ((isPubMedDb && /^\d{1,10}$/.test(val)) || /^\d{6,9}$/.test(val))
   ) {
     pmid = val;
   }
@@ -177,6 +176,7 @@ export function parseRisDateString(value: string): {
 
 export interface FallbackRisRecord {
   itemType: string;
+  citationKey?: string;
   rawAuthors: string[];
   rawEditors?: string[];
   rawTags: string[];
@@ -216,6 +216,98 @@ export interface FallbackRisRecord {
   isPubMedDb?: boolean;
 }
 
+const REFER_TYPE_TO_RIS_MAP: Record<string, string> = {
+  'journal article': 'JOUR', article: 'JOUR', book: 'BOOK', 'edited book': 'BOOK',
+  'book section': 'CHAP', 'conference proceedings': 'CONF', 'conference paper': 'CONF',
+  thesis: 'THES', dissertation: 'THES', report: 'RPRT', patent: 'PAT',
+  'web page': 'ELEC', 'electronic article': 'JOUR', 'electronic book': 'BOOK',
+  'computer program': 'COMP', dataset: 'DATA', 'newspaper article': 'NEWS',
+  'magazine article': 'MGZN', manuscript: 'UNPB', 'unpublished work': 'UNPB',
+  preprint: 'UNPB', audiovisual: 'VIDEO', film: 'MPCT', map: 'MAP',
+  statute: 'STAT', bill: 'BILL', case: 'CASE', hearing: 'HEAR', generic: 'GEN',
+};
+
+const REFER_SIMPLE_TAG_MAP: Record<string, string> = {
+  T: 'TI', A: 'AU', E: 'ED', D: 'PY', J: 'JO', B: 'T2', S: 'T3', V: 'VL', N: 'IS',
+  I: 'PB', C: 'CY', U: 'UR', X: 'AB', K: 'KW', Z: 'N1', O: 'N1', F: 'ID', '@': 'SN',
+  G: 'LA', '7': 'ET', '9': 'M3',
+};
+
+/**
+ * Converts EndNote Refer / UNIX Refer (%0, %T, %A, %D, etc.) into standard RIS lines.
+ */
+export function convertReferToRis(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const risLines: string[] = [];
+  let inRecord = false;
+  let hasExplicitType = false;
+
+  const closeRecord = () => {
+    if (inRecord) {
+      if (!hasExplicitType) {
+        const lastErIdx = risLines.lastIndexOf('ER  - ');
+        const insertIdx = lastErIdx === -1 ? 0 : lastErIdx + 1;
+        risLines.splice(insertIdx, 0, 'TY  - JOUR');
+      }
+      risLines.push('ER  - ');
+      inRecord = false;
+      hasExplicitType = false;
+    }
+  };
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      closeRecord();
+      continue;
+    }
+    const match = trimmed.match(/^%([A-Z0-9@])\s+(.*)$/i);
+    if (!match) {
+      if (inRecord) risLines.push(trimmed);
+      continue;
+    }
+    const code = match[1].toUpperCase();
+    const val = match[2].trim();
+    if (!val) continue;
+
+    if (code === '0') {
+      if (inRecord && hasExplicitType) closeRecord();
+      const risType = RIS_TYPE_MAP[val.toUpperCase()]
+        ? val.toUpperCase()
+        : REFER_TYPE_TO_RIS_MAP[val.toLowerCase()] || 'JOUR';
+      risLines.push(`TY  - ${risType}`);
+      inRecord = true;
+      hasExplicitType = true;
+      continue;
+    }
+
+    if (!inRecord) {
+      inRecord = true;
+      hasExplicitType = false;
+    }
+
+    if (code === 'P') {
+      const pageParts = val.split(/\s*(?:--|-|–)\s*/);
+      if (pageParts.length >= 2 && pageParts[0] && pageParts[1]) {
+        risLines.push(`SP  - ${pageParts[0]}`, `EP  - ${pageParts[1]}`);
+      } else {
+        risLines.push(`SP  - ${val}`);
+      }
+    } else if (code === 'R') {
+      if (/^(?:doi:\s*|https?:\/\/(?:dx\.)?doi\.org\/)?10\.\d{4,9}\//i.test(val)) {
+        risLines.push(`DO  - ${val}`);
+      } else {
+        risLines.push(`M1  - ${val}`, `DO  - ${val}`);
+      }
+    } else if (REFER_SIMPLE_TAG_MAP[code]) {
+      risLines.push(`${REFER_SIMPLE_TAG_MAP[code]}  - ${val}`);
+    }
+  }
+
+  closeRecord();
+  return risLines.join('\n');
+}
+
 export class RisFallbackParser {
   /**
    * Resilient line-by-line parser for non-standard RIS dialect variations
@@ -230,7 +322,11 @@ export class RisFallbackParser {
    * Parses raw RIS content into intermediate FallbackRisRecord objects.
    */
   static parseRawRecords(content: string): FallbackRisRecord[] {
-    const lines = content.split(/\r?\n/);
+    const normalizedContent =
+      !/^TY\s*-/m.test(content) && /^%[A-Z0-9@]\s+/m.test(content)
+        ? convertReferToRis(content)
+        : content;
+    const lines = normalizedContent.split(/\r?\n/);
     const records: FallbackRisRecord[] = [];
     let currentRecord: FallbackRisRecord | null = null;
     let lastTag = '';
@@ -292,6 +388,9 @@ export class RisFallbackParser {
       if (!currentRecord) continue;
 
       switch (tag) {
+        case 'ID':
+          if (value) currentRecord.citationKey = value;
+          break;
         case 'TI':
         case 'T1':
           if ( value ) currentRecord.title = value;
@@ -558,6 +657,7 @@ export class RisFallbackParser {
 
     return {
       itemType: record.itemType,
+      ...(record.citationKey ? { citationKey: record.citationKey } : {}),
       title: record.title || 'Untitled Reference',
       shortTitle: record.shortTitle,
       authors: cleanRawAuthors,

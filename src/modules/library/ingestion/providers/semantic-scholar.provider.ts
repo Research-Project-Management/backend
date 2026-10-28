@@ -85,11 +85,7 @@ export class SemanticScholarProvider extends AbstractAcademicProvider {
       identifier = pmid;
       isSpecificId = true;
     } else {
-      targetUrl = `${this.baseUrl}/search?query=${encodeURIComponent(rawQuery)}&limit=1&fields=${this.FIELDS}`;
-    }
-
-    if (this.rateLimiter) {
-      await this.rateLimiter.acquire('semanticscholar', signal);
+      targetUrl = `${this.baseUrl}/search?query=${encodeURIComponent(rawQuery)}&limit=5&fields=${this.FIELDS}`;
     }
 
     const headers = {
@@ -108,9 +104,20 @@ export class SemanticScholarProvider extends AbstractAcademicProvider {
     );
     if (!payload) return null;
 
-    const paper = isSpecificId
-      ? payload
-      : (payload?.data as Array<Record<string, unknown>> | undefined)?.[0];
+    let paper: Record<string, unknown> | null = null;
+    if (isSpecificId) {
+      paper = payload;
+    } else {
+      const candidates = Array.isArray(payload?.data)
+        ? (payload.data as Array<Record<string, unknown>>)
+        : [];
+      const { bestMatch } = this.rankBestTitleCandidate(
+        candidates,
+        rawQuery,
+        (item) => (typeof item.title === 'string' ? item.title : ''),
+      );
+      paper = bestMatch;
+    }
     if (!paper || !paper.title) return null;
 
     return this.mapPaperToProviderResult(paper, identifier, isSpecificId);

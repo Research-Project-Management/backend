@@ -3,6 +3,7 @@ export * from './catalog.facade';
 
 // Controllers
 export * from './controllers/items.controller';
+export * from './controllers/library-workspace.controller';
 export * from './controllers/item-curation.controller';
 export * from './controllers/collections.controller';
 export * from './controllers/tags.controller';

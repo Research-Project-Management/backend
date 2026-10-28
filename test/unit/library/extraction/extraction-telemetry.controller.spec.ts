@@ -2,23 +2,48 @@ import { BadRequestException } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { ExtractionTelemetryController } from '@/modules/library/extraction/controllers/extraction-telemetry.controller';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
+import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
+import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import { TrustedExtractionResult } from '@/modules/library/extraction/types/trusted-extraction.types';
 
 describe('ExtractionTelemetryController', () => {
   let controller: ExtractionTelemetryController;
   let trustedExtractor: jest.Mocked<TrustedExtractionService>;
+  let ocrWorkerPool: jest.Mocked<OcrWorkerPoolService>;
+  let extractionRepo: jest.Mocked<ExtractionRepository>;
 
   beforeEach(() => {
     trustedExtractor = {
       extract: jest.fn(),
     } as unknown as jest.Mocked<TrustedExtractionService>;
 
-    controller = new ExtractionTelemetryController(trustedExtractor);
+    ocrWorkerPool = {
+      getPoolStatus: jest.fn().mockReturnValue({
+        initialized: true,
+        destroyed: false,
+        activeWorkers: 2,
+        configuredConcurrency: 2,
+        defaultLanguages: ['vie', 'eng'],
+      }),
+    } as unknown as jest.Mocked<OcrWorkerPoolService>;
+
+    extractionRepo = {
+      getExtractionStatusBreakdown: jest.fn().mockResolvedValue({
+        COMPLETED: 12,
+        PENDING: 3,
+      }),
+    } as unknown as jest.Mocked<ExtractionRepository>;
+
+    controller = new ExtractionTelemetryController(
+      trustedExtractor,
+      ocrWorkerPool,
+      extractionRepo,
+    );
   });
 
   describe('GET /telemetry', () => {
-    it('returns formatted telemetry metrics for in-process engine', () => {
-      const response = controller.getTelemetry();
+    it('returns runtime telemetry metrics from OcrWorkerPoolService and ExtractionRepository', async () => {
+      const response = await controller.getTelemetry();
 
       expect(response.status).toBe('UP');
       expect(response.architecture).toBe(
@@ -27,6 +52,20 @@ describe('ExtractionTelemetryController', () => {
       expect(response.flags.enabled).toBe(true);
       expect(response.flags.zeroDocker).toBe(true);
       expect(response.metrics.supportedFormats).toContain('PDF');
+      expect(response.metrics.ocrWorkerPool).toEqual({
+        initialized: true,
+        destroyed: false,
+        activeWorkers: 2,
+        configuredConcurrency: 2,
+        defaultLanguages: ['vie', 'eng'],
+      });
+      expect(response.metrics.attachments).toEqual({
+        total: 15,
+        byStatus: {
+          COMPLETED: 12,
+          PENDING: 3,
+        },
+      });
     });
   });
 

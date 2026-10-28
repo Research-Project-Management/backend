@@ -96,10 +96,26 @@ export class FeedsService {
       const cleanUrl = data.url.trim();
       let feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
       if (!feed) {
-        feed = await this.feedsRepo.createFeed({
-          url: cleanUrl,
-          title: data.customTitle || cleanUrl,
-        });
+        try {
+          const fetched = await this.urlCaptureService.fetchAcademicFeed(
+            cleanUrl,
+            true,
+          );
+          feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
+          if (!feed) {
+            feed = await this.feedsRepo.createFeed({
+              url: cleanUrl,
+              title: data.customTitle || fetched.feedTitle || cleanUrl,
+              siteUrl: fetched.siteUrl || fetched.feedUrl || null,
+              description: fetched.description || null,
+            });
+          }
+        } catch {
+          feed = await this.feedsRepo.createFeed({
+            url: cleanUrl,
+            title: data.customTitle || cleanUrl,
+          });
+        }
       }
       targetFeedId = feed.id;
     }

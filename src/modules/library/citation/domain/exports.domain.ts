@@ -2,6 +2,7 @@ import {
   ExportFormatType,
   CsvExportItem,
 } from '@/modules/library/citation/types/exports.types';
+import { CslJsonMapper, CslSourceItem } from './csl-json.mapper';
 
 const MIME_TYPES: Record<ExportFormatType, string> = {
   bibtex: 'application/x-bibtex',
@@ -64,9 +65,11 @@ export function escapeCsvField(val: unknown): string {
 }
 
 /**
- * Serializes a list of items into standard RFC 4180 CSV string.
+ * Serializes a list of items into standard RFC 4180 CSV string (18-column schema with CRLF).
  */
-export function formatCsvExport(items: CsvExportItem[]): string {
+export function formatCsvExport(
+  items: ReadonlyArray<CsvExportItem | CslSourceItem>,
+): string {
   const headers = [
     'id',
     'title',
@@ -78,20 +81,81 @@ export function formatCsvExport(items: CsvExportItem[]): string {
     'itemType',
     'citationKey',
     'url',
+    'abstract',
+    'volume',
+    'issue',
+    'pages',
+    'isbn',
+    'issn',
+    'pmid',
+    'arxivId',
   ];
 
-  const rows = items.map((it) => [
-    escapeCsvField(it.id),
-    escapeCsvField(it.title || ''),
-    escapeCsvField((it.authors || []).join('; ')),
-    it.year ?? '',
-    escapeCsvField(it.publicationTitle || ''),
-    escapeCsvField(it.publisher || ''),
-    escapeCsvField(it.doi || ''),
-    escapeCsvField(it.itemType || ''),
-    escapeCsvField(it.citationKey || ''),
-    escapeCsvField(it.url || ''),
-  ]);
+  const rows = items.map((it) => {
+    const csl = CslJsonMapper.toCsl(it as CslSourceItem);
+    const rec = it as Record<string, unknown>;
+    const meta = (
+      rec.metadata && typeof rec.metadata === 'object' ? rec.metadata : {}
+    ) as Record<string, unknown>;
+    const publicationTitle =
+      (typeof it.publicationTitle === 'string' ? it.publicationTitle : '') ||
+      (typeof rec.bookTitle === 'string' ? rec.bookTitle : '') ||
+      (typeof rec.proceedingsTitle === 'string' ? rec.proceedingsTitle : '') ||
+      (typeof meta.bookTitle === 'string' ? meta.bookTitle : '') ||
+      (typeof meta.proceedingsTitle === 'string' ? meta.proceedingsTitle : '') ||
+      csl['container-title'] ||
+      '';
+    const citationKey =
+      (typeof it.citationKey === 'string' ? it.citationKey : '') ||
+      (typeof csl['citation-key'] === 'string' ? csl['citation-key'] : '');
+    const arxivId =
+      typeof csl._arxivId === 'string'
+        ? csl._arxivId
+        : typeof rec.arxivId === 'string'
+          ? rec.arxivId
+          : '';
+    const authors =
+      Array.isArray(it.authors) && it.authors.length > 0
+        ? it.authors.join('; ')
+        : CslJsonMapper.getAuthorNames(it as CslSourceItem).join('; ');
+
+    return [
+      escapeCsvField(it.id),
+      escapeCsvField(it.title || ''),
+      escapeCsvField(authors),
+      escapeCsvField(it.year),
+      escapeCsvField(publicationTitle),
+      escapeCsvField(
+        (typeof it.publisher === 'string' ? it.publisher : '') ||
+          csl.publisher ||
+          '',
+      ),
+      escapeCsvField(it.doi || csl.DOI || ''),
+      escapeCsvField(it.itemType || ''),
+      escapeCsvField(citationKey),
+      escapeCsvField(it.url || csl.URL || ''),
+      escapeCsvField(
+        (typeof rec.abstract === 'string' ? rec.abstract : '') ||
+          csl.abstract ||
+          '',
+      ),
+      escapeCsvField(rec.volume ?? csl.volume ?? ''),
+      escapeCsvField(rec.issue ?? csl.issue ?? ''),
+      escapeCsvField(
+        (typeof rec.pages === 'string' ? rec.pages : '') || csl.page || '',
+      ),
+      escapeCsvField(
+        (typeof rec.isbn === 'string' ? rec.isbn : '') || csl.ISBN || '',
+      ),
+      escapeCsvField(
+        (typeof rec.issn === 'string' ? rec.issn : '') || csl.ISSN || '',
+      ),
+      escapeCsvField(
+        (typeof rec.pmid === 'string' ? rec.pmid : '') || csl.PMID || '',
+      ),
+      escapeCsvField(arxivId),
+    ];
+  });
 
   return [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
 }

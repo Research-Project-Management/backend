@@ -1,4 +1,4 @@
-import { ExportItemRecord } from '@/modules/library/citation/repositories/exports.repository';
+import { ExportItemRecord } from './export-item.types';
 import { CslJsonMapper } from './csl-json.mapper';
 
 /**
@@ -57,11 +57,13 @@ export function extractItemCitationAliases(it: ExportItemRecord): string[] {
         ? ((it as Record<string, unknown>).extra as string)
         : '';
   if (rawExtraStr) {
-    const match = rawExtraStr.match(
-      /(?:^|\r?\n)\s*(?:citation[-_\s]?key|cite[-_\s]?key|bibtex|tex\.ids)\s*:\s*([^\r\n]+)/i,
+    const matches = rawExtraStr.matchAll(
+      /(?:^|\r?\n)\s*(?:citation[-_\s]*key|cite[-_\s]*key|bibtex(?:\s*key)?|tex\.ids)\s*:\s*([^\r\n]+)/gi,
     );
-    if (match?.[1]) {
-      addKey(match[1]);
+    for (const match of matches) {
+      if (match[1]) {
+        addKey(match[1]);
+      }
     }
   }
 

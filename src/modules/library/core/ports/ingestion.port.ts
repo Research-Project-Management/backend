@@ -8,6 +8,7 @@ import type {
 } from '../types/ingestion.types';
 
 export const INGESTION_FACADE = 'INGESTION_FACADE';
+export const METADATA_PORT = 'METADATA_PORT';
 
 export interface ReResolveMetadataOptions {
   doi?: string;

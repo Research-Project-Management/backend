@@ -176,25 +176,10 @@ export class AnnotationsRepository {
         });
       }
       const reloaded = await this.findById(id, tx);
-      if (reloaded && reloaded.version > current.version) {
-        return reloaded;
+      if (!reloaded) {
+        throw new NotFoundException(`Annotation ${id} not found`);
       }
-      if (typeof client.annotation?.update === 'function') {
-        return client.annotation.update({
-          where: { id },
-          data: updatePayload,
-          select: ANNOTATION_SELECT,
-        });
-      }
-      return {
-        ...current,
-        color: updatePayload.color,
-        quoteText: updatePayload.quoteText,
-        comment: updatePayload.comment,
-        tags: updatePayload.tags,
-        rectCoords: data.rectCoords !== undefined ? data.rectCoords : current.rectCoords,
-        version: current.version + 1,
-      };
+      return reloaded;
     }
 
     return client.annotation.update({
@@ -345,30 +330,11 @@ export class AnnotationsRepository {
               providedVersion: item.expectedVersion,
             });
           }
-          if (typeof tx.annotation?.update === 'function') {
-            const result = await tx.annotation.update({
-              where: { id: item.id },
-              data: updatePayload,
-              select: ANNOTATION_SELECT,
-            });
-            updated.push(result);
-          } else {
-            const reloaded =
-              (await this.findById(item.id, tx)) ?? {
-                ...current,
-                color: updatePayload.color,
-                quoteText: updatePayload.quoteText,
-                comment: updatePayload.comment,
-                tags: updatePayload.tags,
-                annotationSortIndex: updatePayload.annotationSortIndex,
-                rectCoords:
-                  item.rectCoords !== undefined
-                    ? item.rectCoords
-                    : current.rectCoords,
-                version: current.version + 1,
-              };
-            updated.push(reloaded);
+          const reloaded = await this.findById(item.id, tx);
+          if (!reloaded) {
+            throw new NotFoundException(`Annotation ${item.id} not found`);
           }
+          updated.push(reloaded);
         } else {
           const result = await tx.annotation.update({
             where: { id: item.id },

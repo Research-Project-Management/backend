@@ -36,8 +36,7 @@ describe('DomainRateLimiterService', () => {
   });
 
   it('enforces delay between consecutive calls to the same domain', async () => {
-    // Override config for fast unit testing
-    (service as any).domainConfigs['test-domain'] = { minIntervalMs: 80 };
+    service.setDomainConfig('test-domain', { minIntervalMs: 80 });
 
     const t0 = Date.now();
     await service.acquire('test-domain');
@@ -50,8 +49,8 @@ describe('DomainRateLimiterService', () => {
   });
 
   it('does not block different domains from executing concurrently', async () => {
-    (service as any).domainConfigs['domain-a'] = { minIntervalMs: 150 };
-    (service as any).domainConfigs['domain-b'] = { minIntervalMs: 150 };
+    service.setDomainConfig('domain-a', { minIntervalMs: 150 });
+    service.setDomainConfig('domain-b', { minIntervalMs: 150 });
 
     const t0 = Date.now();
     await service.acquire('domain-a');
@@ -62,9 +61,9 @@ describe('DomainRateLimiterService', () => {
     expect(elapsed).toBeLessThan(50);
   });
 
-  it('respects bypassDelay flag', async () => {
+  it('respects setBypassDelay configuration', async () => {
     service.setDomainConfig('slow-domain', { minIntervalMs: 500 });
-    service.bypassDelay = true;
+    service.setBypassDelay(true);
 
     const t0 = Date.now();
     await service.acquire('slow-domain');
@@ -88,7 +87,7 @@ describe('DomainRateLimiterService', () => {
   });
 
   it('executes tasks via schedule wrapper', async () => {
-    (service as any).domainConfigs['task-domain'] = { minIntervalMs: 20 };
+    service.setDomainConfig('task-domain', { minIntervalMs: 20 });
 
     const result = await service.schedule('task-domain', async () => {
       return 42;

@@ -51,7 +51,7 @@ model Attachment {
   attachmentType        AttachmentType             @default(primary_pdf) @map("attachment_type")
   filename              String                     @default("document.pdf")
   url                   String                     @default("")
-  fileHash              String?                    @default("") @map("file_hash")
+  fileHash              String?                    @map("file_hash")
   fileId                String?                    @map("file_id") @db.Uuid
   storageKey            String?                    @map("storage_key")
   mimeType              String                     @default("application/pdf") @map("mime_type")
@@ -63,6 +63,7 @@ model Attachment {
   extractionCompletedAt DateTime?                  @map("extraction_completed_at") @db.Timestamptz(6)
   extractionLastError   String?                    @map("extraction_last_error")
   metadata              Json?                      @default("{}") @db.JsonB
+  version               Int                        @default(1)
   createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt             DateTime?                  @map("deleted_at") @db.Timestamptz(6)
@@ -74,6 +75,7 @@ model Attachment {
   @@index([itemId, linkMode])
   @@index([itemId, attachmentType])
   @@index([itemId, deletedAt])
+  @@index([deletedAt])
   @@index([fileId])
   @@index([fileHash])
   @@index([extractionStatus, extractionStartedAt])
@@ -86,7 +88,7 @@ model AttachmentRevision {
   attachment     Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
   revisionNumber Int        @default(1) @map("revision_number")
   fileId         String?    @map("file_id") @db.Uuid
-  fileHash       String?    @default("") @map("file_hash")
+  fileHash       String?    @map("file_hash")
   sizeBytes      BigInt     @default(0) @map("size_bytes")
   url            String     @default("")
   comment        String?    @default("")

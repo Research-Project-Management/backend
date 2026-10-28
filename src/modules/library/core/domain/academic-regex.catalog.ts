@@ -2,6 +2,10 @@ import { cleanAuthorName, splitAuthorString } from './author.domain';
 import { cleanAbstractText } from './academic-text.domain';
 import { normalizeAcademicTitleCase } from './academic-title.domain';
 import { normalizeAcademicTags } from './tag.domain';
+import {
+  isValidIsbnChecksum,
+  isValidIssnChecksum,
+} from './identifier.domain';
 
 export interface ExtractedRegexFields {
   doi?: string;
@@ -49,7 +53,7 @@ export class AcademicRegexCatalog {
 
   /** International Standard Book Number (ISBN-10 and ISBN-13) */
   public static readonly ISBN_PATTERN =
-    /(?:ISBN(?:-1[03])?:?\s*)([0-9Xx\s-]{10,20})\b/i;
+    /(?:ISBN(?:-1[03])?:?[ \t]*)([0-9Xx -]{10,20})\b/i;
 
   /** International Standard Serial Number (ISSN) */
   public static readonly ISSN_PATTERN = /\b\d{4}-\d{3}[\dX]\b/i;
@@ -76,6 +80,10 @@ export class AcademicRegexCatalog {
   public static readonly NATURE_HEADER_PATTERN =
     /\bNature\s+(?:Communications\s+)?\((\d{4})\)\s*(\d+):(\d+[-–]\d+)/i;
 
+  /** Major academic book & journal publisher imprints */
+  public static readonly PUBLISHER_IMPRINT_PATTERN =
+    /\b((?:MIT|Oxford\s+University|Cambridge\s+University|Princeton\s+University|Harvard\s+University|Stanford\s+University|Yale\s+University|University\s+of\s+Chicago|University\s+of\s+California|Columbia\s+University|Johns\s+Hopkins\s+University|Cornell\s+University)\s+Press|Springer(?:\s+Nature)?|Elsevier|Wiley(?:-Blackwell)?|Taylor\s*&\s*Francis|Routledge|SAGE\s+Publications|Macmillan|Academic\s+Press|Addison-Wesley|O'Reilly\s+Media|Morgan\s+Kaufmann|CRC\s+Press|World\s+Scientific|now\s+Publishers)\b/i;
+
   // 3. Structural Sections
 
   /** Abstract block bounded lookahead to prevent ReDoS */
@@ -91,7 +99,26 @@ export class AcademicRegexCatalog {
    */
   public static cleanDoi(rawDoi?: string | null): string | undefined {
     if (!rawDoi || typeof rawDoi !== 'string') return undefined;
-    let clean = rawDoi.trim().replace(/[.,;:)\]\s]+$/, '');
+    let clean = rawDoi.trim();
+    let prev = '';
+    while (clean !== prev) {
+      prev = clean;
+      clean = clean.replace(/[.,;:\s]+$/, '');
+      if (clean.endsWith(')')) {
+        const openParens = (clean.match(/\(/g) || []).length;
+        const closeParens = (clean.match(/\)/g) || []).length;
+        if (closeParens > openParens) {
+          clean = clean.slice(0, -1).trim();
+        }
+      }
+      if (clean.endsWith(']')) {
+        const openBrackets = (clean.match(/\[/g) || []).length;
+        const closeBrackets = (clean.match(/\]/g) || []).length;
+        if (closeBrackets > openBrackets) {
+          clean = clean.slice(0, -1).trim();
+        }
+      }
+    }
     try {
       clean = decodeURIComponent(clean);
     } catch {
@@ -102,6 +129,33 @@ export class AcademicRegexCatalog {
       return clean;
     }
     return undefined;
+  }
+
+  /**
+   * Finds the true start offset of the References / Bibliography section while
+   * ignoring Table of Contents entries (e.g. `\n  References ........ 42\n`).
+   */
+  private static findBibliographyPosition(
+    text: string,
+    introPos: number = -1,
+  ): number {
+    const headerPattern =
+      /\n[ \t]*(?:(?:\d+\.?|[IVX]+\.)[ \t]+)?(?:references|bibliography|literature[ \t]+cited)[ \t]*:?[ \t]*([^\n\r]*)/gi;
+    for (const m of text.matchAll(headerPattern)) {
+      const idx = m.index ?? -1;
+      if (idx === -1) continue;
+      const trailingOnLine = (m[1] || '').trim();
+      // Ignore TOC entries with leader dots, dashes, or page numbers on the same line
+      if (trailingOnLine.length > 0) {
+        continue;
+      }
+      // Ignore TOC entries appearing before the Introduction heading
+      if (introPos !== -1 && idx < introPos) {
+        continue;
+      }
+      return idx;
+    }
+    return -1;
   }
 
   /**
@@ -188,10 +242,12 @@ export class AcademicRegexCatalog {
     }
 
     // Positive: Publisher imprint / copyright / citation banner
+    // Guarded against inline citation markers (e.g. "et al." or "[1]") so cited references mentioning a venue don't receive the banner bonus
     if (
       /(?:ieee|acm|elsevier|springer|nature|wiley|plos|mdpi|frontiers|biorxiv|medrxiv|taylor\s*&\s*francis|oxford\s+university\s+press|cambridge|copyright|all\s+rights\s+reserved|©|\bvol\.?\s*\d+|\bissue\s*\d+|received:|accepted:|published:)/i.test(
         lineContext,
-      )
+      ) &&
+      !/\b(?:et\s+al\.?)\b|\[\s*\d+\s*\]/i.test(lineContext)
     ) {
       score += 35;
     }
@@ -203,7 +259,7 @@ export class AcademicRegexCatalog {
 
     // Negative: Reference number prefixes e.g. [1], (1), 1., 2.
     if (
-      /(?:\[\s*\d+\s*\]|\(\s*\d+\s*\)|^\s*\d+\.\s+|ref(?:erence)?s?[:\s])/i.test(
+      /(?:\[\s*\d+\s*\]|\(\s*\d+\s*\)|^\s*\d+\.\s+|ref(?:erence)?s?[:\s](?!\s*\.{2,}))/i.test(
         prefix,
       )
     ) {
@@ -219,18 +275,25 @@ export class AcademicRegexCatalog {
       score -= 45;
     }
 
-    // Negative: Deep in the text after an Introduction header
+    // Negative: Comparative / derivative / figure credit citation phrases
+    if (
+      /(?:adapted\s+from|reproduced\s+from|reprinted\s+from|courtesy\s+of|compared\s+(?:to|with)|builds\s+(?:on|upon)|benchmark\s+from|dataset\s+from)\b/i.test(
+        prefix,
+      )
+    ) {
+      score -= 65;
+    }
+
+    // Negative: Deep in the text after an Introduction header (ignore TOC lines with leader dots)
     const introPos = text.search(
-      /(?:\n\s*(?:1\.?\s+)?introduction|\n\s*i\.?\s+introduction)/i,
+      /\n[ \t]*(?:1\.?[ \t]+|i\.?[ \t]+)?introduction[ \t]*:?[ \t]*(?:\r?\n|$)/i,
     );
     if (introPos !== -1 && matchIndex > introPos) {
       score -= 30;
     }
 
     // Negative: Near "References" or "Bibliography"
-    const refPos = text.search(
-      /(?:\n\s*references|\n\s*bibliography|\n\s*literature\s+cited)/i,
-    );
+    const refPos = this.findBibliographyPosition(text, introPos);
     if (refPos !== -1 && matchIndex > refPos) {
       score -= 60;
     }
@@ -362,21 +425,44 @@ export class AcademicRegexCatalog {
       result.matchedSignatures.push('PUBMED_PMID');
     }
 
-    // Match ISBN
-    const isbnMatch = boundedText.match(this.ISBN_PATTERN);
-    if (isbnMatch && isbnMatch[1]) {
-      const cleanIsbn = isbnMatch[1].replace(/[-\s]/g, '');
-      if (cleanIsbn.length === 10 || cleanIsbn.length === 13) {
+    // Match ISBN (require valid ISBN-10 or ISBN-13 checksum)
+    const isbnMatches = [
+      ...boundedText.matchAll(new RegExp(this.ISBN_PATTERN.source, 'gi')),
+    ];
+    for (const isbnMatch of isbnMatches) {
+      if (!isbnMatch[1]) continue;
+      const cleanIsbn = isbnMatch[1].replace(/[-\s]/g, '').toUpperCase();
+      if (
+        (cleanIsbn.length === 10 || cleanIsbn.length === 13) &&
+        isValidIsbnChecksum(cleanIsbn)
+      ) {
         result.isbn = cleanIsbn;
         result.matchedSignatures.push('ISBN');
+        break;
       }
     }
 
-    // Match ISSN
-    const issnMatch = boundedText.match(this.ISSN_PATTERN);
-    if (issnMatch && issnMatch[0]) {
-      result.issn = issnMatch[0];
+    // Match ISSN (require valid ISO 3297 mod-11 checksum and reject bare 4-digit year ranges like 2020-2024)
+    const issnMatches = [
+      ...boundedText.matchAll(new RegExp(this.ISSN_PATTERN.source, 'gi')),
+    ];
+    for (const issnMatch of issnMatches) {
+      const candidateIssn = issnMatch[0].toUpperCase();
+      if (!isValidIssnChecksum(candidateIssn)) continue;
+      const matchIndex = issnMatch.index ?? 0;
+      const preceding = boundedText.slice(
+        Math.max(0, matchIndex - 20),
+        matchIndex,
+      );
+      if (
+        /^(?:19|20)\d{2}-(?:19|20)\d{2}$/.test(candidateIssn) &&
+        !/\bISSN\b/i.test(preceding)
+      ) {
+        continue;
+      }
+      result.issn = candidateIssn;
       result.matchedSignatures.push('ISSN');
+      break;
     }
 
     // 2. Match Publisher Signatures
@@ -456,6 +542,13 @@ export class AcademicRegexCatalog {
       }
       if (result.arxivId && !boundedText.slice(0, 500).includes('arXiv:')) {
         delete result.arxivId;
+      }
+    }
+
+    if (!result.publisher) {
+      const imprintMatch = boundedText.match(this.PUBLISHER_IMPRINT_PATTERN);
+      if (imprintMatch && imprintMatch[1]) {
+        result.publisher = imprintMatch[1].replace(/\s+/g, ' ').trim();
       }
     }
 

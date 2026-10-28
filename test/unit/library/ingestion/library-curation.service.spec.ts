@@ -522,17 +522,12 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         mockProjectId,
       );
 
-      // Verify single itemMetadata snapshot re-parented to primary item and remaining deleted
+      // Verify upstream itemMetadata snapshot is re-parented to primary item without destructive deleteMany on soft-delete merge (SD2-09)
       expect(mockTx.itemMetadata.update).toHaveBeenCalledWith({
         where: { id: 'meta-dup-1' },
         data: { itemId: 'primary-meta-item' },
       });
-      expect(mockTx.itemMetadata.deleteMany).toHaveBeenCalledWith({
-        where: {
-          itemId: { in: ['dup-meta-item'] },
-          id: { not: 'meta-dup-1' },
-        },
-      });
+      expect(mockTx.itemMetadata.deleteMany).not.toHaveBeenCalled();
     });
   });
 });

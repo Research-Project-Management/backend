@@ -5,6 +5,7 @@ import {
   normalizeAcademicTitleCase,
   cleanAbstractText,
   splitAuthorString,
+  AcademicRegexCatalog,
 } from '@/modules/library/core';
 
 export interface MeXtractResult {
@@ -99,8 +100,7 @@ Return ONLY valid JSON without markdown fences.`;
     ) {
       return {
         metadata: inProcessParsed,
-        confidence:
-          inProcessParsed.title && inProcessParsed.authors?.length ? 0.9 : 0.82,
+        confidence: 0.72,
         engine: 'MEXTRACT_HEURISTIC_SLM',
         durationMs,
       };
@@ -267,16 +267,26 @@ Return ONLY valid JSON without markdown fences.`;
     }
 
     const currentYear = new Date().getFullYear();
-    const allYears = [...text.slice(0, 2500).matchAll(/\b(19\d{2}|20\d{2})\b/g)]
-      .map((m) => parseInt(m[1], 10))
-      .filter((y) => y >= 1950 && y <= currentYear + 2);
-    if (allYears.length > 0) {
-      metadata.year = allYears[allYears.length - 1];
+    const isValidYear = (y: number) => y >= 1950 && y <= currentYear + 2;
+    const frontSlice = text.slice(0, 2500);
+    const pubMarkerMatch = frontSlice.match(
+      /(?:©|\(c\)|published|accepted|received|revised|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[^0-9\n]{0,25}\b(19\d{2}|20\d{2})\b/i,
+    );
+    const markerYear = pubMarkerMatch ? parseInt(pubMarkerMatch[1], 10) : NaN;
+    if (!Number.isNaN(markerYear) && isValidYear(markerYear)) {
+      metadata.year = markerYear;
+    } else {
+      const allYears = [...frontSlice.matchAll(/\b(19\d{2}|20\d{2})\b/g)]
+        .map((m) => parseInt(m[1], 10))
+        .filter(isValidYear);
+      if (allYears.length > 0) {
+        metadata.year = allYears[0];
+      }
     }
 
-    const doiMatch = text.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)/);
-    if (doiMatch) {
-      metadata.doi = doiMatch[1].replace(/[.,;)]+$/, '');
+    const scannedRegex = AcademicRegexCatalog.scan(text);
+    if (scannedRegex.doi) {
+      metadata.doi = scannedRegex.doi;
     }
 
     return metadata;

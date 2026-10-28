@@ -10,6 +10,7 @@ import { LayoutHeuristicExtractor } from '@/modules/library/extraction/extractor
 import { MeXtractExtractor } from '@/modules/library/extraction/extractors/mextract.extractor';
 import { MetadataQualityGate } from '@/modules/library/extraction/extractors/metadata-quality.gate';
 import {
+  FieldExtractionProvenance,
   IPdfExtractionTier,
   PdfExtractionTierContext,
   runPdfExtractionTierChain,
@@ -187,6 +188,13 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       `Trusted extraction completed in ${durationMs}ms [${ctx.engineUsed}] | Score: ${gateEvaluation.breakdown.totalScore} | Sufficient: ${gateEvaluation.isSelfSufficient} | Title: "${ctx.merged.title}" | DOI: ${ctx.merged.doi || 'none'}`,
     );
 
+    ctx.rawMatches.fieldProvenance = { ...ctx.provenance };
+    (
+      ctx.merged as ItemMetadata & {
+        fieldProvenance?: Record<string, FieldExtractionProvenance>;
+      }
+    ).fieldProvenance = { ...ctx.provenance };
+
     return {
       metadata: ctx.merged,
       quality: gateEvaluation.breakdown,
@@ -198,7 +206,8 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
         executionTimeMs: durationMs,
         qualityBreakdown: gateEvaluation.breakdown,
         rawMatches: ctx.rawMatches,
-      },
+        fieldProvenance: { ...ctx.provenance },
+      } as TrustedExtractionResult['provenance'],
     };
   }
 
@@ -233,6 +242,11 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
         publicationDate: xmp.publicationDate,
         journal: xmp.journal,
         publisher: xmp.publisher,
+        volume: xmp.volume,
+        issue: xmp.issue,
+        pages: xmp.pages,
+        issn: xmp.issn,
+        isbn: xmp.isbn,
         abstract: xmp.description,
         keywords: xmp.keywords,
       },
@@ -262,19 +276,27 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
           const pageChunks: string[] = [];
           const readPageText = async (pageNum: number): Promise<string> => {
             const page = await doc.getPage(pageNum);
-            const content = await page.getTextContent();
-            if (content?.items && content.items.length > 0) {
-              const items = content.items as Array<{
-                str?: string;
-                hasEOL?: boolean;
-              }>;
-              return items
-                .filter((it) => it && it.str != null)
-                .map((it) => (it.str || '') + (it.hasEOL ? '\n' : ' '))
-                .join('')
-                .trim();
+            try {
+              const content = await page.getTextContent();
+              if (content?.items && content.items.length > 0) {
+                const items = content.items as Array<{
+                  str?: string;
+                  hasEOL?: boolean;
+                }>;
+                return items
+                  .filter((it) => it && it.str != null)
+                  .map((it) => (it.str || '') + (it.hasEOL ? '\n' : ' '))
+                  .join('')
+                  .trim();
+              }
+              return '';
+            } finally {
+              try {
+                page?.cleanup?.();
+              } catch {
+                // Ignore page cleanup errors
+              }
             }
-            return '';
           };
 
           for (let i = 1; i <= pagesToRead; i++) {
@@ -293,7 +315,7 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
 
       if (docText && docText.trim().length > 0) {
         ctx.pageText = docText;
-      } else {
+      } else if (!ctx.sharedDoc) {
         const cloned = new Uint8Array(buffer.byteLength);
         cloned.set(buffer);
         const rawResult = await extractText(cloned, { mergePages: false });
@@ -487,7 +509,13 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
   ): void {
     const refinements: string[] = [];
 
-    const arxivYear = yearFromArxivId(merged.arxivId);
+    const arxivStampYearMatch = pageText?.match(
+      /arXiv:\s*(?:\d{4}\.\d{4,5}|[a-zA-Z-]+(?:\.[a-zA-Z-]+)?\/\d{7})(?:v\d+)?\s+\[[^\]]+\]\s+\d{1,2}\s+[A-Za-z]+\s+(19\d{2}|20\d{2})/i,
+    );
+    const arxivStampYear = arxivStampYearMatch
+      ? parseInt(arxivStampYearMatch[1], 10)
+      : undefined;
+    const arxivYear = arxivStampYear ?? yearFromArxivId(merged.arxivId);
     if (
       arxivYear &&
       !xmpYear &&
@@ -496,7 +524,9 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
     ) {
       rawMatches.yearBeforeRefinement = merged.year;
       merged.year = arxivYear;
-      refinements.push('year-from-arxiv-id');
+      refinements.push(
+        arxivStampYear ? 'year-from-arxiv-stamp' : 'year-from-arxiv-id',
+      );
     } else if (
       merged.year &&
       (merged.year < 1900 || merged.year > new Date().getFullYear() + 1)

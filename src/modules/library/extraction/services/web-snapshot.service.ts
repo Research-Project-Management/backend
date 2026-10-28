@@ -12,13 +12,14 @@ import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 import { ExternalProviderException } from '@/modules/library/core/errors/domain.exception';
 import { AttachmentStorageException } from '@/modules/library/extraction/types/attachments.types';
-import { buildStandaloneSnapshotHtml } from '@/modules/library/extraction/domain/snapshot-template.helper';
+import { buildStandaloneSnapshotHtml } from '@/modules/library/extraction/extractors/snapshot-template.helper';
 
 export interface SnapshotResult {
   title: string;
   byline?: string;
   excerpt?: string;
   siteName?: string;
+  capturedAt?: string;
   textContent: string;
   htmlContent: string;
   sizeBytes: number;
@@ -277,6 +278,7 @@ export class WebSnapshotService {
       byline,
       excerpt,
       siteName,
+      capturedAt: capturedAtIso,
       textContent,
       htmlContent: standaloneHtml,
       sizeBytes: htmlBuffer.length,
@@ -306,15 +308,17 @@ export class WebSnapshotService {
     const fileKey = `${userId}/library/snapshots/${itemId}_snapshot_${timestamp}.html`;
     const filename = `Snapshot_${sanitizedTitle}_${new Date().toISOString().slice(0, 10)}.html`;
 
-    let fileUrl = `/api/v1/storage/files/snapshots/${fileKey}`;
+    if (!this.storagePort?.uploadFile && !this.storagePort?.uploadBuffer) {
+      throw new AttachmentStorageException(
+        'Failed to store web snapshot in storage: Storage provider is not configured',
+      );
+    }
+
+    let fileUrl = '';
     let resolvedFileId: string | undefined;
     let uploaded = false;
     let lastUploadError: unknown;
     const buffer = Buffer.from(snapshot.htmlContent, 'utf-8');
-
-    const hasStorageUploader = Boolean(
-      this.storagePort?.uploadFile || this.storagePort?.uploadBuffer,
-    );
 
     if (this.storagePort?.uploadFile) {
       try {
@@ -351,7 +355,7 @@ export class WebSnapshotService {
       }
     }
 
-    if (hasStorageUploader && !uploaded) {
+    if (!uploaded || !fileUrl) {
       const message =
         lastUploadError instanceof Error
           ? lastUploadError.message
@@ -361,6 +365,7 @@ export class WebSnapshotService {
       );
     }
 
+    const capturedAtIso = snapshot.capturedAt ?? new Date().toISOString();
     const createPayload = {
       userId,
       itemId,
@@ -372,6 +377,13 @@ export class WebSnapshotService {
       fileHash: snapshot.checksum,
       linkMode: 'imported_url' as const,
       attachmentType: 'snapshot' as const,
+      metadata: {
+        snapshotUrl: url,
+        siteName: snapshot.siteName,
+        byline: snapshot.byline,
+        excerpt: snapshot.excerpt,
+        capturedAt: capturedAtIso,
+      },
     };
     const attachment = options?.projectId
       ? await this.attachmentsService.createAttachment(

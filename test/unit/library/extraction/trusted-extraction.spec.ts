@@ -117,6 +117,44 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
       expect(parsed?.doi).toBe('10.1145/3377811.3380321');
       expect(parsed?.title).toBe('Incremental Trailer Update Paper');
     });
+
+    it('decodes numeric XML entities (&amp; last), supports RDF attributes, and extracts DOIs from dc:identifier rdf:Bag', () => {
+      const rdfAttrXmp = `
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+          <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+            <rdf:Description
+              dc:title="Quantum Computing &#8211; A &#x2014; Survey &amp;amp; Review"
+              prism:publicationName="Physical Review Letters"
+              prism:volume="132"
+              prism:issue="4"
+              prism:issn="0031-9007"
+              prism:isbn="978-0-262-03384-8"
+              prism:publicationDate="2024-02-15">
+              <dc:identifier>
+                <rdf:Bag>
+                  <rdf:li>urn:issn:0031-9007</rdf:li>
+                  <rdf:li>doi:10.1103/PhysRevLett.132.040001</rdf:li>
+                </rdf:Bag>
+              </dc:identifier>
+            </rdf:Description>
+          </rdf:RDF>
+        </x:xmpmeta>
+      `;
+      const buffer = Buffer.from(`%PDF-1.7\n${rdfAttrXmp}\n%%EOF`, 'utf-8');
+      const parsed = XmpParser.parse(buffer);
+
+      expect(parsed).not.toBeNull();
+      expect(parsed?.doi).toBe('10.1103/PhysRevLett.132.040001');
+      expect(parsed?.title).toBe(
+        'Quantum Computing – A — Survey &amp; Review',
+      );
+      expect(parsed?.journal).toBe('Physical Review Letters');
+      expect(parsed?.volume).toBe('132');
+      expect(parsed?.issue).toBe('4');
+      expect(parsed?.issn).toBe('0031-9007');
+      expect(parsed?.isbn).toBe('978-0-262-03384-8');
+      expect(parsed?.year).toBe(2024);
+    });
   });
 
   // 2. Academic Regex Catalog
@@ -257,6 +295,31 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
         expect.arrayContaining(['authors', 'doi/arxivId']),
       );
     });
+
+    it('rejects preprint boilerplate titles, comma-containing institutions as authors, placeholder usernames, and invalid ISBN checksums', () => {
+      const badRecord = {
+        title: 'Journal Pre-proof',
+        authors: ['University of California, Berkeley', 'Administrator', 'unknown'],
+        isbn: '9780262033849',
+        year: 2024,
+        journal: 'Nature',
+      };
+      const evalBad = MetadataQualityGate.evaluate(badRecord);
+      expect(evalBad.breakdown.titleScore).toBe(0.0);
+      expect(evalBad.breakdown.authorScore).toBe(0.3);
+      expect(evalBad.breakdown.identifierScore).toBe(0.0);
+      expect(evalBad.isSelfSufficient).toBe(false);
+
+      const validIsbnRecord = {
+        title: 'Introduction to Algorithms Fourth Edition',
+        authors: ['Thomas H. Cormen'],
+        isbn: '978-0-262-03384-8',
+        year: 2022,
+        publisher: 'MIT Press',
+      };
+      const evalValid = MetadataQualityGate.evaluate(validIsbnRecord);
+      expect(evalValid.breakdown.identifierScore).toBe(1.0);
+    });
   });
 
   // 4. Layout Heuristic Extractor (Tier 3)
@@ -315,6 +378,53 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
       ]);
       expect(layout.maxFontSize).toBe(22);
     });
+
+    it('ignores rotated vertical watermarks, filters expanded noise headers, and stops author scan at prose/section boundaries', async () => {
+      mockedGetDocumentProxy.mockResolvedValue({
+        numPages: 1,
+        getPage: jest.fn().mockResolvedValue({
+          cleanup: jest.fn(),
+          getTextContent: jest.fn().mockResolvedValue({
+            items: [
+              {
+                str: 'arXiv:2401.12345v1 [cs.LG] 10 Jan 2024',
+                transform: [0, 28, -28, 0, 15, 400],
+              },
+              {
+                str: 'Journal Pre-proof',
+                transform: [24, 0, 0, 24, 50, 760],
+              },
+              {
+                str: 'Downloaded from https://academic.oup.com by guest',
+                transform: [20, 0, 0, 20, 50, 740],
+              },
+              {
+                str: 'Robust Graph Representation Learning',
+                transform: [18, 0, 0, 18, 50, 700],
+              },
+              {
+                str: 'Elena Rostova, Marcus Vance',
+                transform: [12, 0, 0, 12, 50, 660],
+              },
+              {
+                str: 'In this paper we propose a novel graph representation learning framework that is designed to handle noisy topologies and dynamic edge perturbations across benchmarks.',
+                transform: [10, 0, 0, 10, 50, 620],
+              },
+              {
+                str: 'Fake Author After Prose',
+                transform: [11, 0, 0, 11, 50, 600],
+              },
+            ],
+          }),
+        }),
+      });
+
+      const layout = await LayoutHeuristicExtractor.extract(
+        Buffer.from('%PDF-1.7 mock'),
+      );
+      expect(layout.title).toBe('Robust Graph Representation Learning');
+      expect(layout.authors).toEqual(['Elena Rostova', 'Marcus Vance']);
+    });
   });
 
   // 5. Master Facade Orchestration (TrustedExtractionFacade)
@@ -368,13 +478,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
         Abstract—We introduce ViT-22B, currently the largest vision model...
       `);
 
-      mockedGetDocumentProxy.mockResolvedValue({
-        numPages: 1,
-        getPage: jest.fn().mockResolvedValue({
-          getViewport: () => ({ width: 612, height: 792 }),
-          getTextContent: jest.fn().mockResolvedValue({ items: [] }),
-        }),
-      });
+      mockedGetDocumentProxy.mockResolvedValue(undefined);
 
       const facade = new TrustedExtractionService();
       const result = await facade.extract(buffer);
@@ -396,13 +500,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
         1. Introduction
       `);
 
-      mockedGetDocumentProxy.mockResolvedValue({
-        numPages: 1,
-        getPage: jest.fn().mockResolvedValue({
-          getViewport: () => ({ width: 612, height: 792 }),
-          getTextContent: jest.fn().mockResolvedValue({ items: [] }),
-        }),
-      });
+      mockedGetDocumentProxy.mockResolvedValue(undefined);
 
       const facade = new TrustedExtractionService();
       const result = await facade.extract(buffer);
@@ -413,6 +511,48 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
       expect(result.metadata.authors).toEqual(['Sarah Connor', 'John Connor']);
       expect(result.provenance.engineUsed).toBe('MEXTRACT_SLM');
       expect(result.provenance.rawMatches?.mextract).toBeDefined();
+    });
+
+    it('prefers explicit arXiv stamp year over yearFromArxivId and skips extractText when sharedDoc exists on scanned PDFs', async () => {
+      const cleanupSpy = jest.fn();
+      const scannedSharedDoc = {
+        numPages: 2,
+        getPage: jest.fn().mockResolvedValue({
+          cleanup: cleanupSpy,
+          getTextContent: jest.fn().mockResolvedValue({ items: [] }),
+        }),
+      };
+
+      const facade = new TrustedExtractionService();
+      await facade.extract(
+        Buffer.from('%PDF-1.7 scanned pdf'),
+        'scanned_paper.pdf',
+        scannedSharedDoc as never,
+      );
+
+      expect(cleanupSpy).toHaveBeenCalledTimes(3);
+      expect(mockedExtractText).not.toHaveBeenCalled();
+
+      mockedGetDocumentProxy.mockResolvedValueOnce({
+        numPages: 1,
+        getPage: jest.fn().mockResolvedValue({
+          cleanup: jest.fn(),
+          getTextContent: jest.fn().mockResolvedValue({
+            items: [
+              {
+                str: 'arXiv:1706.03762v7 [cs.CL] 2 Aug 2023\nAttention Is All You Need\nAshish Vaswani, Noam Shazeer\nAbstract—The dominant sequence transduction models are based on complex recurrent networks.',
+                hasEOL: true,
+              },
+            ],
+          }),
+        }),
+      });
+
+      const stampResult = await facade.extract(
+        Buffer.from('%PDF-1.7 arxiv stamp'),
+      );
+      expect(stampResult.metadata.arxivId).toBe('1706.03762v7');
+      expect(stampResult.metadata.year).toBe(2023);
     });
   });
 

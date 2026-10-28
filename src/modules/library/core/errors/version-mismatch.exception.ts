@@ -2,6 +2,8 @@ import { HttpStatus } from '@nestjs/common';
 import { BaseDomainException } from './domain.exception';
 
 export { BaseDomainException };
+export { VersionMismatchException as OptimisticLockException };
+
 
 export interface VersionMismatchOptions {
   aggregateType?: string;

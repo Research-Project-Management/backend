@@ -1,4 +1,4 @@
-﻿import {
+import {
   CircuitBreaker,
   CircuitBreakerOpenError,
 } from '@/modules/library/core/resilience/circuit-breaker';
@@ -195,6 +195,19 @@ describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter
 
       expect(res).toBe('coordinated-result');
       expect(fn).toHaveBeenCalledTimes(1);
+      expect(registry.normalizeKey('export.arxiv.org')).toBe('arxiv');
+      expect(registry.normalizeKey('api.semanticscholar.org')).toBe('semantic-scholar');
+      expect(registry.normalizeKey('SemanticScholar')).toBe('semantic-scholar');
+      expect(registry.normalizeKey('eutils.ncbi.nlm.nih.gov')).toBe('pubmed');
+      expect(registry.normalizeKey('api.crossref.org')).toBe('crossref');
+      expect(registry.normalizeKey('dx.doi.org')).toBe('doi-org');
+      expect(registry.getCircuitBreaker('export.arxiv.org')).toBe(registry.getCircuitBreaker('arxiv'));
+      expect(registry.getRateLimiter('SemanticScholar')).toBe(registry.getRateLimiter('semantic-scholar'));
+      const crossrefBreaker = registry.getCircuitBreaker('crossref');
+      for (let i = 0; i < 6; i++) {
+        await expect(crossrefBreaker.execute(async () => { throw new Error('CrossRef HTTP 404 Not Found'); })).rejects.toThrow('CrossRef HTTP 404 Not Found');
+      }
+      expect(crossrefBreaker.getState()).toBe('CLOSED');
     });
   });
 

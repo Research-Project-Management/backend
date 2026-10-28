@@ -206,3 +206,102 @@ export async function buildOutboxDiagnosticSummary(params: {
     unhandledEventTypes: Array.from(unhandledSet),
   };
 }
+
+export type ScopeInvalidatorTarget =
+  | ((scopeId: string) => Promise<unknown> | unknown)
+  | {
+      invalidateFacets?: (scopeId: string) => Promise<unknown> | unknown;
+      invalidateScope?: (scopeId: string) => Promise<unknown> | unknown;
+      invalidate?: (scopeId: string) => Promise<unknown> | unknown;
+    };
+
+export async function invalidateScopes(
+  first:
+    | { userId?: string | null; projectId?: string | null }
+    | ScopeInvalidatorTarget
+    | string
+    | undefined,
+  second?: ScopeInvalidatorTarget | string | null,
+  third?: ScopeInvalidatorTarget | string | null,
+): Promise<string[]> {
+  let userId: string | undefined;
+  let projectId: string | undefined;
+  let target: ScopeInvalidatorTarget | undefined;
+
+  const isInvalidator = (val: unknown): val is ScopeInvalidatorTarget =>
+    typeof val === 'function' ||
+    (Boolean(val) &&
+      typeof val === 'object' &&
+      ('invalidateFacets' in (val as Record<string, unknown>) ||
+        'invalidateScope' in (val as Record<string, unknown>) ||
+        'invalidate' in (val as Record<string, unknown>)));
+
+  if (isInvalidator(first)) {
+    target = first;
+    if (typeof second === 'object' && second !== null && !isInvalidator(second)) {
+      const scopeObj = second as { userId?: string | null; projectId?: string | null };
+      userId = scopeObj.userId ?? undefined;
+      projectId = scopeObj.projectId ?? undefined;
+    } else {
+      userId = typeof second === 'string' ? second : undefined;
+      projectId = typeof third === 'string' ? third : undefined;
+    }
+  } else if (typeof first === 'object' && first !== null) {
+    userId = first.userId ?? undefined;
+    projectId = first.projectId ?? undefined;
+    if (isInvalidator(second)) {
+      target = second;
+    }
+  } else if (typeof first === 'string') {
+    userId = first;
+    if (typeof second === 'string' || second === null || second === undefined) {
+      projectId = second ?? undefined;
+      if (isInvalidator(third)) {
+        target = third;
+      }
+    } else if (isInvalidator(second)) {
+      target = second;
+    }
+  }
+
+  const scopes: string[] = [];
+  const cleanProj =
+    typeof projectId === 'string' &&
+    projectId.trim() &&
+    !['personal', 'user', 'me'].includes(projectId.trim().toLowerCase())
+      ? projectId.trim()
+      : undefined;
+  const cleanUser =
+    typeof userId === 'string' && userId.trim() ? userId.trim() : undefined;
+
+  if (cleanProj) {
+    scopes.push(cleanProj);
+  }
+  if (cleanUser && !scopes.includes(cleanUser)) {
+    scopes.push(cleanUser);
+  }
+
+  if (target) {
+    for (const scopeId of scopes) {
+      if (typeof target === 'function') {
+        await target(scopeId);
+      } else if (typeof target.invalidateFacets === 'function') {
+        await target.invalidateFacets(scopeId);
+      } else if (typeof target.invalidateScope === 'function') {
+        await target.invalidateScope(scopeId);
+      } else if (typeof target.invalidate === 'function') {
+        await target.invalidate(scopeId);
+      }
+    }
+  }
+
+  return scopes;
+}
+
+export const OutboxEventHandlers = {
+  handleMissingOutboxHandler,
+  handleOutboxDispatchFailure,
+  executeOutboxGarbageCollection,
+  buildOutboxDiagnosticSummary,
+  invalidateScopes,
+};

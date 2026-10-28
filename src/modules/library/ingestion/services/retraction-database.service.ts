@@ -1,5 +1,6 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { RedisCacheService } from '@/core';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import {
   RetractionDetails,
@@ -42,8 +43,16 @@ export class RetractionDatabaseService implements OnModuleInit {
   // Negative cache: DOIs verified as clean within TTL
   private readonly cleanDoiCache = new Map<string, number>();
   private readonly CLEAN_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+  private readonly CLEAN_CACHE_TTL_SECONDS = 14 * 24 * 60 * 60;
 
-  constructor(private readonly repo: RetractionRepository) {}
+  constructor(
+    private readonly repo: RetractionRepository,
+    @Optional() private readonly redisCache?: RedisCacheService,
+  ) {}
+
+  private getRedisDoiKey(cleanDoi: string): string {
+    return `library:retraction:doi:${cleanDoi}`;
+  }
 
   private setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
     if (map.has(key)) {
@@ -76,12 +85,27 @@ export class RetractionDatabaseService implements OnModuleInit {
   }
 
   private setCleanDoiCache(doi: string, expiresAt: number): void {
-    this.setBoundedMap(
-      this.cleanDoiCache,
-      doi,
-      expiresAt,
-      RetractionDatabaseService.MAX_CLEAN_DOI_CACHE,
-    );
+    if (this.cleanDoiCache.has(doi)) {
+      this.cleanDoiCache.delete(doi);
+    } else if (
+      this.cleanDoiCache.size >= RetractionDatabaseService.MAX_CLEAN_DOI_CACHE
+    ) {
+      const now = Date.now();
+      for (const [k, exp] of this.cleanDoiCache.entries()) {
+        if (exp <= now) {
+          this.cleanDoiCache.delete(k);
+        }
+      }
+      if (
+        this.cleanDoiCache.size >= RetractionDatabaseService.MAX_CLEAN_DOI_CACHE
+      ) {
+        const oldestKey = this.cleanDoiCache.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.cleanDoiCache.delete(oldestKey);
+        }
+      }
+    }
+    this.cleanDoiCache.set(doi, expiresAt);
   }
 
   onModuleInit(): void {
@@ -105,10 +129,13 @@ export class RetractionDatabaseService implements OnModuleInit {
   }
 
   /**
-   * Returns current count of retraction records in PostgreSQL.
+   * Warms the in-memory index and returns the current count of retraction records in PostgreSQL.
    */
-  async seedIfEmpty(_force = false): Promise<number> {
+  async seedIfEmpty(force = false): Promise<number> {
     try {
+      if (force || this.memoryDoiMap.size === 0) {
+        await this.warmMemoryIndex();
+      }
       return await this.repo.countRetractionRecords();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -176,8 +203,30 @@ export class RetractionDatabaseService implements OnModuleInit {
       return hit;
     }
 
-    // 2. Negative Cache Check (verified clean within TTL)
+    // 2. Negative Cache Check (verified clean within TTL) & L2 Redis synchronization
     if (cleanDoi) {
+      if (this.redisCache?.get) {
+        try {
+          const redisEntry = await this.redisCache.get<
+            RetractionDetails | { __clean: true; expiresAt: number }
+          >(this.getRedisDoiKey(cleanDoi));
+          if (redisEntry && typeof redisEntry === 'object') {
+            if ('__clean' in redisEntry && redisEntry.__clean === true) {
+              if (redisEntry.expiresAt > Date.now()) {
+                this.setCleanDoiCache(cleanDoi, redisEntry.expiresAt);
+                return false;
+              }
+            } else if ('nature' in redisEntry) {
+              this.cleanDoiCache.delete(cleanDoi);
+              this.setMemoryDoi(cleanDoi, redisEntry);
+              return redisEntry;
+            }
+          }
+        } catch {
+          // Non-fatal fallback to in-memory cache
+        }
+      }
+
       const cleanUntil = this.cleanDoiCache.get(cleanDoi);
       if (cleanUntil !== undefined) {
         if (cleanUntil > Date.now()) {
@@ -286,6 +335,13 @@ export class RetractionDatabaseService implements OnModuleInit {
     this.setMemoryDoi(cleanDoi, details);
     if (cleanPmid) this.setMemoryPmid(cleanPmid, details);
     this.cleanDoiCache.delete(cleanDoi);
+    await this.redisCache
+      ?.set?.(
+        this.getRedisDoiKey(cleanDoi),
+        details,
+        this.CLEAN_CACHE_TTL_SECONDS,
+      )
+      .catch(() => {});
   }
 
   /**
@@ -294,8 +350,16 @@ export class RetractionDatabaseService implements OnModuleInit {
   async saveClean(doi: string, pmid?: string | null): Promise<void> {
     const cleanDoi = normalizeDoi(doi) || doi.trim().toLowerCase();
     const cleanPmid = pmid ? normalizePmid(pmid) || pmid.trim() : null;
+    const expiresAt = Date.now() + this.CLEAN_CACHE_TTL_MS;
 
-    this.setCleanDoiCache(cleanDoi, Date.now() + this.CLEAN_CACHE_TTL_MS);
+    this.setCleanDoiCache(cleanDoi, expiresAt);
+    await this.redisCache
+      ?.set?.(
+        this.getRedisDoiKey(cleanDoi),
+        { __clean: true, expiresAt },
+        this.CLEAN_CACHE_TTL_SECONDS,
+      )
+      .catch(() => {});
 
     try {
       await this.repo.upsertRetractionRecord({
@@ -375,6 +439,14 @@ export class RetractionDatabaseService implements OnModuleInit {
           };
           this.setMemoryDoi(cleanDoi, details);
           if (cleanPmid) this.setMemoryPmid(cleanPmid, details);
+          this.cleanDoiCache.delete(cleanDoi);
+          await this.redisCache
+            ?.set?.(
+              this.getRedisDoiKey(cleanDoi),
+              details,
+              this.CLEAN_CACHE_TTL_SECONDS,
+            )
+            .catch(() => {});
           imported++;
         }),
       );

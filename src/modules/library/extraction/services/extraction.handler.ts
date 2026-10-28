@@ -281,58 +281,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         }>;
       };
 
-      // 3.1. Wire Page-Level FullText Indexing (FullTextIndex in PostgreSQL)
-      if (
-        Array.isArray(extractionResult.pages) &&
-        extractionResult.pages.length > 0
-      ) {
-        const normalizedPages = extractionResult.pages.map((p, idx) => ({
-          pageIndex:
-            typeof p.pageIndex === 'number'
-              ? p.pageIndex
-              : typeof p.pageNumber === 'number'
-                ? Math.max(0, p.pageNumber - 1)
-                : idx,
-          pageNumber:
-            p.pageNumber ??
-            (typeof p.pageIndex === 'number' ? p.pageIndex + 1 : idx + 1),
-          textContent: p.text ?? p.textContent ?? '',
-          charOffset: p.charOffset ?? 0,
-        }));
-
-        try {
-          if (this.eventEmitter) {
-            this.eventEmitter.emit('library.attachment.pages.extracted', {
-              attachmentId: attachment.id,
-              itemId: attachment.itemId,
-              pages: normalizedPages.map((p) => ({
-                pageNumber: p.pageNumber,
-                pageIndex: p.pageIndex,
-                textContent: p.textContent,
-                charOffset: p.charOffset,
-              })),
-            });
-          } else if (this.searchFacade?.indexAttachmentPages) {
-            await this.searchFacade.indexAttachmentPages(
-              attachment.id,
-              normalizedPages,
-            );
-          } else if (this.extractionRepo.indexAttachmentPages) {
-            await this.extractionRepo.indexAttachmentPages(
-              attachment.id,
-              normalizedPages,
-            );
-          }
-        } catch (indexErr: unknown) {
-          const msg =
-            indexErr instanceof Error ? indexErr.message : String(indexErr);
-          this.logger.warn(
-            `Failed to index extracted pages for attachment ${attachment.id}: ${msg}`,
-          );
-        }
-      }
-
-      // 4.1. Store OCR provenance and quality stats if any pages were OCR'd
+      // 3.1. Store OCR provenance and quality stats if any pages were OCR'd
       if (doc.ocrProvenance && doc.ocrProvenance.totalOcrPages > 0) {
         try {
           await this.extractionRepo.saveMetadataSourceRecord(
@@ -360,7 +309,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         }
       }
 
-      // 4.2. Persist Searchable Sandwich PDF and create revision if OCR produced one
+      // 3.2. Persist Searchable Sandwich PDF and create revision if OCR produced one
       if (
         doc.searchablePdfBuffer &&
         doc.ocrProvenance &&
@@ -412,20 +361,64 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         }
       }
 
-      // 5. Store authoritative PDF extraction provenance & full-text tree
+      // 4. Wire Page-Level FullText Indexing (FullTextIndex in PostgreSQL)
+      if (
+        Array.isArray(extractionResult.pages) &&
+        extractionResult.pages.length > 0
+      ) {
+        const normalizedPages = extractionResult.pages.map((p, idx) => ({
+          pageIndex:
+            typeof p.pageIndex === 'number'
+              ? p.pageIndex
+              : typeof p.pageNumber === 'number'
+                ? Math.max(0, p.pageNumber - 1)
+                : idx,
+          pageNumber:
+            p.pageNumber ??
+            (typeof p.pageIndex === 'number' ? p.pageIndex + 1 : idx + 1),
+          textContent: p.text ?? p.textContent ?? '',
+          charOffset: p.charOffset ?? 0,
+        }));
+
+        try {
+          if (this.eventEmitter) {
+            await this.emitEventDurable('library.attachment.pages.extracted', {
+              attachmentId: attachment.id,
+              itemId: attachment.itemId,
+              pages: normalizedPages.map((p) => ({
+                pageNumber: p.pageNumber,
+                pageIndex: p.pageIndex,
+                textContent: p.textContent,
+                charOffset: p.charOffset,
+              })),
+            });
+          } else if (this.searchFacade?.indexAttachmentPages) {
+            await this.searchFacade.indexAttachmentPages(
+              attachment.id,
+              normalizedPages,
+            );
+          } else if (this.extractionRepo.indexAttachmentPages) {
+            await this.extractionRepo.indexAttachmentPages(
+              attachment.id,
+              normalizedPages,
+            );
+          }
+        } catch (indexErr: unknown) {
+          const msg =
+            indexErr instanceof Error ? indexErr.message : String(indexErr);
+          this.logger.warn(
+            `Failed to index extracted pages for attachment ${attachment.id}: ${msg}`,
+          );
+        }
+      }
+
+      // 5. Build in-library citation graph (match references against papers in same project scope)
       if (signal?.aborted) {
         throw new ExtractionProcessException(
           `Extraction aborted due to lost lease before metadata sync for attachment ${attachmentId}`,
           { eventId: event.id, attachmentId },
         );
       }
-      await this.metadataSync.offloadFullTextAndSyncMetadata(
-        attachment,
-        doc,
-        extractionResult,
-        { skipOutboxPublish: true },
-      );
-
       const effectiveUserId =
         attachment.item?.userId ||
         (typeof payload.userId === 'string' ? payload.userId : undefined) ||
@@ -438,7 +431,6 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       );
       const scopeId = effectiveProjectId || effectiveUserId;
 
-      // 6. Build in-library citation graph (match references against papers in same project scope)
       if (doc.references && doc.references.length > 0 && scopeId) {
         try {
           await this.linkInLibraryCitations(
@@ -453,8 +445,16 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         }
       }
 
-      // 7. Update status to READY on completion
+      // 6. Update status to READY on completion before publishing ITEM_UPDATED and invalidating cache
       await this.extractionRepo.markReady(attachment.id);
+
+      // 7. Store authoritative PDF extraction provenance, offload full-text tree & sync metadata / Outbox ITEM_UPDATED
+      const syncRes = await this.metadataSync.offloadFullTextAndSyncMetadata(
+        attachment,
+        doc,
+        extractionResult,
+        { skipOutboxPublish: false },
+      );
 
       // 8. Invalidate all relevant Redis keys BEFORE publishing ITEM_UPDATED or emitting ATTACHMENT_METADATA_EXTRACTED
       // so downstream listeners (e.g. SearchEventsSubscriber, RetractionWatch, MetadataResolverService) read fresh item state & version
@@ -539,7 +539,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         }
       }
 
-      // 9. Publish ITEM_UPDATED outbox event / domain event for SearchEventsSubscriber & Retraction checks
+      // 9. Publish ITEM_UPDATED domain event fallback if not already published atomically via outbox
       const itemUpdatedPayload = {
         itemId: attachment.itemId,
         userId: effectiveUserId,
@@ -548,7 +548,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       };
       const existingMetaObj =
         attachment.item?.metadata &&
-        typeof attachment.item.metadata === 'object' &&
+        typeof attachment.item?.metadata === 'object' &&
         !Array.isArray(attachment.item.metadata)
           ? (attachment.item.metadata as Record<string, unknown>)
           : {};
@@ -560,28 +560,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           (doc.metadata?.pmid && !existingMetaObj.pmid) ||
           (doc.metadata?.isbn && !existingMetaObj.isbn),
       );
-      let outboxPublished = false;
-      if (this.libraryTx?.executeInTransaction) {
-        try {
-          await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
-            await helpers.publishOutbox(
-              { userId: effectiveUserId, projectId: effectiveProjectId },
-              attachment.itemId,
-              LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-              itemUpdatedPayload,
-            );
-          });
-          outboxPublished = true;
-        } catch (outboxErr: unknown) {
-          const msg =
-            outboxErr instanceof Error ? outboxErr.message : String(outboxErr);
-          this.logger.debug(
-            `Could not publish ITEM_UPDATED outbox after extraction: ${msg}`,
-          );
-        }
-      }
-      if (!outboxPublished) {
-        this.eventEmitter?.emit(LIBRARY_EVENT_TYPES.ITEM_UPDATED, {
+      if (!syncRes?.outboxPublished) {
+        await this.emitEventDurable(LIBRARY_EVENT_TYPES.ITEM_UPDATED, {
           eventId: event.id,
           userId: effectiveUserId,
           projectId: effectiveProjectId,
@@ -599,30 +579,33 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         (discoveredNewIdentifier ||
           (doc.metadata?.title && !existingMetaObj.isVerified))
       ) {
-        this.eventEmitter.emit(LIBRARY_EVENT_TYPES.ATTACHMENT_METADATA_EXTRACTED, {
-          userId: effectiveUserId,
-          projectId: effectiveProjectId,
-          itemId: attachment.itemId,
-          attachmentId: attachment.id,
-          extractedMetadata: {
-            title: doc.metadata?.title,
-            doi: doc.metadata?.doi,
-            arxivId: doc.metadata?.arxivId,
-            pmid: doc.metadata?.pmid,
-            isbn: doc.metadata?.isbn,
-            issn: doc.metadata?.issn,
-            abstract: doc.metadata?.abstract,
-            year: doc.metadata?.year,
-            publicationTitle:
-              (doc.metadata as Record<string, unknown> | null)?.publicationTitle ||
-              doc.metadata?.journal,
-            authors: doc.metadata?.authors,
-            creators: doc.metadata?.creators,
+        await this.emitEventDurable(
+          LIBRARY_EVENT_TYPES.ATTACHMENT_METADATA_EXTRACTED,
+          {
+            userId: effectiveUserId,
+            projectId: effectiveProjectId,
+            itemId: attachment.itemId,
+            attachmentId: attachment.id,
+            extractedMetadata: {
+              title: doc.metadata?.title,
+              doi: doc.metadata?.doi,
+              arxivId: doc.metadata?.arxivId,
+              pmid: doc.metadata?.pmid,
+              isbn: doc.metadata?.isbn,
+              issn: doc.metadata?.issn,
+              abstract: doc.metadata?.abstract,
+              year: doc.metadata?.year,
+              publicationTitle:
+                (doc.metadata as Record<string, unknown> | null)
+                  ?.publicationTitle || doc.metadata?.journal,
+              authors: doc.metadata?.authors,
+              creators: doc.metadata?.creators,
+            },
+            isOcrDerived: Boolean(
+              doc.ocrProvenance && doc.ocrProvenance.totalOcrPages > 0,
+            ),
           },
-          isOcrDerived: Boolean(
-            doc.ocrProvenance && doc.ocrProvenance.totalOcrPages > 0,
-          ),
-        });
+        );
       }
 
       this.logger.log(
@@ -695,6 +678,57 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     }
     const matcher =
       this.referenceMatcher ?? new ReferenceMatcherService(this.extractionRepo);
-    await matcher.linkCitationsInLibrary(scope, sourceItemId, references);
+    const res = await matcher.linkCitationsInLibrary(
+      scope,
+      sourceItemId,
+      references,
+    );
+    if (res?.matches && res.matches.length > 0 && this.libraryTx?.executeInTransaction) {
+      const eventScope =
+        typeof scope === 'string'
+          ? { userId: scope, projectId: null }
+          : {
+              userId: scope.userId || 'system',
+              projectId: normalizeProjectScopeId(scope.projectId),
+            };
+      try {
+        await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
+          for (const m of res.matches) {
+            await helpers.appendChange(eventScope, {
+              entityType: 'Relation',
+              entityId: `${sourceItemId}:${m.targetItemId}`,
+              action: 'create',
+              version: 1,
+              data: {
+                itemId: sourceItemId,
+                fromItemId: sourceItemId,
+                toItemId: m.targetItemId,
+                targetItemId: m.targetItemId,
+                relationType: 'cites',
+              },
+            });
+          }
+        });
+      } catch {
+        // Fallback already handled by repository changelog write
+      }
+    }
+  }
+
+  private async emitEventDurable(
+    eventName: string,
+    payload: unknown,
+  ): Promise<void> {
+    if (!this.eventEmitter) return;
+    try {
+      if (typeof this.eventEmitter.emitAsync === 'function') {
+        await this.eventEmitter.emitAsync(eventName, payload);
+      } else {
+        this.eventEmitter.emit(eventName, payload);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Event listener error during ${eventName}: ${msg}`);
+    }
   }
 }

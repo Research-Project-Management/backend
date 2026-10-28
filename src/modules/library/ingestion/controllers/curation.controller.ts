@@ -2,18 +2,22 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Query,
   UseGuards,
+  Optional,
 } from '@nestjs/common';
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { QualityService } from '@/modules/library/ingestion/services/quality.service';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   MergeDuplicatesDto,
   DismissDuplicatesDto,
   UndoMergeDuplicatesDto,
+  UpdateReviewCaseStatusDto,
 } from '@/modules/library/ingestion/dto/curation.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -31,6 +35,7 @@ export class CurationController {
     private readonly duplicateDetector: DuplicateDetectorService,
     private readonly duplicateMerger: DuplicateMergerService,
     private readonly qualityService: QualityService,
+    @Optional() private readonly ingestionRepo?: IngestionRepository,
   ) {}
 
   @Get('duplicates')
@@ -109,5 +114,49 @@ export class CurationController {
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.qualityService.getQualityAudit(userId, effectiveProjectId);
+  }
+
+  @Get('review-cases')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  async getReviewCases(
+    @CurrentUser('id') userId: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    if (!this.ingestionRepo) {
+      return [];
+    }
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    const parsedLimit = limit ? Number(limit) : undefined;
+    return this.ingestionRepo.findReviewCases(
+      { userId, projectId: effectiveProjectId },
+      {
+        status,
+        limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      },
+    );
+  }
+
+  @Patch('review-cases/:id')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  async updateReviewCaseStatus(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateReviewCaseStatusDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    if (!this.ingestionRepo) {
+      return null;
+    }
+    const effectiveProjectId =
+      paramProjectId || queryProjectId || dto?.projectId;
+    return this.ingestionRepo.updateReviewCaseStatus(
+      { userId, projectId: effectiveProjectId },
+      id,
+      dto.status,
+    );
   }
 }

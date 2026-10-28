@@ -1,5 +1,6 @@
 import { Injectable, Optional, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
 import { TreeEngine } from './tree.engine';
 import {
@@ -15,6 +16,7 @@ import {
   evalJsonField,
   evalStringField,
   evalDateField,
+  evalIdentifierField,
   parseRelativeDuration,
 } from './condition-field-evaluators.helper';
 import {
@@ -35,6 +37,7 @@ export {
   evalJsonField,
   evalStringField,
   evalDateField,
+  evalIdentifierField,
   parseRelativeDuration,
   evalAnyFieldCondition,
   evalCreatorCondition,
@@ -67,6 +70,38 @@ const DIRECT_ITEM_COLUMNS = new Set([
 ]);
 
 const UUID_ITEM_COLUMNS = new Set(['userId', 'projectId']);
+
+const PUBLICATION_TITLE_MAPPED_FIELDS = new Set([
+  'bookTitle',
+  'proceedingsTitle',
+  'websiteTitle',
+  'dictionaryTitle',
+  'encyclopediaTitle',
+  'blogTitle',
+  'forumTitle',
+  'programTitle',
+]);
+
+const PUBLISHER_MAPPED_FIELDS = new Set(['university', 'institution']);
+
+const DATE_RANGE_OPERATORS = new Set<SavedSearchOperator>([
+  'isGreaterThan',
+  'isLessThan',
+  'isBetween',
+  'isInTheLast',
+]);
+
+const NEGATIVE_COMBINATION_OPERATORS = new Set<SavedSearchOperator>([
+  'isAbsent',
+  'isNot',
+  'doesNotContain',
+]);
+
+function extractYearNumber(raw: unknown): number {
+  const str = String(raw ?? '').trim();
+  const match = str.match(/\b(\d{4})\b/);
+  return match ? parseInt(match[1], 10) : Number(str);
+}
 
 const OPERATOR_ALIASES: Record<string, SavedSearchOperator> = {
   equals: 'is',
@@ -301,6 +336,14 @@ export class ConditionEvaluatorEngine {
     return mode === 'OR' || mode === 'ANY' ? { OR: clauses } : { AND: clauses };
   }
 
+  evaluateLeaf(
+    cond: SavedSearchCondition,
+    userId?: string,
+    descendantMap?: Map<string, string[]>,
+  ): Prisma.ItemWhereInput | null {
+    return this.evaluateCondition(cond, userId, descendantMap);
+  }
+
   private evaluateCondition(
     cond: SavedSearchCondition,
     userId?: string,
@@ -355,10 +398,32 @@ export class ConditionEvaluatorEngine {
         return evalDateField('updatedAt', operator, value);
       case 'publicationDate':
       case 'date':
+        if (DATE_RANGE_OPERATORS.has(operator)) {
+          if (operator === 'isInTheLast') {
+            const cutoff = parseRelativeDuration(value);
+            return cutoff ? { year: { gte: cutoff.getFullYear() } } : null;
+          }
+          if (operator === 'isBetween' && Array.isArray(value)) {
+            return evalYearCondition('isBetween', [
+              extractYearNumber(value[0]),
+              extractYearNumber(value[1]),
+            ]);
+          }
+          return evalYearCondition(operator, extractYearNumber(value ?? strVal));
+        }
         return evalJsonField('publicationDate', operator, strVal);
       case 'accessedAt':
       case 'accessDate':
-        return evalJsonField('accessedAt', operator, strVal);
+        if (DATE_RANGE_OPERATORS.has(operator)) {
+          return (
+            evalDateField('accessedAt', operator, value) ??
+            evalJsonField('accessedAt', operator, strVal)
+          );
+        }
+        return (
+          evalJsonField('accessedAt', operator, strVal) ??
+          evalDateField('accessedAt', operator, value)
+        );
       case 'attachmentContent':
         return evalAttachmentCondition(
           'attachmentContent',
@@ -377,13 +442,52 @@ export class ConditionEvaluatorEngine {
       case 'noteContent':
       case 'note':
         return evalNoteCondition(operator, strVal);
+      case 'doi':
+      case 'isbn':
+      case 'issn':
+      case 'pmid':
+      case 'pmcid':
+      case 'arxivId':
+        return evalIdentifierField(normalizedField, operator, strVal);
       default:
         if (UUID_ITEM_COLUMNS.has(normalizedField)) {
           if (operator === 'isPresent') return { [normalizedField]: { not: null } };
           if (operator === 'isAbsent') return { [normalizedField]: null };
-          if (operator === 'is') return strVal ? { [normalizedField]: strVal } : null;
-          if (operator === 'isNot') return strVal ? { NOT: { [normalizedField]: strVal } } : null;
+          if (operator === 'is') {
+            if (!strVal) return null;
+            return isUUID(strVal)
+              ? { [normalizedField]: strVal }
+              : { id: '00000000-0000-0000-0000-000000000000' };
+          }
+          if (operator === 'isNot') {
+            if (!strVal) return null;
+            return isUUID(strVal)
+              ? { NOT: { [normalizedField]: strVal } }
+              : { id: { not: '00000000-0000-0000-0000-000000000000' } };
+          }
           return null;
+        }
+        if (PUBLICATION_TITLE_MAPPED_FIELDS.has(normalizedField)) {
+          const jsonClause = evalJsonField(normalizedField, operator, strVal);
+          const colClause = evalStringField('publicationTitle', operator, strVal);
+          const pair = [jsonClause, colClause].filter(
+            (c): c is Prisma.ItemWhereInput => c !== null,
+          );
+          if (pair.length === 0) return null;
+          return NEGATIVE_COMBINATION_OPERATORS.has(operator)
+            ? { AND: pair }
+            : { OR: pair };
+        }
+        if (PUBLISHER_MAPPED_FIELDS.has(normalizedField)) {
+          const jsonClause = evalJsonField(normalizedField, operator, strVal);
+          const pubClause = evalJsonField('publisher', operator, strVal);
+          const pair = [jsonClause, pubClause].filter(
+            (c): c is Prisma.ItemWhereInput => c !== null,
+          );
+          if (pair.length === 0) return null;
+          return NEGATIVE_COMBINATION_OPERATORS.has(operator)
+            ? { AND: pair }
+            : { OR: pair };
         }
         return DIRECT_ITEM_COLUMNS.has(normalizedField)
           ? evalStringField(normalizedField, operator, strVal)

@@ -5,14 +5,14 @@ import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain'
 import {
   resolveOrCreateTags,
   deriveFirstAuthor,
-  disambiguateCitationKey,
 } from '@/modules/library/catalog';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 import {
   EntityNotFoundException,
-  isPlaceholderItemTitle,
   normalizeProjectScopeId,
+  ItemProvenancePolicy,
 } from '@/modules/library/core';
+import { sanitizeExtractedItemUpdateAgainstFreshState } from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
 
 @Injectable()
 export class ExtractionRepository {
@@ -20,6 +20,26 @@ export class ExtractionRepository {
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
+  }
+
+  async getExtractionStatusBreakdown(
+    tx?: Prisma.TransactionClient,
+  ): Promise<Record<string, number>> {
+    const client = this.getClient(tx);
+    if (typeof client.attachment?.groupBy !== 'function') {
+      return {};
+    }
+    const groups = await client.attachment.groupBy({
+      by: ['extractionStatus'],
+      where: { deletedAt: null },
+      _count: { _all: true },
+    });
+    const breakdown: Record<string, number> = {};
+    for (const row of groups) {
+      const statusKey = String(row.extractionStatus ?? 'UNKNOWN');
+      breakdown[statusKey] = row._count._all;
+    }
+    return breakdown;
   }
 
   async claimPendingOrRetryable(attachmentId: string, tx?: Prisma.TransactionClient) {
@@ -151,86 +171,26 @@ export class ExtractionRepository {
     const freshItem = await client.item.findUnique({
       where: { id: itemId },
       select: {
-        userId: true, projectId: true, citationKey: true,
-        title: true, doi: true, abstract: true, year: true,
-        publicationTitle: true, itemType: true, metadata: true,
+        userId: true,
+        projectId: true,
+        citationKey: true,
+        title: true,
+        doi: true,
+        abstract: true,
+        year: true,
+        publicationTitle: true,
+        itemType: true,
+        metadata: true,
       },
     });
 
-    const sanitizedData: Prisma.ItemUpdateInput = { ...data };
-    let disambiguatedCitKey: string | undefined;
-    const freshestMeta =
-      freshItem?.metadata && typeof freshItem.metadata === 'object' && !Array.isArray(freshItem.metadata)
-        ? (freshItem.metadata as Record<string, unknown>) : {};
-    const freshFieldProv =
-      freshestMeta.fieldProvenance && typeof freshestMeta.fieldProvenance === 'object' && !Array.isArray(freshestMeta.fieldProvenance)
-        ? (freshestMeta.fieldProvenance as Record<string, { source?: string; isUserOverride?: boolean }>) : {};
-    const freshLockedSet = new Set<string>([
-      ...(Array.isArray(freshestMeta.lockedFields) ? (freshestMeta.lockedFields as string[]) : []),
-      ...Object.entries(freshFieldProv)
-        .filter(([, v]) => v?.isUserOverride === true || v?.source === 'UserOverride' || v?.source === 'manual')
-        .map(([k]) => k),
-    ]);
-    if (freshItem) {
-      const isFreshPlaceholder = isPlaceholderItemTitle(freshItem.title);
-      if (sanitizedData.title !== undefined && (!isFreshPlaceholder || freshLockedSet.has('title'))) delete sanitizedData.title;
-      if (sanitizedData.doi !== undefined && (freshItem.doi || freshLockedSet.has('doi'))) delete sanitizedData.doi;
-      if (sanitizedData.abstract !== undefined && (freshItem.abstract || freshLockedSet.has('abstract') || freshLockedSet.has('abstractNote'))) delete sanitizedData.abstract;
-      if (sanitizedData.year !== undefined && (freshItem.year || freshLockedSet.has('year'))) delete sanitizedData.year;
-      if (sanitizedData.publicationTitle !== undefined && (freshItem.publicationTitle || freshLockedSet.has('publicationTitle'))) delete sanitizedData.publicationTitle;
-      if (sanitizedData.itemType !== undefined && freshLockedSet.has('itemType')) delete sanitizedData.itemType;
-      const freshCitKey = String(freshItem.citationKey || '').trim();
-      if (sanitizedData.citationKey !== undefined) {
-        if (freshLockedSet.has('citationKey') || (freshCitKey && !/^anon/i.test(freshCitKey))) {
-          delete sanitizedData.citationKey;
-        } else if (typeof sanitizedData.citationKey === 'string' && sanitizedData.citationKey.trim()) {
-          disambiguatedCitKey =
-            (await disambiguateCitationKey(
-              client,
-              sanitizedData.citationKey.trim(),
-              { userId: freshItem.userId, projectId: normalizeProjectScopeId(freshItem.projectId) },
-              itemId,
-            )) ?? undefined;
-          sanitizedData.citationKey = disambiguatedCitKey;
-        }
-      }
-    }
-
-    let mergedMetadata = sanitizedData.metadata;
-    if (sanitizedData.metadata && typeof sanitizedData.metadata === 'object' && !Array.isArray(sanitizedData.metadata)) {
-      const isFreshMetaTitlePlaceholder = isPlaceholderItemTitle(freshestMeta.title);
-      const incomingMeta = { ...(sanitizedData.metadata as Record<string, unknown>) };
-      const freshCitKey = String(freshItem?.citationKey || '').trim();
-      if (freshLockedSet.has('citationKey') || (freshCitKey && !/^anon/i.test(freshCitKey))) {
-        delete incomingMeta.citationKey;
-      } else if (disambiguatedCitKey) {
-        incomingMeta.citationKey = disambiguatedCitKey;
-      }
-      for (const [k, v] of Object.entries(incomingMeta)) {
-        if (k === 'fieldProvenance') {
-          incomingMeta[k] = {
-            ...(v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}),
-            ...freshFieldProv,
-          };
-          continue;
-        }
-        const hasFreshVal =
-          freshestMeta[k] !== undefined && freshestMeta[k] !== null && freshestMeta[k] !== '' &&
-          !(Array.isArray(freshestMeta[k]) && (freshestMeta[k] as unknown[]).length === 0);
-        if (
-          freshLockedSet.has(k) ||
-          (k !== 'referenceCount' &&
-            !(k === 'title' && isFreshMetaTitlePlaceholder) &&
-            !(k === 'citationKey' && (!freshestMeta.citationKey || /^anon/i.test(String(freshestMeta.citationKey)))) &&
-            hasFreshVal)
-        ) {
-          incomingMeta[k] = freshestMeta[k];
-        } else {
-          incomingMeta[k] = v;
-        }
-      }
-      mergedMetadata = { ...freshestMeta, ...incomingMeta } as Prisma.InputJsonValue;
-    }
+    const { sanitizedData, mergedMetadata } =
+      await sanitizeExtractedItemUpdateAgainstFreshState({
+        client,
+        itemId,
+        data,
+        freshItem,
+      });
 
     return client.item.update({
       where: { id: itemId },
@@ -260,7 +220,7 @@ export class ExtractionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     if (!pages || pages.length === 0) return;
-    const execute = async (client: Prisma.TransactionClient) => {
+    const execute = async (client: Prisma.TransactionClient | PrismaService) => {
       if (!client.fullTextIndex?.deleteMany) return;
       await client.fullTextIndex.deleteMany({
         where: { attachmentId },
@@ -287,7 +247,7 @@ export class ExtractionRepository {
         await execute(innerTx);
       });
     } else {
-      await execute(this.prisma as unknown as Prisma.TransactionClient);
+      await execute(this.prisma);
     }
   }
 
@@ -441,7 +401,7 @@ export class ExtractionRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.itemRelation.upsert({
+    const relation = await client.itemRelation.upsert({
       where: {
         sourceItemId_targetItemId_relationType: {
           sourceItemId,
@@ -457,6 +417,7 @@ export class ExtractionRepository {
         description,
       },
     });
+    return relation;
   }
 
   async recordSearchablePdfRevision(
@@ -667,31 +628,49 @@ export class ExtractionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     if (identifiers.length === 0) return;
-    const client = this.getClient(tx) as unknown as {
-      itemIdentifier?: {
-        upsert?: (args: {
-          where: { itemId_type: { itemId: string; type: string } };
-          update: { value: string; canonicalUri: string };
-          create: {
-            itemId: string;
-            type: string;
-            value: string;
-            canonicalUri: string;
-          };
-        }) => Promise<unknown>;
-      };
-    };
-    if (!client.itemIdentifier?.upsert) return;
+    const rawClient = this.getClient(tx);
+    const freshItem = rawClient.item?.findUnique
+      ? await rawClient.item.findUnique({ where: { id: itemId }, select: { doi: true, metadata: true } })
+      : null;
+    const freshMeta = freshItem?.metadata && typeof freshItem.metadata === 'object' && !Array.isArray(freshItem.metadata)
+      ? (freshItem.metadata as Record<string, unknown>) : {};
+    const filtered = identifiers.filter((idObj) => {
+      const lower = idObj.type.trim().toLowerCase();
+      const t = lower === 'arxivid' || lower === 'arxiv' ? 'arxiv' : lower;
+      const metaKey = t === 'arxiv' ? 'arxivId' : t;
+      if (
+        freshItem &&
+        (ItemProvenancePolicy.isFieldLocked(freshMeta, metaKey) ||
+          ItemProvenancePolicy.isFieldLocked(freshMeta, t))
+      ) {
+        return false;
+      }
+      const existingVal =
+        t === 'doi' ? freshItem?.doi || freshMeta.doi : freshMeta[metaKey] || freshMeta[t];
+      if (
+        existingVal &&
+        String(existingVal).trim() &&
+        String(existingVal).trim().toLowerCase() !== idObj.value.trim().toLowerCase()
+      ) {
+        return false;
+      }
+      return true;
+    });
+    if (filtered.length === 0) return;
+    if (!rawClient.itemIdentifier?.upsert) return;
     await Promise.all(
-      identifiers.map((idObj) => {
-        const canonicalType =
-          idObj.type === 'arxivId' || idObj.type.toLowerCase() === 'arxivid'
-            ? 'arxiv'
-            : idObj.type;
-        return client.itemIdentifier!.upsert!({
+      filtered.map((idObj) => {
+        const lower = idObj.type.trim().toLowerCase();
+        const canonicalType = lower === 'arxivid' || lower === 'arxiv' ? 'arxiv' : lower;
+        return rawClient.itemIdentifier.upsert({
           where: { itemId_type: { itemId, type: canonicalType } },
           update: { value: idObj.value, canonicalUri: idObj.canonicalUri },
-          create: { itemId, ...idObj, type: canonicalType },
+          create: {
+            itemId,
+            type: canonicalType,
+            value: idObj.value,
+            canonicalUri: idObj.canonicalUri,
+          },
         });
       }),
     );

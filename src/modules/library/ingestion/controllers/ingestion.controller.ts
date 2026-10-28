@@ -220,6 +220,14 @@ export class IngestionController {
       this.validateProjectId(dto.projectId);
     let command: IngestionCommand;
 
+    const overrideObj =
+      dto.overrides && typeof dto.overrides === 'object' ? dto.overrides : {};
+    const effectiveCollectionId =
+      dto.collectionId ||
+      (typeof overrideObj.collectionId === 'string'
+        ? overrideObj.collectionId
+        : undefined);
+
     switch (dto.source) {
       case 'doi':
         command = {
@@ -227,7 +235,7 @@ export class IngestionController {
           projectId: effectiveProjectId,
           userId,
           doi: dto.doi || '',
-          collectionId: dto.collectionId,
+          collectionId: effectiveCollectionId,
           overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
@@ -239,7 +247,7 @@ export class IngestionController {
           projectId: effectiveProjectId,
           userId,
           arxivId: dto.arxivId || '',
-          collectionId: dto.collectionId,
+          collectionId: effectiveCollectionId,
           overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
@@ -251,7 +259,7 @@ export class IngestionController {
           projectId: effectiveProjectId,
           userId,
           pmid: dto.pmid || '',
-          collectionId: dto.collectionId,
+          collectionId: effectiveCollectionId,
           overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
@@ -263,7 +271,7 @@ export class IngestionController {
           projectId: effectiveProjectId,
           userId,
           isbn: dto.isbn || '',
-          collectionId: dto.collectionId,
+          collectionId: effectiveCollectionId,
           overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
@@ -277,7 +285,7 @@ export class IngestionController {
           url: dto.url || '',
           previewToken: dto.previewToken,
           overrides: dto.overrides,
-          collectionId: dto.collectionId,
+          collectionId: effectiveCollectionId,
           idempotencyKey: effectiveIdempotencyKey,
         };
         break;
@@ -288,7 +296,8 @@ export class IngestionController {
           projectId: effectiveProjectId,
           userId,
           content: dto.content || dto.bibtex || '',
-          collectionId: dto.collectionId,
+          collectionId: effectiveCollectionId,
+          overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
         break;
@@ -299,7 +308,8 @@ export class IngestionController {
           projectId: effectiveProjectId,
           userId,
           content: dto.content || dto.ris || '',
-          collectionId: dto.collectionId,
+          collectionId: effectiveCollectionId,
+          overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
         break;
@@ -315,7 +325,8 @@ export class IngestionController {
           projectId: effectiveProjectId,
           userId,
           content: dto.content || '',
-          collectionId: dto.collectionId,
+          collectionId: effectiveCollectionId,
+          overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
         break;
@@ -327,7 +338,7 @@ export class IngestionController {
           userId,
           fileId: dto.fileId,
           filename: dto.filename,
-          collectionId: dto.collectionId,
+          collectionId: effectiveCollectionId,
           overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
@@ -340,7 +351,8 @@ export class IngestionController {
           userId,
           connectionId: dto.connectionId,
           externalItemKey: dto.externalItemKey,
-          collectionId: dto.collectionId,
+          collectionId: effectiveCollectionId,
+          overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
         break;
@@ -350,6 +362,8 @@ export class IngestionController {
           source: dto.source,
           projectId: effectiveProjectId,
           userId,
+          collectionId: effectiveCollectionId,
+          overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
     }
@@ -398,12 +412,38 @@ export class IngestionController {
     );
   }
 
+  @Get(['runs/:id/explain', 'runs/:id/Explain'])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({ summary: 'Get ingestion run explain trace' })
+  async getExplain(
+    @CurrentUser('id') userId: string,
+    @Param('id') runId: string,
+    @Param('projectId') projectId?: string,
+  ) {
+    if (!isUUID(runId)) {
+      throw new BadRequestException('Invalid run ID');
+    }
+    return this.ingestionService.getRunStatus(
+      userId,
+      runId,
+      this.validateProjectId(projectId),
+    );
+  }
+
   @Post('fetch-feed')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Fetch and parse an external RSS/Atom journal or arXiv feed with DB caching & ETag support',
   })
-  async fetchFeed(@Body() body: { url: string; forceRefresh?: boolean }) {
-    return this.urlCaptureService.fetchAcademicFeed(body?.url, body?.forceRefresh);
+  async fetchFeed(
+    @Body() body: { url: string; forceRefresh?: boolean },
+    @CurrentUser() user?: { id?: string; userId?: string },
+  ) {
+    const userId = user?.id || user?.userId;
+    return this.urlCaptureService.fetchAcademicFeed(
+      body?.url,
+      body?.forceRefresh,
+      userId,
+    );
   }
 }

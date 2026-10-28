@@ -28,12 +28,30 @@ export function evalAnyFieldCondition(
   }
 
   const ids = AcademicSearchQueryEngine.extractIdentifiers(strVal);
+  const identTerms = Array.from(
+    new Set(
+      [
+        strVal,
+        ids.cleanDoi,
+        ids.cleanIsbn,
+        ids.cleanIssn,
+        ids.cleanArxivBase || ids.cleanArxiv,
+        ids.cleanPmid,
+        ids.cleanPmcid,
+      ].filter((v): v is string => Boolean(v && v.trim())),
+    ),
+  );
   const anyFieldClauses: Prisma.ItemWhereInput[] = [
     { title: { contains: strVal, mode: 'insensitive' } },
     { abstract: { contains: strVal, mode: 'insensitive' } },
     { publicationTitle: { contains: strVal, mode: 'insensitive' } },
     { doi: { contains: ids.cleanDoi || strVal, mode: 'insensitive' } },
     { citationKey: { contains: strVal, mode: 'insensitive' } },
+    ...identTerms.map((term) => ({
+      identifiers: {
+        some: { value: { contains: term, mode: 'insensitive' as const } },
+      },
+    })),
     { metadata: { path: ['publisher'], string_contains: strVal } },
     { metadata: { path: ['isbn'], string_contains: ids.cleanIsbn || strVal } },
     { metadata: { path: ['issn'], string_contains: ids.cleanIssn || strVal } },
@@ -87,6 +105,17 @@ export function evalAnyFieldCondition(
           deletedAt: null,
           OR: [
             { filename: { contains: strVal, mode: 'insensitive' } },
+            {
+              annotations: {
+                some: {
+                  deletedAt: null,
+                  OR: [
+                    { quoteText: { contains: strVal, mode: 'insensitive' } },
+                    { comment: { contains: strVal, mode: 'insensitive' } },
+                  ],
+                },
+              },
+            },
             {
               fullTextIndexes: {
                 some: {

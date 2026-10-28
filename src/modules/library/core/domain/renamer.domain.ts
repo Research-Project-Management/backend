@@ -10,6 +10,8 @@
  * Default template: {{ firstCreator suffix=" - " }}{{ year suffix=" - " }}{{ title truncate="100" }}
  */
 
+import { isInstitutionName } from './author.domain';
+
 export interface RenamerContributor {
   creatorType?: string | null;
   fieldMode?: number | string | null;
@@ -77,12 +79,14 @@ export function extractAuthorTokens(
 
   const lastNames = targetList
     .map((c) => {
+      const candidateCorpName = c.fullName || c.name || '';
       const isCorporate =
         c.fieldMode === 1 ||
         c.fieldMode === '1' ||
         (!c.firstName &&
-          Boolean(c.fullName || c.name) &&
-          INSTITUTIONAL_NAME_REGEX.test(c.fullName || c.name || ''));
+          Boolean(candidateCorpName) &&
+          (INSTITUTIONAL_NAME_REGEX.test(candidateCorpName) ||
+            isInstitutionName(candidateCorpName)));
 
       if (isCorporate) {
         return (c.fullName || c.name || c.lastName || '').trim();

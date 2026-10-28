@@ -127,19 +127,21 @@ export class SavedSearchesRepository {
         version: { increment: 1 },
       },
     });
-    if (res.count === 0 && expectedVersion !== undefined) {
+    if (res.count === 0) {
       const current = await client.savedSearch?.findFirst?.({
         where: { id, deletedAt: null, ...scopeWhere },
       });
       if (!current) {
         throw new NotFoundException(`Saved search ${id} not found`);
       }
-      throw new VersionMismatchException({
-        aggregateType: 'SavedSearch',
-        entityId: id,
-        currentVersion: current.version ?? 1,
-        providedVersion: expectedVersion,
-      });
+      if (expectedVersion !== undefined) {
+        throw new VersionMismatchException({
+          aggregateType: 'SavedSearch',
+          entityId: id,
+          currentVersion: current.version ?? 1,
+          providedVersion: expectedVersion,
+        });
+      }
     }
     return res;
   }
@@ -164,6 +166,7 @@ export class SavedSearchesRepository {
     id: string,
     projectId?: string,
     tx?: Prisma.TransactionClient,
+    expectedVersion?: number,
   ) {
     const client = this.getClient(tx);
     const effectiveProjectId = this.normalizeProjectId(projectId);
@@ -174,24 +177,63 @@ export class SavedSearchesRepository {
       id,
       deletedAt: null,
       ...scopeWhere,
+      ...(expectedVersion !== undefined ? { version: expectedVersion } : {}),
     };
-    return client.savedSearch.updateMany({
+    const res = await client.savedSearch.updateMany({
       where,
       data: {
         deletedAt: new Date(),
+        ...(expectedVersion !== undefined ? { version: { increment: 1 } } : {}),
       },
     });
+    if (res.count === 0 && expectedVersion !== undefined) {
+      const current = await client.savedSearch?.findFirst?.({
+        where: { id, deletedAt: null, ...scopeWhere },
+      });
+      if (!current) {
+        throw new NotFoundException(`Saved search ${id} not found`);
+      }
+      throw new VersionMismatchException({
+        aggregateType: 'SavedSearch',
+        entityId: id,
+        currentVersion: current.version ?? 1,
+        providedVersion: expectedVersion,
+      });
+    }
+    return res;
   }
 
   async countMatchingItems(where: Prisma.ItemWhereInput): Promise<number> {
     return this.prisma.item.count({ where });
   }
 
+  private extractUserIdFromWhere(
+    where?: Prisma.ItemWhereInput,
+  ): string | undefined {
+    if (!where || typeof where !== 'object') return undefined;
+    if (typeof where.userId === 'string' && where.userId.trim()) {
+      return where.userId.trim();
+    }
+    const andList = Array.isArray(where.AND)
+      ? where.AND
+      : where.AND
+        ? [where.AND]
+        : [];
+    for (const clause of andList) {
+      const found = this.extractUserIdFromWhere(clause);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
   async findMatchingItems(
     where: Prisma.ItemWhereInput,
-    options: ExecuteSavedSearchOptions,
+    options: ExecuteSavedSearchOptions & { userId?: string } = {},
+    userIdParam?: string,
   ) {
     const limit = Math.min(options.limit ?? 50, 100);
+    const effectiveUserId =
+      userIdParam || options.userId || this.extractUserIdFromWhere(where);
 
     const sortDir = options.sortOrder || 'desc';
     let orderBy: Prisma.ItemOrderByWithRelationInput[];
@@ -222,9 +264,17 @@ export class SavedSearchesRepository {
           : {}),
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        attachments: { take: 5 },
+        attachments: { where: { deletedAt: null }, take: 5 },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
+        identifiers: true,
+        notesList: { where: { deletedAt: null }, select: { id: true } },
+        publications: effectiveUserId
+          ? { where: { userId: effectiveUserId }, select: { id: true }, take: 1 }
+          : false,
+        ...(effectiveUserId
+          ? { states: { where: { userId: effectiveUserId }, take: 1 } }
+          : {}),
       },
     });
 
@@ -238,5 +288,13 @@ export class SavedSearchesRepository {
     }
 
     return { items, nextCursor, hasNextPage };
+  }
+
+  async executeConditions(
+    where: Prisma.ItemWhereInput,
+    options: ExecuteSavedSearchOptions & { userId?: string } = {},
+    userIdParam?: string,
+  ) {
+    return this.findMatchingItems(where, options, userIdParam);
   }
 }

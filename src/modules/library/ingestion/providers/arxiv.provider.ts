@@ -70,7 +70,8 @@ export class ArxivProvider extends AbstractAcademicProvider {
     return this.parseAtomXml(xmlText, cleanId);
   }
 
-  private parseAtomXml(xml: string, cleanId: string): ProviderResult | null {
+  private parseAtomXml(xml: string, rawQueryId: string): ProviderResult | null {
+    const cleanId = normalizeArxivId(rawQueryId) ?? rawQueryId.trim();
     const entryMatch = xml.match(/<entry>([\s\S]*?)<\/entry>/i);
     if (!entryMatch) return null;
 
@@ -80,7 +81,7 @@ export class ArxivProvider extends AbstractAcademicProvider {
 
     const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/i);
     const title = titleMatch
-      ? cleanBibliographicText(titleMatch[1]) || undefined
+      ? cleanBibliographicText(decodeHtmlEntities(titleMatch[1])) || undefined
       : undefined;
 
     const authors: string[] = [];
@@ -128,14 +129,16 @@ export class ArxivProvider extends AbstractAcademicProvider {
 
     const keywords = normalizeAcademicTags(rawCategories);
 
-    const canonicalArxivIdentifier = cleanId.replace(/v\d+$/i, '');
+    const canonicalArxivIdentifier =
+      normalizeArxivId(cleanId, { stripVersion: true }) ??
+      cleanId.replace(/v\d+$/i, '');
     const doi = cleanId ? `10.48550/arXiv.${canonicalArxivIdentifier}` : undefined;
     let publishedDoi: string | undefined;
     const doiMatchResult = entry.match(
       /<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/i,
     );
     if (doiMatchResult) {
-      publishedDoi = normalizeDoi(doiMatchResult[1]);
+      publishedDoi = normalizeDoi(decodeHtmlEntities(doiMatchResult[1]));
     }
 
     let journal: string | undefined;
@@ -143,7 +146,7 @@ export class ArxivProvider extends AbstractAcademicProvider {
       /<arxiv:journal_ref[^>]*>([\s\S]*?)<\/arxiv:journal_ref>/i,
     );
     if (journalMatch) {
-      journal = cleanBibliographicText(journalMatch[1]);
+      journal = cleanBibliographicText(decodeHtmlEntities(journalMatch[1]));
     }
 
     let comment: string | undefined;
@@ -151,7 +154,7 @@ export class ArxivProvider extends AbstractAcademicProvider {
       /<arxiv:comment[^>]*>([\s\S]*?)<\/arxiv:comment>/i,
     );
     if (commentMatch) {
-      comment = cleanCommentText(commentMatch[1]);
+      comment = cleanCommentText(decodeHtmlEntities(commentMatch[1]));
     }
 
     let rights: string | undefined;

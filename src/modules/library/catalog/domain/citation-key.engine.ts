@@ -20,8 +20,7 @@ export async function disambiguateCitationKey(
   if (!baseKey || !baseKey.trim()) return null;
   const cleanKey = baseKey.trim();
 
-  // Defensive fallback if client is a minimal mock in unit tests
-  if (!client?.item?.findMany) {
+  if (typeof client?.item?.findMany !== 'function') {
     return cleanKey;
   }
 
@@ -30,15 +29,16 @@ export async function disambiguateCitationKey(
       ? { projectId: scope.projectId }
       : { userId: scope.userId, projectId: null };
 
-  const existing = await client.item.findMany({
+  const rows = await client.item.findMany({
     where: {
       ...scopeWhere,
       deletedAt: null,
       ...(excludeItemId ? { id: { not: excludeItemId } } : {}),
-      citationKey: { startsWith: cleanKey },
+      citationKey: { startsWith: cleanKey, mode: 'insensitive' },
     },
     select: { citationKey: true },
   });
+  const existing = Array.isArray(rows) ? rows : [];
 
   const existingKeys = new Set(
     existing

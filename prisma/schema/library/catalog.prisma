@@ -37,15 +37,17 @@ model Item {
   updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // Fast-Display Denormalized Fields & Counter Caches
-  hasFile             Boolean     @default(false) @map("has_file")
-  attachmentCount     Int         @default(0) @map("attachment_count")
-  noteCount           Int         @default(0) @map("note_count")
-  firstAuthor         String?     @map("first_author") @db.VarChar(255)
-  retractionCheckedAt DateTime?   @map("retraction_checked_at") @db.Timestamptz(6)
+  hasFile             Boolean                  @default(false) @map("has_file")
+  attachmentCount     Int                      @default(0) @map("attachment_count")
+  noteCount           Int                      @default(0) @map("note_count")
+  firstAuthor         String?                  @map("first_author") @db.VarChar(255)
+  retractionCheckedAt DateTime?                @map("retraction_checked_at") @db.Timestamptz(6)
+  searchVector        Unsupported("tsvector")? @map("search_vector")
 
   // Canonical Relations across Library Sub-Domains
   attachments         Attachment[]
   contributors        Contributor[]
+  identifiers         ItemIdentifier[]
   collectionItems     CollectionItem[]
   itemTags            ItemTag[]
   notesList           Note[]
@@ -56,7 +58,6 @@ model Item {
   itemMetadata        ItemMetadata[]
   publications        UserPublication[]
 
-  @@index([projectId, deletedAt])
   @@index([projectId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@index([projectId, deletedAt, updatedAt(sort: Desc)])
   @@index([projectId, deletedAt, year(sort: Desc), id(sort: Desc)])
@@ -69,47 +70,39 @@ model Item {
   @@index([projectId, hasFile, deletedAt])
   @@index([projectId, noteCount, deletedAt])
   @@index([retractionCheckedAt])
-  @@index([userId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@index([userId, projectId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
-  @@index([userId, deletedAt, updatedAt(sort: Desc)])
   @@index([userId, projectId, deletedAt, updatedAt(sort: Desc), id(sort: Desc)])
-  @@index([userId, deletedAt, year(sort: Desc), id(sort: Desc)])
   @@index([userId, projectId, deletedAt, year(sort: Desc), id(sort: Desc)])
-  @@index([userId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
-  @@index([userId, deletedAt, firstAuthor, id])
   @@index([userId, projectId, deletedAt, firstAuthor, id])
-  @@index([userId, deletedAt, title])
   @@index([userId, projectId, deletedAt, title, id])
   @@index([userId, projectId, deletedAt, publicationTitle, id])
-  @@index([userId, deletedAt, itemType])
   @@index([userId, projectId, deletedAt, itemType])
-  @@index([userId, deletedAt, doi])
   @@index([userId, projectId, deletedAt, doi])
-  @@index([userId, deletedAt, citationKey])
   @@index([userId, projectId, deletedAt, citationKey])
-  @@index([userId, itemType])
-  @@index([userId, hasFile, deletedAt])
   @@index([userId, projectId, hasFile, deletedAt])
   @@index([userId, projectId, noteCount, deletedAt])
+  @@index([deletedAt])
   @@index([doi])
   @@index([citationKey])
   @@index([publicationTitle])
   @@index([metadata], type: Gin)
+  @@index([searchVector], type: Gin)
   @@map("items")
 }
 
 model Contributor {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  itemId      String   @map("item_id") @db.Uuid
-  item        Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  creatorType String   @default("author") @map("creator_type")
-  fieldMode   Int      @default(0) @map("field_mode") // 0 = personal (two-field), 1 = single-field institution
-  firstName   String?  @default("") @map("first_name")
-  lastName    String?  @default("") @map("last_name")
-  fullName    String   @map("full_name")
-  shortName   String?  @default("") @map("short_name") @db.VarChar(255)
-  orderIndex  Int      @default(0) @map("order_index")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id           String            @id @default(uuid(7)) @db.Uuid
+  itemId       String            @map("item_id") @db.Uuid
+  item         Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  creatorType  String            @default("author") @map("creator_type")
+  fieldMode    Int               @default(0) @map("field_mode") // 0 = personal (two-field), 1 = single-field institution
+  firstName    String?           @default("") @map("first_name")
+  lastName     String?           @default("") @map("last_name")
+  fullName     String            @map("full_name")
+  shortName    String?           @default("") @map("short_name") @db.VarChar(255)
+  orderIndex   Int               @default(0) @map("order_index")
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  publications UserPublication[]
 
   @@index([itemId, orderIndex])
   @@index([fullName])
@@ -174,28 +167,33 @@ model Retraction {
 }
 
 model UserPublication {
-  userId            String   @map("user_id") @db.Uuid
-  itemId            String   @map("item_id") @db.Uuid
-  item              Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  contributorId     String?  @map("contributor_id") @db.Uuid
-  isPublic          Boolean  @default(false) @map("is_public")
-  openAccessLicense String?  @map("open_access_license")
-  addedAt           DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+  userId            String       @map("user_id") @db.Uuid
+  itemId            String       @map("item_id") @db.Uuid
+  item              Item         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  contributorId     String?      @map("contributor_id") @db.Uuid
+  contributor       Contributor? @relation(fields: [contributorId], references: [id], onDelete: SetNull)
+  isPublic          Boolean      @default(false) @map("is_public")
+  openAccessLicense String?      @map("open_access_license")
+  addedAt           DateTime     @default(now()) @map("added_at") @db.Timestamptz(6)
 
   @@id([userId, itemId])
   @@index([userId, isPublic])
   @@index([itemId])
+  @@index([contributorId])
   @@map("user_publications")
 }
 
-model ItemFieldMapping {
-  itemType   String  @map("item_type") @db.VarChar(64)
-  baseField  String  @map("base_field") @db.VarChar(64)
-  fieldKey   String  @map("field_key") @db.VarChar(64)
-  fieldLabel String? @map("field_label") @db.VarChar(128)
-  orderIndex Int     @default(0) @map("order_index")
+model ItemIdentifier {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  itemId       String   @map("item_id") @db.Uuid
+  item         Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  type         String   @db.VarChar(64)
+  value        String   @db.Text
+  canonicalUri String?  @map("canonical_uri") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@id([itemType, baseField])
-  @@index([baseField])
-  @@map("item_field_mappings")
+  @@unique([itemId, type], name: "itemId_type")
+  @@index([type, value])
+  @@map("item_identifiers")
 }

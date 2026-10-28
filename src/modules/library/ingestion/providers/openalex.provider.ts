@@ -282,7 +282,13 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
     }
 
     const payload = item as Record<string, unknown> | null;
-    if (!payload || typeof payload.title !== 'string') return null;
+    if (
+      !payload ||
+      (typeof payload.title !== 'string' &&
+        typeof payload.display_name !== 'string')
+    ) {
+      return null;
+    }
     return this.transformPayload(payload, doi, 0.9);
   }
 
@@ -331,7 +337,11 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
       results,
       cleanTitle,
       (candidate) =>
-        typeof candidate.title === 'string' ? candidate.title : undefined,
+        typeof candidate.title === 'string'
+          ? candidate.title
+          : typeof candidate.display_name === 'string'
+            ? candidate.display_name
+            : undefined,
       TITLE_MATCH_THRESHOLD,
     );
     if (!item) {
@@ -646,13 +656,23 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
   }
 
   private decodeInvertedIndex(index: Record<string, number[]>): string {
+    const MAX_ABSTRACT_WORDS = 5000;
     const wordPositions: Array<{ word: string; pos: number }> = [];
     for (const [word, positions] of Object.entries(index)) {
       if (Array.isArray(positions)) {
         for (const pos of positions) {
-          wordPositions.push({ word, pos });
+          if (
+            typeof pos === 'number' &&
+            Number.isInteger(pos) &&
+            pos >= 0 &&
+            pos < MAX_ABSTRACT_WORDS &&
+            wordPositions.length < MAX_ABSTRACT_WORDS
+          ) {
+            wordPositions.push({ word, pos });
+          }
         }
       }
+      if (wordPositions.length >= MAX_ABSTRACT_WORDS) break;
     }
 
     wordPositions.sort((a, b) => a.pos - b.pos);

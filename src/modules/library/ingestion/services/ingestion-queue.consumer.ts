@@ -101,30 +101,37 @@ export class IngestionQueueConsumer
         `[BULLMQ_ERROR] Ingestion run ${runId} failed after ${elapsed}s (isLast: ${isLastAttempt}): ${msg}`,
       );
 
-      await this.repo
-        .updateRunStatus(
-          projectId,
-          runId,
-          isLastAttempt
-            ? IngestionStatus.FAILED_FINAL
-            : IngestionStatus.FAILED_RETRYABLE,
-          {
-            lastError:
-              msg ||
-              (isLastAttempt
-                ? 'Ingestion pipeline execution failed permanently'
-                : 'Ingestion pipeline execution failed (retryable)'),
-          },
-        )
-        .catch((updateErr: unknown) => {
-          const updateMsg =
-            updateErr instanceof Error
-              ? updateErr.message
-              : String(updateErr);
-          this.logger.error(
-            `Failed to update run status for failed run ${runId}: ${updateMsg}`,
-          );
-        });
+      const alreadyTransitioned = Boolean(
+        (err as { __runStatusTransitioned?: boolean } | null | undefined)
+          ?.__runStatusTransitioned,
+      );
+
+      if (!alreadyTransitioned) {
+        await this.repo
+          .updateRunStatus(
+            projectId,
+            runId,
+            isLastAttempt
+              ? IngestionStatus.FAILED_FINAL
+              : IngestionStatus.FAILED_RETRYABLE,
+            {
+              lastError:
+                msg ||
+                (isLastAttempt
+                  ? 'Ingestion pipeline execution failed permanently'
+                  : 'Ingestion pipeline execution failed (retryable)'),
+            },
+          )
+          .catch((updateErr: unknown) => {
+            const updateMsg =
+              updateErr instanceof Error
+                ? updateErr.message
+                : String(updateErr);
+            this.logger.error(
+              `Failed to update run status for failed run ${runId}: ${updateMsg}`,
+            );
+          });
+      }
 
       throw err; // Allow BullMQ to handle retry backoff
     }

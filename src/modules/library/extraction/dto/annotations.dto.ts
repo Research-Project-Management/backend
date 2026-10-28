@@ -292,6 +292,14 @@ export class UpsertAnnotationItemDto {
   @IsOptional()
   tags?: string[];
 
+  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+    if (value !== undefined) return value;
+    if (Array.isArray(obj?.rects)) return obj.rects;
+    if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
+      return [obj.boundingRect];
+    }
+    return value;
+  })
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 
@@ -299,6 +307,9 @@ export class UpsertAnnotationItemDto {
   @ArrayMaxSize(500)
   @IsOptional()
   rects?: Array<unknown>;
+
+  @IsOptional()
+  boundingRect?: Record<string, unknown>;
 
   /**
    * Required when `id` is provided.

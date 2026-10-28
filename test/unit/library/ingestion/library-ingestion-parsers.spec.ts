@@ -1,7 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { DoiParser } from '@/modules/library/ingestion/parsers/doi.parser';
 import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
+import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
+import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
+import { parseAcademicFeedXml } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 import { XmlLegacyFormatsParser } from '@/modules/library/ingestion/parsers/xml-legacy-formats.parser';
+import { HtmlMetaTagExtractor } from '@/modules/library/ingestion/services/html-meta-tag.extractor';
+import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
 import { IngestionValidationException } from '@/modules/library/ingestion/types/ingestion.errors';
 
 describe('Library Ingestion Parsers (DoiParser, BibtexParser & XmlLegacyFormatsParser)', () => {
@@ -110,20 +115,108 @@ describe('Library Ingestion Parsers (DoiParser, BibtexParser & XmlLegacyFormatsP
       expect(entry.title).toContain(
         'Custom Documentation with Special Nested Braces',
       );
-      expect(entry.authors).toContain('Smith, John');
-      expect(entry.authors).toContain('{Acme Scientific Corp}');
+      expect(entry.authors).toContain('John Smith');
+      expect(entry.authors).toContain('Acme Scientific Corp');
       expect(entry.url).toBe('https://flux.study/docs');
       expect(entry.notes).toEqual(['Internal Research Note']);
+    });
+
+    it('should concatenate # string literals in BibTeX fallback parser and preserve Windows drive paths in JabRef file field', () => {
+      const concatBib = `
+@article{concat_2026,
+  title = "Part One: " # "Part Two",
+  author = {Ada Lovelace},
+  year = 2026,
+  file = {:C\\:/Users/paper.pdf:PDF;Appendix:D:/docs/supp.pdf:PDF}
+}
+      `;
+      const fallbackResults = (bibtexParser as any).fallbackParse(concatBib);
+      expect(fallbackResults).toHaveLength(1);
+      expect(fallbackResults[0].title).toBe('Part One: Part Two');
+      expect(fallbackResults[0].authors).toEqual(['Ada Lovelace']);
+      expect(fallbackResults[0].fileUrl).toBe('C:/Users/paper.pdf');
+    });
+
+    it('should parse EndNote/UNIX Refer format (%0, %T, %A, %D, %J, %R) via RisParser', () => {
+      const risParser = new RisParser();
+      const referText = [
+        '%0 Journal Article',
+        '%T Attention Is All You Need',
+        '%A Vaswani, Ashish',
+        '%A Shazeer, Noam',
+        '%D 2017',
+        '%J Advances in Neural Information Processing Systems',
+        '%V 30',
+        '%P 5998-6008',
+        '%R 10.5555/3295222.3295349',
+        '%K Transformers',
+        '%K Deep Learning',
+      ].join('\n');
+
+      const entries = risParser.parse(referText);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].title).toContain('Attention Is All You Need');
+      expect(entries[0].year).toBe(2017);
+      expect(entries[0].doi).toBe('10.5555/3295222.3295349');
+      expect(entries[0].authors.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should extract object-based keywords in CslParser and handle self-closing <link/> in parseAcademicFeedXml', () => {
+      const cslParser = new CslParser();
+      const cslEntries = cslParser.parse([
+        {
+          type: 'article-journal',
+          title: 'CSL Object Keywords Test',
+          keyword: [{ name: 'Graph Neural Networks' }, { keyword: 'Message Passing' }],
+        },
+      ]);
+      expect(cslEntries[0].keywords).toEqual([
+        'Graph Neural Networks',
+        'Message Passing',
+      ]);
+
+      const atomXml = `
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>arXiv Feed</title>
+          <link href="https://arxiv.org/rss/cs.AI" rel="self" />
+          <entry>
+            <id>http://arxiv.org/abs/2401.12345v1</id>
+            <title>Atom Self-Closing Link Entry</title>
+            <link href="https://arxiv.org/abs/2401.12345" rel="alternate" />
+            <published>2024-01-15T00:00:00Z</published>
+          </entry>
+        </feed>
+      `;
+      const feed = parseAcademicFeedXml(atomXml);
+      expect(feed.entries).toHaveLength(1);
+      expect(feed.entries[0].url).toBe('https://arxiv.org/abs/2401.12345');
+    });
+
+    it('should not extract citation_fulltext_html_url as pdfUrl unless it ends with .pdf and should block trailing-dot localhost SSRF', async () => {
+      const extractor = new HtmlMetaTagExtractor();
+      const meta = extractor.extractHtmlMetadata(
+        `<html><head>
+          <meta name="citation_title" content="HTML Landing Page Test" />
+          <meta name="citation_fulltext_html_url" content="https://publisher.example.com/article/html" />
+          <meta name="dc.identifier.uri" content="https://publisher.example.com/handle/12345" />
+        </head></html>`,
+        'https://publisher.example.com/article',
+      );
+      expect(meta?.pdfUrl).toBeUndefined();
+
+      await expect(
+        MetadataRoutingPolicy.assertSafeUrl('http://localhost./admin'),
+      ).rejects.toThrow();
     });
 
     it('should parse EndNote XML, MODS XML, Zotero RDF, Medline NBIB and Bibliographic CSV via XmlLegacyFormatsParser', () => {
       const parser = new XmlLegacyFormatsParser();
       expect(
         parser.parse(
-          `<xml><records><record><ref-type name="Journal Article">17</ref-type><titles><title>EndNote Quantum Computing</title></titles><contributors><authors><author>Feynman, Richard</author></authors></contributors><dates><year>1982</year></dates><electronic-resource-num>10.1007/BF02650179</electronic-resource-num></record></records></xml>`,
+          `<xml><records><record><ref-type name="Journal Article">17</ref-type><titles><title>EndNote Quantum Computing &amp;amp; Physics &#x1D538;</title></titles><contributors><authors><author>Feynman, Richard</author></authors></contributors><dates><year>1982</year></dates><electronic-resource-num>10.1007/BF02650179</electronic-resource-num></record></records></xml>`,
           'ENDNOTE_XML',
         )[0]?.title,
-      ).toBe('EndNote Quantum Computing');
+      ).toBe('EndNote Quantum Computing &amp; Physics 𝔸');
       expect(
         parser.parse(
           `<modsCollection><mods><titleInfo><title>MODS Digital Libraries</title></titleInfo><originInfo><dateIssued>2000</dateIssued></originInfo></mods></modsCollection>`,

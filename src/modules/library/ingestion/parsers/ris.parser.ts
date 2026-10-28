@@ -103,6 +103,10 @@ export class RisParser {
       );
     }
 
+    if (!/^TY\s*-/m.test(content) && /^%[A-Z0-9@]\s+/m.test(content)) {
+      return this.fallbackParse(content);
+    }
+
     try {
       const cite = new Cite(content);
       const data = cite.data || [];

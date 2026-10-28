@@ -19,6 +19,8 @@ import {
   normalizeIsbn,
   isPlaceholderItemTitle,
   titleSimilarity,
+  hasAuthorAndYearCorroboration,
+  ItemProvenancePolicy,
 } from '@/modules/library/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import {
@@ -159,9 +161,8 @@ export class MetadataResolverService {
     } else if (
       existingItem.title &&
       existingItem.title.trim().length >= 10 &&
-      !/^(untitled|document|uploaded document|manuscript)$/i.test(
-        existingItem.title.trim(),
-      )
+      !isPlaceholderItemTitle(existingItem.title) &&
+      existingExtra.isFilenameTitle !== true
     ) {
       query = existingItem.title.trim();
       queryType = 'TITLE';
@@ -262,11 +263,28 @@ export class MetadataResolverService {
       const resolvedSurnames = extractSurnames(
         resolved.metadata as unknown as Record<string, unknown>,
       );
+      const sim = titleSimilarity(query, resolved.metadata.title);
+      if (sim < 0.75) {
+        return {
+          success: false,
+          message: `Resolved candidate "${resolved.metadata.title || ''}" rejected due to low title similarity (${(sim * 100).toFixed(0)}%) with query "${query}".`,
+          itemId,
+          item: existingItem,
+          updatedFields: [],
+        };
+      }
+
+      const existingYear = Number(existingItem.year || existingExtra.year || 0);
+      const resolvedYear = Number(resolved.metadata.year || 0);
+      const hasCompatibleYear =
+        existingYear > 0 &&
+        resolvedYear > 0 &&
+        Math.abs(existingYear - resolvedYear) <= 1;
 
       if (existingSurnames.length > 0 && resolvedSurnames.length > 0) {
         const resolvedSet = new Set(resolvedSurnames);
         const sharesAuthor = existingSurnames.some((s) => resolvedSet.has(s));
-        if (!sharesAuthor) {
+        if (!sharesAuthor && !(sim >= 0.92 && hasCompatibleYear)) {
           return {
             success: false,
             message: `Resolved candidate for title "${query}" rejected due to author mismatch with existing item.`,
@@ -277,13 +295,10 @@ export class MetadataResolverService {
         }
       } else if (
         existingSurnames.length === 0 &&
-        existingItem.year &&
-        resolved.metadata.year
+        existingYear > 0 &&
+        resolvedYear > 0
       ) {
-        if (
-          Math.abs(Number(existingItem.year) - Number(resolved.metadata.year)) >
-          1
-        ) {
+        if (!hasCompatibleYear) {
           return {
             success: false,
             message: `Resolved candidate for title "${query}" rejected due to publication year mismatch (${existingItem.year} vs ${resolved.metadata.year}).`,
@@ -522,39 +537,102 @@ export class MetadataResolverService {
 
     if (isCrediblePdfTitle && resolved.metadata.title) {
       const sim = titleSimilarity(resolved.metadata.title, pdfTitle);
-      if (sim < 0.4) {
+      const localCorroborationRecord: Record<string, unknown> = {
+        ...(existingItem as unknown as Record<string, unknown>),
+        ...(extractedMetadata as unknown as Record<string, unknown>),
+        authors:
+          (Array.isArray(extractedMetadata.authors) &&
+          extractedMetadata.authors.length > 0
+            ? extractedMetadata.authors
+            : (existingItem as unknown as Record<string, unknown>).authors) ??
+          [],
+        creators:
+          (Array.isArray(extractedMetadata.creators) &&
+          extractedMetadata.creators.length > 0
+            ? extractedMetadata.creators
+            : existingItem.creators) ?? [],
+        year: extractedMetadata.year ?? existingItem.year,
+      };
+      const corroboratedByAuthorAndYear = hasAuthorAndYearCorroboration(
+        localCorroborationRecord,
+        resolved.metadata as unknown as Record<string, unknown>,
+      );
+      if (sim < 0.4 && !corroboratedByAuthorAndYear) {
         this.logger.warn(
           `[SingleAuthorityReconcile] Page-1 Citation Trap Blocked for item ${itemId}: Extracted ${queryType}="${query}" resolved to "${resolved.metadata.title}", which conflicts with PDF title "${pdfTitle}" (similarity=${(sim * 100).toFixed(0)}%).`,
         );
 
         const rejectedCitedDoi = cleanDoi || query;
-        const currentDoiNorm = existingItem.doi
-          ? normalizeDoi(existingItem.doi) || existingItem.doi.trim().toLowerCase()
-          : '';
-        const lockedFields = Array.isArray(existingExtra.lockedFields)
-          ? (existingExtra.lockedFields as string[])
-          : [];
-        const provenance =
-          existingExtra.fieldProvenance && typeof existingExtra.fieldProvenance === 'object'
-            ? (existingExtra.fieldProvenance as Record<string, { locked?: boolean }>)
-            : {};
-        const isDoiLocked =
-          lockedFields.includes('doi') || provenance.doi?.locked === true;
+        const getIdentVal = (type: string): string => {
+          const idents = (existingItem as unknown as { identifiers?: Array<{ type?: string; value?: string }> }).identifiers;
+          if (!Array.isArray(idents)) return '';
+          const match = idents.find((i) => (i.type || '').toLowerCase() === type.toLowerCase());
+          return (match?.value || '').trim();
+        };
+        const currentDoiRaw = String(existingItem.doi || existingExtra.doi || getIdentVal('doi') || '').trim();
+        const currentDoiNorm = currentDoiRaw ? normalizeDoi(currentDoiRaw) || currentDoiRaw.toLowerCase() : '';
+        const existingArxivRaw = String(
+          (existingItem as Record<string, unknown>).arxivId || existingExtra.arxivId || existingExtra.archiveId || existingExtra.archiveID || getIdentVal('arxiv') || '',
+        ).trim();
+        const currentArxivNorm = existingArxivRaw ? (normalizeArxivId(existingArxivRaw) || existingArxivRaw).toLowerCase() : '';
+        const existingPmidRaw = String((existingItem as Record<string, unknown>).pmid || existingExtra.pmid || getIdentVal('pmid') || '').trim();
+        const currentPmidNorm = existingPmidRaw ? (normalizePmid(existingPmidRaw) || existingPmidRaw).toLowerCase() : '';
+        const existingIsbnRaw = String((existingItem as Record<string, unknown>).isbn || existingExtra.isbn || getIdentVal('isbn') || '').trim();
+        const currentIsbnNorm = existingIsbnRaw ? (normalizeIsbn(existingIsbnRaw) || existingIsbnRaw).toLowerCase() : '';
+        const isIdLocked = (key: string) => ItemProvenancePolicy.isFieldLocked(existingItem, key);
 
-        if (
-          cleanDoi &&
-          currentDoiNorm &&
-          currentDoiNorm === cleanDoi.toLowerCase() &&
-          !isDoiLocked
-        ) {
-          const nextExtra = { ...existingExtra, rejectedCitedDoi };
-          delete nextExtra.doi;
+        const resolvedDoiNorm = resolved.metadata.doi ? (normalizeDoi(resolved.metadata.doi) || String(resolved.metadata.doi).trim()).toLowerCase() : '';
+        const resolvedArxivNorm = resolved.metadata.arxivId ? (normalizeArxivId(resolved.metadata.arxivId) || String(resolved.metadata.arxivId).trim()).toLowerCase() : '';
+        const resolvedPmidNorm = resolved.metadata.pmid ? (normalizePmid(resolved.metadata.pmid) || String(resolved.metadata.pmid).trim()).toLowerCase() : '';
+        const resolvedIsbnNorm = resolved.metadata.isbn ? (normalizeIsbn(resolved.metadata.isbn) || String(resolved.metadata.isbn).trim()).toLowerCase() : '';
+
+        const clearDoi = Boolean(
+          currentDoiNorm && !isIdLocked('doi') && ((cleanDoi && currentDoiNorm === cleanDoi.toLowerCase()) || (resolvedDoiNorm && currentDoiNorm === resolvedDoiNorm)),
+        );
+        const clearArxiv = Boolean(
+          currentArxivNorm &&
+            !isIdLocked('arxivId') &&
+            ((cleanArxiv && currentArxivNorm.replace(/v\d+$/i, '') === cleanArxiv.toLowerCase().replace(/v\d+$/i, '')) ||
+              (resolvedArxivNorm && currentArxivNorm.replace(/v\d+$/i, '') === resolvedArxivNorm.replace(/v\d+$/i, ''))),
+        );
+        const clearPmid = Boolean(
+          currentPmidNorm && !isIdLocked('pmid') && ((cleanPmid && currentPmidNorm === cleanPmid.toLowerCase()) || (resolvedPmidNorm && currentPmidNorm === resolvedPmidNorm)),
+        );
+        const clearIsbn = Boolean(
+          currentIsbnNorm && !isIdLocked('isbn') && ((cleanIsbn && currentIsbnNorm === cleanIsbn.toLowerCase()) || (resolvedIsbnNorm && currentIsbnNorm === resolvedIsbnNorm)),
+        );
+
+        if (clearDoi || clearArxiv || clearPmid || clearIsbn) {
+          const nextExtra: Record<string, unknown> = {
+            ...existingExtra,
+            rejectedCitedDoi,
+          };
+          if (clearDoi) {
+            nextExtra.doi = null;
+            delete nextExtra.DOI;
+          }
+          if (clearArxiv) {
+            nextExtra.arxivId = null;
+            nextExtra.archiveId = null;
+            nextExtra.archiveID = null;
+          }
+          if (clearPmid) {
+            nextExtra.pmid = null;
+            delete nextExtra.PMID;
+          }
+          if (clearIsbn) {
+            nextExtra.isbn = null;
+            delete nextExtra.ISBN;
+          }
           await this.catalogGateway
             .updateItem(
               userId,
               itemId,
               {
-                doi: null,
+                ...(clearDoi ? { doi: null } : {}),
+                ...(clearArxiv ? { arxivId: null } : {}),
+                ...(clearPmid ? { pmid: null } : {}),
+                ...(clearIsbn ? { isbn: null } : {}),
                 extraFields: nextExtra,
                 __isSystemUpdate: true,
                 __updateSource: 'ingestion.citation_trap_guard',

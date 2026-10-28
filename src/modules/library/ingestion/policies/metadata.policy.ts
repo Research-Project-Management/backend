@@ -114,8 +114,12 @@ export class MetadataRoutingPolicy {
       );
     }
 
-    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const hostname = parsed.hostname
+      .toLowerCase()
+      .replace(/^\[|\]$/g, '')
+      .replace(/\.+$/, '');
     if (
+      !hostname ||
       hostname === 'localhost' ||
       hostname.endsWith('.localhost') ||
       hostname.endsWith('.local') ||

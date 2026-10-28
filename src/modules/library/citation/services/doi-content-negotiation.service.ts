@@ -1,9 +1,11 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { RedisCacheService } from '@/core';
 import type { ReferenceData } from '@/modules/library/citation/types/citation.types';
 import { normalizeWork } from '@/modules/library/citation/domain/citation.domain';
 import {
   AcademicHttpClient,
   ExternalProviderException,
+  LIBRARY_REDIS_KEYS,
   normalizeDoi,
 } from '@/modules/library/core';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
@@ -26,7 +28,11 @@ export class DoiContentNegotiationService {
     private readonly resilienceRegistry?: ResilienceRegistryService,
     @Optional()
     private readonly httpClient?: AcademicHttpClient,
+    @Optional()
+    private readonly redisCache?: RedisCacheService,
   ) {}
+
+  private static readonly REDIS_TTL_SECONDS = 24 * 60 * 60;
 
   // In-memory cache with TTL (24 hours) and bounded LRU pruning
   private readonly cache = new Map<
@@ -47,20 +53,23 @@ export class DoiContentNegotiationService {
     ttlMs: number = 24 * 60 * 60 * 1000,
     maxSize: number = 2000,
   ): void {
+    const now = Date.now();
     if (map.has(key)) {
       map.delete(key);
     } else if (map.size >= maxSize) {
-      const now = Date.now();
-      let evicted = 0;
       for (const [k, v] of map.entries()) {
-        if (v.expiresAt <= now || evicted < 10) {
+        if (v.expiresAt <= now) {
           map.delete(k);
-          evicted++;
         }
-        if (map.size < maxSize) break;
+      }
+      if (map.size >= maxSize) {
+        for (const k of map.keys()) {
+          map.delete(k);
+          if (map.size < maxSize) break;
+        }
       }
     }
-    map.set(key, { result, expiresAt: Date.now() + ttlMs });
+    map.set(key, { result, expiresAt: now + ttlMs });
   }
 
   private readonly STYLE_ACCEPT_MAP: Record<string, string> = {
@@ -99,11 +108,25 @@ export class DoiContentNegotiationService {
       this.STYLE_ACCEPT_MAP[normalizedStyle];
     if (!acceptHeader) return null;
     const cacheKey = `${doi}:${normalizedStyle}`;
+    const redisKey = LIBRARY_REDIS_KEYS.doiNegotiation(normalizedStyle, doi);
 
-    // Check cache
+    // Check L1 cache
     const cached = this.cache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.result;
+    }
+
+    // Check L2 Redis cache
+    if (this.redisCache?.get) {
+      try {
+        const l2Hit = await this.redisCache.get<DoiCitationResult>(redisKey);
+        if (l2Hit && typeof l2Hit === 'object' && 'bibliography' in l2Hit) {
+          this.setWithLru(this.cache, cacheKey, l2Hit);
+          return l2Hit;
+        }
+      } catch {
+        // Non-fatal fallback to fetch
+      }
     }
 
     const executeFetch = async (): Promise<DoiCitationResult | null> => {
@@ -167,6 +190,9 @@ export class DoiContentNegotiationService {
 
         // Cache for 24h with bounded LRU eviction
         this.setWithLru(this.cache, cacheKey, result);
+        await this.redisCache
+          ?.set?.(redisKey, result, DoiContentNegotiationService.REDIS_TTL_SECONDS)
+          .catch(() => {});
 
         return result;
       } catch (err: unknown) {
@@ -232,10 +258,23 @@ export class DoiContentNegotiationService {
     const doi = normalizeDoi(rawDoi);
     if (!doi) return null;
 
-    // Check metadata cache
+    // Check L1 metadata cache
     const cached = this.metaCache.get(doi);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.result;
+    }
+
+    const redisMetaKey = LIBRARY_REDIS_KEYS.doiNegotiation('meta', doi);
+    if (this.redisCache?.get) {
+      try {
+        const l2Meta = await this.redisCache.get<ReferenceData>(redisMetaKey);
+        if (l2Meta && typeof l2Meta === 'object' && 'title' in l2Meta) {
+          this.setWithLru(this.metaCache, doi, l2Meta);
+          return l2Meta;
+        }
+      } catch {
+        // Non-fatal fallback to fetch
+      }
     }
 
     const executeFetch = async (): Promise<ReferenceData | null> => {
@@ -293,6 +332,13 @@ export class DoiContentNegotiationService {
 
         // Cache metadata with bounded LRU eviction
         this.setWithLru(this.metaCache, doi, result);
+        await this.redisCache
+          ?.set?.(
+            redisMetaKey,
+            result,
+            DoiContentNegotiationService.REDIS_TTL_SECONDS,
+          )
+          .catch(() => {});
 
         return result;
       } catch (err: unknown) {

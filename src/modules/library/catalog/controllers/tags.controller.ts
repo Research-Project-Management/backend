@@ -63,6 +63,7 @@ export class TagController {
       dto.color,
       dto.type,
       projectId,
+      dto.shortcut,
     );
     return { tag };
   }
@@ -86,6 +87,7 @@ export class TagController {
         color: dto.color,
         type: dto.type as TagType | undefined,
         shortcut: dto.shortcut,
+        expectedVersion: dto.expectedVersion,
       },
       projectId,
     );

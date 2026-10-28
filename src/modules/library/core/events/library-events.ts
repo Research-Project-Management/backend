@@ -10,6 +10,7 @@ export const LIBRARY_EVENT_TYPES = {
   ITEM_DELETED: 'library.item.deleted',
   ITEM_RESTORED: 'library.item.restored',
   ITEM_PURGED: 'library.item.purged',
+  ITEM_REINDEXED: 'library.item.reindexed',
   ITEM_INGESTED_URL: 'library.item.ingested_url',
   ITEM_INGESTED_DOI: 'library.item.ingested_doi',
   ITEM_INGESTED_BIBTEX: 'library.item.ingested_bibtex',
@@ -18,6 +19,7 @@ export const LIBRARY_EVENT_TYPES = {
 
   // Tags & Item Tags
   TAG_CREATED: 'library.tag.created',
+  TAG_UPDATED: 'library.tag.updated',
   TAG_DELETED: 'library.tag.deleted',
   ITEM_TAGGED: 'library.item.tagged',
   ITEM_UNTAGGED: 'library.item.untagged',

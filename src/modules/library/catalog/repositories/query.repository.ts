@@ -56,12 +56,21 @@ export class QueryRepository {
   }
 
   private buildItemDetailInclude(userId: string, includeContent: boolean) {
+    const relationPeerSelect = {
+      id: true,
+      title: true,
+      itemType: true,
+      year: true,
+    };
     return {
       identifiers: true,
       contributors: { orderBy: { orderIndex: 'asc' as const } },
       collectionItems: { include: { collection: true } },
       itemTags: { include: { tag: true } },
       states: { where: { userId }, take: 1 },
+      publications: { where: { userId } },
+      outgoingRel: { include: { targetItem: { select: relationPeerSelect } } },
+      incomingRel: { include: { sourceItem: { select: relationPeerSelect } } },
       ...(includeContent
         ? {
             notesList: { where: { deletedAt: null } },
@@ -199,6 +208,7 @@ export class QueryRepository {
       },
       include: {
         itemTags: { include: { tag: true } },
+        identifiers: true,
       },
     });
 
@@ -209,6 +219,15 @@ export class QueryRepository {
     const relationTags = item.itemTags.map((it) => it.tag.name);
     const tags = normalizeAcademicTags(relationTags);
     const meta = (item.metadata as Record<string, unknown>) ?? {};
+    const idents = Array.isArray((item as { identifiers?: unknown }).identifiers)
+      ? ((item as { identifiers: Array<{ type?: string; value?: string }> }).identifiers)
+      : [];
+    const findIdentVal = (type: string): string | null => {
+      const found = idents.find(
+        (ident) => (ident.type || '').trim().toLowerCase() === type && ident.value?.trim(),
+      );
+      return found?.value?.trim() || null;
+    };
 
     return {
       id: item.id,
@@ -216,15 +235,15 @@ export class QueryRepository {
       title: item.title,
       abstract: item.abstract,
       year: item.year,
-      doi: item.doi,
+      doi: item.doi || findIdentVal('doi'),
       citationKey: item.citationKey,
       publicationTitle:
         item.publicationTitle ?? (meta.publicationTitle as string | null) ?? null,
       volume: meta.volume ?? null,
       issue: meta.issue ?? null,
       pages: meta.pages ?? null,
-      issn: meta.issn ?? null,
-      isbn: meta.isbn ?? null,
+      issn: findIdentVal('issn') ?? meta.issn ?? null,
+      isbn: findIdentVal('isbn') ?? meta.isbn ?? null,
       url: item.url,
       tags,
     };
@@ -273,10 +292,18 @@ export class QueryRepository {
     return client.item.findFirst({
       where: {
         ...scopeWhere,
-        doi,
+        OR: [
+          { doi },
+          {
+            identifiers: {
+              some: { type: 'doi', value: { equals: doi, mode: 'insensitive' } },
+            },
+          },
+        ],
         deletedAt: null,
       },
       include: {
+        identifiers: true,
         contributors: {
           orderBy: { orderIndex: 'asc' },
         },
@@ -475,6 +502,12 @@ export class QueryRepository {
     projectId?: string,
   ): Promise<boolean> {
     if (!isUuid(itemId)) return false;
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const hasValidProject = Boolean(validProjectId && isUuid(validProjectId));
+    if (userId !== 'system' && !isUuid(userId) && !hasValidProject) {
+      return false;
+    }
+
     const client = this.getClient(tx);
 
     const item = await client.item.findUnique({
@@ -484,14 +517,13 @@ export class QueryRepository {
 
     if (!item || item.deletedAt !== null) return false;
 
-    if (!isUuid(userId) || userId === 'system') return true;
+    if (userId === 'system') return true;
 
-    const validProjectId = normalizeProjectScopeId(projectId);
-    if (validProjectId && isUuid(validProjectId)) {
-      return item.projectId === validProjectId;
+    if (hasValidProject) {
+      return !item.projectId || item.projectId === validProjectId;
     }
 
-    return item.userId === userId && !item.projectId;
+    return !item.userId || (item.userId === userId && !item.projectId);
   }
 
   async assertExists(
@@ -592,5 +624,62 @@ export class QueryRepository {
 
   async findUserFeedSubscriptions(userId: string, tx?: Prisma.TransactionClient) {
     return this.listRepo.findUserFeedSubscriptions(this.getClient(tx), userId);
+  }
+
+  async findAttachmentByFileId(
+    fileId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{ id: string; itemId: string; metadata?: unknown } | null> {
+    if (!fileId) return null;
+    const client = this.getClient(tx);
+    if (!client?.attachment?.findFirst) return null;
+    return client.attachment.findFirst({
+      where: { fileId, deletedAt: null },
+      select: { id: true, itemId: true, metadata: true },
+    });
+  }
+
+  async findAttachmentById(
+    attachmentId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{ id: string; itemId: string; metadata?: unknown } | null> {
+    if (!attachmentId) return null;
+    const client = this.getClient(tx);
+    if (!client?.attachment?.findUnique) return null;
+    return client.attachment.findUnique({
+      where: { id: attachmentId },
+      select: { id: true, itemId: true, metadata: true },
+    });
+  }
+
+  async findItemForAiMetadata(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    if (!itemId) return null;
+    const client = this.getClient(tx);
+    if (!client?.item?.findUnique) return null;
+    return client.item.findUnique({
+      where: { id: itemId },
+      select: {
+        id: true,
+        userId: true,
+        projectId: true,
+        itemType: true,
+        title: true,
+        year: true,
+        doi: true,
+        abstract: true,
+        publicationTitle: true,
+        url: true,
+        metadata: true,
+        contributors: { orderBy: { orderIndex: 'asc' } },
+        itemTags: { include: { tag: true } },
+        collectionItems: { include: { collection: true } },
+        attachments: { where: { deletedAt: null } },
+        notesList: { where: { deletedAt: null } },
+        identifiers: true,
+      },
+    });
   }
 }

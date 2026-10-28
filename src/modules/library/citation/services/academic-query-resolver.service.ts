@@ -11,7 +11,11 @@ import {
   normalizeWork,
   RawCslWorkInput,
 } from '@/modules/library/citation/domain/citation.domain';
-import { AcademicHttpClient, normalizeDoi } from '@/modules/library/core';
+import {
+  AcademicHttpClient,
+  METADATA_PORT,
+  normalizeDoi,
+} from '@/modules/library/core';
 import { DoiContentNegotiationService } from './doi-content-negotiation.service';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import {
@@ -33,7 +37,7 @@ export class AcademicQueryResolverService {
     @Optional()
     private readonly doiService?: DoiContentNegotiationService,
     @Optional()
-    @Inject('METADATA_PORT')
+    @Inject(METADATA_PORT)
     private readonly metadataPort?: {
       resolve: (req: {
         query: string;
@@ -48,8 +52,27 @@ export class AcademicQueryResolverService {
     return getAcademicContactEmail();
   }
 
+  private async executeHttpGet(
+    url: string,
+    headers: Record<string, string>,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    if (this.httpClient) {
+      const { response } = await this.httpClient.request(url, {
+        headers,
+        signal,
+        timeoutMs: 8000,
+      });
+      return response;
+    }
+    return fetch(url, {
+      headers,
+      signal,
+    });
+  }
+
   /**
-   * Resolves a DOI via CrossRef API.
+   * Resolves a DOI via unified MetadataPort first, falling back to CrossRef API.
    */
   async resolveDoi(rawDoi: string): Promise<ReferenceData> {
     const clean = rawDoi
@@ -58,6 +81,23 @@ export class AcademicQueryResolverService {
       .replace(/^doi:/i, '');
     if (!clean) {
       throw new BadRequestException('Invalid DOI provided');
+    }
+
+    if (this.metadataPort) {
+      try {
+        const resolved = await this.metadataPort.resolve({ query: clean });
+        if (
+          resolved?.metadata &&
+          (resolved.metadata.title || resolved.metadata.doi)
+        ) {
+          return this.mapItemMetadataToReferenceData(resolved.metadata);
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `MetadataPort DOI resolution fallback for "${clean}": ${message}`,
+        );
+      }
     }
 
     try {
@@ -69,18 +109,7 @@ export class AcademicQueryResolverService {
         Accept: 'application/json',
         'User-Agent': getAcademicUserAgent('Citation'),
       };
-      const res = this.httpClient
-        ? (
-            await this.httpClient.request(url, {
-              headers,
-              signal: controller.signal,
-              timeoutMs: 8000,
-            })
-          ).response
-        : await fetch(url, {
-            headers,
-            signal: controller.signal,
-          });
+      const res = await this.executeHttpGet(url, headers, controller.signal);
       clearTimeout(timeout);
 
       if (!res.ok) {
@@ -127,18 +156,7 @@ export class AcademicQueryResolverService {
         Accept: 'application/json',
         'User-Agent': getAcademicUserAgent('Citation'),
       };
-      const res = this.httpClient
-        ? (
-            await this.httpClient.request(url, {
-              headers,
-              signal: controller.signal,
-              timeoutMs: 8000,
-            })
-          ).response
-        : await fetch(url, {
-            headers,
-            signal: controller.signal,
-          });
+      const res = await this.executeHttpGet(url, headers, controller.signal);
       clearTimeout(timeout);
 
       if (!res.ok) {

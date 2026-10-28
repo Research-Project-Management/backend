@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 export {
   restoreMasterRelationsInTx,
   restoreDuplicateRelationsInTx,
+  restoreMergeRelationsInTx,
+  syncRestoredItemCountsInTx,
 } from './duplicate-merge-restore.memento';
 
 export interface MementoIdentifierRecord {
@@ -57,14 +59,22 @@ export interface MementoItemMetadataRecord {
   rawPayload?: unknown;
 }
 
+export interface MementoAnnotationRecord {
+  id: string;
+  attachmentId: string;
+  deletedAt?: string | null;
+}
+
 export interface MementoAttachmentRecord {
   id: string;
   attachmentType?: string | null;
+  annotations?: MementoAnnotationRecord[];
 }
 
 export interface PreMergeItemRelations {
   attachmentIds?: string[];
   attachments?: MementoAttachmentRecord[];
+  annotations?: MementoAnnotationRecord[];
   noteIds?: string[];
   tagIds?: string[];
   collectionIds?: string[];
@@ -92,6 +102,7 @@ export interface MasterItemSnapshot {
   metadata?: Record<string, unknown>;
   attachmentIds?: string[];
   attachments?: MementoAttachmentRecord[];
+  annotations?: MementoAnnotationRecord[];
   tagIds?: string[];
   collectionIds?: string[];
   contributors?: MementoContributorRecord[];
@@ -112,10 +123,13 @@ export interface MergedDuplicateSnapshot {
   doi?: string | null;
   hasFile?: boolean;
   attachmentCount?: number;
+  noteCount?: number;
   metadata?: Record<string, unknown>;
   attachmentIds?: string[];
   attachments?: MementoAttachmentRecord[];
+  annotations?: MementoAnnotationRecord[];
   noteIds?: string[];
+  notesList?: Array<Record<string, unknown>>;
   tagIds?: string[];
   collectionIds?: string[];
   identifiers?: MementoIdentifierRecord[];
@@ -256,18 +270,48 @@ export function extractItemMetadata(val: unknown): MementoItemMetadataRecord[] |
     }));
 }
 
+export function extractAnnotations(
+  val: unknown,
+): MementoAnnotationRecord[] | undefined {
+  if (!Array.isArray(val)) return undefined;
+  return val
+    .filter((ann): ann is Record<string, unknown> =>
+      Boolean(
+        ann &&
+          typeof ann === 'object' &&
+          typeof (ann as { id?: unknown }).id === 'string' &&
+          typeof (ann as { attachmentId?: unknown }).attachmentId === 'string',
+      ),
+    )
+    .map((ann) => ({
+      id: String(ann.id),
+      attachmentId: String(ann.attachmentId),
+      ...(ann.deletedAt instanceof Date
+        ? { deletedAt: ann.deletedAt.toISOString() }
+        : typeof ann.deletedAt === 'string' || ann.deletedAt === null
+          ? { deletedAt: ann.deletedAt as string | null }
+          : {}),
+    }));
+}
+
 export function extractAttachments(val: unknown): MementoAttachmentRecord[] | undefined {
   if (!Array.isArray(val)) return undefined;
   return val
     .filter((a): a is Record<string, unknown> =>
       Boolean(a && typeof a === 'object' && typeof (a as { id?: unknown }).id === 'string'),
     )
-    .map((a) => ({
-      id: String(a.id),
-      ...(typeof a.attachmentType === 'string' || a.attachmentType === null
-        ? { attachmentType: a.attachmentType as string | null }
-        : {}),
-    }));
+    .map((a) => {
+      const parsedAnnots = extractAnnotations(a.annotations);
+      return {
+        id: String(a.id),
+        ...(typeof a.attachmentType === 'string' || a.attachmentType === null
+          ? { attachmentType: a.attachmentType as string | null }
+          : {}),
+        ...(parsedAnnots && parsedAnnots.length > 0
+          ? { annotations: parsedAnnots }
+          : {}),
+      };
+    });
 }
 
 export function extractNestedIds(arr: unknown, nestedKey: string): string[] | undefined {
@@ -302,19 +346,6 @@ export async function capturePreMergeRelationsInTx(params: {
 }> {
   const { tx, primary, duplicates, uniqueDupIds, initialNotes, initialAttachments } = params;
   const allIds = [primary.id, ...uniqueDupIds];
-  const dynTx = tx as unknown as {
-    state?: { findMany?: (args: Record<string, unknown>) => Promise<Array<Record<string, unknown>>> };
-    itemIdentifier?: {
-      findMany?: (args: Record<string, unknown>) => Promise<
-        Array<{
-          itemId: string;
-          type: string;
-          value: string;
-          canonicalUri?: string | null;
-        }>
-      >;
-    };
-  };
 
   const [rawItemTags, rawCollectionItems, rawIdentifiers, rawContribs, rawStates, queriedNotes, queriedAttachments] =
     await Promise.all([
@@ -324,14 +355,14 @@ export async function capturePreMergeRelationsInTx(params: {
       typeof tx.collectionItem?.findMany === 'function'
         ? tx.collectionItem.findMany({ where: { itemId: { in: allIds } }, select: { itemId: true, collectionId: true } })
         : Promise.resolve(undefined),
-      typeof dynTx.itemIdentifier?.findMany === 'function'
-        ? dynTx.itemIdentifier.findMany({ where: { itemId: { in: allIds } } })
+      typeof tx.itemIdentifier?.findMany === 'function'
+        ? tx.itemIdentifier.findMany({ where: { itemId: { in: allIds } } })
         : Promise.resolve(undefined),
       typeof tx.contributor?.findMany === 'function'
         ? tx.contributor.findMany({ where: { itemId: { in: allIds } }, orderBy: { orderIndex: 'asc' } })
         : Promise.resolve(undefined),
-      typeof dynTx.state?.findMany === 'function'
-        ? dynTx.state.findMany({ where: { itemId: { in: allIds } } })
+      typeof tx.state?.findMany === 'function'
+        ? tx.state.findMany({ where: { itemId: { in: allIds } } })
         : Promise.resolve(undefined),
       initialNotes === undefined && typeof tx.note?.findMany === 'function'
         ? tx.note.findMany({ where: { itemId: { in: allIds } }, select: { id: true, itemId: true } })
@@ -355,6 +386,31 @@ export async function capturePreMergeRelationsInTx(params: {
     return true;
   });
 
+  const allAttachmentIds = dedupedAttachments.map((a) => a.id).filter(Boolean);
+  const queriedAnnotations =
+    allAttachmentIds.length > 0 &&
+    typeof tx.annotation?.findMany === 'function'
+      ? await tx.annotation.findMany({
+          where: { attachmentId: { in: allAttachmentIds } },
+          select: { id: true, attachmentId: true, deletedAt: true },
+        })
+      : undefined;
+
+  const annotsByAttachmentId = new Map<string, MementoAnnotationRecord[]>();
+  for (const ann of queriedAnnotations ?? []) {
+    if (!ann?.id || !ann?.attachmentId) continue;
+    const list = annotsByAttachmentId.get(ann.attachmentId) ?? [];
+    list.push({
+      id: ann.id,
+      attachmentId: ann.attachmentId,
+      deletedAt:
+        ann.deletedAt instanceof Date
+          ? ann.deletedAt.toISOString()
+          : (ann.deletedAt ?? null),
+    });
+    annotsByAttachmentId.set(ann.attachmentId, list);
+  }
+
   const groupIds = (
     rows: Array<{ itemId?: string | null; id?: string }> | undefined,
     key: 'tagId' | 'collectionId' | 'id',
@@ -376,16 +432,24 @@ export async function capturePreMergeRelationsInTx(params: {
   const notesByItem = groupIds(queriedNotes, 'id');
   const attsByItem = groupIds(dedupedAttachments, 'id');
   const attRecordsByItem = new Map<string, MementoAttachmentRecord[]>();
+  const annotsByItem = new Map<string, MementoAnnotationRecord[]>();
   for (const row of dedupedAttachments) {
     if (row.itemId && row.id) {
       const list = attRecordsByItem.get(row.itemId) ?? [];
+      const attAnnots = annotsByAttachmentId.get(row.id);
       list.push({
         id: row.id,
         ...(typeof (row as { attachmentType?: unknown }).attachmentType === 'string'
           ? { attachmentType: (row as { attachmentType: string }).attachmentType }
           : {}),
+        ...(attAnnots && attAnnots.length > 0 ? { annotations: attAnnots } : {}),
       });
       attRecordsByItem.set(row.itemId, list);
+      if (attAnnots && attAnnots.length > 0) {
+        const itemAnnList = annotsByItem.get(row.itemId) ?? [];
+        itemAnnList.push(...attAnnots);
+        annotsByItem.set(row.itemId, itemAnnList);
+      }
     }
   }
 
@@ -424,6 +488,7 @@ export async function capturePreMergeRelationsInTx(params: {
   const primaryRelations: PreMergeItemRelations = {
     attachmentIds: attsByItem.get(primary.id) ?? asStringArray(primary.attachmentIds) ?? extractNestedIds(primary.attachments, 'id'),
     attachments: attRecordsByItem.get(primary.id) ?? extractAttachments(primary.attachments),
+    annotations: annotsByItem.get(primary.id) ?? extractAnnotations(primary.annotations),
     noteIds: notesByItem.get(primary.id) ?? asStringArray(primary.noteIds) ?? extractNestedIds(primary.notesList, 'id'),
     tagIds: tagsByItem.get(primary.id) ?? asStringArray(primary.tagIds) ?? extractNestedIds(primary.itemTags, 'tagId'),
     collectionIds: colsByItem.get(primary.id) ?? asStringArray(primary.collectionIds) ?? extractNestedIds(primary.collectionItems, 'collectionId'),
@@ -440,6 +505,7 @@ export async function capturePreMergeRelationsInTx(params: {
     duplicateRelationsById[dup.id] = {
       attachmentIds: attsByItem.get(dup.id) ?? asStringArray(dup.attachmentIds) ?? extractNestedIds(dup.attachments, 'id'),
       attachments: attRecordsByItem.get(dup.id) ?? extractAttachments(dup.attachments),
+      annotations: annotsByItem.get(dup.id) ?? extractAnnotations(dup.annotations),
       noteIds: notesByItem.get(dup.id) ?? asStringArray(dup.noteIds) ?? extractNestedIds(dup.notesList, 'id'),
       tagIds: tagsByItem.get(dup.id) ?? asStringArray(dup.tagIds) ?? extractNestedIds(dup.itemTags, 'tagId'),
       collectionIds: colsByItem.get(dup.id) ?? asStringArray(dup.collectionIds) ?? extractNestedIds(dup.collectionItems, 'collectionId'),

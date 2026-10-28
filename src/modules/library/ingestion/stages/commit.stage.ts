@@ -1,4 +1,9 @@
-import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  Optional,
+  BadRequestException,
+} from '@nestjs/common';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import {
   CATALOG_FACADE,
@@ -86,6 +91,12 @@ const EXCLUDED_RAW_METADATA_KEYS = new Set([
   'updatedAt',
   'mergedIntoId',
   'contentHash',
+  'fileId',
+  'filename',
+  'fileUrl',
+  'pdfUrl',
+  'openAccessPdfUrl',
+  'attachments',
 ]);
 
 /**
@@ -268,7 +279,7 @@ export function toItemData(
     tags: rawTags,
     labels: rawTags,
     keywords: rawTags,
-    fileId: options?.fileId || metadata.fileId || undefined,
+    fileId: options?.fileId || undefined,
     filename: options?.filename || metadata.filename || undefined,
     fileUrl:
       metadata.fileUrl ||
@@ -322,6 +333,31 @@ export function toItemData(
   };
 }
 
+export interface CommitMatchedSideEffectsPort {
+  saveItemMetadataSnapshot?: (
+    itemId: string,
+    payload: Record<string, unknown>,
+  ) => Promise<unknown>;
+  syncRelationsForCommittedItem?: (
+    itemId: string,
+    candidateMeta: Record<string, unknown>,
+    scopeId?: string | { userId?: string; projectId?: string },
+  ) => Promise<unknown>;
+  materializeNotes?: (
+    userId: string,
+    projectId: string | undefined,
+    itemId: string,
+    notes?: unknown[],
+    createdItem?: Record<string, unknown> | null,
+  ) => Promise<unknown>;
+  assignItemToCollection?: (
+    userId: string,
+    collectionId: string,
+    itemId: string,
+    projectId?: string,
+  ) => Promise<unknown>;
+}
+
 @Injectable()
 export class CommitStage implements IWorkflowStage<
   CommitStageInput,
@@ -331,6 +367,8 @@ export class CommitStage implements IWorkflowStage<
   constructor(
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway: ICatalogFacade,
+    @Optional()
+    private readonly sideEffects?: CommitMatchedSideEffectsPort,
   ) {}
 
   async execute(input: CommitStageInput): Promise<ItemDetail> {
@@ -488,26 +526,108 @@ export class CommitStage implements IWorkflowStage<
       return target;
     };
 
-    if (!this.catalogGateway?.updateItem) {
-      return markPreExisting(existingItem);
-    }
-    try {
-      const patch = buildEnrichmentPatch(
-        existingItem as unknown as Record<string, unknown>,
-        createData as unknown as Record<string, unknown>,
-      );
-      if (Object.keys(patch).length > 0) {
-        const updated = await this.catalogGateway.updateItem(
-          userId,
-          existingItem.id,
-          patch,
-          { projectId },
+    let resultItem = existingItem;
+    if (this.catalogGateway?.updateItem) {
+      try {
+        const patch = buildEnrichmentPatch(
+          existingItem as unknown as Record<string, unknown>,
+          createData as unknown as Record<string, unknown>,
         );
-        return markPreExisting(updated ?? existingItem);
+        if (Object.keys(patch).length > 0) {
+          const updated = await this.catalogGateway.updateItem(
+            userId,
+            existingItem.id,
+            patch,
+            { projectId },
+          );
+          if (updated) resultItem = updated;
+        }
+      } catch {
+        // Non-critical additive enrichment on pre-match or P2002 race
+      }
+    }
+
+    const createDataRec = createData as unknown as Record<string, unknown>;
+    const existingRec = existingItem as unknown as Record<string, unknown>;
+    try {
+      await this.sideEffects?.saveItemMetadataSnapshot?.(
+        existingItem.id,
+        createDataRec,
+      );
+      await this.sideEffects?.syncRelationsForCommittedItem?.(
+        existingItem.id,
+        createDataRec,
+        { userId, projectId },
+      );
+      if (Array.isArray(createData.notes) && createData.notes.length > 0) {
+        if (this.sideEffects?.materializeNotes) {
+          await this.sideEffects.materializeNotes(
+            userId,
+            projectId,
+            existingItem.id,
+            createData.notes,
+            existingRec,
+          );
+        } else if (this.catalogGateway?.createNote) {
+          const existingNotes = Array.isArray(existingRec.notesList)
+            ? existingRec.notesList
+            : Array.isArray(existingRec.notes)
+              ? existingRec.notes
+              : [];
+          const seen = new Set<string>(
+            existingNotes
+              .map((n: unknown) =>
+                typeof n === 'string'
+                  ? n.trim().toLowerCase()
+                  : typeof n === 'object' && n !== null
+                    ? String(
+                        (n as Record<string, unknown>).contentMd ??
+                          (n as Record<string, unknown>).content ??
+                          '',
+                      )
+                        .trim()
+                        .toLowerCase()
+                    : '',
+              )
+              .filter(Boolean),
+          );
+          for (const rawNote of createData.notes) {
+            const contentMd =
+              typeof rawNote === 'string'
+                ? rawNote.trim()
+                : typeof rawNote === 'object' && rawNote !== null
+                  ? String(
+                      (rawNote as Record<string, unknown>).content ?? '',
+                    ).trim()
+                  : '';
+            if (!contentMd || seen.has(contentMd.toLowerCase())) continue;
+            seen.add(contentMd.toLowerCase());
+            await this.catalogGateway.createNote(userId, {
+              itemId: existingItem.id,
+              contentMd,
+              title: 'Imported Note',
+              projectId,
+              createdById: userId,
+            });
+          }
+        }
+      }
+      if (
+        Array.isArray(createData.collectionIds) &&
+        createData.collectionIds.length > 0 &&
+        this.catalogGateway?.assignItemsToCollection
+      ) {
+        await this.catalogGateway.assignItemsToCollection(
+          userId,
+          createData.collectionIds[0],
+          [existingItem.id],
+          projectId,
+        );
       }
     } catch {
-      // Non-critical additive enrichment on pre-match or P2002 race
+      // Non-critical side-effects on matched item enrichment
     }
-    return markPreExisting(existingItem);
+
+    return markPreExisting(resultItem);
   }
 }

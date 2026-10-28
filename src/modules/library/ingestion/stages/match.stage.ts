@@ -131,10 +131,34 @@ export class MatchStage implements IWorkflowStage<
       }
 
       if (matchResult.candidateItems && matchResult.candidateItems.length > 0) {
-        return this.duplicatePolicy.evaluate(
-          actualProposed,
-          matchResult.candidateItems,
+        const sortedCandidates = [...matchResult.candidateItems].sort(
+          (a, b) => {
+            const simB = calculateTitleSimilarity(
+              proposedTitle ?? '',
+              b.title ?? '',
+            );
+            const simA = calculateTitleSimilarity(
+              proposedTitle ?? '',
+              a.title ?? '',
+            );
+            if (simB !== simA) {
+              return simB - simA;
+            }
+            if (proposedYear !== undefined) {
+              const yearDiffA =
+                a.year !== null && a.year !== undefined
+                  ? Math.abs(proposedYear - Number(a.year))
+                  : 999;
+              const yearDiffB =
+                b.year !== null && b.year !== undefined
+                  ? Math.abs(proposedYear - Number(b.year))
+                  : 999;
+              return yearDiffA - yearDiffB;
+            }
+            return 0;
+          },
         );
+        return this.duplicatePolicy.evaluate(actualProposed, sortedCandidates);
       }
 
       return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };

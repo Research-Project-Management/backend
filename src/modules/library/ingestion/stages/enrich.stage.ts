@@ -131,15 +131,19 @@ export class EnrichStage implements IWorkflowStage<
       //    and official subject/category tags.
       // 2. For non-FILE candidates (e.g. already-resolved PROVIDER or complete RECORD),
       //    skip enrichment when structured metadata is already complete.
+      const hasAbstract = Boolean(
+        meta.abstract && String(meta.abstract).trim().length > 20,
+      );
       const isCompleteStructuredRecord =
         candidate.sourceKind === 'RECORD' &&
         hasTitle &&
-        ((hasAuthors && hasYearOrDate) ||
+        ((hasAuthors && hasVenueAndYear && hasAbstract) ||
           (isBulkRecordBatch && (hasAuthors || hasYearOrDate)));
 
       const isAlreadyComplete =
         candidate.sourceKind !== 'FILE' &&
-        ((hasTitle &&
+        ((candidate.sourceKind !== 'RECORD' &&
+          hasTitle &&
           hasAuthors &&
           hasVenueAndYear &&
           (candidate.confidenceScore ?? 0) >= 0.9) ||
@@ -255,7 +259,29 @@ export class EnrichStage implements IWorkflowStage<
               : rawMetadata;
 
             const fields: Record<string, FieldEvidence> = {};
-            const provenanceMap = resolved.provenance || {};
+            const provenanceMap = (resolved.provenance || {}) as Record<
+              string,
+              {
+                provider?: string;
+                source?: string;
+                sourceProvider?: string;
+                confidence?: number;
+                fetchedAt?: string;
+              }
+            >;
+            const metadataProv = (
+              resolved.metadata as Record<string, unknown> | undefined
+            )?.provenance as
+              | { originProvider?: string; provider?: string; source?: string }
+              | undefined;
+            const fallbackProvider =
+              metadataProv?.originProvider ||
+              metadataProv?.provider ||
+              metadataProv?.source ||
+              (resolved as { sourceProvider?: string; provider?: string })
+                .sourceProvider ||
+              (resolved as { provider?: string }).provider ||
+              'MetadataResolution';
 
             for (const [fieldName, propertyValue] of Object.entries(
               normalized,
@@ -272,32 +298,65 @@ export class EnrichStage implements IWorkflowStage<
                     }
                   }
                 }
+                const resolvedFieldProvider =
+                  provenance?.provider ||
+                  provenance?.sourceProvider ||
+                  provenance?.source ||
+                  fallbackProvider;
                 fields[fieldName] = {
                   path: fieldName,
-                  value: rawMetadata[fieldName as keyof typeof rawMetadata],
+                  value:
+                    rawMetadata[fieldName as keyof typeof rawMetadata] !==
+                    undefined
+                      ? rawMetadata[fieldName as keyof typeof rawMetadata]
+                      : propertyValue,
                   normalizedValue: propertyValue,
-                  confidence: provenance ? provenance.confidence : 0.9,
-                  sourceProvider: provenance
-                    ? provenance.provider
-                    : 'MetadataResolution',
-                  retrievedAt: provenance
-                    ? provenance.fetchedAt
-                    : resolved.resolvedAt,
+                  confidence:
+                    provenance && typeof provenance.confidence === 'number'
+                      ? provenance.confidence
+                      : 0.9,
+                  sourceProvider: resolvedFieldProvider,
+                  retrievedAt:
+                    provenance?.fetchedAt ||
+                    resolved.resolvedAt ||
+                    new Date().toISOString(),
                 };
               }
             }
 
             for (const matchedCandidate of taskCandidates) {
+              const filteredFields: Record<string, FieldEvidence> = {};
+              const filteredMeta: Record<string, unknown> = {};
+              for (const [k, ev] of Object.entries(fields)) {
+                const origEv = matchedCandidate.fields?.[k];
+                const origIsUser =
+                  origEv?.sourceProvider === 'UserOverride' ||
+                  origEv?.sourceProvider === 'manual';
+                if (origIsUser) continue;
+                filteredFields[k] = ev;
+                filteredMeta[k] = ev.normalizedValue ?? normalized[k as keyof typeof normalized];
+              }
+              for (const [mk, mv] of Object.entries(normalized)) {
+                if (mv !== undefined && mv !== null && !(mk in filteredMeta)) {
+                  const origEv = matchedCandidate.fields?.[mk];
+                  const origIsUser =
+                    origEv?.sourceProvider === 'UserOverride' ||
+                    origEv?.sourceProvider === 'manual';
+                  if (!origIsUser) {
+                    filteredMeta[mk] = mv;
+                  }
+                }
+              }
               enrichedCandidates.push({
                 candidateId: randomUUID(),
                 sourceKind: 'PROVIDER',
-                sourceName: 'EnrichedProvider',
+                sourceName: fallbackProvider || 'EnrichedProvider',
                 sourceRecordId: resolved.canonicalId,
                 rawEvidenceRef: matchedCandidate.candidateId,
                 retrievedAt: resolved.resolvedAt,
                 schemaVersion: '1.0.0',
-                fields: { ...fields },
-                normalizedMetadata: { ...normalized },
+                fields: filteredFields,
+                normalizedMetadata: filteredMeta as MetadataCandidate['normalizedMetadata'],
                 confidenceScore: 0.95,
               });
             }
@@ -348,6 +407,7 @@ export class EnrichStage implements IWorkflowStage<
         }
       }
       last = last
+        .replace(/[đĐ]/g, 'd')
         .normalize('NFKD')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
@@ -375,6 +435,6 @@ export class EnrichStage implements IWorkflowStage<
     if (own.size === 0 || theirs.size === 0) return true;
     let shared = 0;
     for (const name of own) if (theirs.has(name)) shared++;
-    return shared / Math.max(own.size, theirs.size) >= 0.5;
+    return shared / Math.min(own.size, theirs.size) >= 0.5;
   }
 }

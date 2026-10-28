@@ -21,9 +21,12 @@ import {
   shouldAutoAdvanceToReading,
   isValidStateTransition,
   isValidScrollPosition,
+  pickPreferredMergedState,
 } from '@/modules/library/catalog/domain/state.domain';
 import { RedisCacheService } from '@/core';
 import { ItemCacheCoordinator } from './item-cache.coordinator';
+
+export { pickPreferredMergedState };
 
 @Injectable()
 export class StateService {
@@ -36,18 +39,13 @@ export class StateService {
     private readonly itemExistencePort?: ItemQueryService,
     @Optional()
     @Inject(RedisCacheService)
-    cacheOrCoordinator?: RedisCacheService | ItemCacheCoordinator,
+    private readonly cache?: RedisCacheService,
     @Optional()
     @Inject(ItemCacheCoordinator)
-    injectedCoordinator?: ItemCacheCoordinator,
+    cacheCoordinator?: ItemCacheCoordinator,
   ) {
-    if (injectedCoordinator) {
-      this.cacheCoordinator = injectedCoordinator;
-    } else if (cacheOrCoordinator instanceof ItemCacheCoordinator) {
-      this.cacheCoordinator = cacheOrCoordinator;
-    } else {
-      this.cacheCoordinator = new ItemCacheCoordinator(cacheOrCoordinator);
-    }
+    this.cacheCoordinator =
+      cacheCoordinator ?? new ItemCacheCoordinator(this.cache);
   }
 
   private async invalidateStateCache(
@@ -99,52 +97,6 @@ export class StateService {
       );
     }
 
-    const existing = await this.stateRepository.findState(userId, itemId);
-
-    const currentStatus =
-      (existing?.readStatus as ReadingStatus) ?? ReadingStatus.UNREAD;
-    let targetStatus = dto.readStatus ?? currentStatus;
-
-    // Domain rule: auto-advance to reading if unread and moved forward in document
-    if (
-      dto.readStatus === undefined &&
-      shouldAutoAdvanceToReading(
-        currentStatus,
-        dto.currentPage,
-        dto.scrollPosition,
-      )
-    ) {
-      targetStatus = ReadingStatus.READING;
-    }
-
-    // Validate state transition if status is being updated
-    if (dto.readStatus && dto.readStatus !== currentStatus) {
-      if (!isValidStateTransition(currentStatus, dto.readStatus)) {
-        throw new BadRequestException(
-          `Invalid state transition from ${currentStatus} to ${dto.readStatus}`,
-        );
-      }
-    }
-
-    const now = new Date();
-    const isNowReadingOrCompleted =
-      targetStatus === ReadingStatus.READING ||
-      targetStatus === ReadingStatus.COMPLETED;
-
-    const upsertData: UpsertStateData = {
-      isStarred:
-        dto.isStarred !== undefined ? dto.isStarred : existing?.isStarred,
-      readStatus: targetStatus,
-      rating:
-        dto.rating !== undefined ? dto.rating : (existing?.rating ?? undefined),
-      currentPage: dto.currentPage,
-      scrollPosition: dto.scrollPosition,
-      lastOpenedAt: now,
-      lastReadAt: isNowReadingOrCompleted
-        ? (existing?.lastReadAt ?? now)
-        : undefined,
-    };
-
     const effectiveProjectId =
       projectId ||
       ('projectId' in item && typeof item.projectId === 'string'
@@ -156,6 +108,52 @@ export class StateService {
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
+      const existing = await this.stateRepository.findState(userId, itemId, tx);
+
+      const currentStatus =
+        (existing?.readStatus as ReadingStatus) ?? ReadingStatus.UNREAD;
+      let targetStatus = dto.readStatus ?? currentStatus;
+
+      // Domain rule: auto-advance to reading if unread and moved forward in document
+      if (
+        dto.readStatus === undefined &&
+        shouldAutoAdvanceToReading(
+          currentStatus,
+          dto.currentPage,
+          dto.scrollPosition,
+        )
+      ) {
+        targetStatus = ReadingStatus.READING;
+      }
+
+      // Validate state transition if status is being updated
+      if (dto.readStatus && dto.readStatus !== currentStatus) {
+        if (!isValidStateTransition(currentStatus, dto.readStatus)) {
+          throw new BadRequestException(
+            `Invalid state transition from ${currentStatus} to ${dto.readStatus}`,
+          );
+        }
+      }
+
+      const now = new Date();
+      const isNowReadingOrCompleted =
+        targetStatus === ReadingStatus.READING ||
+        targetStatus === ReadingStatus.COMPLETED;
+
+      const upsertData: UpsertStateData = {
+        isStarred:
+          dto.isStarred !== undefined ? dto.isStarred : existing?.isStarred,
+        readStatus: targetStatus,
+        rating:
+          dto.rating !== undefined ? dto.rating : (existing?.rating ?? undefined),
+        currentPage: dto.currentPage,
+        scrollPosition: dto.scrollPosition,
+        lastOpenedAt: now,
+        lastReadAt: isNowReadingOrCompleted
+          ? (existing?.lastReadAt ?? now)
+          : undefined,
+      };
+
       const updated = await this.stateRepository.upsertState(
         userId,
         itemId,
@@ -203,14 +201,6 @@ export class StateService {
     projectId?: string,
   ): Promise<StateData> {
     const item = await this.assertItemExists(userId, itemId, projectId);
-    const existing = await this.stateRepository.findState(userId, itemId);
-
-    const nextStatus =
-      existing?.readStatus === ReadingStatus.COMPLETED
-        ? ReadingStatus.COMPLETED
-        : ReadingStatus.READING;
-
-    const now = new Date();
     const effectiveProjectId = projectId || item.projectId || undefined;
     const eventScope = { userId, projectId: effectiveProjectId };
 
@@ -218,6 +208,14 @@ export class StateService {
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
+      const existing = await this.stateRepository.findState(userId, itemId, tx);
+
+      const nextStatus =
+        existing?.readStatus === ReadingStatus.COMPLETED
+          ? ReadingStatus.COMPLETED
+          : ReadingStatus.READING;
+
+      const now = new Date();
       const updated = await this.stateRepository.upsertState(
         userId,
         itemId,
@@ -310,6 +308,15 @@ export class StateService {
     const cleanSourceIds = sourceItemIds.filter((id) => id !== targetItemId);
     if (cleanSourceIds.length === 0) return;
 
+    if (this.stateRepository?.transferItemStates) {
+      await this.stateRepository.transferItemStates(
+        cleanSourceIds,
+        targetItemId,
+        tx,
+      );
+      return;
+    }
+
     const allUserStates = await tx.state.findMany({
       where: { itemId: { in: [targetItemId, ...cleanSourceIds] } },
     });
@@ -323,40 +330,11 @@ export class StateService {
 
     await Promise.all(
       Array.from(userStateByUser.entries()).map(([userId, states]) => {
-        const maxRating = Math.max(...states.map((s) => s.rating || 0));
-        const isStarred = states.some((s) => Boolean(s.isStarred));
-        const isCompleted = states.some((s) => s.readStatus === 'completed');
-        const isReading = states.some((s) => s.readStatus === 'reading');
-        const readStatus = isCompleted
-          ? 'completed'
-          : isReading
-            ? 'reading'
-            : 'unread';
-
-        const latestReadAt = states
-          .map((s) => s.lastReadAt)
-          .filter((d): d is Date => d !== null)
-          .sort((a, b) => b.getTime() - a.getTime())[0];
-
-        const latestOpenedAt = states
-          .map((s) => s.lastOpenedAt)
-          .filter((d): d is Date => d !== null)
-          .sort((a, b) => b.getTime() - a.getTime())[0];
-
-        const maxCurrentPage = Math.max(...states.map((s) => s.currentPage || 1));
-        const statesWithScroll = states.filter((s) => s.scrollPosition !== null);
-        statesWithScroll.sort((a, b) => {
-          const readA = a.lastReadAt ? a.lastReadAt.getTime() : 0;
-          const readB = b.lastReadAt ? b.lastReadAt.getTime() : 0;
-          if (readB !== readA) return readB - readA;
-
-          const openA = a.lastOpenedAt ? a.lastOpenedAt.getTime() : 0;
-          const openB = b.lastOpenedAt ? b.lastOpenedAt.getTime() : 0;
-          if (openB !== openA) return openB - openA;
-
-          return (b.currentPage || 1) - (a.currentPage || 1);
-        });
-        const latestScroll = statesWithScroll[0]?.scrollPosition;
+        const merged = pickPreferredMergedState(states);
+        const scrollJson =
+          merged.latestScroll !== undefined && merged.latestScroll !== null
+            ? (merged.latestScroll as Prisma.InputJsonValue)
+            : undefined;
 
         return tx.state.upsert({
           where: {
@@ -368,22 +346,22 @@ export class StateService {
           create: {
             userId,
             itemId: targetItemId,
-            isStarred,
-            rating: maxRating,
-            readStatus,
-            currentPage: maxCurrentPage,
-            scrollPosition: latestScroll ?? Prisma.JsonNull,
-            lastOpenedAt: latestOpenedAt || null,
-            lastReadAt: latestReadAt || null,
+            isStarred: merged.isStarred,
+            rating: merged.maxRating,
+            readStatus: merged.readStatus,
+            currentPage: merged.maxCurrentPage,
+            scrollPosition: scrollJson ?? Prisma.JsonNull,
+            lastOpenedAt: merged.latestOpenedAt,
+            lastReadAt: merged.latestReadAt,
           },
           update: {
-            isStarred,
-            rating: maxRating,
-            readStatus,
-            currentPage: maxCurrentPage,
-            scrollPosition: latestScroll ?? undefined,
-            lastOpenedAt: latestOpenedAt || undefined,
-            lastReadAt: latestReadAt || undefined,
+            isStarred: merged.isStarred,
+            rating: merged.maxRating,
+            readStatus: merged.readStatus,
+            currentPage: merged.maxCurrentPage,
+            scrollPosition: scrollJson,
+            lastOpenedAt: merged.latestOpenedAt ?? undefined,
+            lastReadAt: merged.latestReadAt ?? undefined,
           },
         });
       }),

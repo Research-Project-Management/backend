@@ -275,6 +275,24 @@ export class CslNameMapper {
       }
     }
 
+    // 2.5 Month-range within same year: "May-June 2023", "May–June 2023", "May/June 2023"
+    const monthRangeMatch = trimmed.match(
+      /^([A-Za-z]+)\.?\s*[-/–—]\s*([A-Za-z]+)\.?,?\s+(\d{4})$/,
+    );
+    if (monthRangeMatch) {
+      const m1 = MONTH_MAP[monthRangeMatch[1].toLowerCase()];
+      const m2 = MONTH_MAP[monthRangeMatch[2].toLowerCase()];
+      const yr = Number(monthRangeMatch[3]);
+      if (m1 && m2) {
+        return {
+          'date-parts': [
+            [yr, m1],
+            [yr, m2],
+          ],
+        };
+      }
+    }
+
     // 3. Single date (ISO, slash-separated, Month name, Season, Circa)
     const single = this.parseSingleDateParts(trimmed);
     if (single?.parts) {
@@ -349,10 +367,7 @@ export class CslNameMapper {
       .replace(/\s+/g, ' ');
     if (!trimmed) return { family: 'Anonymous' };
 
-    if (
-      (isInstitutionName(trimmed) || INSTITUTIONAL_PATTERN.test(trimmed)) &&
-      !trimmed.includes(',')
-    ) {
+    if (isInstitutionName(trimmed) || INSTITUTIONAL_PATTERN.test(trimmed)) {
       return { literal: trimmed };
     }
 

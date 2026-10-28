@@ -107,7 +107,7 @@ export async function executeBulkRestoreInTx(params: {
         userId,
         projectId: effectiveProjectId,
         aggregateId: restored.id,
-        eventType: 'library.item.restored',
+        eventType: LIBRARY_EVENT_TYPES.ITEM_RESTORED,
         payload: {
           itemId: restored.id,
           userId,

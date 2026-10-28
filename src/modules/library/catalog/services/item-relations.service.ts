@@ -88,6 +88,29 @@ export class ItemRelationsService {
     };
   }
 
+  async addRelation(
+    userId: string,
+    sourceItemId: string,
+    data: {
+      targetItemId?: string;
+      targetItemIds?: string[];
+      relationType?: string;
+      note?: string;
+    },
+    projectId?: string,
+  ) {
+    return this.linkItems(userId, sourceItemId, data, projectId);
+  }
+
+  async removeRelation(
+    userId: string,
+    sourceItemId: string,
+    targetItemId: string,
+    projectId?: string,
+  ) {
+    return this.unlinkItems(userId, sourceItemId, targetItemId, projectId);
+  }
+
   async linkItems(
     userId: string,
     sourceItemId: string,

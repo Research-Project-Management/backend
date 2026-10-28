@@ -143,6 +143,12 @@ export class ItemListQueryRepository {
             requestedFields.has('notesList')),
       );
 
+    const relationPeerSelect = {
+      id: true,
+      title: true,
+      itemType: true,
+      year: true,
+    };
     const itemInclude = {
       contributors: {
         orderBy: { orderIndex: 'asc' as const },
@@ -157,6 +163,15 @@ export class ItemListQueryRepository {
         where: { deletedAt: null },
       },
       identifiers: true,
+      publications: {
+        where: { userId: effectiveUserId },
+      },
+      outgoingRel: {
+        include: { targetItem: { select: relationPeerSelect } },
+      },
+      incomingRel: {
+        include: { sourceItem: { select: relationPeerSelect } },
+      },
       ...(shouldIncludeNotes
         ? {
             notesList: {

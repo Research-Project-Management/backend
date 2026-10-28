@@ -120,6 +120,7 @@ export type IngestionCommand =
       content: string;
       userId?: string;
       collectionId?: string;
+      overrides?: Record<string, unknown>;
       idempotencyKey?: string;
     }
   | {
@@ -129,6 +130,7 @@ export type IngestionCommand =
       content: string;
       userId?: string;
       collectionId?: string;
+      overrides?: Record<string, unknown>;
       idempotencyKey?: string;
     }
   | {
@@ -138,6 +140,7 @@ export type IngestionCommand =
       content: string;
       userId?: string;
       collectionId?: string;
+      overrides?: Record<string, unknown>;
       idempotencyKey?: string;
     }
   | {

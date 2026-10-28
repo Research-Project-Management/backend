@@ -331,14 +331,37 @@ export class ExportsService {
     userId: string,
     keys: string[],
     projectId?: string,
+    format: ExportFormatType = 'bibtex',
   ): Promise<{
     content: string;
     count: number;
+    itemCount: number;
+    filename: string;
     foundKeys: string[];
     missingKeys: string[];
   }> {
+    const filename =
+      'references.' +
+      (format === 'ris' ? 'ris' : format === 'csl-json' ? 'json' : 'bib');
     if (!keys || keys.length === 0) {
-      return { content: '', count: 0, foundKeys: [], missingKeys: [] };
+      const emptyResult = {
+        content: '',
+        count: 0,
+        foundKeys: [] as string[],
+        missingKeys: [] as string[],
+      };
+      Object.defineProperties(emptyResult, {
+        itemCount: { value: 0, enumerable: false, configurable: true },
+        filename: { value: filename, enumerable: false, configurable: true },
+      });
+      return emptyResult as {
+        content: string;
+        count: number;
+        itemCount: number;
+        filename: string;
+        foundKeys: string[];
+        missingKeys: string[];
+      };
     }
 
     const trimmedKeys = keys.map((k) => k.trim()).filter(Boolean);
@@ -418,9 +441,32 @@ export class ExportsService {
       return res.bibliography;
     });
 
+    if (emittedEntries.length === 0) {
+      const noMatchResult = {
+        content: '',
+        count: 0,
+        foundKeys,
+        missingKeys,
+      };
+      Object.defineProperties(noMatchResult, {
+        itemCount: { value: 0, enumerable: false, configurable: true },
+        filename: { value: filename, enumerable: false, configurable: true },
+      });
+      return noMatchResult as {
+        content: string;
+        count: number;
+        itemCount: number;
+        filename: string;
+        foundKeys: string[];
+        missingKeys: string[];
+      };
+    }
+
     return {
       content: entries.join('\n\n'),
       count: emittedEntries.length,
+      itemCount: emittedEntries.length,
+      filename,
       foundKeys,
       missingKeys,
     };

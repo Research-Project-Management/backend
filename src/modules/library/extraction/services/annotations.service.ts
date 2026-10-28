@@ -184,6 +184,18 @@ export class AnnotationsService {
         );
 
         if (deleted) {
+          await helpers.appendChange(eventScope, {
+            entityType: 'Annotation',
+            entityId: id,
+            action: 'delete',
+            version: existing.version,
+            data: {
+              id,
+              attachmentId: existing.attachmentId,
+              itemId: attachment?.itemId,
+            },
+          });
+
           await helpers.recordTombstone(eventScope, {
             entityType: 'Annotation',
             entityId: id,
@@ -195,6 +207,8 @@ export class AnnotationsService {
             'library.annotation.deleted',
             {
               id,
+              attachmentId: existing.attachmentId,
+              itemId: attachment?.itemId,
               deletedAt: new Date(),
             },
           );
@@ -240,7 +254,7 @@ export class AnnotationsService {
         const changes: Array<{
           entityType: string;
           entityId: string;
-          action: 'create' | 'update';
+          action: 'create' | 'update' | 'delete';
           version: number;
           data: unknown;
         }> = [
@@ -257,6 +271,17 @@ export class AnnotationsService {
             action: 'update' as const,
             version: annotation.version,
             data: annotation,
+          })),
+          ...result.deleted.map((id) => ({
+            entityType: 'Annotation',
+            entityId: id,
+            action: 'delete' as const,
+            version: 0,
+            data: {
+              id,
+              attachmentId,
+              itemId: attachment?.itemId,
+            },
           })),
         ];
 
@@ -318,6 +343,8 @@ export class AnnotationsService {
             eventType: 'library.annotation.deleted',
             payload: {
               id,
+              attachmentId,
+              itemId: attachment?.itemId,
               deletedAt,
             },
           })),

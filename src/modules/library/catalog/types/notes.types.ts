@@ -32,6 +32,7 @@ export interface UpdateNoteData {
 
 export interface ExtractLiteratureNoteResult {
   success: boolean;
+  noteId?: string;
   totalExtracted: number;
   message?: string;
   literatureNote?: NoteEntity;

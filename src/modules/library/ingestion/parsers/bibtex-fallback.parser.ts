@@ -69,69 +69,97 @@ export function extractBibtexFields(
   let pos = 0;
   const len = body.length;
 
+  const keyStickyRe = /\s*([a-zA-Z0-9_:-]+)\s*=\s*/y;
+  const keySearchRe = /([a-zA-Z0-9_:-]+)\s*=\s*/g;
+  const wsStickyRe = /\s+/y;
+  const bareStickyRe = /([^,\n}#\s]+)/y;
+  const concatStickyRe = /\s*#\s*/y;
+  const commaStickyRe = /\s*,\s*/y;
+
   while (pos < len) {
-    const keyMatch = body.slice(pos).match(/^\s*([a-zA-Z_-]+)\s*=\s*/);
+    keyStickyRe.lastIndex = pos;
+    let keyMatch = keyStickyRe.exec(body);
     if (!keyMatch) {
-      pos++;
-      continue;
+      keySearchRe.lastIndex = pos;
+      keyMatch = keySearchRe.exec(body);
+      if (!keyMatch) break;
+      pos = keySearchRe.lastIndex;
+    } else {
+      pos = keyStickyRe.lastIndex;
     }
 
     const key = keyMatch[1].toLowerCase();
-    pos += keyMatch[0].length;
-
     if (pos >= len) break;
 
     const shouldExtract = !allowedKeys || allowedKeys.has(key);
-    const char = body[pos];
-    let value = '';
+    const segments: string[] = [];
 
-    if (char === '{') {
-      pos++;
-      let depth = 1;
-      const start = pos;
-      while (pos < len && depth > 0) {
-        if (body[pos] === '\\') {
-          pos += 2;
-          continue;
-        }
-        if (body[pos] === '{') depth++;
-        else if (body[pos] === '}') depth--;
+    while (pos < len) {
+      wsStickyRe.lastIndex = pos;
+      if (wsStickyRe.exec(body)) {
+        pos = wsStickyRe.lastIndex;
+      }
+      if (pos >= len) break;
+
+      const char = body[pos];
+      if (char === '{') {
         pos++;
-      }
-      if (shouldExtract) {
-        value = body.slice(start, depth === 0 ? pos - 1 : pos);
-      }
-    } else if (char === '"') {
-      pos++;
-      const start = pos;
-      while (pos < len && body[pos] !== '"') {
-        if (body[pos] === '\\') {
-          pos += 2;
-          continue;
+        let depth = 1;
+        const start = pos;
+        while (pos < len && depth > 0) {
+          if (body[pos] === '\\') {
+            pos += 2;
+            continue;
+          }
+          if (body[pos] === '{') depth++;
+          else if (body[pos] === '}') depth--;
+          pos++;
         }
-        pos++;
-      }
-      if (shouldExtract) {
-        value = body.slice(start, pos);
-      }
-      if (pos < len && body[pos] === '"') pos++;
-    } else {
-      const bareMatch = body.slice(pos).match(/^([^,\n}\s]+)/);
-      if (bareMatch) {
         if (shouldExtract) {
-          value = bareMatch[1];
+          segments.push(body.slice(start, depth === 0 ? pos - 1 : pos));
         }
-        pos += bareMatch[0].length;
+      } else if (char === '"') {
+        pos++;
+        const start = pos;
+        while (pos < len && body[pos] !== '"') {
+          if (body[pos] === '\\') {
+            pos += 2;
+            continue;
+          }
+          pos++;
+        }
+        if (shouldExtract) {
+          segments.push(body.slice(start, pos));
+        }
+        if (pos < len && body[pos] === '"') pos++;
+      } else {
+        bareStickyRe.lastIndex = pos;
+        const bareMatch = bareStickyRe.exec(body);
+        if (bareMatch) {
+          if (shouldExtract) {
+            segments.push(bareMatch[1]);
+          }
+          pos = bareStickyRe.lastIndex;
+        } else {
+          break;
+        }
       }
+
+      concatStickyRe.lastIndex = pos;
+      if (concatStickyRe.exec(body)) {
+        pos = concatStickyRe.lastIndex;
+        continue;
+      }
+      break;
     }
 
     if (shouldExtract) {
-      fields[key] = value.trim();
+      fields[key] = segments.join('').trim();
     }
 
-    const commaMatch = body.slice(pos).match(/^\s*,\s*/);
-    if (commaMatch) {
-      pos += commaMatch[0].length;
+    commaStickyRe.lastIndex = pos;
+    if (commaStickyRe.exec(body)) {
+      pos = commaStickyRe.lastIndex;
     }
   }
 

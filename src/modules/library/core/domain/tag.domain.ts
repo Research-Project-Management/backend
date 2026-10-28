@@ -186,6 +186,10 @@ export function cleanSingleTag(rawTag: string): string | null {
   }
 
   // 5. Reject bibliographic identifiers & web links (DOI, PMID, PMC, ISBN, ISSN, arXiv ID, URLs)
+  const isDotNetTechTag =
+    /^(?:(?:asp|ml|vb|f#|c#|ado|json|rx|quartz|akka|infer|math|paint|spring|castle|nhibernate|log4|lucene|microsoft)\s*)?\.net(?:\s+(?:core|framework|maui|standard|native|runtime|sdk|cli|ef|\d+(?:\.\d+)?))?$/i.test(
+      tag,
+    );
   if (
     /^(?:doi[:\s/]|https?:\/\/(?:dx\.)?doi\.org\/)/i.test(tag) ||
     /^10\.\d{4,9}\//i.test(tag) ||
@@ -198,7 +202,7 @@ export function cleanSingleTag(rawTag: string): string | null {
     /^www\./i.test(tag) ||
     /^downloaded\s+(?:from|on|by)\b/i.test(tag) ||
     /@/.test(tag) ||
-    /\.(?:com|org|net|edu|gov|de|uk|fr|cn)\b/i.test(tag)
+    (/\.(?:com|org|net|edu|gov|de|uk|fr|cn)\b/i.test(tag) && !isDotNetTechTag)
   ) {
     return null;
   }

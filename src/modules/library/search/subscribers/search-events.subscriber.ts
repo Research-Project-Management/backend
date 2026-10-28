@@ -59,7 +59,7 @@ export class SearchEventsSubscriber {
     }
   }
 
-  @OnEvent('library.attachment.pages.extracted', { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_PAGES_EXTRACTED, { async: true })
   async handleAttachmentPagesExtracted(
     event:
       | DomainEventEnvelope<{
@@ -99,8 +99,21 @@ export class SearchEventsSubscriber {
   }
 
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_DELETED, { async: true })
+  async handleItemDeleted(event: DomainEventEnvelope): Promise<void> {
+    const scopeId = this.resolveScopeId(event);
+    if (!scopeId || !this.searchService?.invalidateFacetsCache) return;
+
+    try {
+      await this.searchService.invalidateFacetsCache(scopeId);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[SearchEvents] Facet cache invalidation error on ITEM_DELETED: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_PURGED, { async: true })
-  async handleItemDeletedOrPurged(event: DomainEventEnvelope): Promise<void> {
+  async handleItemPurged(event: DomainEventEnvelope): Promise<void> {
     const payload = event?.payload as
       | {
           id?: string;
@@ -146,6 +159,14 @@ export class SearchEventsSubscriber {
     }
 
     await Promise.allSettled(cleanupTasks);
+  }
+
+  async handleItemDeletedOrPurged(event: DomainEventEnvelope): Promise<void> {
+    if (event?.eventType === LIBRARY_EVENT_TYPES.ITEM_DELETED) {
+      await this.handleItemDeleted(event);
+      return;
+    }
+    await this.handleItemPurged(event);
   }
 
   @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_DELETED, { async: true })

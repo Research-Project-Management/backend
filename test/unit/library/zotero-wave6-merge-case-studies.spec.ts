@@ -366,12 +366,16 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
               data,
             }: {
               where: { id: { in: string[] } };
-              data: { attachmentId: string };
+              data: { attachmentId?: string; deletedAt?: Date };
             }) => {
-              movedAnnotationUpdates.push({
-                ids: where.id.in,
-                targetAttachmentId: data.attachmentId,
-              });
+              if (data.deletedAt) {
+                deletedAnnotationIds.push(...where.id.in);
+              } else if (data.attachmentId) {
+                movedAnnotationUpdates.push({
+                  ids: where.id.in,
+                  targetAttachmentId: data.attachmentId,
+                });
+              }
               return { count: where.id.in.length };
             },
           ),

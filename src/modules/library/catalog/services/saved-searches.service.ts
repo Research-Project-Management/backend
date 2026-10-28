@@ -144,6 +144,9 @@ export class SavedSearchesService {
     if (!Array.isArray(searches) || searches.length === 0) return searches;
     await Promise.all(
       searches.map(async (saved) => {
+        if (typeof saved.cachedCount === 'number') {
+          return;
+        }
         if (
           !saved.conditions ||
           typeof saved.conditions !== 'object' ||
@@ -161,7 +164,7 @@ export class SavedSearchesService {
             effectiveProj,
           );
           const count = await this.repo.countMatchingItems(where);
-          if (typeof count === 'number' && count !== saved.cachedCount) {
+          if (typeof count === 'number') {
             saved.cachedCount = count;
             await this.repo
               .updateCachedCount(saved.id, count)
@@ -278,7 +281,12 @@ export class SavedSearchesService {
     return this.findById(userId, id, projectId);
   }
 
-  async delete(userId: string, id: string, projectId?: string) {
+  async delete(
+    userId: string,
+    id: string,
+    projectId?: string,
+    expectedVersion?: number,
+  ) {
     const existing = await this.findById(userId, id, projectId);
     const effectiveProjectId = normalizeProjectScopeId(
       projectId || existing.projectId,
@@ -287,7 +295,13 @@ export class SavedSearchesService {
     if (this.libraryTx) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
-          await this.repo.softDelete(userId, id, projectId, tx);
+          await this.repo.softDelete(
+            userId,
+            id,
+            projectId,
+            tx,
+            expectedVersion,
+          );
           const eventScope = { userId, projectId: effectiveProjectId };
           await helpers.recordTombstone(eventScope, {
             entityType: 'SavedSearch',
@@ -307,7 +321,13 @@ export class SavedSearchesService {
       );
       await this.invalidateCache(userId, effectiveProjectId);
     } else {
-      await this.repo.softDelete(userId, id, projectId);
+      await this.repo.softDelete(
+        userId,
+        id,
+        projectId,
+        undefined,
+        expectedVersion,
+      );
       await this.invalidateCache(userId, effectiveProjectId);
     }
 
@@ -336,16 +356,27 @@ export class SavedSearchesService {
     );
     const [count, sampleResult] = await Promise.all([
       this.repo.countMatchingItems(where),
-      this.repo.findMatchingItems(where, {
-        limit: 5,
-        sortBy: dto.sortBy as ExecuteSavedSearchOptions['sortBy'],
-        sortOrder: dto.sortOrder,
-      }),
+      this.repo.findMatchingItems(
+        where,
+        {
+          limit: 5,
+          sortBy: dto.sortBy as ExecuteSavedSearchOptions['sortBy'],
+          sortOrder: dto.sortOrder,
+          userId,
+        },
+        userId,
+      ),
     ]);
 
     return {
       count,
-      sampleItems: ItemsMapper.toDomainList(sampleResult.items),
+      sampleItems: sampleResult.items.map(
+        (item) =>
+          ItemsMapper.mapFlattenedState(
+            item as unknown as Record<string, unknown>,
+            userId,
+          ) ?? ItemsMapper.toDomain(item),
+      ),
     };
   }
 
@@ -378,13 +409,18 @@ export class SavedSearchesService {
 
     const [count, results] = await Promise.all([
       this.repo.countMatchingItems(where),
-      this.repo.findMatchingItems(where, {
-        limit: dto.limit,
-        page: dto.page,
-        cursor: dto.cursor,
-        sortBy,
-        sortOrder,
-      }),
+      this.repo.findMatchingItems(
+        where,
+        {
+          limit: dto.limit,
+          page: dto.page,
+          cursor: dto.cursor,
+          sortBy,
+          sortOrder,
+          userId,
+        },
+        userId,
+      ),
     ]);
 
     // Update cached count asynchronously
@@ -395,7 +431,13 @@ export class SavedSearchesService {
 
     return {
       savedSearch,
-      items: ItemsMapper.toDomainList(results.items),
+      items: results.items.map(
+        (item) =>
+          ItemsMapper.mapFlattenedState(
+            item as unknown as Record<string, unknown>,
+            userId,
+          ) ?? ItemsMapper.toDomain(item),
+      ),
       meta: {
         totalCount: count,
         cursor: results.nextCursor,

@@ -62,6 +62,25 @@ const PRIMARY_CREATOR_ROLES: Set<string> = new Set(
 );
 
 export class CslJsonMapper {
+  private static readonly cslMappingCache = new WeakMap<
+    object,
+    { versionKey: string; csl: CslItemData }
+  >();
+
+  private static computeCacheVersionKey(item: CslSourceItem): string | null {
+    if (!item || typeof item !== 'object') return null;
+    if (!item.id && !item.citationKey) return null;
+    if (item.version === undefined && !item.updatedAt) return null;
+    const ver = item.version !== undefined && item.version !== null ? String(item.version) : '';
+    const upd =
+      item.updatedAt instanceof Date
+        ? String(item.updatedAt.getTime())
+        : typeof item.updatedAt === 'string'
+          ? item.updatedAt
+          : '';
+    return `${item.id || ''}::${item.citationKey || ''}::${ver}::${upd}`;
+  }
+
   static getAuthorNames(item: {
     contributors?: ContributorLike[];
     creators?: ContributorLike[];
@@ -109,6 +128,14 @@ export class CslJsonMapper {
   }
 
   static toCsl(item: CslSourceItem): CslItemData {
+    const cacheKey = this.computeCacheVersionKey(item);
+    if (cacheKey && item && typeof item === 'object') {
+      const cached = this.cslMappingCache.get(item);
+      if (cached && cached.versionKey === cacheKey) {
+        return { ...cached.csl };
+      }
+    }
+
     const rawType = item.itemType || 'journalArticle';
     const cslType = ITEM_TYPE_TO_CSL_TYPE[rawType] || 'article';
 
@@ -467,6 +494,11 @@ export class CslJsonMapper {
           }
         }
       }
+    }
+
+    if (cacheKey && item && typeof item === 'object') {
+      this.cslMappingCache.set(item, { versionKey: cacheKey, csl });
+      return { ...csl };
     }
 
     return csl;

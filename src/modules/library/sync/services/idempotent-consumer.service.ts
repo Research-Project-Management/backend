@@ -6,6 +6,7 @@ import {
   IdempotentConsumerOptions,
   IdempotentResult,
 } from '@/modules/library/core/ports/idempotent-consumer.port';
+import { OutboxRepository } from '../repositories/outbox.repository';
 
 export type { IdempotentConsumerOptions, IdempotentResult };
 
@@ -31,13 +32,22 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
   private readonly memoryStore = new Map<string, MemoryInboxEntry>();
   private static readonly MAX_MEMORY_STORE_SIZE = 5000;
 
-  constructor(@Optional() private readonly redis?: RedisCacheService) {}
+  constructor(
+    @Optional() private readonly redis?: RedisCacheService,
+    @Optional() private readonly outboxRepo?: OutboxRepository,
+  ) {}
 
   /**
    * Generates standardized inbox deduplication key.
    */
   public buildKey(consumer: string, eventId: string): string {
     return `library:inbox:${consumer}:${eventId}`;
+  }
+
+  private extractDbIdempotencyKey(key: string): string {
+    return key.startsWith('library:inbox:')
+      ? key.slice('library:inbox:'.length)
+      : key;
   }
 
   /**
@@ -129,6 +139,26 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       }
     }
 
+    // 3. Check durable IdempotencyRecord fallback when Redis is unavailable
+    if (this.outboxRepo) {
+      try {
+        const dbKey = `${consumer}:${eventId}`;
+        const record = await this.outboxRepo.findIdempotencyRecord(dbKey);
+        if (
+          record &&
+          record.status === 'completed' &&
+          new Date(record.expiresAt).getTime() > Date.now()
+        ) {
+          return true;
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `Error checking IdempotencyRecord for ${key}: ${errMsg}`,
+        );
+      }
+    }
+
     return false;
   }
 
@@ -148,6 +178,17 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Failed to reset Redis inbox key ${key}: ${errMsg}`);
+      }
+    }
+
+    if (this.outboxRepo) {
+      try {
+        await this.outboxRepo.deleteIdempotencyRecords(`${consumer}:${eventId}`);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `Failed to reset IdempotencyRecord for ${key}: ${errMsg}`,
+        );
       }
     }
   }
@@ -226,7 +267,43 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       }
     }
 
-    // 2. In-Memory Fallback Path
+    // 2. Durable IdempotencyRecord Fallback when Redis is unavailable
+    if (this.outboxRepo) {
+      try {
+        const dbKey = this.extractDbIdempotencyKey(key);
+        const existingRecord =
+          await this.outboxRepo.findIdempotencyRecord(dbKey);
+        if (
+          existingRecord &&
+          new Date(existingRecord.expiresAt).getTime() > now
+        ) {
+          if (existingRecord.status === 'completed') {
+            this.setMemoryEntry(key, 'completed', 86400);
+            return { acquired: false, reason: 'ALREADY_COMPLETED' };
+          }
+          if (
+            existingRecord.status === 'processing' ||
+            existingRecord.status === 'in_progress'
+          ) {
+            this.setMemoryEntry(key, 'processing', leaseTtlSeconds);
+            return { acquired: false, reason: 'IN_FLIGHT' };
+          }
+        }
+        const expiresAt = new Date(now + leaseTtlSeconds * 1000);
+        await this.outboxRepo.upsertIdempotencyRecord(
+          dbKey,
+          'processing',
+          expiresAt,
+        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `IdempotencyRecord fallback lease check skipped for ${key}: ${errMsg}`,
+        );
+      }
+    }
+
+    // 3. In-Memory Fallback Path
     const memEntry = this.getMemoryEntry(key);
     if (memEntry) {
       if (memEntry.status === 'completed') {
@@ -289,12 +366,30 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
           } else {
             await client.set(key, completedPayload, 'EX', retentionTtlSeconds);
           }
+          return;
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
           this.logger.warn(
             `Failed to mark event completed in Redis: ${errMsg}`,
           );
         }
+      }
+    }
+
+    if (this.outboxRepo) {
+      try {
+        const dbKey = this.extractDbIdempotencyKey(key);
+        const expiresAt = new Date(Date.now() + retentionTtlSeconds * 1000);
+        await this.outboxRepo.upsertIdempotencyRecord(
+          dbKey,
+          'completed',
+          expiresAt,
+        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `Failed to mark IdempotencyRecord completed for ${key}: ${errMsg}`,
+        );
       }
     }
   }
@@ -334,10 +429,26 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
           } else {
             await client.del(key);
           }
+          return;
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
           this.logger.warn(`Failed to release lease in Redis: ${errMsg}`);
         }
+      }
+    }
+
+    if (this.outboxRepo) {
+      try {
+        const dbKey = this.extractDbIdempotencyKey(key);
+        await this.outboxRepo.deleteIdempotencyRecords(dbKey, [
+          'processing',
+          'in_progress',
+        ]);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `Failed to release IdempotencyRecord lease for ${key}: ${errMsg}`,
+        );
       }
     }
   }

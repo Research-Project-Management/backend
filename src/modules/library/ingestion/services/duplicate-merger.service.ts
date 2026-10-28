@@ -27,6 +27,7 @@ import {
   invalidateMergedItemsCache,
   recordMergedAssetSyncEventsInTx,
   softDeleteDuplicatesAndRecordOutboxInTx,
+  updateAndReloadMergedPrimaryInTx,
 } from '@/modules/library/ingestion/domain/duplicate-merge.helper';
 import { UserId, ProjectId } from '@/modules/library/core/types/branded.types';
 import { asMetaObject } from './duplicate-detector.service';
@@ -124,11 +125,25 @@ export class DuplicateMergerService {
     }
 
     if (dto.fieldSelections) {
-      for (const field of Object.keys(dto.fieldSelections)) {
+      for (const [field, val] of Object.entries(dto.fieldSelections)) {
         if (SYSTEM_RESERVED_MERGE_KEYS.has(field)) {
           throw new BadRequestException(
             `Field "${field}" is a system-reserved key and is not allowed in merge fieldSelections`,
           );
+        }
+        if (
+          field === 'extraFields' &&
+          val &&
+          typeof val === 'object' &&
+          !Array.isArray(val)
+        ) {
+          for (const efKey of Object.keys(val as Record<string, unknown>)) {
+            if (SYSTEM_RESERVED_MERGE_KEYS.has(efKey)) {
+              throw new BadRequestException(
+                `Field "${efKey}" is a system-reserved key and is not allowed in merge fieldSelections`,
+              );
+            }
+          }
         }
       }
     }
@@ -193,7 +208,7 @@ export class DuplicateMergerService {
               hash = (hash << 5) - hash + lockTargetId.charCodeAt(i);
               hash |= 0;
             }
-            const lockKey = hash & 0x7fffffff;
+            const lockKey = BigInt(hash & 0x7fffffff);
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
           }
         } catch (err) {
@@ -264,13 +279,44 @@ export class DuplicateMergerService {
         );
 
         const primaryMeta = { ...asMetaObject(primary.metadata) };
+        delete primaryMeta.extraFields;
+        delete primaryMeta.metadata;
         const rawSelections = dto.fieldSelections || {};
         const {
           authors: _selectedAuthors,
           creators: _selectedCreators,
           contributors: _selectedContributors,
-          ...scalarSelections
-        } = rawSelections;
+          extraFields: selectedExtraFields,
+          metadata: _selectedMetadata,
+          ...topScalarSelections
+        } = rawSelections as Record<string, unknown>;
+        const unpackedExtraSelections: Record<string, unknown> = {};
+        if (
+          selectedExtraFields &&
+          typeof selectedExtraFields === 'object' &&
+          !Array.isArray(selectedExtraFields)
+        ) {
+          for (const [efKey, efVal] of Object.entries(
+            selectedExtraFields as Record<string, unknown>,
+          )) {
+            if (
+              !SYSTEM_RESERVED_MERGE_KEYS.has(efKey) &&
+              efKey !== 'extraFields' &&
+              efKey !== 'metadata' &&
+              efKey !== 'authors' &&
+              efKey !== 'creators' &&
+              efKey !== 'contributors'
+            ) {
+              unpackedExtraSelections[efKey] = efVal;
+            }
+          }
+        }
+        const scalarSelections: Record<string, unknown> = {
+          ...unpackedExtraSelections,
+          ...topScalarSelections,
+        };
+        delete scalarSelections.extraFields;
+        delete scalarSelections.metadata;
         const backfillFields: Record<string, unknown> = {};
 
         const pipelineCtx: DuplicateMergeStepContext = {
@@ -318,15 +364,23 @@ export class DuplicateMergerService {
           (primary as { contributors?: Array<Record<string, unknown>> })
             .contributors ??
           [];
-        const derivedFirstAuthor = deriveFirstAuthor({
-          contributors: primaryContributors,
-          creators: Array.isArray(primaryMeta.creators)
-            ? (primaryMeta.creators as Array<Record<string, unknown>>)
-            : undefined,
-          authors: Array.isArray(primaryMeta.authors)
-            ? (primaryMeta.authors as Array<string | Record<string, unknown>>)
-            : undefined,
-        });
+        const derivedFirstAuthor =
+          Array.isArray(primaryContributors) &&
+          primaryContributors.length === 0 &&
+          backfillFields.firstAuthor === null
+            ? null
+            : deriveFirstAuthor({
+                contributors: primaryContributors,
+                creators: Array.isArray(primaryMeta.creators)
+                  ? (primaryMeta.creators as Array<Record<string, unknown>>)
+                  : undefined,
+                authors: Array.isArray(primaryMeta.authors)
+                  ? (primaryMeta.authors as Array<
+                      string | Record<string, unknown>
+                    >)
+                  : undefined,
+                itemType: String(effectiveMergedItemType),
+              });
 
         const [noteCount, attachmentCount] = await Promise.all([
           tx.note?.count ? tx.note.count({
@@ -344,12 +398,24 @@ export class DuplicateMergerService {
             duplicates: duplicates as Array<Record<string, unknown>>,
             effectiveMergedItemType,
             derivedFirstAuthor,
+            finalContributors: primaryContributors as Array<
+              Record<string, unknown>
+            >,
             noteCount,
             attachmentCount,
             backfillFields,
             scalarSelections,
             primaryMeta,
           });
+
+        const explicitlyClearedFields = new Set<string>(
+          Object.entries(scalarSelections)
+            .filter(
+              ([, v]) =>
+                v === null || (typeof v === 'string' && v.trim() === ''),
+            )
+            .map(([k]) => k),
+        );
 
         await syncMergedIdentifiersInTx({
           tx,
@@ -358,6 +424,7 @@ export class DuplicateMergerService {
           primaryMeta,
           topLevelData,
           primaryDoi: primary.doi,
+          explicitlyClearedFields,
         });
 
         const mergeMemento = createDuplicateMergeMemento({
@@ -369,6 +436,7 @@ export class DuplicateMergerService {
           mergedMetadataFields: Object.keys(backfillFields),
           reassignedNoteIds: initialNotes.map((n) => n.id),
           reassignedAttachmentIds: initialAttachments.map((a) => a.id),
+          reassignedItemMetadata: pipelineCtx.reassignedItemMetadata,
           mergedCreatorCount: Array.isArray(primaryContributors)
             ? primaryContributors.length
             : 0,
@@ -385,14 +453,14 @@ export class DuplicateMergerService {
           memento: mergeMemento,
         });
 
-        const updatedPrimary = await tx.item.update({
-          where: { id: primary.id },
-          data: {
-            ...topLevelData,
-            metadata: primaryMeta as Prisma.InputJsonValue,
-            version: { increment: 1 },
-          },
-        });
+        const { updatedPrimary, reloadedPrimary } =
+          await updateAndReloadMergedPrimaryInTx({
+            tx,
+            primaryId: primary.id,
+            userId: String(userId),
+            topLevelData,
+            primaryMeta,
+          });
 
         await helpers.publishOutbox(
           eventScope,
@@ -428,26 +496,17 @@ export class DuplicateMergerService {
           }
         }
 
-        const reloadedPrimary = await tx.item.findUnique({
-          where: { id: primary.id },
-          include: {
-            contributors: { orderBy: { orderIndex: 'asc' } },
-            collectionItems: { include: { collection: true } },
-            itemTags: { include: { tag: true } },
-            notesList: { where: { deletedAt: null } },
-            attachments: { include: { revisions: true } },
-          },
-        });
-
         const finalPrimary = reloadedPrimary ?? updatedPrimary;
+        const domainPrimary = ItemsMapper.toDomain(
+          finalPrimary as unknown as Parameters<typeof ItemsMapper.toDomain>[0],
+          String(userId),
+        );
         await helpers.appendChange(eventScope, {
           entityType: 'Item',
           entityId: primary.id,
           action: 'update',
           version: updatedPrimary.version,
-          data: ItemsMapper.toDomain(
-            finalPrimary as unknown as Parameters<typeof ItemsMapper.toDomain>[0],
-          ),
+          data: domainPrimary,
         });
         const audit: PrismaMergeAuditTrail = AuditSnapshotBuilder.build({
           primary,
@@ -460,7 +519,7 @@ export class DuplicateMergerService {
         });
 
         return {
-          primaryItem: finalPrimary,
+          primaryItem: domainPrimary,
           mergedCount: duplicates.length,
           softDeletedItemIds: uniqueDupIds,
           audit,
@@ -468,6 +527,25 @@ export class DuplicateMergerService {
       },
     );
 
+    // Invalidate Redis cache immediately after DB transaction commits before slow S3 cleanup
+    if (this.cacheCoordinator) {
+      await this.cacheCoordinator.invalidateForWrite({
+        userId: String(userId),
+        projectId: effectiveProjectId,
+        itemIds: [primary.id, ...uniqueDupIds],
+      });
+    } else {
+      await invalidateMergedItemsCache({
+        cache: this.cache,
+        logger: this.logger,
+        primaryId: primary.id,
+        uniqueDupIds,
+        userId: String(userId),
+        effectiveProjectId,
+      });
+    }
+
+    // Retain offloadedFileIdsToDelete blobs in storagePort so undoMerge can restore ItemMetadata Claim Check payloads intact.
     if (reassignedOrphanFileIds.length > 0) {
       if (this.extractionGateway?.cleanupOrphanedFiles) {
         await this.extractionGateway.cleanupOrphanedFiles(
@@ -486,25 +564,6 @@ export class DuplicateMergerService {
           }
         }
       }
-    }
-
-    // Retain offloadedFileIdsToDelete blobs in storagePort so undoMerge can restore ItemMetadata Claim Check payloads intact.
-
-    if (this.cacheCoordinator) {
-      await this.cacheCoordinator.invalidateForWrite({
-        userId: String(userId),
-        projectId: effectiveProjectId,
-        itemIds: [primary.id, ...uniqueDupIds],
-      });
-    } else {
-      await invalidateMergedItemsCache({
-        cache: this.cache,
-        logger: this.logger,
-        primaryId: primary.id,
-        uniqueDupIds,
-        userId: String(userId),
-        effectiveProjectId,
-      });
     }
 
     return txResult;

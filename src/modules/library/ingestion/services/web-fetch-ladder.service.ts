@@ -38,6 +38,9 @@ import {
 } from '@/modules/library/core';
 
 import { WebMirrorResolverService } from './web-mirror-resolver.service';
+import { CrossRefProvider } from '@/modules/library/ingestion/providers/crossref.provider';
+import { ArxivProvider } from '@/modules/library/ingestion/providers/arxiv.provider';
+import { OpenAlexProvider } from '@/modules/library/ingestion/providers/openalex.provider';
 
 export { WebMirrorResolverService };
 
@@ -84,10 +87,19 @@ export class WebFetchLadderService implements IWebFetchPort {
     @Optional() private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
     @Optional() mirrorResolver?: WebMirrorResolverService,
+    @Optional() private readonly crossRefProvider?: CrossRefProvider,
+    @Optional() private readonly arxivProvider?: ArxivProvider,
+    @Optional() private readonly openAlexProvider?: OpenAlexProvider,
   ) {
     this.mirrorResolver =
       mirrorResolver ??
-      new WebMirrorResolverService(this.httpClient, this.configService);
+      new WebMirrorResolverService(
+        this.httpClient,
+        this.configService,
+        this.crossRefProvider,
+        this.arxivProvider,
+        this.openAlexProvider,
+      );
   }
 
   private isSsrfError(err: unknown): boolean {
@@ -560,20 +572,34 @@ export class WebFetchLadderService implements IWebFetchPort {
       );
       const stealthRes = await this.executeStealthFetch(canonicalUrl);
       if (stealthRes?.text) {
-        this.logger.log(
-          `[Ladder Step 3] Stealth fetch succeeded for "${canonicalUrl}".`,
+        const stealthBlocked =
+          this.verifier?.detectBlockedStatus(
+            finalUrl,
+            stealthRes.text,
+            stealthRes.status,
+          )?.isBlocked || isBotChallengePage(stealthRes.text);
+        if (!stealthBlocked) {
+          this.logger.log(
+            `[Ladder Step 3] Stealth fetch succeeded for "${canonicalUrl}".`,
+          );
+          return {
+            url: canonicalUrl,
+            finalUrl,
+            status: stealthRes.status,
+            isBlocked: false,
+            isPdf: false,
+            bodyText: stealthRes.text,
+            ladderStepReached: 3,
+            derivedIdentifier,
+            warnings,
+          };
+        }
+        const blockedWarning =
+          'Stealth proxy returned a WAF / Cloudflare bot-challenge page.';
+        warnings.push(blockedWarning);
+        this.logger.warn(
+          `[Ladder Step 3] ${blockedWarning} Escalating to Ladder Step 4...`,
         );
-        return {
-          url: canonicalUrl,
-          finalUrl,
-          status: stealthRes.status,
-          isBlocked: false,
-          isPdf: false,
-          bodyText: stealthRes.text,
-          ladderStepReached: 3,
-          derivedIdentifier,
-          warnings,
-        };
       }
     }
 

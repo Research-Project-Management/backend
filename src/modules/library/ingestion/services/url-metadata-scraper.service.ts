@@ -85,7 +85,7 @@ export class UrlMetadataScraperService {
     if (this.ssrfGuard) {
       await this.ssrfGuard.assertSafeUrl(url);
     } else {
-      MetadataRoutingPolicy.validateUrl(url);
+      await MetadataRoutingPolicy.assertSafeUrl(url);
     }
   }
 
@@ -161,21 +161,36 @@ export class UrlMetadataScraperService {
       }
 
       if (ladderRes.mirrorMetadata) {
-        const m = ladderRes.mirrorMetadata;
+        const m = ladderRes.mirrorMetadata as typeof ladderRes.mirrorMetadata &
+          Partial<ScrapedUrlResult>;
         return {
           url: canonicalUrl,
           isPdf: false,
           filename: slugHint.filename,
           title: m.title || slugHint.title,
           authors: m.authors,
-          creators: m.authors?.map((a, idx) =>
-            this.htmlMetaTagExtractor.toCreator(a, idx, 'author'),
-          ),
+          creators:
+            m.creators && m.creators.length > 0
+              ? m.creators
+              : m.authors?.map((a, idx) =>
+                  this.htmlMetaTagExtractor.toCreator(a, idx, 'author'),
+                ),
           doi: m.doi || urlDoi || undefined,
+          arxivId: m.arxivId,
           pmid: m.pmid,
+          pmcid: m.pmcid,
+          isbn: m.isbn,
+          issn: m.issn,
           year: m.year,
+          publicationDate: m.publicationDate,
           publicationTitle: m.journal,
           journal: m.journal,
+          publisher: m.publisher,
+          volume: m.volume,
+          issue: m.issue,
+          pages: m.pages,
+          keywords: m.keywords,
+          itemType: m.itemType,
           abstract: m.abstract,
           pdfUrl: m.pdfUrl,
           confidence: 0.95,

@@ -11,6 +11,7 @@ import {
 } from './full-text.provider';
 import { SearchItemsQueryDto } from '@/modules/library/search/dto/search.dto';
 import { isProjectScopeId } from '@/modules/library/core';
+import { ItemsMapper } from '@/modules/library/catalog';
 
 @Injectable()
 export class SearchService {
@@ -60,8 +61,16 @@ export class SearchService {
         ? Math.max(directCount, pageCount)
         : Math.max(facetSum, pageCount);
 
+    const mappedItems = searchResult.items.map(
+      (item) =>
+        ItemsMapper.mapFlattenedState(
+          item as unknown as Record<string, unknown>,
+          userId,
+        ) ?? ItemsMapper.toDomain(item),
+    );
+
     return {
-      items: searchResult.items,
+      items: mappedItems,
       total: totalCount,
       facets,
       nextCursor: searchResult.nextCursor ?? null,
@@ -84,6 +93,11 @@ export class SearchService {
     pageIndex?: number,
     projectId?: string,
   ): Promise<PageAnchorMatch[]> {
+    const trimmed = term?.trim();
+    if (!trimmed) {
+      return [];
+    }
+
     const attachment = await this.repo.findAttachmentWithItem(attachmentId);
 
     if (!attachment) {
@@ -98,11 +112,7 @@ export class SearchService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    if (!term || !term.trim()) {
-      return [];
-    }
-
-    return this.fullText.searchPageAnchors(attachmentId, term, pageIndex);
+    return this.fullText.searchPageAnchors(attachmentId, trimmed, pageIndex);
   }
 
   async indexAttachmentPages(
@@ -114,5 +124,20 @@ export class SearchService {
 
   async invalidateFacetsCache(scopeId: string): Promise<void> {
     await this.repo.invalidateFacets(scopeId);
+  }
+
+  async indexItem(item: {
+    id: string;
+    userId?: string;
+    projectId?: string;
+  }): Promise<{ indexed: boolean }> {
+    const scopeId = item.projectId || item.userId;
+    if (typeof this.repo.refreshItemSearchIndex === 'function') {
+      return this.repo.refreshItemSearchIndex(item.id, scopeId);
+    }
+    if (scopeId) {
+      await this.invalidateFacetsCache(scopeId);
+    }
+    return { indexed: Boolean(item.id) };
   }
 }

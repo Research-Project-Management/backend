@@ -280,6 +280,7 @@ export async function recordMergedAssetSyncEventsInTx(params: {
         entityId: initNote.id,
         action: 'delete',
         version: 0,
+        data: { id: initNote.id, itemId: initNote.itemId },
       });
     }
   }
@@ -314,6 +315,7 @@ export async function recordMergedAssetSyncEventsInTx(params: {
         entityId: initAtt.id,
         action: 'delete',
         version: 0,
+        data: { id: initAtt.id, itemId: initAtt.itemId },
       });
     }
   }
@@ -336,6 +338,37 @@ export async function recordMergedAssetSyncEventsInTx(params: {
       }
     }
   }
+}
+
+export async function updateAndReloadMergedPrimaryInTx(params: {
+  tx: Prisma.TransactionClient;
+  primaryId: string;
+  userId: string;
+  topLevelData: Record<string, unknown>;
+  primaryMeta: Record<string, unknown>;
+}) {
+  const { tx, primaryId, userId, topLevelData, primaryMeta } = params;
+  const updatedPrimary = await tx.item.update({
+    where: { id: primaryId },
+    data: {
+      ...topLevelData,
+      metadata: primaryMeta as Prisma.InputJsonValue,
+      version: { increment: 1 },
+    },
+  });
+  const reloadedPrimary = await tx.item.findUnique({
+    where: { id: primaryId },
+    include: {
+      contributors: { orderBy: { orderIndex: 'asc' } },
+      collectionItems: { include: { collection: true } },
+      itemTags: { include: { tag: true } },
+      notesList: { where: { deletedAt: null } },
+      attachments: { include: { revisions: true } },
+      identifiers: true,
+      states: { where: { userId }, take: 1 },
+    },
+  });
+  return { updatedPrimary, reloadedPrimary };
 }
 
 export async function softDeleteDuplicatesAndRecordOutboxInTx(params: {

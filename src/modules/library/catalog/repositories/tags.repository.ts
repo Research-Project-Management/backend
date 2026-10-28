@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, TagType } from '@prisma/client';
 import { normalizeProjectScopeId } from '@/modules/library/core';
+import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { resolveOrCreateTags } from '@/modules/library/catalog/domain/command-payload.builder';
 
 @Injectable()
 export class TagsRepository {
@@ -81,6 +83,7 @@ export class TagsRepository {
     type: TagType = TagType.manual,
     projectId?: string | null,
     tx?: Prisma.TransactionClient,
+    shortcut?: number | null,
   ) {
     const client = this.getClient(tx);
     const effectiveProjectId = normalizeProjectScopeId(projectId);
@@ -95,10 +98,16 @@ export class TagsRepository {
         },
       });
       if (existingProjectTag) {
-        if (color !== undefined && existingProjectTag.color !== color) {
+        if (
+          (color !== undefined && existingProjectTag.color !== color) ||
+          (shortcut !== undefined && existingProjectTag.shortcut !== shortcut)
+        ) {
           return client.tag.update({
             where: { id: existingProjectTag.id },
-            data: { color },
+            data: {
+              ...(color !== undefined ? { color } : {}),
+              ...(shortcut !== undefined ? { shortcut } : {}),
+            },
           });
         }
         return existingProjectTag;
@@ -113,6 +122,7 @@ export class TagsRepository {
             color: defaultColor,
             type: resolvedType,
             projectId: effectiveProjectId,
+            ...(shortcut !== undefined ? { shortcut } : {}),
           },
         });
       } catch (err: unknown) {
@@ -141,10 +151,16 @@ export class TagsRepository {
     });
 
     if (existingPersonalTag) {
-      if (color !== undefined && existingPersonalTag.color !== color) {
+      if (
+        (color !== undefined && existingPersonalTag.color !== color) ||
+        (shortcut !== undefined && existingPersonalTag.shortcut !== shortcut)
+      ) {
         return client.tag.update({
           where: { id: existingPersonalTag.id },
-          data: { color },
+          data: {
+            ...(color !== undefined ? { color } : {}),
+            ...(shortcut !== undefined ? { shortcut } : {}),
+          },
         });
       }
       return existingPersonalTag;
@@ -159,6 +175,7 @@ export class TagsRepository {
           color: defaultColor,
           type: resolvedType,
           projectId: null,
+          ...(shortcut !== undefined ? { shortcut } : {}),
         },
       });
     } catch (err: unknown) {
@@ -187,6 +204,8 @@ export class TagsRepository {
       color?: string;
       type?: TagType;
       shortcut?: number | null;
+      expectedVersion?: number;
+      version?: number;
     },
     tx?: Prisma.TransactionClient,
     projectId?: string,
@@ -201,6 +220,35 @@ export class TagsRepository {
       where: scopeWhere,
     });
     if (!tag) return null;
+
+    const expectedVersion = data.expectedVersion ?? data.version;
+    if (expectedVersion !== undefined) {
+      if (client.tag.updateMany) {
+        const versionCheck = await client.tag.updateMany({
+          where: { ...scopeWhere, version: expectedVersion },
+          data: { version: { increment: 1 } },
+        });
+        if (versionCheck.count === 0) {
+          const fresh = await client.tag.findFirst({
+            where: scopeWhere,
+            select: { version: true },
+          });
+          throw new VersionMismatchException({
+            aggregateType: 'Tag',
+            entityId: id,
+            currentVersion: fresh?.version ?? tag.version ?? 1,
+            providedVersion: expectedVersion,
+          });
+        }
+      } else if (tag.version !== expectedVersion) {
+        throw new VersionMismatchException({
+          aggregateType: 'Tag',
+          entityId: id,
+          currentVersion: tag.version ?? 1,
+          providedVersion: expectedVersion,
+        });
+      }
+    }
 
     if (
       typeof data.shortcut === 'number' &&
@@ -275,13 +323,17 @@ export class TagsRepository {
         await client.tag.delete({
           where: { id: tag.id },
         });
-        return client.tag.update({
+        const updatedConflicting = await client.tag.update({
           where: { id: conflictingTag.id },
           data: {
             ...(data.color !== undefined ? { color: data.color } : {}),
             ...(data.type !== undefined ? { type: data.type } : {}),
             ...(data.shortcut !== undefined ? { shortcut: data.shortcut } : {}),
+            version: { increment: 1 },
           },
+        });
+        return Object.assign(updatedConflicting, {
+          _mergedFromTagId: tag.id,
         });
       }
     }
@@ -293,8 +345,26 @@ export class TagsRepository {
         ...(data.color !== undefined ? { color: data.color } : {}),
         ...(data.type !== undefined ? { type: data.type } : {}),
         ...(data.shortcut !== undefined ? { shortcut: data.shortcut } : {}),
+        ...(expectedVersion !== undefined ? {} : { version: { increment: 1 } }),
       },
     });
+  }
+
+  async findItemIdsByTagIds(
+    tagIds: string[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<string[]> {
+    if (!tagIds || tagIds.length === 0) return [];
+    const client = this.getClient(tx);
+    if (!client.itemTag?.findMany) return [];
+    const rows = await client.itemTag.findMany({
+      where: {
+        tagId: tagIds.length === 1 ? tagIds[0] : { in: tagIds },
+      },
+      select: { itemId: true },
+    });
+    if (!Array.isArray(rows)) return [];
+    return Array.from(new Set(rows.map((r: { itemId: string }) => r.itemId).filter(Boolean)));
   }
 
   async delete(
@@ -388,6 +458,153 @@ export class TagsRepository {
         tagId,
         itemId,
       },
+    });
+  }
+
+  async verifyTagAndItemInScope(
+    userId: string,
+    tagId: string,
+    itemId: string,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{ tagFound: boolean; itemFound: boolean }> {
+    const client = this.getClient(tx);
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const tagWhere: Prisma.TagWhereInput = effectiveProjectId
+      ? { id: tagId, projectId: effectiveProjectId }
+      : { id: tagId, userId, projectId: null };
+    const itemWhere: Prisma.ItemWhereInput = effectiveProjectId
+      ? { id: itemId, projectId: effectiveProjectId, deletedAt: null }
+      : { id: itemId, userId, projectId: null, deletedAt: null };
+
+    const [tag, item] = await Promise.all([
+      client.tag.findFirst({
+        where: tagWhere,
+        select: { id: true },
+      }),
+      client.item.findFirst({
+        where: itemWhere,
+        select: { id: true },
+      }),
+    ]);
+
+    return { tagFound: Boolean(tag), itemFound: Boolean(item) };
+  }
+
+  async assignTagToItem(
+    userId: string,
+    tagId: string,
+    itemId: string,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const { tagFound, itemFound } = await this.verifyTagAndItemInScope(
+      userId,
+      tagId,
+      itemId,
+      projectId,
+      tx,
+    );
+    if (!tagFound) {
+      throw new NotFoundException(`Tag ${tagId} not found in library`);
+    }
+    if (!itemFound) {
+      throw new NotFoundException(`Item ${itemId} not found in library`);
+    }
+    await this.assignToItem(tagId, itemId, tx);
+  }
+
+  async removeTagFromItem(
+    userId: string,
+    tagId: string,
+    itemId: string,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const { tagFound, itemFound } = await this.verifyTagAndItemInScope(
+      userId,
+      tagId,
+      itemId,
+      projectId,
+      tx,
+    );
+    if (!tagFound) {
+      throw new NotFoundException(`Tag ${tagId} not found in library`);
+    }
+    if (!itemFound) {
+      throw new NotFoundException(`Item ${itemId} not found in library`);
+    }
+    await this.removeFromItem(tagId, itemId, tx);
+  }
+
+  async syncItemTags(
+    userId: string,
+    itemId: string,
+    tagNames: string[],
+    defaultTagType: TagType = TagType.automatic,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<boolean> {
+    if (tagNames.length === 0) return false;
+    const client = this.getClient(tx);
+    const resolvedTags = await resolveOrCreateTags(
+      client,
+      userId,
+      tagNames,
+      defaultTagType,
+      normalizeProjectScopeId(projectId),
+    );
+    if (resolvedTags.length === 0) return false;
+
+    await client.itemTag.createMany({
+      data: resolvedTags.map((tag) => ({
+        tagId: tag.id,
+        itemId,
+        type: tag.type,
+      })),
+      skipDuplicates: true,
+    });
+    return true;
+  }
+
+  async mergeTagsIntoTarget(
+    sourceItemIds: string[],
+    targetItemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (sourceItemIds.length === 0) return;
+    const client = this.getClient(tx);
+    const [primaryTags, dupTags] = await Promise.all([
+      client.itemTag.findMany({
+        where: { itemId: targetItemId },
+        select: { tagId: true },
+      }),
+      client.itemTag.findMany({
+        where: { itemId: { in: sourceItemIds } },
+        select: { tagId: true },
+      }),
+    ]);
+    const primaryTagIds = new Set(primaryTags.map((it) => it.tagId));
+    const newTagIds = Array.from(
+      new Set(
+        dupTags
+          .map((dup) => dup.tagId)
+          .filter((tagId) => !primaryTagIds.has(tagId)),
+      ),
+    );
+
+    if (newTagIds.length > 0) {
+      await client.itemTag.createMany({
+        data: newTagIds.map((tagId) => ({
+          itemId: targetItemId,
+          tagId,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    await client.itemTag.deleteMany({
+      where: { itemId: { in: sourceItemIds } },
     });
   }
 }

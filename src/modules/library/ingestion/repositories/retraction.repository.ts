@@ -39,7 +39,7 @@ function parseItemMetadata(metadata: unknown): ItemRetractionMetadata {
  * Filter matching Zotero's retraction checking constraint:
  * Only papers with a non-empty DOI or PMID are eligible for retraction audits.
  */
-const RETRACTION_IDENTIFIER_FILTER = {
+const RETRACTION_IDENTIFIER_FILTER: Prisma.ItemWhereInput = {
   OR: [
     {
       doi: { not: null },
@@ -51,8 +51,26 @@ const RETRACTION_IDENTIFIER_FILTER = {
         not: Prisma.AnyNull,
       },
     },
+    {
+      identifiers: {
+        some: {
+          type: { in: ['doi', 'pmid', 'arxiv'] },
+        },
+      },
+    },
   ],
 };
+
+function findIdentVal(
+  identifiers: Array<{ type?: string; value?: string }> | undefined,
+  type: string,
+): string | null {
+  if (!Array.isArray(identifiers)) return null;
+  const match = identifiers.find(
+    (i) => (i.type || '').toLowerCase() === type.toLowerCase() && i.value?.trim(),
+  );
+  return match?.value?.trim() || null;
+}
 
 @Injectable()
 export class RetractionRepository {
@@ -102,6 +120,7 @@ export class RetractionRepository {
         title: true,
         doi: true,
         metadata: true,
+        identifiers: { select: { type: true, value: true } },
       },
     });
 
@@ -111,13 +130,22 @@ export class RetractionRepository {
         const topItem = item as {
           pmid?: string | null;
           isbn?: string | null;
+          identifiers?: Array<{ type?: string; value?: string }>;
         };
         return {
           id: item.id,
           title: item.title,
-          doi: item.doi,
-          pmid: topItem.pmid ?? meta.pmid ?? null,
-          isbn: topItem.isbn ?? meta.isbn ?? null,
+          doi: item.doi ?? findIdentVal(topItem.identifiers, 'doi'),
+          pmid:
+            topItem.pmid ??
+            meta.pmid ??
+            findIdentVal(topItem.identifiers, 'pmid') ??
+            null,
+          isbn:
+            topItem.isbn ??
+            meta.isbn ??
+            findIdentVal(topItem.identifiers, 'isbn') ??
+            null,
           isRetracted: Boolean(meta.isRetracted),
           retractionNature: meta.retractionNature ?? null,
           retractionCheckedAt: meta.retractionCheckedAt
@@ -151,6 +179,7 @@ export class RetractionRepository {
         doi: true,
         metadata: true,
         retractionCheckedAt: true,
+        identifiers: { select: { type: true, value: true } },
       },
       take: limit,
     });
@@ -161,6 +190,7 @@ export class RetractionRepository {
         const topItem = item as {
           pmid?: string | null;
           isbn?: string | null;
+          identifiers?: Array<{ type?: string; value?: string }>;
         };
         const checkedAt =
           item.retractionCheckedAt ??
@@ -168,9 +198,17 @@ export class RetractionRepository {
         return {
           id: item.id,
           title: item.title,
-          doi: item.doi,
-          pmid: topItem.pmid ?? meta.pmid ?? null,
-          isbn: topItem.isbn ?? meta.isbn ?? null,
+          doi: item.doi ?? findIdentVal(topItem.identifiers, 'doi'),
+          pmid:
+            topItem.pmid ??
+            meta.pmid ??
+            findIdentVal(topItem.identifiers, 'pmid') ??
+            null,
+          isbn:
+            topItem.isbn ??
+            meta.isbn ??
+            findIdentVal(topItem.identifiers, 'isbn') ??
+            null,
           isRetracted: Boolean(meta.isRetracted),
           retractionNature: meta.retractionNature ?? null,
           retractionCheckedAt: checkedAt,
@@ -188,38 +226,56 @@ export class RetractionRepository {
     checkedAt: Date = new Date(),
   ): Promise<Item | null> {
     if (!isValidId(itemId)) return null;
-    const existing = await this.prisma.item.findUnique({
-      where: { id: itemId },
-      select: { metadata: true, userId: true, projectId: true },
-    });
-    const prevMeta = parseItemMetadata(existing?.metadata);
-    const statusChanged =
-      Boolean(prevMeta.isRetracted) !== Boolean(isRetracted) ||
-      (prevMeta.retractionNature ?? null) !== (nature || null);
-    const metadataObj: ItemRetractionMetadata = {
-      ...prevMeta,
-      isRetracted,
-      retractionNature: nature || null,
-      retractionDetails: details || null,
-      retractionCheckedAt: checkedAt.toISOString(),
-    };
 
     const runUpdate = async (
-      client: Prisma.TransactionClient,
+      client: Prisma.TransactionClient | PrismaService,
       helpers?: TransactionHelpers,
     ) => {
+      const findUniqueFn =
+        typeof client.item?.findUnique === 'function'
+          ? client.item.findUnique.bind(client.item)
+          : this.prisma.item.findUnique.bind(this.prisma.item);
+      const existing = await findUniqueFn({
+        where: { id: itemId },
+        select: { metadata: true, userId: true, projectId: true },
+      });
+      const prevMeta = parseItemMetadata(existing?.metadata);
+      const statusChanged =
+        Boolean(prevMeta.isRetracted) !== Boolean(isRetracted) ||
+        (prevMeta.retractionNature ?? null) !== (nature || null);
+      const metadataObj: ItemRetractionMetadata = {
+        ...prevMeta,
+        isRetracted,
+        retractionNature: nature || null,
+        retractionDetails: details || null,
+        retractionCheckedAt: checkedAt.toISOString(),
+      };
+
       const updated = await client.item.update({
         where: { id: itemId },
         data: {
           metadata: metadataObj as unknown as Prisma.InputJsonValue,
           retractionCheckedAt: checkedAt,
-          version: { increment: 1 },
+          ...(statusChanged ? { version: { increment: 1 } } : {}),
+        },
+        include: {
+          contributors: { orderBy: { orderIndex: 'asc' } },
+          itemTags: { include: { tag: true } },
+          collectionItems: { include: { collection: true } },
+          attachments: { where: { deletedAt: null } },
+          notesList: { where: { deletedAt: null } },
+          identifiers: true,
         },
       });
-      const domainUpdated = updated ? ItemsMapper.toDomain(updated) : updated;
+      const effectiveUserId = existing?.userId || updated?.userId;
+      const domainUpdated = updated
+        ? ItemsMapper.mapFlattenedState(
+            updated as unknown as Record<string, unknown>,
+            effectiveUserId,
+          )
+        : updated;
 
-      if (updated && (existing?.userId || updated.userId)) {
-        const effectiveUserId = existing?.userId || updated.userId;
+      if (statusChanged && updated && effectiveUserId) {
         const effectiveProjectId = normalizeProjectScopeId(
           existing?.projectId ?? updated.projectId,
         );
@@ -235,19 +291,17 @@ export class RetractionRepository {
             version: updated.version,
             data: domainUpdated as unknown as Prisma.InputJsonValue,
           });
-          if (statusChanged) {
-            await helpers.publishOutbox(
-              eventScope,
-              itemId,
-              LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-              {
-                ...(domainUpdated as unknown as Record<string, unknown>),
-                updatedFields: ['isRetracted', 'retractionCheckedAt'],
-                source: 'retraction_watch',
-              },
-            );
-          }
-          return updated;
+          await helpers.publishOutbox(
+            eventScope,
+            itemId,
+            LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+            {
+              ...(domainUpdated as unknown as Record<string, unknown>),
+              updatedFields: ['isRetracted', 'retractionCheckedAt'],
+              source: 'retraction_watch',
+            },
+          );
+          return domainUpdated as unknown as Item;
         }
         try {
           const seqRecord = effectiveProjectId
@@ -282,29 +336,27 @@ export class RetractionRepository {
               data: domainUpdated as unknown as Prisma.InputJsonValue,
             },
           });
-          if (statusChanged) {
-            await client.outboxEvent?.create({
-              data: {
-                userId: effectiveUserId,
-                projectId: effectiveProjectId ?? null,
-                aggregateId: itemId,
-                eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-                payload: {
-                  ...(domainUpdated as unknown as Record<string, unknown>),
-                  updatedFields: ['isRetracted', 'retractionCheckedAt'],
-                  source: 'retraction_watch',
-                } as unknown as Prisma.InputJsonValue,
-                status: 'PENDING',
-                retryCount: 0,
-              },
-            });
-          }
+          await client.outboxEvent?.create({
+            data: {
+              userId: effectiveUserId,
+              projectId: effectiveProjectId ?? null,
+              aggregateId: itemId,
+              eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+              payload: {
+                ...(domainUpdated as unknown as Record<string, unknown>),
+                updatedFields: ['isRetracted', 'retractionCheckedAt'],
+                source: 'retraction_watch',
+              } as unknown as Prisma.InputJsonValue,
+              status: 'PENDING',
+              retryCount: 0,
+            },
+          });
         } catch {
           // Non-critical changelog write in standalone repository context
         }
       }
 
-      return updated;
+      return (domainUpdated ?? updated) as unknown as Item;
     };
 
     if (this.libraryTx) {
@@ -315,7 +367,7 @@ export class RetractionRepository {
     if (typeof this.prisma.$transaction === 'function') {
       return this.prisma.$transaction((tx) => runUpdate(tx));
     }
-    return runUpdate(this.prisma as unknown as Prisma.TransactionClient);
+    return runUpdate(this.prisma);
   }
 
   async findRetractedItems(userId: string, projectId?: string) {
@@ -332,14 +384,23 @@ export class RetractionRepository {
       orderBy: [{ updatedAt: 'desc' }],
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        attachments: { take: 2 },
+        attachments: { where: { deletedAt: null }, take: 2 },
         itemTags: { include: { tag: true } },
       },
     });
-    return items.filter((item) => {
-      const meta = parseItemMetadata(item.metadata);
-      return meta.isRetracted === true;
-    });
+    return items
+      .filter((item) => {
+        const meta = parseItemMetadata(item.metadata);
+        const rec = item as unknown as { retraction?: { isRetracted?: boolean } };
+        return meta.isRetracted === true || rec.retraction?.isRetracted === true;
+      })
+      .map(
+        (item) =>
+          ItemsMapper.mapFlattenedState(
+            item as unknown as Record<string, unknown>,
+            userId,
+          ) ?? item,
+      );
   }
 
   async getStats(userId: string, projectId?: string): Promise<RetractionStats> {
@@ -416,6 +477,7 @@ export class RetractionRepository {
         doi: true,
         metadata: true,
         retractionCheckedAt: true,
+        identifiers: { select: { type: true, value: true } },
       },
       take: limit,
     });
@@ -426,6 +488,7 @@ export class RetractionRepository {
         const topItem = item as {
           pmid?: string | null;
           isbn?: string | null;
+          identifiers?: Array<{ type?: string; value?: string }>;
         };
         const checkedAt =
           item.retractionCheckedAt ??
@@ -435,9 +498,17 @@ export class RetractionRepository {
           userId: item.userId,
           projectId: item.projectId,
           title: item.title,
-          doi: item.doi,
-          pmid: topItem.pmid ?? meta.pmid ?? null,
-          isbn: topItem.isbn ?? meta.isbn ?? null,
+          doi: item.doi ?? findIdentVal(topItem.identifiers, 'doi'),
+          pmid:
+            topItem.pmid ??
+            meta.pmid ??
+            findIdentVal(topItem.identifiers, 'pmid') ??
+            null,
+          isbn:
+            topItem.isbn ??
+            meta.isbn ??
+            findIdentVal(topItem.identifiers, 'isbn') ??
+            null,
           isRetracted: Boolean(meta.isRetracted),
           retractionNature: meta.retractionNature ?? null,
           retractionCheckedAt: checkedAt,

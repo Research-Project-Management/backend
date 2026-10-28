@@ -29,7 +29,7 @@ describe('Library Workflow & Distributed Consistency Invariants', () => {
           where: expect.objectContaining({
             projectId: PROJECT_ID,
             deletedAt: null,
-            citationKey: { startsWith: 'vaswani2017attention' },
+            citationKey: { startsWith: 'vaswani2017attention', mode: 'insensitive' },
           }),
         }),
       );

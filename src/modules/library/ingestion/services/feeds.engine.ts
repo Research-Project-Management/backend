@@ -37,6 +37,7 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
   private isPollingActive = false;
 
   private readonly BULKHEAD_MAX_CONCURRENCY = 3;
+  private readonly MAX_CIRCUIT_BREAKERS = 500;
   private readonly circuitBreakers = new Map<string, CircuitBreakerState>();
   private readonly FAILURE_THRESHOLD = 3;
   private readonly RESET_TIMEOUT_MS = 12 * 60 * 60 * 1000;
@@ -125,6 +126,21 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
     this.pendingTimeouts.clear();
   }
 
+  private setCircuitBreakerState(
+    feedUrl: string,
+    cb: CircuitBreakerState,
+  ): void {
+    if (this.circuitBreakers.has(feedUrl)) {
+      this.circuitBreakers.delete(feedUrl);
+    } else if (this.circuitBreakers.size >= this.MAX_CIRCUIT_BREAKERS) {
+      const oldestKey = this.circuitBreakers.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.circuitBreakers.delete(oldestKey);
+      }
+    }
+    this.circuitBreakers.set(feedUrl, cb);
+  }
+
   canExecute(feedUrl: string): boolean {
     const cb = this.circuitBreakers.get(feedUrl);
     if (!cb) return true;
@@ -133,7 +149,10 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
       const now = Date.now();
       const timeSinceLastFailure = now - cb.lastFailureTime;
       if (timeSinceLastFailure > this.RESET_TIMEOUT_MS) {
+        cb.isOpen = false;
+        cb.failures = Math.max(0, this.FAILURE_THRESHOLD - 1);
         cb.lastFailureTime = now;
+        this.setCircuitBreakerState(feedUrl, cb);
         this.logger.log(
           `Circuit Breaker for "${redactFeedUrl(feedUrl)}" entered HALF-OPEN state. Testing single probe...`,
         );
@@ -147,7 +166,7 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
   recordSuccess(feedUrl: string): void {
     const cb = this.circuitBreakers.get(feedUrl);
     if (cb) {
-      if (cb.isOpen) {
+      if (cb.isOpen || cb.failures >= this.FAILURE_THRESHOLD - 1) {
         this.logger.log(
           `Circuit Breaker for "${redactFeedUrl(feedUrl)}" recovered: CLOSED.`,
         );
@@ -173,7 +192,7 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    this.circuitBreakers.set(feedUrl, cb);
+    this.setCircuitBreakerState(feedUrl, cb);
   }
 
   async pollAllFeeds(): Promise<void> {
@@ -246,27 +265,39 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
 
       for (const feed of feeds) {
         if (this.isShuttingDown) break;
-        let effectiveRetentionDays = defaultRetentionDays;
+        let readRetentionDays = defaultRetentionDays;
+        let unreadRetentionDays = defaultRetentionDays;
 
         if (feed.subscriptions.length > 0) {
-          const preferences = feed.subscriptions.flatMap((s) => [
-            s.cleanupUnreadAfter,
-            s.cleanupReadAfter ?? s.cleanupUnreadAfter,
-          ]);
-          const hasNeverOption = preferences.some((days) => days <= 0);
-          if (hasNeverOption) {
-            effectiveRetentionDays = systemHardCapDays;
-          } else {
-            effectiveRetentionDays = Math.min(Math.max(...preferences), systemHardCapDays);
-          }
+          const readPrefs = feed.subscriptions.map(
+            (s) => s.cleanupReadAfter ?? s.cleanupUnreadAfter,
+          );
+          const unreadPrefs = feed.subscriptions.map(
+            (s) => s.cleanupUnreadAfter,
+          );
+          readRetentionDays = readPrefs.some((days) => days <= 0)
+            ? systemHardCapDays
+            : Math.min(Math.max(...readPrefs), systemHardCapDays);
+          unreadRetentionDays = unreadPrefs.some((days) => days <= 0)
+            ? systemHardCapDays
+            : Math.min(Math.max(...unreadPrefs), systemHardCapDays);
         }
 
-        const effectiveCutoffDate = new Date(
-          now - effectiveRetentionDays * 24 * 60 * 60 * 1000,
+        const readCutoffDate = new Date(
+          now - readRetentionDays * 24 * 60 * 60 * 1000,
+        );
+        const unreadCutoffDate = new Date(
+          now - unreadRetentionDays * 24 * 60 * 60 * 1000,
         );
         totalPurged += await this.feedsRepo.deleteFeedItemsOlderThan(
-          effectiveCutoffDate,
+          readCutoffDate,
           feed.id,
+          'read',
+        );
+        totalPurged += await this.feedsRepo.deleteFeedItemsOlderThan(
+          unreadCutoffDate,
+          feed.id,
+          'unread',
         );
       }
 

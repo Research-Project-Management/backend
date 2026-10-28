@@ -3,6 +3,7 @@ import {
 } from '@/modules/library/core/types/bibliographic.types';
 import { resolveCanonicalCreatorRole } from './zotero-field-harmonizer.domain';
 import {
+  cleanAuthorName,
   isNoiseAuthorName,
   isInstitutionName,
   splitAuthorString,
@@ -78,16 +79,20 @@ export function mergeCanonicalCreators(
     let finalFieldMode = fieldMode;
 
     if (finalFieldMode === 1) {
-      const single = finalLast || finalFull || finalFirst;
-      if (!single || isNoiseAuthorName(single)) return;
+      const rawSingle = finalLast || finalFull || finalFirst;
+      const single =
+        cleanAuthorName(rawSingle) ||
+        (isInstitutionName(rawSingle) ? rawSingle.trim() : '');
+      if (!single || (isNoiseAuthorName(single) && !isInstitutionName(single))) return;
       finalFirst = '';
       finalLast = single;
       finalFull = single;
     } else if (cleanName.includes(',') || !finalFirst || !finalLast) {
       const rawToParse = cleanName || `${finalFirst} ${finalLast}`.trim();
-      if (!rawToParse || isNoiseAuthorName(rawToParse)) return;
+      const cleanedToParse = cleanAuthorName(rawToParse);
+      if (!cleanedToParse || isNoiseAuthorName(cleanedToParse)) return;
       const parsed = parseCreatorString(
-        rawToParse,
+        cleanedToParse,
         orderIndex ?? creators.length,
         creatorType,
       );
@@ -109,7 +114,11 @@ export function mergeCanonicalCreators(
     }
 
     if (!finalFull && !finalFirst && !finalLast) return;
-    if (isNoiseAuthorName(finalFull || `${finalFirst} ${finalLast}`.trim())) {
+    const candidateFull = finalFull || `${finalFirst} ${finalLast}`.trim();
+    if (
+      isNoiseAuthorName(candidateFull) &&
+      !(finalFieldMode === 1 && isInstitutionName(candidateFull))
+    ) {
       return;
     }
 

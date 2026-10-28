@@ -61,6 +61,10 @@ export class SearchFacade implements ISearchFacade {
     userId?: string;
     projectId?: string;
   }): Promise<void> {
+    if (typeof this.searchService.indexItem === 'function') {
+      await this.searchService.indexItem(item);
+      return;
+    }
     const scopeId = item.projectId || item.userId;
     if (scopeId) {
       await this.searchService.invalidateFacetsCache(scopeId);
@@ -76,8 +80,12 @@ export class SearchFacade implements ISearchFacade {
     error?: string;
   }> {
     try {
+      if (typeof this.searchService.indexItem === 'function') {
+        const res = await this.searchService.indexItem(item);
+        return { localIndexed: res.indexed };
+      }
       await this.indexItem(item);
-      return { localIndexed: true };
+      return { localIndexed: Boolean(item.id) };
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       return { localIndexed: false, error: errMsg };

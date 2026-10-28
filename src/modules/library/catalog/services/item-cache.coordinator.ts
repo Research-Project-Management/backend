@@ -2,7 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { normalizeProjectScopeId, libraryConfig } from '@/modules/library/core';
-import { TagsService } from './tags.service';
+import type { TagsService } from './tags.service';
 
 /**
  * ItemCacheCoordinator

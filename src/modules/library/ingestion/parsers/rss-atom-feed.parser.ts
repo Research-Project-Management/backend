@@ -4,6 +4,8 @@ import {
   decodeHtmlEntities,
   normalizeArxivId,
   normalizeDoi,
+  normalizePmid,
+  normalizePmcid,
   normalizeAcademicTags,
 } from '@/modules/library/core';
 import { parseCreatorString } from '@/modules/library/core';
@@ -18,6 +20,8 @@ export interface ParsedFeedEntry {
   pdfUrl?: string;
   doi?: string;
   arxivId?: string;
+  pmid?: string;
+  pmcid?: string;
   primaryCategory?: string;
   authors: string[];
   creators: AcademicCreator[];
@@ -31,12 +35,15 @@ export interface ParsedFeedEntry {
   keywords: string[];
   rights?: string;
   itemType: 'journalArticle' | 'preprint' | 'webpage';
+  isRead?: boolean;
 }
 
 export interface ParsedAcademicFeed {
   format: FeedFormat;
   feedTitle?: string;
   feedUrl?: string;
+  siteUrl?: string;
+  description?: string;
   updatedAt?: string;
   entries: ParsedFeedEntry[];
 }
@@ -67,9 +74,18 @@ export interface FeedPromotionCatalogPort {
       creators?: AcademicCreator[];
       year?: number;
       doi?: string;
+      arxivId?: string;
+      pmid?: string;
+      pmcid?: string;
       url?: string;
       abstract?: string;
       publicationTitle?: string;
+      volume?: string;
+      issue?: string;
+      pages?: string;
+      publicationDate?: string;
+      rights?: string;
+      metadataSource?: string;
       projectId?: string;
       collectionIds?: string[];
       tags?: string[];
@@ -113,7 +129,7 @@ function extractTagValue(
 ): string | undefined {
   for (const pattern of tagPatterns) {
     const regex = new RegExp(
-      `<${pattern}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${pattern}>`,
+      `<${pattern}(?:\\s[^>]*?)?(?<!\\/)>([\\s\\S]*?)<\\/${pattern}>`,
       'i',
     );
     const match = xml.match(regex);
@@ -132,7 +148,7 @@ function extractAllTagValues(xml: string, tagPatterns: string[]): string[] {
   const results: string[] = [];
   for (const pattern of tagPatterns) {
     const regex = new RegExp(
-      `<${pattern}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${pattern}>`,
+      `<${pattern}(?:\\s[^>]*?)?(?<!\\/)>([\\s\\S]*?)<\\/${pattern}>`,
       'gi',
     );
     for (const match of xml.matchAll(regex)) {
@@ -191,13 +207,17 @@ function parseFeedDate(rawDate: string | undefined): {
  */
 function resolveIdentifiers(params: {
   rawDoi?: string;
+  rawPmid?: string;
+  rawPmcid?: string;
   rawId?: string;
   link?: string;
   dcIdentifiers: string[];
   description?: string;
-}): { doi?: string; arxivId?: string } {
+}): { doi?: string; arxivId?: string; pmid?: string; pmcid?: string } {
   let doi = params.rawDoi ? normalizeDoi(params.rawDoi) : undefined;
   let arxivId = params.rawId ? normalizeArxivId(params.rawId) : undefined;
+  let pmid = params.rawPmid ? normalizePmid(params.rawPmid) : undefined;
+  let pmcid = params.rawPmcid ? normalizePmcid(params.rawPmcid) : undefined;
 
   for (const idVal of params.dcIdentifiers) {
     if (!doi) {
@@ -208,23 +228,58 @@ function resolveIdentifiers(params: {
       const candidateArxiv = normalizeArxivId(idVal);
       if (candidateArxiv) arxivId = candidateArxiv;
     }
+    if (!pmid && /(?:pmid|pubmed)/i.test(idVal)) {
+      const candidatePmid = normalizePmid(idVal);
+      if (candidatePmid) pmid = candidatePmid;
+    }
+    if (!pmcid && /pmc/i.test(idVal)) {
+      const candidatePmcid = normalizePmcid(idVal);
+      if (candidatePmcid) pmcid = candidatePmcid;
+    }
   }
 
   if (!arxivId && params.link) {
     arxivId = normalizeArxivId(params.link);
   }
-
   if (!doi && params.link) {
     const doiFromLink = normalizeDoi(params.link);
     if (doiFromLink) doi = doiFromLink;
   }
+  if (!pmid && params.link && /pubmed\.ncbi\.nlm\.nih\.gov/i.test(params.link)) {
+    pmid = normalizePmid(params.link);
+  }
+  if (!pmcid && params.link && /pmc\/articles\/PMC\d+/i.test(params.link)) {
+    pmcid = normalizePmcid(params.link);
+  }
+  if (!pmid && params.rawId && /(?:pmid|pubmed)/i.test(params.rawId)) {
+    pmid = normalizePmid(params.rawId);
+  }
+  if (!pmcid && params.rawId && /pmc\d+/i.test(params.rawId)) {
+    pmcid = normalizePmcid(params.rawId);
+  }
 
-  if (!doi && params.description) {
-    const doiInDesc = params.description.match(
-      /\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/,
-    );
-    if (doiInDesc?.[1]) {
-      doi = normalizeDoi(doiInDesc[1]);
+  if (params.description) {
+    if (!doi) {
+      const doiInDesc = params.description.match(
+        /\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/,
+      );
+      if (doiInDesc?.[1]) {
+        doi = normalizeDoi(doiInDesc[1]);
+      }
+    }
+    if (!pmid) {
+      const pmidInDesc = params.description.match(/\bPMID:\s*(\d{1,9})\b/i);
+      if (pmidInDesc?.[1]) {
+        pmid = normalizePmid(pmidInDesc[1]);
+      }
+    }
+    if (!pmcid) {
+      const pmcidInDesc =
+        params.description.match(/\bPMCID:\s*(PMC\d{1,9}|\d{1,9})\b/i) ||
+        params.description.match(/\b(PMC\d{1,9})\b/i);
+      if (pmcidInDesc?.[1]) {
+        pmcid = normalizePmcid(pmcidInDesc[1]);
+      }
     }
   }
 
@@ -249,7 +304,7 @@ function resolveIdentifiers(params: {
     doi = `10.48550/arXiv.${canonicalArxiv}`;
   }
 
-  return { doi, arxivId };
+  return { doi, arxivId, pmid, pmcid };
 }
 
 /**
@@ -382,15 +437,23 @@ function parseFeedEntryXml(
     ? cleanAbstractText(strippedAbstractPrefix) || strippedAbstractPrefix
     : undefined;
 
-  // Identifiers (PRISM, arXiv, DC)
+  // Identifiers (PRISM, arXiv, DC, PubMed)
   const rawDoi = extractTagValue(entryXml, [
     'prism:doi',
     'arxiv:doi',
     'dc:doi',
   ]);
+  const rawPmid = extractTagValue(entryXml, ['prism:pmid', 'dc:pmid', 'pmid']);
+  const rawPmcid = extractTagValue(entryXml, [
+    'prism:pmcid',
+    'dc:pmcid',
+    'pmcid',
+  ]);
   const dcIdentifiers = extractAllTagValues(entryXml, ['dc:identifier']);
-  const { doi, arxivId } = resolveIdentifiers({
+  const { doi, arxivId, pmid, pmcid } = resolveIdentifiers({
     rawDoi,
+    rawPmid,
+    rawPmcid,
     rawId,
     link: url,
     dcIdentifiers,
@@ -476,8 +539,12 @@ function parseFeedEntryXml(
     }
   }
 
+  const isPreprintVenue = Boolean(
+    publicationTitle &&
+      /arxiv|biorxiv|medrxiv|chemrxiv|ssrn|preprint/i.test(publicationTitle),
+  );
   const itemType: ParsedFeedEntry['itemType'] =
-    arxivId && !publicationTitle
+    (arxivId && (!publicationTitle || isPreprintVenue)) || isPreprintVenue
       ? 'preprint'
       : publicationTitle || doi
         ? 'journalArticle'
@@ -492,6 +559,8 @@ function parseFeedEntryXml(
     pdfUrl,
     doi,
     arxivId,
+    pmid,
+    pmcid,
     primaryCategory,
     authors,
     creators,
@@ -528,6 +597,11 @@ export function parseAcademicFeedXml(xml: string): ParsedAcademicFeed {
   const headerXml = firstEntryIdx > 0 ? xml.slice(0, firstEntryIdx) : xml;
   const feedTitle = extractTagValue(headerXml, ['title', 'dc:title']);
   const feedUrl = extractTagValue(headerXml, ['link']);
+  const description = extractTagValue(headerXml, [
+    'subtitle',
+    'description',
+    'dc:description',
+  ]);
   const updatedAt = extractTagValue(headerXml, [
     'updated',
     'lastBuildDate',
@@ -554,6 +628,8 @@ export function parseAcademicFeedXml(xml: string): ParsedAcademicFeed {
     format,
     feedTitle,
     feedUrl,
+    ...(feedUrl ? { siteUrl: feedUrl } : {}),
+    ...(description ? { description } : {}),
     updatedAt,
     entries,
   };
@@ -602,16 +678,46 @@ export async function promoteFeedEntryToLibrary(
     ...(options.tags || []),
   ]);
 
+  const normalizedCreators: AcademicCreator[] =
+    Array.isArray(entry.creators) && entry.creators.length > 0
+      ? entry.creators.map((c, idx) => {
+          if (
+            !c.firstName &&
+            c.lastName &&
+            c.lastName.includes(' ') &&
+            c.fieldMode !== 1
+          ) {
+            return parseCreatorString(
+              c.lastName,
+              idx,
+              c.creatorType || 'author',
+            );
+          }
+          return c;
+        })
+      : (entry.authors || []).map((name, idx) =>
+          parseCreatorString(name, idx, 'author'),
+        );
+
   const created = await catalogPort.createItem(userId, {
     title: entry.title,
     itemType: entry.itemType,
     authors: entry.authors,
-    creators: entry.creators,
+    creators: normalizedCreators,
     year: entry.year ?? undefined,
     doi: entry.doi,
+    arxivId: entry.arxivId,
+    pmid: entry.pmid,
+    pmcid: entry.pmcid,
     url: entry.url,
     abstract: entry.abstract,
     publicationTitle: entry.publicationTitle,
+    volume: entry.volume,
+    issue: entry.issue,
+    pages: entry.pages,
+    publicationDate: entry.publicationDate,
+    rights: entry.rights,
+    metadataSource: 'rss_atom_feed',
     projectId: effectiveProjectId,
     collectionIds: options.collectionId ? [options.collectionId] : undefined,
     tags: combinedTags,
@@ -619,6 +725,8 @@ export async function promoteFeedEntryToLibrary(
       source: 'rss_atom_feed',
       feedEntryId: entry.id,
       arxivId: entry.arxivId,
+      pmid: entry.pmid,
+      pmcid: entry.pmcid,
       primaryCategory: entry.primaryCategory,
       pdfUrl: entry.pdfUrl,
       volume: entry.volume,

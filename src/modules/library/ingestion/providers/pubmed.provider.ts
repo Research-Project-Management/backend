@@ -570,17 +570,17 @@ export class PubMedProvider extends AbstractAcademicProvider {
           xml.match(/<MeshHeading>[\s\S]*?<\/MeshHeading>/gi) || [];
         for (const block of meshBlocks) {
           const descMatch = block.match(
-            /<DescriptorName[^>]*>([^<]+)<\/DescriptorName>/i,
+            /<DescriptorName[^>]*>([\s\S]*?)<\/DescriptorName>/i,
           );
           if (!descMatch || !descMatch[1]) continue;
-          const descriptor = cleanBibliographicText(descMatch[1]);
+          const descriptor = this.cleanXmlText(descMatch[1]);
           if (!descriptor) continue;
           const qualMatches = Array.from(
-            block.matchAll(/<QualifierName[^>]*>([^<]+)<\/QualifierName>/gi),
+            block.matchAll(/<QualifierName[^>]*>([\s\S]*?)<\/QualifierName>/gi),
           );
           if (qualMatches.length > 0) {
             for (const qm of qualMatches) {
-              const qual = cleanBibliographicText(qm[1]);
+              const qual = this.cleanXmlText(qm[1]);
               if (qual) rawTags.push(`${descriptor}/${qual}`);
             }
           } else {
@@ -590,10 +590,10 @@ export class PubMedProvider extends AbstractAcademicProvider {
 
         // 2. Extract Author Keywords (<Keyword>)
         const kwMatches = Array.from(
-          xml.matchAll(/<Keyword(?:\s+[^>]*)?>([^<]+)<\/Keyword>/gi),
+          xml.matchAll(/<Keyword(?:\s+[^>]*)?>([\s\S]*?)<\/Keyword>/gi),
         );
         for (const km of kwMatches) {
-          const kw = cleanBibliographicText(km[1]);
+          const kw = this.cleanXmlText(km[1]);
           if (kw) rawTags.push(kw);
         }
 
@@ -636,4 +636,9 @@ export class PubMedProvider extends AbstractAcademicProvider {
     }
   }
 
+  private cleanXmlText(raw?: string): string | undefined {
+    if (!raw) return undefined;
+    const stripped = raw.replace(/<\/?[a-zA-Z0-9:_-]+(?:\s+[^>]*)?>/g, '');
+    return cleanBibliographicText(stripped);
+  }
 }

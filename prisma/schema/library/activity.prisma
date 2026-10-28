@@ -49,10 +49,9 @@ model Note {
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   @@index([itemId, deletedAt])
-  @@index([userId, deletedAt, updatedAt(sort: Desc)])
   @@index([userId, projectId, deletedAt, updatedAt(sort: Desc)])
   @@index([projectId, deletedAt, updatedAt(sort: Desc)])
-  @@index([projectId, deletedAt])
+  @@index([deletedAt])
   @@index([tags], type: Gin)
   @@map("notes")
 }

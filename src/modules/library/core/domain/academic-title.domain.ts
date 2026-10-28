@@ -191,6 +191,11 @@ export function sanitizeItemTitle(title?: string | null): string {
 
 export function normalizeAcademicTitle(title: string): string {
   return (decodeHtmlEntities(title) || title)
+    .replace(/ß/g, 'ss')
+    .replace(/[æÆ]/g, 'ae')
+    .replace(/[œŒ]/g, 'oe')
+    .replace(/[øØ]/g, 'o')
+    .replace(/[łŁ]/g, 'l')
     .replace(/[đĐ]/g, 'd')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -206,13 +211,7 @@ export function tokenizeAcademicTitle(title: string): string[] {
 }
 
 function tokenizeTitleForSimilarity(title: string): string[] {
-  const normalized = (decodeHtmlEntities(title) || title)
-    .replace(/[đĐ]/g, 'd')
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ');
+  const normalized = normalizeAcademicTitle(title);
 
   // Expand CJK ideograph runs into individual characters so CJK titles without spaces tokenize accurately
   const expanded = normalized.replace(
@@ -315,20 +314,119 @@ export function repairFragmentedTitle(
   return collapsed !== title ? collapsed : undefined;
 }
 
+const ACADEMIC_BOILERPLATE_HEADER_RE =
+  /^(?:original\s+(?:article|research|paper)|research\s+(?:article|paper|note)|review\s+(?:article|paper)|short\s+communication|accepted\s+manuscript|author\s+manuscript|preprint\s+submitted(?:\s+to\b.*)?|contents\s+lists\s+available(?:\s+at\s+sciencedirect)?|downloaded\s+from\s+https?:\/\/.*)$/i;
+
 /**
- * Checks whether an item title is empty or a generic system/PDF placeholder
- * (e.g. "Untitled Document", "Uploaded Document", "Untitled", raw filename "*.pdf", or raw DOI).
+ * Checks whether an item title is empty, a generic system/PDF placeholder
+ * (e.g. "Untitled Document", "Uploaded Document", "Untitled", raw filename "*.pdf", raw DOI),
+ * or an academic journal section header / publisher boilerplate banner ("Original Article",
+ * "Contents lists available at ScienceDirect", etc.).
  */
 export function isPlaceholderItemTitle(title?: unknown): boolean {
   if (typeof title !== 'string') return true;
   const trimmed = title.trim();
   if (!trimmed) return true;
   return (
-    /^(untitled(\s+(document|record))?|uploaded\s+document|document)$/i.test(
+    /^(untitled(\s+(document|record|item))?|uploaded\s+document|document|manuscript)$/i.test(
       trimmed,
     ) ||
+    ACADEMIC_BOILERPLATE_HEADER_RE.test(trimmed) ||
     /\.pdf$/i.test(trimmed) ||
     /^10\.\d{4,9}\//.test(trimmed)
   );
 }
+
+function extractRecordSurnames(rec: Record<string, unknown>): Set<string> {
+  const out = new Set<string>();
+  const addRaw = (rawName: string) => {
+    const trimmed = rawName.trim();
+    if (!trimmed) return;
+    const token = trimmed.includes(',')
+      ? trimmed.split(',')[0].trim().split(/\s+/).pop() || ''
+      : trimmed.split(/\s+/).pop() || '';
+    const norm = token
+      .replace(/[đĐ]/g, 'd')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]/gu, '');
+    if (norm.length >= 2) out.add(norm);
+  };
+
+  for (const listKey of ['creators', 'contributors', 'authors'] as const) {
+    const arr = rec[listKey];
+    if (!Array.isArray(arr)) continue;
+    for (const entry of arr) {
+      if (typeof entry === 'string') {
+        addRaw(entry);
+      } else if (entry && typeof entry === 'object') {
+        const obj = entry as {
+          lastName?: string;
+          family?: string;
+          fullName?: string;
+          name?: string;
+        };
+        if (typeof obj.lastName === 'string' && obj.lastName.trim()) {
+          addRaw(obj.lastName);
+        } else if (typeof obj.family === 'string' && obj.family.trim()) {
+          addRaw(obj.family);
+        } else {
+          addRaw(String(obj.fullName || obj.name || ''));
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function extractRecordYear(rec: Record<string, unknown>): number | null {
+  const rawYear = rec.year;
+  if (
+    typeof rawYear === 'number' &&
+    Number.isFinite(rawYear) &&
+    rawYear > 1000
+  ) {
+    return rawYear;
+  }
+  if (typeof rawYear === 'string' && /^\d{4}$/.test(rawYear.trim())) {
+    return parseInt(rawYear.trim(), 10);
+  }
+  for (const dateKey of ['publicationDate', 'date'] as const) {
+    const d = rec[dateKey];
+    if (typeof d === 'string') {
+      const m = d.match(/\b(19\d{2}|20\d{2})\b/);
+      if (m) return parseInt(m[1], 10);
+    }
+  }
+  return null;
+}
+
+/**
+ * Checks whether two bibliographic records share at least one normalized author surname
+ * AND have compatible publication years (`|yearA - yearB| <= 1`).
+ * Used to corroborate that an extracted Page-1 DOI belongs to the paper itself
+ * even when the local PDF title is noisy or truncated.
+ */
+export function hasAuthorAndYearCorroboration(
+  recordA?: Record<string, unknown> | null,
+  recordB?: Record<string, unknown> | null,
+): boolean {
+  if (!recordA || !recordB) return false;
+  const yearA = extractRecordYear(recordA);
+  const yearB = extractRecordYear(recordB);
+  if (yearA === null || yearB === null || Math.abs(yearA - yearB) > 1) {
+    return false;
+  }
+  const surnamesA = extractRecordSurnames(recordA);
+  const surnamesB = extractRecordSurnames(recordB);
+  if (surnamesA.size === 0 || surnamesB.size === 0) {
+    return false;
+  }
+  for (const s of surnamesA) {
+    if (surnamesB.has(s)) return true;
+  }
+  return false;
+}
+
 

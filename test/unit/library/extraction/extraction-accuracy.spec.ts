@@ -1,4 +1,4 @@
-﻿import {
+import {
   isPlausibleAuthorName,
   splitConcatenatedAuthors,
   yearFromArxivId,
@@ -97,8 +97,8 @@ describe('PDF first-page accuracy helpers', () => {
     it('returns the input unchanged when it does not parse cleanly', () => {
       // odd token count -> ambiguous -> leave alone
       expect(
-        splitConcatenatedAuthors('Maria Del Carmen Lopez Garcia', 4),
-      ).toEqual(['Maria Del Carmen Lopez Garcia']);
+        splitConcatenatedAuthors('Maria Elena Carmen Lopez Garcia', 4),
+      ).toEqual(['Maria Elena Carmen Lopez Garcia']);
     });
   });
 

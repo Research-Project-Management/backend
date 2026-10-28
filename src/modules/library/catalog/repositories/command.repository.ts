@@ -6,7 +6,11 @@ import {
   Inject,
   Optional,
 } from '@nestjs/common';
-import { Prisma, RelationType } from '@prisma/client';
+import {
+  Prisma,
+  RelationType,
+  AttachmentExtractionStatus,
+} from '@prisma/client';
 import { PrismaService } from '@/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import {
@@ -40,6 +44,7 @@ import {
   putItemRelationInClient,
   removeItemRelationInClient,
   setMyPublicationInClient,
+  buildCommandMutationInclude,
 } from './command-relations.helper';
 export {
   isUuid,
@@ -81,21 +86,16 @@ export class CommandRepository {
     const item = await client.item.create({
       data: createData,
       include: {
-        collectionItems: { include: { collection: true } },
-        itemTags: { include: { tag: true } },
-        contributors: { orderBy: { orderIndex: 'asc' } },
+        ...buildCommandMutationInclude(userId),
         attachments: true,
-        notesList: { where: { deletedAt: null } },
-        states: { where: { userId }, take: 1 },
-        identifiers: true,
-      } as unknown as Prisma.ItemInclude,
+      },
     });
     if (
       identifiersToCreate.length > 0 &&
-      (!Array.isArray((item as { identifiers?: unknown[] }).identifiers) ||
-        (item as { identifiers?: unknown[] }).identifiers!.length === 0)
+      (!Array.isArray(item.identifiers) || item.identifiers.length === 0)
     ) {
-      await syncCreatedIdentifiers(client as never, item.id, identifiersToCreate);
+      await syncCreatedIdentifiers(client, item.id, identifiersToCreate);
+      (item as Record<string, unknown>).identifiers = identifiersToCreate;
     }
     return item;
   }
@@ -126,7 +126,7 @@ export class CommandRepository {
         notesList: { where: { deletedAt: null } },
         contributors: { orderBy: { orderIndex: 'asc' } },
         identifiers: true,
-      } as unknown as Prisma.ItemInclude,
+      },
     });
     if (!existing) {
       throw new NotFoundException(`CatalogItem ${id} not found`);
@@ -152,6 +152,22 @@ export class CommandRepository {
       sanitizedData,
       { skipVersionIncrement: expectedVersion !== undefined },
     );
+    const createdAttachments = (updateData.attachments as { create?: unknown[] } | undefined)?.create;
+    if (Array.isArray(createdAttachments) && createdAttachments.length > 0 && client.attachment?.count) {
+      const existingAttCount = await client.attachment.count({
+        where: { itemId: id, deletedAt: null },
+      });
+      const nextAttCount = existingAttCount + createdAttachments.length;
+      updateData.attachmentCount = nextAttCount;
+      updateData.hasFile = nextAttCount > 0;
+    }
+    const createdNotes = (updateData.notesList as { create?: unknown[] } | undefined)?.create;
+    if (Array.isArray(createdNotes) && createdNotes.length > 0 && client.note?.count) {
+      const existingNoteCount = await client.note.count({
+        where: { itemId: id, deletedAt: null },
+      });
+      updateData.noteCount = existingNoteCount + createdNotes.length;
+    }
     if (expectedVersion !== undefined) {
       const affected = await client.item.updateMany({
         where: {
@@ -177,7 +193,13 @@ export class CommandRepository {
         });
       }
     }
-    await syncUpdatedIdentifiers(client as never, id, cleanIds, existing);
+    await syncUpdatedIdentifiers(
+      client,
+      id,
+      cleanIds,
+      existing,
+      (sanitizedData as { identifiers?: ReadonlyArray<{ type: string; value: string; canonicalUri?: string | null }> }).identifiers,
+    );
     if (
       typeof updateData.citationKey === 'string' &&
       updateData.citationKey.trim() &&
@@ -191,15 +213,9 @@ export class CommandRepository {
         id,
       );
     }
-    const itemRelationsInclude = {
-      collectionItems: { include: { collection: true } },
-      itemTags: { include: { tag: true } },
-      contributors: { orderBy: { orderIndex: 'asc' as const } },
-      attachments: { include: { revisions: true } },
-      notesList: { where: { deletedAt: null } },
-      states: { where: { userId }, take: 1 },
-      identifiers: true,
-    } as unknown as Prisma.ItemInclude;
+    const itemRelationsInclude = buildCommandMutationInclude(userId, {
+      includeAttachmentRevisions: true,
+    });
     const hasTagSync = Boolean(rawTags && Array.isArray(rawTags));
     const updated = await client.item.update({
       where: { id },
@@ -418,13 +434,10 @@ export class CommandRepository {
         hasFile: activeAttCount > 0,
         ...(expectedVersion !== undefined ? {} : { version: { increment: 1 } }),
       },
-      include: {
-        contributors: { orderBy: { orderIndex: 'asc' } },
-        collectionItems: { include: { collection: true } },
-        itemTags: { include: { tag: true } },
-        notesList: { where: { deletedAt: null } },
-        attachments: { include: { revisions: true } },
-      },
+      include: buildCommandMutationInclude(userId, {
+        includeAttachmentRevisions: true,
+        orderNotes: true,
+      }),
     });
   }
   private async collectStoragePathsForItems(
@@ -625,5 +638,82 @@ export class CommandRepository {
       isMyPublication,
       options,
     );
+  }
+  async updateAttachmentProcessingStatus(
+    attachmentId: string,
+    status: string,
+    currentMeta: Record<string, unknown>,
+    metadataPatch?: Record<string, unknown>,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const client = this.getClient(tx);
+    if (!client?.attachment?.update) return;
+    const validStatuses = new Set<string>(
+      Object.values(AttachmentExtractionStatus),
+    );
+    const normalizedUpper = status.toUpperCase();
+    const isExtractionEnum = validStatuses.has(normalizedUpper);
+
+    await client.attachment.update({
+      where: { id: attachmentId },
+      data: {
+        ...(isExtractionEnum
+          ? {
+              extractionStatus:
+                normalizedUpper as AttachmentExtractionStatus,
+            }
+          : {}),
+        metadata: {
+          ...currentMeta,
+          extractionStatus: status,
+          ...(metadataPatch ?? {}),
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+  async applyItemAiMetadataUpdate(params: {
+    itemId: string;
+    existing: Record<string, unknown>;
+    filteredPatch: Record<string, unknown>;
+    topLevelColumnSync: Record<string, unknown>;
+    mergedMetadata: Prisma.InputJsonValue;
+    tx?: Prisma.TransactionClient;
+  }) {
+    const {
+      itemId,
+      existing,
+      filteredPatch,
+      topLevelColumnSync,
+      mergedMetadata,
+      tx,
+    } = params;
+    const cleanAiIds = normalizeItemIdentifiers(filteredPatch, {
+      preserveOnInvalid: true,
+    });
+    const itemRelationsInclude = {
+      contributors: { orderBy: { orderIndex: 'asc' as const } },
+      itemTags: { include: { tag: true } },
+      collectionItems: { include: { collection: true } },
+      attachments: { where: { deletedAt: null } },
+      notesList: { where: { deletedAt: null } },
+      identifiers: true,
+    } satisfies Prisma.ItemInclude;
+
+    const client = this.getClient(tx);
+    const itemDelegate = client?.item ?? this.prisma?.item;
+    const identClient = client?.itemIdentifier ? client : this.prisma;
+
+    await syncUpdatedIdentifiers(identClient, itemId, cleanAiIds, existing);
+
+    if (!itemDelegate?.update) return null;
+    return itemDelegate.update({
+      where: { id: itemId },
+      data: {
+        ...topLevelColumnSync,
+        metadata: mergedMetadata,
+        version: { increment: 1 },
+      },
+      include: itemRelationsInclude,
+    });
   }
 }

@@ -1,10 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import {
   CitationStyleId,
   CitationItemInput,
   FormattedCitationResult,
-  CitationCreator,
 } from '@/modules/library/citation/types/citation.types';
+import { CslJsonMapper } from './csl-json.mapper';
+import {
+  CslFallbackFormatter,
+  ICslFallbackFormatter,
+} from './csl-style-formatter.domain';
 
 export interface CitationStyleDefinition {
   id: CitationStyleId;
@@ -164,7 +168,10 @@ export class CslStyleRegistry {
   private readonly staticStyleIds = new Set<string>();
   private readonly dynamicStyleIds = new Set<string>();
 
-  constructor() {
+  constructor(
+    @Optional()
+    private readonly formatter: ICslFallbackFormatter = new CslFallbackFormatter(),
+  ) {
     for (const style of SUPPORTED_CITATION_STYLES) {
       this.styleMap.set(style.id, style);
       this.staticStyleIds.add(style.id);
@@ -269,138 +276,67 @@ export class CslStyleRegistry {
 
   /**
    * Minimal resilient fallback formatter used only if CslEngineService
-   * fails completely or is unavailable.
+   * fails completely or is unavailable. Delegates raw BibTeX/RIS rendering
+   * to CslStyleFormatterService and author normalization to CslJsonMapper.
    */
   formatFallback(
     item: CitationItemInput,
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
   ): FormattedCitationResult {
-    const authors = this.parseAuthors(item);
-    const firstAuthor = authors[0]?.lastName || authors[0]?.name || 'Anonymous';
-    const authorStr =
-      authors.length > 0
-        ? authors.map((a) => a.lastName || a.name || 'Anonymous').join(', ')
-        : 'Anonymous';
-    const year =
-      item.year || (item.date ? new Date(item.date).getFullYear() : 'n.d.');
-    const title = item.title || 'Untitled';
-    const source = item.publicationTitle || item.journal || '';
-
+    const cslItem = CslJsonMapper.toCsl(item);
     const meta = this.styleMap.get(styleId);
     const category = meta?.category || 'author-date';
 
-    let inText = `(${firstAuthor}, ${year})`;
-    let bibliography = `${authorStr} (${year}). ${title}.${source ? ` ${source}.` : ''}`;
-
-    if (category === 'numeric') {
-      inText = `[${index}]`;
-      bibliography = `[${index}] ${authorStr}. "${title}."${source ? ` ${source},` : ''} ${year}.`;
-    } else if (category === 'raw') {
+    if (category === 'raw') {
       if (styleId === 'bibtex') {
         const key = item.citationKey || item.id || `ref_${index}`;
-        inText = `\\cite{${key}}`;
-        const entryType =
-          item.itemType === 'book'
-            ? 'book'
-            : item.itemType === 'bookSection'
-              ? 'incollection'
-              : item.itemType === 'conferencePaper'
-                ? 'inproceedings'
-                : item.itemType === 'thesis'
-                  ? 'phdthesis'
-                  : item.itemType === 'report'
-                    ? 'techreport'
-                    : 'article';
-
-        const bibtexAuthors =
-          authors.length > 0
-            ? authors
-                .map((a) => {
-                  if (a.lastName && a.firstName) {
-                    return `${a.lastName}, ${a.firstName}`;
-                  }
-                  if (a.lastName) return a.lastName;
-                  if (a.name) {
-                    const trimmed = a.name.trim();
-                    if (trimmed.includes(',')) return trimmed;
-                    const parts = trimmed.split(/\s+/);
-                    if (parts.length > 1) {
-                      const last = parts.pop();
-                      return `${last}, ${parts.join(' ')}`;
-                    }
-                    return trimmed;
-                  }
-                  return 'Anonymous';
-                })
-                .join(' and ')
-            : 'Anonymous';
-
-        const bibFields: string[] = [
-          `  title = {${title}}`,
-          `  author = {${bibtexAuthors}}`,
-          `  year = {${year}}`,
-        ];
-        if (source) {
-          const containerKey =
-            entryType === 'incollection' || entryType === 'inproceedings'
-              ? 'booktitle'
-              : 'journal';
-          bibFields.push(`  ${containerKey} = {${source}}`);
-        }
-        if (item.doi) bibFields.push(`  doi = {${item.doi}}`);
-        if (item.isbn) bibFields.push(`  isbn = {${item.isbn}}`);
-        if (item.issn) bibFields.push(`  issn = {${item.issn}}`);
-        if (item.pmid) bibFields.push(`  pmid = {${item.pmid}}`);
-        if (item.pmcid) bibFields.push(`  pmcid = {${item.pmcid}}`);
-        if (item.arxivId) {
-          bibFields.push(`  eprint = {${item.arxivId}}`);
-          bibFields.push(`  archiveprefix = {arXiv}`);
-        }
-        bibliography = `@${entryType}{${key},\n${bibFields.join(',\n')}\n}`;
-      } else if (styleId === 'ris') {
-        inText = title;
-        bibliography = `TY  - JOUR\nTI  - ${title}\nAU  - ${firstAuthor}\nPY  - ${year}\nER  -`;
+        return {
+          styleId,
+          inText: `\\cite{${key}}`,
+          bibliography: this.formatter.fallbackBibtex({
+            ...cslItem,
+            id: key,
+          }),
+        };
       }
+      if (styleId === 'ris') {
+        return {
+          styleId,
+          inText: item.title || 'Untitled',
+          bibliography: this.formatter.fallbackRis(cslItem),
+        };
+      }
+    }
+
+    const authors = cslItem.author || [];
+    const firstAuthor =
+      authors[0]?.family || authors[0]?.literal || 'Anonymous';
+    const authorStr =
+      authors.length > 0
+        ? authors
+            .map((a) => a.family || a.literal || 'Anonymous')
+            .join(', ')
+        : 'Anonymous';
+    const year =
+      cslItem.issued?.['date-parts']?.[0]?.[0] ||
+      item.year ||
+      (item.date ? new Date(item.date).getFullYear() : 'n.d.');
+    const title = item.title || 'Untitled';
+    const source = item.publicationTitle || item.journal || '';
+
+    if (category === 'numeric') {
+      return {
+        styleId,
+        inText: `[${index}]`,
+        bibliography: `[${index}] ${authorStr}. "${title}."${source ? ` ${source},` : ''} ${year}.`,
+      };
     }
 
     return {
       styleId,
-      inText,
-      bibliography,
+      inText: `(${firstAuthor}, ${year})`,
+      bibliography: `${authorStr} (${year}). ${title}.${source ? ` ${source}.` : ''}`,
     };
-  }
-
-  private parseAuthors(item: CitationItemInput): CitationCreator[] {
-    const list =
-      Array.isArray(item.creators) && item.creators.length > 0
-        ? item.creators
-        : Array.isArray(item.contributors) && item.contributors.length > 0
-          ? item.contributors
-          : null;
-
-    if (list) {
-      return list.map((c) => ({
-        firstName: c.firstName ?? null,
-        lastName: c.lastName ?? null,
-        name: c.name || (c.fullName ? c.fullName : null),
-        creatorType: c.creatorType || c.role || 'author',
-      }));
-    }
-    if (item.authors && item.authors.length > 0) {
-      return item.authors.map((a) => {
-        const trimmed = a.trim();
-        if (trimmed.includes(',')) {
-          const [last, ...rest] = trimmed.split(',').map((s) => s.trim());
-          return { firstName: rest.join(' '), lastName: last };
-        }
-        const parts = trimmed.split(/\s+/);
-        if (parts.length === 1) return { lastName: parts[0] };
-        const lastName = parts.pop();
-        const firstName = parts.join(' ');
-        return { firstName, lastName };
-      });
-    }
-    return [{ lastName: 'Anonymous' }];
   }
 }

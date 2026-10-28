@@ -217,14 +217,16 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
         years: { 2023: 30, 2024: 20 },
         tags: { AI: 15 },
       };
-      (mockCache.get as jest.Mock).mockResolvedValue(cachedFacets);
+      (mockCache.get as jest.Mock).mockImplementation(async (key: string) =>
+        key.includes('library:search:version:') ? '1' : cachedFacets,
+      );
 
       const facets = await searchRepo.computeFacets('user-1', {
         collectionId: 'col-1',
       });
 
       expect(facets).toEqual(cachedFacets);
-      expect(mockCache.get).toHaveBeenCalledTimes(1);
+      expect(mockCache.get).toHaveBeenCalledTimes(2);
       expect(mockPrisma.item.groupBy).not.toHaveBeenCalled();
       expect(mockPrisma.item.findMany).not.toHaveBeenCalled();
     });
@@ -326,6 +328,21 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       await subscriber.handleItemDeletedOrPurged({
         eventId: 'evt-2',
         eventType: 'library.item.deleted',
+        aggregateId: 'item-100',
+        userId: 'user-1',
+        scopeId: 'user-1',
+        createdAt: new Date(),
+        schemaVersion: 1,
+        payload: {
+          itemId: 'item-100',
+        },
+      });
+
+      expect(searchRepo.deleteFullTextIndexByItemId).not.toHaveBeenCalled();
+
+      await subscriber.handleItemPurged({
+        eventId: 'evt-3',
+        eventType: 'library.item.purged',
         aggregateId: 'item-100',
         userId: 'user-1',
         scopeId: 'user-1',

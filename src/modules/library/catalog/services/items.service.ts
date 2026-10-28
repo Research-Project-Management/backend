@@ -51,7 +51,7 @@ export class ItemService {
   }
   async getItem(userId: string, id: string, projectId?: string) {
     const item = await this.query.findById(userId, id, projectId);
-    return item ? ItemsMapper.toDomain(item) : null;
+    return item ? (ItemsMapper.mapFlattenedState(item, userId) ?? ItemsMapper.toDomain(item)) : null;
   }
   async createItem(
     userId: string,
@@ -99,6 +99,8 @@ export class ItemService {
         tx,
         effectiveProjectId,
       );
+      const domainCreated = (ItemsMapper.mapFlattenedState(item, userId) ??
+        ItemsMapper.toDomain(item)) as ItemDetail;
       await helpers.appendChange(
         { userId, projectId: effectiveProjectId },
         {
@@ -106,7 +108,7 @@ export class ItemService {
           entityId: item.id,
           action: 'create',
           version: item.version,
-          data: ItemsMapper.toDomain(item),
+          data: domainCreated,
         },
       );
       const payload = buildItemCreatedOutboxPayload({
@@ -126,7 +128,7 @@ export class ItemService {
       helpers.onAfterCommit?.(() =>
         this.invalidateScopeListCache(userId, effectiveProjectId),
       );
-      return ItemsMapper.toDomain(item);
+      return domainCreated;
     };
     let result: ItemDetail;
     let ranPostCommitHook = false;
@@ -203,23 +205,29 @@ export class ItemService {
         resolvedProjectId || updated.projectId || undefined;
       resolvedProjectId = effectiveProjectId;
       const eventScope = { userId, projectId: effectiveProjectId };
+      const domainUpdated = (ItemsMapper.mapFlattenedState(updated, userId) ??
+        ItemsMapper.toDomain(updated)) as ItemDetail;
+      const updatedFields = Object.keys(data);
       await helpers.appendChange(eventScope, {
         entityType: 'Item',
         entityId: id,
         action: 'update',
         version: updated.version,
-        data: ItemsMapper.toDomain(updated),
+        data: domainUpdated,
       });
       await helpers.publishOutbox(
         eventScope,
         id,
         LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-        ItemsMapper.toDomain(updated),
+        {
+          ...(domainUpdated as unknown as Record<string, unknown>),
+          updatedFields,
+        },
       );
       helpers.onAfterCommit?.(() =>
         this.invalidateItemCache(id, userId, resolvedProjectId),
       );
-      return ItemsMapper.toDomain(updated);
+      return domainUpdated;
     };
     const res = context
       ? await executeUpdate(context.tx, context.helpers)
@@ -259,7 +267,8 @@ export class ItemService {
         const effectiveProjectId = updated.projectId || undefined;
         resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
-        const domainItem = ItemsMapper.toDomain(updated);
+        const domainItem = (ItemsMapper.mapFlattenedState(updated, userId) ??
+          ItemsMapper.toDomain(updated)) as ItemDetail;
         await helpers.appendChange(eventScope, {
           entityType: 'Item',
           entityId: id,
@@ -288,11 +297,16 @@ export class ItemService {
       normalizeProjectScopeId(projectId) ?? item.projectId ?? undefined;
     const eventScope = { userId, projectId: effectiveProjectId };
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
-      await helpers.publishOutbox(eventScope, id, 'library.item.reindexed', {
-        itemId: id,
-        userId,
-        projectId: effectiveProjectId,
-      });
+      await helpers.publishOutbox(
+        eventScope,
+        id,
+        LIBRARY_EVENT_TYPES.ITEM_REINDEXED,
+        {
+          itemId: id,
+          userId,
+          projectId: effectiveProjectId,
+        },
+      );
     });
     return {
       success: true,
@@ -382,7 +396,8 @@ export class ItemService {
         const effectiveProjectId =
           validProjectId || restored.projectId || undefined;
         const eventScope = { userId, projectId: effectiveProjectId };
-        const domainItem = ItemsMapper.toDomain(restored);
+        const domainItem = (ItemsMapper.mapFlattenedState(restored, userId) ??
+          ItemsMapper.toDomain(restored)) as ItemDetail;
         await helpers.appendChange(eventScope, {
           entityType: 'Item',
           entityId: id,
@@ -391,12 +406,17 @@ export class ItemService {
           data: domainItem,
         });
         await helpers.removeTombstone(eventScope, 'Item', id);
-        await helpers.publishOutbox(eventScope, id, 'library.item.restored', {
-          itemId: id,
-          userId,
-          projectId: effectiveProjectId,
-          restoredAt: new Date().toISOString(),
-        });
+        await helpers.publishOutbox(
+          eventScope,
+          id,
+          LIBRARY_EVENT_TYPES.ITEM_RESTORED,
+          {
+            itemId: id,
+            userId,
+            projectId: effectiveProjectId,
+            restoredAt: new Date().toISOString(),
+          },
+        );
         return domainItem;
       },
     );
@@ -464,13 +484,13 @@ export class ItemService {
         return purgeRes.purged;
       },
     );
-    if (storagePathsToDelete.length > 0) {
-      await this.command.deleteStorageFilesBatch(storagePathsToDelete);
-    }
     if (purged && !ranPostCommitHook) {
       await this.invalidateItemCache(id, userId, validProjectId, {
         skipScopeInvalidation,
       });
+    }
+    if (storagePathsToDelete.length > 0) {
+      await this.command.deleteStorageFilesBatch(storagePathsToDelete);
     }
     return purged;
   }
@@ -580,15 +600,15 @@ export class ItemService {
           validProjectId,
         }),
       );
-    if (fileIdsToDelete.length > 0) {
-      await this.command.deleteStorageFilesBatch(fileIdsToDelete);
-    }
     if (succeededIds.length > 0) {
       await this.invalidateBulkItemsCache(
         succeededIds,
         userId,
         validProjectId,
       );
+    }
+    if (fileIdsToDelete.length > 0) {
+      await this.command.deleteStorageFilesBatch(fileIdsToDelete);
     }
     return {
       success: true,
@@ -618,9 +638,6 @@ export class ItemService {
         return res;
       },
     );
-    if (storagePathsToDelete.length > 0) {
-      await this.command.deleteStorageFilesBatch(storagePathsToDelete);
-    }
     if (purgedItemsList.length > 0) {
       const itemsByUser = new Map<
         string,
@@ -641,6 +658,9 @@ export class ItemService {
             this.invalidateBulkItemsCache(ids, uid, undefined, projectIds),
         ),
       );
+    }
+    if (storagePathsToDelete.length > 0) {
+      await this.command.deleteStorageFilesBatch(storagePathsToDelete);
     }
     return result;
   }

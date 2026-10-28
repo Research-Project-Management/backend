@@ -51,10 +51,10 @@ model LibraryChange {
   data        Json?    @db.JsonB
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([userId, seq])
   @@index([userId, projectId, seq])
   @@index([projectId, seq])
-  @@index([entityType, entityId])
+  @@index([userId, projectId, entityType, entityId, seq(sort: Desc)])
+  @@index([projectId, entityType, entityId, seq(sort: Desc)])
   @@index([createdAt])
   @@map("library_changes")
 }
@@ -69,10 +69,9 @@ model Tombstone {
   deletedById String?   @map("deleted_by_id") @db.Uuid
   deletedAt   DateTime  @default(now()) @map("deleted_at") @db.Timestamptz(6)
 
-  @@index([userId, seq])
+  @@unique([userId, projectId, entityType, entityId])
   @@index([userId, projectId, seq])
   @@index([projectId, seq])
-  @@index([userId, entityType, entityId])
   @@index([userId, projectId, entityType, entityId])
   @@index([projectId, entityType, entityId])
   @@index([deletedAt])

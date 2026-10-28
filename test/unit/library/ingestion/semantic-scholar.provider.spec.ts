@@ -7,8 +7,9 @@ describe('SemanticScholarProvider', () => {
   let originalFetch: typeof global.fetch;
 
   beforeEach(() => {
-    rateLimiter = new DomainRateLimiterService();
-    rateLimiter.bypassDelay = true;
+    rateLimiter = new DomainRateLimiterService(undefined, {
+      bypassDelay: true,
+    });
     provider = new SemanticScholarProvider(rateLimiter);
     originalFetch = global.fetch;
   });

@@ -72,7 +72,11 @@ export class ExtractionFacade implements IExtractionFacade {
 
   async extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: { maxPages?: number; headerOnly?: boolean },
+    options?: {
+      maxPages?: number;
+      headerOnly?: boolean;
+      skipTrustedExtraction?: boolean;
+    },
   ): Promise<ExtractedPdfDocument> {
     return this.pdfProvider.extractDocumentFromBuffer(buffer, options);
   }

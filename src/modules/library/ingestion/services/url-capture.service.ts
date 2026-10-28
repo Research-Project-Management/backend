@@ -77,8 +77,13 @@ export class UrlCaptureService {
   async fetchAcademicFeed(
     feedUrl: string,
     forceRefresh = false,
+    userId?: string,
   ): Promise<ParsedAcademicFeed> {
-    return this.feedRetrieval.fetchAcademicFeed(feedUrl, forceRefresh);
+    return this.feedRetrieval.fetchAcademicFeed(
+      feedUrl,
+      forceRefresh,
+      userId,
+    );
   }
 
   /**
@@ -219,22 +224,35 @@ export class UrlCaptureService {
     try {
       const canonical =
         (preview.canonicalMetadata as Record<string, unknown>) || {};
-      const itemType = (canonical.itemType as string | undefined) || 'webpage';
+      const itemType =
+        dto.itemType || (canonical.itemType as string | undefined) || 'webpage';
 
-      let authors = canonical.authors as string[] | undefined;
+      const hasDtoCreators =
+        Array.isArray(dto.creators) && dto.creators.length > 0;
+      let authors = hasDtoCreators
+        ? undefined
+        : (canonical.authors as string[] | undefined);
       const normalizedCreators = mergeCanonicalCreators({
-        creators: Array.isArray(canonical.creators)
-          ? (canonical.creators as unknown[])
-          : undefined,
-        contributors: Array.isArray(canonical.contributors)
-          ? (canonical.contributors as unknown[])
-          : undefined,
-        authors: Array.isArray(canonical.authors)
-          ? (canonical.authors as unknown[])
-          : undefined,
-        editors: Array.isArray(canonical.editors)
-          ? (canonical.editors as unknown[])
-          : undefined,
+        creators: hasDtoCreators
+          ? (dto.creators as unknown[])
+          : Array.isArray(canonical.creators)
+            ? (canonical.creators as unknown[])
+            : undefined,
+        contributors: hasDtoCreators
+          ? undefined
+          : Array.isArray(canonical.contributors)
+            ? (canonical.contributors as unknown[])
+            : undefined,
+        authors: hasDtoCreators
+          ? undefined
+          : Array.isArray(canonical.authors)
+            ? (canonical.authors as unknown[])
+            : undefined,
+        editors: hasDtoCreators
+          ? undefined
+          : Array.isArray(canonical.editors)
+            ? (canonical.editors as unknown[])
+            : undefined,
         itemType,
       });
 
@@ -347,8 +365,10 @@ export class UrlCaptureService {
         itemType,
         authors,
         creators: normalizedCreators,
-        contributors: (canonical.contributors ||
-          normalizedCreators) as CreateItemData['contributors'],
+        contributors: (hasDtoCreators
+          ? normalizedCreators
+          : canonical.contributors ||
+            normalizedCreators) as CreateItemData['contributors'],
         abstract:
           dto.abstract ||
           (harmonized.abstract as string | undefined) ||
@@ -408,22 +428,34 @@ export class UrlCaptureService {
         libraryCatalog: canonical.libraryCatalog as string | undefined,
         callNumber: canonical.callNumber as string | undefined,
         archive: canonical.archive as string | undefined,
-        collectionId: undefined,
-        tags: Array.isArray(canonical.tags)
-          ? (canonical.tags as string[])
-          : Array.isArray(canonical.keywords)
-            ? (canonical.keywords as string[])
-            : [],
-        labels: Array.isArray(canonical.keywords)
-          ? (canonical.keywords as string[])
-          : Array.isArray(canonical.tags)
-            ? (canonical.tags as string[])
-            : [],
-        keywords: Array.isArray(canonical.keywords)
-          ? (canonical.keywords as string[])
-          : Array.isArray(canonical.tags)
-            ? (canonical.tags as string[])
-            : [],
+        collectionId:
+          dto.collectionId ||
+          (canonical.collectionId as string | undefined) ||
+          undefined,
+        tags:
+          Array.isArray(dto.tags) && dto.tags.length > 0
+            ? dto.tags
+            : Array.isArray(canonical.tags)
+              ? (canonical.tags as string[])
+              : Array.isArray(canonical.keywords)
+                ? (canonical.keywords as string[])
+                : [],
+        labels:
+          Array.isArray(dto.tags) && dto.tags.length > 0
+            ? dto.tags
+            : Array.isArray(canonical.keywords)
+              ? (canonical.keywords as string[])
+              : Array.isArray(canonical.tags)
+                ? (canonical.tags as string[])
+                : [],
+        keywords:
+          Array.isArray(dto.tags) && dto.tags.length > 0
+            ? dto.tags
+            : Array.isArray(canonical.keywords)
+              ? (canonical.keywords as string[])
+              : Array.isArray(canonical.tags)
+                ? (canonical.tags as string[])
+                : [],
         uploadedById: targetUserId,
       };
 
@@ -484,7 +516,10 @@ export class UrlCaptureService {
                   // Non-critical additive enrichment on duplicate URL capture
                 }
               }
-              if (!(dto as unknown as Record<string, unknown>).allowDuplicate) {
+              if (
+                !dto.userOverride &&
+                !(dto as unknown as Record<string, unknown>).allowDuplicate
+              ) {
                 throw new ConflictException({
                   message:
                     'An item with this DOI/identifier already exists in your library',

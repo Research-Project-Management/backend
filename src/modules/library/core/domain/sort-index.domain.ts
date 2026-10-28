@@ -12,6 +12,8 @@
 export const COORD_SCALE = 10_000;
 export const PAGE_PAD = 4;
 export const COORD_PAD = 5;
+export const MAX_SORT_PAGE = 9_999;
+export const MAX_SORT_COORD = 99_999;
 
 export interface ParsedSortIndex {
   page: number;
@@ -27,15 +29,18 @@ export function buildAnnotationSortIndex(
   y = 0,
   x = 0,
 ): string {
-  const p = String(Math.max(0, Math.round(pageIndex))).padStart(PAGE_PAD, '0');
-  const yy = String(Math.max(0, Math.round(y * COORD_SCALE))).padStart(
-    COORD_PAD,
-    '0',
-  );
-  const xx = String(Math.max(0, Math.round(x * COORD_SCALE))).padStart(
-    COORD_PAD,
-    '0',
-  );
+  const safePage = Number.isFinite(pageIndex) ? pageIndex : 0;
+  const safeY = Number.isFinite(y) ? y : 0;
+  const safeX = Number.isFinite(x) ? x : 0;
+  const p = String(
+    Math.min(MAX_SORT_PAGE, Math.max(0, Math.round(safePage))),
+  ).padStart(PAGE_PAD, '0');
+  const yy = String(
+    Math.min(MAX_SORT_COORD, Math.max(0, Math.round(safeY * COORD_SCALE))),
+  ).padStart(COORD_PAD, '0');
+  const xx = String(
+    Math.min(MAX_SORT_COORD, Math.max(0, Math.round(safeX * COORD_SCALE))),
+  ).padStart(COORD_PAD, '0');
   return `${p}|${yy}|${xx}`;
 }
 

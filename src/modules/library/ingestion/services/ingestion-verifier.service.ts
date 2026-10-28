@@ -6,6 +6,10 @@ import {
   TITLE_MATCH_THRESHOLD,
   parseCreatorString,
 } from '@/modules/library/core';
+import {
+  BOT_CHALLENGE_TITLE_RE,
+  BOT_CHALLENGE_HTML_RE,
+} from '@/modules/library/core/domain/academic-text.lexicon';
 
 export interface PdfFingerprint {
   doi?: string;
@@ -36,12 +40,6 @@ export interface VerificationResult {
   warnings: string[];
   isDisambiguationMismatch?: boolean;
 }
-
-const BOT_CHALLENGE_TITLE_RE =
-  /client challenge|just a moment|attention required|access denied|are you a robot|verify you are human|captcha|security check|ddos-guard|please wait|cloudflare|bot verification|request blocked|unusual traffic/i;
-
-const BOT_CHALLENGE_HTML_RE =
-  /cf-challenge|_cf_chl|challenge-platform|perimeterx|px-captcha|datadome|captcha-delivery|cf-browser-verification/i;
 
 /**
  * Enterprise Verification and Evidence Gate implementing the Ingestion Verification Scoring Table.

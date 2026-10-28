@@ -5,6 +5,7 @@ import {
   StateEntity,
   UpsertStateData,
 } from '@/modules/library/catalog/types/state.types';
+import { pickPreferredMergedState } from '@/modules/library/catalog/domain/state.domain';
 
 const STATE_SELECT = {
   userId: true,
@@ -119,6 +120,71 @@ export class StateRepository {
         userId,
         itemId,
       },
+    });
+  }
+
+  async transferItemStates(
+    sourceItemIds: string[],
+    targetItemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (sourceItemIds.length === 0) return;
+    const cleanSourceIds = sourceItemIds.filter((id) => id !== targetItemId);
+    if (cleanSourceIds.length === 0) return;
+
+    const client = this.getClient(tx);
+    const allUserStates = await client.state.findMany({
+      where: { itemId: { in: [targetItemId, ...cleanSourceIds] } },
+    });
+
+    const userStateByUser = new Map<string, typeof allUserStates>();
+    for (const us of allUserStates) {
+      const list = userStateByUser.get(us.userId) || [];
+      list.push(us);
+      userStateByUser.set(us.userId, list);
+    }
+
+    await Promise.all(
+      Array.from(userStateByUser.entries()).map(([userId, states]) => {
+        const merged = pickPreferredMergedState(states);
+        const scrollJson =
+          merged.latestScroll !== undefined && merged.latestScroll !== null
+            ? (merged.latestScroll as Prisma.InputJsonValue)
+            : undefined;
+
+        return client.state.upsert({
+          where: {
+            userId_itemId: {
+              userId,
+              itemId: targetItemId,
+            },
+          },
+          create: {
+            userId,
+            itemId: targetItemId,
+            isStarred: merged.isStarred,
+            rating: merged.maxRating,
+            readStatus: merged.readStatus,
+            currentPage: merged.maxCurrentPage,
+            scrollPosition: scrollJson ?? Prisma.JsonNull,
+            lastOpenedAt: merged.latestOpenedAt,
+            lastReadAt: merged.latestReadAt,
+          },
+          update: {
+            isStarred: merged.isStarred,
+            rating: merged.maxRating,
+            readStatus: merged.readStatus,
+            currentPage: merged.maxCurrentPage,
+            scrollPosition: scrollJson,
+            lastOpenedAt: merged.latestOpenedAt ?? undefined,
+            lastReadAt: merged.latestReadAt ?? undefined,
+          },
+        });
+      }),
+    );
+
+    await client.state.deleteMany({
+      where: { itemId: { in: cleanSourceIds } },
     });
   }
 }

@@ -2,18 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { normalizeProjectScopeId } from '@/modules/library/core';
+import {
+  EXPORT_CHUNK_SIZE,
+  EXPORT_MAX_ITEMS,
+  ExportItemRecord,
+} from '../domain/export-item.types';
 
-/** Maximum number of items exported in a single request. */
-export const EXPORT_MAX_ITEMS = 1000;
-/** Cursor-page size used when fetching from the DB. */
-export const EXPORT_CHUNK_SIZE = 200;
-
-export type ExportItemRecord = Prisma.ItemGetPayload<{
-  include: {
-    contributors: { orderBy: { orderIndex: 'asc' } };
-    identifiers?: boolean;
-  };
-}>;
+export { EXPORT_CHUNK_SIZE, EXPORT_MAX_ITEMS, ExportItemRecord };
 
 /**
  * ExportsRepository — CQRS Read-Side Optimized Data Store for Bulk Citation Export.
@@ -41,6 +36,8 @@ export class ExportsRepository {
         where,
         include: {
           contributors: { orderBy: { orderIndex: 'asc' } },
+          itemTags: { include: { tag: true } },
+          notesList: { where: { deletedAt: null } },
           identifiers: true,
         },
         orderBy: { createdAt: 'desc' },
@@ -101,6 +98,8 @@ export class ExportsRepository {
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
         attachments: { where: { deletedAt: null } },
+        itemTags: { include: { tag: true } },
+        notesList: { where: { deletedAt: null } },
         identifiers: true,
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -125,6 +124,8 @@ export class ExportsRepository {
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
         attachments: { where: { deletedAt: null } },
+        itemTags: { include: { tag: true } },
+        notesList: { where: { deletedAt: null } },
         identifiers: true,
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -145,6 +146,8 @@ export class ExportsRepository {
       },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
+        itemTags: { include: { tag: true } },
+        notesList: { where: { deletedAt: null } },
         identifiers: true,
         attachments: {
           include: {
@@ -165,6 +168,8 @@ export class ExportsRepository {
       where: scopeWhere,
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
+        itemTags: { include: { tag: true } },
+        notesList: { where: { deletedAt: null } },
         identifiers: true,
       },
       take,
@@ -197,6 +202,8 @@ export class ExportsRepository {
         },
         include: {
           contributors: { orderBy: { orderIndex: 'asc' } },
+          itemTags: { include: { tag: true } },
+          notesList: { where: { deletedAt: null } },
           identifiers: true,
         },
         take: Math.min(500, MAX_RESULTS - collectedById.size),

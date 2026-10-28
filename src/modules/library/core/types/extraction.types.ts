@@ -75,6 +75,7 @@ export interface CreateAttachmentInput {
   linkMode?: LinkMode;
   attachmentType?: AttachmentType;
   isPrimary?: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export const AnnotationType = {

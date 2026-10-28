@@ -129,6 +129,11 @@ export class DoiExactMatchSpecification implements IExactMatchSpecification {
     return [
       { doi: { equals: cleanDoi, mode: 'insensitive' } },
       { metadata: { path: ['doi'], equals: cleanDoi } },
+      {
+        identifiers: {
+          some: { type: 'doi', value: { equals: cleanDoi, mode: 'insensitive' } },
+        },
+      },
     ];
   }
 
@@ -185,6 +190,17 @@ export class ArxivExactMatchSpecification implements IExactMatchSpecification {
       { metadata: { path: ['arxivId'], equals: baseArxiv } },
       { metadata: { path: ['arxiv'], equals: cleanArxiv } },
       { metadata: { path: ['arxiv'], equals: baseArxiv } },
+      { metadata: { path: ['archiveID'], equals: cleanArxiv } },
+      { metadata: { path: ['archiveID'], equals: baseArxiv } },
+      { metadata: { path: ['archiveID'], equals: `arXiv:${baseArxiv}` } },
+      {
+        identifiers: {
+          some: {
+            type: 'arxiv',
+            value: { in: [cleanArxiv, baseArxiv], mode: 'insensitive' },
+          },
+        },
+      },
     ];
   }
 
@@ -253,6 +269,11 @@ export class PmidExactMatchSpecification implements IExactMatchSpecification {
     const cleanPmid = input.cleanPmid.trim();
     return [
       { metadata: { path: ['pmid'], equals: cleanPmid } },
+      {
+        identifiers: {
+          some: { type: 'pmid', value: { equals: cleanPmid, mode: 'insensitive' } },
+        },
+      },
     ];
   }
 
@@ -301,6 +322,11 @@ export class IsbnExactMatchSpecification implements IExactMatchSpecification {
     const cleanIsbn = input.cleanIsbn.replace(/[-\s]/g, '').trim();
     return [
       { metadata: { path: ['isbn'], equals: cleanIsbn } },
+      {
+        identifiers: {
+          some: { type: 'isbn', value: { equals: cleanIsbn, mode: 'insensitive' } },
+        },
+      },
     ];
   }
 

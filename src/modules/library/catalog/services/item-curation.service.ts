@@ -16,11 +16,20 @@ import {
 } from '@/modules/library/core/types/bibliographic.types';
 import {
   LIBRARY_EVENT_TYPES,
+  LIBRARY_REDIS_KEYS,
   buildItemCreatedOutboxPayload,
-  mergeCanonicalCreators,
+  normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import {
+  ImportSourceItem,
+  buildImportItemPayload,
+} from '@/modules/library/catalog/domain/item-import-payload.builder';
+import { prepareItemAiMetadataPatch } from '@/modules/library/catalog/domain/item-column-sync.domain';
+
+export type { ImportSourceItem };
+export { buildImportItemPayload };
 
 interface CslItemData {
   id?: string;
@@ -63,7 +72,7 @@ function getCite(): CitationJsConstructor | undefined {
 
 /**
  * ItemCurationService — Dedicated Domain Service for Item Curation, Scholarly Enrichment,
- * Cross-Project Imports, and Metadata Source Provenance.
+ * Cross-Project Imports, Attachment Processing Status, and Metadata Source Provenance.
  */
 @Injectable()
 export class ItemCurationService {
@@ -75,19 +84,14 @@ export class ItemCurationService {
     private readonly libraryTx: TransactionService,
     @Optional()
     @Inject(RedisCacheService)
-    cacheOrCoordinator?: RedisCacheService | ItemCacheCoordinator,
+    private readonly cache?: RedisCacheService,
     @Optional() private readonly itemQueryService?: ItemQueryService,
     @Optional()
     @Inject(ItemCacheCoordinator)
-    injectedCoordinator?: ItemCacheCoordinator,
+    cacheCoordinator?: ItemCacheCoordinator,
   ) {
-    if (injectedCoordinator) {
-      this.cacheCoordinator = injectedCoordinator;
-    } else if (cacheOrCoordinator instanceof ItemCacheCoordinator) {
-      this.cacheCoordinator = cacheOrCoordinator;
-    } else {
-      this.cacheCoordinator = new ItemCacheCoordinator(cacheOrCoordinator);
-    }
+    this.cacheCoordinator =
+      cacheCoordinator ?? new ItemCacheCoordinator(this.cache);
   }
 
   /**
@@ -177,7 +181,10 @@ export class ItemCurationService {
     }
 
     if (this.itemQueryService) {
-      const perms = await this.itemQueryService.getPermissions(userId, projectId);
+      const perms = await this.itemQueryService.getPermissions(
+        userId,
+        projectId,
+      );
       if (!perms.permissions.canImport) {
         throw new ForbiddenException(
           'You do not have permission to import items to this project',
@@ -185,7 +192,10 @@ export class ItemCurationService {
       }
     }
 
-    const sourceItems = await this.query.findManyByIdsWithFullDetails(userId, uniqueItemIds);
+    const sourceItems = await this.query.findManyByIdsWithFullDetails(
+      userId,
+      uniqueItemIds,
+    );
     let importedCount = 0;
 
     // Batch query to detect duplicates in one go, avoiding N+1 queries.
@@ -354,274 +364,135 @@ export class ItemCurationService {
       })),
     };
   }
-}
 
-export interface ImportSourceItem {
-  title: string;
-  year?: number | null;
-  doi?: string | null;
-  abstract?: string | null;
-  itemType?: string | null;
-  publicationTitle?: string | null;
-  publicationDate?: string | null;
-  publisher?: string | null;
-  place?: string | null;
-  volume?: string | null;
-  issue?: string | null;
-  section?: string | null;
-  partNumber?: string | null;
-  partTitle?: string | null;
-  pages?: string | null;
-  series?: string | null;
-  seriesTitle?: string | null;
-  seriesText?: string | null;
-  issn?: string | null;
-  isbn?: string | null;
-  pmid?: string | null;
-  pmcid?: string | null;
-  url?: string | null;
-  language?: string | null;
-  journalAbbr?: string | null;
-  shortTitle?: string | null;
-  rights?: string | null;
-  license?: string | null;
-  citationKey?: string | null;
-  libraryCatalog?: string | null;
-  archive?: string | null;
-  archiveLocation?: string | null;
-  callNumber?: string | null;
-  extra?: string | null;
-  arxivId?: string | null;
-  citationCount?: number | null;
-  referenceCount?: number | null;
-  openAccessPdfUrl?: string | null;
-  fileId?: string | null;
-  fileUrl?: string | null;
-  filename?: string | null;
-  mimeType?: string | null;
-  size?: number | bigint | null;
-  fileHash?: string | null;
-  attachments?: Array<{
-    fileId?: string | null;
-    url?: string | null;
-    filename?: string | null;
-    name?: string | null;
-    mimeType?: string | null;
-    size?: number | bigint | null;
-    fileHash?: string | null;
-  }>;
-  itemTags?: Array<{ tag?: { name?: string } }>;
-  notesList?: Array<{ title?: string; contentMd?: string; tags?: string[] }>;
-  contributors?: Array<{
-    creatorType?: string;
-    firstName?: string | null;
-    lastName?: string | null;
-    fullName?: string;
-    orderIndex?: number;
-  }>;
-  identifiers?: Array<{ type: string; value: string; canonicalUri?: string }>;
-  [key: string]: unknown;
-}
+  async findAttachmentByFileId(
+    fileId: string,
+  ): Promise<{ id: string; itemId: string; metadata?: unknown } | null> {
+    if (!fileId) return null;
+    return this.query.findAttachmentByFileId(fileId);
+  }
 
-export function buildImportItemPayload(
-  rawSource: ImportSourceItem,
-  userId: string,
-): CreateItemData {
-  const unpacked = ItemsMapper.toDomain(rawSource) as Record<string, unknown>;
-  const source: ImportSourceItem = {
-    ...unpacked,
-    ...rawSource,
-    publicationDate:
-      rawSource.publicationDate ??
-      (unpacked.publicationDate as string | null | undefined) ??
-      (unpacked.date as string | null | undefined),
-    publisher:
-      rawSource.publisher ?? (unpacked.publisher as string | null | undefined),
-    place: rawSource.place ?? (unpacked.place as string | null | undefined),
-    volume: rawSource.volume ?? (unpacked.volume as string | null | undefined),
-    issue: rawSource.issue ?? (unpacked.issue as string | null | undefined),
-    section:
-      rawSource.section ?? (unpacked.section as string | null | undefined),
-    partNumber:
-      rawSource.partNumber ??
-      (unpacked.partNumber as string | null | undefined),
-    partTitle:
-      rawSource.partTitle ?? (unpacked.partTitle as string | null | undefined),
-    pages: rawSource.pages ?? (unpacked.pages as string | null | undefined),
-    series: rawSource.series ?? (unpacked.series as string | null | undefined),
-    seriesTitle:
-      rawSource.seriesTitle ??
-      (unpacked.seriesTitle as string | null | undefined),
-    seriesText:
-      rawSource.seriesText ??
-      (unpacked.seriesText as string | null | undefined),
-    issn: rawSource.issn ?? (unpacked.issn as string | null | undefined),
-    isbn: rawSource.isbn ?? (unpacked.isbn as string | null | undefined),
-    pmid: rawSource.pmid ?? (unpacked.pmid as string | null | undefined),
-    pmcid: rawSource.pmcid ?? (unpacked.pmcid as string | null | undefined),
-    arxivId:
-      rawSource.arxivId ?? (unpacked.arxivId as string | null | undefined),
-    language:
-      rawSource.language ?? (unpacked.language as string | null | undefined),
-    journalAbbr:
-      rawSource.journalAbbr ??
-      (unpacked.journalAbbreviation as string | null | undefined) ??
-      (unpacked.journalAbbr as string | null | undefined),
-    shortTitle:
-      rawSource.shortTitle ??
-      (unpacked.shortTitle as string | null | undefined),
-    rights: rawSource.rights ?? (unpacked.rights as string | null | undefined),
-    license:
-      rawSource.license ?? (unpacked.license as string | null | undefined),
-    libraryCatalog:
-      rawSource.libraryCatalog ??
-      (unpacked.libraryCatalog as string | null | undefined),
-    archive:
-      rawSource.archive ?? (unpacked.archive as string | null | undefined),
-    archiveLocation:
-      rawSource.archiveLocation ??
-      (unpacked.archiveLocation as string | null | undefined),
-    callNumber:
-      rawSource.callNumber ??
-      (unpacked.callNumber as string | null | undefined),
-    extra: rawSource.extra ?? (unpacked.extra as string | null | undefined),
-    citationCount:
-      rawSource.citationCount ??
-      (unpacked.citationCount as number | null | undefined),
-    referenceCount:
-      rawSource.referenceCount ??
-      (unpacked.referenceCount as number | null | undefined),
-    openAccessPdfUrl:
-      rawSource.openAccessPdfUrl ??
-      (unpacked.openAccessPdfUrl as string | null | undefined),
-  };
-  const primaryAttachment = rawSource.attachments?.[0];
-  const resolvedFileId = primaryAttachment?.fileId
-    ? String(primaryAttachment.fileId)
-    : source.fileId
-      ? String(source.fileId)
-      : undefined;
-  const resolvedFileUrl = primaryAttachment?.url || source.fileUrl || undefined;
-  const resolvedFilename =
-    primaryAttachment?.filename ||
-    primaryAttachment?.name ||
-    source.filename ||
-    undefined;
-  const resolvedMimeType =
-    primaryAttachment?.mimeType || source.mimeType || undefined;
-  const rawSize = primaryAttachment?.size ?? source.size;
-  const resolvedSize =
-    rawSize !== undefined && rawSize !== null ? Number(rawSize) : undefined;
-  const resolvedFileHash =
-    primaryAttachment?.fileHash || source.fileHash || undefined;
+  async updateAttachmentProcessingStatus(
+    attachmentId: string,
+    status: string,
+    metadataPatch?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!attachmentId) return;
+    const existing = await this.query.findAttachmentById(attachmentId);
+    if (!existing) return;
 
-  const clonedAttachments = (source.attachments || []).map((att) => ({
-    title: att.name || att.filename || 'document.pdf',
-    filename: att.filename || att.name || 'document.pdf',
-    url: att.url || (att.fileId ? `/api/files/${att.fileId}/content` : ''),
-    fileId: att.fileId ? String(att.fileId) : null,
-    fileHash: att.fileHash || '',
-    mimeType: att.mimeType || 'application/pdf',
-    size: att.size !== undefined && att.size !== null ? Number(att.size) : 0,
-    linkMode: (att as Record<string, unknown>).linkMode as string | undefined,
-    attachmentType: (att as Record<string, unknown>).attachmentType as string | undefined,
-    metadata: (att as Record<string, unknown>).metadata as Record<string, unknown> | undefined,
-    annotations: Array.isArray((att as Record<string, unknown>).annotations)
-      ? ((att as Record<string, unknown>).annotations as Array<Record<string, unknown>>)
-          .filter((ann) => ann && !ann.deletedAt)
-          .map((ann) => ({
-            type: ann.type || 'highlight',
-            color: ann.color || '#ffeb3b',
-            pageIndex: typeof ann.pageIndex === 'number' ? ann.pageIndex : 0,
-            pageLabel: typeof ann.pageLabel === 'string' ? ann.pageLabel : '',
-            annotationSortIndex:
-              typeof ann.annotationSortIndex === 'string'
-                ? ann.annotationSortIndex
-                : '',
-            rectCoords: ann.rectCoords ?? null,
-            quoteText: typeof ann.quoteText === 'string' ? ann.quoteText : null,
-            comment: typeof ann.comment === 'string' ? ann.comment : '',
-            tags: Array.isArray(ann.tags) ? (ann.tags as string[]) : [],
-            authorId: userId,
-          }))
-      : [],
-  }));
+    const currentMeta =
+      existing.metadata &&
+      typeof existing.metadata === 'object' &&
+      !Array.isArray(existing.metadata)
+        ? (existing.metadata as Record<string, unknown>)
+        : {};
 
-  return {
-    title: source.title,
-    attachmentCount: clonedAttachments.length,
-    attachments: clonedAttachments,
-    uploadedById: userId,
-    year: source.year ?? undefined,
-    doi: source.doi ?? undefined,
-    abstract: source.abstract ?? undefined,
-    itemType: source.itemType || 'journalArticle',
-    publicationTitle: source.publicationTitle ?? undefined,
-    publicationDate: source.publicationDate ?? undefined,
-    publisher: source.publisher ?? undefined,
-    place: source.place ?? undefined,
-    volume: source.volume ?? undefined,
-    issue: source.issue ?? undefined,
-    section: source.section ?? undefined,
-    partNumber: source.partNumber ?? undefined,
-    partTitle: source.partTitle ?? undefined,
-    pages: source.pages ?? undefined,
-    series: source.series ?? undefined,
-    seriesTitle: source.seriesTitle ?? undefined,
-    seriesText: source.seriesText ?? undefined,
-    issn: source.issn ?? undefined,
-    isbn: source.isbn ?? undefined,
-    pmid: source.pmid ?? undefined,
-    pmcid: source.pmcid ?? undefined,
-    url: source.url ?? undefined,
-    language: source.language ?? undefined,
-    journalAbbr: source.journalAbbr ?? undefined,
-    shortTitle: source.shortTitle ?? undefined,
-    rights: source.rights ?? undefined,
-    license: source.license ?? undefined,
-    citationKey: source.citationKey ?? undefined,
-    libraryCatalog: source.libraryCatalog ?? undefined,
-    archive: source.archive ?? undefined,
-    archiveLocation: source.archiveLocation ?? undefined,
-    callNumber: source.callNumber ?? undefined,
-    extra: source.extra ?? undefined,
-    extraFields:
-      (unpacked.extraFields as Record<string, unknown> | undefined) ??
-      undefined,
-    arxivId: source.arxivId ?? undefined,
-    citationCount: source.citationCount ?? undefined,
-    referenceCount: source.referenceCount ?? undefined,
-    openAccessPdfUrl: source.openAccessPdfUrl ?? undefined,
-    fileId: resolvedFileId,
-    fileUrl: resolvedFileUrl,
-    filename: resolvedFilename,
-    mimeType: resolvedMimeType,
-    size: resolvedSize,
-    fileHash: resolvedFileHash,
-    tags:
-      source.itemTags
-        ?.map((itemTag: { tag?: { name?: string } }) => itemTag.tag?.name)
-        .filter((tagName: unknown): tagName is string => Boolean(tagName)) ||
-      [],
-    notes:
-      source.notesList?.map(
-        (note: { title?: string; contentMd?: string; tags?: string[] }) => ({
-          title: note.title,
-          contentMd: note.contentMd,
-          content: note.contentMd,
-          tags: note.tags || [],
-        }),
-      ) || [],
-    creators: mergeCanonicalCreators({
-      contributors: source.contributors,
-      itemType: source.itemType || 'journalArticle',
-    }),
-    identifiers: source.identifiers?.map(
-      (identifier: { type: string; value: string; canonicalUri?: string }) => ({
-        type: identifier.type,
-        value: identifier.value,
-        canonicalUri: identifier.canonicalUri,
-      }),
-    ),
-  };
+    await this.command.updateAttachmentProcessingStatus(
+      attachmentId,
+      status,
+      currentMeta,
+      metadataPatch,
+    );
+
+    if (existing.itemId && this.cacheCoordinator) {
+      await this.cacheCoordinator.invalidateItemCache(
+        existing.itemId,
+        undefined,
+        undefined,
+        { skipScopeInvalidation: true },
+      );
+    } else if (existing.itemId && this.cache) {
+      await this.cache.delPattern(
+        LIBRARY_REDIS_KEYS.itemPattern(existing.itemId),
+      );
+    }
+  }
+
+  async updateItemAiMetadata(
+    itemId: string,
+    aiMetadataPatch: Record<string, unknown>,
+  ): Promise<void> {
+    if (!itemId) return;
+    const existing = await this.query.findItemForAiMetadata(itemId);
+    if (!existing) return;
+
+    const currentMeta =
+      existing.metadata &&
+      typeof existing.metadata === 'object' &&
+      !Array.isArray(existing.metadata)
+        ? (existing.metadata as Record<string, unknown>)
+        : {};
+
+    const validProjectId = normalizeProjectScopeId(existing.projectId);
+    const effectiveItemType = String(existing.itemType || 'journalArticle');
+
+    const { filteredPatch, topLevelColumnSync, mergedMetadata } =
+      prepareItemAiMetadataPatch({
+        existingTitle: existing.title,
+        effectiveItemType,
+        currentMeta,
+        aiMetadataPatch,
+      });
+
+    if (this.libraryTx && existing.userId) {
+      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        const updated = await this.command.applyItemAiMetadataUpdate({
+          itemId,
+          existing: existing as unknown as Record<string, unknown>,
+          filteredPatch,
+          topLevelColumnSync,
+          mergedMetadata,
+          tx,
+        });
+        const mergedUpdated = {
+          ...existing,
+          ...(updated ?? {}),
+          metadata: updated?.metadata ?? mergedMetadata,
+        };
+        const domainUpdated = ItemsMapper.toDomain(mergedUpdated);
+        const eventScope = {
+          userId: existing.userId,
+          projectId: validProjectId,
+        };
+        await helpers.appendChange(eventScope, {
+          entityType: 'Item',
+          entityId: itemId,
+          action: 'update',
+          version: updated?.version ?? 1,
+          data: domainUpdated,
+        });
+        await helpers.publishOutbox(
+          eventScope,
+          itemId,
+          LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+          domainUpdated,
+        );
+      });
+    } else {
+      await this.command.applyItemAiMetadataUpdate({
+        itemId,
+        existing: existing as unknown as Record<string, unknown>,
+        filteredPatch,
+        topLevelColumnSync,
+        mergedMetadata,
+      });
+    }
+
+    if (this.cacheCoordinator && existing.userId) {
+      await this.cacheCoordinator.invalidateForWrite({
+        userId: existing.userId,
+        projectId: validProjectId,
+        itemIds: [itemId],
+      });
+    } else if (this.cacheCoordinator) {
+      await this.cacheCoordinator.invalidateItemCache(
+        itemId,
+        existing.userId,
+        validProjectId,
+      );
+    } else if (this.cache) {
+      await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId));
+    }
+  }
 }

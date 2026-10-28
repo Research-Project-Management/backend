@@ -74,6 +74,9 @@ const SYSTEM_AND_TELEMETRY_KEYS = new Set([
   'demotedToExtra',
   'demotedExtraLines',
   '__demotedExtraLines',
+]);
+
+const PRIVILEGED_INTERNAL_KEYS = new Set([
   '__isSystemUpdate',
   '__updateSource',
 ]);
@@ -151,37 +154,84 @@ export class ZoteroSchemaValidatorService {
     const validCreatorMap =
       Array.isArray(serviceCreatorTypes) && serviceCreatorTypes.length > 0
         ? new Map(
-            serviceCreatorTypes.map((c: CreatorTypeDefinition) => [
-              c.creatorType.toLowerCase(),
-              c.creatorType,
-            ]),
+            serviceCreatorTypes.flatMap((c: CreatorTypeDefinition) => {
+              const lower = c.creatorType.toLowerCase();
+              const snake = c.creatorType
+                .replace(/([A-Z])/g, '_$1')
+                .toLowerCase();
+              return [
+                [lower, c.creatorType] as const,
+                [snake, c.creatorType] as const,
+              ];
+            }),
           )
         : getValidCreatorMapForType(itemType);
     const primaryCreatorRaw = this.typesService.getPrimaryCreatorType(itemType);
     const primaryCreator =
       validCreatorMap.get(primaryCreatorRaw.toLowerCase()) || primaryCreatorRaw;
 
+    const CREATOR_SYNONYMS: Record<string, string> = {
+      primary_author: 'author',
+      primaryauthor: 'author',
+      corresponding_author: 'author',
+      correspondingauthor: 'author',
+      first_author: 'author',
+      firstauthor: 'author',
+      co_author: 'author',
+      coauthor: 'author',
+      'co-author': 'author',
+      advisor: 'contributor',
+      supervisor: 'contributor',
+      thesis_advisor: 'contributor',
+      thesisadvisor: 'contributor',
+    };
+
+    const PRIMARY_CREATOR_ROLES = new Set([
+      'author',
+      'inventor',
+      'director',
+      'artist',
+      'cartographer',
+      'interviewee',
+      'podcaster',
+      'presenter',
+      'programmer',
+      'sponsor',
+    ]);
+
     const changes: CreatorHarmonizationChange[] = [];
     const harmonizedCreators = creators.map((c, index) => {
       if (!c || typeof c !== 'object') return c;
       const rawRole = (c.creatorType || 'author').trim();
       const lowerRole = rawRole.toLowerCase();
+      const effectiveRole = CREATOR_SYNONYMS[lowerRole] ?? lowerRole;
 
-      const canonicalRole = validCreatorMap.get(lowerRole);
-      if (canonicalRole) {
+      const canonicalRole =
+        validCreatorMap.get(lowerRole) ?? validCreatorMap.get(effectiveRole);
+      if (canonicalRole && canonicalRole === rawRole) {
+        return {
+          ...c,
+          creatorType: canonicalRole,
+        };
+      }
+      if (canonicalRole && lowerRole === effectiveRole) {
         return {
           ...c,
           creatorType: canonicalRole,
         };
       }
 
-      let targetRole = primaryCreator;
+      let targetRole = canonicalRole || primaryCreator;
       let reason: CreatorHarmonizationChange['reason'] =
         'normalized-to-primary';
 
       const contributorCanonical = validCreatorMap.get('contributor');
-      if (index > 0 && contributorCanonical) {
+      const isPrimaryLike = PRIMARY_CREATOR_ROLES.has(effectiveRole);
+      if (!canonicalRole && !isPrimaryLike && index > 0 && contributorCanonical) {
         targetRole = contributorCanonical;
+        reason = 'fallback-to-contributor';
+      } else if (canonicalRole && effectiveRole === 'contributor') {
+        targetRole = canonicalRole;
         reason = 'fallback-to-contributor';
       }
 
@@ -240,6 +290,9 @@ export class ZoteroSchemaValidatorService {
     }
 
     for (const [key, value] of Object.entries(data)) {
+      if (PRIVILEGED_INTERNAL_KEYS.has(key)) {
+        continue;
+      }
       if (value === undefined || value === null || value === '') {
         cleanFields[key] = value;
         continue;
@@ -299,6 +352,20 @@ export class ZoteroSchemaValidatorService {
           demotedExtraLines.push(line);
         }
       }
+    }
+
+    if (
+      cleanFields.extraFields &&
+      typeof cleanFields.extraFields === 'object' &&
+      !Array.isArray(cleanFields.extraFields)
+    ) {
+      const sanitizedExtraFields = {
+        ...(cleanFields.extraFields as Record<string, unknown>),
+      };
+      for (const pk of PRIVILEGED_INTERNAL_KEYS) {
+        delete sanitizedExtraFields[pk];
+      }
+      cleanFields.extraFields = sanitizedExtraFields;
     }
 
     // Map single string `author` into `authors: [author]` if `creators`/`contributors`/`authors` are not provided

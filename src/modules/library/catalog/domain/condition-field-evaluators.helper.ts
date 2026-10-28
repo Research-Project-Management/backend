@@ -6,6 +6,115 @@ function normalizeSavedSearchJsonValue(jsonKey: string, val: string): string {
   return AcademicSearchQueryEngine.normalizeFieldTargetValue(jsonKey, val);
 }
 
+const IDENTIFIER_FIELD_TO_TYPE: Record<string, string> = {
+  doi: 'doi',
+  isbn: 'isbn',
+  issn: 'issn',
+  pmid: 'pmid',
+  pmcid: 'pmcid',
+  arxivId: 'arxiv',
+};
+
+export function evalIdentifierField(
+  fieldKey: string,
+  operator: string,
+  val: string,
+): Prisma.ItemWhereInput | null {
+  const canonicalType = IDENTIFIER_FIELD_TO_TYPE[fieldKey];
+  if (!canonicalType) return null;
+  const effectiveVal = normalizeSavedSearchJsonValue(fieldKey, val);
+  const baseClause =
+    fieldKey === 'doi'
+      ? evalStringField('doi', operator, effectiveVal)
+      : evalJsonField(fieldKey, operator, val);
+  if (!baseClause) return null;
+
+  let identClause: Prisma.ItemWhereInput | null = null;
+  if (operator === 'isPresent') {
+    identClause = {
+      identifiers: { some: { type: canonicalType, value: { not: '' } } },
+    };
+    return { OR: [baseClause, identClause] };
+  }
+  if (operator === 'isAbsent') {
+    identClause = {
+      identifiers: { none: { type: canonicalType, value: { not: '' } } },
+    };
+    return { AND: [baseClause, identClause] };
+  }
+  if (operator === 'is' || operator === 'equals') {
+    identClause = {
+      identifiers: {
+        some: {
+          type: canonicalType,
+          value: { equals: effectiveVal, mode: 'insensitive' },
+        },
+      },
+    };
+    return { OR: [baseClause, identClause] };
+  }
+  if (operator === 'contains') {
+    identClause = {
+      identifiers: {
+        some: {
+          type: canonicalType,
+          value: { contains: effectiveVal, mode: 'insensitive' },
+        },
+      },
+    };
+    return { OR: [baseClause, identClause] };
+  }
+  if (operator === 'beginsWith') {
+    identClause = {
+      identifiers: {
+        some: {
+          type: canonicalType,
+          value: { startsWith: effectiveVal, mode: 'insensitive' },
+        },
+      },
+    };
+    return { OR: [baseClause, identClause] };
+  }
+  if (operator === 'endsWith') {
+    identClause = {
+      identifiers: {
+        some: {
+          type: canonicalType,
+          value: { endsWith: effectiveVal, mode: 'insensitive' },
+        },
+      },
+    };
+    return { OR: [baseClause, identClause] };
+  }
+  if (operator === 'isNot' || operator === 'not_equals') {
+    identClause = {
+      NOT: {
+        identifiers: {
+          some: {
+            type: canonicalType,
+            value: { equals: effectiveVal, mode: 'insensitive' },
+          },
+        },
+      },
+    };
+    return { AND: [baseClause, identClause] };
+  }
+  if (operator === 'doesNotContain') {
+    identClause = {
+      NOT: {
+        identifiers: {
+          some: {
+            type: canonicalType,
+            value: { contains: effectiveVal, mode: 'insensitive' },
+          },
+        },
+      },
+    };
+    return { AND: [baseClause, identClause] };
+  }
+  return baseClause;
+}
+
 export function evalJsonField(
   jsonKey: string,
   operator: string,
@@ -13,7 +122,12 @@ export function evalJsonField(
 ): Prisma.ItemWhereInput | null {
   const effectiveVal = normalizeSavedSearchJsonValue(jsonKey, val);
   if (operator === 'isPresent') {
-    return { metadata: { path: [jsonKey], not: Prisma.JsonNull } };
+    return {
+      AND: [
+        { metadata: { path: [jsonKey], not: Prisma.JsonNull } },
+        { metadata: { path: [jsonKey], not: '' } },
+      ],
+    };
   }
   if (operator === 'isAbsent') {
     return {
@@ -23,10 +137,16 @@ export function evalJsonField(
       ],
     };
   }
-  if (operator === 'is' || operator === 'equals' || operator === 'contains') {
+  if (operator === 'is' || operator === 'equals') {
+    return { metadata: { path: [jsonKey], equals: effectiveVal } };
+  }
+  if (operator === 'contains') {
     return { metadata: { path: [jsonKey], string_contains: effectiveVal } };
   }
-  if (operator === 'isNot' || operator === 'not_equals' || operator === 'doesNotContain') {
+  if (operator === 'isNot' || operator === 'not_equals') {
+    return { NOT: { metadata: { path: [jsonKey], equals: effectiveVal } } };
+  }
+  if (operator === 'doesNotContain') {
     return { NOT: { metadata: { path: [jsonKey], string_contains: effectiveVal } } };
   }
   if (operator === 'beginsWith') {

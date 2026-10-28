@@ -63,7 +63,7 @@ export class ExportsController {
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async exportCitationsBibtex(
     @CurrentUser('id') userId: string,
-    @Body() body: { keys: string[]; projectId?: string },
+    @Body() body: { keys: string[]; projectId?: string; format?: ExportFormatType },
     @Param('projectId') routeProjectId?: string,
     @Query('projectId') queryProjectId?: string,
   ) {
@@ -74,9 +74,12 @@ export class ExportsController {
       userId,
       body.keys || [],
       effectiveProjectId,
+      body.format || 'bibtex',
     );
     return {
       ...result,
+      itemCount: result.itemCount ?? result.count,
+      filename: result.filename ?? 'references.bib',
       bibtex: result.content,
     };
   }

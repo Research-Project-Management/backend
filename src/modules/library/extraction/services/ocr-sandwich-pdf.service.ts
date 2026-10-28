@@ -114,7 +114,11 @@ export class OcrSandwichPdfService {
       }
 
       const pdfBytes = await pdfDoc.save();
-      const resultBuffer = Buffer.from(pdfBytes);
+      const resultBuffer = Buffer.from(
+        pdfBytes.buffer,
+        pdfBytes.byteOffset,
+        pdfBytes.byteLength,
+      );
       this.logger.log(
         `Generated Searchable Sandwich PDF for ${ocrPages.length} scanned pages in ${Date.now() - startTime}ms (size: ${(resultBuffer.length / 1024).toFixed(1)} KB)`,
       );

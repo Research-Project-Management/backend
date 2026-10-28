@@ -438,4 +438,164 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     expect(feUiViolations).toEqual([]);
     expect(feDomainStorageViolations).toEqual([]);
   });
+
+  it('SC-010: Schema & Query Integrity (soft-delete columns, table names, zero ghost delegates or TransactionClient casts)', () => {
+    const schemaDir = path.resolve(
+      __dirname,
+      '../../../prisma/schema/library',
+    );
+    const schemaFiles = fs.existsSync(schemaDir)
+      ? fs
+          .readdirSync(schemaDir)
+          .filter((f) => f.endsWith('.prisma'))
+          .map((f) => path.join(schemaDir, f))
+      : [];
+    const combinedSchema = schemaFiles
+      .map((f) => fs.readFileSync(f, 'utf-8'))
+      .join('\n');
+
+    const softDeletableModels = [
+      'Item',
+      'Collection',
+      'Note',
+      'Attachment',
+      'Annotation',
+      'SavedSearch',
+    ];
+    const missingDeletedAtModels: string[] = [];
+    for (const modelName of softDeletableModels) {
+      const modelBlockRegex = new RegExp(
+        `model\\s+${modelName}\\s*\\{([\\s\\S]*?)\\n\\}`,
+      );
+      const match = combinedSchema.match(modelBlockRegex);
+      if (!match || !/\bdeletedAt\s+DateTime\?/.test(match[1])) {
+        missingDeletedAtModels.push(modelName);
+      }
+    }
+    expect(missingDeletedAtModels).toEqual([]);
+
+    const queryAndCastViolations: Array<{
+      file: string;
+      line: number;
+      match: string;
+    }> = [];
+    for (const file of allFiles) {
+      const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
+      const content = fs.readFileSync(file, 'utf-8');
+      const lines = content.split(/\r?\n/);
+
+      lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+        if (
+          /"full_text_index"/.test(line) ||
+          /\blibraryItem\b/.test(line) ||
+          /as\s+unknown\s+as\s+Prisma\.TransactionClient/.test(line)
+        ) {
+          queryAndCastViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        }
+      });
+    }
+
+    expect(queryAndCastViolations).toEqual([]);
+  });
+
+  it('SC-011: End-to-End Schema -> Backend -> Frontend Contract Integrity (DTO whitelist, ItemsMapper state/relations, prefix query keys)', () => {
+    const itemsDtoPath = path.join(libraryRoot, 'catalog/dto/items.dto.ts');
+    const itemsDtoContent = fs.readFileSync(itemsDtoPath, 'utf-8');
+    for (const requiredDtoField of [
+      'collectionId?:',
+      'identifiers?:',
+      'lockedFields?:',
+      'fieldProvenance?:',
+      'retractionNature?:',
+    ]) {
+      expect(itemsDtoContent).toContain(requiredDtoField);
+    }
+
+    const itemsMapperPath = path.join(
+      libraryRoot,
+      'catalog/domain/items.mapper.ts',
+    );
+    const itemsMapperContent = fs.readFileSync(itemsMapperPath, 'utf-8');
+    for (const requiredMapperField of [
+      'lastReadPage',
+      'scrollPosition',
+      'lastOpenedAt',
+      'isCitedBy',
+    ]) {
+      expect(itemsMapperContent).toContain(requiredMapperField);
+    }
+
+    const searchServicePath = path.join(
+      libraryRoot,
+      'search/services/search.service.ts',
+    );
+    expect(fs.readFileSync(searchServicePath, 'utf-8')).toContain(
+      'mapFlattenedState',
+    );
+
+    const feQueryKeysPath = path.resolve(
+      __dirname,
+      '../../../../frontend/src/features/library/sdk/query-keys.ts',
+    );
+    if (fs.existsSync(feQueryKeysPath)) {
+      const feQueryKeysContent = fs.readFileSync(feQueryKeysPath, 'utf-8');
+      expect(feQueryKeysContent).toContain('attachmentsAll:');
+      expect(feQueryKeysContent).toContain('annotationsAll:');
+      expect(feQueryKeysContent).toContain('relationsAll:');
+    }
+  });
+
+  it('SC-012: Anti-Patchwork, Anti-Split-Brain & Workflow Order Guardrails (no dead pass-through shims, no multi-user metadata split-brain, no duplicate changelog writes, no double ingestion dispatch)', () => {
+    const deletedPassThroughShims = [
+      path.join(libraryRoot, 'extraction/domain/snapshot-template.helper.ts'),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/domain/curation-Duplicates.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/content/use-item-action-handlers.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/reader/reader-attachment.utils.ts',
+      ),
+    ];
+    for (const shimPath of deletedPassThroughShims) {
+      expect(fs.existsSync(shimPath)).toBe(false);
+    }
+
+    const commandRelationsPath = path.join(
+      libraryRoot,
+      'catalog/repositories/command-relations.helper.ts',
+    );
+    const commandRelationsContent = fs.readFileSync(
+      commandRelationsPath,
+      'utf-8',
+    );
+    expect(commandRelationsContent).not.toContain('isMyPublication: isMine');
+
+    const extractionRepoPath = path.join(
+      libraryRoot,
+      'extraction/repositories/extraction.repository.ts',
+    );
+    const extractionRepoContent = fs.readFileSync(extractionRepoPath, 'utf-8');
+    expect(extractionRepoContent).not.toContain('libraryChange.create');
+
+    const ingestionServicePath = path.join(
+      libraryRoot,
+      'ingestion/services/ingestion.service.ts',
+    );
+    const ingestionServiceContent = fs.readFileSync(
+      ingestionServicePath,
+      'utf-8',
+    );
+    expect(ingestionServiceContent).toContain('skipAsyncDispatch: true');
+  });
 });

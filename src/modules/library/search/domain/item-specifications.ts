@@ -167,8 +167,16 @@ export class TextSearchSpecification extends CompositeSpecification {
     const orClauses: Record<string, unknown>[] = [
       { title: { contains: this.query, mode: 'insensitive' } },
       { abstract: { contains: this.query, mode: 'insensitive' } },
+      { publicationTitle: { contains: this.query, mode: 'insensitive' } },
       { doi: { contains: ids.cleanDoi || this.query, mode: 'insensitive' } },
       { citationKey: { contains: this.query, mode: 'insensitive' } },
+      {
+        identifiers: {
+          some: {
+            value: { contains: this.query, mode: 'insensitive' },
+          },
+        },
+      },
       {
         contributors: {
           some: {
@@ -215,7 +223,15 @@ export class TextSearchSpecification extends CompositeSpecification {
         attachments: {
           some: {
             deletedAt: null,
-            fullTextIndex: {
+            filename: { contains: this.query, mode: 'insensitive' },
+          },
+        },
+      },
+      {
+        attachments: {
+          some: {
+            deletedAt: null,
+            fullTextIndexes: {
               some: {
                 textContent: {
                   contains: this.query,
@@ -245,9 +261,26 @@ export class TextSearchSpecification extends CompositeSpecification {
     const rec = item as Record<string, unknown>;
     if (typeof rec.title === 'string' && rec.title.toLowerCase().includes(q)) return true;
     if (typeof rec.abstract === 'string' && rec.abstract.toLowerCase().includes(q)) return true;
+    if (
+      typeof rec.publicationTitle === 'string' &&
+      rec.publicationTitle.toLowerCase().includes(q)
+    ) {
+      return true;
+    }
     if (typeof rec.doi === 'string' && rec.doi.toLowerCase().includes(q)) return true;
     if (typeof rec.citationKey === 'string' && rec.citationKey.toLowerCase().includes(q)) return true;
     if (AcademicSearchQueryEngine.matchesItemIdentifiersInMemory(rec, ids)) return true;
+    if (Array.isArray(rec.identifiers)) {
+      const identifiers = rec.identifiers as Array<{ value?: unknown } | null>;
+      if (
+        identifiers.some(
+          (ident) =>
+            ident?.value && String(ident.value).toLowerCase().includes(q),
+        )
+      ) {
+        return true;
+      }
+    }
     if (Array.isArray(rec.contributors)) {
       const contributors = rec.contributors as Array<{
         fullName?: unknown;
@@ -283,34 +316,47 @@ export class TextSearchSpecification extends CompositeSpecification {
     if (Array.isArray(rec.attachments)) {
       const attachments = rec.attachments as Array<{
         deletedAt?: unknown;
+        filename?: unknown;
         annotations?: Array<{
           deletedAt?: unknown;
           quoteText?: unknown;
           comment?: unknown;
+        } | null>;
+        fullTextIndexes?: Array<{
+          textContent?: unknown;
         } | null>;
         fullTextIndex?: Array<{
           textContent?: unknown;
         } | null>;
       } | null>;
       if (
-        attachments.some(
-          (a) =>
-            !a?.deletedAt &&
-            ((Array.isArray(a?.annotations) &&
-              a.annotations.some(
-                (ann) =>
-                  !ann?.deletedAt &&
-                  ((ann?.quoteText &&
-                    String(ann.quoteText).toLowerCase().includes(q)) ||
-                    (ann?.comment && String(ann.comment).toLowerCase().includes(q))),
-              )) ||
-              (Array.isArray(a?.fullTextIndex) &&
-                a.fullTextIndex.some(
-                  (fti) =>
-                    fti?.textContent &&
-                    String(fti.textContent).toLowerCase().includes(q),
-                ))),
-        )
+        attachments.some((a) => {
+          if (a?.deletedAt) return false;
+          const hasFilenameMatch = Boolean(
+            a?.filename && String(a.filename).toLowerCase().includes(q),
+          );
+          const hasAnnotationMatch =
+            Array.isArray(a?.annotations) &&
+            a.annotations.some(
+              (ann) =>
+                !ann?.deletedAt &&
+                ((ann?.quoteText &&
+                  String(ann.quoteText).toLowerCase().includes(q)) ||
+                  (ann?.comment &&
+                    String(ann.comment).toLowerCase().includes(q))),
+            );
+          const ftiList = Array.isArray(a?.fullTextIndexes)
+            ? a.fullTextIndexes
+            : Array.isArray(a?.fullTextIndex)
+              ? a.fullTextIndex
+              : [];
+          const hasFtiMatch = ftiList.some(
+            (fti) =>
+              fti?.textContent &&
+              String(fti.textContent).toLowerCase().includes(q),
+          );
+          return hasFilenameMatch || hasAnnotationMatch || hasFtiMatch;
+        })
       ) {
         return true;
       }

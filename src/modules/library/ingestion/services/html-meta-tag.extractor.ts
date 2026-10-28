@@ -474,12 +474,20 @@ export class HtmlMetaTagExtractor {
       result.itemType = 'blogPost';
     }
 
-    const pdfUrl = first(
+    const explicitPdfUrl = first(
       'citation_pdf_url',
-      'citation_fulltext_html_url',
       'eprints.document_url',
       'bepress_citation_pdf_url',
     );
+    const fallbackFulltextUrl = first(
+      'citation_fulltext_html_url',
+      'dc.identifier.uri',
+    );
+    const pdfUrl =
+      explicitPdfUrl ||
+      (fallbackFulltextUrl && /\.pdf(?:$|[?#])/i.test(fallbackFulltextUrl)
+        ? fallbackFulltextUrl
+        : undefined);
     if (pdfUrl) {
       try {
         result.pdfUrl = new URL(pdfUrl, pageUrl).toString();

@@ -26,10 +26,28 @@ export class DomainRateLimiterService {
   private readonly domainChains = new Map<string, Promise<void>>();
   private readonly lastExecutionMap = new Map<string, number>();
 
-  // Flag to bypass artificial delay during unit tests if requested
-  public bypassDelay = false;
+  private bypassDelayEnabled = false;
 
-  constructor(@Optional() private readonly redis?: RedisCacheService) {}
+  constructor(
+    @Optional() private readonly redis?: RedisCacheService,
+    @Optional() options?: { bypassDelay?: boolean },
+  ) {
+    if (options?.bypassDelay !== undefined) {
+      this.bypassDelayEnabled = Boolean(options.bypassDelay);
+    }
+  }
+
+  public setBypassDelay(bypass: boolean): void {
+    this.bypassDelayEnabled = Boolean(bypass);
+  }
+
+  public get bypassDelay(): boolean {
+    return this.bypassDelayEnabled;
+  }
+
+  public set bypassDelay(bypass: boolean) {
+    this.bypassDelayEnabled = Boolean(bypass);
+  }
 
   private readonly domainConfigs: Record<string, DomainRateLimitConfig> = {
     // arXiv: strict 1 request per 3 seconds guideline
@@ -50,6 +68,7 @@ export class DomainRateLimiterService {
     // Semantic Scholar API: ~5 requests per second
     'api.semanticscholar.org': { minIntervalMs: 200 },
     semanticscholar: { minIntervalMs: 200 },
+    'semantic-scholar': { minIntervalMs: 200 },
 
     // CrossRef Polite Pool: 50 requests per second
     'api.crossref.org': { minIntervalMs: 50 },
@@ -101,7 +120,7 @@ export class DomainRateLimiterService {
     domainOrKey: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (this.bypassDelay) return;
+    if (this.bypassDelayEnabled) return;
 
     const key = this.normalizeKey(domainOrKey);
     const config = this.getConfig(key);
@@ -125,17 +144,10 @@ export class DomainRateLimiterService {
     this.domainChains.set(key, currentChain);
 
     try {
-      await prevChain;
-    } catch {
-      // Previous task failure should not abort subsequent requests
-    }
-
-    if (signal?.aborted) {
+      await this.waitForPreviousTurn(prevChain, key, signal);
+    } catch (err) {
       releaseSlot();
-      throw (
-        signal.reason ||
-        new Error(`Aborted while waiting for domain rate limit on ${key}`)
-      );
+      throw err;
     }
 
     const lastExec = this.lastExecutionMap.get(key) || 0;
@@ -143,24 +155,58 @@ export class DomainRateLimiterService {
     const elapsed = now - lastExec;
     let waitTime = Math.max(0, config.minIntervalMs - elapsed);
 
-    // Multi-Pod Distributed Check: Synchronize with cluster via Redis
+    // Multi-Pod Distributed Check: Synchronize with cluster via atomic Redis Lua script
     if (this.redis?.isReady && this.redis.isReady()) {
       try {
         const client = this.redis.getClient?.();
         if (client) {
           const redisKey = `library:ratelimit:${key}:last_exec`;
-          const redisLastExecStr = await client.get(redisKey);
-          const redisLastExec = redisLastExecStr ? Number(redisLastExecStr) : 0;
-          const distElapsed = now - redisLastExec;
-          const distWait = Math.max(0, config.minIntervalMs - distElapsed);
-          if (distWait > waitTime) {
-            waitTime = distWait;
+          const ttlMs = Math.max(config.minIntervalMs * 3, 5000);
+          const luaScript = `
+            local last = tonumber(redis.call('GET', KEYS[1]) or '0') or 0
+            local now = tonumber(ARGV[1])
+            local interval = tonumber(ARGV[2])
+            local ttl = tonumber(ARGV[3])
+            local next_exec = math.max(now, last + interval)
+            redis.call('SET', KEYS[1], tostring(next_exec), 'PX', ttl)
+            return next_exec - now
+          `;
+          if (typeof client.eval === 'function') {
+            const evalRes = await client.eval(
+              luaScript,
+              1,
+              redisKey,
+              String(now),
+              String(config.minIntervalMs),
+              String(ttlMs),
+            );
+            const distWait = Math.max(0, Number(evalRes) || 0);
+            if (distWait > waitTime) {
+              waitTime = distWait;
+            }
+          } else {
+            const redisLastExecStr = await client.get(redisKey);
+            const redisLastExec = redisLastExecStr
+              ? Number(redisLastExecStr)
+              : 0;
+            const distElapsed = now - redisLastExec;
+            const distWait = Math.max(0, config.minIntervalMs - distElapsed);
+            if (distWait > waitTime) {
+              waitTime = distWait;
+            }
+            await client.set(
+              redisKey,
+              (now + waitTime).toString(),
+              'PX',
+              ttlMs,
+            );
           }
-          await client.set(redisKey, (now + waitTime).toString(), 'PX', Math.max(config.minIntervalMs * 3, 5000));
         }
       } catch (redisErr) {
         // Non-blocking fallback to local memory
-        this.logger.debug(`[DomainRateLimiter] Distributed rate-limit fallback: ${redisErr instanceof Error ? redisErr.message : String(redisErr)}`);
+        this.logger.debug(
+          `[DomainRateLimiter] Distributed rate-limit fallback: ${redisErr instanceof Error ? redisErr.message : String(redisErr)}`,
+        );
       }
     }
 
@@ -217,6 +263,47 @@ export class DomainRateLimiterService {
   public reset(): void {
     this.domainChains.clear();
     this.lastExecutionMap.clear();
+  }
+
+  private waitForPreviousTurn(
+    prevChain: Promise<void>,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const getAbortError = () =>
+        signal?.reason instanceof Error
+          ? signal.reason
+          : new Error(
+              signal?.reason
+                ? String(signal.reason)
+                : `Aborted while waiting for domain rate limit on ${key}`,
+            );
+
+      if (signal?.aborted) {
+        return reject(getAbortError());
+      }
+      const onAbort = () => {
+        reject(getAbortError());
+      };
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+      prevChain
+        .catch(() => {
+          // Previous task failure should not abort subsequent requests
+        })
+        .finally(() => {
+          if (signal) {
+            signal.removeEventListener('abort', onAbort);
+          }
+          if (signal?.aborted) {
+            reject(getAbortError());
+          } else {
+            resolve();
+          }
+        });
+    });
   }
 
   private sleep(ms: number, signal?: AbortSignal): Promise<void> {

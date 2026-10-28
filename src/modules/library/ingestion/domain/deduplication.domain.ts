@@ -257,8 +257,73 @@ export function calculateTokenSortRatio(
   return Math.max(0, 1 - dist / maxLen);
 }
 
-const PART_OR_VOLUME_MARKER_REGEX =
-  /\b(?:part|vol(?:ume)?|section|paper|chapter|phase|series|study|experiment)\s*([ivxlcdm]+|\d+|[a-z])\b/gi;
+const ROMAN_NUMERAL_TO_ARABIC: Readonly<Record<string, string>> = {
+  i: '1',
+  ii: '2',
+  iii: '3',
+  iv: '4',
+  v: '5',
+  vi: '6',
+  vii: '7',
+  viii: '8',
+  ix: '9',
+  x: '10',
+  xi: '11',
+  xii: '12',
+};
+
+function normalizePartDesignatorToken(raw: string): string {
+  const lower = raw.trim().toLowerCase();
+  if (ROMAN_NUMERAL_TO_ARABIC[lower]) {
+    return ROMAN_NUMERAL_TO_ARABIC[lower];
+  }
+  if (/^\d+$/.test(lower)) {
+    return String(parseInt(lower, 10));
+  }
+  return lower;
+}
+
+export function extractPartAndVolumeMarkers(title: string): string[] {
+  if (!title) return [];
+  const collected: Array<{ index: number; token: string }> = [];
+
+  const structRegex =
+    /\b(?:part|vol(?:ume)?\.?|section|chapter)\s*(?:#|no\.?\s*)?(\d+|i{1,3}|iv|vi{0,3}|ix|x|xi{1,2})\b/gi;
+  for (const m of title.matchAll(structRegex)) {
+    if (m[1] && m.index !== undefined) {
+      collected.push({
+        index: m.index,
+        token: normalizePartDesignatorToken(m[1]),
+      });
+    }
+  }
+
+  const paperStudyRegex =
+    /\b(?:[Pp]aper|PAPER|[Ss]tudy|STUDY)\s*(?:#|no\.?\s*)?(\d+|I{1,3}|IV|VI{0,3}|IX|X|XI{1,2})\b/g;
+  for (const m of title.matchAll(paperStudyRegex)) {
+    if (m[1] && m.index !== undefined) {
+      collected.push({
+        index: m.index,
+        token: normalizePartDesignatorToken(m[1]),
+      });
+    }
+  }
+
+  const upperLetterRegex =
+    /\b(?:[Pp]art|PART|[Ss]ection|SECTION|[Vv]ol(?:ume)?\.?|VOL(?:UME)?\.?)\s+([A-HJ-UW-Z])\b/g;
+  for (const m of title.matchAll(upperLetterRegex)) {
+    if (m[1] && m.index !== undefined) {
+      collected.push({
+        index: m.index,
+        token: m[1].toLowerCase(),
+      });
+    }
+  }
+
+  return collected
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => entry.token);
+}
 
 type DocumentRelationCategory =
   'main' | 'reply' | 'comment' | 'erratum' | 'retraction' | 'supplement';
@@ -361,13 +426,8 @@ export function hasConflictingPartOrSupplementMarkers(
   }
 
   // 2. Check if both titles have explicit Part / Volume / Section / Study designators that differ
-  const extractPartMarkers = (t: string): string[] => {
-    const matches = [...t.matchAll(PART_OR_VOLUME_MARKER_REGEX)];
-    return matches.map((m) => m[1].toLowerCase());
-  };
-
-  const partsA = extractPartMarkers(titleA);
-  const partsB = extractPartMarkers(titleB);
+  const partsA = extractPartAndVolumeMarkers(titleA);
+  const partsB = extractPartAndVolumeMarkers(titleB);
   if (partsA.length > 0 && partsB.length > 0) {
     if (partsA.join('|') !== partsB.join('|')) {
       return true;
@@ -378,11 +438,16 @@ export function hasConflictingPartOrSupplementMarkers(
   }
 
   // 3. Trailing Roman numeral or integer after colon/dash: e.g. "Title: I" vs "Title: II"
-  const trailingPartRegex = /[:—–-]\s*([ivxlcdm]+|\d+)\s*$/i;
-  const trailA = titleA.trim().match(trailingPartRegex)?.[1]?.toLowerCase();
-  const trailB = titleB.trim().match(trailingPartRegex)?.[1]?.toLowerCase();
-  if (trailA && trailB && trailA !== trailB) {
-    return true;
+  const trailingPartRegex =
+    /[:—–-]\s*(i{1,3}|iv|vi{0,3}|ix|x|xi{1,2}|\d+)\s*$/i;
+  const trailRawA = titleA.trim().match(trailingPartRegex)?.[1];
+  const trailRawB = titleB.trim().match(trailingPartRegex)?.[1];
+  if (trailRawA && trailRawB) {
+    const trailA = normalizePartDesignatorToken(trailRawA);
+    const trailB = normalizePartDesignatorToken(trailRawB);
+    if (trailA !== trailB) {
+      return true;
+    }
   }
 
   return false;

@@ -133,4 +133,95 @@ describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', ()
       expect(projected.extra).toContain('Volume: 99');
     });
   });
+
+  describe('4. Loop 2 Output Layer Invariants (Catalog Mappers & Schema Validator)', () => {
+    it('rejects malformed identifiers in cleanSingleIdentifier and respects explicit clearing over stale extra', async () => {
+      const {
+        cleanSingleIdentifier,
+        normalizeItemIdentifiers,
+        syncMetadataIdentifierAliases,
+      } = await import(
+        '@/modules/library/catalog/domain/identifier-change.helper'
+      );
+      const { normalizeDoi } = await import('@/modules/library/core');
+
+      expect(cleanSingleIdentifier('not-a-valid-doi', normalizeDoi)).toBe('');
+
+      const clearedIds = normalizeItemIdentifiers({
+        doi: '',
+        isbn: null,
+        extraFields: { doi: '10.1000/stale', isbn: '978-0-262-03384-8' },
+        extra: 'DOI: 10.1000/stale\nISBN: 978-0-262-03384-8\nCustom: Value',
+      });
+      expect(clearedIds.doi).toBe('');
+      expect(clearedIds.isbn).toBe('');
+
+      const meta: Record<string, unknown> = {
+        doi: '10.1000/stale',
+        DOI: '10.1000/stale',
+        isbn: '978-0-262-03384-8',
+        extra: 'DOI: 10.1000/stale\nISBN: 978-0-262-03384-8\nCustom: Value',
+      };
+      syncMetadataIdentifierAliases(meta, clearedIds, { isCreate: false });
+      expect(meta.doi).toBeNull();
+      expect(meta.DOI).toBeUndefined();
+      expect(meta.isbn).toBeNull();
+      expect(meta.extra).toBe('Custom: Value');
+    });
+
+    it('prioritizes concrete baseMap fields and prevents stale data.metadata from clobbering explicit updates', async () => {
+      const {
+        resolveCanonicalCommandFields,
+        buildMetadataPartial,
+        normalizeItemIdentifiers,
+      } = await import(
+        '@/modules/library/catalog/domain/command-payload.builder'
+      );
+
+      const updateData = {
+        itemType: 'bookSection',
+        bookTitle: 'Updated Handbook of AI',
+        publicationTitle: 'Stale Book Title',
+        metadata: {
+          publicationTitle: 'Stale Book Title',
+          bookTitle: 'Stale Book Title',
+          volume: '1',
+        },
+        volume: '2',
+      };
+      const canonical = resolveCanonicalCommandFields(updateData as any, 'bookSection');
+      expect(canonical.rawPubTitle).toBe('Updated Handbook of AI');
+
+      const ids = normalizeItemIdentifiers(updateData as any);
+      const builtMeta = buildMetadataPartial({
+        mode: 'update',
+        baseMeta: { publicationTitle: 'Stale Book Title', volume: '1' },
+        data: updateData as any,
+        canonical,
+        ids,
+      });
+      expect(builtMeta.publicationTitle).toBe('Updated Handbook of AI');
+      expect(builtMeta.bookTitle).toBe('Updated Handbook of AI');
+      expect(builtMeta.volume).toBe('2');
+    });
+
+    it('harmonizes all patent co-authors to inventor and supports snake_case / synonym creator roles', () => {
+      const patentResult = validator.validateAndHarmonizeCreators('patent', [
+        { firstName: 'Nikola', lastName: 'Tesla', creatorType: 'author' },
+        { firstName: 'Thomas', lastName: 'Edison', creatorType: 'co_author' },
+      ]);
+      expect(patentResult.creators[0].creatorType).toBe('inventor');
+      expect(patentResult.creators[1].creatorType).toBe('inventor');
+
+      const bookSectionResult = validator.validateAndHarmonizeCreators(
+        'bookSection',
+        [
+          { firstName: 'Jane', lastName: 'Doe', creatorType: 'book_author' },
+          { firstName: 'John', lastName: 'Smith', creatorType: 'advisor' },
+        ],
+      );
+      expect(bookSectionResult.creators[0].creatorType).toBe('bookAuthor');
+      expect(bookSectionResult.creators[1].creatorType).toBe('contributor');
+    });
+  });
 });

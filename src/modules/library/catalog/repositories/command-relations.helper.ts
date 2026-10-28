@@ -16,7 +16,12 @@ export async function sanitizeUpdateCollectionIds(params: {
   data: UpdateItemData;
 }): Promise<UpdateItemData> {
   const { client, userId, validProjectId, existingProjectId, data } = params;
-  if (data.collectionIds === undefined && data.collectionId === undefined) {
+  const rawCollections = (data as { collections?: string[] | null }).collections;
+  if (
+    data.collectionIds === undefined &&
+    rawCollections === undefined &&
+    data.collectionId === undefined
+  ) {
     return data;
   }
 
@@ -24,6 +29,7 @@ export async function sanitizeUpdateCollectionIds(params: {
     new Set(
       [
         ...(Array.isArray(data.collectionIds) ? data.collectionIds : []),
+        ...(Array.isArray(rawCollections) ? rawCollections : []),
         ...(data.collectionId && typeof data.collectionId === 'string'
           ? [data.collectionId.trim()]
           : []),
@@ -60,7 +66,7 @@ export async function sanitizeUpdateCollectionIds(params: {
   const validColSet = new Set(validCols.map((c) => c.id));
   return {
     ...data,
-    ...(data.collectionIds !== undefined
+    ...(data.collectionIds !== undefined || rawCollections !== undefined
       ? {
           collectionIds: candidateColIds.filter((cid) => validColSet.has(cid)),
         }
@@ -149,6 +155,35 @@ export async function removeItemRelationInClient(
   });
 }
 
+const RELATION_PEER_SELECT = {
+  id: true,
+  title: true,
+  itemType: true,
+  year: true,
+} as const;
+
+export function buildCommandMutationInclude(
+  userId: string,
+  options?: { includeAttachmentRevisions?: boolean; orderNotes?: boolean },
+) {
+  return {
+    collectionItems: { include: { collection: true } },
+    itemTags: { include: { tag: true } },
+    contributors: { orderBy: { orderIndex: 'asc' as const } },
+    attachments: options?.includeAttachmentRevisions
+      ? { where: { deletedAt: null }, include: { revisions: true } }
+      : { where: { deletedAt: null } },
+    notesList: options?.orderNotes
+      ? { where: { deletedAt: null }, orderBy: { createdAt: 'desc' as const } }
+      : { where: { deletedAt: null } },
+    states: userId ? { where: { userId }, take: 1 } : false,
+    identifiers: true,
+    publications: { where: { userId } },
+    outgoingRel: { include: { targetItem: { select: RELATION_PEER_SELECT } } },
+    incomingRel: { include: { sourceItem: { select: RELATION_PEER_SELECT } } },
+  } satisfies Prisma.ItemInclude;
+}
+
 export async function setMyPublicationInClient(
   client: Prisma.TransactionClient | PrismaService,
   userId: string,
@@ -162,6 +197,7 @@ export async function setMyPublicationInClient(
     includeNotes?: boolean;
     authorshipConfirmed?: boolean;
     projectId?: string;
+    stripSharedPublicationFlag?: boolean;
   },
 ) {
   if (!isUuid(id) || !isUuid(userId)) {
@@ -193,10 +229,15 @@ export async function setMyPublicationInClient(
   } else {
     await client.userPublication.deleteMany({ where: { userId, itemId: id } });
   }
+  const isSharedProjectItem = Boolean(
+    validProjectId ||
+      (existing as { projectId?: string | null }).projectId ||
+      options?.stripSharedPublicationFlag,
+  );
   const metadataObj = buildMyPublicationMetadata(
     existing.metadata,
     isMyPublication,
-    options,
+    isSharedProjectItem ? { ...options, stripSharedFlag: true } : options,
   );
   return client.item.update({
     where: { id },
@@ -204,11 +245,6 @@ export async function setMyPublicationInClient(
       metadata: metadataObj as Prisma.InputJsonValue,
       version: { increment: 1 },
     },
-    include: {
-      collectionItems: { include: { collection: true } },
-      itemTags: { include: { tag: true } },
-      contributors: { orderBy: { orderIndex: 'asc' } },
-      attachments: true,
-    },
+    include: buildCommandMutationInclude(userId),
   });
 }

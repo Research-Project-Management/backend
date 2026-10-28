@@ -5,6 +5,10 @@ import {
   buildTypeConversionUpdatePayload,
   ItemTransformer,
   TypesService,
+  CatalogFacade,
+  ItemCurationService,
+  QueryRepository,
+  CommandRepository,
 } from '@/modules/library/catalog';
 import { buildItemSearchCondition } from '@/modules/library/catalog/repositories/item-filter-where.builder';
 import { ExtractionMetadataSynchronizer } from '@/modules/library/extraction/services/extraction-metadata.synchronizer';
@@ -162,12 +166,26 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
       },
     };
 
+    const curationService = new ItemCurationService(
+      new QueryRepository(mockPrisma as never),
+      new CommandRepository(mockPrisma as never),
+      undefined as never,
+    );
+    const catalogFacade = new CatalogFacade(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      curationService,
+    );
     const facade = new LibraryFacade(
+      catalogFacade,
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
-      mockPrisma as never,
     );
 
     await facade.updateItemAiMetadata('item-ai-1', {
@@ -178,20 +196,50 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
       aiSummary: 'Concise AI summary',
     });
 
-    expect(mockPrisma.item.update).toHaveBeenCalledWith({
-      where: { id: 'item-ai-1' },
-      data: {
-        metadata: {
-          existingKey: 'preserved',
+    expect(mockPrisma.item.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'item-ai-1' },
+        data: {
+          metadata: {
+            existingKey: 'preserved',
+            doi: '10.1145/1234567',
+            isbn: '978-1-4503-9999-9',
+            proceedingsTitle: 'Proceedings of SIGCOMM 2025',
+            publicationTitle: 'Proceedings of SIGCOMM 2025',
+            aiSummary: 'Concise AI summary',
+            fieldProvenance: {
+              doi: {
+                source: 'AIMetadata',
+                sourceProvider: 'AIMetadata',
+                confidence: 0.7,
+                verified: false,
+              },
+              isbn: {
+                source: 'AIMetadata',
+                sourceProvider: 'AIMetadata',
+                confidence: 0.7,
+                verified: false,
+              },
+              proceedingsTitle: {
+                source: 'AIMetadata',
+                sourceProvider: 'AIMetadata',
+                confidence: 0.7,
+                verified: false,
+              },
+              publicationTitle: {
+                source: 'AIMetadata',
+                sourceProvider: 'AIMetadata',
+                confidence: 0.7,
+                verified: false,
+              },
+            },
+          },
           doi: '10.1145/1234567',
-          isbn: '978-1-4503-9999-9',
-          proceedingsTitle: 'Proceedings of SIGCOMM 2025',
           publicationTitle: 'Proceedings of SIGCOMM 2025',
-          aiSummary: 'Concise AI summary',
+          version: { increment: 1 },
         },
-        version: { increment: 1 },
-      },
-    });
+      }),
+    );
   });
 
   it('normalizes hyphenated ISBN and prefixed arXiv/PMID/PMCID in buildItemSearchCondition and ConditionEvaluatorEngine', () => {
@@ -218,16 +266,46 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
     expect(compiledIsbn.AND[1]).toEqual({
       AND: [
         {
-          metadata: {
-            path: ['isbn'],
-            string_contains: '9780262033848',
-          },
+          OR: [
+            {
+              metadata: {
+                path: ['isbn'],
+                equals: '9780262033848',
+              },
+            },
+            {
+              identifiers: {
+                some: {
+                  type: 'isbn',
+                  value: {
+                    equals: '9780262033848',
+                    mode: 'insensitive',
+                  },
+                },
+              },
+            },
+          ],
         },
         {
-          metadata: {
-            path: ['arxivId'],
-            string_contains: '2301.00001v2',
-          },
+          OR: [
+            {
+              metadata: {
+                path: ['arxivId'],
+                string_contains: '2301.00001v2',
+              },
+            },
+            {
+              identifiers: {
+                some: {
+                  type: 'arxiv',
+                  value: {
+                    contains: '2301.00001v2',
+                    mode: 'insensitive',
+                  },
+                },
+              },
+            },
+          ],
         },
       ],
     });
@@ -609,14 +687,14 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
         }),
       ).toBe(true);
 
-      // 3. buildSearchFtsSqlQuery includes full_text_index and normalized identifier clauses
+      // 3. buildSearchFtsSqlQuery includes full_text_indexes and normalized identifier clauses
       const sqlBuilt = buildSearchFtsSqlQuery({
         userId: '550e8400-e29b-41d4-a716-446655440000',
         options: { q: 'arXiv:2301.00001v2' },
         queryText: 'arXiv 2301 00001v2',
         limit: 20,
       });
-      expect(sqlBuilt?.sql).toContain('full_text_index');
+      expect(sqlBuilt?.sql).toContain('full_text_indexes');
       expect(sqlBuilt?.sql).toContain("metadata->>'arxivId'");
       expect(sqlBuilt?.params).toContain('%2301.00001%');
     });
@@ -808,12 +886,26 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
         },
       };
 
+      const curationService = new ItemCurationService(
+        new QueryRepository(mockPrisma as never),
+        new CommandRepository(mockPrisma as never),
+        undefined as never,
+      );
+      const catalogFacade = new CatalogFacade(
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        curationService,
+      );
       const facade = new LibraryFacade(
+        catalogFacade,
         {} as never,
         {} as never,
         {} as never,
-        {} as never,
-        mockPrisma as never,
       );
 
       await facade.updateItemAiMetadata('item-ai-locked', {

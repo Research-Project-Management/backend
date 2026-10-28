@@ -519,6 +519,7 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
   if (Array.isArray(it.identifiers)) {
     const idTypeToField: Record<string, keyof MutableItemPayload> = {
       arxiv: 'arxivId',
+      arxivid: 'arxivId',
       doi: 'doi',
       pmid: 'pmid',
       pmcid: 'pmcid',
@@ -526,10 +527,11 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
       issn: 'issn',
     };
     for (const ident of it.identifiers) {
-      const type = (ident.type || ident.identifierType || '').toLowerCase();
+      const type = (ident.type || ident.identifierType || '').trim().toLowerCase();
       const targetKey = idTypeToField[type];
-      if (targetKey && !it[targetKey]) {
-        it[targetKey] = ident.value;
+      const cleanVal = typeof ident.value === 'string' ? ident.value.trim() : '';
+      if (targetKey && cleanVal) {
+        it[targetKey] = cleanVal;
       }
     }
   }
@@ -616,37 +618,45 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     }
   }
 
-  if (!Array.isArray(it.identifiers) || it.identifiers.length === 0) {
-    const idDefs: ReadonlyArray<{
-      type: string;
-      val: string | null | undefined;
-      uri: (v: string) => string;
-    }> = [
-      { type: 'doi', val: it.doi, uri: (v) => `https://doi.org/${v}` },
-      {
-        type: 'arxiv',
-        val: it.arxivId,
-        uri: (v) => `https://arxiv.org/abs/${v}`,
-      },
-      {
-        type: 'pmid',
-        val: it.pmid,
-        uri: (v) => `https://pubmed.ncbi.nlm.nih.gov/${v}/`,
-      },
-      {
-        type: 'pmcid',
-        val: it.pmcid,
-        uri: (v) => `https://www.ncbi.nlm.nih.gov/pmc/articles/${v}/`,
-      },
-      { type: 'isbn', val: it.isbn, uri: (v) => `urn:isbn:${v}` },
-      { type: 'issn', val: it.issn, uri: (v) => `urn:issn:${v}` },
-    ];
-    it.identifiers = idDefs
-      .filter((d): d is typeof d & { val: string } => Boolean(d.val))
-      .map((d) => ({
+  const idDefs: ReadonlyArray<{
+    type: string;
+    val: string | null | undefined;
+    uri: (v: string) => string;
+  }> = [
+    { type: 'doi', val: it.doi, uri: (v) => `https://doi.org/${v}` },
+    {
+      type: 'arxiv',
+      val: it.arxivId,
+      uri: (v) => `https://arxiv.org/abs/${v}`,
+    },
+    {
+      type: 'pmid',
+      val: it.pmid,
+      uri: (v) => `https://pubmed.ncbi.nlm.nih.gov/${v}/`,
+    },
+    {
+      type: 'pmcid',
+      val: it.pmcid,
+      uri: (v) => `https://www.ncbi.nlm.nih.gov/pmc/articles/${v}/`,
+    },
+    { type: 'isbn', val: it.isbn, uri: (v) => `urn:isbn:${v}` },
+    { type: 'issn', val: it.issn, uri: (v) => `urn:issn:${v}` },
+  ];
+  const existingIdents = Array.isArray(it.identifiers) ? [...it.identifiers] : [];
+  const existingTypes = new Set(
+    existingIdents
+      .map((ident) => (ident.type || ident.identifierType || '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+  for (const d of idDefs) {
+    if (d.val && !existingTypes.has(d.type)) {
+      existingIdents.push({
         type: d.type,
         value: d.val,
         canonicalUri: d.uri(d.val),
-      }));
+      });
+      existingTypes.add(d.type);
+    }
   }
+  it.identifiers = existingIdents;
 }

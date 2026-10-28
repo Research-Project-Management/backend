@@ -39,13 +39,45 @@ import {
   normalizeArxivId,
   normalizePmid,
   normalizeIsbn,
+  ItemProvenancePolicy,
+  isPlaceholderItemTitle,
 } from '@/modules/library/core';
 import {
   RawDuplicateCluster,
   mapCandidateToClusterItem,
   collectExactIdentifierClusters,
   collectFuzzyTitleYearAuthorClusters,
+  isPreprintDoiValue,
+  isPreprintCandidateItem,
+  normalizeNumericLocatorToken,
+  normalizeIssueToken,
+  isLocalOrElectronicPageRange,
 } from '@/modules/library/ingestion/domain/duplicate-clustering.helper';
+
+const EFFECTIVE_FIELD_COUPLED_FALLBACKS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  abstract: ['abstractNote'],
+  abstractNote: ['abstract'],
+  publicationTitle: [
+    'journal',
+    'proceedingsTitle',
+    'bookTitle',
+    'repository',
+    'venue',
+  ],
+  journal: ['publicationTitle'],
+  proceedingsTitle: ['publicationTitle'],
+  bookTitle: ['publicationTitle'],
+  repository: ['publicationTitle'],
+  year: ['date', 'publicationDate'],
+  date: ['publicationDate', 'year'],
+  publicationDate: ['date', 'year'],
+};
+
+function isNonEmptyFieldValue(val: unknown): boolean {
+  return val !== undefined && val !== null && val !== '';
+}
 
 export function asMetaObject(val: unknown): Record<string, unknown> {
   return val && typeof val === 'object' && !Array.isArray(val)
@@ -53,21 +85,85 @@ export function asMetaObject(val: unknown): Record<string, unknown> {
     : {};
 }
 
+export interface EffectiveFieldLookupOptions {
+  excludeGenericsFromSpecificTarget?: boolean;
+}
+
 export function getEffectiveItemField(
   item: unknown,
   field: string,
   metaOverride?: Record<string, unknown>,
+  options?: EffectiveFieldLookupOptions,
 ): unknown {
   const rec = asMetaObject(item);
   const topVal = rec[field];
-  if (topVal !== undefined && topVal !== null && topVal !== '') {
+  if (isNonEmptyFieldValue(topVal)) {
     return topVal;
   }
   const meta = metaOverride || asMetaObject(rec.metadata);
   const metaVal = meta[field];
-  return metaVal !== undefined && metaVal !== null && metaVal !== ''
-    ? metaVal
-    : undefined;
+  if (isNonEmptyFieldValue(metaVal)) {
+    return metaVal;
+  }
+
+  const excludeGenerics = options?.excludeGenericsFromSpecificTarget === true;
+  const coupledAliases = Array.from(
+    new Set([
+      ...ItemProvenancePolicy.getCoupledFieldAliases(field),
+      ...(EFFECTIVE_FIELD_COUPLED_FALLBACKS[field] ?? []),
+    ]),
+  ).filter((alias) => {
+    if (excludeGenerics) {
+      if ((field === 'date' || field === 'publicationDate') && alias === 'year') {
+        return false;
+      }
+      if (
+        (field === 'bookTitle' ||
+          field === 'proceedingsTitle' ||
+          field === 'repository') &&
+        alias === 'publicationTitle'
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
+  for (const alias of coupledAliases) {
+    const aliasTop = rec[alias];
+    if (isNonEmptyFieldValue(aliasTop)) {
+      return aliasTop;
+    }
+    const aliasMeta = meta[alias];
+    if (isNonEmptyFieldValue(aliasMeta)) {
+      return aliasMeta;
+    }
+  }
+
+  const lowerField = field.trim().toLowerCase();
+  if (
+    (lowerField === 'doi' ||
+      lowerField === 'isbn' ||
+      lowerField === 'issn' ||
+      lowerField === 'pmid' ||
+      lowerField === 'pmcid' ||
+      lowerField === 'arxivid' ||
+      lowerField === 'arxiv') &&
+    Array.isArray(rec.identifiers)
+  ) {
+    const targetIdType = lowerField === 'arxivid' ? 'arxiv' : lowerField;
+    for (const ident of rec.identifiers as Array<Record<string, unknown>>) {
+      if (!ident || typeof ident !== 'object') continue;
+      const rawType = String(ident.type ?? ident.identifierType ?? '')
+        .trim()
+        .toLowerCase();
+      const normType = rawType === 'arxivid' ? 'arxiv' : rawType;
+      if (normType === targetIdType && isNonEmptyFieldValue(ident.value)) {
+        return ident.value;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 @Injectable()
@@ -132,69 +228,47 @@ export class DuplicateDetectorService {
   }
 
   isPreprintDoi(doi?: string | null): boolean {
-    if (!doi) return false;
-    const norm = (normalizeDoi(doi) || doi).toLowerCase().trim();
-    return (
-      norm.startsWith('10.48550/arxiv.') ||
-      norm.startsWith('10.1101/') ||
-      norm.startsWith('10.21203/') ||
-      norm.startsWith('10.26434/') ||
-      norm.includes('/arxiv.')
-    );
+    return isPreprintDoiValue(doi);
   }
-
   areCompatibleIdentifierDuplicates(
     itemA: DuplicateCandidateItem,
     itemB: DuplicateCandidateItem,
     idType: string,
   ): boolean {
     if (this.isDismissedPair(itemA, itemB)) return false;
-    if (hasConflictingPartOrSupplementMarkers(itemA.title, itemB.title)) {
-      return false;
-    }
-
+    if (hasConflictingPartOrSupplementMarkers(itemA.title, itemB.title)) return false;
     const metaA = asMetaObject(itemA.metadata);
     const metaB = asMetaObject(itemB.metadata);
     const typeA = this.resolveItemType(itemA);
     const typeB = this.resolveItemType(itemB);
-
     const toStr = (v: unknown) =>
       typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
 
-    const involvesBookChapter =
-      typeA === 'bookSection' ||
-      typeB === 'bookSection' ||
-      typeA === 'chapter' ||
-      typeB === 'chapter';
-    if (involvesBookChapter) {
-      const titleSim = calculateTitleSimilarity(itemA.title, itemB.title);
-      if (titleSim < 0.78) return false;
-      const pagesA = toStr(metaA.pages).toLowerCase();
-      const pagesB = toStr(metaB.pages).toLowerCase();
-      if (pagesA && pagesB && pagesA !== pagesB && titleSim < 0.92) {
-        return false;
-      }
-    }
-
     if (idType === 'isbn') {
+      const involvesBookChapter =
+        typeA === 'bookSection' || typeB === 'bookSection' || typeA === 'chapter' || typeB === 'chapter';
+      if (involvesBookChapter) {
+        const titleSim = calculateTitleSimilarity(itemA.title, itemB.title);
+        if (titleSim < 0.78) return false;
+        const pagesA = toStr(metaA.pages).toLowerCase();
+        const pagesB = toStr(metaB.pages).toLowerCase();
+        if (pagesA && pagesB && pagesA !== pagesB && titleSim < 0.92) return false;
+      }
       for (const locatorKey of ['volume', 'edition'] as const) {
-        const valA = toStr(metaA[locatorKey]).toLowerCase();
-        const valB = toStr(metaB[locatorKey]).toLowerCase();
+        const valA = normalizeNumericLocatorToken(toStr(metaA[locatorKey]));
+        const valB = normalizeNumericLocatorToken(toStr(metaB[locatorKey]));
         if (valA && valB && valA !== valB) return false;
       }
       const normA = normalizeTitleForDedupe(itemA.title);
       const normB = normalizeTitleForDedupe(itemB.title);
       if (
-        normA &&
-        normB &&
-        !normA.includes(normB) &&
-        !normB.includes(normA) &&
+        normA && normB &&
+        !normA.includes(normB) && !normB.includes(normA) &&
         calculateTitleSimilarity(itemA.title, itemB.title) < 0.5
       ) {
         return false;
       }
     }
-
     return true;
   }
 
@@ -202,51 +276,57 @@ export class DuplicateDetectorService {
     itemA: DuplicateCandidateItem,
     itemB: DuplicateCandidateItem,
   ): boolean {
-    if (
-      isGenericBoilerplateTitle(itemA.title) ||
-      isGenericBoilerplateTitle(itemB.title)
-    ) {
+    if (isGenericBoilerplateTitle(itemA.title) || isGenericBoilerplateTitle(itemB.title)) {
       return true;
     }
-
     const toStr = (v: unknown) =>
       typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
-
     const typeA = this.resolveItemType(itemA);
     const typeB = this.resolveItemType(itemB);
     const metaA = asMetaObject(itemA.metadata);
     const metaB = asMetaObject(itemB.metadata);
+    const effDoiA = toStr(getEffectiveItemField(itemA, 'doi', metaA));
+    const effDoiB = toStr(getEffectiveItemField(itemB, 'doi', metaB));
+    const rawArxivA =
+      toStr(getEffectiveItemField(itemA, 'arxivId', metaA)) ||
+      (this.isPreprintDoi(effDoiA) && /arxiv\./i.test(effDoiA) ? effDoiA.replace(/^.*arxiv\./i, '') : '');
+    const rawArxivB =
+      toStr(getEffectiveItemField(itemB, 'arxivId', metaB)) ||
+      (this.isPreprintDoi(effDoiB) && /arxiv\./i.test(effDoiB) ? effDoiB.replace(/^.*arxiv\./i, '') : '');
+    const normArxivA = rawArxivA ? normalizeArxivId(rawArxivA, { stripVersion: true }) : undefined;
+    const normArxivB = rawArxivB ? normalizeArxivId(rawArxivB, { stripVersion: true }) : undefined;
+    if (normArxivA && normArxivB && normArxivA !== normArxivB) return true;
 
-    const isPreprintEvolution =
-      Boolean(
-        itemA.arxivId ||
-        metaA.arxivId ||
-        this.isPreprintDoi(itemA.doi) ||
-        typeA === 'preprint',
-      ) ||
-      Boolean(
-        itemB.arxivId ||
-        metaB.arxivId ||
-        this.isPreprintDoi(itemB.doi) ||
-        typeB === 'preprint',
-      );
+    const rawPmidA = toStr(getEffectiveItemField(itemA, 'pmid', metaA));
+    const rawPmidB = toStr(getEffectiveItemField(itemB, 'pmid', metaB));
+    const normPmidA = rawPmidA ? normalizePmid(rawPmidA) : undefined;
+    const normPmidB = rawPmidB ? normalizePmid(rawPmidB) : undefined;
+    if (normPmidA && normPmidB && normPmidA !== normPmidB) return true;
 
-    if (isPreprintEvolution) return false;
-
-    const normDoiA = normalizeDoi(itemA.doi);
-    const normDoiB = normalizeDoi(itemB.doi);
-    if (normDoiA && normDoiB && normDoiA !== normDoiB) return true;
+    const normDoiA = normalizeDoi(effDoiA);
+    const normDoiB = normalizeDoi(effDoiB);
+    const isPreprintA = Boolean(
+      normArxivA || this.isPreprintDoi(effDoiA) || typeA === 'preprint' || isPreprintCandidateItem(itemA),
+    );
+    const isPreprintB = Boolean(
+      normArxivB || this.isPreprintDoi(effDoiB) || typeB === 'preprint' || isPreprintCandidateItem(itemB),
+    );
+    if (normDoiA && normDoiB && normDoiA !== normDoiB && !isPreprintA && !isPreprintB) {
+      return true;
+    }
+    if (isPreprintA || isPreprintB) return false;
 
     const pagesA = toStr(metaA.pages);
     const pagesB = toStr(metaB.pages);
-    if (pagesA && pagesB) {
+    if (pagesA && pagesB && !isLocalOrElectronicPageRange(pagesA) && !isLocalOrElectronicPageRange(pagesB)) {
       const startPageA = pagesA.match(/\d+/)?.[0];
       const startPageB = pagesB.match(/\d+/)?.[0];
-      if (startPageA && startPageB && startPageA !== startPageB) return true;
+      if (startPageA && startPageB && parseInt(startPageA, 10) !== parseInt(startPageB, 10)) {
+        return true;
+      }
     }
-
-    const issueA = toStr(metaA.issue).toLowerCase();
-    const issueB = toStr(metaB.issue).toLowerCase();
+    const issueA = normalizeIssueToken(toStr(metaA.issue));
+    const issueB = normalizeIssueToken(toStr(metaB.issue));
     return Boolean(issueA && issueB && issueA !== issueB);
   }
 
@@ -283,6 +363,10 @@ export class DuplicateDetectorService {
       if (getEffectiveItemField(item, 'abstract', meta)) score += 10;
       if (item.year) score += 5;
       score += Math.min(10, Object.keys(meta).length);
+
+      if (isPlaceholderItemTitle(item.title) || meta.isFilenameTitle === true) {
+        score -= 25;
+      }
 
       if (score > bestScore) {
         bestScore = score;
@@ -359,6 +443,15 @@ export class DuplicateDetectorService {
                   metadata: meta as Prisma.InputJsonValue,
                   version: { increment: 1 },
                 },
+                include: {
+                  contributors: { orderBy: { orderIndex: 'asc' } },
+                  collectionItems: { include: { collection: true } },
+                  itemTags: { include: { tag: true } },
+                  notesList: { where: { deletedAt: null } },
+                  attachments: { include: { revisions: true } },
+                  identifiers: true,
+                  states: { where: { userId: String(userId) }, take: 1 },
+                },
               });
 
               return { item, updated, dismissedDuplicateIds: meta.dismissedDuplicateIds };
@@ -366,16 +459,26 @@ export class DuplicateDetectorService {
           );
 
           if (helpers && updatedResults.length > 0) {
-            const changeEntries = updatedResults.map(({ item, updated }) => ({
-              entityType: 'Item' as const,
-              entityId: item.id,
-              action: 'update' as const,
-              version: updated.version,
-              data: ItemsMapper.toDomain({
-                ...item,
-                ...updated,
-              } as unknown as Parameters<typeof ItemsMapper.toDomain>[0]),
-            }));
+            const changeEntries = updatedResults.map(({ item, updated }) => {
+              const itemRecord = item as unknown as Record<string, unknown>;
+              const updatedRecord = (updated ?? {}) as Record<string, unknown>;
+              const domainMapped = ItemsMapper.toDomain(
+                { ...itemRecord, ...updatedRecord },
+                String(userId),
+              ) as unknown as Record<string, unknown>;
+              return {
+                entityType: 'Item' as const,
+                entityId: item.id,
+                action: 'update' as const,
+                version: updated.version,
+                data: {
+                  ...itemRecord,
+                  ...domainMapped,
+                  metadata: (updatedRecord.metadata ??
+                    domainMapped.metadata) as Record<string, unknown>,
+                },
+              };
+            });
             const outboxEvents = updatedResults.map(
               ({ item, dismissedDuplicateIds }) => ({
                 aggregateId: item.id,
@@ -515,6 +618,7 @@ export class DuplicateDetectorService {
       areCompatibleIdentifierDuplicates: (a, b, idType) =>
         this.areCompatibleIdentifierDuplicates(a, b, idType),
       computeRecommendedMasterId: (grp) => this.computeRecommendedMasterId(grp),
+      isDismissedPair: (a, b) => this.isDismissedPair(a, b),
     });
 
     // Tier 2: Fuzzy Title + Year (+/-1) + First Author
@@ -560,10 +664,7 @@ export class DuplicateDetectorService {
           m,
           (it) =>
             this.resolveItemType(
-              it as {
-                itemType?: string | null;
-                metadata?: Record<string, unknown> | null;
-              },
+              it as { itemType?: string | null; metadata?: Record<string, unknown> | null },
             ),
           hydratedRawById.get(m.id),
         ),
@@ -591,33 +692,19 @@ export class DuplicateDetectorService {
     if (!this.catalogGateway?.findMatchCandidates) {
       return { matchType: 'NO_MATCH', exactMatch: null, candidateItems: [] };
     }
-    const cleanDoi = candidate.doi
-      ? normalizeDoi(candidate.doi) || candidate.doi.trim()
-      : undefined;
-    const cleanArxiv = candidate.arxivId
-      ? normalizeArxivId(candidate.arxivId) || candidate.arxivId.trim()
-      : undefined;
-    const cleanPmid = candidate.pmid
-      ? normalizePmid(candidate.pmid) || candidate.pmid.trim()
-      : undefined;
-    const cleanIsbn = candidate.isbn
-      ? normalizeIsbn(candidate.isbn) || candidate.isbn.trim()
-      : undefined;
+    const cleanDoi = candidate.doi ? normalizeDoi(candidate.doi) || candidate.doi.trim() : undefined;
+    const cleanArxiv = candidate.arxivId ? normalizeArxivId(candidate.arxivId) || candidate.arxivId.trim() : undefined;
+    const cleanPmid = candidate.pmid ? normalizePmid(candidate.pmid) || candidate.pmid.trim() : undefined;
+    const cleanIsbn = candidate.isbn ? normalizeIsbn(candidate.isbn) || candidate.isbn.trim() : undefined;
     const proposedTitle = candidate.title?.trim();
     const significantWords =
       proposedTitle && proposedTitle.length > 5
-        ? tokenizeTitleWords(proposedTitle)
-            .filter((w) => w.length >= 3)
-            .slice(0, 3)
+        ? tokenizeTitleWords(proposedTitle).filter((w) => w.length >= 3).slice(0, 3)
         : [];
 
     return this.catalogGateway.findMatchCandidates(scope, {
-      doi: cleanDoi,
-      arxivId: cleanArxiv,
-      pmid: cleanPmid,
-      isbn: cleanIsbn,
-      titleWords: significantWords,
-      titlePrefix: proposedTitle,
+      doi: cleanDoi, arxivId: cleanArxiv, pmid: cleanPmid, isbn: cleanIsbn,
+      titleWords: significantWords, titlePrefix: proposedTitle,
     });
   }
 }

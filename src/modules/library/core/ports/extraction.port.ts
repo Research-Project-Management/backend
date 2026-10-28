@@ -33,7 +33,11 @@ export interface IExtractionFacade {
   ): Promise<AttachmentEntity>;
   extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: { maxPages?: number; headerOnly?: boolean },
+    options?: {
+      maxPages?: number;
+      headerOnly?: boolean;
+      skipTrustedExtraction?: boolean;
+    },
   ): Promise<ExtractedPdfDocument>;
   extractMetadataFromBuffer(buffer: Buffer): ExtractedPdfMetadata;
   extractTrustedMetadata(

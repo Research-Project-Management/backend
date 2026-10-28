@@ -13,7 +13,136 @@ import {
   buildEnrichmentPatch,
   mapPayloadToSource,
 } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
 import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
+
+function extractSurname(raw: unknown): string {
+  if (!raw) return '';
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    const part = trimmed.includes(',')
+      ? trimmed.split(',')[0].trim()
+      : trimmed;
+    return (part.split(/\s+/).pop() || '')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+  }
+  if (typeof raw === 'object') {
+    const rec = raw as Record<string, unknown>;
+    const candidate =
+      (typeof rec.lastName === 'string' && rec.lastName.trim()) ||
+      (typeof rec.family === 'string' && rec.family.trim()) ||
+      (typeof rec.fullName === 'string' && rec.fullName.trim()) ||
+      (typeof rec.name === 'string' && rec.name.trim()) ||
+      '';
+    return extractSurname(candidate);
+  }
+  return '';
+}
+
+function extractAuthorSurnames(authors: unknown): Set<string> {
+  const set = new Set<string>();
+  if (!Array.isArray(authors)) return set;
+  for (const a of authors) {
+    const s = extractSurname(a);
+    if (s) set.add(s);
+  }
+  return set;
+}
+
+function isCompatibleTitleProviderMatch(
+  recordCand: MetadataCandidate,
+  providerCand: MetadataCandidate,
+): boolean {
+  const policyVerifier = (
+    ReconciliationPolicy as unknown as {
+      verifyCandidateMatch?: (
+        a: MetadataCandidate,
+        b: MetadataCandidate,
+      ) => boolean;
+    }
+  ).verifyCandidateMatch;
+  if (typeof policyVerifier === 'function') {
+    return policyVerifier(recordCand, providerCand);
+  }
+  if (
+    providerCand.rawEvidenceRef &&
+    recordCand.candidateId &&
+    providerCand.rawEvidenceRef === recordCand.candidateId
+  ) {
+    return true;
+  }
+  const rMeta = recordCand.normalizedMetadata || {};
+  const pMeta = providerCand.normalizedMetadata || {};
+  const rDoi = rMeta.doi?.trim().toLowerCase();
+  const pDoi = pMeta.doi?.trim().toLowerCase();
+  if (rDoi && pDoi && rDoi !== pDoi) return false;
+  const rArxiv = rMeta.arxivId?.trim().toLowerCase();
+  const pArxiv = pMeta.arxivId?.trim().toLowerCase();
+  if (rArxiv && pArxiv && rArxiv !== pArxiv) return false;
+  const rPmid = rMeta.pmid?.trim().toLowerCase();
+  const pPmid = pMeta.pmid?.trim().toLowerCase();
+  if (rPmid && pPmid && rPmid !== pPmid) return false;
+  const rIsbn = rMeta.isbn?.trim().toLowerCase();
+  const pIsbn = pMeta.isbn?.trim().toLowerCase();
+  if (rIsbn && pIsbn && rIsbn !== pIsbn) return false;
+
+  const rYear = Number(rMeta.year);
+  const pYear = Number(pMeta.year);
+  if (
+    Number.isFinite(rYear) &&
+    rYear > 0 &&
+    Number.isFinite(pYear) &&
+    pYear > 0 &&
+    Math.abs(rYear - pYear) > 1
+  ) {
+    return false;
+  }
+
+  const rAuthors = extractAuthorSurnames(
+    rMeta.authors?.length ? rMeta.authors : rMeta.creators,
+  );
+  const pAuthors = extractAuthorSurnames(
+    pMeta.authors?.length ? pMeta.authors : pMeta.creators,
+  );
+  if (rAuthors.size > 0 && pAuthors.size > 0) {
+    let shared = 0;
+    for (const name of rAuthors) {
+      if (pAuthors.has(name)) shared++;
+    }
+    if (shared === 0) return false;
+  }
+
+  if (
+    providerCand.rawEvidenceRef &&
+    recordCand.candidateId &&
+    providerCand.rawEvidenceRef !== recordCand.candidateId
+  ) {
+    if ((rDoi || pDoi) && rDoi !== pDoi) return false;
+    if ((rArxiv || pArxiv) && rArxiv !== pArxiv) return false;
+    if ((rPmid || pPmid) && rPmid !== pPmid) return false;
+    if ((rIsbn || pIsbn) && rIsbn !== pIsbn) return false;
+    if ((rAuthors.size === 0) !== (pAuthors.size === 0)) return false;
+  }
+  return true;
+}
+
+export function serializeSubRunRecordPayload(
+  cand: Pick<MetadataCandidate, 'normalizedMetadata'>,
+): {
+  kind: 'RECORD';
+  format: 'CSL_JSON';
+  content: string;
+} {
+  return {
+    kind: 'RECORD',
+    format: 'CSL_JSON',
+    content: JSON.stringify([cand.normalizedMetadata || {}]),
+  };
+}
 
 @Injectable()
 export class PipelineBatchExecutor {
@@ -63,6 +192,7 @@ export class PipelineBatchExecutor {
       itemId?: string;
       error?: string;
       candidateKey?: string;
+      retryPayload?: ReturnType<typeof serializeSubRunRecordPayload>;
     }> = [];
 
     // Retry idempotency: inspect prior progress on this runId and track in-batch committed keys
@@ -89,8 +219,7 @@ export class PipelineBatchExecutor {
             prev?.itemId &&
             (prev.status === 'SUCCEEDED' || prev.status === 'DUPLICATE')
           ) {
-            const key =
-              prev.candidateKey || prev.title?.trim().toLowerCase() || '';
+            const key = prev.candidateKey || '';
             if (key) {
               committedRecordKeys.set(key, {
                 itemId: prev.itemId,
@@ -189,6 +318,12 @@ export class PipelineBatchExecutor {
       const candYearKey = initialCand.normalizedMetadata?.year
         ? String(initialCand.normalizedMetadata.year)
         : '';
+      const rawCandAuthors = initialCand.normalizedMetadata?.authors?.length
+        ? initialCand.normalizedMetadata.authors
+        : initialCand.normalizedMetadata?.creators;
+      const candAuthorKey = Array.isArray(rawCandAuthors) && rawCandAuthors.length > 0
+        ? extractSurname(rawCandAuthors[0])
+        : '';
       const candidateKey = candDoiKey
         ? `doi:${candDoiKey}`
         : candArxivKey
@@ -197,11 +332,15 @@ export class PipelineBatchExecutor {
             ? `pmid:${candPmidKey}`
             : candIsbnKey
               ? `isbn:${candIsbnKey}`
-              : `title:${itemTitle.trim().toLowerCase()}|year:${candYearKey}`;
+              : `title:${itemTitle.trim().toLowerCase()}|year:${candYearKey}|author:${candAuthorKey}`;
+      const legacyCandidateKey = `title:${itemTitle.trim().toLowerCase()}|year:${candYearKey}`;
+      const retryPayload = serializeSubRunRecordPayload(initialCand);
 
       const alreadyCommitted =
         committedRecordKeys.get(candidateKey) ||
-        committedRecordKeys.get(itemTitle.trim().toLowerCase());
+        (!candAuthorKey
+          ? committedRecordKeys.get(legacyCandidateKey)
+          : undefined);
       if (alreadyCommitted) {
         createdItemIds.push(alreadyCommitted.itemId);
         duplicates++;
@@ -233,7 +372,13 @@ export class PipelineBatchExecutor {
           .toLowerCase();
         if (candTitle) {
           const titleMatches = byTitle.get(candTitle);
-          if (titleMatches) titleMatches.forEach((m) => matchedSet.add(m));
+          if (titleMatches) {
+            titleMatches.forEach((m) => {
+              if (isCompatibleTitleProviderMatch(initialCand, m)) {
+                matchedSet.add(m);
+              }
+            });
+          }
         }
 
         const candArxiv = initialCand.normalizedMetadata?.arxivId
@@ -334,24 +479,6 @@ export class PipelineBatchExecutor {
             candidateKey,
           });
         } else {
-          if (matchRes.matchType === 'PROBABLE' && matchRes.targetItemId) {
-            await this.repo
-              .createReviewCase(resolvedScope, runId, {
-                targetItemId: matchRes.targetItemId,
-                reason: `Probable match with existing item "${matchRes.targetItemTitle}"`,
-                evidence: {
-                  matchReason: matchRes.matchReason,
-                  confidence: matchRes.confidence,
-                  details: matchRes.evidence,
-                } as unknown as Prisma.InputJsonValue,
-                options: {
-                  proposedMetadata: itemDecision.proposedItem,
-                } as unknown as Prisma.InputJsonValue,
-                assignedToId: resolvedScope.userId,
-              })
-              .catch(() => undefined);
-          }
-
           await this.sideEffects.scanRetraction(itemDecision.proposedItem, {
             localOnly: true,
           });
@@ -368,6 +495,24 @@ export class PipelineBatchExecutor {
             },
           });
           if (created?.id) {
+            if (matchRes.matchType === 'PROBABLE' && matchRes.targetItemId) {
+              await this.repo
+                .createReviewCase(resolvedScope, runId, {
+                  targetItemId: matchRes.targetItemId,
+                  reason: `Probable match with existing item "${matchRes.targetItemTitle}"`,
+                  evidence: {
+                    matchReason: matchRes.matchReason,
+                    confidence: matchRes.confidence,
+                    details: matchRes.evidence,
+                    createdItemId: created.id,
+                  } as unknown as Prisma.InputJsonValue,
+                  options: {
+                    proposedMetadata: itemDecision.proposedItem,
+                  } as unknown as Prisma.InputJsonValue,
+                  assignedToId: resolvedScope.userId,
+                })
+                .catch(() => undefined);
+            }
             createdItemIds.push(created.id);
             succeeded++;
             committedRecordKeys.set(candidateKey, {
@@ -394,6 +539,8 @@ export class PipelineBatchExecutor {
               title: itemTitle,
               status: 'FAILED',
               error: 'Commit returned empty record',
+              candidateKey,
+              retryPayload,
             });
           }
         }
@@ -404,6 +551,8 @@ export class PipelineBatchExecutor {
           status: 'FAILED',
           error:
             itemErr instanceof Error ? itemErr.message : 'Processing failed',
+          candidateKey,
+          retryPayload,
         });
       } finally {
         processed++;

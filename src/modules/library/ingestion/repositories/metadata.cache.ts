@@ -51,11 +51,27 @@ export class MetadataCache {
     return `metadata:v${METADATA_POLICY_VERSION}:${queryType}:${hash}`;
   }
 
+  private resolveQueryTypeFromKey(
+    key: string,
+    explicitType?: QueryType,
+  ): QueryType | undefined {
+    if (explicitType && explicitType in this.TTL_MAP) {
+      return explicitType;
+    }
+    const parts = key.split(':');
+    const candidate = parts.length >= 3 ? (parts[2] as QueryType) : undefined;
+    return candidate && candidate in this.TTL_MAP ? candidate : undefined;
+  }
+
   /**
    * Retrieves metadata from L1 memory or L2 Redis.
    */
-  async get(key: string): Promise<ResolvedMetadata | null | false> {
+  async get(
+    key: string,
+    queryType?: QueryType,
+  ): Promise<ResolvedMetadata | null | false> {
     const now = Date.now();
+    const resolvedQueryType = this.resolveQueryTypeFromKey(key, queryType);
 
     // 1. Tier 1: Check L1 In-Memory LRU Cache (0ms)
     const l1Entry = this.l1Cache.get(key);
@@ -88,8 +104,10 @@ export class MetadataCache {
 
       if (raw === NEGATIVE_SENTINEL) {
         this.logger.debug(`L2 Redis Negative Cache HIT: ${key}`);
-        // Populate L1 negative entry
-        this.setL1(key, false, 900);
+        const negativeTtl = resolvedQueryType
+          ? (this.NEGATIVE_TTL_MAP[resolvedQueryType] ?? 900)
+          : 900;
+        this.setL1(key, false, negativeTtl);
         return false;
       }
 
@@ -97,8 +115,10 @@ export class MetadataCache {
       const parsed: ResolvedMetadata =
         typeof raw === 'string' ? (JSON.parse(raw) as ResolvedMetadata) : raw;
 
-      // Populate L1 cache for subsequent 0ms hits
-      this.setL1(key, parsed, 86_400);
+      const positiveTtl = resolvedQueryType
+        ? (this.TTL_MAP[resolvedQueryType] ?? 3_600)
+        : 3_600;
+      this.setL1(key, parsed, positiveTtl);
       return parsed;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -161,15 +181,24 @@ export class MetadataCache {
     value: ResolvedMetadata | false,
     ttlSeconds: number,
   ): void {
-    // Evict oldest if limit reached
-    if (this.l1Cache.size >= this.MAX_L1_ENTRIES) {
-      const oldestKey = this.l1Cache.keys().next().value;
-      if (oldestKey) {
-        this.l1Cache.delete(oldestKey);
+    const now = Date.now();
+    if (this.l1Cache.has(key)) {
+      this.l1Cache.delete(key);
+    } else if (this.l1Cache.size >= this.MAX_L1_ENTRIES) {
+      for (const [k, entry] of this.l1Cache.entries()) {
+        if (entry.expiresAt <= now) {
+          this.l1Cache.delete(k);
+        }
+      }
+      if (this.l1Cache.size >= this.MAX_L1_ENTRIES) {
+        const oldestKey = this.l1Cache.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.l1Cache.delete(oldestKey);
+        }
       }
     }
 
-    const expiresAt = Date.now() + ttlSeconds * 1000;
+    const expiresAt = now + ttlSeconds * 1000;
     this.l1Cache.set(key, { value, expiresAt });
   }
 

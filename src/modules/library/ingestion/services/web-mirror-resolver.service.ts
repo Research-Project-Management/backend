@@ -24,17 +24,41 @@ interface EuropePmcRecord {
   title?: string;
   abstractText?: string;
   pubYear?: string;
+  firstPublicationDate?: string;
   doi?: string;
   pmid?: string;
   pmcid?: string;
   journalTitle?: string;
-  journalInfo?: { journal?: { title?: string } };
+  journalVolume?: string;
+  issue?: string;
+  pageInfo?: string;
+  journalIssn?: string;
+  journalInfo?: {
+    issue?: string;
+    volume?: string;
+    journal?: { title?: string; issn?: string };
+  };
   bookOrReportDetails?: { publisher?: string };
   isOpenAccess?: string;
   authorString?: string;
   authorList?: { author?: EuropePmcAuthor[] };
+  keywordList?: { keyword?: string[] };
   fullTextUrlList?: { fullTextUrl?: EuropePmcFullTextUrl[] };
 }
+
+export type EnrichedMirrorBibliographicMetadata = MirrorBibliographicMetadata & {
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  publisher?: string;
+  isbn?: string;
+  issn?: string;
+  arxivId?: string;
+  publicationDate?: string;
+  itemType?: string;
+  keywords?: string[];
+  creators?: unknown[];
+};
 
 interface EuropePmcResponse {
   resultList?: { result?: EuropePmcRecord[] };
@@ -53,22 +77,30 @@ export class WebMirrorResolverService {
   constructor(
     @Optional() private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
-    private readonly crossRefProvider?: CrossRefProvider,
-    private readonly arxivProvider?: ArxivProvider,
-    private readonly openAlexProvider?: OpenAlexProvider,
+    @Optional() private readonly crossRefProvider?: CrossRefProvider,
+    @Optional() private readonly arxivProvider?: ArxivProvider,
+    @Optional() private readonly openAlexProvider?: OpenAlexProvider,
   ) {}
 
   private mapProviderResultToMirror(
     metadata: Record<string, unknown>,
     sourceMirror: 'CrossRef' | 'arXiv' | 'OpenAlex',
     fallbackDoi?: string,
-  ): MirrorBibliographicMetadata | null {
+  ): EnrichedMirrorBibliographicMetadata | null {
     const title =
       typeof metadata.title === 'string' ? metadata.title.trim() : '';
     if (!title) return null;
     const authors = Array.isArray(metadata.authors)
       ? (metadata.authors as string[]).filter(Boolean)
       : undefined;
+    const creators = Array.isArray(metadata.creators)
+      ? metadata.creators
+      : undefined;
+    const keywords = Array.isArray(metadata.keywords)
+      ? (metadata.keywords as string[]).filter(Boolean)
+      : Array.isArray(metadata.tags)
+        ? (metadata.tags as string[]).filter(Boolean)
+        : undefined;
     const journal =
       (typeof metadata.journal === 'string' && metadata.journal) ||
       (typeof metadata.publicationTitle === 'string' &&
@@ -85,10 +117,34 @@ export class WebMirrorResolverService {
       abstract:
         typeof metadata.abstract === 'string' ? metadata.abstract : undefined,
       authors: authors && authors.length > 0 ? authors : undefined,
+      creators: creators && creators.length > 0 ? creators : undefined,
       year: typeof metadata.year === 'number' ? metadata.year : undefined,
+      publicationDate:
+        typeof metadata.publicationDate === 'string'
+          ? metadata.publicationDate
+          : undefined,
       doi: (typeof metadata.doi === 'string' && metadata.doi) || fallbackDoi,
       pmid: typeof metadata.pmid === 'string' ? metadata.pmid : undefined,
       pmcid: typeof metadata.pmcid === 'string' ? metadata.pmcid : undefined,
+      arxivId:
+        typeof metadata.arxivId === 'string' ? metadata.arxivId : undefined,
+      isbn: typeof metadata.isbn === 'string' ? metadata.isbn : undefined,
+      issn: typeof metadata.issn === 'string' ? metadata.issn : undefined,
+      volume:
+        typeof metadata.volume === 'string' ||
+        typeof metadata.volume === 'number'
+          ? String(metadata.volume)
+          : undefined,
+      issue:
+        typeof metadata.issue === 'string' || typeof metadata.issue === 'number'
+          ? String(metadata.issue)
+          : undefined,
+      pages: typeof metadata.pages === 'string' ? metadata.pages : undefined,
+      publisher:
+        typeof metadata.publisher === 'string' ? metadata.publisher : undefined,
+      itemType:
+        typeof metadata.itemType === 'string' ? metadata.itemType : undefined,
+      keywords: keywords && keywords.length > 0 ? keywords : undefined,
       journal,
       isOpenAccess: sourceMirror === 'arXiv' || Boolean(pdfUrl),
       pdfUrl,
@@ -176,22 +232,35 @@ export class WebMirrorResolverService {
         ? cleanAbstractText(record.abstractText.replace(/<[^>]+>/g, ' '))
         : undefined;
 
-      return {
+      const keywords = Array.isArray(record.keywordList?.keyword)
+        ? record.keywordList.keyword.filter(Boolean)
+        : undefined;
+
+      const mirrorResult: EnrichedMirrorBibliographicMetadata = {
         title: record.title.replace(/<[^>]+>/g, '').trim(),
         abstract: cleanAbstract,
         authors: authors.length > 0 ? authors : undefined,
         year: record.pubYear ? parseInt(record.pubYear, 10) : undefined,
+        publicationDate: record.firstPublicationDate || record.pubYear,
         doi: record.doi || doi,
         pmid: record.pmid || pmid,
-        pmcid: record.pmcid,
+        pmcid: record.pmcid || pmcid,
         journal:
           record.journalTitle ||
           record.journalInfo?.journal?.title ||
           record.bookOrReportDetails?.publisher,
+        publisher: record.bookOrReportDetails?.publisher,
+        volume: record.journalVolume || record.journalInfo?.volume,
+        issue: record.issue || record.journalInfo?.issue,
+        pages: record.pageInfo,
+        issn: record.journalIssn || record.journalInfo?.journal?.issn,
+        keywords: keywords && keywords.length > 0 ? keywords : undefined,
+        itemType: 'journalArticle',
         isOpenAccess: record.isOpenAccess === 'Y',
         pdfUrl,
         sourceMirror: 'EuropePMC',
       };
+      return mirrorResult;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.debug(
