@@ -13,6 +13,7 @@ import {
   IsBoolean,
   IsDateString,
 } from 'class-validator';
+import { Prisma } from '@prisma/client';
 import { DocRanges } from '../domain';
 
 export class CreateDocDto {
@@ -47,7 +48,7 @@ export class CreateDocDto {
   @IsOptional()
   ranges?: DocRanges;
 
-  tx?: unknown;
+  tx?: Prisma.TransactionClient;
 }
 
 export class UpdateDocDto {

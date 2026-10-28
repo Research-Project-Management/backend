@@ -134,7 +134,21 @@ export class FilestoreService {
       );
     }
 
-    const fileEntity = ManuscriptFile.create({
+    const existing = await this.repository.findByProjectAndName(
+      projectId,
+      name,
+    );
+
+    const fileEntity = ManuscriptFile.reconstitute({
+      id: existing?.id ?? ManuscriptFile.create({
+        projectId,
+        name,
+        mimeType: mimeType || 'application/octet-stream',
+        sizeBytes,
+        hash: contentHash,
+        storageKey,
+        bucketName,
+      }).id,
       projectId,
       name,
       mimeType: mimeType || 'application/octet-stream',
@@ -142,6 +156,11 @@ export class FilestoreService {
       hash: contentHash,
       storageKey,
       bucketName,
+      rev: existing ? existing.rev + 1 : 0,
+      deleted: false,
+      deletedAt: null,
+      createdAt: existing?.createdAt ?? new Date(),
+      updatedAt: new Date(),
     });
 
     return await (
@@ -282,10 +301,19 @@ export class FilestoreService {
       throw new FileNotFoundException(fileId, projectId);
     }
 
-    return await this.repository.getSignedDownloadUrl(
+    const signedUrl = await this.repository.getSignedDownloadUrl(
       file.bucketName,
       file.storageKey.getValue(),
       expiresIn,
     );
+
+    if (
+      !signedUrl ||
+      signedUrl.startsWith('/api/manuscripts/filestore/download/')
+    ) {
+      return `/api/v1/manuscripts/projects/${projectId}/files/${file.id}`;
+    }
+
+    return signedUrl;
   }
 }

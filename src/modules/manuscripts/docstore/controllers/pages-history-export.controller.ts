@@ -578,16 +578,27 @@ export class PagesHistoryExportController {
         );
       }
 
-      // Pre-restore auto-snapshot to guarantee non-destructive recovery
+      // Flush active live Yjs session before capturing pre-restore safety snapshot
+      const live = this.getLiveCollaboration();
+      if (live) {
+        await live.flushDoc(doc.projectId, doc.id).catch(() => {});
+      }
+
+      // Pre-restore auto-snapshot to guarantee non-destructive recovery (hydrating cold-storage if needed)
       if (this.historyRepo) {
         try {
           const latestVersion = await this.historyRepo.getLatestVersion(
             doc.projectId,
           );
           const nextVersion = latestVersion + 1;
-          const currentLines = Array.isArray(doc.lines)
-            ? (doc.lines as string[])
-            : [];
+          const hydratedDoc = await this.docstoreService
+            .getDoc(doc.projectId, doc.id)
+            .catch(() => null);
+          const currentLines = Array.isArray(hydratedDoc?.lines)
+            ? hydratedDoc.lines
+            : Array.isArray(doc.lines)
+              ? (doc.lines as string[])
+              : [];
           const currentContent = currentLines.join('\n');
           const autoMap = new Map<string, FileSnapshotVo>();
           const vo = FileSnapshotVo.createDoc(
@@ -614,12 +625,19 @@ export class PagesHistoryExportController {
         }
       }
 
+      const freshDoc = await this.pageScopeRepo.findDocInProject(
+        doc.projectId,
+        doc.id,
+      );
+      const targetRev = freshDoc?.rev ?? doc.rev;
+      const targetVer = (freshDoc?.version ?? doc.version) + 1;
+
       const restoredText = this.pickSnapshotText(files, doc.path);
       const lines = restoredText.split('\n');
       await this.docstoreService.updateDoc(doc.projectId, doc.id, {
         lines,
-        version: doc.version + 1,
-        expectedRev: doc.rev,
+        version: targetVer,
+        expectedRev: targetRev,
       });
       const liveSessionSynced = await this.syncLiveDoc(
         doc.projectId,

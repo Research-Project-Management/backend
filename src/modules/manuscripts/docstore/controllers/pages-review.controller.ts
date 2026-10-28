@@ -42,10 +42,9 @@ import { AuthenticatedRequest, isUuid } from '@/core';
 import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
 import { ManuscriptPageService } from '@/modules/manuscripts/core/services/manuscript-page.service';
-import { ManuscriptUserResolverService } from '../services/manuscript-user-resolver.service';
+import { ManuscriptUserResolverService } from '@/modules/manuscripts/core/services/manuscript-user-resolver.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LiveCollaborationPort } from '@/modules/manuscripts/core';
-import { NotificationsService } from '@/modules/notifications/notifications.service';
 import { ManuscriptPageScopeRepository } from '../repositories/manuscript-page-scope.repository';
 import { TrackChangesService } from '@/modules/manuscripts/track-changes/track-changes.service';
 import { TrackChangesRepository } from '@/modules/manuscripts/track-changes/track-changes.repository';
@@ -56,19 +55,11 @@ import {
   TextRangeVo,
 } from '@/modules/manuscripts/track-changes/domain';
 import {
-  resolveDocAndProjectContext,
-  resolveCreateTargetContext,
   validateCommentRange,
   validateSuggestionRange,
   assertCanModifyReviewItem,
-  findScopedCommentThreadOrThrow,
-  findScopedCommentReplyOrThrow,
   formatCommentThreadDto,
   formatSuggestionItemDto,
-  formatCreatedSuggestionDto,
-  findScopedTrackChangeOrThrow,
-  applyAcceptedSingleSuggestionToDocstore,
-  applyAcceptedBatchSuggestionsToDocstore,
   getDocReviewStatusWithFallback,
   updateDocReviewStatusWithCas,
 } from './pages-review.helpers';
@@ -93,7 +84,6 @@ export interface CreateSuggestionBody {
 export class PagesReviewController {
   private readonly logger = new Logger(PagesReviewController.name);
   private liveCollab: LiveCollaborationPort | null | undefined;
-  private notificationsService: NotificationsService | null | undefined;
 
   constructor(
     private readonly docstoreService: DocstoreService,
@@ -109,19 +99,6 @@ export class PagesReviewController {
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
-
-  private getNotificationsService(): NotificationsService | null {
-    if (this.notificationsService !== undefined) {
-      return this.notificationsService;
-    }
-    try {
-      this.notificationsService =
-        this.moduleRef?.get(NotificationsService, { strict: false }) ?? null;
-    } catch {
-      this.notificationsService = null;
-    }
-    return this.notificationsService;
-  }
 
   private broadcastEvent(
     projectId: string | null | undefined,
@@ -660,11 +637,9 @@ export class PagesReviewController {
       }
     }
 
-    if (this.trackChangesRepo) {
-      await (this.trackChangesRepo as any).prisma?.manuscriptCommentReply
-        ?.delete({ where: { id: replyId } })
-        .catch(() => null);
-    }
+    await this.pageScopeRepo
+      .deleteReplyInThread(existingThread.id, replyId)
+      .catch(() => false);
 
     this.broadcastEvent(targetProjectId, 'comment:reply-deleted', {
       docId: existingThread.docId,
@@ -1001,32 +976,68 @@ export class PagesReviewController {
       suggestionId,
     );
 
+    let updatedPage: {
+      id: string;
+      content: string;
+      version: number;
+      rev: number;
+      projectId: string;
+    } | null = null;
+
     if (record && record.docId) {
       try {
+        const live = this.getLiveCollaboration();
+        if (live && targetProjectId) {
+          await live.flushDocs(targetProjectId, [record.docId]).catch(() => []);
+        }
+
         const doc = await this.pageScopeRepo.findDocInProject(
           targetProjectId,
           record.docId,
         );
         if (doc) {
           const lines = await this.pageService.getHydratedDocLines(doc);
-          (
-            await import('@/modules/manuscripts/track-changes/domain')
-          ).applySuggestionToLines(lines, {
-            type: record.type as 'insert' | 'delete',
+          const { LinePatcher } = await import(
+            '@/modules/manuscripts/track-changes/domain'
+          );
+          const changeEntity = TrackChange.create({
+            id: record.id,
+            projectId: doc.projectId,
+            docId: doc.id,
+            type: record.type === 'delete' ? 'delete' : 'insert',
             text: record.text,
-            startLine: record.startLine,
-            startCol: record.startCol,
-            endLine: record.endLine,
-            endCol: record.endCol,
+            range: TextRangeVo.create({
+              startLine: Math.max(0, (record.startLine ?? 1) > 0 ? (record.startLine ?? 1) - 1 : 0),
+              startCol: Math.max(0, record.startCol ?? 0),
+              endLine: Math.max(0, (record.endLine ?? record.startLine ?? 1) > 0 ? (record.endLine ?? record.startLine ?? 1) - 1 : 0),
+              endCol: Math.max(0, record.endCol ?? 0),
+            }),
+            createdById: record.createdById,
           });
+          const { lines: nextLines, mutated } =
+            LinePatcher.computeAcceptedPatch(lines, changeEntity);
 
-          await this.docstoreService.updateDoc(doc.projectId, doc.id, {
-            lines,
-            version: doc.version + 1,
-            expectedRev: doc.rev,
-          });
+          let finalVersion = doc.version;
+          let finalRev = doc.rev;
+          if (mutated) {
+            const updateRes = await this.docstoreService.updateDoc(doc.projectId, doc.id, {
+              lines: nextLines,
+              version: doc.version + 1,
+              expectedRev: doc.rev,
+            });
+            finalVersion = updateRes?.doc?.version ?? doc.version + 1;
+            finalRev = updateRes?.rev ?? updateRes?.doc?.rev ?? doc.rev + 1;
 
-          await this.syncLiveDoc(doc.projectId, doc.id, lines);
+            await this.syncLiveDoc(doc.projectId, doc.id, nextLines);
+          }
+
+          updatedPage = {
+            id: doc.id,
+            content: nextLines.join('\n'),
+            version: finalVersion,
+            rev: finalRev,
+            projectId: doc.projectId,
+          };
 
           this.broadcastEvent(doc.projectId, 'track-changes:resolved', {
             docId: doc.id,
@@ -1050,7 +1061,11 @@ export class PagesReviewController {
 
     const userMap = await this.resolveUserNames([record?.createdById, userId]);
     const formatted = record ? formatSuggestionItemDto(record, userMap) : null;
-    return { ok: true, suggestion: record ? { ...record, ...formatted } : null };
+    return {
+      ok: true,
+      suggestion: record ? { ...record, ...formatted } : null,
+      ...(updatedPage ? { page: updatedPage } : {}),
+    };
   }
 
   /**
@@ -1119,7 +1134,81 @@ export class PagesReviewController {
       suggestionId,
     );
 
+    let updatedPage: {
+      id: string;
+      content: string;
+      version: number;
+      rev: number;
+      projectId: string;
+    } | null = null;
+
     if (record && record.docId) {
+      try {
+        const live = this.getLiveCollaboration();
+        if (live && targetProjectId) {
+          await live.flushDocs(targetProjectId, [record.docId]).catch(() => []);
+        }
+
+        const doc = await this.pageScopeRepo.findDocInProject(
+          targetProjectId,
+          record.docId,
+        );
+        if (doc) {
+          const lines = await this.pageService.getHydratedDocLines(doc);
+          const { LinePatcher } = await import(
+            '@/modules/manuscripts/track-changes/domain'
+          );
+          const changeEntity = TrackChange.create({
+            id: record.id,
+            projectId: doc.projectId,
+            docId: doc.id,
+            type: record.type === 'delete' ? 'delete' : 'insert',
+            text: record.text,
+            range: TextRangeVo.create({
+              startLine: Math.max(0, (record.startLine ?? 1) > 0 ? (record.startLine ?? 1) - 1 : 0),
+              startCol: Math.max(0, record.startCol ?? 0),
+              endLine: Math.max(0, (record.endLine ?? record.startLine ?? 1) > 0 ? (record.endLine ?? record.startLine ?? 1) - 1 : 0),
+              endCol: Math.max(0, record.endCol ?? 0),
+            }),
+            createdById: record.createdById,
+          });
+          const { lines: nextLines, mutated } =
+            LinePatcher.computeRejectedPatch(lines, changeEntity);
+
+          let finalVersion = doc.version;
+          let finalRev = doc.rev;
+          if (mutated) {
+            const updateRes = await this.docstoreService.updateDoc(doc.projectId, doc.id, {
+              lines: nextLines,
+              version: doc.version + 1,
+              expectedRev: doc.rev,
+            });
+            finalVersion = updateRes?.doc?.version ?? doc.version + 1;
+            finalRev = updateRes?.rev ?? updateRes?.doc?.rev ?? doc.rev + 1;
+
+            await this.syncLiveDoc(doc.projectId, doc.id, nextLines);
+          }
+
+          updatedPage = {
+            id: doc.id,
+            content: nextLines.join('\n'),
+            version: finalVersion,
+            rev: finalRev,
+            projectId: doc.projectId,
+          };
+        }
+      } catch (revertErr) {
+        this.logger.error(
+          `Failed to revert rejected suggestion ${suggestionId} in docstore, rolling back status: ${revertErr}`,
+        );
+        await this.pageScopeRepo.updateTrackChangeInProject(
+          targetProjectId,
+          suggestionId,
+          { status: 'pending', resolvedAt: null, resolvedById: null },
+        );
+        throw revertErr;
+      }
+
       this.broadcastEvent(targetProjectId, 'track-changes:resolved', {
         docId: record.docId,
         change: record,
@@ -1130,7 +1219,11 @@ export class PagesReviewController {
 
     const userMap = await this.resolveUserNames([record?.createdById, userId]);
     const formatted = record ? formatSuggestionItemDto(record, userMap) : null;
-    return { ok: true, suggestion: record ? { ...record, ...formatted } : null };
+    return {
+      ok: true,
+      suggestion: record ? { ...record, ...formatted } : null,
+      ...(updatedPage ? { page: updatedPage } : {}),
+    };
   }
 
   /**
@@ -1149,20 +1242,14 @@ export class PagesReviewController {
     @ResolvedProject() authorizedProjectId: string | { id: string } | null,
     @Req() req?: AuthenticatedRequest,
   ) {
-    const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
-    if (!targetProjectId || !this.trackChangesService) {
-      return { ok: true, acceptedCount: 0 };
-    }
-
-    const result = await this.trackChangesService.batchResolveChanges(
-      targetProjectId,
+    const resolvedCount = await this.batchResolvePageSuggestions(
       pageId,
-      'accept_all',
+      authorizedProjectId,
+      true,
       body?.suggestionIds,
       req?.user?.id || req?.user?.sub || null,
     );
-
-    return { ok: true, acceptedCount: result.resolvedCount };
+    return { ok: true, acceptedCount: resolvedCount };
   }
 
   /**
@@ -1181,20 +1268,135 @@ export class PagesReviewController {
     @ResolvedProject() authorizedProjectId: string | { id: string } | null,
     @Req() req?: AuthenticatedRequest,
   ) {
-    const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
-    if (!targetProjectId || !this.trackChangesService) {
-      return { ok: true, rejectedCount: 0 };
-    }
-
-    const result = await this.trackChangesService.batchResolveChanges(
-      targetProjectId,
+    const resolvedCount = await this.batchResolvePageSuggestions(
       pageId,
-      'reject_all',
+      authorizedProjectId,
+      false,
       body?.suggestionIds,
       req?.user?.id || req?.user?.sub || null,
     );
+    return { ok: true, rejectedCount: resolvedCount };
+  }
 
-    return { ok: true, rejectedCount: result.resolvedCount };
+  private async batchResolvePageSuggestions(
+    pageId: string,
+    authorizedProjectId: string | { id: string } | null,
+    isAccept: boolean,
+    suggestionIds?: string[],
+    userId?: string | null,
+  ): Promise<number> {
+    const { docId: resolvedDocId, projectId: targetProjectId } =
+      await this.resolveDocAndProject(pageId, authorizedProjectId);
+    if (!targetProjectId) {
+      return 0;
+    }
+
+    const docId = resolvedDocId || pageId;
+    if (!this.trackChangesRepo) {
+      if (this.trackChangesService) {
+        const res = await this.trackChangesService.batchResolveChanges(
+          targetProjectId,
+          docId,
+          isAccept ? 'accept_all' : 'reject_all',
+          suggestionIds,
+          userId,
+        );
+        return res.resolvedCount;
+      }
+      return 0;
+    }
+
+    const pendingChanges = await this.trackChangesRepo.listChangesByDoc(
+      targetProjectId,
+      docId,
+      'pending',
+    );
+    const filtered =
+      suggestionIds && suggestionIds.length > 0
+        ? pendingChanges.filter((c) => suggestionIds.includes(c.id))
+        : pendingChanges;
+
+    if (filtered.length === 0) {
+      return 0;
+    }
+
+    const normalizedChanges = filtered.map((c) =>
+      TrackChange.create({
+        id: c.id,
+        projectId: c.projectId,
+        docId: c.docId,
+        type: c.type,
+        text: c.text,
+        range: TextRangeVo.create({
+          startLine: Math.max(0, c.range.startLine > 0 ? c.range.startLine - 1 : 0),
+          startCol: Math.max(0, c.range.startCol),
+          endLine: Math.max(0, c.range.endLine > 0 ? c.range.endLine - 1 : 0),
+          endCol: Math.max(0, c.range.endCol),
+        }),
+        createdById: c.createdById,
+      }),
+    );
+
+    const { LinePatcher } = await import(
+      '@/modules/manuscripts/track-changes/domain'
+    );
+    const sorted = LinePatcher.sortChangesBottomUp(normalizedChanges);
+
+    const live = this.getLiveCollaboration();
+    if (live) {
+      await live.flushDocs(targetProjectId, [docId]).catch(() => []);
+    }
+
+    const doc = await this.pageScopeRepo.findDocInProject(
+      targetProjectId,
+      docId,
+    );
+    if (doc) {
+      let currentLines = await this.pageService.getHydratedDocLines(doc);
+      let anyMutated = false;
+
+      for (const change of sorted) {
+        const computed = isAccept
+          ? LinePatcher.computeAcceptedPatch(currentLines, change)
+          : LinePatcher.computeRejectedPatch(currentLines, change);
+        currentLines = computed.lines;
+        if (computed.mutated) {
+          anyMutated = true;
+        }
+      }
+
+      if (anyMutated) {
+        await this.docstoreService.updateDoc(doc.projectId, doc.id, {
+          lines: currentLines,
+          version: doc.version + 1,
+          expectedRev: doc.rev,
+        });
+        await this.syncLiveDoc(doc.projectId, doc.id, currentLines);
+      }
+    }
+
+    const resolvedStatus = isAccept ? 'accepted' : 'rejected';
+    const now = new Date();
+    const resolvedById = isUuid(userId) ? userId : null;
+    await this.trackChangesRepo.batchUpdateChangesStatus(
+      sorted.map((c) => c.id),
+      resolvedStatus,
+      resolvedById,
+      now,
+      targetProjectId,
+      docId,
+    );
+
+    for (const change of sorted) {
+      this.broadcastEvent(targetProjectId, 'track-changes:resolved', {
+        docId,
+        change: change.toJSON(),
+        action: resolvedStatus,
+        resolvedById,
+      });
+    }
+
+    return sorted.length;
   }
 
   /**
@@ -1222,7 +1424,7 @@ export class PagesReviewController {
     }
 
     const review = await getDocReviewStatusWithFallback(
-      (this.pageScopeRepo as any).prisma,
+      this.pageScopeRepo.getPrisma(),
       this.docstoreService,
       projectId,
       docId,
@@ -1266,7 +1468,7 @@ export class PagesReviewController {
 
     const { review: updatedReview, previousStatus } =
       await updateDocReviewStatusWithCas({
-        prisma: (this.pageScopeRepo as any).prisma,
+        prisma: this.pageScopeRepo.getPrisma(),
         docstoreService: this.docstoreService,
         projectId,
         docId,

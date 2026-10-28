@@ -10,6 +10,7 @@ import {
   Get,
   Put,
   Post,
+  Patch,
   Delete,
   Param,
   Body,
@@ -75,20 +76,94 @@ export class PagesDocController {
   /**
    * PUT /api/v1/manuscripts/pages/:pageId
    * PUT /api/v1/manuscripts/docs/:pageId
+   * PUT /api/v1/manuscripts/projects/:projectId/docs/:pageId
+   * PUT /api/v1/manuscripts/projects/:projectId/docs/doc/:pageId
    */
-  @Put(['pages/:pageId', 'docs/:pageId'])
+  @Put([
+    'pages/:pageId',
+    'docs/:pageId',
+    'projects/:projectId/docs/:pageId',
+    'projects/:projectId/docs/doc/:pageId',
+  ])
   @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({ summary: 'Update document content by pageId' })
   async updatePageContent(
     @Param('pageId') pageId: string,
     @Body() body: UpdatePageContentParams,
+    @Param('projectId') routeProjectId?: string,
     @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     return this.pageService.updatePageContent(
       pageId,
       body,
-      authorizedProjectId,
+      authorizedProjectId || routeProjectId,
     );
+  }
+
+  /**
+   * POST /api/v1/manuscripts/projects/:projectId/docs/:pageId
+   * POST /api/v1/manuscripts/projects/:projectId/docs/doc/:pageId
+   * POST /api/v1/manuscripts/projects/:projectId/updater/doc/:pageId/update
+   */
+  @Post([
+    'projects/:projectId/docs/:pageId',
+    'projects/:projectId/docs/doc/:pageId',
+    'projects/:projectId/updater/doc/:pageId/update',
+  ])
+  @RequireRole(Role.CONTRIBUTOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update or queue document lines with OCC enforcement' })
+  async updateOrQueueDocLines(
+    @Param('projectId') projectId: string,
+    @Param('pageId') pageId: string,
+    @Body()
+    body: UpdatePageContentParams & {
+      docLines?: string[];
+      rev?: number;
+      clientRev?: number;
+    },
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+  ) {
+    const normalizedBody: UpdatePageContentParams = {
+      ...body,
+      lines: body.lines ?? body.docLines,
+      expectedRev: body.expectedRev ?? body.rev ?? body.clientRev,
+    };
+    return this.pageService.updatePageContent(
+      pageId,
+      normalizedBody,
+      authorizedProjectId || projectId,
+    );
+  }
+
+  /**
+   * PATCH /api/v1/manuscripts/projects/:projectId/docs/:pageId
+   * PATCH /api/v1/manuscripts/projects/:projectId/docs/doc/:pageId
+   */
+  @Patch([
+    'projects/:projectId/docs/:pageId',
+    'projects/:projectId/docs/doc/:pageId',
+  ])
+  @RequireRole(Role.CONTRIBUTOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Patch document path or soft-delete metadata' })
+  async patchProjectDoc(
+    @Param('projectId') projectId: string,
+    @Param('pageId') pageId: string,
+    @Body()
+    body: {
+      path?: string;
+      name?: string;
+      deleted?: boolean;
+      deletedAt?: string;
+    },
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+  ) {
+    const resolvedProjectId =
+      (typeof authorizedProjectId === 'string'
+        ? authorizedProjectId
+        : authorizedProjectId?.id) || projectId;
+    return this.docstoreService.patchDoc(resolvedProjectId, pageId, body);
   }
 
   /**

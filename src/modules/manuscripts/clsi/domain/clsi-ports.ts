@@ -67,7 +67,7 @@ export interface WordCountStats {
 }
 
 export interface IWordCounter {
-  count(source: string): WordCountStats;
+  count(source: string, filename?: string): WordCountStats;
 }
 
 export interface DiscoveredOutputFile {

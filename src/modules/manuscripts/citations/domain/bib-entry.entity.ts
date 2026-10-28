@@ -3,6 +3,7 @@
  * Aggregate Entity representing an individual BibTeX bibliography entry.
  */
 
+import { randomUUID } from 'crypto';
 import { CitationKeyVo } from './citation-key.vo';
 import { AuthorListVo } from './author-list.vo';
 import { toBibtexValue } from './bibtex.formatter';
@@ -39,8 +40,7 @@ export class BibEntry {
   public readonly valueFormat: BibValueFormat;
 
   constructor(props: BibEntryProps) {
-    this.id =
-      props.id || `entry-${Math.random().toString(36).substring(2, 10)}`;
+    this.id = props.id || `entry-${randomUUID()}`;
     this.key =
       props.key instanceof CitationKeyVo
         ? props.key

@@ -1,7 +1,7 @@
 /**
  * citations/domain/crossref-arxiv.resolver.ts
- * Resolver resolving DOI and arXiv identifiers via public academic APIs
- * (CrossRef Content Negotiation & arXiv Atom Export API).
+ * Resolver resolving DOI, arXiv, and ISBN identifiers via public academic APIs
+ * (CrossRef Content Negotiation, arXiv Atom Export API, and OpenLibrary Books API).
  */
 
 import { IIdentifierResolverPort } from './citations.ports';
@@ -193,13 +193,14 @@ export class CrossrefBibtexResolutionHandler extends BaseIdentifierResolutionHan
   protected async tryResolve(
     identifier: AcademicIdentifierVo,
   ): Promise<BibEntry | null> {
+    const contactMailto = process.env.CROSSREF_MAILTO || 'support@flux.app';
     try {
       const res = await this.fetchFn(
         `https://doi.org/${encodeURIComponent(identifier.clean)}`,
         {
           headers: {
             Accept: 'application/x-bibtex; charset=utf-8',
-            'User-Agent': 'FluxManuscripts/1.0 (mailto:support@flux.local)',
+            'User-Agent': `FluxManuscripts/1.0 (mailto:${contactMailto})`,
           },
         },
       );
@@ -414,6 +415,84 @@ export class ArxivAtomResolutionHandler extends BaseIdentifierResolutionHandler 
   }
 }
 
+export interface OpenLibraryBookItem {
+  title?: string;
+  publish_date?: string;
+  authors?: Array<{ name?: string }>;
+  publishers?: Array<{ name?: string }>;
+  publish_places?: Array<{ name?: string }>;
+  number_of_pages?: number;
+  url?: string;
+}
+
+export class OpenLibraryIsbnResolutionHandler extends BaseIdentifierResolutionHandler {
+  public readonly name = 'OpenLibraryBooksApi';
+
+  constructor(private readonly fetchFn: FetchLikeFn) {
+    super();
+  }
+
+  protected canHandle(identifier: AcademicIdentifierVo): boolean {
+    return identifier.isIsbn();
+  }
+
+  protected async tryResolve(
+    identifier: AcademicIdentifierVo,
+  ): Promise<BibEntry | null> {
+    const cleanIsbn = identifier.clean;
+    try {
+      const bibKey = `ISBN:${cleanIsbn}`;
+      const res = await this.fetchFn(
+        `https://openlibrary.org/api/books?bibkeys=${encodeURIComponent(bibKey)}&format=json&jscmd=data`,
+        {
+          headers: { 'User-Agent': 'FluxManuscripts/1.0' },
+        },
+      );
+
+      if (res.ok) {
+        const data = (await res.json()) as Record<string, OpenLibraryBookItem>;
+        const book = data?.[bibKey];
+        if (book) {
+          const title = book.title?.trim() || 'Untitled Book';
+          const yearMatch = book.publish_date?.match(/\b(1[5-9]\d{2}|20\d{2})\b/);
+          const year = yearMatch ? yearMatch[1] : undefined;
+          const authors = (book.authors || [])
+            .map((a) => (a.name ? toFamilyGiven(a.name.trim()) : ''))
+            .filter(Boolean);
+          const publisher = book.publishers?.[0]?.name?.trim();
+          const address = book.publish_places?.[0]?.name?.trim();
+
+          const fields: Record<string, string> = {
+            title,
+            author: authors.join(' and ') || 'Unknown Author',
+            isbn: cleanIsbn,
+          };
+          if (year) fields.year = year;
+          if (publisher) fields.publisher = publisher;
+          if (address) fields.address = address;
+          if (book.url) fields.url = book.url;
+
+          const firstFamily = authors[0]?.split(',')[0];
+          return new BibEntry({
+            key: buildResolvedCitationKey(
+              firstFamily,
+              year,
+              title,
+              `isbn_${cleanIsbn}`,
+            ),
+            entryType: 'book',
+            fields,
+            valueFormat: 'plain',
+          });
+        }
+      }
+    } catch {
+      // Pass to next handler in chain
+    }
+    return null;
+  }
+}
+
 export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
   private readonly headHandler: IIdentifierResolutionHandler;
 
@@ -427,7 +506,11 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
       const bibtexHandler = new CrossrefBibtexResolutionHandler(fetchFn);
       const jsonHandler = new CrossrefJsonResolutionHandler(fetchFn);
       const arxivHandler = new ArxivAtomResolutionHandler(fetchFn);
-      bibtexHandler.setNext(jsonHandler).setNext(arxivHandler);
+      const isbnHandler = new OpenLibraryIsbnResolutionHandler(fetchFn);
+      bibtexHandler
+        .setNext(jsonHandler)
+        .setNext(arxivHandler)
+        .setNext(isbnHandler);
       this.headHandler = bibtexHandler;
     }
   }

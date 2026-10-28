@@ -76,6 +76,9 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     // 2. Write-through to Prisma DB
     if (this.prisma) {
       try {
+        const persistedUrl =
+          entity.url ??
+          (entity.collectionId ? `collection:${entity.collectionId}` : null);
         await this.prisma.manuscriptLinkedFile.upsert({
           where: { id: entity.id },
           create: {
@@ -83,7 +86,7 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
             projectId: entity.projectId,
             name: entity.name,
             provider: entity.provider,
-            url: entity.url ?? null,
+            url: persistedUrl,
             targetDocId: entity.docId ?? null,
             targetFileId: entity.fileId ?? null,
             targetPath: entity.nodeId ?? entity.name,
@@ -95,7 +98,7 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
           update: {
             name: entity.name,
             provider: entity.provider,
-            url: entity.url ?? null,
+            url: persistedUrl,
             targetDocId: entity.docId ?? null,
             targetFileId: entity.fileId ?? null,
             targetPath: entity.nodeId ?? entity.name,
@@ -383,12 +386,19 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     createdAt: Date;
     updatedAt: Date;
   }): LinkedFileEntity {
+    const isCollectionRef = record.url?.startsWith('collection:');
+    const resolvedCollectionId = isCollectionRef
+      ? record.url!.slice('collection:'.length)
+      : null;
+    const resolvedUrl = isCollectionRef ? null : record.url;
+
     return new LinkedFileEntity({
       id: record.id,
       projectId: record.projectId,
       name: record.name,
       provider: (record.provider as 'url' | 'zotero' | 'mendeley') || 'url',
-      url: record.url,
+      url: resolvedUrl,
+      collectionId: resolvedCollectionId,
       nodeId: record.targetPath,
       docId: record.targetDocId,
       fileId: record.targetFileId,

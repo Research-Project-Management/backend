@@ -119,25 +119,35 @@ export function convertLatexToHtml(latex: string, title?: string): string {
   const md = convertLatexToMarkdown(latex, title);
   const docTitle = title || 'Document';
 
+  const formatInlineHtml = (text: string): string =>
+    escapeXml(text)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+
   const paragraphs = md
     .split(/\n{2,}/)
     .map((block) => {
       const trimmed = block.trim();
       if (!trimmed) return '';
-      if (trimmed.startsWith('# ')) return `<h1>${trimmed.slice(2)}</h1>`;
-      if (trimmed.startsWith('## ')) return `<h2>${trimmed.slice(3)}</h2>`;
-      if (trimmed.startsWith('### ')) return `<h3>${trimmed.slice(4)}</h3>`;
-      if (trimmed.startsWith('#### ')) return `<h4>${trimmed.slice(5)}</h4>`;
+      if (trimmed.startsWith('# '))
+        return `<h1>${formatInlineHtml(trimmed.slice(2))}</h1>`;
+      if (trimmed.startsWith('## '))
+        return `<h2>${formatInlineHtml(trimmed.slice(3))}</h2>`;
+      if (trimmed.startsWith('### '))
+        return `<h3>${formatInlineHtml(trimmed.slice(4))}</h3>`;
+      if (trimmed.startsWith('#### '))
+        return `<h4>${formatInlineHtml(trimmed.slice(5))}</h4>`;
       if (trimmed.startsWith('- ')) {
         const items = trimmed
           .split('\n')
           .map((line) => line.replace(/^-\s*/, '').trim())
           .filter(Boolean)
-          .map((item) => `<li>${item}</li>`)
+          .map((item) => `<li>${formatInlineHtml(item)}</li>`)
           .join('');
         return `<ul>${items}</ul>`;
       }
-      return `<p>${trimmed.replace(/\n/g, '<br/>')}</p>`;
+      return `<p>${formatInlineHtml(trimmed).replace(/\n/g, '<br/>')}</p>`;
     })
     .filter(Boolean)
     .join('\n');

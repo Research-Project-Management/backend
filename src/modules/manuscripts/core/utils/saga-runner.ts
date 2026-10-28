@@ -28,17 +28,26 @@ export interface SagaRunnerOptions {
 }
 
 export class SagaRunner {
-  private readonly steps: Array<CompensableStep<any>> = [];
+  private readonly steps: Array<{
+    readonly name: string;
+    execute(): Promise<unknown>;
+    compensate?(result: unknown): Promise<void> | void;
+  }> = [];
   private readonly completedDynamicSteps: Array<{
     name: string;
-    compensate?: (result: any) => Promise<void> | void;
-    result: any;
+    compensate?: () => Promise<void> | void;
   }> = [];
 
   constructor(private readonly runnerOptions?: SagaRunnerOptions) {}
 
   public addStep<TResult>(step: CompensableStep<TResult>): this {
-    this.steps.push(step);
+    this.steps.push({
+      name: step.name,
+      execute: () => step.execute(),
+      compensate: step.compensate
+        ? (res: unknown) => step.compensate!(res as TResult)
+        : undefined,
+    });
     return this;
   }
 
@@ -52,16 +61,19 @@ export class SagaRunner {
     compensate?: (result: TResult) => Promise<void> | void,
   ): Promise<TResult> {
     const result = await execute();
-    this.completedDynamicSteps.push({ name, compensate, result });
+    this.completedDynamicSteps.push({
+      name,
+      compensate: compensate ? () => compensate(result) : undefined,
+    });
     return result;
   }
 
   public async compensateAll(options?: SagaExecutionOptions): Promise<void> {
     for (let i = this.completedDynamicSteps.length - 1; i >= 0; i--) {
-      const { name, compensate, result } = this.completedDynamicSteps[i];
+      const { name, compensate } = this.completedDynamicSteps[i];
       if (!compensate) continue;
       try {
-        await compensate(result);
+        await compensate();
       } catch (compErr) {
         options?.onCompensationError?.(name, compErr);
         this.runnerOptions?.logger?.warn?.(
@@ -73,7 +85,13 @@ export class SagaRunner {
   }
 
   public async run(options?: SagaExecutionOptions): Promise<void> {
-    const completed: Array<{ step: CompensableStep<any>; result: any }> = [];
+    const completed: Array<{
+      step: {
+        readonly name: string;
+        compensate?(result: unknown): Promise<void> | void;
+      };
+      result: unknown;
+    }> = [];
 
     try {
       for (const step of this.steps) {

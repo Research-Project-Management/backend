@@ -20,6 +20,7 @@ export interface RemoteCompileRequest {
   dto: CompileManuscriptDto;
   engine?: string;
   cacheKey: string;
+  signal?: AbortSignal;
 }
 
 @Injectable()
@@ -138,6 +139,7 @@ export class RemoteClsiClientAdapter {
     dtoArg?: CompileManuscriptDto,
     engineArg?: string | undefined,
     cacheKeyArg?: string,
+    signalArg?: AbortSignal,
   ): Promise<CompilePipelineResult | null> {
     const req: RemoteCompileRequest =
       typeof projectIdOrRequest === 'object'
@@ -150,11 +152,20 @@ export class RemoteClsiClientAdapter {
             dto: dtoArg!,
             engine: engineArg,
             cacheKey: cacheKeyArg!,
+            signal: signalArg,
           };
 
     return this.guarded<CompilePipelineResult>('compile', async (baseUrl) => {
-      const { projectId, mainFile, source, mergedFiles, dto, engine, cacheKey } =
-        req;
+      const {
+        projectId,
+        mainFile,
+        source,
+        mergedFiles,
+        dto,
+        engine,
+        cacheKey,
+        signal,
+      } = req;
       const endpoints = baseUrl.endsWith('/api/clsi')
         ? [`${baseUrl}/compile`]
         : [
@@ -178,8 +189,18 @@ export class RemoteClsiClientAdapter {
 
       let response: Response | null = null;
       let lastError: Error | null = null;
+      const timeoutSignal = AbortSignal.timeout(
+        dto.timeout_ms ?? dto.timeoutMs ?? 60000,
+      );
+      const requestSignal =
+        signal && typeof AbortSignal.any === 'function'
+          ? AbortSignal.any([signal, timeoutSignal])
+          : signal || timeoutSignal;
 
       for (const endpoint of endpoints) {
+        if (signal?.aborted) {
+          return null;
+        }
         try {
           const res = await fetch(endpoint, {
             method: 'POST',
@@ -194,16 +215,13 @@ export class RemoteClsiClientAdapter {
               files: serializedFiles,
               engine,
             }),
-            signal: AbortSignal.timeout(
-              dto.timeout_ms ?? dto.timeoutMs ?? 60000,
-            ),
+            signal: requestSignal,
           });
           if (res.status !== 404) {
             response = res;
             break;
           }
         } catch (err: unknown) {
-          this.circuitBreaker.recordFailure(err);
           lastError = err instanceof Error ? err : new Error(String(err));
         }
       }

@@ -108,17 +108,16 @@ export class ClsiService implements OnModuleDestroy {
     const rawMode = this.configService
       .get<string>('CLSI_SANDBOX_MODE')
       ?.toLowerCase();
-    const normalizedMode =
-      rawMode === 'local-unsafe' || rawMode === 'local'
-        ? 'local-unsafe'
-        : 'container';
     const sandboxConfig = parseSandboxConfig({
       env: {
-        CLSI_SANDBOX_MODE: normalizedMode,
+        CLSI_SANDBOX_MODE: rawMode || undefined,
         CLSI_SANDBOX_IMAGE:
           this.configService.get<string>('CLSI_SANDBOX_IMAGE') ||
           this.configService.get<string>('CLSI_DOCKER_IMAGE') ||
           undefined,
+        CLSI_URL: this.configService.get<string>('CLSI_URL') || undefined,
+        CLSI_REMOTE_URL:
+          this.configService.get<string>('CLSI_REMOTE_URL') || undefined,
         CLSI_SANDBOX_USER:
           this.configService.get<string>('CLSI_SANDBOX_USER') || undefined,
         CLSI_SANDBOX_MEMORY_MB:
@@ -153,6 +152,9 @@ export class ClsiService implements OnModuleDestroy {
     const tectonicBin =
       this.configService.get<string>('TECTONIC_BIN') || 'tectonic';
 
+    // Workspace & Real Sandbox/Engine seams
+    this.workspace = workspace ?? new OverleafIncrementalWorkspace(scratchDir);
+
     this.remoteClient =
       remoteClient ??
       new RemoteClsiClientAdapter(this.configService, this.cache);
@@ -163,15 +165,13 @@ export class ClsiService implements OnModuleDestroy {
         undefined,
         undefined,
         this.realtimeService,
+        this.workspace,
       );
 
     // Pure in-process domain logic
     this.logParser = logParser ?? new CompileLogAnalyzer();
     this.synctexParser = synctexProcessor ?? new SyncTexProcessor();
     this.wordCounter = wordCounter ?? new TexWordCounter();
-
-    // Workspace & Real Sandbox/Engine seams
-    this.workspace = workspace ?? new OverleafIncrementalWorkspace(scratchDir);
 
     const needsRunner = !latexmkEngine || !tectonicEngine || !healthCheck;
     const runner = needsRunner
@@ -273,6 +273,18 @@ export class ClsiService implements OnModuleDestroy {
     const projectId =
       authorizedProjectId || dto.projectId || dto.project_id || 'default';
     const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
+
+    // Pre-compile Yjs flush in the API process before dispatching to external BullMQ worker
+    if (this.realtimeService && projectId && projectId !== 'default') {
+      try {
+        await this.realtimeService.flushProjectBeforeCompile(projectId);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Pre-queue Yjs flush encountered an error for project ${projectId}: ${msg}`,
+        );
+      }
+    }
 
     const job = await this.compileQueue.add(
       'clsi-compile',
@@ -416,11 +428,12 @@ export class ClsiService implements OnModuleDestroy {
         const cacheable = !!(dto.use_cache && plan.hasMainContent);
 
         if (cacheable && this.cache) {
+          const cacheLookupStart = Date.now();
           const cached = await this.cache.get<ClsiCompileResult>(cacheKey);
           if (cached && cached.success) {
             this.metrics.record({
               engine: metricEngine,
-              durationMs: 5,
+              durationMs: Math.max(1, Date.now() - cacheLookupStart),
               success: true,
               isCached: true,
               isTimeout: false,
@@ -486,6 +499,12 @@ export class ClsiService implements OnModuleDestroy {
       ? rawMain.toString('utf8')
       : rawMain;
 
+    if (dto.force_clean || dto.forceClean) {
+      await this.pipeline.runWithProjectLock(projectId, () =>
+        this.workspace.cleanScratch(projectId),
+      );
+    }
+
     const remoteResult = await this.remoteClient.tryRemoteClsiCompile(
       projectId,
       mainFile,
@@ -494,32 +513,63 @@ export class ClsiService implements OnModuleDestroy {
       dto,
       engine,
       cacheKey,
-    );
-    if (remoteResult) {
-      return remoteResult;
-    }
-
-    if (dto.force_clean || dto.forceClean) {
-      await this.pipeline.runWithProjectLock(projectId, () =>
-        this.workspace.cleanScratch(projectId),
-      );
-    }
-
-    const pipelineResult: CompilePipelineResult = await this.pipeline.execute({
-      projectId,
-      mainFile,
-      engine,
-      texLiveVersion,
-      draft: dto.draft,
-      syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
-      stopOnFirstError:
-        dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
-      timeoutMs: effectiveTimeoutMs,
-      source,
-      files: mergedFiles,
       signal,
-      onLogChunk,
-    });
+    );
+
+    if (remoteResult) {
+      try {
+        const scratchDir = await this.workspace.ensureScratch(projectId);
+        const writes: Promise<void>[] = [];
+        if (remoteResult.pdf) {
+          writes.push(
+            fs.writeFile(
+              path.join(scratchDir, 'output.pdf'),
+              Buffer.from(remoteResult.pdf, 'base64'),
+            ),
+          );
+        }
+        if (remoteResult.synctex) {
+          writes.push(
+            fs.writeFile(
+              path.join(scratchDir, 'output.synctex.gz'),
+              Buffer.from(remoteResult.synctex, 'base64'),
+            ),
+          );
+        }
+        if (remoteResult.logs) {
+          writes.push(
+            fs.writeFile(
+              path.join(scratchDir, 'output.log'),
+              remoteResult.logs,
+              'utf8',
+            ),
+          );
+        }
+        if (writes.length > 0) {
+          await Promise.allSettled(writes);
+        }
+      } catch {
+        // Non-blocking artifact sync to local workspace scratch
+      }
+    }
+
+    const pipelineResult: CompilePipelineResult =
+      remoteResult ??
+      (await this.pipeline.execute({
+        projectId,
+        mainFile,
+        engine,
+        texLiveVersion,
+        draft: dto.draft,
+        syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
+        stopOnFirstError:
+          dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
+        timeoutMs: effectiveTimeoutMs,
+        source,
+        files: mergedFiles,
+        signal,
+        onLogChunk,
+      }));
 
     this.metrics.record({
       engine: metricEngine,

@@ -143,7 +143,7 @@ export class DocstoreRepository {
     );
     const sizeBytes = bytes + Math.max(0, data.lines.length - 1);
 
-    const client = (data.tx as any) ?? this.prisma;
+    const client = data.tx ?? this.prisma;
     const record = await client.manuscriptDoc.create({
       data: {
         projectId: data.projectId,

@@ -187,6 +187,12 @@ export class StructureRepository extends IStructureRepository {
           data: { path: normDest.replace(/^\/+/, '') },
         });
       }
+      if (movedRoot?.fileId) {
+        await tx.manuscriptFile?.updateMany({
+          where: { id: movedRoot.fileId, projectId },
+          data: { name: normDest.replace(/^\/+/, '') },
+        });
+      }
 
       const descendants = await tx.manuscriptNode.findMany({
         where: {
@@ -213,6 +219,12 @@ export class StructureRepository extends IStructureRepository {
             await tx.manuscriptDoc?.updateMany({
               where: { id: descendant.docId, projectId },
               data: { path: newChildPath.replace(/^\/+/, '') },
+            });
+          }
+          if (descendant.fileId) {
+            await tx.manuscriptFile?.updateMany({
+              where: { id: descendant.fileId, projectId },
+              data: { name: newChildPath.replace(/^\/+/, '') },
             });
           }
         }),
@@ -249,6 +261,12 @@ export class StructureRepository extends IStructureRepository {
       await this.prisma.manuscriptDoc?.updateMany({
         where: { id: updated.docId, projectId },
         data: { path: newPath.replace(/^\/+/, '') },
+      });
+    }
+    if (updated?.fileId) {
+      await this.prisma.manuscriptFile?.updateMany({
+        where: { id: updated.fileId, projectId },
+        data: { name: newPath.replace(/^\/+/, '') },
       });
     }
     return this.mapToEntity(updated!);

@@ -248,6 +248,7 @@ export class FastSyntaxLinter {
     const unclosedEnvs: string[] = [];
 
     let inVerbatim = false;
+    let ifFalseDepth = 0;
     let inDisplayMathBracket = false;
     let inDisplayMathDollar = false;
 
@@ -266,12 +267,23 @@ export class FastSyntaxLinter {
         continue;
       }
 
+      const codeOnlyBeforeRules = this.stripComment(line);
+      if (/\\iffalse\b/.test(codeOnlyBeforeRules)) {
+        ifFalseDepth++;
+      }
+      if (ifFalseDepth > 0) {
+        fixedLines.push(line);
+        if (/\\fi\b/.test(codeOnlyBeforeRules)) {
+          ifFalseDepth = Math.max(0, ifFalseDepth - 1);
+        }
+        continue;
+      }
+
       const wasInMathEnv = unclosedEnvs.some((e) => MATH_ENVIRONMENTS.has(e));
       this.trackEnvironmentsForAutoFix(line, unclosedEnvs);
       const isInMathEnv =
         wasInMathEnv || unclosedEnvs.some((e) => MATH_ENVIRONMENTS.has(e));
 
-      const codeOnlyBeforeRules = this.stripComment(line);
       if (/\\\[/.test(codeOnlyBeforeRules)) inDisplayMathBracket = true;
       const doubleDollarMatches = codeOnlyBeforeRules.match(/(?<!\\)\$\$/g);
       const hadDisplayDollarOnLine = Boolean(
@@ -788,19 +800,13 @@ export class FastSyntaxLinter {
   }
 
   private isVerbatimStart(line: string): boolean {
-    return (
-      line.includes('\\begin{verbatim}') ||
-      line.includes('\\begin{lstlisting}') ||
-      line.includes('\\begin{minted}')
-    );
+    const match = line.match(/\\begin\{([a-zA-Z0-9*]+)\}/);
+    return Boolean(match?.[1] && VERBATIM_ENVIRONMENTS.has(match[1]));
   }
 
   private isVerbatimEnd(line: string): boolean {
-    return (
-      line.includes('\\end{verbatim}') ||
-      line.includes('\\end{lstlisting}') ||
-      line.includes('\\end{minted}')
-    );
+    const match = line.match(/\\end\{([a-zA-Z0-9*]+)\}/);
+    return Boolean(match?.[1] && VERBATIM_ENVIRONMENTS.has(match[1]));
   }
 
   private trackEnvironmentsForAutoFix(

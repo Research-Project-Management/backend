@@ -86,7 +86,10 @@ export class LinkedFilesService {
     let fileId: string | null = null;
     let nodeId: string | null = null;
 
-    if (dto.provider === 'url') {
+    if (
+      dto.provider === 'url' ||
+      ((dto.provider === 'github' || dto.provider === 'dropbox') && dto.url)
+    ) {
       if (!dto.url) {
         throw new BadRequestException('URL is required for URL provider');
       }
@@ -355,31 +358,9 @@ export class LinkedFilesService {
       }
     }
 
-    const entity = new LinkedFileEntity({
-      id: linkedFileId,
-      projectId,
-      name: filename,
-      provider: dto.provider,
-      url: dto.url,
-      collectionId: dto.collectionId,
-      nodeId,
-      docId,
-      fileId,
-      status: 'synced',
-      lastSyncedAt: new Date(),
-      autoRefresh: dto.autoRefresh ?? false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    await this.repository.save(entity);
-
-    this.broadcastFileTreeChange(projectId, {
-      action: 'linked-file-created',
-      node: { id: nodeId, name: filename, linkedFileId },
-    });
-
-    return this.mapToDto(entity);
+    throw new BadRequestException(
+      `Unsupported linked file provider "${dto.provider}" or missing required provider configuration`,
+    );
   }
 
   public async refresh(
@@ -405,7 +386,12 @@ export class LinkedFilesService {
     }
 
     try {
-      if (linkedFile.provider === 'url' && linkedFile.url) {
+      if (
+        (linkedFile.provider === 'url' ||
+          linkedFile.provider === 'github' ||
+          linkedFile.provider === 'dropbox') &&
+        linkedFile.url
+      ) {
         const download = await this.downloadUrl(linkedFile.url);
 
         if (linkedFile.docId) {

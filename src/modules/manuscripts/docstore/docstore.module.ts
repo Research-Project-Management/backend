@@ -19,7 +19,7 @@ import {
 } from './controllers';
 import { DocstoreService } from './docstore.service';
 import { ManuscriptPageService } from '../core/services/manuscript-page.service';
-import { ManuscriptUserResolverService } from './services/manuscript-user-resolver.service';
+import { ManuscriptUserResolverService } from '../core/services/manuscript-user-resolver.service';
 import { ManuscriptPresenceService } from './services/manuscript-presence.service';
 import { ManuscriptSearchReplaceService } from './services/manuscript-search-replace.service';
 import { ManuscriptProjectBootstrapService } from './services/manuscript-project-bootstrap.service';

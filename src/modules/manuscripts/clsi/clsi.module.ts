@@ -18,6 +18,7 @@ import { ClsiController } from './clsi.controller';
 import { ClsiService } from './services/clsi.service';
 import { RemoteClsiClientAdapter } from './services/remote-clsi.client';
 import { ClsiWorkspacePlannerService } from './services/workspace-planner.service';
+import { ClsiCompileProcessor } from './processors/clsi-compile.processor';
 import {
   OverleafIncrementalWorkspace,
   DiskUsageCleaner,
@@ -41,6 +42,11 @@ import { CompileFairQueue } from './services/compile-fair-queue.service';
 export const CLSI_SANDBOX_CONFIG = Symbol('CLSI_SANDBOX_CONFIG');
 export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
 
+const inProcessClsiWorkers =
+  process.env.ENABLE_IN_PROCESS_WORKERS === 'true'
+    ? [ClsiCompileProcessor]
+    : [];
+
 @Module({
   imports: [
     AppCoreModule,
@@ -60,7 +66,11 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
         return parseSandboxConfig({
           env: {
             CLSI_SANDBOX_MODE: configService.get<string>('CLSI_SANDBOX_MODE'),
-            CLSI_SANDBOX_IMAGE: configService.get<string>('CLSI_SANDBOX_IMAGE'),
+            CLSI_SANDBOX_IMAGE:
+              configService.get<string>('CLSI_SANDBOX_IMAGE') ||
+              configService.get<string>('CLSI_DOCKER_IMAGE'),
+            CLSI_URL: configService.get<string>('CLSI_URL'),
+            CLSI_REMOTE_URL: configService.get<string>('CLSI_REMOTE_URL'),
             CLSI_SANDBOX_USER: configService.get<string>('CLSI_SANDBOX_USER'),
             CLSI_SANDBOX_MEMORY_MB: configService.get<string>(
               'CLSI_SANDBOX_MEMORY_MB',
@@ -152,6 +162,7 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
     },
     CompileFairQueue,
     ClsiService,
+    ...inProcessClsiWorkers,
   ],
   exports: [
     ClsiService,

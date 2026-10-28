@@ -9,9 +9,10 @@
  * invalidation, and audit telemetry).
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import {
+  LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
 } from '../ports/live-collaboration.port';
@@ -72,12 +73,14 @@ export class ManuscriptDomainEventBus {
   private readonly logger = new Logger(ManuscriptDomainEventBus.name);
   private readonly handlers = new Map<
     ManuscriptDomainEvent['type'],
-    Set<ManuscriptDomainEventHandler<any>>
+    Set<ManuscriptDomainEventHandler<ManuscriptDomainEvent>>
   >();
 
   constructor(
     @Optional() private readonly moduleRef?: ModuleRef,
-    @Optional() private readonly injectedLiveCollab?: LiveCollaborationPort,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    private readonly injectedLiveCollab?: LiveCollaborationPort,
   ) {
     this.registerDefaultCrossContextHandlers();
   }
@@ -88,6 +91,7 @@ export class ManuscriptDomainEventBus {
     }
     try {
       return (
+        this.moduleRef?.get(LIVE_COLLABORATION_PORT, { strict: false }) ??
         this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ??
         NOOP_LIVE_COLLABORATION
       );
@@ -155,9 +159,12 @@ export class ManuscriptDomainEventBus {
       set = new Set();
       this.handlers.set(eventType, set);
     }
-    set.add(handler);
+    const wrappedHandler: ManuscriptDomainEventHandler<ManuscriptDomainEvent> = (
+      event,
+    ) => handler(event as T);
+    set.add(wrappedHandler);
     return () => {
-      set?.delete(handler);
+      set?.delete(wrappedHandler);
     };
   }
 

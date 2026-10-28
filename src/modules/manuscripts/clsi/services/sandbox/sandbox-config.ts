@@ -16,10 +16,11 @@ import {
   readManuscriptsConfig,
 } from '../../../core/config/manuscripts.config';
 
-export type SandboxMode = 'container' | 'local-unsafe';
+export type SandboxMode = 'container' | 'local-unsafe' | 'remote';
 
 export interface ClsiSandboxConfig {
   readonly mode: SandboxMode;
+  readonly remoteUrl?: string;
   readonly image: string;
   readonly user: string;
   readonly memoryMb: number;
@@ -51,26 +52,35 @@ export function parseSandboxConfig(
     options.isProduction ??
     (env.NODE_ENV === 'production' || defaultConfig.isProduction);
 
+  const remoteUrl = (env.CLSI_REMOTE_URL || env.CLSI_URL || '').trim() || undefined;
+
   // Mode resolution
   let mode: SandboxMode;
   if (env.CLSI_SANDBOX_MODE) {
     const rawMode = env.CLSI_SANDBOX_MODE.toLowerCase();
-    if (rawMode === 'container' || rawMode === 'local-unsafe') {
-      mode = rawMode;
+    if (rawMode === 'container') {
+      mode = 'container';
+    } else if (rawMode === 'local-unsafe' || rawMode === 'local') {
+      mode = 'local-unsafe';
+    } else if (rawMode === 'remote') {
+      mode = 'remote';
     } else {
       throw new SandboxConfigurationException(
-        `Invalid CLSI_SANDBOX_MODE "${env.CLSI_SANDBOX_MODE}". Must be "container" or "local-unsafe".`,
+        `Invalid CLSI_SANDBOX_MODE "${env.CLSI_SANDBOX_MODE}". Must be "container", "local-unsafe", or "remote".`,
       );
     }
+  } else if (remoteUrl && !env.CLSI_SANDBOX_IMAGE) {
+    // Self-hosted multi-tier mode: when CLSI_URL / CLSI_REMOTE_URL points to a dedicated CLSI container
+    mode = 'remote';
   } else {
     // Default is container mode
     mode = 'container';
   }
 
-  // Fail-closed in production
-  if (isProduction && mode !== 'container') {
+  // Fail-closed in production: local-unsafe is forbidden unless explicitly delegating to remote CLSI container
+  if (isProduction && mode === 'local-unsafe') {
     throw new SandboxConfigurationException(
-      'CLSI sandbox mode "local-unsafe" is strictly forbidden in production. Container sandbox is mandatory.',
+      'CLSI sandbox mode "local-unsafe" is strictly forbidden in production. Container or remote CLSI sandbox is mandatory.',
     );
   }
 
@@ -79,7 +89,7 @@ export function parseSandboxConfig(
 
   if (mode === 'container') {
     if (!image) {
-      if (isProduction) {
+      if (isProduction && !remoteUrl) {
         throw new SandboxConfigurationException(
           'CLSI_SANDBOX_IMAGE is required in production container mode.',
         );
@@ -87,7 +97,7 @@ export function parseSandboxConfig(
       image = 'sharelatex/clsi:latest';
     }
 
-    if (isProduction && !DIGEST_REGEX.test(image)) {
+    if (isProduction && !remoteUrl && !DIGEST_REGEX.test(image)) {
       throw new SandboxConfigurationException(
         `In production, CLSI_SANDBOX_IMAGE must be pinned with @sha256:<64-hex-digest> (got: "${image}").`,
       );
@@ -133,6 +143,7 @@ export function parseSandboxConfig(
 
   return {
     mode,
+    remoteUrl,
     image,
     user,
     memoryMb,

@@ -44,10 +44,15 @@ export async function resolveProjectIdByEntityId(
   });
   if (doc?.projectId) return doc.projectId;
   const node = await prisma.manuscriptNode.findFirst({
-    where: { projectId: id },
+    where: { OR: [{ id }, { docId: id }, { projectId: id }] },
     select: { projectId: true },
   });
-  return node?.projectId ?? null;
+  if (node?.projectId) return node.projectId;
+  const project = await prisma.project.findUnique({
+    where: { id },
+    select: { id: true },
+  });
+  return project?.id ?? null;
 }
 
 export async function hydratePageDocLines(
@@ -682,41 +687,47 @@ export async function duplicateSourcePageAndNode(
     source,
   );
 
-  const newDoc = await prisma.manuscriptDoc.create({
-    data: {
-      projectId: source.projectId,
-      path: newTitle,
-      lines: hydratedSourceLines,
-      rev: 1,
-      version: 1,
-      ranges: source.ranges ?? {},
-      hash: source.hash,
-      sizeBytes: source.sizeBytes,
-    },
-  });
-
   const sourceNode = await prisma.manuscriptNode.findFirst({
     where: { projectId: source.projectId, docId: pageId },
   });
 
-  if (sourceNode) {
-    await prisma.manuscriptNode.create({
+  const newDoc = await prisma.$transaction(async (tx) => {
+    const createdDoc = await tx.manuscriptDoc.create({
       data: {
         projectId: source.projectId,
-        parentId: sourceNode.parentId,
-        type: sourceNode.type,
-        name: newTitle.replace(/^\//, ''),
-        path: normalizedNodePath,
-        depth: sourceNode.depth,
-        docId: newDoc.id,
-        fileId: null,
-        isRootDoc: sourceNode.isRootDoc,
-        sizeBytes: source.sizeBytes,
+        path: newTitle,
+        lines: hydratedSourceLines,
+        rev: 1,
+        version: 1,
+        ranges: source.ranges ?? {},
         hash: source.hash,
-        sortOrder: sourceNode.sortOrder + 1,
+        sizeBytes: source.sizeBytes,
       },
     });
 
+    if (sourceNode) {
+      await tx.manuscriptNode.create({
+        data: {
+          projectId: source.projectId,
+          parentId: sourceNode.parentId,
+          type: sourceNode.type,
+          name: newTitle.replace(/^\//, ''),
+          path: normalizedNodePath,
+          depth: sourceNode.depth,
+          docId: createdDoc.id,
+          fileId: null,
+          isRootDoc: false,
+          sizeBytes: source.sizeBytes,
+          hash: source.hash,
+          sortOrder: sourceNode.sortOrder + 1,
+        },
+      });
+    }
+
+    return createdDoc;
+  });
+
+  if (sourceNode) {
     eventEmitter?.emit('manuscripts.file-tree.change', {
       projectId: source.projectId,
       change: {

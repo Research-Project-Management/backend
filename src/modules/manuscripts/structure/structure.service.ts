@@ -26,6 +26,7 @@ import {
 import {
   WorkspaceFile,
   CompilationPayload,
+  LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   ManuscriptDomainEventBus,
 } from '@/modules/manuscripts/core';
@@ -47,6 +48,9 @@ export class StructureService {
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    private readonly injectedLiveCollab?: LiveCollaborationPort,
   ) {}
 
   private get repo(): IStructureRepository {
@@ -54,9 +58,14 @@ export class StructureService {
   }
 
   private getLiveCollab(): LiveCollaborationPort | null {
+    if (this.injectedLiveCollab) return this.injectedLiveCollab;
     if (!this.moduleRef) return null;
     try {
-      return this.moduleRef.get(LiveCollaborationPort, { strict: false });
+      return (
+        this.moduleRef.get(LIVE_COLLABORATION_PORT, { strict: false }) ??
+        this.moduleRef.get(LiveCollaborationPort, { strict: false }) ??
+        null
+      );
     } catch {
       return null;
     }

@@ -60,7 +60,7 @@ export class TexWordCounter implements IWordCounter {
     return result;
   }
 
-  public count(source: string): WordCountStats {
+  public count(source: string, filename = 'document.tex'): WordCountStats {
     let processed = source;
 
     // 1. Remove %TC:ignore ... %TC:endignore and \iffalse ... \fi blocks
@@ -144,7 +144,7 @@ export class TexWordCounter implements IWordCounter {
     const charactersNoSpaces = normalizedBody.replace(/\s/g, '').length;
 
     const rawOutput = [
-      `File: document.tex`,
+      `File: ${filename || 'document.tex'}`,
       `Encoding: utf8`,
       `Words in text: ${wordsInText}`,
       `Words in headers: ${wordsInHeaders}`,

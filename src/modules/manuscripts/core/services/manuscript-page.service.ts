@@ -539,13 +539,49 @@ export class ManuscriptPageService {
     }
 
     const cleanDocPath = cleanName.replace(/\\/g, '/').replace(/^\/+/g, '');
-    const cleanNodePath = `/${cleanDocPath}`;
+    const segments = cleanDocPath.split('/').filter(Boolean);
+    const leafName = segments[segments.length - 1] || cleanDocPath || 'untitled.tex';
+    const cleanNodePath = `/${segments.join('/') || leafName}`;
+    const nodeDepth = Math.max(0, segments.length - 1);
 
     let createdDocResult: Awaited<ReturnType<typeof this.docstoreService.createDoc>>;
     let createdNodeResult: { id: string };
 
     try {
       const txResult = await this.prisma.$transaction(async (tx) => {
+        let parentId: string | null = null;
+        if (segments.length > 1) {
+          let currentFolderPath = '';
+          for (let i = 0; i < segments.length - 1; i++) {
+            const folderSegment = segments[i];
+            currentFolderPath = `${currentFolderPath}/${folderSegment}`;
+            let folderNode = await tx.manuscriptNode.findUnique?.({
+              where: {
+                projectId_path: {
+                  projectId,
+                  path: currentFolderPath,
+                },
+              },
+            });
+            if (!folderNode) {
+              folderNode = await tx.manuscriptNode.create({
+                data: {
+                  projectId,
+                  parentId,
+                  type: 'FOLDER',
+                  name: folderSegment,
+                  path: currentFolderPath,
+                  depth: i,
+                  isRootDoc: false,
+                  sizeBytes: 0,
+                  sortOrder: 0,
+                },
+              });
+            }
+            parentId = folderNode?.id ?? parentId;
+          }
+        }
+
         const doc = await this.docstoreService.createDoc(projectId, {
           path: cleanDocPath,
           text: content,
@@ -556,8 +592,10 @@ export class ManuscriptPageService {
         const node = await tx.manuscriptNode.create({
           data: {
             projectId,
-            name: cleanName,
+            parentId,
+            name: leafName,
             path: cleanNodePath,
+            depth: nodeDepth,
             type: 'DOC',
             docId: doc._id,
             sizeBytes: Buffer.byteLength(content, 'utf8'),
@@ -585,9 +623,9 @@ export class ManuscriptPageService {
       file: {
         id: createdDoc._id,
         nodeId,
-        title: cleanName,
-        name: cleanName,
-        path: `/${cleanName}`,
+        title: leafName,
+        name: leafName,
+        path: cleanNodePath,
         type: 'file',
         pageId: parentDocId,
         content,

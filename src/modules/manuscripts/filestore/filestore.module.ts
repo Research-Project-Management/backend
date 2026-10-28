@@ -32,10 +32,20 @@ import {
     {
       provide: IBinaryStoragePort,
       useFactory: (configService: ConfigService) => {
-        const s3Key = configService.get<string>('AWS_ACCESS_KEY_ID');
-        const s3Endpoint = configService.get<string>('AWS_ENDPOINT');
-        const forceLocal =
-          configService.get<string>('MANUSCRIPTS_FILESTORE_DRIVER') === 'local';
+        const driver = configService
+          .get<string>('MANUSCRIPTS_FILESTORE_DRIVER')
+          ?.toLowerCase();
+        const storageDriver = configService
+          .get<string>('STORAGE_DRIVER')
+          ?.toLowerCase();
+        const s3Key =
+          configService.get<string>('AWS_ACCESS_KEY_ID') ||
+          configService.get<string>('R2_ACCESS_KEY');
+        const s3Endpoint =
+          configService.get<string>('AWS_ENDPOINT') ||
+          configService.get<string>('S3_ENDPOINT') ||
+          configService.get<string>('R2_API_URL');
+        const forceLocal = driver === 'local' || storageDriver === 'local';
 
         if (forceLocal || (!s3Key && !s3Endpoint)) {
           return new LocalDiskBinaryStorageAdapter();

@@ -70,11 +70,9 @@ export class ManuscriptHistoryMapper {
       ) {
         resolvedFileCount = Object.keys(
           record.files as Record<string, unknown>,
-        ).length;
-      } else if (record.sizeBytes !== undefined && record.sizeBytes > 0) {
-        resolvedFileCount = record.sizeBytes;
+        ).filter((k) => !k.startsWith('__')).length;
       } else {
-        resolvedFileCount = 1;
+        resolvedFileCount = record.sizeBytes ?? 0;
       }
     }
     return Snapshot.create({

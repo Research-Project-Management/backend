@@ -60,6 +60,9 @@ export class ManuscriptCleanupListener {
         ...(this.prisma.manuscriptDocReview
           ? [this.prisma.manuscriptDocReview.deleteMany({ where: { projectId } })]
           : []),
+        ...(this.prisma.manuscriptLinkedFile
+          ? [this.prisma.manuscriptLinkedFile.deleteMany({ where: { projectId } })]
+          : []),
         this.prisma.manuscriptNode.deleteMany({ where: { projectId } }),
         this.prisma.manuscriptFile.deleteMany({ where: { projectId } }),
         this.prisma.manuscriptSnapshot.deleteMany({ where: { projectId } }),

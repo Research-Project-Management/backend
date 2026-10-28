@@ -262,30 +262,28 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     if (cleanArxiv && this.clsiService) {
       const hasBbl = results.some((r) => r.path.endsWith('.bbl'));
       if (!hasBbl) {
-        results.push({
-          path: 'output.bbl',
-          getData: async () => {
-            const bblBuffer = await this.clsiService!.readAuxFileBuffer(
-              projectId,
-              'output.bbl',
-            );
-            return bblBuffer || Buffer.alloc(0);
-          },
-        });
+        const bblBuffer = await this.clsiService
+          .readAuxFileBuffer(projectId, 'output.bbl')
+          .catch(() => null);
+        if (bblBuffer && bblBuffer.length > 0) {
+          results.push({
+            path: 'output.bbl',
+            getData: async () => bblBuffer,
+          });
+        }
       }
     }
 
     if (includePdf && this.clsiService) {
-      results.push({
-        path: 'output.pdf',
-        getData: async () => {
-          const pdfBuffer = await this.clsiService!.readAuxFileBuffer(
-            projectId,
-            'output.pdf',
-          );
-          return pdfBuffer || Buffer.alloc(0);
-        },
-      });
+      const pdfBuffer = await this.clsiService
+        .readAuxFileBuffer(projectId, 'output.pdf')
+        .catch(() => null);
+      if (pdfBuffer && pdfBuffer.length > 0) {
+        results.push({
+          path: 'output.pdf',
+          getData: async () => pdfBuffer,
+        });
+      }
     }
 
     return results;

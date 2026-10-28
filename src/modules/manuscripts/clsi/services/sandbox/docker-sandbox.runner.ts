@@ -73,12 +73,21 @@ export class DockerSandboxRunner implements ISandboxRunner {
     });
 
     const envArgs: string[] = [];
+    const isTexSearchPathKey = (key: string) =>
+      key === 'TEXINPUTS' || key === 'BIBINPUTS' || key === 'BSTINPUTS';
+
     for (const [k, v] of Object.entries(filteredEnv)) {
       if (v !== undefined) {
-        const containerVal =
+        let containerVal =
           typeof v === 'string'
             ? v.split(options.cwd).join('/compile').replace(/\\/g, '/')
             : String(v);
+        if (isTexSearchPathKey(k)) {
+          // Linux container kpathsea requires ':' path separator and '//' recursive suffix
+          containerVal = containerVal
+            .replace(/\/{3,}/g, '//')
+            .replace(/;/g, ':');
+        }
         envArgs.push('-e', `${k}=${containerVal}`);
       }
     }
@@ -86,6 +95,7 @@ export class DockerSandboxRunner implements ISandboxRunner {
     const dockerArgs = [
       'run',
       '--rm',
+      '--init',
       `--name=${containerName}`,
       `--user=${profile.user}`,
       ...(profile.readOnlyRootfs ? ['--read-only'] : []),

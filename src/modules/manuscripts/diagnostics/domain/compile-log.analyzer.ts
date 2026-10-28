@@ -31,6 +31,9 @@ export interface ErrorExplainerLike {
   getAllRules(): ErrorExplanationVo[];
 }
 
+const LATEX_KB_BASE_URL =
+  process.env.LATEX_KB_BASE_URL || 'https://latexref.xyz/dev/latex2e.html';
+
 export class ErrorKnowledgeBase implements ErrorExplainerLike {
   private readonly rules: RuleDefinition[] = [
     {
@@ -46,8 +49,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Check the spelling of the command, or add \\usepackage{<package_name>} to your document preamble.',
       exampleSnippet: '\\usepackage{amsmath}\n\\usepackage{graphicx}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/Undefined_control_sequence',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Undefined_control_sequence`,
       patterns: [/undefined control sequence/i],
     },
     {
@@ -62,8 +64,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Wrap math expressions in $...$, or escape plain-text underscores with a backslash "\\_".',
       exampleSnippet: 'Value $x_1$ or file path my\\_file.tex',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/Missing_$_inserted',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Missing_$_inserted`,
       patterns: [/missing \$ inserted/i],
     },
     {
@@ -79,8 +80,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Verify that the file exists in your project file tree and that the path in your code matches the file name exactly.',
       exampleSnippet: '\\includegraphics[width=\\linewidth]{figures/plot.png}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/LaTeX_Error%3A_File_not_found',
+      documentationUrl: `${LATEX_KB_BASE_URL}#LaTeX_Error:_File_not_found`,
       patterns: [
         /file [`'](.+?)['] not found/i,
         /i can't find file [`'](.+?)[']/i,
@@ -98,8 +98,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Verify that each \\begin{...} has a matching \\end{...} with the exact same name and in proper nesting order.',
       exampleSnippet: '\\begin{equation}\n  E = mc^2\n\\end{equation}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/%5Cbegin%7B...%7D_ended_by_%5Cend%7B...%7D',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Environment_mismatch`,
       patterns: [
         /\\begin\{([^}]+)\} (?:on input line \d+ )?ended by \\end\{([^}]+)\}/i,
       ],
@@ -116,8 +115,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Add the package providing this environment in your preamble using \\usepackage{...}.',
       exampleSnippet: '\\usepackage{amsmath} % For \\begin{align}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/LaTeX_Error%3A_Environment_undefined',
+      documentationUrl: `${LATEX_KB_BASE_URL}#LaTeX_Error:_Environment_undefined`,
       patterns: [/environment (.+?) undefined/i],
     },
     {
@@ -133,8 +131,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
         'Reduce the number of "&" characters to match the table specification, or use "\\&" for plain-text ampersands.',
       exampleSnippet:
         'AT\\&T Company or \\begin{tabular}{cc} A & B \\\\ \\end{tabular}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/Extra_alignment_tab_has_been_changed_to_%5Ccr',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Extra_alignment_tab`,
       patterns: [
         /extra alignment tab has been changed to/i,
         /extra alignment tab/i,
@@ -152,8 +149,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Remove "\\\\" at the paragraph start. Use a blank line to separate paragraphs or \\vspace{1em} for vertical spacing.',
       exampleSnippet: '% Correct:\nFirst paragraph.\n\nSecond paragraph.',
-      documentationUrl:
-        "https://www.overleaf.com/learn/latex/Errors/There's_no_line_here_to_end",
+      documentationUrl: `${LATEX_KB_BASE_URL}#There's_no_line_here_to_end`,
       patterns: [/there's no line here to end/i],
     },
     {
@@ -169,8 +165,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
         'Move all \\usepackage commands above the \\begin{document} line.',
       exampleSnippet:
         '\\documentclass{article}\n\\usepackage{amsmath} % Before \\begin{document}\n\\begin{document}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/Can_be_used_only_in_preamble',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Can_be_used_only_in_preamble`,
       patterns: [/can be used only in preamble/i],
     },
     {
@@ -185,8 +180,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Choose a different command name, or use \\renewcommand{\\foo}{...} if you intentionally want to overwrite the existing definition.',
       exampleSnippet: '\\renewcommand{\\mycmd}{new definition}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/LaTeX_Error%3A_Command_..._already_defined',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Command_already_defined`,
       patterns: [/command (.+?) already defined/i],
     },
     {
@@ -201,8 +195,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Inspect the braces around the line reported and ensure every opening brace has a matching closing brace.',
       exampleSnippet: '\\textbf{bold text}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/Extra_%7D%2C_or_forgotten_%24',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Unbalanced_braces`,
       patterns: [
         /extra \}, or forgotten \$/i,
         /too many \}'s/i,
@@ -222,8 +215,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
         'Click "Clear cached files" and recompile the project from scratch.',
       exampleSnippet:
         'Clear cached .aux, .bbl, and .out files, then recompile.',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/File_ended_while_scanning_use_of',
+      documentationUrl: `${LATEX_KB_BASE_URL}#File_ended_while_scanning_use_of`,
       patterns: [/file ended while scanning use of/i, /runaway argument/i],
     },
     {
@@ -240,8 +232,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
         'Check the error messages immediately preceding the Emergency Stop line in the log to find the root cause.',
       exampleSnippet:
         'Check the error lines preceding the Emergency Stop message in the raw log.',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/Emergency_stop',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Emergency_stop`,
       patterns: [/! emergency stop/i, /emergency stop/i],
     },
     {
@@ -256,8 +247,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Add \\usepackage{microtype} to improve word justification, or use \\resizebox{\\textwidth}{!}{...} for wide tables and graphics.',
       exampleSnippet: '\\includegraphics[width=\\linewidth]{image.png}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/Overfull_%5Chbox',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Overfull_hbox`,
       patterns: [/overfull \\hbox/i],
     },
     {
@@ -272,8 +262,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Avoid forcing line breaks with "\\\\"; allow LaTeX to justify paragraphs naturally.',
       exampleSnippet: 'Write continuous text paragraphs without forced breaks.',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/Underfull_%5Chbox',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Underfull_hbox`,
       patterns: [/underfull \\hbox/i],
     },
     {
@@ -289,8 +278,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
         'Ensure the label keys match exactly and recompile to synchronize the .aux file.',
       exampleSnippet:
         '\\label{sec:intro}\n... As discussed in Section~\\ref{sec:intro}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/LaTeX_Warning%3A_Reference_..._undefined',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Undefined_reference`,
       patterns: [
         /reference [`'](.+?)['] on page \d+ undefined/i,
         /there were undefined references/i,
@@ -309,8 +297,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       suggestedFix:
         'Verify that the citation key exists in your .bib file and that the bibliography file is properly linked.',
       exampleSnippet: '\\cite{vaswani2017attention}',
-      documentationUrl:
-        'https://www.overleaf.com/learn/latex/Errors/LaTeX_Warning%3A_Citation_..._undefined',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Undefined_citation`,
       patterns: [
         /citation [`'](.+?)['] on page \d+ undefined/i,
         /there were undefined citations/i,
@@ -402,6 +389,8 @@ export class CompileLogAnalyzer implements ILogParser {
 
   /**
    * Implements `ILogParser.parse()` for CLSI compile pipeline diagnostics.
+   * Delegates to the unified TeX paren-tree state machine (`parseTexParenTreeLog`)
+   * so there is a single source of truth for LaTeX/Tectonic log parsing.
    */
   public parse(
     logText: string,
@@ -409,234 +398,35 @@ export class CompileLogAnalyzer implements ILogParser {
   ): CompilerDiagnostic[] {
     if (!logText || typeof logText !== 'string') return [];
 
-    const diagnostics: CompilerDiagnostic[] = [];
-    const lines = LogLineVo.unwrap(logText);
-    const parenStack: Array<{ isFile: boolean; file?: string }> = [
-      { isFile: true, file: defaultFile },
-    ];
-    const getActiveFile = (): string => {
-      for (let s = parenStack.length - 1; s >= 0; s--) {
-        if (parenStack[s]?.isFile && parenStack[s]?.file) {
-          return parenStack[s].file!;
-        }
+    const items = this.parseTexParenTreeLog(logText, defaultFile);
+    return items.map((item) => {
+      const context = item.context || item.message;
+      let message = item.message;
+      if (item.severity.isWarning()) {
+        message = message
+          .replace(/\s*on input line\s+\d+\.?$/i, '')
+          .replace(/\.$/, '')
+          .trim();
       }
-      return defaultFile;
-    };
-    const scanParensLeftToRight = (text: string) => {
-      let idx = 0;
-      while (idx < text.length) {
-        const ch = text[idx];
-        if (ch === '(') {
-          const rest = text.slice(idx + 1);
-          const m = rest.match(
-            /^(?:\.{0,2}\/)?([^\s()"]+\.(?:tex|sty|cls|bib|dtx|ins|aux|bbl))\b/i,
-          );
-          if (m && m[1]) {
-            const norm = m[1]
-              .replace(/\\/g, '/')
-              .replace(/^(\.\/)+/, '')
-              .replace(/^\/+/, '');
-            const isSystem =
-              norm.includes('texmf') ||
-              norm.includes('texlive') ||
-              /\.(?:sty|cls|def|cfg|ldf|fd)$/i.test(norm);
-            parenStack.push({
-              isFile: !isSystem,
-              file: !isSystem ? norm : undefined,
-            });
-            idx += 1 + m[0].length;
-            continue;
-          } else {
-            parenStack.push({ isFile: false });
-          }
-        } else if (ch === ')') {
-          if (parenStack.length > 1) {
-            parenStack.pop();
-          }
-        }
-        idx++;
-      }
-    };
+      const { code, suggestion } = this.generateSuggestion(message, context);
+      const severity: 'error' | 'warning' | 'info' = item.severity.isError()
+        ? 'error'
+        : item.severity.isWarning()
+          ? 'warning'
+          : 'info';
+      const resolvedCode = code || item.code;
+      const resolvedSuggestion = suggestion || item.explanation?.suggestedFix;
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (!line) continue;
-
-      const cleanedLine = CompileLogAnalyzer.cleanNonFileParens(line);
-
-      const isDiagnosticLine =
-        CompileLogAnalyzer.FILE_LINE_ERROR_REGEX.test(line) ||
-        CompileLogAnalyzer.TECTONIC_ERROR_REGEX.test(line) ||
-        line.startsWith('!') ||
-        CompileLogAnalyzer.LATEX_WARNING_REGEX.test(line) ||
-        CompileLogAnalyzer.BADBOX_REGEX.test(line);
-
-      if (!isDiagnosticLine) {
-        scanParensLeftToRight(cleanedLine);
-      }
-
-      const activeFile = getActiveFile();
-
-      const fleMatch = line.match(CompileLogAnalyzer.FILE_LINE_ERROR_REGEX);
-      if (fleMatch && fleMatch[1] && fleMatch[2] && fleMatch[3]) {
-        const errorFile = fleMatch[1]
-          .trim()
-          .replace(/\\/g, '/')
-          .replace(/^(\.\/)+/, '')
-          .replace(/^\/+/, '');
-        const errorLine = parseInt(fleMatch[2], 10);
-        const message = fleMatch[3].trim();
-        const context = lines
-          .slice(i, Math.min(i + 3, lines.length))
-          .join('\n');
-        const { code, suggestion } = this.generateSuggestion(message, context);
-
-        diagnostics.push({
-          file: errorFile,
-          line: errorLine,
-          message,
-          context,
-          severity: 'error',
-          code,
-          suggestion,
-        });
-      } else if (line.match(CompileLogAnalyzer.TECTONIC_ERROR_REGEX)) {
-        const tectonicMatch = line.match(
-          CompileLogAnalyzer.TECTONIC_ERROR_REGEX,
-        )!;
-        if (tectonicMatch[3]) {
-          const errorFile = tectonicMatch[1]?.trim() || activeFile;
-          const errorLine = parseInt(tectonicMatch[2], 10);
-          const message = tectonicMatch[3].trim();
-          const context = lines
-            .slice(i, Math.min(i + 3, lines.length))
-            .join('\n');
-          const { code, suggestion } = this.generateSuggestion(
-            message,
-            context,
-          );
-
-          diagnostics.push({
-            file: errorFile,
-            line: errorLine,
-            message,
-            context,
-            severity: 'error',
-            code,
-            suggestion,
-          });
-        }
-      } else if (line.startsWith('!')) {
-        const message = line.slice(1).trim();
-        let errorLine: number | null = null;
-        let context = '';
-
-        for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
-          const match = lines[j]?.match(/^l\.(\d+)/);
-          if (match && match[1]) {
-            errorLine = parseInt(match[1], 10);
-            context = lines.slice(i, j + 2).join('\n');
-            break;
-          }
-        }
-
-        const resolvedContext = context || lines.slice(i, i + 3).join('\n');
-        const { code, suggestion } = this.generateSuggestion(
-          message,
-          resolvedContext,
-        );
-
-        diagnostics.push({
-          file: activeFile,
-          line: errorLine,
-          message,
-          context: resolvedContext,
-          severity: 'error',
-          code,
-          suggestion,
-        });
-      } else if (line.match(CompileLogAnalyzer.LATEX_WARNING_REGEX)) {
-        const warningMatch = line.match(
-          CompileLogAnalyzer.LATEX_WARNING_REGEX,
-        )!;
-        if (warningMatch[1]) {
-          let warnMsg = warningMatch[1].trim();
-          let lineNum: number | null = null;
-          const inlineMatch = line.match(/on input line\s+(\d+)\./i);
-          if (inlineMatch && inlineMatch[1]) {
-            lineNum = parseInt(inlineMatch[1], 10);
-          }
-          let warnContext = line;
-
-          let j = i + 1;
-          while (
-            j < lines.length &&
-            lines[j] &&
-            lines[j].trim() !== '' &&
-            !lines[j].startsWith('!') &&
-            !lines[j].match(CompileLogAnalyzer.LATEX_WARNING_REGEX) &&
-            !lines[j].match(CompileLogAnalyzer.BADBOX_REGEX) &&
-            !lines[j].match(CompileLogAnalyzer.FILE_LINE_ERROR_REGEX) &&
-            !(lines[j].startsWith('(') && lines[j].includes('/'))
-          ) {
-            const nextL = lines[j].trim();
-            const extraMatch = nextL.match(/on input line\s+(\d+)\./i);
-            if (extraMatch && extraMatch[1]) {
-              lineNum = parseInt(extraMatch[1], 10);
-            }
-            warnMsg += ' ' + nextL;
-            warnContext += '\n' + lines[j];
-            j++;
-          }
-
-          warnMsg = warnMsg
-            .replace(/\s*on input line\s+\d+\.?$/i, '')
-            .replace(/\.$/, '')
-            .trim();
-
-          const fullWarnMessage = `LaTeX Warning: ${warnMsg}`;
-          const { code, suggestion } = this.generateSuggestion(
-            fullWarnMessage,
-            warnContext,
-          );
-
-          diagnostics.push({
-            file: activeFile,
-            line: lineNum,
-            message: fullWarnMessage,
-            context: warnContext,
-            severity: 'warning',
-            ...(code ? { code } : {}),
-            ...(suggestion ? { suggestion } : {}),
-          });
-        }
-      } else if (line.match(CompileLogAnalyzer.BADBOX_REGEX)) {
-        const badboxMatch = line.match(CompileLogAnalyzer.BADBOX_REGEX)!;
-        if (badboxMatch[1]) {
-          const lineNum = parseInt(badboxMatch[1], 10);
-          const trimmedMsg = line.trim();
-          const { code, suggestion } = this.generateSuggestion(
-            trimmedMsg,
-            line,
-          );
-          diagnostics.push({
-            file: activeFile,
-            line: lineNum,
-            message: trimmedMsg,
-            context: line,
-            severity: 'info',
-            ...(code ? { code } : {}),
-            ...(suggestion ? { suggestion } : {}),
-          });
-        }
-      }
-
-      if (isDiagnosticLine) {
-        scanParensLeftToRight(cleanedLine);
-      }
-    }
-
-    return diagnostics;
+      return {
+        file: item.file,
+        line: item.line,
+        message,
+        context,
+        severity,
+        ...(resolvedCode ? { code: resolvedCode } : {}),
+        ...(resolvedSuggestion ? { suggestion: resolvedSuggestion } : {}),
+      };
+    });
   }
 
   private generateSuggestion(
@@ -818,6 +608,7 @@ export class CompileLogAnalyzer implements ILogParser {
 
       const isDiagnosticLine =
         CompileLogAnalyzer.FILE_LINE_ERROR_REGEX.test(line) ||
+        CompileLogAnalyzer.TECTONIC_ERROR_REGEX.test(line) ||
         line.startsWith('!') ||
         CompileLogAnalyzer.LATEX_WARNING_REGEX.test(line) ||
         CompileLogAnalyzer.BADBOX_REGEX.test(line);
@@ -836,6 +627,34 @@ export class CompileLogAnalyzer implements ILogParser {
         );
         const errorLine = parseInt(fleMatch[2], 10);
         const rawMessage = fleMatch[3].trim();
+        const context = lines
+          .slice(i, Math.min(i + 3, lines.length))
+          .join('\n');
+        const explanation =
+          this.explainer?.explain(rawMessage, context) || undefined;
+
+        diagnostics.push(
+          new DiagnosticItem({
+            file: errorFile,
+            line: errorLine,
+            severity: DiagnosticSeverityVo.error(),
+            message: rawMessage,
+            context,
+            code: explanation?.code,
+            explanation,
+          }),
+        );
+        if (isDiagnosticLine) scanParensLeftToRight(cleanedLine);
+        continue;
+      }
+
+      const tectonicMatch = line.match(CompileLogAnalyzer.TECTONIC_ERROR_REGEX);
+      if (tectonicMatch && tectonicMatch[3]) {
+        const errorFile = tectonicMatch[1]?.trim() || currentFile;
+        const errorLine = tectonicMatch[2]
+          ? parseInt(tectonicMatch[2], 10)
+          : null;
+        const rawMessage = tectonicMatch[3].trim();
         const context = lines
           .slice(i, Math.min(i + 3, lines.length))
           .join('\n');

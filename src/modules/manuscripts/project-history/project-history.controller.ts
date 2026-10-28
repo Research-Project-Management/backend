@@ -81,7 +81,7 @@ export class ProjectHistoryController {
       const events = versions.map((v) => ({
         id: v.id,
         version: v.version,
-        label: v.labels?.[0] || v.summary || `Version ${v.version}`,
+        label: v.labels?.[0]?.label || v.summary || `Version ${v.version}`,
         createdAt: v.createdAt,
         userId: v.createdById || 'anonymous',
         summary: v.summary,

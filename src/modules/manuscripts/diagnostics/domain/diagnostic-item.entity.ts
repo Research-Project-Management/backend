@@ -3,6 +3,8 @@
  * Domain Entity modeling an individual compiler diagnostic, warning, or static lint issue.
  */
 
+import { randomUUID } from 'crypto';
+
 export type DiagnosticSeverityType = 'error' | 'warning' | 'info' | 'badbox';
 
 export class DiagnosticSeverityVo {
@@ -128,7 +130,7 @@ export class DiagnosticItem {
   public readonly quickFix?: QuickFixVo;
 
   constructor(props: DiagnosticItemProps) {
-    this.id = props.id || `diag-${Math.random().toString(36).substring(2, 10)}`;
+    this.id = props.id || `diag-${randomUUID()}`;
     this.file = props.file || 'main.tex';
     this.line =
       typeof props.line === 'number' && !isNaN(props.line) ? props.line : null;

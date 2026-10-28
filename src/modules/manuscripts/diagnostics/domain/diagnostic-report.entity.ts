@@ -3,6 +3,7 @@
  * Aggregate Root modeling a complete compilation or linting diagnostic report.
  */
 
+import { randomUUID } from 'crypto';
 import { DiagnosticItem } from './diagnostic-item.entity';
 
 export interface DiagnosticReportProps {
@@ -22,8 +23,7 @@ export class DiagnosticReport {
   public readonly rawLog?: string;
 
   constructor(props: DiagnosticReportProps) {
-    this.id =
-      props.id || `report-${Math.random().toString(36).substring(2, 10)}`;
+    this.id = props.id || `report-${randomUUID()}`;
     this.items = Object.freeze([...props.items]);
     this.rawLog = props.rawLog;
 

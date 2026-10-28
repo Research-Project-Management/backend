@@ -210,11 +210,11 @@ export class LocalDiskBinaryStorageAdapter extends IBinaryStoragePort {
   }
 
   public async getSignedDownloadUrl(
-    bucket: string,
-    key: string,
+    _bucket: string,
+    _key: string,
     _expiresInSeconds: number,
   ): Promise<string | null> {
-    return `/api/manuscripts/filestore/download/${bucket}/${key}`;
+    return null;
   }
 
   public async checkObjectExists(
@@ -251,22 +251,34 @@ export class S3BinaryStorageAdapter extends IBinaryStoragePort {
   constructor(private readonly configService: ConfigService) {
     super();
 
-    const region = this.configService.get<string>('AWS_REGION', 'us-east-1');
-    const endpoint = this.configService.get<string>('AWS_ENDPOINT');
-    const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID', '');
-    const secretAccessKey = this.configService.get<string>(
-      'AWS_SECRET_ACCESS_KEY',
-      '',
-    );
-    const forcePathStyle = this.configService.get<boolean>(
-      'AWS_S3_FORCE_PATH_STYLE',
-      true,
-    );
+    const region =
+      this.configService.get<string>('AWS_REGION') ||
+      this.configService.get<string>('S3_REGION') ||
+      'us-east-1';
+    const endpoint =
+      this.configService.get<string>('AWS_ENDPOINT') ||
+      this.configService.get<string>('S3_ENDPOINT') ||
+      this.configService.get<string>('R2_API_URL');
+    const accessKeyId =
+      this.configService.get<string>('AWS_ACCESS_KEY_ID') ||
+      this.configService.get<string>('R2_ACCESS_KEY') ||
+      '';
+    const secretAccessKey =
+      this.configService.get<string>('AWS_SECRET_ACCESS_KEY') ||
+      this.configService.get<string>('R2_SECRET_KEY') ||
+      '';
+    const rawForcePathStyle =
+      this.configService.get<string | boolean>('AWS_S3_FORCE_PATH_STYLE') ??
+      this.configService.get<string | boolean>('S3_FORCE_PATH_STYLE') ??
+      true;
+    const forcePathStyle =
+      rawForcePathStyle === true || rawForcePathStyle === 'true';
 
-    this.defaultBucket = this.configService.get<string>(
-      'AWS_S3_BUCKET',
-      'manuscript-files',
-    );
+    this.defaultBucket =
+      this.configService.get<string>('AWS_S3_BUCKET') ||
+      this.configService.get<string>('S3_BUCKET') ||
+      this.configService.get<string>('R2_BUCKET_NAME') ||
+      'manuscript-files';
 
     this.s3Client = new S3Client({
       region,
@@ -280,6 +292,27 @@ export class S3BinaryStorageAdapter extends IBinaryStoragePort {
             }
           : undefined,
     });
+  }
+
+  private resolveTargetLocation(
+    bucket: string,
+    key: string,
+  ): { Bucket: string; Key: string } {
+    if (!bucket || bucket === 'manuscript-files') {
+      return { Bucket: this.defaultBucket, Key: key };
+    }
+    if (
+      bucket === 'flux-docstore-archive' &&
+      this.defaultBucket !== 'flux-docstore-archive'
+    ) {
+      return {
+        Bucket: this.defaultBucket,
+        Key: key.startsWith('docstore-archive/')
+          ? key
+          : `docstore-archive/${key}`,
+      };
+    }
+    return { Bucket: bucket, Key: key };
   }
 
   public async sendStream(
@@ -310,9 +343,10 @@ export class S3BinaryStorageAdapter extends IBinaryStoragePort {
       contentLength = body.length;
     }
 
+    const target = this.resolveTargetLocation(bucket, key);
     const command = new PutObjectCommand({
-      Bucket: bucket || this.defaultBucket,
-      Key: key,
+      Bucket: target.Bucket,
+      Key: target.Key,
       Body: body,
       ContentLength: contentLength,
       ContentType: options?.contentType || 'application/octet-stream',
@@ -332,9 +366,10 @@ export class S3BinaryStorageAdapter extends IBinaryStoragePort {
       rangeHeader = `bytes=${range.start}-${range.end}`;
     }
 
+    const target = this.resolveTargetLocation(bucket, key);
     const command = new GetObjectCommand({
-      Bucket: bucket || this.defaultBucket,
-      Key: key,
+      Bucket: target.Bucket,
+      Key: target.Key,
       Range: rangeHeader,
     });
 
@@ -352,9 +387,10 @@ export class S3BinaryStorageAdapter extends IBinaryStoragePort {
     bucket: string,
     key: string,
   ): Promise<StorageObjectMetadata> {
+    const target = this.resolveTargetLocation(bucket, key);
     const command = new HeadObjectCommand({
-      Bucket: bucket || this.defaultBucket,
-      Key: key,
+      Bucket: target.Bucket,
+      Key: target.Key,
     });
 
     const response = await this.s3Client.send(command);
@@ -371,9 +407,10 @@ export class S3BinaryStorageAdapter extends IBinaryStoragePort {
     key: string,
     expiresInSeconds: number,
   ): Promise<string | null> {
+    const target = this.resolveTargetLocation(bucket, key);
     const command = new GetObjectCommand({
-      Bucket: bucket || this.defaultBucket,
-      Key: key,
+      Bucket: target.Bucket,
+      Key: target.Key,
     });
 
     try {
@@ -410,9 +447,10 @@ export class S3BinaryStorageAdapter extends IBinaryStoragePort {
   }
 
   public async deleteObject(bucket: string, key: string): Promise<void> {
+    const target = this.resolveTargetLocation(bucket, key);
     const command = new DeleteObjectCommand({
-      Bucket: bucket || this.defaultBucket,
-      Key: key,
+      Bucket: target.Bucket,
+      Key: target.Key,
     });
     await this.s3Client.send(command);
   }

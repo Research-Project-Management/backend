@@ -4,6 +4,7 @@
  */
 
 import { Readable } from 'stream';
+import { Prisma } from '@prisma/client';
 import { TextDoc } from './text-doc.entity';
 import { DocRanges } from './doc-range.vo';
 
@@ -14,7 +15,7 @@ export interface CreateDocData {
   version?: number;
   ranges?: DocRanges;
   hash?: string;
-  tx?: unknown;
+  tx?: Prisma.TransactionClient;
 }
 
 export interface UpdateDocData {

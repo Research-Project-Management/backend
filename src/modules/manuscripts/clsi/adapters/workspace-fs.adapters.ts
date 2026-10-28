@@ -8,6 +8,7 @@
  */
 
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
 import {
@@ -147,7 +148,10 @@ export class DiskUsageCleaner {
   private static readonly DEFAULT_MAX_BYTES = 5 * 1024 * 1024 * 1024;
   private static readonly DEFAULT_TARGET_BYTES = 3 * 1024 * 1024 * 1024;
 
-  constructor(private readonly baseScratchDir: string = '/tmp/clsi-scratch') {}
+  constructor(
+    private readonly baseScratchDir: string = process.env.CLSI_SCRATCH_DIR ||
+      path.join(os.tmpdir(), 'clsi-scratch'),
+  ) {}
 
   public async cleanStaleProjects(
     options?: DiskUsageOptions,

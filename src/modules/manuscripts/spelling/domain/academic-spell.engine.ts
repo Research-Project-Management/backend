@@ -384,9 +384,6 @@ export class AcademicSpellEngine {
     Map<number, string[]>
   >();
   private readonly tokenizer: LatexProseTokenizer;
-  private dpRow0 = new Int32Array(128);
-  private dpRow1 = new Int32Array(128);
-  private dpRow2 = new Int32Array(128);
 
   constructor(tokenizer?: LatexProseTokenizer) {
     this.englishDictionary = new Set<string>();
@@ -858,16 +855,9 @@ export class AcademicSpellEngine {
     if (tLen === 0) return sLen;
 
     const requiredSize = tLen + 1;
-    if (this.dpRow0.length < requiredSize) {
-      const nextSize = Math.max(requiredSize, this.dpRow0.length * 2);
-      this.dpRow0 = new Int32Array(nextSize);
-      this.dpRow1 = new Int32Array(nextSize);
-      this.dpRow2 = new Int32Array(nextSize);
-    }
-
-    let prevPrev = this.dpRow0;
-    let prev = this.dpRow1;
-    let curr = this.dpRow2;
+    let prevPrev = new Int32Array(requiredSize);
+    let prev = new Int32Array(requiredSize);
+    let curr = new Int32Array(requiredSize);
 
     for (let j = 0; j <= tLen; j++) {
       prev[j] = j;

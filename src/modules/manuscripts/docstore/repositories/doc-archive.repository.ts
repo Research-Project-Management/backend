@@ -234,12 +234,18 @@ export class StoragePortDocArchiveAdapter implements IDocPersistor {
     this.bucket =
       this.configService?.get<string>('S3_BUCKET_NAME') ||
       this.configService?.get<string>('DOCSTORE_ARCHIVE_BUCKET') ||
+      this.configService?.get<string>('AWS_S3_BUCKET') ||
+      this.configService?.get<string>('S3_BUCKET') ||
+      this.configService?.get<string>('R2_BUCKET_NAME') ||
       'flux-docstore-archive';
     this.diskFallback = new DocArchiveRepository(this.configService);
   }
 
   public isDurableStorageConfigured(): boolean {
-    if (this.binaryStorage) {
+    if (
+      this.binaryStorage &&
+      this.binaryStorage.constructor?.name !== 'LocalDiskBinaryStorageAdapter'
+    ) {
       return true;
     }
     return this.diskFallback.isDurableStorageConfigured();
@@ -286,6 +292,11 @@ export class StoragePortDocArchiveAdapter implements IDocPersistor {
         return;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+        if (this.isDurableStorageConfigured() && !this.diskFallback.isDurableStorageConfigured()) {
+          throw new Error(
+            `Durable cold-tier archive write failed for "${key}": ${msg}`,
+          );
+        }
         this.logger.warn(
           `IBinaryStoragePort upload failed for "${key}", falling back to disk archive: ${msg}`,
         );

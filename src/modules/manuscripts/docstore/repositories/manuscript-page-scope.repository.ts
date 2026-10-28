@@ -18,6 +18,24 @@ export class ManuscriptPageScopeRepository {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  public getPrisma(): PrismaService {
+    return this.prisma;
+  }
+
+  /**
+   * Deletes a comment reply conditioned strictly on threadId.
+   */
+  async deleteReplyInThread(
+    threadId: string,
+    replyId: string,
+  ): Promise<boolean> {
+    if (!isUUID(threadId) || !isUUID(replyId)) return false;
+    const result = await this.prisma.manuscriptCommentReply.deleteMany({
+      where: { id: replyId, threadId },
+    });
+    return result.count > 0;
+  }
+
   /**
    * Resolves a document within a project either by its UUID or by relative file path.
    * Scoped strictly by projectId to eliminate cross-tenant IDOR / path traversal.

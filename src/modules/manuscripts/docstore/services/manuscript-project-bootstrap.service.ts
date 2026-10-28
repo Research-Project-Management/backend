@@ -322,29 +322,52 @@ export class ManuscriptProjectBootstrapService {
       // Non-fatal
     }
 
+    // Determine whether a root document already exists for this project
+    const existingNodes =
+      (await this.prisma.manuscriptNode?.findMany?.({
+        where: { projectId, type: 'DOC' },
+        select: { path: true, isRootDoc: true },
+      })) ?? [];
+    const hasExistingRoot = existingNodes.some((n) => n.isRootDoc);
+    const existingPaths = new Set(
+      existingNodes.map((n) => (n.path || '').toLowerCase()),
+    );
+
+    let targetName = 'main.tex';
+    if (existingPaths.has('/main.tex')) {
+      const cleanBase =
+        pageTitle
+          .trim()
+          .replace(/[^a-zA-Z0-9._-]/g, '_')
+          .replace(/\.tex$/i, '') || 'document';
+      let candidate = `${cleanBase}.tex`;
+      let counter = 1;
+      while (existingPaths.has(`/${candidate.toLowerCase()}`)) {
+        candidate = `${cleanBase}_${counter++}.tex`;
+      }
+      targetName = candidate;
+    }
+    const targetPath = `/${targetName}`;
+    const isRootDoc = !hasExistingRoot;
+
     const doc = await this.docstoreService.createDoc(projectId, {
-      path: '/main.tex',
+      path: targetPath,
       text: content,
       version: 1,
       ranges: { title: pageTitle, labelIds, labels: attachedLabels },
     });
 
-    // Ensure a corresponding manuscriptNode exists in the file tree
-    try {
-      await this.prisma.manuscriptNode.create({
-        data: {
-          projectId,
-          name: 'main.tex',
-          path: '/main.tex',
-          type: 'DOC',
-          docId: doc._id,
-          isRootDoc: true,
-          sizeBytes: Buffer.byteLength(content, 'utf8'),
-        },
-      });
-    } catch {
-      // ignore duplicate path conflicts
-    }
+    await this.prisma.manuscriptNode.create({
+      data: {
+        projectId,
+        name: targetName,
+        path: targetPath,
+        type: 'DOC',
+        docId: doc._id,
+        isRootDoc,
+        sizeBytes: Buffer.byteLength(content, 'utf8'),
+      },
+    });
 
     return {
       page: {
@@ -354,13 +377,13 @@ export class ManuscriptProjectBootstrapService {
         status: body?.status || 'draft',
         projectId,
         labels: attachedLabels,
-        mainFile: { id: doc._id, title: 'main.tex' },
+        mainFile: { id: doc._id, title: targetName },
         mainFileId: doc._id,
         rootPageId: doc._id,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
-      mainFile: { id: doc._id, title: 'main.tex' },
+      mainFile: { id: doc._id, title: targetName },
       rootPageId: doc._id,
       mainFileId: doc._id,
     };
