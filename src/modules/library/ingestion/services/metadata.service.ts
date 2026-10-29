@@ -186,8 +186,12 @@ export class MetadataService implements MetadataPort {
       }
     }
 
-    // 5. Routing tiers
-    const tiers = MetadataRoutingPolicy.getTiers(classified.type);
+    // 5. Routing tiers (Zotero-style: single-hit authoritative unless citations/graph explicitly requested)
+    const tiers = MetadataRoutingPolicy.getTiers(classified.type, {
+      includeCitations: wantsCitations,
+      includeReferences: wantsReferences,
+      aggressive: Boolean(request.aggressive),
+    });
     const candidateResults: ProviderResult[] = [];
     const allExecutions: ProviderExecutionResult[] = [];
 

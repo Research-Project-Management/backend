@@ -20,6 +20,7 @@ import {
   harmonizeZoteroFields,
   generateCitationKey,
   isPlaceholderItemTitle,
+  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
 } from '@/modules/library/core';
 import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/deduplication.domain';
 import {
@@ -62,6 +63,7 @@ function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
 
 const EXCLUDED_RAW_METADATA_KEYS = new Set([
   ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
+  ...CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
   'title',
   'abstract',
   'abstractNote',
@@ -316,7 +318,13 @@ export function toItemData(
     citationCount: metadata.citationCount ?? null,
     referenceCount: metadata.referenceCount ?? null,
     extra: metadata.extra ?? (syncedExtraFields.extra as string | undefined),
-    extraFields: syncedExtraFields,
+    extraFields: (() => {
+      const cleaned = { ...syncedExtraFields };
+      for (const colKey of CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS) {
+        delete cleaned[colKey];
+      }
+      return cleaned;
+    })(),
     notes: consolidatedNotes,
     collectionId: options?.collectionIds?.[0] || null,
     collectionIds: options?.collectionIds,

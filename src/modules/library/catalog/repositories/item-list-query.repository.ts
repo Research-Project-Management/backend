@@ -124,7 +124,7 @@ export class ItemListQueryRepository {
   ): Promise<ItemDetail[]> {
     if (!isUuid(userId)) return [];
     const view = options.view ?? 'all';
-    const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 1000);
 
     const effectiveUserId = options.userId || userId;
     const requestedFields = options.fields

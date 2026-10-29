@@ -342,7 +342,7 @@ export class ItemQueryService {
       onlyFlagged?: boolean;
     },
   ): Promise<CursorPaginatedResult<ItemDetail | Record<string, unknown>>> {
-    const limit = Math.min(options.limit ?? 50, 100);
+    const limit = Math.min(options.limit ?? 50, 1000);
     const validProjectId = normalizeProjectScopeId(options.projectId);
     const scopeKey = validProjectId ? `proj:${validProjectId}` : userId;
     const canCache = !options.search && !options.cursor;

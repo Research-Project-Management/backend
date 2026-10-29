@@ -181,7 +181,7 @@ describe('Horizontal Frond 2 — Deduplication, Curation Merge & Undo-Merge Saga
           isFilenameTitle: true,
           fieldProvenance: {
             title: {
-              source: 'GROBID',
+              source: 'LocalPDFExtraction',
               confidenceScore: 0.4,
               lockedByUser: false,
               isFilenameTitle: true,

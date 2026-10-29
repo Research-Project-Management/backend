@@ -149,9 +149,15 @@ export class EnrichStage implements IWorkflowStage<
           (candidate.confidenceScore ?? 0) >= 0.9) ||
           isCompleteStructuredRecord);
 
-      if (isAlreadyComplete) {
+      const isClientResolved =
+        extra.resolutionSource === 'client' ||
+        candidate.sourceName === 'ClientResolved' ||
+        (candidate.rawMetadata as Record<string, unknown> | undefined)?.resolutionSource === 'client' ||
+        (meta as Record<string, unknown>).resolutionSource === 'client';
+
+      if (isAlreadyComplete || isClientResolved) {
         this.logger.debug(
-          `[EnrichStage] Candidate ${candidate.candidateId} (source=${candidate.sourceName}, score=${candidate.confidenceScore}) has complete verified metadata. Skipping external API enrichment.`,
+          `[EnrichStage] Candidate ${candidate.candidateId} (source=${candidate.sourceName}, score=${candidate.confidenceScore}) has complete/client-resolved verified metadata. Skipping external API enrichment.`,
         );
         continue;
       }

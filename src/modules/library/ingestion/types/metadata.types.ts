@@ -172,6 +172,9 @@ export interface MetadataRequest {
   signal?: AbortSignal;
   authorHint?: string;
   yearHint?: number | string;
+  includeCitations?: boolean;
+  includeReferences?: boolean;
+  aggressive?: boolean;
 }
 
 // Canonical Metadata Service Interface

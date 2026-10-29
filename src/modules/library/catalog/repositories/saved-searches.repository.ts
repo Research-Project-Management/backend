@@ -231,7 +231,7 @@ export class SavedSearchesRepository {
     options: ExecuteSavedSearchOptions & { userId?: string } = {},
     userIdParam?: string,
   ) {
-    const limit = Math.min(options.limit ?? 50, 100);
+    const limit = Math.min(options.limit ?? 50, 1000);
     const effectiveUserId =
       userIdParam || options.userId || this.extractUserIdFromWhere(where);
 

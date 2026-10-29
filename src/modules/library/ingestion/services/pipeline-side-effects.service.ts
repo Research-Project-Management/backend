@@ -296,6 +296,29 @@ export class PipelineSideEffectsService {
             this.logger.log(
               `[AUTO_OA_PDF] Downloaded & attached Open Access PDF (${scraped.fileId}) from ${candidateOaUrl} to item ${itemId}`,
             );
+
+            // In-house Semantic Extraction: If PDF has extracted keywords, automatically synchronize them into item tags
+            if (
+              Array.isArray(scraped.keywords) &&
+              scraped.keywords.length > 0 &&
+              this.catalogGateway?.updateItem
+            ) {
+              try {
+                await this.catalogGateway.updateItem(
+                  userId,
+                  itemId,
+                  { keywords: scraped.keywords },
+                  { projectId },
+                );
+                this.logger.log(
+                  `[IN_HOUSE_EXTRACTION] Auto-synced ${scraped.keywords.length} keywords from PDF into item tags for ${itemId}`,
+                );
+              } catch (kwSyncErr: unknown) {
+                this.logger.debug(
+                  `[IN_HOUSE_EXTRACTION] Non-fatal keyword sync failed for ${itemId}: ${kwSyncErr instanceof Error ? kwSyncErr.message : String(kwSyncErr)}`,
+                );
+              }
+            }
           }
         } catch (oaErr: unknown) {
           this.logger.debug(

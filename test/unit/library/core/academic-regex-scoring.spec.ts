@@ -122,4 +122,43 @@ describe('AcademicRegexCatalog - Page-1 Citation Disambiguation & DOI Scoring', 
       expect(result.doi).toBe('10.48550/arXiv.2303.08774v2');
     });
   });
+
+  describe('KEYWORDS_PATTERN extraction', () => {
+    it('extracts keywords when formatted as standalone uppercase heading followed by keywords on next line (Wiley style)', () => {
+      const text = `
+        Abstract
+        This paper investigates digital project management in medical physics.
+
+        KEYWORDS
+        collaboration, digital project management, research productivity, trainee development, workflow efficiency
+
+        1 INTRODUCTION
+        Academic research groups frequently encounter challenges...
+      `;
+
+      const result = AcademicRegexCatalog.scan(text);
+      expect(result.keywords).toEqual([
+        'collaboration',
+        'digital project management',
+        'research productivity',
+        'trainee development',
+        'workflow efficiency',
+      ]);
+    });
+
+    it('extracts keywords with standard colon delimiter', () => {
+      const text = `
+        Abstract: Deep learning approaches.
+        Keywords: neural networks, deep learning, artificial intelligence
+        1. Introduction
+      `;
+
+      const result = AcademicRegexCatalog.scan(text);
+      expect(result.keywords).toEqual([
+        'neural networks',
+        'deep learning',
+        'artificial intelligence',
+      ]);
+    });
+  });
 });

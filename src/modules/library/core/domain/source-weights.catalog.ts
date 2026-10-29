@@ -35,8 +35,6 @@ export const SOURCE_WEIGHTS: Record<string, number> = {
   CSL_JSON: 0.78,
   AIMetadata: 0.7,
   aimetadata: 0.7,
-  Grobid: 0.68,
-  grobid: 0.68,
   BibTeX: 0.65,
   bibtex: 0.65,
   RIS: 0.65,

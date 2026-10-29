@@ -939,7 +939,7 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
               confidence: 0.98,
             },
             abstract: {
-              sourceProvider: 'Grobid',
+              sourceProvider: 'BibTeX',
               confidence: 0.65,
             },
             year: {
@@ -959,12 +959,12 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
         1.0,
       );
 
-      // Crossref title has high authority (~0.95) -> cannot be overwritten by Grobid (0.68)
+      // Crossref title has high authority (~0.95) -> cannot be overwritten by BibTeX (0.65)
       expect(
-        ItemProvenancePolicy.canOverwriteField(sampleItem, 'title', 'Grobid'),
+        ItemProvenancePolicy.canOverwriteField(sampleItem, 'title', 'BibTeX'),
       ).toBe(false);
 
-      // Grobid abstract has low authority (~0.507) -> can be overwritten by PubMed (0.98 * 0.95)
+      // BibTeX abstract has low authority (~0.5395) -> can be overwritten by PubMed (0.98 * 0.95)
       expect(
         ItemProvenancePolicy.canOverwriteField(sampleItem, 'abstract', 'PubMed', {
           incomingConfidence: 0.95,

@@ -21,6 +21,7 @@ import {
   parseCreatorString,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import { AbstractAcademicProvider } from './abstract-academic.provider';
 
 @Injectable()
@@ -537,9 +538,34 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
     const itemIdStr =
       typeof item.id === 'string' ? item.id : title || identifier;
 
-    // OpenAlex keywords/concepts/primary_topic are machine-generated topical guesses,
-    // NOT author-provided or publisher-curated taxonomy tags (unlike Zotero's Crossref/arXiv/PubMed tags).
-    const keywords: string[] = [];
+    const rawKeywords: string[] = [];
+
+    if (Array.isArray(item.keywords) && item.keywords.length > 0) {
+      for (const rawK of item.keywords.slice(0, 8)) {
+        const k = rawK as
+          | string
+          | { keyword?: string; display_name?: string; score?: number }
+          | null
+          | undefined;
+        const text =
+          typeof k === 'string' ? k : k?.keyword || k?.display_name || '';
+        const score =
+          typeof k === 'object' && typeof k?.score === 'number' ? k.score : 1.0;
+        if (text && score >= 0.5) {
+          rawKeywords.push(text);
+        }
+      }
+    } else {
+      const primaryTopic =
+        item.primary_topic && typeof item.primary_topic === 'object'
+          ? (item.primary_topic as { display_name?: unknown })
+          : undefined;
+      if (primaryTopic && typeof primaryTopic.display_name === 'string') {
+        rawKeywords.push(primaryTopic.display_name);
+      }
+    }
+
+    const keywords = normalizeAcademicTags(rawKeywords);
 
     const creators = authors.map((name, idx) =>
       parseCreatorString(name, idx, 'author'),

@@ -184,6 +184,24 @@ export class IdentifyFileResolver {
     let extractedMetadata: ExtractedPdfMetadata = {};
     let fileBuffer: Buffer | undefined;
 
+    const rawPayloadAny = payload as Record<string, unknown>;
+    const rawOverrides = (rawPayloadAny.overrides || {}) as Record<string, unknown>;
+    const clientPreResolved = (rawPayloadAny.preResolvedMetadata || rawOverrides.preResolvedMetadata) as Record<string, unknown> | undefined;
+    const isClientResolved = rawPayloadAny.resolutionSource === 'client' || rawOverrides.resolutionSource === 'client' || Boolean(clientPreResolved);
+
+    if (clientPreResolved && typeof clientPreResolved === 'object') {
+      extractedMetadata = {
+        ...extractedMetadata,
+        ...clientPreResolved,
+        isSelfSufficient: true,
+        qualityScore: 0.95,
+        extraFields: {
+          ...((clientPreResolved.extraFields as Record<string, unknown>) || {}),
+          resolutionSource: 'client',
+        },
+      };
+    }
+
     const filenameWithoutPdf = payload.filename
       ? payload.filename.replace(/\.pdf$/i, '')
       : undefined;
@@ -421,17 +439,23 @@ export class IdentifyFileResolver {
     };
 
     const isSelfSufficient = extractedMetadata.isSelfSufficient === true;
-    const candidateSourceName = isSelfSufficient ? 'TrustedPaper' : 'StagedPdf';
+    const candidateSourceName = isClientResolved
+      ? 'ClientResolved'
+      : isSelfSufficient
+        ? 'TrustedPaper'
+        : 'StagedPdf';
 
-    const candidateConfidence = isSelfSufficient
-      ? extractedMetadata.qualityScore || 0.85
-      : extractedMetadata.doi || filenameDoi
-        ? 0.9
-        : extractedMetadata.arxivId || filenameArxivId
-          ? 0.88
-          : extractedMetadata.isbn
-            ? 0.85
-            : inferredConfidence;
+    const candidateConfidence = isClientResolved
+      ? 0.95
+      : isSelfSufficient
+        ? extractedMetadata.qualityScore || 0.85
+        : extractedMetadata.doi || filenameDoi
+          ? 0.9
+          : extractedMetadata.arxivId || filenameArxivId
+            ? 0.88
+            : extractedMetadata.isbn
+              ? 0.85
+              : inferredConfidence;
 
     const fieldOverrides = isFilenameTitle
       ? {

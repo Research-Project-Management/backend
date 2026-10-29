@@ -13,7 +13,13 @@ export class SsrfBlockedDomainException extends BaseDomainException {
   }
 }
 
-export const METADATA_POLICY_VERSION = 2;
+export const METADATA_POLICY_VERSION = 3;
+
+export interface RoutingOptions {
+  includeCitations?: boolean;
+  includeReferences?: boolean;
+  aggressive?: boolean;
+}
 
 export interface RoutingTiers {
   authoritative: ProviderName[];
@@ -22,52 +28,67 @@ export interface RoutingTiers {
 }
 
 export class MetadataRoutingPolicy {
-  static readonly PARALLEL_LIMIT = 3;
+  static readonly PARALLEL_LIMIT = 2;
   private static readonly ssrfGuard = new SsrfGuardService();
 
-  static getTiers(queryType: QueryType): RoutingTiers {
+  /**
+   * Zotero-inspired metadata routing policy:
+   * 1. Single authoritative registry per identifier type (CrossRef, arXiv, PubMed, OpenLibrary).
+   * 2. NO parallel enrichment calls during standard ingestion to prevent 429 rate limits (e.g. Semantic Scholar)
+   *    and latency bloat.
+   * 3. Enrichment (OpenAlex, SemanticScholar) only executes on-demand when graph exploration or citations
+   *    are explicitly requested.
+   * 4. Fallback is evaluated sequentially only when authoritative resolution returns nothing or fails.
+   */
+  static getTiers(queryType: QueryType, options?: RoutingOptions): RoutingTiers {
+    const wantsGraph = Boolean(
+      options?.includeCitations ||
+      options?.includeReferences ||
+      options?.aggressive,
+    );
+
     switch (queryType) {
       case 'DOI':
         return {
           authoritative: ['CrossRef'],
-          enrichment: ['Unpaywall', 'OpenAlex', 'SemanticScholar'],
-          fallback: ['OpenAlex', 'SemanticScholar', 'DBLP'],
+          enrichment: wantsGraph ? ['OpenAlex', 'SemanticScholar'] : [],
+          fallback: ['OpenAlex', 'DBLP'],
         };
 
       case 'ARXIV':
         return {
           authoritative: ['arXiv'],
-          enrichment: ['OpenAlex', 'SemanticScholar'],
-          fallback: ['CrossRef', 'OpenAlex', 'SemanticScholar'],
+          enrichment: wantsGraph ? ['OpenAlex', 'SemanticScholar'] : [],
+          fallback: ['CrossRef', 'OpenAlex'],
         };
 
       case 'PMID':
         return {
           authoritative: ['PubMed'],
-          enrichment: ['OpenAlex', 'SemanticScholar'],
-          fallback: ['OpenAlex', 'SemanticScholar'],
+          enrichment: wantsGraph ? ['OpenAlex', 'SemanticScholar'] : [],
+          fallback: ['OpenAlex'],
         };
 
       case 'ISBN':
         return {
           authoritative: ['OpenLibrary'],
-          enrichment: ['OpenAlex'],
+          enrichment: [],
           fallback: ['OpenAlex'],
         };
 
       case 'URL':
         return {
-          authoritative: ['OpenAlex'],
+          authoritative: ['CrossRef'],
           enrichment: [],
-          fallback: ['CrossRef'],
+          fallback: ['OpenAlex'],
         };
 
       case 'TITLE':
       default:
         return {
           authoritative: ['CrossRef'],
-          enrichment: ['OpenAlex', 'SemanticScholar', 'DBLP'],
-          fallback: ['OpenAlex', 'DBLP', 'SemanticScholar'],
+          enrichment: wantsGraph ? ['OpenAlex', 'SemanticScholar'] : [],
+          fallback: ['OpenAlex', 'DBLP'],
         };
     }
   }

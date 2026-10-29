@@ -158,11 +158,11 @@ export class PdfTextMetadataExtractor {
     }
 
     const keywordsMatch = scannedText.match(
-      /(?:^|\n)\s*(?:Index\s+Terms|Keywords|Key\s*words)\s*[—:\-–]+\s*([^\n.]+)/i,
+      AcademicRegexCatalog.KEYWORDS_PATTERN,
     );
     if (keywordsMatch?.[1]) {
       const rawTokens = keywordsMatch[1]
-        .split(/[,;•|]/)
+        .split(/[,;•|\n]/)
         .map((k) => k.trim())
         .filter((k) => k.length > 1 && k.split(/\s+/).length <= 7);
       const normalized = normalizeAcademicTags(rawTokens);

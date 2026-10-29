@@ -549,6 +549,19 @@ export class CrossRefProvider extends AbstractAcademicProvider {
     );
 
     const links = Array.isArray(message.link) ? message.link : [];
+    let crossrefPdfUrl: string | undefined;
+    for (const l of links) {
+      if (!l || typeof l !== 'object') continue;
+      const linkObj = l as Record<string, unknown>;
+      if (linkObj['content-type'] === 'application/pdf' && typeof linkObj.URL === 'string') {
+        const u = linkObj.URL.trim();
+        if (u) {
+          crossrefPdfUrl = u;
+          break;
+        }
+      }
+    }
+
     const isOpenAccess = links.some((l) => {
       if (!l || typeof l !== 'object') return false;
       const linkObj = l as Record<string, unknown>;
@@ -692,6 +705,7 @@ export class CrossRefProvider extends AbstractAcademicProvider {
         rights: license,
         archive,
         keywords: keywords.length ? keywords : undefined,
+        openAccessPdfUrl: crossrefPdfUrl,
         itemType,
         libraryCatalog: 'DOI.org (Crossref)',
       },
