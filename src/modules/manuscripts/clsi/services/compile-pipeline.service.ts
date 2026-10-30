@@ -154,6 +154,18 @@ export class LatexmkEngine extends BaseLatexEngine {
     const startTime = Date.now();
     const compiler = options.compilerOverride || this.defaultCompiler;
 
+    // Remove stale *.fdb_latexmk to avoid "gave an error in previous invocation of latexmk" loops
+    try {
+      const dirEntries = await fs.readdir(options.cwd);
+      for (const entry of dirEntries) {
+        if (entry.endsWith('.fdb_latexmk')) {
+          await fs.unlink(path.join(options.cwd, entry)).catch(() => {});
+        }
+      }
+    } catch {
+      // Ignored
+    }
+
     let compilerFlag = '-pdf';
     if (compiler === 'xelatex') {
       compilerFlag = '-pdfxe';
@@ -858,7 +870,7 @@ export class CompilePipeline {
           const timeoutMs = dto.timeoutMs || 240000;
           const stopOnFirstError = dto.stopOnFirstError ?? false;
 
-          const engineResult = await engineToUse.compile(
+          let engineResult = await engineToUse.compile(
             {
               cwd: scratchDir,
               mainFile,
@@ -872,6 +884,51 @@ export class CompilePipeline {
             },
             compilerFlag,
           );
+
+          // Runtime Compile Fallback: If primary engine failed to produce a PDF, try secondary fallback engine
+          if (!engineResult.pdfGenerated) {
+            const secondaryEngine =
+              engineToUse === this.tectonicEngine
+                ? this.latexmkEngine
+                : this.tectonicEngine;
+            if (await secondaryEngine.isAvailable()) {
+              const secondaryName =
+                secondaryEngine === this.latexmkEngine
+                  ? `TeX Live (${compilerFlag})`
+                  : 'Tectonic';
+              this.logger.warn(
+                `Primary compiler (${engineToUse.name}) failed to produce PDF for project ${projectId}. Retrying with fallback engine: ${secondaryName}...`,
+              );
+              dto.onLogChunk?.(
+                `[CLSI Pipeline] Primary compiler (${engineToUse.name}) failed to produce PDF. Retrying with fallback engine: ${secondaryName}...\n`,
+              );
+              const fallbackResult = await secondaryEngine.compile(
+                {
+                  cwd: scratchDir,
+                  mainFile,
+                  timeoutMs,
+                  stopOnFirstError,
+                  draft: dto.draft ?? false,
+                  syntaxOnly: dto.syntaxOnly ?? false,
+                  compilerOverride: compilerFlag,
+                  signal: dto.signal,
+                  onLogChunk: dto.onLogChunk,
+                },
+                compilerFlag,
+              );
+              if (fallbackResult.pdfGenerated) {
+                this.logger.log(
+                  `Fallback engine ${secondaryName} successfully produced PDF for project ${projectId}.`,
+                );
+                engineResult = fallbackResult;
+              } else {
+                engineResult.stdout = `${engineResult.stdout || ''}\n--- Fallback (${secondaryName}) Output ---\n${fallbackResult.stdout || ''}`;
+                if (fallbackResult.stderr) {
+                  engineResult.stderr = `${engineResult.stderr || ''}\n${fallbackResult.stderr}`;
+                }
+              }
+            }
+          }
 
           const durationMs = Date.now() - startTime;
           let fallbackLogs = engineResult.stdout || '';

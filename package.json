@@ -50,6 +50,9 @@
     "test:e2e": "jest --config ./test/jest-e2e.json --forceExit",
     "test:db-suites": "jest --testPathPatterns=\"test/integration\" --runInBand --forceExit",
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
+    "seed:storage-chat": "ts-node -r tsconfig-paths/register scripts/seed-storage-and-chat.ts",
+    "seed:recents": "ts-node -r tsconfig-paths/register scripts/seed-recents.ts",
+    "seed:retractions": "ts-node -r tsconfig-paths/register scripts/seed-retractions.ts",
     "audit:security": "pnpm audit",
     "prepare": "husky"
   },

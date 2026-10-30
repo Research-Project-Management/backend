@@ -263,9 +263,20 @@ export class ClsiWorkspacePlannerService {
             out[relPath] = Buffer.concat(chunks);
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            this.logger.debug(
-              `Skipping missing binary asset ${bf.id} (${relPath}): ${msg}`,
+            this.logger.warn(
+              `Missing binary asset ${bf.id} (${relPath}): ${msg}. Generating fallback placeholder to prevent compiler halt.`,
             );
+            if (relPath.toLowerCase().endsWith('.pdf')) {
+              out[relPath] = Buffer.from(
+                '%PDF-1.4\n1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n2 0 obj <</Type /Pages /Kids [3 0 R] /Count 1>> endobj\n3 0 obj <</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]>> endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000056 00000 n \n0000000111 00000 n \ntrailer <</Size 4 /Root 1 0 R>>\nstartxref\n190\n%%EOF\n',
+                'utf8',
+              );
+            } else {
+              out[relPath] = Buffer.from(
+                '89504e470d0a1a0a0000000d49484452000000640000006408020000004fb0b79f000000097048597300000ec300000ec301c76fa8640000002149444154789c63601805a360148c24000000ffff03008880000188812f860000000049454e44ae426082',
+                'hex',
+              );
+            }
           }
         }
       } catch (err: unknown) {
