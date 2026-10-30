@@ -8,8 +8,8 @@ export const EXPORT_CHUNK_SIZE = 200;
 export type ExportItemRecord = Prisma.ItemGetPayload<{
   include: {
     contributors: { orderBy: { orderIndex: 'asc' } };
-    itemTags?: { include: { tag: true } };
-    notesList?: { where: { deletedAt: null } };
-    identifiers?: true;
+    itemTags: { include: { tag: true } };
+    notesList: { where: { deletedAt: null } };
+    identifiers: true;
   };
 }>;

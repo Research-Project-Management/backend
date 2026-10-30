@@ -98,7 +98,7 @@ export interface MergeableUserItemState {
 export interface PreferredMergedState {
   isStarred: boolean;
   maxRating: number | null;
-  readStatus: 'completed' | 'reading' | 'skimmed' | 'unread';
+  readStatus: 'completed' | 'reading' | 'unread';
   maxCurrentPage: number | null;
   latestScroll: unknown;
   latestOpenedAt: Date | null;
@@ -119,15 +119,14 @@ export function pickPreferredMergedState(
         : null;
   const isStarred = states.some((s) => Boolean(s.isStarred));
   const isCompleted = states.some((s) => s.readStatus === 'completed');
-  const isReading = states.some((s) => s.readStatus === 'reading');
-  const isSkimmed = states.some((s) => s.readStatus === 'skimmed');
+  const isReading = states.some(
+    (s) => s.readStatus === 'reading' || s.readStatus === 'skimmed',
+  );
   const readStatus = isCompleted
     ? 'completed'
     : isReading
       ? 'reading'
-      : isSkimmed
-        ? 'skimmed'
-        : 'unread';
+      : 'unread';
 
   const latestReadAt =
     states

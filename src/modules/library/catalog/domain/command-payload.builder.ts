@@ -601,7 +601,7 @@ export async function buildCommandCreateInput(
       [
         ...(Array.isArray(data.collectionIds) ? data.collectionIds : []),
         ...(Array.isArray((data as { collections?: unknown }).collections)
-          ? ((data as { collections: string[] }).collections)
+          ? ((data as unknown as { collections: string[] }).collections)
           : []),
         ...(data.collectionId ? [data.collectionId] : []),
       ].filter(

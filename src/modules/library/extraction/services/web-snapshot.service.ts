@@ -291,7 +291,10 @@ export class WebSnapshotService {
     itemId: string,
     userId: string,
     options?: CaptureAndAttachOptions,
-  ): Promise<{ attachment: Attachment; snapshot: SnapshotResult }> {
+  ): Promise<{
+    attachment: Awaited<ReturnType<AttachmentsService['createAttachment']>>;
+    snapshot: SnapshotResult;
+  }> {
     this.logger.log(`Capturing web snapshot for item ${itemId} from ${url}`);
 
     const snapshot = await this.captureHtmlSnapshot(url, {

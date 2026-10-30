@@ -162,11 +162,6 @@ export class CursorPaginationQueryDto {
   @IsOptional()
   @Transform(({ value }) => transformOptionalBoolean(value))
   @IsBoolean()
-  isFavorite?: boolean;
-
-  @IsOptional()
-  @Transform(({ value }) => transformOptionalBoolean(value))
-  @IsBoolean()
   isStarred?: boolean;
 
   @IsOptional()

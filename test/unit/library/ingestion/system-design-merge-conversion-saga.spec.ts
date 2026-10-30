@@ -93,7 +93,7 @@ describe('System Design Loop 2 — Duplicate Merge/Undo Saga & Item Type Convers
         itemTags: [{ tagId: 'tag-1', tag: { id: 'tag-1', name: 'ML' } }],
         attachments: [{ id: 'att-1', filename: 'paper.pdf' }],
         identifiers: [{ id: 'id-1', type: 'doi', value: '10.1000/test' }],
-        states: [{ userId, isRead: true, isFavorite: true }],
+        states: [{ userId, isRead: true, isStarred: true }],
       };
       const hydratedB = {
         ...hydratedA,

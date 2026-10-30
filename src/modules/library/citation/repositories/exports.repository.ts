@@ -8,7 +8,8 @@ import {
   ExportItemRecord,
 } from '../domain/export-item.types';
 
-export { EXPORT_CHUNK_SIZE, EXPORT_MAX_ITEMS, ExportItemRecord };
+export { EXPORT_CHUNK_SIZE, EXPORT_MAX_ITEMS };
+export type { ExportItemRecord };
 
 /**
  * ExportsRepository — CQRS Read-Side Optimized Data Store for Bulk Citation Export.

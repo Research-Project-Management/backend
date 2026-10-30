@@ -270,7 +270,7 @@ export class SavedSearchesRepository {
         identifiers: true,
         notesList: { where: { deletedAt: null }, select: { id: true } },
         publications: effectiveUserId
-          ? { where: { userId: effectiveUserId }, select: { id: true }, take: 1 }
+          ? { where: { userId: effectiveUserId }, select: { itemId: true }, take: 1 }
           : false,
         ...(effectiveUserId
           ? { states: { where: { userId: effectiveUserId }, take: 1 } }

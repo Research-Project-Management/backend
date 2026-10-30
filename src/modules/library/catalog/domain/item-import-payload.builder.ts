@@ -74,7 +74,7 @@ export interface ImportSourceItem {
     fullName?: string;
     orderIndex?: number;
   }>;
-  identifiers?: Array<{ type: string; value: string; canonicalUri?: string }>;
+  identifiers?: Array<{ type: string; value: string; canonicalUri?: string | null }>;
   [key: string]: unknown;
 }
 
@@ -261,7 +261,7 @@ export function buildImportItemPayload(
     seriesText: source.seriesText ?? undefined,
     seriesNumber: source.seriesNumber ?? undefined,
     edition: source.edition ?? undefined,
-    accessedAt: source.accessedAt ?? undefined,
+    accessedAt: source.accessedAt ? new Date(source.accessedAt) : undefined,
     isRetracted: source.isRetracted ?? undefined,
     retractionNature: source.retractionNature ?? undefined,
     retractionDetails: source.retractionDetails ?? undefined,
@@ -315,12 +315,10 @@ export function buildImportItemPayload(
       contributors: source.contributors,
       itemType: source.itemType || 'journalArticle',
     }),
-    identifiers: source.identifiers?.map(
-      (identifier: { type: string; value: string; canonicalUri?: string }) => ({
-        type: identifier.type,
-        value: identifier.value,
-        canonicalUri: identifier.canonicalUri,
-      }),
-    ),
+    identifiers: source.identifiers?.map((identifier) => ({
+      type: identifier.type,
+      value: identifier.value,
+      canonicalUri: identifier.canonicalUri ?? undefined,
+    })),
   };
 }

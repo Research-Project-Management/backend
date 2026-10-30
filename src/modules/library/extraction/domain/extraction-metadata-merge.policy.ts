@@ -362,8 +362,12 @@ export function buildExtractedMetadataSyncPlan(
   const resolvedTitle = effectiveUpdateTitle ? cleanedExtractedTitle : currentTitle;
   const resolvedYear = (attachment.item?.year as number | undefined) || doc.metadata?.year;
   const firstCreatorCandidate = creatorsToSync[0];
-  const firstCreatorRaw = firstCreatorCandidate
-    ? firstCreatorCandidate.lastName || firstCreatorCandidate.fullName || firstCreatorCandidate.name || ''
+  const cand = firstCreatorCandidate as Record<string, unknown> | undefined;
+  const firstCreatorRaw = cand
+    ? (typeof cand.lastName === 'string' && cand.lastName) ||
+      (typeof cand.fullName === 'string' && cand.fullName) ||
+      (typeof cand.name === 'string' && cand.name) ||
+      ''
     : '';
   const regeneratedCitKey =
     needsCitationKeyRegen && (effectiveUpdateTitle || firstCreatorRaw || resolvedYear)

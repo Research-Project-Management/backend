@@ -196,7 +196,7 @@ export class ExtractionRepository {
       where: { id: itemId },
       data: {
         ...sanitizedData,
-        ...(mergedMetadata !== undefined ? { metadata: mergedMetadata } : {}),
+        ...(mergedMetadata !== undefined ? { metadata: mergedMetadata as Prisma.InputJsonValue } : {}),
         version: { increment: 1 },
       },
       include: {

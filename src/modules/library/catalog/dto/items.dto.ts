@@ -511,7 +511,6 @@ export class CreateItemDto {
   @IsOptional() @IsString() @MaxLength(100000) bibtex?: string;
   @IsOptional() @IsString() @MaxLength(255) citeKey?: string;
   @IsOptional() @IsBoolean() isStarred?: boolean;
-  @IsOptional() @IsBoolean() isFavorite?: boolean;
   @IsOptional() @IsBoolean() silent?: boolean;
   @IsOptional() @IsString() @MaxLength(50) readStatus?: string;
   @IsOptional() @IsNumber() rating?: number;

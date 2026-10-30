@@ -86,7 +86,12 @@ export type IngestionStatus =
   | 'FAILED_RETRYABLE'
   | 'FAILED_FINAL'
   | 'CANCELLED'
-  | 'STALLED';
+  | 'STALLED'
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'stalled';
 
 export interface IngestionStageSnapshot {
   id: string;

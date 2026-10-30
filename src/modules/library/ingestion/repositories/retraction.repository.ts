@@ -611,7 +611,7 @@ export class RetractionRepository {
   > {
     if (!dois.length) return [];
     const normalized = Array.from(new Set(dois.map((d) => d.toLowerCase().trim())));
-    return this.prisma.item.findMany({
+    const items = await this.prisma.item.findMany({
       where: {
         doi: { in: normalized },
         deletedAt: null,
@@ -621,9 +621,19 @@ export class RetractionRepository {
         userId: true,
         projectId: true,
         doi: true,
-        isRetracted: true,
-        retractionNature: true,
+        metadata: true,
       },
+    });
+    return items.map((it) => {
+      const meta = parseItemMetadata(it.metadata);
+      return {
+        id: it.id,
+        userId: it.userId,
+        projectId: it.projectId,
+        doi: it.doi,
+        isRetracted: Boolean(meta.isRetracted),
+        retractionNature: meta.retractionNature ?? null,
+      };
     });
   }
 

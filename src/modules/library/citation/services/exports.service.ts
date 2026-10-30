@@ -18,6 +18,7 @@ import { PdfBakerService } from './pdf-baker.service';
 import {
   ExportResult,
   BurnableAnnotation,
+  ExportFormatType,
 } from '@/modules/library/citation/types/exports.types';
 import {
   resolveExportFormatStrategy,

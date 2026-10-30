@@ -53,7 +53,12 @@ export class SearchFacade implements ISearchFacade {
       pageCount: number;
     };
   }> {
-    return this.searchService.search(userId, queryDto);
+    const result = await this.searchService.search(userId, queryDto);
+    return {
+      items: result.items as unknown as CatalogItemSummary[],
+      facets: result.facets,
+      meta: result.meta,
+    };
   }
 
   async indexItem(item: {

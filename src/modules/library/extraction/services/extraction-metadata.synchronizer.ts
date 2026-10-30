@@ -245,22 +245,30 @@ export class ExtractionMetadataSynchronizer {
             if (count === 0) {
               const validContributors = creatorsToSync
                 .map((c, idx) => {
-                  const itemCreatorType = c.creatorType || primaryRole;
+                  const cand = c as {
+                    creatorType?: string;
+                    fullName?: string;
+                    name?: string;
+                    firstName?: string;
+                    lastName?: string;
+                    fieldMode?: number;
+                  };
+                  const itemCreatorType = cand.creatorType || primaryRole;
                   const rawName =
-                    c.fullName ||
-                    c.name ||
-                    `${c.firstName || ''} ${c.lastName || ''}`.trim();
+                    cand.fullName ||
+                    cand.name ||
+                    `${cand.firstName || ''} ${cand.lastName || ''}`.trim();
                   const parsed = parseCreatorString(
                     rawName,
                     idx,
                     itemCreatorType,
                   );
-                  const first = (c.firstName || parsed.firstName || '').trim();
-                  const last = (c.lastName || parsed.lastName || '').trim();
+                  const first = (cand.firstName || parsed.firstName || '').trim();
+                  const last = (cand.lastName || parsed.lastName || '').trim();
                   const full =
-                    (c.firstName || c.lastName
-                      ? c.fullName ||
-                        c.name ||
+                    (cand.firstName || cand.lastName
+                      ? cand.fullName ||
+                        cand.name ||
                         [first, last].filter(Boolean).join(' ')
                       : parsed.fullName) ||
                     rawName ||
@@ -273,7 +281,7 @@ export class ExtractionMetadataSynchronizer {
                     itemId: attachment.itemId,
                     orderIndex: idx,
                     creatorType: itemCreatorType,
-                    fieldMode: c.fieldMode ?? parsed.fieldMode ?? 0,
+                    fieldMode: cand.fieldMode ?? parsed.fieldMode ?? 0,
                     firstName: first,
                     lastName: last,
                     fullName:

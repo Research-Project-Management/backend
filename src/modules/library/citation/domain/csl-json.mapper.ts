@@ -82,9 +82,9 @@ export class CslJsonMapper {
   }
 
   static getAuthorNames(item: {
-    contributors?: ContributorLike[];
-    creators?: ContributorLike[];
-    authors?: string[];
+    contributors?: ContributorLike[] | null;
+    creators?: ContributorLike[] | null;
+    authors?: string[] | null;
   }): string[] {
     const formatName = (c: ContributorLike) => {
       if (c.fullName?.trim()) return c.fullName.trim();

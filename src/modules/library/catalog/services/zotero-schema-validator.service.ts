@@ -70,7 +70,6 @@ const SYSTEM_AND_TELEMETRY_KEYS = new Set([
   'rating',
   'lastReadAt',
   'isStarred',
-  'isFavorite',
   'demotedToExtra',
   'demotedExtraLines',
   '__demotedExtraLines',

@@ -15,8 +15,8 @@ import {
   syncMergedIdentifiersInTx,
 } from './duplicate-merge-contributors.domain';
 
+export type { ContributorShape };
 export {
-  ContributorShape,
   IDENTIFIER_META_KEYS,
   syncMergedContributors,
   syncMergedIdentifiersInTx,

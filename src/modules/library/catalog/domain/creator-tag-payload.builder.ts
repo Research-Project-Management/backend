@@ -131,7 +131,7 @@ const IGNORED_SYSTEM_KEYS = new Set([
   'keywords', 'keywordsList', 'attachments', 'primaryFile', 'filename',
   'notes', 'notesList', 'collectionId', 'collectionIds', 'collections',
   'collectionItems', 'userStates', 'states', 'readStatus', 'rating',
-  'lastReadAt', 'isStarred', 'isFavorite', 'metadata', 'extraFields',
+  'lastReadAt', 'isStarred', 'metadata', 'extraFields',
   'fileId', 'size', 'mimeType', 'hasFile', 'attachmentCount', 'noteCount',
   'firstAuthor', 'outgoingRel', 'incomingRel', 'relations', 'seeAlso',
   'identifiers', 'ingestionRuns', 'itemMetadata', 'publications',
@@ -145,8 +145,8 @@ export function applyManualEditProvenanceLocks(input: RecordManualLockInput): vo
   const hasExplicitLocks =
     Array.isArray(input.dataRecord.lockedFields) ||
     input.dataRecord.lockedFields === null ||
-    Array.isArray(input.dataExtra.lockedFields) ||
-    input.dataExtra.lockedFields === null;
+    Array.isArray(input.dataExtra?.lockedFields) ||
+    input.dataExtra?.lockedFields === null;
   const effectiveExistingMeta = hasExplicitLocks
     ? {
         ...input.existingMeta,
@@ -165,7 +165,7 @@ export function applyManualEditProvenanceLocks(input: RecordManualLockInput): vo
     const rawExplicit =
       Array.isArray(input.dataRecord.lockedFields) || input.dataRecord.lockedFields === null
         ? input.dataRecord.lockedFields
-        : input.dataExtra.lockedFields;
+        : input.dataExtra?.lockedFields;
     const explicitSet = new Set(
       Array.isArray(rawExplicit)
         ? (rawExplicit as unknown[]).filter(

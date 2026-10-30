@@ -72,7 +72,7 @@ export function buildGetItemsOptions(
       : undefined);
   const effectiveHasFile = query?.hasFile ?? query?.hasPdf;
   const effectiveOnlyFlagged =
-    query?.onlyFlagged ?? query?.isFavorite ?? query?.isStarred;
+    query?.onlyFlagged ?? query?.isStarred;
   const effectiveView =
     query?.view ?? (query?.unfiled ? 'unfiled' : undefined);
   const effectiveReadStatus =

@@ -33,6 +33,13 @@ import {
   ProjectId,
 } from '@/modules/library/core/types/branded.types';
 
+interface LegacyTransactionHelpers {
+  appendChange?: (tx: unknown, scope: unknown, change: unknown) => Promise<unknown>;
+  appendChangesBatch?: (tx: unknown, changes: unknown[]) => Promise<unknown>;
+  publishOutbox?: (tx: unknown, scope: unknown, aggregateId: string, eventType: string, payload: unknown) => Promise<unknown>;
+  publishOutboxBatch?: (tx: unknown, events: unknown[]) => Promise<unknown>;
+}
+
 @Injectable()
 export class AttachmentRenamerService {
   private readonly logger = new Logger(AttachmentRenamerService.name);
@@ -45,7 +52,7 @@ export class AttachmentRenamerService {
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()
-    private readonly libraryTx?: TransactionService,
+    private readonly libraryTx?: TransactionService & LegacyTransactionHelpers,
     @Optional()
     private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
