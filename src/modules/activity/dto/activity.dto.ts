@@ -5,6 +5,9 @@ export class RecentItemResponse {
   @ApiProperty()
   id!: string;
 
+  @ApiPropertyOptional()
+  type?: string;
+
   @ApiProperty({ enum: EntityType })
   entityType!: EntityType;
 
@@ -17,8 +20,18 @@ export class RecentItemResponse {
   @ApiPropertyOptional()
   projectId?: string | null;
 
+  @ApiPropertyOptional()
+  project?: {
+    id: string;
+    name?: string | null;
+    identifier?: string | null;
+  } | null;
+
   @ApiProperty()
   lastInteractedAt!: Date;
+
+  @ApiPropertyOptional()
+  updatedAt?: Date;
 }
 
 export class ActivityFeedItemResponse {

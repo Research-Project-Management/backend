@@ -96,7 +96,12 @@ export interface IActivityRepository {
     workItemIds: string[],
     paperIds: string[],
     pageIds: string[],
-  ): Promise<Map<string, string>>;
+    fileIds?: string[],
+    projectIds?: string[],
+  ): Promise<{
+    titleMap: Map<string, string>;
+    projectMap: Map<string, { id: string; name: string; identifier: string | null }>;
+  }>;
 
   findWorkItemWithProject(
     workItemId: string,

@@ -713,25 +713,50 @@ export class ActivityService {
       const pageIds = uniqueTargets
         .filter((target) => target.entityType === 'page')
         .map((target) => target.entityId);
+      const fileIds = uniqueTargets
+        .filter((target) => target.entityType === 'file')
+        .map((target) => target.entityId);
+      const allProjectIds = Array.from(
+        new Set([
+          ...uniqueTargets
+            .filter((target) => target.entityType === 'project')
+            .map((target) => target.entityId),
+          ...uniqueTargets
+            .map((target) => target.projectId)
+            .filter((pid): pid is string => Boolean(pid)),
+        ]),
+      );
 
-      const titleMap = await this.activityRepo.findEntitiesTitleMap(
+      const { titleMap, projectMap } = await this.activityRepo.findEntitiesTitleMap(
         workItemIds,
         paperIds,
         pageIds,
+        fileIds,
+        allProjectIds,
       );
 
       items = uniqueTargets.map((target) => {
         const rawType = target.entityType as string;
         const normalizedType = rawType === 'work_item' ? 'work-item' : rawType;
+        const title =
+          titleMap.get(`${target.entityType}:${target.entityId}`) ||
+          `Untitled ${target.entityType}`;
+        const prj = target.projectId
+          ? projectMap.get(target.projectId)
+          : target.entityType === 'project'
+            ? projectMap.get(target.entityId)
+            : null;
+
         return {
           id: `${target.entityType}-${target.entityId}`,
           type: normalizedType,
           entityType: target.entityType,
           entityId: target.entityId,
-          title:
-            titleMap.get(`${target.entityType}:${target.entityId}`) ||
-            `Untitled ${target.entityType}`,
+          title,
           projectId: target.projectId,
+          project: prj
+            ? { id: prj.id, name: prj.name, identifier: prj.identifier }
+            : null,
           lastInteractedAt: target.lastInteractedAt,
           updatedAt: target.lastInteractedAt,
         };

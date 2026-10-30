@@ -172,12 +172,19 @@ export class ActivityRepository implements IActivityRepository {
     workItemIds: string[],
     paperIds: string[],
     pageIds: string[],
-  ): Promise<Map<string, string>> {
+    fileIds: string[] = [],
+    projectIds: string[] = [],
+  ): Promise<{
+    titleMap: Map<string, string>;
+    projectMap: Map<string, { id: string; name: string; identifier: string | null }>;
+  }> {
     const validWorkItemIds = workItemIds.filter((id) => isUUID(id));
     const validPaperIds = paperIds.filter((id) => isUUID(id));
     const validPageIds = pageIds.filter((id) => isUUID(id));
+    const validFileIds = fileIds.filter((id) => isUUID(id));
+    const validProjectIds = projectIds.filter((id) => isUUID(id));
 
-    const [workItems, papers, pages] = await Promise.all([
+    const [workItems, papers, pages, files, projects] = await Promise.all([
       validWorkItemIds.length
         ? this.prisma.workItem.findMany({
             where: { id: { in: validWorkItemIds }, deletedAt: null },
@@ -196,15 +203,33 @@ export class ActivityRepository implements IActivityRepository {
             select: { id: true, path: true },
           })
         : [],
+      validFileIds.length
+        ? this.prisma.file.findMany({
+            where: { id: { in: validFileIds }, trashedAt: null },
+            select: { id: true, filename: true },
+          })
+        : [],
+      validProjectIds.length
+        ? this.prisma.project.findMany({
+            where: { id: { in: validProjectIds } },
+            select: { id: true, name: true, identifier: true },
+          })
+        : [],
     ]);
 
-    const map = new Map<string, string>();
+    const titleMap = new Map<string, string>();
     workItems.forEach((t) => {
-      map.set(`work_item:${t.id}`, t.title);
+      titleMap.set(`work_item:${t.id}`, t.title);
     });
-    papers.forEach((p) => map.set(`paper:${p.id}`, p.title));
-    pages.forEach((pg) => map.set(`page:${pg.id}`, pg.path || 'Manuscript'));
-    return map;
+    papers.forEach((p) => titleMap.set(`paper:${p.id}`, p.title));
+    pages.forEach((pg) => titleMap.set(`page:${pg.id}`, pg.path || 'Manuscript'));
+    files.forEach((f) => titleMap.set(`file:${f.id}`, f.filename));
+    projects.forEach((prj) => titleMap.set(`project:${prj.id}`, prj.name));
+
+    const projectMap = new Map<string, { id: string; name: string; identifier: string | null }>();
+    projects.forEach((prj) => projectMap.set(prj.id, prj));
+
+    return { titleMap, projectMap };
   }
 
   async findWorkItemWithProject(workItemId: string) {
