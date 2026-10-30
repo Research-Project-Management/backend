@@ -27,11 +27,6 @@ import { DuplicateDetectorService } from '@/modules/library/ingestion/services/d
 import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
 import { DuplicatePolicy } from '@/modules/library/ingestion/policies/duplicate.policy';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
-import {
-  capturePreMergeRelationsInTx,
-  restoreMasterRelationsInTx,
-  restoreDuplicateRelationsInTx,
-} from '@/modules/library/ingestion/domain/duplicate-merge-relations.memento';
 import { StateService } from '@/modules/library/catalog/services/state.service';
 import { MetadataService } from '@/modules/library/ingestion/services/metadata.service';
 import { MetadataExecutorService } from '@/modules/library/ingestion/services/metadata-executor.service';
@@ -680,73 +675,6 @@ describe('Loop 2 Worker 4 — Ingestion, Reconciliation, Deduplication & Merge O
 
       expect(deletedIds).toEqual(['ann-dup-identical']);
       expect(movedIds).toEqual(['ann-dup-distinct-comment']);
-    });
-
-    it('capturePreMergeRelationsInTx and restoreDuplicateRelationsInTx capture and restore annotations and sync attachment counts', async () => {
-      const updatedAnnotations: Array<{ id: string; data: Record<string, unknown> }> = [];
-      const updatedItems: Array<{ where: unknown; data: Record<string, unknown> }> = [];
-
-      const mockTx = {
-        attachment: {
-          findMany: jest.fn().mockResolvedValue([
-            { id: 'att-m', itemId: 'master-1', attachmentType: 'pdf' },
-            { id: 'att-d', itemId: 'dup-1', attachmentType: 'supplement' },
-          ]),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-          update: jest.fn().mockResolvedValue({}),
-          count: jest.fn().mockResolvedValue(1),
-        },
-        annotation: {
-          findMany: jest.fn().mockResolvedValue([
-            { id: 'ann-d-1', attachmentId: 'att-d', deletedAt: null },
-          ]),
-          update: jest.fn().mockImplementation(async ({ where, data }) => {
-            updatedAnnotations.push({ id: where.id, data });
-            return {};
-          }),
-        },
-        item: {
-          updateMany: jest.fn().mockImplementation(async ({ where, data }) => {
-            updatedItems.push({ where, data });
-            return { count: 1 };
-          }),
-        },
-      };
-
-      const captured = await capturePreMergeRelationsInTx({
-        tx: mockTx as unknown as Prisma.TransactionClient,
-        primary: { id: 'master-1' },
-        duplicates: [{ id: 'dup-1' }],
-        uniqueDupIds: ['dup-1'],
-      });
-
-      expect(captured.duplicateRelationsById['dup-1'].annotations).toEqual([
-        { id: 'ann-d-1', attachmentId: 'att-d', deletedAt: null },
-      ]);
-
-      await restoreDuplicateRelationsInTx(
-        mockTx as unknown as Prisma.TransactionClient,
-        'master-1',
-        'dup-1',
-        {
-          id: 'dup-1',
-          attachmentIds: ['att-d'],
-          attachments: captured.duplicateRelationsById['dup-1'].attachments,
-        },
-      );
-
-      expect(updatedAnnotations).toEqual([
-        {
-          id: 'ann-d-1',
-          data: { attachmentId: 'att-d', deletedAt: null },
-        },
-      ]);
-      expect(updatedItems).toEqual([
-        {
-          where: { id: 'dup-1' },
-          data: { hasFile: true, attachmentCount: 1 },
-        },
-      ]);
     });
 
     it('StateService.transferUserItemStates preserves null rating when unrated and preserves skimmed status above unread', async () => {

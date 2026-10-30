@@ -155,8 +155,8 @@ export interface IngestionRunSnapshot {
   itemId?: string | null;
   item?: Record<string, unknown> | null;
   stages: IngestionStageSnapshot[];
-  candidates: IngestionCandidateSnapshot[];
-  decisions: IngestionDecisionSnapshot[];
+  candidates?: IngestionCandidateSnapshot[];
+  decisions?: IngestionDecisionSnapshot[];
   reviews?: IngestionReviewCaseSnapshot[];
   errors: unknown[];
 }

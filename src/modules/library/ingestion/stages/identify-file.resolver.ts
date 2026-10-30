@@ -184,7 +184,7 @@ export class IdentifyFileResolver {
     let extractedMetadata: ExtractedPdfMetadata = {};
     let fileBuffer: Buffer | undefined;
 
-    const rawPayloadAny = payload as Record<string, unknown>;
+    const rawPayloadAny = payload as unknown as Record<string, unknown>;
     const rawOverrides = (rawPayloadAny.overrides || {}) as Record<string, unknown>;
     const clientPreResolved = (rawPayloadAny.preResolvedMetadata || rawOverrides.preResolvedMetadata) as Record<string, unknown> | undefined;
     const isClientResolved = rawPayloadAny.resolutionSource === 'client' || rawOverrides.resolutionSource === 'client' || Boolean(clientPreResolved);
@@ -358,7 +358,8 @@ export class IdentifyFileResolver {
       filenameDoi ||
       extractedMetadata.arxivId ||
       filenameArxivId ||
-      extractedMetadata.isbn,
+      extractedMetadata.isbn ||
+      extractedMetadata.pmid,
     );
 
     let inferredItemType: string | undefined;
@@ -382,11 +383,21 @@ export class IdentifyFileResolver {
       }
     }
 
+    // Zero-guesswork abstract policy (Zotero-style):
+    // Abstracts must come from authoritative registries or structured authoring XMP metadata.
+    // Unindexed PDFs without authoritative IDs must not have abstracts populated from arbitrary layout text regex slicing.
+    const isUnindexed = !hasAuthoritativeId && !isClientResolved;
+    const resolvedAbstract =
+      isUnindexed && !extractedMetadata.xmpFound
+        ? undefined
+        : extractedMetadata.abstract || undefined;
+
     const rawFileMetadata = {
       ...extractedItemMeta,
       doi: extractedMetadata.doi || filenameDoi,
       isbn: extractedMetadata.isbn,
       arxivId: extractedMetadata.arxivId || filenameArxivId,
+      pmid: extractedMetadata.pmid,
       title: resolvedTitle,
       itemType: inferredItemType ?? extractedMetadata.itemType,
       authors: extractedMetadata.authors?.length
@@ -399,7 +410,7 @@ export class IdentifyFileResolver {
       publicationDate:
         extractedMetadata.publicationDate ||
         (extractedMetadata.year ? String(extractedMetadata.year) : undefined),
-      abstract: extractedMetadata.abstract || undefined,
+      abstract: resolvedAbstract,
       publisher: extractedMetadata.publisher,
       publicationTitle:
         extractedMetadata.publicationTitle || extractedMetadata.journal,
@@ -418,6 +429,7 @@ export class IdentifyFileResolver {
         : undefined,
       extraFields: {
         ...(extractedMetadata.extraFields || {}),
+        ...(isUnindexed ? { isUnindexed: true } : {}),
         ...(isFilenameTitle ? { isFilenameTitle: true } : {}),
         ...(extractedMetadata.numberOfPages
           ? {

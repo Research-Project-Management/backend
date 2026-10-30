@@ -399,6 +399,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       expect(result.newlyRetracted).toBe(0);
     });
 
+
     it('should sync all stale items globally across users', async () => {
       const globalStale = [
         {
@@ -421,6 +422,24 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       expect(result.scanned).toBe(1);
       expect(result.stillClean).toBe(1);
       expect(result.newlyRetracted).toBe(0);
+    });
+
+    it('should invoke seeder during daily delta sync if seeder is provided', async () => {
+      const mockSeeder = {
+        seedFromGitlab: jest.fn().mockResolvedValue({ inserted: 5 }),
+      };
+      const customSync = new RetractionSyncService(
+        repo,
+        scanner,
+        undefined,
+        mockSeeder as any,
+      );
+
+      mockPrisma.item.findMany.mockResolvedValue([]);
+      const result = await customSync.syncDailyRetractionDelta();
+
+      expect(mockSeeder.seedFromGitlab).toHaveBeenCalledTimes(1);
+      expect(result.scanned).toBe(0);
     });
   });
 });

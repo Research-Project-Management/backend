@@ -92,7 +92,7 @@ export class AcademicRegexCatalog {
 
   /** Keywords / Index Terms (supports both same-line with delimiters and next-line block headers) */
   public static readonly KEYWORDS_PATTERN =
-    /(?:^|\n)\s*(?:Index\s+Terms|Keywords|Key\s*words)\s*(?:[—:\-–]|\r?\n)\s*([\s\S]*?)(?=(?:\r?\n\s*\r?\n)|(?:\r?\n\s*(?:(?:1\b|I\b|1\.?\s+|I\.?\s+)?(?:Introduction|INTRODUCTION|Background|Correspondence|Received|Accepted|Funding|Conflict|PACS|\d\s+[A-Z]))|\.|$))/i;
+    /(?:^|\n)\s*(?:Index\s+Terms|Keywords|Key\s*words)\s*(?:[—:\-–]|\r?\n)\s*([\s\S]*?)(?=(?:\r?\n\s*\r?\n)|(?:\r?\n\s*(?:(?:1\b|I\b|1\.?\s+|I\.?\s+)?(?:Introduction|INTRODUCTION|Background|Correspondence|Received|Accepted|Funding|Conflict|PACS|\d\s+[A-Z])))|(?:\.\s*(?:\r?\n|$))|$)/i;
 
   /**
    * Sanitizes candidate DOI by removing trailing punctuation and decoding URL encodings.

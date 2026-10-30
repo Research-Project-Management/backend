@@ -152,7 +152,8 @@ export class EnrichStage implements IWorkflowStage<
       const isClientResolved =
         extra.resolutionSource === 'client' ||
         candidate.sourceName === 'ClientResolved' ||
-        (candidate.rawMetadata as Record<string, unknown> | undefined)?.resolutionSource === 'client' ||
+        (candidate as unknown as { rawMetadata?: Record<string, unknown> })
+          ?.rawMetadata?.resolutionSource === 'client' ||
         (meta as Record<string, unknown>).resolutionSource === 'client';
 
       if (isAlreadyComplete || isClientResolved) {

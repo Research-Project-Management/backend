@@ -8,7 +8,8 @@ export type IngestionStageName =
   | 'RECONCILE'
   | 'MATCH'
   | 'COMMIT'
-  | 'ENRICH_EXISTING';
+  | 'ENRICH_EXISTING'
+  | 'RESOLVE';
 
 export interface CreateIngestionRunProps {
   id?: string;

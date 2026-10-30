@@ -13,6 +13,7 @@ import {
 import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
+import { RetractionSeederService } from '@/modules/library/ingestion/services/retraction-seeder.service';
 
 export interface RetractionSyncOptions {
   maxDays?: number;
@@ -52,6 +53,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     private readonly repo: RetractionRepository,
     private readonly scanner: RetractionScannerProvider,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly seeder?: RetractionSeederService,
   ) {}
 
   onModuleInit(): void {
@@ -65,7 +67,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     // Initial delay of 2 minutes after boot before first background scan
     this.initTimer = setTimeout(() => {
       this.initTimer = null;
-      this.syncAllStaleItems().catch((err: unknown) => {
+      this.syncDailyRetractionDelta().catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Initial background retraction sync error: ${msg}`);
       });
@@ -73,7 +75,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     this.initTimer.unref();
 
     this.syncTimer = setInterval(() => {
-      this.syncAllStaleItems().catch((err: unknown) => {
+      this.syncDailyRetractionDelta().catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Periodic background retraction sync error: ${msg}`);
       });
@@ -90,6 +92,78 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
       clearInterval(this.syncTimer);
       this.syncTimer = null;
     }
+  }
+
+  /**
+   * Autonomous daily delta sync:
+   * 1. Updates local canonical retraction dataset if seeder is present.
+   * 2. Executes targeted Delta Set reconciliation on newly discovered retractions.
+   * 3. Scans stale user library items and reconciles against the updated dataset.
+   */
+  async syncDailyRetractionDelta(
+    options?: RetractionSyncOptions,
+  ): Promise<RetractionSyncResult> {
+    this.logger.log(
+      'Executing autonomous daily retraction delta synchronization',
+    );
+    if (this.seeder) {
+      try {
+        const seedResult = await this.seeder.seedFromGitlab();
+        if (seedResult.deltaDois && seedResult.deltaDois.length > 0) {
+          await this.reconcileDeltaRetractions(seedResult.deltaDois);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Automated Crossref dump sync skipped/failed: ${msg}`);
+      }
+    }
+    return this.syncAllStaleItems(options);
+  }
+
+  /**
+   * Targeted Delta Set Inverted Lookup ($O(|Δ|)): Instantly finds and flags user items
+   * that match newly added or updated retractions without scanning the entire library.
+   */
+  async reconcileDeltaRetractions(newlyRetractedDois: string[]): Promise<number> {
+    if (!newlyRetractedDois || newlyRetractedDois.length === 0) return 0;
+    this.logger.log(
+      `Executing targeted Delta Set reconciliation for ${newlyRetractedDois.length} DOIs`,
+    );
+
+    const matchingItems = await this.repo.findItemsByDois(newlyRetractedDois);
+    if (!matchingItems.length) {
+      this.logger.log('Delta Set reconciliation: 0 user items affected.');
+      return 0;
+    }
+
+    this.logger.warn(
+      `Delta Set reconciliation: Found ${matchingItems.length} user item(s) matching new retractions!`,
+    );
+    let updatedCount = 0;
+    const now = new Date();
+
+    for (const item of matchingItems) {
+      if (!item.isRetracted && item.doi) {
+        const lookupRes = await this.scanner.lookup(item.doi);
+        if (lookupRes.status === 'retracted') {
+          await this.repo.updateItemRetraction(
+            item.id,
+            true,
+            lookupRes.details.nature,
+            lookupRes.details,
+            now,
+          );
+          updatedCount++;
+          if (this.cache) {
+            await this.cache.del(LIBRARY_REDIS_KEYS.item(item.id)).catch(() => {});
+            await this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(item.id)).catch(() => {});
+          }
+        }
+      }
+    }
+
+    this.logger.log(`Delta Set reconciliation complete: ${updatedCount} user item(s) updated.`);
+    return updatedCount;
   }
 
   /**

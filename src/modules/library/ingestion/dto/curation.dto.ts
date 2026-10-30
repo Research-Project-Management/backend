@@ -57,12 +57,3 @@ export class DismissDuplicatesDto {
   projectId?: string;
 }
 
-export class UndoMergeDuplicatesDto {
-  @IsUUID(undefined, { message: 'primaryItemId must be a valid UUID' })
-  primaryItemId!: string;
-
-  @IsOptional()
-  @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
-  projectId?: string;
-}
-

@@ -44,9 +44,6 @@ export interface DuplicateMergeStepContext {
   primaryMeta: Record<string, unknown>;
   backfillFields: Record<string, unknown>;
   offloadedFileIdsToDelete: string[];
-  capturedPrimaryItemMetadata?: Array<Record<string, unknown>>;
-  capturedDuplicateItemMetadata?: Array<Record<string, unknown>>;
-  reassignedItemMetadata?: Array<{ id: string; previousItemId: string }>;
   syncedContributors?: Array<Record<string, unknown>>;
   now: Date;
 }
@@ -90,9 +87,6 @@ export class ItemMetadataConsolidationMergeStep
     const resolvedPrimaryMetas = Array.isArray(primaryMetaRows)
       ? primaryMetaRows
       : [];
-    ctx.capturedPrimaryItemMetadata = resolvedPrimaryMetas.map((m) => ({
-      ...(m as unknown as Record<string, unknown>),
-    }));
 
     const resolvedDupMetas =
       dupMetas.length > 0
@@ -106,12 +100,6 @@ export class ItemMetadataConsolidationMergeStep
             })()
           : [];
 
-    if (resolvedDupMetas.length > 0) {
-      ctx.capturedDuplicateItemMetadata = resolvedDupMetas.map((m) => ({
-        ...(m as unknown as Record<string, unknown>),
-      }));
-    }
-
     const coveredProviders = new Set<string>(
       resolvedPrimaryMetas
         .map((m) =>
@@ -122,7 +110,6 @@ export class ItemMetadataConsolidationMergeStep
         .filter(Boolean),
     );
 
-    const reassignedList: Array<{ id: string; previousItemId: string }> = [];
     for (const dm of resolvedDupMetas) {
       const dmRec = dm as {
         id?: string;
@@ -137,14 +124,10 @@ export class ItemMetadataConsolidationMergeStep
       const shouldReassign =
         providerKey.length > 0
           ? !coveredProviders.has(providerKey)
-          : resolvedPrimaryMetas.length === 0 && reassignedList.length === 0;
+          : resolvedPrimaryMetas.length === 0;
 
       if (shouldReassign) {
         if (providerKey) coveredProviders.add(providerKey);
-        reassignedList.push({
-          id: dmRec.id,
-          previousItemId: dmRec.itemId || uniqueDupIds[0],
-        });
         if (typeof tx.itemMetadata?.update === 'function') {
           await tx.itemMetadata.update({
             where: { id: dmRec.id },
@@ -153,8 +136,6 @@ export class ItemMetadataConsolidationMergeStep
         }
       }
     }
-
-    ctx.reassignedItemMetadata = reassignedList;
   }
 }
 

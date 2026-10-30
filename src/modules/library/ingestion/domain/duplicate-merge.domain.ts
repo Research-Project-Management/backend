@@ -89,7 +89,6 @@ export const SYSTEM_RESERVED_MERGE_KEYS = new Set([
   'dismissedDuplicateIds',
   'mergedCitationKeys',
   'metadata',
-  'lastMergeMemento',
   'mergedIntoId',
   'mergedAt',
   'mergedFromIds',

@@ -428,6 +428,8 @@ export interface AcademicCreator {
   department?: string;
   country?: string;
   isCorresponding?: boolean;
+  fieldMode?: number;
+  creatorType?: string;
 }
 
 export interface BoundingBoxCoordinates {

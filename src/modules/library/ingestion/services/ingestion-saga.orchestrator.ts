@@ -51,7 +51,9 @@ export class IngestionSagaSession {
       const dbStage: IngestionStage =
         stageName === 'ENRICH_EXISTING'
           ? IngestionStage.ENRICH
-          : IngestionStage[stageName];
+          : stageName === 'RESOLVE'
+            ? IngestionStage.RECONCILE
+            : IngestionStage[stageName];
       await this.repo.updateRunStage(this.scopeId, this.runId, dbStage);
     } catch (stageUpdateErr: unknown) {
       const msg =

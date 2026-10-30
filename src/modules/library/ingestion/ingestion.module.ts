@@ -41,6 +41,8 @@ import { QualityService } from './services/quality.service';
 import { RetractionService } from './services/retraction.service';
 import { RetractionDatabaseService } from './services/retraction-database.service';
 import { RetractionSyncService } from './services/retraction-sync.service';
+import { RetractionSeederService } from './services/retraction-seeder.service';
+import { SeedRetractionsCommand } from './commands/seed-retractions.command';
 import { IngestionVerifierService } from './services/ingestion-verifier.service';
 import {
   WebFetchLadderService,
@@ -227,8 +229,10 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     RetractionDatabaseService,
     RetractionScannerProvider,
     RetractionSyncService,
+    RetractionSeederService,
+    SeedRetractionsCommand,
     RetractionItemEventsSubscriber,
   ],
-  exports: [INGESTION_FACADE, IngestionFacade, METADATA_PORT],
+  exports: [INGESTION_FACADE, IngestionFacade, METADATA_PORT, RetractionSeederService, SeedRetractionsCommand],
 })
 export class IngestionModule {}

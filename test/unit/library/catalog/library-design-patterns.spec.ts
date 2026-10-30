@@ -46,12 +46,6 @@ import {
   ScalarTrustHierarchyReconciliationStrategy,
 } from '@/modules/library/ingestion/domain/field-reconciliation.strategies';
 import { MetadataReconciliationService } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
-import {
-  createDuplicateMergeMemento,
-  serializeMergeMemento,
-  parseMergeMemento,
-  buildMasterRestoreData,
-} from '@/modules/library/ingestion/domain/duplicate-merge.memento';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import {
   CompositeSpecification,
@@ -632,133 +626,6 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
     });
   });
 
-  describe('BE-P6: Domain Memento Pattern for Reversible Duplicate Merge (undoMerge)', () => {
-    it('serializes, parses, and restores master + soft-deleted duplicates via DuplicateMergerService.undoMerge', async () => {
-      const memento = createDuplicateMergeMemento({
-        primary: {
-          id: 'master-1',
-          title: 'Pre-Merge Master Title',
-          year: 2024,
-          doi: '10.1000/master',
-          metadata: { customKey: 'original', extra: 'Line 1' },
-        },
-        duplicates: [
-          {
-            id: 'dup-1',
-            title: 'Duplicate Item 1',
-            citationKey: 'dup2024a',
-            doi: '10.1000/master',
-            metadata: { source: 'arxiv' },
-          },
-          {
-            id: 'dup-2',
-            title: 'Duplicate Item 2',
-            citationKey: 'dup2024b',
-            doi: null,
-            metadata: { source: 'bibtex' },
-          },
-        ],
-        uniqueDupIds: ['dup-1', 'dup-2'],
-        mergedMetadataFields: ['publisher'],
-        reassignedNoteIds: ['note-1'],
-        reassignedAttachmentIds: ['att-1'],
-        mergedCreatorCount: 3,
-        now: new Date('2026-10-26T12:00:00.000Z'),
-      });
-
-      const serialized = serializeMergeMemento(memento);
-      const parsed = parseMergeMemento(serialized);
-      expect(parsed).not.toBeNull();
-      expect(parsed!.masterItemId).toBe('master-1');
-      expect(parsed!.mergedDuplicateIds).toEqual(['dup-1', 'dup-2']);
-      expect(parsed!.beforeMaster?.title).toBe('Pre-Merge Master Title');
-
-      const restoreData = buildMasterRestoreData(parsed!, {
-        customKey: 'modified',
-        publisher: 'Backfilled Publisher',
-        lastMergeMemento: serialized,
-      });
-      expect(restoreData.scalarData.title).toBe('Pre-Merge Master Title');
-      expect(restoreData.restoredMetadata).toEqual({
-        customKey: 'original',
-        extra: 'Line 1',
-      });
-
-      const updatedItems: Array<{ where: unknown; data: unknown }> = [];
-      const appendedChanges: unknown[] = [];
-      const publishedEvents: unknown[] = [];
-
-      const mockTx = {
-        duplicateMergeAudit: {
-          findFirst: jest.fn().mockResolvedValue({
-            id: 'audit-1',
-            masterItemId: 'master-1',
-            snapshotJson: serialized,
-          }),
-        },
-        item: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: 'master-1',
-            title: 'Mutated Master Title',
-            metadata: {
-              customKey: 'modified',
-              lastMergeMemento: serialized,
-            },
-          }),
-          update: jest.fn().mockImplementation((args) => {
-            updatedItems.push(args);
-            return Promise.resolve({
-              id: args.where.id,
-              ...args.data,
-              version: 2,
-            });
-          }),
-        },
-      };
-
-      const mockHelpers = {
-        appendChange: jest.fn().mockImplementation((_scope, change) => {
-          appendedChanges.push(change);
-          return Promise.resolve();
-        }),
-        publishOutbox: jest
-          .fn()
-          .mockImplementation((_scope, id, eventType, payload) => {
-            publishedEvents.push({ id, eventType, payload });
-            return Promise.resolve();
-          }),
-        recordTombstone: jest.fn(),
-      };
-
-      const mockLibraryTx = {
-        executeInTransaction: jest
-          .fn()
-          .mockImplementation((fn) => fn(mockTx, mockHelpers)),
-      };
-
-      const mergerService = new DuplicateMergerService(mockLibraryTx as never);
-      const undoRes = await mergerService.undoMerge('user-1', 'master-1');
-
-      expect(undoRes).toEqual({
-        restoredPrimaryId: 'master-1',
-        restoredDuplicateIds: ['dup-1', 'dup-2'],
-      });
-      expect(updatedItems).toHaveLength(3);
-      expect(updatedItems[1]).toEqual(
-        expect.objectContaining({
-          where: { id: 'dup-1' },
-          data: expect.objectContaining({
-            deletedAt: null,
-            title: 'Duplicate Item 1',
-            citationKey: 'dup2024a',
-          }),
-        }),
-      );
-      expect(appendedChanges).toHaveLength(3);
-      expect(publishedEvents).toHaveLength(3);
-    });
-  });
-
   describe('BE-P7: Shared Core Specification Pattern (And / Or / Not Composition)', () => {
     class HasDoiSpecification extends CompositeSpecification<
       Record<string, unknown>,
@@ -827,121 +694,6 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
   });
 
   describe('BE-HV1 to BE-HV4: Horizontal & Vertical Backend Pattern Optimizations', () => {
-    it('BE-HV1: captures and restores relational state (attachments, notes, tags, collections, identifiers) in Relational Memento v2', async () => {
-      const memento = createDuplicateMergeMemento({
-        primary: {
-          id: 'master-rel-1',
-          title: 'Master Title',
-          tagIds: ['tag-master-only'],
-          collectionIds: ['col-master-only'],
-          contributors: [{ fullName: 'Ada Lovelace', orderIndex: 0 }],
-          identifiers: [{ type: 'doi', value: '10.1000/master' }],
-        },
-        duplicates: [
-          {
-            id: 'dup-rel-1',
-            title: 'Duplicate Title',
-            attachmentIds: ['att-dup-1'],
-            noteIds: ['note-dup-1'],
-            tagIds: ['tag-dup-1'],
-            collectionIds: ['col-dup-1'],
-            identifiers: [{ type: 'arxivId', value: '2401.99999' }],
-          },
-        ],
-        uniqueDupIds: ['dup-rel-1'],
-      });
-
-      const serialized = serializeMergeMemento(memento);
-      const parsed = parseMergeMemento(serialized);
-      expect(parsed?.schemaVersion).toBe(2);
-      expect(parsed?.beforeMaster?.tagIds).toEqual(['tag-master-only']);
-      expect(parsed?.mergedDuplicates?.[0]?.attachmentIds).toEqual(['att-dup-1']);
-      expect(parsed?.mergedDuplicates?.[0]?.noteIds).toEqual(['note-dup-1']);
-      expect(parsed?.mergedDuplicates?.[0]?.tagIds).toEqual(['tag-dup-1']);
-      expect(parsed?.mergedDuplicates?.[0]?.collectionIds).toEqual(['col-dup-1']);
-      expect(parsed?.mergedDuplicates?.[0]?.identifiers).toEqual([
-        { type: 'arxivId', value: '2401.99999' },
-      ]);
-
-      const mockTx = {
-        duplicateMergeAudit: {
-          findFirst: jest.fn().mockResolvedValue({
-            masterItemId: 'master-rel-1',
-            snapshotJson: serialized,
-          }),
-        },
-        item: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: 'master-rel-1',
-            metadata: {},
-          }),
-          update: jest.fn().mockImplementation((args) =>
-            Promise.resolve({ id: args.where.id, ...args.data, version: 2 }),
-          ),
-        },
-        attachment: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        note: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        itemTag: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        collectionItem: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        contributor: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        itemIdentifier: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-      };
-
-      const mockHelpers = {
-        appendChange: jest.fn().mockResolvedValue(undefined),
-        publishOutbox: jest.fn().mockResolvedValue(undefined),
-        recordTombstone: jest.fn().mockResolvedValue(undefined),
-      };
-
-      const mergerService = new DuplicateMergerService({
-        executeInTransaction: jest
-          .fn()
-          .mockImplementation((fn) => fn(mockTx, mockHelpers)),
-      } as never);
-
-      await mergerService.undoMerge('user-1', 'master-rel-1');
-
-      expect(mockTx.attachment.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['att-dup-1'] }, itemId: 'master-rel-1' },
-        data: { itemId: 'dup-rel-1' },
-      });
-      expect(mockTx.note.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['note-dup-1'] }, itemId: 'master-rel-1' },
-        data: { itemId: 'dup-rel-1' },
-      });
-      expect(mockTx.itemTag.createMany).toHaveBeenCalledWith({
-        data: [{ itemId: 'dup-rel-1', tagId: 'tag-dup-1' }],
-        skipDuplicates: true,
-      });
-      expect(mockTx.collectionItem.createMany).toHaveBeenCalledWith({
-        data: [{ itemId: 'dup-rel-1', collectionId: 'col-dup-1' }],
-        skipDuplicates: true,
-      });
-      expect(mockTx.itemIdentifier.createMany).toHaveBeenCalledWith({
-        data: [
-          {
-            itemId: 'dup-rel-1',
-            type: 'arxivId',
-            value: '2401.99999',
-            canonicalUri: '2401.99999',
-          },
-        ],
-        skipDuplicates: true,
-      });
-    });
-
     it('BE-HV2: builds provider results with MD5 rawSnapshotHash + provenance, ranks title candidates, and propagates HTTP 429/5xx', async () => {
       const built = buildAcademicProviderResult({
         provider: 'SemanticScholar',
@@ -1218,228 +970,6 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
       expect(mismatchedDoiRow).toBeNull();
     });
 
-    it('BE-DEEP2: restores aggregate-complete v3 relations (contributors, itemRelations, userPublications, userStates, itemMetadata, overwritten identifiers) and pops audit stack on undoMerge', async () => {
-      const olderMemento = createDuplicateMergeMemento({
-        primary: { id: 'master-v3', title: 'Original Master v0' },
-        duplicates: [{ id: 'dup-older', title: 'Older Dup' }],
-        uniqueDupIds: ['dup-older'],
-      });
-      const olderSerialized = serializeMergeMemento(olderMemento);
-
-      const latestMemento = createDuplicateMergeMemento({
-        primary: {
-          id: 'master-v3',
-          title: 'Master Before Second Merge',
-          identifiers: [{ type: 'doi', value: '10.1000/master-original' }],
-          itemRelations: [
-            {
-              id: 'rel-master-1',
-              sourceItemId: 'master-v3',
-              targetItemId: 'other-1',
-              relationType: 'cites',
-            },
-          ],
-          userPublications: [
-            { userId: 'user-1', itemId: 'master-v3', isPublic: true },
-          ],
-          userStates: [
-            {
-              userId: 'user-1',
-              itemId: 'master-v3',
-              isStarred: false,
-              readStatus: 'unread',
-            },
-          ],
-          itemMetadata: [
-            {
-              id: 'meta-master-1',
-              itemId: 'master-v3',
-              sourceProvider: 'crossref',
-              rawPayload: { v: 1 },
-            },
-          ],
-        },
-        duplicates: [
-          {
-            id: 'dup-v3',
-            title: 'Duplicate With Rich Relations',
-            contributors: [
-              { fullName: 'Grace Hopper', creatorType: 'author', orderIndex: 0 },
-            ],
-            itemRelations: [
-              {
-                id: 'rel-dup-1',
-                sourceItemId: 'dup-v3',
-                targetItemId: 'other-2',
-                relationType: 'supplement',
-              },
-            ],
-            userPublications: [
-              { userId: 'user-2', itemId: 'dup-v3', isPublic: false },
-            ],
-            userStates: [
-              {
-                userId: 'user-1',
-                itemId: 'dup-v3',
-                isStarred: true,
-                rating: 5,
-                readStatus: 'read',
-              },
-            ],
-            itemMetadata: [
-              {
-                id: 'meta-dup-1',
-                itemId: 'dup-v3',
-                sourceProvider: 'openalex',
-                rawPayload: { isOffloaded: true, fileId: 'retained-blob-1' },
-              },
-            ],
-          },
-        ],
-        uniqueDupIds: ['dup-v3'],
-      });
-      const latestSerialized = serializeMergeMemento(latestMemento);
-
-      const mockTx = {
-        duplicateMergeAudit: {
-          findFirst: jest
-            .fn()
-            .mockResolvedValueOnce({
-              id: 'audit-latest',
-              masterItemId: 'master-v3',
-              snapshotJson: latestSerialized,
-            })
-            .mockResolvedValueOnce({
-              id: 'audit-older',
-              masterItemId: 'master-v3',
-              snapshotJson: olderSerialized,
-            }),
-          delete: jest.fn().mockResolvedValue({ id: 'audit-latest' }),
-        },
-        item: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: 'master-v3',
-            metadata: { lastMergeMemento: latestSerialized },
-          }),
-          update: jest.fn().mockImplementation((args) =>
-            Promise.resolve({ id: args.where.id, ...args.data, version: 3 }),
-          ),
-        },
-        itemIdentifier: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-          upsert: jest.fn().mockResolvedValue({}),
-        },
-        contributor: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        itemRelation: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        userPublication: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        state: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        itemMetadata: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-      };
-
-      const mockHelpers = {
-        appendChange: jest.fn().mockResolvedValue(undefined),
-        publishOutbox: jest.fn().mockResolvedValue(undefined),
-        recordTombstone: jest.fn().mockResolvedValue(undefined),
-      };
-
-      const mergerService = new DuplicateMergerService({
-        executeInTransaction: jest
-          .fn()
-          .mockImplementation((fn) => fn(mockTx, mockHelpers)),
-      } as never);
-
-      const undoRes = await mergerService.undoMerge('user-1', 'master-v3');
-      expect(undoRes.restoredPrimaryId).toBe('master-v3');
-      expect(undoRes.restoredDuplicateIds).toEqual(['dup-v3']);
-
-      // Verifies audit stack pop and restoration of previous memento into master metadata
-      expect(mockTx.duplicateMergeAudit.delete).toHaveBeenCalledWith({
-        where: { id: 'audit-latest' },
-      });
-      const masterUpdateArgs = mockTx.item.update.mock.calls[0][0];
-      expect(masterUpdateArgs.data.metadata.lastMergeMemento).toEqual(
-        olderSerialized,
-      );
-
-      // Verifies overwritten master identifier upsert and duplicate relation restoration
-      expect(mockTx.itemIdentifier.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { itemId_type: { itemId: 'master-v3', type: 'doi' } },
-          update: {
-            value: '10.1000/master-original',
-            canonicalUri: '10.1000/master-original',
-          },
-        }),
-      );
-      expect(mockTx.contributor.createMany).toHaveBeenCalledWith({
-        data: [
-          expect.objectContaining({
-            itemId: 'dup-v3',
-            fullName: 'Grace Hopper',
-          }),
-        ],
-      });
-      expect(mockTx.itemRelation.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: [
-            expect.objectContaining({
-              id: 'rel-dup-1',
-              sourceItemId: 'dup-v3',
-              targetItemId: 'other-2',
-            }),
-          ],
-        }),
-      );
-      expect(mockTx.userPublication.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: [
-            expect.objectContaining({
-              userId: 'user-2',
-              itemId: 'dup-v3',
-            }),
-          ],
-        }),
-      );
-      expect(mockTx.state.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: [
-            expect.objectContaining({
-              userId: 'user-1',
-              itemId: 'dup-v3',
-              isStarred: true,
-              rating: 5,
-            }),
-          ],
-        }),
-      );
-      expect(mockTx.itemMetadata.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: [
-            expect.objectContaining({
-              id: 'meta-dup-1',
-              itemId: 'dup-v3',
-              sourceProvider: 'openalex',
-            }),
-          ],
-        }),
-      );
-    });
-
     it('BE-DEEP3: CrossRefProvider, OpenAlexProvider, and PubMedProvider extend AbstractAcademicProvider and parse HTTP-date Retry-After headers without NaN', async () => {
       const crossref = new CrossRefProvider();
       const openalex = new OpenAlexProvider();
@@ -1691,7 +1221,7 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
       expect(backfillFields.firstAuthor).toBe('Hinton');
     });
 
-    it('BE-META3 & BE-META4: soft-deletes duplicate attachments on merge, removes tombstones on undoMerge, and restores soft-deleted attachments', async () => {
+    it('BE-META3: soft-deletes duplicate attachments on merge without immediate hard delete', async () => {
       const updatedAttachments: unknown[] = [];
       const mockPrisma = {
         attachment: {
@@ -1734,7 +1264,7 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
         mockPrisma as never,
       );
 
-      // S3 fileId must NOT be returned as orphaned for immediate deletion while merge is undoable
+      // S3 fileId must NOT be returned as orphaned for immediate deletion
       expect(orphanedFileIds).toEqual([]);
       expect(mockPrisma.attachment.delete).not.toHaveBeenCalled();
       expect(updatedAttachments).toEqual(
@@ -1745,81 +1275,6 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
           }),
         ]),
       );
-
-      // Verify undoMerge calls removeTombstone and un-soft-deletes duplicate attachments
-      const memento = createDuplicateMergeMemento({
-        primary: {
-          id: 'master-1',
-          title: 'Master Title',
-          contributors: [{ fullName: 'Yann LeCun', orderIndex: 0 }],
-        },
-        duplicates: [
-          {
-            id: 'dup-1',
-            title: 'Dup Title',
-            attachmentIds: ['att-dup'],
-            contributors: [{ fullName: 'Yoshua Bengio', orderIndex: 0 }],
-          },
-        ],
-        uniqueDupIds: ['dup-1'],
-      });
-      const serialized = serializeMergeMemento(memento);
-
-      const mockUndoTx = {
-        duplicateMergeAudit: {
-          findFirst: jest.fn().mockResolvedValue({
-            id: 'audit-1',
-            masterItemId: 'master-1',
-            snapshotJson: serialized,
-          }),
-          delete: jest.fn().mockResolvedValue({}),
-        },
-        item: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: 'master-1',
-            metadata: { lastMergeMemento: serialized },
-          }),
-          update: jest.fn().mockImplementation((args) =>
-            Promise.resolve({ id: args.where.id, ...args.data, version: 2 }),
-          ),
-        },
-        attachment: {
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        contributor: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-      };
-      const mockUndoHelpers = {
-        appendChange: jest.fn().mockResolvedValue(undefined),
-        publishOutbox: jest.fn().mockResolvedValue(undefined),
-        recordTombstone: jest.fn().mockResolvedValue(undefined),
-        removeTombstone: jest.fn().mockResolvedValue(undefined),
-      };
-
-      const mergerService = new DuplicateMergerService({
-        executeInTransaction: jest
-          .fn()
-          .mockImplementation((fn) => fn(mockUndoTx, mockUndoHelpers)),
-      } as never);
-
-      await mergerService.undoMerge('user-1', 'master-1');
-
-      expect(mockUndoHelpers.removeTombstone).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: 'user-1' }),
-        'Item',
-        'dup-1',
-      );
-      expect(mockUndoTx.attachment.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['att-dup'] }, deletedAt: { not: null } },
-        data: { itemId: 'dup-1', deletedAt: null },
-      });
-      // Verify CDC snapshot includes restored contributors via ItemsMapper.toDomain
-      const dupChangeCall = mockUndoHelpers.appendChange.mock.calls.find(
-        (c) => c[1]?.entityId === 'dup-1',
-      );
-      expect(dupChangeCall?.[1]?.data?.authors).toContain('Yoshua Bengio');
     });
 
     it('BE-META5: unifies ReconciliationPolicy with FieldReconciliationStrategies, aligns conflicting publicationDate/year, and additively enriches Extra', () => {
@@ -1915,19 +1370,13 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
   });
 
   describe('Cycle-3 BE-SYS-META1 through BE-SYS-META5 Architectural & Consistency Verification', () => {
-    it('BE-SYS-META1: captures all multi-provider ItemMetadata rows, deletes migrated 0->1 UserPublication/ItemMetadata on undo, and restores attachmentType/counts', async () => {
+    it('BE-SYS-META1: consolidates ItemMetadata rows by reassigning unique providers to primary during merge', async () => {
       const { ItemMetadataConsolidationMergeStep } = await import(
         '@/modules/library/ingestion/domain/duplicate-merge.steps'
       );
-      const {
-        attachCapturedMergeStepRelations,
-        createDuplicateMergeMemento,
-        executeUndoDuplicateMergeInTx,
-      } = await import(
-        '@/modules/library/ingestion/domain/duplicate-merge.memento'
-      );
 
       const step = new ItemMetadataConsolidationMergeStep();
+      const updatedMetadata: Array<{ where: { id: string }; data: { itemId: string } }> = [];
       const mockTxMeta = {
         itemMetadata: {
           findMany: jest.fn().mockImplementation(async (args: { where?: { itemId?: unknown } }) => {
@@ -1941,8 +1390,10 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
               { id: 'meta-d1', itemId: 'dup-1', sourceProvider: 'openalex', rawPayload: { id: 'W1' } },
             ];
           }),
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          update: jest.fn().mockResolvedValue({}),
+          update: jest.fn().mockImplementation(async (args) => {
+            updatedMetadata.push(args);
+            return {};
+          }),
         },
       };
 
@@ -1952,112 +1403,13 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
         duplicates: [{ id: 'dup-1' }],
         uniqueDupIds: ['dup-1'],
         offloadedFileIdsToDelete: [] as string[],
-        capturedPrimaryItemMetadata: undefined as Array<Record<string, unknown>> | undefined,
-        capturedDuplicateItemMetadata: undefined as Array<Record<string, unknown>> | undefined,
       };
       await step.execute(stepCtx as never);
-      expect(stepCtx.capturedPrimaryItemMetadata).toHaveLength(2);
-
-      // Test 0-row primary relations + attachmentType/counts restoration on undoMerge
-      const primaryRelations = {
-        attachmentIds: ['att-master-1'],
-        attachments: [{ id: 'att-master-1', attachmentType: 'primary_pdf' }],
-      };
-      const duplicateRelationsById = {
-        'dup-1': {
-          attachmentIds: ['att-dup-1'],
-          attachments: [{ id: 'att-dup-1', attachmentType: 'primary_pdf' }],
-        },
-      };
-      attachCapturedMergeStepRelations({
-        primaryId: 'primary-1',
-        duplicates: [{ id: 'dup-1' }],
-        primaryRelations,
-        duplicateRelationsById,
-        preMergePubs: {
-          primaryPublications: [],
-          dupPublications: [{ userId: 'u-1', itemId: 'dup-1', isPublic: true }],
-        },
-        capturedPrimaryItemMetadata: [],
-        capturedDuplicateItemMetadata: [
-          { id: 'meta-dup-only', itemId: 'dup-1', sourceProvider: 'crossref', rawPayload: {} },
-        ],
+      expect(updatedMetadata).toHaveLength(1);
+      expect(updatedMetadata[0]).toEqual({
+        where: { id: 'meta-d1' },
+        data: { itemId: 'primary-1' },
       });
-
-      expect(primaryRelations).toEqual(
-        expect.objectContaining({
-          userPublications: [],
-          itemMetadata: [],
-        }),
-      );
-
-      const memento = createDuplicateMergeMemento({
-        primary: { id: 'primary-1', title: 'Master', hasFile: true, attachmentCount: 1 },
-        duplicates: [{ id: 'dup-1', title: 'Dup', hasFile: true, attachmentCount: 1 }],
-        uniqueDupIds: ['dup-1'],
-        primaryRelations,
-        duplicateRelationsById,
-      });
-
-      const undoTx = {
-        item: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: 'primary-1',
-            metadata: { lastMergeMemento: memento },
-          }),
-          update: jest.fn().mockImplementation(async (args: { where: { id: string }; data: Record<string, unknown> }) => ({
-            id: args.where.id,
-            version: 2,
-            ...args.data,
-          })),
-        },
-        userPublication: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        itemMetadata: {
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        attachment: {
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-          update: jest.fn().mockResolvedValue({}),
-        },
-      };
-      const helpers = {
-        appendChange: jest.fn().mockResolvedValue(undefined),
-        publishOutbox: jest.fn().mockResolvedValue(undefined),
-        removeTombstone: jest.fn().mockResolvedValue(undefined),
-      };
-
-      await executeUndoDuplicateMergeInTx({
-        tx: undoTx as never,
-        helpers: helpers as never,
-        userId: 'u-1',
-        primaryItemId: 'primary-1',
-      });
-
-      // Migrated UserPublication and ItemMetadata on 0-row master are cleaned up
-      expect(undoTx.userPublication.deleteMany).toHaveBeenCalledWith({
-        where: { itemId: 'primary-1' },
-      });
-      expect(undoTx.itemMetadata.deleteMany).toHaveBeenCalledWith({
-        where: { itemId: 'primary-1' },
-      });
-      // Demoted duplicate attachmentType is restored to 'primary_pdf' and counts are restored
-      expect(undoTx.attachment.update).toHaveBeenCalledWith({
-        where: { id: 'att-dup-1' },
-        data: { itemId: 'dup-1', deletedAt: null, attachmentType: 'primary_pdf' },
-      });
-      expect(undoTx.item.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'dup-1' },
-          data: expect.objectContaining({
-            hasFile: true,
-            attachmentCount: 1,
-          }),
-        }),
-      );
     });
 
     it('BE-SYS-META2: ExtractionMetadataSynchronizer.buildMetadataSyncPlan passes delta-only metaPatch and wraps relation-only backfills in transaction with outbox events', async () => {

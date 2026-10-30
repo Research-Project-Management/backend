@@ -7,7 +7,7 @@ import {
   IngestionSubmissionEnvelope,
   IngestionAcceptedResult,
 } from './types/submission.types';
-import { IngestionRunSnapshot } from './types/ingestion.types';
+import { IngestionRunSnapshot } from '@/modules/library/core';
 import { DuplicateClusterResult } from './types/curation.types';
 import { RetractionCheckResult } from './types/retraction.types';
 

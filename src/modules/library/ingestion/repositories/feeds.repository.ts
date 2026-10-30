@@ -503,7 +503,7 @@ export class FeedsRepository {
                     c.fieldMode !== 1;
                   const resolved = needsReparse
                     ? parseCreatorString(
-                        c.lastName,
+                        c.lastName || '',
                         cIdx,
                         c.creatorType || 'author',
                       )
@@ -523,7 +523,10 @@ export class FeedsRepository {
                     ...(resolved.fieldMode !== undefined
                       ? { fieldMode: resolved.fieldMode }
                       : {}),
-                    creatorType: resolved.creatorType || 'author',
+                    creatorType:
+                      ('creatorType' in resolved
+                        ? resolved.creatorType
+                        : undefined) || 'author',
                   };
                 })
               : Array.isArray(entry.authors)
@@ -626,9 +629,10 @@ export class FeedsRepository {
           keywords?: string[];
           itemType?: string;
         } = {};
-        if (typeof it.comments === 'string' && it.comments.trim().startsWith('{')) {
+        const itComment = (it as { comments?: string | null }).comments;
+        if (typeof itComment === 'string' && itComment.trim().startsWith('{')) {
           try {
-            extraMeta = JSON.parse(it.comments) as typeof extraMeta;
+            extraMeta = JSON.parse(itComment) as typeof extraMeta;
           } catch {
             extraMeta = {};
           }

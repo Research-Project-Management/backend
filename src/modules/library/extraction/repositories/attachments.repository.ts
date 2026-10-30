@@ -387,7 +387,7 @@ export class AttachmentsRepository {
             // Ignore unique constraint collisions if survivor already has pages
           }
         }
-        // Soft-delete redundant duplicate attachment so S3 blobs and DB row remain reversible on undoMerge
+        // Soft-delete redundant duplicate attachment so original attachment rows are preserved in trash/audit
         if (typeof client.attachment.update === 'function') {
           await client.attachment.update({
             where: { id: att.id },

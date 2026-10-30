@@ -50,36 +50,16 @@ import {
   DuplicateMergeStepContext,
   executeDuplicateMergePipeline,
 } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
-import {
-  DuplicateMergeMemento,
-  MasterPreMergeSnapshot,
-  MergedDuplicateSnapshot,
-  capturePreMergeRelationsInTx,
-  attachCapturedMergeStepRelations,
-  createDuplicateMergeMemento,
-  serializeMergeMemento,
-  parseMergeMemento,
-  buildMasterRestoreData,
-  recordMergeMementoInTx,
-  executeUndoDuplicateMergeInTx,
-} from '@/modules/library/ingestion/domain/duplicate-merge.memento';
 import { ItemsMapper, ItemCacheCoordinator } from '@/modules/library/catalog';
 
 export type {
   ContributorShape,
-  DuplicateMergeMemento,
-  MasterPreMergeSnapshot,
-  MergedDuplicateSnapshot,
 };
 export {
   SYSTEM_RESERVED_MERGE_KEYS,
   TOP_LEVEL_ITEM_COLUMNS,
   IDENTIFIER_META_KEYS,
   RETRACTION_SURVIVAL_KEYS,
-  createDuplicateMergeMemento,
-  serializeMergeMemento,
-  parseMergeMemento,
-  buildMasterRestoreData,
 };
 
 @Injectable()
@@ -229,20 +209,10 @@ export class DuplicateMergerService {
             select: { id: true, itemId: true, attachmentType: true },
           }),
         ]);
-        const initialNotes = rawInitialNotes || [];
+        const initialNotes = (rawInitialNotes || []).filter(
+          (n): n is { id: string; itemId: string } => typeof n.itemId === 'string',
+        );
         const initialAttachments = rawInitialAttachments || [];
-
-        const { primaryRelations, duplicateRelationsById } =
-          await capturePreMergeRelationsInTx({
-            tx,
-            primary: primary as Record<string, unknown> & { id: string },
-            duplicates: duplicates as Array<
-              Record<string, unknown> & { id: string }
-            >,
-            uniqueDupIds,
-            initialNotes,
-            initialAttachments,
-          });
 
         if (this.extractionGateway?.reassignContentToItem) {
           const orphaned = await this.extractionGateway.reassignContentToItem(
@@ -344,16 +314,6 @@ export class DuplicateMergerService {
           now,
         };
         await executeDuplicateMergePipeline(pipelineCtx);
-        attachCapturedMergeStepRelations({
-          primaryId: primary.id,
-          duplicates,
-          primaryRelations,
-          duplicateRelationsById,
-          preMergeItemRelations,
-          preMergePubs,
-          capturedPrimaryItemMetadata: pipelineCtx.capturedPrimaryItemMetadata,
-          capturedDuplicateItemMetadata: pipelineCtx.capturedDuplicateItemMetadata,
-        });
 
         const primaryContributors =
           pipelineCtx.syncedContributors ??
@@ -425,32 +385,6 @@ export class DuplicateMergerService {
           topLevelData,
           primaryDoi: primary.doi,
           explicitlyClearedFields,
-        });
-
-        const mergeMemento = createDuplicateMergeMemento({
-          primary: primary as Record<string, unknown> & { id: string },
-          duplicates: duplicates as Array<
-            Record<string, unknown> & { id: string }
-          >,
-          uniqueDupIds,
-          mergedMetadataFields: Object.keys(backfillFields),
-          reassignedNoteIds: initialNotes.map((n) => n.id),
-          reassignedAttachmentIds: initialAttachments.map((a) => a.id),
-          reassignedItemMetadata: pipelineCtx.reassignedItemMetadata,
-          mergedCreatorCount: Array.isArray(primaryContributors)
-            ? primaryContributors.length
-            : 0,
-          primaryRelations,
-          duplicateRelationsById,
-          now,
-        });
-        await recordMergeMementoInTx({
-          tx,
-          userId: String(userId),
-          projectId: effectiveProjectId,
-          primaryId: primary.id,
-          primaryMeta,
-          memento: mergeMemento,
         });
 
         const { updatedPrimary, reloadedPrimary } =
@@ -545,14 +479,14 @@ export class DuplicateMergerService {
       });
     }
 
-    // Retain offloadedFileIdsToDelete blobs in storagePort so undoMerge can restore ItemMetadata Claim Check payloads intact.
-    if (reassignedOrphanFileIds.length > 0) {
+    const filesToCleanup = Array.from(
+      new Set([...reassignedOrphanFileIds, ...offloadedFileIdsToDelete]),
+    );
+    if (filesToCleanup.length > 0) {
       if (this.extractionGateway?.cleanupOrphanedFiles) {
-        await this.extractionGateway.cleanupOrphanedFiles(
-          reassignedOrphanFileIds,
-        );
+        await this.extractionGateway.cleanupOrphanedFiles(filesToCleanup);
       } else if (this.storagePort?.deleteFile) {
-        for (const fid of reassignedOrphanFileIds) {
+        for (const fid of filesToCleanup) {
           try {
             await this.storagePort.deleteFile(fid);
           } catch (delErr: unknown) {
@@ -567,54 +501,5 @@ export class DuplicateMergerService {
     }
 
     return txResult;
-  }
-
-  /**
-   * Reverses a prior duplicate merge using the GoF Memento pattern (`DuplicateMergeMemento`).
-   * Restores soft-deleted duplicate items (`deletedAt: null`), rolls back the master item's
-   * pre-merge scalar fields and metadata from `memento.beforeMaster`, and emits sync/outbox events.
-   */
-  async undoMerge(
-    userId: UserId | string,
-    primaryItemId: string,
-    scope?: { userId?: string; projectId?: string | null } | string,
-  ): Promise<{ restoredPrimaryId: string; restoredDuplicateIds: string[] }> {
-    if (!primaryItemId || !primaryItemId.trim()) {
-      throw new BadRequestException('primaryItemId is required to undo merge');
-    }
-
-    const rawProjectId =
-      typeof scope === 'object' && scope !== null ? scope.projectId : scope;
-    const effectiveProjectId = normalizeProjectScopeId(rawProjectId);
-
-    const result = await this.libraryTx.executeInTransaction(
-      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) =>
-        executeUndoDuplicateMergeInTx({
-          tx,
-          helpers,
-          userId: String(userId),
-          primaryItemId,
-          effectiveProjectId,
-        }),
-    );
-
-    if (this.cacheCoordinator) {
-      await this.cacheCoordinator.invalidateForWrite({
-        userId: String(userId),
-        projectId: effectiveProjectId,
-        itemIds: [result.restoredPrimaryId, ...result.restoredDuplicateIds],
-      });
-    } else {
-      await invalidateMergedItemsCache({
-        cache: this.cache,
-        logger: this.logger,
-        primaryId: result.restoredPrimaryId,
-        uniqueDupIds: result.restoredDuplicateIds,
-        userId: String(userId),
-        effectiveProjectId,
-      });
-    }
-
-    return result;
   }
 }

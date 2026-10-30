@@ -453,27 +453,25 @@ export function cleanAbstractText(text?: string | null): string | undefined {
     /<(?:jats:)?title[^>]*>\s*(?:Abstract|Summary|Résumé|Overview)\s*<\/(?:jats:)?title>/gi,
     '',
   );
-  // Convert structured section titles into formatted plain-text headings (e.g. "Background: ", "Methods: ")
+  // Convert structured section titles into formatted plain-text headings (e.g. "**Background:** ", "**Methods:** ")
   cleaned = cleaned.replace(
     /<(?:jats:)?title[^>]*>([\s\S]*?)<\/(?:jats:)?title>/gi,
     (_, title: string) => {
       const cleanTitle = title.trim().replace(/[:.\s]+$/, '');
-      return cleanTitle ? `\n\n${cleanTitle}: ` : '';
+      return cleanTitle ? `\n\n**${cleanTitle}:** ` : '';
     },
   );
   // PubMed structured abstract tags: <AbstractText Label="BACKGROUND">...</AbstractText>
   cleaned = cleaned.replace(
     /<AbstractText\s+[^>]*Label=["']\s*([^"']+?)\s*["'][^>]*>([\s\S]*?)<\/AbstractText>/gi,
     (_, label: string, content: string) =>
-      `\n\n${label.trim()}: ${content.trim()}`,
+      `\n\n**${label.trim()}:** ${content.trim()}`,
   );
   // Unlabeled AbstractText tags become paragraph breaks
   cleaned = cleaned.replace(
     /<AbstractText[^>]*>([\s\S]*?)<\/AbstractText>/gi,
     '\n\n$1',
   );
-  // Clean redundant Markdown bold syntax on section labels (e.g. "**Background:** " -> "Background: ")
-  cleaned = cleaned.replace(/\*\*([A-Za-z0-9\s_-]+?):\*\*/g, '$1:');
   // Convert paragraph break tags to newlines
   cleaned = cleaned.replace(/<\/(?:jats:)?p>/gi, '\n\n');
   cleaned = cleaned.replace(/<(?:jats:)?p[^>]*>/gi, '');

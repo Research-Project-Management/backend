@@ -68,7 +68,9 @@ export class PipelineSideEffectsService {
       const pmid =
         typeof proposedItem.pmid === 'string' ? proposedItem.pmid : undefined;
 
-      const res = await this.retractionScanner.lookup(doi, pmid, options);
+      const res = await this.retractionScanner.lookup(doi, pmid, {
+        localOnly: options?.localOnly ?? true,
+      });
 
       if (res.status === 'retracted' && res.details) {
         proposedItem.isRetracted = true;

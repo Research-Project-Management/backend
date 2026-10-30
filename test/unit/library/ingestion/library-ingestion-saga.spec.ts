@@ -302,6 +302,58 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       );
     });
 
+    it('should execute forward pipeline through exactly 3 macro stages (IDENTIFY -> RESOLVE -> COMMIT)', async () => {
+      const envelope = {
+        userId: 'user-42',
+        payload: { kind: 'IDENTIFIER', value: '10.1038/nature123' } as any,
+      };
+
+      await pipelineService.executePipeline('run-3stages', 'user-42', envelope);
+
+      expect(mockRepo.createStage).toHaveBeenCalledWith(
+        'run-3stages',
+        expect.objectContaining({ stageName: 'IDENTIFY', success: true }),
+      );
+      expect(mockRepo.createStage).toHaveBeenCalledWith(
+        'run-3stages',
+        expect.objectContaining({ stageName: 'RESOLVE', success: true }),
+      );
+      expect(mockRepo.createStage).toHaveBeenCalledWith(
+        'run-3stages',
+        expect.objectContaining({ stageName: 'COMMIT', success: true }),
+      );
+    });
+
+    it('should fast-track EXACT duplicate matches after IDENTIFY without calling ENRICH or RECONCILE', async () => {
+      mockMatch.execute = jest.fn().mockResolvedValue({
+        matchType: 'EXACT',
+        targetItemId: 'existing-item-999',
+      });
+
+      const envelope = {
+        userId: 'user-42',
+        payload: { kind: 'IDENTIFIER', value: '10.1038/nature123' } as any,
+      };
+
+      await pipelineService.executePipeline('run-dup-fasttrack', 'user-42', envelope);
+
+      expect(mockIdentify.execute).toHaveBeenCalled();
+      expect(mockMatch.execute).toHaveBeenCalled();
+      // ENRICH, RECONCILE, and COMMIT must NOT be called for an exact duplicate!
+      expect(mockEnrich.execute).not.toHaveBeenCalled();
+      expect(mockReconcile.execute).not.toHaveBeenCalled();
+      expect(mockCommit.execute).not.toHaveBeenCalled();
+
+      expect(mockRepo.updateRunStatus).toHaveBeenCalledWith(
+        'user-42',
+        'run-dup-fasttrack',
+        IngestionStatus.COMPLETED,
+        expect.objectContaining({
+          itemId: 'existing-item-999',
+        }),
+      );
+    });
+
     it('should trigger Saga compensation and rollback committed item if updateRunStatus fails', async () => {
       mockRepo.updateRunStatus = jest
         .fn()

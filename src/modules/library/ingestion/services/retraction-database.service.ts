@@ -8,6 +8,7 @@ import {
   RetractionSource,
 } from '@/modules/library/ingestion/types/retraction.types';
 import { normalizeDoi, normalizePmid } from '@/modules/library/core';
+import { RetractionBloomFilter } from '../domain/retraction-bloom-filter.domain';
 
 export interface RetractionSeedItem {
   doi: string;
@@ -40,6 +41,8 @@ export class RetractionDatabaseService implements OnModuleInit {
   // Fast In-Memory Indexes for 0ms lookup without DB roundtrip
   private readonly memoryDoiMap = new Map<string, RetractionDetails>();
   private readonly memoryPmidMap = new Map<string, RetractionDetails>();
+  // High-performance Bitwise Bloom Filter (~70 KB RAM for 60,000 DOIs)
+  private readonly bloomFilter = new RetractionBloomFilter(60000, 0.01);
   // Negative cache: DOIs verified as clean within TTL
   private readonly cleanDoiCache = new Map<string, number>();
   private readonly CLEAN_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
@@ -169,6 +172,19 @@ export class RetractionDatabaseService implements OnModuleInit {
         if (r.pmid) this.setMemoryPmid(r.pmid.toLowerCase().trim(), details);
       }
 
+      if (this.repo.findAllRetractionIdentifiersForBloom) {
+        const identifiers = await this.repo.findAllRetractionIdentifiersForBloom();
+        this.bloomFilter.clear();
+        for (const item of identifiers) {
+          if (item.doi) this.bloomFilter.add(item.doi);
+          if (item.pmid) this.bloomFilter.add(item.pmid);
+        }
+        this.bloomFilter.markReady(true);
+        this.logger.log(
+          `Populated Retraction Bloom Filter with ${this.bloomFilter.getItemCount()} identifiers (${Math.round(this.bloomFilter.getMemorySizeBytes() / 1024)} KB RAM).`,
+        );
+      }
+
       this.logger.log(
         `Warmed retraction memory cache (${this.memoryDoiMap.size} DOIs, ${this.memoryPmidMap.size} PMIDs).`,
       );
@@ -201,6 +217,18 @@ export class RetractionDatabaseService implements OnModuleInit {
       const hit = this.memoryPmidMap.get(cleanPmid)!;
       this.setMemoryPmid(cleanPmid, hit);
       return hit;
+    }
+
+    // 1b. Ultra-fast Bloom Filter Pre-Screening (0.001ms, 100% Zero-False-Negative)
+    if (this.bloomFilter.isReady()) {
+      const doiHit = cleanDoi ? this.bloomFilter.contains(cleanDoi) : false;
+      const pmidHit = cleanPmid ? this.bloomFilter.contains(cleanPmid) : false;
+      if (!doiHit && !pmidHit) {
+        if (cleanDoi) {
+          this.setCleanDoiCache(cleanDoi, Date.now() + this.CLEAN_CACHE_TTL_MS);
+        }
+        return false;
+      }
     }
 
     // 2. Negative Cache Check (verified clean within TTL) & L2 Redis synchronization
@@ -456,13 +484,26 @@ export class RetractionDatabaseService implements OnModuleInit {
   }
 
   /**
-   * Returns statistics about the local retraction database and memory index.
+   * Returns statistics about the local retraction database, memory index, and bloom filter.
    */
-  async getDatabaseStats(): Promise<RetractionDatabaseStats> {
+  async getDatabaseStats(): Promise<RetractionDatabaseStats & { bloomFilter?: { isReady: boolean; itemCount: number; memorySizeBytes: number } }> {
     const stats = await this.repo.getDatabaseStats();
     return {
       ...stats,
       inMemoryCached: this.memoryDoiMap.size,
+      bloomFilter: {
+        isReady: this.bloomFilter.isReady(),
+        itemCount: this.bloomFilter.getItemCount(),
+        memorySizeBytes: this.bloomFilter.getMemorySizeBytes(),
+      },
     };
+  }
+
+  addRetractionToBloom(key: string): void {
+    this.bloomFilter.add(key);
+  }
+
+  getBloomFilter(): RetractionBloomFilter {
+    return this.bloomFilter;
   }
 }

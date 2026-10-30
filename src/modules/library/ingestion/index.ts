@@ -14,7 +14,6 @@ export * from './domain/deduplication.domain';
 export * from './domain/metadata.validator';
 export * from './domain/enrichment-patch.builder';
 export * from './domain/duplicate-merge.steps';
-export * from './domain/duplicate-merge.memento';
 export * from './domain/field-reconciliation.strategies';
 
 // DTOs

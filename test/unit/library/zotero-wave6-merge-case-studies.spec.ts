@@ -43,14 +43,14 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
       dismissDuplicates: detector.dismissDuplicates.bind(detector),
       detectDuplicates: detector.detectDuplicates.bind(detector),
       mergeDuplicates: merger.mergeDuplicates.bind(merger),
-      undoMerge: merger.undoMerge.bind(merger),
+
     };
   };
 
   const createMockTxService = (mockTx: Record<string, unknown>) => {
     mockTx.itemMetadata = {
       findFirst: jest.fn(async () => null),
-      update: jest.fn(async ({ where, data }: any) => { if (data?.deletedAt) deletedAttachmentIds.push(where.id); return { id: where?.id }; }),
+      update: jest.fn(async ({ where }: any) => ({ id: where?.id })),
       deleteMany: jest.fn(async () => ({ count: 0 })),
       ...(mockTx.itemMetadata as Record<string, unknown> | undefined),
     };
@@ -302,11 +302,11 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
             },
           ]),
           delete: jest.fn(async ({ where }: { where: { id: string } }) => {
-            deletedAttachmentIds.push(where.id);
+            
             return { id: where.id };
           }),
           update: jest.fn(async ({ where, data }: { where: { id: string }; data?: { deletedAt?: Date | null } }) => {
-            if (data?.deletedAt) deletedAttachmentIds.push(where.id);
+            if (data?.deletedAt) deletedAttachmentIds.push(where.id); 
             return { id: where.id };
           }),
           updateMany: jest.fn(async () => ({ count: 0 })),

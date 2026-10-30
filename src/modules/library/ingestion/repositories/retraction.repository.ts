@@ -568,6 +568,65 @@ export class RetractionRepository {
     });
   }
 
+  async bulkCreateRetractions(
+    records: Prisma.RetractionCreateManyInput[],
+  ): Promise<number> {
+    if (!records.length) return 0;
+    const res = await this.prisma.retraction.createMany({
+      data: records,
+      skipDuplicates: true,
+    });
+    return res.count;
+  }
+
+  /**
+   * Fetches only indexed DOI and PMID columns across all records to populate the In-Memory Bloom Filter.
+   */
+  async findAllRetractionIdentifiersForBloom(): Promise<
+    Array<{ doi: string; pmid: string | null }>
+  > {
+    return this.prisma.retraction.findMany({
+      where: { isRetracted: true },
+      select: {
+        doi: true,
+        pmid: true,
+      },
+    });
+  }
+
+  /**
+   * Delta Set Inverted Lookup: Finds all user library items matching a set of DOIs.
+   */
+  async findItemsByDois(
+    dois: string[],
+  ): Promise<
+    Array<{
+      id: string;
+      userId: string;
+      projectId: string | null;
+      doi: string | null;
+      isRetracted: boolean;
+      retractionNature: string | null;
+    }>
+  > {
+    if (!dois.length) return [];
+    const normalized = Array.from(new Set(dois.map((d) => d.toLowerCase().trim())));
+    return this.prisma.item.findMany({
+      where: {
+        doi: { in: normalized },
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        userId: true,
+        projectId: true,
+        doi: true,
+        isRetracted: true,
+        retractionNature: true,
+      },
+    });
+  }
+
   async getDatabaseStats(): Promise<{
     totalRecords: number;
     retractedCount: number;

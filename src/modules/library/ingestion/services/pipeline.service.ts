@@ -6,6 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
+import { DuplicateMatchResult } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   IdentifyStage,
@@ -42,45 +43,13 @@ import { PipelineBatchExecutor } from './pipeline-batch.executor';
 import { UrlCaptureService } from './url-capture.service';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
-function resolveScope(
-  scopeId: string,
-  envelope: IngestionSubmissionEnvelope,
-): { userId: string; projectId?: string } {
-  const isProject =
-    Boolean(scopeId) &&
-    scopeId !== 'user' &&
-    scopeId !== 'me' &&
-    scopeId !== envelope.userId &&
-    isUUID(scopeId);
-  const userId = envelope.userId || (scopeId !== 'user' ? scopeId : 'system');
-  const projectId = envelope.projectId || (isProject ? scopeId : undefined);
-  return { userId, projectId };
-}
-
-function getSubmissionPayloadLabel(
-  payload: IngestionSubmissionEnvelope['payload'],
-): string | undefined {
-  if ('filename' in payload && payload.filename) return payload.filename;
-  if ('url' in payload && payload.url) return payload.url;
-  if ('value' in payload && payload.value) return payload.value;
-  return undefined;
-}
-
-function getSubmissionPayloadSize(
-  payload: IngestionSubmissionEnvelope['payload'],
-): number {
-  return 'size' in payload && typeof payload.size === 'number' ? payload.size : 0;
-}
-
-function markErrStatusTransitioned(err: unknown): void {
-  if (err && typeof err === 'object') {
-    Object.defineProperty(err, '__runStatusTransitioned', {
-      value: true,
-      enumerable: false,
-      configurable: true,
-    });
-  }
-}
+import {
+  resolveScope,
+  getSubmissionPayloadLabel,
+  getSubmissionPayloadSize,
+  markErrStatusTransitioned,
+  createSingleItemExecutionLog,
+} from './pipeline-scope.helper';
 
 @Injectable()
 export class PipelineService {
@@ -323,20 +292,53 @@ export class PipelineService {
       },
     );
 
-    // Stage 2: ENRICH (Crossref, OpenAlex, PubMed, arXiv)
-    const enrichedCandidates = await session.executeStep(
-      'ENRICH',
+    // =========================================================================
+    // Stage 2: RESOLVE (Unified Deduplication, Authoritative Enrich & Canonical Reconcile)
+    // =========================================================================
+    const uploadedFileIdentifier =
+      envelope.payload.kind === 'FILE' ? envelope.payload.fileId : undefined;
+    const uploadedFilename =
+      envelope.payload.kind === 'FILE'
+        ? envelope.payload.filename || 'document.pdf'
+        : 'document.pdf';
+    const payloadSize = getSubmissionPayloadSize(envelope.payload);
+
+    const resolution = await session.executeStep(
+      'RESOLVE',
       async () => {
-        const results = await this.enrich.execute({
+        const isSingleCandidate =
+          normalizedCandidates.length === 1 &&
+          envelope.payload.kind !== 'RECORD' &&
+          envelope.payload.kind !== 'CONNECTOR';
+
+        // 1. Early Deduplication Check (Fast-path for single item: O(1) in-catalog match)
+        let earlyMatch: DuplicateMatchResult = { matchType: 'NO_MATCH', confidence: 0 };
+        if (isSingleCandidate && normalizedCandidates[0]?.normalizedMetadata) {
+          earlyMatch = await this.match.execute({
+            scope: resolvedScope,
+            proposedItem: normalizedCandidates[0].normalizedMetadata,
+          });
+
+          if (earlyMatch.matchType === 'EXACT' && earlyMatch.targetItemId) {
+            return {
+              isDuplicate: true,
+              isBatch: false,
+              matchResult: earlyMatch,
+              proposedItem: normalizedCandidates[0].normalizedMetadata,
+            };
+          }
+        }
+
+        // 2. Authoritative Single-Hit Enrichment (Only for NEW items)
+        const enriched = await this.enrich.execute({
           scopeId,
           candidates: normalizedCandidates,
         });
 
-        // Resilient URL Fallback: If a URL had a direct identifier (skipping HTML scrape in IDENTIFY)
-        // and external providers failed or returned nothing in ENRICH, fall back to HTML scraping.
+        // Resilient URL Scrape Fallback
         if (
           envelope.payload.kind === 'URL' &&
-          !results.some((c) => c.sourceKind === 'PROVIDER') &&
+          !enriched.some((c) => c.sourceKind === 'PROVIDER') &&
           (!normalizedCandidates[0]?.normalizedMetadata?.title ||
             normalizedCandidates[0]?.normalizedMetadata?.title ===
               'Untitled Document') &&
@@ -348,7 +350,7 @@ export class PipelineService {
               scopeId,
             );
             if (scrapedFallback) {
-              results.push(
+              enriched.push(
                 applyUserOverridesToCandidate(
                   scrapedFallback,
                   sanitizedOverrides,
@@ -361,21 +363,56 @@ export class PipelineService {
           }
         }
 
-        return results;
+        // 3. Multi-Record Batch Ingestion Handling
+        if (
+          (envelope.payload.kind === 'RECORD' ||
+            envelope.payload.kind === 'CONNECTOR') &&
+          normalizedCandidates.length > 1
+        ) {
+          return {
+            isDuplicate: false,
+            isBatch: true,
+            enrichedCandidates: enriched,
+          };
+        }
+
+        // 4. Canonical Reconciliation (Produces field provenance & proposed item)
+        const decision = await this.reconcile.execute(enriched);
+
+        // 5. Secondary Match check if identifier was discovered during enrich/reconcile
+        let finalMatch = earlyMatch;
+        if (
+          earlyMatch.matchType !== 'EXACT' &&
+          decision.proposedItem?.doi &&
+          !normalizedCandidates[0]?.normalizedMetadata?.doi
+        ) {
+          finalMatch = await this.match.execute({
+            scope: resolvedScope,
+            proposedItem: decision.proposedItem,
+          });
+        }
+
+        return {
+          isDuplicate: finalMatch.matchType === 'EXACT',
+          isBatch: false,
+          matchResult: finalMatch,
+          proposedItem: decision.proposedItem,
+          decision,
+          enrichedCandidates: enriched,
+        };
       },
       {
         outputSnapshot: (res) => ({
-          candidateCount: res.length,
+          isDuplicate: res.isDuplicate,
+          isBatch: res.isBatch,
+          matchType: res.matchResult?.matchType,
+          targetItemId: res.matchResult?.targetItemId,
         }),
       },
     );
 
-    // Multi-Record Ingestion Handling (BibTeX / RIS / Connector batches)
-    if (
-      (envelope.payload.kind === 'RECORD' ||
-        envelope.payload.kind === 'CONNECTOR') &&
-      normalizedCandidates.length > 1
-    ) {
+    // Multi-Record Batch Processing
+    if (resolution.isBatch && resolution.enrichedCandidates) {
       await this.batchExecutor.processRecordBatch({
         scopeId,
         runId,
@@ -384,74 +421,53 @@ export class PipelineService {
         aggregate,
         session,
         normalizedCandidates,
-        enrichedCandidates,
+        enrichedCandidates: resolution.enrichedCandidates,
       });
       return;
     }
 
-    // Stage 4: RECONCILE (Field Provenance & Conflict Detection)
-    const decision = await session.executeStep(
-      'RECONCILE',
-      async () => this.reconcile.execute(enrichedCandidates),
-      {
-        outputSnapshot: (res) => ({
-          conflictCount: res.conflicts.length,
-          fieldCount: Object.keys(res.selectedFields).length,
-        }),
-      },
-    );
-
     // Upstream site blocked by WAF / Cloudflare Turnstile
-    if (decision.proposedItem?.extraFields?.ingestionStatus === 'BLOCKED') {
+    if (
+      resolution.decision?.proposedItem?.extraFields?.ingestionStatus ===
+      'BLOCKED'
+    ) {
       const blockedSourceLabel =
         getSubmissionPayloadLabel(envelope.payload) ||
-        decision.proposedItem?.url ||
+        resolution.decision.proposedItem?.url ||
         'Document';
       await this.sideEffects.handleBlockedSubmission({
         scopeId,
         runId,
         envelope,
-        decision,
+        decision: resolution.decision,
         aggregate,
         sourceLabel: blockedSourceLabel,
       });
       return;
     }
 
-    // Stage 5: MATCH (Duplicate Detection)
-    const matchResult = await session.executeStep(
-      'MATCH',
-      async () =>
-        this.match.execute({
-          scope: resolvedScope,
-          proposedItem: decision.proposedItem,
-        }),
-      {
-        outputSnapshot: (res) => res as unknown as Prisma.InputJsonValue,
-      },
-    );
+    const finalFileIdentifier =
+      uploadedFileIdentifier || resolution.proposedItem?.fileId;
+    const finalFilename =
+      uploadedFilename !== 'document.pdf'
+        ? uploadedFilename
+        : resolution.proposedItem?.filename || 'document.pdf';
 
-    const uploadedFileIdentifier =
-      envelope.payload.kind === 'FILE'
-        ? envelope.payload.fileId
-        : decision.proposedItem?.fileId;
-    const uploadedFilename =
-      envelope.payload.kind === 'FILE'
-        ? envelope.payload.filename || 'document.pdf'
-        : decision.proposedItem?.filename || 'document.pdf';
-    const payloadSize = getSubmissionPayloadSize(envelope.payload);
+    const matchResult = resolution.matchResult;
 
-    // EXACT DOI match → Additive metadata enrichment of existing item
-    if (matchResult.matchType === 'EXACT' && matchResult.targetItemId) {
+    // EXACT match → Fast-track additive metadata enrichment & file attachment of existing item
+    if (resolution.isDuplicate && matchResult?.targetItemId) {
       const targetItemId = matchResult.targetItemId;
+      const candidateItem = resolution.proposedItem || {};
+
       await session.executeStep(
         'ENRICH_EXISTING',
         async () => {
-          await this.sideEffects.scanRetraction(decision.proposedItem, {
+          await this.sideEffects.scanRetraction(candidateItem, {
             localOnly: true,
           });
           let patchedFields: string[] = [];
-          if (this.catalogGateway) {
+          if (this.catalogGateway?.getItem) {
             const existing = await this.catalogGateway.getItem(
               resolvedScope.userId,
               targetItemId,
@@ -462,7 +478,7 @@ export class PipelineService {
 
             const enrichPatch = buildEnrichmentPatch(
               existingRec,
-              decision.proposedItem,
+              candidateItem,
             );
             patchedFields = Object.keys(enrichPatch);
 
@@ -486,12 +502,12 @@ export class PipelineService {
               resolvedScope.userId,
               resolvedScope.projectId,
               targetItemId,
-              uploadedFileIdentifier,
-              uploadedFilename,
+              finalFileIdentifier,
+              finalFilename,
               payloadSize,
               {
                 ...(existingRec || {}),
-                ...(decision.proposedItem || {}),
+                ...candidateItem,
               },
             );
 
@@ -506,10 +522,10 @@ export class PipelineService {
                   : undefined,
               proposedItem: {
                 ...(existingRec || {}),
-                ...(decision.proposedItem || {}),
+                ...candidateItem,
               },
               existingFileId:
-                uploadedFileIdentifier ||
+                finalFileIdentifier ||
                 (typeof existingRec?.fileId === 'string'
                   ? existingRec.fileId
                   : undefined),
@@ -520,7 +536,7 @@ export class PipelineService {
               resolvedScope.userId,
               resolvedScope.projectId,
               targetItemId,
-              decision.proposedItem?.notes,
+              candidateItem.notes as Array<string | { content?: string }>,
               existingRec,
             );
 
@@ -538,8 +554,8 @@ export class PipelineService {
 
           const exactSourceLabel =
             getSubmissionPayloadLabel(envelope.payload) ||
-            decision.proposedItem?.filename ||
-            decision.proposedItem?.title ||
+            finalFilename ||
+            candidateItem.title ||
             'Document';
 
           await this.repo.updateRunStatus(
@@ -549,24 +565,12 @@ export class PipelineService {
             {
               itemId: matchResult.targetItemId,
               completedAt: new Date(),
-              executionLog: {
-                total: 1,
-                processed: 1,
-                succeeded: 0,
-                duplicates: 1,
-                failed: 0,
-                percentage: 100,
-                status: 'COMPLETED',
-                currentTitle: decision.proposedItem?.title || 'Document',
-                items: [
-                  {
-                    title: exactSourceLabel,
-                    itemName: decision.proposedItem?.title || 'Document',
-                    status: 'DUPLICATE',
-                    itemId: matchResult.targetItemId,
-                  },
-                ],
-              } as unknown as Prisma.InputJsonValue,
+              executionLog: createSingleItemExecutionLog({
+                sourceLabel: exactSourceLabel,
+                itemTitle: candidateItem.title || 'Document',
+                itemId: matchResult.targetItemId,
+                status: 'DUPLICATE',
+              }),
             },
           );
 
@@ -590,22 +594,27 @@ export class PipelineService {
       return;
     }
 
-    // Retraction Check: Auto-scan against Retraction Watch & Crossref before commit
-    await this.sideEffects.scanRetraction(decision.proposedItem);
+    // =========================================================================
+    // Stage 3: COMMIT (Create New Item via Saga Transaction)
+    // =========================================================================
+    const itemToCommit = resolution.proposedItem || {};
 
-    // Stage 6: COMMIT (Create new Item via CommitStage with Saga Compensation)
+    // Retraction Check: Auto-scan against Retraction Watch & Crossref before commit
+    await this.sideEffects.scanRetraction(itemToCommit);
+
+    // Stage 3: COMMIT (Create new Item via CommitStage with Saga Compensation)
     const createdItem = await session.executeStep(
       'COMMIT',
       async () =>
         this.commit.execute({
           scopeId: resolvedScope.projectId || resolvedScope.userId,
-          item: decision.proposedItem,
+          item: itemToCommit,
           options: {
             collectionIds: envelope.collectionIds,
             tagIds: envelope.tagIds,
             userId: resolvedScope.userId,
             source: this.mapPayloadToSource(envelope.payload.kind),
-            filename: uploadedFilename,
+            filename: finalFilename,
             skipPreMatch: true,
           },
         }),
@@ -617,8 +626,8 @@ export class PipelineService {
               (item as { __wasPreExistingMatch?: boolean } | null | undefined)
                 ?.__wasPreExistingMatch,
             ) ||
-            matchResult.matchType === 'EXACT' ||
-            Boolean(matchResult.targetItemId && item?.id === matchResult.targetItemId);
+            matchResult?.matchType === 'EXACT' ||
+            Boolean(matchResult?.targetItemId && item?.id === matchResult.targetItemId);
           if (item?.id && !wasPreExisting && this.catalogGateway?.deleteItem) {
             this.logger.warn(
               `[SAGA_COMPENSATION] Rolling back committed item ${item.id} for run ${runId}`,
@@ -635,7 +644,7 @@ export class PipelineService {
 
     try {
       // PROBABLE fuzzy match → Non-blocking duplicate suspect review record (after COMMIT succeeds)
-      if (matchResult.matchType === 'PROBABLE' && matchResult.targetItemId) {
+      if (matchResult?.matchType === 'PROBABLE' && matchResult.targetItemId) {
         await this.repo.createReviewCase(resolvedScope, runId, {
           targetItemId: matchResult.targetItemId,
           reason: `Probable match with existing item "${matchResult.targetItemTitle}"`,
@@ -646,7 +655,7 @@ export class PipelineService {
             ...(createdItem?.id ? { createdItemId: createdItem.id } : {}),
           } as unknown as Prisma.InputJsonValue,
           options: {
-            proposedMetadata: decision.proposedItem,
+            proposedMetadata: itemToCommit,
           } as unknown as Prisma.InputJsonValue,
           assignedToId: resolvedScope.userId,
         });
@@ -657,11 +666,11 @@ export class PipelineService {
           resolvedScope.userId,
           resolvedScope.projectId,
           createdItem.id,
-          uploadedFileIdentifier,
-          uploadedFilename,
+          finalFileIdentifier,
+          finalFilename,
           payloadSize,
           {
-            ...(decision.proposedItem || {}),
+            ...(itemToCommit || {}),
             ...(createdItem as unknown as Record<string, unknown>),
           },
         );
@@ -676,10 +685,10 @@ export class PipelineService {
               ? envelope.payload.url
               : undefined,
           proposedItem: {
-            ...(decision.proposedItem || {}),
+            ...(itemToCommit || {}),
             ...(createdItem as unknown as Record<string, unknown>),
           },
-          existingFileId: uploadedFileIdentifier,
+          existingFileId: finalFileIdentifier,
           overrides: envelope.overrides,
         });
 
@@ -687,14 +696,14 @@ export class PipelineService {
           resolvedScope.userId,
           resolvedScope.projectId,
           createdItem.id,
-          decision.proposedItem?.notes,
+          itemToCommit?.notes as Array<string | { content?: string }>,
           createdItem,
         );
       }
 
       const commitSourceLabel =
         getSubmissionPayloadLabel(envelope.payload) ||
-        decision.proposedItem?.filename ||
+        itemToCommit?.filename ||
         createdItem?.title ||
         'Document';
 
@@ -705,24 +714,12 @@ export class PipelineService {
         {
           itemId: createdItem?.id,
           completedAt: new Date(),
-          executionLog: {
-            total: 1,
-            processed: 1,
-            succeeded: 1,
-            duplicates: 0,
-            failed: 0,
-            percentage: 100,
-            status: 'COMPLETED',
-            currentTitle: createdItem?.title || 'Document',
-            items: [
-              {
-                title: commitSourceLabel,
-                itemName: createdItem?.title || 'Document',
-                status: 'SUCCEEDED',
-                itemId: createdItem?.id,
-              },
-            ],
-          } as unknown as Prisma.InputJsonValue,
+          executionLog: createSingleItemExecutionLog({
+            sourceLabel: commitSourceLabel,
+            itemTitle: createdItem?.title || 'Document',
+            itemId: createdItem?.id,
+            status: 'SUCCEEDED',
+          }),
         },
       );
 
