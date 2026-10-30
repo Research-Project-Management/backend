@@ -58,11 +58,26 @@ export class FileTreeBuilder {
       });
     }
 
+    const pathToNodeMap = new Map<string, TreeNode>();
+    for (const node of nodes) {
+      const treeNode = nodeMap.get(node.id)!;
+      pathToNodeMap.set(node.path, treeNode);
+    }
+
     for (const node of nodes) {
       const treeNode = nodeMap.get(node.id)!;
       if (node.parentId && nodeMap.has(node.parentId)) {
         nodeMap.get(node.parentId)!.children.push(treeNode);
       } else {
+        // Resilient fallback: If parentId is missing or corrupt, resolve parent folder via parentPath
+        const parentPath = NodePathVo.dirname(node.path);
+        if (parentPath !== '/' && pathToNodeMap.has(parentPath)) {
+          const parentTreeNode = pathToNodeMap.get(parentPath)!;
+          if (parentTreeNode.type === 'FOLDER') {
+            parentTreeNode.children.push(treeNode);
+            continue;
+          }
+        }
         rootNodes.push(treeNode);
       }
     }

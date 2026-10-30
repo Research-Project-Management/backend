@@ -347,11 +347,14 @@ export class StructureService {
       NodePathVo.validateFilename(NodePathVo.basename(destPath));
       const parentPath = NodePathVo.dirname(destPath);
       if (parentPath !== '/') {
-        const parentNode = await this.repo.findByPath(projectId, parentPath);
-        if (parentNode && !parentNode.isFolder()) {
+        let parentNode = await this.repo.findByPath(projectId, parentPath);
+        if (!parentNode) {
+          parentNode = await this.mkdirpInternal(projectId, parentPath);
+        }
+        if (!parentNode.isFolder()) {
           throw new StructureError('Destination parent must be a FOLDER');
         }
-        newParentId = parentNode ? parentNode.id : null;
+        newParentId = parentNode.id;
       }
     } else {
       destPath = NodePathVo.join('/', targetNode.name);
