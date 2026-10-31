@@ -68,7 +68,7 @@ USER nestjs
 EXPOSE 3013
 
 HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -sf "http://localhost:${PORT:-3013}/status" || exit 1
+  CMD curl -sf "http://127.0.0.1:${PORT:-3013}/status" || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "dist/clsi.js"]
