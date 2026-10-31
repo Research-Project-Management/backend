@@ -71,6 +71,7 @@ export interface LibraryConfig {
   };
   retraction: {
     syncIntervalHours: number;
+    enableGitlabDump: boolean;
   };
   http: {
     defaultTimeoutMs: number;
@@ -180,6 +181,7 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
     retraction: {
       syncIntervalHours:
         Number(process.env.RETRACTION_SYNC_INTERVAL_HOURS) || 12,
+      enableGitlabDump: process.env.ENABLE_RETRACTION_GITLAB_DUMP === 'true',
     },
     http: {
       defaultTimeoutMs: Number(process.env.LIBRARY_HTTP_TIMEOUT_MS) || 10000,
