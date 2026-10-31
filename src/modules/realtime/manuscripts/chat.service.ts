@@ -102,7 +102,6 @@ export class ChatService {
           },
         });
 
-        let creatorId = user.id;
         const userRecord = await this.prisma.user
           .findUnique({
             where: { id: user.id },
@@ -111,15 +110,10 @@ export class ChatService {
           .catch(() => null);
 
         if (!userRecord) {
-          const project = await this.prisma.project
-            .findUnique({
-              where: { id: dto.projectId },
-              select: { createdById: true },
-            })
-            .catch(() => null);
-          if (project?.createdById) {
-            creatorId = project.createdById;
-          }
+          this.logger.warn(
+            `Skipping Prisma persistence for chat message ${message.id}: sender ${user.id} not found`,
+          );
+          return;
         }
 
         if (!conversation) {
@@ -127,9 +121,9 @@ export class ChatService {
             data: {
               type: 'project_channel',
               projectId: dto.projectId,
-              name: 'Project Discussion',
+              name: 'general',
               topic: 'Realtime manuscript discussion channel',
-              createdById: creatorId,
+              createdById: user.id,
               isDefault: true,
               lastMessageAt: new Date(message.createdAt),
               lastMessageSnippet: dto.text.slice(0, 100),
@@ -138,11 +132,30 @@ export class ChatService {
           });
         }
 
+        if (this.prisma.conversationMember?.upsert) {
+          await this.prisma.conversationMember
+            .upsert({
+              where: {
+                conversationId_userId: {
+                  conversationId: conversation.id,
+                  userId: user.id,
+                },
+              },
+              create: {
+                conversationId: conversation.id,
+                userId: user.id,
+                role: 'member',
+              },
+              update: {},
+            })
+            .catch(() => undefined);
+        }
+
         await this.prisma.message.create({
           data: {
             id: message.id,
             conversationId: conversation.id,
-            senderId: userRecord ? user.id : creatorId,
+            senderId: user.id,
             type: 'text',
             content: dto.text,
             replyToId: dto.replyToId ?? null,

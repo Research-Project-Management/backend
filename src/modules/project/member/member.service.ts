@@ -278,7 +278,7 @@ export class MemberService {
 
     this.eventEmitter?.emit(
       'project.member_updated',
-      new DomainActivityEvent({
+      Object.assign(new DomainActivityEvent({
         entityType: 'project' as unknown as EntityType,
         entityId: projectId,
         verb: 'member_updated',
@@ -287,7 +287,7 @@ export class MemberService {
         newValue: dto.role,
         actorId: actorId || '',
         projectId,
-      }),
+      }), { targetUserId, userId: targetUserId, newRole: dto.role }),
     );
 
     await this.identityFacade?.recordAudit({

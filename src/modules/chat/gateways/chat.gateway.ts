@@ -10,9 +10,9 @@ import {
 } from '@nestjs/websockets';
 import { Logger, Injectable } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
-import { WsAuthService } from '@/modules/realtime/core/ws-auth.guard';
-import { createWsConnectionMiddleware } from '@/modules/realtime/core/ws-connection.middleware';
-import { REALTIME_NAMESPACES } from '@/modules/realtime/core/realtime.constant';
+import { WsAuthService, createWsConnectionMiddleware, REALTIME_NAMESPACES } from '@/modules/realtime';
+
+
 import { isOriginAllowed } from '@/core/http/setup/allowed-origins';
 import { ChatService } from '../services/chat.service';
 import { SendMessageDto } from '../dto/send-message.dto';

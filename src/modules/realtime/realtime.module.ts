@@ -1,13 +1,22 @@
 import { Module, Global } from '@nestjs/common';
-import { CoreModule } from './core/core.module';
-import { ManuscriptsModule } from './manuscripts/manuscripts.module';
-import { NotificationsModule } from './notifications/notifications.module';
+import { RealtimeCoreModule } from './core/core.module';
+import { RealtimeManuscriptsModule } from './manuscripts/manuscripts.module';
+import { RealtimeNotificationsModule } from './notifications/notifications.module';
 import { RealtimeFacade } from './realtime.facade';
 
 @Global()
 @Module({
-  imports: [CoreModule, ManuscriptsModule, NotificationsModule],
+  imports: [
+    RealtimeCoreModule,
+    RealtimeManuscriptsModule,
+    RealtimeNotificationsModule,
+  ],
   providers: [RealtimeFacade],
-  exports: [RealtimeFacade, CoreModule, ManuscriptsModule, NotificationsModule],
+  exports: [
+    RealtimeFacade,
+    RealtimeCoreModule,
+    RealtimeManuscriptsModule,
+    RealtimeNotificationsModule,
+  ],
 })
 export class RealtimeModule {}

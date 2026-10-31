@@ -1,6 +1,6 @@
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
@@ -26,8 +26,8 @@ import {
   shouldAutoAdvanceToReading,
   isValidStateTransition,
 } from '@/modules/library/catalog/domain/state.domain';
-import { ReadingStatus } from '@/modules/library/catalog/types/state.types';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { ReadingStatus } from '@/modules/library/catalog/types/catalog.types';
+import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { buildMockLibraryItem } from '@test/factories';
 
 describe('Comprehensive Library End-to-End (E2E) Feature Matrix Simulation', () => {

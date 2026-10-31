@@ -1,6 +1,7 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Socket } from 'socket.io';
+import { IdentityFacade } from '@/modules/identity/identity.facade';
 import { RealtimeConfigService } from './realtime.config';
 import { RealtimeAuthRequiredException } from './ws-errors';
 
@@ -19,6 +20,7 @@ export class WsAuthService implements OnModuleInit {
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: RealtimeConfigService,
+    @Optional() private readonly identityFacade?: IdentityFacade,
   ) {}
 
   public onModuleInit(): void {
@@ -73,11 +75,26 @@ export class WsAuthService implements OnModuleInit {
       );
     }
 
-    const userName = payload.name || payload.email || 'Collaborator';
+    let userName = payload.name || payload.email || 'Collaborator';
+    let userAvatar: string | undefined = payload.avatar || undefined;
+
+    if (this.identityFacade) {
+      const activeUser = await this.identityFacade
+        .validateUser(userId)
+        .catch(() => null);
+      if (!activeUser) {
+        throw new RealtimeAuthRequiredException(
+          'Authentication required: user is inactive or suspended',
+        );
+      }
+      userName = activeUser.name || userName;
+      userAvatar = activeUser.avatar ?? userAvatar;
+    }
 
     return {
       userId,
       name: userName,
+      ...(userAvatar ? { avatar: userAvatar } : {}),
       authenticated: true,
     };
   }

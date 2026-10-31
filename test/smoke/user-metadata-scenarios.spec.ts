@@ -1,6 +1,6 @@
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
 import {
@@ -14,7 +14,7 @@ import {
   normalizePmid,
 } from '@/modules/library/core';
 import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
-import { MetadataReconciliationService } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
+import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { buildMockLibraryItem } from '@test/factories';
 
@@ -23,7 +23,7 @@ describe('🧪 Researcher Persona: Comprehensive Metadata Testing Suite', () => 
   let schemaValidator: ZoteroSchemaValidatorService;
   let itemTransformer: ItemTransformer;
   let cslEngine: CslEngineService;
-  let reconciliationService: MetadataReconciliationService;
+  let reconciliationPolicy: ReconciliationPolicy;
 
   beforeAll(() => {
     typesService = new TypesService();
@@ -31,7 +31,7 @@ describe('🧪 Researcher Persona: Comprehensive Metadata Testing Suite', () => 
     itemTransformer = new ItemTransformer(typesService);
     cslEngine = new CslEngineService();
     cslEngine.initTemplates();
-    reconciliationService = new MetadataReconciliationService();
+    reconciliationPolicy = new ReconciliationPolicy();
   });
 
   // =========================================================================
@@ -423,63 +423,79 @@ describe('🧪 Researcher Persona: Comprehensive Metadata Testing Suite', () => 
   // =========================================================================
   describe('Scenario 7: Multi-Source Reconciliation & Conflict Resolution', () => {
     it('Case 7.1: Higher confidence provider takes precedence on conflicting title', () => {
-      const candidate1: MetadataCandidate = {
-        id: 'cand-1',
+      const candidate1 = {
+        candidateId: 'cand-1',
+        sourceKind: 'PROVIDER' as const,
+        sourceName: 'arXiv',
         sourceProvider: 'arXiv',
         confidenceScore: 0.75,
-        fetchedAt: new Date().toISOString(),
-        metadata: {
+        retrievedAt: new Date().toISOString(),
+        schemaVersion: '1.0.0',
+        fields: {},
+        normalizedMetadata: {
           title: 'Attention Is All You Need (Preliminary Preprint)',
           year: 2017,
         },
-      };
+      } satisfies MetadataCandidate;
 
-      const candidate2: MetadataCandidate = {
-        id: 'cand-2',
+      const candidate2 = {
+        candidateId: 'cand-2',
+        sourceKind: 'PROVIDER' as const,
+        sourceName: 'CrossRef',
         sourceProvider: 'CrossRef',
         confidenceScore: 0.95,
-        fetchedAt: new Date().toISOString(),
-        metadata: {
+        retrievedAt: new Date().toISOString(),
+        schemaVersion: '1.0.0',
+        fields: {},
+        normalizedMetadata: {
           title: 'Attention Is All You Need',
           year: 2017,
           doi: '10.5555/3295222.3295349',
         },
-      };
+      } satisfies MetadataCandidate;
 
-      const result = reconciliationService.reconcile([candidate1, candidate2]);
-      expect(result.metadata.title).toBe('Attention Is All You Need');
-      expect(result.metadata.doi).toBe('10.5555/3295222.3295349');
+      const result = reconciliationPolicy.reconcile([candidate1, candidate2]);
+      expect(result.proposedItem.title).toBe('Attention Is All You Need');
+      expect(result.proposedItem.doi).toBe('10.5555/3295222.3295349');
     });
 
     it('Case 7.2: User explicit override always trumps external provider data', () => {
-      const crossrefCand: MetadataCandidate = {
-        id: 'cand-crossref',
+      const crossrefCand = {
+        candidateId: 'cand-crossref',
+        sourceKind: 'PROVIDER' as const,
+        sourceName: 'CrossRef',
         sourceProvider: 'CrossRef',
         confidenceScore: 0.95,
-        fetchedAt: new Date().toISOString(),
-        metadata: {
+        retrievedAt: new Date().toISOString(),
+        schemaVersion: '1.0.0',
+        fields: {},
+        normalizedMetadata: {
           title: 'Standard CrossRef Title',
           volume: '10',
         },
-      };
+      } satisfies MetadataCandidate;
 
-      const userOverrideCand: MetadataCandidate = {
-        id: 'cand-user',
+      const userOverrideCand = {
+        candidateId: 'cand-user',
+        sourceKind: 'RECORD' as const,
+        sourceName: 'UserOverride',
         sourceProvider: 'UserOverride',
         confidenceScore: 1.0,
-        fetchedAt: new Date().toISOString(),
-        metadata: {
+        retrievedAt: new Date().toISOString(),
+        schemaVersion: '1.0.0',
+        fields: {},
+        normalizedMetadata: {
           title: 'User Customized Curated Title',
         },
-      };
+      } satisfies MetadataCandidate;
 
-      const result = reconciliationService.reconcile([
+      const result = reconciliationPolicy.reconcile([
         crossrefCand,
         userOverrideCand,
       ]);
-      expect(result.metadata.title).toBe('User Customized Curated Title');
+      expect(result.proposedItem.title).toBe('User Customized Curated Title');
       // Non-conflicting fields from CrossRef are still populated
-      expect(result.metadata.volume).toBe('10');
+      expect(result.proposedItem.volume).toBe('10');
     });
   });
 

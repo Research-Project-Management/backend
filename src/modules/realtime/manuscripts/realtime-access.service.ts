@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { AccessService, Role, Permission } from '@/modules/project/access';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { PrismaService, isUuid } from '@/core';
 import { RealtimeConfigService } from '../core/realtime.config';
 import { WsAccessLevel } from '../core/ws-access.decorator';
@@ -29,6 +30,7 @@ export class RealtimeAccessService {
     private readonly accessService: AccessService,
     private readonly prisma: PrismaService,
     private readonly config: RealtimeConfigService,
+    @Optional() private readonly docstoreService?: DocstoreService,
   ) {}
 
   private setCacheEntry(
@@ -207,6 +209,11 @@ export class RealtimeAccessService {
     }
 
     try {
+      if (this.docstoreService) {
+        const doc = await this.docstoreService.getDocById(docId);
+        return Boolean(doc && doc.projectId === projectId);
+      }
+
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: docId },
         select: { projectId: true },

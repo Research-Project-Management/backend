@@ -25,4 +25,5 @@ import { WsRateLimiter } from './ws-rate-limiter';
     WsRateLimiter,
   ],
 })
-export class CoreModule {}
+export class RealtimeCoreModule {}
+export { RealtimeCoreModule as CoreModule };

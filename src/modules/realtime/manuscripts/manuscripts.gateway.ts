@@ -230,9 +230,13 @@ export class ManuscriptsGateway
     }
 
     if (syncYjsLifecycle && this.yjs) {
-      const room = this.server?.sockets?.adapter?.rooms?.get(
-        `doc:${projectId}:${docId}`,
-      );
+      const adapterRooms =
+        (
+          this.server as unknown as {
+            adapter?: { rooms?: Map<string, Set<string>> };
+          }
+        )?.adapter?.rooms ?? this.server?.sockets?.adapter?.rooms;
+      const room = adapterRooms?.get(`doc:${projectId}:${docId}`);
       if (!room || room.size === 0) {
         this.runBackground('evictDoc', projectId, docId, () =>
           this.yjs!.evictDoc(projectId, docId),
@@ -697,11 +701,11 @@ export class ManuscriptsGateway
 
   @WsAccess('member')
   @SubscribeMessage(REALTIME_EVENTS.CHAT_HISTORY)
-  public handleChatHistory(
+  public async handleChatHistory(
     @ConnectedSocket() _client: Socket,
     @MessageBody() dto: ProjectChatHistoryDto,
   ) {
-    const messages = this.chatService.getHistory(dto.projectId);
+    const messages = await this.chatService.getHistoryAsync(dto.projectId);
     return { success: true, messages };
   }
 

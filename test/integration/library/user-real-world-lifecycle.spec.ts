@@ -1,6 +1,6 @@
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
@@ -13,7 +13,7 @@ import {
   normalizeArxivId,
   normalizeIsbn,
 } from '@/modules/library/core';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { buildMockLibraryItem } from '@test/factories';
 
 describe('Real-World User Journey: End-to-End Researcher Lifecycle Simulation', () => {

@@ -201,13 +201,20 @@ services:
   # 5. Common LaTeX Service Interface (CLSI) Microservice
   # ----------------------------------------------------------------------------
   clsi:
+    build:
+      context: .
+      dockerfile: Dockerfile.clsi
+      target: runner
     image: ghcr.io/research-project-management/clsi:latest
     container_name: flux_clsi
     restart: "no"
+    command: ["node", "dist/clsi.js"]
     ports:
       - "127.0.0.1:${CLSI_PORT:-3013}:3013"
     environment:
       PORT: 3013
+      CLSI_PORT: 3013
+      CLSI_SCRATCH_DIR: /tmp/clsi-scratch
     deploy:
       resources:
         limits:

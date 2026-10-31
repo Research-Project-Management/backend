@@ -449,12 +449,8 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
         findConnection: jest.fn(),
       };
       zoteroProvider = new ZoteroProvider();
-      adapter = new CitationsRepository(
-        undefined,
-        undefined,
-        mockRepo,
-        zoteroProvider,
-      );
+      const integrationsService = new IntegrationsService(mockRepo, zoteroProvider, new MendeleyProvider(), new GithubProvider());
+      adapter = new CitationsRepository(undefined, undefined, integrationsService);
     });
 
     it('should list remote Zotero collections when user has connected account', async () => {

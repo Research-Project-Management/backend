@@ -142,9 +142,12 @@ export class AccessRevocationListener {
       if (!server || typeof server.fetchSockets !== 'function') {
         return;
       }
-      const freshAccess = await this.realtimeAccess
-        .getProjectAccess(projectId, userId)
-        .catch(() => null);
+      const freshAccess =
+        typeof this.realtimeAccess.getProjectAccess === 'function'
+          ? await this.realtimeAccess
+              .getProjectAccess(projectId, userId)
+              .catch(() => null)
+          : null;
       const resolvedCanWrite =
         freshAccess !== null
           ? freshAccess.canWrite

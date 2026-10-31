@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
+import { RealtimeCoreModule } from '@/modules/realtime';
 
 // Controllers
 import { ChatController } from './controllers/chat.controller';
@@ -15,10 +15,9 @@ import { ChatCacheService } from './services/chat-cache.service';
 
 // Realtime Gateway
 import { ChatGateway } from './gateways/chat.gateway';
-import { WsAuthService } from '@/modules/realtime/core/ws-auth.guard';
 
 @Module({
-  imports: [ConfigModule, JwtModule.register({})],
+  imports: [ConfigModule, RealtimeCoreModule],
   controllers: [ChatController, ProjectChatController, FriendshipController],
   providers: [
     ChatService,
@@ -26,7 +25,6 @@ import { WsAuthService } from '@/modules/realtime/core/ws-auth.guard';
     FriendshipService,
     ChatCacheService,
     ChatGateway,
-    WsAuthService,
   ],
   exports: [
     ChatService,

@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
-import { CoreModule } from '../core/core.module';
+import { RealtimeCoreModule } from '../core/core.module';
 import { NotificationGateway } from './notifications.gateway';
 
 @Module({
-  imports: [CoreModule],
+  imports: [RealtimeCoreModule],
   providers: [NotificationGateway],
   exports: [NotificationGateway],
 })
-export class NotificationsModule {}
+export class RealtimeNotificationsModule {}
+export { RealtimeNotificationsModule as NotificationsModule };
