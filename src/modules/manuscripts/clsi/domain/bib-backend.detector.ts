@@ -10,7 +10,7 @@ import * as path from 'path';
 export type BibBackend = 'biber' | 'bibtex';
 
 export interface LatexmkrcOptions {
-  engine: 'pdflatex' | 'xelatex' | 'lualatex' | 'tectonic' | 'latex';
+  engine: 'pdflatex' | 'xelatex' | 'lualatex' | 'latex';
   bibBackend: BibBackend;
   shellEscape?: boolean;
 }
@@ -93,21 +93,30 @@ export class BibBackendDetector {
   }
 
   /**
-   * Sanitizes user-supplied .latexmkrc content to prevent Perl RCE and shell-escape overrides.
-   * Strips any line containing Perl execution primitives (`system`, `exec`, `fork`, `open`,
-   * `eval`, `qx`, backticks, `require`, `use `, `unlink`, `syscall`) or attempts to re-enable
-   * `-shell-escape` / `--shell-escape` / `\write18`.
+   * Sanitizes user-supplied .latexmkrc content using a strict declarative allowlist
+   * to prevent Perl RCE and shell-escape overrides.
+   * Only safe numeric/scalar configuration assignments (`$max_repeat`, `$bibtex_use`,
+   * `$clean_ext`, `$out_dir`, `$aux_dir`, `$recorder`, `$silent`, `$quiet`) and
+   * comments are permitted; arbitrary Perl code or command overrides are rejected.
    */
   public static sanitizeUserLatexmkrc(raw: string): string {
-    const dangerousPattern =
-      /(`|\b(?:system|exec|fork|open|sysopen|pipe|eval|qx|require|do|unlink|rmdir|rename|chmod|chown|kill|syscall|socket|connect)\b|--?(?:enable-)?shell-escape|--?enable-write18|\\write18|\buse\s+(?!strict\b|warnings\b|utf8\b)[A-Za-z0-9_:]+)/i;
+    const safeScalarIntPattern =
+      /^\s*\$(?:max_repeat|bibtex_use|recorder|silent|quiet|preview_mode|view)\s*=\s*[0-9]+\s*;\s*(?:#.*)?$/;
+    const safeCleanExtPattern =
+      /^\s*\$clean_ext\s*=\s*['"][a-zA-Z0-9_.\s%-]*['"]\s*;\s*(?:#.*)?$/;
+    const safeUsePragmaPattern =
+      /^\s*use\s+(?:strict|warnings|utf8)\s*;\s*(?:#.*)?$/;
 
     return raw
       .split(/\r?\n/)
       .filter((line) => {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) return true;
-        return !dangerousPattern.test(trimmed);
+        return (
+          safeScalarIntPattern.test(trimmed) ||
+          safeCleanExtPattern.test(trimmed) ||
+          safeUsePragmaPattern.test(trimmed)
+        );
       })
       .join('\n')
       .trim();
@@ -119,11 +128,14 @@ export class BibBackendDetector {
     userCustomContent?: string,
   ): Promise<string> {
     const filePath = path.join(scratchDir, '.latexmkrc');
-    let content = this.generateLatexmkrc(options);
+    const securityConfig = this.generateLatexmkrc(options);
+    let content = securityConfig;
     if (userCustomContent && userCustomContent.trim().length > 0) {
       const sanitized = this.sanitizeUserLatexmkrc(userCustomContent);
       if (sanitized.length > 0) {
-        content = `${content}\n# --- User-Defined .latexmkrc (Overleaf Parity) ---\n${sanitized}\n`;
+        // Place user-defined safe settings BEFORE Flux's mandatory security compiler overrides
+        // so user configuration can never override $pdflatex/$xelatex/$lualatex/-no-shell-escape.
+        content = `# --- User-Defined .latexmkrc (Allowlisted) ---\n${sanitized}\n\n${securityConfig}`;
       }
     }
     await fs.writeFile(filePath, content, 'utf8');

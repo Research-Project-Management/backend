@@ -11,6 +11,8 @@ import { ISyncTexProcessor, SyncPoint, ReverseSyncPoint } from './clsi-ports';
 
 const gunzipAsync = promisify(zlib.gunzip);
 const MAX_CACHE_ENTRIES = 6;
+const MAX_SYNCTEX_DECOMPRESSED_BYTES = 50 * 1024 * 1024; // 50 MB max output to prevent gzip bombs
+const MAX_SYNCTEX_COMPRESSED_BYTES = 15 * 1024 * 1024; // 15 MB max input buffer
 
 export interface SyncTexInputFile {
   tag: number;
@@ -38,17 +40,21 @@ export interface ParsedSyncTexData {
 
 export class SyncTexProcessor implements ISyncTexProcessor {
   private readonly lruCache = new Map<string, ParsedSyncTexData>();
+  private lastRawRef: string | null = null;
+  private lastParsedRef: ParsedSyncTexData | null = null;
 
   private getCacheKey(synctexText: string): string {
-    if (synctexText.length > 2048) {
-      // Fast fingerprint for large synctex texts avoiding expensive full-text sha256 on every lookup
-      const head = synctexText.slice(0, 128);
-      const tail = synctexText.slice(-128);
-      const mid = synctexText.slice(
-        Math.floor(synctexText.length / 2),
-        Math.floor(synctexText.length / 2) + 64,
-      );
-      return `${synctexText.length}:${head}:${mid}:${tail}`;
+    const len = synctexText.length;
+    if (len > 4096) {
+      // Sample 16 evenly-spaced 64-char windows across the entire string plus length
+      // to guarantee sub-millisecond O(1) cache key generation without middle-edit collisions.
+      const step = Math.floor((len - 64) / 15);
+      let acc = `${len}`;
+      for (let i = 0; i < 16; i++) {
+        const offset = Math.min(i * step, len - 64);
+        acc += `:${synctexText.slice(offset, offset + 64)}`;
+      }
+      return crypto.createHash('sha256').update(acc, 'utf8').digest('hex');
     }
     return crypto
       .createHash('sha256')
@@ -57,26 +63,42 @@ export class SyncTexProcessor implements ISyncTexProcessor {
   }
 
   public async decompress(buffer: Buffer): Promise<string> {
-    if (!buffer || buffer.length === 0) return '';
+    if (
+      !buffer ||
+      buffer.length === 0 ||
+      buffer.length > MAX_SYNCTEX_COMPRESSED_BYTES
+    ) {
+      return '';
+    }
     const isGzip =
       buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b;
     if (isGzip) {
       try {
-        const decompressed = await gunzipAsync(buffer);
+        const decompressed = await gunzipAsync(buffer, {
+          maxOutputLength: MAX_SYNCTEX_DECOMPRESSED_BYTES,
+        });
         return decompressed.toString('utf8');
       } catch {
         return '';
       }
     }
+    if (buffer.length > MAX_SYNCTEX_DECOMPRESSED_BYTES) {
+      return '';
+    }
     return buffer.toString('utf8');
   }
 
   public parseRecords(synctexText: string): ParsedSyncTexData {
+    if (this.lastRawRef === synctexText && this.lastParsedRef) {
+      return this.lastParsedRef;
+    }
     const cacheKey = this.getCacheKey(synctexText);
     const existing = this.lruCache.get(cacheKey);
     if (existing) {
       this.lruCache.delete(cacheKey);
       this.lruCache.set(cacheKey, existing);
+      this.lastRawRef = synctexText;
+      this.lastParsedRef = existing;
       return existing;
     }
 
@@ -177,6 +199,8 @@ export class SyncTexProcessor implements ISyncTexProcessor {
       }
     }
     this.lruCache.set(cacheKey, parsed);
+    this.lastRawRef = synctexText;
+    this.lastParsedRef = parsed;
 
     return parsed;
   }

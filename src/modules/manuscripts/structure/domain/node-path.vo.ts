@@ -5,21 +5,26 @@
 
 import { InvalidNodeNameError } from './structure-errors';
 
+export const MAX_VIRTUAL_TREE_DEPTH = 32;
+
+export interface ParsedFolderSegment {
+  readonly name: string;
+  readonly path: string;
+  readonly depth: number;
+}
+
+export interface ParsedNodePath {
+  readonly normalizedPath: string;
+  readonly relativePath: string;
+  readonly leafName: string;
+  readonly parentPath: string;
+  readonly segments: readonly string[];
+  readonly folderSegments: readonly string[];
+  readonly folderChain: readonly ParsedFolderSegment[];
+  readonly depth: number;
+}
+
 export class NodePathVo {
-  private readonly _path: string;
-
-  private constructor(rawPath: string) {
-    this._path = NodePathVo.normalize(rawPath);
-  }
-
-  public static of(rawPath: string): NodePathVo {
-    return new NodePathVo(rawPath);
-  }
-
-  public get value(): string {
-    return this._path;
-  }
-
   /**
    * Normalizes virtual path:
    * - Replaces backslashes with forward slashes
@@ -49,7 +54,120 @@ export class NodePathVo {
     if (cleanSegments.length === 0) {
       return '/';
     }
+    if (cleanSegments.length > MAX_VIRTUAL_TREE_DEPTH) {
+      throw new InvalidNodeNameError(
+        p,
+        `Path exceeds maximum folder depth (${MAX_VIRTUAL_TREE_DEPTH})`,
+      );
+    }
     return '/' + cleanSegments.join('/');
+  }
+
+  /**
+   * Single-pass canonical path parser that validates every segment and precomputes
+   * normalizedPath, relativePath, leafName, parentPath, depth, and folderChain.
+   */
+  public static parse(rawPath: string, fallbackLeaf = ''): ParsedNodePath {
+    const candidate = rawPath && rawPath.trim() !== '' ? rawPath : fallbackLeaf;
+    const normalizedPath = NodePathVo.normalize(candidate);
+    if (normalizedPath === '/') {
+      if (fallbackLeaf) {
+        NodePathVo.validateFilename(fallbackLeaf);
+        return {
+          normalizedPath: `/${fallbackLeaf}`,
+          relativePath: fallbackLeaf,
+          leafName: fallbackLeaf,
+          parentPath: '/',
+          segments: [fallbackLeaf],
+          folderSegments: [],
+          folderChain: [],
+          depth: 1,
+        };
+      }
+      return {
+        normalizedPath: '/',
+        relativePath: '',
+        leafName: '',
+        parentPath: '/',
+        segments: [],
+        folderSegments: [],
+        folderChain: [],
+        depth: 0,
+      };
+    }
+
+    const segments = normalizedPath.slice(1).split('/');
+    for (const seg of segments) {
+      NodePathVo.validateFilename(seg);
+    }
+
+    const leafName = segments[segments.length - 1];
+    const folderSegments = segments.slice(0, -1);
+    const parentPath =
+      folderSegments.length > 0 ? '/' + folderSegments.join('/') : '/';
+
+    const folderChain: ParsedFolderSegment[] = [];
+    let currentFolderPath = '';
+    for (let i = 0; i < folderSegments.length; i++) {
+      const folderName = folderSegments[i];
+      currentFolderPath = `${currentFolderPath}/${folderName}`;
+      folderChain.push({
+        name: folderName,
+        path: currentFolderPath,
+        depth: i + 1,
+      });
+    }
+
+    return {
+      normalizedPath,
+      relativePath: normalizedPath.slice(1),
+      leafName,
+      parentPath,
+      segments,
+      folderSegments,
+      folderChain,
+      depth: segments.length,
+    };
+  }
+
+  /**
+   * Converts a virtual path (e.g. `/chapters/intro.tex` or `./chapters/intro.tex`)
+   * into a clean relative path without leading slashes (`chapters/intro.tex`).
+   */
+  public static toRelative(p: string): string {
+    const norm = NodePathVo.normalize(p);
+    return norm === '/' ? '' : norm.slice(1);
+  }
+
+  /**
+   * Appends a suffix before the file extension (e.g. `intro.tex` + ` (Restored)` -> `intro (Restored).tex`).
+   */
+  public static withSuffixBeforeExt(leafName: string, suffix: string): string {
+    const extIdx = leafName.lastIndexOf('.');
+    const stem = extIdx > 0 ? leafName.slice(0, extIdx) : leafName;
+    const ext = extIdx > 0 ? leafName.slice(extIdx) : '';
+    return `${stem}${suffix}${ext}`;
+  }
+
+  /**
+   * Rebases a descendant path from `sourcePrefixPath` onto `destPrefixPath`.
+   */
+  public static rebase(
+    childPath: string,
+    sourcePrefixPath: string,
+    destPrefixPath: string,
+  ): { path: string; depth: number; relativePath: string } {
+    const normChild = NodePathVo.normalize(childPath);
+    const normSource = NodePathVo.normalize(sourcePrefixPath);
+    const normDest = NodePathVo.normalize(destPrefixPath);
+    const suffix =
+      normChild === normSource ? '' : normChild.substring(normSource.length);
+    const rebased = NodePathVo.normalize(normDest + suffix);
+    return {
+      path: rebased,
+      depth: NodePathVo.depth(rebased),
+      relativePath: NodePathVo.toRelative(rebased),
+    };
   }
 
   public static basename(p: string): string {

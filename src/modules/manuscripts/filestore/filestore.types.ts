@@ -339,18 +339,29 @@ export class ManuscriptFile {
     return new ManuscriptFile(props);
   }
 
-  private static sanitizeFilename(raw: string): string {
+  public static sanitizeFilename(raw: string): string {
     if (!raw || typeof raw !== 'string') {
       throw new FilestoreValidationException(
         'Filename must be a valid non-empty string.',
       );
     }
-    const trimmed = raw.trim();
-    const sanitized = trimmed.replace(/[/\\]/g, '_');
-    if (sanitized.length === 0 || sanitized === '.' || sanitized === '..') {
+    const trimmed = raw.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (trimmed.length === 0 || trimmed === '.' || trimmed === '..') {
       throw new FilestoreValidationException(`Invalid filename: '${raw}'`);
     }
-    return sanitized;
+    // If path contains traversal segments ('..') or empty double-slashes, sanitize slashes to '_'
+    const segments = trimmed.split('/');
+    const hasTraversalOrInvalidSegment = segments.some(
+      (seg) => !seg || seg === '.' || seg === '..' || seg.includes('\u0000') || seg.length > 255,
+    );
+    if (hasTraversalOrInvalidSegment) {
+      const flat = trimmed.replace(/[/\\]/g, '_');
+      if (flat.length === 0 || flat === '.' || flat === '..') {
+        throw new FilestoreValidationException(`Invalid filename: '${raw}'`);
+      }
+      return flat;
+    }
+    return segments.join('/');
   }
 
   public get id(): string {

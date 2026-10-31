@@ -22,8 +22,6 @@ import {
   BadRequestException,
   Logger,
   UseGuards,
-  Inject,
-  forwardRef,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -69,13 +67,10 @@ export class PagesHistoryExportController {
     private readonly userResolver: ManuscriptUserResolverService,
     private readonly pageService: ManuscriptPageService,
     @Optional()
-    @Inject(forwardRef(() => ProjectHistoryService))
     private readonly projectHistoryService?: ProjectHistoryService,
     @Optional()
-    @Inject(forwardRef(() => ProjectHistoryRepository))
     private readonly historyRepo?: ProjectHistoryRepository,
     @Optional()
-    @Inject(forwardRef(() => ExportImportService))
     private readonly exportImportService?: ExportImportService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,

@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
@@ -10,11 +10,7 @@ import { TemplatesRepository } from './templates.repository';
 import { TEMPLATE_REPOSITORY_PORT, PROJECT_INSTANTIATOR_PORT } from './domain';
 
 @Module({
-  imports: [
-    PrismaModule,
-    forwardRef(() => StructureModule),
-    forwardRef(() => DocstoreModule),
-  ],
+  imports: [PrismaModule, StructureModule, DocstoreModule],
   controllers: [TemplatesController],
   providers: [
     TemplatesRepository,

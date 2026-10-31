@@ -7,6 +7,8 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { ManuscriptFile as PrismaManuscriptFile } from '@prisma/client';
 import { PrismaService } from '@/core';
+import { NodePathVo } from '@/modules/manuscripts/structure/domain';
+import { ensurePrismaFolderChain } from '@/modules/manuscripts/structure/structure.repository';
 import {
   IManuscriptFileRepository,
   IBinaryStoragePort,
@@ -214,11 +216,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         return;
       }
 
-      const rawPath = (data.name || 'unnamed.bin')
-        .replace(/\\/g, '/')
-        .replace(/^\/+/, '');
-      const segments = rawPath.split('/').filter(Boolean);
-      const normalizedPath = '/' + segments.join('/');
+      const parsed = NodePathVo.parse(data.name || 'unnamed.bin', 'unnamed.bin');
 
       const existingByFileId = await this.prisma.manuscriptNode.findFirst?.({
         where: {
@@ -233,49 +231,29 @@ export class FilestoreRepository extends IManuscriptFileRepository {
           data: {
             sizeBytes: data.sizeBytes,
             hash: data.hash,
+            ...(existingByFileId.path !== parsed.normalizedPath
+              ? {
+                  name: parsed.leafName,
+                  path: parsed.normalizedPath,
+                  depth: parsed.depth,
+                }
+              : {}),
           },
         });
         return;
       }
 
-      let parentId: string | null = null;
-      if (segments.length > 1) {
-        let currentFolderPath = '';
-        for (let i = 0; i < segments.length - 1; i++) {
-          const folderSegment = segments[i];
-          currentFolderPath = `${currentFolderPath}/${folderSegment}`;
-          let folderNode = await this.prisma.manuscriptNode.findUnique?.({
-            where: {
-              projectId_path: {
-                projectId: data.projectId,
-                path: currentFolderPath,
-              },
-            },
-          });
-          if (!folderNode && this.prisma.manuscriptNode.create) {
-            folderNode = await this.prisma.manuscriptNode.create({
-              data: {
-                projectId: data.projectId,
-                parentId,
-                type: 'FOLDER',
-                name: folderSegment,
-                path: currentFolderPath,
-                depth: i,
-                isRootDoc: false,
-                sizeBytes: 0,
-                sortOrder: 0,
-              },
-            });
-          }
-          parentId = folderNode?.id ?? parentId;
-        }
-      }
+      const parentId = await ensurePrismaFolderChain(
+        this.prisma,
+        data.projectId,
+        parsed.folderChain,
+      );
 
       const existingByPath = await this.prisma.manuscriptNode.findUnique?.({
         where: {
           projectId_path: {
             projectId: data.projectId,
-            path: normalizedPath,
+            path: parsed.normalizedPath,
           },
         },
       });
@@ -300,9 +278,9 @@ export class FilestoreRepository extends IManuscriptFileRepository {
             projectId: data.projectId,
             parentId,
             type: 'FILE',
-            name: segments[segments.length - 1] || 'unnamed.bin',
-            path: normalizedPath,
-            depth: Math.max(0, segments.length - 1),
+            name: parsed.leafName,
+            path: parsed.normalizedPath,
+            depth: parsed.depth,
             fileId: data.id,
             isRootDoc: false,
             sizeBytes: data.sizeBytes,

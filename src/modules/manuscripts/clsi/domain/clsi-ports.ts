@@ -107,6 +107,7 @@ export interface EngineRunResult {
   durationMs: number;
   pdfGenerated: boolean;
   synctexGenerated: boolean;
+  timedOut?: boolean;
   shellEscapeAdvisories?: string[];
 }
 

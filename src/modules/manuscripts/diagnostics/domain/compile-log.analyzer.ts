@@ -1,6 +1,6 @@
 /**
  * modules/manuscripts/diagnostics/domain/compile-log.analyzer.ts
- * Pure domain LaTeX compilation log analyzer (TeX Paren-Tree State Machine + Tectonic parser + Error Knowledge Base).
+ * Pure domain LaTeX compilation log analyzer (TeX Paren-Tree State Machine + Error Knowledge Base).
  * Zero I/O, zero NestJS imports.
  */
 
@@ -372,14 +372,8 @@ export class CompileLogAnalyzer implements ILogParser {
   private static readonly FILE_LINE_ERROR_REGEX =
     /^(\.{0,2}\/?[^\s:!()]+\.(?:tex|bib|sty|cls|dtx|ins)):(\d+):\s*(.+)/i;
 
-  private static readonly TECTONIC_ERROR_REGEX =
-    /^error:\s*(?:([^:\s]+):(\d+):\s*)?(.+)/i;
-
   private static readonly FILE_EXTENSION_REGEX =
     /\.(tex|sty|cls|bib|bbl|aux|toc|lof|lot|out|def|ldf|fd|cfg|dtx|ins)\b/i;
-
-  private static readonly TECTONIC_DIAGNOSTIC_REGEX =
-    /^(error|warning):\s+(?:([^:\s]+):)?(?:(\d+):)?\s*(.+)/i;
 
   private readonly explainer: ErrorExplainerLike;
 
@@ -390,7 +384,7 @@ export class CompileLogAnalyzer implements ILogParser {
   /**
    * Implements `ILogParser.parse()` for CLSI compile pipeline diagnostics.
    * Delegates to the unified TeX paren-tree state machine (`parseTexParenTreeLog`)
-   * so there is a single source of truth for LaTeX/Tectonic log parsing.
+   * so there is a single source of truth for LaTeX log parsing.
    */
   public parse(
     logText: string,
@@ -474,77 +468,19 @@ export class CompileLogAnalyzer implements ILogParser {
   public analyzeLog(
     logText: string,
     defaultFile = 'main.tex',
-    engine = 'pdflatex',
+    _engine = 'pdflatex',
   ): DiagnosticReport {
     if (typeof logText !== 'string' || logText.trim().length === 0) {
       throw new InvalidLogFormatException();
     }
 
     const resolvedDefaultFile = defaultFile || 'main.tex';
-    const isTectonic = engine?.toLowerCase() === 'tectonic';
-
-    let items = isTectonic
-      ? this.parseTectonicLog(logText, resolvedDefaultFile)
-      : this.parseTexParenTreeLog(logText, resolvedDefaultFile);
-
-    if (items.length === 0 && isTectonic) {
-      items = this.parseTexParenTreeLog(logText, resolvedDefaultFile);
-    }
+    const items = this.parseTexParenTreeLog(logText, resolvedDefaultFile);
 
     return new DiagnosticReport({
       items,
       rawLog: logText,
     });
-  }
-
-  public parseTectonicLog(
-    logText: string,
-    defaultFile = 'main.tex',
-  ): DiagnosticItem[] {
-    const diagnostics: DiagnosticItem[] = [];
-    const lines = logText.split('\n');
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]?.trim();
-      if (!line) continue;
-
-      const match = line.match(CompileLogAnalyzer.TECTONIC_DIAGNOSTIC_REGEX);
-      if (match) {
-        const severityType = match[1].toLowerCase();
-        const errorFile = match[2]?.trim() || defaultFile;
-        const errorLine = match[3] ? parseInt(match[3], 10) : null;
-        const message = match[4].trim();
-
-        const context = lines
-          .slice(i, Math.min(i + 3, lines.length))
-          .join('\n');
-        const explanation =
-          this.explainer?.explain(message, context) || undefined;
-
-        let severity: DiagnosticSeverityVo;
-        if (severityType === 'error') {
-          severity = DiagnosticSeverityVo.error();
-        } else if (severityType === 'warning') {
-          severity = DiagnosticSeverityVo.warning();
-        } else {
-          severity = DiagnosticSeverityVo.info();
-        }
-
-        diagnostics.push(
-          new DiagnosticItem({
-            file: errorFile,
-            line: errorLine,
-            severity,
-            message,
-            context,
-            code: explanation?.code,
-            explanation,
-          }),
-        );
-      }
-    }
-
-    return diagnostics;
   }
 
   public parseTexParenTreeLog(
@@ -608,7 +544,6 @@ export class CompileLogAnalyzer implements ILogParser {
 
       const isDiagnosticLine =
         CompileLogAnalyzer.FILE_LINE_ERROR_REGEX.test(line) ||
-        CompileLogAnalyzer.TECTONIC_ERROR_REGEX.test(line) ||
         line.startsWith('!') ||
         CompileLogAnalyzer.LATEX_WARNING_REGEX.test(line) ||
         CompileLogAnalyzer.BADBOX_REGEX.test(line);
@@ -627,34 +562,6 @@ export class CompileLogAnalyzer implements ILogParser {
         );
         const errorLine = parseInt(fleMatch[2], 10);
         const rawMessage = fleMatch[3].trim();
-        const context = lines
-          .slice(i, Math.min(i + 3, lines.length))
-          .join('\n');
-        const explanation =
-          this.explainer?.explain(rawMessage, context) || undefined;
-
-        diagnostics.push(
-          new DiagnosticItem({
-            file: errorFile,
-            line: errorLine,
-            severity: DiagnosticSeverityVo.error(),
-            message: rawMessage,
-            context,
-            code: explanation?.code,
-            explanation,
-          }),
-        );
-        if (isDiagnosticLine) scanParensLeftToRight(cleanedLine);
-        continue;
-      }
-
-      const tectonicMatch = line.match(CompileLogAnalyzer.TECTONIC_ERROR_REGEX);
-      if (tectonicMatch && tectonicMatch[3]) {
-        const errorFile = tectonicMatch[1]?.trim() || currentFile;
-        const errorLine = tectonicMatch[2]
-          ? parseInt(tectonicMatch[2], 10)
-          : null;
-        const rawMessage = tectonicMatch[3].trim();
         const context = lines
           .slice(i, Math.min(i + 3, lines.length))
           .join('\n');
@@ -730,6 +637,7 @@ export class CompileLogAnalyzer implements ILogParser {
         while (
           j < lines.length &&
           lines[j] &&
+          (/^\s{2,}/.test(lines[j]) || /^\([a-zA-Z0-9_-]+\)\s/.test(lines[j])) &&
           !lines[j].startsWith('!') &&
           !lines[j].match(CompileLogAnalyzer.LATEX_WARNING_REGEX) &&
           !lines[j].match(CompileLogAnalyzer.BADBOX_REGEX) &&
@@ -742,6 +650,9 @@ export class CompileLogAnalyzer implements ILogParser {
           }
           warnMsg += ' ' + nextL;
           context += '\n' + lines[j];
+          scanParensLeftToRight(
+            CompileLogAnalyzer.cleanNonFileParens(lines[j]),
+          );
           j++;
           i = j - 1;
         }
@@ -761,6 +672,44 @@ export class CompileLogAnalyzer implements ILogParser {
           }),
         );
         if (isDiagnosticLine) scanParensLeftToRight(cleanedLine);
+        continue;
+      }
+
+      // BibTeX / Biber warnings and errors
+      const bibErrorMatch = line.match(
+        /^(?:ERROR - BibTeX subsystem:\s*(.+)|I found no \\(?:citation|bibdata|bibstyle) commands---while reading file\s+(.+)|.*---line\s+(\d+)\s+of file\s+([^\s]+))/i,
+      );
+      if (bibErrorMatch) {
+        const bibLine = bibErrorMatch[3]
+          ? parseInt(bibErrorMatch[3], 10)
+          : null;
+        const bibFile = bibErrorMatch[4]
+          ? this.normalizeFilePath(bibErrorMatch[4], defaultFile)
+          : currentFile;
+        diagnostics.push(
+          new DiagnosticItem({
+            file: bibFile,
+            line: bibLine,
+            severity: DiagnosticSeverityVo.error(),
+            message: line.trim(),
+            context: line,
+          }),
+        );
+        if (isDiagnosticLine) scanParensLeftToRight(cleanedLine);
+        continue;
+      }
+
+      const biberWarnMatch = line.match(/^WARN - (.+)$/);
+      if (biberWarnMatch && biberWarnMatch[1]) {
+        diagnostics.push(
+          new DiagnosticItem({
+            file: currentFile,
+            line: null,
+            severity: DiagnosticSeverityVo.warning(),
+            message: `Biber Warning: ${biberWarnMatch[1].trim()}`,
+            context: line,
+          }),
+        );
         continue;
       }
 
@@ -791,10 +740,15 @@ export class CompileLogAnalyzer implements ILogParser {
   }
 
   private static cleanNonFileParens(line: string): string {
+    if (line.length > 8192) {
+      return line.slice(0, 8192);
+    }
     let result = line;
     let prev = '';
-    while (result !== prev) {
+    let iterations = 0;
+    while (result !== prev && iterations < 8) {
       prev = result;
+      iterations++;
       result = result.replace(/\(([^()]*)\)/g, (fullMatch, content) => {
         if (CompileLogAnalyzer.FILE_EXTENSION_REGEX.test(content)) {
           return fullMatch;

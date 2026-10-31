@@ -168,13 +168,30 @@ describe('Manuscripts P0/P1 Security, Data Integrity & Concurrency Regression Su
 
       await repo.save(entity);
 
-      expect(createdNodes).toHaveLength(1);
+      expect(createdNodes).toHaveLength(3);
       expect(createdNodes[0]).toMatchObject({
         projectId: 'proj-uuid-001',
-        type: 'FILE',
-        name: 'figures_plots_result.png',
-        path: '/figures_plots_result.png',
+        type: 'FOLDER',
+        name: 'figures',
+        path: '/figures',
         parentId: null,
+        depth: 1,
+      });
+      expect(createdNodes[1]).toMatchObject({
+        projectId: 'proj-uuid-001',
+        type: 'FOLDER',
+        name: 'plots',
+        path: '/figures/plots',
+        parentId: 'node-1',
+        depth: 2,
+      });
+      expect(createdNodes[2]).toMatchObject({
+        projectId: 'proj-uuid-001',
+        type: 'FILE',
+        name: 'result.png',
+        path: '/figures/plots/result.png',
+        parentId: 'node-2',
+        depth: 3,
         fileId: 'file-uuid-001',
         sizeBytes: 4096,
         hash: validHash,
@@ -428,6 +445,10 @@ describe('Manuscripts P0/P1 Security, Data Integrity & Concurrency Regression Su
           0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
         ]);
         await fs.writeFile(path.join(tmpScratch, 'figure.png'), pngBytes);
+        await fs.writeFile(
+          path.join(tmpScratch, '.clsi-manifest.json'),
+          JSON.stringify({ files: { 'figure.png': 'hash-v1' } }),
+        );
 
         const mockPrisma: any = {
           manuscriptDoc: {

@@ -6,7 +6,7 @@
 
 import { DraftModeManager } from './draft-mode.manager';
 
-export type SupportedEngine = 'pdflatex' | 'xelatex' | 'lualatex' | 'tectonic';
+export type SupportedEngine = 'pdflatex' | 'xelatex' | 'lualatex';
 
 export interface EngineDetectionResult {
   engine: SupportedEngine;
@@ -40,8 +40,7 @@ export class TexEngineDetector {
       if (
         normalized === 'pdflatex' ||
         normalized === 'xelatex' ||
-        normalized === 'lualatex' ||
-        normalized === 'tectonic'
+        normalized === 'lualatex'
       ) {
         return {
           engine: normalized,
@@ -72,8 +71,6 @@ export class TexEngineDetector {
         magicEngine = 'lualatex';
       } else if (prog === 'pdflatex' || prog === 'pdftex') {
         magicEngine = 'pdflatex';
-      } else if (prog === 'tectonic') {
-        magicEngine = 'tectonic';
       }
     }
 

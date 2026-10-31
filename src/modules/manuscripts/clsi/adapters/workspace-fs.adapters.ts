@@ -7,6 +7,7 @@
  * - createZipStreamFromDisk (PKZIP disk artifact stream helper)
  */
 
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -25,12 +26,13 @@ export interface LockOptions {
   intervalMs?: number;
   maxWaitMs?: number;
   staleMs?: number;
+  signal?: AbortSignal;
 }
 
 export class ProjectLockManager {
   private static readonly LOCK_FILENAME = '.project-lock';
-  private static readonly DEFAULT_INTERVAL_MS = 100;
-  private static readonly DEFAULT_MAX_WAIT_MS = 15000;
+  private static readonly DEFAULT_INTERVAL_MS = 50;
+  private static readonly DEFAULT_MAX_WAIT_MS = 30000;
   private static readonly DEFAULT_STALE_MS = 5 * 60 * 1000;
 
   public async runWithLock<T>(
@@ -57,15 +59,22 @@ export class ProjectLockManager {
     const maxWait =
       options?.maxWaitMs ?? ProjectLockManager.DEFAULT_MAX_WAIT_MS;
     const staleMs = options?.staleMs ?? ProjectLockManager.DEFAULT_STALE_MS;
+    const signal = options?.signal;
 
     const lockPath = path.join(scratchDir, ProjectLockManager.LOCK_FILENAME);
     const startTime = Date.now();
+    const lockToken = crypto.randomUUID();
 
     while (Date.now() - startTime < maxWait) {
+      if (signal?.aborted) {
+        throw new Error(`Project lock acquisition aborted for "${projectId}"`);
+      }
+
       try {
         const lockInfo = JSON.stringify({
           projectId,
           pid: process.pid,
+          token: lockToken,
           acquiredAt: new Date().toISOString(),
           timestamp: Date.now(),
         });
@@ -73,7 +82,11 @@ export class ProjectLockManager {
 
         return async () => {
           try {
-            await fs.unlink(lockPath);
+            const raw = await fs.readFile(lockPath, 'utf8');
+            const parsed = JSON.parse(raw) as { token?: string };
+            if (!parsed.token || parsed.token === lockToken) {
+              await fs.unlink(lockPath);
+            }
           } catch {
             // Lockfile may have already been cleaned
           }
@@ -89,7 +102,9 @@ export class ProjectLockManager {
             const stat = await fs.stat(lockPath);
             const age = Date.now() - stat.mtimeMs;
             if (age > staleMs) {
-              await fs.unlink(lockPath);
+              const staleRename = `${lockPath}.stale.${process.pid}.${Date.now()}`;
+              await fs.rename(lockPath, staleRename).catch(() => {});
+              await fs.unlink(staleRename).catch(() => {});
               continue;
             }
           } catch {
@@ -375,12 +390,17 @@ export class OverleafOutputFileFinder implements IOutputFileFinder {
 
       const fullPath = path.join(currentDir, entry.name);
 
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+
       if (entry.isDirectory()) {
         await this.scanDir(baseDir, entryRelPath, inputSet, results);
       } else if (entry.isFile()) {
         if (!inputSet.has(entryRelPath)) {
           try {
-            const stat = await fs.stat(fullPath);
+            const stat = await fs.lstat(fullPath);
+            if (stat.isSymbolicLink() || !stat.isFile()) continue;
             results.push({
               path: entryRelPath,
               size: stat.size,
@@ -416,6 +436,10 @@ export function createZipStreamFromDisk(files: ZipDiskEntry[]): Readable {
     date: entry.date,
     getData: async () => {
       try {
+        const stat = await fs.lstat(entry.fullPath);
+        if (stat.isSymbolicLink() || !stat.isFile()) {
+          return null;
+        }
         return await fs.readFile(entry.fullPath);
       } catch {
         return null;

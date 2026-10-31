@@ -10,7 +10,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '@/core';
+import { PrismaService, mapWithConcurrency } from '@/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
@@ -197,16 +197,22 @@ export class ClsiWorkspacePlannerService {
 
     if (this.prisma && this.filestoreService && projectId !== 'default') {
       try {
-        const [binaryFiles, fileNodes] = await Promise.all([
-          this.prisma.manuscriptFile.findMany({
-            where: { projectId, deleted: false, deletedAt: null },
-            select: { id: true, name: true, sizeBytes: true, hash: true },
-          }),
-          this.prisma.manuscriptNode.findMany({
-            where: { projectId, type: 'FILE' },
-            select: { fileId: true, path: true, name: true },
-          }),
-        ]);
+        const [binaryFiles, fileNodes] =
+          plan.binaryFiles && plan.nodes
+            ? [
+                plan.binaryFiles,
+                plan.nodes.filter((n) => n.type === 'FILE'),
+              ]
+            : await Promise.all([
+                this.prisma.manuscriptFile.findMany({
+                  where: { projectId, deleted: false, deletedAt: null },
+                  select: { id: true, name: true, sizeBytes: true, hash: true },
+                }),
+                this.prisma.manuscriptNode.findMany({
+                  where: { projectId, type: 'FILE' },
+                  select: { fileId: true, path: true, name: true },
+                }),
+              ]);
 
         const pathByFileId = new Map<string, string>();
         for (const n of fileNodes) {
@@ -222,7 +228,23 @@ export class ClsiWorkspacePlannerService {
 
         const scratchDir = this.workspace?.getScratchDir(projectId);
 
-        for (const bf of binaryFiles) {
+        let manifestFiles: Record<string, string> = {};
+        if (scratchDir) {
+          try {
+            const rawManifest = await fs.readFile(
+              path.join(scratchDir, '.clsi-manifest.json'),
+              'utf8',
+            );
+            const parsed = JSON.parse(rawManifest) as {
+              files?: Record<string, string>;
+            };
+            manifestFiles = parsed.files || {};
+          } catch {
+            manifestFiles = {};
+          }
+        }
+
+        await mapWithConcurrency(binaryFiles, 8, async (bf) => {
           const relPath =
             pathByFileId.get(bf.id) ||
             bf.name
@@ -230,21 +252,28 @@ export class ClsiWorkspacePlannerService {
               .replace(/\\/g, '/')
               .replace(/^(\.\/)+/, '')
               .replace(/^\/+/, '');
-          if (!relPath || out[relPath] !== undefined) continue;
+          if (!relPath || out[relPath] !== undefined) return;
 
-          // Disk-cache hit optimization: if workspace already has the exact asset on disk,
-          // read it directly from local scratch disk so syncFiles retains it in the manifest
-          // without re-streaming from remote object storage.
+          // Disk-cache hit optimization: if workspace already has the exact asset on disk
+          // matching both sizeBytes and hash, read from local disk instead of remote storage.
           if (scratchDir) {
             try {
-              const localAssetPath = SafePath.resolveSafePath(
+              const localAssetPath = await SafePath.assertSafeWorkspacePath(
                 scratchDir,
                 relPath,
               );
-              const stat = await fs.stat(localAssetPath);
-              if (bf.sizeBytes && stat.size === bf.sizeBytes) {
+              const stat = await fs.lstat(localAssetPath);
+              const hashMatches =
+                !bf.hash || manifestFiles[relPath] === bf.hash;
+              if (
+                !stat.isSymbolicLink() &&
+                stat.isFile() &&
+                bf.sizeBytes &&
+                stat.size === bf.sizeBytes &&
+                hashMatches
+              ) {
                 out[relPath] = await fs.readFile(localAssetPath);
-                continue;
+                return;
               }
             } catch {
               // Asset not present on disk or unsafe path, proceed with stream fetch
@@ -252,7 +281,7 @@ export class ClsiWorkspacePlannerService {
           }
 
           try {
-            const { stream } = await this.filestoreService.openReadStream(
+            const { stream } = await this.filestoreService!.openReadStream(
               projectId,
               bf.id,
             );
@@ -278,7 +307,7 @@ export class ClsiWorkspacePlannerService {
               );
             }
           }
-        }
+        });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
@@ -298,6 +327,7 @@ export class ClsiWorkspacePlannerService {
     mergedFiles: Record<string, string | Buffer>,
     metricEngine: string,
     userId?: string,
+    plan?: PlannedFileSet,
   ): Promise<void> {
     if (!this.prisma || !projectId || projectId === 'default') return;
 
@@ -311,22 +341,26 @@ export class ClsiWorkspacePlannerService {
           orderBy: { version: 'desc' },
           select: { version: true },
         }),
-        this.prisma.manuscriptDoc?.findMany
-          ? this.prisma.manuscriptDoc
-              .findMany({
-                where: { projectId, deleted: false },
-                select: { id: true, path: true },
-              })
-              .catch(() => [])
-          : Promise.resolve([]),
-        this.prisma.manuscriptNode?.findMany
-          ? this.prisma.manuscriptNode
-              .findMany({
-                where: { projectId },
-                select: { docId: true, path: true, isRootDoc: true },
-              })
-              .catch(() => [])
-          : Promise.resolve([]),
+        plan?.docs
+          ? Promise.resolve(plan.docs)
+          : this.prisma.manuscriptDoc?.findMany
+            ? this.prisma.manuscriptDoc
+                .findMany({
+                  where: { projectId, deleted: false },
+                  select: { id: true, path: true },
+                })
+                .catch(() => [])
+            : Promise.resolve([]),
+        plan?.nodes
+          ? Promise.resolve(plan.nodes)
+          : this.prisma.manuscriptNode?.findMany
+            ? this.prisma.manuscriptNode
+                .findMany({
+                  where: { projectId },
+                  select: { docId: true, path: true, isRootDoc: true },
+                })
+                .catch(() => [])
+            : Promise.resolve([]),
       ]);
 
       const docIdByNormalizedPath = new Map<string, string>();

@@ -56,6 +56,32 @@ export class LinkedFilesService {
     private readonly domainEventBus?: ManuscriptDomainEventBus,
   ) {
     this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
+    this.domainEventBus?.subscribe(
+      'manuscript.nodes.deleted',
+      async (event) => {
+        if (event.type !== 'manuscript.nodes.deleted' || !event.projectId || !this.repository) {
+          return;
+        }
+        const deletedDocIds = new Set(event.deletedDocIds ?? []);
+        const deletedFileIds = new Set(event.deletedFileIds ?? []);
+        if (deletedDocIds.size === 0 && deletedFileIds.size === 0) {
+          return;
+        }
+        try {
+          const linkedList = await this.repository.findByProject(event.projectId);
+          for (const linked of linkedList) {
+            if (
+              (linked.docId && deletedDocIds.has(linked.docId)) ||
+              (linked.fileId && deletedFileIds.has(linked.fileId))
+            ) {
+              await this.repository.delete(event.projectId, linked.id);
+            }
+          }
+        } catch {
+          // Ignore cleanup errors
+        }
+      },
+    );
   }
 
   private broadcastFileTreeChange(
@@ -76,6 +102,14 @@ export class LinkedFilesService {
     const filename = dto.name.trim();
     if (!filename) {
       throw new BadRequestException('Linked file name is required');
+    }
+    if (
+      filename.includes('..') ||
+      filename.includes('/') ||
+      filename.includes('\\') ||
+      /[\x00-\x1f\x7f]/.test(filename)
+    ) {
+      throw new BadRequestException('Invalid linked file name');
     }
 
     const linkedFileId = randomUUID();

@@ -36,6 +36,8 @@ export class Watchdog {
   private killTimer: NodeJS.Timeout | null = null;
   private aborted = false;
   private abortReason?: string;
+  private signal?: AbortSignal;
+  private onSignalAbort?: () => void;
 
   constructor(
     private readonly child: ChildProcess,
@@ -49,7 +51,9 @@ export class Watchdog {
         this.terminate('ABORTED_IMMEDIATELY');
         return;
       }
-      signal.addEventListener('abort', () => this.terminate('SIGNAL_ABORTED'), {
+      this.signal = signal;
+      this.onSignalAbort = () => this.terminate('SIGNAL_ABORTED');
+      signal.addEventListener('abort', this.onSignalAbort, {
         once: true,
       });
     }
@@ -60,6 +64,11 @@ export class Watchdog {
   }
 
   public disarm(): void {
+    if (this.signal && this.onSignalAbort) {
+      this.signal.removeEventListener('abort', this.onSignalAbort);
+      this.signal = undefined;
+      this.onSignalAbort = undefined;
+    }
     if (this.timeoutTimer) {
       clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;

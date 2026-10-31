@@ -8,6 +8,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { escapeLatex } from '@/modules/manuscripts/core';
 import { DocstoreService } from '../docstore.service';
+import { resolveProjectLabels } from '../controllers/pages-doc.helpers';
 
 export interface CreateProjectPageParams {
   title?: string;
@@ -213,6 +214,7 @@ export class ManuscriptProjectBootstrapService {
             projectId,
             name: 'references.bib',
             path: bibPath,
+            depth: 1,
             type: 'DOC',
             docId: createdDoc._id,
             isRootDoc: false,
@@ -243,35 +245,11 @@ export class ManuscriptProjectBootstrapService {
         ? body.labelIds
         : [];
 
-    let attachedLabels: { id: string; name: string; color: string }[] = [];
-    if (labelIds.length > 0) {
-      try {
-        const found = await this.prisma.label.findMany({
-          where: {
-            id: { in: labelIds },
-            projects: { some: { projectId } },
-          },
-        });
-        if (found.length > 0) {
-          attachedLabels = found.map((l) => ({
-            id: l.id,
-            name: l.name,
-            color: l.color,
-          }));
-        } else {
-          const foundWork = await this.prisma.workItemLabel.findMany({
-            where: { id: { in: labelIds }, projectId },
-          });
-          attachedLabels = foundWork.map((l) => ({
-            id: l.id,
-            name: l.name,
-            color: l.color,
-          }));
-        }
-      } catch {
-        // Fallback silently if labels query fails
-      }
-    }
+    const attachedLabels = await resolveProjectLabels(
+      this.prisma,
+      projectId,
+      labelIds,
+    );
 
     if (!isUuid(projectId)) {
       throw new BadRequestException(
@@ -362,6 +340,7 @@ export class ManuscriptProjectBootstrapService {
         projectId,
         name: targetName,
         path: targetPath,
+        depth: 1,
         type: 'DOC',
         docId: doc._id,
         isRootDoc,

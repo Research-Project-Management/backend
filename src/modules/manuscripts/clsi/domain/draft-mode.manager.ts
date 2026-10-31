@@ -15,7 +15,7 @@ export interface DraftModeApplication {
 
 export class DraftModeManager {
   private static readonly GRAPHICX_DRAFT_INJECTION =
-    '\\PassOptionsToPackage{draft}{graphicx} % Injected by Flux CLSI Draft Mode\n';
+    '\\PassOptionsToPackage{draft}{graphicx}';
 
   public static apply(
     source: string,

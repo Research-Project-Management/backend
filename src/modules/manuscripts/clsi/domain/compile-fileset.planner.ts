@@ -60,6 +60,10 @@ export interface PlannedFileSet {
   fingerprint: string;
   /** True when the entry file is known to have content. */
   hasMainContent: boolean;
+  /** Cached metadata from DB planning to avoid redundant DB queries during hydration/snapshots. */
+  nodes?: ManifestNode[];
+  docs?: ManifestDoc[];
+  binaryFiles?: ManifestFile[];
 }
 
 const sha256 = (s: string) =>
@@ -146,7 +150,9 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
   for (const doc of docs) {
     const cleanPath = sanitizeRelativePath(doc.path || '');
     if (cleanPath && !files.has(cleanPath)) files.set(cleanPath, dbSource(doc));
-    idToPath.set(doc.id, cleanPath);
+    if (cleanPath && !idToPath.has(doc.id)) {
+      idToPath.set(doc.id, cleanPath);
+    }
   }
 
   // Client-side buffers (unsaved edits) take precedence over persisted content.
@@ -206,6 +212,9 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
     files,
     fingerprint: fingerprintFileSet(files, binaryTokens),
     hasMainContent: !isEmpty(files.get(mainFile)),
+    nodes,
+    docs,
+    binaryFiles: input.binaryFiles,
   };
 }
 

@@ -21,7 +21,6 @@ export class ClsiMetrics {
     'lualatex',
     'latexmk',
     'latex',
-    'tectonic',
     'other',
   ]);
 

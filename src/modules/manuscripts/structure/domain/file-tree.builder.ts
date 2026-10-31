@@ -4,30 +4,15 @@
  * detecting root compilation documents (Overleaf _rootDocSort), and validating path rules.
  */
 
-import { ManuscriptNodeEntity } from './manuscript-node.entity';
-import { NodePathVo } from './node-path.vo';
 import {
-  CannotDeleteRootFolderError,
-  CyclicMoveError,
-  MaxProjectFilesExceededError,
-} from './structure-errors';
+  ManuscriptNodeEntity,
+  SerializedTreeNode,
+} from './manuscript-node.entity';
+import { NodePathVo } from './node-path.vo';
+import { MaxProjectFilesExceededError } from './structure-errors';
 
-export interface TreeNode {
-  id: string;
-  name: string;
-  path: string;
-  type: 'FOLDER' | 'DOC' | 'FILE';
-  depth: number;
-  isRootDoc: boolean;
-  docId?: string | null;
-  fileId?: string | null;
-  sizeBytes: number;
-  hash?: string | null;
-  sortOrder: number;
-  children: TreeNode[];
-}
+export type TreeNode = SerializedTreeNode;
 
-const VALID_ROOT_EXTENSIONS = ['.tex', '.rtex', '.rnw'];
 export const DEFAULT_MAX_PROJECT_FILES = 2000;
 
 export class FileTreeBuilder {
@@ -39,41 +24,46 @@ export class FileTreeBuilder {
     nodes: readonly ManuscriptNodeEntity[],
   ): TreeNode[] {
     const nodeMap = new Map<string, TreeNode>();
+    const pathToNodeMap = new Map<string, TreeNode>();
+    const parentLookup = new Map<string, string | null>();
     const rootNodes: TreeNode[] = [];
 
     for (const node of nodes) {
-      nodeMap.set(node.id, {
-        id: node.id,
-        name: node.name,
-        path: node.path,
-        type: node.type,
-        depth: node.depth,
-        isRootDoc: node.isRootDoc,
-        docId: node.docId,
-        fileId: node.fileId,
-        sizeBytes: node.sizeBytes,
-        hash: node.hash,
-        sortOrder: node.sortOrder,
-        children: [],
-      });
-    }
-
-    const pathToNodeMap = new Map<string, TreeNode>();
-    for (const node of nodes) {
-      const treeNode = nodeMap.get(node.id)!;
+      const treeNode = node.toTreeNode();
+      nodeMap.set(node.id, treeNode);
       pathToNodeMap.set(node.path, treeNode);
+      parentLookup.set(node.id, node.parentId ?? null);
     }
+
+    const hasParentCycle = (startId: string, candidateParentId: string): boolean => {
+      const visited = new Set<string>([startId]);
+      let curr: string | null | undefined = candidateParentId;
+      while (curr) {
+        if (visited.has(curr)) return true;
+        visited.add(curr);
+        curr = parentLookup.get(curr) ?? null;
+      }
+      return false;
+    };
 
     for (const node of nodes) {
       const treeNode = nodeMap.get(node.id)!;
-      if (node.parentId && nodeMap.has(node.parentId)) {
+      if (
+        node.parentId &&
+        nodeMap.has(node.parentId) &&
+        !hasParentCycle(node.id, node.parentId)
+      ) {
         nodeMap.get(node.parentId)!.children.push(treeNode);
       } else {
         // Resilient fallback: If parentId is missing or corrupt, resolve parent folder via parentPath
         const parentPath = NodePathVo.dirname(node.path);
         if (parentPath !== '/' && pathToNodeMap.has(parentPath)) {
           const parentTreeNode = pathToNodeMap.get(parentPath)!;
-          if (parentTreeNode.type === 'FOLDER') {
+          if (
+            parentTreeNode.type === 'FOLDER' &&
+            parentTreeNode.id !== node.id &&
+            !hasParentCycle(node.id, parentTreeNode.id)
+          ) {
             parentTreeNode.children.push(treeNode);
             continue;
           }
@@ -91,9 +81,12 @@ export class FileTreeBuilder {
       return a.name.localeCompare(b.name);
     };
 
+    const sortedVisited = new Set<string>();
     const sortRecursively = (list: TreeNode[]) => {
       list.sort(sortFn);
       for (const item of list) {
+        if (sortedVisited.has(item.id)) continue;
+        sortedVisited.add(item.id);
         if (item.children.length > 0) {
           sortRecursively(item.children);
         }
@@ -112,11 +105,7 @@ export class FileTreeBuilder {
     nodes: readonly ManuscriptNodeEntity[],
     docContents: Map<string, string[]>,
   ): ManuscriptNodeEntity | null {
-    const candidates = nodes.filter((n) => {
-      if (!n.isDoc()) return false;
-      const lowerName = n.name.toLowerCase();
-      return VALID_ROOT_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
-    });
+    const candidates = nodes.filter((n) => n.canBeRootDoc());
 
     if (candidates.length === 0) {
       return null;
@@ -194,11 +183,7 @@ export class FileTreeBuilder {
    * compiler workspace path (`chapters/intro.tex`).
    */
   public static toRelativeCompilerPath(virtualPath: string): string {
-    return virtualPath
-      .trim()
-      .replace(/\\/g, '/')
-      .replace(/^(\.\/)+/, '')
-      .replace(/^\/+/, '');
+    return NodePathVo.toRelative(virtualPath);
   }
 
   /**
@@ -220,15 +205,7 @@ export class FileTreeBuilder {
     node: ManuscriptNodeEntity,
     destPath: string,
   ): void {
-    if (node.path === '/') {
-      throw new CannotDeleteRootFolderError();
-    }
-    if (
-      node.isFolder() &&
-      (destPath === node.path || NodePathVo.isDescendant(node.path, destPath))
-    ) {
-      throw new CyclicMoveError(node.path, destPath);
-    }
+    node.validateMoveTo(destPath);
   }
 }
 

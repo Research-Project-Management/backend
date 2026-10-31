@@ -6,18 +6,85 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ManuscriptNode, Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { computeDocSha256 } from '@/modules/manuscripts/docstore/domain/doc-hasher';
 import {
   IStructureRepository,
   CreateNodeParams,
   ManuscriptNodeEntity,
   NodePathVo,
+  ParsedFolderSegment,
 } from './domain';
+
+/**
+ * Shared Prisma folder-chain materializer (`mkdir -p` for `ManuscriptNode` folders).
+ * Safe to invoke on both `PrismaService` and transaction clients (`tx`), and preserves
+ * optional-chaining (`findUnique?.`) for lightweight unit test mocks.
+ */
+export async function ensurePrismaFolderChain(
+  db: { manuscriptNode?: Partial<Prisma.TransactionClient['manuscriptNode']> } | null | undefined,
+  projectId: string,
+  folderChain: readonly ParsedFolderSegment[],
+): Promise<string | null> {
+  if (!db?.manuscriptNode || folderChain.length === 0) {
+    return null;
+  }
+  let parentId: string | null = null;
+  for (const folder of folderChain) {
+    let folderNode = await db.manuscriptNode.findUnique?.({
+      where: {
+        projectId_path: {
+          projectId,
+          path: folder.path,
+        },
+      },
+    });
+    if (!folderNode && db.manuscriptNode.create) {
+      folderNode = await db.manuscriptNode
+        .create({
+          data: {
+            projectId,
+            parentId,
+            type: 'FOLDER',
+            name: folder.name,
+            path: folder.path,
+            depth: folder.depth,
+            isRootDoc: false,
+            sizeBytes: 0,
+            sortOrder: 0,
+          },
+        })
+        .catch(() => null);
+    }
+    parentId = folderNode?.id ?? parentId;
+  }
+  return parentId;
+}
 
 @Injectable()
 export class StructureRepository extends IStructureRepository {
   constructor(private readonly prisma: PrismaService) {
     super();
+  }
+
+  private async syncBackingAssetPath(
+    db: Pick<Prisma.TransactionClient, 'manuscriptDoc' | 'manuscriptFile'>,
+    projectId: string,
+    node: { docId?: string | null; fileId?: string | null } | null | undefined,
+    virtualPath: string,
+  ): Promise<void> {
+    if (!node) return;
+    const relativePath = NodePathVo.toRelative(virtualPath);
+    if (node.docId) {
+      await db.manuscriptDoc?.updateMany({
+        where: { id: node.docId, projectId },
+        data: { path: relativePath },
+      });
+    }
+    if (node.fileId) {
+      await db.manuscriptFile?.updateMany({
+        where: { id: node.fileId, projectId },
+        data: { name: relativePath },
+      });
+    }
   }
 
   private mapToEntity(raw: ManuscriptNode): ManuscriptNodeEntity {
@@ -71,7 +138,7 @@ export class StructureRepository extends IStructureRepository {
     const raw = await this.prisma.manuscriptNode.findFirst({
       where: {
         projectId,
-        OR: [{ id: nodeId }, { docId: nodeId }],
+        OR: [{ id: nodeId }, { docId: nodeId }, { fileId: nodeId }],
       },
     });
     return raw ? this.mapToEntity(raw) : null;
@@ -181,18 +248,7 @@ export class StructureRepository extends IStructureRepository {
         },
       });
 
-      if (movedRoot?.docId) {
-        await tx.manuscriptDoc?.updateMany({
-          where: { id: movedRoot.docId, projectId },
-          data: { path: normDest.replace(/^\/+/, '') },
-        });
-      }
-      if (movedRoot?.fileId) {
-        await tx.manuscriptFile?.updateMany({
-          where: { id: movedRoot.fileId, projectId },
-          data: { name: normDest.replace(/^\/+/, '') },
-        });
-      }
+      await this.syncBackingAssetPath(tx, projectId, movedRoot, normDest);
 
       const descendants = await tx.manuscriptNode.findMany({
         where: {
@@ -203,30 +259,21 @@ export class StructureRepository extends IStructureRepository {
 
       await Promise.all(
         descendants.map(async (descendant) => {
-          const relative = descendant.path.substring(normSource.length);
-          const newChildPath = normDest + relative;
-          const newDepth = NodePathVo.depth(newChildPath);
+          const rebased = NodePathVo.rebase(
+            descendant.path,
+            normSource,
+            normDest,
+          );
 
           await tx.manuscriptNode.update({
             where: { id: descendant.id },
             data: {
-              path: newChildPath,
-              depth: newDepth,
+              path: rebased.path,
+              depth: rebased.depth,
             },
           });
 
-          if (descendant.docId) {
-            await tx.manuscriptDoc?.updateMany({
-              where: { id: descendant.docId, projectId },
-              data: { path: newChildPath.replace(/^\/+/, '') },
-            });
-          }
-          if (descendant.fileId) {
-            await tx.manuscriptFile?.updateMany({
-              where: { id: descendant.fileId, projectId },
-              data: { name: newChildPath.replace(/^\/+/, '') },
-            });
-          }
+          await this.syncBackingAssetPath(tx, projectId, descendant, rebased.path);
         }),
       );
     });
@@ -257,18 +304,7 @@ export class StructureRepository extends IStructureRepository {
     const updated = await this.prisma.manuscriptNode.findFirst({
       where: { id: nodeId, projectId },
     });
-    if (updated?.docId) {
-      await this.prisma.manuscriptDoc?.updateMany({
-        where: { id: updated.docId, projectId },
-        data: { path: newPath.replace(/^\/+/, '') },
-      });
-    }
-    if (updated?.fileId) {
-      await this.prisma.manuscriptFile?.updateMany({
-        where: { id: updated.fileId, projectId },
-        data: { name: newPath.replace(/^\/+/, '') },
-      });
-    }
+    await this.syncBackingAssetPath(this.prisma, projectId, updated, newPath);
     return this.mapToEntity(updated!);
   }
 
@@ -435,37 +471,5 @@ export class StructureRepository extends IStructureRepository {
       select: { id: true },
     });
     return Boolean(file);
-  }
-
-  public async createBackingDoc(
-    projectId: string,
-    _name: string,
-    path: string,
-    content?: string,
-  ): Promise<{ id: string; sizeBytes: number; hash: string }> {
-    const rawContent = content ?? '';
-    const lines = rawContent.length > 0 ? rawContent.split(/\r?\n/) : [''];
-    const normalizedText = lines.join('\n');
-    const sizeBytes = Buffer.byteLength(normalizedText, 'utf8');
-    const hash = computeDocSha256(lines);
-
-    const created = await this.prisma.manuscriptDoc.create({
-      data: {
-        projectId,
-        path: path.replace(/^\/+/, ''),
-        lines,
-        rev: 1,
-        hash,
-        sizeBytes,
-        inStorage: false,
-        deleted: false,
-      },
-    });
-
-    return {
-      id: created.id,
-      sizeBytes: Number(created.sizeBytes || sizeBytes),
-      hash: created.hash || hash,
-    };
   }
 }

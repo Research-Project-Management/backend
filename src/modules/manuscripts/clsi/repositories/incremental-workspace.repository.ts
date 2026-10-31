@@ -66,9 +66,6 @@ const PRE_COMPILE_PURGE_FILES = [
   'output.stderr',
   'output.synctex',
   'output.synctex.gz',
-  'output.fdb_latexmk',
-  '.fdb_latexmk',
-  'output.fls',
 ];
 
 export class OverleafIncrementalWorkspace implements IWorkspaceManager {
@@ -85,6 +82,14 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
 
   public getScratchDir(projectId: string): string {
     const safeProjectId = projectId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (safeProjectId !== projectId) {
+      const suffix = crypto
+        .createHash('sha256')
+        .update(projectId)
+        .digest('hex')
+        .slice(0, 8);
+      return path.join(this.baseScratchDir, `${safeProjectId}_${suffix}`);
+    }
     return path.join(this.baseScratchDir, safeProjectId);
   }
 
@@ -191,9 +196,19 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
   public async cleanScratch(projectId: string): Promise<void> {
     const scratchDir = this.getScratchDir(projectId);
     try {
-      await fs.rm(scratchDir, { recursive: true, force: true });
+      const entries = await fs.readdir(scratchDir, { withFileTypes: true });
+      await Promise.allSettled(
+        entries
+          .filter((entry) => entry.name !== '.project-lock')
+          .map((entry) =>
+            fs.rm(path.join(scratchDir, entry.name), {
+              recursive: true,
+              force: true,
+            }),
+          ),
+      );
     } catch {
-      // Ignored
+      // Ignored if directory doesn't exist yet
     }
   }
 
@@ -209,17 +224,6 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
       } catch {
         // File might not exist
       }
-    }
-
-    try {
-      const files = await fs.readdir(scratchDir);
-      for (const file of files) {
-        if (file.endsWith('.fdb_latexmk') || file.endsWith('.fls')) {
-          await fs.unlink(path.join(scratchDir, file)).catch(() => {});
-        }
-      }
-    } catch {
-      // Ignored
     }
 
     const inputSet = new Set(
@@ -323,15 +327,18 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
       const results: AuxFileInfo[] = [];
 
       for (const entry of entries) {
-        if (entry.isFile()) {
+        if (entry.isFile() && !entry.isSymbolicLink()) {
           const ext = path.extname(entry.name).toLowerCase();
           if (AUX_EXTENSIONS.has(ext)) {
-            const stat = await fs.stat(path.join(scratchDir, entry.name));
-            results.push({
-              name: entry.name,
-              size: stat.size,
-              ext,
-            });
+            const fullPath = path.join(scratchDir, entry.name);
+            const stat = await fs.lstat(fullPath);
+            if (!stat.isSymbolicLink() && stat.isFile()) {
+              results.push({
+                name: entry.name,
+                size: stat.size,
+                ext,
+              });
+            }
           }
         }
       }
@@ -348,9 +355,16 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
   ): Promise<Buffer | null> {
     const scratchDir = this.getScratchDir(projectId);
     try {
-      const safePath = SafePath.resolveSafePath(scratchDir, filename);
+      const safePath = await SafePath.assertSafeWorkspacePath(
+        scratchDir,
+        filename,
+      );
       const ext = path.extname(filename).toLowerCase();
-      if (!AUX_EXTENSIONS.has(ext)) {
+      if (!AUX_EXTENSIONS.has(ext) && !filename.toLowerCase().endsWith('.synctex.gz')) {
+        return null;
+      }
+      const stat = await fs.lstat(safePath);
+      if (stat.isSymbolicLink() || !stat.isFile()) {
         return null;
       }
       return await fs.readFile(safePath);
@@ -365,7 +379,14 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
   ): Promise<Buffer | null> {
     const scratchDir = this.getScratchDir(projectId);
     try {
-      const safePath = SafePath.resolveSafePath(scratchDir, filename);
+      const safePath = await SafePath.assertSafeWorkspacePath(
+        scratchDir,
+        filename,
+      );
+      const stat = await fs.lstat(safePath);
+      if (stat.isSymbolicLink() || !stat.isFile()) {
+        return null;
+      }
       return await fs.readFile(safePath);
     } catch {
       return null;

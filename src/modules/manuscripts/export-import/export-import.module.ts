@@ -4,7 +4,7 @@
  * Pure domain modules (document-transpiler, archive-validator) run in-process without DI ceremony.
  */
 
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ManuscriptsCoreModule } from '@/modules/manuscripts/core';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
@@ -12,6 +12,8 @@ import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.modul
 import { ClsiModule } from '@/modules/manuscripts/clsi/clsi.module';
 import { TemplatesModule } from '@/modules/manuscripts/templates/templates.module';
 import { TemplatesService } from '@/modules/manuscripts/templates/templates.service';
+import { ProjectHistoryModule } from '@/modules/manuscripts/project-history/project-history.module';
+import { PagesHistoryExportController } from '@/modules/manuscripts/docstore/controllers/pages-history-export.controller';
 
 // Ports & Engines
 import {
@@ -36,13 +38,14 @@ import { ExportImportController } from './export-import.controller';
 @Module({
   imports: [
     ManuscriptsCoreModule,
-    forwardRef(() => StructureModule),
-    forwardRef(() => DocstoreModule),
+    StructureModule,
+    DocstoreModule,
     FilestoreModule,
-    forwardRef(() => ClsiModule),
+    ClsiModule,
     TemplatesModule,
+    ProjectHistoryModule,
   ],
-  controllers: [ExportImportController],
+  controllers: [ExportImportController, PagesHistoryExportController],
   providers: [
     PkzipEngineAdapter,
     DocumentTranspilerAdapter,

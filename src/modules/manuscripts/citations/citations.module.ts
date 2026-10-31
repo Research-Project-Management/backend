@@ -3,7 +3,7 @@
  * NestJS Module for Manuscripts Citations & Bibliography subsystem.
  */
 
-import { forwardRef, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { PrismaModule } from '@/core';
@@ -25,8 +25,8 @@ import { RegexAstBibtexParser, CrossrefArxivResolverAdapter } from './domain';
     StructureModule,
     DocstoreModule,
     PrismaModule,
-    forwardRef(() => IntegrationsModule),
-    forwardRef(() => LibraryModule),
+    IntegrationsModule,
+    LibraryModule,
   ],
   controllers: [CitationsController, CitationsUtilityController],
   providers: [

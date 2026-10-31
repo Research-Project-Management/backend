@@ -9,6 +9,7 @@ import {
   Logger,
   NotFoundException,
   ForbiddenException,
+  HttpException,
   Optional,
   OnModuleDestroy,
 } from '@nestjs/common';
@@ -50,7 +51,6 @@ import {
   LocalProcessRunner,
   DockerSandboxRunner,
   LatexmkEngine,
-  TectonicEngine,
   ClsiHealthCheck,
 } from './compile-pipeline.service';
 import { CompileFairQueue } from './compile-fair-queue.service';
@@ -74,10 +74,11 @@ export class ClsiService implements OnModuleDestroy {
   private readonly synctexParser: SyncTexProcessor;
   private readonly wordCounter: TexWordCounter;
   private readonly fairQueue: CompileFairQueue;
-  private readonly inFlightBuilds = new Map<
+  private readonly synctexDiskCache = new Map<
     string,
-    Promise<ClsiCompileResult>
+    { mtimeMs: number; size: number; content: string }
   >();
+  private readonly activeQueueJobIds = new Map<string, string>();
   private readonly diskUsageCleaner: DiskUsageCleaner;
   private readonly healthCheck: ClsiHealthCheck;
   private readonly metrics: ClsiMetrics = ClsiMetrics.getInstance();
@@ -95,7 +96,6 @@ export class ClsiService implements OnModuleDestroy {
     @Optional() workspacePlanner?: ClsiWorkspacePlannerService,
     @Optional() workspace?: OverleafIncrementalWorkspace,
     @Optional() latexmkEngine?: LatexmkEngine,
-    @Optional() tectonicEngine?: TectonicEngine,
     @Optional() logParser?: CompileLogAnalyzer,
     @Optional() synctexProcessor?: SyncTexProcessor,
     @Optional() wordCounter?: TexWordCounter,
@@ -149,8 +149,6 @@ export class ClsiService implements OnModuleDestroy {
     const scratchDir = sandboxConfig.scratchDir;
     const latexmkBin =
       this.configService.get<string>('LATEXMK_BIN') || 'latexmk';
-    const tectonicBin =
-      this.configService.get<string>('TECTONIC_BIN') || 'tectonic';
 
     // Workspace & Real Sandbox/Engine seams
     this.workspace = workspace ?? new OverleafIncrementalWorkspace(scratchDir);
@@ -173,7 +171,7 @@ export class ClsiService implements OnModuleDestroy {
     this.synctexParser = synctexProcessor ?? new SyncTexProcessor();
     this.wordCounter = wordCounter ?? new TexWordCounter();
 
-    const needsRunner = !latexmkEngine || !tectonicEngine || !healthCheck;
+    const needsRunner = !latexmkEngine || !healthCheck;
     const runner = needsRunner
       ? sandboxConfig.mode === 'container'
         ? new DockerSandboxRunner(
@@ -188,8 +186,6 @@ export class ClsiService implements OnModuleDestroy {
 
     const resolvedLatexmkEngine =
       latexmkEngine ?? new LatexmkEngine(runner!, latexmkBin, 'pdflatex');
-    const resolvedTectonicEngine =
-      tectonicEngine ?? new TectonicEngine(runner!, tectonicBin);
 
     this.diskUsageCleaner =
       diskUsageCleaner ?? new DiskUsageCleaner(scratchDir);
@@ -200,7 +196,6 @@ export class ClsiService implements OnModuleDestroy {
       new CompilePipeline(
         this.workspace,
         resolvedLatexmkEngine,
-        resolvedTectonicEngine,
         this.logParser,
       );
   }
@@ -286,6 +281,18 @@ export class ClsiService implements OnModuleDestroy {
       }
     }
 
+    // Cancel any previous queued BullMQ job for this project
+    const existingJobId = this.activeQueueJobIds.get(projectId);
+    if (existingJobId) {
+      try {
+        const oldJob = await this.compileQueue.getJob(existingJobId);
+        if (oldJob) {
+          await oldJob.remove().catch(() => {});
+        }
+      } catch {}
+    }
+
+    const jobId = `clsi-${projectId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const job = await this.compileQueue.add(
       'clsi-compile',
       {
@@ -294,32 +301,51 @@ export class ClsiService implements OnModuleDestroy {
         authorizedProjectId,
       },
       {
-        jobId: `clsi-${projectId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
-        removeOnComplete: 100,
-        removeOnFail: 200,
+        jobId,
+        removeOnComplete: { age: 60, count: 10 },
+        removeOnFail: { age: 300, count: 25 },
       },
     );
+    this.activeQueueJobIds.set(projectId, jobId);
 
     const startTime = Date.now();
     const pollIntervalMs = 200;
-    while (Date.now() - startTime < effectiveTimeoutMs) {
-      const state = await job.getState();
-      if (state === 'completed') {
-        const freshJob = await this.compileQueue.getJob(job.id!);
-        return freshJob?.returnvalue as ClsiCompileResult;
+    try {
+      while (Date.now() - startTime < effectiveTimeoutMs) {
+        if (this.activeQueueJobIds.get(projectId) !== jobId) {
+          throw new HttpException(
+            'Compilation superseded or cancelled',
+            409,
+          );
+        }
+        const state = await job.getState();
+        if (state === 'completed') {
+          const freshJob = await this.compileQueue.getJob(job.id!);
+          return freshJob?.returnvalue as ClsiCompileResult;
+        }
+        if (state === 'failed') {
+          const freshJob = await this.compileQueue.getJob(job.id!);
+          const reason =
+            freshJob?.failedReason || 'Job execution failed in CLSI worker';
+          const workerErr = new Error(reason) as Error & {
+            isWorkerExecutionError?: boolean;
+          };
+          workerErr.isWorkerExecutionError = true;
+          throw workerErr;
+        }
+        await new Promise((r) => setTimeout(r, pollIntervalMs));
       }
-      if (state === 'failed') {
-        const freshJob = await this.compileQueue.getJob(job.id!);
-        throw new Error(
-          freshJob?.failedReason || 'Job execution failed in CLSI worker',
-        );
-      }
-      await new Promise((r) => setTimeout(r, pollIntervalMs));
-    }
 
-    throw new Error(
-      `CLSI compile job ${job.id} timed out after ${effectiveTimeoutMs}ms in queue`,
-    );
+      const timeoutErr = new Error(
+        `CLSI compile job ${job.id} timed out after ${effectiveTimeoutMs}ms in queue`,
+      ) as Error & { isWorkerExecutionError?: boolean };
+      timeoutErr.isWorkerExecutionError = true;
+      throw timeoutErr;
+    } finally {
+      if (this.activeQueueJobIds.get(projectId) === jobId) {
+        this.activeQueueJobIds.delete(projectId);
+      }
+    }
   }
 
   public async enqueueCompile(
@@ -337,8 +363,8 @@ export class ClsiService implements OnModuleDestroy {
       { dto, userId, authorizedProjectId },
       {
         jobId: `clsi-${projectId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
-        removeOnComplete: 100,
-        removeOnFail: 200,
+        removeOnComplete: { age: 60, count: 10 },
+        removeOnFail: { age: 300, count: 25 },
       },
     );
     return { jobId: job.id! };
@@ -355,9 +381,15 @@ export class ClsiService implements OnModuleDestroy {
       try {
         return await this.queueCompileJob(dto, userId, authorizedProjectId);
       } catch (err: unknown) {
+        if (
+          err instanceof HttpException ||
+          (err as { isWorkerExecutionError?: boolean })?.isWorkerExecutionError
+        ) {
+          throw err;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `CLSI queue compile failed or timed out, falling back to inline fairQueue: ${msg}`,
+          `CLSI queue dispatch failed (Redis/Queue unavailable), falling back to inline fairQueue: ${msg}`,
         );
       }
     }
@@ -392,7 +424,13 @@ export class ClsiService implements OnModuleDestroy {
         });
       }
     }
-    const projectId = authorizedProjectId || resolvedFromDto;
+    const rawProjectId = authorizedProjectId || resolvedFromDto;
+    const projectId =
+      rawProjectId && rawProjectId !== 'default'
+        ? rawProjectId
+        : _userId
+          ? `adhoc-${_userId}`
+          : `adhoc-${crypto.randomUUID()}`;
     const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
     const metricEngine = requestedEngine || 'pdflatex';
 
@@ -401,7 +439,7 @@ export class ClsiService implements OnModuleDestroy {
       _userId,
       this.realtimeService,
       async (signal, onLogChunk) => {
-        if (this.realtimeService && projectId) {
+        if (this.realtimeService && projectId && !projectId.startsWith('adhoc-')) {
           try {
             await this.realtimeService.flushProjectBeforeCompile(projectId);
           } catch (err: unknown) {
@@ -412,7 +450,10 @@ export class ClsiService implements OnModuleDestroy {
           }
         }
 
-        const plan = await this.workspacePlanner.planFiles(projectId, dto);
+        const plan = await this.workspacePlanner.planFiles(
+          projectId.startsWith('adhoc-') ? 'default' : projectId,
+          dto,
+        );
         const cacheKey = `flux:clsi:compile:${this.hashSource(
           [
             projectId,
@@ -431,6 +472,7 @@ export class ClsiService implements OnModuleDestroy {
           const cacheLookupStart = Date.now();
           const cached = await this.cache.get<ClsiCompileResult>(cacheKey);
           if (cached && cached.success) {
+            await this.syncCachedArtifactsToScratch(projectId, cached);
             this.metrics.record({
               engine: metricEngine,
               durationMs: Math.max(1, Date.now() - cacheLookupStart),
@@ -445,12 +487,7 @@ export class ClsiService implements OnModuleDestroy {
           }
         }
 
-        if (plan.hasMainContent) {
-          const existingBuild = this.inFlightBuilds.get(cacheKey);
-          if (existingBuild) return existingBuild;
-        }
-
-        const build = this.runScheduledCompile(
+        return await this.runScheduledCompile(
           projectId,
           plan,
           dto,
@@ -463,17 +500,44 @@ export class ClsiService implements OnModuleDestroy {
           onLogChunk,
           _userId,
         );
-        if (!plan.hasMainContent) return await build;
-
-        const tracked = build.finally(() => {
-          if (this.inFlightBuilds.get(cacheKey) === tracked) {
-            this.inFlightBuilds.delete(cacheKey);
-          }
-        });
-        this.inFlightBuilds.set(cacheKey, tracked);
-        return await tracked;
       },
     );
+  }
+
+  private async syncCachedArtifactsToScratch(
+    projectId: string,
+    result: ClsiCompileResult,
+  ): Promise<void> {
+    try {
+      const scratchDir = await this.workspace.ensureScratch(projectId);
+      const writes: Promise<void>[] = [];
+      if (result.pdf) {
+        writes.push(
+          fs.writeFile(
+            path.join(scratchDir, 'output.pdf'),
+            Buffer.from(result.pdf, 'base64'),
+          ),
+        );
+      }
+      if (result.synctex) {
+        writes.push(
+          fs.writeFile(
+            path.join(scratchDir, 'output.synctex.gz'),
+            Buffer.from(result.synctex, 'base64'),
+          ),
+        );
+      }
+      if (result.logs) {
+        writes.push(
+          fs.writeFile(path.join(scratchDir, 'output.log'), result.logs, 'utf8'),
+        );
+      }
+      if (writes.length > 0) {
+        await Promise.allSettled(writes);
+      }
+    } catch {
+      // Non-blocking artifact sync to local workspace scratch
+    }
   }
 
   private async runScheduledCompile(
@@ -490,8 +554,9 @@ export class ClsiService implements OnModuleDestroy {
     _userId?: string,
   ): Promise<ClsiCompileResult> {
     const mainFile = plan.mainFile;
+    const dbProjectId = projectId.startsWith('adhoc-') ? 'default' : projectId;
     const mergedFiles = await this.workspacePlanner.hydrateFiles(
-      projectId,
+      dbProjectId,
       plan,
     );
     const rawMain = mergedFiles[mainFile] ?? dto.source ?? '';
@@ -500,8 +565,10 @@ export class ClsiService implements OnModuleDestroy {
       : rawMain;
 
     if (dto.force_clean || dto.forceClean) {
-      await this.pipeline.runWithProjectLock(projectId, () =>
-        this.workspace.cleanScratch(projectId),
+      await this.pipeline.runWithProjectLock(
+        projectId,
+        () => this.workspace.cleanScratch(projectId),
+        signal,
       );
     }
 
@@ -517,40 +584,7 @@ export class ClsiService implements OnModuleDestroy {
     );
 
     if (remoteResult) {
-      try {
-        const scratchDir = await this.workspace.ensureScratch(projectId);
-        const writes: Promise<void>[] = [];
-        if (remoteResult.pdf) {
-          writes.push(
-            fs.writeFile(
-              path.join(scratchDir, 'output.pdf'),
-              Buffer.from(remoteResult.pdf, 'base64'),
-            ),
-          );
-        }
-        if (remoteResult.synctex) {
-          writes.push(
-            fs.writeFile(
-              path.join(scratchDir, 'output.synctex.gz'),
-              Buffer.from(remoteResult.synctex, 'base64'),
-            ),
-          );
-        }
-        if (remoteResult.logs) {
-          writes.push(
-            fs.writeFile(
-              path.join(scratchDir, 'output.log'),
-              remoteResult.logs,
-              'utf8',
-            ),
-          );
-        }
-        if (writes.length > 0) {
-          await Promise.allSettled(writes);
-        }
-      } catch {
-        // Non-blocking artifact sync to local workspace scratch
-      }
+      await this.syncCachedArtifactsToScratch(projectId, remoteResult);
     }
 
     const pipelineResult: CompilePipelineResult =
@@ -576,7 +610,7 @@ export class ClsiService implements OnModuleDestroy {
       durationMs: pipelineResult.durationMs,
       success: pipelineResult.success,
       isCached: false,
-      isTimeout: pipelineResult.durationMs >= effectiveTimeoutMs,
+      isTimeout: Boolean(pipelineResult.timedOut),
       pdfSizeBytes: pipelineResult.pdf
         ? Buffer.byteLength(pipelineResult.pdf, 'base64')
         : 0,
@@ -591,25 +625,36 @@ export class ClsiService implements OnModuleDestroy {
       await this.cache.set(cacheKey, pipelineResult, 300);
     }
 
-    this.realtimeService?.broadcastCompileProgress(projectId, {
-      status: pipelineResult.success ? 'success' : 'failed',
-      logs: pipelineResult.logs ? [pipelineResult.logs] : [],
-    });
+    if (!projectId.startsWith('adhoc-')) {
+      this.realtimeService?.broadcastCompileProgress(projectId, {
+        status: pipelineResult.success ? 'success' : 'failed',
+        logs: pipelineResult.logs ? [pipelineResult.logs] : [],
+      });
 
-    if (pipelineResult.success) {
-      await this.workspacePlanner.recordCompileSnapshotIfEligible(
-        projectId,
-        mergedFiles,
-        metricEngine,
-        _userId,
-      );
+      if (pipelineResult.success) {
+        await this.workspacePlanner.recordCompileSnapshotIfEligible(
+          projectId,
+          mergedFiles,
+          metricEngine,
+          _userId,
+          plan,
+        );
+      }
     }
 
     return pipelineResult;
   }
 
   public cancelCompile(projectId: string): boolean {
-    return this.fairQueue.cancel(projectId);
+    const existingJobId = this.activeQueueJobIds.get(projectId);
+    if (existingJobId && this.compileQueue) {
+      this.activeQueueJobIds.delete(projectId);
+      this.compileQueue
+        .getJob(existingJobId)
+        .then((job) => job?.remove())
+        .catch(() => {});
+    }
+    return this.fairQueue.cancel(projectId) || Boolean(existingJobId);
   }
 
   private async loadSynctexContent(
@@ -621,20 +666,43 @@ export class ClsiService implements OnModuleDestroy {
       return await this.synctexParser.decompress(buffer);
     }
 
-    const gzBuffer = await this.workspace.readAuxFile(
-      projectId,
-      'output.synctex.gz',
-    );
-    if (gzBuffer) {
-      return await this.synctexParser.decompress(gzBuffer);
-    }
+    const scratchDir = this.workspace.getScratchDir(projectId);
+    for (const filename of ['output.synctex.gz', 'output.synctex']) {
+      try {
+        const safePath = path.join(scratchDir, filename);
+        const stat = await fs.lstat(safePath);
+        if (stat.isSymbolicLink() || !stat.isFile()) continue;
 
-    const plainBuffer = await this.workspace.readAuxFile(
-      projectId,
-      'output.synctex',
-    );
-    if (plainBuffer) {
-      return plainBuffer.toString('utf8');
+        const cacheKey = `${projectId}:${filename}`;
+        const cached = this.synctexDiskCache.get(cacheKey);
+        if (
+          cached &&
+          cached.mtimeMs === stat.mtimeMs &&
+          cached.size === stat.size
+        ) {
+          return cached.content;
+        }
+
+        const buf = await this.workspace.readAuxFile(projectId, filename);
+        if (!buf) continue;
+        const content = filename.endsWith('.gz')
+          ? await this.synctexParser.decompress(buf)
+          : buf.toString('utf8');
+        if (content) {
+          if (this.synctexDiskCache.size >= 16) {
+            const oldestKey = this.synctexDiskCache.keys().next().value;
+            if (oldestKey) this.synctexDiskCache.delete(oldestKey);
+          }
+          this.synctexDiskCache.set(cacheKey, {
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            content,
+          });
+          return content;
+        }
+      } catch {
+        continue;
+      }
     }
 
     return null;
@@ -897,7 +965,9 @@ export class ClsiService implements OnModuleDestroy {
           if (
             entry.name === '.project-lock' ||
             entry.name === '.clsi-manifest.json' ||
-            entry.name === '.latexmkrc'
+            entry.name === '.clsi-build-state.json' ||
+            entry.name === '.latexmkrc' ||
+            entry.isSymbolicLink()
           ) {
             continue;
           }
@@ -906,8 +976,10 @@ export class ClsiService implements OnModuleDestroy {
           if (entry.isDirectory()) {
             await walk(fullPath, relPath);
           } else if (entry.isFile()) {
-            const stat = await fs.stat(fullPath);
-            diskEntries.push({ fullPath, relPath, date: stat.mtime });
+            const stat = await fs.lstat(fullPath);
+            if (!stat.isSymbolicLink() && stat.isFile()) {
+              diskEntries.push({ fullPath, relPath, date: stat.mtime });
+            }
           }
         }
       } catch {

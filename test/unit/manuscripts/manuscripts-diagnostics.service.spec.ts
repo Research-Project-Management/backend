@@ -1,7 +1,7 @@
 /**
  * test/unit/manuscripts-diagnostics.service.spec.ts
  * Comprehensive Unit Test Suite for Manuscripts Diagnostics Subsystem
- * Testing TeX Paren-Tree File Tracker, Tectonic Parser, Fast Syntax Linter, Explainer & Controller.
+ * Testing TeX Paren-Tree File Tracker, Fast Syntax Linter, Explainer & Controller.
  */
 
 import {
@@ -346,42 +346,6 @@ Underfull \\hbox (badness 10000) in paragraph at lines 200--205
     });
   });
 
-  // =========================================================================
-  // 4. TECTONIC LOG PARSER
-  // =========================================================================
-  describe('CompileLogAnalyzer - Tectonic Log Parser', () => {
-    it('should parse modern Tectonic rust cli error output', () => {
-      const log = `
-note: running tectonic
-error: chapters/intro.tex:34: undefined control sequence \\badmacro
-note: target halted
-`;
-      const items = logAnalyzer.parseTectonicLog(log, 'main.tex');
-      expect(items.length).toBe(1);
-
-      const err = items[0];
-      expect(err.file).toBe('chapters/intro.tex');
-      expect(err.line).toBe(34);
-      expect(err.severity.isError()).toBe(true);
-      expect(err.code).toBe('UNDEFINED_CONTROL_SEQUENCE');
-    });
-
-    it('should parse modern Tectonic warnings and notes', () => {
-      const log = `
-warning: main.tex:12: label 'sec:method' multiply defined
-error: main.tex:50: missing $ inserted
-`;
-      const items = logAnalyzer.parseTectonicLog(log, 'main.tex');
-      expect(items.length).toBe(2);
-
-      expect(items[0].severity.isWarning()).toBe(true);
-      expect(items[0].line).toBe(12);
-
-      expect(items[1].severity.isError()).toBe(true);
-      expect(items[1].line).toBe(50);
-      expect(items[1].code).toBe('MISSING_MATH_DELIMITER');
-    });
-  });
 
   // =========================================================================
   // 5. FAST SYNTAX LINTER ADAPTER (PRE-COMPILATION)
@@ -530,13 +494,6 @@ Normal text.
         );
       });
 
-      it('should route to tectonic parser when engine is tectonic', () => {
-        const log = `error: main.tex:5: undefined control sequence \\bar`;
-        const report = logAnalyzer.analyzeLog(log, 'main.tex', 'tectonic');
-
-        expect(report.errorsCount).toBe(1);
-        expect(report.items[0].line).toBe(5);
-      });
     });
 
     describe('FastSyntaxLinter.lintToReport', () => {

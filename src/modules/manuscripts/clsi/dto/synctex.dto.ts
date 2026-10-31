@@ -9,6 +9,7 @@ import {
   IsNumber,
   IsOptional,
   Min,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -55,6 +56,7 @@ export class ForwardSyncDto {
     description: 'Raw plaintext SyncTeX data from compilation',
   })
   @IsString()
+  @MaxLength(20 * 1024 * 1024)
   @IsOptional()
   synctex?: string;
 }
@@ -97,6 +99,7 @@ export class ReverseSyncDto {
     description: 'Raw plaintext SyncTeX data from compilation',
   })
   @IsString()
+  @MaxLength(20 * 1024 * 1024)
   @IsOptional()
   synctex?: string;
 }

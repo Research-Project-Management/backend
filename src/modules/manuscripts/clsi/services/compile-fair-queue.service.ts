@@ -177,7 +177,6 @@ export class CompileFairQueue implements OnModuleDestroy {
     const session = this.inFlightCompiles.get(projectId);
     if (session) {
       session.abortController.abort();
-      this.inFlightCompiles.delete(projectId);
       this.logger.log(
         `Manually cancelled compilation for project "${projectId}"`,
       );

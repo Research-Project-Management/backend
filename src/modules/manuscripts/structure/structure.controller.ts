@@ -41,12 +41,7 @@ import {
 } from './dto/node.dto';
 import {
   NodeNotFoundError,
-  DuplicateNodePathError,
-  CyclicMoveError,
-  InvalidNodeNameError,
-  CannotDeleteRootFolderError,
-  RootDocNotFoundError,
-  MaxProjectFilesExceededError,
+  StructureError,
 } from './domain';
 
 @ApiTags('Manuscripts - Project Structure & File Tree')
@@ -62,21 +57,13 @@ export class StructureController {
   constructor(private readonly structureService: StructureService) {}
 
   private handleError(error: unknown): never {
-    if (
-      error instanceof NodeNotFoundError ||
-      error instanceof RootDocNotFoundError
-    ) {
-      throw new NotFoundException(error.message);
-    }
-    if (error instanceof DuplicateNodePathError) {
-      throw new ConflictException(error.message);
-    }
-    if (
-      error instanceof CyclicMoveError ||
-      error instanceof InvalidNodeNameError ||
-      error instanceof CannotDeleteRootFolderError ||
-      error instanceof MaxProjectFilesExceededError
-    ) {
+    if (error instanceof StructureError) {
+      if (error.httpStatus === HttpStatus.NOT_FOUND) {
+        throw new NotFoundException(error.message);
+      }
+      if (error.httpStatus === HttpStatus.CONFLICT) {
+        throw new ConflictException(error.message);
+      }
       throw new BadRequestException(error.message);
     }
     throw error;
@@ -93,6 +80,19 @@ export class StructureController {
     return authorized || paramProjectId;
   }
 
+  private async execute<T>(
+    projectId: string,
+    resolvedProject: string | { id?: string } | null | undefined,
+    fn: (targetId: string) => Promise<T>,
+  ): Promise<T> {
+    try {
+      const targetId = this.resolveScope(projectId, resolvedProject);
+      return await fn(targetId);
+    } catch (err) {
+      this.handleError(err);
+    }
+  }
+
   @Get('tree')
   @ApiOperation({
     summary: 'Get hierarchical recursive file tree for IDE sidebar',
@@ -102,12 +102,9 @@ export class StructureController {
     @Param('projectId') projectId: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
-      return await this.structureService.getFileTree(targetId);
-    } catch (err) {
-      this.handleError(err);
-    }
+    return this.execute(projectId, resolvedProject, (targetId) =>
+      this.structureService.getFileTree(targetId),
+    );
   }
 
   @Get('nodes')
@@ -116,13 +113,10 @@ export class StructureController {
     @Param('projectId') projectId: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
+    return this.execute(projectId, resolvedProject, async (targetId) => {
       const nodes = await this.structureService.getAllNodes(targetId);
       return nodes.map((n) => n.toJSON());
-    } catch (err) {
-      this.handleError(err);
-    }
+    });
   }
 
   @Get('nodes/:nodeId')
@@ -132,16 +126,13 @@ export class StructureController {
     @Param('nodeId') nodeId: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
+    return this.execute(projectId, resolvedProject, async (targetId) => {
       const node = await this.structureService.getNodeById(targetId, nodeId);
       if (!node) {
         throw new NodeNotFoundError(nodeId);
       }
       return node.toJSON();
-    } catch (err) {
-      this.handleError(err);
-    }
+    });
   }
 
   @Post('nodes')
@@ -154,13 +145,10 @@ export class StructureController {
     @Body() dto: CreateNodeDto,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
+    return this.execute(projectId, resolvedProject, async (targetId) => {
       const node = await this.structureService.createNode(targetId, dto);
       return node.toJSON();
-    } catch (err) {
-      this.handleError(err);
-    }
+    });
   }
 
   @Patch('nodes/:nodeId/move')
@@ -175,13 +163,10 @@ export class StructureController {
     @Body() dto: MoveNodeDto,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
+    return this.execute(projectId, resolvedProject, async (targetId) => {
       const node = await this.structureService.moveNode(targetId, nodeId, dto);
       return node.toJSON();
-    } catch (err) {
-      this.handleError(err);
-    }
+    });
   }
 
   @Patch('nodes/:nodeId/rename')
@@ -196,17 +181,14 @@ export class StructureController {
     @Body() dto: RenameNodeDto,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
+    return this.execute(projectId, resolvedProject, async (targetId) => {
       const node = await this.structureService.renameNode(
         targetId,
         nodeId,
         dto,
       );
       return node.toJSON();
-    } catch (err) {
-      this.handleError(err);
-    }
+    });
   }
 
   @Delete('nodes/:nodeId')
@@ -217,16 +199,13 @@ export class StructureController {
     @Param('nodeId') nodeId: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
+    return this.execute(projectId, resolvedProject, async (targetId) => {
       const deleted = await this.structureService.deleteNode(targetId, nodeId);
       return {
         deletedCount: deleted.length,
         nodes: deleted.map((n) => n.toJSON()),
       };
-    } catch (err) {
-      this.handleError(err);
-    }
+    });
   }
 
   @Get('root-doc')
@@ -235,19 +214,10 @@ export class StructureController {
     @Param('projectId') projectId: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
+    return this.execute(projectId, resolvedProject, async (targetId) => {
       const rootDoc = await this.structureService.getRootDoc(targetId);
-      if (!rootDoc) {
-        return null;
-      }
-      return rootDoc.toJSON();
-    } catch (err) {
-      if (err instanceof RootDocNotFoundError) {
-        return null;
-      }
-      this.handleError(err);
-    }
+      return rootDoc ? rootDoc.toJSON() : null;
+    });
   }
 
   @Post('root-doc/:nodeId')
@@ -258,13 +228,10 @@ export class StructureController {
     @Param('nodeId') nodeId: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
+    return this.execute(projectId, resolvedProject, async (targetId) => {
       const rootDoc = await this.structureService.setRootDoc(targetId, nodeId);
       return rootDoc.toJSON();
-    } catch (err) {
-      this.handleError(err);
-    }
+    });
   }
 
   @Post('nodes/:nodeId/reorder')
@@ -277,11 +244,8 @@ export class StructureController {
     @Body() dto: ReorderNodeDto,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
+    return this.execute(projectId, resolvedProject, async (targetId) => {
       await this.structureService.reorderNode(targetId, nodeId, dto.sortOrder);
-    } catch (err) {
-      this.handleError(err);
-    }
+    });
   }
 }

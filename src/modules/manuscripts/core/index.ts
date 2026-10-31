@@ -20,4 +20,3 @@ export {
   ManuscriptUserResolverService,
   type ResolvedManuscriptUser,
 } from './services/manuscript-user-resolver.service';
-export * from './services/manuscript-page.service';

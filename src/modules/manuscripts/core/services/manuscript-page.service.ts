@@ -16,6 +16,8 @@ import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
 import { LiveCollaborationPort, ManuscriptDomainEventBus } from '@/modules/manuscripts/core';
+import { NodePathVo } from '@/modules/manuscripts/structure/domain';
+import { ensurePrismaFolderChain } from '@/modules/manuscripts/structure/structure.repository';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { ManuscriptPageScopeRepository } from '@/modules/manuscripts/docstore/repositories/manuscript-page-scope.repository';
 import {
@@ -64,7 +66,7 @@ export type { CreateProjectPageParams, PageDocRanges };
 export class ManuscriptPageService {
   private readonly logger = new Logger(ManuscriptPageService.name);
   private liveCollab: LiveCollaborationPort | null | undefined;
-  private domainEventBusInstance: ManuscriptDomainEventBus | null | undefined;
+  private readonly domainEventBus: ManuscriptDomainEventBus;
   private readonly pageScopeRepo: ManuscriptPageScopeRepository;
 
   constructor(
@@ -74,22 +76,16 @@ export class ManuscriptPageService {
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() pageScopeRepo?: ManuscriptPageScopeRepository,
-    @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
+    @Optional() domainEventBus?: ManuscriptDomainEventBus,
   ) {
     this.pageScopeRepo =
       pageScopeRepo || new ManuscriptPageScopeRepository(prisma);
+    this.domainEventBus =
+      domainEventBus ?? new ManuscriptDomainEventBus(this.moduleRef);
   }
 
-  public getDomainEventBus(): ManuscriptDomainEventBus | null {
-    if (this.domainEventBus) return this.domainEventBus;
-    if (this.domainEventBusInstance !== undefined) return this.domainEventBusInstance;
-    try {
-      this.domainEventBusInstance =
-        this.moduleRef?.get(ManuscriptDomainEventBus, { strict: false }) ?? null;
-    } catch {
-      this.domainEventBusInstance = null;
-    }
-    return this.domainEventBusInstance;
+  public getDomainEventBus(): ManuscriptDomainEventBus {
+    return this.domainEventBus;
   }
 
   public getLiveCollaboration(): LiveCollaborationPort | null {
@@ -101,24 +97,6 @@ export class ManuscriptPageService {
       this.liveCollab = null;
     }
     return this.liveCollab;
-  }
-
-  public async syncLiveDoc(
-    projectId: string,
-    docId: string,
-    lines: string[],
-  ): Promise<boolean> {
-    const live = this.getLiveCollaboration();
-    if (!live) return false;
-    try {
-      return await live.applyExternalText(projectId, docId, lines.join('\n'));
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Failed to sync REST write into live session ${projectId}:${docId}: ${message}`,
-      );
-      return false;
-    }
   }
 
   public async resolveProjectId(id: string): Promise<string | null> {
@@ -357,37 +335,17 @@ export class ManuscriptPageService {
 
     let liveSynced = false;
     if (hasNewContent && record.projectId) {
-      const bus = this.getDomainEventBus();
-      if (bus) {
-        try {
-          await bus.publish({
-            type: 'manuscript.document.mutated',
-            projectId: record.projectId,
-            docId: pageId,
-            lines: result.doc.lines || [''],
-            rev: result.doc.rev,
-            version: result.doc.version,
-            source: 'rest-docstore',
-            occurredAt: Date.now(),
-          });
-          liveSynced = true;
-        } catch (busErr) {
-          this.logger.warn(
-            `Failed to publish manuscript.document.mutated event for doc ${pageId}: ${String(busErr)}`,
-          );
-          liveSynced = await this.syncLiveDoc(
-            record.projectId,
-            pageId,
-            result.doc.lines || lines,
-          );
-        }
-      } else {
-        liveSynced = await this.syncLiveDoc(
-          record.projectId,
-          pageId,
-          result.doc.lines || lines,
-        );
-      }
+      await this.domainEventBus.publish({
+        type: 'manuscript.document.mutated',
+        projectId: record.projectId,
+        docId: pageId,
+        lines: result.doc.lines || [''],
+        rev: result.doc.rev,
+        version: result.doc.version,
+        source: 'rest-docstore',
+        occurredAt: Date.now(),
+      });
+      liveSynced = true;
     }
 
     return {
@@ -509,28 +467,12 @@ export class ManuscriptPageService {
     authorizedProjectId?: string | { id: string } | null,
   ) {
     const fileName = body?.title || body?.name || 'untitled.tex';
-    const cleanName = fileName.trim().replace(/^\//, '');
     const content = body?.content || '';
 
-    let projectId: string | null =
-      this.resolveActiveProjectId(authorizedProjectId) || null;
+    const projectId =
+      this.resolveActiveProjectId(authorizedProjectId) ||
+      (await resolveProjectIdByEntityId(this.prisma, pageId));
     const parentDocId = pageId;
-
-    if (!projectId && isUuid(pageId)) {
-      const record = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-      });
-      if (record) {
-        projectId = record.projectId;
-      } else {
-        const project = await this.prisma.project.findUnique({
-          where: { id: pageId },
-        });
-        if (project) {
-          projectId = project.id;
-        }
-      }
-    }
 
     if (!projectId) {
       throw new NotFoundException(
@@ -538,52 +480,21 @@ export class ManuscriptPageService {
       );
     }
 
-    const cleanDocPath = cleanName.replace(/\\/g, '/').replace(/^\/+/g, '');
-    const segments = cleanDocPath.split('/').filter(Boolean);
-    const leafName = segments[segments.length - 1] || cleanDocPath || 'untitled.tex';
-    const cleanNodePath = `/${segments.join('/') || leafName}`;
-    const nodeDepth = Math.max(0, segments.length - 1);
+    const parsed = NodePathVo.parse(fileName, 'untitled.tex');
 
     let createdDocResult: Awaited<ReturnType<typeof this.docstoreService.createDoc>>;
     let createdNodeResult: { id: string };
 
     try {
       const txResult = await this.prisma.$transaction(async (tx) => {
-        let parentId: string | null = null;
-        if (segments.length > 1) {
-          let currentFolderPath = '';
-          for (let i = 0; i < segments.length - 1; i++) {
-            const folderSegment = segments[i];
-            currentFolderPath = `${currentFolderPath}/${folderSegment}`;
-            let folderNode = await tx.manuscriptNode.findUnique?.({
-              where: {
-                projectId_path: {
-                  projectId,
-                  path: currentFolderPath,
-                },
-              },
-            });
-            if (!folderNode) {
-              folderNode = await tx.manuscriptNode.create({
-                data: {
-                  projectId,
-                  parentId,
-                  type: 'FOLDER',
-                  name: folderSegment,
-                  path: currentFolderPath,
-                  depth: i,
-                  isRootDoc: false,
-                  sizeBytes: 0,
-                  sortOrder: 0,
-                },
-              });
-            }
-            parentId = folderNode?.id ?? parentId;
-          }
-        }
+        const parentId = await ensurePrismaFolderChain(
+          tx,
+          projectId,
+          parsed.folderChain,
+        );
 
         const doc = await this.docstoreService.createDoc(projectId, {
-          path: cleanDocPath,
+          path: parsed.relativePath,
           text: content,
           version: 1,
           tx,
@@ -593,9 +504,9 @@ export class ManuscriptPageService {
           data: {
             projectId,
             parentId,
-            name: leafName,
-            path: cleanNodePath,
-            depth: nodeDepth,
+            name: parsed.leafName,
+            path: parsed.normalizedPath,
+            depth: parsed.depth,
             type: 'DOC',
             docId: doc._id,
             sizeBytes: Buffer.byteLength(content, 'utf8'),
@@ -610,7 +521,7 @@ export class ManuscriptPageService {
     } catch (createErr: unknown) {
       if (isPrismaUniqueConstraintError(createErr)) {
         throw new BadRequestException(
-          `File path already exists: ${cleanNodePath}`,
+          `File path already exists: ${parsed.normalizedPath}`,
         );
       }
       throw createErr;
@@ -623,9 +534,9 @@ export class ManuscriptPageService {
       file: {
         id: createdDoc._id,
         nodeId,
-        title: leafName,
-        name: leafName,
-        path: cleanNodePath,
+        title: parsed.leafName,
+        name: parsed.leafName,
+        path: parsed.normalizedPath,
         type: 'file',
         pageId: parentDocId,
         content,
@@ -652,6 +563,16 @@ export class ManuscriptPageService {
               where: { id: pageId },
             });
         if (doc) {
+          const existingNodes = await this.prisma.manuscriptNode
+            .findMany({
+              where: {
+                projectId: doc.projectId,
+                OR: [{ docId: doc.id }, { id: pageId }],
+              },
+            })
+            .catch(() => []);
+          const deletedRootDoc = existingNodes.some((n) => n.isRootDoc);
+
           await Promise.all([
             this.docstoreService.patchDoc(doc.projectId, doc.id, {
               deleted: true,
@@ -666,10 +587,36 @@ export class ManuscriptPageService {
               })
               .catch(() => null),
           ]);
-          const live = this.getLiveCollaboration();
-          if (live) {
-            await live.evictDoc(doc.projectId, doc.id).catch(() => null);
+
+          if (deletedRootDoc) {
+            const nextRootCandidate = await this.prisma.manuscriptNode
+              .findFirst({
+                where: {
+                  projectId: doc.projectId,
+                  type: 'DOC',
+                  name: { endsWith: '.tex' },
+                },
+                orderBy: [{ depth: 'asc' }, { sortOrder: 'asc' }],
+              })
+              .catch(() => null);
+            if (nextRootCandidate) {
+              await this.prisma.manuscriptNode
+                .update({
+                  where: { id: nextRootCandidate.id },
+                  data: { isRootDoc: true },
+                })
+                .catch(() => null);
+            }
           }
+
+          await this.domainEventBus.publish({
+            type: 'manuscript.nodes.deleted',
+            projectId: doc.projectId,
+            deletedDocIds: [doc.id],
+            deletedFileIds: [],
+            hadRootDoc: deletedRootDoc,
+            occurredAt: Date.now(),
+          });
         }
       } catch {
         // Fallback
@@ -685,23 +632,9 @@ export class ManuscriptPageService {
     pageId: string,
     authorizedProjectId?: string | { id: string } | null,
   ) {
-    let projectId: string | null =
-      this.resolveActiveProjectId(authorizedProjectId) || null;
-    if (!projectId && isUuid(pageId)) {
-      const doc = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-        select: { projectId: true },
-      });
-      if (doc) {
-        projectId = doc.projectId;
-      } else {
-        const project = await this.prisma.project.findUnique({
-          where: { id: pageId },
-          select: { id: true },
-        });
-        if (project) projectId = project.id;
-      }
-    }
+    const projectId =
+      this.resolveActiveProjectId(authorizedProjectId) ||
+      (await resolveProjectIdByEntityId(this.prisma, pageId));
 
     if (!projectId) {
       return { files: [] };

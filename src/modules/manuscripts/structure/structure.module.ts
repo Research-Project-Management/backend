@@ -3,7 +3,7 @@
  * NestJS Module for Manuscript Project File Tree & Hierarchy Subsystem.
  */
 
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
@@ -13,7 +13,7 @@ import { StructureRepository } from './structure.repository';
 import { IStructureRepository } from './domain';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => DocstoreModule), FilestoreModule],
+  imports: [PrismaModule, DocstoreModule, FilestoreModule],
   controllers: [StructureController],
   providers: [
     StructureService,

@@ -19,9 +19,6 @@ import {
   HttpStatus,
   HttpCode,
   UseGuards,
-  Optional,
-  Inject,
-  forwardRef,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
@@ -33,7 +30,6 @@ import {
 } from '@/modules/project/access';
 import { AuthenticatedRequest } from '@/core';
 import { DocstoreService } from '../docstore.service';
-import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import {
   ManuscriptPageService,
   UpdatePageContentParams,
@@ -53,9 +49,6 @@ export class PagesDocController {
   constructor(
     private readonly pageService: ManuscriptPageService,
     private readonly docstoreService: DocstoreService,
-    @Optional()
-    @Inject(forwardRef(() => StructureService))
-    private readonly structureService?: StructureService,
   ) {}
 
   // ─── 1. CORE DOCUMENT CONTENT & METADATA ──────────────────────────────────────

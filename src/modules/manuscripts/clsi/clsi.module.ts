@@ -5,7 +5,7 @@
  * fileset planner) are invoked directly without DI ceremony.
  */
 
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config';
@@ -28,7 +28,6 @@ import {
   LocalProcessRunner,
   DockerSandboxRunner,
   LatexmkEngine,
-  TectonicEngine,
   ClsiHealthCheck,
 } from './services/compile-pipeline.service';
 import { ISandboxRunner } from './domain/clsi-ports';
@@ -50,7 +49,7 @@ const inProcessClsiWorkers =
 @Module({
   imports: [
     AppCoreModule,
-    forwardRef(() => DocstoreModule),
+    DocstoreModule,
     FilestoreModule,
     BullModule.registerQueue({
       name: MANUSCRIPT_CLSI_QUEUE,
@@ -92,7 +91,9 @@ const inProcessClsiWorkers =
             CLSI_SANDBOX_RUNTIME: configService.get<string>(
               'CLSI_SANDBOX_RUNTIME',
             ),
-            CLSI_SCRATCH_DIR: configService.get<string>('CLSI_SCRATCH_DIR'),
+            CLSI_SCRATCH_DIR:
+              configService.get<string>('CLSI_SCRATCH_DIR') ||
+              configService.get<string>('SCRATCH_DIR'),
             NODE_ENV: configService.get<string>('NODE_ENV'),
           },
           isProduction: configService.get<string>('NODE_ENV') === 'production',
@@ -131,15 +132,6 @@ const inProcessClsiWorkers =
       inject: [CLSI_SANDBOX_RUNNER, ConfigService],
     },
     {
-      provide: TectonicEngine,
-      useFactory: (runner: ISandboxRunner, configService: ConfigService) => {
-        const tectonicBin =
-          configService.get<string>('TECTONIC_BIN') || 'tectonic';
-        return new TectonicEngine(runner, tectonicBin);
-      },
-      inject: [CLSI_SANDBOX_RUNNER, ConfigService],
-    },
-    {
       provide: DiskUsageCleaner,
       useFactory: (sandboxConfig: ClsiSandboxConfig) =>
         new DiskUsageCleaner(sandboxConfig.scratchDir),
@@ -156,9 +148,8 @@ const inProcessClsiWorkers =
       useFactory: (
         workspace: OverleafIncrementalWorkspace,
         latexmkEngine: LatexmkEngine,
-        tectonicEngine: TectonicEngine,
-      ) => new CompilePipeline(workspace, latexmkEngine, tectonicEngine),
-      inject: [OverleafIncrementalWorkspace, LatexmkEngine, TectonicEngine],
+      ) => new CompilePipeline(workspace, latexmkEngine),
+      inject: [OverleafIncrementalWorkspace, LatexmkEngine],
     },
     CompileFairQueue,
     ClsiService,

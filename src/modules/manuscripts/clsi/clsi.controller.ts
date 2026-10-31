@@ -221,6 +221,8 @@ export class ClsiController {
   }
 
   @Get('clsi/metrics/summary')
+  @UseGuards(OperatorGuard)
+  @RequireOperator()
   @NoProjectContext()
   @ApiOperation({ summary: 'JSON metrics summary of compilation statistics' })
   async getMetricsSummary() {

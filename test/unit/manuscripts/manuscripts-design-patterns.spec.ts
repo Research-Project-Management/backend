@@ -18,7 +18,6 @@ import { ExportImportService } from '../../../src/modules/manuscripts/export-imp
 import {
   BaseLatexEngine,
   LatexmkEngine,
-  TectonicEngine,
 } from '../../../src/modules/manuscripts/clsi/services/compile-pipeline.service';
 import { RemoteClsiClientAdapter } from '../../../src/modules/manuscripts/clsi/services/remote-clsi.client';
 import {
@@ -147,7 +146,7 @@ describe('Manuscripts Design Patterns & Audit Remediations', () => {
   });
 
   describe('3. Template Method Pattern: BaseLatexEngine & ExportImportService', () => {
-    it('enforces shell-escape sandbox rejection and safe mainFile validation across both LatexmkEngine and TectonicEngine (LSP)', async () => {
+    it('enforces shell-escape sandbox rejection and safe mainFile validation across LatexmkEngine (LSP)', async () => {
       const fakeRunner = {
         name: 'fake',
         run: jest.fn().mockResolvedValue({
@@ -159,7 +158,6 @@ describe('Manuscripts Design Patterns & Audit Remediations', () => {
 
       const engines: BaseLatexEngine[] = [
         new LatexmkEngine(fakeRunner),
-        new TectonicEngine(fakeRunner),
       ];
 
       for (const engine of engines) {

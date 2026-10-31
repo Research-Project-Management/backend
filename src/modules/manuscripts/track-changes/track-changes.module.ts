@@ -3,9 +3,10 @@
  * NestJS Module for Manuscripts Review Mode: Track Changes & Comments.
  */
 
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
+import { PagesReviewController } from '@/modules/manuscripts/docstore/controllers/pages-review.controller';
 
 import { TrackChangesController } from './track-changes.controller';
 import { TrackChangesService } from './track-changes.service';
@@ -21,8 +22,8 @@ import {
 } from './domain';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => DocstoreModule)],
-  controllers: [TrackChangesController],
+  imports: [PrismaModule, DocstoreModule],
+  controllers: [TrackChangesController, PagesReviewController],
   providers: [
     TrackChangesService,
     TrackChangesRepository,

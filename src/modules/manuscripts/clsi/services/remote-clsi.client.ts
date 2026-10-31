@@ -177,11 +177,7 @@ export class RemoteClsiClientAdapter {
       const serializedFiles: Record<string, string> = {};
       for (const [k, v] of Object.entries(mergedFiles)) {
         if (Buffer.isBuffer(v)) {
-          const isBinaryAsset =
-            /\.(png|jpe?g|gif|webp|pdf|eps|ps|ttf|otf|woff2?)$/i.test(k);
-          serializedFiles[k] = isBinaryAsset
-            ? `base64:${v.toString('base64')}`
-            : v.toString('utf8');
+          serializedFiles[k] = `base64:${v.toString('base64')}`;
         } else {
           serializedFiles[k] = v;
         }

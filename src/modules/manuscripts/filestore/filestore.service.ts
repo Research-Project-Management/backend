@@ -134,15 +134,16 @@ export class FilestoreService {
       );
     }
 
+    const sanitizedName = ManuscriptFile.sanitizeFilename(name);
     const existing = await this.repository.findByProjectAndName(
       projectId,
-      name,
+      sanitizedName,
     );
 
     const fileEntity = ManuscriptFile.reconstitute({
       id: existing?.id ?? ManuscriptFile.create({
         projectId,
-        name,
+        name: sanitizedName,
         mimeType: mimeType || 'application/octet-stream',
         sizeBytes,
         hash: contentHash,
@@ -150,7 +151,7 @@ export class FilestoreService {
         bucketName,
       }).id,
       projectId,
-      name,
+      name: sanitizedName,
       mimeType: mimeType || 'application/octet-stream',
       sizeBytes,
       hash: contentHash,

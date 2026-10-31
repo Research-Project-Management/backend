@@ -62,7 +62,7 @@ describe('Structure Repository & Service Project Scoping (SEC-02 / US5)', () => 
       expect(mockPrisma.manuscriptNode.findFirst).toHaveBeenCalledWith({
         where: {
           projectId: projectAId,
-          OR: [{ id: nodeAId }, { docId: nodeAId }],
+          OR: [{ id: nodeAId }, { docId: nodeAId }, { fileId: nodeAId }],
         },
       });
     });
@@ -75,7 +75,7 @@ describe('Structure Repository & Service Project Scoping (SEC-02 / US5)', () => 
       expect(mockPrisma.manuscriptNode.findFirst).toHaveBeenCalledWith({
         where: {
           projectId: projectBId,
-          OR: [{ id: nodeAId }, { docId: nodeAId }],
+          OR: [{ id: nodeAId }, { docId: nodeAId }, { fileId: nodeAId }],
         },
       });
     });
@@ -174,6 +174,43 @@ describe('Structure Repository & Service Project Scoping (SEC-02 / US5)', () => 
           docId: docAId,
         }),
       ).rejects.toThrow(DuplicateNodePathError);
+    });
+
+    it('createNode should extract leafName and mkdirp parent folders when dto.name contains a relative path', async () => {
+      mockPrisma.manuscriptNode.findByPath = jest.fn();
+      mockPrisma.manuscriptNode.findUnique.mockResolvedValue(null);
+      mockPrisma.manuscriptNode.create
+        .mockResolvedValueOnce({
+          id: 'folder-sec-id',
+          projectId: projectAId,
+          parentId: null,
+          name: 'sections',
+          path: '/sections',
+          type: 'FOLDER',
+          depth: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .mockResolvedValueOnce({
+          id: nodeAId,
+          projectId: projectAId,
+          parentId: 'folder-sec-id',
+          name: 'intro.tex',
+          path: '/sections/intro.tex',
+          type: 'DOC',
+          depth: 2,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+
+      const created = await service.createNode(projectAId, {
+        name: 'sections/intro.tex',
+        type: 'DOC',
+      });
+
+      expect(created.name).toBe('intro.tex');
+      expect(created.path).toBe('/sections/intro.tex');
+      expect(created.parentId).toBe('folder-sec-id');
     });
   });
 });

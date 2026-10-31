@@ -3,20 +3,12 @@
  * NestJS Module bundling Manuscripts Docstore controllers, services, repositories, and adapters.
  */
 
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '@/core';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
-import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
-import { ProjectHistoryModule } from '@/modules/manuscripts/project-history/project-history.module';
-import { TrackChangesModule } from '@/modules/manuscripts/track-changes/track-changes.module';
-import { ExportImportModule } from '@/modules/manuscripts/export-import/export-import.module';
-import {
-  PagesDocController,
-  PagesReviewController,
-  PagesHistoryExportController,
-  PagesSearchPresenceController,
-} from './controllers';
+import { PagesDocController } from './controllers/pages-doc.controller';
+import { PagesSearchPresenceController } from './controllers/pages-search-presence.controller';
 import { DocstoreService } from './docstore.service';
 import { ManuscriptPageService } from '../core/services/manuscript-page.service';
 import { ManuscriptUserResolverService } from '../core/services/manuscript-user-resolver.service';
@@ -39,21 +31,8 @@ import {
 import { ManuscriptPageScopeRepository } from './repositories/manuscript-page-scope.repository';
 
 @Module({
-  imports: [
-    ConfigModule,
-    PrismaModule,
-    FilestoreModule,
-    forwardRef(() => StructureModule),
-    forwardRef(() => ProjectHistoryModule),
-    forwardRef(() => TrackChangesModule),
-    forwardRef(() => ExportImportModule),
-  ],
-  controllers: [
-    PagesDocController,
-    PagesReviewController,
-    PagesHistoryExportController,
-    PagesSearchPresenceController,
-  ],
+  imports: [ConfigModule, PrismaModule, FilestoreModule],
+  controllers: [PagesDocController, PagesSearchPresenceController],
   providers: [
     // Domain Services
     ManuscriptPageService,

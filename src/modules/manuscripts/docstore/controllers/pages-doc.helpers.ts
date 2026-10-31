@@ -4,15 +4,16 @@
  * for PagesDocController.
  */
 
-import * as path from 'path';
 import {
   BadRequestException,
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { ManuscriptDoc, ManuscriptNode, Prisma } from '@prisma/client';
+import { ManuscriptDoc, ManuscriptNode } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
+import { NodePathVo } from '@/modules/manuscripts/structure/domain';
+import { ensurePrismaFolderChain } from '@/modules/manuscripts/structure/structure.repository';
 import { DocstoreService } from '../docstore.service';
 import { DocModifiedError } from '../domain';
 import { ManuscriptPageScopeRepository } from '../repositories/manuscript-page-scope.repository';
@@ -142,49 +143,27 @@ export async function formatPageByIdResponse(
   docstoreService: DocstoreService,
   record: ManuscriptDoc & { node: ManuscriptNode | null },
 ) {
-  let doc: {
-    _id: string;
-    id?: string;
-    projectId?: string;
-    path: string;
-    lines: string[];
-    version: number;
-    rev: number;
-    ranges?: unknown;
-    hash?: string | null;
-    sizeBytes?: number;
-    createdAt?: Date;
-    updatedAt?: Date;
-  };
-  if (record.inStorage) {
-    doc = await docstoreService.getDoc(record.projectId, record.id);
-  } else {
-    const rawLines = record.lines;
-    const lines = Array.isArray(rawLines)
-      ? (rawLines as string[])
-      : typeof rawLines === 'string'
-        ? rawLines.split('\n')
-        : [];
-    doc = {
-      _id: record.id,
-      id: record.id,
-      projectId: record.projectId,
-      path: record.path,
-      lines,
-      version: record.version,
-      rev: record.rev,
-      ranges: record.ranges || {},
-      hash: record.hash,
-      sizeBytes: record.sizeBytes,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-    };
-  }
+  const doc = record.inStorage
+    ? await docstoreService.getDoc(record.projectId, record.id)
+    : {
+        _id: record.id,
+        id: record.id,
+        projectId: record.projectId,
+        path: record.path,
+        lines: await hydratePageDocLines(docstoreService, record),
+        version: record.version,
+        rev: record.rev,
+        ranges: record.ranges || {},
+        hash: record.hash,
+        sizeBytes: record.sizeBytes,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      };
 
   const lines = doc.lines || [];
   const content = Array.isArray(lines) ? lines.join('\n') : String(lines);
   const title =
-    record.node?.name || doc.path?.replace(/^\//, '') || 'document.tex';
+    record.node?.name || NodePathVo.toRelative(doc.path || 'document.tex') || 'document.tex';
 
   return {
     ...doc,
@@ -262,20 +241,35 @@ export async function applyPageMetadataAndTitleUpdates(
   },
 ): Promise<{ cleanTitle: string | undefined; existingRanges: PageDocRanges }> {
   const cleanTitle = body.title
-    ? body.title.trim().replace(/^\//, '')
+    ? body.title.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
     : undefined;
 
   if (cleanTitle) {
-    const dir = path.posix.dirname(record.path);
-    const newPath =
-      dir && dir !== '.' && dir !== '/'
-        ? `${dir}/${cleanTitle}`
-        : `/${cleanTitle}`;
+    let titleParsed: ReturnType<typeof NodePathVo.parse>;
+    try {
+      titleParsed = NodePathVo.parse(cleanTitle, cleanTitle);
+    } catch {
+      throw new BadRequestException(`Invalid document title or path: ${cleanTitle}`);
+    }
+
+    const existingParsed = NodePathVo.parse(record.path || 'document.tex', 'document.tex');
+    const targetParsed =
+      titleParsed.segments.length > 1
+        ? titleParsed
+        : existingParsed.parentPath
+          ? NodePathVo.parse(`${existingParsed.parentPath}/${titleParsed.leafName}`, titleParsed.leafName)
+          : titleParsed;
+
+    const parentId =
+      titleParsed.segments.length > 1
+        ? await ensurePrismaFolderChain(prisma, record.projectId, targetParsed.folderChain)
+        : undefined;
+
     await Promise.all([
       prisma.manuscriptDoc
         .update({
           where: { id: pageId },
-          data: { path: newPath },
+          data: { path: targetParsed.normalizedPath },
         })
         .catch(() => null),
       prisma.manuscriptNode
@@ -285,8 +279,10 @@ export async function applyPageMetadataAndTitleUpdates(
             OR: [{ docId: pageId }, { id: pageId }],
           },
           data: {
-            name: cleanTitle,
-            path: newPath,
+            name: targetParsed.leafName,
+            path: targetParsed.normalizedPath,
+            depth: targetParsed.depth,
+            ...(parentId !== undefined ? { parentId } : {}),
           },
         })
         .catch(() => null),
@@ -550,6 +546,70 @@ export async function formatRootNodesAsProjectPages(
   return pages;
 }
 
+async function ensureRestoredAssetNode(
+  prisma: PrismaService,
+  params: {
+    projectId: string;
+    rawPath: string;
+    fallbackLeaf: string;
+    type: 'DOC' | 'FILE';
+    assetId: string;
+    sizeBytes: number;
+  },
+): Promise<{ node: ManuscriptNode; parsed: ReturnType<typeof NodePathVo.parse> }> {
+  const parsed = NodePathVo.parse(params.rawPath, params.fallbackLeaf);
+  const existingNode = await prisma.manuscriptNode.findFirst({
+    where: {
+      projectId: params.projectId,
+      ...(params.type === 'DOC' ? { docId: params.assetId } : { fileId: params.assetId }),
+    },
+  });
+  if (existingNode) {
+    return { node: existingNode, parsed };
+  }
+
+  const parentId = await ensurePrismaFolderChain(
+    prisma,
+    params.projectId,
+    parsed.folderChain,
+  );
+
+  const pathConflict = await prisma.manuscriptNode.findUnique?.({
+    where: {
+      projectId_path: {
+        projectId: params.projectId,
+        path: parsed.normalizedPath,
+      },
+    },
+  });
+
+  const conflictAssetId =
+    params.type === 'DOC' ? pathConflict?.docId : pathConflict?.fileId;
+  let finalLeafName = parsed.leafName;
+  let cleanPath = parsed.normalizedPath;
+  if (pathConflict && conflictAssetId !== params.assetId) {
+    finalLeafName = NodePathVo.withSuffixBeforeExt(parsed.leafName, ' (Restored)');
+    cleanPath = parsed.parentPath
+      ? `${parsed.parentPath}/${finalLeafName}`
+      : `/${finalLeafName}`;
+  }
+
+  const node = await prisma.manuscriptNode.create({
+    data: {
+      projectId: params.projectId,
+      parentId,
+      name: finalLeafName,
+      path: cleanPath,
+      depth: parsed.depth,
+      type: params.type,
+      ...(params.type === 'DOC' ? { docId: params.assetId } : { fileId: params.assetId }),
+      sizeBytes: params.sizeBytes,
+    },
+  });
+
+  return { node, parsed };
+}
+
 export async function restoreDeletedDocOrFile(
   prisma: PrismaService,
   docstoreService: DocstoreService,
@@ -570,24 +630,14 @@ export async function restoreDeletedDocOrFile(
       deleted: false,
     });
 
-    const cleanPath = doc.path.startsWith('/') ? doc.path : `/${doc.path}`;
-    const cleanName = doc.path.replace(/^\//, '') || 'restored.tex';
-    let existingNode = await prisma.manuscriptNode.findFirst({
-      where: { projectId: doc.projectId, docId: doc.id },
+    const { node: existingNode, parsed } = await ensureRestoredAssetNode(prisma, {
+      projectId: doc.projectId,
+      rawPath: doc.path || 'restored.tex',
+      fallbackLeaf: 'restored.tex',
+      type: 'DOC',
+      assetId: doc.id,
+      sizeBytes: doc.sizeBytes || 0,
     });
-
-    if (!existingNode) {
-      existingNode = await prisma.manuscriptNode.create({
-        data: {
-          projectId: doc.projectId,
-          name: cleanName,
-          path: cleanPath,
-          type: 'DOC',
-          docId: doc.id,
-          sizeBytes: doc.sizeBytes || 0,
-        },
-      });
-    }
 
     eventEmitter?.emit('manuscripts.file-tree.change', {
       projectId: doc.projectId,
@@ -604,7 +654,7 @@ export async function restoreDeletedDocOrFile(
       success: true,
       page: {
         id: doc.id,
-        title: cleanName,
+        title: parsed.relativePath,
         content,
         projectId: doc.projectId,
       },
@@ -625,22 +675,14 @@ export async function restoreDeletedDocOrFile(
       data: { deleted: false },
     });
 
-    let existingNode = await prisma.manuscriptNode.findFirst({
-      where: { projectId: file.projectId, fileId: file.id },
+    const { node: existingNode } = await ensureRestoredAssetNode(prisma, {
+      projectId: file.projectId,
+      rawPath: file.name || 'restored.bin',
+      fallbackLeaf: 'restored.bin',
+      type: 'FILE',
+      assetId: file.id,
+      sizeBytes: Number(file.sizeBytes || 0),
     });
-
-    if (!existingNode) {
-      existingNode = await prisma.manuscriptNode.create({
-        data: {
-          projectId: file.projectId,
-          name: file.name,
-          path: `/${file.name}`,
-          type: 'FILE',
-          fileId: file.id,
-          sizeBytes: Number(file.sizeBytes || 0),
-        },
-      });
-    }
 
     eventEmitter?.emit('manuscripts.file-tree.change', {
       projectId: file.projectId,
@@ -674,13 +716,17 @@ export async function duplicateSourcePageAndNode(
   pageId: string,
   source: ManuscriptDoc,
 ) {
-  const sourceTitle = source.path || 'document.tex';
-  const newTitle = sourceTitle.endsWith(' (Copy)')
-    ? `${sourceTitle.replace(/ \(Copy\)$/, '')} (Copy 2)`
-    : `${sourceTitle} (Copy)`;
-  const normalizedNodePath = newTitle.startsWith('/')
-    ? newTitle
-    : `/${newTitle}`;
+  const parsedSource = NodePathVo.parse(source.path || 'document.tex', 'document.tex');
+  const leafSource = parsedSource.leafName;
+
+  const newLeafName = leafSource.endsWith(' (Copy)')
+    ? `${leafSource.replace(/ \(Copy\)$/, '')} (Copy 2)`
+    : `${leafSource} (Copy)`;
+  const newTitle = parsedSource.folderSegments.length > 0
+    ? `${parsedSource.folderSegments.join('/')}/${newLeafName}`
+    : newLeafName;
+  const normalizedNodePath = `/${newTitle}`;
+  const computedDepth = parsedSource.depth;
 
   const hydratedSourceLines = await hydratePageDocLines(
     docstoreService,
@@ -711,9 +757,9 @@ export async function duplicateSourcePageAndNode(
           projectId: source.projectId,
           parentId: sourceNode.parentId,
           type: sourceNode.type,
-          name: newTitle.replace(/^\//, ''),
+          name: newLeafName,
           path: normalizedNodePath,
-          depth: sourceNode.depth,
+          depth: sourceNode.depth || computedDepth,
           docId: createdDoc.id,
           fileId: null,
           isRootDoc: false,
@@ -764,6 +810,39 @@ export async function duplicateSourcePageAndNode(
   };
 }
 
+export async function resolveProjectLabels(
+  prisma: PrismaService,
+  projectId: string,
+  labelIds: string[],
+): Promise<{ id: string; name: string; color: string }[]> {
+  if (!labelIds || labelIds.length === 0) return [];
+  try {
+    const found = await prisma.label.findMany({
+      where: {
+        id: { in: labelIds },
+        projects: { some: { projectId } },
+      },
+    });
+    if (found.length > 0) {
+      return found.map((l) => ({
+        id: l.id,
+        name: l.name,
+        color: l.color,
+      }));
+    }
+    const foundWork = await prisma.workItemLabel.findMany({
+      where: { id: { in: labelIds }, projectId },
+    });
+    return foundWork.map((l) => ({
+      id: l.id,
+      name: l.name,
+      color: l.color,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function resolveAndAssignLabelsForDoc(
   prisma: PrismaService,
   pageScopeRepo: ManuscriptPageScopeRepository,
@@ -781,33 +860,7 @@ export async function resolveAndAssignLabelsForDoc(
   }
 
   const targetProjectId = doc.projectId || projectId;
-  let labels: { id: string; name: string; color: string }[] = [];
-  try {
-    const found = await prisma.label.findMany({
-      where: {
-        id: { in: labelIds },
-        projects: { some: { projectId: targetProjectId } },
-      },
-    });
-    if (found.length > 0) {
-      labels = found.map((l) => ({
-        id: l.id,
-        name: l.name,
-        color: l.color,
-      }));
-    } else {
-      const foundWork = await prisma.workItemLabel.findMany({
-        where: { id: { in: labelIds }, projectId: targetProjectId },
-      });
-      labels = foundWork.map((l) => ({
-        id: l.id,
-        name: l.name,
-        color: l.color,
-      }));
-    }
-  } catch {
-    // Fallback
-  }
+  const labels = await resolveProjectLabels(prisma, targetProjectId, labelIds);
 
   await pageScopeRepo.updateDocInProject(projectId, pageId, {
     ranges: { labelIds, labels },

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as path from 'path';
 import {
   ISandboxRunner,
   ProcessExecutionOptions,
@@ -75,12 +76,18 @@ export class DockerSandboxRunner implements ISandboxRunner {
     const envArgs: string[] = [];
     const isTexSearchPathKey = (key: string) =>
       key === 'TEXINPUTS' || key === 'BIBINPUTS' || key === 'BSTINPUTS';
+    const resolvedCwd = path.resolve(options.cwd);
 
     for (const [k, v] of Object.entries(filteredEnv)) {
       if (v !== undefined) {
         let containerVal =
           typeof v === 'string'
-            ? v.split(options.cwd).join('/compile').replace(/\\/g, '/')
+            ? v
+                .split(resolvedCwd)
+                .join('/compile')
+                .split(options.cwd)
+                .join('/compile')
+                .replace(/\\/g, '/')
             : String(v);
         if (isTexSearchPathKey(k)) {
           // Linux container kpathsea requires ':' path separator and '//' recursive suffix
@@ -172,6 +179,10 @@ export class DockerSandboxRunner implements ISandboxRunner {
     } catch (err: unknown) {
       await cleanupContainer();
       throw err;
+    } finally {
+      if (options.signal) {
+        options.signal.removeEventListener('abort', onAbort);
+      }
     }
   }
 }

@@ -14,7 +14,6 @@ import {
   StructureError,
   DuplicateNodePathError,
   NodeNotFoundError,
-  CannotDeleteRootFolderError,
   RootDocNotFoundError,
 } from './domain';
 import {
@@ -39,6 +38,7 @@ export type { CompilationPayload };
 @Injectable()
 export class StructureService {
   private readonly logger = new Logger(StructureService.name);
+  private readonly domainEventBus: ManuscriptDomainEventBus;
 
   constructor(
     @Inject(IStructureRepository)
@@ -47,85 +47,127 @@ export class StructureService {
     @Optional() private readonly filestoreService?: FilestoreService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly moduleRef?: ModuleRef,
-    @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
+    @Optional() domainEventBus?: ManuscriptDomainEventBus,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly injectedLiveCollab?: LiveCollaborationPort,
-  ) {}
-
-  private get repo(): IStructureRepository {
-    return this.repository;
-  }
-
-  private getLiveCollab(): LiveCollaborationPort | null {
-    if (this.injectedLiveCollab) return this.injectedLiveCollab;
-    if (!this.moduleRef) return null;
-    try {
-      return (
-        this.moduleRef.get(LIVE_COLLABORATION_PORT, { strict: false }) ??
-        this.moduleRef.get(LiveCollaborationPort, { strict: false }) ??
-        null
-      );
-    } catch {
-      return null;
-    }
+  ) {
+    this.domainEventBus =
+      domainEventBus ??
+      new ManuscriptDomainEventBus(this.moduleRef, this.injectedLiveCollab);
   }
 
   public async getFileTree(projectId: string): Promise<TreeNodeDto[]> {
-    const nodes = await this.repo.getAllNodes(projectId);
+    const nodes = await this.repository.getAllNodes(projectId);
     return FileTreeBuilder.buildTreeHierarchy(nodes);
   }
 
   public async getAllNodes(projectId: string): Promise<ManuscriptNodeEntity[]> {
-    return await this.repo.getAllNodes(projectId);
+    return await this.repository.getAllNodes(projectId);
   }
 
   public async getNodeById(
     projectId: string,
     nodeId: string,
   ): Promise<ManuscriptNodeEntity | null> {
-    return await this.repo.findById(projectId, nodeId);
+    return await this.repository.findById(projectId, nodeId);
   }
 
   public async getNodeByPath(
     projectId: string,
     path: string,
   ): Promise<ManuscriptNodeEntity | null> {
-    return await this.repo.findByPath(projectId, path);
+    return await this.repository.findByPath(projectId, path);
+  }
+
+  private async resolveOrMaterializeParentFolder(
+    projectId: string,
+    options: {
+      parentId?: string | null;
+      explicitPath?: string;
+      leafName: string;
+      parentRoleLabel?: string;
+    },
+  ): Promise<{ parentNode: ManuscriptNodeEntity | null; computedPath: string }> {
+    const roleLabel = options.parentRoleLabel || 'Parent node';
+    if (options.parentId) {
+      const parentNode = await this.repository.findById(
+        projectId,
+        options.parentId,
+      );
+      if (!parentNode) {
+        throw new NodeNotFoundError(options.parentId);
+      }
+      parentNode.assertCanContainChildren(roleLabel);
+      return {
+        parentNode,
+        computedPath: NodePathVo.join(parentNode.path, options.leafName),
+      };
+    }
+
+    if (options.explicitPath) {
+      const parsed = NodePathVo.parse(options.explicitPath);
+      if (parsed.parentPath === '/') {
+        return { parentNode: null, computedPath: parsed.normalizedPath };
+      }
+      const existingParent = await this.repository.findByPath(
+        projectId,
+        parsed.parentPath,
+      );
+      if (existingParent) {
+        existingParent.assertCanContainChildren(roleLabel);
+        return {
+          parentNode: existingParent,
+          computedPath: parsed.normalizedPath,
+        };
+      }
+      const createdParent = await this.mkdirpInternal(
+        projectId,
+        parsed.parentPath,
+      );
+      return {
+        parentNode: createdParent,
+        computedPath: parsed.normalizedPath,
+      };
+    }
+
+    return {
+      parentNode: null,
+      computedPath: NodePathVo.join('/', options.leafName),
+    };
   }
 
   public async createNode(
     projectId: string,
     dto: CreateNodeDto,
   ): Promise<ManuscriptNodeEntity> {
-    NodePathVo.validateFilename(dto.name);
+    const rawTarget =
+      dto.path && dto.path.trim() !== '' ? dto.path : dto.name;
+    const parsedTarget = NodePathVo.parse(rawTarget);
+    const leafName =
+      parsedTarget.leafName ||
+      NodePathVo.parse(dto.name).leafName;
+    NodePathVo.validateFilename(leafName);
 
-    const currentCount = await this.repo.countNodes(projectId);
+    const currentCount = await this.repository.countNodes(projectId);
     FileTreeBuilder.validateProjectFileLimit(currentCount);
 
-    let parentNode: ManuscriptNodeEntity | null = null;
-    let computedPath: string;
+    const explicitPath =
+      dto.path && dto.path.trim() !== ''
+        ? dto.path
+        : !dto.parentId && parsedTarget.folderSegments.length > 0
+          ? parsedTarget.normalizedPath
+          : undefined;
 
-    if (dto.parentId) {
-      parentNode = await this.repo.findById(projectId, dto.parentId);
-      if (!parentNode) {
-        throw new NodeNotFoundError(dto.parentId);
-      }
-      if (!parentNode.isFolder()) {
-        throw new StructureError('Parent node must be a FOLDER');
-      }
-      computedPath = NodePathVo.join(parentNode.path, dto.name);
-    } else if (dto.path) {
-      computedPath = NodePathVo.normalize(dto.path);
-      const dirname = NodePathVo.dirname(computedPath);
-      if (dirname !== '/') {
-        parentNode = await this.mkdirpInternal(projectId, dirname);
-      }
-    } else {
-      computedPath = NodePathVo.join('/', dto.name);
-    }
+    const { parentNode, computedPath } =
+      await this.resolveOrMaterializeParentFolder(projectId, {
+        parentId: dto.parentId,
+        explicitPath,
+        leafName,
+        parentRoleLabel: 'Parent node',
+      });
 
-    const existing = await this.repo.findByPath(projectId, computedPath);
+    const existing = await this.repository.findByPath(projectId, computedPath);
     if (existing) {
       if (dto.type === 'FILE' && dto.fileId && existing.fileId === dto.fileId) {
         this.realtimeService?.broadcastFileTreeChange(projectId, {
@@ -137,17 +179,17 @@ export class StructureService {
       throw new DuplicateNodePathError(computedPath);
     }
 
-    if (dto.type === 'FILE' && dto.fileId && this.repo.findByFileId) {
-      const preSyncedNode = await this.repo.findByFileId(projectId, dto.fileId);
+    if (dto.type === 'FILE' && dto.fileId && this.repository.findByFileId) {
+      const preSyncedNode = await this.repository.findByFileId(projectId, dto.fileId);
       if (preSyncedNode) {
-        await this.repo.moveSubtree(
+        await this.repository.moveSubtree(
           projectId,
           preSyncedNode.path,
           computedPath,
           parentNode ? parentNode.id : null,
         );
         const movedNode =
-          (await this.repo.findById(projectId, preSyncedNode.id)) ??
+          (await this.repository.findById(projectId, preSyncedNode.id)) ??
           preSyncedNode;
         this.realtimeService?.broadcastFileTreeChange(projectId, {
           action: 'create',
@@ -161,8 +203,8 @@ export class StructureService {
     let resolvedSizeBytes: number | undefined;
     let resolvedHash: string | null | undefined;
 
-    if (resolvedDocId && this.repo.docExistsInProject) {
-      const exists = await this.repo.docExistsInProject(
+    if (resolvedDocId && this.repository.docExistsInProject) {
+      const exists = await this.repository.docExistsInProject(
         projectId,
         resolvedDocId,
       );
@@ -173,34 +215,22 @@ export class StructureService {
           message: 'Document not found in project',
         });
       }
-    } else if (dto.type === 'DOC' && !resolvedDocId) {
-      if (this.docstoreService) {
-        const initialLines =
-          dto.content && dto.content.length > 0
-            ? dto.content.split(/\r?\n/)
-            : [''];
-        const createdDoc = await this.docstoreService.createDoc(projectId, {
-          path: computedPath.replace(/^\/+/, ''),
-          lines: initialLines,
-        });
-        resolvedDocId = createdDoc.id;
-        resolvedSizeBytes = createdDoc.sizeBytes;
-        resolvedHash = createdDoc.hash;
-      } else if (this.repo.createBackingDoc) {
-        const createdDoc = await this.repo.createBackingDoc(
-          projectId,
-          dto.name,
-          computedPath,
-          dto.content,
-        );
-        resolvedDocId = createdDoc.id;
-        resolvedSizeBytes = createdDoc.sizeBytes;
-        resolvedHash = createdDoc.hash;
-      }
+    } else if (dto.type === 'DOC' && !resolvedDocId && this.docstoreService) {
+      const initialLines =
+        dto.content && dto.content.length > 0
+          ? dto.content.split(/\r?\n/)
+          : [''];
+      const createdDoc = await this.docstoreService.createDoc(projectId, {
+        path: NodePathVo.toRelative(computedPath),
+        lines: initialLines,
+      });
+      resolvedDocId = createdDoc.id;
+      resolvedSizeBytes = createdDoc.sizeBytes;
+      resolvedHash = createdDoc.hash;
     }
 
-    if (dto.fileId && this.repo.fileExistsInProject) {
-      const exists = await this.repo.fileExistsInProject(projectId, dto.fileId);
+    if (dto.fileId && this.repository.fileExistsInProject) {
+      const exists = await this.repository.fileExistsInProject(projectId, dto.fileId);
       if (!exists) {
         throw new NotFoundException({
           statusCode: 404,
@@ -211,11 +241,11 @@ export class StructureService {
     }
 
     try {
-      const node = await this.repo.createNode({
+      const node = await this.repository.createNode({
         projectId,
         parentId: parentNode ? parentNode.id : null,
         type: dto.type,
-        name: dto.name,
+        name: leafName,
         path: computedPath,
         docId: resolvedDocId,
         fileId: dto.fileId,
@@ -228,7 +258,7 @@ export class StructureService {
 
       if (dto.isRootDoc && dto.type === 'DOC') {
         try {
-          await this.repo.setRootDoc(projectId, node.id);
+          await this.repository.setRootDoc(projectId, node.id);
         } catch (rootErr: unknown) {
           this.logger.warn(
             `Failed to set root doc for newly created node ${node.id} in project ${projectId}: ${String(rootErr)}`,
@@ -268,26 +298,24 @@ export class StructureService {
     projectId: string,
     dirPath: string,
   ): Promise<ManuscriptNodeEntity> {
-    const normalized = NodePathVo.normalize(dirPath);
-    if (normalized === '/') {
+    const parsed = NodePathVo.parse(dirPath);
+    if (parsed.normalizedPath === '/') {
       throw new StructureError('Cannot mkdirp root directory');
     }
 
-    const segments = normalized.split('/').filter(Boolean);
     let currentPath = '';
     let parentNode: ManuscriptNodeEntity | null = null;
 
-    for (const segment of segments) {
-      NodePathVo.validateFilename(segment);
+    for (const segment of parsed.segments) {
       currentPath = NodePathVo.join(currentPath, segment);
-      let found = await this.repo.findByPath(projectId, currentPath);
+      let found = await this.repository.findByPath(projectId, currentPath);
 
       if (found && !found.isFolder()) {
         throw new DuplicateNodePathError(currentPath);
       }
 
       if (!found) {
-        found = await this.repo.createNode({
+        found = await this.repository.createNode({
           projectId,
           parentId: parentNode ? parentNode.id : null,
           type: 'FOLDER',
@@ -319,59 +347,34 @@ export class StructureService {
     nodeId: string,
     dto: MoveNodeDto,
   ): Promise<ManuscriptNodeEntity> {
-    const targetNode = await this.repo.findById(projectId, nodeId);
+    const targetNode = await this.repository.findById(projectId, nodeId);
     if (!targetNode) {
       throw new NodeNotFoundError(nodeId);
     }
-    if (targetNode.path === '/') {
-      throw new CannotDeleteRootFolderError();
-    }
+    targetNode.assertMutableTarget();
 
-    let destPath: string;
-    let newParentId: string | null = null;
     const targetParentId =
       dto.destParentId !== undefined ? dto.destParentId : dto.parentId;
+    const { parentNode: destParent, computedPath: destPath } =
+      await this.resolveOrMaterializeParentFolder(projectId, {
+        parentId: targetParentId,
+        explicitPath: targetParentId ? undefined : dto.destPath,
+        leafName: targetNode.name,
+        parentRoleLabel: 'Destination parent',
+      });
+    const newParentId = destParent ? destParent.id : null;
 
-    if (targetParentId) {
-      const destParent = await this.repo.findById(projectId, targetParentId);
-      if (!destParent) {
-        throw new NodeNotFoundError(targetParentId);
-      }
-      if (!destParent.isFolder()) {
-        throw new StructureError('Destination parent must be a FOLDER');
-      }
-      destPath = NodePathVo.join(destParent.path, targetNode.name);
-      newParentId = destParent.id;
-    } else if (dto.destPath) {
-      destPath = NodePathVo.normalize(dto.destPath);
-      NodePathVo.validateFilename(NodePathVo.basename(destPath));
-      const parentPath = NodePathVo.dirname(destPath);
-      if (parentPath !== '/') {
-        let parentNode = await this.repo.findByPath(projectId, parentPath);
-        if (!parentNode) {
-          parentNode = await this.mkdirpInternal(projectId, parentPath);
-        }
-        if (!parentNode.isFolder()) {
-          throw new StructureError('Destination parent must be a FOLDER');
-        }
-        newParentId = parentNode.id;
-      }
-    } else {
-      destPath = NodePathVo.join('/', targetNode.name);
-      newParentId = null;
-    }
+    targetNode.validateMoveTo(destPath);
 
-    FileTreeBuilder.validateMoveTarget(targetNode, destPath);
-
-    const existing = await this.repo.findByPath(projectId, destPath);
+    const existing = await this.repository.findByPath(projectId, destPath);
     if (existing && existing.id !== targetNode.id) {
       throw new DuplicateNodePathError(destPath);
     }
 
     const oldPath = targetNode.path;
-    await this.repo.moveSubtree(projectId, oldPath, destPath, newParentId);
+    await this.repository.moveSubtree(projectId, oldPath, destPath, newParentId);
 
-    const node = (await this.repo.findById(projectId, targetNode.id))!;
+    const node = (await this.repository.findById(projectId, targetNode.id))!;
 
     this.realtimeService?.broadcastFileTreeChange(projectId, {
       action: 'move',
@@ -385,40 +388,73 @@ export class StructureService {
     nodeId: string,
     dto: RenameNodeDto,
   ): Promise<ManuscriptNodeEntity> {
-    const newName = dto.name;
-    NodePathVo.validateFilename(newName);
-
-    const existingNode = await this.repo.findById(projectId, nodeId);
+    const existingNode = await this.repository.findById(projectId, nodeId);
     if (!existingNode) {
       throw new NodeNotFoundError(nodeId);
     }
-    if (existingNode.path === '/') {
-      throw new CannotDeleteRootFolderError();
+    existingNode.assertMutableTarget();
+
+    // If caller passes a relative path (e.g. "sections/new_name.tex"), extract the leaf name
+    // when the parent folder is unchanged, or delegate to move+rename when the parent folder changes.
+    const rawInput = (dto.name || '').trim();
+    if (rawInput.includes('/') || rawInput.includes('\\')) {
+      const parsed = NodePathVo.parse(rawInput);
+      const currentParentPath = NodePathVo.dirname(existingNode.path);
+      if (parsed.parentPath !== '/' && parsed.parentPath !== currentParentPath) {
+        const { parentNode: destParent, computedPath: destPath } =
+          await this.resolveOrMaterializeParentFolder(projectId, {
+            explicitPath: parsed.normalizedPath,
+            leafName: parsed.leafName,
+            parentRoleLabel: 'Destination parent',
+          });
+        existingNode.validateMoveTo(destPath);
+        const conflict = await this.repository.findByPath(projectId, destPath);
+        if (conflict && conflict.id !== existingNode.id) {
+          throw new DuplicateNodePathError(destPath);
+        }
+        await this.repository.moveSubtree(
+          projectId,
+          existingNode.path,
+          destPath,
+          destParent ? destParent.id : null,
+        );
+        const movedAndRenamed = (await this.repository.findById(
+          projectId,
+          existingNode.id,
+        ))!;
+        this.realtimeService?.broadcastFileTreeChange(projectId, {
+          action: 'rename',
+          node: movedAndRenamed,
+        });
+        return movedAndRenamed;
+      }
+      dto = { ...dto, name: parsed.leafName };
     }
+
+    const newName = dto.name;
+    NodePathVo.validateFilename(newName);
 
     let node: ManuscriptNodeEntity;
     if (existingNode.name === newName) {
       node = existingNode;
     } else {
-      const parentPath = NodePathVo.dirname(existingNode.path);
-      const newPath = NodePathVo.join(parentPath, newName);
+      const { oldPath, newPath } = existingNode.renameTo(newName);
 
-      const conflict = await this.repo.findByPath(projectId, newPath);
+      const conflict = await this.repository.findByPath(projectId, newPath);
       if (conflict && conflict.id !== existingNode.id) {
         throw new DuplicateNodePathError(newPath);
       }
 
-      const oldPath = existingNode.path;
       if (existingNode.isFolder()) {
-        await this.repo.moveSubtree(
+        await this.repository.moveSubtree(
           projectId,
           oldPath,
           newPath,
           existingNode.parentId,
         );
-        node = (await this.repo.findById(projectId, existingNode.id))!;
+        node = (await this.repository.findById(projectId, existingNode.id))!;
       } else {
-        node = await this.repo.renameNode(
+        node = await this.repository.renameNode(
           projectId,
           existingNode.id,
           newName,
@@ -438,15 +474,13 @@ export class StructureService {
     projectId: string,
     nodeId: string,
   ): Promise<ManuscriptNodeEntity[]> {
-    const node = await this.repo.findById(projectId, nodeId);
+    const node = await this.repository.findById(projectId, nodeId);
     if (!node) {
       throw new NodeNotFoundError(nodeId);
     }
-    if (node.path === '/') {
-      throw new CannotDeleteRootFolderError();
-    }
+    node.assertMutableTarget();
 
-    const deletedNodes = await this.repo.deleteSubtree(projectId, node.path);
+    const deletedNodes = await this.repository.deleteSubtree(projectId, node.path);
 
     const docIds = Array.from(
       new Set(
@@ -468,32 +502,17 @@ export class StructureService {
     );
     const hadRootDoc = deletedNodes.some((n) => n.isRootDoc);
 
-    if (this.domainEventBus) {
-      await this.domainEventBus.publish({
-        type: 'manuscript.nodes.deleted',
-        projectId,
-        deletedDocIds: docIds,
-        deletedFileIds: fileIds,
-        hadRootDoc,
-        occurredAt: Date.now(),
-      });
-    } else {
-      const liveCollab = this.getLiveCollab();
-      if (liveCollab) {
-        for (const docId of docIds) {
-          try {
-            await liveCollab.evictDoc(projectId, docId);
-          } catch (evictErr) {
-            this.logger.warn(
-              `Failed to evict live doc ${projectId}:${docId} during node deletion: ${String(evictErr)}`,
-            );
-          }
-        }
-      }
-    }
+    await this.domainEventBus.publish({
+      type: 'manuscript.nodes.deleted',
+      projectId,
+      deletedDocIds: docIds,
+      deletedFileIds: fileIds,
+      hadRootDoc,
+      occurredAt: Date.now(),
+    });
 
     if (hadRootDoc) {
-      await this.repo.unsetRootDoc(projectId);
+      await this.repository.unsetRootDoc(projectId);
       const docContentsMap = new Map<string, string[]>();
       if (this.docstoreService) {
         try {
@@ -521,25 +540,21 @@ export class StructureService {
   public async getRootDoc(
     projectId: string,
   ): Promise<ManuscriptNodeEntity | null> {
-    return await this.repo.getRootDoc(projectId);
+    return await this.repository.getRootDoc(projectId);
   }
 
   public async setRootDoc(
     projectId: string,
     nodeId: string,
   ): Promise<ManuscriptNodeEntity> {
-    const found = await this.repo.findById(projectId, nodeId);
+    const found = await this.repository.findById(projectId, nodeId);
     if (!found) {
       throw new NodeNotFoundError(nodeId);
     }
-    if (!found.isDoc() && !found.name.toLowerCase().endsWith('.tex')) {
-      throw new StructureError(
-        `Cannot set node of type ${found.type} as root document. Must be a LaTeX document (.tex).`,
-      );
-    }
+    found.assertCanBeRootDoc();
 
-    await this.repo.setRootDoc(projectId, found.id);
-    const node = (await this.repo.findById(projectId, found.id))!;
+    await this.repository.setRootDoc(projectId, found.id);
+    const node = (await this.repository.findById(projectId, found.id))!;
 
     this.realtimeService?.broadcastFileTreeChange(projectId, {
       action: 'set-root',
@@ -555,21 +570,21 @@ export class StructureService {
   ): Promise<ManuscriptNodeEntity | null> {
     const existing = existingNodes
       ? (existingNodes.find((n) => n.isRootDoc) ?? null)
-      : await this.repo.getRootDoc(projectId);
+      : await this.repository.getRootDoc(projectId);
     if (existing) {
       return existing;
     }
 
-    const allNodes = existingNodes ?? (await this.repo.getAllNodes(projectId));
+    const allNodes = existingNodes ?? (await this.repository.getAllNodes(projectId));
     const detected = FileTreeBuilder.detectRootDoc(allNodes, docContents);
 
     if (detected) {
-      await this.repo.setRootDoc(projectId, detected.id);
+      await this.repository.setRootDoc(projectId, detected.id);
       this.logger.log(
         `Auto-detected root document '${detected.path}' for project ${projectId}`,
       );
 
-      return (await this.repo.findById(projectId, detected.id)) ?? detected;
+      return (await this.repository.findById(projectId, detected.id)) ?? detected;
     }
 
     return null;
@@ -579,7 +594,7 @@ export class StructureService {
     projectId: string,
     docContentsMap: Map<string, { lines: string[]; hash?: string | null }>,
   ): Promise<CompilationPayload> {
-    const nodes = await this.repo.getAllNodes(projectId);
+    const nodes = await this.repository.getAllNodes(projectId);
 
     let rootNode = nodes.find((n) => n.isRootDoc) ?? null;
     if (!rootNode) {
@@ -653,7 +668,9 @@ export class StructureService {
     nodeId: string,
     sortOrder: number,
   ): Promise<void> {
-    await this.repo.updateSortOrder(projectId, nodeId, sortOrder);
+    const existing = await this.repository.findById(projectId, nodeId);
+    const targetId = existing ? existing.id : nodeId;
+    await this.repository.updateSortOrder(projectId, targetId, sortOrder);
   }
 
   public async updateNodeFileId(
@@ -663,12 +680,12 @@ export class StructureService {
     sizeBytes?: number,
     hash?: string | null,
   ): Promise<ManuscriptNodeEntity> {
-    if (!this.repo.updateNodeFileId) {
+    if (!this.repository.updateNodeFileId) {
       throw new StructureError(
         'updateNodeFileId is not supported by this repository',
       );
     }
-    const node = await this.repo.updateNodeFileId(
+    const node = await this.repository.updateNodeFileId(
       projectId,
       nodeId,
       fileId,

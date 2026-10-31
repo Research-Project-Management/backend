@@ -4,8 +4,28 @@
  */
 
 import { NodePathVo } from './node-path.vo';
+import {
+  CannotDeleteRootFolderError,
+  CyclicMoveError,
+  StructureError,
+} from './structure-errors';
 
 export type ManuscriptNodeType = 'FOLDER' | 'DOC' | 'FILE';
+
+export interface SerializedTreeNode {
+  id: string;
+  name: string;
+  path: string;
+  type: ManuscriptNodeType;
+  depth: number;
+  isRootDoc: boolean;
+  docId?: string | null;
+  fileId?: string | null;
+  sizeBytes: number;
+  hash?: string | null;
+  sortOrder: number;
+  children: SerializedTreeNode[];
+}
 
 export interface ManuscriptNodeProps {
   id: string;
@@ -123,6 +143,12 @@ export class ManuscriptNodeEntity {
     return this.props.children || [];
   }
 
+  public static readonly VALID_ROOT_EXTENSIONS = [
+    '.tex',
+    '.rtex',
+    '.rnw',
+  ] as const;
+
   public isFolder(): boolean {
     return this.props.type === 'FOLDER';
   }
@@ -135,12 +161,65 @@ export class ManuscriptNodeEntity {
     return this.props.type === 'FILE';
   }
 
+  public isRootFolder(): boolean {
+    return this.props.path === '/';
+  }
+
+  public canContainChildren(): boolean {
+    return this.isFolder();
+  }
+
+  public assertCanContainChildren(role = 'Parent node'): void {
+    if (!this.canContainChildren()) {
+      throw new StructureError(`${role} must be a FOLDER`);
+    }
+  }
+
+  public assertMutableTarget(): void {
+    if (this.isRootFolder()) {
+      throw new CannotDeleteRootFolderError();
+    }
+  }
+
+  public canBeRootDoc(): boolean {
+    if (!this.isDoc()) return false;
+    const lowerName = this.props.name.toLowerCase();
+    return ManuscriptNodeEntity.VALID_ROOT_EXTENSIONS.some((ext) =>
+      lowerName.endsWith(ext),
+    );
+  }
+
+  public assertCanBeRootDoc(): void {
+    if (!this.isDoc() && !this.props.name.toLowerCase().endsWith('.tex')) {
+      throw new StructureError(
+        `Cannot set node of type ${this.type} as root document. Must be a LaTeX document (.tex).`,
+      );
+    }
+  }
+
   public setChildren(children: ManuscriptNodeEntity[]): void {
     this.props.children = children;
   }
 
   public markAsRootDoc(isRoot: boolean): void {
     this.props.isRootDoc = isRoot;
+  }
+
+  public renameTo(newName: string): {
+    oldPath: string;
+    newPath: string;
+    newName: string;
+    depth: number;
+  } {
+    this.assertMutableTarget();
+    NodePathVo.validateFilename(newName);
+    const oldPath = this.props.path;
+    const parentPath = NodePathVo.dirname(oldPath);
+    const newPath = NodePathVo.join(parentPath, newName);
+    this.props.name = newName;
+    this.props.path = newPath;
+    this.props.depth = NodePathVo.depth(newPath);
+    return { oldPath, newPath, newName, depth: this.props.depth };
   }
 
   public rename(newName: string, newPath: string): void {
@@ -150,11 +229,42 @@ export class ManuscriptNodeEntity {
     this.props.depth = NodePathVo.depth(newPath);
   }
 
+  public validateMoveTo(destPath: string): string {
+    this.assertMutableTarget();
+    const normDest = NodePathVo.normalize(destPath);
+    if (
+      this.isFolder() &&
+      (normDest === this.props.path ||
+        NodePathVo.isDescendant(this.props.path, normDest))
+    ) {
+      throw new CyclicMoveError(this.props.path, normDest);
+    }
+    return normDest;
+  }
+
   public moveTo(newParentId: string | null, newPath: string): void {
+    const normDest = this.validateMoveTo(newPath);
     this.props.parentId = newParentId;
-    this.props.path = NodePathVo.normalize(newPath);
-    this.props.name = NodePathVo.basename(newPath);
-    this.props.depth = NodePathVo.depth(newPath);
+    this.props.path = normDest;
+    this.props.name = NodePathVo.basename(normDest);
+    this.props.depth = NodePathVo.depth(normDest);
+  }
+
+  public toTreeNode(children: SerializedTreeNode[] = []): SerializedTreeNode {
+    return {
+      id: this.id,
+      name: this.name,
+      path: this.path,
+      type: this.type,
+      depth: this.depth,
+      isRootDoc: this.isRootDoc,
+      docId: this.docId,
+      fileId: this.fileId,
+      sizeBytes: this.sizeBytes,
+      hash: this.hash,
+      sortOrder: this.sortOrder,
+      children,
+    };
   }
 
   public toJSON(): Record<string, unknown> {

@@ -21,7 +21,7 @@ export class ParseLogDto {
   defaultFile?: string;
 
   @ApiPropertyOptional({
-    description: 'Compiler engine (pdflatex, xelatex, tectonic)',
+    description: 'Compiler engine (pdflatex, xelatex, lualatex)',
     default: 'pdflatex',
   })
   @IsString()

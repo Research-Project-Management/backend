@@ -269,6 +269,18 @@ export class DocstoreRepository {
         updatedAt: new Date(),
       });
 
+      if (this.prisma.manuscriptNode?.updateMany) {
+        await this.prisma.manuscriptNode
+          .updateMany({
+            where: { projectId, docId },
+            data: {
+              sizeBytes,
+              ...(resolvedHash ? { hash: resolvedHash } : {}),
+            },
+          })
+          .catch(() => undefined);
+      }
+
       DocstoreMetrics.recordWrite(sizeBytes);
       return { doc: updatedDoc, modified: true };
     }
@@ -292,6 +304,18 @@ export class DocstoreRepository {
           rev: { increment: 1 },
         },
       });
+
+      if (this.prisma.manuscriptNode?.updateMany) {
+        await this.prisma.manuscriptNode
+          .updateMany({
+            where: { projectId, docId },
+            data: {
+              sizeBytes,
+              ...(data.hash ? { hash: data.hash } : {}),
+            },
+          })
+          .catch(() => undefined);
+      }
 
       DocstoreMetrics.recordWrite(sizeBytes);
       return { doc: this.mapToEntity(updated), modified: true };

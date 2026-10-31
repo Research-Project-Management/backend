@@ -16,7 +16,8 @@
  */
 
 import { Injectable, Optional } from '@nestjs/common';
-import { DocstoreService, UpdateDocDto } from './docstore/docstore.service';
+import { DocstoreService } from './docstore/docstore.service';
+import { UpdateDocDto } from './docstore/dto/doc.dto';
 import { StructureService } from './structure/structure.service';
 import { FilestoreService } from './filestore/filestore.service';
 import { ClsiService } from './clsi/services/clsi.service';
@@ -30,11 +31,7 @@ import { CreateNodeDto, MoveNodeDto, RenameNodeDto } from './structure/dto/node.
 import { CompileManuscriptDto, ClsiWordCountDto } from './clsi/dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './clsi/dto/synctex.dto';
 import { CitationQueryDto, ResolveIdentifierDto } from './citations/dto/citations.dto';
-import {
-  CreateSnapshotDto,
-  SnapshotQueryDto,
-  CompareSnapshotsDto,
-} from './project-history/dto/project-history.dto';
+import { CreateSnapshotDto } from './project-history/dto/history.dto';
 import { ExportZipQueryDto } from './export-import/dto/export-import.dto';
 
 @Injectable()
@@ -79,12 +76,20 @@ export class ManuscriptsFacade {
     return this.structure.createNode(projectId, dto);
   }
 
-  public async renameNode(projectId: string, dto: RenameNodeDto) {
-    return this.structure.renameNode(projectId, dto);
+  public async renameNode(
+    projectId: string,
+    nodeId: string,
+    dto: RenameNodeDto,
+  ) {
+    return this.structure.renameNode(projectId, nodeId, dto);
   }
 
-  public async moveNode(projectId: string, dto: MoveNodeDto) {
-    return this.structure.moveNode(projectId, dto);
+  public async moveNode(
+    projectId: string,
+    nodeId: string,
+    dto: MoveNodeDto,
+  ) {
+    return this.structure.moveNode(projectId, nodeId, dto);
   }
 
   public async deleteNode(projectId: string, nodeId: string): Promise<void> {
@@ -138,8 +143,11 @@ export class ManuscriptsFacade {
     return this.citations.searchCitationKeys(projectId, queryDto);
   }
 
-  public async resolveAcademicIdentifier(dto: ResolveIdentifierDto) {
-    return this.citations.resolveIdentifier(dto);
+  public async resolveAcademicIdentifier(
+    projectId: string,
+    dto: ResolveIdentifierDto,
+  ) {
+    return this.citations.resolveIdentifier(projectId, dto);
   }
 
   // ==========================================================================
@@ -154,26 +162,24 @@ export class ManuscriptsFacade {
     return this.projectHistory.createSnapshot(projectId, dto, userId);
   }
 
-  public async listSnapshots(
-    projectId: string,
-    query?: SnapshotQueryDto,
-  ) {
-    return this.projectHistory.listSnapshots(projectId, query);
+  public async listSnapshots(projectId: string) {
+    return this.projectHistory.listVersions(projectId);
   }
 
   public async restoreSnapshot(
     projectId: string,
-    snapshotId: string,
+    targetVersion: number,
     userId?: string,
   ) {
-    return this.projectHistory.restoreSnapshot(projectId, snapshotId, userId);
+    return this.projectHistory.restoreVersion(projectId, targetVersion, userId);
   }
 
   public async compareSnapshots(
     projectId: string,
-    dto: CompareSnapshotsDto,
+    baseVersion: number,
+    targetVersion: number,
   ) {
-    return this.projectHistory.compareSnapshots(projectId, dto);
+    return this.projectHistory.compareVersions(projectId, baseVersion, targetVersion);
   }
 
   // ==========================================================================

@@ -77,10 +77,4 @@ export abstract class IStructureRepository {
     projectId: string,
     fileId: string,
   ): Promise<boolean>;
-  abstract createBackingDoc?(
-    projectId: string,
-    name: string,
-    path: string,
-    content?: string,
-  ): Promise<{ id: string; sizeBytes: number; hash: string }>;
 }

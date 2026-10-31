@@ -24,8 +24,6 @@ import {
   ForbiddenException,
   Logger,
   UseGuards,
-  Inject,
-  forwardRef,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -91,10 +89,8 @@ export class PagesReviewController {
     private readonly userResolver: ManuscriptUserResolverService,
     private readonly pageService: ManuscriptPageService,
     @Optional()
-    @Inject(forwardRef(() => TrackChangesService))
     private readonly trackChangesService?: TrackChangesService,
     @Optional()
-    @Inject(forwardRef(() => TrackChangesRepository))
     private readonly trackChangesRepo?: TrackChangesRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
@@ -133,7 +129,17 @@ export class PagesReviewController {
     docId: string,
     lines: string[],
   ): Promise<boolean> {
-    return this.pageService.syncLiveDoc(projectId, docId, lines);
+    const live = this.getLiveCollaboration();
+    if (!live) return false;
+    try {
+      return await live.applyExternalText(projectId, docId, lines.join('\n'));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to sync REST write into live session ${projectId}:${docId}: ${message}`,
+      );
+      return false;
+    }
   }
 
   private async resolveUserNames(

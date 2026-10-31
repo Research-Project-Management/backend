@@ -18,7 +18,6 @@ export enum ClsiCompilerEngine {
   XELATEX = 'xelatex',
   LUALATEX = 'lualatex',
   LATEX = 'latex',
-  TECTONIC = 'tectonic',
 }
 
 export class CompileManuscriptDto {
