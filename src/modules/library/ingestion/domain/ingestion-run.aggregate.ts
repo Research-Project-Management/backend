@@ -334,14 +334,40 @@ export class IngestionRunAggregate {
     }
   }
 
-  public completeCompensation(): void {
-    this._status = IngestionStatusVo.create('FAILED_FINAL');
+  public completeCompensation(isRetryable = false): void {
+    this._status = IngestionStatusVo.create(
+      isRetryable ? 'FAILED_RETRYABLE' : 'FAILED_FINAL',
+    );
     if (!this._errorReason) {
       this._errorReason = this._compensationReason;
     }
     if (this._compensatedSteps.length === 0) {
       this._compensatedSteps = [...this._completedSteps].reverse();
     }
+    if (!isRetryable) {
+      this._completedAt = new Date();
+    }
+  }
+
+  public transitionToFailedIfActive(
+    reason: string,
+    isRetryable: boolean,
+  ): boolean {
+    if (this._status.isTerminal || this._status.value === 'FAILED_RETRYABLE') {
+      return false;
+    }
+    const nextStatusStr = isRetryable ? 'FAILED_RETRYABLE' : 'FAILED_FINAL';
+    const nextStatus = IngestionStatusVo.create(nextStatusStr);
+    if (!this._status.canTransitionTo(nextStatus)) {
+      return false;
+    }
+    this._status = nextStatus;
+    this._failedItems = Math.max(1, this._failedItems);
+    this._errorReason = reason;
+    if (!isRetryable) {
+      this._completedAt = new Date();
+    }
+    return true;
   }
 
   public recordProgress(processedDelta: number, failedDelta: number = 0): void {
