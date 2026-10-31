@@ -1,4 +1,5 @@
 import { getFileContentPath } from '@/modules/storage/storage.port';
+import type { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
@@ -16,6 +17,7 @@ import {
   parseJsonObject,
   mapCreatorsPartial,
   harmonizeDomainMetadataAndIdentifiersPartial,
+  mapFlattenedStateHelper,
 } from './item-bibliographic.mapper';
 
 export {
@@ -25,6 +27,7 @@ export {
   parseJsonObject,
   mapCreatorsPartial,
   harmonizeDomainMetadataAndIdentifiersPartial,
+  mapFlattenedStateHelper,
 };
 
 const NON_COLUMN_LOWER_SET = new Set(
@@ -202,6 +205,31 @@ export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
   }
 }
 
+export function inferViewerFormat(
+  att?: {
+    attachmentType?: string | null;
+    mimeType?: string | null;
+    filename?: string | null;
+  } | null,
+): 'pdf' | 'epub' | 'snapshot' {
+  const mime = (att?.mimeType || '').toLowerCase();
+  const filename = (att?.filename || '').toLowerCase();
+  const attType = (att?.attachmentType || '').toLowerCase();
+
+  if (mime.includes('epub') || filename.endsWith('.epub')) {
+    return 'epub';
+  }
+  if (
+    attType === 'snapshot' ||
+    mime.includes('html') ||
+    filename.endsWith('.html') ||
+    filename.endsWith('.htm')
+  ) {
+    return 'snapshot';
+  }
+  return 'pdf';
+}
+
 export function mapAttachmentsAndPrimaryFilePartial(
   it: MutableItemPayload,
 ): AttachmentLike | null {
@@ -215,6 +243,11 @@ export function mapAttachmentsAndPrimaryFilePartial(
         (attMeta.title as string | undefined) ||
         normalized.filename ||
         '';
+      if (normalized.id) {
+        (normalized as Record<string, unknown>).attachmentId = normalized.id;
+      }
+      (normalized as Record<string, unknown>).viewerFormat =
+        inferViewerFormat(normalized);
       if (normalized.size !== undefined && normalized.size !== null) {
         normalized.size = Number(normalized.size);
         (normalized as Record<string, unknown>).fileSize = normalized.size;
@@ -225,7 +258,11 @@ export function mapAttachmentsAndPrimaryFilePartial(
           ...(rev?.sizeBytes !== undefined && rev?.sizeBytes !== null
             ? { sizeBytes: Number(rev.sizeBytes) }
             : {}),
-          ...(normalized.fileId ? { url: getFileContentPath(normalized.fileId) } : {}),
+          ...(rev?.fileId
+            ? { url: getFileContentPath(String(rev.fileId)) }
+            : normalized.fileId
+              ? { url: getFileContentPath(normalized.fileId) }
+              : {}),
         }));
       }
       if (normalized.fileId) {
@@ -302,26 +339,33 @@ export function finalizePrimaryFilePartial(
 
   if (primaryPdf?.fileId) {
     it.primaryFile = {
+      attachmentId: primaryPdf.id ?? null,
       fileId: primaryPdf.fileId,
       filename: it.filename || primaryPdf.filename || '',
       title:
         primaryPdf.title ||
-        primaryPdf.metadata?.title ||
+        (primaryPdf.metadata?.title as string | undefined) ||
         it.filename ||
         primaryPdf.filename ||
         '',
       url: it.fileUrl || '',
       size: it.size || primaryPdf.size || 0,
       mimeType: it.mimeType || primaryPdf.mimeType || 'application/pdf',
+      viewerFormat: inferViewerFormat(primaryPdf),
     };
   } else if (it.fileUrl) {
     it.primaryFile = {
+      attachmentId: primaryPdf?.id ?? null,
       fileId: null,
       filename: it.filename || '',
       title: it.filename || '',
       url: it.fileUrl,
       size: it.size || 0,
       mimeType: it.mimeType || 'application/pdf',
+      viewerFormat: inferViewerFormat({
+        mimeType: it.mimeType,
+        filename: it.filename,
+      }),
     };
   } else {
     it.primaryFile = it.primaryFile ?? null;
@@ -441,7 +485,7 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
     }
     if (it.currentPage === undefined) it.currentPage = typeof active?.currentPage === 'number' ? active.currentPage : null;
     if (it.lastReadPage === undefined) it.lastReadPage = typeof active?.currentPage === 'number' ? active.currentPage : null;
-    if (it.scrollPosition === undefined) it.scrollPosition = typeof active?.scrollPosition === 'number' ? active.scrollPosition : null;
+    if (it.scrollPosition === undefined) it.scrollPosition = active?.scrollPosition ?? null;
     if (it.lastOpenedAt === undefined) {
       it.lastOpenedAt = active?.lastOpenedAt ? (active.lastOpenedAt instanceof Date ? active.lastOpenedAt.toISOString() : String(active.lastOpenedAt)) : null;
     }
@@ -646,60 +690,12 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
   }
 }
 
-export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
-  item: T | null | undefined,
-  toDomainFn: <U>(it: U) => U,
-  userId?: string,
-): (T & { readStatus: string; rating: number; lastReadAt: string | null }) | null {
-  if (!item) return null;
-  interface StateRecordLike {
-    userId?: string;
-    readStatus?: string;
-    rating?: number;
-    lastReadAt?: Date | string | null;
-    [key: string]: unknown;
-  }
-  const normalized = toDomainFn(item) as Record<string, unknown>;
-  const statesArr =
-    Array.isArray(normalized.states) && normalized.states.length > 0
-      ? (normalized.states as StateRecordLike[])
-      : null;
-  const userState = statesArr
-    ? userId
-      ? statesArr.find((s) => !s.userId || s.userId === userId)
-      : statesArr[0]
-    : undefined;
-  const { states: _states, ...rest } = normalized;
-  return {
-    ...rest,
-    isStarred:
-      userState?.isStarred !== undefined
-        ? Boolean(userState.isStarred)
-        : Boolean(normalized.isStarred),
-    readStatus: userState?.readStatus ?? 'unread',
-    rating: userState?.rating ?? 0,
-    currentPage: (userState?.currentPage as number | null | undefined) ?? null,
-    lastReadPage: (userState?.currentPage as number | null | undefined) ?? null,
-    scrollPosition: (userState?.scrollPosition as number | null | undefined) ?? null,
-    lastOpenedAt: userState?.lastOpenedAt
-      ? userState.lastOpenedAt instanceof Date
-        ? userState.lastOpenedAt.toISOString()
-        : String(userState.lastOpenedAt)
-      : null,
-    lastReadAt: userState?.lastReadAt
-      ? userState.lastReadAt instanceof Date
-        ? userState.lastReadAt.toISOString()
-        : String(userState.lastReadAt)
-      : null,
-  } as unknown as T & { readStatus: string; rating: number; lastReadAt: string | null };
-}
-
 export class ItemsMapper {
-  static toDomain<T = unknown>(
+  static toDomain<T = Record<string, unknown>>(
     raw: T,
     visitedOrUserId: WeakSet<object> | string = new WeakSet(),
-  ): T {
-    if (!raw || typeof raw !== 'object') return raw;
+  ): T & Partial<ItemDetail> {
+    if (!raw || typeof raw !== 'object') return raw as T & Partial<ItemDetail>;
     const visited =
       visitedOrUserId instanceof WeakSet ? visitedOrUserId : new WeakSet<object>();
     const userId =
@@ -707,7 +703,7 @@ export class ItemsMapper {
         ? visitedOrUserId
         : undefined;
     if (visited.has(raw as object)) {
-      return { ...(raw as Record<string, unknown>) } as unknown as T;
+      return { ...(raw as Record<string, unknown>) } as unknown as T & Partial<ItemDetail>;
     }
     visited.add(raw as object);
     const it = { ...(raw as Record<string, unknown>) } as MutableItemPayload;
@@ -726,10 +722,10 @@ export class ItemsMapper {
     harmonizeDomainMetadataAndIdentifiersPartial(it);
     finalizePrimaryFilePartial(it, primaryPdf);
     mapPublicationsAndRelationsPartial(it, (target) => ItemsMapper.toDomain(target, visited));
-    return it as unknown as T;
+    return it as unknown as T & Partial<ItemDetail>;
   }
 
-  static toDomainList<T = unknown>(items: T[]): T[] {
+  static toDomainList<T = Record<string, unknown>>(items: T[]): Array<T & Partial<ItemDetail>> {
     if (!Array.isArray(items)) return [];
     return items.map((item) => this.toDomain(item));
   }

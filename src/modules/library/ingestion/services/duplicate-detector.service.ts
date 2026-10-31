@@ -10,6 +10,8 @@ import { Prisma } from '@prisma/client';
 import {
   CATALOG_FACADE,
   ICatalogFacade,
+  IItemCacheInvalidator,
+  ITEM_CACHE_INVALIDATOR,
   DuplicateCandidateItem,
   normalizeProjectScopeId,
   LIBRARY_REDIS_KEYS,
@@ -18,7 +20,7 @@ import {
 } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
 import { TransactionService } from '@/modules/library/sync';
-import { ItemsMapper, ItemCacheCoordinator } from '@/modules/library/catalog';
+import { ItemsMapper } from '@/modules/library/catalog';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   DuplicateClusterResult,
@@ -181,7 +183,8 @@ export class DuplicateDetectorService {
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()
-    private readonly cacheCoordinator?: ItemCacheCoordinator,
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
   ) {}
 
   normalizeScopeProjectId(
@@ -517,12 +520,9 @@ export class DuplicateDetectorService {
       );
     }
 
-    if (this.cacheCoordinator) {
-      await this.cacheCoordinator.invalidateForWrite({
-        userId: String(userId),
-        projectId: effectiveProjectId,
-        itemIds: uniqueIds,
-      });
+    const invalidator = this.cacheCoordinator?.invalidateForWrite ? this.cacheCoordinator : this.catalogGateway?.invalidateForWrite ? this.catalogGateway : undefined;
+    if (invalidator?.invalidateForWrite) {
+      await invalidator.invalidateForWrite({ userId: String(userId), projectId: effectiveProjectId, itemIds: uniqueIds });
     } else if (this.cache) {
       try {
         const scopeKey = effectiveProjectId

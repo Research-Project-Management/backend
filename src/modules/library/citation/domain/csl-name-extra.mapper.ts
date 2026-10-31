@@ -59,26 +59,27 @@ export const EXTRA_DIRECT_CSL_STRING_KEYS: Record<string, keyof CslItemData> = {
   chapter: 'chapter-number',
 };
 
-export const EXTRA_FALLBACK_CSL_STRING_KEYS: Record<string, keyof CslItemData> = {
-  abstract: 'abstract',
-  shorttitle: 'title-short',
-  'short-title': 'title-short',
-  'title-short': 'title-short',
-  journalabbr: 'container-title-short',
-  journalabbreviation: 'container-title-short',
-  'journal-abbreviation': 'container-title-short',
-  'container-title-short': 'container-title-short',
-  event: 'event-title',
-  eventtitle: 'event-title',
-  'event-title': 'event-title',
-  rights: 'rights',
-  license: 'rights',
-  url: 'URL',
-  isbn: 'ISBN',
-  issn: 'ISSN',
-  callnumber: 'call-number',
-  'call-number': 'call-number',
-};
+export const EXTRA_FALLBACK_CSL_STRING_KEYS: Record<string, keyof CslItemData> =
+  {
+    abstract: 'abstract',
+    shorttitle: 'title-short',
+    'short-title': 'title-short',
+    'title-short': 'title-short',
+    journalabbr: 'container-title-short',
+    journalabbreviation: 'container-title-short',
+    'journal-abbreviation': 'container-title-short',
+    'container-title-short': 'container-title-short',
+    event: 'event-title',
+    eventtitle: 'event-title',
+    'event-title': 'event-title',
+    rights: 'rights',
+    license: 'rights',
+    url: 'URL',
+    isbn: 'ISBN',
+    issn: 'ISSN',
+    callnumber: 'call-number',
+    'call-number': 'call-number',
+  };
 
 const INSTITUTIONAL_PATTERN =
   /(?:^|[\s,;(])(?:\b(?:organization|consortium|association|institute|university|laboratory|committee|team|group|corporation|inc\.|llc|agency|department|ministry|academy|bureau|council|center|centre|foundation|society|openai|google|microsoft|meta|deepmind|who|unesco|ieee|acm)\b|(?:đại học|học viện|viện|trung tâm|bộ giáo dục|bộ y tế|bộ khoa học|bộ|trường|tổng cục|cục|sở|ngân hàng|ban quản lý|hội đồng|liên minh))(?=$|[\s,;.)])/i;
@@ -127,7 +128,8 @@ export class CslNameMapper {
     if (!VIETNAMESE_FAMILY_NAMES.has(parts[0].toLowerCase())) return false;
     return (
       parts.length >= 3 ||
-      (parts.length === 2 && VIETNAMESE_MIDDLE_NAMES.has(parts[1].toLowerCase()))
+      (parts.length === 2 &&
+        VIETNAMESE_MIDDLE_NAMES.has(parts[1].toLowerCase()))
     );
   }
 
@@ -253,13 +255,19 @@ export class CslNameMapper {
     const yearRangeMatch = trimmed.match(/^(\d{4})\s*[-/–—]\s*(\d{4})$/);
     if (yearRangeMatch) {
       return {
-        'date-parts': [[Number(yearRangeMatch[1])], [Number(yearRangeMatch[2])]],
+        'date-parts': [
+          [Number(yearRangeMatch[1])],
+          [Number(yearRangeMatch[2])],
+        ],
       };
     }
 
     // 2. Full or partial ISO date range: "2020-03-15/2020-04-01" or "2020-03/2020-04"
     if (trimmed.includes('/')) {
-      const slashParts = trimmed.split('/').map((p) => p.trim()).filter(Boolean);
+      const slashParts = trimmed
+        .split('/')
+        .map((p) => p.trim())
+        .filter(Boolean);
       if (
         slashParts.length === 2 &&
         /^\d{4}[-/]\d{1,2}/.test(slashParts[0]) &&
@@ -353,7 +361,9 @@ export class CslNameMapper {
     }
 
     const fallbackFull =
-      contrib.fullName?.trim() || contrib.name?.trim() || contrib.firstName?.trim();
+      contrib.fullName?.trim() ||
+      contrib.name?.trim() ||
+      contrib.firstName?.trim();
     return fallbackFull
       ? attachShort(this.parseStringName(fallbackFull))
       : { family: 'Anonymous' };
@@ -460,14 +470,23 @@ export class CslNameMapper {
 }
 
 export class CslExtraMapper {
-  public static parseExtraCslVariables(extraStr: string, csl: CslItemData): void {
+  public static parseExtraCslVariables(
+    extraStr: string,
+    csl: CslItemData,
+  ): void {
     if (!extraStr?.trim()) return;
     const cslRec = csl as Record<string, unknown>;
 
-    const applyKeyValue = (rawKeyInput: string, rawValInput: string): boolean => {
+    const applyKeyValue = (
+      rawKeyInput: string,
+      rawValInput: string,
+    ): boolean => {
       const val = rawValInput.trim();
       if (!val) return false;
-      const rawKey = rawKeyInput.trim().toLowerCase().replace(/[\s_]+/g, '-');
+      const rawKey = rawKeyInput
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_]+/g, '-');
 
       if (rawKey === 'original-date' || rawKey === 'originaldate') {
         const parsed = CslNameMapper.parseCslDate(val);
@@ -577,7 +596,9 @@ export class CslExtraMapper {
     for (const line of strippedBraced.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      const match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/);
+      const match = trimmed.match(
+        /^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/,
+      );
       if (!match || !applyKeyValue(match[1], match[2])) {
         remainingNotes.push(trimmed);
       }

@@ -11,6 +11,8 @@ import { RedisCacheService } from '@/core';
 import {
   CATALOG_FACADE,
   ICatalogFacade,
+  ITEM_CACHE_INVALIDATOR,
+  IItemCacheInvalidator,
   LIBRARY_REDIS_KEYS,
   LIBRARY_EVENT_TYPES,
   normalizeProjectScopeId,
@@ -21,7 +23,6 @@ import {
   TransactionHelpers,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
-import { ItemCacheCoordinator } from '@/modules/library/catalog';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import type {
   RenameAttachmentDto,
@@ -34,9 +35,19 @@ import {
 } from '@/modules/library/core/types/branded.types';
 
 interface LegacyTransactionHelpers {
-  appendChange?: (tx: unknown, scope: unknown, change: unknown) => Promise<unknown>;
+  appendChange?: (
+    tx: unknown,
+    scope: unknown,
+    change: unknown,
+  ) => Promise<unknown>;
   appendChangesBatch?: (tx: unknown, changes: unknown[]) => Promise<unknown>;
-  publishOutbox?: (tx: unknown, scope: unknown, aggregateId: string, eventType: string, payload: unknown) => Promise<unknown>;
+  publishOutbox?: (
+    tx: unknown,
+    scope: unknown,
+    aggregateId: string,
+    eventType: string,
+    payload: unknown,
+  ) => Promise<unknown>;
   publishOutboxBatch?: (tx: unknown, events: unknown[]) => Promise<unknown>;
 }
 
@@ -54,7 +65,8 @@ export class AttachmentRenamerService {
     @Optional()
     private readonly libraryTx?: TransactionService & LegacyTransactionHelpers,
     @Optional()
-    private readonly cacheCoordinator?: ItemCacheCoordinator,
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
   ) {}
 
   private async invalidateAttachmentCache(
@@ -62,8 +74,14 @@ export class AttachmentRenamerService {
     userId: string,
     projectId?: string,
   ): Promise<void> {
-    if (this.cacheCoordinator) {
-      await this.cacheCoordinator.invalidateForWrite({
+    const invalidator =
+      this.cacheCoordinator?.invalidateForWrite
+        ? this.cacheCoordinator
+        : this.catalogGateway?.invalidateForWrite
+          ? this.catalogGateway
+          : undefined;
+    if (invalidator?.invalidateForWrite) {
+      await invalidator.invalidateForWrite({
         userId,
         projectId,
         itemIds: [itemId],
@@ -417,7 +435,10 @@ export class AttachmentRenamerService {
               await helpers.appendChangesBatch(changeEntries);
             } else {
               for (const u of updatesToPersist) {
-                const scope = { userId, projectId: u.projectId || validProjectId };
+                const scope = {
+                  userId,
+                  projectId: u.projectId || validProjectId,
+                };
                 await helpers.appendChange(scope, {
                   entityType: 'Attachment',
                   entityId: u.id,
@@ -460,7 +481,10 @@ export class AttachmentRenamerService {
               await helpers.publishOutboxBatch(outboxEvents);
             } else {
               for (const u of updatesToPersist) {
-                const scope = { userId, projectId: u.projectId || validProjectId };
+                const scope = {
+                  userId,
+                  projectId: u.projectId || validProjectId,
+                };
                 await helpers.publishOutbox(
                   scope,
                   u.id,

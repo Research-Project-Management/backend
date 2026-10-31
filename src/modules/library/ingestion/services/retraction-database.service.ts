@@ -57,7 +57,12 @@ export class RetractionDatabaseService implements OnModuleInit {
     return `library:retraction:doi:${cleanDoi}`;
   }
 
-  private setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
+  private setBoundedMap<K, V>(
+    map: Map<K, V>,
+    key: K,
+    value: V,
+    max: number,
+  ): void {
     if (map.has(key)) {
       map.delete(key);
     } else if (map.size >= max) {
@@ -173,7 +178,8 @@ export class RetractionDatabaseService implements OnModuleInit {
       }
 
       if (this.repo.findAllRetractionIdentifiersForBloom) {
-        const identifiers = await this.repo.findAllRetractionIdentifiersForBloom();
+        const identifiers =
+          await this.repo.findAllRetractionIdentifiersForBloom();
         this.bloomFilter.clear();
         for (const item of identifiers) {
           if (item.doi) this.bloomFilter.add(item.doi);
@@ -271,11 +277,7 @@ export class RetractionDatabaseService implements OnModuleInit {
         cleanDoi && this.repo.findRetractionRecordByDoi
           ? await this.repo.findRetractionRecordByDoi(cleanDoi)
           : null;
-      if (
-        !record &&
-        cleanPmid &&
-        this.repo.findRetractionRecordByPmid
-      ) {
+      if (!record && cleanPmid && this.repo.findRetractionRecordByPmid) {
         record = await this.repo.findRetractionRecordByPmid(cleanPmid);
       }
       if (!record && this.repo.findRetractionRecord) {
@@ -290,14 +292,20 @@ export class RetractionDatabaseService implements OnModuleInit {
       if (record) {
         // Handle negative cache: verified clean (enforce 14-day TTL)
         if (!record.isRetracted) {
-          const checkedAtMs = record.checkedAt ? new Date(record.checkedAt).getTime() : 0;
-          if (checkedAtMs > 0 && Date.now() - checkedAtMs > this.CLEAN_CACHE_TTL_MS) {
+          const checkedAtMs = record.checkedAt
+            ? new Date(record.checkedAt).getTime()
+            : 0;
+          if (
+            checkedAtMs > 0 &&
+            Date.now() - checkedAtMs > this.CLEAN_CACHE_TTL_MS
+          ) {
             return null;
           }
           if (cleanDoi) {
             this.setCleanDoiCache(
               cleanDoi,
-              (checkedAtMs > 0 ? checkedAtMs : Date.now()) + this.CLEAN_CACHE_TTL_MS,
+              (checkedAtMs > 0 ? checkedAtMs : Date.now()) +
+                this.CLEAN_CACHE_TTL_MS,
             );
           }
           return false;
@@ -486,7 +494,15 @@ export class RetractionDatabaseService implements OnModuleInit {
   /**
    * Returns statistics about the local retraction database, memory index, and bloom filter.
    */
-  async getDatabaseStats(): Promise<RetractionDatabaseStats & { bloomFilter?: { isReady: boolean; itemCount: number; memorySizeBytes: number } }> {
+  async getDatabaseStats(): Promise<
+    RetractionDatabaseStats & {
+      bloomFilter?: {
+        isReady: boolean;
+        itemCount: number;
+        memorySizeBytes: number;
+      };
+    }
+  > {
     const stats = await this.repo.getDatabaseStats();
     return {
       ...stats,

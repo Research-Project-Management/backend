@@ -37,12 +37,15 @@ export async function disambiguateCitationKey(
       citationKey: { startsWith: cleanKey, mode: 'insensitive' },
     },
     select: { citationKey: true },
+    take: 500,
   });
   const existing = Array.isArray(rows) ? rows : [];
 
   const existingKeys = new Set(
     existing
-      .map((item: { citationKey?: string | null }) => item.citationKey?.toLowerCase())
+      .map((item: { citationKey?: string | null }) =>
+        item.citationKey?.toLowerCase(),
+      )
       .filter((k: string | undefined): k is string => Boolean(k)),
   );
 

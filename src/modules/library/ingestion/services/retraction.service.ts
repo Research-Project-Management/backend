@@ -1,10 +1,19 @@
-import { Injectable, NotFoundException, Logger, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  Logger,
+  Optional,
+  Inject,
+} from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 import {
   LIBRARY_REDIS_KEYS,
+  CATALOG_FACADE,
+  ICatalogFacade,
+  ITEM_CACHE_INVALIDATOR,
+  IItemCacheInvalidator,
   normalizeProjectScopeId,
 } from '@/modules/library/core';
-import { ItemCacheCoordinator } from '@/modules/library/catalog';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import {
@@ -37,7 +46,12 @@ export class RetractionService {
     private readonly retractionDb: RetractionDatabaseService,
     private readonly syncService: RetractionSyncService,
     @Optional() private readonly cache?: RedisCacheService,
-    @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
+    @Optional()
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
+    @Optional()
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
   ) {}
 
   private async invalidateRetractionCache(
@@ -46,8 +60,14 @@ export class RetractionService {
     projectId?: string,
   ): Promise<void> {
     if (itemIds.length === 0) return;
-    if (this.cacheCoordinator) {
-      await this.cacheCoordinator.invalidateForWrite({
+    const invalidator =
+      this.cacheCoordinator?.invalidateForWrite
+        ? this.cacheCoordinator
+        : this.catalogGateway?.invalidateForWrite
+          ? this.catalogGateway
+          : undefined;
+    if (invalidator?.invalidateForWrite) {
+      await invalidator.invalidateForWrite({
         userId,
         projectId,
         itemIds,
@@ -82,7 +102,9 @@ export class RetractionService {
           this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(userId)),
           this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
           this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
-          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(`proj:${validProjectId}`)),
+          this.cache.del(
+            LIBRARY_REDIS_KEYS.searchVersion(`proj:${validProjectId}`),
+          ),
           this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(userId)),
         );
       }

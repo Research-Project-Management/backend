@@ -54,13 +54,17 @@ export class PdfExtractionTierContext {
       allowOverwritePredicate?: (
         currentVal: ExtractedMetadata[K] | undefined,
       ) => boolean;
-      rejectValuePredicate?: (candidateVal: ExtractedMetadata[K]) => boolean;
+      rejectValuePredicate?: (
+        candidateVal: NonNullable<ExtractedMetadata[K]>,
+      ) => boolean;
     },
   ): boolean {
     if (value === undefined || value === null) return false;
     if (typeof value === 'string' && value.trim().length === 0) return false;
     if (Array.isArray(value) && value.length === 0) return false;
-    if (options?.rejectValuePredicate?.(value)) return false;
+    if (options?.rejectValuePredicate?.(value)) {
+      return false;
+    }
 
     const current = this.merged[field];
     const isCurrentEmpty =
@@ -117,8 +121,6 @@ export class PdfExtractionTierContext {
     return anyMerged;
   }
 }
-
-export type PdfExtractionContext = PdfExtractionTierContext;
 
 /**
  * GoF Chain of Responsibility — `IPdfExtractionTier`

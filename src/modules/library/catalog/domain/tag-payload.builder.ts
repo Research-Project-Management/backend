@@ -1,11 +1,7 @@
 import { Prisma, TagType } from '@prisma/client';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { normalizeAcademicTags, cleanSingleTag } from '@/modules/library/core';
 import { TagInput } from '@/modules/library/catalog/types/tags.types';
-import { isUUID } from 'class-validator';
-
-const isUuid = (val: unknown): val is string =>
-  typeof val === 'string' && Boolean(val) && isUUID(val);
 
 export interface ResolvedTag {
   id: string;
@@ -21,7 +17,8 @@ export function buildTagTypeMap(
     if (typeof rt === 'object' && rt !== null) {
       const tagName = (rt.name || rt.tag || '').trim();
       if (!tagName) continue;
-      const typeVal = 'type' in rt ? (rt as { type?: unknown }).type : undefined;
+      const typeVal =
+        'type' in rt ? (rt as { type?: unknown }).type : undefined;
       let resolvedType: TagType | undefined;
       if (
         typeVal === 1 ||
@@ -82,9 +79,15 @@ export async function resolveOrCreateTags(
       )
       .filter(Boolean),
   );
-  const missingTagNames = normalizedTagNames.filter(
-    (name) => !existingLowerNames.has(name.toLowerCase()),
-  );
+  const seenMissingLower = new Set<string>();
+  const missingTagNames = normalizedTagNames.filter((name) => {
+    const lower = name.toLowerCase();
+    if (existingLowerNames.has(lower) || seenMissingLower.has(lower)) {
+      return false;
+    }
+    seenMissingLower.add(lower);
+    return true;
+  });
   if (missingTagNames.length > 0) {
     if (typeof client.tag.createMany === 'function') {
       await client.tag.createMany({

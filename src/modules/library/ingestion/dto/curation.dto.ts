@@ -10,12 +10,7 @@ import {
 export class UpdateReviewCaseStatusDto {
   @IsIn(['OPEN', 'PENDING', 'APPROVED', 'REJECTED', 'DISMISSED', 'RESOLVED'])
   status!:
-    | 'OPEN'
-    | 'PENDING'
-    | 'APPROVED'
-    | 'REJECTED'
-    | 'DISMISSED'
-    | 'RESOLVED';
+    'OPEN' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISMISSED' | 'RESOLVED';
 
   @IsOptional()
   @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
@@ -56,4 +51,3 @@ export class DismissDuplicatesDto {
   @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
   projectId?: string;
 }
-

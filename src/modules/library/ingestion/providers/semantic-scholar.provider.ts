@@ -19,7 +19,6 @@ import {
   libraryConfig,
 } from '@/modules/library/core';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
-import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
 import { AbstractAcademicProvider } from './abstract-academic.provider';
 
 /**
@@ -43,7 +42,6 @@ export class SemanticScholarProvider extends AbstractAcademicProvider {
     'title,authors,year,publicationDate,venue,publicationVenue,journal,publicationTypes,abstract,openAccessPdf,citationCount,referenceCount,influentialCitationCount,tldr,externalIds,url';
 
   constructor(
-    @Optional() private readonly rateLimiter?: DomainRateLimiterService,
     httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {

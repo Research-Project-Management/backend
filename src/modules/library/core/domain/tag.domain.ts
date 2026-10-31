@@ -313,12 +313,6 @@ export function normalizeAcademicTags(
  * Resolves the canonical arXiv primary category code (e.g. `cs.LG`, `stat.ML`, `math.PR`)
  * for structured Extra field formatting: `arXiv:<id> [<primaryCategory>]`.
  */
-export function normalizeTags(
-  rawTags?: (TagInput | null | undefined)[] | null,
-): string[] {
-  return normalizeAcademicTags(rawTags);
-}
-
 export function resolveCanonicalArxivCategory(
   arxivId?: string | null,
   tags?: unknown[],

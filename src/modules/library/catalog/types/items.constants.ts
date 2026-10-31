@@ -1,17 +1,9 @@
-import {
-  SCHEMA_V42_DATA,
-  BASE_FIELD_MAPPINGS,
-  REVERSE_BASE_FIELD_MAPPINGS,
-} from '@/modules/library/core/types/schema.constants';
+import { SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
 import {
   CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
   PRISMA_ITEM_SCALAR_COLUMNS,
   INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
 } from '@/modules/library/core/types/bibliographic.types';
-import {
-  getEffectiveBaseFieldMap,
-  getEffectiveReverseBaseFieldMap,
-} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
 
 export {
   CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
@@ -29,26 +21,6 @@ export {
   BASE_FIELD_MAPPINGS,
   REVERSE_BASE_FIELD_MAPPINGS,
 } from '@/modules/library/core/types/schema.constants';
-
-export function resolveBaseColumnForField(
-  itemType: string,
-  fieldKey: string,
-): string | undefined {
-  return (
-    getEffectiveReverseBaseFieldMap(itemType)?.[fieldKey] ??
-    REVERSE_BASE_FIELD_MAPPINGS[itemType]?.[fieldKey]
-  );
-}
-
-export function resolveTypeSpecificFieldForBase(
-  itemType: string,
-  baseColumn: string,
-): string | undefined {
-  return (
-    getEffectiveBaseFieldMap(itemType)?.[baseColumn] ??
-    BASE_FIELD_MAPPINGS[itemType]?.[baseColumn]
-  );
-}
 
 export const TYPE_SPECIFIC_EXTRA_FIELDS = [
   ...new Set(

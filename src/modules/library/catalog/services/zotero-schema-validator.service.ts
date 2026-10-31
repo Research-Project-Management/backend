@@ -12,7 +12,7 @@ import {
 } from '@/modules/library/core/types/schema.constants';
 import {
   CreatorCreditInput,
-  ITEM_COLUMN_METADATA_FIELDS,
+  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
   INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
   getEffectiveBaseFieldMap,
   getEffectiveReverseBaseFieldMap,
@@ -82,7 +82,7 @@ const PRIVILEGED_INTERNAL_KEYS = new Set([
 
 const UNIVERSAL_FIELDS = new Set([
   ...SYSTEM_AND_TELEMETRY_KEYS,
-  ...ITEM_COLUMN_METADATA_FIELDS,
+  ...CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
   ...Object.keys(FIELD_ALIASES),
   ...Object.values(FIELD_ALIASES),
   'creators',
@@ -226,7 +226,12 @@ export class ZoteroSchemaValidatorService {
 
       const contributorCanonical = validCreatorMap.get('contributor');
       const isPrimaryLike = PRIMARY_CREATOR_ROLES.has(effectiveRole);
-      if (!canonicalRole && !isPrimaryLike && index > 0 && contributorCanonical) {
+      if (
+        !canonicalRole &&
+        !isPrimaryLike &&
+        index > 0 &&
+        contributorCanonical
+      ) {
         targetRole = contributorCanonical;
         reason = 'fallback-to-contributor';
       } else if (canonicalRole && effectiveRole === 'contributor') {
@@ -322,9 +327,9 @@ export class ZoteroSchemaValidatorService {
       );
       const isValidMappedBase = Boolean(
         (mappedBase && validFields.has(mappedBase)) ||
-          (key === 'type' &&
-            mappedMediumField &&
-            validFields.has(mappedMediumField)),
+        (key === 'type' &&
+          mappedMediumField &&
+          validFields.has(mappedMediumField)),
       );
 
       if (isValidDirect || isValidAlias || isValidMappedBase) {

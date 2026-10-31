@@ -399,6 +399,7 @@ describe('System Design Phase 4 Loop 2 — Extraction, Ingestion, Feeds & Retrac
               title: 'Quantum Paper',
               url: 'https://nature.com/q1',
               authors: ['Alice', 'Bob'],
+              creators: [],
               publicationTitle: 'Nature',
               volume: '650',
               issue: '4',
@@ -673,7 +674,7 @@ describe('System Design Phase 4 Loop 2 — Extraction, Ingestion, Feeds & Retrac
           title: 'Existing Item',
           doi: '10.1000/match-1',
           abstract: 'New Abstract',
-          notes: ['Imported Note 1'],
+          notes: [{ content: 'Imported Note 1' }],
           tags: ['TagA'],
         },
         options: {
@@ -695,7 +696,7 @@ describe('System Design Phase 4 Loop 2 — Extraction, Ingestion, Feeds & Retrac
         'user-1',
         'proj-1',
         'existing-item-1',
-        ['Imported Note 1'],
+        [{ content: 'Imported Note 1' }],
         expect.objectContaining({ id: 'existing-item-1' }),
       );
       expect(assignCollectionMock).toHaveBeenCalledWith(

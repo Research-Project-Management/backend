@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, UnprocessableEntity
 import { Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';
-import { CreateCollectionDto, UpdateCollectionDto, AssignItemsToCollectionDto } from '@/modules/library/catalog/dto/collections.dto';
+import { CreateCollectionDto, UpdateCollectionDto, AssignItemsToCollectionDto, CopyCollectionDto } from '@/modules/library/catalog/dto/collections.dto';
 import { CollectionDeleteStrategy, CollectionTreeNode } from '@/modules/library/catalog/types/collections.types';
 import { normalizeParentId, sanitizeCollectionName, sanitizeCollectionDescription } from '@/modules/library/catalog/domain/collections.domain';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
@@ -15,6 +15,7 @@ import {
   validateCollectionReorderNoCycle,
   executeAssignItemsToCollection,
   executeDeleteCollectionWithCascade,
+  executeCopyCollectionSubtree,
   transferCollectionItemMembershipsInTx,
 } from '@/modules/library/catalog/domain/collection-membership.helper';
 @Injectable()
@@ -632,6 +633,33 @@ export class CollectionsService {
     }
     await this.invalidateCollectionsCache(userId, projectId, itemIds);
     return { success: true, count: itemIds.length };
+  }
+  async copyCollection(
+    userId: string,
+    collectionId: string,
+    dto?: CopyCollectionDto,
+    projectId?: string,
+  ) {
+    const {
+      collection,
+      copiedCount,
+      effectiveProjectId,
+      affectedItemIds,
+    } = await executeCopyCollectionSubtree(
+      this.repo,
+      this.tree,
+      this.libraryTx,
+      userId,
+      collectionId,
+      dto?.parentId,
+      projectId,
+    );
+    await this.invalidateCollectionsCache(
+      userId,
+      effectiveProjectId ?? projectId,
+      affectedItemIds,
+    );
+    return { collection, copiedCount };
   }
   async transferItemMemberships(
     sourceItemIds: string[],

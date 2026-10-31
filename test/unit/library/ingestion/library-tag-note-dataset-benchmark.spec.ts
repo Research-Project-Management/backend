@@ -13,7 +13,7 @@ import { toItemData } from '@/modules/library/ingestion/stages/commit.stage';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
-import { formatCsvExport } from '@/modules/library/citation/domain/exports.domain';
+import { formatCsvExport } from '@/modules/library/citation/domain/export-format.strategies';
 
 export interface BenchmarkDatasetRecord {
   id: string;

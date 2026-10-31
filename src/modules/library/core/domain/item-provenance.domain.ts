@@ -168,13 +168,19 @@ function extractMetaContainer(itemOrMeta: unknown): Record<string, unknown> {
     };
   }
   if (metaObj) {
-    if (Array.isArray(obj.lockedFields) && !Array.isArray(metaObj.lockedFields)) {
+    if (
+      Array.isArray(obj.lockedFields) &&
+      !Array.isArray(metaObj.lockedFields)
+    ) {
       return { ...metaObj, lockedFields: obj.lockedFields };
     }
     return metaObj;
   }
   if (extraObj) {
-    if (Array.isArray(obj.lockedFields) && !Array.isArray(extraObj.lockedFields)) {
+    if (
+      Array.isArray(obj.lockedFields) &&
+      !Array.isArray(extraObj.lockedFields)
+    ) {
       return { ...extraObj, lockedFields: obj.lockedFields };
     }
     return extraObj;
@@ -236,7 +242,7 @@ export class ItemProvenancePolicy {
 
     const isFilenameTitle = Boolean(
       meta.isFilenameTitle === true ||
-        provenanceMap.title?.isFilenameTitle === true,
+      provenanceMap.title?.isFilenameTitle === true,
     );
 
     return {
@@ -284,7 +290,8 @@ export class ItemProvenancePolicy {
     itemOrMeta: unknown,
     fieldKey: string,
   ): { locked: boolean; provenance?: FieldProvenanceRecord } {
-    const { lockedSet, provenanceMap } = this.extractProvenanceState(itemOrMeta);
+    const { lockedSet, provenanceMap } =
+      this.extractProvenanceState(itemOrMeta);
     const coupled = this.getCoupledFieldAliases(fieldKey);
     const locked =
       lockedSet.has(fieldKey) || coupled.some((alias) => lockedSet.has(alias));
@@ -300,8 +307,7 @@ export class ItemProvenancePolicy {
     return {
       locked,
       provenance:
-        existingProv ??
-        (locked ? this.createUserOverrideRecord() : undefined),
+        existingProv ?? (locked ? this.createUserOverrideRecord() : undefined),
     };
   }
 
@@ -422,9 +428,9 @@ export class ItemProvenancePolicy {
     const { existingMeta, dataRecord, dataExtra = {}, updatedMetadata } = input;
     const isSystemUpdate = Boolean(
       dataRecord.__isSystemUpdate === true ||
-        (typeof dataRecord.__updateSource === 'string' &&
-          dataRecord.__updateSource !== 'manual') ||
-        dataExtra.__isSystemUpdate === true,
+      (typeof dataRecord.__updateSource === 'string' &&
+        dataRecord.__updateSource !== 'manual') ||
+      dataExtra.__isSystemUpdate === true,
     );
     delete updatedMetadata.__isSystemUpdate;
     delete updatedMetadata.__updateSource;
@@ -591,7 +597,10 @@ export class ItemProvenancePolicy {
           this.getCoupledFieldAliases(mapped.fromField)
             .map((a) => provenanceMap[a])
             .find((p) => p !== undefined);
-        if (fromProv !== undefined && provenanceMap[mapped.toField] === undefined) {
+        if (
+          fromProv !== undefined &&
+          provenanceMap[mapped.toField] === undefined
+        ) {
           provenanceMap[mapped.toField] = fromProv;
           for (const toAlias of this.getCoupledFieldAliases(mapped.toField)) {
             if (provenanceMap[toAlias] === undefined) {
@@ -600,7 +609,9 @@ export class ItemProvenancePolicy {
           }
         }
         delete provenanceMap[mapped.fromField];
-        const toCoupledSet = new Set(this.getCoupledFieldAliases(mapped.toField));
+        const toCoupledSet = new Set(
+          this.getCoupledFieldAliases(mapped.toField),
+        );
         for (const fromAlias of this.getCoupledFieldAliases(mapped.fromField)) {
           if (fromAlias !== mapped.toField && !toCoupledSet.has(fromAlias)) {
             delete provenanceMap[fromAlias];
@@ -608,14 +619,18 @@ export class ItemProvenancePolicy {
         }
         const wasLocked =
           lockedSet.has(mapped.fromField) ||
-          this.getCoupledFieldAliases(mapped.fromField).some((a) => lockedSet.has(a));
+          this.getCoupledFieldAliases(mapped.fromField).some((a) =>
+            lockedSet.has(a),
+          );
         if (wasLocked) {
           lockedSet.add(mapped.toField);
           for (const toAlias of this.getCoupledFieldAliases(mapped.toField)) {
             lockedSet.add(toAlias);
           }
           lockedSet.delete(mapped.fromField);
-          for (const fromAlias of this.getCoupledFieldAliases(mapped.fromField)) {
+          for (const fromAlias of this.getCoupledFieldAliases(
+            mapped.fromField,
+          )) {
             if (fromAlias !== mapped.toField && !toCoupledSet.has(fromAlias)) {
               lockedSet.delete(fromAlias);
             }

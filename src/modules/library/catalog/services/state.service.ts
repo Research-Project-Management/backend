@@ -1,4 +1,9 @@
-import { Injectable, Inject, BadRequestException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
 import { UpdateStateDto } from '@/modules/library/catalog/dto/state.dto';
@@ -145,7 +150,9 @@ export class StateService {
           dto.isStarred !== undefined ? dto.isStarred : existing?.isStarred,
         readStatus: targetStatus,
         rating:
-          dto.rating !== undefined ? dto.rating : (existing?.rating ?? undefined),
+          dto.rating !== undefined
+            ? dto.rating
+            : (existing?.rating ?? undefined),
         currentPage: dto.currentPage,
         scrollPosition: dto.scrollPosition,
         lastOpenedAt: now,
@@ -274,13 +281,15 @@ export class StateService {
   async getBatchStates(
     userId: string,
     itemIds: string[],
-    _projectId?: string,
+    projectId?: string,
   ): Promise<Record<string, StateData>> {
     if (!itemIds.length) return {};
 
     const states = await this.stateRepository.findStatesForItems(
       userId,
       itemIds,
+      undefined,
+      projectId,
     );
 
     const resultMap: Record<string, StateData> = {};
@@ -308,67 +317,10 @@ export class StateService {
     const cleanSourceIds = sourceItemIds.filter((id) => id !== targetItemId);
     if (cleanSourceIds.length === 0) return;
 
-    if (this.stateRepository?.transferItemStates) {
-      await this.stateRepository.transferItemStates(
-        cleanSourceIds,
-        targetItemId,
-        tx,
-      );
-      return;
-    }
-
-    const allUserStates = await tx.state.findMany({
-      where: { itemId: { in: [targetItemId, ...cleanSourceIds] } },
-    });
-
-    const userStateByUser = new Map<string, typeof allUserStates>();
-    for (const us of allUserStates) {
-      const list = userStateByUser.get(us.userId) || [];
-      list.push(us);
-      userStateByUser.set(us.userId, list);
-    }
-
-    await Promise.all(
-      Array.from(userStateByUser.entries()).map(([userId, states]) => {
-        const merged = pickPreferredMergedState(states);
-        const scrollJson =
-          merged.latestScroll !== undefined && merged.latestScroll !== null
-            ? (merged.latestScroll as Prisma.InputJsonValue)
-            : undefined;
-
-        return tx.state.upsert({
-          where: {
-            userId_itemId: {
-              userId,
-              itemId: targetItemId,
-            },
-          },
-          create: {
-            userId,
-            itemId: targetItemId,
-            isStarred: merged.isStarred,
-            rating: merged.maxRating,
-            readStatus: merged.readStatus,
-            currentPage: merged.maxCurrentPage,
-            scrollPosition: scrollJson ?? Prisma.JsonNull,
-            lastOpenedAt: merged.latestOpenedAt,
-            lastReadAt: merged.latestReadAt,
-          },
-          update: {
-            isStarred: merged.isStarred,
-            rating: merged.maxRating,
-            readStatus: merged.readStatus,
-            currentPage: merged.maxCurrentPage,
-            scrollPosition: scrollJson,
-            lastOpenedAt: merged.latestOpenedAt ?? undefined,
-            lastReadAt: merged.latestReadAt ?? undefined,
-          },
-        });
-      }),
+    await this.stateRepository.transferItemStates(
+      cleanSourceIds,
+      targetItemId,
+      tx,
     );
-
-    await tx.state.deleteMany({
-      where: { itemId: { in: cleanSourceIds } },
-    });
   }
 }

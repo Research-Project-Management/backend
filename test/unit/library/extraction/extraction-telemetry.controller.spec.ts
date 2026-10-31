@@ -3,14 +3,14 @@ import { FastifyRequest } from 'fastify';
 import { ExtractionTelemetryController } from '@/modules/library/extraction/controllers/extraction-telemetry.controller';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
 import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
-import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
+import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { TrustedExtractionResult } from '@/modules/library/extraction/types/trusted-extraction.types';
 
 describe('ExtractionTelemetryController', () => {
   let controller: ExtractionTelemetryController;
   let trustedExtractor: jest.Mocked<TrustedExtractionService>;
   let ocrWorkerPool: jest.Mocked<OcrWorkerPoolService>;
-  let extractionRepo: jest.Mocked<ExtractionRepository>;
+  let attachmentsService: jest.Mocked<AttachmentsService>;
 
   beforeEach(() => {
     trustedExtractor = {
@@ -27,22 +27,22 @@ describe('ExtractionTelemetryController', () => {
       }),
     } as unknown as jest.Mocked<OcrWorkerPoolService>;
 
-    extractionRepo = {
+    attachmentsService = {
       getExtractionStatusBreakdown: jest.fn().mockResolvedValue({
         COMPLETED: 12,
         PENDING: 3,
       }),
-    } as unknown as jest.Mocked<ExtractionRepository>;
+    } as unknown as jest.Mocked<AttachmentsService>;
 
     controller = new ExtractionTelemetryController(
       trustedExtractor,
       ocrWorkerPool,
-      extractionRepo,
+      attachmentsService,
     );
   });
 
   describe('GET /telemetry', () => {
-    it('returns runtime telemetry metrics from OcrWorkerPoolService and ExtractionRepository', async () => {
+    it('returns runtime telemetry metrics from OcrWorkerPoolService and AttachmentsService', async () => {
       const response = await controller.getTelemetry();
 
       expect(response.status).toBe('UP');

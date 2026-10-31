@@ -1,5 +1,11 @@
 export type RetractionNature =
-  'retraction' | 'expression_of_concern' | 'correction' | 'manual';
+  | 'retraction'
+  | 'Retraction'
+  | 'expression_of_concern'
+  | 'Expression of concern'
+  | 'correction'
+  | 'Correction'
+  | 'manual';
 
 export type RetractionSource =
   'crossref' | 'openalex' | 'retraction_watch' | 'manual';

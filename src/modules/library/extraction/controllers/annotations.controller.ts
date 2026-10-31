@@ -24,6 +24,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { AnnotationType } from '@/modules/library/extraction/types/annotations.types';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 import { PdfAnnotationImporterService } from '@/modules/library/extraction/services/pdf-annotation-importer.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
@@ -32,7 +33,11 @@ import {
   BatchAnnotationsDto,
   normalizeAnnotationType,
 } from '@/modules/library/extraction/dto/annotations.dto';
-import { ProjectAccessGuard, ProjectRoles, ProjectRole } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  ProjectRoles,
+  ProjectRole,
+} from '@/modules/project/access';
 import { AnnotationsService } from '@/modules/library/extraction/services/annotations.service';
 
 @ApiTags('Annotations')
@@ -67,7 +72,8 @@ export class AnnotationsController {
     @Param('attachmentId') attachmentId: string,
     @Query('pageIndex') pageIndexRaw?: string,
     @Query('type') type?: AnnotationType,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     let pageIndex: number | undefined;
     if (pageIndexRaw !== undefined) {
@@ -89,6 +95,8 @@ export class AnnotationsController {
         `type must be one of: ${Object.values(AnnotationType).join(', ')}`,
       );
     }
+
+    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
 
     if (projectId !== undefined) {
       return this.annotationsService.getAnnotationsByAttachment(
@@ -122,7 +130,8 @@ export class AnnotationsController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Body() body: CreateAnnotationDto,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!userId) {
       throw new UnauthorizedException(
@@ -131,6 +140,7 @@ export class AnnotationsController {
     }
 
     const createData = {
+      ...(body.id ? { id: body.id } : {}),
       attachmentId,
       type: body.type,
       pageIndex: body.pageIndex,
@@ -140,9 +150,14 @@ export class AnnotationsController {
       quoteText: body.quoteText ?? body.text,
       comment: body.comment,
       tags: body.tags,
-      rectCoords: body.rectCoords,
+      rectCoords:
+        body.rectCoords ??
+        body.rects ??
+        (body.boundingRect ? [body.boundingRect] : undefined),
       authorId: userId,
     };
+
+    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
 
     if (projectId !== undefined) {
       return this.annotationsService.createAnnotation(
@@ -170,11 +185,12 @@ export class AnnotationsController {
   @ApiParam({ name: 'id', description: 'Annotation UUID' })
   async updateAnnotation(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') _attachmentId: string,
+    @Param('attachmentId') attachmentId: string,
     @Param('id') id: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateAnnotationDto,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     const rawVersion =
       body.expectedVersion ??
@@ -186,23 +202,34 @@ export class AnnotationsController {
       );
     }
 
-    const { expectedVersion: _, text: __, rects: ___, boundingRect: ____, ...updateData } = body;
+    const {
+      expectedVersion: _,
+      text,
+      rects,
+      boundingRect,
+      ...restUpdateData
+    } = body;
 
-    if (projectId !== undefined) {
-      return this.annotationsService.updateAnnotation(
-        userId,
-        id,
-        rawVersion,
-        updateData,
-        projectId,
-      );
-    }
+    const updateData = {
+      ...restUpdateData,
+      ...(restUpdateData.quoteText === undefined && text !== undefined
+        ? { quoteText: text }
+        : {}),
+      ...(restUpdateData.rectCoords === undefined &&
+      (rects !== undefined || boundingRect !== undefined)
+        ? { rectCoords: rects ?? (boundingRect ? [boundingRect] : undefined) }
+        : {}),
+    };
+
+    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
 
     return this.annotationsService.updateAnnotation(
       userId,
       id,
       rawVersion,
       updateData,
+      projectId,
+      attachmentId,
     );
   }
 
@@ -218,11 +245,12 @@ export class AnnotationsController {
   @ApiParam({ name: 'id', description: 'Annotation UUID' })
   async deleteAnnotation(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') _attachmentId: string,
+    @Param('attachmentId') attachmentId: string,
     @Param('id') id: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     let expectedVersion: number | undefined;
     if (expectedVersionQuery !== undefined) {
@@ -241,19 +269,15 @@ export class AnnotationsController {
       }
     }
 
-    const deleted =
-      projectId !== undefined
-        ? await this.annotationsService.deleteAnnotation(
-            userId,
-            id,
-            expectedVersion,
-            projectId,
-          )
-        : await this.annotationsService.deleteAnnotation(
-            userId,
-            id,
-            expectedVersion,
-          );
+    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+
+    const deleted = await this.annotationsService.deleteAnnotation(
+      userId,
+      id,
+      expectedVersion,
+      projectId,
+      attachmentId,
+    );
 
     if (!deleted) throw new NotFoundException(`Annotation ${id} not found`);
     return { id, deleted: true };
@@ -273,17 +297,27 @@ export class AnnotationsController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Body() body: BatchAnnotationsDto,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!userId) {
       throw new UnauthorizedException('Authentication required');
     }
 
+    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+
+    const normalizedUpserts = (body.upserts ?? []).map((u) => ({
+      ...u,
+      quoteText: u.quoteText ?? u.text,
+      rectCoords:
+        u.rectCoords ?? u.rects ?? (u.boundingRect ? [u.boundingRect] : undefined),
+    }));
+
     if (projectId !== undefined) {
       return this.annotationsService.batchUpsertAnnotations(
         userId,
         attachmentId,
-        { upserts: body.upserts, deletes: body.deletes },
+        { upserts: normalizedUpserts, deletes: body.deletes },
         projectId,
       );
     }
@@ -291,7 +325,7 @@ export class AnnotationsController {
     return this.annotationsService.batchUpsertAnnotations(
       userId,
       attachmentId,
-      { upserts: body.upserts, deletes: body.deletes },
+      { upserts: normalizedUpserts, deletes: body.deletes },
     );
   }
 
@@ -303,16 +337,22 @@ export class AnnotationsController {
     ProjectRole.CONTRIBUTOR,
   )
   @ApiOperation({
-    summary:
-      'Batch upsert/delete annotations via POST (alias for PUT /batch)',
+    summary: 'Batch upsert/delete annotations via POST (alias for PUT /batch)',
   })
   async batchUpsertAnnotationsPost(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Body() body: BatchAnnotationsDto,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
-    return this.batchUpsertAnnotations(userId, attachmentId, body, projectId);
+    return this.batchUpsertAnnotations(
+      userId,
+      attachmentId,
+      body,
+      paramProjectId,
+      queryProjectId,
+    );
   }
 
   // POST /import-external
@@ -330,11 +370,14 @@ export class AnnotationsController {
   async importExternalAnnotations(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!userId) {
       throw new UnauthorizedException('Authentication required');
     }
+
+    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
 
     if (projectId !== undefined) {
       return this.pdfAnnotationImporterService.importFromAttachment(

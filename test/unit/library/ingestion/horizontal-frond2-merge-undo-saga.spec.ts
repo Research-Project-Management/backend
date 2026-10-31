@@ -580,7 +580,7 @@ describe('Horizontal Frond 2 — Deduplication, Curation Merge & Undo-Merge Saga
         expect.objectContaining({
           edition: '2nd Edition',
           seriesNumber: 'Vol. 42',
-          accessedAt: '2025-02-01T00:00:00.000Z',
+          accessedAt: new Date('2025-02-01T00:00:00.000Z'),
           isRetracted: true,
           retractionNature: 'Retraction',
           retractionDetails: 'Data fabrication',

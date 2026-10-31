@@ -57,6 +57,7 @@ export interface CreatorCredit {
   lastName?: string | null;
   fullName: string;
   shortName?: string | null;
+  [key: string]: unknown;
 }
 
 export interface CreatorCreditInput {
@@ -133,18 +134,64 @@ export const VENUE_TYPE_SPECIFIC_FIELDS = [
   'seriesTitle',
 ] as const;
 
-export const PRISMA_ITEM_SCALAR_COLUMNS = ['title', 'itemType', 'year', 'citationKey', 'doi', 'publicationTitle', 'abstract', 'url', 'firstAuthor'] as const;
+export const PRISMA_ITEM_SCALAR_COLUMNS = [
+  'title',
+  'itemType',
+  'year',
+  'citationKey',
+  'doi',
+  'publicationTitle',
+  'abstract',
+  'url',
+  'firstAuthor',
+] as const;
 
 export const INTERNAL_SYSTEM_AND_TELEMETRY_KEYS = [
-  'ingestionStatus', 'extractionStatus', 'enrichmentStatus', 'matchStatus', 'confidenceScore',
-  'verificationScore', 'qualityScore', 'isVerified', 'isSelfSufficient', 'isFilenameTitle',
-  'matchedSignals', 'missingFields', 'engineUsed', 'wafKind', 'statusCode', 'provenance',
-  'fieldProvenance', 'contentHash', 'sourceUrl', 'pdfUrl', 'fileUrl', 'openAccessPdfUrl',
-  'demotedToExtra', 'demotedExtraLines', '__demotedExtraLines', 'dismissedDuplicateIds',
-  'mergedDuplicateIds', 'mergedCitationKeys', 'mergedFromIds', 'mergedIntoId', 'mergeHistory',
-  'retraction', 'retractionDetails', 'isRetracted', 'retractionNature', 'retractionCheckedAt',
-  'retractionStatus', 'retractionDate', 'retractionReasons', 'retractionNoticeDoi',
-  'retractionSource', 'isMyPublication', 'myPublicationNote', 'myPublicationAddedAt', 'openAccessLicense',
+  'ingestionStatus',
+  'extractionStatus',
+  'enrichmentStatus',
+  'matchStatus',
+  'confidenceScore',
+  'verificationScore',
+  'qualityScore',
+  'isVerified',
+  'isSelfSufficient',
+  'isFilenameTitle',
+  'matchedSignals',
+  'missingFields',
+  'engineUsed',
+  'wafKind',
+  'statusCode',
+  'provenance',
+  'fieldProvenance',
+  'contentHash',
+  'sourceUrl',
+  'pdfUrl',
+  'fileUrl',
+  'openAccessPdfUrl',
+  'demotedToExtra',
+  'demotedExtraLines',
+  '__demotedExtraLines',
+  'dismissedDuplicateIds',
+  'mergedDuplicateIds',
+  'mergedCitationKeys',
+  'mergedFromIds',
+  'mergedIntoId',
+  'mergeHistory',
+  'retraction',
+  'retractionDetails',
+  'isRetracted',
+  'retractionNature',
+  'retractionCheckedAt',
+  'retractionStatus',
+  'retractionDate',
+  'retractionReasons',
+  'retractionNoticeDoi',
+  'retractionSource',
+  'isMyPublication',
+  'myPublicationNote',
+  'myPublicationAddedAt',
+  'openAccessLicense',
 ] as const;
 
 export const CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS = [
@@ -204,67 +251,64 @@ export const CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS = [
   'openAccessPdfUrl',
 ] as const;
 
-export const ITEM_COLUMN_METADATA_FIELDS =
-  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS;
-
 export interface CreateItemData {
   title: string;
   authors?: string[];
   year?: number | null;
-  doi?: string;
-  abstract?: string;
+  doi?: string | null;
+  abstract?: string | null;
   /** Zotero alias for abstract. Either field may be provided; they are kept
    *  in sync throughout the stack. Stored in the single DB `abstract` column. */
-  abstractNote?: string;
+  abstractNote?: string | null;
   itemType?: string;
   type?: string;
   editors?: string[];
-  journal?: string;
-  journalAbbr?: string;
-  journalAbbreviation?: string;
-  publicationTitle?: string;
-  publicationDate?: string;
-  date?: string;
-  publisher?: string;
-  place?: string;
-  volume?: string;
-  issue?: string;
-  section?: string;
-  partNumber?: string;
-  partTitle?: string;
-  pages?: string;
-  series?: string;
-  seriesTitle?: string;
-  seriesText?: string;
-  seriesNumber?: string;
-  issn?: string;
-  isbn?: string;
-  pmid?: string;
-  pmcid?: string;
-  arxivId?: string;
-  archiveId?: string;
-  archiveID?: string;
-  DOI?: string;
-  ISBN?: string;
-  ISSN?: string;
-  PMID?: string;
-  PMCID?: string;
-  primaryCategory?: string;
-  url?: string;
-  accessedAt?: Date | null;
-  accessDate?: string;
-  archive?: string;
-  archiveLocation?: string;
-  libraryCatalog?: string;
-  callNumber?: string;
-  rights?: string;
-  license?: string;
-  language?: string;
-  edition?: string;
-  shortTitle?: string;
-  citationKey?: string;
-  citeKey?: string;
-  extra?: string;
+  journal?: string | null;
+  journalAbbr?: string | null;
+  journalAbbreviation?: string | null;
+  publicationTitle?: string | null;
+  publicationDate?: string | null;
+  date?: string | null;
+  publisher?: string | null;
+  place?: string | null;
+  volume?: string | number | null;
+  issue?: string | number | null;
+  section?: string | null;
+  partNumber?: string | null;
+  partTitle?: string | null;
+  pages?: string | number | null;
+  series?: string | null;
+  seriesTitle?: string | null;
+  seriesText?: string | null;
+  seriesNumber?: string | number | null;
+  issn?: string | null;
+  isbn?: string | null;
+  pmid?: string | null;
+  pmcid?: string | null;
+  arxivId?: string | null;
+  archiveId?: string | null;
+  archiveID?: string | null;
+  DOI?: string | null;
+  ISBN?: string | null;
+  ISSN?: string | null;
+  PMID?: string | null;
+  PMCID?: string | null;
+  primaryCategory?: string | null;
+  url?: string | null;
+  accessedAt?: Date | string | null;
+  accessDate?: string | null;
+  archive?: string | null;
+  archiveLocation?: string | null;
+  libraryCatalog?: string | null;
+  callNumber?: string | null;
+  rights?: string | null;
+  license?: string | null;
+  language?: string | null;
+  edition?: string | null;
+  shortTitle?: string | null;
+  citationKey?: string | null;
+  citeKey?: string | null;
+  extra?: string | null;
   tags?: string[];
   labels?: string[];
   keywords?: string[];
@@ -461,6 +505,7 @@ export interface DocumentSection {
   content?: string;
   paragraphs?: string[];
   page?: number;
+  pageNumber?: number;
   level?: number;
   imradCategory?:
     | 'introduction'
@@ -594,6 +639,12 @@ export interface ItemDetail {
   labels?: string[];
   keywords?: string[];
   notes?: Array<{ content: string; source?: string }>;
+  identifiers?: Array<{
+    id?: string;
+    type: string;
+    value: string;
+    canonicalUri?: string | null;
+  }>;
   attachments?: unknown[];
   rights?: string | null;
   license?: string | null;
@@ -639,5 +690,3 @@ export interface ItemDetail {
 }
 
 export * from './bibliographic-conversion.types';
-
-

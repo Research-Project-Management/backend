@@ -107,18 +107,34 @@ export class PdfBakerService {
       if (ann.comment && ann.comment.trim()) {
         const commentY = rectList[0]?.y ?? 40;
         const safeY = Math.min(Math.max(20, commentY), pageHeight - 40);
+        const safeComment = this.sanitizeForPdf(ann.comment.trim()).slice(
+          0,
+          80,
+        );
 
-        page.drawText(`[Note: ${ann.comment.trim().slice(0, 80)}]`, {
-          x: 20,
-          y: safeY,
-          size: 8,
-          font: helvetica,
-          color: rgb(0.2, 0.2, 0.2),
-        });
+        if (safeComment) {
+          page.drawText(`[Note: ${safeComment}]`, {
+            x: 20,
+            y: safeY,
+            size: 8,
+            font: helvetica,
+            color: rgb(0.2, 0.2, 0.2),
+          });
+        }
       }
     }
 
     return pdfDoc.save();
+  }
+
+  private sanitizeForPdf(text: string): string {
+    if (!text) return '';
+    return text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[đĐ]/g, (m) => (m === 'đ' ? 'd' : 'D'))
+      .replace(/[^\x20-\x7E\xA0-\xFF]/g, ' ')
+      .trim();
   }
 
   parseColor(colorStr?: string) {

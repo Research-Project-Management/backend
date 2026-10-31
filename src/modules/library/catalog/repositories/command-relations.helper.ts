@@ -16,7 +16,8 @@ export async function sanitizeUpdateCollectionIds(params: {
   data: UpdateItemData;
 }): Promise<UpdateItemData> {
   const { client, userId, validProjectId, existingProjectId, data } = params;
-  const rawCollections = (data as { collections?: string[] | null }).collections;
+  const rawCollections = (data as { collections?: string[] | null })
+    .collections;
   if (
     data.collectionIds === undefined &&
     rawCollections === undefined &&
@@ -231,8 +232,8 @@ export async function setMyPublicationInClient(
   }
   const isSharedProjectItem = Boolean(
     validProjectId ||
-      (existing as { projectId?: string | null }).projectId ||
-      options?.stripSharedPublicationFlag,
+    (existing as { projectId?: string | null }).projectId ||
+    options?.stripSharedPublicationFlag,
   );
   const metadataObj = buildMyPublicationMetadata(
     existing.metadata,

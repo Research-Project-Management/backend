@@ -90,7 +90,7 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
       const md = formatLiteratureNoteMarkdown(mockItem, mockAnnotations);
       expect(md).toContain('🔴 Critical');
       expect(md).toContain(
-        'flux://open-pdf/library/items/att-456?page=1&annotation=ann-999',
+        'flux://open-pdf/library/papers/paper-123?attachmentId=att-456&page=1&annotation=ann-999',
       );
     });
 
@@ -107,7 +107,7 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
         webBaseUrl: 'https://research.flux.ac',
       });
       expect(md).toContain(
-        'https://research.flux.ac/library/papers/paper-123?page=1&annotation=ann-999',
+        'https://research.flux.ac/library/papers/paper-123?attachmentId=att-456&page=1&annotation=ann-999',
       );
     });
   });

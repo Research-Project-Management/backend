@@ -68,7 +68,13 @@ export class StateController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    return this.updateState(userId, itemId, dto, queryProjectId, paramProjectId);
+    return this.updateState(
+      userId,
+      itemId,
+      dto,
+      queryProjectId,
+      paramProjectId,
+    );
   }
 
   @Post(['mark-read', 'read'])

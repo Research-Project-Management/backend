@@ -119,6 +119,7 @@ export interface SavedSearchCondition {
 
 export interface SavedSearchConditionGroup {
   conjunction?: 'AND' | 'OR';
+  operator?: 'AND' | 'OR';
   matchMode?: 'all' | 'any' | 'AND' | 'OR';
   conditions: (SavedSearchCondition | SavedSearchConditionGroup)[];
   scopeOptions?: SavedSearchScopeOptions;
@@ -130,7 +131,8 @@ export function isConditionGroup(
   return (
     typeof node === 'object' &&
     node !== null &&
-    ('conjunction' in node || 'matchMode' in node) &&
+    ('conjunction' in node || 'matchMode' in node || 'operator' in node) &&
+    'conditions' in node &&
     Array.isArray(node.conditions)
   );
 }

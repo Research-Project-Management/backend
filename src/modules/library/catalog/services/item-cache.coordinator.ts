@@ -2,7 +2,6 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { normalizeProjectScopeId, libraryConfig } from '@/modules/library/core';
-import type { TagsService } from './tags.service';
 
 /**
  * ItemCacheCoordinator
@@ -25,7 +24,6 @@ export class ItemCacheCoordinator {
 
   constructor(
     @Optional() private readonly cache?: RedisCacheService,
-    @Optional() private readonly tagsService?: TagsService,
   ) {}
 
   /**
@@ -109,7 +107,9 @@ export class ItemCacheCoordinator {
         this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
         this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(userId)),
         this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(userId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(`u:${userId}`)),
+        this.cache.delPattern(
+          LIBRARY_REDIS_KEYS.collectionsPattern(`u:${userId}`),
+        ),
         this.cache.del(LIBRARY_REDIS_KEYS.savedSearches(userId)),
         this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
         this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
@@ -127,9 +127,7 @@ export class ItemCacheCoordinator {
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.tagsPattern(`proj:${validProjectId}`),
           ),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.tagsPattern(validProjectId),
-          ),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(validProjectId)),
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.collectionsPattern(validProjectId),
           ),
@@ -144,7 +142,9 @@ export class ItemCacheCoordinator {
             LIBRARY_REDIS_KEYS.searchItemsPattern(validProjectId),
           ),
           this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(validProjectId)),
-          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(`proj:${validProjectId}`)),
+          this.cache.del(
+            LIBRARY_REDIS_KEYS.searchVersion(`proj:${validProjectId}`),
+          ),
           this.invalidateCounts(validProjectId),
         );
       }
@@ -223,7 +223,9 @@ export class ItemCacheCoordinator {
     itemIds?: string[];
     additionalProjectIds?: Array<string | null | undefined>;
   }): Promise<void> {
-    const validProjectId = normalizeProjectScopeId(params.projectId ?? undefined);
+    const validProjectId = normalizeProjectScopeId(
+      params.projectId ?? undefined,
+    );
     if (params.itemIds && params.itemIds.length > 0) {
       await this.invalidateBulkItemsCache(
         params.itemIds,

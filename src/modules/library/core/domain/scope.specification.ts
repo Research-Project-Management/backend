@@ -77,6 +77,8 @@ export class ScopeSpecification extends CompositeSpecification<
     if (isProjectScopeId(this.projectId)) {
       return rec.projectId === this.projectId.trim();
     }
-    return rec.userId === this.userId && (!rec.projectId || rec.projectId === null);
+    return (
+      rec.userId === this.userId && (!rec.projectId || rec.projectId === null)
+    );
   }
 }

@@ -152,8 +152,14 @@ export class CommandRepository {
       sanitizedData,
       { skipVersionIncrement: expectedVersion !== undefined },
     );
-    const createdAttachments = (updateData.attachments as { create?: unknown[] } | undefined)?.create;
-    if (Array.isArray(createdAttachments) && createdAttachments.length > 0 && client.attachment?.count) {
+    const createdAttachments = (
+      updateData.attachments as { create?: unknown[] } | undefined
+    )?.create;
+    if (
+      Array.isArray(createdAttachments) &&
+      createdAttachments.length > 0 &&
+      client.attachment?.count
+    ) {
       const existingAttCount = await client.attachment.count({
         where: { itemId: id, deletedAt: null },
       });
@@ -161,8 +167,14 @@ export class CommandRepository {
       updateData.attachmentCount = nextAttCount;
       updateData.hasFile = nextAttCount > 0;
     }
-    const createdNotes = (updateData.notesList as { create?: unknown[] } | undefined)?.create;
-    if (Array.isArray(createdNotes) && createdNotes.length > 0 && client.note?.count) {
+    const createdNotes = (
+      updateData.notesList as { create?: unknown[] } | undefined
+    )?.create;
+    if (
+      Array.isArray(createdNotes) &&
+      createdNotes.length > 0 &&
+      client.note?.count
+    ) {
       const existingNoteCount = await client.note.count({
         where: { itemId: id, deletedAt: null },
       });
@@ -198,7 +210,15 @@ export class CommandRepository {
       id,
       cleanIds,
       existing,
-      (sanitizedData as { identifiers?: ReadonlyArray<{ type: string; value: string; canonicalUri?: string | null }> }).identifiers,
+      (
+        sanitizedData as {
+          identifiers?: ReadonlyArray<{
+            type: string;
+            value: string;
+            canonicalUri?: string | null;
+          }>;
+        }
+      ).identifiers,
     );
     if (
       typeof updateData.citationKey === 'string' &&
@@ -398,7 +418,9 @@ export class CommandRepository {
         });
       }
     }
-    const deletedFilter = existing.deletedAt ? { gte: existing.deletedAt } : { not: null };
+    const deletedFilter = existing.deletedAt
+      ? { gte: existing.deletedAt }
+      : { not: null };
 
     await Promise.all([
       client.note?.updateMany?.({
@@ -659,15 +681,14 @@ export class CommandRepository {
       data: {
         ...(isExtractionEnum
           ? {
-              extractionStatus:
-                normalizedUpper as AttachmentExtractionStatus,
+              extractionStatus: normalizedUpper as AttachmentExtractionStatus,
             }
           : {}),
         metadata: {
           ...currentMeta,
           extractionStatus: status,
           ...(metadataPatch ?? {}),
-        } as Prisma.InputJsonValue,
+        },
       },
     });
   }

@@ -54,7 +54,7 @@ export interface ItemFieldDefinition {
   field?: string;
   label: string;
   baseField?: string;
-  order: number;
+  order?: number;
   category?:
     'core' | 'venue' | 'publication' | 'identifiers' | 'archive' | 'extra';
   type?: 'text' | 'textarea' | 'date' | 'number' | 'url';

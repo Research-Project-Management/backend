@@ -88,7 +88,7 @@ describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapt
   it('should get fulltext using ItemService', async () => {
     const res = await controller.getFulltext(validUuid, 'user-1', 'proj-1');
     expect(res.success).toBe(true);
-    expect(res.data.title).toBe('Attention Is All You Need');
+    expect(res.data?.title).toBe('Attention Is All You Need');
     expect(mockItemService.getFulltext).toHaveBeenCalledWith(
       'user-1',
       validUuid,

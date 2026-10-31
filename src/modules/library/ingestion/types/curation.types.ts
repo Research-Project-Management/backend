@@ -1,8 +1,8 @@
-import { ITEM_COLUMN_METADATA_FIELDS } from '@/modules/library/core/types/bibliographic.types';
+import { CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS } from '@/modules/library/core/types/bibliographic.types';
 import { SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
 
 export const ALLOWED_MERGE_METADATA_FIELDS = new Set([
-  ...ITEM_COLUMN_METADATA_FIELDS,
+  ...CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
   ...SCHEMA_V42_DATA.distinctFieldKeys,
   'authors',
   'creators',

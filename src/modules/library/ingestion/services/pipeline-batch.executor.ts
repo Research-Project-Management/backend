@@ -21,9 +21,7 @@ function extractSurname(raw: unknown): string {
   if (typeof raw === 'string') {
     const trimmed = raw.trim();
     if (!trimmed) return '';
-    const part = trimmed.includes(',')
-      ? trimmed.split(',')[0].trim()
-      : trimmed;
+    const part = trimmed.includes(',') ? trimmed.split(',')[0].trim() : trimmed;
     return (part.split(/\s+/).pop() || '')
       .normalize('NFKD')
       .replace(/[\u0300-\u036f]/g, '')
@@ -43,95 +41,16 @@ function extractSurname(raw: unknown): string {
   return '';
 }
 
-function extractAuthorSurnames(authors: unknown): Set<string> {
-  const set = new Set<string>();
-  if (!Array.isArray(authors)) return set;
-  for (const a of authors) {
-    const s = extractSurname(a);
-    if (s) set.add(s);
-  }
-  return set;
-}
-
 function isCompatibleTitleProviderMatch(
   recordCand: MetadataCandidate,
   providerCand: MetadataCandidate,
 ): boolean {
-  const policyVerifier = (
-    ReconciliationPolicy as unknown as {
-      verifyCandidateMatch?: (
-        a: MetadataCandidate,
-        b: MetadataCandidate,
-      ) => boolean;
-    }
-  ).verifyCandidateMatch;
-  if (typeof policyVerifier === 'function') {
-    return policyVerifier(recordCand, providerCand);
-  }
-  if (
-    providerCand.rawEvidenceRef &&
-    recordCand.candidateId &&
-    providerCand.rawEvidenceRef === recordCand.candidateId
-  ) {
-    return true;
-  }
-  const rMeta = recordCand.normalizedMetadata || {};
-  const pMeta = providerCand.normalizedMetadata || {};
-  const rDoi = rMeta.doi?.trim().toLowerCase();
-  const pDoi = pMeta.doi?.trim().toLowerCase();
-  if (rDoi && pDoi && rDoi !== pDoi) return false;
-  const rArxiv = rMeta.arxivId?.trim().toLowerCase();
-  const pArxiv = pMeta.arxivId?.trim().toLowerCase();
-  if (rArxiv && pArxiv && rArxiv !== pArxiv) return false;
-  const rPmid = rMeta.pmid?.trim().toLowerCase();
-  const pPmid = pMeta.pmid?.trim().toLowerCase();
-  if (rPmid && pPmid && rPmid !== pPmid) return false;
-  const rIsbn = rMeta.isbn?.trim().toLowerCase();
-  const pIsbn = pMeta.isbn?.trim().toLowerCase();
-  if (rIsbn && pIsbn && rIsbn !== pIsbn) return false;
-
-  const rYear = Number(rMeta.year);
-  const pYear = Number(pMeta.year);
-  if (
-    Number.isFinite(rYear) &&
-    rYear > 0 &&
-    Number.isFinite(pYear) &&
-    pYear > 0 &&
-    Math.abs(rYear - pYear) > 1
-  ) {
-    return false;
-  }
-
-  const rAuthors = extractAuthorSurnames(
-    rMeta.authors?.length ? rMeta.authors : rMeta.creators,
-  );
-  const pAuthors = extractAuthorSurnames(
-    pMeta.authors?.length ? pMeta.authors : pMeta.creators,
-  );
-  if (rAuthors.size > 0 && pAuthors.size > 0) {
-    let shared = 0;
-    for (const name of rAuthors) {
-      if (pAuthors.has(name)) shared++;
-    }
-    if (shared === 0) return false;
-  }
-
-  if (
-    providerCand.rawEvidenceRef &&
-    recordCand.candidateId &&
-    providerCand.rawEvidenceRef !== recordCand.candidateId
-  ) {
-    if ((rDoi || pDoi) && rDoi !== pDoi) return false;
-    if ((rArxiv || pArxiv) && rArxiv !== pArxiv) return false;
-    if ((rPmid || pPmid) && rPmid !== pPmid) return false;
-    if ((rIsbn || pIsbn) && rIsbn !== pIsbn) return false;
-    if ((rAuthors.size === 0) !== (pAuthors.size === 0)) return false;
-  }
-  return true;
+  return ReconciliationPolicy.verifyCandidateMatch(recordCand, providerCand);
 }
 
 export function serializeSubRunRecordPayload(
-  cand: Pick<MetadataCandidate, 'normalizedMetadata'>,
+  cand: Pick<MetadataCandidate, 'normalizedMetadata'> &
+    Partial<MetadataCandidate>,
 ): {
   kind: 'RECORD';
   format: 'CSL_JSON';
@@ -294,8 +213,10 @@ export class PipelineBatchExecutor {
           'Processing batch...',
         items: [],
       });
-    } catch {
-      // Non-critical initial progress checkpoint
+    } catch (progressErr: unknown) {
+      this.logger.warn(
+        `Failed to checkpoint initial progress for run ${runId}: ${progressErr instanceof Error ? progressErr.message : String(progressErr)}`,
+      );
     }
 
     for (const initialCand of normalizedCandidates) {
@@ -321,9 +242,10 @@ export class PipelineBatchExecutor {
       const rawCandAuthors = initialCand.normalizedMetadata?.authors?.length
         ? initialCand.normalizedMetadata.authors
         : initialCand.normalizedMetadata?.creators;
-      const candAuthorKey = Array.isArray(rawCandAuthors) && rawCandAuthors.length > 0
-        ? extractSurname(rawCandAuthors[0])
-        : '';
+      const candAuthorKey =
+        Array.isArray(rawCandAuthors) && rawCandAuthors.length > 0
+          ? extractSurname(rawCandAuthors[0])
+          : '';
       const candidateKey = candDoiKey
         ? `doi:${candDoiKey}`
         : candArxivKey
@@ -425,9 +347,7 @@ export class PipelineBatchExecutor {
                 resolvedScope.projectId,
               );
               const existingRec = existing as
-                | Record<string, unknown>
-                | null
-                | undefined;
+                Record<string, unknown> | null | undefined;
               const enrichPatch = buildEnrichmentPatch(
                 existingRec,
                 itemDecision.proposedItem,
@@ -447,8 +367,10 @@ export class PipelineBatchExecutor {
                 itemDecision.proposedItem?.notes,
                 existingRec,
               );
-            } catch {
-              // Non-critical additive enrichment on duplicate
+            } catch (enrichErr: unknown) {
+              this.logger.warn(
+                `Additive enrichment on duplicate item ${matchRes.targetItemId} failed: ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`,
+              );
             }
           }
 
@@ -511,7 +433,11 @@ export class PipelineBatchExecutor {
                   } as unknown as Prisma.InputJsonValue,
                   assignedToId: resolvedScope.userId,
                 })
-                .catch(() => undefined);
+                .catch((rcErr: unknown) => {
+                  this.logger.warn(
+                    `Failed to create review case for run ${runId}: ${rcErr instanceof Error ? rcErr.message : String(rcErr)}`,
+                  );
+                });
             }
             createdItemIds.push(created.id);
             succeeded++;
@@ -576,8 +502,10 @@ export class PipelineBatchExecutor {
               currentTitle: itemTitle,
               items: progressItems.slice(-20),
             });
-          } catch {
-            // Non-critical progress checkpoint failure
+          } catch (cpErr: unknown) {
+            this.logger.warn(
+              `Failed to checkpoint batch progress for run ${runId}: ${cpErr instanceof Error ? cpErr.message : String(cpErr)}`,
+            );
           }
         }
       }

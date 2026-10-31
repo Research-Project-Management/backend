@@ -10,6 +10,9 @@ import {
 import { parseCreatorString } from '@/modules/library/core/domain/author.domain';
 import { normalizeArxivId } from '@/modules/library/core/domain/identifier.domain';
 
+export const PREPRINT_SERVER_VENUE_REGEX =
+  /^(?:arxiv(?:\.org)?|corr|biorxiv|medrxiv|chemrxiv|techrxiv|ssrn|research\s+square|osf\s+preprints|hal|zenodo)(?:\s+preprints?|\s+e-?prints?)?$/i;
+
 const AUTHORITATIVE_CREATOR_PROVIDERS = new Set([
   'crossref',
   'pubmed',
@@ -139,7 +142,9 @@ export function selectAuthoritativeCreatorVariant<
   const firstNonEmpty =
     sortedVariants.find((v) => Array.isArray(v.val) && v.val.length > 0) ||
     sortedVariants[0];
-  const firstProviderLower = (firstNonEmpty?.sourceProvider || '').toLowerCase();
+  const firstProviderLower = (
+    firstNonEmpty?.sourceProvider || ''
+  ).toLowerCase();
   if (
     firstNonEmpty?.isUserOverride ||
     firstProviderLower === 'useroverride' ||
@@ -261,9 +266,7 @@ export function mergeReconciledExtraText(variants: unknown[]): string {
  * Deep-merges `extraFields` dictionaries and additively merges plain-text `extra` lines
  * so higher-trust provider keys override lower-trust ones while preserving unique supplemental keys.
  */
-export class ExtraFieldsMergeReconciliationStrategy
-  implements IFieldReconciliationStrategy
-{
+export class ExtraFieldsMergeReconciliationStrategy implements IFieldReconciliationStrategy {
   readonly strategyName = 'EXTRA_FIELDS_MERGE';
 
   supports(field: string): boolean {
@@ -328,9 +331,7 @@ export class ExtraFieldsMergeReconciliationStrategy
  * Reconciles `tags`, `labels`, `keywords`, and `notes` by unioning and deduplicating
  * across all candidate arrays without discarding non-conflicting entries.
  */
-export class AppendOnlyUniqueArrayReconciliationStrategy
-  implements IFieldReconciliationStrategy
-{
+export class AppendOnlyUniqueArrayReconciliationStrategy implements IFieldReconciliationStrategy {
   readonly strategyName = 'APPEND_ONLY_UNIQUE_ARRAY';
 
   supports(field: string): boolean {
@@ -403,9 +404,7 @@ export class AppendOnlyUniqueArrayReconciliationStrategy
  * Reconciles `creators` and `authors` by preferring complete lists from authoritative
  * registries over truncated lists.
  */
-export class CreatorCompletenessReconciliationStrategy
-  implements IFieldReconciliationStrategy
-{
+export class CreatorCompletenessReconciliationStrategy implements IFieldReconciliationStrategy {
   readonly strategyName = 'CREATOR_COMPLETENESS';
 
   supports(field: string): boolean {
@@ -445,9 +444,7 @@ const ABSTRACT_BOILERPLATE_REGEX =
  * Strategy 4: `ScalarTrustHierarchyReconciliationStrategy`
  * Default weighted trust + completeness scoring for scalar bibliographic fields.
  */
-export class ScalarTrustHierarchyReconciliationStrategy
-  implements IFieldReconciliationStrategy
-{
+export class ScalarTrustHierarchyReconciliationStrategy implements IFieldReconciliationStrategy {
   readonly strategyName = 'SCALAR_TRUST_HIERARCHY';
 
   supports(_field: string): boolean {
@@ -561,7 +558,8 @@ export function finalizeReconciledBibliographicMetadata(
   const resolvedYearNum =
     typeof resolved.year === 'number'
       ? resolved.year
-      : typeof resolved.year === 'string' && /^\d{4}$/.test(resolved.year.trim())
+      : typeof resolved.year === 'string' &&
+          /^\d{4}$/.test(resolved.year.trim())
         ? Number(resolved.year.trim())
         : undefined;
   if (resolvedYearNum && resolvedYearNum >= 1000 && resolvedYearNum <= 2999) {
@@ -573,13 +571,14 @@ export function finalizeReconciledBibliographicMetadata(
         if (matchYear && matchYear[1] !== yearStr) {
           const matchingCandDate = _candidates
             ?.map((c) => {
-              const meta = c.metadata ?? (c as Record<string, unknown>);
+              const meta = (c.metadata ?? c) as Record<string, unknown>;
               const candVal = meta?.[dateKey];
               if (typeof candVal === 'string') return candVal;
               if (
                 candVal &&
                 typeof candVal === 'object' &&
-                typeof (candVal as { normalizedValue?: unknown }).normalizedValue === 'string'
+                typeof (candVal as { normalizedValue?: unknown })
+                  .normalizedValue === 'string'
               ) {
                 return (candVal as { normalizedValue: string }).normalizedValue;
               }
@@ -623,8 +622,8 @@ export function finalizeReconciledBibliographicMetadata(
       /^[a-z-]+(?:\.[a-z]{2})?\/\d{7}$/i.test(rawArxivCandidate);
     const isNonArxivDoi = Boolean(
       typeof resolved.doi === 'string' &&
-        resolved.doi.trim() &&
-        !/^10\.48550\/arxiv\./i.test(resolved.doi.trim()),
+      resolved.doi.trim() &&
+      !/^10\.48550\/arxiv\./i.test(resolved.doi.trim()),
     );
     if (isValidArxivId && !isNonArxivDoi) {
       resolved.repository = resolved.repository || 'arXiv';

@@ -96,7 +96,9 @@ export function isVietnameseName(raw?: string | null): boolean {
     if (AMBIGUOUS_UNACCENTED_VN_SURNAMES.has(firstLower)) {
       return false;
     }
-    return VN_SYLLABLE_REGEX.test(tokens[0]) && VN_SYLLABLE_REGEX.test(tokens[1]);
+    return (
+      VN_SYLLABLE_REGEX.test(tokens[0]) && VN_SYLLABLE_REGEX.test(tokens[1])
+    );
   }
 
   // If unaccented >= 3 tokens with an ambiguous short surname, require a known Vietnamese middle name
@@ -673,40 +675,22 @@ export function normalizeCreators(
 }
 
 // PDF first-page accuracy helpers
-
-/**
- * Rejects author candidates that are clearly prose (e.g. an abstract sentence
- * that bled into the author block: "We introduce Adam"). A person name is made
- * of capitalised tokens; the only lowercase tokens allowed are name particles.
- */
 export function isPlausibleAuthorName(name?: string | null): boolean {
   if (!name) return false;
   const trimmed = name.trim();
-  if (trimmed.includes(':')) return false;
-  if (isNoiseAuthorName(trimmed)) return false;
+  if (trimmed.includes(':') || isNoiseAuthorName(trimmed)) return false;
   const tokens = trimmed.split(/\s+/);
   if (tokens.length === 0 || tokens.length > 8) return false;
   return tokens.every(
     (t) =>
       /^\p{Lu}/u.test(t) ||
-      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
-        t,
-      ) ||
+      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(t) ||
       PREFIX_PARTICLES.has(t.toLowerCase()) ||
       !/\p{L}/u.test(t),
   );
 }
 
-/**
- * Splits a run of names that the PDF text layer joined without any delimiter,
- * e.g. "Kaiming He Xiangyu Zhang Shaoqing Ren Jian Sun".
- *
- * Heuristic: each name is `Given [Initial.]* [particle]* Surname`. The split is
- * only applied when the whole string parses cleanly into >= 2 names; otherwise
- * the input is returned untouched. Known limitation: a person with a given name
- * of two words and no initial (e.g. "Maria Del Carmen Lopez") is ambiguous, so
- * strings shorter than `minTokens` are left alone unless the caller opts in.
- */
+// Heuristic: each name is `Given [Initial.]* [particle]* Surname` when >= minTokens.
 export function splitConcatenatedAuthors(raw: string, minTokens = 6): string[] {
   const input = (raw || '').trim();
   if (!input) return [];
@@ -735,4 +719,21 @@ export function splitConcatenatedAuthors(raw: string, minTokens = 6): string[] {
     names.push(tokens.slice(start, i).join(' '));
   }
   return names.length >= 2 ? names : [input];
+}
+
+export function formatAuthors(item: {
+  contributors?: Array<{ fullName?: string | null; firstName?: string | null; lastName?: string | null; name?: string | null; creatorType?: string | null }> | null;
+  creators?: Array<{ fullName?: string | null; firstName?: string | null; lastName?: string | null; name?: string | null; creatorType?: string | null }> | null;
+  authors?: string[] | null;
+}): string[] {
+  const fmt = (c: { fullName?: string | null; firstName?: string | null; lastName?: string | null; name?: string | null }) =>
+    c.fullName?.trim() || `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.name || 'Anonymous';
+  const list = Array.isArray(item.contributors) && item.contributors.length > 0 ? item.contributors : Array.isArray(item.creators) && item.creators.length > 0 ? item.creators : null;
+  if (list) {
+    const authors = list.filter((c) => (c.creatorType || 'author').toLowerCase() === 'author').map(fmt).filter(Boolean);
+    if (authors.length > 0) return authors;
+    const editors = list.filter((c) => (c.creatorType || '').toLowerCase() === 'editor').map(fmt).filter(Boolean);
+    return editors.length > 0 ? editors : list.map(fmt).filter(Boolean);
+  }
+  return Array.isArray(item.authors) ? item.authors.map((a) => String(a).trim()).filter(Boolean) : [];
 }

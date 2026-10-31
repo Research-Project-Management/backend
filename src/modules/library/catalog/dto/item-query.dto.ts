@@ -10,8 +10,10 @@ import {
 import { Type, Transform } from 'class-transformer';
 
 function transformOptionalBoolean(value: unknown): boolean | undefined {
-  if (value === 'true' || value === true || value === '1' || value === 1) return true;
-  if (value === 'false' || value === false || value === '0' || value === 0) return false;
+  if (value === 'true' || value === true || value === '1' || value === 1)
+    return true;
+  if (value === 'false' || value === false || value === '0' || value === 0)
+    return false;
   return undefined;
 }
 
@@ -241,6 +243,8 @@ export interface DocumentSectionDto {
   title: string;
   paragraphs: string[];
   page: number;
+  pageNumber?: number;
+  level?: number;
   coords?: DocumentBoundingBoxDto;
   imradCategory?:
     | 'introduction'
@@ -298,6 +302,13 @@ export interface DocumentFulltextResponse {
   markdown?: string;
   plainText?: string;
   pageCount?: number;
+  isScanned?: boolean;
+  ocrStatus?: string;
+  pages?: Array<{
+    pageNumber: number;
+    pageIndex?: number;
+    text: string;
+  }>;
   sections: DocumentSectionDto[];
   figures: DocumentFigureDto[];
   tables: DocumentTableDto[];

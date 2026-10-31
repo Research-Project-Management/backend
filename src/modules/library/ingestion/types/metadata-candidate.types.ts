@@ -1,13 +1,13 @@
 import { ItemMetadata } from './metadata.types';
 
 export interface FieldEvidence {
-  path: string;
+  path?: string;
   value?: unknown;
   rawValue?: unknown;
   normalizedValue: unknown;
   confidence: number;
   sourceProvider: string;
-  retrievedAt: string;
+  retrievedAt?: string;
   warnings?: string[];
   isUserOverride?: boolean;
 }
@@ -20,11 +20,13 @@ export interface MetadataCandidate {
   sourceProvider?: string;
   sourceRecordId?: string;
   retrievedAt: string;
-  schemaVersion: string;
+  schemaVersion?: string;
   rawEvidenceRef?: string;
+  rawMetadata?: Record<string, unknown>;
   fields: Record<string, FieldEvidence>;
   normalizedMetadata: ItemMetadata;
-  confidenceScore: number;
+  confidenceScore?: number;
+  overallConfidence?: number;
 }
 
 export interface MetadataConflictDetail {

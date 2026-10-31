@@ -20,7 +20,6 @@ describe('WebFetchLadderService', () => {
 
     const mirrorResolver = new WebMirrorResolverService(
       undefined,
-      undefined,
       new CrossRefProvider(),
       new ArxivProvider(),
       new OpenAlexProvider(),

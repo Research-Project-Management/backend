@@ -42,7 +42,8 @@ export class FeedsService {
 
     if (!feed) {
       try {
-        const fetched = await this.urlCaptureService.fetchAcademicFeed(cleanUrl);
+        const fetched =
+          await this.urlCaptureService.fetchAcademicFeed(cleanUrl);
         feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
         if (!feed) {
           feed = await this.feedsRepo.createFeed({
@@ -53,7 +54,9 @@ export class FeedsService {
           });
         }
       } catch (err: unknown) {
-        this.logger.warn(`Could not parse feed at ${cleanUrl} during subscribe: ${err}`);
+        this.logger.warn(
+          `Could not parse feed at ${cleanUrl} during subscribe: ${err}`,
+        );
         feed = await this.feedsRepo.createFeed({
           url: cleanUrl,
           title: customTitle || cleanUrl,
@@ -137,15 +140,18 @@ export class FeedsService {
     const limit = Math.min(Math.max(options?.limit ?? 50, 1), 200);
     const readStatus = options?.readStatus ?? 'all';
     const sub = await this.feedsRepo.findSubscription(userId, feedId);
-    const resolvedFeedId = sub?.feedId || feedId;
+    if (!sub) {
+      throw new NotFoundException('Feed subscription not found');
+    }
+    const resolvedFeedId = sub.feedId || feedId;
 
     const items = await this.feedsRepo.findFeedItemsForUser({
       userId,
       feedId: resolvedFeedId,
       readStatus,
       limit,
-      cleanupReadAfter: sub?.cleanupReadAfter,
-      cleanupUnreadAfter: sub?.cleanupUnreadAfter,
+      cleanupReadAfter: sub.cleanupReadAfter,
+      cleanupUnreadAfter: sub.cleanupUnreadAfter,
     });
 
     return items.map((it) => ({
@@ -168,8 +174,15 @@ export class FeedsService {
     }));
   }
 
-  async markItemRead(userId: string, itemId: string, isRead = true): Promise<void> {
-    const canonicalId = await this.feedsRepo.resolveFeedItemUuid(itemId);
+  async markItemRead(
+    userId: string,
+    itemId: string,
+    isRead = true,
+  ): Promise<void> {
+    const canonicalId = await this.feedsRepo.resolveFeedItemUuid(
+      itemId,
+      userId,
+    );
     if (!canonicalId) {
       this.logger.debug(
         `[FeedsService] Cannot record read state: FeedItem not found for identifier "${itemId}"`,
@@ -185,6 +198,7 @@ export class FeedsService {
 
     const resolvedIds = await this.feedsRepo.resolveFeedItemUuids(
       itemIds.slice(0, 200),
+      userId,
     );
 
     if (resolvedIds.length === 0) return;

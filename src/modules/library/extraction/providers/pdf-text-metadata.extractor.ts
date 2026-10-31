@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PDFDocument } from 'pdf-lib';
+import { getDocumentProxy } from 'unpdf';
 import {
   cleanAbstractText,
   AcademicRegexCatalog,
@@ -7,9 +8,137 @@ import {
   cleanAuthorName,
   splitConcatenatedAuthors,
 } from '@/modules/library/core';
+import type { DocumentSection } from '@/modules/library/core/types/bibliographic.types';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
 import type { ExtractedPdfMetadata } from './pdf.provider';
+
+export async function extractPdfOutlineSections(
+  document: Awaited<ReturnType<typeof getDocumentProxy>>,
+  pages: Array<{
+    pageIndex: number;
+    pageNumber?: number;
+    textContent: string;
+  }>,
+): Promise<DocumentSection[]> {
+  const sections: DocumentSection[] = [];
+  const docProxy = document as unknown as {
+    getOutline?: () => Promise<
+      Array<{ title?: string; dest?: unknown; items?: unknown[] }> | null
+    >;
+    getDestination?: (dest: string) => Promise<unknown[] | null>;
+    getPageIndex?: (ref: unknown) => Promise<number>;
+  };
+
+  try {
+    if (typeof docProxy.getOutline === 'function') {
+      const outline = await docProxy.getOutline();
+      if (Array.isArray(outline) && outline.length > 0) {
+        const resolvePageNum = async (dest: unknown): Promise<number> => {
+          try {
+            let explicitDest = dest;
+            if (typeof dest === 'string' && typeof docProxy.getDestination === 'function') {
+              explicitDest = await docProxy.getDestination(dest);
+            }
+            if (Array.isArray(explicitDest) && explicitDest.length > 0) {
+              const ref = explicitDest[0];
+              if (typeof ref === 'number') return ref + 1;
+              if (ref && typeof ref === 'object' && typeof docProxy.getPageIndex === 'function') {
+                const idx = await docProxy.getPageIndex(ref);
+                if (typeof idx === 'number' && idx >= 0) return idx + 1;
+              }
+            }
+          } catch {
+            // Ignore destination resolution error
+          }
+          return 1;
+        };
+
+        let sectionCounter = 0;
+        const traverseOutline = async (
+          items: Array<{ title?: string; dest?: unknown; items?: unknown[] }>,
+          level: number,
+          prefix: string,
+        ) => {
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const rawTitle = typeof item?.title === 'string' ? item.title.replace(/\s+/g, ' ').trim() : '';
+            const num = prefix ? `${prefix}.${i + 1}` : `${i + 1}`;
+            if (rawTitle) {
+              sectionCounter++;
+              const pageNum = await resolvePageNum(item.dest);
+              sections.push({
+                id: `sec-${sectionCounter}`,
+                num,
+                title: rawTitle,
+                level,
+                page: pageNum,
+                pageNumber: pageNum,
+                paragraphs: [],
+              });
+            }
+            if (Array.isArray(item?.items) && item.items.length > 0) {
+              await traverseOutline(
+                item.items as Array<{ title?: string; dest?: unknown; items?: unknown[] }>,
+                level + 1,
+                num,
+              );
+            }
+          }
+        };
+
+        await traverseOutline(outline, 1, '');
+        if (sections.length > 0) return sections;
+      }
+    }
+  } catch {
+    // Fallback to heading heuristics below
+  }
+
+  const numberedHeadingRegex =
+    /^(?:(\d+(?:\.\d+){0,2}|[IVX]{1,4})\.?\s+)([A-Z][A-Za-z0-9\s,:;()\-–—/]{2,80})$/;
+  const canonicalHeadingRegex =
+    /^(Abstract|Introduction|Background|Related Work|Literature Review|Methodology|Methods|Materials and Methods|Experiments|Experimental Setup|Results|Results and Discussion|Evaluation|Discussion|Limitations|Conclusion|Conclusions|Future Work|Acknowledgments|Acknowledgements|References|Bibliography|Appendix)$/i;
+
+  let fallbackCounter = 0;
+  const seenTitles = new Set<string>();
+
+  for (const p of pages) {
+    const pageNum = p.pageNumber ?? p.pageIndex + 1;
+    const lines = (p.textContent || '')
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    for (const line of lines) {
+      if (line.length > 90) continue;
+      const numberedMatch = line.match(numberedHeadingRegex);
+      const canonicalMatch = !numberedMatch ? line.match(canonicalHeadingRegex) : null;
+
+      if (numberedMatch || canonicalMatch) {
+        const num = numberedMatch ? numberedMatch[1] : undefined;
+        const title = (numberedMatch ? numberedMatch[2] : canonicalMatch![1]).trim();
+        const dedupeKey = `${num || ''}:${title.toLowerCase()}`;
+        if (seenTitles.has(dedupeKey)) continue;
+        seenTitles.add(dedupeKey);
+
+        fallbackCounter++;
+        const level = num ? Math.min(3, num.split('.').length) : 1;
+        sections.push({
+          id: `sec-${fallbackCounter}`,
+          ...(num ? { num } : {}),
+          title,
+          level,
+          page: pageNum,
+          pageNumber: pageNum,
+          paragraphs: [],
+        });
+      }
+    }
+  }
+
+  return sections;
+}
 
 @Injectable()
 export class PdfTextMetadataExtractor {
@@ -27,8 +156,15 @@ export class PdfTextMetadataExtractor {
         continue;
       }
       if (idx < 1000) {
-        const afterMatch = text.slice(idx + match[0].length, idx + match[0].length + 80);
-        if (/^(?:\r?\n)?\s*(?:[.\u2026·]{2,}\s*\d+|\d{1,4}\s*(?:\r?\n|$))/.test(afterMatch)) {
+        const afterMatch = text.slice(
+          idx + match[0].length,
+          idx + match[0].length + 80,
+        );
+        if (
+          /^(?:\r?\n)?\s*(?:[.\u2026·]{2,}\s*\d+|\d{1,4}\s*(?:\r?\n|$))/.test(
+            afterMatch,
+          )
+        ) {
           continue;
         }
       }
@@ -66,7 +202,8 @@ export class PdfTextMetadataExtractor {
   extractMetadataFromText(text: string): ExtractedPdfMetadata {
     const scannedText = text.slice(0, PdfTextMetadataExtractor.TEXT_SCAN_LIMIT);
     const refIdx = this.findReferencesHeadingIndex(scannedText);
-    const preRefText = refIdx !== -1 ? scannedText.slice(0, refIdx) : scannedText;
+    const preRefText =
+      refIdx !== -1 ? scannedText.slice(0, refIdx) : scannedText;
     const frontMatter = preRefText.slice(0, 4000);
     const normalizedFrontMatter = frontMatter
       .replace(/(10\.\d{4,9})\s*\/\s*/g, '$1/')
@@ -263,13 +400,11 @@ export class PdfTextMetadataExtractor {
         .replace(/\s+/g, ' ')
         .trim();
       const candidateTitle = rawTitle
-        .replace(
-          /\b([A-Za-z])(?:\s+([A-Za-z])){2,}\b/g,
-          (match) =>
-            match
-              .split(/\s{2,}/)
-              .map((word) => word.replace(/\s+/g, ''))
-              .join(' '),
+        .replace(/\b([A-Za-z])(?:\s+([A-Za-z])){2,}\b/g, (match) =>
+          match
+            .split(/\s{2,}/)
+            .map((word) => word.replace(/\s+/g, ''))
+            .join(' '),
         )
         .replace(/\b([A-Za-z0-9]+)\s+-\s+([A-Za-z0-9]+)\b/g, '$1-$2')
         .replace(/-\s+/g, '')
@@ -358,8 +493,7 @@ export class PdfTextMetadataExtractor {
           const authors = splitAuthorString(cleanAuthorStr)
             .map((a) => cleanAuthorName(a))
             .filter(Boolean);
-          pdfLibMeta.authors =
-            authors.length > 0 ? authors : [cleanAuthorStr];
+          pdfLibMeta.authors = authors.length > 0 ? authors : [cleanAuthorStr];
         }
       }
 
@@ -515,7 +649,9 @@ export class PdfTextMetadataExtractor {
           continue;
         }
         if (/[0-7]/.test(next)) {
-          const octalMatch = stream.slice(idx + 1, idx + 4).match(/^[0-7]{1,3}/);
+          const octalMatch = stream
+            .slice(idx + 1, idx + 4)
+            .match(/^[0-7]{1,3}/);
           if (octalMatch) {
             raw += String.fromCharCode(parseInt(octalMatch[0], 8));
             idx += 1 + octalMatch[0].length;
@@ -556,9 +692,9 @@ export class PdfTextMetadataExtractor {
           const code = (body.charCodeAt(i) << 8) | body.charCodeAt(i + 1);
           if (code !== 0) utf16 += String.fromCharCode(code);
         }
-        str = utf16.trim() || body.replace(/\x00/g, '');
+        str = utf16.trim() || body.split('\0').join('');
       } else {
-        str = body.replace(/\x00/g, '');
+        str = body.split('\0').join('');
       }
     } else if (str.charCodeAt(0) === 0xff && str.charCodeAt(1) === 0xfe) {
       const body = str.slice(2);
@@ -567,7 +703,7 @@ export class PdfTextMetadataExtractor {
         const code = body.charCodeAt(i) | (body.charCodeAt(i + 1) << 8);
         if (code !== 0) utf16le += String.fromCharCode(code);
       }
-      str = utf16le.trim() || body.replace(/\x00/g, '');
+      str = utf16le.trim() || body.split('\0').join('');
     }
 
     return str
@@ -576,7 +712,8 @@ export class PdfTextMetadataExtractor {
       .replace(/\\\(/g, '(')
       .replace(/\\\)/g, ')')
       .replace(/\\\\/g, '\\')
-      .replace(/\x00/g, '')
+      .split('\0')
+      .join('')
       .replace(/\s+/g, ' ')
       .trim();
   }

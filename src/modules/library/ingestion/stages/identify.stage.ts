@@ -5,8 +5,6 @@ import {
   Optional,
   BadRequestException,
 } from '@nestjs/common';
-import zlib from 'zlib';
-import { promisify } from 'util';
 import {
   SubmissionPayload,
   RecordFormat,
@@ -31,6 +29,7 @@ import {
   normalizePmid,
   normalizePmcid,
   normalizeIsbn,
+  gunzipAsync,
 } from '@/modules/library/core';
 import {
   IWorkflowStage,
@@ -44,8 +43,6 @@ import {
 } from './candidate-builder.helper';
 import { IdentifyFileResolver, cleanPdfTitle } from './identify-file.resolver';
 import { IdentifyUrlResolver } from './identify-url.resolver';
-
-const gunzipAsync = promisify(zlib.gunzip);
 
 export {
   type ExtractedPdfMetadata,
@@ -116,7 +113,11 @@ export class IdentifyStage implements IWorkflowStage<
     const context = {
       scopeId,
       userId,
-      projectId: projectId ?? (scopeId && scopeId !== 'user' && scopeId !== userId ? scopeId : undefined),
+      projectId:
+        projectId ??
+        (scopeId && scopeId !== 'user' && scopeId !== userId
+          ? scopeId
+          : undefined),
     };
     const candidates: MetadataCandidate[] = [];
 
@@ -157,7 +158,11 @@ export class IdentifyStage implements IWorkflowStage<
       }
 
       case 'FILE': {
-        const candidate = await this.resolveFileCandidate(payload, scopeId, context);
+        const candidate = await this.resolveFileCandidate(
+          payload,
+          scopeId,
+          context,
+        );
         if (candidate) candidates.push(candidate);
         break;
       }
@@ -165,9 +170,7 @@ export class IdentifyStage implements IWorkflowStage<
       case 'CONNECTOR': {
         const connectorRaw = payload as unknown as Record<string, unknown>;
         const inlineContent =
-          typeof connectorRaw.content === 'string'
-            ? connectorRaw.content
-            : '';
+          typeof connectorRaw.content === 'string' ? connectorRaw.content : '';
         if (inlineContent.trim()) {
           const parsedList = this.bibtexParser.parse(inlineContent);
           for (const item of parsedList) {
@@ -274,7 +277,11 @@ export class IdentifyStage implements IWorkflowStage<
     context?: { userId?: string; projectId?: string; scopeId?: string },
   ): Promise<string> {
     let content = payload.content || '';
-    if (payload.isOffloaded && payload.fileId && this.storagePort?.readOwnedFile) {
+    if (
+      payload.isOffloaded &&
+      payload.fileId &&
+      this.storagePort?.readOwnedFile
+    ) {
       try {
         const file = await this.storagePort.readOwnedFile({
           fileId: payload.fileId,

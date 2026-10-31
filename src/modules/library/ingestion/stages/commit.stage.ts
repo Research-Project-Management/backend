@@ -289,8 +289,7 @@ export function toItemData(
       metadata.openAccessPdfUrl ||
       undefined,
     openAccessPdfUrl: metadata.openAccessPdfUrl || undefined,
-    attachments:
-      (metadata.attachments as CreateItemData['attachments']) || undefined,
+    attachments: metadata.attachments || undefined,
     language:
       metadata.language ?? (syncedExtraFields.language as string | undefined),
     rights:
@@ -335,7 +334,7 @@ export function toItemData(
       metadata.retractionDetails &&
       typeof metadata.retractionDetails === 'object' &&
       !Array.isArray(metadata.retractionDetails)
-        ? (metadata.retractionDetails as Record<string, unknown>)
+        ? metadata.retractionDetails
         : null,
     retractionCheckedAt: metadata.retractionCheckedAt,
   };
@@ -470,10 +469,7 @@ export class CommitStage implements IWorkflowStage<
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code;
       const msg = err instanceof Error ? err.message : String(err);
-      if (
-        code === 'P2002' ||
-        msg.includes('Unique constraint failed')
-      ) {
+      if (code === 'P2002' || msg.includes('Unique constraint failed')) {
         if (this.catalogGateway.findMatchCandidates) {
           const match = await this.catalogGateway.findMatchCandidates(
             { userId: effectiveUserId, projectId: effectiveProjectId },
@@ -537,10 +533,7 @@ export class CommitStage implements IWorkflowStage<
     let resultItem = existingItem;
     if (this.catalogGateway?.updateItem) {
       try {
-        const patch = buildEnrichmentPatch(
-          existingItem as unknown as Record<string, unknown>,
-          createData as unknown as Record<string, unknown>,
-        );
+        const patch = buildEnrichmentPatch(existingItem, createData);
         if (Object.keys(patch).length > 0) {
           const updated = await this.catalogGateway.updateItem(
             userId,
@@ -625,12 +618,15 @@ export class CommitStage implements IWorkflowStage<
         createData.collectionIds.length > 0 &&
         this.catalogGateway?.assignItemsToCollection
       ) {
-        await this.catalogGateway.assignItemsToCollection(
-          userId,
-          createData.collectionIds[0],
-          [existingItem.id],
-          projectId,
-        );
+        for (const collectionId of createData.collectionIds) {
+          if (!collectionId) continue;
+          await this.catalogGateway.assignItemsToCollection(
+            userId,
+            collectionId,
+            [existingItem.id],
+            projectId,
+          );
+        }
       }
     } catch {
       // Non-critical side-effects on matched item enrichment

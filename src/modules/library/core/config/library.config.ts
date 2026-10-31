@@ -127,9 +127,8 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
       batchSize: Number(process.env.OUTBOX_BATCH_SIZE) || 50,
       maxRetries: Number(process.env.OUTBOX_MAX_RETRIES) || 5,
       leaseMs:
-        Number(
-          process.env.OUTBOX_LEASE_MS || process.env.OUTBOX_LOCK_TTL_MS,
-        ) || 30000,
+        Number(process.env.OUTBOX_LEASE_MS || process.env.OUTBOX_LOCK_TTL_MS) ||
+        30000,
       workerEnabled: process.env.OUTBOX_WORKER_ENABLED,
     },
     ingestion: {

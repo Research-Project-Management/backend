@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   METADATA_PROVIDERS,
   MetadataPort,
@@ -22,6 +21,7 @@ import {
   normalizeDoi,
   normalizePmcid,
   normalizePmid,
+  titleSimilarity,
 } from '@/modules/library/core';
 import {
   MetadataRoutingPolicy,
@@ -44,7 +44,6 @@ export class MetadataService implements MetadataPort {
     private readonly cache: MetadataCache,
     private readonly reconciler: MetadataReconciliationService,
     private readonly executor: MetadataExecutorService,
-    @Optional() private readonly _ingestionRepo?: IngestionRepository,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
   ) {
     for (const provider of providers) {
@@ -216,9 +215,14 @@ export class MetadataService implements MetadataPort {
     if (candidateResults.length > 0 && tiers.enrichment.length > 0) {
       const primaryMeta = candidateResults[0]?.metadata;
       const primaryAuthoritativeTitle = primaryMeta?.title;
-      const primaryDoi = primaryMeta?.doi ? normalizeDoi(primaryMeta.doi) : undefined;
+      const primaryDoi = primaryMeta?.doi
+        ? normalizeDoi(primaryMeta.doi)
+        : undefined;
       const isPreprintDoi = (d?: string) =>
-        Boolean(d && /^10\.(?:48550\/arxiv\.|1101\/|21203\/|26434\/|20944\/)/i.test(d));
+        Boolean(
+          d &&
+          /^10\.(?:48550\/arxiv\.|1101\/|21203\/|26434\/|20944\/)/i.test(d),
+        );
       const enrichmentProviders = tiers.enrichment
         .map((id) => this.providerMap.get(id))
         .filter(
@@ -441,56 +445,7 @@ export class MetadataService implements MetadataPort {
   }
 
   private isTitleSimilar(query: string, candidateTitle: string): boolean {
-    const qTokens = query
-      .toLowerCase()
-      .replace(/[đĐ]/g, 'd')
-      .normalize('NFKD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-      .replace(
-        /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu,
-        ' $& ',
-      )
-      .split(/\s+/)
-      .filter(
-        (t) =>
-          t.length > 2 ||
-          /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
-            t,
-          ),
-      );
-    const cTokens = candidateTitle
-      .toLowerCase()
-      .replace(/[đĐ]/g, 'd')
-      .normalize('NFKD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-      .replace(
-        /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu,
-        ' $& ',
-      )
-      .split(/\s+/)
-      .filter(
-        (t) =>
-          t.length > 2 ||
-          /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
-            t,
-          ),
-      );
-
-    if (qTokens.length === 0 || cTokens.length === 0) return false;
-
-    let matches = 0;
-    for (const qt of qTokens) {
-      if (cTokens.includes(qt)) {
-        matches++;
-      }
-    }
-
-    const similarity = matches / qTokens.length;
-    if (similarity < 0.5) return false;
+    if (titleSimilarity(query, candidateTitle) < 0.5) return false;
 
     // Bag-of-words alone accepts re-ordered titles ("Is Attention All You Need?" vs
     // "Attention Is All You Need"), which are different works. Require the ordered

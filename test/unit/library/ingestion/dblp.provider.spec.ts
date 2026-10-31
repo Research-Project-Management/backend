@@ -1,16 +1,11 @@
 import { DblpProvider } from '@/modules/library/ingestion/providers/dblp.provider';
-import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
 
 describe('DblpProvider', () => {
   let provider: DblpProvider;
-  let rateLimiter: DomainRateLimiterService;
   let originalFetch: typeof global.fetch;
 
   beforeEach(() => {
-    rateLimiter = new DomainRateLimiterService(undefined, {
-      bypassDelay: true,
-    });
-    provider = new DblpProvider(rateLimiter);
+    provider = new DblpProvider();
     originalFetch = global.fetch;
   });
 

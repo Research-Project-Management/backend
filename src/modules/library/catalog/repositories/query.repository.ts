@@ -5,13 +5,13 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { promisify } from 'util';
-import zlib from 'zlib';
-import { PrismaService } from '@/core';
 
-const gunzipAsync = promisify(zlib.gunzip);
-import { isUUID } from 'class-validator';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+
+import { PrismaService, isUuid } from '@/core';
+
+
+
+import { normalizeProjectScopeId, gunzipAsync } from '@/modules/library/core';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import {
   ItemSummary,
@@ -36,8 +36,8 @@ export { ItemMatchQueryRepository } from './item-match-query.repository';
 export { ItemRelationsQueryRepository } from './item-relations-query.repository';
 export { ItemListQueryRepository } from './item-list-query.repository';
 
-const isUuid = (val: unknown): val is string =>
-  typeof val === 'string' && isUUID(val);
+
+
 
 @Injectable()
 export class QueryRepository {
@@ -320,14 +320,18 @@ export class QueryRepository {
 
   private async hydrateMetadataRecord<
     T extends { rawPayload: Prisma.JsonValue },
-  >(record: T): Promise<T> {
+  >(record: T, scope?: { userId?: string; projectId?: string | null }): Promise<T> {
     const raw = record.rawPayload as
-      | (Record<string, unknown> & { isOffloaded?: boolean; fileId?: string })
+      | (Record<string, unknown> & { isOffloaded?: boolean; fileId?: string; userId?: string; projectId?: string | null })
       | null;
     if (raw?.isOffloaded && raw?.fileId && this.storagePort?.readOwnedFile) {
       try {
+        const effectiveUserId = scope?.userId ?? raw.userId;
+        const effectiveProjectId = normalizeProjectScopeId(scope?.projectId ?? raw.projectId ?? undefined);
         const storageFile = await this.storagePort.readOwnedFile({
           fileId: raw.fileId,
+          ...(effectiveUserId ? { userId: effectiveUserId } : {}),
+          ...(effectiveProjectId ? { projectId: effectiveProjectId } : {}),
         });
         if (storageFile?.buffer) {
           const decompressed = await gunzipAsync(storageFile.buffer);
@@ -357,6 +361,7 @@ export class QueryRepository {
     itemId: string,
     sourceProvider: string,
     tx?: Prisma.TransactionClient,
+    scope?: { userId?: string; projectId?: string | null },
   ) {
     if (!isUuid(itemId)) return null;
     const client = this.getClient(tx);
@@ -369,7 +374,7 @@ export class QueryRepository {
     });
 
     if (!record) return null;
-    return this.hydrateMetadataRecord(record);
+    return this.hydrateMetadataRecord(record, scope);
   }
 
   /**
@@ -380,6 +385,7 @@ export class QueryRepository {
     itemId: string,
     sourceProviders: string[],
     tx?: Prisma.TransactionClient,
+    scope?: { userId?: string; projectId?: string | null },
   ) {
     if (!isUuid(itemId) || sourceProviders.length === 0) return null;
     const client = this.getClient(tx);
@@ -396,7 +402,7 @@ export class QueryRepository {
     for (const provider of sourceProviders) {
       const matched = records.find((r) => r.sourceProvider === provider);
       if (matched) {
-        return this.hydrateMetadataRecord(matched);
+        return this.hydrateMetadataRecord(matched, scope);
       }
     }
     return null;

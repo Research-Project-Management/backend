@@ -97,9 +97,7 @@ export class CommandBulkOperations {
     projectId?: string,
   ): Promise<{ succeededIds: string[]; failedIds: string[] }> {
     const validUserId = isUuid(userId);
-    const validIds = Array.from(
-      new Set(itemIds.filter((id) => isUuid(id))),
-    );
+    const validIds = Array.from(new Set(itemIds.filter((id) => isUuid(id))));
     if (!validUserId || validIds.length === 0) {
       return { succeededIds: [], failedIds: [...itemIds] };
     }
@@ -175,14 +173,16 @@ export class CommandBulkOperations {
     itemIds: string[],
     projectId?: string,
   ): Promise<{
-    restoredItems: Array<{ id: string; version: number; projectId: string | null }>;
+    restoredItems: Array<{
+      id: string;
+      version: number;
+      projectId: string | null;
+    }>;
     succeededIds: string[];
     failedIds: string[];
   }> {
     const validUserId = isUuid(userId);
-    const validIds = Array.from(
-      new Set(itemIds.filter((id) => isUuid(id))),
-    );
+    const validIds = Array.from(new Set(itemIds.filter((id) => isUuid(id))));
     if (!validUserId || validIds.length === 0) {
       return { restoredItems: [], succeededIds: [], failedIds: [...itemIds] };
     }
@@ -198,12 +198,23 @@ export class CommandBulkOperations {
         deletedAt: { not: null },
         ...scopeFilter,
       },
-      select: { id: true, version: true, projectId: true, metadata: true, deletedAt: true },
+      select: {
+        id: true,
+        version: true,
+        projectId: true,
+        metadata: true,
+        deletedAt: true,
+      },
     });
 
     const restorableMap = new Map<
       string,
-      { id: string; version: number; projectId: string | null; deletedAt: Date | null }
+      {
+        id: string;
+        version: number;
+        projectId: string | null;
+        deletedAt: Date | null;
+      }
     >();
     for (const item of existingItems) {
       const metadataObj =
@@ -250,7 +261,9 @@ export class CommandBulkOperations {
       await Promise.all(
         succeededIds.flatMap((id) => {
           const itemDeletedAt = restorableMap.get(id)?.deletedAt;
-          const deletedFilter = itemDeletedAt ? { gte: itemDeletedAt } : { not: null };
+          const deletedFilter = itemDeletedAt
+            ? { gte: itemDeletedAt }
+            : { not: null };
           return [
             client.note?.updateMany?.({
               where: { itemId: id, deletedAt: deletedFilter },
@@ -299,7 +312,10 @@ export class CommandBulkOperations {
         if (ag.itemId) attachmentCountMap.set(ag.itemId, ag._count.id);
       }
 
-      const countBuckets = new Map<string, { nc: number; ac: number; ids: string[] }>();
+      const countBuckets = new Map<
+        string,
+        { nc: number; ac: number; ids: string[] }
+      >();
       for (const id of succeededIds) {
         const nc = noteCountMap.get(id) ?? 0;
         const ac = attachmentCountMap.get(id) ?? 0;
@@ -342,9 +358,7 @@ export class CommandBulkOperations {
     storagePaths: string[];
   }> {
     const validUserId = isUuid(userId);
-    const validIds = Array.from(
-      new Set(itemIds.filter((id) => isUuid(id))),
-    );
+    const validIds = Array.from(new Set(itemIds.filter((id) => isUuid(id))));
     if (!validUserId || validIds.length === 0) {
       return {
         succeededIds: [],
@@ -408,9 +422,21 @@ export class CommandBulkOperations {
     purgedNotes: number;
     purgedCollections: number;
     storagePaths: string[];
-    expiredItems: Array<{ id: string; userId: string; projectId: string | null }>;
-    expiredNotes: Array<{ id: string; userId: string; projectId: string | null }>;
-    expiredCollections: Array<{ id: string; userId: string; projectId: string | null }>;
+    expiredItems: Array<{
+      id: string;
+      userId: string;
+      projectId: string | null;
+    }>;
+    expiredNotes: Array<{
+      id: string;
+      userId: string;
+      projectId: string | null;
+    }>;
+    expiredCollections: Array<{
+      id: string;
+      userId: string;
+      projectId: string | null;
+    }>;
   }> {
     const cutoff = new Date(Date.now() - retentionDays * 86400 * 1000);
 
@@ -473,5 +499,4 @@ export class CommandBulkOperations {
       expiredCollections,
     };
   }
-
 }

@@ -113,7 +113,8 @@ export class MatchStage implements IWorkflowStage<
           Boolean(existingTitle) &&
           !isGenericTitle(proposedTitle) &&
           !isGenericTitle(existingTitle) &&
-          calculateTitleSimilarity(proposedTitle ?? '', existingTitle ?? '') < 0.5;
+          calculateTitleSimilarity(proposedTitle ?? '', existingTitle ?? '') <
+            0.5;
 
         if (!titlesConflict) {
           return {

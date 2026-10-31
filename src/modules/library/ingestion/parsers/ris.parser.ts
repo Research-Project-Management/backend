@@ -229,7 +229,9 @@ export class RisParser {
         if (csl.keyword) {
           if (Array.isArray(csl.keyword)) {
             rawKeywords.push(
-              ...csl.keyword.map((k: string) => String(k).trim()).filter(Boolean),
+              ...csl.keyword
+                .map((k: string) => String(k).trim())
+                .filter(Boolean),
             );
           } else if (typeof csl.keyword === 'string') {
             rawKeywords.push(csl.keyword.trim());
@@ -238,14 +240,17 @@ export class RisParser {
         const tags = normalizeAcademicTags(rawKeywords);
 
         const dateParts = csl.issued?.['date-parts']?.[0];
-        let year =
-          dateParts?.[0] != null ? Number(dateParts[0]) : undefined;
+        let year = dateParts?.[0] != null ? Number(dateParts[0]) : undefined;
         if (!year || Number.isNaN(year)) {
           year = rawRec?.year;
         }
 
         let cslPubDate: string | undefined;
-        if (Array.isArray(dateParts) && dateParts[0] != null && !Number.isNaN(Number(dateParts[0]))) {
+        if (
+          Array.isArray(dateParts) &&
+          dateParts[0] != null &&
+          !Number.isNaN(Number(dateParts[0]))
+        ) {
           const yStr = String(dateParts[0]).padStart(4, '0');
           const mNum = dateParts[1] != null ? Number(dateParts[1]) : undefined;
           const dNum = dateParts[2] != null ? Number(dateParts[2]) : undefined;

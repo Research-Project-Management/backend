@@ -1,4 +1,8 @@
-import { cleanBibliographicText, cleanAbstractText, AcademicHttpClient } from '@/modules/library/core';
+import {
+  cleanBibliographicText,
+  cleanAbstractText,
+  AcademicHttpClient,
+} from '@/modules/library/core';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import type { ProviderResult } from '@/modules/library/ingestion/types/metadata.types';
 
@@ -6,20 +10,34 @@ export function parseMedlineDate(raw: string): string | undefined {
   const str = raw.trim();
   if (!str) return undefined;
   const MONTHS: Record<string, string> = {
-    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+    jan: '01',
+    feb: '02',
+    mar: '03',
+    apr: '04',
+    may: '05',
+    jun: '06',
+    jul: '07',
+    aug: '08',
+    sep: '09',
+    oct: '10',
+    nov: '11',
+    dec: '12',
   };
   const iso = str.match(/^(\d{4})[/-](\d{1,2})(?:[/-](\d{1,2}))?/);
   if (iso) {
     const m = iso[2].padStart(2, '0');
-    return iso[3] ? `${iso[1]}-${m}-${iso[3].padStart(2, '0')}` : `${iso[1]}-${m}`;
+    return iso[3]
+      ? `${iso[1]}-${m}-${iso[3].padStart(2, '0')}`
+      : `${iso[1]}-${m}`;
   }
   const med = str.match(/^(\d{4})(?:\s+([A-Za-z]{3})[a-z]*(?:\s+(\d{1,2}))?)?/);
   if (!med) return str;
   const year = med[1];
   const month = med[2] ? MONTHS[med[2].toLowerCase()] : undefined;
   if (!month) return med[2] ? str : year;
-  return med[3] ? `${year}-${month}-${med[3].padStart(2, '0')}` : `${year}-${month}`;
+  return med[3]
+    ? `${year}-${month}-${med[3].padStart(2, '0')}`
+    : `${year}-${month}`;
 }
 
 export async function enrichFromEuropePmc(
@@ -49,7 +67,9 @@ export async function enrichFromEuropePmc(
           meshHeadingList?: {
             meshHeading?: Array<{
               descriptorName?: string;
-              meshQualifierList?: { meshQualifier?: Array<{ qualifierName?: string }> };
+              meshQualifierList?: {
+                meshQualifier?: Array<{ qualifierName?: string }>;
+              };
             }>;
           };
           keywordList?: { keyword?: Array<string | null> };

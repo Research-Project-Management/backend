@@ -312,7 +312,10 @@ export class ItemCurationService {
         }
 
         if (helpers.appendChangesBatch) {
-          await helpers.appendChangesBatch({ userId, projectId }, changeEntries);
+          await helpers.appendChangesBatch(
+            { userId, projectId },
+            changeEntries,
+          );
         } else {
           for (const entry of changeEntries) {
             await helpers.appendChange({ userId, projectId }, entry);
@@ -439,7 +442,7 @@ export class ItemCurationService {
       await this.libraryTx.executeInTransaction(async (tx, helpers) => {
         const updated = await this.command.applyItemAiMetadataUpdate({
           itemId,
-          existing: existing as unknown as Record<string, unknown>,
+          existing: existing,
           filteredPatch,
           topLevelColumnSync,
           mergedMetadata,
@@ -472,7 +475,7 @@ export class ItemCurationService {
     } else {
       await this.command.applyItemAiMetadataUpdate({
         itemId,
-        existing: existing as unknown as Record<string, unknown>,
+        existing: existing,
         filteredPatch,
         topLevelColumnSync,
         mergedMetadata,

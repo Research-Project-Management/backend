@@ -1,7 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { isUUID } from 'class-validator';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import {
   ItemDetail,
@@ -13,18 +12,15 @@ import {
   buildItemWhereClause,
 } from './item-filter-where.builder';
 
-const isUuid = (val: unknown): val is string =>
-  typeof val === 'string' && isUUID(val);
-
 export type PrismaClientOrTx = Prisma.TransactionClient | PrismaService;
 
 @Injectable()
 export class ItemListQueryRepository {
-  private readonly treeEngine = new TreeEngine();
-
   constructor(
     @Optional()
     private readonly prisma?: PrismaService,
+    @Optional()
+    private readonly treeEngine: TreeEngine = new TreeEngine(),
   ) {}
 
   /**
@@ -139,8 +135,7 @@ export class ItemListQueryRepository {
       options.includeNotes === true ||
       Boolean(
         requestedFields &&
-          (requestedFields.has('notes') ||
-            requestedFields.has('notesList')),
+        (requestedFields.has('notes') || requestedFields.has('notesList')),
       );
 
     const relationPeerSelect = {

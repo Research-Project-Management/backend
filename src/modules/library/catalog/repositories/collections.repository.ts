@@ -1,7 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
-import { isUUID } from 'class-validator';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
@@ -28,9 +27,11 @@ export interface UpdateCollectionInput {
 
 @Injectable()
 export class CollectionsRepository {
-  private readonly treeEngine = new TreeEngine();
-
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    private readonly treeEngine: TreeEngine = new TreeEngine(),
+  ) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
@@ -38,7 +39,7 @@ export class CollectionsRepository {
 
   private resolveProjectScopeId(projectId?: string | null): string | undefined {
     const normalized = normalizeProjectScopeId(projectId);
-    return normalized && isUUID(normalized) ? normalized : undefined;
+    return normalized && isUuid(normalized) ? normalized : undefined;
   }
 
   private buildScopeWhere(
@@ -486,7 +487,13 @@ export class CollectionsRepository {
         },
       });
     } else {
-      await this.addItemsToCollection(userId, targetCollectionId, itemIds, tx, validProjectId);
+      await this.addItemsToCollection(
+        userId,
+        targetCollectionId,
+        itemIds,
+        tx,
+        validProjectId,
+      );
     }
   }
 
@@ -580,9 +587,7 @@ export class CollectionsRepository {
     const items = await client.collectionItem.findMany({
       where: {
         collectionId:
-          collectionIds.length === 1
-            ? collectionIds[0]
-            : { in: collectionIds },
+          collectionIds.length === 1 ? collectionIds[0] : { in: collectionIds },
         item: {
           ...(validProjectId
             ? { projectId: validProjectId }

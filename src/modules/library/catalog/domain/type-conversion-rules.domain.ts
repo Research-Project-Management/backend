@@ -153,7 +153,9 @@ export class ToConferencePaperConversionRule implements ITypeConversionRule {
   apply(ctx: TypeConversionRuleContext): void {
     if (ctx.sourceValues.proceedingsTitle !== undefined) return;
     for (const candidate of ['publicationTitle', 'journal', 'bookTitle']) {
-      if (remapFieldInContext(ctx, candidate, 'proceedingsTitle', 'base-semantic')) {
+      if (
+        remapFieldInContext(ctx, candidate, 'proceedingsTitle', 'base-semantic')
+      ) {
         break;
       }
     }
@@ -186,7 +188,9 @@ export class ToJournalArticleConversionRule implements ITypeConversionRule {
         ? ['proceedingsTitle', 'bookTitle']
         : ['proceedingsTitle', 'bookTitle', 'repository'];
     for (const candidate of candidates) {
-      if (remapFieldInContext(ctx, candidate, 'publicationTitle', 'base-semantic')) {
+      if (
+        remapFieldInContext(ctx, candidate, 'publicationTitle', 'base-semantic')
+      ) {
         break;
       }
     }
@@ -282,7 +286,14 @@ export class ToPatentConversionRule implements ITypeConversionRule {
     }
     if (ctx.sourceValues.issuingAuthority === undefined) {
       for (const candidate of ['authority', 'publisher', 'institution']) {
-        if (remapFieldInContext(ctx, candidate, 'issuingAuthority', 'base-semantic')) {
+        if (
+          remapFieldInContext(
+            ctx,
+            candidate,
+            'issuingAuthority',
+            'base-semantic',
+          )
+        ) {
           break;
         }
       }

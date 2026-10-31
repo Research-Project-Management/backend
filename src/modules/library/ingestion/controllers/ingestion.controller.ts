@@ -65,7 +65,12 @@ export class IngestionController {
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ summary: 'Submit item ingestion into library' })
-  @ApiParam({ name: 'projectId', required: false, type: 'string', format: 'uuid' })
+  @ApiParam({
+    name: 'projectId',
+    required: false,
+    type: 'string',
+    format: 'uuid',
+  })
   async submit(
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
@@ -433,7 +438,8 @@ export class IngestionController {
   @Post('fetch-feed')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
-    summary: 'Fetch and parse an external RSS/Atom journal or arXiv feed with DB caching & ETag support',
+    summary:
+      'Fetch and parse an external RSS/Atom journal or arXiv feed with DB caching & ETag support',
   })
   async fetchFeed(
     @Body() body: { url: string; forceRefresh?: boolean },

@@ -58,7 +58,7 @@ class RisFormatStrategy implements IBibliographyFormatStrategy {
 
   async parseRecords(content: string): Promise<Record<string, unknown>[]> {
     const parsedList = this.parser.parse(content);
-    return parsedList as unknown as Record<string, unknown>[];
+    return parsedList;
   }
 
   extractRecordId(record: Record<string, unknown>): string | undefined {
@@ -80,7 +80,7 @@ class ReferFormatStrategy implements IBibliographyFormatStrategy {
 
   async parseRecords(content: string): Promise<Record<string, unknown>[]> {
     const parsedList = this.parser.parse(content);
-    return parsedList as unknown as Record<string, unknown>[];
+    return parsedList;
   }
 
   extractRecordId(record: Record<string, unknown>): string | undefined {
@@ -103,7 +103,7 @@ class CslJsonFormatStrategy implements IBibliographyFormatStrategy {
 
   async parseRecords(content: string): Promise<Record<string, unknown>[]> {
     const parsedList = this.parser.parse(content);
-    return parsedList as unknown as Record<string, unknown>[];
+    return parsedList;
   }
 
   extractRecordId(record: Record<string, unknown>): string | undefined {
@@ -128,7 +128,7 @@ class EndnoteXmlFormatStrategy implements IBibliographyFormatStrategy {
 
   async parseRecords(content: string): Promise<Record<string, unknown>[]> {
     const parsedList = this.parser.parse(content, 'ENDNOTE_XML');
-    return parsedList as unknown as Record<string, unknown>[];
+    return parsedList;
   }
 
   extractRecordId(record: Record<string, unknown>): string | undefined {
@@ -150,7 +150,7 @@ class ModsFormatStrategy implements IBibliographyFormatStrategy {
 
   async parseRecords(content: string): Promise<Record<string, unknown>[]> {
     const parsedList = this.parser.parse(content, 'MODS');
-    return parsedList as unknown as Record<string, unknown>[];
+    return parsedList;
   }
 
   extractRecordId(record: Record<string, unknown>): string | undefined {
@@ -176,7 +176,7 @@ class ZoteroRdfFormatStrategy implements IBibliographyFormatStrategy {
 
   async parseRecords(content: string): Promise<Record<string, unknown>[]> {
     const parsedList = this.parser.parse(content, 'ZOTERO_RDF');
-    return parsedList as unknown as Record<string, unknown>[];
+    return parsedList;
   }
 
   extractRecordId(record: Record<string, unknown>): string | undefined {
@@ -199,7 +199,7 @@ class MedlineFormatStrategy implements IBibliographyFormatStrategy {
 
   async parseRecords(content: string): Promise<Record<string, unknown>[]> {
     const parsedList = this.parser.parse(content, 'MEDLINE');
-    return parsedList as unknown as Record<string, unknown>[];
+    return parsedList;
   }
 
   extractRecordId(record: Record<string, unknown>): string | undefined {
@@ -223,7 +223,7 @@ class CsvFormatStrategy implements IBibliographyFormatStrategy {
 
   async parseRecords(content: string): Promise<Record<string, unknown>[]> {
     const parsedList = this.parser.parse(content, 'CSV');
-    return parsedList as unknown as Record<string, unknown>[];
+    return parsedList;
   }
 
   extractRecordId(record: Record<string, unknown>): string | undefined {

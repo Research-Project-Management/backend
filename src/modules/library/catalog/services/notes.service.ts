@@ -316,7 +316,24 @@ export class NotesService {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
-    const annotations = await this.repo.findItemAnnotations(itemId);
+    const hasFilterOpts =
+      Boolean(opts.attachmentId) ||
+      Boolean(opts.annotationIds && opts.annotationIds.length > 0);
+    let annotations = hasFilterOpts
+      ? await this.repo.findItemAnnotations(itemId, {
+          attachmentId: opts.attachmentId,
+          annotationIds: opts.annotationIds,
+        })
+      : await this.repo.findItemAnnotations(itemId);
+
+    if (typeof opts.tagColor === 'string' && opts.tagColor.trim()) {
+      const targetColor = opts.tagColor.trim().toLowerCase();
+      if (targetColor !== 'true' && targetColor !== 'false') {
+        annotations = annotations.filter(
+          (a) => (a.color ?? '').toLowerCase() === targetColor,
+        );
+      }
+    }
 
     if (annotations.length === 0) {
       return {

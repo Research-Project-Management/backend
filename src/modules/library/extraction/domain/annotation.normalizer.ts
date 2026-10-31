@@ -7,7 +7,7 @@ import {
 } from '@/modules/library/extraction/types/annotations.types';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 
-export const DEFAULT_ANNOTATION_COLOR = '#ffeb3b';
+export const DEFAULT_ANNOTATION_COLOR = '#ffd400';
 const HEX_COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
 
 /**

@@ -55,23 +55,27 @@ export function normalizeAnnotationType(
   return lower as AnnotationType;
 }
 
-const transformAnnotationType = normalizeAnnotationType;
-
 // Create
 
 export class CreateAnnotationDto {
+  @IsUUID('all')
+  @IsOptional()
+  id?: string;
+
   @IsEnum(AnnotationType)
   @IsOptional()
-  @Transform(({ value }: { value: unknown }) => transformAnnotationType(value))
+  @Transform(({ value }: { value: unknown }) => normalizeAnnotationType(value))
   type?: AnnotationType;
 
-  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-    if (typeof value === 'number' && !Number.isNaN(value)) return value;
-    if (typeof obj?.pageNumber === 'number' && obj.pageNumber >= 1) {
-      return obj.pageNumber - 1;
-    }
-    return 0;
-  })
+  @Transform(
+    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+      if (typeof value === 'number' && !Number.isNaN(value)) return value;
+      if (typeof obj?.pageNumber === 'number' && obj.pageNumber >= 1) {
+        return obj.pageNumber - 1;
+      }
+      return 0;
+    },
+  )
   @IsInt()
   @Min(0)
   @IsOptional()
@@ -108,11 +112,13 @@ export class CreateAnnotationDto {
   @IsOptional()
   color?: string;
 
-  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-    if (typeof value === 'string') return value;
-    if (typeof obj?.text === 'string') return obj.text;
-    return value;
-  })
+  @Transform(
+    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+      if (typeof value === 'string') return value;
+      if (typeof obj?.text === 'string') return obj.text;
+      return value;
+    },
+  )
   @IsString()
   @MaxLength(50_000)
   @IsOptional()
@@ -135,14 +141,16 @@ export class CreateAnnotationDto {
   @IsOptional()
   tags?: string[];
 
-  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-    if (value !== undefined) return value;
-    if (Array.isArray(obj?.rects)) return obj.rects;
-    if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
-      return [obj.boundingRect];
-    }
-    return value;
-  })
+  @Transform(
+    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+      if (value !== undefined) return value;
+      if (Array.isArray(obj?.rects)) return obj.rects;
+      if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
+        return [obj.boundingRect];
+      }
+      return value;
+    },
+  )
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 
@@ -164,11 +172,13 @@ export class UpdateAnnotationDto {
   @IsOptional()
   color?: string;
 
-  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-    if (typeof value === 'string') return value;
-    if (typeof obj?.text === 'string') return obj.text;
-    return value;
-  })
+  @Transform(
+    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+      if (typeof value === 'string') return value;
+      if (typeof obj?.text === 'string') return obj.text;
+      return value;
+    },
+  )
   @IsString()
   @MaxLength(50_000)
   @IsOptional()
@@ -191,14 +201,16 @@ export class UpdateAnnotationDto {
   @IsOptional()
   tags?: string[];
 
-  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-    if (value !== undefined) return value;
-    if (Array.isArray(obj?.rects)) return obj.rects;
-    if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
-      return [obj.boundingRect];
-    }
-    return value;
-  })
+  @Transform(
+    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+      if (value !== undefined) return value;
+      if (Array.isArray(obj?.rects)) return obj.rects;
+      if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
+        return [obj.boundingRect];
+      }
+      return value;
+    },
+  )
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 
@@ -227,16 +239,18 @@ export class UpsertAnnotationItemDto {
 
   @IsEnum(AnnotationType)
   @IsOptional()
-  @Transform(({ value }: { value: unknown }) => transformAnnotationType(value))
+  @Transform(({ value }: { value: unknown }) => normalizeAnnotationType(value))
   type?: AnnotationType;
 
-  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-    if (typeof value === 'number' && !Number.isNaN(value)) return value;
-    if (typeof obj?.pageNumber === 'number' && obj.pageNumber >= 1) {
-      return obj.pageNumber - 1;
-    }
-    return 0;
-  })
+  @Transform(
+    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+      if (typeof value === 'number' && !Number.isNaN(value)) return value;
+      if (typeof obj?.pageNumber === 'number' && obj.pageNumber >= 1) {
+        return obj.pageNumber - 1;
+      }
+      return 0;
+    },
+  )
   @IsInt()
   @Min(0)
   @IsOptional()
@@ -265,11 +279,13 @@ export class UpsertAnnotationItemDto {
   @IsOptional()
   color?: string;
 
-  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-    if (typeof value === 'string') return value;
-    if (typeof obj?.text === 'string') return obj.text;
-    return value;
-  })
+  @Transform(
+    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+      if (typeof value === 'string') return value;
+      if (typeof obj?.text === 'string') return obj.text;
+      return value;
+    },
+  )
   @IsString()
   @MaxLength(50_000)
   @IsOptional()
@@ -292,14 +308,16 @@ export class UpsertAnnotationItemDto {
   @IsOptional()
   tags?: string[];
 
-  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-    if (value !== undefined) return value;
-    if (Array.isArray(obj?.rects)) return obj.rects;
-    if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
-      return [obj.boundingRect];
-    }
-    return value;
-  })
+  @Transform(
+    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+      if (value !== undefined) return value;
+      if (Array.isArray(obj?.rects)) return obj.rects;
+      if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
+        return [obj.boundingRect];
+      }
+      return value;
+    },
+  )
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 

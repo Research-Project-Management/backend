@@ -6,6 +6,7 @@ import {
   UpsertStateData,
 } from '@/modules/library/catalog/types/state.types';
 import { pickPreferredMergedState } from '@/modules/library/catalog/domain/state.domain';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 
 const STATE_SELECT = {
   userId: true,
@@ -49,12 +50,17 @@ export class StateRepository {
     userId: string,
     itemIds: string[],
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<StateEntity[]> {
     const client = this.getClient(tx);
+    const validProjectId = normalizeProjectScopeId(projectId);
     return client.state.findMany({
       where: {
         userId,
         itemId: { in: itemIds },
+        ...(validProjectId
+          ? { item: { projectId: validProjectId, deletedAt: null } }
+          : {}),
       },
       select: STATE_SELECT,
     });
@@ -164,7 +170,7 @@ export class StateRepository {
             itemId: targetItemId,
             isStarred: merged.isStarred,
             rating: merged.maxRating,
-            readStatus: merged.readStatus,
+            readStatus: merged.readStatus as Prisma.StateUncheckedCreateInput['readStatus'],
             currentPage: merged.maxCurrentPage,
             scrollPosition: scrollJson ?? Prisma.JsonNull,
             lastOpenedAt: merged.latestOpenedAt,
@@ -173,7 +179,7 @@ export class StateRepository {
           update: {
             isStarred: merged.isStarred,
             rating: merged.maxRating,
-            readStatus: merged.readStatus,
+            readStatus: merged.readStatus as Prisma.StateUncheckedUpdateInput['readStatus'],
             currentPage: merged.maxCurrentPage,
             scrollPosition: scrollJson,
             lastOpenedAt: merged.latestOpenedAt ?? undefined,

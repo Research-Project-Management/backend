@@ -5,7 +5,7 @@ import {
   normalizePmid,
   normalizeIsbn,
 } from '@/modules/library/core';
-import { ItemsMapper } from '@/modules/library/catalog/catalog.facade';
+import { ItemsMapper } from '@/modules/library/catalog';
 import {
   DuplicateClusterResult,
   DuplicateClusterItem,
@@ -17,6 +17,9 @@ import {
   calculateTitleSimilarity,
   hasConflictingPartOrSupplementMarkers,
 } from './deduplication.domain';
+import { PREPRINT_SERVER_VENUE_REGEX } from './field-reconciliation.strategies';
+
+export { PREPRINT_SERVER_VENUE_REGEX };
 
 export interface RawDuplicateCluster {
   clusterId: string;
@@ -25,9 +28,6 @@ export interface RawDuplicateCluster {
   recommendedMasterId: string;
   rawGroup: DuplicateCandidateItem[];
 }
-
-export const PREPRINT_SERVER_VENUE_REGEX =
-  /^(?:arxiv(?:\.org)?|corr|biorxiv|medrxiv|chemrxiv|techrxiv|ssrn|research\s+square|osf\s+preprints|hal|zenodo)(?:\s+preprints?|\s+e-?prints?)?$/i;
 
 export function isPreprintDoiValue(doi?: string | null): boolean {
   if (!doi) return false;
@@ -52,7 +52,7 @@ export function isPreprintCandidateItem(item: DuplicateCandidateItem): boolean {
     item.metadata &&
     typeof item.metadata === 'object' &&
     !Array.isArray(item.metadata)
-      ? (item.metadata as Record<string, unknown>)
+      ? item.metadata
       : {};
   const itemType = String(item.itemType || meta.itemType || '').trim();
   if (itemType === 'preprint') return true;

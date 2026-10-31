@@ -11,7 +11,7 @@ import {
 } from '@/modules/library/sync/domain/outbox.domain';
 import {
   IUnitOfWork,
-  TransactionHelpers as CoreTransactionHelpers,
+  TransactionHelpers,
   AppendChangeEntry,
   AppendChangeInput,
   RecordTombstoneEntry,
@@ -24,29 +24,8 @@ import {
 } from '@/modules/library/sync/repositories/outbox.repository';
 import { OutboxWorker } from './outbox.worker';
 
-export interface TransactionHelpers extends Omit<CoreTransactionHelpers, 'publishOutbox' | 'publishOutboxBatch'> {
-  publishOutbox(
-    scope: { userId: string; projectId?: string | null; dedupeKey?: string | null },
-    aggregateId: string,
-    eventType: string,
-    payload: unknown,
-    options?: { dedupeKey?: string | null },
-  ): Promise<Prisma.OutboxEventGetPayload<object>>;
-  publishOutboxBatch(
-    scopeOrEvents:
-      | { userId: string; projectId?: string | null }
-      | PublishOutboxInput[],
-    events?: Array<{
-      aggregateId: string;
-      eventType: string;
-      payload: unknown;
-      projectId?: string | null;
-      dedupeKey?: string | null;
-    }>,
-  ): Promise<string[]>;
-}
-
 export type {
+  TransactionHelpers,
   AppendChangeEntry,
   AppendChangeInput,
   RecordTombstoneEntry,
@@ -139,14 +118,24 @@ export class TransactionService implements IUnitOfWork {
             entityType: string,
             entityId: string,
           ) => {
-            return this.changeLogRepo.removeTombstone(scope, entityType, entityId, tx);
+            return this.changeLogRepo.removeTombstone(
+              scope,
+              entityType,
+              entityId,
+              tx,
+            );
           },
           removeTombstonesBatch: async (
             scope: { userId?: string; projectId?: string | null },
             entityType: string,
             entityIds: string[],
           ) => {
-            return this.changeLogRepo.removeTombstonesBatch(scope, entityType, entityIds, tx);
+            return this.changeLogRepo.removeTombstonesBatch(
+              scope,
+              entityType,
+              entityIds,
+              tx,
+            );
           },
           publishOutbox: async (
             scope: {
@@ -187,7 +176,10 @@ export class TransactionService implements IUnitOfWork {
                 retryCount: 0,
               },
             });
-            pendingOutboxEvents.push({ id: event.id, eventType: event.eventType });
+            pendingOutboxEvents.push({
+              id: event.id,
+              eventType: event.eventType,
+            });
             return event;
           },
           publishOutboxBatch: async (
@@ -225,7 +217,10 @@ export class TransactionService implements IUnitOfWork {
               );
               normalizedEvents.forEach((ev, idx) => {
                 if (ids[idx]) {
-                  pendingOutboxEvents.push({ id: ids[idx], eventType: ev.eventType });
+                  pendingOutboxEvents.push({
+                    id: ids[idx],
+                    eventType: ev.eventType,
+                  });
                 }
               });
               return ids;
@@ -260,7 +255,10 @@ export class TransactionService implements IUnitOfWork {
             for (const row of data) {
               const created = await tx.outboxEvent.create({ data: row });
               createdIds.push(created.id);
-              pendingOutboxEvents.push({ id: created.id, eventType: created.eventType });
+              pendingOutboxEvents.push({
+                id: created.id,
+                eventType: created.eventType,
+              });
             }
             return createdIds;
           },
@@ -298,7 +296,6 @@ export class TransactionService implements IUnitOfWork {
 
     return result;
   }
-
 
   async dispatchPostCommitOutboxNotifications(
     events: Array<{ id: string; eventType: string }>,
@@ -354,15 +351,17 @@ export class TransactionService implements IUnitOfWork {
     return this.changeLogRepo.getTombstonesSince(scope, sinceSeq, limit);
   }
 
-  async getMinRetainedSequence(
-    scope: { userId?: string; projectId?: string | null },
-  ): Promise<bigint | null> {
+  async getMinRetainedSequence(scope: {
+    userId?: string;
+    projectId?: string | null;
+  }): Promise<bigint | null> {
     return this.changeLogRepo.getMinRetainedSequence(scope);
   }
 
-  async getLatestSequence(
-    scope: { userId?: string; projectId?: string | null },
-  ) {
+  async getLatestSequence(scope: {
+    userId?: string;
+    projectId?: string | null;
+  }) {
     return this.changeLogRepo.getLatestSequence(scope);
   }
 }

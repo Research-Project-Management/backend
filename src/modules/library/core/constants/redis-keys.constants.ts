@@ -42,7 +42,6 @@ export const LIBRARY_REDIS_KEYS = {
         ? `library:counts:${userId}`
         : `library:counts:user:${userId}`,
   countsPattern: (scopeId: string) => `library:counts:*${scopeId}*`,
-  countsByScope: (scopeId: string) => `library:counts:*${scopeId}*`,
 
   // Search & Facets Cache
   searchItems: (scopeKey: string, version: string, filterHash: string) =>

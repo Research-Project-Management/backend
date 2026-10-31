@@ -3,6 +3,7 @@ import { DuplicateDetectorService } from '@/modules/library/ingestion/services/d
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { CatalogFacade } from '@/modules/library/catalog/catalog.facade';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
+import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
 import { StateService } from '@/modules/library/catalog/services/state.service';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { CollectionsService } from '@/modules/library/catalog/services/collections.service';
@@ -658,7 +659,8 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         },
       };
 
-      const stateService = new StateService({} as never, {} as never);
+      const stateRepo = new StateRepository(mockTx as unknown as PrismaService);
+      const stateService = new StateService(stateRepo, {} as never);
       await stateService.transferUserItemStates(
         mockTx as unknown as Prisma.TransactionClient,
         ['item-dup-2'],
@@ -1742,7 +1744,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
           scope: projectId,
           by: userId,
         })),
-      } as unknown as DuplicateDetectorService & DuplicateMergerService;
+      };
 
       const mockQualityService = {
         getQualityAudit: jest.fn(),

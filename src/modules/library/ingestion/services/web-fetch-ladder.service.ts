@@ -95,7 +95,6 @@ export class WebFetchLadderService implements IWebFetchPort {
       mirrorResolver ??
       new WebMirrorResolverService(
         this.httpClient,
-        this.configService,
         this.crossRefProvider,
         this.arxivProvider,
         this.openAlexProvider,
@@ -207,7 +206,9 @@ export class WebFetchLadderService implements IWebFetchPort {
     pmid?: string,
     pmcid?: string,
   ): Promise<MirrorBibliographicMetadata | null> {
-    return (await this.mirrorResolver?.resolveOpenMirror(doi, pmid, pmcid)) ?? null;
+    return (
+      (await this.mirrorResolver?.resolveOpenMirror(doi, pmid, pmcid)) ?? null
+    );
   }
 
   /**
@@ -398,7 +399,7 @@ export class WebFetchLadderService implements IWebFetchPort {
             isPdf: false,
             ladderStepReached: 1,
             derivedIdentifier,
-            warnings: ["SSRF blocked redirect: " + ssrfMsg],
+            warnings: ['SSRF blocked redirect: ' + ssrfMsg],
           };
         }
         fetchError = err instanceof Error ? err : new Error(String(err));

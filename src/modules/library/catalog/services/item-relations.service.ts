@@ -62,7 +62,9 @@ export class ItemRelationsService {
       }
       if (validProjectId) {
         tasks.push(
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(validProjectId)),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.itemsPattern(validProjectId),
+          ),
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
           ),

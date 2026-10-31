@@ -551,7 +551,6 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
           title: 'My Custom Curated Title',
           publicationTitle: 'Curated Venue Name',
         },
-        mockPrismaClient,
       );
 
       const updatedMeta = updateData.metadata as Record<string, unknown>;

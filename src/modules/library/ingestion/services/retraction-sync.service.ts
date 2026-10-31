@@ -124,7 +124,9 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
    * Targeted Delta Set Inverted Lookup ($O(|Δ|)): Instantly finds and flags user items
    * that match newly added or updated retractions without scanning the entire library.
    */
-  async reconcileDeltaRetractions(newlyRetractedDois: string[]): Promise<number> {
+  async reconcileDeltaRetractions(
+    newlyRetractedDois: string[],
+  ): Promise<number> {
     if (!newlyRetractedDois || newlyRetractedDois.length === 0) return 0;
     this.logger.log(
       `Executing targeted Delta Set reconciliation for ${newlyRetractedDois.length} DOIs`,
@@ -155,14 +157,20 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
           );
           updatedCount++;
           if (this.cache) {
-            await this.cache.del(LIBRARY_REDIS_KEYS.item(item.id)).catch(() => {});
-            await this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(item.id)).catch(() => {});
+            await this.cache
+              .del(LIBRARY_REDIS_KEYS.item(item.id))
+              .catch(() => {});
+            await this.cache
+              .del(LIBRARY_REDIS_KEYS.itemDetails(item.id))
+              .catch(() => {});
           }
         }
       }
     }
 
-    this.logger.log(`Delta Set reconciliation complete: ${updatedCount} user item(s) updated.`);
+    this.logger.log(
+      `Delta Set reconciliation complete: ${updatedCount} user item(s) updated.`,
+    );
     return updatedCount;
   }
 

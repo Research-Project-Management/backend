@@ -45,7 +45,10 @@ export class TypesService {
   isValidItemType(itemType: string): boolean {
     if (!itemType) return false;
     const normalized = this.normalizeTypeKey(itemType);
-    return Object.prototype.hasOwnProperty.call(this.snapshot.itemTypes, normalized);
+    return Object.prototype.hasOwnProperty.call(
+      this.snapshot.itemTypes,
+      normalized,
+    );
   }
 
   isBibliographic(itemType: string): boolean {

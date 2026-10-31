@@ -23,8 +23,24 @@ export class TcvnCitationFormatterService {
     /^(?:(?:p?gs|ts(?:kh)?|ths|cn|ks|bs|dr|prof|ph\.?d)\.?\s*)+/gi;
 
   private static readonly AMBIGUOUS_ASCII_SURNAMES = new Set([
-    'le', 'do', 'ha', 'ma', 'la', 'to', 'chu', 'an', 'ton', 'au',
-    'ho', 'vo', 'vu', 'ly', 'ta', 'vi', 'cu', 'ba',
+    'le',
+    'do',
+    'ha',
+    'ma',
+    'la',
+    'to',
+    'chu',
+    'an',
+    'ton',
+    'au',
+    'ho',
+    'vo',
+    'vu',
+    'ly',
+    'ta',
+    'vi',
+    'cu',
+    'ba',
   ]);
   private static readonly VN_GIVEN_SYLLABLES_REGEX =
     /\b(?:van|thi|huu|duc|minh|quoc|gia|ngoc|thanh|hoang|xuan|thu|anh|tuan|hung|dung|nam|son|hai|long|linh|lan|huong|trang|thao|phuong|quynh|vy|khanh|khoa|kiet|phat|dat|loc|tai|phuc|cuong|thinh|vu|viet|tinh|tam|dinh|quang|trong|cong|kim|bao|hong|thuy|manh|tien|dac|ba|chi|binh|tuyet|ngan|hien|hieu|nghia|nhan|phat|phong|phuc|phuoc|quyen|sinh|tan|thang|thien|thuan|toan|tri|trung|tu|tuyen|uyen|vinh|yen)\b/i;
@@ -46,7 +62,11 @@ export class TcvnCitationFormatterService {
       return false;
     }
     const firstFamilyToken = cleanFamily.split(/\s+/)[0]?.toLowerCase() || '';
-    if (TcvnCitationFormatterService.AMBIGUOUS_ASCII_SURNAMES.has(firstFamilyToken)) {
+    if (
+      TcvnCitationFormatterService.AMBIGUOUS_ASCII_SURNAMES.has(
+        firstFamilyToken,
+      )
+    ) {
       const restTokens = [
         ...cleanFamily.split(/\s+/).slice(1),
         ...cleanGiven.split(/\s+/),
@@ -54,7 +74,9 @@ export class TcvnCitationFormatterService {
         .filter(Boolean)
         .join(' ');
       if (!restTokens) return false;
-      return TcvnCitationFormatterService.VN_GIVEN_SYLLABLES_REGEX.test(restTokens);
+      return TcvnCitationFormatterService.VN_GIVEN_SYLLABLES_REGEX.test(
+        restTokens,
+      );
     }
     return true;
   }

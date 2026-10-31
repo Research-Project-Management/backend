@@ -57,9 +57,7 @@ export class XmpParser {
     return null;
   }
 
-  public static parse(
-    buffer: Buffer,
-  ):
+  public static parse(buffer: Buffer):
     | (RawXmpMetadata & {
         volume?: string;
         issue?: string;
@@ -220,8 +218,7 @@ export class XmpParser {
       const rawEndingPage =
         rawPacket.match(
           /<prism:endingPage>([^<]+)<\/prism:endingPage>/i,
-        )?.[1] ||
-        rawPacket.match(/\bprism:endingPage=["']([^"']+)["']/i)?.[1];
+        )?.[1] || rawPacket.match(/\bprism:endingPage=["']([^"']+)["']/i)?.[1];
       const rawPageRange =
         rawPacket.match(/<prism:pageRange>([^<]+)<\/prism:pageRange>/i)?.[1] ||
         rawPacket.match(/\bprism:pageRange=["']([^"']+)["']/i)?.[1];

@@ -1,41 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { SearchService } from './services/search.service';
 import { SearchItemsQueryDto } from './dto/search.dto';
-import { CatalogItemSummary } from '@/modules/library/core';
+import {
+  CatalogItemSummary,
+  SEARCH_FACADE,
+  ISearchFacade,
+} from '@/modules/library/core';
 
-export const SEARCH_FACADE = 'SEARCH_FACADE';
-
-export interface ISearchFacade {
-  search(
-    userId: string,
-    queryDto: SearchItemsQueryDto,
-  ): Promise<{
-    items: CatalogItemSummary[];
-    facets?: unknown;
-    meta?: {
-      cursor?: string;
-      hasNextPage: boolean;
-      pageCount: number;
-    };
-  }>;
-  indexItem(item: {
-    id: string;
-    userId?: string;
-    projectId?: string;
-  }): Promise<void>;
-  reindexItem(item: {
-    id: string;
-    userId?: string;
-    projectId?: string;
-  }): Promise<{
-    localIndexed: boolean;
-    error?: string;
-  }>;
-  indexAttachmentPages?(
-    attachmentId: string,
-    pages: Array<{ pageIndex: number; textContent: string }>,
-  ): Promise<void>;
-}
+export { SEARCH_FACADE };
+export type { ISearchFacade };
 
 @Injectable()
 export class SearchFacade implements ISearchFacade {

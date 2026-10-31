@@ -209,8 +209,12 @@ export class RetractionScannerProvider {
           const message = crData?.message;
 
           const updateTo = [
-            ...(Array.isArray(message?.['updated-by']) ? message['updated-by'] : []),
-            ...(Array.isArray(message?.['update-to']) ? message['update-to'] : []),
+            ...(Array.isArray(message?.['updated-by'])
+              ? message['updated-by']
+              : []),
+            ...(Array.isArray(message?.['update-to'])
+              ? message['update-to']
+              : []),
           ];
           if (Array.isArray(updateTo) && updateTo.length > 0) {
             let bestNotice: RetractionDetails | null = null;

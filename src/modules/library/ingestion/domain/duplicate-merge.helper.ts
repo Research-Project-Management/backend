@@ -10,8 +10,7 @@ import {
 import { PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/curation.types';
 
 export type IngestionScope =
-  | { userId?: string; projectId?: string | null }
-  | string;
+  { userId?: string; projectId?: string | null } | string;
 
 export function parseRunScope(
   scope?: IngestionScope,
@@ -409,7 +408,7 @@ export async function softDeleteDuplicatesAndRecordOutboxInTx(params: {
         where: { id: dup.id },
         data: {
           deletedAt: now,
-          metadata: dupMeta as Prisma.InputJsonValue,
+          metadata: dupMeta,
           version: { increment: 1 },
         },
       });

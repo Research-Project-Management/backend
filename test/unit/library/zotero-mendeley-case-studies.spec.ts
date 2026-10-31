@@ -1116,7 +1116,7 @@ ER  -
 
       // Verify deep-link citation format
       expect(markdownFlux).toContain(
-        '[(Vaswani et al., 2017, p. 1)](flux://open-pdf/library/items/att-pdf-1?page=1&annotation=ann-p1-top)',
+        '[(Vaswani et al., 2017, p. 1)](flux://open-pdf/library/papers/item-attention-id?attachmentId=att-pdf-1&page=1&annotation=ann-p1-top)',
       );
 
       // 2. Zotero protocol backlinks

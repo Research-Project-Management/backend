@@ -12,6 +12,16 @@ import {
 } from 'class-validator';
 import { ReadingStatus } from '@/modules/library/catalog/types/state.types';
 
+export interface ReaderScrollPositionDto {
+  page?: number;
+  zoom?: number;
+  fitMode?: string;
+  rotation?: number;
+  themeMode?: string;
+  bookmarks?: number[];
+  [key: string]: unknown;
+}
+
 export class UpdateStateDto {
   @IsOptional()
   @IsBoolean()
@@ -34,7 +44,11 @@ export class UpdateStateDto {
   currentPage?: number;
 
   @IsOptional()
-  scrollPosition?: Record<string, unknown> | Array<unknown> | null;
+  scrollPosition?:
+    | ReaderScrollPositionDto
+    | Record<string, unknown>
+    | Array<unknown>
+    | null;
 }
 
 export class GetBatchStatesDto {

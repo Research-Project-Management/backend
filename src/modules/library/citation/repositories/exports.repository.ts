@@ -41,7 +41,7 @@ export class ExportsRepository {
           notesList: { where: { deletedAt: null } },
           identifiers: true,
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       });

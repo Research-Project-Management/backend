@@ -109,7 +109,16 @@ export class ItemCurationController {
       id,
       projectId,
     );
-    return { success: true, data: fulltext, ...fulltext };
+    const response = { success: true, ...fulltext } as typeof fulltext & {
+      success: boolean;
+      data: typeof fulltext;
+    };
+    Object.defineProperty(response, 'data', {
+      value: fulltext,
+      enumerable: false,
+      configurable: true,
+    });
+    return response;
   }
 
   @Post(':id/reindex')
@@ -299,7 +308,9 @@ export class ItemCurationController {
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     const item = projectId
-      ? await this.itemService.setMyPublication(userId, id, false, { projectId })
+      ? await this.itemService.setMyPublication(userId, id, false, {
+          projectId,
+        })
       : await this.itemService.setMyPublication(userId, id, false);
     return { success: true, data: item, item };
   }

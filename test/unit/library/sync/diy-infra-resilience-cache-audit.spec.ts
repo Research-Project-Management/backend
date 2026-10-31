@@ -77,8 +77,12 @@ describe('DIY Infrastructure, Resilience, Rate-Limiting & Cache Consolidation Au
     it('does not double-count failures or double-consume HALF_OPEN probe slots when provider uses AcademicHttpClient', async () => {
       const rateLimiter = new DomainRateLimiterService();
       rateLimiter.bypassDelay = true;
-      const registry = new ResilienceRegistryService(rateLimiter);
-      const _httpClient = new AcademicHttpClient(registry);
+      const registry = new ResilienceRegistryService();
+      const _httpClient = new AcademicHttpClient(
+        {} as never,
+        registry,
+        { academic: { userAgent: 'test' } } as never,
+      );
       const executor = new MetadataExecutorService(rateLimiter, registry);
 
       const breaker: CircuitBreaker = registry.getCircuitBreaker('crossref', {
@@ -87,8 +91,11 @@ describe('DIY Infrastructure, Resilience, Rate-Limiting & Cache Consolidation Au
       });
 
       const failingProvider = {
-        id: 'crossref' as const,
+        id: 'CrossRef' as const,
+        supports: () => true,
         capabilities: {
+          queryTypes: ['DOI' as const],
+          isAuthoritative: true,
           supportsDoi: true,
           supportsIsbn: false,
           supportsPmid: false,
@@ -131,7 +138,9 @@ describe('DIY Infrastructure, Resilience, Rate-Limiting & Cache Consolidation Au
         ...failingProvider,
         resolve: jest.fn(async () => {
           return registry.execute('crossref', async () => ({
-            provider: 'crossref' as const,
+            provider: 'CrossRef' as const,
+            identifier: '10.1000/xyz',
+            fetchedAt: new Date().toISOString(),
             confidence: 0.95,
             metadata: {
               title: 'Recovered Paper',
@@ -179,10 +188,7 @@ describe('DIY Infrastructure, Resilience, Rate-Limiting & Cache Consolidation Au
         }),
       };
 
-      const provider = new DblpProvider(
-        rateLimiter as never,
-        httpClient as never,
-      );
+      const provider = new DblpProvider(httpClient as never);
       const res = await provider.resolve({
         query: '10.1000/dblp.1',
         queryType: 'DOI',
@@ -359,7 +365,7 @@ describe('DIY Infrastructure, Resilience, Rate-Limiting & Cache Consolidation Au
     it('PipelineService.runTerminalMaintenanceGc uses 7-day retention instead of 0 days', async () => {
       const cleanupExpiredPreviews = jest.fn().mockResolvedValue(0);
       const purgeOldRuns = jest.fn().mockResolvedValue(0);
-      const pipeline = Object.create(PipelineService.prototype) as PipelineService & {
+      const pipeline = Object.create(PipelineService.prototype) as {
         urlCapture: { cleanupExpiredPreviews: jest.Mock };
         repo: { purgeOldRuns: jest.Mock };
         runTerminalMaintenanceGc: () => Promise<void>;
@@ -406,7 +412,7 @@ describe('DIY Infrastructure, Resilience, Rate-Limiting & Cache Consolidation Au
     it('awaits eventEmitter.emitAsync in emitEventDurable and catches listener rejections gracefully', async () => {
       const handler = Object.create(
         ExtractionHandler.prototype,
-      ) as ExtractionHandler & {
+      ) as {
         eventEmitter: { emitAsync: jest.Mock; emit: jest.Mock };
         logger: { warn: jest.Mock };
         emitEventDurable: (eventName: string, payload: unknown) => Promise<void>;

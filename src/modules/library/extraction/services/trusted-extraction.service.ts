@@ -30,7 +30,11 @@ export type { IPdfExtractionTier };
 
 export class XmpExtractionTier implements IPdfExtractionTier {
   readonly tierName = 'XMP_BINARY';
-  constructor(private readonly run: (ctx: PdfExtractionTierContext) => Promise<void> | void) {}
+  constructor(
+    private readonly run: (
+      ctx: PdfExtractionTierContext,
+    ) => Promise<void> | void,
+  ) {}
   async executeTier(ctx: PdfExtractionTierContext): Promise<void> {
     await this.run(ctx);
   }
@@ -38,7 +42,11 @@ export class XmpExtractionTier implements IPdfExtractionTier {
 
 export class AcademicRegexExtractionTier implements IPdfExtractionTier {
   readonly tierName = 'ACADEMIC_REGEX';
-  constructor(private readonly run: (ctx: PdfExtractionTierContext) => Promise<void> | void) {}
+  constructor(
+    private readonly run: (
+      ctx: PdfExtractionTierContext,
+    ) => Promise<void> | void,
+  ) {}
   async executeTier(ctx: PdfExtractionTierContext): Promise<void> {
     await this.run(ctx);
   }
@@ -46,7 +54,11 @@ export class AcademicRegexExtractionTier implements IPdfExtractionTier {
 
 export class LayoutHeuristicExtractionTier implements IPdfExtractionTier {
   readonly tierName = 'LAYOUT_HEURISTIC';
-  constructor(private readonly run: (ctx: PdfExtractionTierContext) => Promise<void> | void) {}
+  constructor(
+    private readonly run: (
+      ctx: PdfExtractionTierContext,
+    ) => Promise<void> | void,
+  ) {}
   async executeTier(ctx: PdfExtractionTierContext): Promise<void> {
     await this.run(ctx);
   }
@@ -54,7 +66,11 @@ export class LayoutHeuristicExtractionTier implements IPdfExtractionTier {
 
 export class MeXtractTier implements IPdfExtractionTier {
   readonly tierName = 'MEXTRACT_SLM';
-  constructor(private readonly run: (ctx: PdfExtractionTierContext) => Promise<void> | void) {}
+  constructor(
+    private readonly run: (
+      ctx: PdfExtractionTierContext,
+    ) => Promise<void> | void,
+  ) {}
   async executeTier(ctx: PdfExtractionTierContext): Promise<void> {
     await this.run(ctx);
   }
@@ -143,7 +159,12 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       await runPdfExtractionTierChain(ctx, tiers);
 
       // Accuracy refinement (year, author list, fragmented title, arXiv DOI)
-      this.refineMetadata(ctx.merged, ctx.xmpYear, ctx.pageText, ctx.rawMatches);
+      this.refineMetadata(
+        ctx.merged,
+        ctx.xmpYear,
+        ctx.pageText,
+        ctx.rawMatches,
+      );
     } finally {
       if (ctx.sharedDoc && ctx.sharedDoc !== pdfDocument) {
         try {
@@ -159,7 +180,10 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
 
     // Filename fallback ONLY if title is still missing AND no authoritative identifier exists.
     const hasAuthoritativeId = Boolean(
-      ctx.merged.doi || ctx.merged.arxivId || ctx.merged.pmid || ctx.merged.isbn,
+      ctx.merged.doi ||
+      ctx.merged.arxivId ||
+      ctx.merged.pmid ||
+      ctx.merged.isbn,
     );
     if (!ctx.merged.title && !hasAuthoritativeId && preferredFilename) {
       const cleanSlug = preferredFilename
@@ -207,7 +231,7 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
         qualityBreakdown: gateEvaluation.breakdown,
         rawMatches: ctx.rawMatches,
         fieldProvenance: { ...ctx.provenance },
-      } as TrustedExtractionResult['provenance'],
+      },
     };
   }
 
@@ -362,7 +386,9 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
         0.85,
       );
     }
-    if (ctx.mergeFieldIfEmpty('pmid', regexResults.pmid, 'ACADEMIC_REGEX', 0.9)) {
+    if (
+      ctx.mergeFieldIfEmpty('pmid', regexResults.pmid, 'ACADEMIC_REGEX', 0.9)
+    ) {
       ctx.rawMatches.detectedPmid = regexResults.pmid;
     }
 
@@ -452,13 +478,17 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       ) {
         addedFields = true;
       }
-      if (ctx.mergeFieldIfEmpty('authors', mMeta.authors, 'MEXTRACT_SLM', conf)) {
+      if (
+        ctx.mergeFieldIfEmpty('authors', mMeta.authors, 'MEXTRACT_SLM', conf)
+      ) {
         addedFields = true;
       }
       if (ctx.mergeFieldIfEmpty('year', mMeta.year, 'MEXTRACT_SLM', conf)) {
         addedFields = true;
       }
-      if (ctx.mergeFieldIfEmpty('journal', mMeta.journal, 'MEXTRACT_SLM', conf)) {
+      if (
+        ctx.mergeFieldIfEmpty('journal', mMeta.journal, 'MEXTRACT_SLM', conf)
+      ) {
         ctx.mergeFieldIfEmpty(
           'publicationTitle',
           mMeta.journal,
@@ -516,12 +546,7 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       ? parseInt(arxivStampYearMatch[1], 10)
       : undefined;
     const arxivYear = arxivStampYear ?? yearFromArxivId(merged.arxivId);
-    if (
-      arxivYear &&
-      !xmpYear &&
-      !merged.journal &&
-      merged.year !== arxivYear
-    ) {
+    if (arxivYear && !xmpYear && !merged.journal && merged.year !== arxivYear) {
       rawMatches.yearBeforeRefinement = merged.year;
       merged.year = arxivYear;
       refinements.push(

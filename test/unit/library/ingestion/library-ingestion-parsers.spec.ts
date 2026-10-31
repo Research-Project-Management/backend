@@ -158,7 +158,7 @@ describe('Library Ingestion Parsers (DoiParser, BibtexParser & XmlLegacyFormatsP
       expect(entries[0].title).toContain('Attention Is All You Need');
       expect(entries[0].year).toBe(2017);
       expect(entries[0].doi).toBe('10.5555/3295222.3295349');
-      expect(entries[0].authors.length).toBeGreaterThanOrEqual(2);
+      expect(entries[0].authors?.length).toBeGreaterThanOrEqual(2);
     });
 
     it('should extract object-based keywords in CslParser and handle self-closing <link/> in parseAcademicFeedXml', () => {

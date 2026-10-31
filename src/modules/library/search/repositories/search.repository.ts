@@ -1,6 +1,4 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
-import { createHash } from 'crypto';
-import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
 import { RedisCacheService } from '@/core';
 import { Prisma } from '@prisma/client';
@@ -52,7 +50,7 @@ export class SearchRepository implements OnModuleInit {
 
   private resolveScopeId(userId: string, options?: SearchOptions): string {
     return this.isProjectScope(options?.projectId)
-      ? options!.projectId.trim()
+      ? options.projectId.trim()
       : userId;
   }
 
@@ -311,33 +309,35 @@ export class SearchRepository implements OnModuleInit {
           ? [{ title: options.sortOrder || 'asc' }, { id: 'desc' }]
           : [{ createdAt: options.sortOrder || 'desc' }, { id: 'desc' }];
 
-    return client.item.findMany({
-      where,
-      orderBy,
-      take: limit + 1,
-      ...(options.cursor && isValidUuid(options.cursor)
-        ? { cursor: { id: options.cursor }, skip: 1 }
-        : {}),
-      include: {
-        contributors: { orderBy: { orderIndex: 'asc' } },
-        attachments: { where: { deletedAt: null }, take: 5 },
-        itemTags: { include: { tag: true } },
-        collectionItems: { include: { collection: true } },
-        states: { where: { userId }, take: 1 },
-        identifiers: true,
-      },
-    }).then((items) => {
-      let hasNextPage = false;
-      let nextCursor: string | undefined;
+    return client.item
+      .findMany({
+        where,
+        orderBy,
+        take: limit + 1,
+        ...(options.cursor && isValidUuid(options.cursor)
+          ? { cursor: { id: options.cursor }, skip: 1 }
+          : {}),
+        include: {
+          contributors: { orderBy: { orderIndex: 'asc' } },
+          attachments: { where: { deletedAt: null }, take: 5 },
+          itemTags: { include: { tag: true } },
+          collectionItems: { include: { collection: true } },
+          states: { where: { userId }, take: 1 },
+          identifiers: true,
+        },
+      })
+      .then((items) => {
+        let hasNextPage = false;
+        let nextCursor: string | undefined;
 
-      if (items.length > limit) {
-        hasNextPage = true;
-        items.pop();
-        nextCursor = items[items.length - 1]?.id;
-      }
+        if (items.length > limit) {
+          hasNextPage = true;
+          items.pop();
+          nextCursor = items[items.length - 1]?.id;
+        }
 
-      return { items, nextCursor, hasNextPage };
-    });
+        return { items, nextCursor, hasNextPage };
+      });
   }
 
   async countSearchItems(

@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { normalizeDoi, normalizePmid, ExternalProviderException } from '@/modules/library/core';
+import {
+  normalizeDoi,
+  normalizePmid,
+  ExternalProviderException,
+} from '@/modules/library/core';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
 
@@ -12,7 +16,9 @@ export interface RetractionSeedResult {
   deltaDois?: string[];
 }
 
-export function parseRfc4180Csv(csvText: string): Array<Record<string, string>> {
+export function parseRfc4180Csv(
+  csvText: string,
+): Array<Record<string, string>> {
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let currentField = '';
@@ -109,7 +115,11 @@ export function parseRetractionNature(natureRaw?: string): {
   if (norm.includes('concern')) {
     return { nature: 'expression_of_concern', isRetracted: true };
   }
-  if (norm.includes('correction') || norm.includes('erratum') || norm.includes('corrigendum')) {
+  if (
+    norm.includes('correction') ||
+    norm.includes('erratum') ||
+    norm.includes('corrigendum')
+  ) {
     return { nature: 'correction', isRetracted: true };
   }
   return { nature: 'retraction', isRetracted: true };
@@ -162,13 +172,16 @@ export class RetractionSeederService {
       if (!cleanDoi || seenDois.has(cleanDoi)) continue;
       seenDois.add(cleanDoi);
 
-      const rawPmid = row['OriginalPaperPubMedID'] || row['OriginalPaperPubmedId'];
+      const rawPmid =
+        row['OriginalPaperPubMedID'] || row['OriginalPaperPubmedId'];
       const cleanPmid =
         rawPmid && rawPmid !== '0' && !/unavailable/i.test(rawPmid)
           ? normalizePmid(rawPmid) || rawPmid.trim()
           : null;
 
-      const { nature, isRetracted } = parseRetractionNature(row['RetractionNature']);
+      const { nature, isRetracted } = parseRetractionNature(
+        row['RetractionNature'],
+      );
       const reason = cleanRetractionReason(row['Reason']);
       const noticeDoi = row['RetractionDOI'];
       const noticeUrl =
@@ -206,13 +219,17 @@ export class RetractionSeederService {
       validRecords++;
 
       if (pendingBatch.length >= chunkSize) {
-        const count = await flushBatch(pendingBatch.splice(0, pendingBatch.length));
+        const count = await flushBatch(
+          pendingBatch.splice(0, pendingBatch.length),
+        );
         inserted += count;
       }
     }
 
     if (pendingBatch.length > 0) {
-      const count = await flushBatch(pendingBatch.splice(0, pendingBatch.length));
+      const count = await flushBatch(
+        pendingBatch.splice(0, pendingBatch.length),
+      );
       inserted += count;
     }
 
@@ -237,8 +254,12 @@ export class RetractionSeederService {
   /**
    * Fetches the official daily CSV dump from Crossref GitLab and seeds it.
    */
-  async seedFromGitlab(url = RetractionSeederService.OFFICIAL_GITLAB_CSV_URL): Promise<RetractionSeedResult> {
-    this.logger.log(`Fetching Retraction Watch dataset from official Crossref repository: ${url}`);
+  async seedFromGitlab(
+    url = RetractionSeederService.OFFICIAL_GITLAB_CSV_URL,
+  ): Promise<RetractionSeedResult> {
+    this.logger.log(
+      `Fetching Retraction Watch dataset from official Crossref repository: ${url}`,
+    );
     const res = await fetch(url, {
       headers: { Accept: 'text/csv, text/plain' },
     });

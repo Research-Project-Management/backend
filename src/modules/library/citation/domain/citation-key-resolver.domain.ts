@@ -11,7 +11,7 @@ export function extractItemCitationAliases(it: ExportItemRecord): string[] {
     it.metadata &&
     typeof it.metadata === 'object' &&
     !Array.isArray(it.metadata)
-      ? (itemMetaAsRecord(it.metadata))
+      ? itemMetaAsRecord(it.metadata)
       : {};
 
   const addKey = (val: unknown) => {

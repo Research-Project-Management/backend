@@ -245,7 +245,11 @@ function resolveIdentifiers(params: {
     const doiFromLink = normalizeDoi(params.link);
     if (doiFromLink) doi = doiFromLink;
   }
-  if (!pmid && params.link && /pubmed\.ncbi\.nlm\.nih\.gov/i.test(params.link)) {
+  if (
+    !pmid &&
+    params.link &&
+    /pubmed\.ncbi\.nlm\.nih\.gov/i.test(params.link)
+  ) {
     pmid = normalizePmid(params.link);
   }
   if (!pmcid && params.link && /pmc\/articles\/PMC\d+/i.test(params.link)) {
@@ -541,7 +545,7 @@ function parseFeedEntryXml(
 
   const isPreprintVenue = Boolean(
     publicationTitle &&
-      /arxiv|biorxiv|medrxiv|chemrxiv|ssrn|preprint/i.test(publicationTitle),
+    /arxiv|biorxiv|medrxiv|chemrxiv|ssrn|preprint/i.test(publicationTitle),
   );
   const itemType: ParsedFeedEntry['itemType'] =
     (arxivId && (!publicationTitle || isPreprintVenue)) || isPreprintVenue

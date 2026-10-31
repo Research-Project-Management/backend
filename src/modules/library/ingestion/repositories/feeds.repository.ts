@@ -1,4 +1,4 @@
-import { Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import { parseCreatorString } from '@/modules/library/core';
@@ -40,6 +40,8 @@ export interface CachedFeedWithItems {
     abstract?: string | null;
     publishedAt?: Date | null;
     license?: string | null;
+    guid?: string | null;
+    comments?: string | null;
   }>;
 }
 
@@ -54,6 +56,7 @@ const FEED_SUMMARY_SELECT = {
 
 @Injectable()
 export class FeedsRepository {
+  private readonly logger = new Logger(FeedsRepository.name);
   constructor(@Optional() private readonly prisma?: PrismaService) {}
 
   get isAvailable(): boolean {
@@ -153,7 +156,7 @@ export class FeedsRepository {
   async deleteSubscription(userId: string, feedId: string): Promise<void> {
     if (!this.prisma) return;
     await this.prisma.feedSubscription.deleteMany({
-      where: { userId, feedId },
+      where: { userId, OR: [{ feedId }, { id: feedId }] },
     });
   }
 
@@ -295,12 +298,13 @@ export class FeedsRepository {
     });
   }
 
-  async resolveFeedItemUuid(rawItemId: string): Promise<string | null> {
+  async resolveFeedItemUuid(rawItemId: string, userId?: string): Promise<string | null> {
     if (!rawItemId || typeof rawItemId !== 'string') return null;
     const trimmed = rawItemId.trim();
     if (!this.prisma?.feedItem?.findFirst) return isUuid(trimmed) ? trimmed : null;
     const found = await this.prisma.feedItem.findFirst({
       where: {
+        ...(userId ? { feed: { subscriptions: { some: { userId } } } } : {}),
         OR: [
           ...(isUuid(trimmed) ? [{ id: trimmed }] : []),
           { guid: trimmed },
@@ -311,10 +315,10 @@ export class FeedsRepository {
       },
       select: { id: true },
     });
-    return found?.id || (isUuid(trimmed) ? trimmed : null);
+    return found?.id || (isUuid(trimmed) && !userId ? trimmed : null);
   }
 
-  async resolveFeedItemUuids(rawItemIds: string[]): Promise<string[]> {
+  async resolveFeedItemUuids(rawItemIds: string[], userId?: string): Promise<string[]> {
     if (!Array.isArray(rawItemIds) || rawItemIds.length === 0) return [];
     const uniqueRaw = Array.from(
       new Set(rawItemIds.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean)),
@@ -325,15 +329,21 @@ export class FeedsRepository {
       if (isUuid(id)) directUuids.push(id);
       else nonUuids.push(id);
     }
-    if (nonUuids.length === 0 || !this.prisma) return directUuids;
+    if ((nonUuids.length === 0 && !userId) || !this.prisma) return directUuids;
+    const orFilters: Prisma.FeedItemWhereInput[] = [
+      ...(directUuids.length > 0 ? [{ id: { in: directUuids } }] : []),
+      ...(nonUuids.length > 0 ? [{ guid: { in: nonUuids } }, { url: { in: nonUuids } }, { doi: { in: nonUuids } }, { arxivId: { in: nonUuids } }] : []),
+    ];
+    if (orFilters.length === 0) return [];
     const foundItems = await this.prisma.feedItem.findMany({
       where: {
-        OR: [{ guid: { in: nonUuids } }, { url: { in: nonUuids } }, { doi: { in: nonUuids } }, { arxivId: { in: nonUuids } }],
+        ...(userId ? { feed: { subscriptions: { some: { userId } } } } : {}),
+        OR: orFilters,
       },
       select: { id: true },
       take: 200,
     });
-    return Array.from(new Set([...directUuids, ...foundItems.map((it) => it.id)]));
+    return Array.from(new Set([...(userId ? [] : directUuids), ...foundItems.map((it) => it.id)]));
   }
 
   async setItemReadState(userId: string, canonicalItemId: string, isRead: boolean): Promise<void> {
@@ -401,7 +411,7 @@ export class FeedsRepository {
     await this.prisma.feed.update({
       where: { id: feedId },
       data: { errorCount: 0, lastFetchedAt: new Date(), ...(status !== undefined ? { lastStatus: status } : {}) },
-    }).catch(() => {});
+    }).catch((err: unknown) => this.logger.warn(`Failed to update feed poll state (${feedId}): ${err instanceof Error ? err.message : String(err)}`));
   }
 
   async markFeedPollFailure(feedId: string): Promise<void> {
@@ -409,7 +419,7 @@ export class FeedsRepository {
     await this.prisma.feed.update({
       where: { id: feedId },
       data: { errorCount: { increment: 1 } },
-    }).catch(() => {});
+    }).catch((err: unknown) => this.logger.warn(`Failed to update feed poll state (${feedId}): ${err instanceof Error ? err.message : String(err)}`));
   }
 
   async findFeedsWithRetentionPreferences(take = 500) {
@@ -593,7 +603,10 @@ export class FeedsRepository {
                 ...(serializedComments ? { comments: serializedComments } : {}),
               },
             })
-            .catch(() => null);
+            .catch((err: unknown) => {
+              this.logger.warn(`Failed to upsert feed item "${guid}": ${err instanceof Error ? err.message : String(err)}`);
+              return null;
+            });
           if (saved && typeof saved.id === 'string') {
             entry.id = saved.id;
             return saved;

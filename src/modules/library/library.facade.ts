@@ -3,10 +3,9 @@ import { CatalogFacade } from './catalog/catalog.facade';
 import { SearchFacade } from './search/search.facade';
 import { CitationFacade } from './citation/citation.facade';
 import { ExtractionFacade } from './extraction/extraction.facade';
-import { CslJsonMapper } from './citation';
 import { ExportLibraryDto } from './citation/dto/exports.dto';
 import { ExportResult } from './citation/types/exports.types';
-import { ExtractedPdfDocument } from './core';
+import { ExtractedPdfDocument, formatAuthors } from './core';
 
 export interface LibraryItemSummary {
   id: string;
@@ -59,10 +58,6 @@ export interface ILibraryFacade {
     buffer: Buffer,
     options?: { maxPages?: number; headerOnly?: boolean },
   ): Promise<ExtractedPdfDocument>;
-  extractPdfBuffer(
-    buffer: Buffer,
-    filename?: string,
-  ): Promise<ExtractedPdfDocument>;
   updateAttachmentProcessingStatus(
     attachmentId: string,
     status: string,
@@ -72,9 +67,7 @@ export interface ILibraryFacade {
     itemId: string,
     aiMetadataPatch: Record<string, unknown>,
   ): Promise<void>;
-  findAttachmentByFileId(
-    fileId: string,
-  ): Promise<{
+  findAttachmentByFileId(fileId: string): Promise<{
     id: string;
     itemId: string;
     metadata?: unknown;
@@ -149,7 +142,7 @@ export class LibraryFacade implements ILibraryFacade {
       abstract: item.abstract,
       year: item.year,
       itemType: item.itemType || 'journalArticle',
-      authors: CslJsonMapper.getAuthorNames(item),
+      authors: formatAuthors(item),
     };
   }
 
@@ -182,7 +175,7 @@ export class LibraryFacade implements ILibraryFacade {
       abstract: catalogItem.abstract,
       year: catalogItem.year,
       itemType: catalogItem.itemType || 'journalArticle',
-      authors: CslJsonMapper.getAuthorNames(catalogItem),
+      authors: formatAuthors(catalogItem),
     }));
   }
 
@@ -193,16 +186,7 @@ export class LibraryFacade implements ILibraryFacade {
     return this.extractionFacade.extractDocumentFromBuffer(buffer, options);
   }
 
-  async extractPdfBuffer(
-    buffer: Buffer,
-    _filename?: string,
-  ): Promise<ExtractedPdfDocument> {
-    return this.extractionFacade.extractDocumentFromBuffer(buffer);
-  }
-
-  async findAttachmentByFileId(
-    fileId: string,
-  ): Promise<{
+  async findAttachmentByFileId(fileId: string): Promise<{
     id: string;
     itemId: string;
     metadata?: unknown;

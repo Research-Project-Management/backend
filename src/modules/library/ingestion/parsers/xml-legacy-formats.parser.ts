@@ -20,11 +20,7 @@ import {
 } from './medline-csv-formats.parser';
 
 export type LegacyRecordFormat =
-  | 'ENDNOTE_XML'
-  | 'MODS'
-  | 'ZOTERO_RDF'
-  | 'MEDLINE'
-  | 'CSV';
+  'ENDNOTE_XML' | 'MODS' | 'ZOTERO_RDF' | 'MEDLINE' | 'CSV';
 
 function decodeXmlEntities(raw: string): string {
   if (!raw) return '';
@@ -92,7 +88,10 @@ export function extractBalancedXmlTag(
   return undefined;
 }
 
-function extractFirstTagText(xml: string, tagPattern: string): string | undefined {
+function extractFirstTagText(
+  xml: string,
+  tagPattern: string,
+): string | undefined {
   const re = new RegExp(
     `<(?:[a-zA-Z0-9_-]+:)?(?:${tagPattern})(?:\\s+[^>]*)?>([\\s\\S]*?)<\\/(?:[a-zA-Z0-9_-]+:)?(?:${tagPattern})>`,
     'i',
@@ -121,17 +120,28 @@ function mapEndnoteRefType(rawName?: string, rawNum?: string): string {
   const name = (rawName || '').toLowerCase().trim();
   const num = Number(rawNum || 0);
   if (name.includes('book section') || num === 5) return 'bookSection';
-  if (name.includes('edited book') || name === 'book' || num === 6 || num === 28) {
+  if (
+    name.includes('edited book') ||
+    name === 'book' ||
+    num === 6 ||
+    num === 28
+  ) {
     return 'book';
   }
-  if (name.includes('conference') || name.includes('proceeding') || num === 10 || num === 47) {
+  if (
+    name.includes('conference') ||
+    name.includes('proceeding') ||
+    num === 10 ||
+    num === 47
+  ) {
     return 'conferencePaper';
   }
   if (name.includes('thesis') || name.includes('dissertation') || num === 32) {
     return 'thesis';
   }
   if (name.includes('report') || num === 27) return 'report';
-  if (name.includes('web') || name.includes('blog') || num === 12) return 'webpage';
+  if (name.includes('web') || name.includes('blog') || num === 12)
+    return 'webpage';
   if (name.includes('patent') || num === 25) return 'patent';
   if (name.includes('newspaper') || num === 23) return 'newspaperArticle';
   if (name.includes('magazine') || num === 19) return 'magazineArticle';
@@ -149,7 +159,10 @@ function mapEndnoteRefType(rawName?: string, rawNum?: string): string {
 export class XmlLegacyFormatsParser {
   private readonly logger = new Logger(XmlLegacyFormatsParser.name);
 
-  detectFormat(content: string, hintFormat?: string): LegacyRecordFormat | null {
+  detectFormat(
+    content: string,
+    hintFormat?: string,
+  ): LegacyRecordFormat | null {
     const trimmed = (content || '').trim();
     const upperHint = (hintFormat || '').toUpperCase().trim();
 
@@ -321,7 +334,9 @@ export class XmlLegacyFormatsParser {
         tags: keywords,
         callNumber,
         language,
-        notes: notesText ? [{ content: notesText, source: 'endnote_xml' }] : undefined,
+        notes: notesText
+          ? [{ content: notesText, source: 'endnote_xml' }]
+          : undefined,
       });
     }
 
@@ -343,12 +358,15 @@ export class XmlLegacyFormatsParser {
         /\btype\s*=\s*["']host["']/i.test(attrs),
       );
       const hostXml = hostBlock?.innerXml || '';
-      const mainXml = hostBlock ? block.replace(hostBlock.fullMatch, '') : block;
+      const mainXml = hostBlock
+        ? block.replace(hostBlock.fullMatch, '')
+        : block;
       const titleInfoMatch = mainXml.match(
         /<(?:[a-zA-Z0-9_-]+:)?titleInfo(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?titleInfo>/i,
       );
       const titleXml = titleInfoMatch?.[1] || mainXml;
-      const baseTitle = extractFirstTagText(titleXml, 'title') || 'Untitled Record';
+      const baseTitle =
+        extractFirstTagText(titleXml, 'title') || 'Untitled Record';
       const subTitle = extractFirstTagText(titleXml, 'subTitle');
       const title = subTitle ? `${baseTitle}: ${subTitle}` : baseTitle;
       const nestedHostSeries = hostXml
@@ -375,9 +393,12 @@ export class XmlLegacyFormatsParser {
         const given = nXml.match(
           /<(?:[a-zA-Z0-9_-]+:)?namePart[^>]*type=["']given["'][^>]*>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?namePart>/i,
         )?.[1];
-        const roleTerm = extractFirstTagText(nXml, 'roleTerm')?.toLowerCase() || '';
+        const roleTerm =
+          extractFirstTagText(nXml, 'roleTerm')?.toLowerCase() || '';
         const role =
-          roleTerm.includes('edt') || roleTerm.includes('editor') ? 'editor' : 'author';
+          roleTerm.includes('edt') || roleTerm.includes('editor')
+            ? 'editor'
+            : 'author';
 
         if (family || given) {
           const cleanFam = decodeXmlEntities(family || '');
@@ -406,12 +427,18 @@ export class XmlLegacyFormatsParser {
       const year = extractYearFromDate(dateStr);
       const publisher = extractFirstTagText(block, 'publisher');
       const place = extractFirstTagText(block, 'placeTerm');
-      const abstract = cleanAbstractText(extractFirstTagText(block, 'abstract'));
+      const abstract = cleanAbstractText(
+        extractFirstTagText(block, 'abstract'),
+      );
       const url = extractFirstTagText(block, 'url');
-      const genres = extractAllTagTexts(block, 'genre').map((g) => g.toLowerCase());
+      const genres = extractAllTagTexts(block, 'genre').map((g) =>
+        g.toLowerCase(),
+      );
 
       let itemType = 'journalArticle';
-      if (genres.some((g) => g.includes('thesis') || g.includes('dissertation'))) {
+      if (
+        genres.some((g) => g.includes('thesis') || g.includes('dissertation'))
+      ) {
         itemType = 'thesis';
       } else if (genres.some((g) => g.includes('conference'))) {
         itemType = 'conferencePaper';
@@ -485,7 +512,10 @@ export class XmlLegacyFormatsParser {
         abstract: abstract || undefined,
         keywords: topics,
         tags: topics,
-        notes: notes.length > 0 ? notes.map((n) => ({ content: n, source: 'mods' })) : undefined,
+        notes:
+          notes.length > 0
+            ? notes.map((n) => ({ content: n, source: 'mods' }))
+            : undefined,
       });
     }
 
@@ -533,8 +563,7 @@ export class XmlLegacyFormatsParser {
 
       const creators: CreatorInput[] = [];
       const authors: string[] = [];
-      const personRe =
-        /<foaf:Person(?:\s+[^>]*)?>([\s\S]*?)<\/foaf:Person>/gi;
+      const personRe = /<foaf:Person(?:\s+[^>]*)?>([\s\S]*?)<\/foaf:Person>/gi;
       let pMatch: RegExpExecArray | null;
       while ((pMatch = personRe.exec(body)) !== null) {
         const pXml = pMatch[1] || '';

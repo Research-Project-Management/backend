@@ -586,28 +586,33 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
       const reconciliationService = new MetadataReconciliationService();
       const result = reconciliationService.reconcile([
         {
+          id: 'c1',
           sourceProvider: 'local_pdf',
           confidenceScore: 0.95,
           metadata: {
             title: 'Attention Is All You Need',
             authors: ['A. Vaswani'],
             tags: ['Transformers', 'Deep Learning'],
-            notes: ['Initial extraction note'],
+            notes: [{ content: 'Initial extraction note' }],
             extraFields: { localKey: 'v1', sharedKey: 'from-local' },
           },
-          retrievedAt: '2026-10-26T00:00:00.000Z',
+          fetchedAt: '2026-10-26T00:00:00.000Z',
         },
         {
+          id: 'c2',
           sourceProvider: 'crossref',
           confidenceScore: 0.9,
           metadata: {
             title: 'Attention Is All You Need',
             authors: ['Ashish Vaswani', 'Noam Shazeer', 'Niki Parmar'],
             tags: ['deep learning', 'NLP'],
-            notes: ['Initial extraction note', 'Publisher note'],
+            notes: [
+              { content: 'Initial extraction note' },
+              { content: 'Publisher note' },
+            ],
             extraFields: { crossrefKey: 'v2', sharedKey: 'from-crossref' },
           },
-          retrievedAt: '2026-10-26T00:00:00.000Z',
+          fetchedAt: '2026-10-26T00:00:00.000Z',
         },
       ]);
 
@@ -855,8 +860,9 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
 
   describe('BE-DEEP1 to BE-DEEP4: Deep-Module & DDD Optimizations', () => {
     it('BE-DEEP1: composes tagId + tag and view=starred + onlyFlagged/readStatus via CompositeSpecification without overwriting', () => {
-      const spec = new ItemWhereSpecification({ description: 'test' }, (item) =>
-        Boolean(item),
+      const spec = new ItemWhereSpecification(
+        { title: 'test' } as never,
+        (item) => Boolean(item),
       );
       expect(spec).toBeInstanceOf(CompositeSpecification);
 
@@ -1281,9 +1287,13 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
       const policy = new ReconciliationPolicy();
       const decision = policy.reconcile([
         {
+          candidateId: 'cand-arxiv',
+          sourceKind: 'PROVIDER',
+          sourceName: 'arXiv',
           sourceProvider: 'arxiv',
           retrievedAt: '2026-10-26T00:00:00.000Z',
           overallConfidence: 0.9,
+          normalizedMetadata: {},
           fields: {
             title: {
               rawValue: 'Paper Title',
@@ -1316,9 +1326,13 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
           },
         },
         {
+          candidateId: 'cand-crossref',
+          sourceKind: 'PROVIDER',
+          sourceName: 'CrossRef',
           sourceProvider: 'crossref',
           retrievedAt: '2026-10-26T00:00:00.000Z',
           overallConfidence: 0.98,
+          normalizedMetadata: {},
           fields: {
             title: {
               rawValue: 'Paper Title',
@@ -1538,6 +1552,7 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
           sourceName: 'EnrichedProvider',
           sourceProvider: 'crossref',
           retrievedAt: '2026-10-26T00:00:00.000Z',
+          normalizedMetadata: {},
           fields: {
             title: {
               path: 'title',

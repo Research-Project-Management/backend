@@ -104,8 +104,7 @@ export class DoiContentNegotiationService {
     if (!doi) return null;
 
     const normalizedStyle = (styleId || 'apa').toLowerCase();
-    const acceptHeader =
-      this.STYLE_ACCEPT_MAP[normalizedStyle];
+    const acceptHeader = this.STYLE_ACCEPT_MAP[normalizedStyle];
     if (!acceptHeader) return null;
     const cacheKey = `${doi}:${normalizedStyle}`;
     const redisKey = LIBRARY_REDIS_KEYS.doiNegotiation(normalizedStyle, doi);
@@ -191,7 +190,11 @@ export class DoiContentNegotiationService {
         // Cache for 24h with bounded LRU eviction
         this.setWithLru(this.cache, cacheKey, result);
         await this.redisCache
-          ?.set?.(redisKey, result, DoiContentNegotiationService.REDIS_TTL_SECONDS)
+          ?.set?.(
+            redisKey,
+            result,
+            DoiContentNegotiationService.REDIS_TTL_SECONDS,
+          )
           .catch(() => {});
 
         return result;
@@ -323,10 +326,7 @@ export class DoiContentNegotiationService {
         const json = (await response.json()) as unknown;
         if (!json || typeof json !== 'object') return null;
 
-        const result = normalizeWork(
-          json as Record<string, unknown>,
-          doi,
-        );
+        const result = normalizeWork(json, doi);
         if (!result || !result.title || result.title === 'Untitled')
           return null;
 

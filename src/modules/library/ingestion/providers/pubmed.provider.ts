@@ -91,7 +91,8 @@ export class PubMedProvider extends AbstractAcademicProvider {
     }
 
     if (result) {
-      const effectivePmid = result.metadata.pmid || (!isPmc ? targetId : undefined);
+      const effectivePmid =
+        result.metadata.pmid || (!isPmc ? targetId : undefined);
       if (effectivePmid) {
         await this.enrichFromPubmedXml(result, effectivePmid, signal);
       }
@@ -619,7 +620,13 @@ export class PubMedProvider extends AbstractAcademicProvider {
         }
       } else {
         // Fallback to EuropePMC REST API when NCBI efetch.fcgi returns HTML error/rate-limit diagnostic
-        await enrichFromEuropePmc(result, cleanPmid, rawTags, this.httpClient, signal);
+        await enrichFromEuropePmc(
+          result,
+          cleanPmid,
+          rawTags,
+          this.httpClient,
+          signal,
+        );
       }
 
       if (rawTags.length > 0) {

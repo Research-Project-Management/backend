@@ -403,8 +403,7 @@ export class AcademicSearchQueryEngine {
       return true;
     }
     if (ids.cleanPmid && typeof meta.pmid === 'string') {
-      const normalizedStoredPmid =
-        normalizePmid(meta.pmid) || meta.pmid.trim();
+      const normalizedStoredPmid = normalizePmid(meta.pmid) || meta.pmid.trim();
       if (normalizedStoredPmid === ids.cleanPmid) {
         return true;
       }

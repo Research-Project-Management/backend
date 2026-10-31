@@ -1,4 +1,4 @@
-import { ITEM_COLUMN_METADATA_FIELDS } from '../types/bibliographic.types';
+import { CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS } from '../types/bibliographic.types';
 import {
   ALL_CREATOR_ROLES,
   BASE_FIELD_MAPPINGS,
@@ -109,7 +109,10 @@ export function resolveCanonicalCreatorRole(
       const directMatch = validTypeMap.get(lower);
       if (directMatch) return directMatch;
 
-      const synonymTarget = Object.prototype.hasOwnProperty.call(CREATOR_ROLE_SYNONYMS, lower)
+      const synonymTarget = Object.prototype.hasOwnProperty.call(
+        CREATOR_ROLE_SYNONYMS,
+        lower,
+      )
         ? CREATOR_ROLE_SYNONYMS[lower]
         : undefined;
       if (synonymTarget && validTypeMap.has(synonymTarget.toLowerCase())) {
@@ -167,15 +170,30 @@ const CANONICAL_ALIAS_GROUPS: ReadonlyArray<{
   { canonical: ['issn'], sources: ['issn', 'ISSN'] },
   { canonical: ['pmid'], sources: ['pmid', 'PMID'] },
   { canonical: ['pmcid'], sources: ['pmcid', 'PMCID'] },
-  { canonical: ['arxivId', 'archiveId'], sources: ['arxivId', 'archiveId', 'archiveID'] },
-  { canonical: ['journalAbbreviation', 'journalAbbr'], sources: ['journalAbbreviation', 'journalAbbr'] },
-  { canonical: ['abstract', 'abstractNote'], sources: ['abstract', 'abstractNote'] },
+  {
+    canonical: ['arxivId', 'archiveId'],
+    sources: ['arxivId', 'archiveId', 'archiveID'],
+  },
+  {
+    canonical: ['journalAbbreviation', 'journalAbbr'],
+    sources: ['journalAbbreviation', 'journalAbbr'],
+  },
+  {
+    canonical: ['abstract', 'abstractNote'],
+    sources: ['abstract', 'abstractNote'],
+  },
   { canonical: ['accessDate'], sources: ['accessDate', 'accessedAt'] },
   { canonical: ['citationKey'], sources: ['citationKey', 'citeKey'] },
   { canonical: ['url'], sources: ['url', 'URL'] },
   { canonical: ['rights', 'license'], sources: ['rights', 'license'] },
-  { canonical: ['numPages', 'numberOfPages'], sources: ['numPages', 'numberOfPages'] },
-  { canonical: ['authority', 'issuingAuthority'], sources: ['authority', 'issuingAuthority'] },
+  {
+    canonical: ['numPages', 'numberOfPages'],
+    sources: ['numPages', 'numberOfPages'],
+  },
+  {
+    canonical: ['authority', 'issuingAuthority'],
+    sources: ['authority', 'issuingAuthority'],
+  },
 ];
 
 /**
@@ -406,13 +424,19 @@ export function extractExtraKeyValues(
   for (const match of extraStr.matchAll(
     /\{:\s*([a-zA-Z_][a-zA-Z0-9_.\s-]*?)\s*:\s*([^}]+?)\s*\}/g,
   )) {
-    const key = match[1].trim().toLowerCase().replace(/[\s_]+/g, '-');
+    const key = match[1]
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_]+/g, '-');
     result[key] = match[2].trim();
   }
   for (const line of extraStr.split(/\r?\n/)) {
     const m = line.trim().match(/^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/);
     if (m) {
-      const key = m[1].trim().toLowerCase().replace(/[\s_]+/g, '-');
+      const key = m[1]
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_]+/g, '-');
       if (!result[key]) {
         result[key] = m[2].trim();
       }
@@ -596,7 +620,7 @@ export const ALL_RECONCILABLE_METADATA_FIELDS: ReadonlyArray<string> = (() => {
     'referenceCount',
   ]);
 
-  for (const key of ITEM_COLUMN_METADATA_FIELDS) {
+  for (const key of CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS) {
     if (!excludedTopLevel.has(key)) {
       fieldSet.add(key);
     }

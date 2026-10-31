@@ -256,7 +256,7 @@ describe('Gatekeeper Validation, Sanitization & Parser Guards Security Audit (GE
         referenceCount: 0,
       };
       const canonical = resolveCanonicalCommandFields(data, 'preprint', null);
-      const ids = normalizeItemIdentifiers(data);
+      const ids = normalizeItemIdentifiers(data as never);
       const createdMeta = buildMetadataPartial({
         mode: 'create',
         baseMeta: {},

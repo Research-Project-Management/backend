@@ -88,7 +88,8 @@ export class SyncController {
     const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId } : { userId };
     const sinceSeq = parseSafeBigInt(query.since) ?? 0n;
-    const minRetainedSeq = await this.transactionService.getMinRetainedSequence?.(scope);
+    const minRetainedSeq =
+      await this.transactionService.getMinRetainedSequence?.(scope);
     if (minRetainedSeq && sinceSeq > 0n && sinceSeq < minRetainedSeq - 1n) {
       throw new HttpException(
         {
@@ -154,8 +155,14 @@ export class SyncController {
     const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId } : { userId };
     const sinceSeq = parseSafeBigInt(query.since);
-    const minRetainedTombSeq = await this.transactionService.getMinRetainedSequence?.(scope);
-    if (minRetainedTombSeq && sinceSeq !== undefined && sinceSeq > 0n && sinceSeq < minRetainedTombSeq - 1n) {
+    const minRetainedTombSeq =
+      await this.transactionService.getMinRetainedSequence?.(scope);
+    if (
+      minRetainedTombSeq &&
+      sinceSeq !== undefined &&
+      sinceSeq > 0n &&
+      sinceSeq < minRetainedTombSeq - 1n
+    ) {
       throw new HttpException(
         {
           statusCode: HttpStatus.GONE,

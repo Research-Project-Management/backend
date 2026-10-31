@@ -24,10 +24,6 @@ import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper
 import { TextSearchSpecification } from '@/modules/library/search/domain/item-specifications';
 import { buildSearchFtsMatchingIdsSql } from '@/modules/library/search/repositories/search-sql.helper';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
-import {
-  OutboxEventHandlers,
-  invalidateScopes,
-} from '@/modules/library/sync/domain/outbox-event.handlers';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core';
 
 describe('Horizontal Frond 3 — Smart Collections, Feeds, Export Round-Trip & Search/Sync Cache', () => {
@@ -689,28 +685,6 @@ describe('Horizontal Frond 3 — Smart Collections, Feeds, Export Round-Trip & S
         mockCache.set.mock.calls[mockCache.set.mock.calls.length - 1];
       expect(lastSetCall[0]).toContain(':v2:');
       expect(lastSetCall[0]).not.toBe(firstFacetKey);
-    });
-
-    it('OutboxEventHandlers.invalidateScopes invalidates both projectId and userId when projectId is present', async () => {
-      const invalidated: string[] = [];
-      const result = await OutboxEventHandlers.invalidateScopes(
-        { userId: 'user-123', projectId: 'proj-456' },
-        async (scopeId) => {
-          invalidated.push(scopeId);
-        },
-      );
-
-      expect(result).toEqual(['proj-456', 'user-123']);
-      expect(invalidated).toEqual(['proj-456', 'user-123']);
-
-      const personalOnly: string[] = [];
-      await invalidateScopes(
-        { userId: 'user-123', projectId: null },
-        async (scopeId) => {
-          personalOnly.push(scopeId);
-        },
-      );
-      expect(personalOnly).toEqual(['user-123']);
     });
   });
 });

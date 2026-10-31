@@ -26,7 +26,10 @@ export class OutboxMetrics {
   }
 
   recordOutboxDispatch(durationMs: number, success: boolean) {
-    const safeDuration = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
+    const safeDuration = Math.max(
+      0,
+      Number.isFinite(durationMs) ? durationMs : 0,
+    );
     this.incrementCounter('outbox.dispatch.total', 1);
     if (success) {
       this.incrementCounter('outbox.dispatch.succeeded', 1);

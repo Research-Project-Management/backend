@@ -233,6 +233,12 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     SeedRetractionsCommand,
     RetractionItemEventsSubscriber,
   ],
-  exports: [INGESTION_FACADE, IngestionFacade, METADATA_PORT, RetractionSeederService, SeedRetractionsCommand],
+  exports: [
+    INGESTION_FACADE,
+    IngestionFacade,
+    METADATA_PORT,
+    RetractionSeederService,
+    SeedRetractionsCommand,
+  ],
 })
 export class IngestionModule {}

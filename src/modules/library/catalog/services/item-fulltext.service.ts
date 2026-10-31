@@ -5,16 +5,16 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
-import zlib from 'zlib';
-import { promisify } from 'util';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
-import { normalizeProjectScopeId, libraryConfig } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  libraryConfig,
+  gunzipAsync,
+} from '@/modules/library/core';
 import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-
-const gunzipAsync = promisify(zlib.gunzip);
 
 const applyJitter = (ttl: number): number =>
   libraryConfig().app.isTest
@@ -75,13 +75,21 @@ export class ItemFulltextService {
     }
 
     // 1. Look for authoritative full-text or header extraction record in a single query via QueryRepository
-    const matchedRecord = await this.query.findItemMetadataByProviders(id, [
-      'pdf_fulltext',
-      'trusted_extraction',
-      'ocr',
-      'mextract_fulltext',
-      'mextract',
-    ]);
+    const matchedRecord = await this.query.findItemMetadataByProviders(
+      id,
+      [
+        'pdf_fulltext',
+        'trusted_extraction',
+        'ocr',
+        'mextract_fulltext',
+        'mextract',
+      ],
+      undefined,
+      {
+        userId: item.userId,
+        projectId: item.projectId ?? null,
+      },
+    );
 
     const isFulltextProvider =
       matchedRecord && matchedRecord.sourceProvider !== 'mextract';
@@ -96,6 +104,7 @@ export class ItemFulltextService {
 
       const hasHydratedContent =
         payload.sections !== undefined ||
+        payload.pages !== undefined ||
         payload.plainText !== undefined ||
         payload.markdown !== undefined ||
         payload.references !== undefined;
@@ -150,6 +159,12 @@ export class ItemFulltextService {
             : undefined) ||
           item.abstract ||
           undefined,
+        ...(typeof payload.isScanned === 'boolean'
+          ? { isScanned: payload.isScanned }
+          : {}),
+        ...(typeof payload.ocrStatus === 'string'
+          ? { ocrStatus: payload.ocrStatus }
+          : {}),
         sections: (Array.isArray(payload.sections)
           ? payload.sections
           : []) as DocumentFulltextResponse['sections'],
@@ -165,6 +180,31 @@ export class ItemFulltextService {
         references: (Array.isArray(payload.references)
           ? payload.references
           : []) as DocumentFulltextResponse['references'],
+        ...(Array.isArray(payload.pages)
+          ? {
+              pages: (
+                payload.pages as Array<{
+                  pageNumber?: number;
+                  pageIndex?: number;
+                  text?: string;
+                  textContent?: string;
+                }>
+              ).map((p, idx) => ({
+                pageNumber:
+                  typeof p.pageNumber === 'number'
+                    ? p.pageNumber
+                    : typeof p.pageIndex === 'number'
+                      ? p.pageIndex + 1
+                      : idx + 1,
+                text:
+                  typeof p.text === 'string'
+                    ? p.text
+                    : typeof p.textContent === 'string'
+                      ? p.textContent
+                      : '',
+              })),
+            }
+          : {}),
         ...(typeof payload.markdown === 'string'
           ? { markdown: payload.markdown }
           : {}),

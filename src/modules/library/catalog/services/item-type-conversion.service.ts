@@ -76,7 +76,10 @@ export class ItemTypeConversionService {
       throw new NotFoundException(`Item ${itemId} not found in user library`);
     }
     const existing = ItemsMapper.toDomain<ItemDetail>(rawExisting);
-    if (rawExisting.itemType === 'preprint' && rawExisting.publicationTitle == null) {
+    if (
+      rawExisting.itemType === 'preprint' &&
+      rawExisting.publicationTitle == null
+    ) {
       const rawMeta =
         rawExisting.metadata &&
         typeof rawExisting.metadata === 'object' &&
@@ -84,7 +87,8 @@ export class ItemTypeConversionService {
           ? (rawExisting.metadata as Record<string, unknown>)
           : {};
       if (rawMeta.publicationTitle == null) {
-        delete (existing as unknown as Record<string, unknown>).publicationTitle;
+        delete (existing as unknown as Record<string, unknown>)
+          .publicationTitle;
       }
       if (rawMeta.publisher == null) {
         delete (existing as unknown as Record<string, unknown>).publisher;
@@ -260,16 +264,24 @@ export function buildTypeConversionUpdatePayload(
 
   const existingRec = existing as unknown as Record<string, unknown>;
   const existingMetaRec =
-    existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)
+    existing.metadata &&
+    typeof existing.metadata === 'object' &&
+    !Array.isArray(existing.metadata)
       ? (existing.metadata as Record<string, unknown>)
       : {};
   const existingExtraRec =
-    existing.extraFields && typeof existing.extraFields === 'object' && !Array.isArray(existing.extraFields)
-      ? (existing.extraFields as Record<string, unknown>)
+    existing.extraFields &&
+    typeof existing.extraFields === 'object' &&
+    !Array.isArray(existing.extraFields)
+      ? existing.extraFields
       : {};
 
   if (options?.retainUnmappedInExtra === false) {
-    for (const container of [existingMetaRec, existingExtraRec, dynamicExtraFields]) {
+    for (const container of [
+      existingMetaRec,
+      existingExtraRec,
+      dynamicExtraFields,
+    ]) {
       for (const k of Object.keys(container)) {
         if (/^__unmapped_/i.test(k)) {
           dynamicExtraFields[k] = null;
@@ -283,7 +295,10 @@ export function buildTypeConversionUpdatePayload(
       metadataPatch[unmappedKey] = null;
     }
   } else {
-    for (const k of new Set([...Object.keys(existingMetaRec), ...Object.keys(existingExtraRec)])) {
+    for (const k of new Set([
+      ...Object.keys(existingMetaRec),
+      ...Object.keys(existingExtraRec),
+    ])) {
       if (/^__unmapped_/i.test(k) && dynamicExtraFields[k] === undefined) {
         dynamicExtraFields[k] = null;
         metadataPatch[k] = null;
@@ -292,10 +307,20 @@ export function buildTypeConversionUpdatePayload(
   }
 
   const hadShortTitle = Boolean(
-    existingRec.shortTitle || existingMetaRec.shortTitle || existingExtraRec.shortTitle,
+    existingRec.shortTitle ||
+    existingMetaRec.shortTitle ||
+    existingExtraRec.shortTitle,
   );
-  const projectedShortTitle = transformer.getItemFieldValue(projected, 'shortTitle');
-  if (hadShortTitle && (projectedShortTitle === undefined || projectedShortTitle === null || projectedShortTitle === '')) {
+  const projectedShortTitle = transformer.getItemFieldValue(
+    projected,
+    'shortTitle',
+  );
+  if (
+    hadShortTitle &&
+    (projectedShortTitle === undefined ||
+      projectedShortTitle === null ||
+      projectedShortTitle === '')
+  ) {
     dynamicExtraFields.shortTitle = null;
     metadataPatch.shortTitle = null;
   }
@@ -311,7 +336,8 @@ export function buildTypeConversionUpdatePayload(
     itemType: targetType,
     type: targetType,
     creators: projected.creators ?? existing.creators,
-    contributors: projected.creators ?? existing.contributors ?? existing.creators,
+    contributors:
+      projected.creators ?? existing.contributors ?? existing.creators,
     extraFields: dynamicExtraFields,
     ...(projected.extra !== undefined ? { extra: projected.extra } : {}),
     metadata: metadataPatch,

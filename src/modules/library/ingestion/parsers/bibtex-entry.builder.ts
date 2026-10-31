@@ -461,7 +461,8 @@ export function buildParsedBibtexEntry(
   let fileUrl: string | undefined;
   const rawFile = rawFields.file || rawFields.pdf;
   if (rawFile) {
-    const firstFileEntry = rawFile.split(/(?<!\\);/)[0]?.trim() || rawFile.trim();
+    const firstFileEntry =
+      rawFile.split(/(?<!\\);/)[0]?.trim() || rawFile.trim();
     const jabrefMatch = firstFileEntry.match(/^[^:]*:(.+):[^:]*$/);
     const extractedPath = jabrefMatch ? jabrefMatch[1] : firstFileEntry;
     const cleanFile = extractedPath.replace(/\\:/g, ':').trim();

@@ -198,10 +198,7 @@ export class IngestionRunAggregate {
     this._currentStep = null;
   }
 
-  public failStep(
-    _stageName: IngestionStageName,
-    errorReason: string,
-  ): void {
+  public failStep(_stageName: IngestionStageName, errorReason: string): void {
     this._currentStep = null;
     this._errorReason = errorReason;
   }
@@ -275,4 +272,3 @@ export class IngestionRunAggregate {
     this._completedAt = new Date();
   }
 }
-

@@ -181,7 +181,11 @@ export function normalizeCreators(
       } else if (allExistingInParsed) {
         list.push(...existingPrimary);
         for (const pa of parsedAuthors) {
-          if (!existingPrimaryNames.has((pa.fullName || pa.name || '').toLowerCase())) {
+          if (
+            !existingPrimaryNames.has(
+              (pa.fullName || pa.name || '').toLowerCase(),
+            )
+          ) {
             list.push(pa);
           }
         }

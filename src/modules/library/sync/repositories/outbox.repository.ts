@@ -435,7 +435,9 @@ export class OutboxRepository {
       where: {
         userId: normalizedUserId,
         idempotencyKey,
-        ...(statuses && statuses.length > 0 ? { status: { in: statuses } } : {}),
+        ...(statuses && statuses.length > 0
+          ? { status: { in: statuses } }
+          : {}),
       },
     });
   }

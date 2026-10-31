@@ -18,13 +18,25 @@ export class IngestionSubmissionDto {
   @Transform(({ value, obj }) => {
     if (value && typeof value === 'string') {
       const upper = value.toUpperCase();
-      if (['IDENTIFIER', 'RECORD', 'URL', 'FILE', 'CONNECTOR'].includes(upper)) {
+      if (
+        ['IDENTIFIER', 'RECORD', 'URL', 'FILE', 'CONNECTOR'].includes(upper)
+      ) {
         return upper as SubmissionKind;
       }
     }
     const src = String(obj?.source || '').toLowerCase();
     if (src === 'pdf' || obj?.fileId) return 'FILE';
-    if (src === 'doi' || src === 'arxiv' || src === 'isbn' || src === 'pmid' || obj?.doi || obj?.arxivId || obj?.isbn || obj?.pmid) return 'IDENTIFIER';
+    if (
+      src === 'doi' ||
+      src === 'arxiv' ||
+      src === 'isbn' ||
+      src === 'pmid' ||
+      obj?.doi ||
+      obj?.arxivId ||
+      obj?.isbn ||
+      obj?.pmid
+    )
+      return 'IDENTIFIER';
     if (
       src === 'bibtex' ||
       src === 'ris' ||
@@ -41,7 +53,8 @@ export class IngestionSubmissionDto {
     )
       return 'RECORD';
     if (src === 'url' || obj?.url) return 'URL';
-    if (src === 'zotero' || src === 'connector' || obj?.connectionId) return 'CONNECTOR';
+    if (src === 'zotero' || src === 'connector' || obj?.connectionId)
+      return 'CONNECTOR';
     return value;
   })
   @IsIn(['IDENTIFIER', 'RECORD', 'URL', 'FILE', 'CONNECTOR'])

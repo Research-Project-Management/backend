@@ -333,9 +333,7 @@ export class PipelineSideEffectsService {
     // 2. Auto Web Snapshot Capture (.html)
     if (shouldSaveSnapshot && this.extractionGateway?.captureWebSnapshot) {
       const itemType =
-        typeof proposedItem?.itemType === 'string'
-          ? proposedItem.itemType
-          : '';
+        typeof proposedItem?.itemType === 'string' ? proposedItem.itemType : '';
       const isWebOrientedType = [
         'webpage',
         'blogPost',
@@ -459,7 +457,9 @@ export class PipelineSideEffectsService {
       });
     }
 
-    const createNote = this.catalogGateway?.createNote?.bind(this.catalogGateway);
+    const createNote = this.catalogGateway?.createNote?.bind(
+      this.catalogGateway,
+    );
     if (!createNote) return;
 
     await Promise.all(

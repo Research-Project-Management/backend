@@ -67,7 +67,7 @@ export class EnrichStage implements IWorkflowStage<
 
     for (const candidate of candidates) {
       const meta = candidate.normalizedMetadata || {};
-      const extra = (meta.extraFields || {}) as Record<string, unknown>;
+      const extra = meta.extraFields || {};
       const isFilenameTitle = extra.isFilenameTitle === true;
       const hasTitle = Boolean(
         !isFilenameTitle && !isPlaceholderItemTitle(meta.title),
@@ -169,7 +169,7 @@ export class EnrichStage implements IWorkflowStage<
       // allow title-based registry lookup (validated by MetadataService title similarity).
       const hasExtractedTags = Boolean(
         (Array.isArray(meta.tags) && meta.tags.length > 0) ||
-          (Array.isArray(meta.keywords) && meta.keywords.length > 0),
+        (Array.isArray(meta.keywords) && meta.keywords.length > 0),
       );
       if (
         candidate.sourceKind === 'FILE' &&
@@ -341,7 +341,9 @@ export class EnrichStage implements IWorkflowStage<
                   origEv?.sourceProvider === 'manual';
                 if (origIsUser) continue;
                 filteredFields[k] = ev;
-                filteredMeta[k] = ev.normalizedValue ?? normalized[k as keyof typeof normalized];
+                filteredMeta[k] =
+                  ev.normalizedValue ??
+                  normalized[k as keyof typeof normalized];
               }
               for (const [mk, mv] of Object.entries(normalized)) {
                 if (mv !== undefined && mv !== null && !(mk in filteredMeta)) {
@@ -363,7 +365,7 @@ export class EnrichStage implements IWorkflowStage<
                 retrievedAt: resolved.resolvedAt,
                 schemaVersion: '1.0.0',
                 fields: filteredFields,
-                normalizedMetadata: filteredMeta as MetadataCandidate['normalizedMetadata'],
+                normalizedMetadata: filteredMeta,
                 confidenceScore: 0.95,
               });
             }
@@ -434,7 +436,9 @@ export class EnrichStage implements IWorkflowStage<
     resolved: unknown,
   ): boolean {
     const meta = candidate.normalizedMetadata || {};
-    const own = EnrichStage.authorLastNames(meta.authors?.length ? meta.authors : meta.creators);
+    const own = EnrichStage.authorLastNames(
+      meta.authors?.length ? meta.authors : meta.creators,
+    );
     const theirs = EnrichStage.authorLastNames(
       (resolved as { authors?: unknown; creators?: unknown }).authors ??
         (resolved as { creators?: unknown }).creators,

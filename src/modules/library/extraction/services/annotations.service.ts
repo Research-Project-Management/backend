@@ -2,8 +2,11 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Optional,
+  Inject,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { RedisCacheService } from '@/core';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import {
   CreateAnnotationData,
@@ -11,9 +14,17 @@ import {
   BatchAnnotationsData,
   BatchAnnotationsResult,
   AnnotationType,
+  UpsertAnnotationItem,
 } from '@/modules/library/extraction/types/annotations.types';
 import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
-import { TransactionHelpers } from '@/modules/library/core';
+import {
+  TransactionHelpers,
+  LIBRARY_REDIS_KEYS,
+  ITEM_CACHE_INVALIDATOR,
+  IItemCacheInvalidator,
+  CATALOG_FACADE,
+  ICatalogFacade,
+} from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { AttachmentsService } from './attachments.service';
 
@@ -24,7 +35,63 @@ export class AnnotationsService {
     private readonly libraryTx: TransactionService,
     private readonly attachmentsService: AttachmentsService,
     private readonly normalizer: AnnotationNormalizer,
+    @Optional()
+    private readonly cache?: RedisCacheService,
+    @Optional()
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
+    @Optional()
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
   ) {}
+
+  async invalidateCache(
+    attachmentId: string,
+    itemId?: string | null,
+    userId?: string,
+    projectId?: string,
+  ): Promise<void> {
+    if (itemId) {
+      const invalidator =
+        this.cacheCoordinator?.invalidateForWrite
+          ? this.cacheCoordinator
+          : this.catalogGateway?.invalidateForWrite
+            ? this.catalogGateway
+            : undefined;
+      if (invalidator?.invalidateForWrite && userId) {
+        try {
+          await invalidator.invalidateForWrite({
+            userId,
+            projectId,
+            itemIds: [itemId],
+          });
+        } catch {
+          // Ignore cache invalidation errors
+        }
+      }
+    }
+    if (!this.cache) return;
+    try {
+      const tasks: Promise<unknown>[] = [
+        this.cache.del(`library:attachment:${attachmentId}:annotations`),
+      ];
+      if (itemId) {
+        tasks.push(
+          this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
+          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
+          this.cache.del(LIBRARY_REDIS_KEYS.itemAttachments(itemId)),
+        );
+        if (typeof this.cache.delPattern === 'function') {
+          tasks.push(
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
+          );
+        }
+      }
+      await Promise.all(tasks);
+    } catch {
+      // Ignore cache invalidation errors
+    }
+  }
 
   // Queries
 
@@ -63,7 +130,9 @@ export class AnnotationsService {
     data: CreateAnnotationData,
     projectId?: string,
   ) {
-    return this.libraryTx.executeInTransaction(
+    let resolvedItemId: string | undefined;
+    let resolvedProjectId: string | undefined;
+    const annotation = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const attachment = await this.attachmentsService.assertAttachmentExists(
           data.attachmentId,
@@ -71,31 +140,40 @@ export class AnnotationsService {
           tx,
           projectId,
         );
+        resolvedItemId = attachment?.itemId;
         const effectiveProjectId =
           projectId || attachment?.item?.projectId || undefined;
+        resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
 
         const normalized = this.normalizer.normalizeCreateData(data);
-        const annotation = await this.annotationsRepo.create(normalized, tx);
+        const created = await this.annotationsRepo.create(normalized, tx);
 
         await helpers.appendChange(eventScope, {
           entityType: 'Annotation',
-          entityId: annotation.id,
+          entityId: created.id,
           action: 'create',
-          version: annotation.version,
-          data: annotation,
+          version: created.version,
+          data: created,
         });
 
         await helpers.publishOutbox(
           eventScope,
-          annotation.id,
+          created.id,
           'library.annotation.created',
-          annotation,
+          created,
         );
 
-        return annotation;
+        return created;
       },
     );
+    await this.invalidateCache(
+      data.attachmentId,
+      resolvedItemId,
+      userId,
+      resolvedProjectId,
+    );
+    return annotation;
   }
 
   async updateAnnotation(
@@ -104,12 +182,22 @@ export class AnnotationsService {
     expectedVersion: number,
     data: UpdateAnnotationData,
     projectId?: string,
+    attachmentId?: string,
   ) {
-    return this.libraryTx.executeInTransaction(
+    let resolvedAttachmentId = attachmentId;
+    let resolvedItemId: string | undefined;
+    let resolvedProjectId: string | undefined;
+    const updated = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const existing = await this.annotationsRepo.findById(id, tx);
         if (!existing)
           throw new NotFoundException(`Annotation ${id} not found`);
+        if (attachmentId && existing.attachmentId !== attachmentId) {
+          throw new NotFoundException(
+            `Annotation ${id} not found on attachment ${attachmentId}`,
+          );
+        }
+        resolvedAttachmentId = existing.attachmentId;
 
         const attachment = await this.attachmentsService.assertAttachmentExists(
           existing.attachmentId,
@@ -117,14 +205,16 @@ export class AnnotationsService {
           tx,
           projectId,
         );
+        resolvedItemId = attachment?.itemId;
         const effectiveProjectId =
           projectId || attachment?.item?.projectId || undefined;
+        resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
 
         this.assertCanModifyAnnotation(userId, existing);
 
         const normalizedData = this.normalizer.normalizeUpdateData(data);
-        const updated = await this.annotationsRepo.update(
+        const result = await this.annotationsRepo.update(
           id,
           expectedVersion,
           normalizedData,
@@ -134,22 +224,31 @@ export class AnnotationsService {
 
         await helpers.appendChange(eventScope, {
           entityType: 'Annotation',
-          entityId: updated.id,
+          entityId: result.id,
           action: 'update',
-          version: updated.version,
-          data: updated,
+          version: result.version,
+          data: result,
         });
 
         await helpers.publishOutbox(
           eventScope,
-          updated.id,
+          result.id,
           'library.annotation.updated',
-          updated,
+          result,
         );
 
-        return updated;
+        return result;
       },
     );
+    if (resolvedAttachmentId) {
+      await this.invalidateCache(
+        resolvedAttachmentId,
+        resolvedItemId,
+        userId,
+        resolvedProjectId,
+      );
+    }
+    return updated;
   }
 
   async deleteAnnotation(
@@ -157,12 +256,22 @@ export class AnnotationsService {
     id: string,
     expectedVersion?: number,
     projectId?: string,
+    attachmentId?: string,
   ) {
-    return this.libraryTx.executeInTransaction(
+    let resolvedAttachmentId = attachmentId;
+    let resolvedItemId: string | undefined;
+    let resolvedProjectId: string | undefined;
+    const deleted = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const existing = await this.annotationsRepo.findById(id, tx);
         if (!existing)
           throw new NotFoundException(`Annotation ${id} not found`);
+        if (attachmentId && existing.attachmentId !== attachmentId) {
+          throw new NotFoundException(
+            `Annotation ${id} not found on attachment ${attachmentId}`,
+          );
+        }
+        resolvedAttachmentId = existing.attachmentId;
 
         const attachment = await this.attachmentsService.assertAttachmentExists(
           existing.attachmentId,
@@ -170,20 +279,22 @@ export class AnnotationsService {
           tx,
           projectId,
         );
+        resolvedItemId = attachment?.itemId;
         const effectiveProjectId =
           projectId || attachment?.item?.projectId || undefined;
+        resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
 
         this.assertCanModifyAnnotation(userId, existing);
 
-        const deleted = await this.annotationsRepo.softDelete(
+        const isDeleted = await this.annotationsRepo.softDelete(
           id,
           expectedVersion,
           tx,
           existing,
         );
 
-        if (deleted) {
+        if (isDeleted) {
           await helpers.appendChange(eventScope, {
             entityType: 'Annotation',
             entityId: id,
@@ -214,9 +325,18 @@ export class AnnotationsService {
           );
         }
 
-        return deleted;
+        return isDeleted;
       },
     );
+    if (deleted && resolvedAttachmentId) {
+      await this.invalidateCache(
+        resolvedAttachmentId,
+        resolvedItemId,
+        userId,
+        resolvedProjectId,
+      );
+    }
+    return deleted;
   }
 
   // Batch
@@ -231,7 +351,10 @@ export class AnnotationsService {
       return { created: [], updated: [], deleted: [] };
     }
 
-    return this.libraryTx.executeInTransaction(
+    let resolvedItemId: string | undefined;
+    let resolvedProjectId: string | undefined;
+
+    const batchResult = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const attachment = await this.attachmentsService.assertAttachmentExists(
           attachmentId,
@@ -239,14 +362,62 @@ export class AnnotationsService {
           tx,
           projectId,
         );
+        resolvedItemId = attachment?.itemId;
         const effectiveProjectId =
           projectId || attachment?.item?.projectId || undefined;
+        resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
+
+        const normalizedUpserts: UpsertAnnotationItem[] = data.upserts.map(
+          (item) => {
+            if (item.id && item.expectedVersion !== undefined) {
+              const normUpdate = this.normalizer.normalizeUpdateData({
+                color: item.color,
+                quoteText: item.quoteText,
+                comment: item.comment,
+                tags: item.tags,
+                rectCoords: item.rectCoords,
+                y: item.y,
+                x: item.x,
+              });
+              return {
+                ...item,
+                ...normUpdate,
+                ...(item.type !== undefined
+                  ? { type: this.normalizer.parseType(item.type) }
+                  : {}),
+              };
+            }
+            const normCreate = this.normalizer.normalizeCreateData({
+              id: item.id,
+              attachmentId,
+              type: item.type,
+              pageIndex: item.pageIndex,
+              y: item.y,
+              x: item.x,
+              color: item.color,
+              quoteText: item.quoteText,
+              comment: item.comment,
+              tags: item.tags,
+              rectCoords: item.rectCoords,
+              authorId: userId,
+            });
+            return {
+              ...item,
+              type: normCreate.type,
+              color: normCreate.color,
+              quoteText: normCreate.quoteText,
+              comment: normCreate.comment,
+              tags: normCreate.tags,
+              rectCoords: normCreate.rectCoords,
+            };
+          },
+        );
 
         const result = await this.annotationsRepo.batchUpsert(
           attachmentId,
           userId,
-          data.upserts,
+          normalizedUpserts,
           data.deletes,
           tx,
         );
@@ -368,6 +539,13 @@ export class AnnotationsService {
         return result;
       },
     );
+    await this.invalidateCache(
+      attachmentId,
+      resolvedItemId,
+      userId,
+      resolvedProjectId,
+    );
+    return batchResult;
   }
 
   // Auth helpers

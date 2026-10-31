@@ -48,12 +48,15 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   private scheduleTimeout(fn: () => void, delayMs: number): NodeJS.Timeout {
-    const handle = setTimeout(() => {
-      this.pendingTimeouts.delete(handle);
-      if (!this.isShuttingDown) {
-        fn();
-      }
-    }, Math.max(0, delayMs));
+    const handle = setTimeout(
+      () => {
+        this.pendingTimeouts.delete(handle);
+        if (!this.isShuttingDown) {
+          fn();
+        }
+      },
+      Math.max(0, delayMs),
+    );
     handle.unref?.();
     this.pendingTimeouts.add(handle);
     return handle;
@@ -87,13 +90,16 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
     this.pollingTimer.unref?.();
 
     const pruneIntervalMs = 24 * 60 * 60 * 1000;
-    this.scheduleTimeout(() => {
-      this.pruneOldFeedArticles().catch((err) => {
-        this.logger.warn(
-          `Initial feed pruning error: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
-    }, 2 * 60 * 1000);
+    this.scheduleTimeout(
+      () => {
+        this.pruneOldFeedArticles().catch((err) => {
+          this.logger.warn(
+            `Initial feed pruning error: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      },
+      2 * 60 * 1000,
+    );
 
     this.pruningTimer = setInterval(() => {
       if (this.isShuttingDown) return;
@@ -196,7 +202,11 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
   }
 
   async pollAllFeeds(): Promise<void> {
-    if (!this.feedsRepo?.isAvailable || this.isPollingActive || this.isShuttingDown) {
+    if (
+      !this.feedsRepo?.isAvailable ||
+      this.isPollingActive ||
+      this.isShuttingDown
+    ) {
       return;
     }
     this.isPollingActive = true;
@@ -209,7 +219,11 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
         `Starting background feed refresh for ${activeFeeds.length} active feeds (Bulkhead limit: ${this.BULKHEAD_MAX_CONCURRENCY})...`,
       );
 
-      for (let i = 0; i < activeFeeds.length; i += this.BULKHEAD_MAX_CONCURRENCY) {
+      for (
+        let i = 0;
+        i < activeFeeds.length;
+        i += this.BULKHEAD_MAX_CONCURRENCY
+      ) {
         if (this.isShuttingDown) break;
         const chunk = activeFeeds.slice(i, i + this.BULKHEAD_MAX_CONCURRENCY);
 
@@ -228,7 +242,8 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
               this.recordSuccess(feed.url);
               await this.feedsRepo?.markFeedPollSuccess(feed.id);
             } catch (fetchErr: unknown) {
-              const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+              const errMsg =
+                fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
               this.logger.warn(
                 `Failed background fetch for feed "${redactFeedUrl(feed.url)}": ${errMsg}`,
               );
@@ -261,7 +276,9 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
 
       let totalPurged = 0;
       const now = Date.now();
-      const hardCapDate = new Date(now - systemHardCapDays * 24 * 60 * 60 * 1000);
+      const hardCapDate = new Date(
+        now - systemHardCapDays * 24 * 60 * 60 * 1000,
+      );
 
       for (const feed of feeds) {
         if (this.isShuttingDown) break;
@@ -302,7 +319,8 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
       }
 
       if (!this.isShuttingDown) {
-        totalPurged += await this.feedsRepo.deleteFeedItemsOlderThan(hardCapDate);
+        totalPurged +=
+          await this.feedsRepo.deleteFeedItemsOlderThan(hardCapDate);
       }
 
       if (totalPurged > 0) {

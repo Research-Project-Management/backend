@@ -7,6 +7,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { isUuid } from '@/core';
 import {
   ExportsRepository,
   EXPORT_MAX_ITEMS,
@@ -144,11 +145,7 @@ export class ExportsService {
     });
   }
 
-  async exportBundle(
-    userId: string,
-    collectionId: string,
-    projectId?: string,
-  ) {
+  async exportBundle(userId: string, collectionId: string, projectId?: string) {
     const collection = await this.exportsRepo.findCollection(collectionId);
 
     if (!collection) {
@@ -240,6 +237,7 @@ export class ExportsService {
     itemId: string,
     rawPdfBuffer?: Buffer,
     projectId?: string,
+    attachmentId?: string,
   ): Promise<{
     filename: string;
     mimeType: string;
@@ -271,6 +269,13 @@ export class ExportsService {
     const attachments = item.attachments ?? [];
 
     const pdfAttachment =
+      (attachmentId
+        ? attachments.find((a) => a.id === attachmentId)
+        : undefined) ||
+      attachments.find(
+        (a) =>
+          (a as { attachmentType?: string }).attachmentType === 'primary_pdf',
+      ) ||
       attachments.find((a) => a.mimeType === 'application/pdf') ||
       attachments[0];
 
@@ -386,10 +391,6 @@ export class ExportsService {
       ? { projectId: effectiveProjectId, deletedAt: null }
       : { userId, projectId: null, deletedAt: null };
 
-    const isUuid = (val: string) =>
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-7][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        val,
-      );
     const idKeys = normalizedKeys.filter((k) => isUuid(k));
     const citeKeys = normalizedKeys;
 
@@ -434,14 +435,6 @@ export class ExportsService {
         ));
     }
 
-    const entries = emittedEntries.map(({ item: it, emitCiteKey }) => {
-      const res = this.citationService.formatItem(
-        toCitationItemInput(it, emitCiteKey),
-        'bibtex',
-      );
-      return res.bibliography;
-    });
-
     if (emittedEntries.length === 0) {
       const noMatchResult = {
         content: '',
@@ -463,8 +456,33 @@ export class ExportsService {
       };
     }
 
+    const strategy = resolveExportFormatStrategy(format);
+    let content: string;
+    if (strategy && format !== 'bibtex' && format !== 'ris') {
+      const exported = strategy.exportItems({
+        items: emittedEntries.map(({ item: it, emitCiteKey }) => ({
+          ...it,
+          citationKey: emitCiteKey,
+        })),
+        timestamp: new Date().toISOString().split('T')[0],
+        truncated: false,
+        citationFormatter: this.citationService,
+      });
+      content = exported.content;
+    } else {
+      const targetStyle = format === 'ris' ? 'ris' : 'bibtex';
+      const entries = emittedEntries.map(({ item: it, emitCiteKey }) => {
+        const res = this.citationService.formatItem(
+          toCitationItemInput(it, emitCiteKey),
+          targetStyle,
+        );
+        return res.bibliography;
+      });
+      content = entries.join(targetStyle === 'ris' ? '\n' : '\n\n');
+    }
+
     return {
-      content: entries.join('\n\n'),
+      content,
       count: emittedEntries.length,
       itemCount: emittedEntries.length,
       filename,

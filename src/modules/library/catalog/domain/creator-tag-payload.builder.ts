@@ -1,5 +1,5 @@
 import { Prisma, LinkMode, AttachmentType, AnnotationType, TagType } from '@prisma/client';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import {
   normalizeAcademicTags,
   cleanSingleTag,
@@ -7,6 +7,7 @@ import {
   parseCreatorString,
   getPrimaryCreatorRoleForType,
   mergeCanonicalCreators,
+  deriveFirstAuthor,
   INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
   convertAcademicHtmlToMarkdown,
   ItemProvenancePolicy,
@@ -19,10 +20,10 @@ import {
 import { TagInput } from '@/modules/library/catalog/types/tags.types';
 import { CreatorCreditInput } from '@/modules/library/core/types/bibliographic.types';
 import { getFileContentPath } from '@/modules/storage/storage.port';
-import { isUUID } from 'class-validator';
-export { buildTipTapDocFromText };
-export const isUuid = (val: unknown): val is string =>
-  typeof val === 'string' && Boolean(val) && isUUID(val);
+export { buildTipTapDocFromText, isUuid };
+
+
+
 export {
   cleanSingleIdentifier,
   extractExtraKeyValues,
@@ -414,7 +415,7 @@ export function prepareAttachmentsToCreate(
                 const ann = rawAnn as Record<string, unknown>;
                 return {
                   type: (ann.type as AnnotationType) || AnnotationType.highlight,
-                  color: (ann.color as string) || '#ffeb3b',
+                  color: (ann.color as string) || '#ffd400',
                   pageIndex: typeof ann.pageIndex === 'number' ? ann.pageIndex : 0,
                   pageLabel: typeof ann.pageLabel === 'string' ? ann.pageLabel : '',
                   annotationSortIndex:
@@ -516,71 +517,7 @@ export {
   resolveOrCreateTags,
   syncTagsForCatalogItem,
 } from './tag-payload.builder';
-export function deriveFirstAuthor(data: {
-  contributors?: Array<Record<string, unknown> | CreatorCreditInput>;
-  creators?: Array<Record<string, unknown> | CreatorCreditInput>;
-  authors?: Array<string | Record<string, unknown>>;
-  author?: string;
-  editors?: Array<string | Record<string, unknown>>;
-  itemType?: string;
-}): string | null {
-  const formatResult = (name: string, count: number): string | null => {
-    const trimmed = name.trim();
-    if (!trimmed) return null;
-    return (count > 1 ? `${trimmed} et al.` : trimmed).slice(0, 255);
-  };
-
-  const primaryRoleLower = getPrimaryCreatorRoleForType(data.itemType).toLowerCase();
-  const structured =
-    data.contributors && data.contributors.length > 0
-      ? data.contributors
-      : data.creators && data.creators.length > 0
-        ? data.creators
-        : null;
-  if (structured) {
-    const isAuthorRole = (c: Record<string, unknown>) => {
-      const role = String(c.creatorType || c.role || 'author').trim().toLowerCase();
-      return role === 'author' || role === primaryRoleLower || role === 'creator' || role === '';
-    };
-    const isNonEditorRole = (c: Record<string, unknown>) => {
-      const role = String(c.creatorType || c.role || 'author').trim().toLowerCase();
-      return role !== 'editor' && role !== 'serieseditor';
-    };
-
-    const preferredPool = structured.filter((c) => isAuthorRole(c as Record<string, unknown>));
-    const nonEditorPool = preferredPool.length > 0 ? preferredPool : structured.filter((c) => isNonEditorRole(c as Record<string, unknown>));
-    const effectivePool = nonEditorPool.length > 0 ? nonEditorPool : structured;
-
-    const c0 = effectivePool[0] as Record<string, unknown>;
-    const rawLast = (c0.lastName as string) || '';
-    const rawFull = (c0.fullName as string) || (c0.name as string) || '';
-    let authorName = rawLast;
-    if (!authorName && rawFull) {
-      const parsed = parseCreatorString(rawFull, 0);
-      authorName = parsed.lastName || parsed.fullName || rawFull;
-    }
-    if (!authorName) return null;
-    return formatResult(authorName, effectivePool.length);
-  }
-  const authorList =
-    data.authors && data.authors.length > 0
-      ? data.authors
-      : typeof data.author === 'string' && data.author.trim()
-        ? [data.author.trim()]
-        : data.editors && data.editors.length > 0
-          ? data.editors
-          : null;
-  if (authorList && authorList.length > 0) {
-    const firstAuthor = authorList[0] as string | { name?: string; fullName?: string; lastName?: string } | undefined;
-    const authorStr: string =
-      typeof firstAuthor === 'string' ? firstAuthor : firstAuthor?.name || firstAuthor?.fullName || firstAuthor?.lastName || '';
-    const parsed0 = parseCreatorString(authorStr, 0);
-    const authorName = parsed0.lastName || parsed0.fullName;
-    if (!authorName) return null;
-    return formatResult(authorName, authorList.length);
-  }
-  return null;
-}
+export { deriveFirstAuthor };
 export function prepareContributorsToCreate(
   data: {
     contributors?: CreatorCreditInput[];

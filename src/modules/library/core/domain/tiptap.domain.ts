@@ -107,7 +107,9 @@ export function buildTipTapDocFromText(text: string): Record<string, unknown> {
           content: [
             {
               type: 'paragraph',
-              content: parseInlineMarkdownNodes(l.replace(/^[-*]\s+/, '').trim()),
+              content: parseInlineMarkdownNodes(
+                l.replace(/^[-*]\s+/, '').trim(),
+              ),
             },
           ],
         })),
@@ -123,7 +125,9 @@ export function buildTipTapDocFromText(text: string): Record<string, unknown> {
           content: [
             {
               type: 'paragraph',
-              content: parseInlineMarkdownNodes(l.replace(/^\d+\.\s+/, '').trim()),
+              content: parseInlineMarkdownNodes(
+                l.replace(/^\d+\.\s+/, '').trim(),
+              ),
             },
           ],
         })),
@@ -132,7 +136,9 @@ export function buildTipTapDocFromText(text: string): Record<string, unknown> {
     }
 
     if (lines.length > 0 && lines.every((l) => /^>\s?/.test(l))) {
-      const quoteText = lines.map((l) => l.replace(/^>\s?/, '').trim()).join('\n');
+      const quoteText = lines
+        .map((l) => l.replace(/^>\s?/, '').trim())
+        .join('\n');
       docContent.push({
         type: 'blockquote',
         content: [

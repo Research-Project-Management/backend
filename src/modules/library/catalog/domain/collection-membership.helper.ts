@@ -75,12 +75,7 @@ export async function executeAssignItemsToCollection(
     : { userId, projectId: null };
 
   const validateInClient = async (tx?: Prisma.TransactionClient) => {
-    const collection = await repo.findById(
-      userId,
-      collectionId,
-      tx,
-      projectId,
-    );
+    const collection = await repo.findById(userId, collectionId, tx, projectId);
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
@@ -202,10 +197,7 @@ export async function executeDeleteCollectionWithCascade(
       );
       descendantIds = tree.getDescendantIds(allCollections || [], collectionId);
       if (descendantIds.length > 0) {
-        const effectiveTx =
-          tx && Object.keys(tx as Record<string, unknown>).length > 0
-            ? tx
-            : undefined;
+        const effectiveTx = tx && Object.keys(tx).length > 0 ? tx : undefined;
         const descendantItemLists = repo.findItemIdsByCollections
           ? [
               await repo.findItemIdsByCollections(
@@ -389,4 +381,179 @@ export async function executeDeleteCollectionWithCascade(
   const { effectiveProjectId, affectedItemIds } = await resolveCascadeTargets();
   await repo.delete(userId, collectionId, strategy, undefined, projectId);
   return { effectiveProjectId, affectedItemIds };
+}
+
+export async function executeCopyCollectionSubtree(
+  repo: CollectionsRepository,
+  tree: TreeEngine,
+  libraryTx: TransactionService | undefined,
+  userId: string,
+  collectionId: string,
+  targetParentId?: string | null,
+  projectId?: string,
+): Promise<{
+  collection: Awaited<ReturnType<CollectionsRepository['create']>>;
+  copiedCount: number;
+  effectiveProjectId?: string;
+  affectedItemIds: string[];
+}> {
+  const normalizedTargetParentId = normalizeParentId(targetParentId);
+
+  const runCopy = async (
+    tx?: Prisma.TransactionClient,
+    helpers?: TransactionHelpers,
+  ) => {
+    const root = await repo.findById(userId, collectionId, tx, projectId);
+    if (!root) {
+      throw new NotFoundException(`Collection not found: ${collectionId}`);
+    }
+
+    const effectiveProjectId =
+      normalizeProjectScopeId(projectId ?? root.projectId) ?? undefined;
+    const allCollections =
+      (await repo.findAll(userId, effectiveProjectId, tx)) || [];
+
+    if (normalizedTargetParentId) {
+      if (normalizedTargetParentId === collectionId) {
+        throw new BadRequestException(
+          'Cannot copy collection into itself or its descendants',
+        );
+      }
+      const parentExists =
+        allCollections.some((c) => c.id === normalizedTargetParentId) ||
+        Boolean(
+          await repo.findById(
+            userId,
+            normalizedTargetParentId,
+            tx,
+            effectiveProjectId,
+          ),
+        );
+      if (!parentExists) {
+        throw new BadRequestException(
+          `Target parent collection not found: ${normalizedTargetParentId}`,
+        );
+      }
+      const descendantIds = tree.getDescendantIds(allCollections, collectionId);
+      if (descendantIds.includes(normalizedTargetParentId)) {
+        throw new BadRequestException(
+          'Cannot copy collection into itself or its descendants',
+        );
+      }
+    }
+
+    const childrenByParent = new Map<string, typeof allCollections>();
+    for (const col of allCollections) {
+      if (col.parentId) {
+        const list = childrenByParent.get(col.parentId) ?? [];
+        list.push(col);
+        childrenByParent.set(col.parentId, list);
+      }
+    }
+
+    const affectedItemIdSet = new Set<string>();
+    let copiedCount = 0;
+    const eventScope = { userId, projectId: effectiveProjectId };
+
+    const cloneNode = async (
+      source: NonNullable<typeof root> | (typeof allCollections)[number],
+      destParentId: string | null,
+      isRoot: boolean,
+    ): Promise<Awaited<ReturnType<CollectionsRepository['create']>>> => {
+      const copyName = isRoot ? `${source.name} (Copy)` : source.name;
+      const created = await repo.create(
+        userId,
+        {
+          name: copyName,
+          description: source.description ?? undefined,
+          color: source.color ?? undefined,
+          icon: source.icon ?? undefined,
+          parentId: destParentId,
+          projectId: effectiveProjectId ?? null,
+          createdById: userId,
+        },
+        tx,
+      );
+      copiedCount += 1;
+
+      if (helpers) {
+        await helpers.appendChange(eventScope, {
+          entityType: 'Collection',
+          entityId: created.id,
+          action: 'create',
+          version: created.version ?? 1,
+          data: created,
+        });
+        await helpers.publishOutbox(
+          eventScope,
+          created.id,
+          LIBRARY_EVENT_TYPES.COLLECTION_CREATED,
+          created,
+        );
+      }
+
+      const itemIds = await repo.findItemIdsByCollection(
+        userId,
+        source.id,
+        tx,
+        undefined,
+        effectiveProjectId,
+      );
+      if (itemIds && itemIds.length > 0) {
+        await repo.addItemsToCollection(
+          userId,
+          created.id,
+          itemIds,
+          tx,
+          effectiveProjectId,
+        );
+        for (const id of itemIds) {
+          affectedItemIdSet.add(id);
+        }
+        if (helpers) {
+          await helpers.appendChange(eventScope, {
+            entityType: 'CollectionItem',
+            entityId: `${created.id}:${itemIds.join(',')}`,
+            action: 'create',
+            version: 1,
+            data: { collectionId: created.id, itemIds },
+          });
+          await helpers.publishOutbox(
+            eventScope,
+            created.id,
+            LIBRARY_EVENT_TYPES.COLLECTION_ITEMS_ASSIGNED,
+            {
+              collectionId: created.id,
+              itemIds,
+              userId,
+              projectId: effectiveProjectId,
+            },
+          );
+        }
+      }
+
+      const children = childrenByParent.get(source.id) ?? [];
+      for (const child of children) {
+        await cloneNode(child, created.id, false);
+      }
+
+      return created;
+    };
+
+    const rootClone = await cloneNode(root, normalizedTargetParentId, true);
+    return {
+      collection: rootClone,
+      copiedCount,
+      effectiveProjectId,
+      affectedItemIds: Array.from(affectedItemIdSet),
+    };
+  };
+
+  if (libraryTx?.executeInTransaction) {
+    return libraryTx.executeInTransaction(
+      (tx: Prisma.TransactionClient, helpers: TransactionHelpers) =>
+        runCopy(tx, helpers),
+    );
+  }
+  return runCopy();
 }

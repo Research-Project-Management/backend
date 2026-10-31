@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
@@ -60,7 +53,9 @@ export function buildGetItemsOptions(
   query?: ItemsListQuery,
   projectId?: string | null,
 ) {
-  const effectiveProjectId = normalizeProjectScopeId(projectId ?? query?.projectId);
+  const effectiveProjectId = normalizeProjectScopeId(
+    projectId ?? query?.projectId,
+  );
   const effectiveOrderBy = query?.orderBy ?? query?.sortBy;
   const effectiveOrderDirection = query?.orderDirection ?? query?.sortOrder;
   const effectiveFromYear = query?.fromYear ?? query?.year;
@@ -71,10 +66,8 @@ export function buildGetItemsOptions(
       ? query.tags.join(',')
       : undefined);
   const effectiveHasFile = query?.hasFile ?? query?.hasPdf;
-  const effectiveOnlyFlagged =
-    query?.onlyFlagged ?? query?.isStarred;
-  const effectiveView =
-    query?.view ?? (query?.unfiled ? 'unfiled' : undefined);
+  const effectiveOnlyFlagged = query?.onlyFlagged ?? query?.isStarred;
+  const effectiveView = query?.view ?? (query?.unfiled ? 'unfiled' : undefined);
   const effectiveReadStatus =
     query?.readStatus ??
     (query?.isRead === true
@@ -88,7 +81,9 @@ export function buildGetItemsOptions(
     collectionId: query?.collectionId,
     tagId: query?.tagId,
     search: query?.search,
-    ...(query?.searchMode !== undefined ? { searchMode: query.searchMode } : {}),
+    ...(query?.searchMode !== undefined
+      ? { searchMode: query.searchMode }
+      : {}),
     cursor: query?.cursor,
     limit: query?.limit,
     projectId: effectiveProjectId,
@@ -99,9 +94,7 @@ export function buildGetItemsOptions(
       : {}),
     ...(query?.itemType !== undefined ? { itemType: query.itemType } : {}),
     ...(query?.type !== undefined ? { type: query.type } : {}),
-    ...(effectiveFromYear !== undefined
-      ? { fromYear: effectiveFromYear }
-      : {}),
+    ...(effectiveFromYear !== undefined ? { fromYear: effectiveFromYear } : {}),
     ...(effectiveToYear !== undefined ? { toYear: effectiveToYear } : {}),
     ...(effectiveReadStatus !== undefined
       ? { readStatus: effectiveReadStatus }

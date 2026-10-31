@@ -122,7 +122,7 @@ export class SsrfGuardService {
     }
 
     // Resolve all DNS records (A and AAAA)
-    let resolvedIps: string[] = [];
+    const resolvedIps: string[] = [];
     try {
       const addresses = await lookup(rawHostname, { all: true });
       if (!addresses || addresses.length === 0) {
@@ -234,7 +234,8 @@ export class SsrfGuardService {
           'resolvedIps' in validated &&
           Array.isArray((validated as { resolvedIps?: unknown }).resolvedIps)
         ) {
-          lastResolvedIps = (validated as { resolvedIps: string[] }).resolvedIps;
+          lastResolvedIps = (validated as { resolvedIps: string[] })
+            .resolvedIps;
         }
       }
 
@@ -271,15 +272,19 @@ export class SsrfGuardService {
     const initialSafe = await this.assertSafeUrl(rawUrl, options);
     let lastResolvedIps = initialSafe.resolvedIps;
 
-    const result = await SsrfGuardService.executeSafeRedirectFetch(rawUrl, init, {
-      maxRedirects: options.maxRedirects,
-      validateUrl: async (nextUrl) => {
-        const safeHop = await this.assertSafeUrl(nextUrl, options);
-        lastResolvedIps = safeHop.resolvedIps;
-        return safeHop;
+    const result = await SsrfGuardService.executeSafeRedirectFetch(
+      rawUrl,
+      init,
+      {
+        maxRedirects: options.maxRedirects,
+        validateUrl: async (nextUrl) => {
+          const safeHop = await this.assertSafeUrl(nextUrl, options);
+          lastResolvedIps = safeHop.resolvedIps;
+          return safeHop;
+        },
+        beforeHop: options.beforeHop,
       },
-      beforeHop: options.beforeHop,
-    });
+    );
     return {
       ...result,
       ...(lastResolvedIps ? { resolvedIps: lastResolvedIps } : {}),
@@ -367,9 +372,12 @@ export class SsrfGuardService {
    */
   isPrivateIPv6(normalized: string): boolean {
     if (normalized === '::1' || normalized === '::') return true;
+    if (/^(?:0{1,4}:){7}0*1$/i.test(normalized)) return true;
+    if (/^(?:0{1,4}:){7}0{1,4}$/i.test(normalized)) return true;
 
     // Discard prefix (100::/64 RFC 6666)
-    if (normalized.startsWith('100:')) return true;
+    if (normalized.startsWith('100:') || /^0?100:/i.test(normalized))
+      return true;
 
     // Teredo tunneling (2001:0000::/32 or 2001::/32 RFC 4380)
     if (
@@ -382,7 +390,11 @@ export class SsrfGuardService {
     }
 
     // Documentation prefix (2001:db8::/32 RFC 3849)
-    if (normalized.startsWith('2001:db8:') || normalized.startsWith('2001:0db8:')) return true;
+    if (
+      normalized.startsWith('2001:db8:') ||
+      normalized.startsWith('2001:0db8:')
+    )
+      return true;
 
     // 6to4 prefix (2002::/16 RFC 3056) - extracts embedded IPv4 in 2nd and 3rd 16-bit blocks
     if (normalized.startsWith('2002:')) {
@@ -408,8 +420,15 @@ export class SsrfGuardService {
     }
 
     // NAT64 Well-Known Prefix (64:ff9b::/96 RFC 6052)
-    if (normalized.startsWith('64:ff9b::') || normalized.startsWith('0064:ff9b::')) {
-      const remainder = normalized.replace(/^(?:00)?64:ff9b::/i, '');
+    if (
+      normalized.startsWith('64:ff9b::') ||
+      normalized.startsWith('0064:ff9b::') ||
+      /^0*64:ff9b:(?:0{1,4}:){4}/i.test(normalized)
+    ) {
+      const remainder = normalized.replace(
+        /^(?:0*64:ff9b::|0*64:ff9b:(?:0{1,4}:){4})/i,
+        '',
+      );
       if (isIP(remainder) === 4) {
         return this.isPrivateOrReservedIp(remainder);
       }
@@ -428,29 +447,12 @@ export class SsrfGuardService {
       return true; // Fail closed for NAT64 gateway prefix
     }
 
-    // IPv4-compatible IPv6 (::x.x.x.x or ::hhhh:hhhh)
-    if (normalized.startsWith('::') && !normalized.startsWith('::ffff:')) {
-      const remainder = normalized.substring(2);
-      if (isIP(remainder) === 4) {
-        return this.isPrivateOrReservedIp(remainder);
-      }
-      const hexParts = remainder.split(':');
-      if (hexParts.length === 2) {
-        const h1 = parseInt(hexParts[0], 16);
-        const h2 = parseInt(hexParts[1], 16);
-        if (!isNaN(h1) && !isNaN(h2)) {
-          const b1 = (h1 >> 8) & 0xff;
-          const b2 = h1 & 0xff;
-          const b3 = (h2 >> 8) & 0xff;
-          const b4 = h2 & 0xff;
-          return this.isPrivateOrReservedIp(`${b1}.${b2}.${b3}.${b4}`);
-        }
-      }
-    }
-
-    // IPv4-mapped IPv6 (::ffff:x.x.x.x or ::ffff:hhhh:hhhh in hex)
-    if (normalized.startsWith('::ffff:')) {
-      const remainder = normalized.substring(7);
+    // IPv4-mapped IPv6 (::ffff:x.x.x.x, ::ffff:hhhh:hhhh, or expanded 0:0:0:0:0:ffff:...)
+    const mappedMatch = normalized.match(
+      /^(?:::ffff:|(?:0{1,4}:){1,5}ffff:)(.+)$/i,
+    );
+    if (mappedMatch) {
+      const remainder = mappedMatch[1];
       if (isIP(remainder) === 4) {
         return this.isPrivateOrReservedIp(remainder);
       }
@@ -475,6 +477,29 @@ export class SsrfGuardService {
         }
       }
       return true; // Fail closed for any other ::ffff: pattern
+    }
+
+    // IPv4-compatible IPv6 (::x.x.x.x, ::hhhh:hhhh, or expanded 0:0:0:0:0:0:...)
+    const compatMatch = normalized.match(
+      /^(?:::|(?:0{1,4}:){5,6})([^:]+(?::[^:]+)?)$/i,
+    );
+    if (compatMatch) {
+      const remainder = compatMatch[1];
+      if (isIP(remainder) === 4) {
+        return this.isPrivateOrReservedIp(remainder);
+      }
+      const hexParts = remainder.split(':');
+      if (hexParts.length === 2) {
+        const h1 = parseInt(hexParts[0], 16);
+        const h2 = parseInt(hexParts[1], 16);
+        if (!isNaN(h1) && !isNaN(h2)) {
+          const b1 = (h1 >> 8) & 0xff;
+          const b2 = h1 & 0xff;
+          const b3 = (h2 >> 8) & 0xff;
+          const b4 = h2 & 0xff;
+          return this.isPrivateOrReservedIp(`${b1}.${b2}.${b3}.${b4}`);
+        }
+      }
     }
 
     // Link-local (fe80::/10)

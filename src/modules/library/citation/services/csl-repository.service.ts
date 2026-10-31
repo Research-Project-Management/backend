@@ -368,7 +368,10 @@ export class CslRepositoryService implements OnModuleInit {
    * 3. Zotero Style Repository API (https://www.zotero.org/styles/:styleId)
    * 4. GitHub CSL Repository Raw Fallback
    */
-  public async fetchCslXml(styleId: string, scopeId?: string): Promise<string | null> {
+  public async fetchCslXml(
+    styleId: string,
+    scopeId?: string,
+  ): Promise<string | null> {
     const normalized = styleId.trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9._-]{0,100}$/.test(normalized)) {
       return null;
@@ -395,7 +398,11 @@ export class CslRepositoryService implements OnModuleInit {
         const customCached = await this.redisCache.get<string>(
           LIBRARY_REDIS_KEYS.cslStyleXml(normalized, 'custom'),
         );
-        if (customCached && typeof customCached === 'string' && customCached.includes('<style')) {
+        if (
+          customCached &&
+          typeof customCached === 'string' &&
+          customCached.includes('<style')
+        ) {
           return customCached;
         }
       }
@@ -505,7 +512,8 @@ export class CslRepositoryService implements OnModuleInit {
     const titleMatch = cslXml.match(/<title>([^<]+)<\/title>/i);
     const idMatch = cslXml.match(/<id>([^<]+)<\/id>/i);
 
-    const rawTitle = customTitle || titleMatch?.[1]?.trim() || 'Custom CSL Style';
+    const rawTitle =
+      customTitle || titleMatch?.[1]?.trim() || 'Custom CSL Style';
     const title =
       rawTitle
         .replace(/<[^>]*>/g, '')
@@ -552,10 +560,7 @@ export class CslRepositoryService implements OnModuleInit {
 
     // Cache XML and metadata with user/project scope isolation
     if (this.redisCache) {
-      const xmlKey = LIBRARY_REDIS_KEYS.cslStyleXml(
-        slug,
-        scopeId || 'custom',
-      );
+      const xmlKey = LIBRARY_REDIS_KEYS.cslStyleXml(slug, scopeId || 'custom');
       await this.redisCache.set(xmlKey, cslXml, 86400 * 365);
       const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeId);
       const existing = await this.getCustomStyles(scopeId);

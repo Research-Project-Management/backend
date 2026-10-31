@@ -415,12 +415,19 @@ export class AttachmentStorageController {
       }
 
       if (this.storagePort.getOwnedFileStream) {
-        const fileRecord = await this.storagePort.getOwnedFileStream({
+        const fileRecord = (await this.storagePort.getOwnedFileStream({
           fileId: attachment.fileId,
           userId,
           projectId,
           ...(range ? { range } : {}),
-        });
+        })) as {
+          stream: NodeJS.ReadableStream;
+          mimeType: string;
+          size: number;
+          filename: string;
+          contentRange?: string;
+          isPartial?: boolean;
+        };
 
         return this.sendAttachmentPayload(res, {
           content: fileRecord.stream,
@@ -429,6 +436,8 @@ export class AttachmentStorageController {
           size: fileRecord.size,
           mimeType: fileRecord.mimeType || defaultMimeType,
           contentRange: fileRecord.contentRange,
+          isPartial:
+            fileRecord.isPartial ?? Boolean(fileRecord.contentRange),
         });
       }
 
@@ -439,12 +448,32 @@ export class AttachmentStorageController {
           projectId,
         });
 
+        let bufferContent = fileRecord.buffer;
+        let contentRange: string | undefined;
+        let isPartial = false;
+        const totalSize = fileRecord.size || bufferContent.length;
+
+        if (range && totalSize > 0) {
+          const start = Math.max(0, Math.min(range.start, totalSize - 1));
+          const end =
+            range.end >= 0
+              ? Math.min(range.end, totalSize - 1)
+              : totalSize - 1;
+          if (start <= end) {
+            bufferContent = bufferContent.subarray(start, end + 1);
+            contentRange = `bytes ${start}-${end}/${totalSize}`;
+            isPartial = true;
+          }
+        }
+
         return this.sendAttachmentPayload(res, {
-          content: fileRecord.buffer,
+          content: bufferContent,
           filename:
             attachment.filename || fileRecord.filename || defaultFilename,
-          size: fileRecord.size,
+          size: isPartial ? bufferContent.length : totalSize,
           mimeType: fileRecord.mimeType || defaultMimeType,
+          contentRange,
+          isPartial,
         });
       }
     }
@@ -480,6 +509,7 @@ export class AttachmentStorageController {
       size: number;
       mimeType?: string;
       contentRange?: string;
+      isPartial?: boolean;
     },
   ) {
     const rawMimeType = (payload.mimeType || 'application/pdf').trim();
@@ -502,12 +532,25 @@ export class AttachmentStorageController {
     res.header('Cache-Control', 'private, no-cache, no-store, must-revalidate');
     res.header('Vary', 'Authorization, Range');
 
-    if (payload.contentRange) {
+    let contentLength = payload.size;
+    if (payload.isPartial || payload.contentRange) {
       res.status(206);
-      res.header('Content-Range', payload.contentRange);
+      if (payload.contentRange) {
+        res.header('Content-Range', payload.contentRange);
+        const rangeMatch = payload.contentRange.match(
+          /^bytes\s+(\d+)-(\d+)\//i,
+        );
+        if (rangeMatch?.[1] !== undefined && rangeMatch?.[2] !== undefined) {
+          const start = parseInt(rangeMatch[1], 10);
+          const end = parseInt(rangeMatch[2], 10);
+          if (!isNaN(start) && !isNaN(end) && end >= start) {
+            contentLength = end - start + 1;
+          }
+        }
+      }
     }
 
-    res.header('Content-Length', payload.size);
+    res.header('Content-Length', contentLength);
     return res.send(payload.content);
   }
 }

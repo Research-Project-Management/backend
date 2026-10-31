@@ -317,10 +317,7 @@ export class IngestionVerifierService {
     const fieldProvenance: Record<string, VerificationFieldProvenance> = {};
     const warnings: string[] = [];
     const effectiveQualityScore =
-      qualityScore ??
-      calculateMetadataQualityScore(
-        metadata as unknown as Record<string, unknown>,
-      ).score / 100;
+      qualityScore ?? calculateMetadataQualityScore(metadata).score / 100;
 
     const assignProv = (fieldName: string, conf: number, verified: boolean) => {
       fieldProvenance[fieldName] = {

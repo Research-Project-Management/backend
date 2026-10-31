@@ -115,11 +115,13 @@ export class UnpaywallProvider implements MetadataProvider {
     const bestOaLocation = payload?.best_oa_location;
     // Strict Full-text resolver: Only treat as openAccessPdfUrl if it is explicitly a direct PDF URL
     // or a non-DOI URL (to avoid polluting openAccessPdfUrl with DOI landing page redirect loops)
-    const rawOaCandidate = bestOaLocation?.url_for_pdf || bestOaLocation?.url || undefined;
+    const rawOaCandidate =
+      bestOaLocation?.url_for_pdf || bestOaLocation?.url || undefined;
     const isDirectPdfUrl = Boolean(
       bestOaLocation?.url_for_pdf ||
       (rawOaCandidate && /\.pdf(?:$|\?|#)/i.test(rawOaCandidate)) ||
-      (rawOaCandidate && !/^https?:\/\/(?:dx\.)?doi\.org\//i.test(rawOaCandidate))
+      (rawOaCandidate &&
+        !/^https?:\/\/(?:dx\.)?doi\.org\//i.test(rawOaCandidate)),
     );
     const pdfUrl = isDirectPdfUrl ? rawOaCandidate : undefined;
 

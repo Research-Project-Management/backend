@@ -153,7 +153,11 @@ export class ConditionEvaluatorEngine {
     depth: number = 0,
     counter: { count: number } = { count: 0 },
   ): void {
-    if (!group || typeof group !== 'object' || !Array.isArray(group.conditions)) {
+    if (
+      !group ||
+      typeof group !== 'object' ||
+      !Array.isArray(group.conditions)
+    ) {
       throw new BadRequestException('Invalid condition group structure');
     }
     if (depth > MAX_CONDITION_DEPTH) {
@@ -174,9 +178,16 @@ export class ConditionEvaluatorEngine {
             `Saved search condition count exceeds maximum allowed (${MAX_CONDITION_COUNT})`,
           );
         }
-        const cond = item as SavedSearchCondition;
-        if (!cond.field || typeof cond.field !== 'string' || !cond.operator || typeof cond.operator !== 'string') {
-          throw new BadRequestException('Condition must have valid field and operator');
+        const cond = item;
+        if (
+          !cond.field ||
+          typeof cond.field !== 'string' ||
+          !cond.operator ||
+          typeof cond.operator !== 'string'
+        ) {
+          throw new BadRequestException(
+            'Condition must have valid field and operator',
+          );
         }
       }
     }
@@ -192,7 +203,10 @@ export class ConditionEvaluatorEngine {
       : { userId, projectId: null, deletedAt: null };
 
     if (!group) return baseWhere;
-    if (typeof group !== 'object' || (group.conditions !== undefined && !Array.isArray(group.conditions))) {
+    if (
+      typeof group !== 'object' ||
+      (group.conditions !== undefined && !Array.isArray(group.conditions))
+    ) {
       throw new BadRequestException('Invalid saved search conditions');
     }
     if (!group.conditions?.length) return baseWhere;
@@ -310,7 +324,11 @@ export class ConditionEvaluatorEngine {
         `Saved search condition nesting depth exceeds maximum allowed (${MAX_CONDITION_DEPTH})`,
       );
     }
-    if (!group || typeof group !== 'object' || !Array.isArray(group.conditions)) {
+    if (
+      !group ||
+      typeof group !== 'object' ||
+      !Array.isArray(group.conditions)
+    ) {
       return {};
     }
     const clauses: Prisma.ItemWhereInput[] = [];
@@ -351,7 +369,12 @@ export class ConditionEvaluatorEngine {
   ): Prisma.ItemWhereInput | null {
     if (!cond || typeof cond !== 'object') return null;
     const { field, operator: rawOperator, value } = cond;
-    if (!field || typeof field !== 'string' || !rawOperator || typeof rawOperator !== 'string') {
+    if (
+      !field ||
+      typeof field !== 'string' ||
+      !rawOperator ||
+      typeof rawOperator !== 'string'
+    ) {
       return null;
     }
     const operator: SavedSearchOperator =
@@ -409,7 +432,10 @@ export class ConditionEvaluatorEngine {
               extractYearNumber(value[1]),
             ]);
           }
-          return evalYearCondition(operator, extractYearNumber(value ?? strVal));
+          return evalYearCondition(
+            operator,
+            extractYearNumber(value ?? strVal),
+          );
         }
         return evalJsonField('publicationDate', operator, strVal);
       case 'accessedAt':
@@ -451,7 +477,8 @@ export class ConditionEvaluatorEngine {
         return evalIdentifierField(normalizedField, operator, strVal);
       default:
         if (UUID_ITEM_COLUMNS.has(normalizedField)) {
-          if (operator === 'isPresent') return { [normalizedField]: { not: null } };
+          if (operator === 'isPresent')
+            return { [normalizedField]: { not: null } };
           if (operator === 'isAbsent') return { [normalizedField]: null };
           if (operator === 'is') {
             if (!strVal) return null;
@@ -469,7 +496,11 @@ export class ConditionEvaluatorEngine {
         }
         if (PUBLICATION_TITLE_MAPPED_FIELDS.has(normalizedField)) {
           const jsonClause = evalJsonField(normalizedField, operator, strVal);
-          const colClause = evalStringField('publicationTitle', operator, strVal);
+          const colClause = evalStringField(
+            'publicationTitle',
+            operator,
+            strVal,
+          );
           const pair = [jsonClause, colClause].filter(
             (c): c is Prisma.ItemWhereInput => c !== null,
           );

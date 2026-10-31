@@ -20,6 +20,7 @@ import { NotesService } from '@/modules/library/catalog/services/notes.service';
 import {
   CreateNoteDto,
   UpdateNoteDto,
+  ExtractNotesFromAnnotationsDto,
 } from '@/modules/library/catalog/dto/notes.dto';
 
 @ApiTags('Library Notes')
@@ -162,13 +163,7 @@ export class NoteController {
     @Param('itemId') itemId: string,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
-    @Body()
-    body?: {
-      noteId?: string;
-      tagColor?: boolean;
-      includeComments?: boolean;
-      projectId?: string;
-    },
+    @Body() body?: ExtractNotesFromAnnotationsDto,
   ) {
     if (!isUUID(itemId)) {
       throw new BadRequestException(`Invalid item UUID: ${itemId}`);
@@ -176,18 +171,29 @@ export class NoteController {
     const effectiveProjectId = normalizeProjectScopeId(
       paramProjectId || queryProjectId || body?.projectId,
     );
-    const options =
+    const hasOptions =
       body &&
       (body.noteId !== undefined ||
+        body.attachmentId !== undefined ||
+        body.annotationIds !== undefined ||
         body.tagColor !== undefined ||
-        body.includeComments !== undefined)
-        ? {
-            noteId: body.noteId,
-            tagColor: body.tagColor,
-            includeComments: body.includeComments,
-            projectId: effectiveProjectId,
-          }
-        : undefined;
+        body.tagColorName !== undefined ||
+        body.includeComments !== undefined ||
+        body.protocol !== undefined ||
+        body.webBaseUrl !== undefined);
+    const options = hasOptions
+      ? {
+          noteId: body.noteId,
+          attachmentId: body.attachmentId,
+          annotationIds: body.annotationIds,
+          tagColor: body.tagColor,
+          tagColorName: body.tagColorName,
+          includeComments: body.includeComments,
+          protocol: body.protocol,
+          webBaseUrl: body.webBaseUrl,
+          projectId: effectiveProjectId,
+        }
+      : undefined;
 
     return this.notesService.extractNotesFromAnnotations(
       currentUserId,

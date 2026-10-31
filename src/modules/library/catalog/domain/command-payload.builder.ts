@@ -225,9 +225,9 @@ export function resolveCanonicalCommandFields(
       return targetItemType === 'preprint' &&
         Boolean(
           getVal('arxivId') ||
-            getVal('archiveId') ||
-            (typeof getVal('doi') === 'string' &&
-              /^10\.48550\/arxiv\./i.test(String(getVal('doi')))),
+          getVal('archiveId') ||
+          (typeof getVal('doi') === 'string' &&
+            /^10\.48550\/arxiv\./i.test(String(getVal('doi')))),
         )
         ? 'arXiv'
         : undefined;
@@ -321,10 +321,7 @@ export function resolveCanonicalCommandFields(
     'number',
   ]) as string | number | null | undefined;
   const rawPages = firstDefined([baseMap.pages, 'firstPage', 'pages']) as
-    | string
-    | number
-    | null
-    | undefined;
+    string | number | null | undefined;
   const rawAbstract = toNullableStr(firstDefined(['abstract', 'abstractNote']));
   const rawJournalAbbr = toNullableStr(
     firstDefined(['journalAbbr', 'journalAbbreviation']),
@@ -332,15 +329,14 @@ export function resolveCanonicalCommandFields(
   const rawRights = toNullableStr(firstDefined(['rights', 'license']));
   const rawLicense = toNullableStr(firstDefined(['license', 'rights']));
   const rawEdition = firstDefined(['edition']) as
-    | string
-    | number
-    | null
-    | undefined;
+    string | number | null | undefined;
   const rawAccessDate = toNullableStr(firstDefined(['accessDate']));
   const rawUrl = toNullableStr(firstDefined(['url', 'URL']));
 
   const extraKv = extractExtraKeyValues(data.extra);
-  const explicitCitKey = toNullableStr(firstDefined(['citationKey', 'citeKey']));
+  const explicitCitKey = toNullableStr(
+    firstDefined(['citationKey', 'citeKey']),
+  );
   const rawCitationKey =
     explicitCitKey !== undefined
       ? explicitCitKey
@@ -350,7 +346,7 @@ export function resolveCanonicalCommandFields(
         extraKv['tex.ids']?.split(/[,\s]+/)[0]);
 
   const effectiveAuthorsForCitKey = Array.isArray(data.authors)
-    ? (data.authors as string[])
+    ? data.authors
     : typeof (data as Record<string, unknown>).author === 'string' &&
         String((data as Record<string, unknown>).author).trim()
       ? [String((data as Record<string, unknown>).author).trim()]
@@ -362,14 +358,7 @@ export function resolveCanonicalCommandFields(
       title: rawTitle,
       year:
         extractedYear ?? (data.year !== undefined ? Number(data.year) : null),
-      creators: Array.isArray(data.creators)
-        ? (data.creators as Array<{
-            lastName?: string | null;
-            fullName?: string | null;
-            name?: string | null;
-            fieldMode?: number | null;
-          }>)
-        : null,
+      creators: Array.isArray(data.creators) ? data.creators : null,
       authors: effectiveAuthorsForCitKey,
     });
 
@@ -405,7 +394,7 @@ export function resolveCanonicalCommandFields(
   const syncedExtra: Record<string, unknown> = {
     ...(harmonizedProbe.extraFields &&
     typeof harmonizedProbe.extraFields === 'object'
-      ? (harmonizedProbe.extraFields as Record<string, unknown>)
+      ? harmonizedProbe.extraFields
       : {}),
   };
   for (const hk of [
@@ -601,7 +590,7 @@ export async function buildCommandCreateInput(
       [
         ...(Array.isArray(data.collectionIds) ? data.collectionIds : []),
         ...(Array.isArray((data as { collections?: unknown }).collections)
-          ? ((data as unknown as { collections: string[] }).collections)
+          ? (data as unknown as { collections: string[] }).collections
           : []),
         ...(data.collectionId ? [data.collectionId] : []),
       ].filter(
@@ -657,10 +646,14 @@ export async function buildCommandCreateInput(
     abstract: canonical.rawAbstract || null,
     url: (canonical.rawUrl ?? '').trim() || null,
     citationKey: (canonical.rawCitationKey ?? '').trim()
-      ? await disambiguateCitationKey(client, canonical.rawCitationKey!.trim(), {
-          userId,
-          projectId: effectiveProjectId,
-        })
+      ? await disambiguateCitationKey(
+          client,
+          canonical.rawCitationKey!.trim(),
+          {
+            userId,
+            projectId: effectiveProjectId,
+          },
+        )
       : null,
     metadata: metadataPayload as Prisma.InputJsonValue,
     hasFile,

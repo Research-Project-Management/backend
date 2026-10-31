@@ -55,6 +55,7 @@ import { NotesRepository } from './repositories/notes.repository';
 
 // Facade
 import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
+import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core/ports/catalog.port';
 
 @Module({
   imports: [CoreModule, LibraryCoreModule],
@@ -85,6 +86,10 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     ItemCurationService,
     ItemRelationsService,
     ItemCacheCoordinator,
+    {
+      provide: ITEM_CACHE_INVALIDATOR,
+      useExisting: ItemCacheCoordinator,
+    },
     ItemService,
     CollectionsService,
     TagsService,
@@ -113,6 +118,6 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     SavedSearchesRepository,
     NotesRepository,
   ],
-  exports: [CATALOG_FACADE, CatalogFacade, ItemCacheCoordinator],
+  exports: [CATALOG_FACADE, CatalogFacade, ITEM_CACHE_INVALIDATOR],
 })
 export class CatalogModule {}

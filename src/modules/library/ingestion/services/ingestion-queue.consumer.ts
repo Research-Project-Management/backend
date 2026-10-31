@@ -12,6 +12,7 @@ import {
 import { QueuedIngestionJob } from './queue.service';
 import { PipelineService } from './pipeline.service';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
+import { isNonRetryableIngestionError } from '@/modules/library/ingestion/domain/ingestion-error.classifier';
 import { IngestionStatus } from '@prisma/client';
 
 @Processor(LIBRARY_INGESTION_QUEUE_STANDARD, { concurrency: 4 })
@@ -95,10 +96,11 @@ export class IngestionQueueConsumer
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      const isLastAttempt = isFinalAttempt;
+      const isTerminalFailure =
+        isFinalAttempt || isNonRetryableIngestionError(err);
 
       this.logger.error(
-        `[BULLMQ_ERROR] Ingestion run ${runId} failed after ${elapsed}s (isLast: ${isLastAttempt}): ${msg}`,
+        `[BULLMQ_ERROR] Ingestion run ${runId} failed after ${elapsed}s (isLast: ${isTerminalFailure}): ${msg}`,
       );
 
       const alreadyTransitioned = Boolean(
@@ -111,13 +113,13 @@ export class IngestionQueueConsumer
           .updateRunStatus(
             projectId,
             runId,
-            isLastAttempt
+            isTerminalFailure
               ? IngestionStatus.FAILED_FINAL
               : IngestionStatus.FAILED_RETRYABLE,
             {
               lastError:
                 msg ||
-                (isLastAttempt
+                (isTerminalFailure
                   ? 'Ingestion pipeline execution failed permanently'
                   : 'Ingestion pipeline execution failed (retryable)'),
             },

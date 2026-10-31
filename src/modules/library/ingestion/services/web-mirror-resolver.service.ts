@@ -2,7 +2,6 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { MirrorBibliographicMetadata } from '@/modules/library/ingestion/types/web-fetch.types';
 import {
   AcademicHttpClient,
-  LibraryConfigService,
   cleanAbstractText,
 } from '@/modules/library/core';
 import { CrossRefProvider } from '@/modules/library/ingestion/providers/crossref.provider';
@@ -46,19 +45,20 @@ interface EuropePmcRecord {
   fullTextUrlList?: { fullTextUrl?: EuropePmcFullTextUrl[] };
 }
 
-export type EnrichedMirrorBibliographicMetadata = MirrorBibliographicMetadata & {
-  volume?: string;
-  issue?: string;
-  pages?: string;
-  publisher?: string;
-  isbn?: string;
-  issn?: string;
-  arxivId?: string;
-  publicationDate?: string;
-  itemType?: string;
-  keywords?: string[];
-  creators?: unknown[];
-};
+export type EnrichedMirrorBibliographicMetadata =
+  MirrorBibliographicMetadata & {
+    volume?: string;
+    issue?: string;
+    pages?: string;
+    publisher?: string;
+    isbn?: string;
+    issn?: string;
+    arxivId?: string;
+    publicationDate?: string;
+    itemType?: string;
+    keywords?: string[];
+    creators?: unknown[];
+  };
 
 interface EuropePmcResponse {
   resultList?: { result?: EuropePmcRecord[] };
@@ -76,7 +76,6 @@ export class WebMirrorResolverService {
 
   constructor(
     @Optional() private readonly httpClient?: AcademicHttpClient,
-    @Optional() private readonly configService?: LibraryConfigService,
     @Optional() private readonly crossRefProvider?: CrossRefProvider,
     @Optional() private readonly arxivProvider?: ArxivProvider,
     @Optional() private readonly openAlexProvider?: OpenAlexProvider,
@@ -289,7 +288,7 @@ export class WebMirrorResolverService {
       );
       if (res?.metadata) {
         return this.mapProviderResultToMirror(
-          res.metadata as Record<string, unknown>,
+          res.metadata,
           'CrossRef',
           targetDoi,
         );
@@ -317,10 +316,7 @@ export class WebMirrorResolverService {
         AbortSignal.timeout(6000),
       );
       if (res?.metadata) {
-        return this.mapProviderResultToMirror(
-          res.metadata as Record<string, unknown>,
-          'arXiv',
-        );
+        return this.mapProviderResultToMirror(res.metadata, 'arXiv');
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -362,7 +358,7 @@ export class WebMirrorResolverService {
 
       if (res?.metadata) {
         return this.mapProviderResultToMirror(
-          res.metadata as Record<string, unknown>,
+          res.metadata,
           'OpenAlex',
           target.doi,
         );

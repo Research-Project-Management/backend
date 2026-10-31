@@ -64,7 +64,8 @@ function stripArxivVersion(arxivId: string): string {
 }
 
 function getIdentifierValue(
-  rowOrIdents: MatchedCandidateRow | MatchedCandidateIdentifierRow[] | undefined,
+  rowOrIdents:
+    MatchedCandidateRow | MatchedCandidateIdentifierRow[] | undefined,
   type: string,
 ): string {
   if (!rowOrIdents) return '';
@@ -79,7 +80,7 @@ function getIdentifierValue(
   }
 
   // If passed MatchedCandidateRow
-  const row = rowOrIdents as MatchedCandidateRow;
+  const row = rowOrIdents;
   if (Array.isArray(row.identifiers) && row.identifiers.length > 0) {
     const found = row.identifiers.find(
       (i) => (i.type || '').toLowerCase() === normType,
@@ -90,7 +91,10 @@ function getIdentifierValue(
   const meta = asMetaRecord(row.metadata);
   if (Array.isArray(meta.identifiers)) {
     const found = (meta.identifiers as Array<Record<string, unknown>>).find(
-      (i) => i && typeof i === 'object' && String(i.type || '').toLowerCase() === normType,
+      (i) =>
+        i &&
+        typeof i === 'object' &&
+        String(i.type || '').toLowerCase() === normType,
     );
     if (found?.value) return String(found.value).trim();
   }
@@ -107,12 +111,12 @@ export function hasAnyPopulatedIdentifier(match: MatchedCandidateRow): boolean {
   ).trim();
   return Boolean(
     (typeof match.doi === 'string' && match.doi.trim()) ||
-      meta.doi ||
-      metaArxiv ||
-      meta.pmid ||
-      meta.isbn ||
-      idents.length > 0 ||
-      metaIdents.length > 0,
+    meta.doi ||
+    metaArxiv ||
+    meta.pmid ||
+    meta.isbn ||
+    idents.length > 0 ||
+    metaIdents.length > 0,
   );
 }
 
@@ -131,7 +135,10 @@ export class DoiExactMatchSpecification implements IExactMatchSpecification {
       { metadata: { path: ['doi'], equals: cleanDoi } },
       {
         identifiers: {
-          some: { type: 'doi', value: { equals: cleanDoi, mode: 'insensitive' } },
+          some: {
+            type: 'doi',
+            value: { equals: cleanDoi, mode: 'insensitive' },
+          },
         },
       },
     ];
@@ -148,9 +155,9 @@ export class DoiExactMatchSpecification implements IExactMatchSpecification {
     const isDoiMatch = Boolean(
       (typeof match.doi === 'string' &&
         match.doi.trim().toLowerCase() === cleanDoi) ||
-        (typeof meta.doi === 'string' &&
-          meta.doi.trim().toLowerCase() === cleanDoi) ||
-        identDoi === cleanDoi,
+      (typeof meta.doi === 'string' &&
+        meta.doi.trim().toLowerCase() === cleanDoi) ||
+      identDoi === cleanDoi,
     );
 
     if (isDoiMatch) {
@@ -219,8 +226,7 @@ export class ArxivExactMatchSpecification implements IExactMatchSpecification {
       .trim()
       .toLowerCase();
     const identArxiv = (
-      getIdentifierValue(match, 'arxiv') ||
-      getIdentifierValue(match, 'arxivId')
+      getIdentifierValue(match, 'arxiv') || getIdentifierValue(match, 'arxivId')
     )
       .replace(/^arxiv:\s*/i, '')
       .toLowerCase();
@@ -229,11 +235,11 @@ export class ArxivExactMatchSpecification implements IExactMatchSpecification {
 
     const isArxivMatch = Boolean(
       metaArxiv === cleanArxivLower ||
-        metaArxiv === baseArxivLower ||
-        (metaArxiv && stripArxivVersion(metaArxiv) === baseArxivLower) ||
-        identArxiv === cleanArxivLower ||
-        identArxiv === baseArxivLower ||
-        (identArxiv && stripArxivVersion(identArxiv) === baseArxivLower),
+      metaArxiv === baseArxivLower ||
+      (metaArxiv && stripArxivVersion(metaArxiv) === baseArxivLower) ||
+      identArxiv === cleanArxivLower ||
+      identArxiv === baseArxivLower ||
+      (identArxiv && stripArxivVersion(identArxiv) === baseArxivLower),
     );
 
     if (isArxivMatch) {
@@ -271,7 +277,10 @@ export class PmidExactMatchSpecification implements IExactMatchSpecification {
       { metadata: { path: ['pmid'], equals: cleanPmid } },
       {
         identifiers: {
-          some: { type: 'pmid', value: { equals: cleanPmid, mode: 'insensitive' } },
+          some: {
+            type: 'pmid',
+            value: { equals: cleanPmid, mode: 'insensitive' },
+          },
         },
       },
     ];
@@ -324,7 +333,10 @@ export class IsbnExactMatchSpecification implements IExactMatchSpecification {
       { metadata: { path: ['isbn'], equals: cleanIsbn } },
       {
         identifiers: {
-          some: { type: 'isbn', value: { equals: cleanIsbn, mode: 'insensitive' } },
+          some: {
+            type: 'isbn',
+            value: { equals: cleanIsbn, mode: 'insensitive' },
+          },
         },
       },
     ];
@@ -337,10 +349,7 @@ export class IsbnExactMatchSpecification implements IExactMatchSpecification {
     if (!this.isApplicable(input) || !input.cleanIsbn) return null;
     const cleanIsbn = input.cleanIsbn.replace(/[-\s]/g, '').trim();
     const meta = asMetaRecord(match.metadata);
-    const identIsbn = getIdentifierValue(match, 'isbn').replace(
-      /[-\s]/g,
-      '',
-    );
+    const identIsbn = getIdentifierValue(match, 'isbn').replace(/[-\s]/g, '');
     const isIsbnMatch = Boolean(
       String(meta.isbn || '')
         .replace(/[-\s]/g, '')

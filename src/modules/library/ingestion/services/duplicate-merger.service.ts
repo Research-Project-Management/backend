@@ -14,10 +14,13 @@ import {
   LIBRARY_REDIS_KEYS,
   CATALOG_FACADE,
   ICatalogFacade,
+  ITEM_CACHE_INVALIDATOR,
+  IItemCacheInvalidator,
   EXTRACTION_FACADE,
   IExtractionFacade,
   normalizeDoi,
   normalizeProjectScopeId,
+  deriveFirstAuthor,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
@@ -32,7 +35,6 @@ import {
 import { UserId, ProjectId } from '@/modules/library/core/types/branded.types';
 import { asMetaObject } from './duplicate-detector.service';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
-import { deriveFirstAuthor } from '@/modules/library/catalog/catalog.facade';
 
 import {
   ContributorShape,
@@ -50,11 +52,9 @@ import {
   DuplicateMergeStepContext,
   executeDuplicateMergePipeline,
 } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
-import { ItemsMapper, ItemCacheCoordinator } from '@/modules/library/catalog';
+import { ItemsMapper } from '@/modules/library/catalog';
 
-export type {
-  ContributorShape,
-};
+export type { ContributorShape };
 export {
   SYSTEM_RESERVED_MERGE_KEYS,
   TOP_LEVEL_ITEM_COLUMNS,
@@ -82,7 +82,8 @@ export class DuplicateMergerService {
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()
-    private readonly cacheCoordinator?: ItemCacheCoordinator,
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
   ) {}
 
   async mergeDuplicates(
@@ -117,7 +118,7 @@ export class DuplicateMergerService {
           typeof val === 'object' &&
           !Array.isArray(val)
         ) {
-          for (const efKey of Object.keys(val as Record<string, unknown>)) {
+          for (const efKey of Object.keys(val)) {
             if (SYSTEM_RESERVED_MERGE_KEYS.has(efKey)) {
               throw new BadRequestException(
                 `Field "${efKey}" is a system-reserved key and is not allowed in merge fieldSelections`,
@@ -181,15 +182,20 @@ export class DuplicateMergerService {
         const now = new Date();
 
         try {
-          const sortedLockIds = [primary.id, ...uniqueDupIds].slice().sort();
-          for (const lockTargetId of sortedLockIds) {
-            let hash = 0;
-            for (let i = 0; i < lockTargetId.length; i++) {
-              hash = (hash << 5) - hash + lockTargetId.charCodeAt(i);
-              hash |= 0;
-            }
-            const lockKey = BigInt(hash & 0x7fffffff);
-            await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+          const lockKeys = Array.from(
+            new Set(
+              [primary.id, ...uniqueDupIds].map((lockTargetId) => {
+                let hash = 0;
+                for (let i = 0; i < lockTargetId.length; i++) {
+                  hash = (hash << 5) - hash + lockTargetId.charCodeAt(i);
+                  hash |= 0;
+                }
+                return BigInt(hash & 0x7fffffff);
+              }),
+            ),
+          ).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+          if (lockKeys.length > 0) {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(k) FROM unnest(ARRAY[${Prisma.join(lockKeys)}]::bigint[]) AS k`;
           }
         } catch (err) {
           this.logger.warn(
@@ -210,7 +216,8 @@ export class DuplicateMergerService {
           }),
         ]);
         const initialNotes = (rawInitialNotes || []).filter(
-          (n): n is { id: string; itemId: string } => typeof n.itemId === 'string',
+          (n): n is { id: string; itemId: string } =>
+            typeof n.itemId === 'string',
         );
         const initialAttachments = rawInitialAttachments || [];
 
@@ -259,7 +266,7 @@ export class DuplicateMergerService {
           extraFields: selectedExtraFields,
           metadata: _selectedMetadata,
           ...topScalarSelections
-        } = rawSelections as Record<string, unknown>;
+        } = rawSelections;
         const unpackedExtraSelections: Record<string, unknown> = {};
         if (
           selectedExtraFields &&
@@ -291,20 +298,8 @@ export class DuplicateMergerService {
 
         const pipelineCtx: DuplicateMergeStepContext = {
           tx,
-          primary: primary as Record<string, unknown> & {
-            id: string;
-            citationKey?: string | null;
-            metadata?: unknown;
-          },
-          duplicates: duplicates as Array<
-            Record<string, unknown> & {
-              id: string;
-              citationKey?: string | null;
-              doi?: string | null;
-              metadata?: unknown;
-              contributors?: unknown;
-            }
-          >,
+          primary: primary,
+          duplicates: duplicates,
           uniqueDupIds,
           rawSelections,
           scalarSelections,
@@ -343,24 +338,26 @@ export class DuplicateMergerService {
               });
 
         const [noteCount, attachmentCount] = await Promise.all([
-          tx.note?.count ? tx.note.count({
-            where: { itemId: primary.id, deletedAt: null },
-          }) : Promise.resolve(undefined),
-          tx.attachment?.count ? tx.attachment.count({
-            where: { itemId: primary.id, deletedAt: null },
-          }) : Promise.resolve(undefined),
+          tx.note?.count
+            ? tx.note.count({
+                where: { itemId: primary.id, deletedAt: null },
+              })
+            : Promise.resolve(undefined),
+          tx.attachment?.count
+            ? tx.attachment.count({
+                where: { itemId: primary.id, deletedAt: null },
+              })
+            : Promise.resolve(undefined),
         ]);
 
         const { topLevelData } =
           await applyMergedUpdatesAndClearDuplicateCitationKeyCollision({
             tx,
-            primary: primary as Record<string, unknown>,
-            duplicates: duplicates as Array<Record<string, unknown>>,
+            primary: primary,
+            duplicates: duplicates,
             effectiveMergedItemType,
             derivedFirstAuthor,
-            finalContributors: primaryContributors as Array<
-              Record<string, unknown>
-            >,
+            finalContributors: primaryContributors,
             noteCount,
             attachmentCount,
             backfillFields,
@@ -414,7 +411,7 @@ export class DuplicateMergerService {
           helpers,
           eventScope: { userId: String(userId), projectId: effectiveProjectId },
           primaryId: primary.id,
-          duplicates: duplicates as Array<{ id: string; metadata?: unknown }>,
+          duplicates: duplicates,
           userId: String(userId),
           effectiveProjectId,
           now,
@@ -432,7 +429,7 @@ export class DuplicateMergerService {
 
         const finalPrimary = reloadedPrimary ?? updatedPrimary;
         const domainPrimary = ItemsMapper.toDomain(
-          finalPrimary as unknown as Parameters<typeof ItemsMapper.toDomain>[0],
+          finalPrimary,
           String(userId),
         );
         await helpers.appendChange(eventScope, {
@@ -462,8 +459,14 @@ export class DuplicateMergerService {
     );
 
     // Invalidate Redis cache immediately after DB transaction commits before slow S3 cleanup
-    if (this.cacheCoordinator) {
-      await this.cacheCoordinator.invalidateForWrite({
+    const invalidator =
+      this.cacheCoordinator?.invalidateForWrite
+        ? this.cacheCoordinator
+        : this.catalogGateway?.invalidateForWrite
+          ? this.catalogGateway
+          : undefined;
+    if (invalidator?.invalidateForWrite) {
+      await invalidator.invalidateForWrite({
         userId: String(userId),
         projectId: effectiveProjectId,
         itemIds: [primary.id, ...uniqueDupIds],

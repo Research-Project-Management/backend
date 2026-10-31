@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { isUUID } from 'class-validator';
+import { isUuid as isValidUuid } from '@/core';
 import {
   SearchOptions,
   FacetResult,
@@ -7,8 +7,7 @@ import {
 import { isProjectScopeId, LIBRARY_REDIS_KEYS } from '@/modules/library/core';
 import { extractSearchQueryIdentifiers } from '@/modules/library/search/domain/item-specifications';
 
-export const isValidUuid = (val: unknown): val is string =>
-  typeof val === 'string' && isUUID(val);
+export { isValidUuid };
 
 export function sanitizeUuidSearchOptions(
   options: SearchOptions,

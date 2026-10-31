@@ -100,9 +100,18 @@ export interface AnnotationEntity {
   annotationSortIndex?: string | null;
   color: string;
   quoteText?: string | null;
+  text?: string | null;
   comment?: string | null;
   tags: string[];
   rectCoords?: unknown;
+  rects?: Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    width?: number;
+    height?: number;
+  }>;
   authorId: string;
   version: number;
   deletedAt?: Date | null;
@@ -111,6 +120,7 @@ export interface AnnotationEntity {
 }
 
 export interface CreateAnnotationData {
+  id?: string;
   attachmentId: string;
   type?: AnnotationType;
   pageIndex: number;
@@ -131,6 +141,8 @@ export interface UpdateAnnotationData {
   comment?: string;
   tags?: string[];
   rectCoords?: unknown;
+  y?: number;
+  x?: number;
   annotationSortIndex?: string;
 }
 
@@ -211,6 +223,8 @@ export interface OcrPageProvenance {
 
 export interface OcrProvenanceData {
   totalOcrPages: number;
+  ocrPages?: number;
+  digitalPages?: number;
   avgConfidence: number;
   executionTimeMs: number;
   pages: OcrPageProvenance[];
@@ -220,7 +234,9 @@ export interface ExtractedPdfDocument {
   metadata: ExtractedPdfMetadata;
   pages: Array<{
     pageIndex: number;
+    pageNumber?: number;
     textContent: string;
+    text?: string;
     charOffset: number;
   }>;
   references?: BibliographicReference[];
@@ -263,6 +279,7 @@ export interface TrustedExtractionProvenance {
   engineUsed: ExtractionEngineKind;
   executionTimeMs: number;
   qualityBreakdown: QualityScoreBreakdown;
+  fieldProvenance?: Record<string, { source: string; confidence: number }>;
   rawMatches?: {
     xmpFound?: boolean;
     detectedDoi?: string;
@@ -298,4 +315,3 @@ export interface TrustedExtractionResult {
 
   provenance: TrustedExtractionProvenance;
 }
-

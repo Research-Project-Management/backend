@@ -1,27 +1,25 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import * as zlib from 'zlib';
-import { promisify } from 'util';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   parseCreatorString,
   isNoiseAuthorName,
   LIBRARY_EVENT_TYPES,
+  CATALOG_FACADE,
+  ICatalogFacade,
+  ITEM_CACHE_INVALIDATOR,
+  IItemCacheInvalidator,
   normalizeProjectScopeId,
+  gzipAsync,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
-import {
-  ItemsMapper,
-  ItemCacheCoordinator,
-} from '@/modules/library/catalog';
+import { ItemsMapper } from '@/modules/library/catalog';
 import {
   buildExtractedMetadataSyncPlan,
   ExtractionSyncAttachmentInput,
   ExtractionSyncDocumentInput,
 } from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
-
-const gzipAsync = promisify(zlib.gzip);
 
 @Injectable()
 export class ExtractionMetadataSynchronizer {
@@ -35,7 +33,11 @@ export class ExtractionMetadataSynchronizer {
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
     @Optional()
-    private readonly cacheCoordinator?: ItemCacheCoordinator,
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
+    @Optional()
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
   ) {}
 
   /**
@@ -43,9 +45,94 @@ export class ExtractionMetadataSynchronizer {
    * and synchronizes extracted metadata (DOI, arXiv, title, year, contributors, keywords, notes) onto Item model.
    */
   async offloadFullTextAndSyncMetadata(
-    attachment: Record<string, unknown> & { id: string; itemId: string; fileId?: string | null; metadata?: unknown; item?: Record<string, unknown> & { id?: string; userId?: string; projectId?: string | null; title?: string; doi?: string | null; arxivId?: string | null; abstract?: string | null; year?: number | null; metadata?: unknown; contributors?: unknown[]; itemTags?: unknown[]; notesList?: unknown[] } | null },
-    doc: { references?: unknown[]; sections?: unknown[]; figures?: unknown[]; tables?: unknown[]; formulas?: unknown[]; fullText?: string; pages?: Array<{ textContent?: string }>; metadata?: { rawText?: string; keywords?: string[]; notes?: Array<{ content: string; type?: string }>; title?: string; doi?: string; arxivId?: string; abstract?: string; year?: number; numberOfPages?: number; publicationTitle?: string; journal?: string; proceedingsTitle?: string; conferenceName?: string; bookTitle?: string; isbn?: string; issn?: string; pmid?: string; volume?: string; issue?: string; pages?: string; publisher?: string; place?: string; publicationDate?: string; primaryCategory?: string; authors?: string[]; creators?: Array<{ creatorType?: string; fullName?: string; name?: string; firstName?: string; lastName?: string; fieldMode?: number }> } },
-    extractionResult: { text?: string; sections?: unknown[]; figures?: unknown[]; tables?: unknown[]; formulas?: unknown[]; references?: unknown[]; markdown?: string; pageCount?: number; qualityScore?: number; engineUsed?: string },
+    attachment: Record<string, unknown> & {
+      id: string;
+      itemId: string;
+      fileId?: string | null;
+      metadata?: unknown;
+      item?:
+        | (Record<string, unknown> & {
+            id?: string;
+            userId?: string;
+            projectId?: string | null;
+            title?: string;
+            doi?: string | null;
+            arxivId?: string | null;
+            abstract?: string | null;
+            year?: number | null;
+            metadata?: unknown;
+            contributors?: unknown[];
+            itemTags?: unknown[];
+            notesList?: unknown[];
+          })
+        | null;
+    },
+    doc: {
+      references?: unknown[];
+      sections?: unknown[];
+      figures?: unknown[];
+      tables?: unknown[];
+      formulas?: unknown[];
+      fullText?: string;
+      pages?: Array<{
+        pageIndex?: number;
+        pageNumber?: number;
+        textContent?: string;
+        text?: string;
+      }>;
+      ocrProvenance?: {
+        totalOcrPages?: number;
+        ocrPages?: number;
+        digitalPages?: number;
+      };
+      metadata?: {
+        rawText?: string;
+        keywords?: string[];
+        notes?: Array<{ content: string; type?: string }>;
+        title?: string;
+        doi?: string;
+        arxivId?: string;
+        abstract?: string;
+        year?: number;
+        numberOfPages?: number;
+        publicationTitle?: string;
+        journal?: string;
+        proceedingsTitle?: string;
+        conferenceName?: string;
+        bookTitle?: string;
+        isbn?: string;
+        issn?: string;
+        pmid?: string;
+        volume?: string;
+        issue?: string;
+        pages?: string;
+        publisher?: string;
+        place?: string;
+        publicationDate?: string;
+        primaryCategory?: string;
+        authors?: string[];
+        creators?: Array<{
+          creatorType?: string;
+          fullName?: string;
+          name?: string;
+          firstName?: string;
+          lastName?: string;
+          fieldMode?: number;
+        }>;
+      };
+    },
+    extractionResult: {
+      text?: string;
+      sections?: unknown[];
+      figures?: unknown[];
+      tables?: unknown[];
+      formulas?: unknown[];
+      references?: unknown[];
+      markdown?: string;
+      pageCount?: number;
+      qualityScore?: number;
+      engineUsed?: string;
+    },
     options?: { skipOutboxPublish?: boolean },
   ): Promise<{ outboxPublished: boolean }> {
     let outboxPublished = false;
@@ -62,12 +149,12 @@ export class ExtractionMetadataSynchronizer {
       (doc.metadata?.notes && doc.metadata.notes.length > 0) ||
       Boolean(
         doc.metadata &&
-          (doc.metadata.title ||
-            doc.metadata.doi ||
-            doc.metadata.abstract ||
-            doc.metadata.year ||
-            (doc.metadata.authors && doc.metadata.authors.length > 0) ||
-            (doc.metadata.creators && doc.metadata.creators.length > 0)),
+        (doc.metadata.title ||
+          doc.metadata.doi ||
+          doc.metadata.abstract ||
+          doc.metadata.year ||
+          (doc.metadata.authors && doc.metadata.authors.length > 0) ||
+          (doc.metadata.creators && doc.metadata.creators.length > 0)),
       )
     ) {
       try {
@@ -75,8 +162,32 @@ export class ExtractionMetadataSynchronizer {
           extractionResult.text ??
           doc.fullText ??
           (Array.isArray(doc.pages) && doc.pages.length > 0
-            ? doc.pages.map((p) => p.textContent || '').join('\n')
-            : doc.metadata?.rawText ?? '');
+            ? doc.pages.map((p) => p.text ?? p.textContent ?? '').join('\n')
+            : (doc.metadata?.rawText ?? ''));
+
+        const ocrPagesCount =
+          doc.ocrProvenance?.ocrPages ?? doc.ocrProvenance?.totalOcrPages ?? 0;
+        const digitalPagesCount =
+          doc.ocrProvenance?.digitalPages ??
+          Math.max(0, (doc.pages?.length ?? 0) - ocrPagesCount);
+        const isScanned = Boolean(
+          doc.ocrProvenance && ocrPagesCount > 0 && digitalPagesCount === 0,
+        );
+        const ocrStatus =
+          doc.ocrProvenance && ocrPagesCount > 0 ? 'completed' : 'none';
+        const normalizedPages = Array.isArray(doc.pages)
+          ? doc.pages.map((p, idx) => ({
+              pageNumber:
+                p.pageNumber ??
+                (typeof p.pageIndex === 'number' ? p.pageIndex + 1 : idx + 1),
+              text: p.text ?? p.textContent ?? '',
+            }))
+          : [];
+        const resolvedSections =
+          extractionResult.sections && extractionResult.sections.length > 0
+            ? extractionResult.sections
+            : (doc.sections ?? []);
+
         const fulltextTree = {
           title: doc.metadata?.title,
           abstract: doc.metadata?.abstract,
@@ -86,17 +197,20 @@ export class ExtractionMetadataSynchronizer {
           year: doc.metadata?.year,
           keywords: doc.metadata?.keywords,
           notes: doc.metadata?.notes,
-          sections: extractionResult.sections ?? [],
-          figures: extractionResult.figures ?? [],
-          tables: extractionResult.tables ?? [],
-          formulas: extractionResult.formulas ?? [],
-          references: extractionResult.references ?? [],
+          isScanned,
+          ocrStatus,
+          sections: resolvedSections,
+          figures: extractionResult.figures ?? doc.figures ?? [],
+          tables: extractionResult.tables ?? doc.tables ?? [],
+          formulas: extractionResult.formulas ?? doc.formulas ?? [],
+          references: extractionResult.references ?? doc.references ?? [],
+          pages: normalizedPages,
           markdown: extractionResult.markdown ?? '',
           plainText: combinedPlainText,
           pageCount:
             extractionResult.pageCount ??
             doc.metadata?.numberOfPages ??
-            (Array.isArray(doc.pages) ? doc.pages.length : 0),
+            normalizedPages.length,
         };
 
         let payloadToSave: Record<string, unknown> = {
@@ -134,6 +248,8 @@ export class ExtractionMetadataSynchronizer {
                 uncompressedSize: jsonBuffer.length,
                 title: doc.metadata?.title,
                 abstract: doc.metadata?.abstract,
+                isScanned,
+                ocrStatus,
                 referenceCount: fulltextTree.references.length,
                 pageCount: fulltextTree.pageCount,
               };
@@ -263,7 +379,11 @@ export class ExtractionMetadataSynchronizer {
                     idx,
                     itemCreatorType,
                   );
-                  const first = (cand.firstName || parsed.firstName || '').trim();
+                  const first = (
+                    cand.firstName ||
+                    parsed.firstName ||
+                    ''
+                  ).trim();
                   const last = (cand.lastName || parsed.lastName || '').trim();
                   const full =
                     (cand.firstName || cand.lastName
@@ -296,7 +416,9 @@ export class ExtractionMetadataSynchronizer {
                 await this.extractionRepo.createContributors(
                   validContributors as unknown as Prisma.ContributorCreateManyInput[],
                   tx,
-                  skipVersionIncrement ? { skipVersionIncrement: true } : undefined,
+                  skipVersionIncrement
+                    ? { skipVersionIncrement: true }
+                    : undefined,
                 );
               }
             }
@@ -315,7 +437,9 @@ export class ExtractionMetadataSynchronizer {
                   itemId: attachment.itemId,
                   rawTags: tagsToSync.slice(0, Math.max(1, 25 - tagCount)),
                   projectId: attachment.item?.projectId,
-                  ...(skipVersionIncrement ? { skipVersionIncrement: true } : {}),
+                  ...(skipVersionIncrement
+                    ? { skipVersionIncrement: true }
+                    : {}),
                 },
                 tx,
               );
@@ -335,7 +459,9 @@ export class ExtractionMetadataSynchronizer {
                   itemId: attachment.itemId,
                   notes: notesToSync,
                   projectId: attachment.item?.projectId,
-                  ...(skipVersionIncrement ? { skipVersionIncrement: true } : {}),
+                  ...(skipVersionIncrement
+                    ? { skipVersionIncrement: true }
+                    : {}),
                 },
                 tx,
               );
@@ -402,14 +528,24 @@ export class ExtractionMetadataSynchronizer {
             await this.extractionRepo.updateItem(attachment.itemId, itemPatch);
           }
 
-          if (this.cacheCoordinator && ownerUserId) {
-            await this.cacheCoordinator.invalidateForWrite({
+          const invalidator =
+            this.cacheCoordinator?.invalidateForWrite
+              ? this.cacheCoordinator
+              : this.catalogGateway?.invalidateForWrite
+                ? this.catalogGateway
+                : undefined;
+          if (invalidator?.invalidateForWrite && ownerUserId) {
+            await invalidator.invalidateForWrite({
               userId: ownerUserId,
               projectId: ownerProjectId,
               itemIds: [attachment.itemId],
             });
           }
-        } else if (!options?.skipOutboxPublish && this.libraryTx && ownerUserId) {
+        } else if (
+          !options?.skipOutboxPublish &&
+          this.libraryTx &&
+          ownerUserId
+        ) {
           await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
             await helpers.publishOutbox(
               eventScope,

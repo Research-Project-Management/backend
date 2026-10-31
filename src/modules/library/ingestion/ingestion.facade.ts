@@ -92,7 +92,11 @@ export class IngestionFacade implements IIngestionFacade {
 
   async reconcileExtractedCandidate(
     payload: ReconcileExtractedCandidatePayload,
-  ): Promise<{ updated: boolean; updatedFields: string[]; rejectedCitedDoi?: string }> {
+  ): Promise<{
+    updated: boolean;
+    updatedFields: string[];
+    rejectedCitedDoi?: string;
+  }> {
     return this.ingestionService.reconcileExtractedCandidate(payload);
   }
 }

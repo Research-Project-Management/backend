@@ -217,20 +217,59 @@ export interface FallbackRisRecord {
 }
 
 const REFER_TYPE_TO_RIS_MAP: Record<string, string> = {
-  'journal article': 'JOUR', article: 'JOUR', book: 'BOOK', 'edited book': 'BOOK',
-  'book section': 'CHAP', 'conference proceedings': 'CONF', 'conference paper': 'CONF',
-  thesis: 'THES', dissertation: 'THES', report: 'RPRT', patent: 'PAT',
-  'web page': 'ELEC', 'electronic article': 'JOUR', 'electronic book': 'BOOK',
-  'computer program': 'COMP', dataset: 'DATA', 'newspaper article': 'NEWS',
-  'magazine article': 'MGZN', manuscript: 'UNPB', 'unpublished work': 'UNPB',
-  preprint: 'UNPB', audiovisual: 'VIDEO', film: 'MPCT', map: 'MAP',
-  statute: 'STAT', bill: 'BILL', case: 'CASE', hearing: 'HEAR', generic: 'GEN',
+  'journal article': 'JOUR',
+  article: 'JOUR',
+  book: 'BOOK',
+  'edited book': 'BOOK',
+  'book section': 'CHAP',
+  'conference proceedings': 'CONF',
+  'conference paper': 'CONF',
+  thesis: 'THES',
+  dissertation: 'THES',
+  report: 'RPRT',
+  patent: 'PAT',
+  'web page': 'ELEC',
+  'electronic article': 'JOUR',
+  'electronic book': 'BOOK',
+  'computer program': 'COMP',
+  dataset: 'DATA',
+  'newspaper article': 'NEWS',
+  'magazine article': 'MGZN',
+  manuscript: 'UNPB',
+  'unpublished work': 'UNPB',
+  preprint: 'UNPB',
+  audiovisual: 'VIDEO',
+  film: 'MPCT',
+  map: 'MAP',
+  statute: 'STAT',
+  bill: 'BILL',
+  case: 'CASE',
+  hearing: 'HEAR',
+  generic: 'GEN',
 };
 
 const REFER_SIMPLE_TAG_MAP: Record<string, string> = {
-  T: 'TI', A: 'AU', E: 'ED', D: 'PY', J: 'JO', B: 'T2', S: 'T3', V: 'VL', N: 'IS',
-  I: 'PB', C: 'CY', U: 'UR', X: 'AB', K: 'KW', Z: 'N1', O: 'N1', F: 'ID', '@': 'SN',
-  G: 'LA', '7': 'ET', '9': 'M3',
+  T: 'TI',
+  A: 'AU',
+  E: 'ED',
+  D: 'PY',
+  J: 'JO',
+  B: 'T2',
+  S: 'T3',
+  V: 'VL',
+  N: 'IS',
+  I: 'PB',
+  C: 'CY',
+  U: 'UR',
+  X: 'AB',
+  K: 'KW',
+  Z: 'N1',
+  O: 'N1',
+  F: 'ID',
+  '@': 'SN',
+  G: 'LA',
+  '7': 'ET',
+  '9': 'M3',
 };
 
 /**
@@ -294,7 +333,9 @@ export function convertReferToRis(content: string): string {
         risLines.push(`SP  - ${val}`);
       }
     } else if (code === 'R') {
-      if (/^(?:doi:\s*|https?:\/\/(?:dx\.)?doi\.org\/)?10\.\d{4,9}\//i.test(val)) {
+      if (
+        /^(?:doi:\s*|https?:\/\/(?:dx\.)?doi\.org\/)?10\.\d{4,9}\//i.test(val)
+      ) {
         risLines.push(`DO  - ${val}`);
       } else {
         risLines.push(`M1  - ${val}`, `DO  - ${val}`);
@@ -313,9 +354,7 @@ export class RisFallbackParser {
    * Resilient line-by-line parser for non-standard RIS dialect variations
    */
   static parse(content: string): RisItem[] {
-    return this.parseRawRecords(content).map((rec) =>
-      this.finalizeRecord(rec),
-    );
+    return this.parseRawRecords(content).map((rec) => this.finalizeRecord(rec));
   }
 
   /**
@@ -393,10 +432,10 @@ export class RisFallbackParser {
           break;
         case 'TI':
         case 'T1':
-          if ( value ) currentRecord.title = value;
+          if (value) currentRecord.title = value;
           break;
         case 'ST':
-          if ( value ) currentRecord.shortTitle = value;
+          if (value) currentRecord.shortTitle = value;
           break;
         case 'AU':
         case 'A1':
@@ -485,7 +524,8 @@ export class RisFallbackParser {
             value,
             currentRecord.isPubMedDb,
           );
-          if (ids.pmcid && !currentRecord.pmcid) currentRecord.pmcid = ids.pmcid;
+          if (ids.pmcid && !currentRecord.pmcid)
+            currentRecord.pmcid = ids.pmcid;
           if (ids.pmid && !currentRecord.pmid) currentRecord.pmid = ids.pmid;
           if (ids.arxivId && !currentRecord.arxivId) {
             currentRecord.arxivId = ids.arxivId;
@@ -652,8 +692,7 @@ export class RisFallbackParser {
 
     const doi = record.doi ? normalizeDoi(record.doi) || record.doi : undefined;
     const publicationDate =
-      record.publicationDate ||
-      (record.year ? String(record.year) : undefined);
+      record.publicationDate || (record.year ? String(record.year) : undefined);
 
     return {
       itemType: record.itemType,

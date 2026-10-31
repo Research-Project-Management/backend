@@ -12,12 +12,12 @@ import {
   TransactionHelpers,
   CATALOG_FACADE,
   ICatalogFacade,
+  IItemCacheInvalidator, ITEM_CACHE_INVALIDATOR,
   LIBRARY_REDIS_KEYS,
   normalizeProjectScopeId,
   extractFileIdFromUrl,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
-import { ItemCacheCoordinator } from '@/modules/library/catalog';
 import { CreateAttachmentInput } from '@/modules/library/extraction/types/attachments.types';
 import {
   validateAttachmentInvariants,
@@ -25,6 +25,7 @@ import {
 } from '@/modules/library/extraction/domain/attachments.domain';
 
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
+import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import type {
@@ -59,7 +60,9 @@ export class AttachmentsService {
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()
-    private readonly cacheCoordinator?: ItemCacheCoordinator,
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
+    @Optional() private readonly extractionRepo?: ExtractionRepository,
   ) {}
 
   private async assertItemExists(
@@ -294,12 +297,9 @@ export class AttachmentsService {
     projectId?: string,
   ): Promise<void> {
     if (!itemId) return;
-    if (this.cacheCoordinator) {
-      await this.cacheCoordinator.invalidateForWrite({
-        userId,
-        projectId,
-        itemIds: [itemId],
-      });
+    const invalidator = this.cacheCoordinator?.invalidateForWrite ? this.cacheCoordinator : this.catalogGateway?.invalidateForWrite ? this.catalogGateway : undefined;
+    if (invalidator?.invalidateForWrite) {
+      await invalidator.invalidateForWrite({ userId, projectId, itemIds: [itemId] });
       return;
     }
     if (!this.cache) return;
@@ -592,7 +592,11 @@ export class AttachmentsService {
       },
     );
 
-    if (this.cache) {
+    if (this.cacheCoordinator?.invalidateForWrite) {
+      await this.cacheCoordinator.invalidateForWrite({ userId, projectId, itemIds: [itemId] });
+    } else if (this.catalogGateway?.invalidateForWrite) {
+      await this.catalogGateway.invalidateForWrite({ userId, projectId, itemIds: [itemId] });
+    } else if (this.cache) {
       const validProjectId = normalizeProjectScopeId(projectId);
       const scopeId = validProjectId || userId;
       await Promise.all([
@@ -636,13 +640,8 @@ export class AttachmentsService {
     return { buffer: thumbBuffer, mimeType: 'image/webp' };
   }
 
-  async renameAttachment(
-    userId: UserId | string,
-    attachmentId: AttachmentId | string,
-    dto: RenameAttachmentDto,
-    projectId?: ProjectId | string,
-  ) {
-    const renamer =
+  private getRenamerService(): AttachmentRenamerService {
+    return (
       this.renamerService ??
       new AttachmentRenamerService(
         this.repo,
@@ -650,8 +649,17 @@ export class AttachmentsService {
         this.cache,
         this.libraryTx,
         this.cacheCoordinator,
-      );
-    return renamer.renameAttachment(userId, attachmentId, dto, projectId);
+      )
+    );
+  }
+
+  async renameAttachment(
+    userId: UserId | string,
+    attachmentId: AttachmentId | string,
+    dto: RenameAttachmentDto,
+    projectId?: ProjectId | string,
+  ) {
+    return this.getRenamerService().renameAttachment(userId, attachmentId, dto, projectId);
   }
 
   async batchRenameAttachments(
@@ -662,16 +670,7 @@ export class AttachmentsService {
     renamedCount: number;
     results: Array<{ attachmentId: string; itemId: string; oldFilename: string; newFilename: string }>;
   }> {
-    const renamer =
-      this.renamerService ??
-      new AttachmentRenamerService(
-        this.repo,
-        this.catalogGateway,
-        this.cache,
-        this.libraryTx,
-        this.cacheCoordinator,
-      );
-    return renamer.batchRenameAttachments(userId, dto, projectId);
+    return this.getRenamerService().batchRenameAttachments(userId, dto, projectId);
   }
 
   async resolveItemUrl(
@@ -691,16 +690,21 @@ export class AttachmentsService {
     return itemUrl;
   }
 
+  async getExtractionStatusBreakdown(scope?: { userId?: string; projectId?: string | null }): Promise<Record<string, number>> {
+    return this.extractionRepo?.getExtractionStatusBreakdown ? this.extractionRepo.getExtractionStatusBreakdown(scope) : {};
+  }
+
   async reExtractAttachment(
     userId: string,
     attachmentId: string,
     projectId?: string,
   ): Promise<{ status: string; attachmentId: string; message: string }> {
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
     const attachment = await this.repo.findUnique(attachmentId, { item: true });
     const isAuthorized =
-      attachment &&
-      (projectId && projectId !== 'user'
-        ? attachment.item.projectId === projectId
+      attachment && !attachment.deletedAt && attachment.item && !attachment.item.deletedAt &&
+      (effectiveProjectId
+        ? attachment.item.projectId === effectiveProjectId
         : attachment.item.userId === userId && !attachment.item.projectId);
     if (!isAuthorized) throw new NotFoundException(`Attachment ${attachmentId} not found`);
     if (
@@ -709,7 +713,7 @@ export class AttachmentsService {
     ) {
       throw new BadRequestException(`Attachment ${attachmentId} is not a PDF file`);
     }
-    const eventScope = projectId && projectId !== 'user' ? { projectId, userId } : { userId };
+    const eventScope = effectiveProjectId ? { projectId: effectiveProjectId, userId } : { userId };
 
     return this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
@@ -727,7 +731,7 @@ export class AttachmentsService {
             attachmentId: attachment.id,
             itemId: attachment.itemId,
             userId,
-            projectId: projectId && projectId !== 'user' ? projectId : undefined,
+            projectId: effectiveProjectId,
           },
         );
         return {

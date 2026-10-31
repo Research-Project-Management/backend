@@ -74,7 +74,11 @@ export interface ImportSourceItem {
     fullName?: string;
     orderIndex?: number;
   }>;
-  identifiers?: Array<{ type: string; value: string; canonicalUri?: string | null }>;
+  identifiers?: Array<{
+    type: string;
+    value: string;
+    canonicalUri?: string | null;
+  }>;
   [key: string]: unknown;
 }
 
@@ -206,11 +210,9 @@ export function buildImportItemPayload(
     size: att.size !== undefined && att.size !== null ? Number(att.size) : 0,
     linkMode: (att as Record<string, unknown>).linkMode as string | undefined,
     attachmentType: (att as Record<string, unknown>).attachmentType as
-      | string
-      | undefined,
+      string | undefined,
     metadata: (att as Record<string, unknown>).metadata as
-      | Record<string, unknown>
-      | undefined,
+      Record<string, unknown> | undefined,
     annotations: Array.isArray((att as Record<string, unknown>).annotations)
       ? (
           (att as Record<string, unknown>).annotations as Array<
@@ -220,7 +222,7 @@ export function buildImportItemPayload(
           .filter((ann) => ann && !ann.deletedAt)
           .map((ann) => ({
             type: ann.type || 'highlight',
-            color: ann.color || '#ffeb3b',
+            color: ann.color || '#ffd400',
             pageIndex: typeof ann.pageIndex === 'number' ? ann.pageIndex : 0,
             pageLabel: typeof ann.pageLabel === 'string' ? ann.pageLabel : '',
             annotationSortIndex:
@@ -228,8 +230,7 @@ export function buildImportItemPayload(
                 ? ann.annotationSortIndex
                 : '',
             rectCoords: ann.rectCoords ?? null,
-            quoteText:
-              typeof ann.quoteText === 'string' ? ann.quoteText : null,
+            quoteText: typeof ann.quoteText === 'string' ? ann.quoteText : null,
             comment: typeof ann.comment === 'string' ? ann.comment : '',
             tags: Array.isArray(ann.tags) ? (ann.tags as string[]) : [],
             authorId: userId,

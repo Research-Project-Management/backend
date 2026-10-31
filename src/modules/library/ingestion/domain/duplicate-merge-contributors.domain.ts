@@ -1,7 +1,5 @@
 import { Prisma } from '@prisma/client';
-import {
-  asMetaObject,
-} from '@/modules/library/ingestion/services/duplicate-detector.service';
+import { asMetaObject } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import {
   normalizeDoi,
   normalizeArxivId,
@@ -24,14 +22,23 @@ export interface ContributorShape {
   orderIndex?: number;
 }
 
-export const IDENTIFIER_META_KEYS = ['arxivId', 'pmid', 'pmcid', 'isbn', 'issn'] as const;
+export const IDENTIFIER_META_KEYS = [
+  'arxivId',
+  'pmid',
+  'pmcid',
+  'isbn',
+  'issn',
+] as const;
 
 export async function syncMergedContributors(
   tx: Prisma.TransactionClient,
   primaryId: string,
   chosenContributors: ContributorShape[] | string[] | undefined,
   duplicates: Array<{ contributors?: unknown; metadata?: unknown }>,
-  primary?: Record<string, unknown> & { contributors?: unknown; metadata?: unknown },
+  primary?: Record<string, unknown> & {
+    contributors?: unknown;
+    metadata?: unknown;
+  },
   primaryMeta?: Record<string, unknown>,
 ): Promise<Array<Record<string, unknown>>> {
   const mapContributorInput = (c: ContributorShape | string, idx: number) => {
@@ -46,7 +53,7 @@ export async function syncMergedContributors(
       (typeof c === 'string' ? c : '')
     ).trim();
     if (!firstName && !lastName && fullName) {
-      const parsed = parseCreatorString(fullName, idx, creatorType as never);
+      const parsed = parseCreatorString(fullName, idx, creatorType);
       firstName = parsed.firstName || '';
       lastName = parsed.lastName || '';
       fullName = parsed.fullName || fullName;
@@ -76,11 +83,17 @@ export async function syncMergedContributors(
     }));
     primaryMeta.authors = mapped
       .filter((c) => !c.creatorType || c.creatorType === 'author')
-      .map((c) => c.fullName || [c.firstName, c.lastName].filter(Boolean).join(' '))
+      .map(
+        (c) =>
+          c.fullName || [c.firstName, c.lastName].filter(Boolean).join(' '),
+      )
       .filter(Boolean);
   };
 
-  const getContribs = (item?: { contributors?: unknown; metadata?: unknown }): Array<ContributorShape | string> => {
+  const getContribs = (item?: {
+    contributors?: unknown;
+    metadata?: unknown;
+  }): Array<ContributorShape | string> => {
     if (!item) return [];
     if (Array.isArray(item.contributors) && item.contributors.length > 0) {
       return item.contributors as ContributorShape[];
@@ -131,7 +144,9 @@ export async function syncMergedContributors(
             const existingLocked = Array.isArray(primaryMeta.lockedFields)
               ? (primaryMeta.lockedFields as string[])
               : [];
-            primaryMeta.lockedFields = Array.from(new Set([...existingLocked, 'creators', 'authors']));
+            primaryMeta.lockedFields = Array.from(
+              new Set([...existingLocked, 'creators', 'authors']),
+            );
           }
           return data;
         }
@@ -147,7 +162,11 @@ export async function syncMergedContributors(
       .filter(Boolean)
       .some((t) => t.length >= 2 && !/^[A-Z]+$/.test(t));
   const countFullGiven = (list: Array<ContributorShape | string>) =>
-    list.reduce((acc, c, idx) => acc + (isFullGiven(mapContributorInput(c, idx).firstName) ? 1 : 0), 0);
+    list.reduce(
+      (acc, c, idx) =>
+        acc + (isFullGiven(mapContributorInput(c, idx).firstName) ? 1 : 0),
+      0,
+    );
 
   const primaryContribCount =
     typeof tx.contributor?.count === 'function'
@@ -170,7 +189,12 @@ export async function syncMergedContributors(
       };
     })
     .filter((e) => e.list.length > 0)
-    .sort((a, b) => b.auth - a.auth || b.fullGivenCount - a.fullGivenCount || b.list.length - a.list.length);
+    .sort(
+      (a, b) =>
+        b.auth - a.auth ||
+        b.fullGivenCount - a.fullGivenCount ||
+        b.list.length - a.list.length,
+    );
 
   if (sortedDups.length === 0) return [];
   const bestDonor = sortedDups[0];
@@ -194,8 +218,10 @@ export async function syncMergedContributors(
     const shouldUpgrade =
       (bestDonor.auth >= primaryAuth &&
         bestDonor.list.length >= primaryContribs.length &&
-        (bestDonor.fullGivenCount > primaryFullGiven || bestDonor.list.length > primaryContribs.length)) ||
-      (bestDonor.auth > primaryAuth + highAuthAdvantage && bestDonor.list.length > 0);
+        (bestDonor.fullGivenCount > primaryFullGiven ||
+          bestDonor.list.length > primaryContribs.length)) ||
+      (bestDonor.auth > primaryAuth + highAuthAdvantage &&
+        bestDonor.list.length > 0);
     if (shouldUpgrade) {
       await tx.contributor.deleteMany({ where: { itemId: primaryId } });
       const data = bestDonor.list.map(mapContributorInput);
@@ -217,18 +243,38 @@ export async function syncMergedIdentifiersInTx(params: {
   primaryDoi?: string | null;
   explicitlyClearedFields?: ReadonlySet<string>;
 }): Promise<void> {
-  const { tx, primaryId, uniqueDupIds, primaryMeta, topLevelData, primaryDoi, explicitlyClearedFields } = params;
+  const {
+    tx,
+    primaryId,
+    uniqueDupIds,
+    primaryMeta,
+    topLevelData,
+    primaryDoi,
+    explicitlyClearedFields,
+  } = params;
   const identTx = tx as unknown as {
     itemIdentifier?: {
       findMany?: (args: { where: { itemId: { in: string[] } } }) => Promise<
-        Array<{ itemId: string; type: string; value: string; canonicalUri?: string | null }>
+        Array<{
+          itemId: string;
+          type: string;
+          value: string;
+          canonicalUri?: string | null;
+        }>
       >;
       upsert?: (args: {
         where: { itemId_type: { itemId: string; type: string } };
         update: { value: string; canonicalUri: string };
-        create: { itemId: string; type: string; value: string; canonicalUri: string };
+        create: {
+          itemId: string;
+          type: string;
+          value: string;
+          canonicalUri: string;
+        };
       }) => Promise<unknown>;
-      deleteMany?: (args: { where: Record<string, unknown> }) => Promise<unknown>;
+      deleteMany?: (args: {
+        where: Record<string, unknown>;
+      }) => Promise<unknown>;
     };
   };
 
@@ -267,10 +313,15 @@ export async function syncMergedIdentifiersInTx(params: {
   if (!identTx.itemIdentifier) return;
 
   const existingIdRecords = identTx.itemIdentifier.findMany
-    ? await identTx.itemIdentifier.findMany({ where: { itemId: { in: [primaryId, ...uniqueDupIds] } } })
+    ? await identTx.itemIdentifier.findMany({
+        where: { itemId: { in: [primaryId, ...uniqueDupIds] } },
+      })
     : [];
 
-  const desiredByType = new Map<string, { type: string; value: string; canonicalUri: string }>();
+  const desiredByType = new Map<
+    string,
+    { type: string; value: string; canonicalUri: string }
+  >();
   for (const rec of existingIdRecords) {
     if (rec.itemId === primaryId && rec.type && rec.value) {
       const cType = canonicalIdType(rec.type);
@@ -321,9 +372,18 @@ export async function syncMergedIdentifiersInTx(params: {
   }
 
   const idNormMap = {
-    arxivId: { norm: normalizeArxivId, uri: (v: string) => `https://arxiv.org/abs/${v}` },
-    pmid: { norm: normalizePmid, uri: (v: string) => `https://pubmed.ncbi.nlm.nih.gov/${v}/` },
-    pmcid: { norm: normalizePmcid, uri: (v: string) => `https://www.ncbi.nlm.nih.gov/pmc/articles/${v}/` },
+    arxivId: {
+      norm: normalizeArxivId,
+      uri: (v: string) => `https://arxiv.org/abs/${v}`,
+    },
+    pmid: {
+      norm: normalizePmid,
+      uri: (v: string) => `https://pubmed.ncbi.nlm.nih.gov/${v}/`,
+    },
+    pmcid: {
+      norm: normalizePmcid,
+      uri: (v: string) => `https://www.ncbi.nlm.nih.gov/pmc/articles/${v}/`,
+    },
     isbn: { norm: normalizeIsbn, uri: (v: string) => `urn:isbn:${v}` },
     issn: { norm: normalizeIssn, uri: (v: string) => `urn:issn:${v}` },
   } as const;
@@ -358,11 +418,16 @@ export async function syncMergedIdentifiersInTx(params: {
   }
 
   if (identTx.itemIdentifier.deleteMany && uniqueDupIds.length > 0) {
-    await identTx.itemIdentifier.deleteMany({ where: { itemId: { in: uniqueDupIds } } });
+    await identTx.itemIdentifier.deleteMany({
+      where: { itemId: { in: uniqueDupIds } },
+    });
   }
   if (identTx.itemIdentifier.deleteMany && clearedCanonicalTypes.size > 0) {
     await identTx.itemIdentifier.deleteMany({
-      where: { itemId: primaryId, type: { in: Array.from(clearedCanonicalTypes) } },
+      where: {
+        itemId: primaryId,
+        type: { in: Array.from(clearedCanonicalTypes) },
+      },
     });
   }
 

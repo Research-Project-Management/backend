@@ -255,7 +255,9 @@ export class UrlCaptureProvider {
     const lookupQuery = candidateArxiv || candidateDoi || candidatePmid;
     if (this.metadataPort && lookupQuery) {
       try {
-        const resolved = await this.metadataPort.resolve({ query: lookupQuery });
+        const resolved = await this.metadataPort.resolve({
+          query: lookupQuery,
+        });
         if (resolved?.metadata && resolved.metadata.title) {
           const rm = resolved.metadata;
           const regTags = normalizeAcademicTags(
@@ -265,7 +267,7 @@ export class UrlCaptureProvider {
             rm.itemType === 'preprint' ||
             Boolean(
               candidateArxiv &&
-                (!rm.doi || /^10\.48550\/arxiv\./i.test(String(rm.doi))),
+              (!rm.doi || /^10\.48550\/arxiv\./i.test(String(rm.doi))),
             );
           const cleanArxiv = candidateArxiv
             ? candidateArxiv.replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '')
@@ -293,10 +295,12 @@ export class UrlCaptureProvider {
                   }))
                 : captured.creators,
             year: rm.year ?? captured.year,
-            publicationDate: rm.publicationDate || rm.date || captured.publicationDate,
-            doi: isArxivPreprint && cleanArxiv
-              ? `10.48550/arXiv.${cleanArxiv}`
-              : rm.doi || candidateDoi || captured.doi,
+            publicationDate:
+              rm.publicationDate || rm.date || captured.publicationDate,
+            doi:
+              isArxivPreprint && cleanArxiv
+                ? `10.48550/arXiv.${cleanArxiv}`
+                : rm.doi || candidateDoi || captured.doi,
             arxivId: cleanArxiv || captured.arxivId,
             pmid: rm.pmid || candidatePmid || captured.pmid,
             pmcid: rm.pmcid || captured.pmcid,
@@ -305,17 +309,35 @@ export class UrlCaptureProvider {
             publicationTitle: isArxivPreprint
               ? 'arXiv'
               : rm.publicationTitle || rm.journal || captured.publicationTitle,
-            journal: isArxivPreprint ? undefined : rm.journal || captured.journal,
-            journalAbbr: isArxivPreprint ? undefined : rm.journalAbbr || captured.journalAbbr,
+            journal: isArxivPreprint
+              ? undefined
+              : rm.journal || captured.journal,
+            journalAbbr: isArxivPreprint
+              ? undefined
+              : rm.journalAbbr || captured.journalAbbr,
             publisher: isArxivPreprint
               ? 'arXiv'
               : rm.publisher || captured.publisher,
-            volume: isArxivPreprint ? undefined : rm.volume != null ? String(rm.volume) : captured.volume,
-            issue: isArxivPreprint ? undefined : rm.issue != null ? String(rm.issue) : captured.issue,
+            volume: isArxivPreprint
+              ? undefined
+              : rm.volume != null
+                ? String(rm.volume)
+                : captured.volume,
+            issue: isArxivPreprint
+              ? undefined
+              : rm.issue != null
+                ? String(rm.issue)
+                : captured.issue,
             pages: isArxivPreprint ? undefined : rm.pages || captured.pages,
-            conferenceName: isArxivPreprint ? undefined : rm.conferenceName || captured.conferenceName,
-            proceedingsTitle: isArxivPreprint ? undefined : rm.proceedingsTitle || captured.proceedingsTitle,
-            bookTitle: isArxivPreprint ? undefined : rm.bookTitle || captured.bookTitle,
+            conferenceName: isArxivPreprint
+              ? undefined
+              : rm.conferenceName || captured.conferenceName,
+            proceedingsTitle: isArxivPreprint
+              ? undefined
+              : rm.proceedingsTitle || captured.proceedingsTitle,
+            bookTitle: isArxivPreprint
+              ? undefined
+              : rm.bookTitle || captured.bookTitle,
             series: isArxivPreprint ? undefined : rm.series || captured.series,
             language: rm.language || captured.language,
             rights: rm.rights || captured.rights,
@@ -324,7 +346,10 @@ export class UrlCaptureProvider {
             archive: isArxivPreprint ? 'arXiv' : rm.archive || captured.archive,
             extra: rm.extra || captured.extra,
             keywords: regTags.length > 0 ? regTags : captured.keywords,
-            openAccessPdfUrl: rm.openAccessPdfUrl || captured.openAccessPdfUrl || captured.pdfUrl,
+            openAccessPdfUrl:
+              rm.openAccessPdfUrl ||
+              captured.openAccessPdfUrl ||
+              captured.pdfUrl,
             extraFields: {
               ...(captured.extraFields || {}),
               ...(rm.extraFields || {}),

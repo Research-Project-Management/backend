@@ -141,3 +141,20 @@ export class BulkDetachItemsDto {
   @MaxLength(100, { each: true })
   itemIds!: string[];
 }
+
+export class CopyCollectionDto {
+  @IsOptional()
+  @ValidateIf(
+    (o: { parentId?: string | null }) =>
+      o.parentId !== null &&
+      o.parentId !== undefined &&
+      o.parentId !== '' &&
+      o.parentId !== 'root',
+  )
+  @IsUUID()
+  parentId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  projectId?: string | null;
+}

@@ -402,8 +402,31 @@ export const NOISE_AUTHOR_WORDS = new Set([
 ]);
 
 export const AMBIGUOUS_UNACCENTED_VN_SURNAMES = new Set([
-  'le', 'mai', 'ha', 'do', 'la', 'to', 'ma', 'ho', 'ly', 'chu', 'can', 'vi',
-  'an', 'ta', 'cu', 'ba', 'ca', 'vo', 'vu', 'au', 'lo', 'no', 'ro', 'so', 'po',
+  'le',
+  'mai',
+  'ha',
+  'do',
+  'la',
+  'to',
+  'ma',
+  'ho',
+  'ly',
+  'chu',
+  'can',
+  'vi',
+  'an',
+  'ta',
+  'cu',
+  'ba',
+  'ca',
+  'vo',
+  'vu',
+  'au',
+  'lo',
+  'no',
+  'ro',
+  'so',
+  'po',
 ]);
 
 export const VN_SYLLABLE_REGEX =

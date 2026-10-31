@@ -21,6 +21,7 @@ import {
   ReorderCollectionsDto,
   AssignItemsToCollectionDto,
   BulkDetachItemsDto,
+  CopyCollectionDto,
 } from '@/modules/library/catalog/dto/collections.dto';
 import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -39,7 +40,9 @@ export class CollectionsController {
 
   @Get()
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'List all collections in personal or project scope' })
+  @ApiOperation({
+    summary: 'List all collections in personal or project scope',
+  })
   async getCollections(
     @CurrentUser('id') userId: string,
     @Query('projectId') queryProjectId?: string,
@@ -224,6 +227,28 @@ export class CollectionsController {
       userId,
       collectionId,
       dto?.itemIds || [],
+      projectId,
+    );
+  }
+
+  @Post(':collectionId/copy')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Atomically duplicate collection subtree and item memberships' })
+  async copyCollection(
+    @CurrentUser('id') userId: string,
+    @Param('collectionId') collectionId: string,
+    @Body() dto?: CopyCollectionDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const projectId = normalizeProjectScopeId(
+      paramProjectId || queryProjectId || dto?.projectId,
+    );
+    return this.collectionsService.copyCollection(
+      userId,
+      collectionId,
+      dto,
       projectId,
     );
   }

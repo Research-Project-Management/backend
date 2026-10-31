@@ -63,9 +63,10 @@ export class RetractionBloomFilter {
    */
   private getHashIndexes(key: string): number[] {
     const h1 = RetractionBloomFilter.fnv1a(key, 0x811c9dc5);
-    const h2 = RetractionBloomFilter.murmurMix(
-      RetractionBloomFilter.fnv1a(key, 0x9e3779b9),
-    ) | 1; // ensure odd number to cover full bit range
+    const h2 =
+      RetractionBloomFilter.murmurMix(
+        RetractionBloomFilter.fnv1a(key, 0x9e3779b9),
+      ) | 1; // ensure odd number to cover full bit range
 
     const indexes: number[] = new Array(this.numHashes);
     for (let i = 0; i < this.numHashes; i++) {

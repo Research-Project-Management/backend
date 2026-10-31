@@ -565,6 +565,8 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         'annot-1',
         1,
         { color: '#ff0000' },
+        undefined,
+        'att-1',
       );
       expect(res).toEqual({ id: 'annot-1', color: '#ff0000' });
     });
@@ -580,6 +582,8 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         'user-1',
         'annot-1',
         1,
+        undefined,
+        'att-1',
       );
       expect(res).toEqual({ id: 'annot-1', deleted: true });
     });

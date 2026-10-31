@@ -86,7 +86,7 @@ export class MetadataReconciliationService {
       resolveBidirectionalBaseFields(clonedMeta, candType, undefined, false);
       return {
         ...cand,
-        metadata: clonedMeta as ItemMetadata,
+        metadata: clonedMeta,
       };
     });
 
@@ -192,10 +192,7 @@ export class MetadataReconciliationService {
       ...resolved,
     };
 
-    finalizeReconciledBibliographicMetadata(
-      finalMetadata as Record<string, unknown>,
-      candidates,
-    );
+    finalizeReconciledBibliographicMetadata(finalMetadata, candidates);
 
     return {
       metadata: finalMetadata,

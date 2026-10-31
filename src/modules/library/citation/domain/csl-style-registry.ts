@@ -314,9 +314,7 @@ export class CslStyleRegistry {
       authors[0]?.family || authors[0]?.literal || 'Anonymous';
     const authorStr =
       authors.length > 0
-        ? authors
-            .map((a) => a.family || a.literal || 'Anonymous')
-            .join(', ')
+        ? authors.map((a) => a.family || a.literal || 'Anonymous').join(', ')
         : 'Anonymous';
     const year =
       cslItem.issued?.['date-parts']?.[0]?.[0] ||

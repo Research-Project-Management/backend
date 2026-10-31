@@ -40,4 +40,3 @@ export interface CommitStageInput {
   item: ItemMetadata;
   options?: CommitStageOptions;
 }
-

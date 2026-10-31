@@ -24,7 +24,7 @@ import { SavedSearchesRepository } from '@/modules/library/catalog/repositories/
 import { CatalogFacade } from '@/modules/library/catalog/catalog.facade';
 import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
 import { LibraryFacade } from '@/modules/library/library.facade';
-import { formatCsvExport } from '@/modules/library/citation/domain/exports.domain';
+import { formatCsvExport } from '@/modules/library/citation/domain/export-format.strategies';
 import {
   CsvExportStrategy,
   CslJsonExportStrategy,

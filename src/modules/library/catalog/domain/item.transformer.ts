@@ -105,10 +105,16 @@ export class ItemTransformer implements IItemTransformerPort {
     let unmappedVal: unknown;
     let unmappedSuffix: string | undefined;
     for (const container of [item.extraFields, item.metadata]) {
-      if (!container || typeof container !== 'object' || Array.isArray(container)) {
+      if (
+        !container ||
+        typeof container !== 'object' ||
+        Array.isArray(container)
+      ) {
         continue;
       }
-      for (const [k, v] of Object.entries(container as Record<string, unknown>)) {
+      for (const [k, v] of Object.entries(
+        container as Record<string, unknown>,
+      )) {
         if (v === undefined || v === null || v === '') continue;
         const m = k.match(/^__unmapped_[^_]+_(.+)$/i);
         if (m && m[1] && candidateSuffixes.has(m[1].toLowerCase())) {
@@ -129,9 +135,14 @@ export class ItemTransformer implements IItemTransformerPort {
         targetNorms.add(unmappedSuffix.toLowerCase().replace(/[\s_-]+/g, ''));
       }
       for (const rawLine of item.extra.split(/\r?\n/)) {
-        const kv = rawLine.trim().match(/^([A-Za-z_][A-Za-z0-9._\s-]{0,40}?)\s*:\s*(.+)$/);
+        const kv = rawLine
+          .trim()
+          .match(/^([A-Za-z_][A-Za-z0-9._\s-]{0,40}?)\s*:\s*(.+)$/);
         if (!kv || !kv[1] || !kv[2]) continue;
-        const kNorm = kv[1].trim().toLowerCase().replace(/[\s_-]+/g, '');
+        const kNorm = kv[1]
+          .trim()
+          .toLowerCase()
+          .replace(/[\s_-]+/g, '');
         if (targetNorms.has(kNorm)) {
           return kv[2].trim();
         }
@@ -345,13 +356,26 @@ export class ItemTransformer implements IItemTransformerPort {
         lowerSet.add(k.toLowerCase());
         recoveredExtraLineNorms.add(k.toLowerCase().replace(/[\s_-]+/g, ''));
         const lbl = targetLabelMap.get(k) || sourceLabelMap.get(k);
-        if (lbl) recoveredExtraLineNorms.add(String(lbl).toLowerCase().replace(/[\s_-]+/g, ''));
+        if (lbl)
+          recoveredExtraLineNorms.add(
+            String(lbl)
+              .toLowerCase()
+              .replace(/[\s_-]+/g, ''),
+          );
         const alias = FIELD_ALIASES[k] || REVERSE_FIELD_ALIASES[k];
         if (alias) {
           lowerSet.add(alias.toLowerCase());
-          recoveredExtraLineNorms.add(alias.toLowerCase().replace(/[\s_-]+/g, ''));
-          const aliasLbl = targetLabelMap.get(alias) || sourceLabelMap.get(alias);
-          if (aliasLbl) recoveredExtraLineNorms.add(String(aliasLbl).toLowerCase().replace(/[\s_-]+/g, ''));
+          recoveredExtraLineNorms.add(
+            alias.toLowerCase().replace(/[\s_-]+/g, ''),
+          );
+          const aliasLbl =
+            targetLabelMap.get(alias) || sourceLabelMap.get(alias);
+          if (aliasLbl)
+            recoveredExtraLineNorms.add(
+              String(aliasLbl)
+                .toLowerCase()
+                .replace(/[\s_-]+/g, ''),
+            );
         }
       }
       for (const efKey of Object.keys(newExtraFields)) {
@@ -359,13 +383,21 @@ export class ItemTransformer implements IItemTransformerPort {
         if (m && m[1] && lowerSet.has(m[1].toLowerCase())) {
           delete newExtraFields[efKey];
           const suffix = m[1];
-          recoveredExtraLineNorms.add(suffix.toLowerCase().replace(/[\s_-]+/g, ''));
+          recoveredExtraLineNorms.add(
+            suffix.toLowerCase().replace(/[\s_-]+/g, ''),
+          );
           const lbl =
             targetLabelMap.get(suffix) ||
             sourceLabelMap.get(suffix) ||
-            keys.map((k) => targetLabelMap.get(k) || sourceLabelMap.get(k)).find(Boolean);
+            keys
+              .map((k) => targetLabelMap.get(k) || sourceLabelMap.get(k))
+              .find(Boolean);
           if (lbl) {
-            recoveredExtraLineNorms.add(String(lbl).toLowerCase().replace(/[\s_-]+/g, ''));
+            recoveredExtraLineNorms.add(
+              String(lbl)
+                .toLowerCase()
+                .replace(/[\s_-]+/g, ''),
+            );
           }
         }
       }
@@ -449,7 +481,8 @@ export class ItemTransformer implements IItemTransformerPort {
           } else {
             delete projectedItem[sField];
             delete newExtraFields[sField];
-            const aliasKey = FIELD_ALIASES[sField] || REVERSE_FIELD_ALIASES[sField];
+            const aliasKey =
+              FIELD_ALIASES[sField] || REVERSE_FIELD_ALIASES[sField];
             if (aliasKey) {
               delete projectedItem[aliasKey];
               delete newExtraFields[aliasKey];
@@ -523,7 +556,10 @@ export class ItemTransformer implements IItemTransformerPort {
             .trim()
             .match(/^([A-Za-z_][A-Za-z0-9._\s-]{0,40}?)\s*:\s*(.+)$/);
           if (!kv || !kv[1]) return true;
-          const kNorm = kv[1].trim().toLowerCase().replace(/[\s_-]+/g, '');
+          const kNorm = kv[1]
+            .trim()
+            .toLowerCase()
+            .replace(/[\s_-]+/g, '');
           return !recoveredExtraLineNorms.has(kNorm);
         });
       projectedItem.extra = filteredLines.join('\n').trim();

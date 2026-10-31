@@ -7,32 +7,19 @@ import {
 } from './types/citation.types';
 import { ExportLibraryDto } from './dto/exports.dto';
 import { ExportResult } from './types/exports.types';
+import {
+  CITATION_FACADE,
+  ICitationFacade as ICoreCitationFacade,
+} from '@/modules/library/core';
 
-export const CITATION_FACADE = 'CITATION_FACADE';
+export { CITATION_FACADE };
 
-export interface ICitationFacade {
-  formatCitation(
-    userId: string,
-    itemId: string,
-    styleId?: CitationStyleId,
-    index?: number,
-    projectId?: string,
-  ): Promise<FormattedCitationResult>;
-  exportByCitationKeys(
-    userId: string,
-    citeKeys: string[],
-    projectId?: string,
-  ): Promise<{
-    content: string;
-    count: number;
-    foundKeys: string[];
-    missingKeys: string[];
-  }>;
-  exportLibrary(
-    userId: string,
-    options?: ExportLibraryDto,
-  ): Promise<ExportResult>;
-}
+export type ICitationFacade = ICoreCitationFacade<
+  CitationStyleId,
+  FormattedCitationResult,
+  ExportLibraryDto,
+  ExportResult
+>;
 
 @Injectable()
 export class CitationFacade implements ICitationFacade {

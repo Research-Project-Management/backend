@@ -2,11 +2,12 @@ import {
   IsOptional,
   IsString,
   IsInt,
+  IsBoolean,
   Min,
   Max,
   Matches,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SyncQueryDto {
@@ -42,6 +43,12 @@ export class SyncQueryDto {
     example: true,
   })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return true;
+    if (typeof value === 'boolean') return value;
+    const normalized = String(value).trim().toLowerCase();
+    return normalized !== 'false' && normalized !== '0';
+  })
+  @IsBoolean()
   compact?: boolean = true;
 }

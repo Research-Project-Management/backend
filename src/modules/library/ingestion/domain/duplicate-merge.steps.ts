@@ -15,12 +15,15 @@ import {
   syncMergedContributors,
 } from './duplicate-merge.domain';
 import { buildMergeAuditTrail } from './duplicate-merge.helper';
-import { deriveFirstAuthor } from '@/modules/library/catalog';
+import { PREPRINT_SERVER_VENUE_REGEX } from './field-reconciliation.strategies';
 import {
   ItemProvenancePolicy,
   FieldProvenanceRecord,
   isPlaceholderItemTitle,
+  deriveFirstAuthor,
 } from '@/modules/library/core';
+
+export type MergePipelineContext = DuplicateMergeStepContext;
 
 export interface DuplicateMergeStepContext {
   tx: Prisma.TransactionClient;
@@ -53,9 +56,7 @@ export interface IDuplicateMergeStep {
   execute(context: DuplicateMergeStepContext): Promise<void> | void;
 }
 
-export class ItemMetadataConsolidationMergeStep
-  implements IDuplicateMergeStep
-{
+export class ItemMetadataConsolidationMergeStep implements IDuplicateMergeStep {
   readonly stepName = 'ITEM_METADATA_CONSOLIDATION';
 
   async execute(ctx: DuplicateMergeStepContext): Promise<void> {
@@ -104,7 +105,9 @@ export class ItemMetadataConsolidationMergeStep
       resolvedPrimaryMetas
         .map((m) =>
           typeof (m as { sourceProvider?: unknown }).sourceProvider === 'string'
-            ? (m as { sourceProvider: string }).sourceProvider.trim().toLowerCase()
+            ? (m as { sourceProvider: string }).sourceProvider
+                .trim()
+                .toLowerCase()
             : '',
         )
         .filter(Boolean),
@@ -139,9 +142,7 @@ export class ItemMetadataConsolidationMergeStep
   }
 }
 
-export class MetadataAndCreatorBackfillMergeStep
-  implements IDuplicateMergeStep
-{
+export class MetadataAndCreatorBackfillMergeStep implements IDuplicateMergeStep {
   readonly stepName = 'METADATA_AND_CREATOR_BACKFILL';
 
   async execute(ctx: DuplicateMergeStepContext): Promise<void> {
@@ -237,7 +238,9 @@ export class MetadataAndCreatorBackfillMergeStep
       if (selVal === '' || selVal === null) {
         primaryLockedSet.delete(selKey);
         delete primaryProvenance[selKey];
-        for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(selKey)) {
+        for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(
+          selKey,
+        )) {
           primaryLockedSet.delete(alias);
           delete primaryProvenance[alias];
         }
@@ -293,10 +296,7 @@ export class MetadataAndCreatorBackfillMergeStep
       }
 
       const isPreprintVenueString = (v: unknown): boolean =>
-        typeof v === 'string' &&
-        /^(?:arxiv(?:\.org)?|corr|biorxiv|medrxiv|chemrxiv|techrxiv|ssrn|research\s+square|osf\s+preprints|hal|zenodo)(?:\s+preprints?|\s+e-?prints?)?$/i.test(
-          v.trim(),
-        );
+        typeof v === 'string' && PREPRINT_SERVER_VENUE_REGEX.test(v.trim());
 
       const existingPrimaryVal = getEffectiveItemField(
         primary,
@@ -389,9 +389,14 @@ export class MetadataAndCreatorBackfillMergeStep
 
     for (const idKey of IDENTIFIER_META_KEYS) {
       if (scalarSelections[idKey] !== undefined) {
-        if (scalarSelections[idKey] === '' || scalarSelections[idKey] === null) {
+        if (
+          scalarSelections[idKey] === '' ||
+          scalarSelections[idKey] === null
+        ) {
           delete primaryMeta[idKey];
-          for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(idKey)) {
+          for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(
+            idKey,
+          )) {
             delete primaryMeta[alias];
           }
         } else {
@@ -439,7 +444,10 @@ export class MetadataAndCreatorBackfillMergeStep
     if (primaryLockedSet.size > 0 || Array.isArray(primaryMeta.lockedFields)) {
       primaryMeta.lockedFields = Array.from(primaryLockedSet);
     }
-    if (Object.keys(primaryProvenance).length > 0 || primaryMeta.fieldProvenance !== undefined) {
+    if (
+      Object.keys(primaryProvenance).length > 0 ||
+      primaryMeta.fieldProvenance !== undefined
+    ) {
       primaryMeta.fieldProvenance = primaryProvenance;
     }
 

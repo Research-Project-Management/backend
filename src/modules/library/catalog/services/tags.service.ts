@@ -74,9 +74,7 @@ export class TagsService {
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.tagsPattern(`proj:${validProjectId}`),
           ),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.tagsPattern(validProjectId),
-          ),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(validProjectId)),
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
           ),
@@ -95,9 +93,7 @@ export class TagsService {
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.searchItemsPattern(validProjectId),
           ),
-          this.cache.del(
-            LIBRARY_REDIS_KEYS.searchVersion(validProjectId),
-          ),
+          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(validProjectId)),
           this.cache.del(
             LIBRARY_REDIS_KEYS.searchVersion(`proj:${validProjectId}`),
           ),
@@ -206,7 +202,10 @@ export class TagsService {
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
         if (this.repo?.findItemIdsByTagIds) {
-          affectedItemIds = await this.repo.findItemIdsByTagIds([String(tagId)], tx);
+          affectedItemIds = await this.repo.findItemIdsByTagIds(
+            [String(tagId)],
+            tx,
+          );
         }
         const updated = await this.repo.update(
           userId,
@@ -271,7 +270,10 @@ export class TagsService {
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
         if (this.repo?.findItemIdsByTagIds) {
-          affectedItemIds = await this.repo.findItemIdsByTagIds([String(tagId)], tx);
+          affectedItemIds = await this.repo.findItemIdsByTagIds(
+            [String(tagId)],
+            tx,
+          );
         }
         const deleted = await this.repo.delete(
           userId,

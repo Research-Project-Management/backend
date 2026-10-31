@@ -157,8 +157,14 @@ export class CslStyleFormatterService extends CslFallbackFormatter {
           }
         }
 
-        if (/\burl\s*=/i.test(raw) || extraBibFields.some((f) => /^\s*url\s*=/i.test(f))) {
-          raw = raw.replace(/^\s*howpublished\s*=\s*\{\\url\{[^}]*\}\},?\r?\n?/gim, '');
+        if (
+          /\burl\s*=/i.test(raw) ||
+          extraBibFields.some((f) => /^\s*url\s*=/i.test(f))
+        ) {
+          raw = raw.replace(
+            /^\s*howpublished\s*=\s*\{\\url\{[^}]*\}\},?\r?\n?/gim,
+            '',
+          );
         }
 
         if (extraBibFields.length > 0) {
@@ -219,7 +225,9 @@ export class CslStyleFormatterService extends CslFallbackFormatter {
         )) {
           if (!checkRegex.test(raw)) {
             extraRisLines.push(
-              `${tag}  - ${String(value).replace(/\r?\n+/g, ' ').trim()}`,
+              `${tag}  - ${String(value)
+                .replace(/\r?\n+/g, ' ')
+                .trim()}`,
             );
           }
         }

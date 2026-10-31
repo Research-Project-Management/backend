@@ -27,10 +27,9 @@ import {
   CATALOG_FACADE,
   ICatalogFacade,
   ReconcileExtractedCandidatePayload,
+  gzipAsync,
 } from '@/modules/library/core';
 import { createHash, randomUUID } from 'crypto';
-import zlib from 'zlib';
-import { promisify } from 'util';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   METADATA_PORT,
@@ -46,8 +45,6 @@ import {
   IngestionRunProgressResult,
 } from './ingestion-run-reporter.service';
 import { isRetryableIngestionError } from '@/modules/library/ingestion/domain/ingestion-error.classifier';
-
-const gzipAsync = promisify(zlib.gzip);
 
 @Injectable()
 export class IngestionService {
@@ -230,8 +227,8 @@ export class IngestionService {
         if (raceRun) {
           if (raceRun.inputHash !== requestHash) {
             throw new UnprocessableEntityException(
-            'Idempotency key reused with different request payload',
-          );
+              'Idempotency key reused with different request payload',
+            );
           }
           return {
             runId: raceRun.id,
@@ -286,8 +283,7 @@ export class IngestionService {
 
     this.submissionCountSinceLastGc++;
     if (
-      this.submissionCountSinceLastGc >=
-      IngestionService.GC_SUBMISSION_INTERVAL
+      this.submissionCountSinceLastGc >= IngestionService.GC_SUBMISSION_INTERVAL
     ) {
       this.submissionCountSinceLastGc = 0;
       void this.runMaintenanceGc().catch(() => undefined);
@@ -713,17 +709,25 @@ export class IngestionService {
     options?: ReResolveMetadataOptions,
     projectId?: string,
   ): Promise<ReResolveMetadataResult> {
-    return this.metadataResolver.reResolveMetadata(
-      userId,
-      itemId,
-      options,
-      projectId,
-    );
+    return this.metadataResolver.reResolveMetadata(userId, itemId, options, projectId);
   }
 
-  async reconcileExtractedCandidate(
-    payload: ReconcileExtractedCandidatePayload,
-  ): Promise<{ updated: boolean; updatedFields: string[]; rejectedCitedDoi?: string }> {
+  async reconcileExtractedCandidate(payload: ReconcileExtractedCandidatePayload) {
     return this.metadataResolver.reconcileExtractedCandidate(payload);
+  }
+
+  async findReviewCases(
+    scope: { userId?: string; projectId?: string | null } | string,
+    options?: { status?: string; limit?: number },
+  ) {
+    return this.repo.findReviewCases(scope, options);
+  }
+
+  async updateReviewCaseStatus(
+    scope: { userId?: string; projectId?: string | null } | string,
+    id: string,
+    status: 'OPEN' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISMISSED' | 'RESOLVED',
+  ) {
+    return this.repo.updateReviewCaseStatus(scope, id, status);
   }
 }

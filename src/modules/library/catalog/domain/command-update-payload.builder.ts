@@ -729,7 +729,7 @@ export function buildCommandUpdateInput(
             data.retractionCheckedAt === null && data.isRetracted === undefined
               ? null
               : data.retractionCheckedAt
-                ? new Date(data.retractionCheckedAt)
+                ? new Date(data.retractionCheckedAt as string | number | Date)
                 : new Date(),
         }
       : {}),

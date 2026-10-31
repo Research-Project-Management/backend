@@ -162,8 +162,8 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
             pageIndex: 0,
             y: 0.25,
             x: 0.1,
-            quoteText: 'Important research finding',
-            comment: '',
+            quoteText: '',
+            comment: 'Important research finding',
             color: '#ffd400',
             rectCoords: [
               {
@@ -180,7 +180,8 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
           expect.objectContaining({
             type: AnnotationType.strike,
             pageIndex: 0,
-            quoteText: 'Outdated hypothesis',
+            quoteText: '',
+            comment: 'Outdated hypothesis',
             color: '#ff0000',
           }),
         ],

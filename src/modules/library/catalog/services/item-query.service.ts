@@ -251,8 +251,9 @@ export class ItemQueryService {
         >(cacheKey);
         if (cached) {
           const isOwner = cached.userId === userId && !cached.projectId;
-          const isProjectMatch =
-            Boolean(validProjectId && cached.projectId === validProjectId);
+          const isProjectMatch = Boolean(
+            validProjectId && cached.projectId === validProjectId,
+          );
           if (isOwner || isProjectMatch) {
             const cachedStates = Array.isArray(
               (cached as Record<string, unknown>).states,
@@ -413,7 +414,8 @@ export class ItemQueryService {
         ? { targetCollectionIds: preResolvedCollectionIds }
         : {}),
     };
-    const isInitialPage = !options.cursor && (!options.page || options.page === 1);
+    const isInitialPage =
+      !options.cursor && (!options.page || options.page === 1);
     const shouldCount = isInitialPage;
     const [totalCount, rawItems] = await Promise.all([
       shouldCount

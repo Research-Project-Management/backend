@@ -1,7 +1,8 @@
+import { CreatorCreditInput } from '@/modules/library/core/types/bibliographic.types';
 import {
-  CreatorCreditInput,
-} from '@/modules/library/core/types/bibliographic.types';
-import { resolveCanonicalCreatorRole } from './zotero-field-harmonizer.domain';
+  resolveCanonicalCreatorRole,
+  getPrimaryCreatorRoleForType,
+} from './zotero-field-harmonizer.domain';
 import {
   cleanAuthorName,
   isNoiseAuthorName,
@@ -83,7 +84,8 @@ export function mergeCanonicalCreators(
       const single =
         cleanAuthorName(rawSingle) ||
         (isInstitutionName(rawSingle) ? rawSingle.trim() : '');
-      if (!single || (isNoiseAuthorName(single) && !isInstitutionName(single))) return;
+      if (!single || (isNoiseAuthorName(single) && !isInstitutionName(single)))
+        return;
       finalFirst = '';
       finalLast = single;
       finalFull = single;
@@ -106,8 +108,7 @@ export function mergeCanonicalCreators(
           finalFirst = finalFirst || parsed.firstName;
           finalLast = finalLast || parsed.lastName;
         }
-        finalFull =
-          parsed.fullName || `${finalFirst} ${finalLast}`.trim();
+        finalFull = parsed.fullName || `${finalFirst} ${finalLast}`.trim();
       }
     } else if (!finalFull) {
       finalFull = `${finalFirst} ${finalLast}`.trim();
@@ -170,7 +171,15 @@ export function mergeCanonicalCreators(
     if (cFieldMode === 1) {
       const singleName =
         c.lastName || c.fullName || c.name || c.firstName || '';
-      append(singleName, creatorType, '', singleName, 1, cShortName, cOrderIndex);
+      append(
+        singleName,
+        creatorType,
+        '',
+        singleName,
+        1,
+        cShortName,
+        cOrderIndex,
+      );
       continue;
     }
 
@@ -253,4 +262,70 @@ export function mergeCanonicalCreators(
   appendStringRoleList(input.editors, 'editor', false);
 
   return creators.length > 0 ? creators : undefined;
+}
+
+export function deriveFirstAuthor(data: {
+  contributors?: Array<Record<string, unknown> | CreatorCreditInput>;
+  creators?: Array<Record<string, unknown> | CreatorCreditInput>;
+  authors?: Array<string | Record<string, unknown>>;
+  author?: string;
+  editors?: Array<string | Record<string, unknown>>;
+  itemType?: string;
+}): string | null {
+  const formatResult = (name: string, count: number): string | null => {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    return (count > 1 ? `${trimmed} et al.` : trimmed).slice(0, 255);
+  };
+
+  const primaryRoleLower = getPrimaryCreatorRoleForType(data.itemType).toLowerCase();
+  const structured =
+    data.contributors && data.contributors.length > 0
+      ? data.contributors
+      : data.creators && data.creators.length > 0
+        ? data.creators
+        : null;
+  if (structured) {
+    const isAuthorRole = (c: Record<string, unknown>) => {
+      const role = String(c.creatorType || c.role || 'author').trim().toLowerCase();
+      return role === 'author' || role === primaryRoleLower || role === 'creator' || role === '';
+    };
+    const isNonEditorRole = (c: Record<string, unknown>) => {
+      const role = String(c.creatorType || c.role || 'author').trim().toLowerCase();
+      return role !== 'editor' && role !== 'serieseditor';
+    };
+
+    const preferredPool = structured.filter((c) => isAuthorRole(c as Record<string, unknown>));
+    const nonEditorPool = preferredPool.length > 0 ? preferredPool : structured.filter((c) => isNonEditorRole(c as Record<string, unknown>));
+    const effectivePool = nonEditorPool.length > 0 ? nonEditorPool : structured;
+
+    const c0 = effectivePool[0] as Record<string, unknown>;
+    const rawLast = (c0.lastName as string) || '';
+    const rawFull = (c0.fullName as string) || (c0.name as string) || '';
+    let authorName = rawLast;
+    if (!authorName && rawFull) {
+      const parsed = parseCreatorString(rawFull, 0);
+      authorName = parsed.lastName || parsed.fullName || rawFull;
+    }
+    if (!authorName) return null;
+    return formatResult(authorName, effectivePool.length);
+  }
+  const authorList =
+    data.authors && data.authors.length > 0
+      ? data.authors
+      : typeof data.author === 'string' && data.author.trim()
+        ? [data.author.trim()]
+        : data.editors && data.editors.length > 0
+          ? data.editors
+          : null;
+  if (authorList && authorList.length > 0) {
+    const firstAuthor = authorList[0] as string | { name?: string; fullName?: string; lastName?: string } | undefined;
+    const authorStr: string =
+      typeof firstAuthor === 'string' ? firstAuthor : firstAuthor?.name || firstAuthor?.fullName || firstAuthor?.lastName || '';
+    const parsed0 = parseCreatorString(authorStr, 0);
+    const authorName = parsed0.lastName || parsed0.fullName;
+    if (!authorName) return null;
+    return formatResult(authorName, authorList.length);
+  }
+  return null;
 }

@@ -73,7 +73,11 @@ export function prepareItemAiMetadataPatch(params: {
         typeof filteredPatch.year === 'number'
           ? filteredPatch.year
           : parseInt(String(filteredPatch.year), 10);
-      if (!Number.isNaN(parsedYear) && parsedYear >= 1000 && parsedYear <= 2999) {
+      if (
+        !Number.isNaN(parsedYear) &&
+        parsedYear >= 1000 &&
+        parsedYear <= 2999
+      ) {
         topLevelColumnSync.year = parsedYear;
       }
     }

@@ -297,7 +297,8 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
         extraFields.abstractNote,
     );
     it.abstract =
-      cleanAbstractText(rawAbstract) ?? (it.abstract || it.abstractNote || null);
+      cleanAbstractText(rawAbstract) ??
+      (it.abstract || it.abstractNote || null);
   }
   it.abstractNote = it.abstract ?? null;
 
@@ -527,9 +528,12 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
       issn: 'issn',
     };
     for (const ident of it.identifiers) {
-      const type = (ident.type || ident.identifierType || '').trim().toLowerCase();
+      const type = (ident.type || ident.identifierType || '')
+        .trim()
+        .toLowerCase();
       const targetKey = idTypeToField[type];
-      const cleanVal = typeof ident.value === 'string' ? ident.value.trim() : '';
+      const cleanVal =
+        typeof ident.value === 'string' ? ident.value.trim() : '';
       if (targetKey && cleanVal) {
         it[targetKey] = cleanVal;
       }
@@ -642,10 +646,14 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     { type: 'isbn', val: it.isbn, uri: (v) => `urn:isbn:${v}` },
     { type: 'issn', val: it.issn, uri: (v) => `urn:issn:${v}` },
   ];
-  const existingIdents = Array.isArray(it.identifiers) ? [...it.identifiers] : [];
+  const existingIdents = Array.isArray(it.identifiers)
+    ? [...it.identifiers]
+    : [];
   const existingTypes = new Set(
     existingIdents
-      .map((ident) => (ident.type || ident.identifierType || '').trim().toLowerCase())
+      .map((ident) =>
+        (ident.type || ident.identifierType || '').trim().toLowerCase(),
+      )
       .filter(Boolean),
   );
   for (const d of idDefs) {
@@ -659,4 +667,52 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     }
   }
   it.identifiers = existingIdents;
+}
+
+export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
+  item: T | null | undefined,
+  toDomainFn: <U>(it: U) => U,
+  userId?: string,
+): (T & { readStatus: string; rating: number; lastReadAt: string | null }) | null {
+  if (!item) return null;
+  interface StateRecordLike {
+    userId?: string;
+    readStatus?: string;
+    rating?: number;
+    lastReadAt?: Date | string | null;
+    [key: string]: unknown;
+  }
+  const normalized = toDomainFn(item) as Record<string, unknown>;
+  const statesArr =
+    Array.isArray(normalized.states) && normalized.states.length > 0
+      ? (normalized.states as StateRecordLike[])
+      : null;
+  const userState = statesArr
+    ? userId
+      ? statesArr.find((s) => !s.userId || s.userId === userId)
+      : statesArr[0]
+    : undefined;
+  const { states: _states, ...rest } = normalized;
+  return {
+    ...rest,
+    isStarred:
+      userState?.isStarred !== undefined
+        ? Boolean(userState.isStarred)
+        : Boolean(normalized.isStarred),
+    readStatus: userState?.readStatus ?? 'unread',
+    rating: userState?.rating ?? 0,
+    currentPage: (userState?.currentPage as number | null | undefined) ?? null,
+    lastReadPage: (userState?.currentPage as number | null | undefined) ?? null,
+    scrollPosition: (userState?.scrollPosition as Record<string, unknown> | number | null | undefined) ?? null,
+    lastOpenedAt: userState?.lastOpenedAt
+      ? userState.lastOpenedAt instanceof Date
+        ? userState.lastOpenedAt.toISOString()
+        : String(userState.lastOpenedAt)
+      : null,
+    lastReadAt: userState?.lastReadAt
+      ? userState.lastReadAt instanceof Date
+        ? userState.lastReadAt.toISOString()
+        : String(userState.lastReadAt)
+      : null,
+  } as unknown as T & { readStatus: string; rating: number; lastReadAt: string | null };
 }

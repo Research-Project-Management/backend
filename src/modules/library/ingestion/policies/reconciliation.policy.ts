@@ -38,8 +38,20 @@ export {
 };
 export type { WeightedFieldVariant };
 
-export const ALIAS_EVIDENCE_FALLBACK_KEYS: Readonly<Record<string, readonly string[]>> = {
-  publicationTitle: ['publicationTitle', 'journal', 'venue', 'proceedingsTitle', 'conferenceName', 'bookTitle', 'websiteTitle', 'reporter', 'code'],
+export const ALIAS_EVIDENCE_FALLBACK_KEYS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  publicationTitle: [
+    'publicationTitle',
+    'journal',
+    'venue',
+    'proceedingsTitle',
+    'conferenceName',
+    'bookTitle',
+    'websiteTitle',
+    'reporter',
+    'code',
+  ],
   journal: ['journal', 'publicationTitle', 'venue'],
   abstract: ['abstract', 'abstractNote'],
   abstractNote: ['abstractNote', 'abstract'],
@@ -49,13 +61,48 @@ export const ALIAS_EVIDENCE_FALLBACK_KEYS: Readonly<Record<string, readonly stri
   archiveId: ['archiveId', 'arxivId', 'archiveID'],
   journalAbbreviation: ['journalAbbreviation', 'journalAbbr'],
   journalAbbr: ['journalAbbr', 'journalAbbreviation'],
-  publicationDate: ['publicationDate', 'date', 'dateDecided', 'dateEnacted', 'issueDate', 'filingDate'],
-  date: ['date', 'publicationDate', 'dateDecided', 'dateEnacted', 'issueDate', 'filingDate'],
-  publisher: ['publisher', 'university', 'institution', 'repository', 'issuingAuthority', 'court'],
+  publicationDate: [
+    'publicationDate',
+    'date',
+    'dateDecided',
+    'dateEnacted',
+    'issueDate',
+    'filingDate',
+  ],
+  date: [
+    'date',
+    'publicationDate',
+    'dateDecided',
+    'dateEnacted',
+    'issueDate',
+    'filingDate',
+  ],
+  publisher: [
+    'publisher',
+    'university',
+    'institution',
+    'repository',
+    'issuingAuthority',
+    'court',
+  ],
   place: ['place', 'eventPlace', 'country'],
   eventPlace: ['eventPlace', 'place'],
-  issue: ['issue', 'number', 'reportNumber', 'docketNumber', 'publicLawNumber', 'patentNumber'],
-  number: ['number', 'issue', 'reportNumber', 'docketNumber', 'publicLawNumber', 'patentNumber'],
+  issue: [
+    'issue',
+    'number',
+    'reportNumber',
+    'docketNumber',
+    'publicLawNumber',
+    'patentNumber',
+  ],
+  number: [
+    'number',
+    'issue',
+    'reportNumber',
+    'docketNumber',
+    'publicLawNumber',
+    'patentNumber',
+  ],
   numPages: ['numPages', 'numberOfPages'],
   numberOfPages: ['numberOfPages', 'numPages'],
   authority: ['authority', 'issuingAuthority', 'court'],
@@ -169,7 +216,12 @@ export class ReconciliationPolicy {
           'journalArticle',
       );
       resolveFieldAliases(harmonizedMeta);
-      resolveBidirectionalBaseFields(harmonizedMeta, candType, undefined, false);
+      resolveBidirectionalBaseFields(
+        harmonizedMeta,
+        candType,
+        undefined,
+        false,
+      );
       if (
         harmonizedMeta.abstractNote !== undefined &&
         harmonizedMeta.abstract === undefined
@@ -225,7 +277,9 @@ export class ReconciliationPolicy {
     const conflicts: MetadataConflictDetail[] = [];
     const proposedItem: Record<string, unknown> = {};
 
-    const stripInternalAnnotation = (ev: AnnotatedFieldEvidence): FieldEvidence => {
+    const stripInternalAnnotation = (
+      ev: AnnotatedFieldEvidence,
+    ): FieldEvidence => {
       if (!('__isAlreadyWeighted' in ev)) return ev;
       const { __isAlreadyWeighted: _, ...clean } = ev;
       return clean;
@@ -458,5 +512,108 @@ export class ReconciliationPolicy {
       decidedAt: new Date().toISOString(),
       policyVersion: '1.1.0',
     };
+  }
+
+  private static extractCandidateSurname(raw: unknown): string {
+    if (!raw) return '';
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return '';
+      const part = trimmed.includes(',')
+        ? trimmed.split(',')[0].trim()
+        : trimmed;
+      return (part.split(/\s+/).pop() || '')
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+    }
+    if (typeof raw === 'object') {
+      const rec = raw as Record<string, unknown>;
+      const candidate =
+        (typeof rec.lastName === 'string' && rec.lastName.trim()) ||
+        (typeof rec.family === 'string' && rec.family.trim()) ||
+        (typeof rec.fullName === 'string' && rec.fullName.trim()) ||
+        (typeof rec.name === 'string' && rec.name.trim()) ||
+        '';
+      return ReconciliationPolicy.extractCandidateSurname(candidate);
+    }
+    return '';
+  }
+
+  private static extractCandidateAuthorSurnames(authors: unknown): Set<string> {
+    const set = new Set<string>();
+    if (!Array.isArray(authors)) return set;
+    for (const a of authors) {
+      const s = ReconciliationPolicy.extractCandidateSurname(a);
+      if (s) set.add(s);
+    }
+    return set;
+  }
+
+  static verifyCandidateMatch(
+    recordCand: MetadataCandidate,
+    providerCand: MetadataCandidate,
+  ): boolean {
+    if (
+      providerCand.rawEvidenceRef &&
+      recordCand.candidateId &&
+      providerCand.rawEvidenceRef === recordCand.candidateId
+    ) {
+      return true;
+    }
+    const rMeta = recordCand.normalizedMetadata || {};
+    const pMeta = providerCand.normalizedMetadata || {};
+    const rDoi = rMeta.doi?.trim().toLowerCase();
+    const pDoi = pMeta.doi?.trim().toLowerCase();
+    if (rDoi && pDoi && rDoi !== pDoi) return false;
+    const rArxiv = rMeta.arxivId?.trim().toLowerCase();
+    const pArxiv = pMeta.arxivId?.trim().toLowerCase();
+    if (rArxiv && pArxiv && rArxiv !== pArxiv) return false;
+    const rPmid = rMeta.pmid?.trim().toLowerCase();
+    const pPmid = pMeta.pmid?.trim().toLowerCase();
+    if (rPmid && pPmid && rPmid !== pPmid) return false;
+    const rIsbn = rMeta.isbn?.trim().toLowerCase();
+    const pIsbn = pMeta.isbn?.trim().toLowerCase();
+    if (rIsbn && pIsbn && rIsbn !== pIsbn) return false;
+
+    const rYear = Number(rMeta.year);
+    const pYear = Number(pMeta.year);
+    if (
+      Number.isFinite(rYear) &&
+      rYear > 0 &&
+      Number.isFinite(pYear) &&
+      pYear > 0 &&
+      Math.abs(rYear - pYear) > 1
+    ) {
+      return false;
+    }
+
+    const rAuthors = ReconciliationPolicy.extractCandidateAuthorSurnames(
+      rMeta.authors?.length ? rMeta.authors : rMeta.creators,
+    );
+    const pAuthors = ReconciliationPolicy.extractCandidateAuthorSurnames(
+      pMeta.authors?.length ? pMeta.authors : pMeta.creators,
+    );
+    if (rAuthors.size > 0 && pAuthors.size > 0) {
+      let shared = 0;
+      for (const name of rAuthors) {
+        if (pAuthors.has(name)) shared++;
+      }
+      if (shared === 0) return false;
+    }
+
+    if (
+      providerCand.rawEvidenceRef &&
+      recordCand.candidateId &&
+      providerCand.rawEvidenceRef !== recordCand.candidateId
+    ) {
+      if ((rDoi || pDoi) && rDoi !== pDoi) return false;
+      if ((rArxiv || pArxiv) && rArxiv !== pArxiv) return false;
+      if ((rPmid || pPmid) && rPmid !== pPmid) return false;
+      if ((rIsbn || pIsbn) && rIsbn !== pIsbn) return false;
+      if ((rAuthors.size === 0) !== (pAuthors.size === 0)) return false;
+    }
+    return true;
   }
 }

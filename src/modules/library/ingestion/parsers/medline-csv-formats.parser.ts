@@ -108,7 +108,10 @@ export function parseCsvBibliographyRecords(content: string): ItemMetadata[] {
   if (rows.length < 2) return [];
 
   const headers = rows[0].map((h) =>
-    h.replace(/^\uFEFF/, '').trim().toLowerCase(),
+    h
+      .replace(/^\uFEFF/, '')
+      .trim()
+      .toLowerCase(),
   );
   const items: ItemMetadata[] = [];
 

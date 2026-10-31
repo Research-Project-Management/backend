@@ -141,10 +141,9 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
 
     const data = (await response.json()) as {
       results?: Array<Record<string, unknown>>;
+      [key: string]: unknown;
     } | null;
-    const item = Array.isArray(data?.results)
-      ? data.results[0]
-      : (data as Record<string, unknown> | null);
+    const item = (Array.isArray(data?.results) ? data.results[0] : data) as Record<string, unknown> | null | undefined;
     if (
       !item ||
       (typeof item.title !== 'string' && typeof item.display_name !== 'string')
@@ -237,7 +236,11 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
       );
     }
 
-    if (!item || typeof item !== 'object' || (typeof item.title !== 'string' && typeof item.display_name !== 'string')) {
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      (typeof item.title !== 'string' && typeof item.display_name !== 'string')
+    ) {
       return null;
     }
 

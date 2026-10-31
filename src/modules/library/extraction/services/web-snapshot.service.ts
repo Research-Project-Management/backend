@@ -402,4 +402,3 @@ export class WebSnapshotService {
     return { attachment, snapshot };
   }
 }
-

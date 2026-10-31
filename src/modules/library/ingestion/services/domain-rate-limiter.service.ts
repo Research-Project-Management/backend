@@ -239,17 +239,6 @@ export class DomainRateLimiterService {
   }
 
   /**
-   * Alias for schedule to execute rate-limited tasks per domain.
-   */
-  public async executeRateLimited<T>(
-    domainOrKey: string,
-    task: () => Promise<T>,
-    signal?: AbortSignal,
-  ): Promise<T> {
-    return this.schedule(domainOrKey, task, signal);
-  }
-
-  /**
    * Configures rate limit for a specific domain (useful for tests or custom endpoints).
    */
   public setDomainConfig(domain: string, config: DomainRateLimitConfig): void {

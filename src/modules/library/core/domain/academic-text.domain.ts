@@ -165,21 +165,18 @@ export function convertAcademicHtmlToMarkdown(raw: string): string {
       /<h[4-6][^>]*>([\s\S]*?)<\/h[4-6]>/gi,
       (_, c: string) => `#### ${c.trim()}\n\n`,
     )
-    .replace(
-      /<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi,
-      (_, c: string) => {
-        const inner = c
-          .replace(/<br\s*\/?>/gi, '\n')
-          .replace(/<\/p>\s*<p[^>]*>/gi, '\n')
-          .replace(/<\/?p[^>]*>/gi, '')
-          .trim();
-        const quoted = inner
-          .split(/\r?\n/)
-          .map((line) => `> ${line.trim()}`)
-          .join('\n');
-        return `${quoted}\n\n`;
-      },
-    )
+    .replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, c: string) => {
+      const inner = c
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>\s*<p[^>]*>/gi, '\n')
+        .replace(/<\/?p[^>]*>/gi, '')
+        .trim();
+      const quoted = inner
+        .split(/\r?\n/)
+        .map((line) => `> ${line.trim()}`)
+        .join('\n');
+      return `${quoted}\n\n`;
+    })
     .replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner: string) => {
       let itemIndex = 0;
       const items: string[] = [];

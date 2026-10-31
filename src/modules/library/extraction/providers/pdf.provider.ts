@@ -1,6 +1,9 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { getDocumentProxy, getMeta } from 'unpdf';
-import { AcademicCreator } from '@/modules/library/core/types/bibliographic.types';
+import {
+  AcademicCreator,
+  DocumentSection,
+} from '@/modules/library/core/types/bibliographic.types';
 import {
   cleanAbstractText,
   libraryConfig,
@@ -17,7 +20,10 @@ import {
   OcrBlock,
 } from '@/modules/library/extraction/types/ocr.types';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
-import { PdfTextMetadataExtractor } from './pdf-text-metadata.extractor';
+import {
+  PdfTextMetadataExtractor,
+  extractPdfOutlineSections,
+} from './pdf-text-metadata.extractor';
 
 export type {
   ExtractedPdfMetadata,
@@ -48,9 +54,12 @@ export class PdfProvider {
   ): Promise<ExtractedPdfDocument> {
     const pages: Array<{
       pageIndex: number;
+      pageNumber?: number;
       textContent: string;
+      text?: string;
       charOffset: number;
     }> = [];
+    let extractedSections: DocumentSection[] = [];
 
     const ocrPageResults: OcrPageResult[] = [];
     const imageDimensionsMap = new Map<
@@ -70,8 +79,7 @@ export class PdfProvider {
     }
 
     let fallbackDocumentProxy:
-      | Awaited<ReturnType<typeof getDocumentProxy>>
-      | undefined;
+      Awaited<ReturnType<typeof getDocumentProxy>> | undefined;
 
     try {
       // 2. Local-first In-Process Fast-Path: TrustedExtractionFacade (< 15ms)
@@ -231,7 +239,11 @@ export class PdfProvider {
                 } else if (rawOcrText) {
                   pageText = rawOcrText;
                 }
-                if (typeof res === 'object' && res !== null && (res as { wasOcr?: boolean }).wasOcr) {
+                if (
+                  typeof res === 'object' &&
+                  res !== null &&
+                  (res as { wasOcr?: boolean }).wasOcr
+                ) {
                   ocrPageResults.push(res);
                   if (typeof page.getViewport === 'function') {
                     try {
@@ -250,7 +262,9 @@ export class PdfProvider {
 
             pages.push({
               pageIndex: pageIndex - 1,
+              pageNumber: pageIndex,
               textContent: pageText,
+              text: pageText,
               charOffset: currentOffset,
             });
             currentOffset += pageText.length + 1;
@@ -263,6 +277,9 @@ export class PdfProvider {
             }
           }
         }
+
+        // Extract outline/bookmarks or fallback to heading regex heuristics on extracted pages
+        extractedSections = await this.extractOutlineSections(document, pages);
       } catch (caughtError: unknown) {
         const errorMessage =
           caughtError instanceof Error
@@ -277,292 +294,304 @@ export class PdfProvider {
         ? this.extractMetadataFromText(combinedText)
         : {};
 
-    const metadata: ExtractedPdfMetadata = {
-      doi:
-        trustedResult?.metadata?.doi ||
-        textExtractedMetadata.doi ||
-        unpdfExtractedMetadata.doi ||
-        headerExtractedMetadata.doi,
-      isbn:
-        trustedResult?.metadata?.isbn ||
-        textExtractedMetadata.isbn ||
-        unpdfExtractedMetadata.isbn ||
-        headerExtractedMetadata.isbn,
-      issn:
-        trustedResult?.metadata?.issn ||
-        textExtractedMetadata.issn ||
-        unpdfExtractedMetadata.issn ||
-        headerExtractedMetadata.issn,
-      pmid:
-        trustedResult?.metadata?.pmid ||
-        textExtractedMetadata.pmid ||
-        unpdfExtractedMetadata.pmid ||
-        headerExtractedMetadata.pmid,
-      publisher:
-        trustedResult?.metadata?.publisher ||
-        textExtractedMetadata.publisher ||
-        unpdfExtractedMetadata.publisher ||
-        headerExtractedMetadata.publisher,
-      place:
-        trustedResult?.metadata?.place ||
-        textExtractedMetadata.place ||
-        unpdfExtractedMetadata.place ||
-        headerExtractedMetadata.place,
-      journal:
-        trustedResult?.metadata?.journal ||
-        textExtractedMetadata.journal ||
-        unpdfExtractedMetadata.journal ||
-        headerExtractedMetadata.journal,
-      bookTitle:
-        trustedResult?.metadata?.bookTitle ||
-        textExtractedMetadata.bookTitle ||
-        unpdfExtractedMetadata.bookTitle ||
-        headerExtractedMetadata.bookTitle,
-      conferenceName:
-        trustedResult?.metadata?.conferenceName ||
-        textExtractedMetadata.conferenceName ||
-        unpdfExtractedMetadata.conferenceName ||
-        headerExtractedMetadata.conferenceName,
-      volume:
-        trustedResult?.metadata?.volume ||
-        textExtractedMetadata.volume ||
-        unpdfExtractedMetadata.volume ||
-        headerExtractedMetadata.volume,
-      issue:
-        trustedResult?.metadata?.issue ||
-        textExtractedMetadata.issue ||
-        unpdfExtractedMetadata.issue ||
-        headerExtractedMetadata.issue,
-      pages:
-        trustedResult?.metadata?.pages ||
-        textExtractedMetadata.pages ||
-        unpdfExtractedMetadata.pages ||
-        headerExtractedMetadata.pages,
-      numberOfPages: unpdfExtractedMetadata.numberOfPages,
-      arxivId:
-        trustedResult?.metadata?.arxivId ||
-        textExtractedMetadata.arxivId ||
-        unpdfExtractedMetadata.arxivId ||
-        headerExtractedMetadata.arxivId,
-      primaryCategory:
-        trustedResult?.metadata?.primaryCategory ||
-        textExtractedMetadata.primaryCategory ||
-        unpdfExtractedMetadata.primaryCategory ||
-        headerExtractedMetadata.primaryCategory,
-      title:
-        (trustedResult?.metadata?.title &&
-        !TrustedExtractionService.isBogusTitle(trustedResult.metadata.title)
-          ? trustedResult.metadata.title
-          : undefined) ||
-        (unpdfExtractedMetadata.title &&
-        unpdfExtractedMetadata.title.length > 8 &&
-        !TrustedExtractionService.isBogusTitle(unpdfExtractedMetadata.title)
-          ? unpdfExtractedMetadata.title
-          : undefined) ||
-        (textExtractedMetadata.title &&
-        !TrustedExtractionService.isBogusTitle(textExtractedMetadata.title)
-          ? textExtractedMetadata.title
-          : undefined) ||
-        (headerExtractedMetadata.title &&
-        !headerExtractedMetadata.title.toLowerCase().endsWith('.pdf') &&
-        !TrustedExtractionService.isBogusTitle(headerExtractedMetadata.title)
-          ? headerExtractedMetadata.title
-          : undefined),
-      authors:
-        trustedResult?.metadata?.authors &&
-        trustedResult.metadata.authors.length > 0
-          ? trustedResult.metadata.authors
-          : textExtractedMetadata.authors &&
-              textExtractedMetadata.authors.length > 0
-            ? textExtractedMetadata.authors
-            : unpdfExtractedMetadata.authors &&
-                unpdfExtractedMetadata.authors.length > 0
-              ? unpdfExtractedMetadata.authors
-              : headerExtractedMetadata.authors,
-      creators: trustedResult?.metadata?.creators
-        ? (
-            trustedResult.metadata.creators as Array<{
-              orderIndex?: number;
-              creatorType?: string;
-              fullName?: string;
-              firstName?: string;
-              lastName?: string;
-            }>
-          ).map((c, idx: number) => ({
-            orderIndex: c.orderIndex ?? idx,
-            creatorType: c.creatorType || 'author',
-            fullName:
-              c.fullName ||
-              `${c.firstName || ''} ${c.lastName || ''}`.trim() ||
-              'Unknown Author',
-            firstName: c.firstName || undefined,
-            lastName: c.lastName || undefined,
-          }))
-        : trustedResult?.metadata?.authors &&
-            trustedResult.metadata.authors.length > 0
-          ? trustedResult.metadata.authors.map((a: string, idx: number) => ({
-              orderIndex: idx,
-              creatorType: 'author',
-              fullName: a,
+      const metadata: ExtractedPdfMetadata = {
+        doi:
+          trustedResult?.metadata?.doi ||
+          textExtractedMetadata.doi ||
+          unpdfExtractedMetadata.doi ||
+          headerExtractedMetadata.doi,
+        isbn:
+          trustedResult?.metadata?.isbn ||
+          textExtractedMetadata.isbn ||
+          unpdfExtractedMetadata.isbn ||
+          headerExtractedMetadata.isbn,
+        issn:
+          trustedResult?.metadata?.issn ||
+          textExtractedMetadata.issn ||
+          unpdfExtractedMetadata.issn ||
+          headerExtractedMetadata.issn,
+        pmid:
+          trustedResult?.metadata?.pmid ||
+          textExtractedMetadata.pmid ||
+          unpdfExtractedMetadata.pmid ||
+          headerExtractedMetadata.pmid,
+        publisher:
+          trustedResult?.metadata?.publisher ||
+          textExtractedMetadata.publisher ||
+          unpdfExtractedMetadata.publisher ||
+          headerExtractedMetadata.publisher,
+        place:
+          trustedResult?.metadata?.place ||
+          textExtractedMetadata.place ||
+          unpdfExtractedMetadata.place ||
+          headerExtractedMetadata.place,
+        journal:
+          trustedResult?.metadata?.journal ||
+          textExtractedMetadata.journal ||
+          unpdfExtractedMetadata.journal ||
+          headerExtractedMetadata.journal,
+        bookTitle:
+          trustedResult?.metadata?.bookTitle ||
+          textExtractedMetadata.bookTitle ||
+          unpdfExtractedMetadata.bookTitle ||
+          headerExtractedMetadata.bookTitle,
+        conferenceName:
+          trustedResult?.metadata?.conferenceName ||
+          textExtractedMetadata.conferenceName ||
+          unpdfExtractedMetadata.conferenceName ||
+          headerExtractedMetadata.conferenceName,
+        volume:
+          trustedResult?.metadata?.volume ||
+          textExtractedMetadata.volume ||
+          unpdfExtractedMetadata.volume ||
+          headerExtractedMetadata.volume,
+        issue:
+          trustedResult?.metadata?.issue ||
+          textExtractedMetadata.issue ||
+          unpdfExtractedMetadata.issue ||
+          headerExtractedMetadata.issue,
+        pages:
+          trustedResult?.metadata?.pages ||
+          textExtractedMetadata.pages ||
+          unpdfExtractedMetadata.pages ||
+          headerExtractedMetadata.pages,
+        numberOfPages: unpdfExtractedMetadata.numberOfPages,
+        arxivId:
+          trustedResult?.metadata?.arxivId ||
+          textExtractedMetadata.arxivId ||
+          unpdfExtractedMetadata.arxivId ||
+          headerExtractedMetadata.arxivId,
+        primaryCategory:
+          trustedResult?.metadata?.primaryCategory ||
+          textExtractedMetadata.primaryCategory ||
+          unpdfExtractedMetadata.primaryCategory ||
+          headerExtractedMetadata.primaryCategory,
+        title:
+          (trustedResult?.metadata?.title &&
+          !TrustedExtractionService.isBogusTitle(trustedResult.metadata.title)
+            ? trustedResult.metadata.title
+            : undefined) ||
+          (unpdfExtractedMetadata.title &&
+          unpdfExtractedMetadata.title.length > 8 &&
+          !TrustedExtractionService.isBogusTitle(unpdfExtractedMetadata.title)
+            ? unpdfExtractedMetadata.title
+            : undefined) ||
+          (textExtractedMetadata.title &&
+          !TrustedExtractionService.isBogusTitle(textExtractedMetadata.title)
+            ? textExtractedMetadata.title
+            : undefined) ||
+          (headerExtractedMetadata.title &&
+          !headerExtractedMetadata.title.toLowerCase().endsWith('.pdf') &&
+          !TrustedExtractionService.isBogusTitle(headerExtractedMetadata.title)
+            ? headerExtractedMetadata.title
+            : undefined),
+        authors:
+          trustedResult?.metadata?.authors &&
+          trustedResult.metadata.authors.length > 0
+            ? trustedResult.metadata.authors
+            : textExtractedMetadata.authors &&
+                textExtractedMetadata.authors.length > 0
+              ? textExtractedMetadata.authors
+              : unpdfExtractedMetadata.authors &&
+                  unpdfExtractedMetadata.authors.length > 0
+                ? unpdfExtractedMetadata.authors
+                : headerExtractedMetadata.authors,
+        creators: trustedResult?.metadata?.creators
+          ? (
+              trustedResult.metadata.creators as Array<{
+                orderIndex?: number;
+                creatorType?: string;
+                fullName?: string;
+                firstName?: string;
+                lastName?: string;
+              }>
+            ).map((c, idx: number) => ({
+              orderIndex: c.orderIndex ?? idx,
+              creatorType: c.creatorType || 'author',
+              fullName:
+                c.fullName ||
+                `${c.firstName || ''} ${c.lastName || ''}`.trim() ||
+                'Unknown Author',
+              firstName: c.firstName || undefined,
+              lastName: c.lastName || undefined,
             }))
-          : undefined,
-      year:
-        trustedResult?.metadata?.year ||
-        textExtractedMetadata.year ||
-        unpdfExtractedMetadata.year ||
-        headerExtractedMetadata.year,
-      publicationDate:
-        trustedResult?.metadata?.publicationDate ||
-        textExtractedMetadata.publicationDate ||
-        unpdfExtractedMetadata.publicationDate ||
-        headerExtractedMetadata.publicationDate,
-      abstract:
-        trustedResult?.metadata?.abstract ||
-        cleanAbstractText(headerExtractedMetadata.abstract) ||
-        cleanAbstractText(textExtractedMetadata.abstract) ||
-        undefined,
-      keywords:
-        trustedResult?.metadata?.keywords ||
-        (textExtractedMetadata.keywords &&
-        textExtractedMetadata.keywords.length > 0
-          ? textExtractedMetadata.keywords
-          : unpdfExtractedMetadata.keywords &&
-              unpdfExtractedMetadata.keywords.length > 0
-            ? unpdfExtractedMetadata.keywords
-            : headerExtractedMetadata.keywords),
-      rawText: combinedText.slice(0, PdfProvider.TEXT_SCAN_LIMIT),
-      isSelfSufficient: trustedResult?.isSelfSufficient,
-      qualityScore: trustedResult?.quality?.totalScore,
-      engineUsed: trustedResult?.provenance?.engineUsed,
-    };
+          : trustedResult?.metadata?.authors &&
+              trustedResult.metadata.authors.length > 0
+            ? trustedResult.metadata.authors.map((a: string, idx: number) => ({
+                orderIndex: idx,
+                creatorType: 'author',
+                fullName: a,
+              }))
+            : undefined,
+        year:
+          trustedResult?.metadata?.year ||
+          textExtractedMetadata.year ||
+          unpdfExtractedMetadata.year ||
+          headerExtractedMetadata.year,
+        publicationDate:
+          trustedResult?.metadata?.publicationDate ||
+          textExtractedMetadata.publicationDate ||
+          unpdfExtractedMetadata.publicationDate ||
+          headerExtractedMetadata.publicationDate,
+        abstract:
+          trustedResult?.metadata?.abstract ||
+          cleanAbstractText(headerExtractedMetadata.abstract) ||
+          cleanAbstractText(textExtractedMetadata.abstract) ||
+          undefined,
+        keywords:
+          trustedResult?.metadata?.keywords ||
+          (textExtractedMetadata.keywords &&
+          textExtractedMetadata.keywords.length > 0
+            ? textExtractedMetadata.keywords
+            : unpdfExtractedMetadata.keywords &&
+                unpdfExtractedMetadata.keywords.length > 0
+              ? unpdfExtractedMetadata.keywords
+              : headerExtractedMetadata.keywords),
+        rawText: combinedText.slice(0, PdfProvider.TEXT_SCAN_LIMIT),
+        isSelfSufficient: trustedResult?.isSelfSufficient,
+        qualityScore: trustedResult?.quality?.totalScore,
+        engineUsed: trustedResult?.provenance?.engineUsed,
+      };
 
-    const trustedProvObj = trustedResult?.provenance as
-      | {
-          fieldProvenance?: Record<
-            string,
-            { source: string; confidence: number; extractedAt?: string }
-          >;
-          rawMatches?: {
+      const trustedProvObj = trustedResult?.provenance as
+        | {
             fieldProvenance?: Record<
               string,
               { source: string; confidence: number; extractedAt?: string }
             >;
+            rawMatches?: {
+              fieldProvenance?: Record<
+                string,
+                { source: string; confidence: number; extractedAt?: string }
+              >;
+            };
+          }
+        | undefined;
+      const mergedFieldProvenance: Record<
+        string,
+        { source: string; confidence: number; extractedAt?: string }
+      > = {
+        ...(trustedProvObj?.fieldProvenance ??
+          trustedProvObj?.rawMatches?.fieldProvenance ??
+          {}),
+      };
+      const nowIso = new Date().toISOString();
+      for (const key of Object.keys(metadata) as Array<
+        keyof ExtractedPdfMetadata
+      >) {
+        if (
+          key === 'rawText' ||
+          key === 'isSelfSufficient' ||
+          key === 'qualityScore' ||
+          key === 'engineUsed' ||
+          key === 'numberOfPages' ||
+          metadata[key] === undefined
+        ) {
+          continue;
+        }
+        if (mergedFieldProvenance[key]) continue;
+        if (trustedResult?.metadata?.[key] !== undefined) {
+          mergedFieldProvenance[key] = {
+            source: trustedResult.provenance?.engineUsed || 'ACADEMIC_REGEX',
+            confidence: 0.85,
+            extractedAt: nowIso,
+          };
+        } else if (
+          (unpdfExtractedMetadata as Record<string, unknown>)[key] !==
+            undefined ||
+          (headerExtractedMetadata as Record<string, unknown>)[key] !==
+            undefined
+        ) {
+          mergedFieldProvenance[key] = {
+            source: 'XMP_BINARY',
+            confidence: 0.9,
+            extractedAt: nowIso,
+          };
+        } else if (
+          (textExtractedMetadata as Record<string, unknown>)[key] !== undefined
+        ) {
+          mergedFieldProvenance[key] = {
+            source: 'ACADEMIC_REGEX',
+            confidence: 0.85,
+            extractedAt: nowIso,
           };
         }
-      | undefined;
-    const mergedFieldProvenance: Record<
-      string,
-      { source: string; confidence: number; extractedAt?: string }
-    > = {
-      ...(trustedProvObj?.fieldProvenance ??
-        trustedProvObj?.rawMatches?.fieldProvenance ??
-        {}),
-    };
-    const nowIso = new Date().toISOString();
-    for (const key of Object.keys(metadata) as Array<keyof ExtractedPdfMetadata>) {
+      }
+      if (metadata.creators && !mergedFieldProvenance.creators) {
+        mergedFieldProvenance.creators = mergedFieldProvenance.authors || {
+          source: trustedResult?.provenance?.engineUsed || 'ACADEMIC_REGEX',
+          confidence: 0.85,
+          extractedAt: nowIso,
+        };
+      }
+      (
+        metadata as ExtractedPdfMetadata & {
+          fieldProvenance?: Record<
+            string,
+            { source: string; confidence: number; extractedAt?: string }
+          >;
+        }
+      ).fieldProvenance = mergedFieldProvenance;
+
+      let searchablePdfBuffer: Buffer | undefined;
+
       if (
-        key === 'rawText' ||
-        key === 'isSelfSufficient' ||
-        key === 'qualityScore' ||
-        key === 'engineUsed' ||
-        key === 'numberOfPages' ||
-        metadata[key] === undefined
+        ocrPageResults.length > 0 &&
+        this.ocrProvider?.generateSearchablePdf
       ) {
-        continue;
+        try {
+          searchablePdfBuffer = await this.ocrProvider.generateSearchablePdf(
+            buffer,
+            ocrPageResults,
+            imageDimensionsMap,
+          );
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Failed to generate sandwich PDF: ${message}`);
+        }
       }
-      if (mergedFieldProvenance[key]) continue;
-      if (trustedResult?.metadata?.[key] !== undefined) {
-        mergedFieldProvenance[key] = {
-          source: trustedResult.provenance?.engineUsed || 'ACADEMIC_REGEX',
-          confidence: 0.85,
-          extractedAt: nowIso,
-        };
-      } else if (
-        (unpdfExtractedMetadata as Record<string, unknown>)[key] !== undefined ||
-        (headerExtractedMetadata as Record<string, unknown>)[key] !== undefined
-      ) {
-        mergedFieldProvenance[key] = {
-          source: 'XMP_BINARY',
-          confidence: 0.9,
-          extractedAt: nowIso,
-        };
-      } else if (
-        (textExtractedMetadata as Record<string, unknown>)[key] !== undefined
-      ) {
-        mergedFieldProvenance[key] = {
-          source: 'ACADEMIC_REGEX',
-          confidence: 0.85,
-          extractedAt: nowIso,
-        };
-      }
-    }
-    if (metadata.creators && !mergedFieldProvenance.creators) {
-      mergedFieldProvenance.creators = mergedFieldProvenance.authors || {
-        source: trustedResult?.provenance?.engineUsed || 'ACADEMIC_REGEX',
-        confidence: 0.85,
-        extractedAt: nowIso,
-      };
-    }
-    (
-      metadata as ExtractedPdfMetadata & {
-        fieldProvenance?: Record<
-          string,
-          { source: string; confidence: number; extractedAt?: string }
-        >;
-      }
-    ).fieldProvenance = mergedFieldProvenance;
 
-    let searchablePdfBuffer: Buffer | undefined;
-
-    if (ocrPageResults.length > 0 && this.ocrProvider?.generateSearchablePdf) {
-      try {
-        searchablePdfBuffer = await this.ocrProvider.generateSearchablePdf(
-          buffer,
-          ocrPageResults,
-          imageDimensionsMap,
-        );
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Failed to generate sandwich PDF: ${message}`);
-      }
-    }
-
-    let ocrProvenance: OcrProvenanceData | undefined;
-    if (ocrPageResults.length > 0) {
-      const avgConfidence =
-        ocrPageResults.reduce(
-          (acc: number, p: OcrPageResult) => acc + p.confidence,
-          0,
-        ) / ocrPageResults.length;
-      const totalExecTime = ocrPageResults.reduce(
-        (acc: number, p: OcrPageResult) => acc + p.executionTimeMs,
-        0,
-      );
-
-      ocrProvenance = {
-        totalOcrPages: ocrPageResults.length,
-        avgConfidence: Math.round(avgConfidence * 10) / 10,
-        executionTimeMs: totalExecTime,
-        pages: ocrPageResults.map((p: OcrPageResult) => ({
-          pageIndex: p.pageIndex,
-          confidence: Math.round(p.confidence * 10) / 10,
-          orientationAngle: p.orientationAngle,
-          skewAngle: p.skewAngle,
-          preprocessed: p.preprocessed,
-          textLength: p.text.length,
-          lineCount: p.blocks.reduce(
-            (acc: number, b: OcrBlock) => acc + (b.lines?.length || 0),
+      let ocrProvenance: OcrProvenanceData | undefined;
+      if (ocrPageResults.length > 0) {
+        const avgConfidence =
+          ocrPageResults.reduce(
+            (acc: number, p: OcrPageResult) => acc + p.confidence,
             0,
-          ),
-          wordCount: p.words.length,
-          executionTimeMs: p.executionTimeMs,
-        })),
-      };
-    }
+          ) / ocrPageResults.length;
+        const totalExecTime = ocrPageResults.reduce(
+          (acc: number, p: OcrPageResult) => acc + p.executionTimeMs,
+          0,
+        );
+
+        ocrProvenance = {
+          totalOcrPages: ocrPageResults.length,
+          ocrPages: ocrPageResults.length,
+          digitalPages: Math.max(0, pages.length - ocrPageResults.length),
+          avgConfidence: Math.round(avgConfidence * 10) / 10,
+          executionTimeMs: totalExecTime,
+          pages: ocrPageResults.map((p: OcrPageResult) => ({
+            pageIndex: p.pageIndex,
+            confidence: Math.round(p.confidence * 10) / 10,
+            orientationAngle: p.orientationAngle,
+            skewAngle: p.skewAngle,
+            preprocessed: p.preprocessed,
+            textLength: p.text.length,
+            lineCount: p.blocks.reduce(
+              (acc: number, b: OcrBlock) => acc + (b.lines?.length || 0),
+              0,
+            ),
+            wordCount: p.words.length,
+            executionTimeMs: p.executionTimeMs,
+          })),
+        };
+      }
 
       return {
         metadata,
         pages,
+        ...(extractedSections.length > 0
+          ? { sections: extractedSections }
+          : {}),
         ocrProvenance,
         searchablePdfBuffer,
       };
@@ -581,6 +610,17 @@ export class PdfProvider {
       await disposeProxy(fallbackDocumentProxy);
       await disposeProxy(sharedDocumentProxy);
     }
+  }
+
+  private async extractOutlineSections(
+    document: Awaited<ReturnType<typeof getDocumentProxy>>,
+    pages: Array<{
+      pageIndex: number;
+      pageNumber?: number;
+      textContent: string;
+    }>,
+  ): Promise<DocumentSection[]> {
+    return extractPdfOutlineSections(document, pages);
   }
 
   async extractMetadataFromBufferAsync(

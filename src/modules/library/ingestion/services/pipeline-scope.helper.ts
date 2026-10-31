@@ -29,7 +29,9 @@ export function getSubmissionPayloadLabel(
 export function getSubmissionPayloadSize(
   payload: IngestionSubmissionEnvelope['payload'],
 ): number {
-  return 'size' in payload && typeof payload.size === 'number' ? payload.size : 0;
+  return 'size' in payload && typeof payload.size === 'number'
+    ? payload.size
+    : 0;
 }
 
 export function markErrStatusTransitioned(err: unknown): void {
@@ -66,5 +68,5 @@ export function createSingleItemExecutionLog(params: {
         itemId: params.itemId,
       },
     ],
-  } as unknown as Prisma.InputJsonValue;
+  };
 }

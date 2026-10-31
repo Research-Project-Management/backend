@@ -115,8 +115,14 @@ export class ItemsController {
         'Project ID is required in URL parameter to import items',
       );
     }
-    if (!Array.isArray(body?.itemIds) || body.itemIds.length === 0 || body.itemIds.length > 100) {
-      throw new BadRequestException('itemIds must be a non-empty array of at most 100 IDs');
+    if (
+      !Array.isArray(body?.itemIds) ||
+      body.itemIds.length === 0 ||
+      body.itemIds.length > 100
+    ) {
+      throw new BadRequestException(
+        'itemIds must be a non-empty array of at most 100 IDs',
+      );
     }
     return this.curationService.importItemsToProject(
       userId,
@@ -293,7 +299,10 @@ export class ItemsController {
     const expectedVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
       : undefined;
-    if (expectedVersion !== undefined && (Number.isNaN(expectedVersion) || expectedVersion < 0)) {
+    if (
+      expectedVersion !== undefined &&
+      (Number.isNaN(expectedVersion) || expectedVersion < 0)
+    ) {
       throw new BadRequestException('Invalid expectedVersion');
     }
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
@@ -326,9 +335,12 @@ export class ItemsController {
       expectedVersionQuery !== undefined
         ? parseInt(expectedVersionQuery, 10)
         : ifMatch
-            ? parseInt(ifMatch.replace(/["']/g, ''), 10)
-            : undefined;
-    if (expectedVersion !== undefined && (Number.isNaN(expectedVersion) || expectedVersion < 0)) {
+          ? parseInt(ifMatch.replace(/["']/g, ''), 10)
+          : undefined;
+    if (
+      expectedVersion !== undefined &&
+      (Number.isNaN(expectedVersion) || expectedVersion < 0)
+    ) {
       throw new BadRequestException('Invalid expectedVersion');
     }
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
@@ -361,7 +373,9 @@ export class ItemsController {
 
   @Post('bulk-purge')
   @ProjectRoles('owner')
-  @ApiOperation({ summary: 'Permanently purge multiple deleted items in batch' })
+  @ApiOperation({
+    summary: 'Permanently purge multiple deleted items in batch',
+  })
   async bulkPurgeItems(
     @CurrentUser('id') userId: string,
     @Body() body: BulkPurgeItemsDto,
@@ -387,7 +401,9 @@ export class ItemsController {
 
   @Post('bulk-restore')
   @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Restore multiple library items from trash in batch' })
+  @ApiOperation({
+    summary: 'Restore multiple library items from trash in batch',
+  })
   async bulkRestoreItems(
     @CurrentUser('id') userId: string,
     @Body() body: BulkRestoreItemsDto,

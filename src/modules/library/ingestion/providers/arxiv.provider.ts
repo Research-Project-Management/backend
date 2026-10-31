@@ -132,7 +132,9 @@ export class ArxivProvider extends AbstractAcademicProvider {
     const canonicalArxivIdentifier =
       normalizeArxivId(cleanId, { stripVersion: true }) ??
       cleanId.replace(/v\d+$/i, '');
-    const doi = cleanId ? `10.48550/arXiv.${canonicalArxivIdentifier}` : undefined;
+    const doi = cleanId
+      ? `10.48550/arXiv.${canonicalArxivIdentifier}`
+      : undefined;
     let publishedDoi: string | undefined;
     const doiMatchResult = entry.match(
       /<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/i,

@@ -17,6 +17,7 @@ import {
   FormatBatchCitationDto,
 } from '@/modules/library/citation/dto/citation.dto';
 import { normalizeCitationStyleId } from '@/modules/library/citation/domain/citation.domain';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   ProjectAccessGuard,
@@ -67,10 +68,11 @@ export class CitationController {
       Number.isFinite(parsedLimit) && parsedLimit > 0
         ? Math.min(parsedLimit, 200)
         : 30;
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
     const styles = await this.citationService.searchStyles(
       query || '',
       numLimit,
-      projectId || userId,
+      effectiveProjectId || userId,
     );
     return {
       total: styles.length,
@@ -93,10 +95,11 @@ export class CitationController {
     @Body('title') title?: string,
     @Param('projectId') projectId?: string,
   ) {
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
     return this.citationService.registerCustomStyle(
       xml,
       title,
-      projectId || userId,
+      effectiveProjectId || userId,
     );
   }
 
@@ -242,7 +245,9 @@ export class CitationController {
     const parsedIndex = index ? parseInt(index, 10) : 1;
     const numIndex =
       Number.isFinite(parsedIndex) && parsedIndex > 0 ? parsedIndex : 1;
-    const projectId = queryProjectId || routeProjectId;
+    const projectId =
+      normalizeProjectScopeId(queryProjectId) ||
+      normalizeProjectScopeId(routeProjectId);
     const res = await this.citationService.formatItemById(
       userId,
       itemId,
@@ -280,7 +285,10 @@ export class CitationController {
     const rawIds = Array.isArray(itemIds) ? itemIds : [];
     // Safety guard: Deduplicate and cap batch at 100 items to protect Node.js event loop
     const ids = Array.from(new Set(rawIds)).slice(0, 100);
-    const projectId = bodyProjectId || queryProjectId || routeProjectId;
+    const projectId =
+      normalizeProjectScopeId(bodyProjectId) ||
+      normalizeProjectScopeId(queryProjectId) ||
+      normalizeProjectScopeId(routeProjectId);
     return this.citationService.formatItemBatch(
       userId,
       ids,

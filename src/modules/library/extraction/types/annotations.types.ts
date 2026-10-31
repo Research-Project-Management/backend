@@ -19,4 +19,3 @@ export {
 };
 
 export type RectCoords = [number, number, number, number];
-

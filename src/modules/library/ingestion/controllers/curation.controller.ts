@@ -12,7 +12,7 @@ import {
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { QualityService } from '@/modules/library/ingestion/services/quality.service';
-import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
+import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
 import {
   MergeDuplicatesDto,
   DismissDuplicatesDto,
@@ -34,7 +34,7 @@ export class CurationController {
     private readonly duplicateDetector: DuplicateDetectorService,
     private readonly duplicateMerger: DuplicateMergerService,
     private readonly qualityService: QualityService,
-    @Optional() private readonly ingestionRepo?: IngestionRepository,
+    @Optional() private readonly ingestionService?: IngestionService,
   ) {}
 
   @Get('duplicates')
@@ -107,12 +107,12 @@ export class CurationController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    if (!this.ingestionRepo) {
+    if (!this.ingestionService) {
       return [];
     }
     const effectiveProjectId = paramProjectId || queryProjectId;
     const parsedLimit = limit ? Number(limit) : undefined;
-    return this.ingestionRepo.findReviewCases(
+    return this.ingestionService.findReviewCases(
       { userId, projectId: effectiveProjectId },
       {
         status,
@@ -130,12 +130,12 @@ export class CurationController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    if (!this.ingestionRepo) {
+    if (!this.ingestionService) {
       return null;
     }
     const effectiveProjectId =
       paramProjectId || queryProjectId || dto?.projectId;
-    return this.ingestionRepo.updateReviewCaseStatus(
+    return this.ingestionService.updateReviewCaseStatus(
       { userId, projectId: effectiveProjectId },
       id,
       dto.status,

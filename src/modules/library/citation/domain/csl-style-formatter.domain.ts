@@ -313,7 +313,9 @@ export class CslFallbackFormatter implements ICslFallbackFormatter {
       [];
     const pushTag = (tag: string, val: unknown, customCheck?: RegExp) => {
       if (typeof val === 'string' || typeof val === 'number') {
-        const strVal = String(val).replace(/\r?\n+/g, ' ').trim();
+        const strVal = String(val)
+          .replace(/\r?\n+/g, ' ')
+          .trim();
         if (strVal !== '') {
           entries.push({
             tag,
@@ -465,10 +467,18 @@ export class CslFallbackFormatter implements ICslFallbackFormatter {
     }
     const year = item.issued?.['date-parts']?.[0]?.[0];
     if (year)
-      lines.push(`PY  - ${String(year).replace(/\r?\n+/g, ' ').trim()}`);
+      lines.push(
+        `PY  - ${String(year)
+          .replace(/\r?\n+/g, ' ')
+          .trim()}`,
+      );
 
     for (const { tag, value } of this.collectRisSupplementTags(item)) {
-      lines.push(`${tag}  - ${String(value).replace(/\r?\n+/g, ' ').trim()}`);
+      lines.push(
+        `${tag}  - ${String(value)
+          .replace(/\r?\n+/g, ' ')
+          .trim()}`,
+      );
     }
     lines.push('ER  - ');
     return lines.join('\n');

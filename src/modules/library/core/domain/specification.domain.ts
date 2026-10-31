@@ -9,22 +9,18 @@ export type QueryCriteria = Record<string, unknown>;
  * - Database query compilation via `toPrismaWhere()`
  * - Logical composition via `.and()`, `.or()`, and `.not()`
  */
-export interface ISpecification<
-  T = unknown,
-  TWhere = QueryCriteria,
-> {
+export interface ISpecification<T = unknown, TWhere = QueryCriteria> {
   toPrismaWhere(): TWhere;
   isSatisfiedBy(item: T): boolean;
   and(other: ISpecification<T, TWhere>): ISpecification<T, TWhere>;
-  or?(other: ISpecification<T, TWhere>): ISpecification<T, TWhere>;
-  not?(): ISpecification<T, TWhere>;
+  or(other: ISpecification<T, TWhere>): ISpecification<T, TWhere>;
+  not(): ISpecification<T, TWhere>;
 }
 
 export abstract class CompositeSpecification<
   T = unknown,
   TWhere = QueryCriteria,
-> implements ISpecification<T, TWhere>
-{
+> implements ISpecification<T, TWhere> {
   abstract toPrismaWhere(): TWhere;
   abstract isSatisfiedBy(item: T): boolean;
 
@@ -46,7 +42,7 @@ function isEmptyWhereObject(where: unknown): boolean {
     !where ||
     (typeof where === 'object' &&
       !Array.isArray(where) &&
-      Object.keys(where as Record<string, unknown>).length === 0)
+      Object.keys(where).length === 0)
   );
 }
 
@@ -57,7 +53,11 @@ function extractCombinatorClauses(
   if (where && typeof where === 'object' && !Array.isArray(where)) {
     const rec = where as Record<string, unknown>;
     const keys = Object.keys(rec);
-    if (keys.length === 1 && keys[0] === operator && Array.isArray(rec[operator])) {
+    if (
+      keys.length === 1 &&
+      keys[0] === operator &&
+      Array.isArray(rec[operator])
+    ) {
       return rec[operator] as unknown[];
     }
   }

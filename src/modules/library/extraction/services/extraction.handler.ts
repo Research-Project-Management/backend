@@ -8,6 +8,13 @@ import { OutboxEvent, Prisma } from '@prisma/client';
 import {
   OutboxDispatchHandler,
   LIBRARY_EVENT_TYPES,
+  CATALOG_FACADE,
+  ICatalogFacade,
+  ITEM_CACHE_INVALIDATOR,
+  IItemCacheInvalidator,
+  SEARCH_FACADE,
+  ISearchFacade,
+  IDEMPOTENT_CONSUMER,
   normalizeProjectScopeId,
   extractFileIdFromUrl,
   ExtractionProcessException,
@@ -19,7 +26,6 @@ import {
 import { AttachmentStorageException } from '@/modules/library/extraction/types/attachments.types';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
-import { ItemCacheCoordinator } from '@/modules/library/catalog';
 import { ReferenceMatcherService } from './reference-matcher.service';
 import { ExtractionMetadataSynchronizer } from './extraction-metadata.synchronizer';
 
@@ -39,7 +45,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     private readonly extractionRepo: ExtractionRepository,
     private readonly pdf: PdfProvider,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
-    @Optional()
+    @Optional() @Inject(IDEMPOTENT_CONSUMER)
     private readonly idempotentConsumer?: IdempotentConsumerService,
     @Optional()
     private readonly cache?: RedisCacheService,
@@ -50,21 +56,16 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     @Optional()
     private readonly libraryTx?: TransactionService,
     @Optional()
-    @Inject('SEARCH_FACADE')
-    private readonly searchFacade?: {
-      indexAttachmentPages?: (
-        attachmentId: string,
-        pages: Array<{
-          pageIndex: number;
-          textContent: string;
-          charOffset?: number;
-        }>,
-      ) => Promise<void>;
-    },
+    @Inject(SEARCH_FACADE)
+    private readonly searchGateway?: ISearchFacade,
     @Optional()
     metadataSync?: ExtractionMetadataSynchronizer,
     @Optional()
-    private readonly cacheCoordinator?: ItemCacheCoordinator,
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
+    @Optional()
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
   ) {
     this.metadataSync =
       metadataSync ??
@@ -73,6 +74,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         this.libraryTx,
         this.storagePort,
         this.cacheCoordinator,
+        this.catalogGateway,
       );
   }
 
@@ -252,7 +254,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         ? rawBuffer
         : typeof rawBuffer === 'string'
           ? Buffer.from(rawBuffer)
-          : Buffer.from(rawBuffer as ArrayBuffer);
+          : Buffer.from(rawBuffer);
 
       // 3. Extract text and per-page structures
       if (signal?.aborted) {
@@ -392,8 +394,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
                 charOffset: p.charOffset,
               })),
             });
-          } else if (this.searchFacade?.indexAttachmentPages) {
-            await this.searchFacade.indexAttachmentPages(
+          } else if (this.searchGateway?.indexAttachmentPages) {
+            await this.searchGateway.indexAttachmentPages(
               attachment.id,
               normalizedPages,
             );
@@ -458,9 +460,15 @@ export class ExtractionHandler implements OutboxDispatchHandler {
 
       // 8. Invalidate all relevant Redis keys BEFORE publishing ITEM_UPDATED or emitting ATTACHMENT_METADATA_EXTRACTED
       // so downstream listeners (e.g. SearchEventsSubscriber, RetractionWatch, MetadataResolverService) read fresh item state & version
-      if (this.cacheCoordinator) {
+      const cacheInvalidator =
+        this.cacheCoordinator?.invalidateForWrite
+          ? this.cacheCoordinator
+          : this.catalogGateway?.invalidateForWrite
+            ? this.catalogGateway
+            : undefined;
+      if (cacheInvalidator?.invalidateForWrite) {
         try {
-          await this.cacheCoordinator.invalidateForWrite({
+          await cacheInvalidator.invalidateForWrite({
             userId: effectiveUserId,
             projectId: effectiveProjectId,
             itemIds: [attachment.itemId],
@@ -469,7 +477,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           const msg =
             cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
           this.logger.warn(
-            `Failed to invalidate Redis caches via ItemCacheCoordinator after extraction for item ${attachment.itemId}: ${msg}`,
+            `Failed to invalidate Redis caches after extraction for item ${attachment.itemId}: ${msg}`,
           );
         }
       } else if (this.cache) {
@@ -524,9 +532,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
                   `proj:${effectiveProjectId}`,
                 ),
               ),
-              this.cache.del(
-                LIBRARY_REDIS_KEYS.savedSearches(effectiveUserId),
-              ),
+              this.cache.del(LIBRARY_REDIS_KEYS.savedSearches(effectiveUserId)),
             );
           }
           await Promise.all(invalidationTasks);
@@ -554,11 +560,11 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           : {};
       const discoveredNewIdentifier = Boolean(
         (doc.metadata?.doi && !attachment.item?.doi) ||
-          (doc.metadata?.arxivId &&
-            !(attachment.item as Record<string, unknown> | null)?.arxivId &&
-            !existingMetaObj.arxivId) ||
-          (doc.metadata?.pmid && !existingMetaObj.pmid) ||
-          (doc.metadata?.isbn && !existingMetaObj.isbn),
+        (doc.metadata?.arxivId &&
+          !(attachment.item as Record<string, unknown> | null)?.arxivId &&
+          !existingMetaObj.arxivId) ||
+        (doc.metadata?.pmid && !existingMetaObj.pmid) ||
+        (doc.metadata?.isbn && !existingMetaObj.isbn),
       );
       if (!syncRes?.outboxPublished) {
         await this.emitEventDurable(LIBRARY_EVENT_TYPES.ITEM_UPDATED, {
@@ -683,7 +689,11 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       sourceItemId,
       references,
     );
-    if (res?.matches && res.matches.length > 0 && this.libraryTx?.executeInTransaction) {
+    if (
+      res?.matches &&
+      res.matches.length > 0 &&
+      this.libraryTx?.executeInTransaction
+    ) {
       const eventScope =
         typeof scope === 'string'
           ? { userId: scope, projectId: null }

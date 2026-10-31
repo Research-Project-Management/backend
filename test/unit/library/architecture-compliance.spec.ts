@@ -89,7 +89,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       lines.forEach((line, index) => {
         // Must not inject repositories directly in controllers or facades
         if (
-          /private\s+readonly\s+\w*Repo(sitory)?\s*:\s*[A-Z]\w*Repository/.test(
+          /private\s+readonly\s+\w*Repo(sitory)?\??\s*:\s*[A-Z]\w*Repository/.test(
             line,
           ) &&
           !line.trim().startsWith('//')
@@ -354,7 +354,11 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       }
       const content = fs.readFileSync(file, 'utf-8');
       content.split(/\r?\n/).forEach((line, index) => {
-        if (!line.trim().startsWith('//') && /this\.prisma\./.test(line)) {
+        if (
+          !line.trim().startsWith('//') &&
+          (/this\.prisma\./.test(line) ||
+            /private\s+readonly\s+\w*\??\s*:\s*PrismaService/.test(line))
+        ) {
           beDirectPrismaInServices.push({
             file: relPath,
             line: index + 1,
@@ -392,6 +396,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     const feFiles = walkFrontend(feRoot);
     const feUiViolations: Array<{ file: string; line: number; match: string }> = [];
     const feDomainStorageViolations: Array<{ file: string; line: number; match: string }> = [];
+    const feLayerDirectionViolations: Array<{ file: string; line: number; match: string }> = [];
 
     for (const file of feFiles) {
       const relPath = path.relative(feRoot, file).replace(/\\/g, '/');
@@ -407,7 +412,8 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
             /\buseQuery\s*\(/.test(line) ||
             /\buseMutation\s*\(/.test(line) ||
             /\blocalStorage\b/.test(line) ||
-            /\b(catalogService|collectionsService|attachmentsService|annotationsService|feedsService|savedSearchesService|relationsService|itemLinksService|libraryIngestionService)\./.test(
+            /\.getState\s*\(/.test(line) ||
+            /\b(catalogService|collectionsService|attachmentsService|annotationsService|feedsService|savedSearchesService|relationsService|itemLinksService|libraryIngestionService|ItemsService|CollectionsService|TagsService|NotesService|StateService|SavedSearchesService|RelationsService|CitationService|ExportsService|AttachmentsService|UploadService|AnnotationsService|IngestionService|CurationService|RetractionService|SearchService|SyncService|FeedsService)\./.test(
               line,
             )
           ) {
@@ -431,12 +437,42 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
               match: trimmed,
             });
           }
+          if (
+            /from\s+['"]@\/features\/library\/(core|sdk|ui)\//.test(line) ||
+            /from\s+['"]\.\.\/(core|sdk|ui)\//.test(line)
+          ) {
+            feLayerDirectionViolations.push({
+              file: relPath,
+              line: index + 1,
+              match: trimmed,
+            });
+          }
+        });
+      }
+
+      if (relPath.startsWith('sdk/')) {
+        lines.forEach((line, index) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+          if (
+            /from\s+['"]@\/features\/library\/(core|ui)\//.test(line) ||
+            /import\s+['"]@\/features\/library\/(core|ui)\//.test(line) ||
+            /from\s+['"]\.\.\/(core|ui)\//.test(line) ||
+            /from\s+['"]\.\.\/\.\.\/(core|ui)\//.test(line)
+          ) {
+            feLayerDirectionViolations.push({
+              file: relPath,
+              line: index + 1,
+              match: trimmed,
+            });
+          }
         });
       }
     }
 
     expect(feUiViolations).toEqual([]);
     expect(feDomainStorageViolations).toEqual([]);
+    expect(feLayerDirectionViolations).toEqual([]);
   });
 
   it('SC-010: Schema & Query Integrity (soft-delete columns, table names, zero ghost delegates or TransactionClient casts)', () => {
@@ -597,5 +633,49 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       'utf-8',
     );
     expect(ingestionServiceContent).toContain('skipAsyncDispatch: true');
+  });
+
+  it('SC-013: Hollywood Principle & Zero Shadow Backend Guardrails (Backend port inversion & Frontend server authority)', () => {
+    // 1. Backend: Zero concrete ItemCacheCoordinator imports outside catalog/
+    const cacheCoordinatorViolations: Array<{ file: string; line: number; match: string }> = [];
+    for (const file of allFiles) {
+      const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
+      if (relPath.startsWith('catalog/')) continue;
+      const content = fs.readFileSync(file, 'utf-8');
+      content.split(/\r?\n/).forEach((line, index) => {
+        if (!line.trim().startsWith('//') && /\bItemCacheCoordinator\b/.test(line)) {
+          cacheCoordinatorViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: line.trim(),
+          });
+        }
+      });
+    }
+    expect(cacheCoordinatorViolations).toEqual([]);
+
+    // 2. Frontend: Zero client-metadata-resolver shadow backend file or N+1 copySubtree in collection.coordinator
+    const feRoot = path.resolve(
+      __dirname,
+      '../../../../frontend/src/features/library',
+    );
+    if (!fs.existsSync(feRoot)) return;
+
+    const deletedShadowBackendFile = path.join(
+      feRoot,
+      'core/services/client-metadata-resolver.service.ts',
+    );
+    expect(fs.existsSync(deletedShadowBackendFile)).toBe(false);
+
+    const collectionCoordinatorPath = path.join(
+      feRoot,
+      'core/coordinator/collection.coordinator.ts',
+    );
+    const collectionCoordinatorContent = fs.readFileSync(
+      collectionCoordinatorPath,
+      'utf-8',
+    );
+    expect(collectionCoordinatorContent).toContain('libraryServices.collections.copy(');
+    expect(collectionCoordinatorContent).not.toContain('copySubtree');
   });
 });

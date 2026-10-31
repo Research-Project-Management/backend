@@ -364,7 +364,9 @@ export class TagsRepository {
       select: { itemId: true },
     });
     if (!Array.isArray(rows)) return [];
-    return Array.from(new Set(rows.map((r: { itemId: string }) => r.itemId).filter(Boolean)));
+    return Array.from(
+      new Set(rows.map((r: { itemId: string }) => r.itemId).filter(Boolean)),
+    );
   }
 
   async delete(

@@ -56,23 +56,6 @@ export interface CreateNoteData {
   createdById?: string;
 }
 
-export interface ItemTypeConversionFieldDiff {
-  key: string;
-  label: string;
-  sourceValue: unknown;
-  targetValue: unknown;
-  status: 'preserved' | 'mapped' | 'cleared';
-  baseSemantic?: string;
-}
-
-export interface ItemTypeConversionRoleDiff {
-  creatorId?: string;
-  name: string;
-  sourceRole: string;
-  targetRole: string;
-  changed: boolean;
-}
-
 export interface FieldMappingChange {
   fromField: string;
   toField: string;
@@ -112,8 +95,6 @@ export interface ConvertTypeOptions {
   expectedVersion?: number;
   retainUnmappedInExtra?: boolean;
 }
-
-export const ITEM_TRANSFORMER_PORT = Symbol('ITEM_TRANSFORMER_PORT');
 
 /** Transaction context passed to write methods for composing operations within a parent transaction. */
 export interface ItemTransactionContext<TTx = Prisma.TransactionClient> {

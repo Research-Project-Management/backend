@@ -955,7 +955,6 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
           typeof PdfAnnotationImporterService
         >[2],
         annotationsService,
-        mockAttachmentsService,
       );
 
       // Spy on loadPdfDocument to simulate a 1-page PDF with 2 embedded annotations (Highlight + Text Sticky Note)

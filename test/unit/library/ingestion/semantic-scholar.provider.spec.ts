@@ -1,16 +1,11 @@
 import { SemanticScholarProvider } from '@/modules/library/ingestion/providers/semantic-scholar.provider';
-import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
 
 describe('SemanticScholarProvider', () => {
   let provider: SemanticScholarProvider;
-  let rateLimiter: DomainRateLimiterService;
   let originalFetch: typeof global.fetch;
 
   beforeEach(() => {
-    rateLimiter = new DomainRateLimiterService(undefined, {
-      bypassDelay: true,
-    });
-    provider = new SemanticScholarProvider(rateLimiter);
+    provider = new SemanticScholarProvider();
     originalFetch = global.fetch;
   });
 

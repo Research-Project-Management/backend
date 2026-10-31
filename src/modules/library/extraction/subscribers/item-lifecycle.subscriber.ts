@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  Optional,
-  Inject,
-} from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
   LIBRARY_EVENT_TYPES,
@@ -79,7 +74,10 @@ export class ItemLifecycleSubscriber {
             if (attFileId) fileIdsToDelete.add(attFileId);
             const revisions = (
               att as {
-                revisions?: Array<{ fileId?: string | null; url?: string | null }>;
+                revisions?: Array<{
+                  fileId?: string | null;
+                  url?: string | null;
+                }>;
               }
             ).revisions;
             if (Array.isArray(revisions)) {
@@ -209,5 +207,4 @@ export class ItemLifecycleSubscriber {
       );
     }
   }
-
 }

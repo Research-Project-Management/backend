@@ -43,6 +43,79 @@ export class AnnotationsRepository {
     return tx ?? this.prisma;
   }
 
+  private normalizeRectItem(item: unknown): {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    width: number;
+    height: number;
+  } | null {
+    if (Array.isArray(item) && item.length === 4 && item.every((n) => typeof n === 'number')) {
+      const [x1, y1, x2, y2] = item as [number, number, number, number];
+      return {
+        x1,
+        y1,
+        x2,
+        y2,
+        width: Math.max(0, x2 - x1),
+        height: Math.max(0, y2 - y1),
+      };
+    }
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      const r = item as Record<string, unknown>;
+      const x1 = typeof r.x1 === 'number' ? r.x1 : typeof r.x === 'number' ? r.x : undefined;
+      const y1 = typeof r.y1 === 'number' ? r.y1 : typeof r.y === 'number' ? r.y : undefined;
+      const w = typeof r.width === 'number' ? r.width : undefined;
+      const h = typeof r.height === 'number' ? r.height : undefined;
+      const x2 = typeof r.x2 === 'number' ? r.x2 : x1 !== undefined && w !== undefined ? x1 + w : undefined;
+      const y2 = typeof r.y2 === 'number' ? r.y2 : y1 !== undefined && h !== undefined ? y1 + h : undefined;
+      if (x1 !== undefined && y1 !== undefined && x2 !== undefined && y2 !== undefined) {
+        return {
+          x1,
+          y1,
+          x2,
+          y2,
+          width: w ?? Math.max(0, x2 - x1),
+          height: h ?? Math.max(0, y2 - y1),
+        };
+      }
+    }
+    return null;
+  }
+
+  private mapEntity(raw: AnnotationEntity): AnnotationEntity {
+    const rects: Array<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      width: number;
+      height: number;
+    }> = [];
+    const rc = raw.rectCoords;
+    if (Array.isArray(rc)) {
+      if (rc.length === 4 && rc.every((n) => typeof n === 'number')) {
+        const single = this.normalizeRectItem(rc);
+        if (single) rects.push(single);
+      } else {
+        for (const entry of rc) {
+          const mapped = this.normalizeRectItem(entry);
+          if (mapped) rects.push(mapped);
+        }
+      }
+    } else if (rc && typeof rc === 'object') {
+      const single = this.normalizeRectItem(rc);
+      if (single) rects.push(single);
+    }
+
+    return {
+      ...raw,
+      text: raw.quoteText ?? '',
+      rects,
+    };
+  }
+
   // Queries
 
   async findByAttachment(
@@ -52,7 +125,7 @@ export class AnnotationsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<AnnotationEntity[]> {
     const client = this.getClient(tx);
-    return client.annotation.findMany({
+    const rows = await client.annotation.findMany({
       where: {
         attachmentId,
         deletedAt: null,
@@ -61,11 +134,12 @@ export class AnnotationsRepository {
       },
       select: ANNOTATION_SELECT,
       orderBy: [
-        { annotationSortIndex: 'asc' },
         { pageIndex: 'asc' },
+        { annotationSortIndex: 'asc' },
         { createdAt: 'asc' },
       ],
     });
+    return rows.map((r) => this.mapEntity(r));
   }
 
   async findById(
@@ -73,10 +147,11 @@ export class AnnotationsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<AnnotationEntity | null> {
     const client = this.getClient(tx);
-    return client.annotation.findFirst({
+    const row = await client.annotation.findFirst({
       where: { id, deletedAt: null },
       select: ANNOTATION_SELECT,
     });
+    return row ? this.mapEntity(row) : null;
   }
 
   async findExistingForImport(
@@ -90,6 +165,83 @@ export class AnnotationsRepository {
     });
   }
 
+  private deriveTopLeftFromRectCoords(
+    rectCoords: unknown,
+    fallbackY?: number,
+    fallbackX?: number,
+  ): { y: number; x: number } | null {
+    if (fallbackY !== undefined || fallbackX !== undefined) {
+      return { y: fallbackY ?? 0, x: fallbackX ?? 0 };
+    }
+    if (!Array.isArray(rectCoords) || rectCoords.length === 0) {
+      return null;
+    }
+    if (
+      rectCoords.length === 4 &&
+      rectCoords.every((c) => typeof c === 'number' && Number.isFinite(c))
+    ) {
+      const [x1, y1, x2, y2] = rectCoords as number[];
+      return {
+        y: Math.min(y1, y2),
+        x: Math.min(x1, x2),
+      };
+    }
+    const first = rectCoords[0];
+    if (first && typeof first === 'object' && !Array.isArray(first)) {
+      const r = first as Record<string, unknown>;
+      const rawX = Number(r.x1 ?? r.x);
+      const rawY = Number(r.y1 ?? r.y);
+      if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
+        return { y: rawY, x: rawX };
+      }
+    }
+    return null;
+  }
+
+  private buildUpdateData(
+    data: UpdateAnnotationData,
+    current: AnnotationEntity,
+  ) {
+    const coordsUpdated = data.rectCoords !== undefined;
+    const nextRectCoords = coordsUpdated
+      ? data.rectCoords != null
+        ? (data.rectCoords as Prisma.InputJsonValue)
+        : Prisma.JsonNull
+      : current.rectCoords != null
+        ? (current.rectCoords as Prisma.InputJsonValue)
+        : Prisma.JsonNull;
+
+    let annotationSortIndex =
+      data.annotationSortIndex ?? current.annotationSortIndex ?? '';
+    if (
+      data.annotationSortIndex === undefined &&
+      (coordsUpdated || data.y !== undefined || data.x !== undefined)
+    ) {
+      const topLeft = this.deriveTopLeftFromRectCoords(
+        coordsUpdated ? data.rectCoords : current.rectCoords,
+        data.y,
+        data.x,
+      );
+      if (topLeft) {
+        annotationSortIndex = buildAnnotationSortIndex(
+          current.pageIndex,
+          topLeft.y,
+          topLeft.x,
+        );
+      }
+    }
+
+    return {
+      color: data.color ?? current.color,
+      quoteText:
+        data.quoteText !== undefined ? data.quoteText : current.quoteText,
+      comment: data.comment !== undefined ? data.comment : current.comment,
+      tags: data.tags !== undefined ? data.tags : current.tags,
+      rectCoords: nextRectCoords,
+      annotationSortIndex,
+    };
+  }
+
   // Mutations
 
   async create(
@@ -97,17 +249,25 @@ export class AnnotationsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<AnnotationEntity> {
     const client = this.getClient(tx);
-    return client.annotation.create({
+    const topLeft = this.deriveTopLeftFromRectCoords(
+      data.rectCoords,
+      data.y,
+      data.x,
+    );
+    const row = await client.annotation.create({
       data: {
+        ...(data.id ? { id: data.id } : {}),
         attachmentId: data.attachmentId,
         type: data.type ?? AnnotationType.highlight,
         pageIndex: data.pageIndex,
-        annotationSortIndex: buildAnnotationSortIndex(
-          data.pageIndex,
-          data.y,
-          data.x,
-        ),
-        color: data.color ?? '#ffeb3b',
+        annotationSortIndex:
+          data.annotationSortIndex ??
+          buildAnnotationSortIndex(
+            data.pageIndex,
+            topLeft?.y ?? data.y,
+            topLeft?.x ?? data.x,
+          ),
+        color: data.color ?? '#ffd400',
         quoteText: data.quoteText ?? '',
         comment: data.comment ?? '',
         tags: data.tags ?? [],
@@ -120,6 +280,7 @@ export class AnnotationsRepository {
       },
       select: ANNOTATION_SELECT,
     });
+    return this.mapEntity(row);
   }
 
   async update(
@@ -142,21 +303,7 @@ export class AnnotationsRepository {
       });
     }
 
-    const updatePayload = {
-      color: data.color ?? current.color,
-      quoteText:
-        data.quoteText !== undefined ? data.quoteText : current.quoteText,
-      comment: data.comment !== undefined ? data.comment : current.comment,
-      tags: data.tags !== undefined ? data.tags : current.tags,
-      rectCoords:
-        data.rectCoords !== undefined
-          ? data.rectCoords != null
-            ? (data.rectCoords as Prisma.InputJsonValue)
-            : Prisma.JsonNull
-          : current.rectCoords != null
-            ? (current.rectCoords as Prisma.InputJsonValue)
-            : Prisma.JsonNull,
-    };
+    const updatePayload = this.buildUpdateData(data, current);
 
     if (client.annotation?.updateMany) {
       const affected = await client.annotation.updateMany({
@@ -182,7 +329,7 @@ export class AnnotationsRepository {
       return reloaded;
     }
 
-    return client.annotation.update({
+    const row = await client.annotation.update({
       where: { id },
       data: {
         ...updatePayload,
@@ -190,6 +337,7 @@ export class AnnotationsRepository {
       },
       select: ANNOTATION_SELECT,
     });
+    return this.mapEntity(row);
   }
 
   async softDelete(
@@ -217,7 +365,10 @@ export class AnnotationsRepository {
         deletedAt: null,
         ...(expectedVersion !== undefined ? { version: expectedVersion } : {}),
       },
-      data: { deletedAt: new Date() },
+      data: {
+        deletedAt: new Date(),
+        version: { increment: 1 },
+      },
     });
 
     if (result.count === 0 && expectedVersion !== undefined) {
@@ -248,14 +399,14 @@ export class AnnotationsRepository {
     const updated: AnnotationEntity[] = [];
     let deleted: string[] = [];
 
-    const upsertIds = upserts
+    const idsToLookup = upserts
       .map((item) => item.id)
       .filter((id): id is string => Boolean(id));
 
     const existingMap = new Map<string, AnnotationEntity>();
-    if (upsertIds.length > 0) {
+    if (idsToLookup.length > 0) {
       const existingRows = await tx.annotation.findMany({
-        where: { id: { in: upsertIds }, attachmentId, deletedAt: null },
+        where: { id: { in: idsToLookup }, attachmentId },
         select: ANNOTATION_SELECT,
       });
       for (const row of existingRows) {
@@ -264,54 +415,57 @@ export class AnnotationsRepository {
     }
 
     for (const item of upserts) {
-      if (item.id) {
-        const current = existingMap.get(item.id);
-        if (!current)
-          throw new NotFoundException(`Annotation ${item.id} not found`);
+      const current = item.id ? existingMap.get(item.id) : undefined;
+      if (item.id && !current && item.expectedVersion !== undefined) {
+        throw new NotFoundException(`Annotation ${item.id} not found`);
+      }
 
+      if (current) {
         if (current.authorId !== authorId) {
           throw new ForbiddenException(
             'You can only modify your own annotations',
           );
         }
 
+        const isResurrecting = current.deletedAt !== null;
+
         if (
+          !isResurrecting &&
           item.expectedVersion !== undefined &&
           current.version !== item.expectedVersion
         ) {
           throw new VersionMismatchException({
             aggregateType: 'Annotation',
-            entityId: item.id,
+            entityId: current.id,
             currentVersion: current.version,
             providedVersion: item.expectedVersion,
           });
         }
 
         const updatePayload = {
-          color: item.color ?? current.color,
-          quoteText:
-            item.quoteText !== undefined ? item.quoteText : current.quoteText,
-          comment:
-            item.comment !== undefined ? item.comment : current.comment,
-          tags: item.tags !== undefined ? item.tags : current.tags,
-          rectCoords:
-            item.rectCoords !== undefined
-              ? item.rectCoords != null
-                ? (item.rectCoords as Prisma.InputJsonValue)
-                : Prisma.JsonNull
-              : current.rectCoords != null
-                ? (current.rectCoords as Prisma.InputJsonValue)
-                : Prisma.JsonNull,
-          annotationSortIndex:
-            item.y !== undefined || item.x !== undefined
-              ? buildAnnotationSortIndex(item.pageIndex, item.y, item.x)
-              : (current.annotationSortIndex ?? ''),
+          ...this.buildUpdateData(
+            {
+              color: item.color,
+              quoteText: item.quoteText,
+              comment: item.comment,
+              tags: item.tags,
+              rectCoords: item.rectCoords,
+              y: item.y,
+              x: item.x,
+            },
+            current,
+          ),
+          ...(isResurrecting ? { deletedAt: null } : {}),
         };
 
-        if (item.expectedVersion !== undefined && tx.annotation?.updateMany) {
+        if (
+          !isResurrecting &&
+          item.expectedVersion !== undefined &&
+          tx.annotation?.updateMany
+        ) {
           const affected = await tx.annotation.updateMany({
             where: {
-              id: item.id,
+              id: current.id,
               attachmentId,
               deletedAt: null,
               version: item.expectedVersion,
@@ -322,42 +476,52 @@ export class AnnotationsRepository {
             },
           });
           if (affected.count === 0) {
-            const fresh = await this.findById(item.id, tx);
+            const fresh = await this.findById(current.id, tx);
             throw new VersionMismatchException({
               aggregateType: 'Annotation',
-              entityId: item.id,
+              entityId: current.id,
               currentVersion: fresh?.version ?? current.version,
               providedVersion: item.expectedVersion,
             });
           }
-          const reloaded = await this.findById(item.id, tx);
+          const reloaded = await this.findById(current.id, tx);
           if (!reloaded) {
-            throw new NotFoundException(`Annotation ${item.id} not found`);
+            throw new NotFoundException(`Annotation ${current.id} not found`);
           }
           updated.push(reloaded);
         } else {
           const result = await tx.annotation.update({
-            where: { id: item.id },
+            where: { id: current.id },
             data: {
               ...updatePayload,
               version: { increment: 1 },
             },
             select: ANNOTATION_SELECT,
           });
-          updated.push(result);
+          if (isResurrecting) {
+            created.push(this.mapEntity(result));
+          } else {
+            updated.push(this.mapEntity(result));
+          }
         }
       } else {
+        const topLeft = this.deriveTopLeftFromRectCoords(
+          item.rectCoords,
+          item.y,
+          item.x,
+        );
         const result = await tx.annotation.create({
           data: {
+            ...(item.id ? { id: item.id } : {}),
             attachmentId,
             type: item.type ?? AnnotationType.highlight,
             pageIndex: item.pageIndex,
             annotationSortIndex: buildAnnotationSortIndex(
               item.pageIndex,
-              item.y,
-              item.x,
+              topLeft?.y ?? item.y,
+              topLeft?.x ?? item.x,
             ),
-            color: item.color ?? '#ffeb3b',
+            color: item.color ?? '#ffd400',
             quoteText: item.quoteText ?? '',
             comment: item.comment ?? '',
             tags: item.tags ?? [],
@@ -370,7 +534,7 @@ export class AnnotationsRepository {
           },
           select: ANNOTATION_SELECT,
         });
-        created.push(result);
+        created.push(this.mapEntity(result));
       }
     }
 

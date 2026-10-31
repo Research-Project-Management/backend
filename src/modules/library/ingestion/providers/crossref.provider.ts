@@ -64,7 +64,11 @@ export class CrossRefProvider extends AbstractAcademicProvider {
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
     const { query } = request;
-    if (/^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.48550\/arxiv\./i.test(query.trim())) {
+    if (
+      /^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.48550\/arxiv\./i.test(
+        query.trim(),
+      )
+    ) {
       return null;
     }
     const cleanDoi = normalizeDoi(query);
@@ -553,7 +557,10 @@ export class CrossRefProvider extends AbstractAcademicProvider {
     for (const l of links) {
       if (!l || typeof l !== 'object') continue;
       const linkObj = l as Record<string, unknown>;
-      if (linkObj['content-type'] === 'application/pdf' && typeof linkObj.URL === 'string') {
+      if (
+        linkObj['content-type'] === 'application/pdf' &&
+        typeof linkObj.URL === 'string'
+      ) {
         const u = linkObj.URL.trim();
         if (u) {
           crossrefPdfUrl = u;

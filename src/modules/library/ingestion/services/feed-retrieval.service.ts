@@ -33,9 +33,7 @@ export function redactFeedUrl(rawUrl: string): string {
     parsed.hash = '';
     return parsed.toString();
   } catch {
-    return rawUrl
-      .replace(/\/\/[^/@]+@/, '//')
-      .split(/[?#]/)[0];
+    return rawUrl.replace(/\/\/[^/@]+@/, '//').split(/[?#]/)[0];
   }
 }
 
@@ -255,11 +253,32 @@ export class FeedRetrievalService {
           etag: etagHeader,
           lastModified: lastModifiedHeader,
         });
-        if (persisted?.items && persisted.items.length === parsedFeed.entries.length) {
-          parsedFeed.entries = parsedFeed.entries.map((e, idx) => ({
-            ...e,
-            id: persisted.items[idx]?.id || e.id,
-          }));
+        if (persisted?.items && persisted.items.length > 0) {
+          const idByGuid = new Map<string, string>();
+          for (const item of persisted.items) {
+            if (item.guid && item.id) {
+              idByGuid.set(item.guid, item.id);
+            }
+          }
+          parsedFeed.entries = parsedFeed.entries.map((e, idx) => {
+            const guid = (
+              e.doi ||
+              e.arxivId ||
+              e.url ||
+              e.id ||
+              e.title ||
+              ''
+            ).trim();
+            const matchedId =
+              (guid ? idByGuid.get(guid) : undefined) ||
+              (persisted.items.length === parsedFeed.entries.length
+                ? persisted.items[idx]?.id
+                : undefined);
+            return {
+              ...e,
+              id: matchedId || e.id,
+            };
+          });
         }
       } catch (err: unknown) {
         this.logger.warn(
@@ -313,7 +332,7 @@ export class FeedRetrievalService {
         );
       }
 
-      const entries = (items as Array<Record<string, unknown>>).map(
+      const entries = items.map(
         (
           item: {
             title?: string | string[];
@@ -367,7 +386,8 @@ export class FeedRetrievalService {
             creators: authors.map((name: string, cIdx: number) =>
               parseCreatorString(name, cIdx, 'author'),
             ),
-            abstract: item.abstract?.replace(/<[^>]+>/g, '').trim() || undefined,
+            abstract:
+              item.abstract?.replace(/<[^>]+>/g, '').trim() || undefined,
             publicationTitle: journal,
             volume: item.volume || undefined,
             issue: item.issue || undefined,

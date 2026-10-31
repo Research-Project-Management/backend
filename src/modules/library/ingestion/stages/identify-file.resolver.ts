@@ -158,8 +158,7 @@ export class IdentifyFileResolver {
   async resolve(
     payload: SubmissionPayload & { kind: 'FILE' },
     scopeOrContext?:
-      | string
-      | { userId?: string; projectId?: string; scopeId?: string },
+      string | { userId?: string; projectId?: string; scopeId?: string },
   ): Promise<MetadataCandidate> {
     const context =
       typeof scopeOrContext === 'string'
@@ -185,9 +184,16 @@ export class IdentifyFileResolver {
     let fileBuffer: Buffer | undefined;
 
     const rawPayloadAny = payload as unknown as Record<string, unknown>;
-    const rawOverrides = (rawPayloadAny.overrides || {}) as Record<string, unknown>;
-    const clientPreResolved = (rawPayloadAny.preResolvedMetadata || rawOverrides.preResolvedMetadata) as Record<string, unknown> | undefined;
-    const isClientResolved = rawPayloadAny.resolutionSource === 'client' || rawOverrides.resolutionSource === 'client' || Boolean(clientPreResolved);
+    const rawOverrides = (rawPayloadAny.overrides || {}) as Record<
+      string,
+      unknown
+    >;
+    const clientPreResolved = (rawPayloadAny.preResolvedMetadata ||
+      rawOverrides.preResolvedMetadata) as Record<string, unknown> | undefined;
+    const isClientResolved =
+      rawPayloadAny.resolutionSource === 'client' ||
+      rawOverrides.resolutionSource === 'client' ||
+      Boolean(clientPreResolved);
 
     if (clientPreResolved && typeof clientPreResolved === 'object') {
       extractedMetadata = {
@@ -284,8 +290,9 @@ export class IdentifyFileResolver {
                     : {}),
                 },
               );
-            const docMeta = ((extractedDoc?.metadata ||
-              extractedDoc) as unknown as ExtractedPdfMetadata) || {};
+            const docMeta =
+              ((extractedDoc?.metadata ||
+                extractedDoc) as unknown as ExtractedPdfMetadata) || {};
             if (Object.keys(extractedMetadata).length === 0) {
               extractedMetadata = docMeta;
             } else {
@@ -317,9 +324,9 @@ export class IdentifyFileResolver {
         try {
           extractedMetadata =
             fileBuffer && this.extractionGateway?.extractMetadataFromBuffer
-              ? ((await this.extractionGateway.extractMetadataFromBuffer(
+              ? (this.extractionGateway.extractMetadataFromBuffer(
                   fileBuffer,
-                )) as unknown as ExtractedPdfMetadata) || {}
+                ) as unknown as ExtractedPdfMetadata) || {}
               : {};
         } catch {
           extractedMetadata = {};

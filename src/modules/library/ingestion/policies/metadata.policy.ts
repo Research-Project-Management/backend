@@ -40,7 +40,10 @@ export class MetadataRoutingPolicy {
    *    are explicitly requested.
    * 4. Fallback is evaluated sequentially only when authoritative resolution returns nothing or fails.
    */
-  static getTiers(queryType: QueryType, options?: RoutingOptions): RoutingTiers {
+  static getTiers(
+    queryType: QueryType,
+    options?: RoutingOptions,
+  ): RoutingTiers {
     const wantsGraph = Boolean(
       options?.includeCitations ||
       options?.includeReferences ||
@@ -167,4 +170,3 @@ export class MetadataRoutingPolicy {
     }
   }
 }
-

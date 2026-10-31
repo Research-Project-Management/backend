@@ -30,7 +30,8 @@ export interface RawOcrRecognitionResult {
 
 @Injectable()
 export class OcrWorkerPoolService
-  implements OnModuleDestroy, BeforeApplicationShutdown {
+  implements OnModuleDestroy, BeforeApplicationShutdown
+{
   private readonly logger = new Logger(OcrWorkerPoolService.name);
   private scheduler?: Scheduler;
   private workers: Worker[] = [];

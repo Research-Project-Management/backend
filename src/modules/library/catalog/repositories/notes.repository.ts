@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { Prisma, Annotation } from '@prisma/client';
-import { isUUID } from 'class-validator';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
@@ -12,9 +11,6 @@ import {
 } from '@/modules/library/catalog/types/notes.types';
 
 export type { CreateNoteData, UpdateNoteData };
-
-const isUuid = (val: unknown): val is string =>
-  typeof val === 'string' && isUUID(val);
 
 @Injectable()
 export class NotesRepository {
@@ -96,7 +92,9 @@ export class NotesRepository {
         select: { id: true, projectId: true },
       });
       if (!parentItem) {
-        throw new NotFoundException(`Target item ${data.itemId} not found or has been deleted`);
+        throw new NotFoundException(
+          `Target item ${data.itemId} not found or has been deleted`,
+        );
       }
       if (!effectiveProjectId && parentItem.projectId) {
         effectiveProjectId = parentItem.projectId;
@@ -150,9 +148,7 @@ export class NotesRepository {
             ? (data.contentJson as Prisma.InputJsonValue)
             : Prisma.DbNull
           : data.contentMd !== undefined
-            ? (buildTipTapDocFromText(
-                data.contentMd,
-              ) as Prisma.InputJsonValue)
+            ? (buildTipTapDocFromText(data.contentMd) as Prisma.InputJsonValue)
             : undefined,
       contentMd:
         data.contentMd !== undefined ? data.contentMd : existing.contentMd,
@@ -217,7 +213,9 @@ export class NotesRepository {
         contentMd:
           data.contentMd !== undefined ? data.contentMd : existing.contentMd,
         tags:
-          data.tags !== undefined ? normalizeAcademicTags(data.tags) : existing.tags,
+          data.tags !== undefined
+            ? normalizeAcademicTags(data.tags)
+            : existing.tags,
         version: { increment: 1 },
       },
     });
@@ -339,9 +337,19 @@ export class NotesRepository {
     await this.syncItemNoteCount(itemId, tx);
   }
 
-  async findItemAnnotations(itemId: string): Promise<Annotation[]> {
+  async findItemAnnotations(
+    itemId: string,
+    opts?: { attachmentId?: string; annotationIds?: string[] },
+  ): Promise<Annotation[]> {
+    const cleanAnnotationIds = Array.isArray(opts?.annotationIds)
+      ? opts.annotationIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
+      : [];
     return this.prisma.annotation.findMany({
       where: {
+        ...(opts?.attachmentId ? { attachmentId: opts.attachmentId } : {}),
+        ...(cleanAnnotationIds.length > 0
+          ? { id: { in: cleanAnnotationIds } }
+          : {}),
         attachment: {
           itemId,
           deletedAt: null,

@@ -23,15 +23,25 @@ export class ExtractionRepository {
   }
 
   async getExtractionStatusBreakdown(
+    scopeOrTx?: { userId?: string; projectId?: string | null } | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ): Promise<Record<string, number>> {
-    const client = this.getClient(tx);
-    if (typeof client.attachment?.groupBy !== 'function') {
-      return {};
-    }
+    const isScopeObj =
+      scopeOrTx && typeof scopeOrTx === 'object' && !('attachment' in scopeOrTx) &&
+      ('userId' in scopeOrTx || 'projectId' in scopeOrTx);
+    const scope = isScopeObj ? (scopeOrTx as { userId?: string; projectId?: string | null }) : undefined;
+    const effectiveTx = isScopeObj ? tx : (scopeOrTx as Prisma.TransactionClient | undefined);
+    const client = this.getClient(effectiveTx);
+    if (typeof client.attachment?.groupBy !== 'function') return {};
+    const validProjectId = normalizeProjectScopeId(scope?.projectId);
+    const itemScopeWhere: Prisma.ItemWhereInput | undefined = validProjectId
+      ? { projectId: validProjectId, deletedAt: null }
+      : scope?.userId
+        ? { userId: scope.userId, projectId: null, deletedAt: null }
+        : undefined;
     const groups = await client.attachment.groupBy({
       by: ['extractionStatus'],
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...(itemScopeWhere ? { item: itemScopeWhere } : {}) },
       _count: { _all: true },
     });
     const breakdown: Record<string, number> = {};

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { ItemService } from './services/items.service';
 import { ItemQueryService } from './services/item-query.service';
 import { ItemCurationService } from './services/item-curation.service';
+import { ItemCacheCoordinator } from './services/item-cache.coordinator';
 import { CollectionsService } from './services/collections.service';
 import { TagsService } from './services/tags.service';
 import { TypesService } from './services/types.service';
@@ -48,6 +49,8 @@ export class CatalogFacade implements ICatalogFacade {
     private readonly notesService: NotesService,
     @Optional()
     private readonly curationService?: ItemCurationService,
+    @Optional()
+    private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 
   async getItem<T = ItemDetail>(
@@ -251,7 +254,9 @@ export class CatalogFacade implements ICatalogFacade {
   async listCollections(
     userId: string,
     projectId?: string,
-  ): Promise<Awaited<ReturnType<CollectionsService['getCollections']>>['collections']> {
+  ): Promise<
+    Awaited<ReturnType<CollectionsService['getCollections']>>['collections']
+  > {
     const res = await this.collectionsService.getCollections(userId, projectId);
     return res.collections;
   }
@@ -311,6 +316,16 @@ export class CatalogFacade implements ICatalogFacade {
   ): Promise<void> {
     if (!this.curationService) return;
     await this.curationService.updateItemAiMetadata(itemId, aiMetadataPatch);
+  }
+
+  async invalidateForWrite(params: {
+    userId: string;
+    projectId?: string | null;
+    itemIds?: string[];
+    additionalProjectIds?: Array<string | null | undefined>;
+  }): Promise<void> {
+    if (!this.cacheCoordinator) return;
+    await this.cacheCoordinator.invalidateForWrite(params);
   }
 }
 

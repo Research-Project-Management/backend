@@ -127,14 +127,11 @@ describe('Multi-Tier Metadata Cache & Local Database Resolution', () => {
         },
       };
 
-      const ingestionRepo = new IngestionRepository(mockPrisma);
-
       service = new MetadataService(
         [],
         mockCache,
         mockReconciler,
         mockExecutor,
-        ingestionRepo,
       );
     });
 

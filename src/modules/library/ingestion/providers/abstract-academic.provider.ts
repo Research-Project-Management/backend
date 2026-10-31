@@ -18,9 +18,7 @@ import {
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 
 export type ProviderQueryInput =
-  | QueryType
-  | MetadataRequest
-  | { type?: QueryType; queryType?: QueryType };
+  QueryType | MetadataRequest | { type?: QueryType; queryType?: QueryType };
 
 export interface BuildProviderResultParams {
   provider?: ProviderName;
@@ -71,8 +69,7 @@ export function buildAcademicProviderResult(
   const effectiveCanonicalUrl = sourceUrl ?? metadata.url ?? undefined;
   const effectiveOpenAccessUrl =
     openAccessPdfUrl ?? metadata.openAccessPdfUrl ?? undefined;
-  const effectiveIsOpenAccess =
-    isOpenAccess ?? Boolean(effectiveOpenAccessUrl);
+  const effectiveIsOpenAccess = isOpenAccess ?? Boolean(effectiveOpenAccessUrl);
 
   const provenance: Provenance = {
     ...(metadata.provenance ?? {}),
@@ -81,7 +78,8 @@ export function buildAcademicProviderResult(
     resolvedAt,
     canonicalId:
       canonicalId ??
-      (metadata.provenance as { canonicalId?: string } | undefined)?.canonicalId ??
+      (metadata.provenance as { canonicalId?: string } | undefined)
+        ?.canonicalId ??
       `${provider.toLowerCase()}:${effectiveIdentifier}`,
     ...(effectiveCanonicalUrl ? { canonicalUrl: effectiveCanonicalUrl } : {}),
     confidenceScore,
@@ -190,8 +188,8 @@ export abstract class AbstractAcademicProvider implements MetadataProvider {
       typeof responseOrHeader === 'string'
         ? responseOrHeader
         : responseOrHeader &&
-            typeof (responseOrHeader as Response).headers?.get === 'function'
-          ? (responseOrHeader as Response).headers.get('retry-after')
+            typeof responseOrHeader.headers?.get === 'function'
+          ? responseOrHeader.headers.get('retry-after')
           : undefined;
     if (!rawHeader) return undefined;
     const trimmed = rawHeader.trim();

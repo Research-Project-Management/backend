@@ -93,4 +93,3 @@ export interface IExtractionFacade {
     projectId?: string,
   ): Promise<BatchAnnotationsResult>;
 }
-

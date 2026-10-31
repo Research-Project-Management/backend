@@ -325,7 +325,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
     it('should clean up FTS index and invalidate facet cache when ITEM_DELETED domain event arrives', async () => {
       const invalidateSpy = jest.spyOn(searchService, 'invalidateFacetsCache');
 
-      await subscriber.handleItemDeletedOrPurged({
+      await subscriber.handleItemDeleted({
         eventId: 'evt-2',
         eventType: 'library.item.deleted',
         aggregateId: 'item-100',

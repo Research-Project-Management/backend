@@ -239,7 +239,8 @@ export class IngestionRunReporterService {
         ? projectId
         : (run.projectId ?? undefined);
     const resolvedUserId = run.userId || userIdOrScopeId;
-    const queueTargetScope = resolvedProjectId || resolvedUserId || effectiveScopeId;
+    const queueTargetScope =
+      resolvedProjectId || resolvedUserId || effectiveScopeId;
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
     if (envelope && typeof envelope === 'object') {

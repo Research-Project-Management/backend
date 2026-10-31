@@ -21,12 +21,7 @@ import {
   MarkAllReadDto,
 } from '../dto/feeds.dto';
 
-export {
-  SubscribeFeedDto,
-  UpdateFeedSubDto,
-  MarkItemReadDto,
-  MarkAllReadDto,
-};
+export { SubscribeFeedDto, UpdateFeedSubDto, MarkItemReadDto, MarkAllReadDto };
 
 @ApiTags('Library Feeds')
 @ApiBearerAuth('JWT-auth')
@@ -36,7 +31,9 @@ export class FeedsController {
   constructor(private readonly feedsService: FeedsService) {}
 
   @Get('subscriptions')
-  @ApiOperation({ summary: 'Get current user subscribed academic RSS/Atom feeds' })
+  @ApiOperation({
+    summary: 'Get current user subscribed academic RSS/Atom feeds',
+  })
   async getSubscriptions(@CurrentUser('id') userId: string) {
     const subscriptions = await this.feedsService.getSubscriptions(userId);
     return { data: subscriptions };

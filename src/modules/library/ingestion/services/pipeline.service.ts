@@ -57,7 +57,7 @@ export class PipelineService {
   private readonly orchestrator: IngestionSagaOrchestrator;
   private readonly sideEffects: PipelineSideEffectsService;
   private readonly batchExecutor: PipelineBatchExecutor;
-  private readonly normalizer = new NormalizationPolicy();
+  private readonly normalizer: NormalizationPolicy;
   private lastGcRunAt = 0;
   private static readonly GC_THROTTLE_INTERVAL_MS = 15 * 60_000;
 
@@ -87,7 +87,10 @@ export class PipelineService {
     private readonly storagePort?: IStoragePort,
     @Optional()
     private readonly urlCapture?: UrlCaptureService,
+    @Optional()
+    normalizer?: NormalizationPolicy,
   ) {
+    this.normalizer = normalizer ?? new NormalizationPolicy();
     this.orchestrator = sagaOrchestrator ?? new IngestionSagaOrchestrator(repo);
     this.sideEffects =
       sideEffects ??
@@ -152,11 +155,11 @@ export class PipelineService {
         await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.FAILED_FINAL, {
           lastError: errMsg,
           completedAt: new Date(),
-        }).catch(() => undefined);
+        }).catch((e: unknown) => this.logger.warn(`Failed to update run status for run ${runId}: ${e instanceof Error ? e.message : String(e)}`));
       } else if (explicitFinalAttempt === undefined && retryable) {
         await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.FAILED_RETRYABLE, {
           lastError: errMsg,
-        }).catch(() => undefined);
+        }).catch((e: unknown) => this.logger.warn(`Failed to update run status for run ${runId}: ${e instanceof Error ? e.message : String(e)}`));
       }
       markErrStatusTransitioned(err);
       throw err;
@@ -201,9 +204,9 @@ export class PipelineService {
   ): Promise<void> {
     try {
       if (this.urlCapture?.cleanupExpiredPreviews) {
-        await this.urlCapture.cleanupExpiredPreviews(7).catch(() => undefined);
+        await this.urlCapture.cleanupExpiredPreviews(7).catch((e: unknown) => this.logger.warn(`[PipelineGC] Failed to cleanup expired previews: ${e instanceof Error ? e.message : String(e)}`));
       }
-      await this.repo.purgeOldRuns(7).catch(() => undefined);
+      await this.repo.purgeOldRuns(7).catch((e: unknown) => this.logger.warn(`[PipelineGC] Failed to purge old runs: ${e instanceof Error ? e.message : String(e)}`));
     } catch {
       // Non-critical background GC
     }

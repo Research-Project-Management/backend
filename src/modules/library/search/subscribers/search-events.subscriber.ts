@@ -74,7 +74,10 @@ export class SearchEventsSubscriber {
         },
   ): Promise<void> {
     const rawPayload =
-      event && 'payload' in event && event.payload && typeof event.payload === 'object'
+      event &&
+      'payload' in event &&
+      event.payload &&
+      typeof event.payload === 'object'
         ? event.payload
         : (event as {
             attachmentId?: string;
@@ -128,8 +131,8 @@ export class SearchEventsSubscriber {
 
     const isMergedDuplicate = Boolean(
       payload?.reason === 'merged_into' ||
-        payload?.mergedIntoId ||
-        payload?.primaryId,
+      payload?.mergedIntoId ||
+      payload?.primaryId,
     );
 
     const cleanupTasks: Promise<unknown>[] = [];
@@ -161,14 +164,6 @@ export class SearchEventsSubscriber {
     await Promise.allSettled(cleanupTasks);
   }
 
-  async handleItemDeletedOrPurged(event: DomainEventEnvelope): Promise<void> {
-    if (event?.eventType === LIBRARY_EVENT_TYPES.ITEM_DELETED) {
-      await this.handleItemDeleted(event);
-      return;
-    }
-    await this.handleItemPurged(event);
-  }
-
   @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_DELETED, { async: true })
   async handleDomainAttachmentDeleted(
     event: DomainEventEnvelope,
@@ -192,8 +187,7 @@ export class SearchEventsSubscriber {
 
   private resolveScopeId(event: DomainEventEnvelope): string | undefined {
     const payload = event?.payload as
-      | { projectId?: string | null; userId?: string }
-      | undefined;
+      { projectId?: string | null; userId?: string } | undefined;
     return (
       event?.scopeId ||
       event?.projectId ||

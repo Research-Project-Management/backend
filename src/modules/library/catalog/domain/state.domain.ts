@@ -119,9 +119,7 @@ export function pickPreferredMergedState(
         : null;
   const isStarred = states.some((s) => Boolean(s.isStarred));
   const isCompleted = states.some((s) => s.readStatus === 'completed');
-  const isReading = states.some(
-    (s) => s.readStatus === 'reading' || s.readStatus === 'skimmed',
-  );
+  const isReading = states.some((s) => s.readStatus === 'reading');
   const readStatus = isCompleted
     ? 'completed'
     : isReading
@@ -143,8 +141,7 @@ export function pickPreferredMergedState(
   const validPages = states
     .map((s) => s.currentPage)
     .filter((p): p is number => typeof p === 'number' && p > 0);
-  const maxCurrentPage =
-    validPages.length > 0 ? Math.max(...validPages) : null;
+  const maxCurrentPage = validPages.length > 0 ? Math.max(...validPages) : null;
   const statesWithScroll = states.filter(
     (s) => s.scrollPosition !== null && s.scrollPosition !== undefined,
   );

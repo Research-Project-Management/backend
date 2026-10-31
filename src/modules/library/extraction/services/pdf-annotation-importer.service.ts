@@ -4,15 +4,16 @@ import {
   NotFoundException,
   BadRequestException,
   Inject,
-  Optional,
 } from '@nestjs/common';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { AnnotationsService } from './annotations.service';
-import { AttachmentsService } from './attachments.service';
 import { AnnotationType } from '@/modules/library/extraction/types/annotations.types';
-import { extractFileIdFromUrl } from '@/modules/library/core';
+import {
+  extractFileIdFromUrl,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
 import { getDocumentProxy } from 'unpdf';
 
 export interface ImportAnnotationsResult {
@@ -30,8 +31,6 @@ export class PdfAnnotationImporterService {
     private readonly attachmentsRepo: AttachmentsRepository,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
     private readonly annotationsService: AnnotationsService,
-    @Optional()
-    private readonly attachmentsService?: AttachmentsService,
   ) {}
 
   /**
@@ -52,16 +51,15 @@ export class PdfAnnotationImporterService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
     if (attachment.item) {
-      if (projectId && projectId !== 'user') {
-        if (attachment.item.projectId !== projectId) {
+      if (effectiveProjectId) {
+        if (attachment.item.projectId !== effectiveProjectId) {
           throw new NotFoundException(`Attachment ${attachmentId} not found`);
         }
-      } else if (
-        !attachment.item.projectId &&
-        attachment.item.userId &&
-        attachment.item.userId !== userId
-      ) {
+      } else if (attachment.item.userId && attachment.item.userId !== userId) {
+        throw new NotFoundException(`Attachment ${attachmentId} not found`);
+      } else if (attachment.item.projectId && !attachment.item.userId) {
         throw new NotFoundException(`Attachment ${attachmentId} not found`);
       }
     }
@@ -74,7 +72,14 @@ export class PdfAnnotationImporterService {
       );
     }
 
-    const storageFile = await this.storagePort.readOwnedFile({ fileId });
+    const resolvedProjectId =
+      effectiveProjectId ||
+      normalizeProjectScopeId(attachment.item?.projectId ?? undefined);
+    const storageFile = await this.storagePort.readOwnedFile({
+      fileId,
+      userId,
+      ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
+    });
     const buffer = storageFile.buffer;
 
     if (!buffer || buffer.byteLength === 0) {
@@ -136,17 +141,41 @@ export class PdfAnnotationImporterService {
           interface PdfRawAnnotation {
             subtype?: string;
             rect?: number[];
+            quadPoints?: number[];
             color?: number[];
             contents?: string;
             contentsObj?: { str?: string } | null;
           }
+          interface PdfTextItem {
+            str?: string;
+            transform?: number[];
+            width?: number;
+            height?: number;
+            hasEOL?: boolean;
+          }
           const annots = (await page.getAnnotations()) as
-            | PdfRawAnnotation[]
-            | null
-            | undefined;
+            PdfRawAnnotation[] | null | undefined;
           if (!annots || !Array.isArray(annots) || annots.length === 0) {
             continue;
           }
+
+          let textItems: PdfTextItem[] | undefined;
+          const loadTextItems = async (): Promise<PdfTextItem[]> => {
+            if (textItems !== undefined) return textItems;
+            try {
+              if (typeof page?.getTextContent === 'function') {
+                const tc = (await page.getTextContent()) as {
+                  items?: PdfTextItem[];
+                } | null;
+                textItems = Array.isArray(tc?.items) ? tc.items : [];
+              } else {
+                textItems = [];
+              }
+            } catch {
+              textItems = [];
+            }
+            return textItems;
+          };
 
           const viewport =
             typeof page.getViewport === 'function'
@@ -163,29 +192,17 @@ export class PdfAnnotationImporterService {
 
             totalFound++;
 
-            const rect = annot.rect;
-            if (!rect || !Array.isArray(rect) || rect.length < 4) continue;
+            const normalizedRects = this.parseNormalizedRects(
+              annot.quadPoints,
+              annot.rect,
+              pageWidth,
+              pageHeight,
+            );
+            if (normalizedRects.length === 0) continue;
 
-            const rx1 = Math.min(rect[0], rect[2]);
-            const rx2 = Math.max(rect[0], rect[2]);
-            const ry1 = Math.min(rect[1], rect[3]);
-            const ry2 = Math.max(rect[1], rect[3]);
-
-            const normX1 = Math.max(0, rx1 / pageWidth);
-            const normY1 = Math.max(0, (pageHeight - ry2) / pageHeight);
-            const normW = Math.min(1 - normX1, (rx2 - rx1) / pageWidth);
-            const normH = Math.min(1 - normY1, (ry2 - ry1) / pageHeight);
-
-            if (normW <= 0.001 || normH <= 0.001) continue;
-
-            const normalizedRect = {
-              x1: normX1,
-              y1: normY1,
-              x2: normX1 + normW,
-              y2: normY1 + normH,
-              width: normW,
-              height: normH,
-            };
+            const primaryRect = normalizedRects[0];
+            const normX1 = primaryRect.x1;
+            const normY1 = primaryRect.y1;
 
             interface RectCoordLike {
               x1?: number;
@@ -233,12 +250,38 @@ export class PdfAnnotationImporterService {
             if (isDuplicate) continue;
 
             const colorHex = this.formatColor(annot.color, mappedType);
-            const contentText =
+            const contentText = (
               annot.contents ||
               (typeof annot.contentsObj === 'object' && annot.contentsObj
                 ? annot.contentsObj.str || ''
                 : '') ||
-              '';
+              ''
+            ).trim();
+
+            const isTextMarkup =
+              mappedType === AnnotationType.highlight ||
+              mappedType === AnnotationType.underline ||
+              mappedType === AnnotationType.strike;
+
+            let extractedQuote = '';
+            if (isTextMarkup) {
+              const items = await loadTextItems();
+              extractedQuote = this.extractUnderlyingText(
+                items,
+                normalizedRects,
+                pageWidth,
+                pageHeight,
+              );
+            }
+
+            const quoteText = isTextMarkup
+              ? extractedQuote ||
+                (!contentText && mappedType === AnnotationType.highlight
+                  ? 'Imported Highlight'
+                  : '')
+              : undefined;
+
+            const comment = contentText;
 
             annotationsToCreate.push({
               type: mappedType,
@@ -246,23 +289,16 @@ export class PdfAnnotationImporterService {
               y: normY1,
               x: normX1,
               color: colorHex,
-              quoteText:
-                contentText ||
-                (mappedType === AnnotationType.highlight
-                  ? 'Imported Highlight'
-                  : undefined),
-              comment:
-                contentText && mappedType !== AnnotationType.highlight
-                  ? contentText
-                  : '',
-              rectCoords: [normalizedRect],
+              quoteText,
+              comment,
+              rectCoords: normalizedRects,
               authorId: userId,
             });
 
             existingAnnotations.push({
               pageIndex,
               type: mappedType,
-              rectCoords: [normalizedRect],
+              rectCoords: normalizedRects,
             });
 
             imported++;
@@ -321,6 +357,160 @@ export class PdfAnnotationImporterService {
     return getDocumentProxy(data);
   }
 
+  private parseNormalizedRects(
+    quadPoints: unknown,
+    rect: number[] | undefined,
+    pageWidth: number,
+    pageHeight: number,
+  ): Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    width: number;
+    height: number;
+  }> {
+    const toNormalizedRect = (
+      rx1: number,
+      ry1: number,
+      rx2: number,
+      ry2: number,
+    ) => {
+      const minX = Math.min(rx1, rx2);
+      const maxX = Math.max(rx1, rx2);
+      const minY = Math.min(ry1, ry2);
+      const maxY = Math.max(ry1, ry2);
+
+      const normX1 = Math.max(0, Math.min(1, minX / pageWidth));
+      const normY1 = Math.max(0, Math.min(1, (pageHeight - maxY) / pageHeight));
+      const normW = Math.min(1 - normX1, Math.max(0, (maxX - minX) / pageWidth));
+      const normH = Math.min(
+        1 - normY1,
+        Math.max(0, (maxY - minY) / pageHeight),
+      );
+      if (normW <= 0.001 || normH <= 0.001) return null;
+      return {
+        x1: normX1,
+        y1: normY1,
+        x2: normX1 + normW,
+        y2: normY1 + normH,
+        width: normW,
+        height: normH,
+      };
+    };
+
+    const rects: Array<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      width: number;
+      height: number;
+    }> = [];
+
+    if (
+      quadPoints &&
+      (Array.isArray(quadPoints) || ArrayBuffer.isView(quadPoints))
+    ) {
+      const nums = Array.from(quadPoints as ArrayLike<unknown>).map(Number);
+      if (
+        nums.length >= 8 &&
+        nums.length % 8 === 0 &&
+        nums.every((n) => Number.isFinite(n))
+      ) {
+        for (let i = 0; i <= nums.length - 8; i += 8) {
+          const xs = [nums[i], nums[i + 2], nums[i + 4], nums[i + 6]];
+          const ys = [nums[i + 1], nums[i + 3], nums[i + 5], nums[i + 7]];
+          const normalized = toNormalizedRect(
+            Math.min(...xs),
+            Math.min(...ys),
+            Math.max(...xs),
+            Math.max(...ys),
+          );
+          if (normalized) {
+            rects.push(normalized);
+          }
+        }
+      }
+    }
+
+    if (rects.length > 0) {
+      return rects;
+    }
+
+    if (rect && Array.isArray(rect) && rect.length >= 4) {
+      const fallback = toNormalizedRect(rect[0], rect[1], rect[2], rect[3]);
+      if (fallback) {
+        return [fallback];
+      }
+    }
+
+    return [];
+  }
+
+  private extractUnderlyingText(
+    items: Array<{
+      str?: string;
+      transform?: number[];
+      width?: number;
+      height?: number;
+      hasEOL?: boolean;
+    }>,
+    normalizedRects: Array<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      width: number;
+      height: number;
+    }>,
+    pageWidth: number,
+    pageHeight: number,
+  ): string {
+    if (!items || items.length === 0 || normalizedRects.length === 0) {
+      return '';
+    }
+
+    const matchedChunks: string[] = [];
+
+    for (const item of items) {
+      const text = item.str;
+      if (!text || !text.trim()) continue;
+
+      const tr = item.transform;
+      if (!Array.isArray(tr) || tr.length < 6) continue;
+
+      const pdfX = Number(tr[4]) || 0;
+      const pdfY = Number(tr[5]) || 0;
+      const fontHeight =
+        Math.abs(Number(item.height) || Number(tr[3]) || Number(tr[0]) || 10) ||
+        10;
+      const itemWidth = Math.max(
+        1,
+        Math.abs(Number(item.width) || text.length * (fontHeight * 0.5)),
+      );
+
+      const ix1 = Math.max(0, pdfX / pageWidth);
+      const ix2 = Math.min(1, (pdfX + itemWidth) / pageWidth);
+      const iy1 = Math.max(0, (pageHeight - (pdfY + fontHeight)) / pageHeight);
+      const iy2 = Math.min(1, (pageHeight - pdfY + fontHeight * 0.25) / pageHeight);
+
+      const intersects = normalizedRects.some((r) => {
+        const overlapX = Math.min(ix2, r.x2) - Math.max(ix1, r.x1);
+        const overlapY = Math.min(iy2, r.y2) - Math.max(iy1, r.y1);
+        if (overlapX <= 0 || overlapY <= 0) return false;
+        const itemHeightNorm = Math.max(0.001, iy2 - iy1);
+        return overlapY >= itemHeightNorm * 0.25;
+      });
+
+      if (intersects) {
+        matchedChunks.push(text.trim());
+      }
+    }
+
+    return matchedChunks.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
   private mapSubtype(subtype?: string): AnnotationType | null {
     if (!subtype) return null;
     switch (subtype.toLowerCase()) {
@@ -334,9 +524,10 @@ export class PdfAnnotationImporterService {
       case 'freetext':
       case 'text':
         return AnnotationType.text;
+      case 'ink':
+        return AnnotationType.ink;
       case 'square':
       case 'circle':
-      case 'ink':
       case 'line':
         return AnnotationType.rect;
       default:

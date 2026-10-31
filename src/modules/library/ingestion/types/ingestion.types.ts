@@ -21,7 +21,6 @@ export interface IngestionStage {
   executedAt: Date;
 }
 
-
 export interface IngestionReviewCase {
   id: string;
   userId?: string | null;

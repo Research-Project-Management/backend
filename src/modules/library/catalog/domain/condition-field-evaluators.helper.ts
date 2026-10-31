@@ -147,7 +147,9 @@ export function evalJsonField(
     return { NOT: { metadata: { path: [jsonKey], equals: effectiveVal } } };
   }
   if (operator === 'doesNotContain') {
-    return { NOT: { metadata: { path: [jsonKey], string_contains: effectiveVal } } };
+    return {
+      NOT: { metadata: { path: [jsonKey], string_contains: effectiveVal } },
+    };
   }
   if (operator === 'beginsWith') {
     return { metadata: { path: [jsonKey], string_starts_with: effectiveVal } };

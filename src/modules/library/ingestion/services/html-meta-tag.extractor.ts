@@ -445,7 +445,7 @@ export class HtmlMetaTagExtractor {
       ) || jsonLd.language;
     if (language) result.language = language;
 
-    const eprintsType = (first('eprints.type') || '').toLowerCase();
+    const eprintsType = (first('eprints.type', 'dc.type') || '').toLowerCase();
     if (thesisInstitution || thesisType || eprintsType === 'thesis') {
       result.itemType = 'thesis';
       if (!result.university && result.institution) {
@@ -464,7 +464,7 @@ export class HtmlMetaTagExtractor {
       result.itemType = 'bookSection';
     } else if (journalTitle || eprintsType === 'article') {
       result.itemType = 'journalArticle';
-    } else if (eprprintsTypeMatch(eprintsType)) {
+    } else if (eprintsTypeMatch(eprintsType)) {
       result.itemType = 'book';
     } else if (jsonLd.itemType) {
       result.itemType = jsonLd.itemType;
@@ -658,6 +658,6 @@ export class HtmlMetaTagExtractor {
   }
 }
 
-function eprprintsTypeMatch(t: string): boolean {
+function eprintsTypeMatch(t: string): boolean {
   return t === 'book';
 }

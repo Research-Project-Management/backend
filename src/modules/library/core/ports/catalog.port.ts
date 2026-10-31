@@ -12,6 +12,7 @@ import {
 } from '@/modules/library/core/types/bibliographic.types';
 
 export const CATALOG_FACADE = 'CATALOG_FACADE';
+export const ITEM_CACHE_INVALIDATOR = Symbol('ITEM_CACHE_INVALIDATOR');
 export type CatalogItemSummary = ItemDetail;
 
 export interface ICatalogFacade {
@@ -130,4 +131,31 @@ export interface ICatalogFacade {
       creators?: unknown[];
     }>;
   }>;
+  invalidateForWrite?(params: {
+    userId: string;
+    projectId?: string | null;
+    itemIds?: string[];
+    additionalProjectIds?: Array<string | null | undefined>;
+  }): Promise<void>;
+  findAttachmentByFileId?(
+    fileId: string,
+  ): Promise<{ id: string; itemId: string; metadata?: unknown } | null>;
+  updateAttachmentProcessingStatus?(
+    attachmentId: string,
+    status: string,
+    metadataPatch?: Record<string, unknown>,
+  ): Promise<void>;
+  updateItemAiMetadata?(
+    itemId: string,
+    aiMetadataPatch: Record<string, unknown>,
+  ): Promise<void>;
+}
+
+export interface IItemCacheInvalidator {
+  invalidateForWrite(params: {
+    userId: string;
+    projectId?: string | null;
+    itemIds?: string[];
+    additionalProjectIds?: Array<string | null | undefined>;
+  }): Promise<void>;
 }

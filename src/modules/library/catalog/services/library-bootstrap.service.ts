@@ -66,7 +66,9 @@ export class LibraryBootstrapService {
   ) {
     const validProjectId = normalizeProjectScopeId(options.projectId);
     const shouldIncludeItems = options.includeItems !== false;
-    const syncScope = validProjectId ? { projectId: validProjectId } : { userId };
+    const syncScope = validProjectId
+      ? { projectId: validProjectId }
+      : { userId };
 
     const [
       counts,

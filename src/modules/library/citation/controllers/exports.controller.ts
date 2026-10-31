@@ -34,6 +34,7 @@ export class ExportsController {
     @Param('itemId') itemId: string,
     @Param('projectId') routeProjectId?: string,
     @Query('projectId') queryProjectId?: string,
+    @Query('attachmentId') attachmentId?: string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(
       routeProjectId || queryProjectId,
@@ -43,6 +44,7 @@ export class ExportsController {
       itemId,
       undefined,
       effectiveProjectId,
+      attachmentId,
     );
   }
 
@@ -63,7 +65,8 @@ export class ExportsController {
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async exportCitationsBibtex(
     @CurrentUser('id') userId: string,
-    @Body() body: { keys: string[]; projectId?: string; format?: ExportFormatType },
+    @Body()
+    body: { keys: string[]; projectId?: string; format?: ExportFormatType },
     @Param('projectId') routeProjectId?: string,
     @Query('projectId') queryProjectId?: string,
   ) {

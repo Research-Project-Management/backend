@@ -130,6 +130,10 @@ export function normalizeWork(
             : csl.type === 'book'
               ? 'book'
               : csl.type || 'journalArticle',
-    ...(csl.score !== undefined ? { score: csl.score } : fallbackDoi ? {} : { score: 0 }),
+    ...(csl.score !== undefined
+      ? { score: csl.score }
+      : fallbackDoi
+        ? {}
+        : { score: 0 }),
   };
 }

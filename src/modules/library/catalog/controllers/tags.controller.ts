@@ -18,7 +18,10 @@ import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
-import { CreateTagDto, UpdateTagDto } from '@/modules/library/catalog/dto/tags.dto';
+import {
+  CreateTagDto,
+  UpdateTagDto,
+} from '@/modules/library/catalog/dto/tags.dto';
 
 @ApiTags('Library Tags')
 @ApiBearerAuth('JWT-auth')
@@ -85,7 +88,7 @@ export class TagController {
       {
         name: dto.name,
         color: dto.color,
-        type: dto.type as TagType | undefined,
+        type: dto.type,
         shortcut: dto.shortcut,
         expectedVersion: dto.expectedVersion,
       },

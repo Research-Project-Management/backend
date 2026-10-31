@@ -1,5 +1,5 @@
 import { Prisma, ReadStatus } from '@prisma/client';
-import { isUUID } from 'class-validator';
+import { isUuid } from '@/core';
 import {
   normalizeProjectScopeId,
   AcademicSearchQueryEngine,
@@ -16,10 +16,8 @@ export {
   AndSpecification,
   OrSpecification,
   NotSpecification,
+  isUuid,
 };
-
-export const isUuid = (val: unknown): val is string =>
-  typeof val === 'string' && isUUID(val);
 
 export interface ItemFilterOptions {
   view?:
@@ -266,11 +264,11 @@ function composeAndSpecifications(
   const combined = specs
     .slice(1)
     .reduce<
-       CompositeSpecification<Record<string, unknown>, Prisma.ItemWhereInput>
-    >((acc, spec) => acc.and(spec) as CompositeSpecification<Record<string, unknown>, Prisma.ItemWhereInput>, specs[0])
+      CompositeSpecification<Record<string, unknown>, Prisma.ItemWhereInput>
+    >((acc, spec) => acc.and(spec), specs[0])
     .toPrismaWhere();
   if (combined && Array.isArray(combined.AND)) {
-    return combined.AND as Prisma.ItemWhereInput[];
+    return combined.AND;
   }
   return [combined];
 }

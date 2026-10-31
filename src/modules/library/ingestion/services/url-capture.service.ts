@@ -36,7 +36,6 @@ import { TransactionService } from '@/modules/library/sync';
 import { ParsedAcademicFeed } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 import { createHash, randomUUID } from 'crypto';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
-import { PrismaService } from '@/core';
 import { FeedRetrievalService } from './feed-retrieval.service';
 import { FeedsRepository } from '@/modules/library/ingestion/repositories/feeds.repository';
 
@@ -58,14 +57,13 @@ export class UrlCaptureService {
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
-    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly feedsRepo?: FeedsRepository,
     @Optional() feedRetrieval?: FeedRetrievalService,
     @Optional() private readonly duplicateDetector?: DuplicateDetectorService,
     @Optional() private readonly retractionScanner?: RetractionScannerProvider,
   ) {
-    const resolvedFeedsRepo = prisma ? new FeedsRepository(prisma) : undefined;
     this.feedRetrieval =
-      feedRetrieval ?? new FeedRetrievalService(resolvedFeedsRepo, ssrfGuard);
+      feedRetrieval ?? new FeedRetrievalService(this.feedsRepo, ssrfGuard);
   }
 
   private readonly feedRetrieval: FeedRetrievalService;
@@ -79,11 +77,7 @@ export class UrlCaptureService {
     forceRefresh = false,
     userId?: string,
   ): Promise<ParsedAcademicFeed> {
-    return this.feedRetrieval.fetchAcademicFeed(
-      feedUrl,
-      forceRefresh,
-      userId,
-    );
+    return this.feedRetrieval.fetchAcademicFeed(feedUrl, forceRefresh, userId);
   }
 
   /**
@@ -234,7 +228,7 @@ export class UrlCaptureService {
         : (canonical.authors as string[] | undefined);
       const normalizedCreators = mergeCanonicalCreators({
         creators: hasDtoCreators
-          ? (dto.creators as unknown[])
+          ? dto.creators
           : Array.isArray(canonical.creators)
             ? (canonical.creators as unknown[])
             : undefined,
@@ -500,10 +494,7 @@ export class UrlCaptureService {
                     match.exactMatch.id,
                     projectId,
                   );
-                  const patch = buildEnrichmentPatch(
-                    existing as unknown as Record<string, unknown>,
-                    itemData as unknown as Record<string, unknown>,
-                  );
+                  const patch = buildEnrichmentPatch(existing, itemData);
                   if (Object.keys(patch).length > 0) {
                     await this.catalogGateway.updateItem(
                       targetUserId,
@@ -618,7 +609,9 @@ export class UrlCaptureService {
         }
         expiredIds = expiredList
           .map((p) => p?.id)
-          .filter((id): id is string => typeof id === 'string' && id.length > 0);
+          .filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          );
 
         if (this.storagePort?.deleteFile) {
           for (const p of expiredList) {
@@ -648,7 +641,9 @@ export class UrlCaptureService {
               (typeof extra.fileId === 'string' && extra.fileId) ||
               (typeof meta.fileId === 'string' && meta.fileId);
             if (pdfFileId) {
-              await this.storagePort.deleteFile(pdfFileId).catch(() => undefined);
+              await this.storagePort
+                .deleteFile(pdfFileId)
+                .catch(() => undefined);
             }
           }
         }

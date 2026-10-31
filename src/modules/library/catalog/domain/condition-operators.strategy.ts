@@ -142,16 +142,34 @@ export function evalCreatorCondition(
   if (operator === 'isPresent') return { contributors: { some: {} } };
   if (operator === 'isAbsent') return { contributors: { none: {} } };
   if (operator === 'contains' || operator === 'is') {
-    return { contributors: { some: { fullName: { contains: strVal, mode: 'insensitive' } } } };
+    return {
+      contributors: {
+        some: { fullName: { contains: strVal, mode: 'insensitive' } },
+      },
+    };
   }
   if (operator === 'doesNotContain' || operator === 'isNot') {
-    return { NOT: { contributors: { some: { fullName: { contains: strVal, mode: 'insensitive' } } } } };
+    return {
+      NOT: {
+        contributors: {
+          some: { fullName: { contains: strVal, mode: 'insensitive' } },
+        },
+      },
+    };
   }
   if (operator === 'beginsWith') {
-    return { contributors: { some: { fullName: { startsWith: strVal, mode: 'insensitive' } } } };
+    return {
+      contributors: {
+        some: { fullName: { startsWith: strVal, mode: 'insensitive' } },
+      },
+    };
   }
   if (operator === 'endsWith') {
-    return { contributors: { some: { fullName: { endsWith: strVal, mode: 'insensitive' } } } };
+    return {
+      contributors: {
+        some: { fullName: { endsWith: strVal, mode: 'insensitive' } },
+      },
+    };
   }
   return null;
 }
@@ -164,12 +182,15 @@ export function evalYearCondition(
   if (operator === 'isAbsent') return { year: null };
   if (operator === 'isBetween' && Array.isArray(value)) {
     const [start, end] = value.map(Number);
-    return Number.isFinite(start) && Number.isFinite(end) ? { year: { gte: start, lte: end } } : null;
+    return Number.isFinite(start) && Number.isFinite(end)
+      ? { year: { gte: start, lte: end } }
+      : null;
   }
   const numVal = Number(value);
   if (!Number.isFinite(numVal)) return null;
   if (operator === 'is' || operator === 'equals') return { year: numVal };
-  if (operator === 'isNot' || operator === 'not_equals') return { NOT: { year: numVal } };
+  if (operator === 'isNot' || operator === 'not_equals')
+    return { NOT: { year: numVal } };
   if (operator === 'isGreaterThan') return { year: { gt: numVal } };
   if (operator === 'isLessThan') return { year: { lt: numVal } };
   return null;
@@ -182,9 +203,12 @@ export function evalItemTypeCondition(
   if (operator === 'isPresent') return { itemType: { not: '' } };
   if (operator === 'isAbsent') return { itemType: '' };
   if (operator === 'is' || operator === 'equals') return { itemType: strVal };
-  if (operator === 'isNot' || operator === 'not_equals') return { NOT: { itemType: strVal } };
-  if (operator === 'contains') return { itemType: { contains: strVal, mode: 'insensitive' } };
-  if (operator === 'doesNotContain') return { NOT: { itemType: { contains: strVal, mode: 'insensitive' } } };
+  if (operator === 'isNot' || operator === 'not_equals')
+    return { NOT: { itemType: strVal } };
+  if (operator === 'contains')
+    return { itemType: { contains: strVal, mode: 'insensitive' } };
+  if (operator === 'doesNotContain')
+    return { NOT: { itemType: { contains: strVal, mode: 'insensitive' } } };
   return null;
 }
 
@@ -195,16 +219,34 @@ export function evalTagCondition(
   if (operator === 'isPresent') return { itemTags: { some: {} } };
   if (operator === 'isAbsent') return { itemTags: { none: {} } };
   if (operator === 'contains' || operator === 'is') {
-    return { itemTags: { some: { tag: { name: { contains: strVal, mode: 'insensitive' } } } } };
+    return {
+      itemTags: {
+        some: { tag: { name: { contains: strVal, mode: 'insensitive' } } },
+      },
+    };
   }
   if (operator === 'doesNotContain' || operator === 'isNot') {
-    return { NOT: { itemTags: { some: { tag: { name: { contains: strVal, mode: 'insensitive' } } } } } };
+    return {
+      NOT: {
+        itemTags: {
+          some: { tag: { name: { contains: strVal, mode: 'insensitive' } } },
+        },
+      },
+    };
   }
   if (operator === 'beginsWith') {
-    return { itemTags: { some: { tag: { name: { startsWith: strVal, mode: 'insensitive' } } } } };
+    return {
+      itemTags: {
+        some: { tag: { name: { startsWith: strVal, mode: 'insensitive' } } },
+      },
+    };
   }
   if (operator === 'endsWith') {
-    return { itemTags: { some: { tag: { name: { endsWith: strVal, mode: 'insensitive' } } } } };
+    return {
+      itemTags: {
+        some: { tag: { name: { endsWith: strVal, mode: 'insensitive' } } },
+      },
+    };
   }
   return null;
 }
@@ -218,12 +260,18 @@ export function evalCollectionCondition(
   if (operator === 'isAbsent') return { collectionItems: { none: {} } };
   const targetIds = descendantMap?.get(strVal) || [strVal];
   const collectionCondition =
-    targetIds.length === 1 ? { collectionId: targetIds[0] } : { collectionId: { in: targetIds } };
+    targetIds.length === 1
+      ? { collectionId: targetIds[0] }
+      : { collectionId: { in: targetIds } };
 
   if (operator === 'is' || operator === 'equals' || operator === 'contains') {
     return { collectionItems: { some: collectionCondition } };
   }
-  if (operator === 'isNot' || operator === 'not_equals' || operator === 'doesNotContain') {
+  if (
+    operator === 'isNot' ||
+    operator === 'not_equals' ||
+    operator === 'doesNotContain'
+  ) {
     return { NOT: { collectionItems: { some: collectionCondition } } };
   }
   return null;
@@ -237,10 +285,18 @@ export function evalUserStarredCondition(
 ): Prisma.ItemWhereInput | null {
   if (!userId) return null;
   const wantStarred =
-    operator !== 'isAbsent' && operator !== 'isNot' && value !== false && strVal !== 'false';
+    operator !== 'isAbsent' &&
+    operator !== 'isNot' &&
+    value !== false &&
+    strVal !== 'false';
   return wantStarred
     ? { states: { some: { userId, isStarred: true } } }
-    : { OR: [{ states: { none: { userId } } }, { states: { some: { userId, isStarred: false } } }] };
+    : {
+        OR: [
+          { states: { none: { userId } } },
+          { states: { some: { userId, isStarred: false } } },
+        ],
+      };
 }
 
 export function evalReadStatusCondition(
@@ -250,16 +306,27 @@ export function evalReadStatusCondition(
 ): Prisma.ItemWhereInput | null {
   if (!userId) return null;
   const mappedStatus = strVal === 'read' ? 'completed' : strVal;
-  const targetStatus: ReadStatus = (
-    mappedStatus === 'reading' || mappedStatus === 'completed' ? mappedStatus : 'unread'
-  );
+  const targetStatus: ReadStatus =
+    mappedStatus === 'reading' || mappedStatus === 'completed'
+      ? mappedStatus
+      : 'unread';
   if (operator === 'isNot') {
     return targetStatus === 'unread'
       ? { states: { some: { userId, readStatus: { not: 'unread' } } } }
-      : { OR: [{ states: { none: { userId } } }, { states: { some: { userId, readStatus: { not: targetStatus } } } }] };
+      : {
+          OR: [
+            { states: { none: { userId } } },
+            { states: { some: { userId, readStatus: { not: targetStatus } } } },
+          ],
+        };
   }
   return targetStatus === 'unread'
-    ? { OR: [{ states: { none: { userId } } }, { states: { some: { userId, readStatus: 'unread' } } }] }
+    ? {
+        OR: [
+          { states: { none: { userId } } },
+          { states: { some: { userId, readStatus: 'unread' } } },
+        ],
+      }
     : { states: { some: { userId, readStatus: targetStatus } } };
 }
 

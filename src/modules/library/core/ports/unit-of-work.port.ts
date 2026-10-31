@@ -35,6 +35,7 @@ export interface PublishOutboxInput {
   aggregateId: string;
   eventType: string;
   payload: unknown;
+  dedupeKey?: string | null;
 }
 
 export interface TransactionHelpers {
@@ -44,8 +45,7 @@ export interface TransactionHelpers {
   ): Promise<LibraryChange>;
   appendChangesBatch(
     scopeOrEntries:
-      | { userId?: string; projectId?: string | null }
-      | AppendChangeInput[],
+      { userId?: string; projectId?: string | null } | AppendChangeInput[],
     entries?: AppendChangeEntry[],
   ): Promise<number>;
   recordTombstone(
@@ -54,8 +54,7 @@ export interface TransactionHelpers {
   ): Promise<Tombstone>;
   recordTombstonesBatch(
     scopeOrEntries:
-      | { userId?: string; projectId?: string | null }
-      | RecordTombstoneInput[],
+      { userId?: string; projectId?: string | null } | RecordTombstoneInput[],
     entries?: RecordTombstoneEntry[],
   ): Promise<number>;
   removeTombstone(
@@ -69,20 +68,25 @@ export interface TransactionHelpers {
     entityIds: string[],
   ): Promise<number>;
   publishOutbox(
-    scope: { userId: string; projectId?: string | null },
+    scope: {
+      userId: string;
+      projectId?: string | null;
+      dedupeKey?: string | null;
+    },
     aggregateId: string,
     eventType: string,
     payload: unknown,
+    options?: { dedupeKey?: string | null },
   ): Promise<OutboxEvent>;
   publishOutboxBatch(
     scopeOrEvents:
-      | { userId: string; projectId?: string | null }
-      | PublishOutboxInput[],
+      { userId: string; projectId?: string | null } | PublishOutboxInput[],
     events?: Array<{
       aggregateId: string;
       eventType: string;
       payload: unknown;
       projectId?: string | null;
+      dedupeKey?: string | null;
     }>,
   ): Promise<string[]>;
   onAfterCommit?(callback: () => Promise<void> | void): void;
@@ -98,4 +102,22 @@ export interface IUnitOfWork {
     ) => Promise<T>,
     options?: { maxWait?: number; timeout?: number },
   ): Promise<T>;
+  getChangesSince?(
+    scope: { userId?: string; projectId?: string | null },
+    sinceSeq?: bigint,
+    limit?: number,
+  ): Promise<LibraryChange[]>;
+  getTombstonesSince?(
+    scope: { userId?: string; projectId?: string | null },
+    sinceSeq?: bigint,
+    limit?: number,
+  ): Promise<Tombstone[]>;
+  getMinRetainedSequence?(scope: {
+    userId?: string;
+    projectId?: string | null;
+  }): Promise<bigint | null>;
+  getLatestSequence?(scope: {
+    userId?: string;
+    projectId?: string | null;
+  }): Promise<bigint>;
 }

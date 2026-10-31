@@ -183,7 +183,9 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
 
     if (this.outboxRepo) {
       try {
-        await this.outboxRepo.deleteIdempotencyRecords(`${consumer}:${eventId}`);
+        await this.outboxRepo.deleteIdempotencyRecords(
+          `${consumer}:${eventId}`,
+        );
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.debug(
@@ -399,7 +401,9 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
     if (
       !memEntry ||
       (memEntry.status === 'processing' &&
-        (!ownerToken || !memEntry.ownerToken || memEntry.ownerToken === ownerToken))
+        (!ownerToken ||
+          !memEntry.ownerToken ||
+          memEntry.ownerToken === ownerToken))
     ) {
       this.memoryStore.delete(key);
     }

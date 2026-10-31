@@ -17,6 +17,7 @@ export interface NoteItemSource {
   id?: string | null;
   title?: string | null;
   citekey?: string | null;
+  citationKey?: string | null;
   creators?: Array<{
     firstName?: string | null;
     lastName?: string | null;
@@ -37,7 +38,10 @@ export interface FormatNoteOptions {
   webBaseUrl?: string;
   projectId?: string;
   noteId?: string;
-  tagColor?: boolean;
+  attachmentId?: string;
+  annotationIds?: string[];
+  tagColor?: boolean | string;
+  tagColorName?: string;
   includeComments?: boolean;
 }
 
@@ -132,14 +136,58 @@ export function sanitizeNoteContent(content?: string | null): string {
   return purify
     .sanitize(content, {
       ALLOWED_TAGS: [
-        'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike',
-        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-        'blockquote', 'pre', 'code', 'ul', 'ol', 'li',
-        'a', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-        'span', 'div', 'hr', 'mark', 'sub', 'sup', 'img'
+        'p',
+        'br',
+        'strong',
+        'b',
+        'em',
+        'i',
+        'u',
+        's',
+        'strike',
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'blockquote',
+        'pre',
+        'code',
+        'ul',
+        'ol',
+        'li',
+        'a',
+        'table',
+        'thead',
+        'tbody',
+        'tr',
+        'th',
+        'td',
+        'span',
+        'div',
+        'hr',
+        'mark',
+        'sub',
+        'sup',
+        'img',
       ],
-      ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'style', 'src', 'alt', 'width', 'height'],
+      ALLOWED_ATTR: [
+        'href',
+        'target',
+        'rel',
+        'class',
+        'style',
+        'src',
+        'alt',
+        'width',
+        'height',
+      ],
       ALLOW_DATA_ATTR: false,
+    })
+    .replace(/^(\s*)(?:&gt;)+/gm, (match, ws: string) => {
+      const count = (match.match(/&gt;/g) || []).length;
+      return `${ws}${'>'.repeat(count)}`;
     })
     .trim();
 }
@@ -150,7 +198,11 @@ export function validateTipTapDoc(doc: unknown): boolean {
   if (d.type !== 'doc') return false;
   if (!Array.isArray(d.content)) return false;
   for (const node of d.content) {
-    if (!node || typeof node !== 'object' || typeof (node as Record<string, unknown>).type !== 'string') {
+    if (
+      !node ||
+      typeof node !== 'object' ||
+      typeof (node as Record<string, unknown>).type !== 'string'
+    ) {
       return false;
     }
   }
@@ -191,8 +243,9 @@ export function formatLiteratureNoteMarkdown(
     `**Year:** ${item.year || 'N/A'} | **DOI:** ${doi}`,
   ];
 
-  if (item.citekey) {
-    headerLines.push(`**@citekey:** ${item.citekey}`);
+  const citekey = item.citationKey || item.citekey;
+  if (citekey) {
+    headerLines.push(`**@citekey:** ${citekey}`);
   }
 
   headerLines.push('', '---', '', '## Extracted Highlights & Annotations', '');
@@ -227,7 +280,8 @@ export function formatLiteratureNoteMarkdown(
   const citationYear = item.year ? String(item.year) : 'n.d.';
   const authorCitationBase = `${firstAuthorName}${hasMultipleAuthors ? ' et al.' : ''}, ${citationYear}`;
 
-  const showColorHeaders = options?.tagColor !== false;
+  const showColorHeaders =
+    options?.tagColor !== false && options?.tagColor !== 'false';
   const showComments = options?.includeComments !== false;
 
   let currentPage = -1;
@@ -245,7 +299,11 @@ export function formatLiteratureNoteMarkdown(
 
     if (showColorHeaders) {
       const annColor = (ann.color ?? '').toLowerCase();
-      const colorLabel = COLOR_LABEL_MAP[annColor] ?? '📌 General';
+      const colorLabel =
+        (typeof options?.tagColorName === 'string' &&
+          options.tagColorName.trim()) ||
+        COLOR_LABEL_MAP[annColor] ||
+        '📌 General';
       if (annColor !== currentColor) {
         currentColor = annColor;
         lines.push(`#### ${colorLabel}`);
@@ -255,20 +313,26 @@ export function formatLiteratureNoteMarkdown(
 
     const citationLabel = `(${authorCitationBase}, p. ${pageNum})`;
     const protocol = options?.protocol || 'flux';
+    const targetItemId = item.id || ann.attachmentId || '';
+    const attachmentParam = ann.attachmentId
+      ? `attachmentId=${ann.attachmentId}&`
+      : '';
+    const projectPrefix =
+      options?.projectId && options.projectId !== 'user' && options.projectId !== 'default'
+        ? `/projects/${encodeURIComponent(options.projectId)}`
+        : '';
     let backlinkUrl = '';
     if (protocol === 'zotero') {
       const attId = ann.attachmentId || '0';
       backlinkUrl = `zotero://open-pdf/0_${attId}/${pageNum}?annotation=${ann.id || ''}`;
     } else if (protocol === 'web') {
-      const base =
-        (options?.webBaseUrl || '').replace(/\/$/, '') ||
-        'https://app.flux.domain';
-      const targetId = item.id || ann.attachmentId || '';
-      backlinkUrl = `${base}/library/papers/${targetId}?page=${pageNum}&annotation=${ann.id || ''}`;
+      const base = (options?.webBaseUrl || '').replace(/\/$/, '');
+      const canonicalPath = `${projectPrefix}/library/papers/${targetItemId}?${attachmentParam}page=${pageNum}&annotation=${ann.id || ''}`;
+      backlinkUrl = base ? `${base}${canonicalPath}` : canonicalPath;
     } else {
-      backlinkUrl = ann.attachmentId
-        ? `flux://open-pdf/library/items/${ann.attachmentId}?page=${pageNum}&annotation=${ann.id || ''}`
-        : `flux://open-pdf/library/items?page=${pageNum}&annotation=${ann.id || ''}`;
+      backlinkUrl = targetItemId
+        ? `flux://open-pdf${projectPrefix}/library/papers/${targetItemId}?${attachmentParam}page=${pageNum}&annotation=${ann.id || ''}`
+        : `flux://open-pdf${projectPrefix}/library/papers?${attachmentParam}page=${pageNum}&annotation=${ann.id || ''}`;
     }
     const citationLink = `[${citationLabel}](${backlinkUrl})`;
 

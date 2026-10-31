@@ -35,24 +35,60 @@ export {
 };
 
 export interface CslSourceItem {
-  id?: string | null; itemType?: string | null; title?: string | null; shortTitle?: string | null;
-  version?: number | string | null; updatedAt?: Date | string | null; citationKey?: string | null;
-  abstract?: string | null; doi?: string | null; isbn?: string | null; issn?: string | null;
-  url?: string | null; volume?: string | null; issue?: string | null; pages?: string | null;
-  publisher?: string | null; publicationTitle?: string | null; publicationDate?: string | null;
-  date?: string | null; accessedAt?: Date | string | null; accessDate?: Date | string | null;
-  edition?: string | number | null; year?: number | string | null; journal?: string | null;
-  bookTitle?: string | null; proceedingsTitle?: string | null; repository?: string | null;
-  series?: string | null; seriesTitle?: string | null; conferenceName?: string | null;
-  place?: string | null; partNumber?: string | null; pmid?: string | null; pmcid?: string | null;
-  archive?: string | null; archiveLocation?: string | null; callNumber?: string | null;
-  arxivId?: string | null; thesisType?: string | null; reportType?: string | null;
-  versionNumber?: string | null; authors?: string[] | null;
-  contributors?: ContributorLike[] | null; creators?: ContributorLike[] | null;
-  tags?: unknown[] | string | null; keywords?: unknown[] | string | null;
-  itemTags?: Array<{ tag?: { name?: string | null } | null; name?: string | null }> | null;
+  id?: string | null;
+  itemType?: string | null;
+  title?: string | null;
+  shortTitle?: string | null;
+  version?: number | string | null;
+  updatedAt?: Date | string | null;
+  citationKey?: string | null;
+  abstract?: string | null;
+  doi?: string | null;
+  isbn?: string | null;
+  issn?: string | null;
+  url?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  publisher?: string | null;
+  publicationTitle?: string | null;
+  publicationDate?: string | null;
+  date?: string | null;
+  accessedAt?: Date | string | null;
+  accessDate?: Date | string | null;
+  edition?: string | number | null;
+  year?: number | string | null;
+  journal?: string | null;
+  bookTitle?: string | null;
+  proceedingsTitle?: string | null;
+  repository?: string | null;
+  series?: string | null;
+  seriesTitle?: string | null;
+  conferenceName?: string | null;
+  place?: string | null;
+  partNumber?: string | null;
+  pmid?: string | null;
+  pmcid?: string | null;
+  archive?: string | null;
+  archiveLocation?: string | null;
+  callNumber?: string | null;
+  arxivId?: string | null;
+  thesisType?: string | null;
+  reportType?: string | null;
+  versionNumber?: string | null;
+  authors?: string[] | null;
+  contributors?: ContributorLike[] | null;
+  creators?: ContributorLike[] | null;
+  tags?: unknown[] | string | null;
+  keywords?: unknown[] | string | null;
+  itemTags?: Array<{
+    tag?: { name?: string | null } | null;
+    name?: string | null;
+  }> | null;
   identifiers?: Array<{ type?: string | null; value?: string | null }> | null;
-  extraFields?: Record<string, unknown> | null; metadata?: unknown; extra?: string | null;
+  extraFields?: Record<string, unknown> | null;
+  metadata?: unknown;
+  extra?: string | null;
 }
 
 const PRIMARY_CREATOR_ROLES: Set<string> = new Set(
@@ -71,7 +107,10 @@ export class CslJsonMapper {
     if (!item || typeof item !== 'object') return null;
     if (!item.id && !item.citationKey) return null;
     if (item.version === undefined && !item.updatedAt) return null;
-    const ver = item.version !== undefined && item.version !== null ? String(item.version) : '';
+    const ver =
+      item.version !== undefined && item.version !== null
+        ? String(item.version)
+        : '';
     const upd =
       item.updatedAt instanceof Date
         ? String(item.updatedAt.getTime())
@@ -191,15 +230,28 @@ export class CslJsonMapper {
             ? String(new Date(item.updatedAt).getTime())
             : undefined,
       _itemId: item.id,
-      _updatedAt: item.updatedAt ? new Date(item.updatedAt).getTime() : undefined,
+      _updatedAt: item.updatedAt
+        ? new Date(item.updatedAt).getTime()
+        : undefined,
     };
 
-    const rawPubDate = getStr('publicationDate', 'date', 'issueDate', 'dateDecided', 'dateEnacted');
+    const rawPubDate = getStr(
+      'publicationDate',
+      'date',
+      'issueDate',
+      'dateDecided',
+      'dateEnacted',
+    );
     if (rawPubDate) {
-      csl.issued = this.parseCslDate(rawPubDate) || (item.year ? { 'date-parts': [[Number(item.year)]] } : undefined);
+      csl.issued =
+        this.parseCslDate(rawPubDate) ||
+        (item.year ? { 'date-parts': [[Number(item.year)]] } : undefined);
     } else if (item.year) {
       csl.issued = { 'date-parts': [[Number(item.year)]] };
-    } else if (typeof effectiveExtra.date === 'string' || typeof effectiveExtra.date === 'number') {
+    } else if (
+      typeof effectiveExtra.date === 'string' ||
+      typeof effectiveExtra.date === 'number'
+    ) {
       const parsedYear = parseInt(String(effectiveExtra.date), 10);
       if (!isNaN(parsedYear)) csl.issued = { 'date-parts': [[parsedYear]] };
     }
@@ -210,16 +262,37 @@ export class CslJsonMapper {
       if (parsedSubmitted) csl.submitted = parsedSubmitted;
     }
 
-    const rawAccessDate = item.accessedAt || item.accessDate || effectiveExtra.accessedAt || effectiveExtra.accessDate;
-    if (rawAccessDate instanceof Date || typeof rawAccessDate === 'string' || typeof rawAccessDate === 'number') {
-      const isoStr = rawAccessDate instanceof Date ? rawAccessDate.toISOString() : String(rawAccessDate).trim();
+    const rawAccessDate =
+      item.accessedAt ||
+      item.accessDate ||
+      effectiveExtra.accessedAt ||
+      effectiveExtra.accessDate;
+    if (
+      rawAccessDate instanceof Date ||
+      typeof rawAccessDate === 'string' ||
+      typeof rawAccessDate === 'number'
+    ) {
+      const isoStr =
+        rawAccessDate instanceof Date
+          ? rawAccessDate.toISOString()
+          : String(rawAccessDate).trim();
       const parsedAccessed = this.parseCslDate(isoStr);
       if (parsedAccessed) csl.accessed = parsedAccessed;
     }
 
     const container = getStr(
-      'publicationTitle', 'journal', 'bookTitle', 'proceedingsTitle', 'reporter', 'code',
-      'websiteTitle', 'blogTitle', 'forumTitle', 'dictionaryTitle', 'encyclopediaTitle', 'repository',
+      'publicationTitle',
+      'journal',
+      'bookTitle',
+      'proceedingsTitle',
+      'reporter',
+      'code',
+      'websiteTitle',
+      'blogTitle',
+      'forumTitle',
+      'dictionaryTitle',
+      'encyclopediaTitle',
+      'repository',
     );
     if (container) csl['container-title'] = container;
 
@@ -245,11 +318,22 @@ export class CslJsonMapper {
     }
 
     const publisher = getStr(
-      'publisher', 'university', 'institution', 'company', 'organization', 'committee', 'repository',
+      'publisher',
+      'university',
+      'institution',
+      'company',
+      'organization',
+      'committee',
+      'repository',
     );
     if (publisher) csl.publisher = publisher;
 
-    const authorityVal = getStr('authority', 'court', 'issuingAuthority', 'legislativeBody');
+    const authorityVal = getStr(
+      'authority',
+      'court',
+      'issuingAuthority',
+      'legislativeBody',
+    );
     if (authorityVal) csl.authority = authorityVal;
 
     const place = getStr('place', 'publisherPlace', 'eventPlace', 'country');
@@ -259,8 +343,15 @@ export class CslJsonMapper {
     if (countryVal) csl.jurisdiction = countryVal;
 
     const numberLocator = getStrOrNum(
-      'reportNumber', 'patentNumber', 'docketNumber', 'publicLawNumber',
-      'billNumber', 'standardNumber', 'number', 'applicationNumber', 'partNumber',
+      'reportNumber',
+      'patentNumber',
+      'docketNumber',
+      'publicLawNumber',
+      'billNumber',
+      'standardNumber',
+      'number',
+      'applicationNumber',
+      'partNumber',
     );
     if (numberLocator !== undefined) csl.number = String(numberLocator);
 
@@ -277,7 +368,8 @@ export class CslJsonMapper {
       typeof effectiveExtra.edition === 'number'
         ? effectiveExtra.edition
         : undefined);
-    if (editionVal !== undefined && editionVal !== null) csl.edition = editionVal;
+    if (editionVal !== undefined && editionVal !== null)
+      csl.edition = editionVal;
 
     const numPagesVal = getStrOrNum('numPages', 'numberOfPages');
     if (numPagesVal !== undefined) csl['number-of-pages'] = numPagesVal;
@@ -286,7 +378,9 @@ export class CslJsonMapper {
       if (!Array.isArray(item.identifiers)) return undefined;
       for (const t of types) {
         const match = item.identifiers.find(
-          (ident) => ident?.type?.toLowerCase() === t.toLowerCase() && ident?.value?.trim(),
+          (ident) =>
+            ident?.type?.toLowerCase() === t.toLowerCase() &&
+            ident?.value?.trim(),
         );
         if (match?.value) return match.value.trim();
       }
@@ -298,7 +392,9 @@ export class CslJsonMapper {
     const issnVal = getStr('issn', 'ISSN') || getIdent('issn');
     const pmidVal = getStr('pmid', 'PMID') || getIdent('pmid');
     const pmcidVal = getStr('pmcid', 'PMCID') || getIdent('pmcid', 'pmc');
-    const arxivVal = getStr('arxivId', 'archiveID', 'archiveId') || getIdent('arxiv', 'arxivid');
+    const arxivVal =
+      getStr('arxivId', 'archiveID', 'archiveId') ||
+      getIdent('arxiv', 'arxivid');
 
     if (doiVal) {
       csl.DOI = doiVal
@@ -310,7 +406,9 @@ export class CslJsonMapper {
     if (pmidVal) csl.PMID = pmidVal.replace(/^pmid:\s*/i, '').trim();
     if (pmcidVal) {
       const cleanPmc = pmcidVal.replace(/^(?:pmcid|pmc):\s*/i, '').trim();
-      csl.PMCID = /^PMC/i.test(cleanPmc) ? cleanPmc.toUpperCase() : `PMC${cleanPmc}`;
+      csl.PMCID = /^PMC/i.test(cleanPmc)
+        ? cleanPmc.toUpperCase()
+        : `PMC${cleanPmc}`;
     }
     if (arxivVal) {
       csl._arxivId = arxivVal;
@@ -342,7 +440,12 @@ export class CslJsonMapper {
     const metaKeywords =
       (item as Record<string, unknown>)?.metadata &&
       typeof (item as Record<string, unknown>).metadata === 'object'
-        ? ((item as Record<string, unknown>).metadata as Record<string, unknown>).keywords
+        ? (
+            (item as Record<string, unknown>).metadata as Record<
+              string,
+              unknown
+            >
+          ).keywords
         : undefined;
 
     const rawKeywordsSources = [
@@ -359,11 +462,13 @@ export class CslJsonMapper {
     const kwInput: Array<string | { name?: string; tag?: string }> = [];
     for (const src of rawKeywordsSources) {
       if (Array.isArray(src)) {
-        kwInput.push(...(src as Array<string | { name?: string; tag?: string }>));
+        kwInput.push(
+          ...(src as Array<string | { name?: string; tag?: string }>),
+        );
       } else if (typeof src === 'string' && src.trim()) {
         kwInput.push(src);
       }
-    };
+    }
     if (kwInput.length > 0) {
       const kwStrings = normalizeAcademicTags(kwInput);
       if (kwStrings.length > 0) {
@@ -412,8 +517,13 @@ export class CslJsonMapper {
     }
 
     const versionNumber =
-      item.versionNumber || effectiveExtra.versionNumber || effectiveExtra.version;
-    if (typeof versionNumber === 'string' || typeof versionNumber === 'number') {
+      item.versionNumber ||
+      effectiveExtra.versionNumber ||
+      effectiveExtra.version;
+    if (
+      typeof versionNumber === 'string' ||
+      typeof versionNumber === 'number'
+    ) {
       csl.version = String(versionNumber);
     }
 
@@ -513,7 +623,10 @@ export class CslJsonMapper {
   public static parseCslDate(dateStr: string): CslDate | undefined {
     return CslNameMapper.parseCslDate(dateStr);
   }
-  public static parseExtraCslVariables(extraStr: string, csl: CslItemData): void {
+  public static parseExtraCslVariables(
+    extraStr: string,
+    csl: CslItemData,
+  ): void {
     CslExtraMapper.parseExtraCslVariables(extraStr, csl);
   }
 }

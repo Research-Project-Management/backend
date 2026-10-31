@@ -64,7 +64,9 @@ export class ItemTypeSpecification extends CompositeSpecification {
   isSatisfiedBy(item: unknown): boolean {
     if (!item || typeof item !== 'object') return false;
     const rec = item as Record<string, unknown>;
-    return typeof rec.itemType === 'string' && this.itemTypes.includes(rec.itemType);
+    return (
+      typeof rec.itemType === 'string' && this.itemTypes.includes(rec.itemType)
+    );
   }
 }
 
@@ -90,8 +92,13 @@ export class YearRangeSpecification extends CompositeSpecification {
     if (!item || typeof item !== 'object') return false;
     const rec = item as Record<string, unknown>;
     const year = typeof rec.year === 'number' ? rec.year : undefined;
-    if (this.yearFrom !== undefined && (year === undefined || year < this.yearFrom)) return false;
-    if (this.yearTo !== undefined && (year === undefined || year > this.yearTo)) return false;
+    if (
+      this.yearFrom !== undefined &&
+      (year === undefined || year < this.yearFrom)
+    )
+      return false;
+    if (this.yearTo !== undefined && (year === undefined || year > this.yearTo))
+      return false;
     return true;
   }
 }
@@ -259,17 +266,28 @@ export class TextSearchSpecification extends CompositeSpecification {
     const q = this.query.toLowerCase();
     const ids = extractSearchQueryIdentifiers(this.query);
     const rec = item as Record<string, unknown>;
-    if (typeof rec.title === 'string' && rec.title.toLowerCase().includes(q)) return true;
-    if (typeof rec.abstract === 'string' && rec.abstract.toLowerCase().includes(q)) return true;
+    if (typeof rec.title === 'string' && rec.title.toLowerCase().includes(q))
+      return true;
+    if (
+      typeof rec.abstract === 'string' &&
+      rec.abstract.toLowerCase().includes(q)
+    )
+      return true;
     if (
       typeof rec.publicationTitle === 'string' &&
       rec.publicationTitle.toLowerCase().includes(q)
     ) {
       return true;
     }
-    if (typeof rec.doi === 'string' && rec.doi.toLowerCase().includes(q)) return true;
-    if (typeof rec.citationKey === 'string' && rec.citationKey.toLowerCase().includes(q)) return true;
-    if (AcademicSearchQueryEngine.matchesItemIdentifiersInMemory(rec, ids)) return true;
+    if (typeof rec.doi === 'string' && rec.doi.toLowerCase().includes(q))
+      return true;
+    if (
+      typeof rec.citationKey === 'string' &&
+      rec.citationKey.toLowerCase().includes(q)
+    )
+      return true;
+    if (AcademicSearchQueryEngine.matchesItemIdentifiersInMemory(rec, ids))
+      return true;
     if (Array.isArray(rec.identifiers)) {
       const identifiers = rec.identifiers as Array<{ value?: unknown } | null>;
       if (

@@ -50,7 +50,9 @@ export class OutboxQueueConsumer
     }
   }
 
-  async process(job: Job<{ eventId: string; eventType?: string }>): Promise<void> {
+  async process(
+    job: Job<{ eventId: string; eventType?: string }>,
+  ): Promise<void> {
     if (job.name !== LIBRARY_OUTBOX_JOB && job.name !== '__default__') {
       this.logger.debug(`Ignoring unknown job name: ${job.name}`);
       return;

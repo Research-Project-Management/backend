@@ -43,7 +43,9 @@ export class SavedSearchesService {
     if (!this.cache) return;
     const validProjectId = normalizeProjectScopeId(projectId || undefined);
     const scopeKey = validProjectId || userId;
-    await this.cache.del(LIBRARY_REDIS_KEYS.savedSearches(scopeKey)).catch(() => undefined);
+    await this.cache
+      .del(LIBRARY_REDIS_KEYS.savedSearches(scopeKey))
+      .catch(() => undefined);
   }
 
   async createSavedSearch(
@@ -58,8 +60,14 @@ export class SavedSearchesService {
     const effectiveProjectId = normalizeProjectScopeId(
       projectId || dto.projectId,
     );
-    if (!dto.conditions || typeof dto.conditions !== 'object' || Array.isArray(dto.conditions)) {
-      throw new BadRequestException('Saved search conditions must be a valid condition group object');
+    if (
+      !dto.conditions ||
+      typeof dto.conditions !== 'object' ||
+      Array.isArray(dto.conditions)
+    ) {
+      throw new BadRequestException(
+        'Saved search conditions must be a valid condition group object',
+      );
     }
     if (dto.scopeOptions && dto.conditions) {
       dto.conditions.scopeOptions =
@@ -75,7 +83,9 @@ export class SavedSearchesService {
     } catch (err: unknown) {
       if (err instanceof BadRequestException) throw err;
       const message = err instanceof Error ? err.message : String(err);
-      throw new BadRequestException(`Invalid saved search conditions: ${message}`);
+      throw new BadRequestException(
+        `Invalid saved search conditions: ${message}`,
+      );
     }
     let initialCount = 0;
     try {
@@ -95,7 +105,11 @@ export class SavedSearchesService {
             tx,
           );
           if (initialCount > 0) {
-            await this.repo.updateCachedCount(createdRecord.id, initialCount, tx);
+            await this.repo.updateCachedCount(
+              createdRecord.id,
+              initialCount,
+              tx,
+            );
             createdRecord.cachedCount = initialCount;
           }
           const eventScope = { userId, projectId: effectiveProjectId };
@@ -136,11 +150,7 @@ export class SavedSearchesService {
       cachedCount?: number | null;
       lastEvaluatedAt?: Date | null;
     },
-  >(
-    userId: string,
-    searches: T[],
-    fallbackProjectId?: string,
-  ): Promise<T[]> {
+  >(userId: string, searches: T[], fallbackProjectId?: string): Promise<T[]> {
     if (!Array.isArray(searches) || searches.length === 0) return searches;
     await Promise.all(
       searches.map(async (saved) => {
@@ -214,7 +224,9 @@ export class SavedSearchesService {
     let recalculatedCount: number | undefined;
     if (dto.conditions) {
       if (typeof dto.conditions !== 'object' || Array.isArray(dto.conditions)) {
-        throw new BadRequestException('Saved search conditions must be a valid condition group object');
+        throw new BadRequestException(
+          'Saved search conditions must be a valid condition group object',
+        );
       }
       if (dto.scopeOptions) {
         dto.conditions.scopeOptions =
@@ -230,7 +242,9 @@ export class SavedSearchesService {
       } catch (err: unknown) {
         if (err instanceof BadRequestException) throw err;
         const message = err instanceof Error ? err.message : String(err);
-        throw new BadRequestException(`Invalid saved search conditions: ${message}`);
+        throw new BadRequestException(
+          `Invalid saved search conditions: ${message}`,
+        );
       }
       try {
         recalculatedCount = await this.repo.countMatchingItems(where);
@@ -247,7 +261,12 @@ export class SavedSearchesService {
           if (recalculatedCount !== undefined) {
             await this.repo.updateCachedCount(id, recalculatedCount, tx);
           }
-          const updatedRecord = await this.repo.findById(userId, id, projectId, tx);
+          const updatedRecord = await this.repo.findById(
+            userId,
+            id,
+            projectId,
+            tx,
+          );
           if (!updatedRecord) {
             throw new NotFoundException(`Saved search ${id} not found`);
           }

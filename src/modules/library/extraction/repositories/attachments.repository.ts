@@ -70,9 +70,11 @@ export class AttachmentsRepository {
     if (!client.attachment || !client.item) {
       return;
     }
-    const rawCount = client.attachment?.count ? await client.attachment.count({
-      where: { itemId, deletedAt: null },
-    }) : 1;
+    const rawCount = client.attachment?.count
+      ? await client.attachment.count({
+          where: { itemId, deletedAt: null },
+        })
+      : 1;
     const activeCount = Math.max(0, rawCount);
     if (client.item?.updateMany) {
       await client.item.updateMany({
@@ -93,9 +95,7 @@ export class AttachmentsRepository {
     }
   }
 
-  async create<
-    I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude,
-  >(
+  async create<I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude>(
     data: Prisma.AttachmentCreateInput,
     include?: Prisma.Subset<I, Prisma.AttachmentInclude>,
     tx?: Prisma.TransactionClient,
@@ -108,12 +108,24 @@ export class AttachmentsRepository {
       }
       delete sanitizedData.itemId;
     }
-    const targetItemId = (sanitizedData.item as { connect?: { id?: string } })?.connect?.id;
-    const targetFileId = typeof sanitizedData.fileId === 'string' ? sanitizedData.fileId : undefined;
-    const isPrimaryPdf = sanitizedData.attachmentType === 'primary_pdf' || (!sanitizedData.attachmentType && sanitizedData.mimeType === 'application/pdf');
+    const targetItemId = (sanitizedData.item as { connect?: { id?: string } })
+      ?.connect?.id;
+    const targetFileId =
+      typeof sanitizedData.fileId === 'string'
+        ? sanitizedData.fileId
+        : undefined;
+    const isPrimaryPdf =
+      sanitizedData.attachmentType === 'primary_pdf' ||
+      (!sanitizedData.attachmentType &&
+        sanitizedData.mimeType === 'application/pdf');
 
     // Prevent duplicate attachment rows when the same physical fileId is already attached to this item
-    if (targetItemId && targetFileId && client.attachment?.findFirst && client.attachment?.update) {
+    if (
+      targetItemId &&
+      targetFileId &&
+      client.attachment?.findFirst &&
+      client.attachment?.update
+    ) {
       const existingSameFile = await client.attachment.findFirst({
         where: {
           itemId: targetItemId,
@@ -136,7 +148,10 @@ export class AttachmentsRepository {
           });
         }
         const updatePayload: Record<string, unknown> = {};
-        if (typeof sanitizedData.filename === 'string' && sanitizedData.filename) {
+        if (
+          typeof sanitizedData.filename === 'string' &&
+          sanitizedData.filename
+        ) {
           updatePayload.filename = sanitizedData.filename;
         }
         if (typeof sanitizedData.title === 'string' && sanitizedData.title) {
@@ -148,19 +163,34 @@ export class AttachmentsRepository {
         if (typeof sanitizedData.size === 'number') {
           updatePayload.size = sanitizedData.size;
         }
-        if (typeof sanitizedData.mimeType === 'string' && sanitizedData.mimeType) {
+        if (
+          typeof sanitizedData.mimeType === 'string' &&
+          sanitizedData.mimeType
+        ) {
           updatePayload.mimeType = sanitizedData.mimeType;
         }
-        if (typeof sanitizedData.attachmentType === 'string' && sanitizedData.attachmentType) {
+        if (
+          typeof sanitizedData.attachmentType === 'string' &&
+          sanitizedData.attachmentType
+        ) {
           updatePayload.attachmentType = sanitizedData.attachmentType;
         }
-        if (typeof sanitizedData.fileHash === 'string' && sanitizedData.fileHash) {
+        if (
+          typeof sanitizedData.fileHash === 'string' &&
+          sanitizedData.fileHash
+        ) {
           updatePayload.fileHash = sanitizedData.fileHash;
         }
-        if (sanitizedData.metadata && typeof sanitizedData.metadata === 'object') {
-          const existingMeta = (existingSameFile.metadata && typeof existingSameFile.metadata === 'object' && !Array.isArray(existingSameFile.metadata))
-            ? (existingSameFile.metadata as Record<string, unknown>)
-            : {};
+        if (
+          sanitizedData.metadata &&
+          typeof sanitizedData.metadata === 'object'
+        ) {
+          const existingMeta =
+            existingSameFile.metadata &&
+            typeof existingSameFile.metadata === 'object' &&
+            !Array.isArray(existingSameFile.metadata)
+              ? (existingSameFile.metadata as Record<string, unknown>)
+              : {};
           updatePayload.metadata = {
             ...existingMeta,
             ...(sanitizedData.metadata as Record<string, unknown>),
@@ -168,9 +198,11 @@ export class AttachmentsRepository {
         }
         const updated = (await client.attachment.update({
           where: { id: existingSameFile.id },
-          data: updatePayload as Prisma.AttachmentUpdateInput,
+          data: updatePayload,
           include,
-        })) as Prisma.AttachmentGetPayload<{ include: I }> & { itemId?: string };
+        })) as Prisma.AttachmentGetPayload<{ include: I }> & {
+          itemId?: string;
+        };
         await this.syncItemAttachmentCounts(targetItemId, tx);
         return updated;
       }
@@ -285,7 +317,9 @@ export class AttachmentsRepository {
       });
       await Promise.all([
         this.syncItemAttachmentCounts(targetItemId, tx),
-        ...cleanSourceIds.map((srcId) => this.syncItemAttachmentCounts(srcId, tx)),
+        ...cleanSourceIds.map((srcId) =>
+          this.syncItemAttachmentCounts(srcId, tx),
+        ),
       ]);
       return [];
     }
@@ -299,6 +333,19 @@ export class AttachmentsRepository {
 
     const survivingByHash = new Map<string, (typeof sortedAttachments)[0]>();
     const survivingByUrl = new Map<string, (typeof sortedAttachments)[0]>();
+    const survivingFileIds = new Set<string>(
+      sortedAttachments
+        .filter((a) => a.itemId === targetItemId)
+        .flatMap((a) => [
+          ...(a.fileId ? [a.fileId] : []),
+          ...(Array.isArray(a.revisions)
+            ? a.revisions
+                .map((r) => r.fileId)
+                .filter((fid): fid is string => Boolean(fid))
+            : []),
+        ]),
+    );
+    const candidateOrphanFileIds: string[] = [];
     let hasPrimaryPdf = false;
 
     for (const att of sortedAttachments) {
@@ -321,23 +368,29 @@ export class AttachmentsRepository {
       if (existingSurvivor && existingSurvivor.id !== att.id) {
         // Consolidate annotations from duplicate attachment onto existingSurvivor
         const [survivorAnnots, dupAnnots] = await Promise.all([
-          client.annotation?.findMany?.({ where: { attachmentId: existingSurvivor.id, deletedAt: null } }) ?? [],
-          client.annotation?.findMany?.({ where: { attachmentId: att.id, deletedAt: null } }) ?? [],
+          client.annotation?.findMany?.({
+            where: { attachmentId: existingSurvivor.id, deletedAt: null },
+          }) ?? [],
+          client.annotation?.findMany?.({
+            where: { attachmentId: att.id, deletedAt: null },
+          }) ?? [],
         ]);
 
         const duplicateAnnotIdsToDelete: string[] = [];
         const annotIdsToMove: string[] = [];
-        const extractQuote = (a: { quoteText?: string | null; textSelection?: string | null }) =>
-          (a.quoteText ?? a.textSelection ?? '').trim().toLowerCase();
+        const extractQuote = (a: {
+          quoteText?: string | null;
+          textSelection?: string | null;
+        }) => (a.quoteText ?? a.textSelection ?? '').trim().toLowerCase();
         const extractComment = (a: { comment?: string | null }) =>
           (a.comment ?? '').trim();
 
         for (const dupAnn of dupAnnots) {
-          const dupQuote = extractQuote(dupAnn as { quoteText?: string | null; textSelection?: string | null });
-          const dupComment = extractComment(dupAnn as { comment?: string | null });
+          const dupQuote = extractQuote(dupAnn);
+          const dupComment = extractComment(dupAnn);
           const isIdentical = survivorAnnots.some((sa) => {
-            const saQuote = extractQuote(sa as { quoteText?: string | null; textSelection?: string | null });
-            const saComment = extractComment(sa as { comment?: string | null });
+            const saQuote = extractQuote(sa);
+            const saComment = extractComment(sa);
             const commentsCompatible =
               dupComment.length === 0 || dupComment === saComment;
             return (
@@ -375,7 +428,9 @@ export class AttachmentsRepository {
         if (client.fullTextIndex?.updateMany) {
           try {
             const survivorFtsCount = client.fullTextIndex.count
-              ? await client.fullTextIndex.count({ where: { attachmentId: existingSurvivor.id } })
+              ? await client.fullTextIndex.count({
+                  where: { attachmentId: existingSurvivor.id },
+                })
               : 0;
             if (survivorFtsCount === 0) {
               await client.fullTextIndex.updateMany({
@@ -398,6 +453,9 @@ export class AttachmentsRepository {
             where: { id: att.id },
             data: { deletedAt: new Date() },
           });
+        } else if (typeof client.attachment.delete === 'function') {
+          await client.attachment.delete({ where: { id: att.id } });
+          if (att.fileId) candidateOrphanFileIds.push(att.fileId);
         }
         continue;
       }
@@ -405,6 +463,12 @@ export class AttachmentsRepository {
       // Surviving attachment: register hash/url and enforce single primary_pdf
       if (hashKey) survivingByHash.set(hashKey, att);
       if (urlKey) survivingByUrl.set(urlKey, att);
+      if (att.fileId) survivingFileIds.add(att.fileId);
+      if (Array.isArray(att.revisions)) {
+        for (const rev of att.revisions) {
+          if (rev.fileId) survivingFileIds.add(rev.fileId);
+        }
+      }
 
       const isPrimaryPdf = att.attachmentType === 'primary_pdf';
       let nextAttachmentType = att.attachmentType;
@@ -432,9 +496,19 @@ export class AttachmentsRepository {
       }
     }
 
-    await Promise.all([this.syncItemAttachmentCounts(targetItemId, tx), ...cleanSourceIds.map((srcId) => this.syncItemAttachmentCounts(srcId, tx))]);
+    await Promise.all([
+      this.syncItemAttachmentCounts(targetItemId, tx),
+      ...cleanSourceIds.map((srcId) =>
+        this.syncItemAttachmentCounts(srcId, tx),
+      ),
+    ]);
 
-    return [];
+    const orphanedFileIds = Array.from(
+      new Set(
+        candidateOrphanFileIds.filter((fid) => !survivingFileIds.has(fid)),
+      ),
+    );
+    return orphanedFileIds;
   }
 
   async updateLinkedFile(
@@ -565,13 +639,12 @@ export class AttachmentsRepository {
     return null;
   }
 
-  async renameAttachment(
+  private async applyAttachmentFilenameAndFileRename(
     attachmentId: string,
     newFilename: string,
-    fileId?: string,
-    tx?: Prisma.TransactionClient,
+    fileId: string | undefined,
+    client: Prisma.TransactionClient,
   ) {
-    const client = this.getClient(tx);
     let updated = await client.attachment.update({
       where: { id: attachmentId },
       data: { filename: newFilename },
@@ -603,6 +676,15 @@ export class AttachmentsRepository {
     return updated;
   }
 
+  async renameAttachment(
+    attachmentId: string,
+    newFilename: string,
+    fileId?: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    return this.applyAttachmentFilenameAndFileRename(attachmentId, newFilename, fileId, this.getClient(tx));
+  }
+
   async batchRename(
     updates: Array<{ id: string; filename: string; fileId?: string }>,
     tx?: Prisma.TransactionClient,
@@ -610,53 +692,20 @@ export class AttachmentsRepository {
     if (!updates || updates.length === 0) return;
     const run = async (client: Prisma.TransactionClient) => {
       await Promise.all(
-        updates.map(async (item) => {
-          const updated = await client.attachment.update({
-            where: { id: item.id },
-            data: { filename: item.filename },
-          });
-          if (item.fileId) {
-            const cloned = await this.syncRenamedFileRecord(
-              item.id,
-              item.filename,
-              item.fileId,
-              updated,
-              client,
-            );
-            if (cloned) {
-              await client.attachment.update({
-                where: { id: item.id },
-                data: {
-                  fileId: cloned.clonedFileId,
-                  ...(typeof cloned.nextUrl === 'string' ? { url: cloned.nextUrl } : {}),
-                },
-              });
-            }
-          }
-          if (updated?.itemId && client.item?.updateMany) {
-            await client.item.updateMany({
-              where: { id: updated.itemId },
-              data: { version: { increment: 1 } },
-            });
-          }
-        }),
+        updates.map((item) =>
+          this.applyAttachmentFilenameAndFileRename(item.id, item.filename, item.fileId, client),
+        ),
       );
     };
-    if (tx) {
-      await run(tx);
-    } else {
-      await this.prisma.$transaction(run);
-    }
+    if (tx) await run(tx);
+    else await this.prisma.$transaction(run);
   }
 
   async deleteManyByItemId(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
     return (await this.getClient(tx).attachment.deleteMany({ where: { itemId } })).count;
   }
 
-  async softDeleteByItemId(
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-  ): Promise<number> {
+  async softDeleteByItemId(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
     const count = (
       await this.getClient(tx).attachment.updateMany({
         where: { itemId, deletedAt: null },
@@ -667,10 +716,7 @@ export class AttachmentsRepository {
     return count;
   }
 
-  async restoreByItemId(
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-  ): Promise<number> {
+  async restoreByItemId(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
     const count = (
       await this.getClient(tx).attachment.updateMany({
         where: { itemId, deletedAt: { not: null } },

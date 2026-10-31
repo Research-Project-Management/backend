@@ -26,7 +26,7 @@ export interface ReconcileExtractedCandidatePayload {
   userId: string;
   projectId?: string;
   itemId: string;
-  attachmentId: string;
+  attachmentId?: string;
   extractedMetadata: {
     title?: string;
     doi?: string;
@@ -47,6 +47,7 @@ export interface ReconcileExtractedCandidatePayload {
     canonicalUri?: string;
   }>;
   isOcrExtracted?: boolean;
+  isOcrDerived?: boolean;
   engineUsed?: string;
   qualityScore?: number;
 }

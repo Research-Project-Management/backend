@@ -4,7 +4,9 @@ import {
   Post,
   Req,
   Body,
+  Param,
   BadRequestException,
+  PayloadTooLargeException,
   HttpCode,
   HttpStatus,
   Optional,
@@ -12,11 +14,18 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
-import { JwtAuthGuard } from '@/modules/identity/auth';
-import { libraryConfig } from '@/modules/library/core';
+import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
+import {
+  ProjectAccessGuard,
+  ProjectRoles,
+  ProjectRole,
+} from '@/modules/project/access';
+import { libraryConfig, normalizeProjectScopeId } from '@/modules/library/core';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
 import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
-import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
+import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
+
+const MAX_BENCHMARK_PDF_BYTES = 50 * 1024 * 1024; // 50 MB
 
 export interface BenchmarkPayloadDto {
   base64Pdf?: string;
@@ -25,7 +34,7 @@ export interface BenchmarkPayloadDto {
 
 @ApiTags('Library Extraction Telemetry')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @Controller([
   'api/v1/library/extraction',
   'api/v1/projects/:projectId/library/extraction',
@@ -34,18 +43,27 @@ export class ExtractionTelemetryController {
   constructor(
     private readonly trustedExtractor: TrustedExtractionService,
     @Optional() private readonly ocrWorkerPool?: OcrWorkerPoolService,
-    @Optional() private readonly extractionRepo?: ExtractionRepository,
+    @Optional() private readonly attachmentsService?: AttachmentsService,
   ) {}
 
   /**
    * Returns operational telemetry and engine metrics for dashboards.
    */
   @Get('telemetry')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   @ApiOperation({
     summary:
       'Get operational telemetry and in-process extraction engine metrics',
   })
-  async getTelemetry() {
+  async getTelemetry(
+    @CurrentUser('id') userId?: string,
+    @Param('projectId') projectId?: string,
+  ) {
     const slmConfigured = Boolean(libraryConfig().mextract.apiUrl);
     const ocrPool = this.ocrWorkerPool?.getPoolStatus() ?? {
       initialized: false,
@@ -54,8 +72,13 @@ export class ExtractionTelemetryController {
       configuredConcurrency: libraryConfig().ocr.concurrency || 1,
       defaultLanguages: ['vie', 'eng'],
     };
-    const attachmentStatusCounts = this.extractionRepo
-      ? await this.extractionRepo.getExtractionStatusBreakdown()
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const attachmentStatusCounts = this.attachmentsService
+      ? await this.attachmentsService.getExtractionStatusBreakdown(
+          userId || effectiveProjectId
+            ? { userId, projectId: effectiveProjectId }
+            : undefined,
+        )
       : {};
     const totalAttachments = Object.values(attachmentStatusCounts).reduce(
       (sum, count) => sum + count,
@@ -97,6 +120,11 @@ export class ExtractionTelemetryController {
    * Measures precise execution latency in milliseconds and evaluates the Quality Gate.
    */
   @Post('benchmark')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+  )
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -119,6 +147,11 @@ export class ExtractionTelemetryController {
         /^data:application\/pdf;base64,/,
         '',
       );
+      if (cleanBase64.length > Math.ceil((MAX_BENCHMARK_PDF_BYTES * 4) / 3)) {
+        throw new PayloadTooLargeException(
+          'Benchmark PDF payload exceeds the 50MB size limit',
+        );
+      }
       buffer = Buffer.from(cleanBase64, 'base64');
     }
 
@@ -148,6 +181,12 @@ export class ExtractionTelemetryController {
     if (!buffer || buffer.length === 0) {
       throw new BadRequestException(
         'Please provide a PDF file via multipart upload or base64Pdf JSON field',
+      );
+    }
+
+    if (buffer.length > MAX_BENCHMARK_PDF_BYTES) {
+      throw new PayloadTooLargeException(
+        'Benchmark PDF payload exceeds the 50MB size limit',
       );
     }
 

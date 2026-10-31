@@ -1,6 +1,6 @@
 import {
   SCHEMA_V42_DATA,
-  ITEM_COLUMN_METADATA_FIELDS,
+  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
   FIELD_ALIASES,
   getPrimaryCreatorRoleForType,
   harmonizeZoteroFields,
@@ -35,7 +35,7 @@ export const NON_SCALAR_ENRICH_KEYS = new Set([
 export const SCALAR_METADATA_FIELDS: string[] = Array.from(
   new Set([
     ...SCHEMA_V42_DATA.distinctFieldKeys,
-    ...ITEM_COLUMN_METADATA_FIELDS,
+    ...CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
     ...Object.keys(FIELD_ALIASES),
     ...Object.values(FIELD_ALIASES),
   ]),

@@ -728,10 +728,7 @@ export function generateCitationKey(metadata: {
 export function normalizeBibcode(bibcode?: string | null): string | undefined {
   if (!bibcode || typeof bibcode !== 'string') return undefined;
   const clean = stripSurroundingPunctuation(bibcode)
-    .replace(
-      /^(?:bibcode:\s*|https?:\/\/ui\.adsabs\.harvard\.edu\/abs\/)/i,
-      '',
-    )
+    .replace(/^(?:bibcode:\s*|https?:\/\/ui\.adsabs\.harvard\.edu\/abs\/)/i, '')
     .replace(/\/(?:abstract|citations|references|metrics)?\/?$/i, '')
     .trim();
   return /^\d{4}[A-Za-z0-9.&]{5}[A-Za-z0-9.]{4}[A-Za-z0-9.][A-Za-z0-9.]{4}[A-Za-z]$/.test(

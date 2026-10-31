@@ -2,10 +2,7 @@ import { cleanAuthorName, splitAuthorString } from './author.domain';
 import { cleanAbstractText } from './academic-text.domain';
 import { normalizeAcademicTitleCase } from './academic-title.domain';
 import { normalizeAcademicTags } from './tag.domain';
-import {
-  isValidIsbnChecksum,
-  isValidIssnChecksum,
-} from './identifier.domain';
+import { isValidIsbnChecksum, isValidIssnChecksum } from './identifier.domain';
 
 export interface ExtractedRegexFields {
   doi?: string;
@@ -178,7 +175,11 @@ export class AcademicRegexCatalog {
       .toLowerCase();
 
     // Positive: Explicit arXiv header indicators (e.g. arXiv:2303.08774v2 [cs.CV] or 'arxiv.org')
-    if (/(?:arxiv(?::|\.org\/abs\/|\.org\/pdf\/)|posted\s+on\s+arxiv)/i.test(prefix)) {
+    if (
+      /(?:arxiv(?::|\.org\/abs\/|\.org\/pdf\/)|posted\s+on\s+arxiv)/i.test(
+        prefix,
+      )
+    ) {
       score += 35;
     }
 
@@ -193,18 +194,26 @@ export class AcademicRegexCatalog {
     }
 
     // Negative: Inline citation wording ('et al.', 'proposed by', 'in [')
-    if (/(?:et\s+al\.?|see\s+also|cited\s+(?:in|by)|according\s+to|proposed\s+by|in\s+\[)/i.test(prefix)) {
+    if (
+      /(?:et\s+al\.?|see\s+also|cited\s+(?:in|by)|according\s+to|proposed\s+by|in\s+\[)/i.test(
+        prefix,
+      )
+    ) {
       score -= 45;
     }
 
     // Negative: Deep in text after Introduction
-    const introPos = text.search(/(?:\n\s*(?:1\.?\s+)?introduction|\n\s*i\.?\s+introduction)/i);
+    const introPos = text.search(
+      /(?:\n\s*(?:1\.?\s+)?introduction|\n\s*i\.?\s+introduction)/i,
+    );
     if (introPos !== -1 && matchIndex > introPos) {
       score -= 35;
     }
 
     // Negative: Near References / Bibliography
-    const refPos = text.search(/(?:\n\s*references|\n\s*bibliography|\n\s*literature\s+cited)/i);
+    const refPos = text.search(
+      /(?:\n\s*references|\n\s*bibliography|\n\s*literature\s+cited)/i,
+    );
     if (refPos !== -1 && matchIndex > refPos) {
       score -= 60;
     }

@@ -1,19 +1,18 @@
 import { Prisma } from '@prisma/client';
-import {
-  asMetaObject,
-} from '@/modules/library/ingestion/services/duplicate-detector.service';
+import { asMetaObject } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import {
   normalizeDoi,
   PRISMA_ITEM_SCALAR_COLUMNS,
   ItemProvenancePolicy,
+  deriveFirstAuthor,
 } from '@/modules/library/core';
-import { deriveFirstAuthor } from '@/modules/library/catalog/catalog.facade';
 import {
   ContributorShape,
   IDENTIFIER_META_KEYS,
   syncMergedContributors,
   syncMergedIdentifiersInTx,
 } from './duplicate-merge-contributors.domain';
+import { PREPRINT_SERVER_VENUE_REGEX } from './field-reconciliation.strategies';
 
 export type { ContributorShape };
 export {
@@ -97,7 +96,9 @@ export const SYSTEM_RESERVED_MERGE_KEYS = new Set([
   'prototype',
 ]);
 
-export const TOP_LEVEL_ITEM_COLUMNS = new Set<string>(PRISMA_ITEM_SCALAR_COLUMNS);
+export const TOP_LEVEL_ITEM_COLUMNS = new Set<string>(
+  PRISMA_ITEM_SCALAR_COLUMNS,
+);
 export const RETRACTION_SURVIVAL_KEYS = [
   'isRetracted',
   'retraction',
@@ -115,14 +116,15 @@ export async function rewireMergedItemRelations(
   primaryId: string,
   uniqueDupIds: string[],
 ): Promise<Array<Record<string, unknown>>> {
-  const existingRelations = (await tx.itemRelation?.findMany?.({
-    where: {
-      OR: [
-        { sourceItemId: { in: [primaryId, ...uniqueDupIds] } },
-        { targetItemId: { in: [primaryId, ...uniqueDupIds] } },
-      ],
-    },
-  })) ?? [];
+  const existingRelations =
+    (await tx.itemRelation?.findMany?.({
+      where: {
+        OR: [
+          { sourceItemId: { in: [primaryId, ...uniqueDupIds] } },
+          { targetItemId: { in: [primaryId, ...uniqueDupIds] } },
+        ],
+      },
+    })) ?? [];
 
   const primaryExistingPairs = new Set<string>();
   for (const rel of existingRelations) {
@@ -141,7 +143,11 @@ export async function rewireMergedItemRelations(
   }
 
   const relationIdsToDelete: string[] = [];
-  const relationUpdates: Array<{ id: string; sourceItemId: string; targetItemId: string }> = [];
+  const relationUpdates: Array<{
+    id: string;
+    sourceItemId: string;
+    targetItemId: string;
+  }> = [];
 
   for (const rel of existingRelations) {
     const isSourceDup = uniqueDupIds.includes(rel.sourceItemId);
@@ -159,7 +165,11 @@ export async function rewireMergedItemRelations(
     if (primaryExistingPairs.has(candidateKey)) {
       relationIdsToDelete.push(rel.id);
     } else {
-      relationUpdates.push({ id: rel.id, sourceItemId: newSourceId, targetItemId: newTargetId });
+      relationUpdates.push({
+        id: rel.id,
+        sourceItemId: newSourceId,
+        targetItemId: newTargetId,
+      });
       registerRelationPairWithReciprocal(
         primaryExistingPairs,
         newSourceId,
@@ -174,21 +184,28 @@ export async function rewireMergedItemRelations(
       relationUpdates.map((upd) =>
         tx.itemRelation.update({
           where: { id: upd.id },
-          data: { sourceItemId: upd.sourceItemId, targetItemId: upd.targetItemId },
+          data: {
+            sourceItemId: upd.sourceItemId,
+            targetItemId: upd.targetItemId,
+          },
         }),
       ),
     );
   }
   if (relationIdsToDelete.length > 0) {
     if (tx.itemRelation.deleteMany) {
-      await tx.itemRelation.deleteMany({ where: { id: { in: relationIdsToDelete } } });
+      await tx.itemRelation.deleteMany({
+        where: { id: { in: relationIdsToDelete } },
+      });
     } else {
       await Promise.all(
-        relationIdsToDelete.map((relId) => tx.itemRelation.delete({ where: { id: relId } })),
+        relationIdsToDelete.map((relId) =>
+          tx.itemRelation.delete({ where: { id: relId } }),
+        ),
       );
     }
   }
-  return existingRelations as unknown as Array<Record<string, unknown>>;
+  return existingRelations;
 }
 
 export async function consolidateUserPublications(
@@ -199,9 +216,10 @@ export async function consolidateUserPublications(
   dupPublications: Array<Record<string, unknown>>;
   primaryPublications: Array<Record<string, unknown>>;
 }> {
-  const dupPublications = (await tx.userPublication?.findMany?.({
-    where: { itemId: { in: uniqueDupIds } },
-  })) ?? [];
+  const dupPublications =
+    (await tx.userPublication?.findMany?.({
+      where: { itemId: { in: uniqueDupIds } },
+    })) ?? [];
   if (dupPublications.length === 0) {
     return { dupPublications: [], primaryPublications: [] };
   }
@@ -216,7 +234,9 @@ export async function consolidateUserPublications(
         where: { userId_itemId: { userId: pub.userId, itemId: primaryId } },
       });
       if (existingPrimaryPub) {
-        initialPrimaryPubs.push({ ...(existingPrimaryPub as unknown as Record<string, unknown>) });
+        initialPrimaryPubs.push({
+          ...(existingPrimaryPub as unknown as Record<string, unknown>),
+        });
       }
     }
 
@@ -231,23 +251,32 @@ export async function consolidateUserPublications(
           addedAt: pub.addedAt,
         },
       });
-      primaryPubByUser.set(pub.userId, created ?? ({ ...pub, itemId: primaryId } as never));
+      primaryPubByUser.set(
+        pub.userId,
+        created ?? { ...pub, itemId: primaryId },
+      );
     } else {
       const updatedData = {
         isPublic: existingPrimaryPub.isPublic || pub.isPublic,
-        openAccessLicense: existingPrimaryPub.openAccessLicense || pub.openAccessLicense,
+        openAccessLicense:
+          existingPrimaryPub.openAccessLicense || pub.openAccessLicense,
         contributorId: existingPrimaryPub.contributorId || pub.contributorId,
       };
       await tx.userPublication.update({
         where: { userId_itemId: { userId: pub.userId, itemId: primaryId } },
         data: updatedData,
       });
-      primaryPubByUser.set(pub.userId, { ...existingPrimaryPub, ...updatedData });
+      primaryPubByUser.set(pub.userId, {
+        ...existingPrimaryPub,
+        ...updatedData,
+      });
     }
   }
 
   if (tx.userPublication.deleteMany) {
-    await tx.userPublication.deleteMany({ where: { itemId: { in: uniqueDupIds } } });
+    await tx.userPublication.deleteMany({
+      where: { itemId: { in: uniqueDupIds } },
+    });
   } else {
     for (const pub of dupPublications) {
       await tx.userPublication.delete({
@@ -257,7 +286,9 @@ export async function consolidateUserPublications(
   }
 
   return {
-    dupPublications: dupPublications as unknown as Array<Record<string, unknown>>,
+    dupPublications: dupPublications as unknown as Array<
+      Record<string, unknown>
+    >,
     primaryPublications: initialPrimaryPubs,
   };
 }
@@ -294,7 +325,10 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
   const isEmptyClear = (v: unknown): boolean =>
     v === null || (typeof v === 'string' && v.trim() === '');
   const origPrimaryMeta = asMetaObject(primary.metadata);
-  const combinedUpdates: Record<string, unknown> = { ...backfillFields, ...scalarSelections };
+  const combinedUpdates: Record<string, unknown> = {
+    ...backfillFields,
+    ...scalarSelections,
+  };
   const resolvedItemType = String(
     scalarSelections.itemType ||
       effectiveMergedItemType ||
@@ -304,25 +338,38 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
   );
   const computedFirstAuthor =
     Array.isArray(finalContributors) && finalContributors.length > 0
-      ? deriveFirstAuthor({ contributors: finalContributors, itemType: resolvedItemType })
+      ? deriveFirstAuthor({
+          contributors: finalContributors,
+          itemType: resolvedItemType,
+        })
       : derivedFirstAuthor;
   const topLevelData: Record<string, unknown> = {
     itemType: resolvedItemType,
-    ...(computedFirstAuthor !== undefined ? { firstAuthor: computedFirstAuthor } : {}),
+    ...(computedFirstAuthor !== undefined
+      ? { firstAuthor: computedFirstAuthor }
+      : {}),
     ...(noteCount !== undefined ? { noteCount } : {}),
-    ...(attachmentCount !== undefined ? { attachmentCount, hasFile: attachmentCount > 0 } : {}),
+    ...(attachmentCount !== undefined
+      ? { attachmentCount, hasFile: attachmentCount > 0 }
+      : {}),
   };
 
   for (const [key, val] of Object.entries(combinedUpdates)) {
-    if (key === 'extraFields' || key === 'metadata' || SYSTEM_RESERVED_MERGE_KEYS.has(key)) {
+    if (
+      key === 'extraFields' ||
+      key === 'metadata' ||
+      SYSTEM_RESERVED_MERGE_KEYS.has(key)
+    ) {
       continue;
     }
     if (TOP_LEVEL_ITEM_COLUMNS.has(key)) {
       if (isEmptyClear(val)) {
-        topLevelData[key] = key === 'title' ? (primary.title ?? 'Untitled Item') : null;
+        topLevelData[key] =
+          key === 'title' ? (primary.title ?? 'Untitled Item') : null;
         delete primaryMeta[key];
       } else if (key === 'year') {
-        const numYear = typeof val === 'number' ? val : parseInt(String(val), 10);
+        const numYear =
+          typeof val === 'number' ? val : parseInt(String(val), 10);
         topLevelData.year = Number.isNaN(numYear) ? null : numYear;
       } else {
         topLevelData[key] = val;
@@ -348,7 +395,8 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
       ? topLevelData.abstract
       : scalarSelections.abstractNote !== undefined
         ? scalarSelections.abstractNote
-        : backfillFields.abstractNote !== undefined && (!primaryHasAbstract || abstractAliasAuthorized)
+        : backfillFields.abstractNote !== undefined &&
+            (!primaryHasAbstract || abstractAliasAuthorized)
           ? backfillFields.abstractNote
           : undefined;
   if (effectiveAbstract !== undefined) {
@@ -367,22 +415,22 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
   }
 
   const rawOrigVenue = String(
-    primary.publicationTitle || origPrimaryMeta.publicationTitle || origPrimaryMeta.journal || '',
+    primary.publicationTitle ||
+      origPrimaryMeta.publicationTitle ||
+      origPrimaryMeta.journal ||
+      '',
   ).trim();
-  const isOrigPreprintVenue =
-    /^(?:arxiv(?:\.org)?|corr|biorxiv|medrxiv|chemrxiv|techrxiv|ssrn|research\s+square|osf\s+preprints|hal|zenodo)(?:\s+preprints?|\s+e-?prints?)?$/i.test(
-      rawOrigVenue,
-    );
+  const isOrigPreprintVenue = PREPRINT_SERVER_VENUE_REGEX.test(rawOrigVenue);
   const primaryHasPubTitle =
     Boolean(rawOrigVenue) &&
     (!isOrigPreprintVenue ||
       ItemProvenancePolicy.isFieldLocked(origPrimaryMeta, 'publicationTitle'));
-  const selectedVenueAlias = VENUE_ALIAS_MERGE_KEYS.map((k) => scalarSelections[k]).find(
-    (v) => v !== undefined,
-  );
-  const backfillVenueAlias = VENUE_ALIAS_MERGE_KEYS.map((k) => backfillFields[k]).find(
-    (v) => v !== undefined,
-  );
+  const selectedVenueAlias = VENUE_ALIAS_MERGE_KEYS.map(
+    (k) => scalarSelections[k],
+  ).find((v) => v !== undefined);
+  const backfillVenueAlias = VENUE_ALIAS_MERGE_KEYS.map(
+    (k) => backfillFields[k],
+  ).find((v) => v !== undefined);
   const journalAliasAuthorized =
     scalarSelections.journal !== undefined ||
     (backfillFields.journal !== undefined &&
@@ -392,7 +440,9 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
     selectedVenueAlias !== undefined ||
     (backfillVenueAlias !== undefined &&
       VENUE_ALIAS_MERGE_KEYS.some(
-        (k) => backfillFields[k] !== undefined && ItemProvenancePolicy.isFieldLocked(primaryMeta, k),
+        (k) =>
+          backfillFields[k] !== undefined &&
+          ItemProvenancePolicy.isFieldLocked(primaryMeta, k),
       ) &&
       !ItemProvenancePolicy.isFieldLocked(origPrimaryMeta, 'publicationTitle'));
 
@@ -403,9 +453,11 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
         ? scalarSelections.journal
         : selectedVenueAlias !== undefined
           ? selectedVenueAlias
-          : backfillFields.journal !== undefined && (!primaryHasPubTitle || journalAliasAuthorized)
+          : backfillFields.journal !== undefined &&
+              (!primaryHasPubTitle || journalAliasAuthorized)
             ? backfillFields.journal
-            : backfillVenueAlias !== undefined && (!primaryHasPubTitle || venueAliasAuthorized)
+            : backfillVenueAlias !== undefined &&
+                (!primaryHasPubTitle || venueAliasAuthorized)
               ? backfillVenueAlias
               : undefined;
   if (effectivePubTitle !== undefined) {
@@ -417,13 +469,19 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
     } else {
       topLevelData.publicationTitle = effectivePubTitle;
       primaryMeta.publicationTitle = effectivePubTitle;
-      if (combinedUpdates.journal !== undefined && !isEmptyClear(combinedUpdates.journal)) {
+      if (
+        combinedUpdates.journal !== undefined &&
+        !isEmptyClear(combinedUpdates.journal)
+      ) {
         primaryMeta.journal = combinedUpdates.journal;
       }
     }
   } else if (hasNonEmpty(primary.publicationTitle)) {
     primaryMeta.publicationTitle = primary.publicationTitle;
-    if (backfillFields.journal !== undefined && scalarSelections.journal === undefined) {
+    if (
+      backfillFields.journal !== undefined &&
+      scalarSelections.journal === undefined
+    ) {
       if (hasNonEmpty(origPrimaryMeta.journal)) {
         primaryMeta.journal = origPrimaryMeta.journal;
       } else {
@@ -434,9 +492,11 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
 
   const primaryHasYear = hasNonEmpty(primary.year);
   const dateExplicitlySelected =
-    scalarSelections.date !== undefined || scalarSelections.publicationDate !== undefined;
+    scalarSelections.date !== undefined ||
+    scalarSelections.publicationDate !== undefined;
   const dateLockedUpgrade =
-    (backfillFields.date !== undefined || backfillFields.publicationDate !== undefined) &&
+    (backfillFields.date !== undefined ||
+      backfillFields.publicationDate !== undefined) &&
     (ItemProvenancePolicy.isFieldLocked(primaryMeta, 'date') ||
       ItemProvenancePolicy.isFieldLocked(primaryMeta, 'publicationDate')) &&
     !ItemProvenancePolicy.isFieldLocked(origPrimaryMeta, 'year');
@@ -456,13 +516,19 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
     combinedUpdates.publicationDate === undefined
   ) {
     const yearStr = topLevelData.year != null ? String(topLevelData.year) : '';
-    const existingDate = String(primaryMeta.date ?? primaryMeta.publicationDate ?? '').trim();
+    const existingDate = String(
+      primaryMeta.date ?? primaryMeta.publicationDate ?? '',
+    ).trim();
     if (!existingDate || /^\d{4}$/.test(existingDate)) {
       primaryMeta.date = yearStr;
       primaryMeta.publicationDate = yearStr;
     }
-  } else if (combinedUpdates.date !== undefined || combinedUpdates.publicationDate !== undefined) {
-    const rawDateInput = combinedUpdates.publicationDate ?? combinedUpdates.date;
+  } else if (
+    combinedUpdates.date !== undefined ||
+    combinedUpdates.publicationDate !== undefined
+  ) {
+    const rawDateInput =
+      combinedUpdates.publicationDate ?? combinedUpdates.date;
     if (isEmptyClear(rawDateInput)) {
       delete primaryMeta.date;
       delete primaryMeta.publicationDate;
@@ -481,7 +547,10 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
         if (topLevelData.year === undefined && parsedYear !== undefined) {
           topLevelData.year = parsedYear;
         }
-      } else if (parsedYear === undefined || parsedYear === Number(primary.year)) {
+      } else if (
+        parsedYear === undefined ||
+        parsedYear === Number(primary.year)
+      ) {
         primaryMeta.date = chosenDate;
         primaryMeta.publicationDate = chosenDate;
       } else {
@@ -526,19 +595,34 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
     }
   }
 
-  if (topLevelData.citationKey !== undefined && isEmptyClear(topLevelData.citationKey)) {
+  if (
+    topLevelData.citationKey !== undefined &&
+    isEmptyClear(topLevelData.citationKey)
+  ) {
     topLevelData.citationKey = null;
     delete primaryMeta.citationKey;
     delete primaryMeta.citeKey;
   }
 
-  if (typeof topLevelData.citationKey === 'string' && topLevelData.citationKey.trim()) {
+  if (
+    typeof topLevelData.citationKey === 'string' &&
+    topLevelData.citationKey.trim()
+  ) {
     const targetCitKey = topLevelData.citationKey.trim().toLowerCase();
     for (const dup of duplicates) {
       const dupCitKey =
-        typeof dup.citationKey === 'string' ? dup.citationKey.trim().toLowerCase() : '';
-      if (dupCitKey && dupCitKey === targetCitKey && typeof dup.id === 'string') {
-        await tx.item.update({ where: { id: dup.id }, data: { citationKey: null } });
+        typeof dup.citationKey === 'string'
+          ? dup.citationKey.trim().toLowerCase()
+          : '';
+      if (
+        dupCitKey &&
+        dupCitKey === targetCitKey &&
+        typeof dup.id === 'string'
+      ) {
+        await tx.item.update({
+          where: { id: dup.id },
+          data: { citationKey: null },
+        });
       }
     }
   }

@@ -1,9 +1,27 @@
-import { Injectable, Logger, NotFoundException, UnprocessableEntityException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+  Optional,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { CreateItemData, UpdateItemData, ItemDetail, ItemTransactionContext } from '@/modules/library/core/types/bibliographic.types';
-import { sanitizeItemTitle, normalizeProjectScopeId, TransactionHelpers, LIBRARY_EVENT_TYPES, buildItemCreatedOutboxPayload, LibraryItemSource } from '@/modules/library/core';
+import {
+  CreateItemData,
+  UpdateItemData,
+  ItemDetail,
+  ItemTransactionContext,
+} from '@/modules/library/core/types/bibliographic.types';
+import {
+  sanitizeItemTitle,
+  normalizeProjectScopeId,
+  TransactionHelpers,
+  LIBRARY_EVENT_TYPES,
+  buildItemCreatedOutboxPayload,
+  LibraryItemSource,
+} from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
@@ -33,7 +51,7 @@ export class ItemService {
     @Optional() cacheCoordinator?: ItemCacheCoordinator,
   ) {
     this.cacheCoordinator =
-      cacheCoordinator ?? new ItemCacheCoordinator(cache, tagsService);
+      cacheCoordinator ?? new ItemCacheCoordinator(cache);
   }
   async invalidateItemCache(
     id: string,
@@ -41,7 +59,12 @@ export class ItemService {
     projectId?: string,
     options?: { skipScopeInvalidation?: boolean },
   ): Promise<void> {
-    return this.cacheCoordinator.invalidateItemCache(id, userId, projectId, options);
+    return this.cacheCoordinator.invalidateItemCache(
+      id,
+      userId,
+      projectId,
+      options,
+    );
   }
   async invalidateScopeListCache(
     userId: string,
@@ -51,7 +74,10 @@ export class ItemService {
   }
   async getItem(userId: string, id: string, projectId?: string) {
     const item = await this.query.findById(userId, id, projectId);
-    return item ? (ItemsMapper.mapFlattenedState(item, userId) ?? ItemsMapper.toDomain(item)) : null;
+    return item
+      ? (ItemsMapper.mapFlattenedState(item, userId) ??
+          ItemsMapper.toDomain(item))
+      : null;
   }
   async createItem(
     userId: string,
@@ -135,10 +161,12 @@ export class ItemService {
     if (context?.tx && context?.helpers) {
       result = await execute(context.tx, context.helpers);
     } else {
-      result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-        ranPostCommitHook = Boolean(helpers.onAfterCommit);
-        return execute(tx, helpers);
-      });
+      result = await this.libraryTx.executeInTransaction(
+        async (tx, helpers) => {
+          ranPostCommitHook = Boolean(helpers.onAfterCommit);
+          return execute(tx, helpers);
+        },
+      );
     }
     if (!ranPostCommitHook) {
       await this.invalidateScopeListCache(userId, effectiveProjectId);
@@ -183,7 +211,8 @@ export class ItemService {
           false,
         );
         if (existing) {
-          targetItemType = existing.itemType || existing.type || 'journalArticle';
+          targetItemType =
+            existing.itemType || existing.type || 'journalArticle';
         }
       }
       let updatePayload = data;
@@ -529,11 +558,7 @@ export class ItemService {
         }),
       );
     if (succeededIds.length > 0) {
-      await this.invalidateBulkItemsCache(
-        succeededIds,
-        userId,
-        validProjectId,
-      );
+      await this.invalidateBulkItemsCache(succeededIds, userId, validProjectId);
     }
     return {
       success: true,
@@ -601,11 +626,7 @@ export class ItemService {
         }),
       );
     if (succeededIds.length > 0) {
-      await this.invalidateBulkItemsCache(
-        succeededIds,
-        userId,
-        validProjectId,
-      );
+      await this.invalidateBulkItemsCache(succeededIds, userId, validProjectId);
     }
     if (fileIdsToDelete.length > 0) {
       await this.command.deleteStorageFilesBatch(fileIdsToDelete);

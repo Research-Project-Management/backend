@@ -61,15 +61,24 @@ export class ReconcileStage implements IWorkflowStage<
     // If we have an authentic local PDF extraction with a credible title,
     // verify that external enriched candidates do not belong to a cited paper.
     let citationTrapRejectedDoi: string | undefined;
-    const isFilenameFallback = Boolean(
-      fileCandidate?.fields?.extraFields?.normalizedValue &&
+    const isFilenameFallback =
+      Boolean(
+        fileCandidate?.fields?.extraFields?.normalizedValue &&
         typeof fileCandidate.fields.extraFields.normalizedValue === 'object' &&
-        (fileCandidate.fields.extraFields.normalizedValue as Record<string, unknown>).isFilenameTitle,
-    ) || Boolean(
-      fileCandidate?.normalizedMetadata?.extraFields?.isFilenameTitle,
-    );
+        (
+          fileCandidate.fields.extraFields.normalizedValue as Record<
+            string,
+            unknown
+          >
+        ).isFilenameTitle,
+      ) ||
+      Boolean(fileCandidate?.normalizedMetadata?.extraFields?.isFilenameTitle);
 
-    if (fileCandidate && fileCandidate.normalizedMetadata?.title && !isFilenameFallback) {
+    if (
+      fileCandidate &&
+      fileCandidate.normalizedMetadata?.title &&
+      !isFilenameFallback
+    ) {
       const fileTitle = fileCandidate.normalizedMetadata.title;
       const isCrediblePdfTitle =
         fileTitle.trim().length >= 10 &&
@@ -91,11 +100,8 @@ export class ReconcileStage implements IWorkflowStage<
               fileTitle,
             );
             const corroboratedByAuthorAndYear = hasAuthorAndYearCorroboration(
-              fileCandidate.normalizedMetadata as unknown as Record<
-                string,
-                unknown
-              >,
-              cand.normalizedMetadata as unknown as Record<string, unknown>,
+              fileCandidate.normalizedMetadata,
+              cand.normalizedMetadata,
             );
             if (sim < 0.4 && !corroboratedByAuthorAndYear) {
               citationTrapRejectedDoi =

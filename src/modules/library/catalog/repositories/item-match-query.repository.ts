@@ -1,16 +1,12 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { isUUID } from 'class-validator';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { ConfigurationException } from '@/modules/library/core/errors/domain.exception';
 import {
   normalizeExactMatchCandidateInput,
   buildExactMatchOrClauses,
   evaluateExactMatchSpecifications,
 } from '@/modules/library/catalog/domain/match-specifications.domain';
-
-const isUuid = (val: unknown): val is string =>
-  typeof val === 'string' && isUUID(val);
 
 export type PrismaClientOrTx = Prisma.TransactionClient | PrismaService;
 
@@ -303,7 +299,11 @@ export class ItemMatchQueryRepository {
         title: string;
         doi?: string | null;
         metadata?: unknown;
-        identifiers?: Array<{ type?: string; value?: string; canonicalUri?: string | null }>;
+        identifiers?: Array<{
+          type?: string;
+          value?: string;
+          canonicalUri?: string | null;
+        }>;
       } | null;
       if (match) {
         const evaluated = evaluateExactMatchSpecifications(matchInput, match);

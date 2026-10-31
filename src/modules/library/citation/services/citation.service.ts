@@ -19,6 +19,7 @@ import {
   METADATA_PORT,
   ICatalogFacade,
   AcademicHttpClient,
+  normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { DoiContentNegotiationService } from './doi-content-negotiation.service';
 import { CslEngineService } from './csl-engine.service';
@@ -83,7 +84,11 @@ export class CitationService {
     }
     const sanitizedTitle =
       typeof title === 'string'
-        ? title.replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, 200)
+        ? title
+            .replace(/<[^>]*>/g, '')
+            .replace(/[<>]/g, '')
+            .trim()
+            .slice(0, 200)
         : undefined;
     const meta = await this.cslRepo.registerCustomStyle(
       cslXml,
@@ -312,11 +317,12 @@ export class CitationService {
     index: number = 1,
     projectId?: string,
   ) {
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
     const item = this.catalogGateway
       ? await this.catalogGateway.getItem<CatalogItemRecord>(
           userId,
           itemId,
-          projectId,
+          effectiveProjectId,
         )
       : null;
 
@@ -327,7 +333,10 @@ export class CitationService {
     // Tier 1: Official In-Process CSL Engine (Instant, Offline-capable, Consistent with library metadata)
     if (this.cslEngine) {
       try {
-        await this.cslEngine.ensureTemplate(styleId, projectId || userId);
+        await this.cslEngine.ensureTemplate(
+          styleId,
+          effectiveProjectId || userId,
+        );
         const cslItem = CslJsonMapper.toCsl(item);
         const engineRes = this.cslEngine.format(cslItem, styleId, index);
         if (engineRes && engineRes.bibliography) {
@@ -387,11 +396,12 @@ export class CitationService {
     styleId: CitationStyleId = 'apa-7th',
     projectId?: string,
   ) {
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
     const items = this.catalogGateway
       ? await this.catalogGateway.findByIds<CatalogItemRecord>(
           userId,
           itemIds,
-          projectId,
+          effectiveProjectId,
         )
       : [];
 
@@ -403,7 +413,7 @@ export class CitationService {
     // Primary Tier: Use official CSL Engine to format the entire batch together
     // This correctly resolves author-date grouping, numeric collapsing [1]-[3], and A-Z / numeric sorting!
     if (this.cslEngine && items.length > 0) {
-      const scopeId = projectId || userId;
+      const scopeId = effectiveProjectId || userId;
       try {
         await this.cslEngine.ensureTemplate(styleId, scopeId);
         const cslItems = items.map((it) => CslJsonMapper.toCsl(it));
