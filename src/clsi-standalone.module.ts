@@ -26,7 +26,6 @@ import * as path from 'path';
 import {
   CompileManuscriptDto,
   ClsiWordCountDto,
-  ClsiCompilerEngine,
 } from './modules/manuscripts/clsi/dto/clsi.dto';
 import {
   ForwardSyncDto,
@@ -83,46 +82,15 @@ export class ClsiStandaloneService {
     );
   }
 
-  private normalizeCompileDto(dto: CompileManuscriptDto): void {
-    if (dto.compile) {
-      if (dto.compile.rootResourcePath && !dto.main_file && !dto.mainFile) {
-        dto.main_file = dto.compile.rootResourcePath;
-      }
-      if (dto.compile.options?.compiler && !dto.engine) {
-        const rawCompiler =
-          dto.compile.options.compiler.toLowerCase() as ClsiCompilerEngine;
-        if (Object.values(ClsiCompilerEngine).includes(rawCompiler)) {
-          dto.engine = rawCompiler;
-        }
-      }
-      if (dto.compile.options?.draft !== undefined && dto.draft === undefined) {
-        dto.draft = dto.compile.options.draft;
-      }
-      if (dto.compile.options?.timeout && !dto.timeout_ms && !dto.timeoutMs) {
-        dto.timeout_ms = dto.compile.options.timeout * 1000;
-      }
-      if (dto.compile.resources) {
-        dto.files = dto.files || {};
-        for (const res of dto.compile.resources) {
-          if (res.content !== undefined) {
-            dto.files[res.path] = res.content;
-          }
-        }
-      }
-    }
-  }
-
-  public async compile(dto: CompileManuscriptDto, routeProjectId?: string) {
-    this.normalizeCompileDto(dto);
-    const projectId =
-      routeProjectId || dto.projectId || dto.project_id || 'default';
-    const mainFile = dto.mainFile || dto.main_file || 'main.tex';
+  public async compile(dto: CompileManuscriptDto) {
+    const projectId = dto.projectId || 'default';
+    const mainFile = dto.mainFile || 'main.tex';
     const source = dto.source || '';
     const files = dto.files || {};
     const engine = dto.engine || 'pdflatex';
-    const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
+    const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
 
-    if (dto.force_clean || dto.forceClean) {
+    if (dto.forceClean) {
       await this.pipeline.runWithProjectLock(projectId, () =>
         this.workspace.cleanScratch(projectId),
       );
@@ -134,12 +102,11 @@ export class ClsiStandaloneService {
       projectId,
       mainFile,
       engine,
-      texLiveVersion: dto.tex_live_version || dto.texLiveVersion,
+      texLiveVersion: dto.texLiveVersion || '2025',
       draft: dto.draft,
-      syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
-      force: dto.force_clean ?? dto.forceClean,
-      stopOnFirstError:
-        dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
+      syntaxOnly: dto.syntaxOnly,
+      force: dto.forceClean,
+      stopOnFirstError: dto.stopOnFirstError ?? false,
       timeoutMs: effectiveTimeoutMs,
       source,
       files,
@@ -156,8 +123,7 @@ export class ClsiStandaloneService {
         : 0,
     });
 
-    const { compile: _overleafEnvelope, ...flatResponse } = pipelineResult;
-    return flatResponse;
+    return pipelineResult;
   }
 
   private async loadSynctexContent(
@@ -185,8 +151,7 @@ export class ClsiStandaloneService {
   }
 
   public async forwardSync(dto: ForwardSyncDto) {
-    const projectId =
-      dto.projectId || dto.project_id || dto.pageId || dto.page_id || 'default';
+    const projectId = dto.projectId || dto.pageId || 'default';
     const synctexContent = await this.loadSynctexContent(
       projectId,
       dto.synctex,
@@ -215,8 +180,7 @@ export class ClsiStandaloneService {
   }
 
   public async reverseSync(dto: ReverseSyncDto) {
-    const projectId =
-      dto.projectId || dto.project_id || dto.pageId || dto.page_id || 'default';
+    const projectId = dto.projectId || dto.pageId || 'default';
     const synctexContent = await this.loadSynctexContent(
       projectId,
       dto.synctex,
@@ -366,28 +330,20 @@ export class ClsiStandaloneService {
 export class ClsiStandaloneController {
   constructor(private readonly clsiService: ClsiStandaloneService) {}
 
-  @Post([
-    'compile',
-    'api/clsi/compile',
-    'api/manuscripts/compile',
-    'project/:projectId/compile',
-  ])
+  @Post('compile')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Compile LaTeX manuscript source to PDF (Overleaf parity)',
+    summary: 'Compile LaTeX manuscript source to PDF',
   })
   @ApiResponse({
     status: 200,
     description: 'Compilation finished (success or compiler error with logs)',
   })
-  async compile(
-    @Body() dto: CompileManuscriptDto,
-    @Param('projectId') projectId?: string,
-  ) {
-    return this.clsiService.compile(dto, projectId);
+  async compile(@Body() dto: CompileManuscriptDto) {
+    return this.clsiService.compile(dto);
   }
 
-  @Post(['word-count', 'api/clsi/word-count', 'api/manuscripts/word-count'])
+  @Post('word-count')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Calculate academic word count and section metrics',
@@ -396,7 +352,7 @@ export class ClsiStandaloneController {
     return this.clsiService.getWordCount(dto);
   }
 
-  @Post(['synctex/forward', 'api/clsi/synctex/forward'])
+  @Post('synctex/forward')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Forward SyncTeX: map LaTeX source line/column to PDF coordinates',
@@ -405,7 +361,7 @@ export class ClsiStandaloneController {
     return this.clsiService.forwardSync(dto);
   }
 
-  @Post(['synctex/reverse', 'api/clsi/synctex/reverse'])
+  @Post('synctex/reverse')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -415,7 +371,7 @@ export class ClsiStandaloneController {
     return this.clsiService.reverseSync(dto);
   }
 
-  @Get(['artifacts/:projectId', 'api/clsi/artifacts/:projectId'])
+  @Get('artifacts/:projectId')
   @ApiOperation({
     summary: 'List auxiliary build files generated by compilation',
   })
@@ -423,10 +379,7 @@ export class ClsiStandaloneController {
     return this.clsiService.listAuxFiles(projectId);
   }
 
-  @Get([
-    'artifacts/:projectId/:filename',
-    'api/clsi/artifacts/:projectId/:filename',
-  ])
+  @Get('artifacts/:projectId/:filename')
   @ApiOperation({ summary: 'Download a specific auxiliary file' })
   async downloadAuxFile(
     @Param('projectId') projectId: string,
@@ -436,7 +389,7 @@ export class ClsiStandaloneController {
     return this.clsiService.downloadAuxFile(projectId, filename, res);
   }
 
-  @Get(['artifacts-zip/:projectId', 'api/clsi/artifacts-zip/:projectId'])
+  @Get('artifacts-zip/:projectId')
   @ApiOperation({
     summary:
       'Download all project output artifacts packaged as a ZIP archive',
@@ -448,7 +401,7 @@ export class ClsiStandaloneController {
     return this.clsiService.downloadAllArtifactsZip(projectId, res);
   }
 
-  @Get(['status', 'isalive', 'api/clsi/status', 'health/liveness'])
+  @Get('status')
   @ApiOperation({
     summary: 'Check health status and probe compiler binaries',
   })
@@ -456,7 +409,7 @@ export class ClsiStandaloneController {
     return this.clsiService.getHealthReport();
   }
 
-  @Get(['metrics', 'api/clsi/metrics'])
+  @Get('metrics')
   @ApiOperation({
     summary: 'Prometheus metrics endpoint for compilation performance',
   })
@@ -466,7 +419,7 @@ export class ClsiStandaloneController {
     return res.send(metricsText);
   }
 
-  @Get(['metrics/summary', 'api/clsi/metrics/summary'])
+  @Get('metrics/summary')
   @ApiOperation({
     summary: 'JSON metrics summary of compilation statistics',
   })
@@ -474,7 +427,7 @@ export class ClsiStandaloneController {
     return this.clsiService.getMetricsSummary();
   }
 
-  @Post(['admin/clean-scratch', 'api/clsi/admin/clean-scratch'])
+  @Post('admin/clean-scratch')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Trigger LRU garbage collection and disk quota enforcement',

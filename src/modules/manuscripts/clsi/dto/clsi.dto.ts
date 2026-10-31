@@ -1,203 +1,149 @@
 /**
  * modules/manuscripts/clsi/dto/clsi.dto.ts
- * Data Transfer Objects for CLSI Compile & Word Count operations
+ * Canonical Data Transfer Objects for the Common LaTeX Service Interface (CLSI).
  */
 
 import {
-  IsBoolean,
-  IsEnum,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
   IsString,
+  IsOptional,
+  IsBoolean,
+  IsIn,
+  IsObject,
+  IsNumber,
+  Min,
+  Max,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export enum ClsiCompilerEngine {
-  PDFLATEX = 'pdflatex',
-  XELATEX = 'xelatex',
-  LUALATEX = 'lualatex',
-  LATEX = 'latex',
-}
-
 export class CompileManuscriptDto {
-  @ApiPropertyOptional({ description: 'Target Project ID' })
-  @IsString()
+  @ApiPropertyOptional({
+    description: 'Project UUID for multi-file compile',
+    example: 'project-uuid-123',
+  })
   @IsOptional()
-  project_id?: string;
-
-  @ApiPropertyOptional({ description: 'Target Project ID (camelCase)' })
   @IsString()
-  @IsOptional()
   projectId?: string;
 
-  @ApiPropertyOptional({ description: 'Target Document / Page ID' })
-  @IsString()
+  @ApiPropertyOptional({
+    description: 'Editor page UUID when compiling from a workspace page',
+    example: 'page-uuid-123',
+  })
   @IsOptional()
-  page_id?: string;
-
-  @ApiPropertyOptional({ description: 'Target Document / Page ID (camelCase)' })
   @IsString()
-  @IsOptional()
   pageId?: string;
 
   @ApiPropertyOptional({
-    description: 'Main entry TeX file',
-    default: 'main.tex',
+    description: 'Main TeX file relative path',
+    example: 'main.tex',
   })
-  @IsString()
   @IsOptional()
-  main_file?: string;
-
-  @ApiPropertyOptional({
-    description: 'Main entry TeX file (camelCase)',
-    default: 'main.tex',
-  })
   @IsString()
-  @IsOptional()
   mainFile?: string;
 
-  @ApiPropertyOptional({ description: 'Raw TeX source content' })
-  @IsString()
+  @ApiPropertyOptional({
+    description: 'Raw LaTeX source content (max 15MB)',
+    example: '\\documentclass{article}\\begin{document}Hello\\end{document}',
+  })
   @IsOptional()
+  @IsString()
+  @MaxLength(15 * 1024 * 1024, {
+    message: 'LaTeX source exceeds maximum allowed size of 15MB',
+  })
   source?: string;
 
   @ApiPropertyOptional({
-    enum: ClsiCompilerEngine,
-    default: ClsiCompilerEngine.PDFLATEX,
+    description: 'TeX compiler engine',
+    enum: ['pdflatex', 'xelatex', 'lualatex', 'latex'],
+    default: 'pdflatex',
   })
-  @IsEnum(ClsiCompilerEngine)
   @IsOptional()
-  engine?: ClsiCompilerEngine;
+  @IsIn(['pdflatex', 'xelatex', 'lualatex', 'latex'])
+  engine?: 'pdflatex' | 'xelatex' | 'lualatex' | 'latex';
 
   @ApiPropertyOptional({
-    description: 'Target TeX Live release year',
-    example: '2024',
-    default: '2024',
+    description: 'TeX Live distribution version',
+    enum: ['2025', '2024', '2023', '2022', '2021'],
+    default: '2025',
   })
-  @IsString()
   @IsOptional()
-  tex_live_version?: string;
-
-  @ApiPropertyOptional({
-    description: 'Target TeX Live release year (camelCase)',
-    example: '2024',
-    default: '2024',
-  })
-  @IsString()
-  @IsOptional()
+  @IsIn(['2025', '2024', '2023', '2022', '2021'])
   texLiveVersion?: string;
 
   @ApiPropertyOptional({
-    description: 'Draft compilation (skips images/PDF embed for speed)',
+    description: 'Enable fast draft compilation mode',
+    default: false,
   })
-  @IsBoolean()
   @IsOptional()
+  @IsBoolean()
   draft?: boolean;
 
   @ApiPropertyOptional({
-    description:
-      'Syntax only compilation (skips PDF generation for fast diagnostics)',
+    description: 'Syntax validation only (-draftmode, no PDF output)',
+    default: false,
   })
-  @IsBoolean()
   @IsOptional()
-  syntax_only?: boolean;
-
-  @ApiPropertyOptional({ description: 'Syntax only compilation (camelCase)' })
   @IsBoolean()
-  @IsOptional()
   syntaxOnly?: boolean;
 
   @ApiPropertyOptional({
     description: 'Compilation timeout in milliseconds',
     default: 240000,
+    minimum: 5000,
+    maximum: 600000,
   })
-  @IsNumber()
   @IsOptional()
-  timeout_ms?: number;
-
-  @ApiPropertyOptional({
-    description: 'Compilation timeout in milliseconds (camelCase)',
-  })
   @IsNumber()
-  @IsOptional()
+  @Min(5000)
+  @Max(600000)
   timeoutMs?: number;
 
   @ApiPropertyOptional({
-    description: 'Use cached compile results',
+    description: 'Use compilation cache if available',
     default: true,
   })
-  @IsBoolean()
   @IsOptional()
-  use_cache?: boolean;
+  @IsBoolean()
+  useCache?: boolean;
 
   @ApiPropertyOptional({
-    description:
-      'Force clean compilation (purge aux and scratch workspace before build)',
+    description: 'Force clean auxiliary files before compilation',
+    default: false,
   })
-  @IsBoolean()
   @IsOptional()
-  force_clean?: boolean;
-
-  @ApiPropertyOptional({
-    description: 'Force clean compilation (camelCase)',
-  })
   @IsBoolean()
-  @IsOptional()
   forceClean?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Halt on first LaTeX error (snake_case)',
+    description: 'Halt compilation on the first LaTeX error',
+    default: false,
   })
-  @IsBoolean()
   @IsOptional()
-  stop_on_first_error?: boolean;
-
-  @ApiPropertyOptional({ description: 'Halt on first LaTeX error (camelCase)' })
   @IsBoolean()
-  @IsOptional()
   stopOnFirstError?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Multi-file dictionary: path -> content',
+    description: 'Additional virtual files map (filename -> content)',
   })
   @IsOptional()
+  @IsObject()
   files?: Record<string, string>;
-
-  @ApiPropertyOptional({
-    description: 'Official Overleaf CLSI request envelope',
-  })
-  @IsOptional()
-  compile?: {
-    options?: {
-      compiler?: string;
-      timeout?: number;
-      draft?: boolean;
-      check?: string;
-    };
-    rootResourcePath?: string;
-    resources?: Array<{
-      path: string;
-      content?: string;
-      url?: string;
-      hash?: string;
-    }>;
-  };
 }
 
 export class ClsiWordCountDto {
-  @ApiProperty({ description: 'LaTeX source content to analyze' })
+  @ApiProperty({
+    description: 'LaTeX source to count words from (max 15MB)',
+  })
   @IsString()
-  @IsNotEmpty({ message: 'Source content is required for word count' })
+  @MaxLength(15 * 1024 * 1024, {
+    message: 'LaTeX source exceeds maximum allowed size of 15MB',
+  })
   source!: string;
 
-  @ApiPropertyOptional({ description: 'Optional page ID' })
-  @IsString()
+  @ApiPropertyOptional({
+    description: 'Project UUID for resolving multi-file \\input / \\include',
+  })
   @IsOptional()
-  pageId?: string;
-
-  @ApiPropertyOptional({ description: 'Optional project ID' })
   @IsString()
-  @IsOptional()
   projectId?: string;
 }

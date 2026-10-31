@@ -52,7 +52,7 @@ export function parseSandboxConfig(
     options.isProduction ??
     (env.NODE_ENV === 'production' || defaultConfig.isProduction);
 
-  const remoteUrl = (env.CLSI_REMOTE_URL || env.CLSI_URL || '').trim() || undefined;
+  const remoteUrl = (env.CLSI_URL || '').trim() || undefined;
 
   // Mode resolution
   let mode: SandboxMode;
@@ -70,7 +70,7 @@ export function parseSandboxConfig(
       );
     }
   } else if (remoteUrl && !env.CLSI_SANDBOX_IMAGE) {
-    // Self-hosted multi-tier mode: when CLSI_URL / CLSI_REMOTE_URL points to a dedicated CLSI container
+    // Self-hosted multi-tier mode: when CLSI_URL points to a dedicated CLSI container
     mode = 'remote';
   } else {
     // Default is container mode

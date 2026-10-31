@@ -1,11 +1,10 @@
 /**
  * modules/manuscripts/clsi/dto/synctex.dto.ts
- * Data Transfer Objects for SyncTeX forward/reverse coordinate mapping
+ * Canonical Data Transfer Objects for Forward and Reverse SyncTeX navigation.
  */
 
 import {
   IsString,
-  IsNotEmpty,
   IsNumber,
   IsOptional,
   Min,
@@ -14,92 +13,74 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class ForwardSyncDto {
-  @ApiProperty({ description: 'Source filename (e.g. main.tex, intro.tex)' })
+  @ApiProperty({ description: 'Source file name', example: 'main.tex' })
   @IsString()
-  @IsNotEmpty({ message: 'Filename is required for forward sync' })
+  @MaxLength(512)
   file!: string;
 
-  @ApiProperty({ description: 'Line number in the source file (1-indexed)' })
+  @ApiProperty({ description: '1-based line number in TeX source', example: 42 })
   @IsNumber()
   @Min(1)
   line!: number;
 
   @ApiPropertyOptional({
-    description: 'Column number in the source file (0-indexed)',
-    default: 0,
+    description: '1-based column number',
+    example: 1,
+    default: 1,
   })
-  @IsNumber()
   @IsOptional()
+  @IsNumber()
+  @Min(0)
   column?: number;
 
-  @ApiPropertyOptional({ description: 'Project ID context' })
-  @IsString()
+  @ApiPropertyOptional({ description: 'Project ID for workspace lookup' })
   @IsOptional()
+  @IsString()
   projectId?: string;
 
-  @ApiPropertyOptional({ description: 'Project ID context (snake_case)' })
-  @IsString()
+  @ApiPropertyOptional({ description: 'Page ID fallback for workspace lookup' })
   @IsOptional()
-  project_id?: string;
-
-  @ApiPropertyOptional({ description: 'Document page ID context' })
   @IsString()
-  @IsOptional()
   pageId?: string;
 
-  @ApiPropertyOptional({ description: 'Document page ID context (snake_case)' })
-  @IsString()
-  @IsOptional()
-  page_id?: string;
-
   @ApiPropertyOptional({
-    description: 'Raw plaintext SyncTeX data from compilation',
+    description: 'Base64-encoded synctex payload (max 10MB)',
   })
-  @IsString()
-  @MaxLength(20 * 1024 * 1024)
   @IsOptional()
+  @IsString()
+  @MaxLength(10 * 1024 * 1024)
   synctex?: string;
 }
 
 export class ReverseSyncDto {
-  @ApiProperty({ description: 'Rendered PDF page number (1-indexed)' })
+  @ApiProperty({ description: '1-based PDF page number', example: 1 })
   @IsNumber()
   @Min(1)
   page!: number;
 
-  @ApiProperty({ description: 'X coordinate in points on the PDF page' })
+  @ApiProperty({ description: 'X coordinate in PDF points', example: 120.5 })
   @IsNumber()
   x!: number;
 
-  @ApiProperty({ description: 'Y coordinate in points on the PDF page' })
+  @ApiProperty({ description: 'Y coordinate in PDF points', example: 340.0 })
   @IsNumber()
   y!: number;
 
-  @ApiPropertyOptional({ description: 'Project ID context' })
-  @IsString()
+  @ApiPropertyOptional({ description: 'Project ID for workspace lookup' })
   @IsOptional()
+  @IsString()
   projectId?: string;
 
-  @ApiPropertyOptional({ description: 'Project ID context (snake_case)' })
-  @IsString()
+  @ApiPropertyOptional({ description: 'Page ID fallback for workspace lookup' })
   @IsOptional()
-  project_id?: string;
-
-  @ApiPropertyOptional({ description: 'Document page ID context' })
   @IsString()
-  @IsOptional()
   pageId?: string;
 
-  @ApiPropertyOptional({ description: 'Document page ID context (snake_case)' })
-  @IsString()
-  @IsOptional()
-  page_id?: string;
-
   @ApiPropertyOptional({
-    description: 'Raw plaintext SyncTeX data from compilation',
+    description: 'Base64-encoded synctex payload (max 10MB)',
   })
-  @IsString()
-  @MaxLength(20 * 1024 * 1024)
   @IsOptional()
+  @IsString()
+  @MaxLength(10 * 1024 * 1024)
   synctex?: string;
 }

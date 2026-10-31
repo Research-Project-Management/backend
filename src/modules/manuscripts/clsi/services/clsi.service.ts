@@ -20,14 +20,9 @@ import { ConfigService } from '@nestjs/config';
 import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
-import * as os from 'os';
 import * as path from 'path';
 import { RedisCacheService } from '@/core';
-import {
-  CompileManuscriptDto,
-  ClsiWordCountDto,
-  ClsiCompilerEngine,
-} from '../dto/clsi.dto';
+import { CompileManuscriptDto, ClsiWordCountDto } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import {
   SyncPoint,
@@ -116,8 +111,6 @@ export class ClsiService implements OnModuleDestroy {
           this.configService.get<string>('CLSI_DOCKER_IMAGE') ||
           undefined,
         CLSI_URL: this.configService.get<string>('CLSI_URL') || undefined,
-        CLSI_REMOTE_URL:
-          this.configService.get<string>('CLSI_REMOTE_URL') || undefined,
         CLSI_SANDBOX_USER:
           this.configService.get<string>('CLSI_SANDBOX_USER') || undefined,
         CLSI_SANDBOX_MEMORY_MB:
@@ -211,35 +204,6 @@ export class ClsiService implements OnModuleDestroy {
       .digest('hex');
   }
 
-  private normalizeCompileDto(dto: CompileManuscriptDto): void {
-    if (dto.compile) {
-      if (dto.compile.rootResourcePath && !dto.main_file) {
-        dto.main_file = dto.compile.rootResourcePath;
-      }
-      if (dto.compile.options?.compiler && !dto.engine) {
-        const rawCompiler =
-          dto.compile.options.compiler.toLowerCase() as ClsiCompilerEngine;
-        if (Object.values(ClsiCompilerEngine).includes(rawCompiler)) {
-          dto.engine = rawCompiler;
-        }
-      }
-      if (dto.compile.options?.draft !== undefined && dto.draft === undefined) {
-        dto.draft = dto.compile.options.draft;
-      }
-      if (dto.compile.options?.timeout && !dto.timeout_ms) {
-        dto.timeout_ms = dto.compile.options.timeout * 1000;
-      }
-      if (dto.compile.resources) {
-        dto.files = dto.files || {};
-        for (const res of dto.compile.resources) {
-          if (res.content !== undefined) {
-            dto.files[res.path] = res.content;
-          }
-        }
-      }
-    }
-  }
-
   private async isQueueActive(): Promise<boolean> {
     if (!this.compileQueue) return false;
     if (
@@ -265,9 +229,8 @@ export class ClsiService implements OnModuleDestroy {
       throw new Error('CLSI compile queue is not initialized');
     }
 
-    const projectId =
-      authorizedProjectId || dto.projectId || dto.project_id || 'default';
-    const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
+    const projectId = authorizedProjectId || dto.projectId || 'default';
+    const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
 
     // Pre-compile Yjs flush in the API process before dispatching to external BullMQ worker
     if (this.realtimeService && projectId && projectId !== 'default') {
@@ -353,8 +316,7 @@ export class ClsiService implements OnModuleDestroy {
     if (!this.compileQueue) {
       throw new Error('CLSI compile queue is not initialized');
     }
-    const projectId =
-      authorizedProjectId || dto.projectId || dto.project_id || 'default';
+    const projectId = authorizedProjectId || dto.projectId || 'default';
     const job = await this.compileQueue.add(
       'clsi-compile',
       { dto, userId, authorizedProjectId },
@@ -372,8 +334,6 @@ export class ClsiService implements OnModuleDestroy {
     userId?: string,
     authorizedProjectId?: string,
   ): Promise<ClsiCompileResult> {
-    this.normalizeCompileDto(dto);
-
     if (await this.isQueueActive()) {
       try {
         return await this.queueCompileJob(dto, userId, authorizedProjectId);
@@ -399,11 +359,9 @@ export class ClsiService implements OnModuleDestroy {
     _userId?: string,
     authorizedProjectId?: string,
   ): Promise<ClsiCompileResult> {
-    this.normalizeCompileDto(dto);
-
     const requestedEngine = dto.engine;
-    const texLiveVersion = dto.tex_live_version || dto.texLiveVersion || '2024';
-    const explicitDtoProjectId = dto.projectId || dto.project_id;
+    const texLiveVersion = dto.texLiveVersion || '2025';
+    const explicitDtoProjectId = dto.projectId;
     const resolvedFromDto = await this.workspacePlanner.resolveProjectId(dto);
 
     if (authorizedProjectId) {
@@ -428,7 +386,7 @@ export class ClsiService implements OnModuleDestroy {
         : _userId
           ? `adhoc-${_userId}`
           : `adhoc-${crypto.randomUUID()}`;
-    const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
+    const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
     const metricEngine = requestedEngine || 'pdflatex';
 
     return await this.fairQueue.schedule(
@@ -463,11 +421,11 @@ export class ClsiService implements OnModuleDestroy {
             requestedEngine || 'auto',
             texLiveVersion,
             dto.draft ?? false,
-            dto.syntax_only ?? dto.syntaxOnly ?? false,
-            dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
+            dto.syntaxOnly ?? false,
+            dto.stopOnFirstError ?? false,
           ].join('|'),
         )}`;
-        const cacheable = !!(dto.use_cache && plan.hasMainContent);
+        const cacheable = !!(dto.useCache && plan.hasMainContent);
 
         if (cacheable && this.cache) {
           const cacheLookupStart = Date.now();
@@ -569,7 +527,7 @@ export class ClsiService implements OnModuleDestroy {
       ? rawMain.toString('utf8')
       : rawMain;
 
-    if (dto.force_clean || dto.forceClean) {
+    if (dto.forceClean) {
       await this.pipeline.runWithProjectLock(
         projectId,
         () => this.workspace.cleanScratch(projectId),
@@ -577,7 +535,7 @@ export class ClsiService implements OnModuleDestroy {
       );
     }
 
-    const remoteResult = await this.remoteClient.tryRemoteClsiCompile(
+    const remoteResult = await this.remoteClient.tryRemoteClsiCompile({
       projectId,
       mainFile,
       source,
@@ -586,7 +544,7 @@ export class ClsiService implements OnModuleDestroy {
       engine,
       cacheKey,
       signal,
-    );
+    });
 
     if (remoteResult) {
       await this.syncCachedArtifactsToScratch(projectId, remoteResult);
@@ -600,9 +558,8 @@ export class ClsiService implements OnModuleDestroy {
         engine,
         texLiveVersion,
         draft: dto.draft,
-        syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
-        stopOnFirstError:
-          dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
+        syntaxOnly: dto.syntaxOnly,
+        stopOnFirstError: dto.stopOnFirstError ?? false,
         timeoutMs: effectiveTimeoutMs,
         source,
         files: mergedFiles,
@@ -721,12 +678,10 @@ export class ClsiService implements OnModuleDestroy {
     result?: SyncPoint;
     error?: string;
   }> {
-    const explicitDtoProjectId = dto.projectId || dto.project_id;
+    const explicitDtoProjectId = dto.projectId;
     const resolvedFromDto = await this.workspacePlanner.resolveProjectId({
       projectId: dto.projectId,
-      project_id: dto.project_id,
       pageId: dto.pageId,
-      page_id: dto.page_id,
     });
 
     if (authorizedProjectId) {
@@ -786,12 +741,10 @@ export class ClsiService implements OnModuleDestroy {
     result?: ReverseSyncPoint;
     error?: string;
   }> {
-    const explicitDtoProjectId = dto.projectId || dto.project_id;
+    const explicitDtoProjectId = dto.projectId;
     const resolvedFromDto = await this.workspacePlanner.resolveProjectId({
       projectId: dto.projectId,
-      project_id: dto.project_id,
       pageId: dto.pageId,
-      page_id: dto.page_id,
     });
 
     if (authorizedProjectId) {

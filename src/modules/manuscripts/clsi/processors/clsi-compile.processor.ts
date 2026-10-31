@@ -33,7 +33,6 @@ export class ClsiCompileProcessor extends WorkerHost {
     const projectId =
       job.data.authorizedProjectId ||
       job.data.dto.projectId ||
-      job.data.dto.project_id ||
       'unknown';
 
     this.logger.log(

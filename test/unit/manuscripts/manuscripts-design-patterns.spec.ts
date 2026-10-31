@@ -209,7 +209,7 @@ describe('Manuscripts Design Patterns & Audit Remediations', () => {
   });
 
   describe('4. Circuit-Breaker Guard & Parameter Object: RemoteClsiClientAdapter', () => {
-    it('supports both positional arguments and RemoteCompileRequest Parameter Object', async () => {
+    it('executes remote compile via canonical RemoteCompileRequest Parameter Object', async () => {
       const client = new RemoteClsiClientAdapter();
       const res = await client.tryRemoteClsiCompile({
         projectId: 'proj-1',

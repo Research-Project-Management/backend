@@ -31,7 +31,6 @@ import { FastifyReply } from 'fastify';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { ClsiService } from './services/clsi.service';
 import { CompileManuscriptDto, ClsiWordCountDto } from './dto/clsi.dto';
-
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 
 @ApiTags('Manuscripts - CLSI')
@@ -47,7 +46,7 @@ export class ClsiController {
   @UserRateLimit('compile')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Compile LaTeX manuscript source to PDF via Overleaf-parity CLSI',
+    summary: 'Compile LaTeX manuscript source to PDF via CLSI',
   })
   async compile(
     @Body() dto: CompileManuscriptDto,
@@ -57,9 +56,8 @@ export class ClsiController {
   ) {
     const authorizedProjectId =
       (typeof project === 'string' ? project : project?.id) || routeProjectId;
-    if (authorizedProjectId && !dto.projectId && !dto.project_id) {
+    if (authorizedProjectId && !dto.projectId) {
       dto.projectId = authorizedProjectId;
-      dto.project_id = authorizedProjectId;
     }
     return this.clsiService.compile(dto, userId, authorizedProjectId);
   }
@@ -79,7 +77,7 @@ export class ClsiController {
     return { success: true, cancelled };
   }
 
-  @Post(['word-count', 'clsi/word-count', 'projects/:projectId/word-count'])
+  @Post(['word-count', 'projects/:projectId/word-count'])
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.REVIEWER)
   @UserRateLimit('compile')
@@ -105,9 +103,8 @@ export class ClsiController {
   ) {
     const authorizedProjectId =
       (typeof project === 'string' ? project : project?.id) || routeProjectId;
-    if (authorizedProjectId && !dto.projectId && !dto.project_id) {
+    if (authorizedProjectId && !dto.projectId) {
       dto.projectId = authorizedProjectId;
-      dto.project_id = authorizedProjectId;
     }
     return this.clsiService.forwardSync(dto, authorizedProjectId);
   }
@@ -127,9 +124,8 @@ export class ClsiController {
   ) {
     const authorizedProjectId =
       (typeof project === 'string' ? project : project?.id) || routeProjectId;
-    if (authorizedProjectId && !dto.projectId && !dto.project_id) {
+    if (authorizedProjectId && !dto.projectId) {
       dto.projectId = authorizedProjectId;
-      dto.project_id = authorizedProjectId;
     }
     return this.clsiService.reverseSync(dto, authorizedProjectId);
   }

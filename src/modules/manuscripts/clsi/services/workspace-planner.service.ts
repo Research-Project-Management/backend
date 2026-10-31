@@ -45,11 +45,9 @@ export class ClsiWorkspacePlannerService {
    */
   public async resolveProjectId(dto: {
     projectId?: string;
-    project_id?: string;
     pageId?: string;
-    page_id?: string;
   }): Promise<string> {
-    const pageId = dto.pageId || dto.page_id;
+    const pageId = dto.pageId;
     if (pageId && this.prisma) {
       try {
         const pageDoc = await this.prisma.manuscriptDoc.findUnique({
@@ -62,7 +60,7 @@ export class ClsiWorkspacePlannerService {
       }
     }
 
-    const projectId = dto.projectId || dto.project_id || '';
+    const projectId = dto.projectId || '';
     if (projectId) return projectId;
 
     return 'default';
@@ -77,7 +75,7 @@ export class ClsiWorkspacePlannerService {
     dto: CompileManuscriptDto,
   ): Promise<PlannedFileSet> {
     const incomingFiles = { ...(dto.files || {}) };
-    const mainFile = dto.main_file || undefined;
+    const mainFile = dto.mainFile || undefined;
     const source = dto.source || '';
 
     if (this.prisma && projectId !== 'default') {
@@ -129,7 +127,7 @@ export class ClsiWorkspacePlannerService {
           incomingFiles,
           source,
           mainFile,
-          pageId: dto.pageId || dto.page_id,
+          pageId: dto.pageId,
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

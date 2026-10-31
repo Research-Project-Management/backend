@@ -9,8 +9,6 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config';
-import * as os from 'os';
-import * as path from 'path';
 import { CoreModule as AppCoreModule } from '@/core';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
@@ -69,7 +67,6 @@ const inProcessClsiWorkers =
               configService.get<string>('CLSI_SANDBOX_IMAGE') ||
               configService.get<string>('CLSI_DOCKER_IMAGE'),
             CLSI_URL: configService.get<string>('CLSI_URL'),
-            CLSI_REMOTE_URL: configService.get<string>('CLSI_REMOTE_URL'),
             CLSI_SANDBOX_USER: configService.get<string>('CLSI_SANDBOX_USER'),
             CLSI_SANDBOX_MEMORY_MB: configService.get<string>(
               'CLSI_SANDBOX_MEMORY_MB',
