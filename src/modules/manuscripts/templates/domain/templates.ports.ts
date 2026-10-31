@@ -1,4 +1,4 @@
-import { ManuscriptTemplateEntity } from './manuscript-template.entity';
+import { ManuscriptTemplateEntity } from './template.entity';
 
 export interface FindTemplatesFilter {
   category?: string;

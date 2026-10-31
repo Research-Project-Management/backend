@@ -8,12 +8,12 @@ import {
 } from '../../../../src/modules/manuscripts/clsi/services/compile-pipeline.service';
 import { BibBackendDetector } from '../../../../src/modules/manuscripts/clsi/domain/bib-backend.detector';
 import { DraftModeManager } from '../../../../src/modules/manuscripts/clsi/domain/draft-mode.manager';
-import { SandboxPolicyViolationException } from '../../../../src/modules/manuscripts/clsi/domain/sandbox-errors';
+import { SandboxPolicyViolationException } from '../../../../src/modules/manuscripts/clsi/domain/sandbox.errors';
 import {
   ISandboxRunner,
   ProcessExecutionOptions,
   ProcessExecutionResult,
-} from '../../../../src/modules/manuscripts/clsi/domain/clsi-ports';
+} from '../../../../src/modules/manuscripts/clsi/domain/clsi.ports';
 
 class MockSandboxRunner implements ISandboxRunner {
   readonly name = 'mock-runner';

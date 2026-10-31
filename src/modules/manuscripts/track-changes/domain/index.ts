@@ -7,6 +7,6 @@ export * from './line-patcher';
 export * from './track-change.entity';
 export * from './comment-thread.entity';
 export * from './comment-reply.entity';
-export * from './text-range.vo';
-export * from './track-changes.exceptions';
+export * from './text-range';
+export * from './track-changes.errors';
 export * from './track-changes.ports';

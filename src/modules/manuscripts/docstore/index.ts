@@ -6,7 +6,7 @@
 
 export * from './docstore.module';
 export * from './docstore.service';
-export { ManuscriptPageService } from '../core/services/manuscript-page.service';
+export { ManuscriptPageService } from '../core/services/page.service';
 export * from './controllers';
 export * from './dto/doc.dto';
 
@@ -19,4 +19,4 @@ export {
   DocArchiveRepository,
   InMemoryDocArchiveRepository,
   StoragePortDocArchiveAdapter,
-} from './repositories/doc-archive.repository';
+} from './repositories/archive.repository';

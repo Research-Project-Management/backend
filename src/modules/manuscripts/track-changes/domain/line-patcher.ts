@@ -5,7 +5,7 @@
  */
 
 import { TrackChange } from './track-change.entity';
-import { TextRangeVo, TextRangeProps } from './text-range.vo';
+import { TextRangeVo, TextRangeProps } from './text-range';
 
 export interface LinePatchComputation {
   lines: string[];

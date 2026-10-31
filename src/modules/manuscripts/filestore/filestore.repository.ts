@@ -90,7 +90,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() @Inject(IBinaryStoragePort) storage?: IBinaryStoragePort,
-    @Optional() @Inject(IContentHasherPort) hasher?: CryptoGitBlobHasherAdapter,
+    @Optional() hasher?: CryptoGitBlobHasherAdapter,
   ) {
     super();
     this.storage = storage ?? new LocalDiskBinaryStorageAdapter();

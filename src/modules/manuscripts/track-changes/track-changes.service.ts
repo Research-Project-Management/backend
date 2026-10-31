@@ -10,9 +10,11 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { ManuscriptDomainEventBus } from '@/modules/manuscripts/core';
+import {
+  LiveCollaborationPort,
+  ManuscriptDomainEventBus,
+} from '@/modules/manuscripts/core';
 import {
   ITrackChangesRepositoryPort,
   LinePatcher,
@@ -26,6 +28,7 @@ import {
   ResolvedThreadException,
   BatchAction,
 } from './domain';
+import { TrackChangesRepository } from './track-changes.repository';
 import {
   DocstorePatcherAdapter,
   RealtimeNotifierAdapter,
@@ -47,11 +50,11 @@ export class TrackChangesService {
   private readonly docstorePatcher?: DocstorePatcherAdapter;
 
   constructor(
-    private readonly repository: ITrackChangesRepositoryPort,
+    private readonly repository: TrackChangesRepository,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() docstorePatcher?: DocstorePatcherAdapter,
     @Optional() private readonly realtimeNotifier?: RealtimeNotifierAdapter,
-    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly liveCollab?: LiveCollaborationPort,
     @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
   ) {
     this.docstorePatcher =
@@ -59,8 +62,9 @@ export class TrackChangesService {
       (docstoreService
         ? new DocstorePatcherAdapter(
             docstoreService,
-            this.moduleRef,
+            this.liveCollab,
             this.domainEventBus,
+            this.liveCollab,
           )
         : undefined);
   }

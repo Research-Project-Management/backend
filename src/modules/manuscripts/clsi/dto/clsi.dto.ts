@@ -49,6 +49,14 @@ export class CompileManuscriptDto {
   @IsOptional()
   main_file?: string;
 
+  @ApiPropertyOptional({
+    description: 'Main entry TeX file (camelCase)',
+    default: 'main.tex',
+  })
+  @IsString()
+  @IsOptional()
+  mainFile?: string;
+
   @ApiPropertyOptional({ description: 'Raw TeX source content' })
   @IsString()
   @IsOptional()

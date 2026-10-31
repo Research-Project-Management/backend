@@ -14,7 +14,7 @@ import {
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { TreeNode } from '../domain/file-tree.builder';
+import type { TreeNode } from '../domain/tree-builder';
 
 export class CreateNodeDto {
   @ApiProperty({

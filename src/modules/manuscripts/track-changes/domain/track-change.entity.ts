@@ -4,7 +4,7 @@
  */
 
 import * as crypto from 'node:crypto';
-import { TextRangeVo } from './text-range.vo';
+import { TextRangeVo } from './text-range';
 
 export type ChangeType = 'insert' | 'delete';
 export type ChangeStatus = 'pending' | 'accepted' | 'rejected';

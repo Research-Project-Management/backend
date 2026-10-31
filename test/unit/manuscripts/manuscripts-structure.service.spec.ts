@@ -318,6 +318,45 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
         }),
       ).rejects.toThrow(DuplicateNodePathError);
     });
+
+    it('should hard-delete orphan backing doc via deleteDoc(soft: false) if repository.createNode fails', async () => {
+      const mockDocstore = {
+        createDoc: jest.fn().mockResolvedValue({
+          id: 'doc-orphan-1',
+          sizeBytes: 12,
+          hash: 'abc1234',
+        }),
+        deleteDoc: jest.fn().mockResolvedValue(undefined),
+        patchDoc: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const svcWithDocstore = new StructureService(
+        repository,
+        undefined,
+        undefined,
+        mockDocstore as any,
+      );
+      jest
+        .spyOn(repository, 'createNode')
+        .mockRejectedValueOnce(Object.assign(new Error('Unique constraint P2002'), { code: 'P2002' }));
+
+      await expect(
+        svcWithDocstore.createNode(PROJECT_ID, {
+          name: 'orphan.tex',
+          path: '/orphan.tex',
+          type: 'DOC',
+          content: '\\section{Orphan}',
+        }),
+      ).rejects.toThrow(DuplicateNodePathError);
+
+      expect(mockDocstore.createDoc).toHaveBeenCalledTimes(1);
+      expect(mockDocstore.deleteDoc).toHaveBeenCalledWith(
+        PROJECT_ID,
+        'doc-orphan-1',
+        { soft: false },
+      );
+      expect(mockDocstore.patchDoc).not.toHaveBeenCalled();
+    });
   });
 
   // =========================================================================
@@ -645,6 +684,50 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
       const mainFile = payload.files.find((f) => f.path === 'main.tex');
       expect(mainFile?.content).toContain('\\documentclass{article}');
       expect(mainFile?.hash).toBe('hash-main');
+    });
+
+    it('should hydrate multiple binary FILE nodes with bounded concurrency while preserving order', async () => {
+      const { Readable } = await import('stream');
+      const mockFilestore = {
+        openReadStream: jest.fn().mockImplementation(async (_projId: string, fileId: string) => ({
+          stream: Readable.from([Buffer.from(`bin-${fileId}`)]),
+        })),
+      };
+
+      const svcWithFilestore = new StructureService(
+        repository,
+        undefined,
+        mockFilestore as any,
+      );
+
+      await svcWithFilestore.createNode(PROJECT_ID, {
+        name: 'main.tex',
+        type: 'DOC',
+        path: '/main.tex',
+        isRootDoc: true,
+      });
+
+      for (let i = 1; i <= 10; i++) {
+        await svcWithFilestore.createNode(PROJECT_ID, {
+          name: `fig-${i}.png`,
+          type: 'FILE',
+          path: `/figs/fig-${i}.png`,
+          fileId: `file-${i}`,
+        });
+      }
+
+      const payload = await svcWithFilestore.buildCompilerPayload(
+        PROJECT_ID,
+        new Map(),
+      );
+
+      expect(payload.files.length).toBe(11);
+      expect(mockFilestore.openReadStream).toHaveBeenCalledTimes(10);
+      const fig1 = payload.files.find((f) => f.path === 'figs/fig-1.png');
+      const fig10 = payload.files.find((f) => f.path === 'figs/fig-10.png');
+      expect(Buffer.isBuffer(fig1?.content)).toBe(true);
+      expect((fig1?.content as Buffer).toString('utf8')).toBe('bin-file-1');
+      expect((fig10?.content as Buffer).toString('utf8')).toBe('bin-file-10');
     });
   });
 });

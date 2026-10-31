@@ -6,13 +6,14 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { PrismaModule } from '@/core';
+import { IdentityModule } from '@/modules/identity/identity.module';
+import { AccessModule } from '@/modules/project/access';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { GitBridgeController } from './git-bridge.controller';
 import { GitBridgeService } from './git-bridge.service';
 import { GitBridgeRepository, GitCliAdapter } from './git-bridge.repository';
-import { GIT_ACCESS_REPOSITORY_PORT, GIT_CLI_PORT } from './domain';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -22,28 +23,17 @@ const GIT_CONTENT_TYPES = [
 ];
 
 @Module({
-  imports: [PrismaModule, DocstoreModule, FilestoreModule, StructureModule],
+  imports: [
+    PrismaModule,
+    IdentityModule,
+    AccessModule,
+    DocstoreModule,
+    FilestoreModule,
+    StructureModule,
+  ],
   controllers: [GitBridgeController],
-  providers: [
-    GitCliAdapter,
-    GitBridgeRepository,
-    GitBridgeService,
-    {
-      provide: GIT_CLI_PORT,
-      useExisting: GitCliAdapter,
-    },
-    {
-      provide: GIT_ACCESS_REPOSITORY_PORT,
-      useExisting: GitBridgeRepository,
-    },
-  ],
-  exports: [
-    GitBridgeService,
-    GitBridgeRepository,
-    GitCliAdapter,
-    GIT_CLI_PORT,
-    GIT_ACCESS_REPOSITORY_PORT,
-  ],
+  providers: [GitCliAdapter, GitBridgeRepository, GitBridgeService],
+  exports: [GitBridgeService, GitBridgeRepository, GitCliAdapter],
 })
 export class GitBridgeModule implements OnModuleInit {
   constructor(private readonly adapterHost: HttpAdapterHost) {}

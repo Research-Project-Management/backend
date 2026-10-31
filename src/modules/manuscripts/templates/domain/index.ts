@@ -1,4 +1,4 @@
 export * from './official-template.catalog';
-export * from './manuscript-template.entity';
-export * from './templates.exceptions';
+export * from './template.entity';
+export * from './templates.errors';
 export * from './templates.ports';

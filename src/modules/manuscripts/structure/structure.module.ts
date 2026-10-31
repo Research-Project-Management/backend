@@ -18,10 +18,7 @@ import { IStructureRepository } from './domain';
   providers: [
     StructureService,
     StructureRepository,
-    {
-      provide: IStructureRepository,
-      useExisting: StructureRepository,
-    },
+    { provide: IStructureRepository, useExisting: StructureRepository },
   ],
   exports: [StructureService, StructureRepository, IStructureRepository],
 })

@@ -4,11 +4,11 @@ import {
   ISandboxRunner,
   ProcessExecutionOptions,
   ProcessExecutionResult,
-} from '../../domain/clsi-ports';
+} from '../../domain/clsi.ports';
 import { LocalProcessRunner } from './local-process.runner';
 import { buildSandboxEnv } from '../../domain/sandbox-env.builder';
 import { getSafeHostEnv } from '../../../core/config/manuscripts.config';
-import { SandboxUnavailableException } from '../../domain/sandbox-errors';
+import { SandboxUnavailableException } from '../../domain/sandbox.errors';
 import {
   DEFAULT_SANDBOX_PROFILE,
   SandboxProfile,

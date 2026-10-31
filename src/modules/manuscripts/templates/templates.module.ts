@@ -7,28 +7,11 @@ import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { TemplatesController } from './templates.controller';
 import { TemplatesService } from './templates.service';
 import { TemplatesRepository } from './templates.repository';
-import { TEMPLATE_REPOSITORY_PORT, PROJECT_INSTANTIATOR_PORT } from './domain';
 
 @Module({
   imports: [PrismaModule, StructureModule, DocstoreModule],
   controllers: [TemplatesController],
-  providers: [
-    TemplatesRepository,
-    TemplatesService,
-    {
-      provide: TEMPLATE_REPOSITORY_PORT,
-      useExisting: TemplatesRepository,
-    },
-    {
-      provide: PROJECT_INSTANTIATOR_PORT,
-      useExisting: TemplatesRepository,
-    },
-  ],
-  exports: [
-    TemplatesService,
-    TemplatesRepository,
-    TEMPLATE_REPOSITORY_PORT,
-    PROJECT_INSTANTIATOR_PORT,
-  ],
+  providers: [TemplatesRepository, TemplatesService],
+  exports: [TemplatesService, TemplatesRepository],
 })
 export class TemplatesModule {}

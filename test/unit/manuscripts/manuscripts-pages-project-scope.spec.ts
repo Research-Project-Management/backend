@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import { ManuscriptPageScopeRepository } from '@/modules/manuscripts/docstore/repositories/manuscript-page-scope.repository';
+import { ManuscriptPageScopeRepository } from '@/modules/manuscripts/docstore/repositories/scope.repository';
 
 describe('ManuscriptPageScopeRepository & Tenant Isolation', () => {
   let repository: ManuscriptPageScopeRepository;

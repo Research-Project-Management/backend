@@ -6,7 +6,6 @@
  */
 
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
 import * as pathPosix from 'node:path/posix';
 import { Prisma } from '@prisma/client';
 import { PrismaService, mapWithConcurrency } from '@/core';
@@ -21,6 +20,7 @@ import { StructureService } from '@/modules/manuscripts/structure/structure.serv
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import type { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
+import { ProjectHistoryRepository } from '../project-history.repository';
 import {
   IHistoryRepositoryPort,
   IProjectCollectorPort,
@@ -41,30 +41,24 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
     private readonly structureService: StructureService,
     private readonly docstoreService: DocstoreService,
     private readonly filestoreService: FilestoreService,
-    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollab?: LiveCollaborationPort,
   ) {
     super();
-    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
+    const candidate = liveCollab ?? liveCollabOrLegacyRef;
+    this.liveCollab =
+      candidate &&
+      typeof (candidate as LiveCollaborationPort).flushDocs === 'function'
+        ? (candidate as LiveCollaborationPort)
+        : NOOP_LIVE_COLLABORATION;
   }
 
   private getLiveCollab(): LiveCollaborationPort {
-    if (this.liveCollab !== NOOP_LIVE_COLLABORATION) {
-      return this.liveCollab;
-    }
-    try {
-      if (typeof this.moduleRef?.get === 'function') {
-        return (
-          this.moduleRef.get(LiveCollaborationPort, { strict: false }) ??
-          NOOP_LIVE_COLLABORATION
-        );
-      }
-      return NOOP_LIVE_COLLABORATION;
-    } catch {
-      return NOOP_LIVE_COLLABORATION;
-    }
+    return this.liveCollab;
   }
 
   public async collectCurrentState(
@@ -144,33 +138,30 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
   constructor(
     private readonly structureService: StructureService,
     private readonly docstoreService: DocstoreService,
-    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional()
+    @Inject(IDistributedLockPort)
+    private readonly lockOrLegacyRef?: IDistributedLockPort | unknown,
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollab?: LiveCollaborationPort,
-    @Optional() private readonly historyRepository?: IHistoryRepositoryPort,
+    @Optional()
+    private readonly historyRepository?: ProjectHistoryRepository,
+    @Optional()
+    @Inject(IDistributedLockPort)
+    private readonly distributedLock?: IDistributedLockPort,
   ) {
     super();
-    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
+    this.liveCollab =
+      liveCollab &&
+      typeof (liveCollab as LiveCollaborationPort).flushDocs === 'function'
+        ? liveCollab
+        : NOOP_LIVE_COLLABORATION;
   }
 
   private getLiveCollab(): LiveCollaborationPort {
-    if (this.liveCollab !== NOOP_LIVE_COLLABORATION) {
-      return this.liveCollab;
-    }
-    try {
-      if (typeof this.moduleRef?.get === 'function') {
-        return (
-          this.moduleRef.get(LiveCollaborationPort, { strict: false }) ??
-          NOOP_LIVE_COLLABORATION
-        );
-      }
-      return NOOP_LIVE_COLLABORATION;
-    } catch {
-      return NOOP_LIVE_COLLABORATION;
-    }
+    return this.liveCollab;
   }
 
   public async restoreToState(
@@ -178,17 +169,12 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     snapshot: Snapshot,
   ): Promise<RestoreResult> {
     const lockPort =
-      typeof this.moduleRef?.get === 'function'
-        ? (() => {
-            try {
-              return this.moduleRef.get(IDistributedLockPort, {
-                strict: false,
-              });
-            } catch {
-              return undefined;
-            }
-          })()
-        : undefined;
+      this.distributedLock ??
+      (this.lockOrLegacyRef &&
+      typeof (this.lockOrLegacyRef as IDistributedLockPort).withLock ===
+        'function'
+        ? (this.lockOrLegacyRef as IDistributedLockPort)
+        : undefined);
     const restoreAction = async () =>
       this.executeRestoreWorkflow(projectId, snapshot);
 
@@ -221,20 +207,7 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
       });
 
     // Pre-Restore Safety Guard: Snapshot current state if repository or prisma available to prevent partial restore data loss
-    const resolvedHistoryRepo =
-      this.historyRepository ??
-      (() => {
-        try {
-          if (typeof this.moduleRef?.get === 'function') {
-            return this.moduleRef.get(IHistoryRepositoryPort, {
-              strict: false,
-            });
-          }
-          return undefined;
-        } catch {
-          return undefined;
-        }
-      })();
+    const resolvedHistoryRepo = this.historyRepository;
 
     if (resolvedHistoryRepo || this.prisma) {
       try {

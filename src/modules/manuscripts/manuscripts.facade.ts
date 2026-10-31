@@ -24,8 +24,8 @@ import { ClsiService } from './clsi/services/clsi.service';
 import { ProjectHistoryService } from './project-history/project-history.service';
 import { CitationsService } from './citations/citations.service';
 import { ExportImportService } from './export-import/export-import.service';
-import { ProjectWorkspaceCollectorService } from './core/services/project-workspace-collector.service';
-import { ManuscriptDomainEventBus } from './core/events/manuscript-domain-event-bus.service';
+import { ProjectWorkspaceCollectorService } from './core/services/workspace-collector.service';
+import { ManuscriptDomainEventBus } from './core/events/event-bus.service';
 
 import { CreateNodeDto, MoveNodeDto, RenameNodeDto } from './structure/dto/node.dto';
 import { CompileManuscriptDto, ClsiWordCountDto } from './clsi/dto/clsi.dto';
@@ -93,9 +93,7 @@ export class ManuscriptsFacade {
   }
 
   public async deleteNode(projectId: string, nodeId: string): Promise<void> {
-    await this.structure.deleteNode(projectId, nodeId).catch(() => null);
-    await this.docstore.deleteDoc?.(projectId, nodeId).catch(() => null);
-    await this.workspaceCollector.evictDoc(projectId, nodeId).catch(() => null);
+    await this.structure.deleteNode(projectId, nodeId);
   }
 
   // ==========================================================================

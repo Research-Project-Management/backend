@@ -12,7 +12,16 @@ import {
   ManuscriptNodeEntity,
   NodePathVo,
   ParsedFolderSegment,
+  DuplicateNodePathError,
+  StructureError,
 } from './domain';
+
+function isPrismaUniqueError(err: unknown): boolean {
+  const errObj = err as { code?: string; message?: string } | null;
+  return Boolean(
+    errObj?.code === 'P2002' || errObj?.message?.includes('P2002'),
+  );
+}
 
 /**
  * Shared Prisma folder-chain materializer (`mkdir -p` for `ManuscriptNode` folders).
@@ -38,8 +47,8 @@ export async function ensurePrismaFolderChain(
       },
     });
     if (!folderNode && db.manuscriptNode.create) {
-      folderNode = await db.manuscriptNode
-        .create({
+      try {
+        folderNode = await db.manuscriptNode.create({
           data: {
             projectId,
             parentId,
@@ -51,8 +60,27 @@ export async function ensurePrismaFolderChain(
             sizeBytes: 0,
             sortOrder: 0,
           },
-        })
-        .catch(() => null);
+        });
+      } catch (createErr: unknown) {
+        if (isPrismaUniqueError(createErr)) {
+          folderNode =
+            (await db.manuscriptNode.findUnique?.({
+              where: {
+                projectId_path: {
+                  projectId,
+                  path: folder.path,
+                },
+              },
+            })) ?? null;
+        } else {
+          throw createErr;
+        }
+      }
+    }
+    if (folderNode && folderNode.type && folderNode.type !== 'FOLDER') {
+      throw new StructureError(
+        `Parent node at '${folder.path}' must be a FOLDER (found ${folderNode.type})`,
+      );
     }
     parentId = folderNode?.id ?? parentId;
   }
@@ -232,51 +260,71 @@ export class StructureRepository extends IStructureRepository {
     const normDest = NodePathVo.normalize(destPath);
     const sourcePrefix = normSource + '/';
 
-    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const movedRoot = await tx.manuscriptNode.update({
-        where: {
-          projectId_path: {
-            projectId,
-            path: normSource,
-          },
-        },
-        data: {
-          path: normDest,
-          name: NodePathVo.basename(normDest),
-          parentId: newParentId,
-          depth: NodePathVo.depth(normDest),
-        },
-      });
-
-      await this.syncBackingAssetPath(tx, projectId, movedRoot, normDest);
-
-      const descendants = await tx.manuscriptNode.findMany({
-        where: {
-          projectId,
-          path: { startsWith: sourcePrefix },
-        },
-      });
-
-      await Promise.all(
-        descendants.map(async (descendant) => {
-          const rebased = NodePathVo.rebase(
-            descendant.path,
-            normSource,
-            normDest,
-          );
-
-          await tx.manuscriptNode.update({
-            where: { id: descendant.id },
-            data: {
-              path: rebased.path,
-              depth: rebased.depth,
+    try {
+      await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const movedRoot = await tx.manuscriptNode.update({
+          where: {
+            projectId_path: {
+              projectId,
+              path: normSource,
             },
-          });
+          },
+          data: {
+            path: normDest,
+            name: NodePathVo.basename(normDest),
+            parentId: newParentId,
+            depth: NodePathVo.depth(normDest),
+          },
+        });
 
-          await this.syncBackingAssetPath(tx, projectId, descendant, rebased.path);
-        }),
-      );
-    });
+        await this.syncBackingAssetPath(tx, projectId, movedRoot, normDest);
+
+        const descendants = await tx.manuscriptNode.findMany({
+          where: {
+            projectId,
+            path: { startsWith: sourcePrefix },
+          },
+        });
+
+        if (descendants.length === 0) {
+          return;
+        }
+
+        const BATCH_CONCURRENCY = 20;
+        for (let i = 0; i < descendants.length; i += BATCH_CONCURRENCY) {
+          const chunk = descendants.slice(i, i + BATCH_CONCURRENCY);
+          await Promise.all(
+            chunk.map(async (descendant) => {
+              const rebased = NodePathVo.rebase(
+                descendant.path,
+                normSource,
+                normDest,
+              );
+
+              await tx.manuscriptNode.update({
+                where: { id: descendant.id },
+                data: {
+                  path: rebased.path,
+                  depth: rebased.depth,
+                },
+              });
+
+              await this.syncBackingAssetPath(
+                tx,
+                projectId,
+                descendant,
+                rebased.path,
+              );
+            }),
+          );
+        }
+      });
+    } catch (err: unknown) {
+      if (isPrismaUniqueError(err)) {
+        throw new DuplicateNodePathError(normDest);
+      }
+      throw err;
+    }
   }
 
   public async renameNode(
@@ -286,26 +334,49 @@ export class StructureRepository extends IStructureRepository {
     newPath: string,
   ): Promise<ManuscriptNodeEntity> {
     const depth = NodePathVo.depth(newPath);
-    const result = await this.prisma.manuscriptNode.updateMany({
-      where: { id: nodeId, projectId },
-      data: {
-        name: newName,
-        path: newPath,
-        depth,
-      },
-    });
-    if (result.count === 0) {
-      throw new NotFoundException({
-        statusCode: 404,
-        code: 'RESOURCE_NOT_FOUND',
-        message: 'Node not found in project',
+    const executeRename = async (
+      db: Pick<
+        Prisma.TransactionClient,
+        'manuscriptNode' | 'manuscriptDoc' | 'manuscriptFile'
+      >,
+    ): Promise<ManuscriptNode> => {
+      const result = await db.manuscriptNode.updateMany({
+        where: { id: nodeId, projectId },
+        data: {
+          name: newName,
+          path: newPath,
+          depth,
+        },
       });
+      if (result.count === 0) {
+        throw new NotFoundException({
+          statusCode: 404,
+          code: 'RESOURCE_NOT_FOUND',
+          message: 'Node not found in project',
+        });
+      }
+      const updated = await db.manuscriptNode.findFirst({
+        where: { id: nodeId, projectId },
+      });
+      await this.syncBackingAssetPath(db, projectId, updated, newPath);
+      return updated!;
+    };
+
+    try {
+      const updated =
+        typeof this.prisma.$transaction === 'function'
+          ? await this.prisma.$transaction(async (tx) => {
+              const client = tx?.manuscriptNode ? tx : this.prisma;
+              return await executeRename(client);
+            })
+          : await executeRename(this.prisma);
+      return this.mapToEntity(updated);
+    } catch (err: unknown) {
+      if (isPrismaUniqueError(err)) {
+        throw new DuplicateNodePathError(newPath);
+      }
+      throw err;
     }
-    const updated = await this.prisma.manuscriptNode.findFirst({
-      where: { id: nodeId, projectId },
-    });
-    await this.syncBackingAssetPath(this.prisma, projectId, updated, newPath);
-    return this.mapToEntity(updated!);
   }
 
   public async deleteSubtree(

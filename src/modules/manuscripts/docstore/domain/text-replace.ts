@@ -3,7 +3,7 @@
  * Pure search/replace rules shared by project-wide replace endpoints.
  */
 
-import { InvalidSearchPatternError } from './doc-errors';
+import { InvalidSearchPatternError } from './doc.errors';
 
 export interface ReplaceOptions {
   caseSensitive?: boolean;

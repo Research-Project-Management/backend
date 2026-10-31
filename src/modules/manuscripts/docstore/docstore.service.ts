@@ -9,7 +9,13 @@ import { Readable } from 'stream';
 import * as crypto from 'crypto';
 import { mapWithConcurrency } from '@/core';
 import { WorkspaceFile } from '@/modules/manuscripts/core';
+import { DocstoreRepository } from './repositories/docstore.repository';
 import {
+  DocArchiveRepository,
+  StoragePortDocArchiveAdapter,
+} from './repositories/archive.repository';
+import {
+  DocHasherAdapter,
   IDocRepository,
   IDocPersistor,
   IDocHasher,
@@ -63,9 +69,14 @@ export class DocstoreService {
   private readonly docPersistor: IDocPersistor;
 
   constructor(
+    @Inject(IDocRepository)
     private readonly docRepository: IDocRepository,
-    @Optional() private readonly docHasher?: IDocHasher,
-    @Optional() @Inject(IDocPersistor) docPersistor?: IDocPersistor,
+    @Optional()
+    @Inject(IDocHasher)
+    private readonly docHasher?: IDocHasher,
+    @Optional()
+    @Inject(IDocPersistor)
+    docPersistor?: IDocPersistor,
   ) {
     this.docPersistor =
       docPersistor ?? (docRepository as unknown as IDocPersistor);
@@ -133,12 +144,20 @@ export class DocstoreService {
       const lines = Array.isArray(parsed.lines) ? parsed.lines : [];
       const ranges = parsed.ranges || { changes: [], comments: [] };
 
-      return await this.docRepository.unarchiveDoc(
+      const unarchived = await this.docRepository.unarchiveDoc(
         projectId,
         docId,
         lines,
         ranges,
       );
+
+      if (this.docPersistor?.deleteObject) {
+        await Promise.resolve(this.docPersistor.deleteObject(doc.storageKey)).catch(
+          () => undefined,
+        );
+      }
+
+      return unarchived;
     }
 
     return doc;
@@ -373,7 +392,15 @@ export class DocstoreService {
         deletedAt: new Date(),
       });
     } else {
+      const existing = await this.docRepository
+        .getDoc(projectId, docId)
+        .catch(() => null);
       await this.docRepository.destroyDoc(projectId, docId);
+      if (existing?.inStorage && existing.storageKey && this.docPersistor?.deleteObject) {
+        await Promise.resolve(
+          this.docPersistor.deleteObject(existing.storageKey),
+        ).catch(() => undefined);
+      }
     }
   }
 

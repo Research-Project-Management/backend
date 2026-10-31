@@ -21,7 +21,7 @@ import {
   ISandboxRunner,
   ProcessExecutionOptions,
   ProcessExecutionResult,
-} from '../domain/clsi-ports';
+} from '../domain/clsi.ports';
 import {
   ProjectLockManager,
   OverleafOutputFileFinder,
@@ -30,7 +30,7 @@ import { TexEngineDetector } from '../domain/tex-engine.detector';
 import { CompileLogAnalyzer } from '@/modules/manuscripts/diagnostics/domain';
 import { BibBackendDetector } from '../domain/bib-backend.detector';
 import { DraftModeManager } from '../domain/draft-mode.manager';
-import { SandboxPolicyViolationException } from '../domain/sandbox-errors';
+import { SandboxPolicyViolationException } from '../domain/sandbox.errors';
 import { SafePath } from '../domain/safe-path';
 
 function hasControlChar(str: string): boolean {

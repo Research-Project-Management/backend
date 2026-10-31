@@ -8,7 +8,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { SafePath } from '../../../../src/modules/manuscripts/clsi/domain/safe-path';
-import { UnsafePathException } from '../../../../src/modules/manuscripts/clsi/domain/sandbox-errors';
+import { UnsafePathException } from '../../../../src/modules/manuscripts/clsi/domain/sandbox.errors';
 
 describe('SafePath Traversal & Prefix Collision Hardening (Slice S5 / US4)', () => {
   let tmpBaseDir: string;

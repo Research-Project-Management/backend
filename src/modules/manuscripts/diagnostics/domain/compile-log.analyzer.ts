@@ -11,15 +11,15 @@ import {
   ErrorExplanationProps,
 } from './diagnostic-item.entity';
 import { DiagnosticReport } from './diagnostic-report.entity';
-import { LogLineVo } from './log-line.vo';
+import { LogLineVo } from './log-line';
 import {
   InvalidLogFormatException,
   ExplanationNotFoundException,
-} from './diagnostics.exceptions';
+} from './diagnostics.errors';
 import {
   CompilerDiagnostic,
   ILogParser,
-} from '@/modules/manuscripts/clsi/domain/clsi-ports';
+} from '@/modules/manuscripts/clsi/domain/clsi.ports';
 
 export interface RuleDefinition extends ErrorExplanationProps {
   patterns: RegExp[];

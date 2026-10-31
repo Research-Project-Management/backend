@@ -5,8 +5,8 @@
 
 export * from './doc-hasher';
 export * from './text-doc.entity';
-export * from './doc-range.vo';
-export * from './doc-errors';
+export * from './doc-range';
+export * from './doc.errors';
 export * from './text-replace';
 export * from './line-array';
-export * from './doc-ports';
+export * from './doc.ports';

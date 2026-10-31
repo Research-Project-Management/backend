@@ -15,9 +15,6 @@ import { LinkedFilesController } from './linked-files.controller';
 import { LinkedFilesService } from './linked-files.service';
 import { LinkedFilesRepository } from './linked-files.repository';
 
-// Ports
-import { ILinkedFilesRepositoryPort } from './domain';
-
 @Module({
   imports: [
     ManuscriptsCoreModule,
@@ -29,18 +26,7 @@ import { ILinkedFilesRepositoryPort } from './domain';
     CitationsModule,
   ],
   controllers: [LinkedFilesController],
-  providers: [
-    LinkedFilesRepository,
-    {
-      provide: ILinkedFilesRepositoryPort,
-      useExisting: LinkedFilesRepository,
-    },
-    LinkedFilesService,
-  ],
-  exports: [
-    LinkedFilesService,
-    LinkedFilesRepository,
-    ILinkedFilesRepositoryPort,
-  ],
+  providers: [LinkedFilesRepository, LinkedFilesService],
+  exports: [LinkedFilesService, LinkedFilesRepository],
 })
 export class LinkedFilesModule {}

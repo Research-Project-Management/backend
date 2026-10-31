@@ -4,8 +4,8 @@
  */
 
 import { randomUUID } from 'crypto';
-import { CitationKeyVo } from './citation-key.vo';
-import { AuthorListVo } from './author-list.vo';
+import { CitationKeyVo } from './citation-key';
+import { AuthorListVo } from './author-list';
 import { toBibtexValue } from './bibtex.formatter';
 
 /**

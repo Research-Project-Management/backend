@@ -33,7 +33,7 @@ import {
   SyncPoint,
   ReverseSyncPoint,
   WordCountStats,
-} from '../domain/clsi-ports';
+} from '../domain/clsi.ports';
 import {
   OverleafIncrementalWorkspace,
   DiskUsageCleaner,

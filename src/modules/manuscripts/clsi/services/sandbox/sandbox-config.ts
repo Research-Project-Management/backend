@@ -6,7 +6,7 @@
 
 import * as os from 'os';
 import * as path from 'path';
-import { SandboxConfigurationException } from '../../domain/sandbox-errors';
+import { SandboxConfigurationException } from '../../domain/sandbox.errors';
 import {
   DEFAULT_SANDBOX_PROFILE,
   SandboxProfile,

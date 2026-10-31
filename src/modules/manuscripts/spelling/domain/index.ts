@@ -5,4 +5,4 @@
 
 export * from './academic-dictionaries';
 export * from './academic-spell.engine';
-export * from './spelling.exceptions';
+export * from './spelling.errors';

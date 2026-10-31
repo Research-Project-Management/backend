@@ -13,23 +13,15 @@ import { ClsiModule } from '@/modules/manuscripts/clsi/clsi.module';
 import { TemplatesModule } from '@/modules/manuscripts/templates/templates.module';
 import { TemplatesService } from '@/modules/manuscripts/templates/templates.service';
 import { ProjectHistoryModule } from '@/modules/manuscripts/project-history/project-history.module';
-import { PagesHistoryExportController } from '@/modules/manuscripts/docstore/controllers/pages-history-export.controller';
+import { PagesHistoryExportController } from '@/modules/manuscripts/docstore/controllers/history-export.controller';
 
-// Ports & Engines
-import {
-  IZipEnginePort,
-  IManuscriptAggregatorPort,
-  IManuscriptHydratorPort,
-  IDocumentTranspilerPort,
-} from './domain';
+// Adapters & Repositories
 import { PkzipEngineAdapter } from './services/pkzip-engine.adapter';
 import { DocumentTranspilerAdapter } from './services/document-transpiler.adapter';
-
-// Repositories
 import {
   ManuscriptAggregatorAdapter,
   ManuscriptHydratorAdapter,
-} from './repositories/manuscript-aggregator.repository';
+} from './repositories/aggregator.repository';
 
 // Service & Controller
 import { ExportImportService } from './export-import.service';
@@ -51,54 +43,14 @@ import { ExportImportController } from './export-import.controller';
     DocumentTranspilerAdapter,
     ManuscriptAggregatorAdapter,
     ManuscriptHydratorAdapter,
-    {
-      provide: IZipEnginePort,
-      useExisting: PkzipEngineAdapter,
-    },
-    {
-      provide: IDocumentTranspilerPort,
-      useExisting: DocumentTranspilerAdapter,
-    },
-    {
-      provide: IManuscriptAggregatorPort,
-      useExisting: ManuscriptAggregatorAdapter,
-    },
-    {
-      provide: IManuscriptHydratorPort,
-      useExisting: ManuscriptHydratorAdapter,
-    },
-    {
-      provide: ExportImportService,
-      useFactory: (
-        aggregator: IManuscriptAggregatorPort,
-        zipEngine: IZipEnginePort,
-        hydrator: IManuscriptHydratorPort,
-        templatesService: TemplatesService,
-        transpiler: IDocumentTranspilerPort,
-      ) =>
-        new ExportImportService(
-          aggregator,
-          zipEngine,
-          hydrator,
-          templatesService,
-          transpiler,
-        ),
-      inject: [
-        IManuscriptAggregatorPort,
-        IZipEnginePort,
-        IManuscriptHydratorPort,
-        TemplatesService,
-        IDocumentTranspilerPort,
-      ],
-    },
+    ExportImportService,
   ],
   exports: [
     ExportImportService,
     ManuscriptAggregatorAdapter,
-    IZipEnginePort,
-    IDocumentTranspilerPort,
-    IManuscriptAggregatorPort,
-    IManuscriptHydratorPort,
+    ManuscriptHydratorAdapter,
+    PkzipEngineAdapter,
+    DocumentTranspilerAdapter,
   ],
 })
 export class ExportImportModule {}

@@ -21,7 +21,7 @@ import {
   linesToText,
   PlannedFileSet,
 } from '../domain/compile-fileset.planner';
-import { FileSnapshotVo } from '@/modules/manuscripts/project-history/domain/file-snapshot.vo';
+import { FileSnapshotVo } from '@/modules/manuscripts/project-history/domain/file-snapshot';
 import { OverleafIncrementalWorkspace } from '../repositories/incremental-workspace.repository';
 import { SafePath } from '../domain/safe-path';
 

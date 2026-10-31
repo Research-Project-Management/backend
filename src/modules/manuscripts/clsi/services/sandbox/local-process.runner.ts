@@ -4,7 +4,7 @@ import {
   ISandboxRunner,
   ProcessExecutionOptions,
   ProcessExecutionResult,
-} from '../../domain/clsi-ports';
+} from '../../domain/clsi.ports';
 import { Watchdog, killProcessGroup } from './process-watchdog';
 import { buildSandboxEnv } from '../../domain/sandbox-env.builder';
 import { getSafeHostEnv } from '../../../core/config/manuscripts.config';

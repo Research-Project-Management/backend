@@ -17,10 +17,10 @@ import {
   AuxFileInfo,
   IOutputFileFinder,
   DiscoveredOutputFile,
-} from '../domain/clsi-ports';
+} from '../domain';
 import { SafePath } from '../domain/safe-path';
 import { createPkZipStream, PkZipEntry } from '@/modules/manuscripts/core';
-import { mapWithConcurrency } from '@/core';
+import { mapWithConcurrency } from '@/core/utils/concurrency.util';
 
 export interface ProjectManifest {
   version: number;
@@ -141,7 +141,9 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
       );
       const contentBuffer = Buffer.isBuffer(file.content)
         ? file.content
-        : Buffer.from(file.content, 'utf8');
+        : typeof file.content === 'string' && file.content.startsWith('base64:')
+          ? Buffer.from(file.content.slice('base64:'.length), 'base64')
+          : Buffer.from(file.content, 'utf8');
       const contentHash = file.hash || this.computeHash(contentBuffer);
       const cachedHash = manifest.files[sanitizedRelPath];
       let fileExists = false;

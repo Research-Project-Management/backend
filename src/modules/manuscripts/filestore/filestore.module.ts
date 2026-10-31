@@ -14,21 +14,13 @@ import {
   S3BinaryStorageAdapter,
   CryptoGitBlobHasherAdapter,
 } from './filestore.repository';
-import {
-  IBinaryStoragePort,
-  IManuscriptFileRepository,
-  IContentHasherPort,
-} from './filestore.types';
+import { IBinaryStoragePort } from './filestore.types';
 
 @Module({
   imports: [ConfigModule, PrismaModule],
   controllers: [FilestoreController],
   providers: [
     CryptoGitBlobHasherAdapter,
-    {
-      provide: IContentHasherPort,
-      useExisting: CryptoGitBlobHasherAdapter,
-    },
     {
       provide: IBinaryStoragePort,
       useFactory: (configService: ConfigService) => {
@@ -55,18 +47,13 @@ import {
       inject: [ConfigService],
     },
     FilestoreRepository,
-    {
-      provide: IManuscriptFileRepository,
-      useExisting: FilestoreRepository,
-    },
     FilestoreService,
   ],
   exports: [
     FilestoreService,
     FilestoreRepository,
+    CryptoGitBlobHasherAdapter,
     IBinaryStoragePort,
-    IManuscriptFileRepository,
-    IContentHasherPort,
   ],
 })
 export class FilestoreModule {}

@@ -6,7 +6,6 @@
  */
 
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '@/core';
 import {
@@ -34,28 +33,25 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
 
   constructor(
     private readonly docstoreService: DocstoreService,
-    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
     @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollab?: LiveCollaborationPort,
   ) {
     super();
-    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
+    const candidate = liveCollab ?? liveCollabOrLegacyRef;
+    this.liveCollab =
+      candidate &&
+      typeof (candidate as LiveCollaborationPort).flushDocs === 'function'
+        ? (candidate as LiveCollaborationPort)
+        : NOOP_LIVE_COLLABORATION;
   }
 
   private getLiveCollab(): LiveCollaborationPort {
-    if (this.liveCollab !== NOOP_LIVE_COLLABORATION) {
-      return this.liveCollab;
-    }
-    try {
-      return (
-        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ??
-        NOOP_LIVE_COLLABORATION
-      );
-    } catch {
-      return NOOP_LIVE_COLLABORATION;
-    }
+    return this.liveCollab;
   }
 
   /**

@@ -32,6 +32,8 @@ import {
   ContentHash,
   StorageKey,
   FilestoreValidationException,
+  MAX_FILE_SIZE_BYTES,
+  StorageQuotaExceededException,
 } from '../filestore.types';
 
 @Injectable()
@@ -51,6 +53,11 @@ export class CryptoGitBlobHasherAdapter extends IContentHasherPort {
     meterStream.on('data', (chunk: Buffer | string) => {
       sizeBytes +=
         typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
+      if (sizeBytes > MAX_FILE_SIZE_BYTES) {
+        meterStream.destroy(
+          new StorageQuotaExceededException(sizeBytes, MAX_FILE_SIZE_BYTES),
+        );
+      }
     });
 
     let cleanedUp = false;

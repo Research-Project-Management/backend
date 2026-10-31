@@ -4,7 +4,7 @@
  */
 
 import { Readable } from 'stream';
-import { GitService, ProjectRole, StoredGitToken } from './git-bridge.domain';
+import { GitService, ProjectRole, StoredGitToken } from './git-bridge.types';
 
 export const GIT_ACCESS_REPOSITORY_PORT = Symbol('GIT_ACCESS_REPOSITORY_PORT');
 

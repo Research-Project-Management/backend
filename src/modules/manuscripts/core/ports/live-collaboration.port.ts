@@ -17,6 +17,8 @@ export interface LivePresenceUser {
 }
 
 export abstract class LiveCollaborationPort {
+  public readonly isNoop?: boolean;
+
   /**
    * Pushes externally-written full text into the live Y.Doc session (if one is
    * open) and broadcasts the CRDT update to connected peers.

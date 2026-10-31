@@ -51,7 +51,7 @@ import {
   GIT_SERVICES,
   GitService,
   parseRepoName,
-} from './domain/git-bridge.domain';
+} from './domain/git-bridge.types';
 
 function pktLine(s: string): Buffer {
   const len = (Buffer.byteLength(s) + 4).toString(16).padStart(4, '0');

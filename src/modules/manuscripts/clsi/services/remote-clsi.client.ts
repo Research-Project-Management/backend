@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { RedisCacheService, CircuitBreaker } from '@/core';
 import { CompileManuscriptDto } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
-import { SyncPoint, ReverseSyncPoint } from '../domain/clsi-ports';
+import { SyncPoint, ReverseSyncPoint } from '../domain';
 import { CompileLogAnalyzer } from '@/modules/manuscripts/diagnostics/domain';
 import { CompilePipelineResult } from './compile-pipeline.service';
 
@@ -248,13 +248,24 @@ export class RemoteClsiClientAdapter {
           );
 
           const [pdfBase64, logsText, synctexBase64] = await Promise.all([
-            this.fetchRemoteBuffer(baseUrl, pdfEntry?.url),
-            this.fetchRemoteText(baseUrl, logEntry?.url),
-            this.fetchRemoteBuffer(baseUrl, synctexEntry?.url),
+            typeof rawResult.pdf === 'string' && rawResult.pdf.length > 0
+              ? Promise.resolve(rawResult.pdf)
+              : this.fetchRemoteBuffer(baseUrl, pdfEntry?.url),
+            typeof rawResult.logs === 'string' && rawResult.logs.length > 0
+              ? Promise.resolve(rawResult.logs)
+              : this.fetchRemoteText(baseUrl, logEntry?.url),
+            typeof rawResult.synctex === 'string' && rawResult.synctex.length > 0
+              ? Promise.resolve(rawResult.synctex)
+              : this.fetchRemoteBuffer(baseUrl, synctexEntry?.url),
           ]);
 
-          const diagnostics = this.logParser.parse(logsText, mainFile);
-          const durationMs = rawResult.timing?.totalMs ?? 0;
+          const diagnostics =
+            Array.isArray(rawResult.diagnostics) &&
+            rawResult.diagnostics.length > 0
+              ? rawResult.diagnostics
+              : this.logParser.parse(logsText, mainFile);
+          const durationMs =
+            rawResult.durationMs ?? rawResult.timing?.totalMs ?? 0;
 
           if (isSuccess && pdfBase64) {
             result = {
@@ -265,6 +276,7 @@ export class RemoteClsiClientAdapter {
               synctex: synctexBase64 || undefined,
               logs: logsText,
               diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
+              outputFiles: rawResult.outputFiles,
               durationMs,
             };
           } else {
@@ -273,22 +285,43 @@ export class RemoteClsiClientAdapter {
               status: 'failure',
               compile: rawResult.compile,
               error:
+                rawResult.error ||
                 diagnostics.find(
                   (d: { severity?: string; message?: string }) =>
                     d.severity === 'error',
-                )?.message || 'LaTeX compilation failed to produce a PDF',
+                )?.message ||
+                'LaTeX compilation failed to produce a PDF',
               pdf: pdfBase64 || undefined,
               synctex: synctexBase64 || undefined,
               logs: logsText,
               diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
+              outputFiles: rawResult.outputFiles,
               durationMs,
             };
           }
         } else {
+          const isSuccess = Boolean(
+            rawResult.success || rawResult.status === 'success',
+          );
+          const logsText =
+            typeof rawResult.logs === 'string' ? rawResult.logs : '';
+          const diagnostics =
+            Array.isArray(rawResult.diagnostics) &&
+            rawResult.diagnostics.length > 0
+              ? rawResult.diagnostics
+              : logsText
+                ? this.logParser.parse(logsText, mainFile)
+                : undefined;
           result = {
             ...rawResult,
-            status:
-              rawResult.status || (rawResult.success ? 'success' : 'failure'),
+            success: isSuccess,
+            status: isSuccess ? 'success' : 'failure',
+            compile: rawResult.compile ?? {
+              status: isSuccess ? 'success' : 'failure',
+              outputFiles: [],
+            },
+            diagnostics:
+              diagnostics && diagnostics.length > 0 ? diagnostics : undefined,
             durationMs: rawResult.durationMs ?? rawResult.timing?.totalMs ?? 0,
           };
         }

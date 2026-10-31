@@ -20,7 +20,7 @@ import {
   SemaphoreWaitTimeoutError,
   SemaphoreAbortedError,
   CompileRateLimitExceededError,
-} from '../domain/fair-semaphore.domain';
+} from '../domain/fair-semaphore';
 
 export interface InFlightCompileSession {
   projectId: string;

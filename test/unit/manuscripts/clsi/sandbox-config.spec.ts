@@ -8,7 +8,7 @@ import {
   parseSandboxConfig,
   ClsiSandboxConfig,
 } from '../../../../src/modules/manuscripts/clsi/services/sandbox/sandbox-config';
-import { SandboxConfigurationException } from '../../../../src/modules/manuscripts/clsi/domain/sandbox-errors';
+import { SandboxConfigurationException } from '../../../../src/modules/manuscripts/clsi/domain/sandbox.errors';
 
 describe('CLSI Sandbox Configuration & Fail-Closed Rules (Slice S4 / US2 & US5)', () => {
   const validProductionDigest =

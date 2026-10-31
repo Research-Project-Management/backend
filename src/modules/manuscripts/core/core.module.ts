@@ -8,21 +8,22 @@
 
 import { Global, Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
+import { IdentityModule } from '@/modules/identity/identity.module';
 import { ManuscriptsConfigService } from './config/manuscripts.config';
-import { ProjectWorkspaceCollectorService } from './services/project-workspace-collector.service';
-import { ManuscriptDomainEventBus } from './events/manuscript-domain-event-bus.service';
-import { ManuscriptUserResolverService } from './services/manuscript-user-resolver.service';
+import { ProjectWorkspaceCollectorService } from './services/workspace-collector.service';
+import { ManuscriptDomainEventBus } from './events/event-bus.service';
+import { ManuscriptUserResolverService } from './services/user-resolver.service';
 import {
   IDistributedLockPort,
   InMemoryDistributedLockAdapter,
 } from './ports/distributed-lock.port';
 import { RedisDistributedLockAdapter } from './adapters/redis-distributed-lock.adapter';
 
-import { ManuscriptCleanupListener } from './services/manuscript-cleanup.listener';
+import { ManuscriptCleanupListener } from './services/cleanup.listener';
 
 @Global()
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, IdentityModule],
   providers: [
     ManuscriptsConfigService,
     ProjectWorkspaceCollectorService,

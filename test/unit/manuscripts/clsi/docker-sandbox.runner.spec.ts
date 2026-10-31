@@ -10,8 +10,8 @@ import {
   ISandboxRunner,
   ProcessExecutionOptions,
   ProcessExecutionResult,
-} from '../../../../src/modules/manuscripts/clsi/domain/clsi-ports';
-import { SandboxUnavailableException } from '../../../../src/modules/manuscripts/clsi/domain/sandbox-errors';
+} from '../../../../src/modules/manuscripts/clsi/domain/clsi.ports';
+import { SandboxUnavailableException } from '../../../../src/modules/manuscripts/clsi/domain/sandbox.errors';
 import { DEFAULT_SANDBOX_PROFILE } from '../../../../src/modules/manuscripts/clsi/domain/sandbox-profile';
 
 class MockLocalRunner implements ISandboxRunner {

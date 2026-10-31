@@ -5,7 +5,7 @@
  * for Project History.
  */
 
-import { FileSnapshotType, FileSnapshotVo } from './file-snapshot.vo';
+import { FileSnapshotType, FileSnapshotVo } from './file-snapshot';
 import { Snapshot } from './snapshot.entity';
 import { VersionLabel } from './version-label.entity';
 

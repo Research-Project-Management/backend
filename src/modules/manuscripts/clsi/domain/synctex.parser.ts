@@ -7,7 +7,7 @@
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
-import { ISyncTexProcessor, SyncPoint, ReverseSyncPoint } from './clsi-ports';
+import { ISyncTexProcessor, SyncPoint, ReverseSyncPoint } from './clsi.ports';
 
 const gunzipAsync = promisify(zlib.gunzip);
 const MAX_CACHE_ENTRIES = 6;

@@ -9,7 +9,7 @@ import { escapeLatex } from '@/modules/manuscripts/core';
 import {
   buildPkZipBuffer,
   type PkZipEntry,
-} from '@/modules/manuscripts/core/utils/pkzip-builder.util';
+} from '@/modules/manuscripts/core/utils/pkzip-builder';
 
 export { escapeLatex };
 

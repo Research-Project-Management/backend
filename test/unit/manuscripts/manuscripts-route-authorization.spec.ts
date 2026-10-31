@@ -13,10 +13,10 @@ import {
 } from '@/modules/manuscripts/citations/citations.controller';
 import { ClsiController } from '@/modules/manuscripts/clsi/clsi.controller';
 import { DiagnosticsController } from '@/modules/manuscripts/diagnostics/diagnostics.controller';
-import { PagesDocController } from '@/modules/manuscripts/docstore/controllers/pages-doc.controller';
-import { PagesHistoryExportController } from '@/modules/manuscripts/docstore/controllers/pages-history-export.controller';
-import { PagesReviewController } from '@/modules/manuscripts/docstore/controllers/pages-review.controller';
-import { PagesSearchPresenceController } from '@/modules/manuscripts/docstore/controllers/pages-search-presence.controller';
+import { PagesDocController } from '@/modules/manuscripts/docstore/controllers/doc.controller';
+import { PagesHistoryExportController } from '@/modules/manuscripts/docstore/controllers/history-export.controller';
+import { PagesReviewController } from '@/modules/manuscripts/docstore/controllers/review.controller';
+import { PagesSearchPresenceController } from '@/modules/manuscripts/docstore/controllers/search-presence.controller';
 import { ExportImportController } from '@/modules/manuscripts/export-import/export-import.controller';
 import { FilestoreController } from '@/modules/manuscripts/filestore/filestore.controller';
 import { GitBridgeController } from '@/modules/manuscripts/git-bridge/git-bridge.controller';

@@ -16,13 +16,7 @@ import {
   ManuscriptCollectorAdapter,
   ManuscriptRestorerAdapter,
 } from './adapters/project-history.adapters';
-import {
-  IHistoryRepositoryPort,
-  IDiffEnginePort,
-  IProjectCollectorPort,
-  IProjectRestorerPort,
-  MyersDiffEngine,
-} from './domain';
+import { MyersDiffEngine } from './domain';
 
 @Module({
   imports: [PrismaModule, StructureModule, DocstoreModule, FilestoreModule],
@@ -30,40 +24,15 @@ import {
   providers: [
     ProjectHistoryService,
     ProjectHistoryRepository,
-
-    // Driven Adapters
-    {
-      provide: MyersDiffEngine,
-      useFactory: () => new MyersDiffEngine(),
-    },
+    MyersDiffEngine,
     ManuscriptCollectorAdapter,
     ManuscriptRestorerAdapter,
-
-    // Ports SPI bindings
-    {
-      provide: IHistoryRepositoryPort,
-      useExisting: ProjectHistoryRepository,
-    },
-    {
-      provide: IDiffEnginePort,
-      useExisting: MyersDiffEngine,
-    },
-    {
-      provide: IProjectCollectorPort,
-      useExisting: ManuscriptCollectorAdapter,
-    },
-    {
-      provide: IProjectRestorerPort,
-      useExisting: ManuscriptRestorerAdapter,
-    },
   ],
   exports: [
     ProjectHistoryService,
     ProjectHistoryRepository,
-    IHistoryRepositoryPort,
-    IDiffEnginePort,
-    IProjectCollectorPort,
-    IProjectRestorerPort,
+    ManuscriptCollectorAdapter,
+    ManuscriptRestorerAdapter,
   ],
 })
 export class ProjectHistoryModule {}

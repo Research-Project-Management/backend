@@ -8,6 +8,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, ManuscriptDoc } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
+import { NodePathVo } from '@/modules/manuscripts/structure/domain';
+import { ensurePrismaFolderChain } from '@/modules/manuscripts/structure/structure.repository';
 import {
   TextDoc,
   DocModifiedError,
@@ -369,6 +371,41 @@ export class DocstoreRepository {
       where: { id: docId },
       data: updateData,
     });
+
+    if (patch.deleted === true) {
+      await this.prisma.manuscriptNode
+        ?.deleteMany({
+          where: {
+            projectId,
+            OR: [{ docId }, { id: docId }],
+          },
+        })
+        ?.catch(() => undefined);
+    } else if (patch.name !== undefined && updateData.path) {
+      const parsed = NodePathVo.parse(
+        String(updateData.path),
+        String(updateData.path),
+      );
+      const parentId = await ensurePrismaFolderChain(
+        this.prisma,
+        projectId,
+        parsed.folderChain,
+      ).catch(() => null);
+      await this.prisma.manuscriptNode
+        ?.updateMany({
+          where: {
+            projectId,
+            OR: [{ docId }, { id: docId }],
+          },
+          data: {
+            name: parsed.leafName,
+            path: parsed.normalizedPath,
+            depth: parsed.depth,
+            ...(parentId !== undefined ? { parentId } : {}),
+          },
+        })
+        ?.catch(() => undefined);
+    }
 
     return this.mapToEntity(updated);
   }

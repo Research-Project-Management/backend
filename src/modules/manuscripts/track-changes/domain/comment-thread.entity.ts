@@ -4,7 +4,7 @@
  */
 
 import * as crypto from 'node:crypto';
-import { TextRangeVo } from './text-range.vo';
+import { TextRangeVo } from './text-range';
 import { CommentReply } from './comment-reply.entity';
 
 export interface CreateCommentThreadProps {

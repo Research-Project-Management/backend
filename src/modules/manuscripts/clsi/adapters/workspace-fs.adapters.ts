@@ -15,7 +15,7 @@ import { Readable } from 'node:stream';
 import {
   createPkZipStream,
   PkZipEntry,
-} from '../../core/utils/pkzip-builder.util';
+} from '../../core/utils/pkzip-builder';
 import { IOutputFileFinder, DiscoveredOutputFile } from '../domain';
 
 // ─────────────────────────────────────────────────────────────────

@@ -35,7 +35,7 @@ import {
   CrossrefArxivResolverAdapter,
   createResilientFetch,
 } from '../../../src/modules/manuscripts/citations/domain/crossref-arxiv.resolver';
-import { AcademicIdentifierVo } from '../../../src/modules/manuscripts/citations/domain/academic-identifier.vo';
+import { AcademicIdentifierVo } from '../../../src/modules/manuscripts/citations/domain/academic-identifier';
 import { FastSyntaxLinter } from '../../../src/modules/manuscripts/diagnostics/domain/fast-syntax.linter';
 import {
   classifyEvent,

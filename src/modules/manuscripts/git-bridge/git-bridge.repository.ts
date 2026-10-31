@@ -7,6 +7,8 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
+import { IdentityFacade } from '@/modules/identity/identity.facade';
+import { AccessService } from '@/modules/project/access';
 import {
   ProjectRole,
   StoredGitToken,
@@ -24,6 +26,10 @@ export class GitBridgeRepository implements IGitAccessRepositoryPort {
   constructor(
     @Optional()
     private readonly prisma?: PrismaService,
+    @Optional()
+    private readonly identityFacade?: IdentityFacade,
+    @Optional()
+    private readonly accessService?: AccessService,
   ) {}
 
   async readConfig(userId: string): Promise<UserEditorGitConfig> {
@@ -59,6 +65,12 @@ export class GitBridgeRepository implements IGitAccessRepositoryPort {
   }
 
   async isActiveUser(userId: string): Promise<boolean> {
+    if (this.identityFacade) {
+      const session = await this.identityFacade
+        .validateUser(userId)
+        .catch(() => null);
+      if (session) return true;
+    }
     if (!this.prisma) return false;
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -71,6 +83,14 @@ export class GitBridgeRepository implements IGitAccessRepositoryPort {
     projectId: string,
     userId: string,
   ): Promise<ProjectRole | null> {
+    if (this.accessService) {
+      const context = await this.accessService
+        .getMemberAccessContext(projectId, userId)
+        .catch(() => null);
+      if (context?.role) {
+        return context.role as ProjectRole;
+      }
+    }
     if (!this.prisma) return null;
     const member = await this.prisma.projectMember.findUnique({
       where: { projectId_userId: { projectId, userId } },

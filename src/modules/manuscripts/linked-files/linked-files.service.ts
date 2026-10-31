@@ -182,6 +182,18 @@ export class LinkedFilesService {
               },
             });
         } else {
+          let targetRelativePath = filename;
+          if (
+            dto.parentFolderId &&
+            typeof this.structureService?.getNodeById === 'function'
+          ) {
+            const parentFolder = await Promise.resolve(
+              this.structureService.getNodeById(projectId, dto.parentFolderId),
+            ).catch(() => null);
+            if (parentFolder?.path && parentFolder.path !== '/') {
+              targetRelativePath = `${parentFolder.path.replace(/^\/+/, '')}/${filename}`;
+            }
+          }
           saga
             .addStep({
               name: 'upload-linked-binary',
@@ -189,7 +201,7 @@ export class LinkedFilesService {
                 const uploadedFile =
                   await this.filestoreService!.uploadFileFromBuffer(
                     projectId,
-                    filename,
+                    targetRelativePath,
                     download.buffer,
                     download.mimeType,
                   );
@@ -504,12 +516,25 @@ export class LinkedFilesService {
           linkedFile.provider === 'mendeley') &&
         linkedFile.collectionId
       ) {
+        let resolvedBibPath = linkedFile.name;
+        if (
+          linkedFile.nodeId &&
+          typeof this.structureService?.getNodeById === 'function'
+        ) {
+          const currentNode = await Promise.resolve(
+            this.structureService.getNodeById(projectId, linkedFile.nodeId),
+          ).catch(() => null);
+          if (currentNode?.path) {
+            resolvedBibPath = currentNode.path.replace(/^\/+/, '');
+            linkedFile.name = currentNode.name || resolvedBibPath;
+          }
+        }
         await this.citationsService!.syncLibraryCollection(
           projectId,
           userId || 'anonymous',
           {
             collectionId: linkedFile.collectionId,
-            targetFilename: linkedFile.name,
+            targetFilename: resolvedBibPath,
           },
         );
 

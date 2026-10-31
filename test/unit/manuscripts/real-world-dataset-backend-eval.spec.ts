@@ -231,7 +231,9 @@ describe('Backend Manuscripts / CLSI / Yjs Gateway - Real-World Dataset Evaluati
       const lines = res.source.split('\n');
       expect(lines[0]).toBe('% \\documentclass[12pt]{article}');
       expect(lines[2]).toContain('\\PassOptionsToPackage{draft}{graphicx}');
-      expect(lines[3]).toBe('\\documentclass[11pt]{article}');
+      expect(lines[1]).toBe('% Old template comment');
+      expect(lines[2]).toBe('\\PassOptionsToPackage{draft}{graphicx}\\documentclass[11pt]{article}');
+      expect(lines[3]).toBe('\\usepackage{graphicx}');
     });
   });
 

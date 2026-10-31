@@ -6,18 +6,19 @@
  */
 
 import {
+  Inject,
   Injectable,
   Logger,
   Optional,
   BadRequestException,
   PayloadTooLargeException,
 } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
 import { Readable } from 'stream';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import {
+  LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
   ManuscriptDomainEventBus,
@@ -79,16 +80,28 @@ export class GitBridgeService {
   private readonly logger = new Logger(GitBridgeService.name);
   private readonly locks = new Map<string, Promise<unknown>>();
   private readonly gitCli: GitCliAdapter;
+  private readonly liveCollab: LiveCollaborationPort;
+  private readonly domainEventBus: ManuscriptDomainEventBus | null;
 
   constructor(
     private readonly repository: GitBridgeRepository,
     private readonly docstore: DocstoreService,
     private readonly filestore: FilestoreService,
     private readonly structure: StructureService,
-    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
     @Optional() gitCli?: GitCliAdapter,
+    @Optional() domainEventBus?: ManuscriptDomainEventBus,
   ) {
     this.gitCli = gitCli ?? new GitCliAdapter();
+    this.liveCollab =
+      liveCollabOrLegacyRef &&
+      typeof (liveCollabOrLegacyRef as LiveCollaborationPort).flushDocs ===
+        'function'
+        ? (liveCollabOrLegacyRef as LiveCollaborationPort)
+        : NOOP_LIVE_COLLABORATION;
+    this.domainEventBus = domainEventBus ?? null;
   }
 
   // ─── Token & Access Management ──────────────────────────────────────────────
@@ -257,24 +270,11 @@ export class GitBridgeService {
   }
 
   private live(): LiveCollaborationPort {
-    try {
-      return (
-        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ??
-        NOOP_LIVE_COLLABORATION
-      );
-    } catch {
-      return NOOP_LIVE_COLLABORATION;
-    }
+    return this.liveCollab;
   }
 
   private domainBus(): ManuscriptDomainEventBus | null {
-    try {
-      return (
-        this.moduleRef?.get(ManuscriptDomainEventBus, { strict: false }) ?? null
-      );
-    } catch {
-      return null;
-    }
+    return this.domainEventBus;
   }
 
   /** Commits the current project state to `main`; returns tip sha. Caller holds lock. */

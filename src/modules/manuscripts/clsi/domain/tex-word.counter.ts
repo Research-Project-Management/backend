@@ -3,7 +3,7 @@
  * Pure in-process academic word and structural element counter following Overleaf texcount rules.
  */
 
-import { IWordCounter, WordCountStats } from './clsi-ports';
+import { IWordCounter, WordCountStats } from './clsi.ports';
 
 export class TexWordCounter implements IWordCounter {
   private countWords(text: string): number {

@@ -4,6 +4,7 @@
  * for comparing Manuscript Snapshots.
  */
 
+import { Injectable } from '@nestjs/common';
 import { Snapshot } from './snapshot.entity';
 import {
   DiffHunkVo,
@@ -13,6 +14,7 @@ import {
   WordDiffToken,
 } from './project-history.ports';
 
+@Injectable()
 export class MyersDiffEngine {
   /**
    * Compares two snapshots and identifies all added, deleted, modified, and renamed files.

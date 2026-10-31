@@ -6,7 +6,7 @@
 import {
   ManuscriptNodeEntity,
   ManuscriptNodeType,
-} from './manuscript-node.entity';
+} from './node.entity';
 
 export interface CreateNodeParams {
   projectId: string;

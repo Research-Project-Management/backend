@@ -30,7 +30,7 @@ export class DocumentTranspilerAdapter extends IDocumentTranspilerPort {
   private readonly logger = new Logger(DocumentTranspilerAdapter.name);
   private readonly zipEngine: IZipEnginePort;
 
-  constructor(@Optional() zipEngine?: IZipEnginePort) {
+  constructor(@Optional() zipEngine?: PkzipEngineAdapter) {
     super();
     this.zipEngine = zipEngine ?? new PkzipEngineAdapter();
   }

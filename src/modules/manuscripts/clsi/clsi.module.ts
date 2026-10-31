@@ -30,7 +30,7 @@ import {
   LatexmkEngine,
   ClsiHealthCheck,
 } from './services/compile-pipeline.service';
-import { ISandboxRunner } from './domain/clsi-ports';
+import { ISandboxRunner } from './domain/clsi.ports';
 import {
   parseSandboxConfig,
   buildSandboxProfileFromConfig,

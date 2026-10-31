@@ -6,6 +6,7 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
 import { FilestoreRepository } from './filestore.repository';
 import {
@@ -15,13 +16,18 @@ import {
   StorageObjectMetadata,
   StreamManuscriptFileOutput,
   GetFileHeadOutput,
+  MAX_FILE_SIZE_BYTES,
+  StorageQuotaExceededException,
 } from './filestore.types';
 
 @Injectable()
 export class FilestoreService {
   private readonly logger = new Logger(FilestoreService.name);
 
-  constructor(private readonly repository: FilestoreRepository) {}
+  constructor(
+    private readonly repository: FilestoreRepository,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+  ) {}
 
   /**
    * Directly opens a readable stream for a file without passing through HTTP.
@@ -106,8 +112,17 @@ export class FilestoreService {
     bucketName = 'manuscript-files',
     options?: { syncStructureNode?: boolean },
   ): Promise<ManuscriptFile> {
+    // Validate filename BEFORE spooling stream or writing to S3/disk storage
+    const sanitizedName = ManuscriptFile.sanitizeFilename(name);
+
     const { contentHash, sizeBytes, dataStream } =
       await this.repository.hashStream(stream);
+
+    if (sizeBytes > MAX_FILE_SIZE_BYTES) {
+      dataStream.destroy();
+      throw new StorageQuotaExceededException(sizeBytes, MAX_FILE_SIZE_BYTES);
+    }
+
     const storageKey = this.repository.buildStorageKey(contentHash);
 
     const blobExists = await this.repository.checkObjectExists(
@@ -118,7 +133,7 @@ export class FilestoreService {
     if (blobExists) {
       dataStream.destroy();
       this.logger.log(
-        `[CAS Deduplication] Reusing existing blob '${storageKey.getValue()}' for file '${name}' in project '${projectId}'. (0 bytes written to storage)`,
+        `[CAS Deduplication] Reusing existing blob '${storageKey.getValue()}' for file '${sanitizedName}' in project '${projectId}'. (0 bytes written to storage)`,
       );
     } else {
       await this.repository.sendStream(
@@ -134,7 +149,6 @@ export class FilestoreService {
       );
     }
 
-    const sanitizedName = ManuscriptFile.sanitizeFilename(name);
     const existing = await this.repository.findByProjectAndName(
       projectId,
       sanitizedName,
@@ -164,12 +178,29 @@ export class FilestoreService {
       updatedAt: new Date(),
     });
 
-    return await (
+    const saved = await (
       this.repository.save as (
         f: ManuscriptFile,
         opts?: { syncStructureNode?: boolean },
       ) => Promise<ManuscriptFile>
     )(fileEntity, options);
+
+    if (options?.syncStructureNode !== false) {
+      this.eventEmitter?.emit('manuscripts.file-tree.change', {
+        projectId,
+        change: {
+          action: 'create',
+          node: {
+            id: saved.id,
+            fileId: saved.id,
+            name: saved.name,
+            path: `/${saved.name.replace(/^\/+/, '')}`,
+          },
+        },
+      });
+    }
+
+    return saved;
   }
 
   /**
@@ -253,6 +284,17 @@ export class FilestoreService {
 
     file.markDeleted();
     await this.repository.save(file);
+
+    this.eventEmitter?.emit('manuscripts.file-tree.change', {
+      projectId,
+      change: {
+        action: 'delete',
+        node: {
+          id: fileId,
+          fileId,
+        },
+      },
+    });
 
     if (purgeBlob) {
       const remainingRefs = await this.repository.countReferencesByHash(

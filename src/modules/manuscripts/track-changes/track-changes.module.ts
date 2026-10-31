@@ -6,7 +6,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
-import { PagesReviewController } from '@/modules/manuscripts/docstore/controllers/pages-review.controller';
+import { PagesReviewController } from '@/modules/manuscripts/docstore/controllers/review.controller';
 
 import { TrackChangesController } from './track-changes.controller';
 import { TrackChangesService } from './track-changes.service';
@@ -15,11 +15,6 @@ import {
   DocstorePatcherAdapter,
   RealtimeNotifierAdapter,
 } from './adapters/track-changes.adapters';
-import {
-  ITrackChangesRepositoryPort,
-  IDocstorePatcherPort,
-  IRealtimeNotifierPort,
-} from './domain';
 
 @Module({
   imports: [PrismaModule, DocstoreModule],
@@ -29,25 +24,12 @@ import {
     TrackChangesRepository,
     DocstorePatcherAdapter,
     RealtimeNotifierAdapter,
-    {
-      provide: ITrackChangesRepositoryPort,
-      useExisting: TrackChangesRepository,
-    },
-    {
-      provide: IDocstorePatcherPort,
-      useExisting: DocstorePatcherAdapter,
-    },
-    {
-      provide: IRealtimeNotifierPort,
-      useExisting: RealtimeNotifierAdapter,
-    },
   ],
   exports: [
     TrackChangesService,
     TrackChangesRepository,
-    ITrackChangesRepositoryPort,
-    IDocstorePatcherPort,
-    IRealtimeNotifierPort,
+    DocstorePatcherAdapter,
+    RealtimeNotifierAdapter,
   ],
 })
 export class TrackChangesModule {}

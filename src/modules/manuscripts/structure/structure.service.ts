@@ -5,7 +5,6 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
 import {
   IStructureRepository,
   ManuscriptNodeEntity,
@@ -32,6 +31,7 @@ import {
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
+import { StructureRepository } from './structure.repository';
 
 export type { CompilationPayload };
 
@@ -46,15 +46,23 @@ export class StructureService {
     @Optional() private readonly realtimeService?: RealtimeFacade,
     @Optional() private readonly filestoreService?: FilestoreService,
     @Optional() private readonly docstoreService?: DocstoreService,
-    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional()
+    @Inject(ManuscriptDomainEventBus)
+    _legacyOrEventBus?: ManuscriptDomainEventBus | unknown,
     @Optional() domainEventBus?: ManuscriptDomainEventBus,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly injectedLiveCollab?: LiveCollaborationPort,
   ) {
-    this.domainEventBus =
+    const resolvedBus =
       domainEventBus ??
-      new ManuscriptDomainEventBus(this.moduleRef, this.injectedLiveCollab);
+      (_legacyOrEventBus &&
+      typeof (_legacyOrEventBus as ManuscriptDomainEventBus).publish ===
+        'function'
+        ? (_legacyOrEventBus as ManuscriptDomainEventBus)
+        : undefined);
+    this.domainEventBus =
+      resolvedBus ?? new ManuscriptDomainEventBus(this.injectedLiveCollab);
   }
 
   public async getFileTree(projectId: string): Promise<TreeNodeDto[]> {
@@ -241,7 +249,8 @@ export class StructureService {
     }
 
     try {
-      const node = await this.repository.createNode({
+      const shouldSetRootDoc = Boolean(dto.isRootDoc && dto.type === 'DOC');
+      let node = await this.repository.createNode({
         projectId,
         parentId: parentNode ? parentNode.id : null,
         type: dto.type,
@@ -249,16 +258,17 @@ export class StructureService {
         path: computedPath,
         docId: resolvedDocId,
         fileId: dto.fileId,
-        isRootDoc: dto.isRootDoc ?? false,
+        isRootDoc: shouldSetRootDoc,
         ...(resolvedSizeBytes !== undefined
           ? { sizeBytes: resolvedSizeBytes }
           : {}),
         ...(resolvedHash !== undefined ? { hash: resolvedHash } : {}),
       });
 
-      if (dto.isRootDoc && dto.type === 'DOC') {
+      if (shouldSetRootDoc) {
         try {
           await this.repository.setRootDoc(projectId, node.id);
+          node.markAsRootDoc(true);
         } catch (rootErr: unknown) {
           this.logger.warn(
             `Failed to set root doc for newly created node ${node.id} in project ${projectId}: ${String(rootErr)}`,
@@ -275,14 +285,20 @@ export class StructureService {
       if (resolvedDocId && !dto.docId) {
         try {
           if (this.docstoreService) {
-            await this.docstoreService.patchDoc(projectId, resolvedDocId, {
-              deleted: true,
-              deletedAt: new Date().toISOString(),
-            });
+            if (typeof this.docstoreService.deleteDoc === 'function') {
+              await this.docstoreService.deleteDoc(projectId, resolvedDocId, {
+                soft: false,
+              });
+            } else {
+              await this.docstoreService.patchDoc(projectId, resolvedDocId, {
+                deleted: true,
+                deletedAt: new Date().toISOString(),
+              });
+            }
           }
         } catch (rollbackErr) {
           this.logger.warn(
-            `Failed to soft-delete orphan backing doc ${resolvedDocId} after createNode error: ${String(rollbackErr)}`,
+            `Failed to delete orphan backing doc ${resolvedDocId} after createNode error: ${String(rollbackErr)}`,
           );
         }
       }
@@ -315,13 +331,29 @@ export class StructureService {
       }
 
       if (!found) {
-        found = await this.repository.createNode({
-          projectId,
-          parentId: parentNode ? parentNode.id : null,
-          type: 'FOLDER',
-          name: segment,
-          path: currentPath,
-        });
+        try {
+          found = await this.repository.createNode({
+            projectId,
+            parentId: parentNode ? parentNode.id : null,
+            type: 'FOLDER',
+            name: segment,
+            path: currentPath,
+          });
+        } catch (err: unknown) {
+          const errObj = err as { code?: string; message?: string } | null;
+          if (
+            errObj?.code === 'P2002' ||
+            errObj?.message?.includes('P2002') ||
+            err instanceof DuplicateNodePathError
+          ) {
+            found = await this.repository.findByPath(projectId, currentPath);
+            if (!found || !found.isFolder()) {
+              throw new DuplicateNodePathError(currentPath);
+            }
+          } else {
+            throw err;
+          }
+        }
       }
 
       parentNode = found;
@@ -394,13 +426,13 @@ export class StructureService {
     }
     existingNode.assertMutableTarget();
 
-    // If caller passes a relative path (e.g. "sections/new_name.tex"), extract the leaf name
-    // when the parent folder is unchanged, or delegate to move+rename when the parent folder changes.
+    // If caller passes a relative or absolute path (e.g. "sections/new_name.tex" or "/new_name.tex"),
+    // extract the leaf name when the parent folder is unchanged, or delegate to move+rename when the parent folder changes.
     const rawInput = (dto.name || '').trim();
     if (rawInput.includes('/') || rawInput.includes('\\')) {
       const parsed = NodePathVo.parse(rawInput);
       const currentParentPath = NodePathVo.dirname(existingNode.path);
-      if (parsed.parentPath !== '/' && parsed.parentPath !== currentParentPath) {
+      if (parsed.parentPath !== currentParentPath) {
         const { parentNode: destParent, computedPath: destPath } =
           await this.resolveOrMaterializeParentFolder(projectId, {
             explicitPath: parsed.normalizedPath,
@@ -554,7 +586,9 @@ export class StructureService {
     found.assertCanBeRootDoc();
 
     await this.repository.setRootDoc(projectId, found.id);
-    const node = (await this.repository.findById(projectId, found.id))!;
+    found.markAsRootDoc(true);
+    const node =
+      (await this.repository.findById(projectId, found.id)) ?? found;
 
     this.realtimeService?.broadcastFileTreeChange(projectId, {
       action: 'set-root',
@@ -609,57 +643,67 @@ export class StructureService {
       throw new RootDocNotFoundError(projectId);
     }
 
-    const files: WorkspaceFile[] = [];
+    const nonFolderNodes = nodes.filter((n) => !n.isFolder());
+    const files: WorkspaceFile[] = new Array(nonFolderNodes.length);
+    const STREAM_CONCURRENCY = 8;
 
-    for (const node of nodes) {
-      if (node.isFolder()) continue;
+    for (let i = 0; i < nonFolderNodes.length; i += STREAM_CONCURRENCY) {
+      const batch = nonFolderNodes.slice(i, i + STREAM_CONCURRENCY);
+      await Promise.all(
+        batch.map(async (node, idx) => {
+          const targetIndex = i + idx;
+          const relativePath = FileTreeBuilder.toRelativeCompilerPath(
+            node.path,
+          );
 
-      const relativePath = FileTreeBuilder.toRelativeCompilerPath(node.path);
+          if (node.isDoc()) {
+            const docData =
+              docContentsMap.get(node.id) ||
+              (node.docId ? docContentsMap.get(node.docId) : undefined);
+            const content = docData ? docData.lines.join('\n') : '';
+            const hash = docData?.hash || node.hash || undefined;
 
-      if (node.isDoc()) {
-        const docData =
-          docContentsMap.get(node.id) ||
-          (node.docId ? docContentsMap.get(node.docId) : undefined);
-        const content = docData ? docData.lines.join('\n') : '';
-        const hash = docData?.hash || node.hash || undefined;
-
-        files.push({
-          path: relativePath,
-          content,
-          hash,
-        });
-      } else if (node.isFile()) {
-        let binaryContent: Buffer | string = '';
-        if (node.fileId && this.filestoreService) {
-          try {
-            const { stream } = await this.filestoreService.openReadStream(
-              projectId,
-              node.fileId,
-            );
-            const chunks: Buffer[] = [];
-            for await (const chunk of stream) {
-              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            files[targetIndex] = {
+              path: relativePath,
+              content,
+              hash,
+            };
+          } else {
+            let binaryContent: Buffer | string = '';
+            if (node.fileId && this.filestoreService) {
+              try {
+                const { stream } = await this.filestoreService.openReadStream(
+                  projectId,
+                  node.fileId,
+                );
+                const chunks: Buffer[] = [];
+                for await (const chunk of stream) {
+                  chunks.push(
+                    Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
+                  );
+                }
+                binaryContent = Buffer.concat(chunks);
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err);
+                this.logger.warn(
+                  `Failed to read binary file ${node.fileId} (${relativePath}) from filestore: ${msg}`,
+                );
+              }
             }
-            binaryContent = Buffer.concat(chunks);
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.logger.warn(
-              `Failed to read binary file ${node.fileId} (${relativePath}) from filestore: ${msg}`,
-            );
-          }
-        }
 
-        files.push({
-          path: relativePath,
-          content: binaryContent,
-          hash: node.hash || undefined,
-        });
-      }
+            files[targetIndex] = {
+              path: relativePath,
+              content: binaryContent,
+              hash: node.hash || undefined,
+            };
+          }
+        }),
+      );
     }
 
     return {
       rootDocPath: FileTreeBuilder.toRelativeCompilerPath(rootNode.path),
-      files,
+      files: files.filter(Boolean),
     };
   }
 

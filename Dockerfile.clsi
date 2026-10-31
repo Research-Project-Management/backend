@@ -1,0 +1,74 @@
+# ==============================================================================
+# Multi-stage Dockerfile for Flux CLSI Microservice (TeX Live Compilation Engine)
+# ==============================================================================
+
+FROM node:22-alpine AS base
+RUN apk add --no-cache libc6-compat dumb-init curl && \
+    npm install -g pnpm@10
+WORKDIR /app
+
+FROM base AS dependencies
+WORKDIR /app
+COPY package.json pnpm-lock.yaml prisma.config.ts ./
+COPY prisma ./prisma
+RUN pnpm install
+
+FROM base AS builder
+WORKDIR /app
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY . .
+RUN pnpm run build:clsi
+RUN pnpm prune --prod || pnpm install --prod --ignore-scripts
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+
+# Install TeX Live engines (pdflatex, xelatex, lualatex, latexmk, synctex),
+# bibliography processors (bibtex, biber), and comprehensive academic macro packages
+RUN apk add --no-cache \
+    libc6-compat \
+    dumb-init \
+    curl \
+    perl \
+    ghostscript \
+    biber \
+    texlive \
+    texlive-luatex \
+    texlive-xetex \
+    texlive-dvi \
+    texmf-dist-latexrecommended \
+    texmf-dist-latexextra \
+    texmf-dist-mathscience \
+    texmf-dist-pictures \
+    texmf-dist-bibtexextra \
+    texmf-dist-publishers \
+    texmf-dist-plaingeneric \
+    texmf-dist-fontsrecommended \
+    texmf-dist-langenglish \
+    texmf-dist-langother
+
+ENV NODE_ENV=production
+ENV PORT=3013
+ENV CLSI_PORT=3013
+ENV HOST=0.0.0.0
+ENV CLSI_SCRATCH_DIR=/tmp/clsi-scratch
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 -G nodejs -h /home/nestjs -D nestjs && \
+    mkdir -p /tmp/clsi-scratch && \
+    chown -R nestjs:nodejs /tmp/clsi-scratch && \
+    chmod 1777 /tmp/clsi-scratch
+
+COPY --chown=nestjs:nodejs package.json ./
+COPY --chown=nestjs:nodejs --from=builder /app/node_modules ./node_modules
+COPY --chown=nestjs:nodejs --from=builder /app/dist ./dist
+
+USER nestjs
+
+EXPOSE 3013
+
+HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -sf "http://localhost:${PORT:-3013}/status" || exit 1
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "dist/clsi.js"]

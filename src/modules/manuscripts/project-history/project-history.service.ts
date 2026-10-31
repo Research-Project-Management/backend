@@ -30,7 +30,7 @@ import {
   DiffResponseDto,
 } from './dto/history.dto';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
-import { ManuscriptUserResolverService } from '@/modules/manuscripts/docstore/services/manuscript-user-resolver.service';
+import { ManuscriptUserResolverService } from '@/modules/manuscripts/core/services/user-resolver.service';
 
 @Injectable()
 export class ProjectHistoryService {

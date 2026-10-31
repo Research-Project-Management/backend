@@ -7,28 +7,28 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '@/core';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
-import { PagesDocController } from './controllers/pages-doc.controller';
-import { PagesSearchPresenceController } from './controllers/pages-search-presence.controller';
+import { PagesDocController } from './controllers/doc.controller';
+import { PagesSearchPresenceController } from './controllers/search-presence.controller';
 import { DocstoreService } from './docstore.service';
-import { ManuscriptPageService } from '../core/services/manuscript-page.service';
-import { ManuscriptUserResolverService } from '../core/services/manuscript-user-resolver.service';
-import { ManuscriptPresenceService } from './services/manuscript-presence.service';
-import { ManuscriptSearchReplaceService } from './services/manuscript-search-replace.service';
-import { ManuscriptProjectBootstrapService } from './services/manuscript-project-bootstrap.service';
+import { ManuscriptPageService } from '../core/services/page.service';
+import { ManuscriptUserResolverService } from '../core/services/user-resolver.service';
+import { ManuscriptPresenceService } from './services/presence.service';
+import { ManuscriptSearchReplaceService } from './services/search-replace.service';
+import { ManuscriptProjectBootstrapService } from './services/bootstrap.service';
 
 // Repositories & Adapters
 import { DocstoreRepository } from './repositories/docstore.repository';
 import {
   DocArchiveRepository,
   StoragePortDocArchiveAdapter,
-} from './repositories/doc-archive.repository';
+} from './repositories/archive.repository';
 import {
   DocHasherAdapter,
   IDocRepository,
   IDocPersistor,
   IDocHasher,
 } from './domain';
-import { ManuscriptPageScopeRepository } from './repositories/manuscript-page-scope.repository';
+import { ManuscriptPageScopeRepository } from './repositories/scope.repository';
 
 @Module({
   imports: [ConfigModule, PrismaModule, FilestoreModule],
@@ -44,24 +44,13 @@ import { ManuscriptPageScopeRepository } from './repositories/manuscript-page-sc
 
     // Repositories & Adapters
     DocstoreRepository,
+    { provide: IDocRepository, useExisting: DocstoreRepository },
     DocArchiveRepository,
     StoragePortDocArchiveAdapter,
+    { provide: IDocPersistor, useExisting: StoragePortDocArchiveAdapter },
     DocHasherAdapter,
+    { provide: IDocHasher, useExisting: DocHasherAdapter },
     ManuscriptPageScopeRepository,
-
-    // Token Bindings
-    {
-      provide: IDocRepository,
-      useExisting: DocstoreRepository,
-    },
-    {
-      provide: IDocPersistor,
-      useClass: StoragePortDocArchiveAdapter,
-    },
-    {
-      provide: IDocHasher,
-      useExisting: DocHasherAdapter,
-    },
   ],
   exports: [
     ManuscriptPageService,
@@ -71,12 +60,13 @@ import { ManuscriptPageScopeRepository } from './repositories/manuscript-page-sc
     ManuscriptSearchReplaceService,
     ManuscriptProjectBootstrapService,
     DocstoreRepository,
+    IDocRepository,
     DocArchiveRepository,
     StoragePortDocArchiveAdapter,
-    ManuscriptPageScopeRepository,
-    IDocRepository,
     IDocPersistor,
+    DocHasherAdapter,
     IDocHasher,
+    ManuscriptPageScopeRepository,
   ],
 })
 export class DocstoreModule {}

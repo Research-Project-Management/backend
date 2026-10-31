@@ -7,7 +7,7 @@
 import {
   InvalidWordException,
   UnsupportedLanguageException,
-} from './spelling.exceptions';
+} from './spelling.errors';
 import {
   ACADEMIC_SHARED_WORDS,
   ENGLISH_COMMON_WORDS,

@@ -9,7 +9,7 @@ export * from './export-import.controller';
 export * from './dto/export-import.dto';
 
 // Repositories
-export * from './repositories/manuscript-aggregator.repository';
+export * from './repositories/aggregator.repository';
 
 // Services & Adapters
 export { PkzipEngineAdapter } from './services/pkzip-engine.adapter';

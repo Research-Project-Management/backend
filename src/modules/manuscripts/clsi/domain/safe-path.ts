@@ -6,7 +6,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { UnsafePathException } from './sandbox-errors';
+import { UnsafePathException } from './sandbox.errors';
 
 export class SafePath {
   /**

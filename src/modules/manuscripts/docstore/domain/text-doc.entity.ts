@@ -3,7 +3,7 @@
  * Rich Domain Entity representing a LaTeX/TeX text document in the Manuscripts subsystem.
  */
 
-import { DocRanges, DocRangeVo } from './doc-range.vo';
+import { DocRanges, DocRangeVo } from './doc-range';
 import { WorkspaceFile } from '@/modules/manuscripts/core';
 
 export interface TextDocProps {

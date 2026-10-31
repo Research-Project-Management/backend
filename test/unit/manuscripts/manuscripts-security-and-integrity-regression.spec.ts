@@ -37,7 +37,7 @@ import {
   FileSnapshotVo,
   Snapshot,
 } from '@/modules/manuscripts/project-history/domain';
-import { sanitizePkZipPath } from '@/modules/manuscripts/core/utils/pkzip-builder.util';
+import { sanitizePkZipPath } from '@/modules/manuscripts/core/utils/pkzip-builder';
 import { RemoteClsiClientAdapter } from '@/modules/manuscripts/clsi/services/remote-clsi.client';
 import { ClsiWorkspacePlannerService } from '@/modules/manuscripts/clsi/services/workspace-planner.service';
 import { planDbFileSet } from '@/modules/manuscripts/clsi/domain/compile-fileset.planner';
@@ -49,14 +49,14 @@ import {
   ProjectWorkspaceCollectorService,
 } from '@/modules/manuscripts/core';
 import { YjsService } from '@/modules/realtime/manuscripts/yjs.service';
-import { ManuscriptSearchReplaceService } from '@/modules/manuscripts/docstore/services/manuscript-search-replace.service';
+import { ManuscriptSearchReplaceService } from '@/modules/manuscripts/docstore/services/search-replace.service';
 import { CitationsRepository } from '@/modules/manuscripts/citations/citations.repository';
 import { SpellingService } from '@/modules/manuscripts/spelling/spelling.service';
 import { DiagnosticsService } from '@/modules/manuscripts/diagnostics/diagnostics.service';
 import {
   ManuscriptAggregatorAdapter,
   ManuscriptHydratorAdapter,
-} from '@/modules/manuscripts/export-import/repositories/manuscript-aggregator.repository';
+} from '@/modules/manuscripts/export-import/repositories/aggregator.repository';
 import { ArchiveEntryVo } from '@/modules/manuscripts/export-import/domain';
 import * as Y from 'yjs';
 import { ManuscriptsNotificationsService } from '@/modules/notifications/manuscripts/manuscripts-notifications.service';

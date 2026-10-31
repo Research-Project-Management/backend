@@ -20,11 +20,11 @@ import {
 } from '@nestjs/common';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
-import { IntegrationsRepository } from '@/modules/integrations/integrations.repository';
-import { ZoteroProvider } from '@/modules/integrations/providers/zotero.provider';
-import { MendeleyProvider } from '@/modules/integrations/providers/mendeley.provider';
-import { decryptToken } from '@/modules/integrations/utils/integration-crypto.utils';
+import {
+  ManuscriptNodeEntity,
+  NodePathVo,
+} from '@/modules/manuscripts/structure/domain';
+import { IntegrationsService } from '@/modules/integrations/integrations.service';
 import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
 import {
   LIVE_COLLABORATION_PORT,
@@ -48,6 +48,8 @@ export class CitationsRepository
 {
   private readonly logger = new Logger(CitationsRepository.name);
   protected bibParser: IBibtexParserPort;
+  private readonly liveCollab?: LiveCollaborationPort;
+  private readonly domainEventBus?: ManuscriptDomainEventBus;
 
   constructor(
     @Optional()
@@ -55,11 +57,7 @@ export class CitationsRepository
     @Optional()
     private readonly docstoreService?: DocstoreService,
     @Optional()
-    private readonly integrationsRepo?: IntegrationsRepository,
-    @Optional()
-    private readonly zoteroProvider?: ZoteroProvider,
-    @Optional()
-    private readonly mendeleyProvider?: MendeleyProvider,
+    private readonly integrationsService?: IntegrationsService,
     @Optional()
     @Inject(LIBRARY_FACADE)
     private readonly libraryFacade?: ILibraryFacade,
@@ -67,11 +65,51 @@ export class CitationsRepository
     bibParser?: RegexAstBibtexParser,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
-    private readonly liveCollab?: LiveCollaborationPort,
+    liveCollabOrLegacy?: LiveCollaborationPort,
     @Optional()
-    private readonly domainEventBus?: ManuscriptDomainEventBus,
+    domainEventBusOrParser?: ManuscriptDomainEventBus | RegexAstBibtexParser,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    legacyLiveCollab?: LiveCollaborationPort,
+    @Optional()
+    legacyDomainEventBus?: ManuscriptDomainEventBus,
   ) {
-    this.bibParser = bibParser ?? new RegexAstBibtexParser();
+    const isParser = (obj: unknown): obj is IBibtexParserPort =>
+      Boolean(
+        obj &&
+          typeof (obj as IBibtexParserPort).parse === 'function' &&
+          typeof (obj as IBibtexParserPort).format === 'function',
+      );
+    const isEventBus = (obj: unknown): obj is ManuscriptDomainEventBus =>
+      Boolean(
+        obj &&
+          typeof (obj as ManuscriptDomainEventBus).publish === 'function',
+      );
+    const isLiveCollab = (obj: unknown): obj is LiveCollaborationPort =>
+      Boolean(
+        obj &&
+          (typeof (obj as LiveCollaborationPort).flushDocs === 'function' ||
+            typeof (obj as LiveCollaborationPort).applyExternalText ===
+              'function'),
+      );
+
+    this.bibParser = isParser(bibParser)
+      ? bibParser
+      : isParser(domainEventBusOrParser)
+        ? domainEventBusOrParser
+        : new RegexAstBibtexParser();
+
+    this.liveCollab = isLiveCollab(liveCollabOrLegacy)
+      ? liveCollabOrLegacy
+      : isLiveCollab(legacyLiveCollab)
+        ? legacyLiveCollab
+        : undefined;
+
+    this.domainEventBus = isEventBus(domainEventBusOrParser)
+      ? domainEventBusOrParser
+      : isEventBus(legacyDomainEventBus)
+        ? legacyDomainEventBus
+        : undefined;
   }
 
   // ─── Project .bib File Aggregation & Upsert ─────────────────────────────────
@@ -253,7 +291,7 @@ export class CitationsRepository
     try {
       newNode = await this.structureService.createNode(projectId, {
         path: cleanPath,
-        name: cleanFilename,
+        name: NodePathVo.basename(cleanPath) || cleanFilename,
         type: 'DOC',
         docId: createdDocId,
         parentId: null,
@@ -301,63 +339,53 @@ export class CitationsRepository
   ): Promise<LibraryCollectionSummary[]> {
     const results: LibraryCollectionSummary[] = [];
 
-    if (this.integrationsRepo && this.zoteroProvider) {
+    if (this.integrationsService) {
       try {
-        const conn = await this.integrationsRepo.findConnection(
+        const zoteroCols = await this.integrationsService.listCollections(
           userId,
           'zotero',
         );
-        if (conn && conn.status === 'connected' && !conn.authFailedAt) {
-          const decryptedToken = decryptToken(conn.accessToken);
-          const zoteroCols = await this.zoteroProvider.fetchCollections(
-            decryptedToken,
-            conn.providerUserId,
-          );
-          for (const col of zoteroCols) {
-            results.push({
-              id: `zotero:${col.id}`,
-              name: `[Zotero] ${col.name}`,
-              itemCount: col.itemCount,
-            });
-          }
+        for (const col of zoteroCols) {
+          results.push({
+            id: `zotero:${col.id}`,
+            name: `[Zotero] ${col.name}`,
+            itemCount: col.itemCount,
+          });
         }
       } catch (zoteroErr: unknown) {
-        const msg =
-          zoteroErr instanceof Error ? zoteroErr.message : String(zoteroErr);
-        this.logger.warn(
-          `Failed to fetch remote Zotero collections for user ${userId}: ${msg}`,
-        );
+        if (!(zoteroErr instanceof NotFoundException)) {
+          const msg =
+            zoteroErr instanceof Error ? zoteroErr.message : String(zoteroErr);
+          this.logger.warn(
+            `Failed to fetch remote Zotero collections for user ${userId}: ${msg}`,
+          );
+        }
       }
     }
 
-    if (this.integrationsRepo && this.mendeleyProvider) {
+    if (this.integrationsService) {
       try {
-        const conn = await this.integrationsRepo.findConnection(
+        const mendeleyCols = await this.integrationsService.listCollections(
           userId,
           'mendeley',
         );
-        if (conn && conn.status === 'connected' && !conn.authFailedAt) {
-          const decryptedToken = decryptToken(conn.accessToken);
-          const mendeleyCols = await this.mendeleyProvider.fetchCollections(
-            decryptedToken,
-            conn.providerUserId,
-          );
-          for (const col of mendeleyCols) {
-            results.push({
-              id: `mendeley:${col.id}`,
-              name: `[Mendeley] ${col.name}`,
-              itemCount: col.itemCount,
-            });
-          }
+        for (const col of mendeleyCols) {
+          results.push({
+            id: `mendeley:${col.id}`,
+            name: `[Mendeley] ${col.name}`,
+            itemCount: col.itemCount,
+          });
         }
       } catch (mendeleyErr: unknown) {
-        const msg =
-          mendeleyErr instanceof Error
-            ? mendeleyErr.message
-            : String(mendeleyErr);
-        this.logger.warn(
-          `Failed to fetch remote Mendeley collections for user ${userId}: ${msg}`,
-        );
+        if (!(mendeleyErr instanceof NotFoundException)) {
+          const msg =
+            mendeleyErr instanceof Error
+              ? mendeleyErr.message
+              : String(mendeleyErr);
+          this.logger.warn(
+            `Failed to fetch remote Mendeley collections for user ${userId}: ${msg}`,
+          );
+        }
       }
     }
 
@@ -389,56 +417,39 @@ export class CitationsRepository
       collectionId.startsWith('zotero:') ||
       collectionId.startsWith('group:')
     ) {
-      if (!this.integrationsRepo || !this.zoteroProvider) {
+      const rawCollId = collectionId.startsWith('zotero:')
+        ? collectionId.replace('zotero:', '')
+        : collectionId;
+
+      if (!this.integrationsService) {
         throw new ServiceUnavailableException(
           'Zotero integration services are not configured',
         );
       }
 
-      const conn = await this.integrationsRepo.findConnection(userId, 'zotero');
-      if (!conn || conn.status !== 'connected' || conn.authFailedAt) {
-        throw new BadRequestException(
-          'Zotero account is not connected or authorization is invalid',
-        );
-      }
-
-      const decryptedToken = decryptToken(conn.accessToken);
-      const rawCollId = collectionId.startsWith('zotero:')
-        ? collectionId.replace('zotero:', '')
-        : collectionId;
-
-      return await this.zoteroProvider.fetchCollectionBibtex(
-        decryptedToken,
-        conn.providerUserId,
+      const res = await this.integrationsService.fetchRemoteCollectionBibtex(
+        userId,
+        'zotero',
         rawCollId,
       );
+      return res.bibtex;
     }
 
     if (collectionId.startsWith('mendeley:')) {
-      if (!this.integrationsRepo || !this.mendeleyProvider) {
+      const rawCollId = collectionId.replace('mendeley:', '');
+
+      if (!this.integrationsService) {
         throw new ServiceUnavailableException(
           'Mendeley integration services are not configured',
         );
       }
 
-      const conn = await this.integrationsRepo.findConnection(
+      const res = await this.integrationsService.fetchRemoteCollectionBibtex(
         userId,
         'mendeley',
-      );
-      if (!conn || conn.status !== 'connected' || conn.authFailedAt) {
-        throw new BadRequestException(
-          'Mendeley account is not connected or authorization is invalid',
-        );
-      }
-
-      const decryptedToken = decryptToken(conn.accessToken);
-      const rawCollId = collectionId.replace('mendeley:', '');
-
-      return await this.mendeleyProvider.fetchCollectionBibtex(
-        decryptedToken,
-        conn.providerUserId,
         rawCollId,
       );
+      return res.bibtex;
     }
 
     if (this.libraryFacade) {

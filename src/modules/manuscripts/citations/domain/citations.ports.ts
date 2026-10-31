@@ -5,7 +5,7 @@
 
 import { BibEntry } from './bib-entry.entity';
 import { BibliographyFile } from './bibliography-file.entity';
-import { AcademicIdentifierVo } from './academic-identifier.vo';
+import { AcademicIdentifierVo } from './academic-identifier';
 
 export interface IBibtexParserPort {
   /**

@@ -4,4 +4,4 @@
  */
 
 export * from './docstore.repository';
-export * from './doc-archive.repository';
+export * from './archive.repository';

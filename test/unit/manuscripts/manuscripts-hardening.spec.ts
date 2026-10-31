@@ -1,10 +1,10 @@
 import * as Y from 'yjs';
 import { PkzipEngineAdapter } from '@/modules/manuscripts/export-import/services/pkzip-engine.adapter';
-import { ManuscriptCleanupListener } from '@/modules/manuscripts/core/services/manuscript-cleanup.listener';
+import { ManuscriptCleanupListener } from '@/modules/manuscripts/core/services/cleanup.listener';
 import { YjsUpdateValidator } from '@/modules/realtime/manuscripts/yjs-update-validator';
 import { YjsService } from '@/modules/realtime/manuscripts/yjs.service';
 import { RealtimeValidationFailedException } from '@/modules/realtime/core/ws-errors';
-import { updateDocReviewStatusWithCas } from '@/modules/manuscripts/docstore/controllers/pages-review.helpers';
+import { updateDocReviewStatusWithCas } from '@/modules/manuscripts/docstore/controllers/review.helpers';
 import { Role } from '@/modules/project/access';
 import { ConflictException } from '@nestjs/common';
 

@@ -1,8 +1,8 @@
 import { NotFoundException } from '@nestjs/common';
-import { ManuscriptPageService } from '@/modules/manuscripts/core/services/manuscript-page.service';
-import { PagesDocController } from '@/modules/manuscripts/docstore/controllers/pages-doc.controller';
-import { ManuscriptProjectBootstrapService } from '@/modules/manuscripts/docstore/services/manuscript-project-bootstrap.service';
-import { ManuscriptPageScopeRepository } from '@/modules/manuscripts/docstore/repositories/manuscript-page-scope.repository';
+import { ManuscriptPageService } from '@/modules/manuscripts/core/services/page.service';
+import { PagesDocController } from '@/modules/manuscripts/docstore/controllers/doc.controller';
+import { ManuscriptProjectBootstrapService } from '@/modules/manuscripts/docstore/services/bootstrap.service';
+import { ManuscriptPageScopeRepository } from '@/modules/manuscripts/docstore/repositories/scope.repository';
 
 describe('ManuscriptPageService & Thin Controller Delegation', () => {
   let pageService: ManuscriptPageService;
@@ -317,6 +317,7 @@ describe('ManuscriptPageService & Thin Controller Delegation', () => {
         id: pageId,
         projectId,
       });
+      mockPrisma.manuscriptNode.findMany.mockResolvedValue([]);
 
       const deleted = await pageService.deletePage(pageId, projectId);
       expect(deleted.success).toBe(true);
