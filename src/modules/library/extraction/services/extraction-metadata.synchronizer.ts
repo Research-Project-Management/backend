@@ -12,9 +12,10 @@ import {
   IItemCacheInvalidator,
   normalizeProjectScopeId,
   gzipAsync,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  ItemsMapper,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
-import { ItemsMapper } from '@/modules/library/catalog';
 import {
   buildExtractedMetadataSyncPlan,
   ExtractionSyncAttachmentInput,
@@ -28,7 +29,8 @@ export class ExtractionMetadataSynchronizer {
   constructor(
     private readonly extractionRepo: ExtractionRepository,
     @Optional()
-    private readonly libraryTx?: TransactionService,
+    @Inject(UNIT_OF_WORK)
+    private readonly libraryTx?: IUnitOfWork,
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
@@ -133,9 +135,10 @@ export class ExtractionMetadataSynchronizer {
       qualityScore?: number;
       engineUsed?: string;
     },
-    options?: { skipOutboxPublish?: boolean },
-  ): Promise<{ outboxPublished: boolean }> {
+    options?: { skipOutboxPublish?: boolean; skipCacheInvalidation?: boolean },
+  ): Promise<{ outboxPublished: boolean; cacheInvalidated: boolean }> {
     let outboxPublished = false;
+    let cacheInvalidated = false;
     if (
       (doc.references && doc.references.length > 0) ||
       (doc.sections && doc.sections.length > 0) ||
@@ -353,119 +356,117 @@ export class ExtractionMetadataSynchronizer {
             );
           }
 
-          if (creatorsToSync.length > 0) {
-            const count = await this.extractionRepo.countContributors(
-              attachment.itemId,
-              tx,
-            );
-            if (count === 0) {
-              const validContributors = creatorsToSync
-                .map((c, idx) => {
-                  const cand = c as {
-                    creatorType?: string;
-                    fullName?: string;
-                    name?: string;
-                    firstName?: string;
-                    lastName?: string;
-                    fieldMode?: number;
-                  };
-                  const itemCreatorType = cand.creatorType || primaryRole;
-                  const rawName =
-                    cand.fullName ||
-                    cand.name ||
-                    `${cand.firstName || ''} ${cand.lastName || ''}`.trim();
-                  const parsed = parseCreatorString(
-                    rawName,
-                    idx,
-                    itemCreatorType,
-                  );
-                  const first = (
-                    cand.firstName ||
-                    parsed.firstName ||
-                    ''
-                  ).trim();
-                  const last = (cand.lastName || parsed.lastName || '').trim();
-                  const full =
-                    (cand.firstName || cand.lastName
-                      ? cand.fullName ||
-                        cand.name ||
-                        [first, last].filter(Boolean).join(' ')
-                      : parsed.fullName) ||
-                    rawName ||
-                    [first, last].filter(Boolean).join(' ') ||
-                    '';
-                  if (!full || isNoiseAuthorName(full)) {
-                    return null;
-                  }
-                  return {
-                    itemId: attachment.itemId,
-                    orderIndex: idx,
-                    creatorType: itemCreatorType,
-                    fieldMode: cand.fieldMode ?? parsed.fieldMode ?? 0,
-                    firstName: first,
-                    lastName: last,
-                    fullName:
-                      full ||
-                      [first, last].filter(Boolean).join(' ') ||
-                      'Unknown Author',
-                  };
-                })
-                .filter(Boolean);
+          const [existingContributorsCount, existingTagsCount, existingNotesCount] =
+            await Promise.all([
+              creatorsToSync.length > 0
+                ? this.extractionRepo.countContributors(attachment.itemId, tx)
+                : Promise.resolve(0),
+              tagsToSync.length > 0
+                ? this.extractionRepo.countItemTags(attachment.itemId, tx)
+                : Promise.resolve(0),
+              notesToSync.length > 0
+                ? this.extractionRepo.countItemNotes(attachment.itemId, tx)
+                : Promise.resolve(0),
+            ]);
 
-              if (validContributors.length > 0) {
-                await this.extractionRepo.createContributors(
-                  validContributors as unknown as Prisma.ContributorCreateManyInput[],
-                  tx,
-                  skipVersionIncrement
-                    ? { skipVersionIncrement: true }
-                    : undefined,
+          if (creatorsToSync.length > 0 && existingContributorsCount === 0) {
+            const validContributors = creatorsToSync
+              .map((c, idx) => {
+                const cand = c as {
+                  creatorType?: string;
+                  fullName?: string;
+                  name?: string;
+                  firstName?: string;
+                  lastName?: string;
+                  fieldMode?: number;
+                };
+                const itemCreatorType = cand.creatorType || primaryRole;
+                const rawName =
+                  cand.fullName ||
+                  cand.name ||
+                  `${cand.firstName || ''} ${cand.lastName || ''}`.trim();
+                const parsed = parseCreatorString(
+                  rawName,
+                  idx,
+                  itemCreatorType,
                 );
-              }
-            }
-          }
-
-          if (tagsToSync.length > 0) {
-            const tagCount = await this.extractionRepo.countItemTags(
-              attachment.itemId,
-              tx,
-            );
-            if (tagCount < 15) {
-              const effectiveUserId = attachment.item?.userId || 'system';
-              await this.extractionRepo.syncItemTags(
-                {
-                  userId: effectiveUserId,
+                const first = (
+                  cand.firstName ||
+                  parsed.firstName ||
+                  ''
+                ).trim();
+                const last = (cand.lastName || parsed.lastName || '').trim();
+                const full =
+                  (cand.firstName || cand.lastName
+                    ? cand.fullName ||
+                      cand.name ||
+                      [first, last].filter(Boolean).join(' ')
+                    : parsed.fullName) ||
+                  rawName ||
+                  [first, last].filter(Boolean).join(' ') ||
+                  '';
+                if (!full || isNoiseAuthorName(full)) {
+                  return null;
+                }
+                return {
                   itemId: attachment.itemId,
-                  rawTags: tagsToSync.slice(0, Math.max(1, 25 - tagCount)),
-                  projectId: attachment.item?.projectId,
-                  ...(skipVersionIncrement
-                    ? { skipVersionIncrement: true }
-                    : {}),
-                },
+                  orderIndex: idx,
+                  creatorType: itemCreatorType,
+                  fieldMode: cand.fieldMode ?? parsed.fieldMode ?? 0,
+                  firstName: first,
+                  lastName: last,
+                  fullName:
+                    full ||
+                    [first, last].filter(Boolean).join(' ') ||
+                    'Unknown Author',
+                };
+              })
+              .filter(Boolean);
+
+            if (validContributors.length > 0) {
+              await this.extractionRepo.createContributors(
+                validContributors as unknown as Prisma.ContributorCreateManyInput[],
                 tx,
+                skipVersionIncrement
+                  ? { skipVersionIncrement: true }
+                  : undefined,
               );
             }
           }
 
-          if (notesToSync.length > 0) {
-            const noteCount = await this.extractionRepo.countItemNotes(
-              attachment.itemId,
+          if (tagsToSync.length > 0 && existingTagsCount < 15) {
+            const effectiveUserId = attachment.item?.userId || 'system';
+            await this.extractionRepo.syncItemTags(
+              {
+                userId: effectiveUserId,
+                itemId: attachment.itemId,
+                rawTags: tagsToSync.slice(
+                  0,
+                  Math.max(1, 25 - existingTagsCount),
+                ),
+                projectId: attachment.item?.projectId,
+                ...(skipVersionIncrement
+                  ? { skipVersionIncrement: true }
+                  : {}),
+              },
               tx,
             );
-            if (noteCount === 0) {
-              const effectiveUserId = attachment.item?.userId || 'system';
-              await this.extractionRepo.createItemNotes(
-                {
-                  userId: effectiveUserId,
-                  itemId: attachment.itemId,
-                  notes: notesToSync,
-                  projectId: attachment.item?.projectId,
-                  ...(skipVersionIncrement
-                    ? { skipVersionIncrement: true }
-                    : {}),
-                },
-                tx,
-              );
-            }
+          }
+
+          if (notesToSync.length > 0 && existingNotesCount === 0) {
+            const effectiveUserId = attachment.item?.userId || 'system';
+            await this.extractionRepo.createItemNotes(
+              {
+                userId: effectiveUserId,
+                itemId: attachment.itemId,
+                notes: notesToSync,
+                projectId: attachment.item?.projectId,
+                ...(skipVersionIncrement
+                  ? { skipVersionIncrement: true }
+                  : {}),
+              },
+              tx,
+            );
           }
         };
 
@@ -486,7 +487,25 @@ export class ExtractionMetadataSynchronizer {
           projectId: ownerProjectId,
         };
 
+        const invalidateSyncedItemCache = async () => {
+          if (options?.skipCacheInvalidation) return;
+          const invalidator = this.cacheCoordinator?.invalidateForWrite
+            ? this.cacheCoordinator
+            : this.catalogGateway?.invalidateForWrite
+              ? this.catalogGateway
+              : undefined;
+          if (invalidator?.invalidateForWrite && ownerUserId) {
+            await invalidator.invalidateForWrite({
+              userId: ownerUserId,
+              projectId: ownerProjectId,
+              itemIds: [attachment.itemId],
+            });
+            cacheInvalidated = true;
+          }
+        };
+
         if (hasAnyMutation) {
+          let postCommitRegistered = false;
           if (this.libraryTx && ownerUserId) {
             await this.libraryTx.executeInTransaction(async (tx, helpers) => {
               await runSideEffects(tx, true);
@@ -516,11 +535,16 @@ export class ExtractionMetadataSynchronizer {
                     userId: ownerUserId,
                     projectId: ownerProjectId,
                     attachmentId: attachment.id,
+                    updatedFields: Object.keys(itemPatch),
                     updatedAt: new Date().toISOString(),
                     source: 'extraction.metadata_sync',
                   },
                 );
                 outboxPublished = true;
+              }
+              if (helpers?.onAfterCommit) {
+                postCommitRegistered = true;
+                helpers.onAfterCommit(() => invalidateSyncedItemCache());
               }
             });
           } else {
@@ -528,18 +552,8 @@ export class ExtractionMetadataSynchronizer {
             await this.extractionRepo.updateItem(attachment.itemId, itemPatch);
           }
 
-          const invalidator =
-            this.cacheCoordinator?.invalidateForWrite
-              ? this.cacheCoordinator
-              : this.catalogGateway?.invalidateForWrite
-                ? this.catalogGateway
-                : undefined;
-          if (invalidator?.invalidateForWrite && ownerUserId) {
-            await invalidator.invalidateForWrite({
-              userId: ownerUserId,
-              projectId: ownerProjectId,
-              itemIds: [attachment.itemId],
-            });
+          if (!postCommitRegistered) {
+            await invalidateSyncedItemCache();
           }
         } else if (
           !options?.skipOutboxPublish &&
@@ -556,6 +570,7 @@ export class ExtractionMetadataSynchronizer {
                 userId: ownerUserId,
                 projectId: ownerProjectId,
                 attachmentId: attachment.id,
+                updatedFields: [],
                 updatedAt: new Date().toISOString(),
                 source: 'extraction.metadata_sync',
               },
@@ -573,7 +588,7 @@ export class ExtractionMetadataSynchronizer {
         );
       }
     }
-    return { outboxPublished };
+    return { outboxPublished, cacheInvalidated };
   }
 
   buildMetadataSyncPlan(

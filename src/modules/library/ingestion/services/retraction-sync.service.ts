@@ -18,7 +18,7 @@ import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import { RetractionSeederService } from '@/modules/library/ingestion/services/retraction-seeder.service';
-import { invalidateIngestionItemCache } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
+import { invalidateIngestionItemCache } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 
 export interface RetractionSyncOptions {
   maxDays?: number;

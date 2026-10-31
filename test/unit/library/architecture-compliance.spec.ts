@@ -224,7 +224,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     expect(violations).toEqual([]);
   });
 
-  it('SC-006: Strict Bounded Context Encapsulation (zero deep imports into another context internal folders)', () => {
+  it('SC-006: Strict Bounded Context Encapsulation (zero peer imports or sibling module couplings across non-core sub-modules)', () => {
     const boundedContexts = [
       'catalog',
       'citation',
@@ -233,6 +233,14 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       'search',
       'sync',
     ];
+    const contextModuleMap: Record<string, string> = {
+      catalog: 'CatalogModule',
+      citation: 'CitationModule',
+      extraction: 'ExtractionModule',
+      ingestion: 'IngestionModule',
+      search: 'SearchModule',
+      sync: 'SyncModule',
+    };
     const violations: Array<{ file: string; line: number; match: string }> = [];
 
     for (const file of allFiles) {
@@ -244,20 +252,33 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
 
       const content = fs.readFileSync(file, 'utf-8');
       const lines = content.split(/\r?\n/);
+      const isContextModuleFile =
+        relPath === `${sourceContext}/${sourceContext}.module.ts`;
 
       lines.forEach((line, index) => {
-        if (line.trim().startsWith('//')) return;
+        if (line.trim().startsWith('//') || line.trim().startsWith('*')) return;
         for (const targetContext of boundedContexts) {
           if (targetContext === sourceContext) continue;
-          const deepImportPattern = new RegExp(
-            `(?:@/modules/library/${targetContext}|\\.\\./${targetContext})/(?:services|repositories|controllers|domain|providers|stages|policies|parsers|subscribers|types|dto)/`,
+          const peerImportPattern = new RegExp(
+            `(?:@/modules/library/${targetContext}|\\.\\./${targetContext}|\\.\\./\\.\\./${targetContext})(?:/|['"])`,
           );
-          if (deepImportPattern.test(line)) {
+          if (peerImportPattern.test(line)) {
             violations.push({
               file: relPath,
               line: index + 1,
               match: line.trim(),
             });
+          }
+
+          if (isContextModuleFile) {
+            const siblingModuleName = contextModuleMap[targetContext];
+            if (new RegExp(`\\b${siblingModuleName}\\b`).test(line)) {
+              violations.push({
+                file: relPath,
+                line: index + 1,
+                match: `Sibling module coupling (${siblingModuleName}): ${line.trim()}`,
+              });
+            }
           }
         }
       });
@@ -346,13 +367,37 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
 
   it('SC-009: Centralization of Data, State, Cache & Business Logic (Backend Repositories & Frontend Coordinators/SDK)', () => {
     // 1. Backend: Zero direct this.prisma calls in domain services (excluding infrastructure transaction.service.ts)
+    // AND zero PrismaService / RedisCacheService / Repository imports inside /domain/ across all bounded contexts
     const beDirectPrismaInServices: Array<{ file: string; line: number; match: string }> = [];
+    const beInfraInDomainViolations: Array<{ file: string; line: number; match: string }> = [];
     for (const file of allFiles) {
       const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
+      const content = fs.readFileSync(file, 'utf-8');
+
+      if (relPath.includes('/domain/')) {
+        content.split(/\r?\n/).forEach((line, index) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+          if (
+            /\bPrismaService\b/.test(line) ||
+            /\bRedisCacheService\b/.test(line) ||
+            /from\s+['"][^'"]*\/repositories\//.test(line) ||
+            /\b(?:this\.prisma|tx)\.(?:item|collection|tag|note|attachment|annotation|userPublication|itemMetadata|contributor|itemIdentifier|itemRelation|outboxEvent|changeLog)\b/.test(
+              line,
+            )
+          ) {
+            beInfraInDomainViolations.push({
+              file: relPath,
+              line: index + 1,
+              match: trimmed,
+            });
+          }
+        });
+      }
+
       if (!relPath.includes('/services/') || relPath.endsWith('sync/services/transaction.service.ts')) {
         continue;
       }
-      const content = fs.readFileSync(file, 'utf-8');
       content.split(/\r?\n/).forEach((line, index) => {
         if (
           !line.trim().startsWith('//') &&
@@ -368,6 +413,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       });
     }
     expect(beDirectPrismaInServices).toEqual([]);
+    expect(beInfraInDomainViolations).toEqual([]);
 
     // 2. Frontend: Zero scattered useQueryClient, useQuery, useMutation, localStorage, or direct *Service.* in UI components
     const feRoot = path.resolve(
@@ -555,7 +601,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
 
     const itemsMapperPath = path.join(
       libraryRoot,
-      'catalog/domain/items.mapper.ts',
+      'core/domain/items.mapper.ts',
     );
     const itemsMapperContent = fs.readFileSync(itemsMapperPath, 'utf-8');
     for (const requiredMapperField of [

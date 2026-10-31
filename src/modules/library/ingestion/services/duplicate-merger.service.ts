@@ -21,8 +21,10 @@ import {
   normalizeDoi,
   normalizeProjectScopeId,
   deriveFirstAuthor,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  ItemsMapper,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/ingestion.dto';
 import { PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/ingestion.types';
@@ -36,21 +38,20 @@ import {
   TOP_LEVEL_ITEM_COLUMNS,
   IDENTIFIER_META_KEYS,
   RETRACTION_SURVIVAL_KEYS,
+  buildMergeAuditTrail,
+} from '@/modules/library/ingestion/domain/duplicate-merge.domain';
+import {
+  DuplicateMergeStepContext,
   rewireMergedItemRelations,
   consolidateUserPublications,
   syncMergedIdentifiersInTx,
   applyMergedUpdatesAndClearDuplicateCitationKeyCollision,
   invalidateMergedItemsCache,
-  buildMergeAuditTrail,
-} from '@/modules/library/ingestion/domain/duplicate-merge.domain';
-import {
-  DuplicateMergeStepContext,
   executeDuplicateMergePipeline,
   recordMergedAssetSyncEventsInTx,
   softDeleteDuplicatesAndRecordOutboxInTx,
   updateAndReloadMergedPrimaryInTx,
-} from '@/modules/library/ingestion/domain/duplicate-merge.steps';
-import { ItemsMapper } from '@/modules/library/catalog';
+} from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 import { RetractionBloomFilter } from '@/modules/library/ingestion/domain/retraction-bloom-filter.domain';
 
 export type { ContributorShape };
@@ -66,7 +67,7 @@ export class DuplicateMergerService {
   private readonly logger = new Logger(DuplicateMergerService.name);
 
   constructor(
-    private readonly libraryTx: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional()
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway?: ICatalogFacade,
@@ -175,6 +176,7 @@ export class DuplicateMergerService {
 
     const offloadedFileIdsToDelete: string[] = [];
     const reassignedOrphanFileIds: string[] = [];
+    let postCommitRegistered = false;
 
     const txResult = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
@@ -445,6 +447,22 @@ export class DuplicateMergerService {
           now,
         });
 
+        if (helpers?.onAfterCommit) {
+          postCommitRegistered = true;
+          helpers.onAfterCommit(() =>
+            invalidateMergedItemsCache({
+              cache: this.cache,
+              cacheCoordinator: this.cacheCoordinator,
+              catalogGateway: this.catalogGateway,
+              logger: this.logger,
+              primaryId: primary.id,
+              uniqueDupIds,
+              userId: String(userId),
+              effectiveProjectId,
+            }),
+          );
+        }
+
         return {
           primaryItem: domainPrimary,
           mergedCount: duplicates.length,
@@ -454,17 +472,18 @@ export class DuplicateMergerService {
       },
     );
 
-    // Invalidate Redis cache immediately after DB transaction commits before slow S3 cleanup
-    await invalidateMergedItemsCache({
-      cache: this.cache,
-      cacheCoordinator: this.cacheCoordinator,
-      catalogGateway: this.catalogGateway,
-      logger: this.logger,
-      primaryId: primary.id,
-      uniqueDupIds,
-      userId: String(userId),
-      effectiveProjectId,
-    });
+    if (!postCommitRegistered) {
+      await invalidateMergedItemsCache({
+        cache: this.cache,
+        cacheCoordinator: this.cacheCoordinator,
+        catalogGateway: this.catalogGateway,
+        logger: this.logger,
+        primaryId: primary.id,
+        uniqueDupIds,
+        userId: String(userId),
+        effectiveProjectId,
+      });
+    }
 
     const filesToCleanup = Array.from(
       new Set([...reassignedOrphanFileIds, ...offloadedFileIdsToDelete]),

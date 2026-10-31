@@ -27,7 +27,7 @@ import {
 } from '@/modules/library/search/services/search.service';
 import { TextSearchSpecification } from '@/modules/library/search/domain/item-specifications';
 import { buildSearchFtsSqlQuery } from '@/modules/library/search/repositories/search-sql.helper';
-import { backfillMetadataAndCreatorsStep } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
+import { backfillMetadataAndCreatorsStep } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslStyleFormatterService } from '@/modules/library/citation/services/csl-style-formatter.service';
 import {
@@ -44,15 +44,8 @@ import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
 
 describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Search Normalization', () => {
-  const mockPrismaClient = {
-    tag: {
-      createMany: jest.fn().mockResolvedValue({ count: 0 }),
-      findMany: jest.fn().mockResolvedValue([]),
-    },
-  } as unknown as Parameters<typeof buildCommandCreateInput>[2];
-
   it('promotes Comment: lines from extra into relational Note rows on create and preserves read-path projection', async () => {
-    const { createData } = await buildCommandCreateInput(
+    const { createData } = buildCommandCreateInput(
       'user-123',
       {
         itemType: 'preprint',
@@ -60,7 +53,6 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
         arxivId: '2501.12948',
         extra: 'Comment: 22 pages, 10 figures, accepted to ICML 2025',
       },
-      mockPrismaClient,
     );
 
     const notesListCreate = (

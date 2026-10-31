@@ -21,8 +21,9 @@ import {
   DEFAULT_RENAME_PATTERN,
   TransactionHelpers,
   executeStandardLibraryCacheInvalidation,
+  UNIT_OF_WORK,
+  IUnitOfWork,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import type {
   RenameAttachmentDto,
@@ -63,7 +64,8 @@ export class AttachmentRenamerService {
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()
-    private readonly libraryTx?: TransactionService & LegacyTransactionHelpers,
+    @Inject(UNIT_OF_WORK)
+    private readonly libraryTx?: IUnitOfWork & LegacyTransactionHelpers,
     @Optional()
     @Inject(ITEM_CACHE_INVALIDATOR)
     private readonly cacheCoordinator?: IItemCacheInvalidator,

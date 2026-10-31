@@ -46,8 +46,19 @@ export class RetractionItemEventsSubscriber {
     const userId = event?.userId ?? event?.payload?.userId ?? undefined;
     if (!itemId || !userId) return;
 
-    const updatedFields = event.payload?.updatedFields;
-    const source = (event.payload as { source?: string } | undefined)?.source;
+    const payload = event.payload as
+      | {
+          updatedFields?: string[];
+          userId?: string;
+          projectId?: string;
+          source?: string;
+          doi?: string | null;
+          pmid?: string | null;
+          metadata?: { doi?: string | null; pmid?: string | null };
+        }
+      | undefined;
+    const updatedFields = payload?.updatedFields;
+    const source = payload?.source;
     if (
       source === 'retraction_watch' ||
       (Array.isArray(updatedFields) &&
@@ -56,9 +67,15 @@ export class RetractionItemEventsSubscriber {
     ) {
       return;
     }
-    const mayAffectIdentifier =
-      !Array.isArray(updatedFields) ||
-      updatedFields.some((f) => IDENTIFIER_FIELD_GROUPS.includes(f));
+    const hasExplicitIdentifierInPayload = Boolean(
+      payload?.doi ||
+        payload?.pmid ||
+        payload?.metadata?.doi ||
+        payload?.metadata?.pmid,
+    );
+    const mayAffectIdentifier = Array.isArray(updatedFields)
+      ? updatedFields.some((f) => IDENTIFIER_FIELD_GROUPS.includes(f))
+      : hasExplicitIdentifierInPayload;
     if (!mayAffectIdentifier) return;
 
     try {

@@ -325,13 +325,7 @@ describe('Wave 9 — Metadata Ingestion, Extraction & Persistence Completeness &
       expect(validated.sanitizedItem.bookTitle).toBe('Handbook of AI');
 
       // Also verify CommandPayloadBuilder does not dump extraFields into metadata.extra plain text
-      const mockClient = {
-        tag: {
-          createMany: jest.fn().mockResolvedValue({ count: 0 }),
-          findMany: jest.fn().mockResolvedValue([]),
-        },
-      };
-      const { createData } = await buildCommandCreateInput(
+      const { createData } = buildCommandCreateInput(
         'user-1',
         {
           title: 'Chapter 1: Foundations',
@@ -343,7 +337,6 @@ describe('Wave 9 — Metadata Ingestion, Extraction & Persistence Completeness &
           ingestionStatus: 'COMPLETED',
           verificationScore: 95,
         },
-        mockClient as never,
       );
 
       const meta = createData.metadata as Record<string, unknown>;

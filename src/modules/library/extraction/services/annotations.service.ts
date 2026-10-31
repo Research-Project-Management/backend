@@ -24,15 +24,16 @@ import {
   CATALOG_FACADE,
   ICatalogFacade,
   executeStandardLibraryCacheInvalidation,
+  UNIT_OF_WORK,
+  IUnitOfWork,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { AttachmentsService } from './attachments.service';
 
 @Injectable()
 export class AnnotationsService {
   constructor(
     private readonly annotationsRepo: AnnotationsRepository,
-    private readonly libraryTx: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     private readonly attachmentsService: AttachmentsService,
     private readonly normalizer: AnnotationNormalizer,
     @Optional()
@@ -102,6 +103,7 @@ export class AnnotationsService {
   ) {
     let resolvedItemId: string | undefined;
     let resolvedProjectId: string | undefined;
+    let postCommitRegistered = false;
     const annotation = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const attachment = await this.attachmentsService.assertAttachmentExists(
@@ -134,15 +136,29 @@ export class AnnotationsService {
           created,
         );
 
+        if (helpers?.onAfterCommit) {
+          postCommitRegistered = true;
+          helpers.onAfterCommit(() =>
+            this.invalidateCache(
+              data.attachmentId,
+              resolvedItemId,
+              userId,
+              resolvedProjectId,
+            ),
+          );
+        }
+
         return created;
       },
     );
-    await this.invalidateCache(
-      data.attachmentId,
-      resolvedItemId,
-      userId,
-      resolvedProjectId,
-    );
+    if (!postCommitRegistered) {
+      await this.invalidateCache(
+        data.attachmentId,
+        resolvedItemId,
+        userId,
+        resolvedProjectId,
+      );
+    }
     return annotation;
   }
 
@@ -157,6 +173,7 @@ export class AnnotationsService {
     let resolvedAttachmentId = attachmentId;
     let resolvedItemId: string | undefined;
     let resolvedProjectId: string | undefined;
+    let postCommitRegistered = false;
     const updated = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const existing = await this.annotationsRepo.findById(id, tx);
@@ -207,10 +224,23 @@ export class AnnotationsService {
           result,
         );
 
+        if (resolvedAttachmentId && helpers?.onAfterCommit) {
+          const targetAttId = resolvedAttachmentId;
+          postCommitRegistered = true;
+          helpers.onAfterCommit(() =>
+            this.invalidateCache(
+              targetAttId,
+              resolvedItemId,
+              userId,
+              resolvedProjectId,
+            ),
+          );
+        }
+
         return result;
       },
     );
-    if (resolvedAttachmentId) {
+    if (!postCommitRegistered && resolvedAttachmentId) {
       await this.invalidateCache(
         resolvedAttachmentId,
         resolvedItemId,
@@ -231,6 +261,7 @@ export class AnnotationsService {
     let resolvedAttachmentId = attachmentId;
     let resolvedItemId: string | undefined;
     let resolvedProjectId: string | undefined;
+    let postCommitRegistered = false;
     const deleted = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const existing = await this.annotationsRepo.findById(id, tx);
@@ -293,12 +324,25 @@ export class AnnotationsService {
               deletedAt: new Date(),
             },
           );
+
+          if (resolvedAttachmentId && helpers?.onAfterCommit) {
+            const targetAttId = resolvedAttachmentId;
+            postCommitRegistered = true;
+            helpers.onAfterCommit(() =>
+              this.invalidateCache(
+                targetAttId,
+                resolvedItemId,
+                userId,
+                resolvedProjectId,
+              ),
+            );
+          }
         }
 
         return isDeleted;
       },
     );
-    if (deleted && resolvedAttachmentId) {
+    if (deleted && resolvedAttachmentId && !postCommitRegistered) {
       await this.invalidateCache(
         resolvedAttachmentId,
         resolvedItemId,
@@ -323,6 +367,7 @@ export class AnnotationsService {
 
     let resolvedItemId: string | undefined;
     let resolvedProjectId: string | undefined;
+    let postCommitRegistered = false;
 
     const batchResult = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
@@ -506,15 +551,29 @@ export class AnnotationsService {
           }
         }
 
+        if (helpers?.onAfterCommit) {
+          postCommitRegistered = true;
+          helpers.onAfterCommit(() =>
+            this.invalidateCache(
+              attachmentId,
+              resolvedItemId,
+              userId,
+              resolvedProjectId,
+            ),
+          );
+        }
+
         return result;
       },
     );
-    await this.invalidateCache(
-      attachmentId,
-      resolvedItemId,
-      userId,
-      resolvedProjectId,
-    );
+    if (!postCommitRegistered) {
+      await this.invalidateCache(
+        attachmentId,
+        resolvedItemId,
+        userId,
+        resolvedProjectId,
+      );
+    }
     return batchResult;
   }
 

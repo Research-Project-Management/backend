@@ -17,10 +17,11 @@ import {
   LIBRARY_REDIS_KEYS,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  ItemsMapper,
 } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
-import { TransactionService } from '@/modules/library/sync';
-import { ItemsMapper } from '@/modules/library/catalog';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   DuplicateClusterResult,
@@ -58,7 +59,7 @@ import {
   EffectiveFieldLookupOptions,
   getEffectiveItemField,
 } from '@/modules/library/ingestion/domain/duplicate-clustering.helper';
-import { invalidateIngestionItemCache } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
+import { invalidateIngestionItemCache } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 
 export { asMetaObject, getEffectiveItemField };
 export type { EffectiveFieldLookupOptions };
@@ -74,7 +75,8 @@ export class DuplicateDetectorService {
     @Optional()
     private readonly ingestionRepo?: IngestionRepository,
     @Optional()
-    private readonly libraryTx?: TransactionService,
+    @Inject(UNIT_OF_WORK)
+    private readonly libraryTx?: IUnitOfWork,
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()

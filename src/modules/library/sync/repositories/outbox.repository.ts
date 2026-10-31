@@ -2,6 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { OutboxStatus, OutboxEvent, Prisma } from '@prisma/client';
 import { uuidv7, PublishOutboxInput as CorePublishOutboxInput } from '@/modules/library/core';
+import {
+  OutboxMetricsRecorder,
+  OutboxDiagnosticSummary,
+  evaluateOutboxFailureDecision,
+  computeOutboxDiagnostics,
+} from '../domain/outbox.domain';
+import type { ChangeLogRepository } from './changelog.repository';
 
 export interface OutboxPublishInput extends CorePublishOutboxInput {
   dedupeKey?: string | null;
@@ -441,3 +448,167 @@ export class OutboxRepository {
     });
   }
 }
+
+async function transitionRetryOrDeadLetter(params: {
+  event: { id: string; eventType: string; retryCount: number };
+  maxRetries: number;
+  workerId: string;
+  repo: OutboxRepository;
+  logger: Logger;
+  metricsService?: OutboxMetricsRecorder;
+  counterName: string;
+  baseSec: number;
+  maxSec: number;
+  reasonMessage: string;
+  retryLogFormatter: (newRetryCount: number, delaySec: number) => string;
+  dlqLogFormatter: () => string;
+}): Promise<'deadLettered' | 'retried'> {
+  const {
+    event, maxRetries, workerId, repo, logger, metricsService,
+    counterName, baseSec, maxSec, reasonMessage, retryLogFormatter, dlqLogFormatter,
+  } = params;
+  metricsService?.incrementCounter(counterName);
+  const decision = evaluateOutboxFailureDecision(event.retryCount, maxRetries, baseSec, maxSec);
+
+  if (decision.isDeadLetter) {
+    logger.error(dlqLogFormatter());
+    metricsService?.incrementCounter('outbox_dlq_total');
+    await repo.markDeadLetter(
+      event.id,
+      decision.nextRetryCount,
+      reasonMessage || 'Exceeded maximum retry attempts',
+      workerId,
+    );
+    return 'deadLettered';
+  }
+
+  logger.warn(retryLogFormatter(decision.nextRetryCount, decision.delaySec!));
+  await repo.scheduleRetry(
+    event.id,
+    decision.nextRetryCount,
+    decision.nextRetryAt!,
+    reasonMessage,
+    workerId,
+  );
+  return 'retried';
+}
+
+export async function handleMissingOutboxHandler(params: {
+  event: { id: string; eventType: string; retryCount: number };
+  maxRetries: number;
+  workerId: string;
+  repo: OutboxRepository;
+  logger: Logger;
+  metricsService?: OutboxMetricsRecorder;
+}): Promise<'deadLettered' | 'retried'> {
+  const { event, maxRetries } = params;
+  const reason = `No handler registered for event type "${event.eventType}"`;
+  return transitionRetryOrDeadLetter({
+    ...params,
+    counterName: 'outbox_unhandled_event_total',
+    baseSec: 10,
+    maxSec: 600,
+    reasonMessage: reason,
+    retryLogFormatter: (attempt, delaySec) =>
+      `${reason} on event ${event.id}. Retrying in ${delaySec}s (attempt ${attempt}/${maxRetries})`,
+    dlqLogFormatter: () =>
+      `Unrecognized event type "${event.eventType}" on event ${event.id} reached max retries (${maxRetries}). Moving to DLQ.`,
+  });
+}
+
+export async function handleOutboxDispatchFailure(params: {
+  event: { id: string; eventType: string; retryCount: number };
+  err: unknown;
+  maxRetries: number;
+  workerId: string;
+  repo: OutboxRepository;
+  logger: Logger;
+  metricsService?: OutboxMetricsRecorder;
+}): Promise<'deadLettered' | 'retried'> {
+  const { event, err, maxRetries } = params;
+  const errMsg = err instanceof Error ? err.message : String(err);
+  return transitionRetryOrDeadLetter({
+    ...params,
+    counterName: 'outbox_retry_total',
+    baseSec: 1,
+    maxSec: 300,
+    reasonMessage: errMsg,
+    retryLogFormatter: (attempt, delaySec) =>
+      `Event ${event.id} (${event.eventType}) failed (attempt ${attempt}/${maxRetries}). Retrying in ${delaySec}s: ${errMsg}`,
+    dlqLogFormatter: () =>
+      `Event ${event.id} (${event.eventType}) reached max retries (${maxRetries}). Moving to FAILED / DLQ: ${errMsg}`,
+  });
+}
+
+export async function executeOutboxGarbageCollection(params: {
+  repo: OutboxRepository;
+  changeLogRepo?: ChangeLogRepository;
+  logger: Logger;
+}): Promise<{
+  purgedPublished: number;
+  purgedFailed: number;
+  purgedChanges: number;
+  purgedTombstones: number;
+}> {
+  const { repo, changeLogRepo, logger } = params;
+  let purgedPublished = 0;
+  let purgedFailed = 0;
+  let purgedChanges = 0;
+  let purgedTombstones = 0;
+
+  try {
+    const outboxRes = await repo.purgeProcessedOutboxEvents(3, 30, 1000);
+    purgedPublished = outboxRes.purgedPublished;
+    purgedFailed = outboxRes.purgedFailed;
+
+    if (changeLogRepo) {
+      const changeLogRes = await changeLogRepo.compactAndPurgeChangeLog(30, 1000);
+      purgedChanges = changeLogRes.purgedChanges;
+      purgedTombstones = changeLogRes.purgedTombstones;
+    }
+    if (purgedPublished > 0 || purgedFailed > 0 || purgedChanges > 0 || purgedTombstones > 0) {
+      logger.log(
+        `[OutboxGC] Purged ${purgedPublished} published outbox events, ${purgedFailed} failed outbox events, ${purgedChanges} change log entries, and ${purgedTombstones} tombstones.`,
+      );
+    }
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.warn(`Outbox database GC sweep encountered error: ${errMsg}`);
+  }
+
+  return { purgedPublished, purgedFailed, purgedChanges, purgedTombstones };
+}
+
+export async function buildOutboxDiagnosticSummary(params: {
+  workerId: string;
+  registeredHandlers: string[];
+  hasHandler: (eventType: string) => boolean;
+  hasDefaultHandler: boolean;
+  repo: OutboxRepository;
+  metricsService?: OutboxMetricsRecorder;
+}): Promise<OutboxDiagnosticSummary> {
+  const { workerId, registeredHandlers, hasHandler, hasDefaultHandler, repo, metricsService } = params;
+  const { groupedPending, oldestPendingCreatedAt, processingCount } = await repo.getDiagnosticData();
+  const summary = computeOutboxDiagnostics({
+    workerId,
+    registeredHandlers,
+    hasHandler,
+    hasDefaultHandler,
+    groupedPending,
+    oldestPendingCreatedAt,
+    processingCount,
+  });
+
+  metricsService?.setGauge('outbox_pending_total', summary.totalPending);
+  metricsService?.setGauge('outbox_processing_total', summary.totalProcessing);
+  metricsService?.setGauge('outbox_oldest_pending_age_seconds', summary.oldestPendingAgeSeconds);
+
+  return summary;
+}
+
+export const OutboxEventHandlers = {
+  handleMissingOutboxHandler,
+  handleOutboxDispatchFailure,
+  executeOutboxGarbageCollection,
+  buildOutboxDiagnosticSummary,
+};

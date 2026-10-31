@@ -1,6 +1,12 @@
 import { DuplicateDetectorService, getEffectiveItemField } from '@/modules/library/ingestion/services/duplicate-detector.service';
-import { applyMergedUpdatesAndClearDuplicateCitationKeyCollision, rewireMergedItemRelations, syncMergedContributors, syncMergedIdentifiersInTx } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
-import { backfillMetadataAndCreatorsStep, MergePipelineContext } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
+import {
+  applyMergedUpdatesAndClearDuplicateCitationKeyCollision,
+  rewireMergedItemRelations,
+  syncMergedContributors,
+  syncMergedIdentifiersInTx,
+  backfillMetadataAndCreatorsStep,
+  MergePipelineContext,
+} from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
 import { StateService } from '@/modules/library/catalog/services/state.service';

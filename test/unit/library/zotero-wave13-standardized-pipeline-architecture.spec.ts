@@ -25,13 +25,6 @@ describe('Wave 13: Standardized Pipeline Architecture & Single-Source-of-Truth H
   const normalizationPolicy = new NormalizationPolicy();
   const reconciliationPolicy = new ReconciliationPolicy();
 
-  const mockPrismaClient = {
-    tag: {
-      createMany: jest.fn().mockResolvedValue({ count: 0 }),
-      findMany: jest.fn().mockResolvedValue([]),
-    },
-  } as unknown as Parameters<typeof buildCommandCreateInput>[2];
-
   describe('1. Single-Source-of-Truth Zotero Field Harmonizer (Idempotency & Bidirectional Base Mapping)', () => {
     it('is strictly idempotent across all 37 Zotero v42 item types', () => {
       const itemTypeKeys = Object.keys(SCHEMA_V42_DATA.itemTypes);
@@ -372,10 +365,9 @@ describe('Wave 13: Standardized Pipeline Architecture & Single-Source-of-Truth H
           ...payload,
         };
 
-        const { createData } = await buildCommandCreateInput(
+        const { createData } = buildCommandCreateInput(
           'user-123',
           inputData as Parameters<typeof buildCommandCreateInput>[1],
-          mockPrismaClient,
         );
 
         const existingBlankItem = {

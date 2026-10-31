@@ -2,17 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import {
-  resolveOrCreateTags,
-  deriveFirstAuthor,
-} from '@/modules/library/catalog';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 import {
   EntityNotFoundException,
   normalizeProjectScopeId,
   ItemProvenancePolicy,
+  deriveFirstAuthor,
 } from '@/modules/library/core';
-import { sanitizeExtractedItemUpdateAgainstFreshState } from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
+import {
+  sanitizeExtractedItemUpdateAgainstFreshState,
+  disambiguateCitationKey,
+  resolveOrCreateTags,
+} from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
 
 @Injectable()
 export class ExtractionRepository {
@@ -196,10 +197,20 @@ export class ExtractionRepository {
 
     const { sanitizedData, mergedMetadata } =
       await sanitizeExtractedItemUpdateAgainstFreshState({
-        client,
-        itemId,
         data,
         freshItem,
+        resolveCitationKey: freshItem
+          ? (candidateKey: string) =>
+              disambiguateCitationKey(
+                client,
+                candidateKey,
+                {
+                  userId: freshItem.userId,
+                  projectId: normalizeProjectScopeId(freshItem.projectId),
+                },
+                itemId,
+              )
+          : undefined,
       });
 
     return client.item.update({
@@ -529,12 +540,12 @@ export class ExtractionRepository {
     );
 
     if (resolvedTags.length > 0) {
-      if (client.itemTag?.createMany) {
+      if (typeof client.itemTag?.createMany === 'function') {
         await client.itemTag.createMany({
-          data: resolvedTags.map((t) => ({ tagId: t.id, itemId: params.itemId, type: 'automatic' })),
+          data: resolvedTags.map((t) => ({ itemId: params.itemId, tagId: t.id, type: 'automatic' })),
           skipDuplicates: true,
         });
-      } else if (client.itemTag?.upsert) {
+      } else if (typeof client.itemTag?.upsert === 'function') {
         for (const t of resolvedTags) {
           await client.itemTag.upsert({
             where: { tagId_itemId: { itemId: params.itemId, tagId: t.id } },

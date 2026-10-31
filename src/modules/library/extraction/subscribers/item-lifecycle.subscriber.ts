@@ -89,17 +89,33 @@ export class ItemLifecycleSubscriber {
             }
           }
         }
-        for (const fid of fileIdsToDelete) {
-          try {
-            await this.storagePort.deleteFile(fid);
-          } catch (delErr: unknown) {
-            const msg =
-              delErr instanceof Error ? delErr.message : String(delErr);
-            this.logger.warn(
-              `[ExtractionSubscriber] Failed to delete storage file ${fid} for purged item ${itemId}: ${msg}`,
-            );
-          }
-        }
+        const candidateFileIds = Array.from(fileIdsToDelete);
+        await Promise.all(
+          candidateFileIds.map(async (fid) => {
+            try {
+              if (
+                typeof this.attachmentsRepository?.countFileIdReferences ===
+                'function'
+              ) {
+                const remainingRefs =
+                  await this.attachmentsRepository.countFileIdReferences(
+                    fid,
+                    itemId,
+                  );
+                if (typeof remainingRefs === 'number' && remainingRefs > 0) {
+                  return;
+                }
+              }
+              await this.storagePort!.deleteFile(fid);
+            } catch (delErr: unknown) {
+              const msg =
+                delErr instanceof Error ? delErr.message : String(delErr);
+              this.logger.warn(
+                `[ExtractionSubscriber] Failed to delete storage file ${fid} for purged item ${itemId}: ${msg}`,
+              );
+            }
+          }),
+        );
       }
 
       if (this.annotationsRepository) {

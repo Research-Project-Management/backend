@@ -1,7 +1,5 @@
-import { Module, OnModuleInit, Optional, Inject } from '@nestjs/common';
+import { Global, Module, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { CoreModule } from '@/core';
-import { CatalogModule } from '@/modules/library/catalog/catalog.module';
-import { SearchModule } from '@/modules/library/search/search.module';
 import {
   LibraryCoreModule,
   IOutboxRegistry,
@@ -48,8 +46,9 @@ import {
 import { ItemLifecycleSubscriber } from './subscribers/item-lifecycle.subscriber';
 import { AnnotationNormalizer } from './domain/annotation.normalizer';
 
+@Global()
 @Module({
-  imports: [CoreModule, LibraryCoreModule, CatalogModule, SearchModule],
+  imports: [CoreModule, LibraryCoreModule],
   controllers: [
     AttachmentStorageController,
     AttachmentController,

@@ -1,4 +1,4 @@
-import { disambiguateCitationKey } from '@/modules/library/catalog/domain/command-payload.builder';
+import { disambiguateCitationKey } from '@/modules/library/catalog/repositories/command-relations.helper';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';

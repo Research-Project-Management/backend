@@ -210,10 +210,9 @@ describe('Wave 12: Exhaustive End-to-End Type, Field & Format Round-Trip Verific
           }
         }
 
-        const { createData } = await buildCommandCreateInput(
+        const { createData } = buildCommandCreateInput(
           'user-wave12-test',
           validationResult.sanitizedItem as CreateItemData,
-          mockPrisma,
         );
 
         expect(createData.itemType).toBe(itemType);

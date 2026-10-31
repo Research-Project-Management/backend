@@ -270,7 +270,9 @@ export class AttachmentsRepository {
       count += await client.attachment.count({
         where: {
           fileId,
-          ...(excludeAttachmentId ? { id: { not: excludeAttachmentId } } : {}),
+          ...(excludeAttachmentId
+            ? { id: { not: excludeAttachmentId }, itemId: { not: excludeAttachmentId } }
+            : {}),
         },
       });
     }

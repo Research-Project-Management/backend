@@ -43,6 +43,7 @@ import {
 import {
   IngestionRunReporterService,
   IngestionRunProgressResult,
+  clearRunStatusTransition,
 } from './ingestion-run-reporter.service';
 import { isRetryableIngestionError } from '@/modules/library/ingestion/types/ingestion.errors';
 
@@ -101,6 +102,29 @@ export class IngestionService {
       .digest('hex');
   }
 
+  private verifyAndMapExistingRun(
+    existingRun: IngestionRun,
+    requestHash: string,
+  ): IngestionAcceptedResult {
+    if (existingRun.inputHash !== requestHash) {
+      throw new UnprocessableEntityException(
+        'Idempotency key reused with different request payload',
+      );
+    }
+
+    return {
+      runId: existingRun.id,
+      statusUrl: `/api/v1/library/ingestion/status/${existingRun.id}`,
+      acceptedAt: existingRun.startedAt
+        ? existingRun.startedAt.toISOString()
+        : new Date().toISOString(),
+      requestHash,
+      status: existingRun.status,
+      existingItemId: existingRun.itemId ?? undefined,
+      deduplicated: true,
+    };
+  }
+
   /**
    * Primary Fast-Path Submission Entry Point (Async 202 Contract)
    */
@@ -127,23 +151,7 @@ export class IngestionService {
       );
 
       if (existingRun) {
-        if (existingRun.inputHash !== requestHash) {
-          throw new UnprocessableEntityException(
-            'Idempotency key reused with different request payload',
-          );
-        }
-
-        return {
-          runId: existingRun.id,
-          statusUrl: `/api/v1/library/ingestion/status/${existingRun.id}`,
-          acceptedAt: existingRun.startedAt
-            ? existingRun.startedAt.toISOString()
-            : new Date().toISOString(),
-          requestHash,
-          status: existingRun.status,
-          existingItemId: existingRun.itemId ?? undefined,
-          deduplicated: true,
-        };
+        return this.verifyAndMapExistingRun(existingRun, requestHash);
       }
     }
 
@@ -225,22 +233,7 @@ export class IngestionService {
           idempotencyKey,
         );
         if (raceRun) {
-          if (raceRun.inputHash !== requestHash) {
-            throw new UnprocessableEntityException(
-              'Idempotency key reused with different request payload',
-            );
-          }
-          return {
-            runId: raceRun.id,
-            statusUrl: `/api/v1/library/ingestion/status/${raceRun.id}`,
-            acceptedAt: raceRun.startedAt
-              ? raceRun.startedAt.toISOString()
-              : new Date().toISOString(),
-            requestHash,
-            status: raceRun.status,
-            existingItemId: raceRun.itemId ?? undefined,
-            deduplicated: true,
-          };
+          return this.verifyAndMapExistingRun(raceRun, requestHash);
         }
       }
       throw err;
@@ -392,31 +385,23 @@ export class IngestionService {
     }
 
     try {
+      clearRunStatusTransition(runId);
       await this.pipeline.executePipeline(runId, projectId, envelope);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.error(
         `Ingestion pipeline failed for run ${runId}: ${errMsg}`,
       );
-      const alreadyTransitioned = Boolean(
-        (err as { __runStatusTransitioned?: boolean } | null | undefined)
-          ?.__runStatusTransitioned,
+      const isRetryable = this.isRetryableIngestionError(err, envelope);
+      const targetStatus = isRetryable
+        ? IngestionStatus.FAILED_RETRYABLE
+        : IngestionStatus.FAILED_FINAL;
+      await this.runReporter.transitionRunToFailedIfActive(
+        projectId,
+        runId,
+        targetStatus,
+        errMsg,
       );
-      if (!alreadyTransitioned) {
-        const isRetryable = this.isRetryableIngestionError(err, envelope);
-        const targetStatus = isRetryable
-          ? IngestionStatus.FAILED_RETRYABLE
-          : IngestionStatus.FAILED_FINAL;
-        await this.repo
-          .updateRunStatus(projectId, runId, targetStatus, {
-            lastError: errMsg,
-          })
-          .catch((repoErr: unknown) => {
-            this.logger.error(
-              `Failed to update run status to ${targetStatus} for run ${runId}: ${repoErr instanceof Error ? repoErr.message : String(repoErr)}`,
-            );
-          });
-      }
 
       return {
         runId,

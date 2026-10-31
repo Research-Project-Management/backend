@@ -15,14 +15,12 @@ import {
   FeedsRepository,
   type FeedSubscriptionRecord,
 } from '@/modules/library/ingestion/repositories/feeds.repository';
+import {
+  CircuitBreaker,
+  ResilienceRegistryService,
+} from '@/modules/library/core';
 
 export type FeedSubscriptionDto = FeedSubscriptionRecord;
-
-export interface CircuitBreakerState {
-  failures: number;
-  lastFailureTime: number;
-  isOpen: boolean;
-}
 
 /**
  * FeedsEngine
@@ -44,14 +42,14 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
   private isPollingActive = false;
 
   private readonly BULKHEAD_MAX_CONCURRENCY = 3;
-  private readonly MAX_CIRCUIT_BREAKERS = 500;
-  private readonly circuitBreakers = new Map<string, CircuitBreakerState>();
   private readonly FAILURE_THRESHOLD = 3;
   private readonly RESET_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 
   constructor(
     private readonly urlCaptureService: UrlCaptureService,
     @Optional() private readonly feedsRepo?: FeedsRepository,
+    @Optional()
+    private readonly resilienceRegistry: ResilienceRegistryService = new ResilienceRegistryService(),
   ) {}
 
   private scheduleTimeout(fn: () => void, delayMs: number): NodeJS.Timeout {
@@ -139,73 +137,34 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
     this.pendingTimeouts.clear();
   }
 
-  private setCircuitBreakerState(
-    feedUrl: string,
-    cb: CircuitBreakerState,
-  ): void {
-    if (this.circuitBreakers.has(feedUrl)) {
-      this.circuitBreakers.delete(feedUrl);
-    } else if (this.circuitBreakers.size >= this.MAX_CIRCUIT_BREAKERS) {
-      const oldestKey = this.circuitBreakers.keys().next().value;
-      if (oldestKey !== undefined) {
-        this.circuitBreakers.delete(oldestKey);
-      }
-    }
-    this.circuitBreakers.set(feedUrl, cb);
+  public get circuitBreakers(): Map<string, CircuitBreaker> {
+    return this.resilienceRegistry.getBreakersByPrefix('feed:');
+  }
+
+  private getBreaker(feedUrl: string): CircuitBreaker {
+    return this.resilienceRegistry.getCircuitBreaker(`feed:${feedUrl}`, {
+      failureThreshold: this.FAILURE_THRESHOLD,
+      resetTimeoutMs: this.RESET_TIMEOUT_MS,
+    });
   }
 
   canExecute(feedUrl: string): boolean {
-    const cb = this.circuitBreakers.get(feedUrl);
-    if (!cb) return true;
-
-    if (cb.isOpen) {
-      const now = Date.now();
-      const timeSinceLastFailure = now - cb.lastFailureTime;
-      if (timeSinceLastFailure > this.RESET_TIMEOUT_MS) {
-        cb.isOpen = false;
-        cb.failures = Math.max(0, this.FAILURE_THRESHOLD - 1);
-        cb.lastFailureTime = now;
-        this.setCircuitBreakerState(feedUrl, cb);
-        this.logger.log(
-          `Circuit Breaker for "${redactFeedUrl(feedUrl)}" entered HALF-OPEN state. Testing single probe...`,
-        );
-        return true;
-      }
-      return false;
-    }
-    return true;
+    return this.getBreaker(feedUrl).canExecute();
   }
 
   recordSuccess(feedUrl: string): void {
-    const cb = this.circuitBreakers.get(feedUrl);
-    if (cb) {
-      if (cb.isOpen || cb.failures >= this.FAILURE_THRESHOLD - 1) {
-        this.logger.log(
-          `Circuit Breaker for "${redactFeedUrl(feedUrl)}" recovered: CLOSED.`,
-        );
-      }
-      this.circuitBreakers.delete(feedUrl);
-    }
+    this.getBreaker(feedUrl).recordSuccess();
   }
 
   recordFailure(feedUrl: string, reason: string): void {
-    const cb = this.circuitBreakers.get(feedUrl) || {
-      failures: 0,
-      lastFailureTime: 0,
-      isOpen: false,
-    };
-
-    cb.failures += 1;
-    cb.lastFailureTime = Date.now();
-
-    if (cb.failures >= this.FAILURE_THRESHOLD && !cb.isOpen) {
-      cb.isOpen = true;
+    const breaker = this.getBreaker(feedUrl);
+    const wasOpen = breaker.isOpen;
+    breaker.recordFailure(true);
+    if (!wasOpen && breaker.isOpen) {
       this.logger.warn(
-        `🚨 Circuit Breaker TRIPPED for "${redactFeedUrl(feedUrl)}" (${cb.failures} consecutive failures: ${reason}). Silencing for 12 hours to protect worker threads.`,
+        `🚨 Circuit Breaker TRIPPED for "${redactFeedUrl(feedUrl)}" (${breaker.getFailures()} consecutive failures: ${reason}). Silencing for 12 hours to protect worker threads.`,
       );
     }
-
-    this.setCircuitBreakerState(feedUrl, cb);
   }
 
   async pollAllFeeds(): Promise<void> {

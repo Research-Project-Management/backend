@@ -295,19 +295,35 @@ export class AnnotationNormalizer {
   /**
    * Safely parses and normalizes annotation type string into AnnotationType enum.
    */
-  parseType(type?: string | null): AnnotationType {
+  parseType(type?: string | null): AnnotationType;
+  parseType<T extends AnnotationType | null>(
+    type: string | null | undefined,
+    fallback: T,
+  ): AnnotationType | T;
+  parseType(
+    type?: string | null,
+    fallback: AnnotationType | null = AnnotationType.highlight,
+  ): AnnotationType | null {
     if (!type || typeof type !== 'string') {
-      return AnnotationType.highlight;
+      return fallback;
     }
     const normalized = type.trim().toLowerCase();
     if (
       normalized === 'box' ||
       normalized === 'area' ||
-      normalized === 'image'
+      normalized === 'image' ||
+      normalized === 'square' ||
+      normalized === 'circle' ||
+      normalized === 'line' ||
+      normalized === 'rect'
     ) {
       return AnnotationType.rect;
     }
-    if (normalized === 'strike' || normalized === 'strikethrough') {
+    if (
+      normalized === 'strike' ||
+      normalized === 'strikeout' ||
+      normalized === 'strikethrough'
+    ) {
       return AnnotationType.strike;
     }
     if (normalized === 'text' || normalized === 'freetext') {
@@ -324,7 +340,7 @@ export class AnnotationNormalizer {
     if (validTypes.includes(normalized)) {
       return normalized as AnnotationType;
     }
-    return AnnotationType.highlight;
+    return fallback;
   }
 
   /**

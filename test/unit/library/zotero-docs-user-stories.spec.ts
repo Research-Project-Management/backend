@@ -129,14 +129,7 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
     });
 
     it('extracts pinned BetterBibTeX citation keys (Citation Key:, bibtex:, tex.ids:) and identifiers in CommandPayloadBuilder', async () => {
-      const mockPrismaClient = {
-        tag: {
-          createMany: jest.fn().mockResolvedValue({ count: 0 }),
-          findMany: jest.fn().mockResolvedValue([]),
-        },
-      };
-
-      const { createData } = await buildCommandCreateInput(
+      const { createData } = buildCommandCreateInput(
         'user-1',
         {
           title: 'Attention Is All You Need',
@@ -150,9 +143,6 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
             'DOI: 10.48550/arXiv.1706.03762',
           ].join('\n'),
         },
-        mockPrismaClient as unknown as Parameters<
-          typeof buildCommandCreateInput
-        >[2],
       );
 
       expect(createData.citationKey).toBe('vaswani2017attention');

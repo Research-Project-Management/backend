@@ -6,18 +6,19 @@ import { Job, Queue } from 'bullmq';
 import { OutboxEvent, OutboxStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB } from '@/modules/library/sync/domain/outbox.domain';
-import { OutboxRepository, ClaimedOutboxEvent } from '../repositories/outbox.repository';
+import {
+  OutboxRepository,
+  ClaimedOutboxEvent,
+  handleMissingOutboxHandler,
+  handleOutboxDispatchFailure,
+  executeOutboxGarbageCollection,
+  buildOutboxDiagnosticSummary,
+} from '../repositories/outbox.repository';
 import { ChangeLogRepository } from '../repositories/changelog.repository';
 import { libraryConfig, LibraryConfigService } from '@/modules/library/core/config/library.config';
 import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
 import { DomainEventEnvelope, OutboxDispatchHandler } from '@/modules/library/core';
 import { shouldRunWorkerConsumers } from '@/core';
-import {
-  handleMissingOutboxHandler,
-  handleOutboxDispatchFailure,
-  executeOutboxGarbageCollection,
-  buildOutboxDiagnosticSummary,
-} from '../domain/outbox.domain';
 
 export type { OutboxDispatchHandler };
 

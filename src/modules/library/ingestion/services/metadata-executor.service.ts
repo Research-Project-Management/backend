@@ -155,23 +155,15 @@ export class MetadataExecutorService {
   private readonly logger = new Logger(MetadataExecutorService.name);
   private readonly globalSemaphore = new Semaphore(10);
   private readonly providerSemaphores = new Map<ProviderName, Semaphore>();
-  private readonly circuitBreakers = new Map<ProviderName, CircuitBreaker>();
 
   constructor(
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
-    @Optional() private readonly resilienceRegistry?: ResilienceRegistryService,
+    @Optional()
+    private readonly resilienceRegistry: ResilienceRegistryService = new ResilienceRegistryService(),
   ) {}
 
   public getCircuitBreaker(providerName: ProviderName): CircuitBreaker {
-    if (this.resilienceRegistry) {
-      return this.resilienceRegistry.getCircuitBreaker(providerName);
-    }
-    let cb = this.circuitBreakers.get(providerName);
-    if (!cb) {
-      cb = new CircuitBreaker({ name: providerName });
-      this.circuitBreakers.set(providerName, cb);
-    }
-    return cb;
+    return this.resilienceRegistry.getCircuitBreaker(providerName);
   }
 
   private getProviderSemaphore(provider: MetadataProvider): Semaphore {

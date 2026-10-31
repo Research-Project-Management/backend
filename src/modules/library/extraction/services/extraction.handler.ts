@@ -15,15 +15,14 @@ import {
   SEARCH_FACADE,
   ISearchFacade,
   IDEMPOTENT_CONSUMER,
+  IIdempotentConsumer,
+  UNIT_OF_WORK,
+  IUnitOfWork,
   normalizeProjectScopeId,
   extractFileIdFromUrl,
   ExtractionProcessException,
   executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
-import {
-  IdempotentConsumerService,
-  TransactionService,
-} from '@/modules/library/sync';
 import { AttachmentStorageException } from '@/modules/library/extraction/types/extraction.types';
 import { RedisCacheService } from '@/core';
 import { ReferenceMatcherService } from './reference-matcher.service';
@@ -68,7 +67,7 @@ interface PostExtractionPipelineContext {
   effectiveProjectId?: string;
   scopeId: string;
   signal?: AbortSignal;
-  syncRes?: { outboxPublished?: boolean };
+  syncRes?: { outboxPublished?: boolean; cacheInvalidated?: boolean };
 }
 
 @Injectable()
@@ -83,7 +82,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     private readonly pdf: PdfProvider,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
     @Optional() @Inject(IDEMPOTENT_CONSUMER)
-    private readonly idempotentConsumer?: IdempotentConsumerService,
+    private readonly idempotentConsumer?: IIdempotentConsumer,
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()
@@ -91,7 +90,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     @Optional()
     private readonly eventEmitter?: EventEmitter2,
     @Optional()
-    private readonly libraryTx?: TransactionService,
+    @Inject(UNIT_OF_WORK)
+    private readonly libraryTx?: IUnitOfWork,
     @Optional()
     @Inject(SEARCH_FACADE)
     private readonly searchGateway?: ISearchFacade,
@@ -576,16 +576,19 @@ export class ExtractionHandler implements OutboxDispatchHandler {
 
   private async markReadyAndSyncMetadataStep(ctx: PostExtractionPipelineContext): Promise<void> {
     const { attachment, doc, extractionResult } = ctx;
-    await this.extractionRepo.markReady(attachment.id);
     ctx.syncRes = await this.metadataSync.offloadFullTextAndSyncMetadata(
       attachment,
       doc,
       extractionResult,
       { skipOutboxPublish: false },
     );
+    await this.extractionRepo.markReady(attachment.id);
   }
 
   private async invalidateExtractionCachesStep(ctx: PostExtractionPipelineContext): Promise<void> {
+    if (ctx.syncRes?.cacheInvalidated) {
+      return;
+    }
     const { attachment, effectiveUserId, effectiveProjectId } = ctx;
     const cacheInvalidator =
       this.cacheCoordinator?.invalidateForWrite

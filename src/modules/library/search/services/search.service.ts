@@ -15,8 +15,8 @@ import {
   SubsystemUnavailableException,
   isSafeSearchRegex,
   parseSafeSearchRegex,
+  ItemsMapper,
 } from '@/modules/library/core';
-import { ItemsMapper } from '@/modules/library/catalog';
 
 export { isSafeSearchRegex, parseSafeSearchRegex };
 

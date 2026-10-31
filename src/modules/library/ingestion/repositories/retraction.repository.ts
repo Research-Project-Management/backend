@@ -1,13 +1,14 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { Prisma, Item } from '@prisma/client';
 import { PrismaService, isUuid as isValidId } from '@/core';
 import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  ItemsMapper,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
-import { ItemsMapper } from '@/modules/library/catalog';
 import {
   RetractionDetails,
   RetractionNature,
@@ -73,7 +74,7 @@ function findIdentVal(
 export class RetractionRepository {
   constructor(
     private readonly prisma: PrismaService,
-    @Optional() private readonly libraryTx?: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx?: IUnitOfWork,
   ) {}
 
   private getScopeWhere(userId: string, projectId?: string) {

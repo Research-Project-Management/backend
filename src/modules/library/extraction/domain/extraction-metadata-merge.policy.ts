@@ -1,5 +1,5 @@
-import { Prisma } from '@prisma/client';
-import { disambiguateCitationKey } from '@/modules/library/catalog';
+import { Prisma, TagType } from '@prisma/client';
+import { isUuid } from '@/core';
 import {
   normalizeDoi,
   normalizeArxivId,
@@ -7,13 +7,13 @@ import {
   normalizePmcid,
   normalizeIsbn,
   normalizeIssn,
+  normalizeAcademicTags,
   generateCitationKey,
   getPrimaryCreatorRoleForType,
   isPlaceholderItemTitle,
   sanitizeItemTitle,
   cleanAbstractText,
   harmonizeZoteroFields,
-  normalizeProjectScopeId,
   ItemProvenancePolicy,
   inferItemTypeFromPdfSignals,
   resolveProviderFieldWeight,
@@ -137,8 +137,9 @@ export function buildExtractedMetadataSyncPlan(
     : undefined;
 
   const existingMeta = asMetaRecord(attachment.item?.metadata);
-  const { lockedSet, provenanceMap: existingFieldProv } =
+  const { provenanceMap: existingFieldProv } =
     ItemProvenancePolicy.extractProvenanceState(attachment.item ?? existingMeta);
+  const lockedSet = ItemProvenancePolicy.expandLockedFieldSet(attachment.item ?? existingMeta);
   const isLocked = (fieldKey: string) =>
     lockedSet.has(fieldKey) ||
     ItemProvenancePolicy.isFieldLocked(attachment.item ?? existingMeta, fieldKey);
@@ -467,32 +468,21 @@ export function buildExtractedMetadataSyncPlan(
 }
 
 export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
-  client: Parameters<typeof disambiguateCitationKey>[0];
-  itemId: string;
   data: Prisma.ItemUpdateInput;
   freshItem: FreshItemExtractionTarget | null;
+  resolveCitationKey?: (candidateKey: string) => Promise<string | null>;
 }): Promise<{
   sanitizedData: Prisma.ItemUpdateInput;
   mergedMetadata: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined;
 }> {
-  const { client, itemId, data, freshItem } = params;
+  const { data, freshItem, resolveCitationKey } = params;
   const sanitizedData: Prisma.ItemUpdateInput = { ...data };
   let disambiguatedCitKey: string | undefined;
 
   const freshestMeta = asMetaRecord(freshItem?.metadata);
-  const { lockedSet: freshLockedSet, provenanceMap: freshFieldProv } =
+  const { provenanceMap: freshFieldProv } =
     ItemProvenancePolicy.extractProvenanceState(freshestMeta);
-
-  for (const lock of Array.from(freshLockedSet)) {
-    for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(lock)) {
-      freshLockedSet.add(alias);
-    }
-    if (lock === 'date' || lock === 'publicationDate' || lock === 'year') {
-      freshLockedSet.add('year');
-      freshLockedSet.add('date');
-      freshLockedSet.add('publicationDate');
-    }
-  }
+  const freshLockedSet = ItemProvenancePolicy.expandLockedFieldSet(freshestMeta);
 
   const cannotOverwriteItemType = !canExtractionOverwriteItemType(
     freshItem,
@@ -536,16 +526,10 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
       if (freshLockedSet.has('citationKey') || (freshCitKey && !/^anon/i.test(freshCitKey))) {
         delete sanitizedData.citationKey;
       } else if (typeof sanitizedData.citationKey === 'string' && sanitizedData.citationKey.trim()) {
-        disambiguatedCitKey =
-          (await disambiguateCitationKey(
-            client,
-            sanitizedData.citationKey.trim(),
-            {
-              userId: freshItem.userId,
-              projectId: normalizeProjectScopeId(freshItem.projectId),
-            },
-            itemId,
-          )) ?? undefined;
+        const candidateKey = sanitizedData.citationKey.trim();
+        disambiguatedCitKey = resolveCitationKey
+          ? ((await resolveCitationKey(candidateKey)) ?? undefined)
+          : candidateKey;
         sanitizedData.citationKey = disambiguatedCitKey;
       }
     }
@@ -655,4 +639,101 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
   }
 
   return { sanitizedData, mergedMetadata };
+}
+
+export async function disambiguateCitationKey(
+  client:
+    | Prisma.TransactionClient
+    | { item?: { findMany?: Prisma.TransactionClient['item']['findMany'] } }
+    | null
+    | undefined,
+  baseKey: string | null | undefined,
+  scope: { userId: string; projectId?: string | null },
+  excludeItemId?: string,
+): Promise<string | null> {
+  if (!baseKey || !baseKey.trim()) return null;
+  const cleanKey = baseKey.trim();
+  if (typeof client?.item?.findMany !== 'function') return cleanKey;
+  const scopeWhere: Prisma.ItemWhereInput =
+    scope.projectId && isUuid(scope.projectId)
+      ? { projectId: scope.projectId }
+      : { userId: scope.userId, projectId: null };
+  const rows = await client.item.findMany({
+    where: {
+      ...scopeWhere,
+      deletedAt: null,
+      ...(excludeItemId ? { id: { not: excludeItemId } } : {}),
+      citationKey: { startsWith: cleanKey, mode: 'insensitive' },
+    },
+    select: { citationKey: true },
+    take: 500,
+  });
+  const existingKeys = new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((item: { citationKey?: string | null }) => item.citationKey?.toLowerCase())
+      .filter((k: string | undefined): k is string => Boolean(k)),
+  );
+  if (!existingKeys.has(cleanKey.toLowerCase())) return cleanKey;
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+  for (let i = 0; i < alphabet.length; i++) {
+    const candidate = `${cleanKey}${alphabet[i]}`;
+    if (!existingKeys.has(candidate.toLowerCase())) return candidate;
+  }
+  let counter = 1;
+  while (existingKeys.has(`${cleanKey}-${counter}`.toLowerCase())) counter++;
+  return `${cleanKey}-${counter}`;
+}
+
+export async function resolveOrCreateTags(
+  client: Prisma.TransactionClient,
+  userId: string,
+  rawTagList: (string | null | undefined)[],
+  defaultTagType: TagType = TagType.automatic,
+  projectId?: string | null,
+): Promise<Array<{ id: string; type: TagType }>> {
+  const normalizedTagNames = normalizeAcademicTags(rawTagList).slice(0, 500);
+  if (normalizedTagNames.length === 0) return [];
+  const effectiveProjectId =
+    projectId && projectId !== 'user' && projectId !== 'me' && projectId !== 'personal' && isUuid(projectId)
+      ? projectId
+      : null;
+  const scopeWhere: Prisma.TagWhereInput = effectiveProjectId ? { projectId: effectiveProjectId } : { userId, projectId: null };
+  const tagOrFilter = normalizedTagNames.map((name) => ({ name: { equals: name, mode: 'insensitive' as const } }));
+  const preExistingTags = (await client.tag.findMany({ where: { ...scopeWhere, OR: tagOrFilter }, select: { id: true, name: true, type: true } })) || [];
+  const existingLowerNames = new Set(
+    preExistingTags.map((t: { id: string; name?: string }) => (typeof t.name === 'string' ? t.name.toLowerCase() : '')).filter(Boolean),
+  );
+  const seenMissingLower = new Set<string>();
+  const missingTagNames = normalizedTagNames.filter((name) => {
+    const lower = name.toLowerCase();
+    if (existingLowerNames.has(lower) || seenMissingLower.has(lower)) return false;
+    seenMissingLower.add(lower);
+    return true;
+  });
+  if (missingTagNames.length > 0) {
+    if (typeof client.tag.createMany === 'function') {
+      await client.tag.createMany({
+        data: missingTagNames.map((name) => ({ userId, createdById: userId, name, type: defaultTagType, projectId: effectiveProjectId })),
+        skipDuplicates: true,
+      });
+    } else {
+      for (const name of missingTagNames) {
+        try {
+          await client.tag.create({ data: { userId, createdById: userId, name, type: defaultTagType, projectId: effectiveProjectId } });
+        } catch {
+          // Concurrent creation
+        }
+      }
+    }
+  }
+  const allMatchingTags =
+    missingTagNames.length > 0
+      ? (await client.tag.findMany({ where: { ...scopeWhere, OR: tagOrFilter }, select: { id: true, name: true, type: true } })) || preExistingTags
+      : preExistingTags;
+  const dedupedByLower = new Map<string, { id: string; type: TagType }>();
+  for (const t of allMatchingTags as Array<{ id: string; name?: string; type?: TagType }>) {
+    const key = typeof t.name === 'string' ? t.name.toLowerCase() : t.id;
+    if (!dedupedByLower.has(key)) dedupedByLower.set(key, { id: t.id, type: t.type || defaultTagType });
+  }
+  return Array.from(dedupedByLower.values());
 }

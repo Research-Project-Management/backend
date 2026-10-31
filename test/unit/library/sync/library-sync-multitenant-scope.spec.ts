@@ -9,7 +9,7 @@ import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repository';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
-import { TransactionHelpers } from '@/modules/library/core';
+import { TransactionHelpers, UNIT_OF_WORK } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { PrismaService } from '@/core';
 import { CATALOG_FACADE } from '@/modules/library/catalog/catalog.facade';
@@ -59,6 +59,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
             },
           },
           { provide: TransactionService, useValue: mockLibraryTx },
+          { provide: UNIT_OF_WORK, useValue: mockLibraryTx },
           { provide: PrismaService, useValue: {} },
           {
             provide: CATALOG_FACADE,
@@ -201,6 +202,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
             },
           },
           { provide: TransactionService, useValue: mockLibraryTx },
+          { provide: UNIT_OF_WORK, useValue: mockLibraryTx },
           { provide: AttachmentsService, useValue: attachmentsService },
           {
             provide: AnnotationNormalizer,
@@ -293,6 +295,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
             },
           },
           { provide: TransactionService, useValue: mockLibraryTx },
+          { provide: UNIT_OF_WORK, useValue: mockLibraryTx },
           { provide: PrismaService, useValue: {} },
         ],
       }).compile();

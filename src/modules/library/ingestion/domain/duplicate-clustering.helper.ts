@@ -6,8 +6,8 @@ import {
   normalizeIsbn,
   ItemProvenancePolicy,
   PREPRINT_SERVER_VENUE_REGEX,
+  ItemsMapper,
 } from '@/modules/library/core';
-import { ItemsMapper } from '@/modules/library/catalog';
 import {
   DuplicateClusterResult,
   DuplicateClusterItem,

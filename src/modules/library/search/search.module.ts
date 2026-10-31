@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
 import { SearchFacade, SEARCH_FACADE } from './search.facade';
 
@@ -18,6 +18,7 @@ import { SearchEventsSubscriber } from './subscribers/search-events.subscriber';
  * - Faceted search & anchor matching
  * - Event-driven search index updates
  */
+@Global()
 @Module({
   imports: [CoreModule],
   controllers: [SearchController],

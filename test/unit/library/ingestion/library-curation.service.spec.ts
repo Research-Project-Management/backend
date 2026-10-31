@@ -11,6 +11,7 @@ import {
   IExtractionFacade,
   ItemDetail,
   TransactionHelpers,
+  UNIT_OF_WORK,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
@@ -144,6 +145,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
 
           { provide: PrismaService, useValue: mockPrisma },
           { provide: TransactionService, useValue: mockLibraryTx },
+          { provide: UNIT_OF_WORK, useValue: mockLibraryTx },
           { provide: CATALOG_FACADE, useValue: mockBibliographyFacade },
           { provide: EXTRACTION_FACADE, useValue: mockReaderFacade },
           { provide: IngestionRepository, useValue: mockIngestionRepo },

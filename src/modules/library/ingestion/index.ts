@@ -12,7 +12,7 @@ export * from './domain/ingestion-run.aggregate';
 export * from './domain/deduplication.domain';
 export * from './domain/metadata.validator';
 export * from './domain/enrichment-patch.builder';
-export * from './domain/duplicate-merge.steps';
+export * from './domain/duplicate-merge.domain';
 export * from './domain/candidate-builder.helper';
 
 // DTOs
@@ -46,6 +46,7 @@ export * from './services/feed-retrieval.service';
 
 // Repositories
 export * from './repositories/ingestion.repository';
+export * from './repositories/duplicate-merge.repository';
 export * from './repositories/retraction.repository';
 export * from './repositories/feeds.repository';
 export * from './repositories/metadata.cache';

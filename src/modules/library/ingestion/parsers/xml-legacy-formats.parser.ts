@@ -489,6 +489,9 @@ export class XmlLegacyFormatsParser {
 
       const topics = normalizeAcademicTags(extractAllTagTexts(block, 'topic'));
       const notes = extractAllTagTexts(block, 'note');
+      if (itemType === 'journalArticle' && isbn && !issn && !doi) {
+        itemType = hostTitle ? 'bookSection' : 'book';
+      }
 
       items.push({
         title,

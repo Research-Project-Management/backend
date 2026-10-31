@@ -1,8 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { CoreModule, shouldRunWorkerConsumers } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
-import { CatalogModule } from '@/modules/library/catalog/catalog.module';
-import { ExtractionModule } from '@/modules/library/extraction/extraction.module';
 import { BullModule } from '@nestjs/bullmq';
 import { LIBRARY_INGESTION_QUEUE_STANDARD } from './types/ingestion.types';
 
@@ -50,6 +48,7 @@ import { DomainRateLimiterService } from './services/domain-rate-limiter.service
 
 // Repositories
 import { IngestionRepository } from './repositories/ingestion.repository';
+import { DuplicateMergeRepository } from './repositories/duplicate-merge.repository';
 import { MetadataCache } from './repositories/metadata.cache';
 import { RetractionRepository } from './repositories/retraction.repository';
 import { FeedsRepository } from './repositories/feeds.repository';
@@ -90,12 +89,11 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
   ? [IngestionQueueConsumer]
   : [];
 
+@Global()
 @Module({
   imports: [
     CoreModule,
     LibraryCoreModule,
-    CatalogModule,
-    ExtractionModule,
     BullModule.registerQueue({ name: LIBRARY_INGESTION_QUEUE_STANDARD }),
   ],
   controllers: [
@@ -115,6 +113,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
 
     // Repositories
     IngestionRepository,
+    DuplicateMergeRepository,
     MetadataCache,
     RetractionRepository,
     FeedsRepository,

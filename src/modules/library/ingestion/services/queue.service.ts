@@ -108,16 +108,22 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(
           `Found ${orphanedRuns.length} orphaned ingestion run(s) on startup. Marking as FAILED_RETRYABLE.`,
         );
-        for (const run of orphanedRuns) {
-          const targetId = run.projectId || run.userId || '';
-          await this.repo.updateRunStatus(
-            targetId,
-            run.id,
-            IngestionStatus.FAILED_RETRYABLE,
-            {
-              lastError:
-                'Pipeline interrupted by server restart. Eligible for retry.',
-            },
+        const CHUNK_SIZE = 25;
+        for (let i = 0; i < orphanedRuns.length; i += CHUNK_SIZE) {
+          const chunk = orphanedRuns.slice(i, i + CHUNK_SIZE);
+          await Promise.all(
+            chunk.map((run) => {
+              const targetId = run.projectId || run.userId || '';
+              return this.repo.updateRunStatus(
+                targetId,
+                run.id,
+                IngestionStatus.FAILED_RETRYABLE,
+                {
+                  lastError:
+                    'Pipeline interrupted by server restart. Eligible for retry.',
+                },
+              );
+            }),
           );
         }
       }

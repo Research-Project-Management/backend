@@ -29,10 +29,11 @@ import {
   SsrfGuardService,
   ItemProvenancePolicy,
   isPlaceholderItemTitle,
+  UNIT_OF_WORK,
+  IUnitOfWork,
 } from '@/modules/library/core';
 import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/deduplication.domain';
 import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
-import { TransactionService } from '@/modules/library/sync';
 import { ParsedAcademicFeed } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 import { createHash, randomUUID } from 'crypto';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
@@ -46,7 +47,7 @@ export class UrlCaptureService {
   constructor(
     private readonly repo: IngestionRepository,
     @Optional() private readonly urlCaptureProvider?: UrlCaptureProvider,
-    @Optional() private readonly txService?: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly txService?: IUnitOfWork,
     @Optional()
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway?: ICatalogFacade,

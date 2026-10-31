@@ -17,8 +17,9 @@ import {
   normalizeProjectScopeId,
   extractFileIdFromUrl,
   executeStandardLibraryCacheInvalidation,
+  UNIT_OF_WORK,
+  IUnitOfWork,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { CreateAttachmentInput } from '@/modules/library/extraction/types/extraction.types';
 import {
   validateAttachmentInvariants,
@@ -49,7 +50,7 @@ export class AttachmentsService {
 
   constructor(
     private readonly repo: AttachmentsRepository,
-    private readonly libraryTx: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional()
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway?: ICatalogFacade,
@@ -190,6 +191,7 @@ export class AttachmentsService {
             ? inferAttachmentTypeFromFilename(input.filename)
             : AttachmentType.primary_pdf);
 
+    let postCommitRegistered = false;
     return this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const createData: Prisma.AttachmentCreateInput = {
@@ -280,14 +282,23 @@ export class AttachmentsService {
           );
         }
 
+        if (helpers?.onAfterCommit) {
+          postCommitRegistered = true;
+          helpers.onAfterCommit(() =>
+            this.invalidateAttachmentItemCache(targetItemId, userId, projectId),
+          );
+        }
+
         return serializedAttachment;
       },
     ).then(async (attachment) => {
-      await this.invalidateAttachmentItemCache(
-        targetItemId,
-        userId,
-        projectId,
-      );
+      if (!postCommitRegistered) {
+        await this.invalidateAttachmentItemCache(
+          targetItemId,
+          userId,
+          projectId,
+        );
+      }
       return attachment;
     });
   }
@@ -384,6 +395,7 @@ export class AttachmentsService {
       }
     }
     const effectiveProjectId = projectId || attachment.item?.projectId || undefined;
+    let postCommitRegistered = false;
     const result = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const eventScope = { userId, projectId: effectiveProjectId };
@@ -405,11 +417,21 @@ export class AttachmentsService {
           'library.attachment.deleted',
           { attachmentId: attachment.id, itemId: attachment.itemId, projectId: effectiveProjectId },
         );
+        if (attachment.itemId && helpers?.onAfterCommit) {
+          postCommitRegistered = true;
+          helpers.onAfterCommit(() =>
+            this.invalidateAttachmentItemCache(
+              attachment.itemId,
+              userId,
+              effectiveProjectId,
+            ),
+          );
+        }
         return { success: true };
       },
     );
 
-    if (attachment.itemId) {
+    if (attachment.itemId && !postCommitRegistered) {
       await this.invalidateAttachmentItemCache(
         attachment.itemId,
         userId,
@@ -418,23 +440,26 @@ export class AttachmentsService {
     }
 
     if (fileIdsToDelete.size > 0 && this.storagePort?.deleteFile) {
-      for (const fid of fileIdsToDelete) {
-        try {
-          const remainingRefs = await this.repo.countFileIdReferences?.(
-            fid,
-            attachment.id,
-          );
-          if (typeof remainingRefs === 'number' && remainingRefs > 0) {
-            continue;
+      const candidateFileIds = Array.from(fileIdsToDelete);
+      await Promise.all(
+        candidateFileIds.map(async (fid) => {
+          try {
+            const remainingRefs = await this.repo.countFileIdReferences?.(
+              fid,
+              attachment.id,
+            );
+            if (typeof remainingRefs === 'number' && remainingRefs > 0) {
+              return;
+            }
+            await this.storagePort!.deleteFile(fid);
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.warn(
+              `Failed to delete storage file ${fid} on attachment delete: ${message}`,
+            );
           }
-          await this.storagePort.deleteFile(fid);
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.logger.warn(
-            `Failed to delete storage file ${fid} on attachment delete: ${message}`,
-          );
-        }
-      }
+        }),
+      );
     }
 
     return result;
@@ -466,22 +491,25 @@ export class AttachmentsService {
     ) {
       return;
     }
-    for (const fid of orphanedFileIds) {
-      try {
-        if (this.repo.countFileIdReferences) {
-          const remainingRefs = await this.repo.countFileIdReferences(fid);
-          if (typeof remainingRefs === 'number' && remainingRefs > 0) {
-            continue;
+    const candidateFileIds = Array.from(new Set(orphanedFileIds));
+    await Promise.all(
+      candidateFileIds.map(async (fid) => {
+        try {
+          if (this.repo.countFileIdReferences) {
+            const remainingRefs = await this.repo.countFileIdReferences(fid);
+            if (typeof remainingRefs === 'number' && remainingRefs > 0) {
+              return;
+            }
           }
+          await this.storagePort!.deleteFile(fid);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Failed to delete duplicate attachment file ${fid} on item merge: ${message}`,
+          );
         }
-        await this.storagePort.deleteFile(fid);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `Failed to delete duplicate attachment file ${fid} on item merge: ${message}`,
-        );
-      }
-    }
+      }),
+    );
   }
 
   async assertAttachmentExists(
@@ -537,6 +565,7 @@ export class AttachmentsService {
     const effectiveProjectId =
       projectId && projectId !== 'user' ? projectId : undefined;
 
+    let postCommitRegistered = false;
     await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         await this.repo.setPrimaryAttachment(itemId, attachmentId, tx);
@@ -552,10 +581,18 @@ export class AttachmentsService {
             attachmentType: AttachmentType.primary_pdf,
           },
         });
+        if (helpers?.onAfterCommit) {
+          postCommitRegistered = true;
+          helpers.onAfterCommit(() =>
+            this.invalidateAttachmentItemCache(itemId, userId, projectId),
+          );
+        }
       },
     );
 
-    await this.invalidateAttachmentItemCache(itemId, userId, projectId);
+    if (!postCommitRegistered) {
+      await this.invalidateAttachmentItemCache(itemId, userId, projectId);
+    }
 
     return { success: true };
   }

@@ -14,7 +14,7 @@ import {
   shouldAutoAdvanceToReading,
   toStateResponse,
 } from '@/modules/library/catalog/domain/state.domain';
-import { TransactionHelpers } from '@/modules/library/core';
+import { TransactionHelpers, UNIT_OF_WORK } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { PrismaService } from '@/core';
@@ -154,6 +154,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
             },
           },
           { provide: TransactionService, useValue: mockLibraryTx },
+          { provide: UNIT_OF_WORK, useValue: mockLibraryTx },
           { provide: PrismaService, useValue: {} },
           { provide: ItemQueryService, useValue: mockItemExistencePort },
         ],

@@ -10,13 +10,13 @@ import {
 } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import {
   SYSTEM_RESERVED_MERGE_KEYS,
-  syncMergedContributors,
-  applyMergedUpdatesAndClearDuplicateCitationKeyCollision,
 } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
 import {
+  syncMergedContributors,
+  applyMergedUpdatesAndClearDuplicateCitationKeyCollision,
   backfillMetadataAndCreatorsStep,
   DuplicateMergeStepContext,
-} from '@/modules/library/ingestion/domain/duplicate-merge.steps';
+} from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { TypesService } from '@/modules/library/catalog/services/types.service';

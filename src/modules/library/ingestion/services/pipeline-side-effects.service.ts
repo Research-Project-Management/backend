@@ -462,27 +462,25 @@ export class PipelineSideEffectsService {
     );
     if (!createNote) return;
 
-    await Promise.all(
-      notesToCreate.map(async ({ contentMd, title, noteSource }) => {
-        try {
-          await createNote(userId, {
-            itemId,
-            contentMd,
-            title,
-            projectId,
-            createdById: userId,
-          });
-          this.logger.log(
-            `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
-          );
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(
-            `[NOTE] Failed to create note for item ${itemId}: ${msg}`,
-          );
-        }
-      }),
-    );
+    for (const { contentMd, title, noteSource } of notesToCreate) {
+      try {
+        await createNote(userId, {
+          itemId,
+          contentMd,
+          title,
+          projectId,
+          createdById: userId,
+        });
+        this.logger.log(
+          `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
+        );
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `[NOTE] Failed to create note for item ${itemId}: ${msg}`,
+        );
+      }
+    }
   }
 
   /**

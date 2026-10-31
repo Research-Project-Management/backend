@@ -4,13 +4,17 @@ import {
   NotFoundException,
   BadRequestException,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { AnnotationsService } from './annotations.service';
 import { AnnotationType } from '@/modules/library/extraction/types/extraction.types';
-import { extractTopLeftAnchor } from '@/modules/library/extraction/domain/annotation.normalizer';
+import {
+  AnnotationNormalizer,
+  extractTopLeftAnchor,
+} from '@/modules/library/extraction/domain/annotation.normalizer';
 import {
   extractFileIdFromUrl,
   normalizeProjectScopeId,
@@ -32,6 +36,8 @@ export class PdfAnnotationImporterService {
     private readonly attachmentsRepo: AttachmentsRepository,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
     private readonly annotationsService: AnnotationsService,
+    @Optional()
+    private readonly normalizer: AnnotationNormalizer = new AnnotationNormalizer(),
   ) {}
 
   /**
@@ -492,27 +498,7 @@ export class PdfAnnotationImporterService {
   }
 
   private mapSubtype(subtype?: string): AnnotationType | null {
-    if (!subtype) return null;
-    switch (subtype.toLowerCase()) {
-      case 'highlight':
-        return AnnotationType.highlight;
-      case 'underline':
-        return AnnotationType.underline;
-      case 'strikeout':
-      case 'strike':
-        return AnnotationType.strike;
-      case 'freetext':
-      case 'text':
-        return AnnotationType.text;
-      case 'ink':
-        return AnnotationType.ink;
-      case 'square':
-      case 'circle':
-      case 'line':
-        return AnnotationType.rect;
-      default:
-        return null;
-    }
+    return this.normalizer.parseType(subtype, null);
   }
 
   private formatColor(colorArr?: number[], type?: AnnotationType): string {

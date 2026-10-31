@@ -12,7 +12,7 @@ import {
   ITEM_CACHE_INVALIDATOR,
   IItemCacheInvalidator,
 } from '@/modules/library/core';
-import { invalidateIngestionItemCache } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
+import { invalidateIngestionItemCache } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 import {
   calculateMetadataQualityScore,
   diagnoseBibliographicQualityIssues,
@@ -274,12 +274,17 @@ export class RetractionService {
     }
 
     if (lookup.status === 'clean') {
-      await this.repo.updateItemRetraction(itemId, false, null, null, now);
-      await this.invalidateRetractionCache(
-        [itemId],
-        userId,
-        effectiveProjectId,
+      const wasRetracted = Boolean(
+        (item as { isRetracted?: boolean }).isRetracted || meta.isRetracted,
       );
+      await this.repo.updateItemRetraction(itemId, false, null, null, now);
+      if (wasRetracted) {
+        await this.invalidateRetractionCache(
+          [itemId],
+          userId,
+          effectiveProjectId,
+        );
+      }
       return {
         itemId,
         isRetracted: false,

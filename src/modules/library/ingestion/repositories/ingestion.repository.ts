@@ -45,10 +45,37 @@ function toJsonValue<T>(val: T): Prisma.InputJsonValue {
 @Injectable()
 export class IngestionRepository {
   private readonly logger = new Logger(IngestionRepository.name);
+  private static readonly MAX_CACHED_RUN_LOGS = 500;
+  private readonly executionLogCache = new Map<string, Record<string, unknown>>();
   constructor(private readonly prisma: PrismaService) {}
 
   private getClient(tx?: Prisma.TransactionClient): PrismaService | Prisma.TransactionClient {
     return tx || this.prisma;
+  }
+
+  private setCachedExecutionLog(runId: string, log: Record<string, unknown>): void {
+    if (!runId) return;
+    if (this.executionLogCache.has(runId)) this.executionLogCache.delete(runId);
+    else if (this.executionLogCache.size >= IngestionRepository.MAX_CACHED_RUN_LOGS) {
+      const oldestKey = this.executionLogCache.keys().next().value;
+      if (oldestKey !== undefined) this.executionLogCache.delete(oldestKey);
+    }
+    this.executionLogCache.set(runId, log);
+  }
+
+  private async resolveExecutionLog(
+    client: PrismaService | Prisma.TransactionClient,
+    runId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const cached = this.executionLogCache.get(runId);
+    if (cached) return { ...cached };
+    if (typeof client.ingestionRun?.findUnique !== 'function') return null;
+    const existing = await client.ingestionRun.findUnique({ where: { id: runId }, select: { executionLog: true } });
+    if (!existing) return null;
+    const log = existing.executionLog && typeof existing.executionLog === 'object' && !Array.isArray(existing.executionLog)
+      ? (existing.executionLog as Record<string, unknown>) : {};
+    this.setCachedExecutionLog(runId, log);
+    return { ...log };
   }
 
   async createRun(
@@ -59,7 +86,7 @@ export class IngestionRepository {
     const client = this.getClient(tx);
     const { userId, projectId } = parseRunScope(scope, data.userId);
 
-    return client.ingestionRun.create({
+    const created = await client.ingestionRun.create({
       data: {
         ...(data.id ? { id: data.id } : {}),
         userId,
@@ -74,6 +101,12 @@ export class IngestionRepository {
         nextRetryAt: data.nextRetryAt ?? null,
       },
     });
+    if (created?.id) {
+      const initialLog = created.executionLog && typeof created.executionLog === 'object' && !Array.isArray(created.executionLog)
+        ? (created.executionLog as Record<string, unknown>) : {};
+      this.setCachedExecutionLog(created.id, initialLog);
+    }
+    return created;
   }
 
   async updateRunStage(
@@ -158,6 +191,33 @@ export class IngestionRepository {
   ): Promise<IngestionRun> {
     const client = this.getClient(tx);
     const isRetry = details?.previousStatus === IngestionStatus.FAILED_RETRYABLE && status === IngestionStatus.PENDING;
+    const isTerminal =
+      status === IngestionStatus.COMPLETED ||
+      status === IngestionStatus.FAILED_FINAL ||
+      status === IngestionStatus.CANCELLED;
+    let resolvedExecutionLog: Prisma.InputJsonValue | undefined;
+    if (details?.executionLog !== undefined) {
+      if (details.executionLog && typeof details.executionLog === 'object' && !Array.isArray(details.executionLog)) {
+        const incomingLog = details.executionLog as Record<string, unknown>;
+        const existingLog = (await this.resolveExecutionLog(client, runId)) ?? {};
+        const mergedLog: Record<string, unknown> = {
+          ...existingLog,
+          ...incomingLog,
+          ...(incomingLog.stages !== undefined || existingLog.stages !== undefined
+            ? { stages: incomingLog.stages ?? existingLog.stages }
+            : {}),
+        };
+        if (isTerminal) this.executionLogCache.delete(runId);
+        else this.setCachedExecutionLog(runId, mergedLog);
+        resolvedExecutionLog = mergedLog as Prisma.InputJsonValue;
+      } else {
+        if (isTerminal) this.executionLogCache.delete(runId);
+        resolvedExecutionLog = details.executionLog;
+      }
+    } else if (isTerminal) {
+      this.executionLogCache.delete(runId);
+    }
+
     return client.ingestionRun.update({
       where: { id: runId },
       data: {
@@ -165,19 +225,7 @@ export class IngestionRepository {
         ...(details?.itemId !== undefined ? { itemId: details.itemId } : {}),
         ...(details?.lastError !== undefined ? { lastError: details.lastError } : {}),
         ...(details?.completedAt !== undefined ? { completedAt: details.completedAt } : {}),
-        ...(details?.executionLog !== undefined
-          ? {
-              executionLog: await (async () => {
-                if (details.executionLog && typeof details.executionLog === 'object' && !Array.isArray(details.executionLog)) {
-                  const existing = await client.ingestionRun.findUnique({ where: { id: runId }, select: { executionLog: true } });
-                  const existingLog = existing?.executionLog && typeof existing.executionLog === 'object' && !Array.isArray(existing.executionLog)
-                    ? (existing.executionLog as Record<string, unknown>) : {};
-                  return { ...existingLog, ...(details.executionLog as Record<string, unknown>), stages: (details.executionLog as Record<string, unknown>).stages ?? existingLog.stages } as Prisma.InputJsonValue;
-                }
-                return details.executionLog;
-              })(),
-            }
-          : {}),
+        ...(resolvedExecutionLog !== undefined ? { executionLog: resolvedExecutionLog } : {}),
         ...(isRetry ? { attempts: { increment: 1 } } : {}),
       },
     });
@@ -192,10 +240,16 @@ export class IngestionRepository {
     const client = this.getClient(tx);
     let mergedProgress = progress;
     if (progress && typeof progress === 'object' && !Array.isArray(progress)) {
-      const existing = await client.ingestionRun.findUnique({ where: { id: runId }, select: { executionLog: true } });
-      const existingLog = existing?.executionLog && typeof existing.executionLog === 'object' && !Array.isArray(existing.executionLog)
-        ? (existing.executionLog as Record<string, unknown>) : {};
-      mergedProgress = { ...existingLog, ...(progress as Record<string, unknown>), stages: (progress as Record<string, unknown>).stages ?? existingLog.stages } as Prisma.InputJsonValue;
+      const existingLog = (await this.resolveExecutionLog(client, runId)) ?? {};
+      const nextLog: Record<string, unknown> = {
+        ...existingLog,
+        ...(progress as Record<string, unknown>),
+        ...((progress as Record<string, unknown>).stages !== undefined || existingLog.stages !== undefined
+          ? { stages: (progress as Record<string, unknown>).stages ?? existingLog.stages }
+          : {}),
+      };
+      this.setCachedExecutionLog(runId, nextLog);
+      mergedProgress = nextLog as Prisma.InputJsonValue;
     }
     await client.ingestionRun.update({ where: { id: runId }, data: { executionLog: mergedProgress } });
   }
@@ -268,10 +322,8 @@ export class IngestionRepository {
       executedAt: new Date(),
     };
     try {
-      const run = await client.ingestionRun.findUnique({ where: { id: ingestionRunId }, select: { executionLog: true } });
-      if (run) {
-        const log = run.executionLog && typeof run.executionLog === 'object' && !Array.isArray(run.executionLog)
-          ? (run.executionLog as Record<string, unknown>) : {};
+      const log = await this.resolveExecutionLog(client, ingestionRunId);
+      if (log) {
         const stages = Array.isArray(log.stages) ? [...(log.stages as unknown[])] : [];
         stages.push({
           id: stage.id,
@@ -284,9 +336,11 @@ export class IngestionRepository {
           leaseExpiresAt: data.leaseExpiresAt ?? null,
           executedAt: stage.executedAt,
         });
+        const nextLog = { ...log, stages };
+        this.setCachedExecutionLog(ingestionRunId, nextLog);
         await client.ingestionRun.update({
           where: { id: ingestionRunId },
-          data: { executionLog: { ...log, stages } as unknown as Prisma.InputJsonValue },
+          data: { executionLog: nextLog as unknown as Prisma.InputJsonValue },
         });
       }
     } catch (err: unknown) {
@@ -302,10 +356,8 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionStage | null> {
     const client = this.getClient(tx);
-    const run = await client.ingestionRun.findUnique({ where: { id: ingestionRunId }, select: { executionLog: true } });
-    if (!run) return null;
-    const log = run.executionLog && typeof run.executionLog === 'object' && !Array.isArray(run.executionLog)
-      ? (run.executionLog as Record<string, unknown>) : {};
+    const log = await this.resolveExecutionLog(client, ingestionRunId);
+    if (!log) return null;
     const stages = Array.isArray(log.stages) ? [...(log.stages as Array<Record<string, unknown>>)] : [];
     const idx = stages.findIndex((s) => s && s.stageName === stageName);
     const existing = idx >= 0 ? stages[idx] : null;
@@ -334,9 +386,11 @@ export class IngestionRepository {
     };
     if (idx >= 0) stages[idx] = persistedStage;
     else stages.push(persistedStage);
+    const nextLog = { ...log, stages };
+    this.setCachedExecutionLog(ingestionRunId, nextLog);
     await client.ingestionRun.update({
       where: { id: ingestionRunId },
-      data: { executionLog: { ...log, stages } as unknown as Prisma.InputJsonValue },
+      data: { executionLog: nextLog as unknown as Prisma.InputJsonValue },
     });
     return updatedStage;
   }

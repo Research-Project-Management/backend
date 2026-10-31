@@ -679,6 +679,9 @@ export class PipelineService {
       }
 
       if (createdItem?.id) {
+        const wasPreExistingMatch = Boolean(
+          (createdItem as { __wasPreExistingMatch?: boolean }).__wasPreExistingMatch,
+        );
         await this.sideEffects.runPostPersistSideEffects(
           createdItem.id,
           {
@@ -692,7 +695,8 @@ export class PipelineService {
             filename: finalFilename,
             payloadSize,
             existingRecord: createdItem,
-            assignCollections: false,
+            assignCollections:
+              wasPreExistingMatch && !this.catalogGateway?.assignItemsToCollection,
           },
         );
       }

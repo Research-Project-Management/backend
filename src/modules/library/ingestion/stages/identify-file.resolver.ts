@@ -188,6 +188,12 @@ export class IdentifyFileResolver {
       string,
       unknown
     >;
+    const inlineExtracted = rawPayloadAny.extractedMetadata as
+      | Record<string, unknown>
+      | undefined;
+    if (inlineExtracted && typeof inlineExtracted === 'object') {
+      extractedMetadata = { ...extractedMetadata, ...inlineExtracted };
+    }
     const clientPreResolved = (rawPayloadAny.preResolvedMetadata ||
       rawOverrides.preResolvedMetadata) as Record<string, unknown> | undefined;
     const isClientResolved =

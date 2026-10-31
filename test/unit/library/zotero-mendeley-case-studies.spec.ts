@@ -687,55 +687,46 @@ ER  -
   // CASE STUDY 3: Saved Searches (Smart Collections), Hierarchical Folders & Tags
   describe('Case Study 3: Saved Searches (Smart Collections), Hierarchical Subcollection Roll-Up & Tag Curation', () => {
     it('3.1 compiles nested Saved Search AST with matchMode (all/any), snake_case operators, recursive subcollections, and isStarred/readStatus', async () => {
-      const mockPrisma = {
-        collection: {
-          findMany: jest.fn().mockResolvedValue([
-            { id: 'col-phd', parentId: null },
-            { id: 'col-ch1', parentId: 'col-phd' },
-            { id: 'col-transformers', parentId: 'col-ch1' },
-            { id: 'col-unrelated', parentId: null },
-          ]),
-        },
-      };
+      const allCollections = [
+        { id: 'col-phd', parentId: null },
+        { id: 'col-ch1', parentId: 'col-phd' },
+        { id: 'col-transformers', parentId: 'col-ch1' },
+        { id: 'col-unrelated', parentId: null },
+      ];
+      const treeEngine = new TreeEngine();
+      const evaluator = new ConditionEvaluatorEngine();
 
-      const evaluator = new ConditionEvaluatorEngine(
-        mockPrisma as never,
-        new TreeEngine(),
-      );
-
-      // Complex Zotero Smart Collection query:
-      // Match ALL:
-      // - collection IS 'col-phd' (with recursive subcollections enabled -> col-phd, col-ch1, col-transformers)
-      // - Match ANY: itemType IS 'journalArticle' OR itemType IS 'conferencePaper'
-      // - year greater_than 2020
-      // - hasPdf is_present
-      // - tag does_not_contain 'archived'
-      // - author contains 'Vaswani'
-      // - readStatus is_not 'read'
-      // - isStarred is true
-      const compiled = await evaluator.compile('user-1', {
-        matchMode: 'all',
+      const smartQueryGroup = {
+        matchMode: 'all' as const,
         scopeOptions: {
           searchSubcollections: true,
           showOnlyTopLevel: true,
         },
         conditions: [
-          { field: 'collection', operator: 'is', value: 'col-phd' },
+          { field: 'collection' as const, operator: 'is' as const, value: 'col-phd' },
           {
-            matchMode: 'any',
+            matchMode: 'any' as const,
             conditions: [
-              { field: 'itemType', operator: 'is', value: 'journalArticle' },
-              { field: 'itemType', operator: 'is', value: 'conferencePaper' },
+              { field: 'itemType' as const, operator: 'is' as const, value: 'journalArticle' },
+              { field: 'itemType' as const, operator: 'is' as const, value: 'conferencePaper' },
             ],
           },
-          { field: 'year', operator: 'greater_than', value: 2020 },
-          { field: 'hasPdf', operator: 'is_present' },
-          { field: 'tag', operator: 'does_not_contain', value: 'archived' },
-          { field: 'author', operator: 'contains', value: 'Vaswani' },
-          { field: 'readStatus', operator: 'is_not', value: 'read' },
-          { field: 'isStarred', operator: 'is', value: true },
+          { field: 'year' as const, operator: 'greater_than' as const, value: 2020 },
+          { field: 'hasPdf' as const, operator: 'is_present' as const },
+          { field: 'tag' as const, operator: 'does_not_contain' as const, value: 'archived' },
+          { field: 'author' as const, operator: 'contains' as const, value: 'Vaswani' },
+          { field: 'readStatus' as const, operator: 'is_not' as const, value: 'read' },
+          { field: 'isStarred' as const, operator: 'is' as const, value: true },
         ],
-      });
+      };
+
+      const referencedCols = evaluator.extractReferencedCollectionIds(smartQueryGroup);
+      const descendantMap = new Map<string, string[]>();
+      for (const colId of referencedCols) {
+        descendantMap.set(colId, [colId, ...treeEngine.getDescendantIds(allCollections, colId)]);
+      }
+
+      const compiled = evaluator.compile('user-1', smartQueryGroup, undefined, descendantMap);
 
       const jsonStr = JSON.stringify(compiled);
       // Recursive subcollections resolved

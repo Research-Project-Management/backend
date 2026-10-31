@@ -1,11 +1,18 @@
-import { Injectable } from '@nestjs/common';
-import { CatalogFacade } from './catalog/catalog.facade';
-import { SearchFacade } from './search/search.facade';
-import { CitationFacade } from './citation/citation.facade';
-import { ExtractionFacade } from './extraction/extraction.facade';
+import { Injectable, Inject } from '@nestjs/common';
 import { ExportLibraryDto } from './citation/dto/citation.dto';
 import { ExportResult } from './citation/types/citation.types';
-import { ExtractedPdfDocument, formatAuthors } from './core';
+import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+  EXTRACTION_FACADE,
+  IExtractionFacade,
+  SEARCH_FACADE,
+  ISearchFacade,
+  CITATION_FACADE,
+  ICitationFacade,
+  ExtractedPdfDocument,
+  formatAuthors,
+} from './core';
 
 export interface LibraryItemSummary {
   id: string;
@@ -83,10 +90,19 @@ export const LIBRARY_FACADE = 'LIBRARY_FACADE';
 @Injectable()
 export class LibraryFacade implements ILibraryFacade {
   constructor(
-    private readonly catalogFacade: CatalogFacade,
-    private readonly extractionFacade: ExtractionFacade,
-    private readonly searchFacade: SearchFacade,
-    private readonly citationFacade: CitationFacade,
+    @Inject(CATALOG_FACADE)
+    private readonly catalogFacade: ICatalogFacade,
+    @Inject(EXTRACTION_FACADE)
+    private readonly extractionFacade: IExtractionFacade,
+    @Inject(SEARCH_FACADE)
+    private readonly searchFacade: ISearchFacade,
+    @Inject(CITATION_FACADE)
+    private readonly citationFacade: ICitationFacade<
+      string,
+      unknown,
+      ExportLibraryDto,
+      ExportResult | null
+    >,
   ) {}
 
   async listCollections(

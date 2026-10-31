@@ -27,7 +27,7 @@ import {
   consolidateItemMetadataStep,
   buildMergeAuditTrail,
   executeDuplicateMergePipeline,
-} from '@/modules/library/ingestion/domain/duplicate-merge.steps';
+} from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 import {
   TYPE_CONVERSION_RULES,
   applyStructuralTypeConversionRules,
@@ -80,7 +80,7 @@ import { QualityService } from '@/modules/library/ingestion/services/retraction.
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import { resolveExtraPlainText } from '@/modules/library/catalog/domain/creator-tag-payload.builder';
 import { ItemTypeConversionService } from '@/modules/library/catalog/services/item-type-conversion.service';
-import { syncMergedIdentifiersInTx } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
+import { syncMergedIdentifiersInTx } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
 import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
