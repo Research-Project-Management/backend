@@ -62,7 +62,7 @@ model Item {
   @@index([projectId, deletedAt, updatedAt(sort: Desc)])
   @@index([projectId, deletedAt, year(sort: Desc), id(sort: Desc)])
   @@index([projectId, deletedAt, firstAuthor, id])
-  @@index([projectId, deletedAt, title])
+  @@index([projectId, deletedAt, title, id(sort: Desc)])
   @@index([projectId, deletedAt, publicationTitle, id])
   @@index([projectId, deletedAt, itemType])
   @@index([projectId, deletedAt, doi])
@@ -82,9 +82,9 @@ model Item {
   @@index([userId, projectId, hasFile, deletedAt])
   @@index([userId, projectId, noteCount, deletedAt])
   @@index([deletedAt])
-  @@index([doi])
-  @@index([citationKey])
-  @@index([publicationTitle])
+  @@index([doi, deletedAt])
+  @@index([citationKey, deletedAt])
+  @@index([publicationTitle, deletedAt])
   @@index([metadata], type: Gin)
   @@index([searchVector], type: Gin)
   @@map("items")
@@ -105,6 +105,7 @@ model Contributor {
   publications UserPublication[]
 
   @@index([itemId, orderIndex])
+  @@index([lastName, firstName])
   @@index([fullName])
   @@map("contributors")
 }

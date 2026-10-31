@@ -15,9 +15,10 @@ import {
 } from '@/modules/library/catalog/types/catalog.types';
 import {
   TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
   LIBRARY_EVENT_TYPES,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { ItemQueryService } from './item-query.service';
 import {
   toStateResponse,
@@ -39,7 +40,7 @@ export class StateService {
 
   constructor(
     private readonly stateRepository: StateRepository,
-    private readonly libraryTx: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional()
     private readonly itemExistencePort?: ItemQueryService,
     @Optional()
@@ -194,11 +195,23 @@ export class StateService {
         },
       );
 
+      helpers?.onAfterCommit?.(() =>
+        this.invalidateStateCache(itemId, userId, effectiveProjectId),
+      );
+
       return this.toResponse(updated);
     };
 
-    const result = await this.libraryTx.executeInTransaction(execute);
-    await this.invalidateStateCache(itemId, userId, effectiveProjectId);
+    let ranPostCommitHook = false;
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
+        return execute(tx, helpers);
+      },
+    );
+    if (!ranPostCommitHook) {
+      await this.invalidateStateCache(itemId, userId, effectiveProjectId);
+    }
     return result;
   }
 
@@ -259,11 +272,23 @@ export class StateService {
         },
       );
 
+      helpers?.onAfterCommit?.(() =>
+        this.invalidateStateCache(itemId, userId, effectiveProjectId),
+      );
+
       return this.toResponse(updated);
     };
 
-    const result = await this.libraryTx.executeInTransaction(execute);
-    await this.invalidateStateCache(itemId, userId, effectiveProjectId);
+    let ranPostCommitHook = false;
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
+        return execute(tx, helpers);
+      },
+    );
+    if (!ranPostCommitHook) {
+      await this.invalidateStateCache(itemId, userId, effectiveProjectId);
+    }
     return result;
   }
 

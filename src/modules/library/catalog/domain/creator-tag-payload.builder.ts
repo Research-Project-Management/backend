@@ -1,7 +1,8 @@
-import { Prisma, LinkMode, AttachmentType, AnnotationType } from '@prisma/client';
+import { Prisma, LinkMode, AttachmentType, AnnotationType, TagType } from '@prisma/client';
 import { isUuid } from '@/core';
 import {
   normalizeAcademicTags,
+  cleanSingleTag,
   buildTipTapDocFromText,
   getPrimaryCreatorRoleForType,
   mergeCanonicalCreators,
@@ -14,6 +15,7 @@ import {
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
+  TagInput,
 } from '@/modules/library/catalog/types/catalog.types';
 import {
   CreateItemData,
@@ -30,6 +32,37 @@ export {
   prepareItemAiMetadataPatch,
 } from './identifier-change.helper';
 export type { AiMetadataPatchPreparation } from './identifier-change.helper';
+
+export interface ResolvedTag {
+  id: string;
+  type: TagType;
+}
+
+export function buildTagTypeMap(
+  rawTagList: (TagInput | null | undefined)[],
+): Map<string, TagType> {
+  const tagTypeMap = new Map<string, TagType>();
+  if (!Array.isArray(rawTagList)) return tagTypeMap;
+  for (const rt of rawTagList) {
+    if (typeof rt === 'object' && rt !== null) {
+      const tagName = (rt.name || rt.tag || '').trim();
+      if (!tagName) continue;
+      const typeVal = 'type' in rt ? (rt as { type?: unknown }).type : undefined;
+      const resolvedType =
+        typeVal === 1 || typeVal === 'automatic' || typeVal === TagType.automatic
+          ? TagType.automatic
+          : typeVal === 0 || typeVal === 'manual' || typeVal === TagType.manual
+            ? TagType.manual
+            : undefined;
+      if (resolvedType) {
+        tagTypeMap.set(tagName.toLowerCase(), resolvedType);
+        const normalized = cleanSingleTag(tagName);
+        if (normalized) tagTypeMap.set(normalized.toLowerCase(), resolvedType);
+      }
+    }
+  }
+  return tagTypeMap;
+}
 
 export function resolveExtraPlainText(
   extraInput?: string | null,

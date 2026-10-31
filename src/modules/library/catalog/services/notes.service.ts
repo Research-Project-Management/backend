@@ -23,11 +23,12 @@ import {
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 import {
   TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
   normalizeProjectScopeId,
   ConfigurationException,
   LIBRARY_EVENT_TYPES,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import { ItemQueryService } from './item-query.service';
 
@@ -39,7 +40,7 @@ export class NotesService {
 
   constructor(
     private readonly repo: NotesRepository,
-    private readonly libraryTx: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional()
     private readonly itemQuery?: ItemQueryService,
     @Optional()
@@ -92,8 +93,10 @@ export class NotesService {
         throw new NotFoundException(`Item not found`);
       }
     }
+    let ranPostCommitHook = false;
     const createdNote = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         const sanitizedData: CreateNoteData = {
           ...data,
           title: sanitizeNoteTitle(data.title),
@@ -123,15 +126,25 @@ export class NotesService {
           note,
         );
 
+        helpers?.onAfterCommit?.(() =>
+          this.invalidateNoteItemCaches(
+            userId,
+            note?.projectId ?? data.projectId,
+            note?.itemId ?? data.itemId,
+          ),
+        );
+
         return note;
       },
     );
 
-    await this.invalidateNoteItemCaches(
-      userId,
-      createdNote?.projectId ?? data.projectId,
-      createdNote?.itemId ?? data.itemId,
-    );
+    if (!ranPostCommitHook) {
+      await this.invalidateNoteItemCaches(
+        userId,
+        createdNote?.projectId ?? data.projectId,
+        createdNote?.itemId ?? data.itemId,
+      );
+    }
     return createdNote;
   }
 
@@ -144,8 +157,10 @@ export class NotesService {
     const resolvedVersion = data?.expectedVersion;
     const effectiveProjectId = normalizeProjectScopeId(projectId);
 
+    let ranPostCommitHook = false;
     const updatedNote = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         const sanitizedData: UpdateNoteData = {
           ...data,
           ...(data.title !== undefined
@@ -186,15 +201,25 @@ export class NotesService {
           updated,
         );
 
+        helpers?.onAfterCommit?.(() =>
+          this.invalidateNoteItemCaches(
+            userId,
+            updated?.projectId ?? effectiveProjectId,
+            updated?.itemId,
+          ),
+        );
+
         return updated;
       },
     );
 
-    await this.invalidateNoteItemCaches(
-      userId,
-      updatedNote?.projectId ?? effectiveProjectId,
-      updatedNote?.itemId,
-    );
+    if (!ranPostCommitHook) {
+      await this.invalidateNoteItemCaches(
+        userId,
+        updatedNote?.projectId ?? effectiveProjectId,
+        updatedNote?.itemId,
+      );
+    }
     return updatedNote;
   }
 
@@ -207,9 +232,11 @@ export class NotesService {
     const validProjectId = normalizeProjectScopeId(projectId);
     let deletedItemId: string | null | undefined;
     let deletedProjectId: string | undefined = validProjectId;
+    let ranPostCommitHook = false;
 
     const deleted = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         const existing = await this.repo.findById(
           userId,
           id,
@@ -253,13 +280,21 @@ export class NotesService {
               deletedAt: new Date(),
             },
           );
+
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateNoteItemCaches(
+              userId,
+              deletedProjectId,
+              deletedItemId,
+            ),
+          );
         }
 
         return isDeleted;
       },
     );
 
-    if (deleted) {
+    if (deleted && !ranPostCommitHook) {
       await this.invalidateNoteItemCaches(
         userId,
         deletedProjectId,

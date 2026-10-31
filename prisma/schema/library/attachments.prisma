@@ -74,7 +74,7 @@ model Attachment {
 
   @@index([itemId, linkMode])
   @@index([itemId, attachmentType])
-  @@index([itemId, deletedAt])
+  @@index([itemId, deletedAt, createdAt])
   @@index([deletedAt])
   @@index([fileId])
   @@index([fileHash])

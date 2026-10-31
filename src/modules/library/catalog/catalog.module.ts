@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
 
@@ -55,6 +55,7 @@ import { NotesRepository } from './repositories/notes.repository';
 import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
 import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core';
 
+@Global()
 @Module({
   imports: [CoreModule, LibraryCoreModule],
   controllers: [

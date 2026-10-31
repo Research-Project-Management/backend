@@ -253,6 +253,25 @@ export class ItemProvenancePolicy {
   }
 
   /**
+   * Returns an expanded Set of all user-locked field keys including coupled field aliases
+   * and date/publicationDate/year equivalence.
+   */
+  static expandLockedFieldSet(itemOrMeta: unknown): Set<string> {
+    const { lockedSet } = this.extractProvenanceState(itemOrMeta);
+    for (const lock of Array.from(lockedSet)) {
+      for (const alias of this.getCoupledFieldAliases(lock)) {
+        lockedSet.add(alias);
+      }
+      if (lock === 'date' || lock === 'publicationDate' || lock === 'year') {
+        lockedSet.add('year');
+        lockedSet.add('date');
+        lockedSet.add('publicationDate');
+      }
+    }
+    return lockedSet;
+  }
+
+  /**
    * Builds a canonical UserOverride provenance record.
    */
   static createUserOverrideRecord(
@@ -276,10 +295,8 @@ export class ItemProvenancePolicy {
     fieldKey: string,
     aliases: string[] = [],
   ): boolean {
-    const { lockedSet } = this.extractProvenanceState(itemOrMeta);
-    if (lockedSet.has(fieldKey)) return true;
-    const allAliases = [...aliases, ...this.getCoupledFieldAliases(fieldKey)];
-    return allAliases.some((alias) => lockedSet.has(alias));
+    const expandedLocks = this.expandLockedFieldSet(itemOrMeta);
+    return expandedLocks.has(fieldKey) || aliases.some((alias) => expandedLocks.has(alias));
   }
 
   /**

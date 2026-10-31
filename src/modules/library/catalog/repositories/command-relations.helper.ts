@@ -4,9 +4,9 @@ import { PrismaService, isUuid } from '@/core';
 import {
   normalizeProjectScopeId,
   normalizeAcademicTags,
-  cleanSingleTag,
 } from '@/modules/library/core';
 import {
+  CreateItemData,
   UpdateItemData,
   ItemDetail,
 } from '@/modules/library/core/types/bibliographic.types';
@@ -16,46 +16,18 @@ import {
   calculateIdentifierChanges,
   normalizeItemIdentifiers,
 } from '@/modules/library/catalog/domain/identifier-change.helper';
+import {
+  ResolvedTag,
+  buildTagTypeMap,
+} from '@/modules/library/catalog/domain/creator-tag-payload.builder';
+import {
+  buildCommandCreateInput,
+  extractUniqueCreateCollectionIds,
+  resolveCreateDefaultTagType,
+} from '@/modules/library/catalog/domain/command-payload.builder';
 
-export interface ResolvedTag {
-  id: string;
-  type: TagType;
-}
-
-export function buildTagTypeMap(
-  rawTagList: (TagInput | null | undefined)[],
-): Map<string, TagType> {
-  const tagTypeMap = new Map<string, TagType>();
-  if (!Array.isArray(rawTagList)) return tagTypeMap;
-  for (const rt of rawTagList) {
-    if (typeof rt === 'object' && rt !== null) {
-      const tagName = (rt.name || rt.tag || '').trim();
-      if (!tagName) continue;
-      const typeVal =
-        'type' in rt ? (rt as { type?: unknown }).type : undefined;
-      let resolvedType: TagType | undefined;
-      if (
-        typeVal === 1 ||
-        typeVal === 'automatic' ||
-        typeVal === TagType.automatic
-      ) {
-        resolvedType = TagType.automatic;
-      } else if (
-        typeVal === 0 ||
-        typeVal === 'manual' ||
-        typeVal === TagType.manual
-      ) {
-        resolvedType = TagType.manual;
-      }
-      if (resolvedType) {
-        tagTypeMap.set(tagName.toLowerCase(), resolvedType);
-        const normalized = cleanSingleTag(tagName);
-        if (normalized) tagTypeMap.set(normalized.toLowerCase(), resolvedType);
-      }
-    }
-  }
-  return tagTypeMap;
-}
+export { buildTagTypeMap };
+export type { ResolvedTag };
 
 export async function resolveOrCreateTags(
   client: Prisma.TransactionClient | PrismaService,
@@ -592,3 +564,38 @@ export async function disambiguateCitationKey(
 }
 
 export { disambiguateCitationKey as disambiguate };
+
+export async function resolveCreateItemRelations(
+  client: Prisma.TransactionClient | PrismaService,
+  userId: string,
+  data: CreateItemData,
+  projectId?: string,
+) {
+  const effectiveProjectId =
+    (projectId && projectId !== 'user' && isUuid(projectId) ? projectId : undefined) ||
+    (data.projectId && isUuid(data.projectId) ? data.projectId : null);
+  const rawTagList = [...(data.tags || []), ...(data.keywords || []), ...(data.labels || [])];
+  const defaultTagType = resolveCreateDefaultTagType(data);
+  const resolvedTags = await resolveOrCreateTags(client, userId, rawTagList, defaultTagType, effectiveProjectId);
+  const rawUniqueCollectionIds = extractUniqueCreateCollectionIds(data);
+  let validCollectionIds: ReadonlySet<string> | undefined;
+  if (rawUniqueCollectionIds.length > 0 && client.collection) {
+    const validCollections = await client.collection.findMany({
+      where: effectiveProjectId
+        ? { id: { in: rawUniqueCollectionIds }, projectId: effectiveProjectId, deletedAt: null }
+        : { id: { in: rawUniqueCollectionIds }, userId, projectId: null, deletedAt: null },
+      select: { id: true },
+    });
+    if (Array.isArray(validCollections)) {
+      validCollectionIds = new Set(validCollections.map((c) => c.id));
+    }
+  }
+  const built = buildCommandCreateInput(userId, data, { resolvedTags, validCollectionIds }, projectId);
+  if (built.rawCitationKey) {
+    built.createData.citationKey = await disambiguateCitationKey(client, built.rawCitationKey, {
+      userId,
+      projectId: effectiveProjectId,
+    });
+  }
+  return built;
+}

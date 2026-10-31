@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Inject,
   NotFoundException,
   BadRequestException,
   Logger,
@@ -23,10 +24,11 @@ import {
 import {
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
   normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
-import { TransactionService } from '@/modules/library/sync';
 
 @Injectable()
 export class SavedSearchesService {
@@ -35,7 +37,7 @@ export class SavedSearchesService {
   constructor(
     private readonly repo: SavedSearchesRepository,
     private readonly evaluator: ConditionEvaluatorEngine,
-    @Optional() private readonly libraryTx?: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx?: IUnitOfWork,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
@@ -46,6 +48,19 @@ export class SavedSearchesService {
     await this.cache
       .del(LIBRARY_REDIS_KEYS.savedSearches(scopeKey))
       .catch(() => undefined);
+  }
+
+  private async compileConditions(
+    userId: string,
+    group: SavedSearchConditionGroup,
+    projectId?: string,
+  ): Promise<Prisma.ItemWhereInput> {
+    const referencedColIds = this.evaluator.extractReferencedCollectionIds(group);
+    const descendantMap =
+      referencedColIds.length > 0 && this.repo.findCollectionDescendantsMap
+        ? await this.repo.findCollectionDescendantsMap(userId, projectId, referencedColIds)
+        : new Map<string, string[]>();
+    return this.evaluator.compile(userId, group, projectId, descendantMap);
   }
 
   async createSavedSearch(
@@ -75,7 +90,7 @@ export class SavedSearchesService {
     }
     let where: Prisma.ItemWhereInput;
     try {
-      where = await this.evaluator.compile(
+      where = await this.compileConditions(
         userId,
         dto.conditions,
         effectiveProjectId,
@@ -89,28 +104,33 @@ export class SavedSearchesService {
     }
     let initialCount = 0;
     try {
-      initialCount = await this.repo.countMatchingItems(where);
+      if (this.repo.countMatchingItems) {
+        initialCount = await this.repo.countMatchingItems(where);
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Failed to evaluate initial count: ${message}`);
     }
 
     if (this.libraryTx) {
+      let ranPostCommitHook = false;
       const created = await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           const createdRecord = await this.repo.create(
             userId,
             dto,
             effectiveProjectId,
             tx,
           );
-          if (initialCount > 0) {
+          if (typeof initialCount === 'number') {
             await this.repo.updateCachedCount(
               createdRecord.id,
               initialCount,
               tx,
             );
             createdRecord.cachedCount = initialCount;
+            createdRecord.lastEvaluatedAt = new Date();
           }
           const eventScope = { userId, projectId: effectiveProjectId };
           await helpers.appendChange(eventScope, {
@@ -126,17 +146,23 @@ export class SavedSearchesService {
             LIBRARY_EVENT_TYPES.SAVED_SEARCH_CREATED,
             createdRecord,
           );
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateCache(userId, effectiveProjectId),
+          );
           return createdRecord;
         },
       );
-      await this.invalidateCache(userId, effectiveProjectId);
+      if (!ranPostCommitHook) {
+        await this.invalidateCache(userId, effectiveProjectId);
+      }
       return created;
     }
 
     const created = await this.repo.create(userId, dto, effectiveProjectId);
-    if (initialCount > 0) {
+    if (typeof initialCount === 'number') {
       await this.repo.updateCachedCount(created.id, initialCount);
       created.cachedCount = initialCount;
+      created.lastEvaluatedAt = new Date();
     }
     await this.invalidateCache(userId, effectiveProjectId);
     return created;
@@ -154,7 +180,10 @@ export class SavedSearchesService {
     if (!Array.isArray(searches) || searches.length === 0) return searches;
     await Promise.all(
       searches.map(async (saved) => {
-        if (typeof saved.cachedCount === 'number') {
+        if (
+          typeof saved.cachedCount === 'number' &&
+          (saved.cachedCount > 0 || saved.lastEvaluatedAt != null)
+        ) {
           return;
         }
         if (
@@ -168,7 +197,7 @@ export class SavedSearchesService {
           const effectiveProj = normalizeProjectScopeId(
             fallbackProjectId || saved.projectId || undefined,
           );
-          const where = await this.evaluator.compile(
+          const where = await this.compileConditions(
             userId,
             saved.conditions as SavedSearchConditionGroup,
             effectiveProj,
@@ -176,6 +205,7 @@ export class SavedSearchesService {
           const count = await this.repo.countMatchingItems(where);
           if (typeof count === 'number') {
             saved.cachedCount = count;
+            saved.lastEvaluatedAt = new Date();
             await this.repo
               .updateCachedCount(saved.id, count)
               .catch(() => undefined);
@@ -234,7 +264,7 @@ export class SavedSearchesService {
       }
       let where: Prisma.ItemWhereInput;
       try {
-        where = await this.evaluator.compile(
+        where = await this.compileConditions(
           userId,
           dto.conditions,
           effectiveProjectId,
@@ -255,8 +285,10 @@ export class SavedSearchesService {
     }
 
     if (this.libraryTx) {
+      let ranPostCommitHook = false;
       const updated = await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           await this.repo.update(userId, id, dto, projectId, tx);
           if (recalculatedCount !== undefined) {
             await this.repo.updateCachedCount(id, recalculatedCount, tx);
@@ -284,10 +316,15 @@ export class SavedSearchesService {
             LIBRARY_EVENT_TYPES.SAVED_SEARCH_UPDATED,
             updatedRecord,
           );
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateCache(userId, effectiveProjectId),
+          );
           return updatedRecord;
         },
       );
-      await this.invalidateCache(userId, effectiveProjectId);
+      if (!ranPostCommitHook) {
+        await this.invalidateCache(userId, effectiveProjectId);
+      }
       return updated;
     }
 
@@ -312,8 +349,10 @@ export class SavedSearchesService {
     );
 
     if (this.libraryTx) {
+      let ranPostCommitHook = false;
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           await this.repo.softDelete(
             userId,
             id,
@@ -336,9 +375,14 @@ export class SavedSearchesService {
               projectId: effectiveProjectId,
             },
           );
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateCache(userId, effectiveProjectId),
+          );
         },
       );
-      await this.invalidateCache(userId, effectiveProjectId);
+      if (!ranPostCommitHook) {
+        await this.invalidateCache(userId, effectiveProjectId);
+      }
     } else {
       await this.repo.softDelete(
         userId,
@@ -368,7 +412,7 @@ export class SavedSearchesService {
     }
 
     const effectiveProjectId = projectId || dto.projectId;
-    const where = await this.evaluator.compile(
+    const where = await this.compileConditions(
       userId,
       dto.conditions,
       effectiveProjectId,
@@ -412,7 +456,7 @@ export class SavedSearchesService {
 
     const queryProjectId =
       effectiveProjectId || savedSearch.projectId || undefined;
-    const where = await this.evaluator.compile(
+    const where = await this.compileConditions(
       userId,
       conditions,
       queryProjectId,

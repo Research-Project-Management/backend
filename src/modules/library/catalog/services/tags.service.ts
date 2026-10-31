@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Inject,
   Optional,
   NotFoundException,
   BadRequestException,
@@ -9,11 +10,12 @@ import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repo
 import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,
+  UNIT_OF_WORK,
+  IUnitOfWork,
   executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { cleanSingleTag } from '@/modules/library/core/domain/tag.domain';
-import { resolveOrCreateTags } from '@/modules/library/catalog/domain/command-payload.builder';
+import { resolveOrCreateTags } from '@/modules/library/catalog/repositories/command-relations.helper';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import {
@@ -28,7 +30,7 @@ import { ItemCacheCoordinator } from './item-cache.coordinator';
 export class TagsService {
   constructor(
     private readonly repo: TagsRepository,
-    private readonly libraryTx: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
@@ -88,8 +90,10 @@ export class TagsService {
       );
     }
     const effectiveProjectId = normalizeProjectScopeId(projectId);
+    let ranPostCommitHook = false;
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         const tag = await this.repo.create(
           userId,
           cleanName,
@@ -117,11 +121,17 @@ export class TagsService {
           tag,
         );
 
+        helpers?.onAfterCommit?.(() =>
+          this.invalidateTagsCache(userId, effectiveProjectId),
+        );
+
         return tag;
       },
     );
 
-    await this.invalidateTagsCache(userId, effectiveProjectId);
+    if (!ranPostCommitHook) {
+      await this.invalidateTagsCache(userId, effectiveProjectId);
+    }
     return result;
   }
 
@@ -151,8 +161,10 @@ export class TagsService {
     const eventScope = { userId, projectId: effectiveProjectId };
 
     let affectedItemIds: string[] = [];
+    let ranPostCommitHook = false;
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         if (this.repo?.findItemIdsByTagIds) {
           affectedItemIds = await this.repo.findItemIdsByTagIds(
             [String(tagId)],
@@ -202,11 +214,17 @@ export class TagsService {
           updated,
         );
 
+        helpers?.onAfterCommit?.(() =>
+          this.invalidateTagsCache(userId, effectiveProjectId, affectedItemIds),
+        );
+
         return updated;
       },
     );
 
-    await this.invalidateTagsCache(userId, effectiveProjectId, affectedItemIds);
+    if (!ranPostCommitHook) {
+      await this.invalidateTagsCache(userId, effectiveProjectId, affectedItemIds);
+    }
     return result;
   }
 
@@ -219,8 +237,10 @@ export class TagsService {
     const eventScope = { userId, projectId: effectiveProjectId };
 
     let affectedItemIds: string[] = [];
+    let ranPostCommitHook = false;
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         if (this.repo?.findItemIdsByTagIds) {
           affectedItemIds = await this.repo.findItemIdsByTagIds(
             [String(tagId)],
@@ -250,11 +270,16 @@ export class TagsService {
             },
           );
         }
+        helpers?.onAfterCommit?.(() =>
+          this.invalidateTagsCache(userId, effectiveProjectId, affectedItemIds),
+        );
         return deleted;
       },
     );
 
-    await this.invalidateTagsCache(userId, effectiveProjectId, affectedItemIds);
+    if (!ranPostCommitHook) {
+      await this.invalidateTagsCache(userId, effectiveProjectId, affectedItemIds);
+    }
     return result;
   }
 
@@ -265,8 +290,10 @@ export class TagsService {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
     const eventScope = { userId, projectId: effectiveProjectId };
 
+    let ranPostCommitHook = false;
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         const deletedTagIds = await this.repo.deleteAutomatic(
           userId,
           tx,
@@ -307,11 +334,16 @@ export class TagsService {
             })),
           );
         }
+        helpers?.onAfterCommit?.(() =>
+          this.invalidateTagsCache(userId, effectiveProjectId),
+        );
         return { count: deletedTagIds.length };
       },
     );
 
-    await this.invalidateTagsCache(userId, effectiveProjectId);
+    if (!ranPostCommitHook) {
+      await this.invalidateTagsCache(userId, effectiveProjectId);
+    }
     return result;
   }
 
@@ -323,7 +355,9 @@ export class TagsService {
   ) {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
 
+    let ranPostCommitHook = false;
     await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      ranPostCommitHook = Boolean(helpers?.onAfterCommit);
       if (this.repo?.assignTagToItem) {
         await this.repo.assignTagToItem(
           userId,
@@ -380,9 +414,14 @@ export class TagsService {
           projectId: effectiveProjectId,
         },
       );
+      helpers?.onAfterCommit?.(() =>
+        this.invalidateTagsCache(userId, effectiveProjectId, itemId),
+      );
     });
 
-    await this.invalidateTagsCache(userId, effectiveProjectId, itemId);
+    if (!ranPostCommitHook) {
+      await this.invalidateTagsCache(userId, effectiveProjectId, itemId);
+    }
   }
 
   async removeTag(
@@ -393,7 +432,9 @@ export class TagsService {
   ) {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
 
+    let ranPostCommitHook = false;
     await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      ranPostCommitHook = Boolean(helpers?.onAfterCommit);
       if (this.repo?.removeTagFromItem) {
         await this.repo.removeTagFromItem(
           userId,
@@ -447,9 +488,14 @@ export class TagsService {
           projectId: effectiveProjectId,
         },
       );
+      helpers?.onAfterCommit?.(() =>
+        this.invalidateTagsCache(userId, effectiveProjectId, itemId),
+      );
     });
 
-    await this.invalidateTagsCache(userId, effectiveProjectId, itemId);
+    if (!ranPostCommitHook) {
+      await this.invalidateTagsCache(userId, effectiveProjectId, itemId);
+    }
   }
 
   async syncTagsToItem(
@@ -494,10 +540,20 @@ export class TagsService {
     };
 
     if (this.libraryTx && !tx) {
-      const synced = await this.libraryTx.executeInTransaction((innerTx) =>
-        executeSync(innerTx),
+      let ranPostCommitHook = false;
+      const synced = await this.libraryTx.executeInTransaction(
+        async (innerTx, helpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
+          const didSync = await executeSync(innerTx);
+          if (didSync) {
+            helpers?.onAfterCommit?.(() =>
+              this.invalidateTagsCache(userId, projectId, itemId),
+            );
+          }
+          return didSync;
+        },
       );
-      if (synced) {
+      if (synced && !ranPostCommitHook) {
         await this.invalidateTagsCache(userId, projectId, itemId);
       }
       return;

@@ -120,7 +120,17 @@ export interface ICatalogFacade {
     itemId?: string,
     projectId?: string,
   ): Promise<NoteEntity[]>;
-  listCollections?(userId: string, projectId?: string): Promise<unknown[]>;
+  listCollections(
+    userId: string,
+    projectId?: string,
+  ): Promise<
+    Array<{
+      id: string;
+      name: string;
+      itemCount?: number;
+      _count?: { collectionItems?: number };
+    }>
+  >;
   assignItemsToCollection?(
     userId: string,
     collectionId: string,
@@ -167,15 +177,15 @@ export interface ICatalogFacade {
     itemIds?: string[];
     additionalProjectIds?: Array<string | null | undefined>;
   }): Promise<void>;
-  findAttachmentByFileId?(
+  findAttachmentByFileId(
     fileId: string,
   ): Promise<{ id: string; itemId: string; metadata?: unknown } | null>;
-  updateAttachmentProcessingStatus?(
+  updateAttachmentProcessingStatus(
     attachmentId: string,
     status: string,
     metadataPatch?: Record<string, unknown>,
   ): Promise<void>;
-  updateItemAiMetadata?(
+  updateItemAiMetadata(
     itemId: string,
     aiMetadataPatch: Record<string, unknown>,
   ): Promise<void>;
@@ -559,6 +569,8 @@ export interface IUnitOfWork {
     projectId?: string | null;
   }): Promise<bigint>;
 }
+
+export type TransactionService = IUnitOfWork;
 
 // ============================================================================
 // 7. OUTBOX PORT

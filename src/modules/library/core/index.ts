@@ -22,6 +22,8 @@ export * from './domain/renamer.domain';
 export * from './domain/metadata-coalesce.policy';
 export * from './domain/item-provenance.domain';
 export * from './domain/academic-search-query.domain';
+export * from './domain/item-bibliographic.mapper';
+export * from './domain/items.mapper';
 
 // Constants
 export * from './constants/redis-keys.constants';

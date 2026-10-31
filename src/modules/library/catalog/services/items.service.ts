@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Inject,
   Logger,
   NotFoundException,
   UnprocessableEntityException,
@@ -18,11 +19,12 @@ import {
   sanitizeItemTitle,
   normalizeProjectScopeId,
   TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
   LibraryItemSource,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { TagsService } from './tags.service';
@@ -43,7 +45,7 @@ export class ItemService {
   constructor(
     private readonly query: QueryRepository,
     private readonly command: CommandRepository,
-    private readonly libraryTx: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     private readonly tagsService: TagsService,
     @Optional()
     private readonly validator?: ZoteroSchemaValidatorService,
@@ -201,18 +203,15 @@ export class ItemService {
       helpers: TransactionHelpers,
     ): Promise<ItemDetail> => {
       let targetItemType = data.itemType;
-      if (!targetItemType) {
-        const existing = await this.query.findById(
-          userId,
-          id,
-          projectId,
-          tx,
-          false,
-          false,
-        );
+      if (!targetItemType && this.validator?.validateAndSanitizeItem) {
+        const existing = this.query.findSummaryById
+          ? await this.query.findSummaryById(userId, id, tx, projectId)
+          : await this.query.findById(userId, id, projectId, tx, false, false);
         if (existing) {
           targetItemType =
-            existing.itemType || existing.type || 'journalArticle';
+            existing.itemType ||
+            (existing as { type?: string }).type ||
+            'journalArticle';
         }
       }
       let updatePayload = data;
@@ -284,8 +283,10 @@ export class ItemService {
     },
   ): Promise<ItemDetail> {
     let resolvedProjectId: string | undefined;
+    let ranPostCommitHook = false;
     const res = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers.onAfterCommit);
         const updated = await this.command.setMyPublication(
           userId,
           id,
@@ -311,10 +312,15 @@ export class ItemService {
           LIBRARY_EVENT_TYPES.ITEM_UPDATED,
           domainItem,
         );
+        helpers.onAfterCommit?.(() =>
+          this.invalidateItemCache(id, userId, resolvedProjectId),
+        );
         return domainItem;
       },
     );
-    await this.invalidateItemCache(id, userId, resolvedProjectId);
+    if (!ranPostCommitHook) {
+      await this.invalidateItemCache(id, userId, resolvedProjectId);
+    }
     return res;
   }
   async reindexItem(userId: string, id: string, projectId?: string) {
@@ -413,8 +419,10 @@ export class ItemService {
     skipScopeInvalidation?: boolean,
   ) {
     const validProjectId = normalizeProjectScopeId(projectId);
+    let ranPostCommitHook = false;
     const res = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers.onAfterCommit);
         const restored = await this.command.restore(
           userId,
           id,
@@ -446,12 +454,19 @@ export class ItemService {
             restoredAt: new Date().toISOString(),
           },
         );
+        helpers.onAfterCommit?.(() =>
+          this.invalidateItemCache(id, userId, validProjectId, {
+            skipScopeInvalidation,
+          }),
+        );
         return domainItem;
       },
     );
-    await this.invalidateItemCache(id, userId, validProjectId, {
-      skipScopeInvalidation,
-    });
+    if (!ranPostCommitHook) {
+      await this.invalidateItemCache(id, userId, validProjectId, {
+        skipScopeInvalidation,
+      });
+    }
     return res;
   }
   async purgeItem(
@@ -546,18 +561,26 @@ export class ItemService {
       };
     }
     const validProjectId = normalizeProjectScopeId(projectId);
+    let ranPostCommitHook = false;
     const { succeededIds, failedIds } =
-      await this.libraryTx.executeInTransaction(async (tx, helpers) =>
-        executeBulkSoftDeleteInTx({
+      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers.onAfterCommit);
+        const res = await executeBulkSoftDeleteInTx({
           command: this.command,
           userId,
           itemIds,
           tx,
           helpers,
           validProjectId,
-        }),
-      );
-    if (succeededIds.length > 0) {
+        });
+        if (res.succeededIds.length > 0) {
+          helpers.onAfterCommit?.(() =>
+            this.invalidateBulkItemsCache(res.succeededIds, userId, validProjectId),
+          );
+        }
+        return res;
+      });
+    if (succeededIds.length > 0 && !ranPostCommitHook) {
       await this.invalidateBulkItemsCache(succeededIds, userId, validProjectId);
     }
     return {
@@ -577,9 +600,11 @@ export class ItemService {
       };
     }
     const validProjectId = normalizeProjectScopeId(projectId);
+    let ranPostCommitHook = false;
     const { succeededIds, failedIds, restoredItems } =
-      await this.libraryTx.executeInTransaction(async (tx, helpers) =>
-        executeBulkRestoreInTx({
+      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers.onAfterCommit);
+        const res = await executeBulkRestoreInTx({
           command: this.command,
           query: this.query,
           userId,
@@ -587,9 +612,20 @@ export class ItemService {
           tx,
           helpers,
           validProjectId,
-        }),
-      );
-    if (succeededIds.length > 0) {
+        });
+        if (res.succeededIds.length > 0) {
+          helpers.onAfterCommit?.(() =>
+            this.invalidateBulkItemsCache(
+              res.succeededIds,
+              userId,
+              validProjectId,
+              res.restoredItems.map((r) => r.projectId),
+            ),
+          );
+        }
+        return res;
+      });
+    if (succeededIds.length > 0 && !ranPostCommitHook) {
       await this.invalidateBulkItemsCache(
         succeededIds,
         userId,
@@ -614,18 +650,26 @@ export class ItemService {
       };
     }
     const validProjectId = normalizeProjectScopeId(projectId);
+    let ranPostCommitHook = false;
     const { succeededIds, failedIds, fileIdsToDelete } =
-      await this.libraryTx.executeInTransaction(async (tx, helpers) =>
-        executeBulkPurgeInTx({
+      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers.onAfterCommit);
+        const res = await executeBulkPurgeInTx({
           command: this.command,
           userId,
           itemIds,
           tx,
           helpers,
           validProjectId,
-        }),
-      );
-    if (succeededIds.length > 0) {
+        });
+        if (res.succeededIds.length > 0) {
+          helpers.onAfterCommit?.(() =>
+            this.invalidateBulkItemsCache(res.succeededIds, userId, validProjectId),
+          );
+        }
+        return res;
+      });
+    if (succeededIds.length > 0 && !ranPostCommitHook) {
       await this.invalidateBulkItemsCache(succeededIds, userId, validProjectId);
     }
     if (fileIdsToDelete.length > 0) {
@@ -645,21 +689,8 @@ export class ItemService {
       userId: string;
       projectId: string | null;
     }> = [];
-    const result = await this.libraryTx.executeInTransaction(
-      async (tx, helpers) => {
-        const res = await executePurgeExpiredTrashInTx({
-          command: this.command,
-          retentionDays,
-          limit,
-          tx,
-          helpers,
-        });
-        storagePathsToDelete = res.storagePaths;
-        purgedItemsList = res.expiredItems ?? [];
-        return res;
-      },
-    );
-    if (purgedItemsList.length > 0) {
+    const invalidatePurgedItems = async () => {
+      if (purgedItemsList.length === 0) return;
       const itemsByUser = new Map<
         string,
         { itemIds: string[]; projectIds: Array<string | null> }
@@ -679,6 +710,28 @@ export class ItemService {
             this.invalidateBulkItemsCache(ids, uid, undefined, projectIds),
         ),
       );
+    };
+    let ranPostCommitHook = false;
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers.onAfterCommit);
+        const res = await executePurgeExpiredTrashInTx({
+          command: this.command,
+          retentionDays,
+          limit,
+          tx,
+          helpers,
+        });
+        storagePathsToDelete = res.storagePaths;
+        purgedItemsList = res.expiredItems ?? [];
+        if (purgedItemsList.length > 0) {
+          helpers.onAfterCommit?.(invalidatePurgedItems);
+        }
+        return res;
+      },
+    );
+    if (!ranPostCommitHook) {
+      await invalidatePurgedItems();
     }
     if (storagePathsToDelete.length > 0) {
       await this.command.deleteStorageFilesBatch(storagePathsToDelete);

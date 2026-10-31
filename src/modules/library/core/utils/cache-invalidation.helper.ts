@@ -222,9 +222,6 @@ export async function invalidateLibraryScopeCaches(
             LIBRARY_REDIS_KEYS.collectionsPattern(`u:${userId}`),
           ),
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.countsPattern(userId)),
-          rawCache.delPattern!(
-            LIBRARY_REDIS_KEYS.countsPattern(`user:${userId}`),
-          ),
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
         );
@@ -264,18 +261,11 @@ export async function invalidateLibraryScopeCaches(
           rawCache.delPattern!(
             LIBRARY_REDIS_KEYS.countsPattern(validProjectId),
           ),
-          rawCache.delPattern!(LIBRARY_REDIS_KEYS.countsPattern(projScope)),
           rawCache.delPattern!(
             LIBRARY_REDIS_KEYS.searchFacetsPattern(validProjectId),
           ),
           rawCache.delPattern!(
-            LIBRARY_REDIS_KEYS.searchFacetsPattern(projScope),
-          ),
-          rawCache.delPattern!(
             LIBRARY_REDIS_KEYS.searchItemsPattern(validProjectId),
-          ),
-          rawCache.delPattern!(
-            LIBRARY_REDIS_KEYS.searchItemsPattern(projScope),
           ),
         );
       }

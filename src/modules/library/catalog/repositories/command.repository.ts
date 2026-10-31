@@ -29,17 +29,18 @@ import {
   resolveExtraPlainText,
   extractNonColumnExtraFields,
   prepareNotesToCreate,
-  resolveOrCreateTags,
-  syncTagsForCatalogItem,
   buildCommandCreateInput,
   buildCommandUpdateInput,
   buildMyPublicationMetadata,
-  disambiguateCitationKey,
-  syncCreatedIdentifiers,
-  syncUpdatedIdentifiers,
 } from '@/modules/library/catalog/domain/command-payload.builder';
 import { CommandBulkOperations } from './command-bulk.operations';
 import {
+  resolveOrCreateTags,
+  syncTagsForCatalogItem,
+  disambiguateCitationKey,
+  syncCreatedIdentifiers,
+  syncUpdatedIdentifiers,
+  resolveCreateItemRelations,
   sanitizeUpdateCollectionIds,
   putItemRelationInClient,
   removeItemRelationInClient,
@@ -77,10 +78,10 @@ export class CommandRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
-    const { createData, identifiersToCreate } = await buildCommandCreateInput(
+    const { createData, identifiersToCreate } = await resolveCreateItemRelations(
+      client,
       userId,
       data,
-      client,
       normalizeProjectScopeId(projectId),
     );
     const item = await client.item.create({

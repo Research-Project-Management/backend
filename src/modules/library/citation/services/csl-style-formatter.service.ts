@@ -545,10 +545,12 @@ export class CslStyleFormatterService implements ICslFallbackFormatter {
           }
         }
 
-        raw = raw.replace(
-          /(\bpages\s*=\s*\{)([A-Za-z0-9]+)\s*[-–—]+\s*([A-Za-z0-9]+)(\})/i,
-          '$1$2--$3$4',
-        );
+        raw = raw
+          .replace(
+            /(\bpages\s*=\s*\{)([A-Za-z0-9]+)\s*[-–—]+\s*([A-Za-z0-9]+)(\})/i,
+            '$1$2--$3$4',
+          )
+          .replace(/^\s*[a-zA-Z0-9_-]+\s*=\s*\{\s*\},?\r?\n?/gm, '');
 
         const extraBibFields: string[] = [];
         for (const [fieldKey, val] of this.collectBibtexSupplementPairs(

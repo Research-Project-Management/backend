@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Inject,
   Logger,
   NotFoundException,
   BadRequestException,
@@ -14,10 +15,11 @@ import { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 import {
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
   normalizeProjectScopeId,
   executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { ItemCacheCoordinator } from './item-cache.coordinator';
 
 @Injectable()
@@ -28,7 +30,7 @@ export class ItemRelationsService {
     private readonly query: QueryRepository,
     private readonly command: CommandRepository,
     @Optional() private readonly cache?: RedisCacheService,
-    @Optional() private readonly libraryTx?: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx?: IUnitOfWork,
     @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 
@@ -128,16 +130,23 @@ export class ItemRelationsService {
       targetTitle: string;
     }> = [];
 
-    // Batch fetch target items to eliminate N+1 queries
-    let targetItemMap = new Map<string, ItemDetail>();
-    if (this.query.findByIds && targetIds.length > 0) {
-      const targetItems = await this.query.findByIds(
-        userId,
-        targetIds,
-        projectId,
+    // Batch fetch target items before opening transaction (zero N+1 fallback queries)
+    const targetItemMap = new Map<string, ItemDetail>();
+    const batchTargets = this.query.findByIds
+      ? await this.query.findByIds(userId, targetIds, projectId)
+      : undefined;
+    if (Array.isArray(batchTargets)) {
+      for (const item of batchTargets) {
+        if (item) targetItemMap.set(item.id, item);
+      }
+    } else {
+      const fallbackTargets = await Promise.all(
+        targetIds.map((targetId) =>
+          this.query.findById(userId, targetId, projectId),
+        ),
       );
-      if (targetItems && targetItems.length > 0) {
-        targetItemMap = new Map(targetItems.map((item) => [item.id, item]));
+      for (const item of fallbackTargets) {
+        if (item) targetItemMap.set(item.id, item);
       }
     }
 
@@ -154,9 +163,7 @@ export class ItemRelationsService {
     }> = [];
 
     for (const targetId of targetIds) {
-      const targetItem =
-        targetItemMap.get(targetId) ||
-        (await this.query.findById(userId, targetId, projectId));
+      const targetItem = targetItemMap.get(targetId);
       if (!targetItem) continue;
 
       const relation = {
@@ -170,13 +177,21 @@ export class ItemRelationsService {
       resolvedTargets.push({ targetItem, relation });
     }
 
+    if (resolvedTargets.length === 0) {
+      throw new NotFoundException(
+        `Target item(s) ${targetIds.join(', ')} not found`,
+      );
+    }
+
     const effectiveProjectId =
       normalizeProjectScopeId(projectId ?? sourceItem.projectId) ?? undefined;
     const eventScope = { userId, projectId: effectiveProjectId };
 
-    if (this.libraryTx && resolvedTargets.length > 0) {
+    let ranPostCommitHook = false;
+    if (this.libraryTx) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           await Promise.all(
             resolvedTargets.map(async ({ targetItem, relation }) => {
               await this.command.putRelation(sourceItemId, relation, tx);
@@ -204,6 +219,13 @@ export class ItemRelationsService {
               projectId: effectiveProjectId,
             },
           );
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateRelationCaches(
+              [sourceItemId, ...linkedRelations.map((r) => r.targetItemId)],
+              userId,
+              effectiveProjectId,
+            ),
+          );
         },
       );
     } else {
@@ -218,11 +240,13 @@ export class ItemRelationsService {
       );
     }
 
-    await this.invalidateRelationCaches(
-      [sourceItemId, ...linkedRelations.map((r) => r.targetItemId)],
-      userId,
-      effectiveProjectId,
-    );
+    if (!ranPostCommitHook) {
+      await this.invalidateRelationCaches(
+        [sourceItemId, ...linkedRelations.map((r) => r.targetItemId)],
+        userId,
+        effectiveProjectId,
+      );
+    }
 
     return {
       success: true,
@@ -255,9 +279,11 @@ export class ItemRelationsService {
       normalizeProjectScopeId(projectId ?? sourceItem.projectId) ?? undefined;
     const eventScope = { userId, projectId: effectiveProjectId };
 
+    let ranPostCommitHook = false;
     if (this.libraryTx) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           await this.command.removeRelation(sourceItemId, targetItemId, tx);
           await helpers.appendChange(eventScope, {
             entityType: 'Item',
@@ -277,17 +303,26 @@ export class ItemRelationsService {
               projectId: effectiveProjectId,
             },
           );
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateRelationCaches(
+              [sourceItemId, targetItemId],
+              userId,
+              effectiveProjectId,
+            ),
+          );
         },
       );
     } else {
       await this.command.removeRelation(sourceItemId, targetItemId);
     }
 
-    await this.invalidateRelationCaches(
-      [sourceItemId, targetItemId],
-      userId,
-      effectiveProjectId,
-    );
+    if (!ranPostCommitHook) {
+      await this.invalidateRelationCaches(
+        [sourceItemId, targetItemId],
+        userId,
+        effectiveProjectId,
+      );
+    }
 
     return {
       success: true,

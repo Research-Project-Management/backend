@@ -10,10 +10,38 @@ import {
   UpdateSavedSearchDto,
 } from '@/modules/library/catalog/dto/saved-search.dto';
 import { ExecuteSavedSearchOptions } from '@/modules/library/catalog/types/saved-search.types';
+import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 
 @Injectable()
 export class SavedSearchesRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  async findCollectionDescendantsMap(
+    userId: string,
+    projectId: string | undefined,
+    rootCollectionIds: string[],
+  ): Promise<Map<string, string[]>> {
+    const descendantMap = new Map<string, string[]>();
+    if (!rootCollectionIds.length || !this.prisma?.collection?.findMany) return descendantMap;
+    const effectiveProjectId = this.normalizeProjectId(projectId);
+    const scopeWhere: Prisma.CollectionWhereInput = effectiveProjectId
+      ? { projectId: effectiveProjectId, deletedAt: null }
+      : { userId, projectId: null, deletedAt: null };
+    try {
+      const allCollections = await this.prisma.collection.findMany({
+        where: scopeWhere,
+        select: { id: true, parentId: true },
+      });
+      const treeEngine = new TreeEngine();
+      for (const colId of rootCollectionIds) {
+        const descendants = treeEngine.getDescendantIds(allCollections, colId);
+        descendantMap.set(colId, [colId, ...descendants]);
+      }
+    } catch {
+      // Graceful fallback
+    }
+    return descendantMap;
+  }
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
@@ -28,6 +56,7 @@ export class SavedSearchesRepository {
     dto: CreateSavedSearchDto,
     projectId?: string,
     tx?: Prisma.TransactionClient,
+    initialCount?: number,
   ) {
     const client = this.getClient(tx);
     const effectiveProjectId =
@@ -45,6 +74,9 @@ export class SavedSearchesRepository {
         sortBy: dto.sortBy || 'dateAdded',
         sortOrder: dto.sortOrder || 'desc',
         isPinned: dto.isPinned ?? false,
+        ...(typeof initialCount === 'number'
+          ? { cachedCount: initialCount, lastEvaluatedAt: new Date() }
+          : {}),
       },
     });
   }

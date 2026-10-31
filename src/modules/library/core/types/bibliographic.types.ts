@@ -4,6 +4,7 @@
  */
 import type { Prisma } from '@prisma/client';
 import type { TransactionHelpers } from '../ports';
+import { SCHEMA_V42_DATA } from './schema.constants';
 
 export enum IngestionSource {
   Manual = 'Manual',
@@ -250,6 +251,18 @@ export const CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS = [
   'referenceCount',
   'openAccessPdfUrl',
 ] as const;
+
+export const ITEM_COLUMN_METADATA_FIELDS = new Set<string>(
+  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
+);
+
+export const TYPE_SPECIFIC_EXTRA_FIELDS = [
+  ...new Set(
+    Object.values(SCHEMA_V42_DATA.itemTypes)
+      .flatMap((itemType) => itemType.fields.map((field) => field.key))
+      .filter((field) => !ITEM_COLUMN_METADATA_FIELDS.has(field)),
+  ),
+];
 
 export interface CreateItemData {
   title: string;

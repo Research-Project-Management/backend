@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
@@ -20,10 +20,11 @@ import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
   ItemProvenancePolicy,
   getEffectiveBaseFieldMap,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 
 import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';
 
@@ -39,7 +40,7 @@ export class ItemTypeConversionService {
     private readonly command: CommandRepository,
     private readonly typesService: TypesService,
     private readonly transformer: ItemTransformer,
-    @Optional() private readonly libraryTx?: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx?: IUnitOfWork,
     @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 

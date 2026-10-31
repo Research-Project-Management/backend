@@ -1,9 +1,7 @@
-import { Injectable, Optional, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { Prisma, ReadStatus } from '@prisma/client';
 import { isUUID } from 'class-validator';
-import { PrismaService } from '@/core';
 import { AcademicSearchQueryEngine } from '@/modules/library/core';
-import { TreeEngine } from './tree.engine';
 import {
   SavedSearchCondition, SavedSearchConditionGroup, isConditionGroup, SavedSearchOperator, SavedSearchScopeOptions,
 } from '@/modules/library/catalog/types/saved-search.types';
@@ -471,11 +469,6 @@ function evaluateDefaultFieldStrategy(ctx: FieldEvaluatorContext): Prisma.ItemWh
 
 @Injectable()
 export class ConditionEvaluatorEngine {
-  constructor(
-    @Optional() private readonly prisma?: PrismaService,
-    @Optional() private readonly treeEngine: TreeEngine = new TreeEngine(),
-  ) {}
-
   private validateGroupStructure(
     group: SavedSearchConditionGroup,
     depth: number = 0,
@@ -511,11 +504,25 @@ export class ConditionEvaluatorEngine {
     return [...new Set(counter.collectionIds)];
   }
 
+  extractReferencedCollectionIds(group: SavedSearchConditionGroup | null | undefined): string[] {
+    if (!group || typeof group !== 'object' || !Array.isArray(group.conditions) || !group.conditions.length) {
+      return [];
+    }
+    const optionsFallback =
+      'options' in group && group.options && typeof group.options === 'object'
+        ? (group.options as SavedSearchScopeOptions)
+        : {};
+    const scopeOptions = group.scopeOptions || optionsFallback;
+    if (scopeOptions.searchSubcollections === false) return [];
+    return this.validateGroupStructure(group);
+  }
+
   compile(
     userId: string,
     group: SavedSearchConditionGroup,
     projectId?: string,
-  ): Prisma.ItemWhereInput | Promise<Prisma.ItemWhereInput> {
+    descendantMap: Map<string, string[]> = new Map(),
+  ): Prisma.ItemWhereInput {
     const baseWhere: Prisma.ItemWhereInput = projectId
       ? { projectId, deletedAt: null }
       : { userId, projectId: null, deletedAt: null };
@@ -525,41 +532,7 @@ export class ConditionEvaluatorEngine {
     }
     if (!group.conditions?.length) return baseWhere;
 
-    const referencedCollectionIds = this.validateGroupStructure(group);
-    const optionsFallback =
-      'options' in group && group.options && typeof group.options === 'object'
-        ? (group.options as SavedSearchScopeOptions)
-        : {};
-    const scopeOptions = group.scopeOptions || optionsFallback;
-    if (this.prisma && scopeOptions.searchSubcollections !== false && referencedCollectionIds.length > 0) {
-      return this.compileAsync(userId, group, projectId, baseWhere, referencedCollectionIds);
-    }
-    return this.buildCompiledQuery(group, userId, baseWhere, new Map());
-  }
-
-  private async compileAsync(
-    userId: string,
-    group: SavedSearchConditionGroup,
-    projectId: string | undefined,
-    baseWhere: Prisma.ItemWhereInput,
-    referencedCollectionIds: string[],
-  ): Promise<Prisma.ItemWhereInput> {
-    const descendantMap = new Map<string, string[]>();
-    const scopeWhere: Prisma.CollectionWhereInput = projectId
-      ? { projectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
-    try {
-      const allCollections = await this.prisma!.collection.findMany({
-        where: scopeWhere,
-        select: { id: true, parentId: true },
-      });
-      for (const colId of referencedCollectionIds) {
-        const descendants = this.treeEngine.getDescendantIds(allCollections, colId);
-        descendantMap.set(colId, [colId, ...descendants]);
-      }
-    } catch {
-      // Graceful fallback
-    }
+    this.validateGroupStructure(group);
     return this.buildCompiledQuery(group, userId, baseWhere, descendantMap);
   }
 

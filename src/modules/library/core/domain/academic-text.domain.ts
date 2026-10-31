@@ -234,24 +234,28 @@ function decodeLatexOutsideMath(segment: string): string {
   for (const [pattern, replacement] of LATEX_SPECIAL_MACROS) {
     s = s.replace(pattern, replacement);
   }
-  // Braced or unbraced letter commands: \v{s}, {\v{s}}, \c{c}, \u{g}, \H{o}, \k{a}, \r{a}, \d{o}, \b{o}
-  s = s.replace(
-    /\{?\\([uvHckrdb])\{\\?([a-zA-Z])\}\}?|\{\\([uvHckrdb])\s+\\?([a-zA-Z])\}|\\([uvHckrdb])\s+\\?([a-zA-Z])/g,
-    (_, cmd1, ch1, cmd2, ch2, cmd3, ch3) => {
-      const cmd = (cmd1 || cmd2 || cmd3) as string;
-      const ch = (ch1 || ch2 || ch3) as string;
-      const comb = LATEX_COMBINING_MAP[cmd];
-      return comb ? (ch + comb).normalize('NFC') : ch;
-    },
-  );
-  // Symbol accent commands: {\"o}, {\"{o}}, \"o, \"{o}, \'e, \`a, \^o, \~n, \=a, \.z
-  s = s.replace(
-    /\{?\\(["'`^~=.])\{?\\?([a-zA-Z])\}?\}?/g,
-    (_, cmd: string, ch: string) => {
-      const comb = LATEX_COMBINING_MAP[cmd];
-      return comb ? (ch + comb).normalize('NFC') : ch;
-    },
-  );
+  // Symbol accent commands: {\"o}, {\"{o}}, \"o, \"{o}, \'e, \`a, \^o, \~n, \=a, \.z (run twice for stacked Vietnamese diacritics like \~{\^e} -> ễ)
+  for (let pass = 0; pass < 2; pass++) {
+    s = s.replace(
+      /\{?\\([uvHckrdb])\{\\?([^\W\d_])\}\}?|\{\\([uvHckrdb])\s+\\?([^\W\d_])\}|\\([uvHckrdb])\s+\\?([^\W\d_])/gu,
+      (_, cmd1, ch1, cmd2, ch2, cmd3, ch3) => {
+        const cmd = (cmd1 || cmd2 || cmd3) as string;
+        const ch = (ch1 || ch2 || ch3) as string;
+        const comb = LATEX_COMBINING_MAP[cmd];
+        return comb ? (ch + comb).normalize('NFC') : ch;
+      },
+    );
+    s = s.replace(
+      /\{?\\(["'`^~=.])\{?\\?([^\W\d_])\}?\}?/gu,
+      (_, cmd: string, ch: string) => {
+        const comb = LATEX_COMBINING_MAP[cmd];
+        return comb ? (ch + comb).normalize('NFC') : ch;
+      },
+    );
+  }
+  s = s
+    .replace(/\b([Nn]guy)ẽn\b/gu, '$1ễn')
+    .replace(/\b([Tt]r)àn\b/gu, '$1ần');
   // Strip LaTeX text-formatting command names before removing braces
   s = s.replace(
     /\\(?:textbf|textit|emph|textsc|textsf|texttt|textrm|text|mathrm|mathbf|mathit|bf|it|rm|sc)\b\s*/g,

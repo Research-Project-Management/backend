@@ -9,8 +9,8 @@ import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
+  TransactionService,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 
 export async function validateCollectionReorderNoCycle(
   repo: CollectionsRepository,
@@ -67,7 +67,8 @@ export async function executeAssignItemsToCollection(
   collectionId: string,
   dto: AssignItemsToCollectionDto,
   projectId?: string,
-): Promise<{ ids: string[]; count: number }> {
+  onAfterCommit?: (ids: string[]) => Promise<void> | void,
+): Promise<{ ids: string[]; count: number; ranPostCommitHook?: boolean }> {
   const ids = dto.itemIds || [];
   const validProjectId = normalizeProjectScopeId(projectId);
   const scopeWhere = validProjectId
@@ -93,6 +94,7 @@ export async function executeAssignItemsToCollection(
 
   if (libraryTx?.executeInTransaction) {
     let assigned = false;
+    let ranPostCommitHook = false;
     await libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const shouldProceed = await validateInClient(tx);
@@ -124,9 +126,14 @@ export async function executeAssignItemsToCollection(
             projectId: validProjectId,
           },
         );
+        if (onAfterCommit && helpers?.onAfterCommit) {
+          ranPostCommitHook = true;
+          helpers.onAfterCommit(() => onAfterCommit(ids));
+        }
       },
     );
-    if (!assigned) return { ids: [], count: 0 };
+    if (!assigned) return { ids: [], count: 0, ranPostCommitHook };
+    return { ids, count: ids.length, ranPostCommitHook };
   } else {
     const shouldProceed = await validateInClient();
     if (!shouldProceed) return { ids: [], count: 0 };
@@ -173,7 +180,15 @@ export async function executeDeleteCollectionWithCascade(
   collectionId: string,
   strategy: CollectionDeleteStrategy = 'orphan',
   projectId?: string,
-): Promise<{ effectiveProjectId?: string; affectedItemIds: string[] }> {
+  onAfterCommit?: (
+    effectiveProjectId: string | undefined,
+    affectedItemIds: string[],
+  ) => Promise<void> | void,
+): Promise<{
+  effectiveProjectId?: string;
+  affectedItemIds: string[];
+  ranPostCommitHook?: boolean;
+}> {
   const resolveCascadeTargets = async (tx?: Prisma.TransactionClient) => {
     const existing = await repo.findById(userId, collectionId, tx, projectId);
     if (!existing) {
@@ -373,7 +388,14 @@ export async function executeDeleteCollectionWithCascade(
             deletedItemIds,
           },
         );
-        return { effectiveProjectId, affectedItemIds };
+        let ranPostCommitHook = false;
+        if (onAfterCommit && helpers?.onAfterCommit) {
+          ranPostCommitHook = true;
+          helpers.onAfterCommit(() =>
+            onAfterCommit(effectiveProjectId, affectedItemIds),
+          );
+        }
+        return { effectiveProjectId, affectedItemIds, ranPostCommitHook };
       },
     );
   }
@@ -391,11 +413,16 @@ export async function executeCopyCollectionSubtree(
   collectionId: string,
   targetParentId?: string | null,
   projectId?: string,
+  onAfterCommit?: (
+    effectiveProjectId: string | undefined,
+    affectedItemIds: string[],
+  ) => Promise<void> | void,
 ): Promise<{
   collection: Awaited<ReturnType<CollectionsRepository['create']>>;
   copiedCount: number;
   effectiveProjectId?: string;
   affectedItemIds: string[];
+  ranPostCommitHook?: boolean;
 }> {
   const normalizedTargetParentId = normalizeParentId(targetParentId);
 
@@ -541,11 +568,20 @@ export async function executeCopyCollectionSubtree(
     };
 
     const rootClone = await cloneNode(root, normalizedTargetParentId, true);
+    const affectedItemIds = Array.from(affectedItemIdSet);
+    let ranPostCommitHook = false;
+    if (onAfterCommit && helpers?.onAfterCommit) {
+      ranPostCommitHook = true;
+      helpers.onAfterCommit(() =>
+        onAfterCommit(effectiveProjectId, affectedItemIds),
+      );
+    }
     return {
       collection: rootClone,
       copiedCount,
       effectiveProjectId,
-      affectedItemIds: Array.from(affectedItemIdSet),
+      affectedItemIds,
+      ranPostCommitHook,
     };
   };
 

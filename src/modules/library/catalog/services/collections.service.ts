@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, UnprocessableEntityException, Optional } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, UnprocessableEntityException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';
@@ -7,8 +7,7 @@ import { CollectionDeleteStrategy, CollectionTreeNode } from '@/modules/library/
 import { normalizeParentId, sanitizeCollectionName, sanitizeCollectionDescription } from '@/modules/library/catalog/domain/tree.engine';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import { RedisCacheService } from '@/core';
-import { normalizeProjectScopeId, isProjectScopeId, LIBRARY_EVENT_TYPES, TransactionHelpers, executeStandardLibraryCacheInvalidation } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
+import { normalizeProjectScopeId, isProjectScopeId, LIBRARY_EVENT_TYPES, TransactionHelpers, UNIT_OF_WORK, IUnitOfWork, executeStandardLibraryCacheInvalidation } from '@/modules/library/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { ItemCacheCoordinator } from './item-cache.coordinator';
 import {
@@ -25,7 +24,7 @@ export class CollectionsService {
     @Optional()
     private readonly tree: TreeEngine = new TreeEngine(),
     @Optional() private readonly cache?: RedisCacheService,
-    @Optional() private readonly libraryTx?: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx?: IUnitOfWork,
     @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
   private resolveValidProjectId(projectId?: string | null): string | undefined {
@@ -159,9 +158,11 @@ export class CollectionsService {
       projectId: effectiveProjectId,
       createdById: userId,
     };
+    let ranPostCommitHook = false;
     const collection = this.libraryTx
       ? await this.libraryTx.executeInTransaction(
           async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+            ranPostCommitHook = Boolean(helpers?.onAfterCommit);
             const created = await this.repo.create(userId, createPayload, tx);
             const eventScope = {
               userId,
@@ -180,14 +181,22 @@ export class CollectionsService {
               LIBRARY_EVENT_TYPES.COLLECTION_CREATED,
               created,
             );
+            helpers?.onAfterCommit?.(() =>
+              this.invalidateCollectionsCache(
+                userId,
+                effectiveProjectId || undefined,
+              ),
+            );
             return created;
           },
         )
       : await this.repo.create(userId, createPayload);
-    await this.invalidateCollectionsCache(
-      userId,
-      effectiveProjectId || undefined,
-    );
+    if (!ranPostCommitHook) {
+      await this.invalidateCollectionsCache(
+        userId,
+        effectiveProjectId || undefined,
+      );
+    }
     return { collection };
   }
   private async validateParentNoCycle(
@@ -248,9 +257,11 @@ export class CollectionsService {
     };
     const expectedVersion = dto.expectedVersion ?? dto.version;
     let effectiveProjectId = normalizeProjectScopeId(projectId) ?? undefined;
+    let ranPostCommitHook = false;
     const collection = this.libraryTx
       ? await this.libraryTx.executeInTransaction(
           async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+            ranPostCommitHook = Boolean(helpers?.onAfterCommit);
             const existing = await this.repo.findById(
               userId,
               collectionId,
@@ -293,6 +304,12 @@ export class CollectionsService {
               LIBRARY_EVENT_TYPES.COLLECTION_UPDATED,
               updated,
             );
+            helpers?.onAfterCommit?.(() =>
+              this.invalidateCollectionsCache(
+                userId,
+                effectiveProjectId ?? projectId,
+              ),
+            );
             return updated;
           },
         )
@@ -325,7 +342,9 @@ export class CollectionsService {
             expectedVersion,
           );
         })();
-    await this.invalidateCollectionsCache(userId, effectiveProjectId ?? projectId);
+    if (!ranPostCommitHook) {
+      await this.invalidateCollectionsCache(userId, effectiveProjectId ?? projectId);
+    }
     return { collection };
   }
   async deleteCollection(
@@ -334,7 +353,7 @@ export class CollectionsService {
     strategy: CollectionDeleteStrategy = 'orphan',
     projectId?: string,
   ) {
-    const { effectiveProjectId, affectedItemIds } =
+    const { effectiveProjectId, affectedItemIds, ranPostCommitHook } =
       await executeDeleteCollectionWithCascade(
         this.repo,
         this.tree,
@@ -343,8 +362,12 @@ export class CollectionsService {
         collectionId,
         strategy,
         projectId,
+        (effProj, affectedIds) =>
+          this.invalidateCollectionsCache(userId, effProj, affectedIds),
       );
-    await this.invalidateCollectionsCache(userId, effectiveProjectId, affectedItemIds);
+    if (!ranPostCommitHook) {
+      await this.invalidateCollectionsCache(userId, effectiveProjectId, affectedItemIds);
+    }
     return { success: true };
   }
   async moveItems(userId: string, collectionId: string, itemIds: string[], projectId?: string) {
@@ -352,9 +375,11 @@ export class CollectionsService {
     const validProjectId = normalizeProjectScopeId(projectId);
     const scopeWhere = validProjectId ? { projectId: validProjectId } : { userId, projectId: null };
     let ownedItemIds: string[] = [];
+    let ranPostCommitHook = false;
     if (this.libraryTx?.executeInTransaction) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           if (collectionId !== 'unfiled') {
             const collection = await this.repo.findById(userId, collectionId, tx, projectId);
             if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
@@ -380,6 +405,9 @@ export class CollectionsService {
             userId,
             projectId: validProjectId,
           });
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateCollectionsCache(userId, projectId, ownedItemIds),
+          );
         },
       );
     } else {
@@ -396,7 +424,9 @@ export class CollectionsService {
     if (ownedItemIds.length === 0) {
       return { message: 'No owned items to move', count: 0, targetCollectionId: destinationCollectionId };
     }
-    await this.invalidateCollectionsCache(userId, projectId, ownedItemIds);
+    if (!ranPostCommitHook) {
+      await this.invalidateCollectionsCache(userId, projectId, ownedItemIds);
+    }
     return { message: 'Items moved successfully', count: ownedItemIds.length, targetCollectionId: destinationCollectionId };
   }
   private async validateReorderNoCycle(
@@ -422,9 +452,11 @@ export class CollectionsService {
     const effectiveProjectId = normalizeProjectScopeId(projectId) ?? undefined;
 
     let updated: Awaited<ReturnType<CollectionsRepository['findAll']>> | undefined;
+    let ranPostCommitHook = false;
     if (this.libraryTx?.executeInTransaction) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           await this.validateReorderNoCycle(userId, collections, projectId, tx);
           await this.repo.reorder(userId, collections, projectId, tx);
           const refreshed = (await this.repo.findAll(userId, projectId, tx)) || [];
@@ -481,6 +513,9 @@ export class CollectionsService {
               );
             }
           }
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateCollectionsCache(userId, projectId),
+          );
         },
       );
     } else {
@@ -491,7 +526,9 @@ export class CollectionsService {
     if (updated === undefined) {
       updated = await this.repo.findAll(userId, projectId);
     }
-    await this.invalidateCollectionsCache(userId, projectId);
+    if (!ranPostCommitHook) {
+      await this.invalidateCollectionsCache(userId, projectId);
+    }
     return { collections: updated };
   }
   async assignItemsToCollection(
@@ -500,15 +537,17 @@ export class CollectionsService {
     dto: AssignItemsToCollectionDto,
     projectId?: string,
   ) {
-    const { ids, count } = await executeAssignItemsToCollection(
+    const { ids, count, ranPostCommitHook } = await executeAssignItemsToCollection(
       this.repo,
       this.libraryTx,
       userId,
       collectionId,
       dto,
       projectId,
+      (assignedIds) =>
+        this.invalidateCollectionsCache(userId, projectId, assignedIds),
     );
-    if (count > 0) {
+    if (count > 0 && !ranPostCommitHook) {
       await this.invalidateCollectionsCache(userId, projectId, ids);
     }
     return { success: true, count };
@@ -538,9 +577,11 @@ export class CollectionsService {
   ) {
     const validProjectId = normalizeProjectScopeId(projectId);
     const scopeWhere = validProjectId ? { projectId: validProjectId } : { userId, projectId: null };
+    let ranPostCommitHook = false;
     if (this.libraryTx?.executeInTransaction) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           const collection = await this.repo.findById(userId, collectionId, tx, projectId);
           if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
           const itemExists = await this.repo.verifyItemInScope(itemId, scopeWhere, tx);
@@ -557,6 +598,9 @@ export class CollectionsService {
             LIBRARY_EVENT_TYPES.COLLECTION_ITEMS_DETACHED,
             { collectionId, itemIds: [itemId], itemId, userId, projectId: validProjectId },
           );
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateCollectionsCache(userId, projectId, [itemId]),
+          );
         },
       );
     } else {
@@ -566,7 +610,9 @@ export class CollectionsService {
       if (!itemExists) throw new NotFoundException(`Item not found in library: ${itemId}`);
       await this.repo.removeItemFromCollection(userId, collectionId, itemId);
     }
-    await this.invalidateCollectionsCache(userId, projectId, [itemId]);
+    if (!ranPostCommitHook) {
+      await this.invalidateCollectionsCache(userId, projectId, [itemId]);
+    }
     return { success: true };
   }
   async detachItemsFromCollection(
@@ -577,9 +623,11 @@ export class CollectionsService {
   ) {
     if (!itemIds || itemIds.length === 0) return { success: true, count: 0 };
     const validProjectId = normalizeProjectScopeId(projectId);
+    let ranPostCommitHook = false;
     if (this.libraryTx?.executeInTransaction) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           const collection = await this.repo.findById(userId, collectionId, tx, projectId);
           if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
           await this.repo.removeItems(collectionId, itemIds, tx);
@@ -594,6 +642,9 @@ export class CollectionsService {
             LIBRARY_EVENT_TYPES.COLLECTION_ITEMS_DETACHED,
             { collectionId, itemIds, userId, projectId: validProjectId },
           );
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateCollectionsCache(userId, projectId, itemIds),
+          );
         },
       );
     } else {
@@ -601,7 +652,9 @@ export class CollectionsService {
       if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
       await this.repo.removeItems(collectionId, itemIds);
     }
-    await this.invalidateCollectionsCache(userId, projectId, itemIds);
+    if (!ranPostCommitHook) {
+      await this.invalidateCollectionsCache(userId, projectId, itemIds);
+    }
     return { success: true, count: itemIds.length };
   }
   async copyCollection(
@@ -615,6 +668,7 @@ export class CollectionsService {
       copiedCount,
       effectiveProjectId,
       affectedItemIds,
+      ranPostCommitHook,
     } = await executeCopyCollectionSubtree(
       this.repo,
       this.tree,
@@ -623,12 +677,20 @@ export class CollectionsService {
       collectionId,
       dto?.parentId,
       projectId,
+      (effProj, affectedIds) =>
+        this.invalidateCollectionsCache(
+          userId,
+          effProj ?? projectId,
+          affectedIds,
+        ),
     );
-    await this.invalidateCollectionsCache(
-      userId,
-      effectiveProjectId ?? projectId,
-      affectedItemIds,
-    );
+    if (!ranPostCommitHook) {
+      await this.invalidateCollectionsCache(
+        userId,
+        effectiveProjectId ?? projectId,
+        affectedItemIds,
+      );
+    }
     return { collection, copiedCount };
   }
   async transferItemMemberships(

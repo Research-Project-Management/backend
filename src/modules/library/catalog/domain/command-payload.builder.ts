@@ -1,5 +1,4 @@
 import { Prisma, TagType } from '@prisma/client';
-import { PrismaService } from '@/core';
 import { generateCitationKey } from '@/modules/library/core/domain/identifier.domain';
 import {
   cleanAbstractText, getEffectiveBaseFieldMap, getEffectiveReverseBaseFieldMap,
@@ -13,26 +12,22 @@ import {
   isUuid, cleanSingleIdentifier, extractExtraKeyValues, normalizeItemIdentifiers, resolveExtraPlainText,
   extractNonColumnExtraFields, convertHtmlToMarkdown, buildTipTapDocFromText, prepareNotesToCreate,
   prepareAttachmentsToCreate, deriveFirstAuthor, prepareContributorsToCreate, applyManualEditProvenanceLocks,
-  prepareItemAiMetadataPatch, buildImportItemPayload, ImportSourceItem, AiMetadataPatchPreparation,
+  prepareItemAiMetadataPatch, buildImportItemPayload, buildTagTypeMap, ResolvedTag,
+  ImportSourceItem, AiMetadataPatchPreparation,
 } from './creator-tag-payload.builder';
 import {
   buildDeduplicatedIdentifiers, buildCollectionItemsUpdatePatch, syncMetadataIdentifierAliases,
   IDENTIFIER_URI_BUILDERS, calculateIdentifierChanges, buildMyPublicationMetadata, applyMetadataProvenanceAndTelemetry,
 } from './identifier-change.helper';
-import {
-  disambiguateCitationKey, resolveOrCreateTags, syncTagsForCatalogItem, buildTagTypeMap,
-  ResolvedTag, syncCreatedIdentifiers, syncUpdatedIdentifiers,
-} from '../repositories/command-relations.helper';
 
 export * from './creator-tag-payload.builder';
 export type { ResolvedTag, ImportSourceItem, AiMetadataPatchPreparation };
 export {
   ITEM_COLUMN_METADATA_FIELDS, IDENTIFIER_URI_BUILDERS, buildDeduplicatedIdentifiers, calculateIdentifierChanges,
-  buildMyPublicationMetadata, buildCollectionItemsUpdatePatch, syncMetadataIdentifierAliases, syncCreatedIdentifiers,
-  syncUpdatedIdentifiers, disambiguateCitationKey, isUuid, cleanSingleIdentifier, extractExtraKeyValues,
-  normalizeItemIdentifiers, resolveExtraPlainText, extractNonColumnExtraFields, convertHtmlToMarkdown,
-  buildTipTapDocFromText, prepareNotesToCreate, prepareAttachmentsToCreate, resolveOrCreateTags,
-  syncTagsForCatalogItem, deriveFirstAuthor, prepareContributorsToCreate, buildTagTypeMap,
+  buildMyPublicationMetadata, buildCollectionItemsUpdatePatch, syncMetadataIdentifierAliases,
+  isUuid, cleanSingleIdentifier, extractExtraKeyValues, normalizeItemIdentifiers, resolveExtraPlainText,
+  extractNonColumnExtraFields, convertHtmlToMarkdown, buildTipTapDocFromText, prepareNotesToCreate,
+  prepareAttachmentsToCreate, deriveFirstAuthor, prepareContributorsToCreate, buildTagTypeMap,
   applyManualEditProvenanceLocks, prepareItemAiMetadataPatch, buildImportItemPayload,
 };
 
@@ -391,13 +386,39 @@ export function buildMetadataPartial(params: {
   return result;
 }
 
-export async function buildCommandCreateInput(
-  userId: string, data: CreateItemData, client: Prisma.TransactionClient | PrismaService, projectId?: string,
-): Promise<{
+export interface PreResolvedCreateRelations {
+  resolvedTags?: ReadonlyArray<ResolvedTag>;
+  validCollectionIds?: ReadonlySet<string>;
+  disambiguatedCitationKey?: string | null;
+}
+
+export function extractUniqueCreateCollectionIds(data: CreateItemData): string[] {
+  return Array.from(
+    new Set(
+      [
+        ...(Array.isArray(data.collectionIds) ? data.collectionIds : []),
+        ...(Array.isArray((data as { collections?: unknown }).collections) ? (data as unknown as { collections: string[] }).collections : []),
+        ...(data.collectionId ? [data.collectionId] : []),
+      ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
+    ),
+  );
+}
+
+export function resolveCreateDefaultTagType(data: CreateItemData): TagType {
+  return (data.keywords && data.keywords.length > 0) || (data.labels && data.labels.length > 0) ||
+    Boolean(data.fileId || data.doi || data.arxivId || data.pmid || data.isbn)
+    ? TagType.automatic
+    : TagType.manual;
+}
+
+export function buildCommandCreateInput(
+  userId: string, data: CreateItemData, options?: PreResolvedCreateRelations, projectId?: string,
+): {
   createData: Prisma.ItemUncheckedCreateInput;
   resolvedFileId: string | null;
   identifiersToCreate: Array<{ type: string; value: string; canonicalUri: string | null }>;
-}> {
+  rawCitationKey: string | null;
+} {
   const dataRecord = data as Record<string, unknown>;
   if (typeof dataRecord.author === 'string' && dataRecord.author.trim() && data.creators === undefined && data.contributors === undefined && data.authors === undefined) {
     data = { ...data, authors: [dataRecord.author.trim()] };
@@ -428,12 +449,7 @@ export async function buildCommandCreateInput(
 
   const ids = normalizeItemIdentifiers(data);
   const rawTagList = [...(data.tags || []), ...(data.keywords || []), ...(data.labels || [])];
-  const defaultTagType =
-    (data.keywords && data.keywords.length > 0) || (data.labels && data.labels.length > 0) ||
-    Boolean(data.fileId || data.doi || data.arxivId || data.pmid || data.isbn)
-      ? TagType.automatic
-      : TagType.manual;
-  const resolvedTags = await resolveOrCreateTags(client, userId, rawTagList, defaultTagType, effectiveProjectId);
+  const resolvedTags = options?.resolvedTags ?? [];
 
   const resolvedItemType = data.itemType ?? data.type ?? 'journalArticle';
   const canonical = resolveCanonicalCommandFields(data, resolvedItemType, null);
@@ -458,41 +474,25 @@ export async function buildCommandCreateInput(
       ? deriveFirstAuthor({ contributors: contributorsToCreate, itemType: resolvedItemType })
       : deriveFirstAuthor({ ...data, itemType: resolvedItemType });
 
-  const rawUniqueCollectionIds = Array.from(
-    new Set(
-      [
-        ...(Array.isArray(data.collectionIds) ? data.collectionIds : []),
-        ...(Array.isArray((data as { collections?: unknown }).collections) ? (data as unknown as { collections: string[] }).collections : []),
-        ...(data.collectionId ? [data.collectionId] : []),
-      ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
-    ),
-  );
-  let uniqueCollectionIds = rawUniqueCollectionIds;
-  if (rawUniqueCollectionIds.length > 0 && client.collection) {
-    const validCollections = await client.collection.findMany({
-      where: effectiveProjectId
-        ? { id: { in: rawUniqueCollectionIds }, projectId: effectiveProjectId, deletedAt: null }
-        : { id: { in: rawUniqueCollectionIds }, userId, projectId: null, deletedAt: null },
-      select: { id: true },
-    });
-    if (Array.isArray(validCollections)) {
-      const validSet = new Set(validCollections.map((c) => c.id));
-      uniqueCollectionIds = rawUniqueCollectionIds.filter((cid) => validSet.has(cid));
-    }
-  }
+  const rawUniqueCollectionIds = extractUniqueCreateCollectionIds(data);
+  const uniqueCollectionIds = options?.validCollectionIds
+    ? rawUniqueCollectionIds.filter((cid) => options.validCollectionIds!.has(cid))
+    : rawUniqueCollectionIds;
 
   const identifiersToCreate = buildDeduplicatedIdentifiers(
     ids, (data as { identifiers?: ReadonlyArray<{ type: string; value: string; canonicalUri?: string | null }> }).identifiers,
   );
+
+  const rawCitationKey = (canonical.rawCitationKey ?? '').trim() || null;
+  const effectiveCitationKey =
+    options?.disambiguatedCitationKey !== undefined ? options.disambiguatedCitationKey : rawCitationKey;
 
   const createData = {
     userId, title: resolvedCreateTitle, itemType: resolvedItemType,
     ...(resolvedPubTitle ? { publicationTitle: resolvedPubTitle } : {}),
     year: resolvedCreateYear, doi: ids.doi || null, abstract: canonical.rawAbstract || null,
     url: (canonical.rawUrl ?? '').trim() || null,
-    citationKey: (canonical.rawCitationKey ?? '').trim()
-      ? await disambiguateCitationKey(client, canonical.rawCitationKey!.trim(), { userId, projectId: effectiveProjectId })
-      : null,
+    citationKey: effectiveCitationKey,
     metadata: metadataPayload as Prisma.InputJsonValue,
     hasFile, attachmentCount: attachmentsToCreate.length, noteCount: notes.length, firstAuthor,
     projectId: effectiveProjectId, version: 1,
@@ -505,7 +505,7 @@ export async function buildCommandCreateInput(
     ...(notes.length > 0 ? { notesList: { create: notes } } : {}),
   } as unknown as Prisma.ItemUncheckedCreateInput;
 
-  return { createData, resolvedFileId, identifiersToCreate };
+  return { createData, resolvedFileId, identifiersToCreate, rawCitationKey };
 }
 
 export function buildCommandUpdateInput(

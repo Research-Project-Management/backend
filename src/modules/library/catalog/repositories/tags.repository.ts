@@ -3,7 +3,7 @@ import { PrismaService } from '@/core';
 import { Prisma, TagType } from '@prisma/client';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
-import { resolveOrCreateTags } from '@/modules/library/catalog/domain/command-payload.builder';
+import { resolveOrCreateTags } from '@/modules/library/catalog/repositories/command-relations.helper';
 
 @Injectable()
 export class TagsRepository {

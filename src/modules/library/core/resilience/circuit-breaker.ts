@@ -85,6 +85,14 @@ export class CircuitBreaker {
     return this.consecutiveFailures;
   }
 
+  public get failures(): number {
+    return this.consecutiveFailures;
+  }
+
+  public get isOpen(): boolean {
+    return this.getState() === 'OPEN';
+  }
+
   public getFailureSequence(): number {
     return this.failureSequence;
   }

@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Inject, Optional } from '@nestjs/common';
 import {
   ItemFieldDefinition,
   CreatorTypeDefinition,
@@ -11,8 +11,9 @@ import {
   getEffectiveBaseFieldMap,
   getEffectiveReverseBaseFieldMap,
   normalizeProjectScopeId,
+  UNIT_OF_WORK,
+  IUnitOfWork,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { ItemQueryService } from './item-query.service';
 import { CollectionsService } from './collections.service';
@@ -229,7 +230,7 @@ export class LibraryBootstrapService {
     private readonly collectionsService: CollectionsService,
     private readonly savedSearchesService: SavedSearchesService,
     private readonly typesService: TypesService,
-    @Optional() private readonly libraryTx?: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx?: IUnitOfWork,
   ) {}
 
   async getBootstrap(
@@ -258,7 +259,7 @@ export class LibraryBootstrapService {
       this.itemQueryService.getCounts(userId, validProjectId, accessHint),
       this.collectionsService.getCollections(userId, validProjectId),
       this.savedSearchesService.findAll(userId, validProjectId),
-      this.libraryTx
+      this.libraryTx?.getLatestSequence
         ? this.libraryTx.getLatestSequence(syncScope).catch(() => 0n)
         : Promise.resolve(0n),
       validProjectId

@@ -99,7 +99,9 @@ model OutboxEvent {
 
   @@index([status, createdAt])
   @@index([status, updatedAt])
+  @@index([status, leaseExpiresAt])
   @@index([status, scheduledAt, leaseExpiresAt])
+  @@index([aggregateId, status])
   @@index([userId, createdAt])
   @@index([projectId, createdAt])
   @@index([dedupeKey])

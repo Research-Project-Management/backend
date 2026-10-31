@@ -19,10 +19,11 @@ import {
   LIBRARY_EVENT_TYPES,
   LIBRARY_REDIS_KEYS,
   TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
   buildItemCreatedOutboxPayload,
   normalizeProjectScopeId,
 } from '@/modules/library/core';
-import { TransactionService } from '@/modules/library/sync';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import {
   ImportSourceItem,
@@ -83,7 +84,7 @@ export class ItemCurationService {
   constructor(
     private readonly query: QueryRepository,
     private readonly command: CommandRepository,
-    private readonly libraryTx: TransactionService,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional()
     @Inject(RedisCacheService)
     private readonly cache?: RedisCacheService,
@@ -263,8 +264,10 @@ export class ItemCurationService {
       }
     }
 
+    let ranPostCommitHook = false;
     if (candidatesToImport.length > 0) {
       await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         const changeEntries: Array<{
           entityType: 'Item';
           entityId: string;
@@ -336,10 +339,15 @@ export class ItemCurationService {
             );
           }
         }
+        if (importedCount > 0) {
+          helpers?.onAfterCommit?.(() =>
+            this.cacheCoordinator.invalidateScopeListCache(userId, projectId),
+          );
+        }
       });
     }
 
-    if (importedCount > 0) {
+    if (importedCount > 0 && !ranPostCommitHook) {
       await this.cacheCoordinator.invalidateScopeListCache(userId, projectId);
     }
 
@@ -440,8 +448,28 @@ export class ItemCurationService {
         aiMetadataPatch,
       });
 
+    const invalidateUpdatedItemCache = async () => {
+      if (this.cacheCoordinator && existing.userId) {
+        await this.cacheCoordinator.invalidateForWrite({
+          userId: existing.userId,
+          projectId: validProjectId,
+          itemIds: [itemId],
+        });
+      } else if (this.cacheCoordinator) {
+        await this.cacheCoordinator.invalidateItemCache(
+          itemId,
+          existing.userId,
+          validProjectId,
+        );
+      } else if (this.cache) {
+        await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId));
+      }
+    };
+
+    let ranPostCommitHook = false;
     if (this.libraryTx && existing.userId) {
       await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         const updated = await this.command.applyItemAiMetadataUpdate({
           itemId,
           existing: existing,
@@ -473,6 +501,7 @@ export class ItemCurationService {
           LIBRARY_EVENT_TYPES.ITEM_UPDATED,
           domainUpdated,
         );
+        helpers?.onAfterCommit?.(invalidateUpdatedItemCache);
       });
     } else {
       await this.command.applyItemAiMetadataUpdate({
@@ -484,20 +513,8 @@ export class ItemCurationService {
       });
     }
 
-    if (this.cacheCoordinator && existing.userId) {
-      await this.cacheCoordinator.invalidateForWrite({
-        userId: existing.userId,
-        projectId: validProjectId,
-        itemIds: [itemId],
-      });
-    } else if (this.cacheCoordinator) {
-      await this.cacheCoordinator.invalidateItemCache(
-        itemId,
-        existing.userId,
-        validProjectId,
-      );
-    } else if (this.cache) {
-      await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId));
+    if (!ranPostCommitHook) {
+      await invalidateUpdatedItemCache();
     }
   }
 }

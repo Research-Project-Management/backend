@@ -38,6 +38,13 @@ export * from './services/zotero-schema-validator.service';
 
 // Repositories
 export { CommandRepository } from './repositories/command.repository';
+export {
+  resolveOrCreateTags,
+  syncTagsForCatalogItem,
+  disambiguateCitationKey,
+  syncCreatedIdentifiers,
+  syncUpdatedIdentifiers,
+} from './repositories/command-relations.helper';
 export * from './repositories/query.repository';
 export * from './repositories/collections.repository';
 export * from './repositories/tags.repository';
