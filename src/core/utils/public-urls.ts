@@ -23,7 +23,7 @@ export function resolvePublicUrl(
 }
 
 /**
- * Resolves an infrastructure endpoint (Redis, SearXNG, AI engine, ...).
+ * Resolves an infrastructure endpoint (Redis, CLSI, AI engine, ...).
  * The dev default applies only outside production.
  */
 export function resolveServiceUrl(

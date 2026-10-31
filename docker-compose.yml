@@ -220,7 +220,6 @@ services:
         max-size: "10m"
         max-file: "3"
     volumes:
-      - flux_latex_tectonic_cache:/root/.cache/Tectonic
       - flux_clsi_scratch:/tmp/clsi-scratch
     networks:
       flux_network:
@@ -228,45 +227,12 @@ services:
           - clsi
           - flux_clsi
 
-  # ----------------------------------------------------------------------------
-  # 6. SearXNG Self-Hosted Science Meta-Search Engine
-  # ----------------------------------------------------------------------------
-  searxng:
-    image: searxng/searxng:latest
-    container_name: flux_searxng
-    restart: "no"
-    ports:
-      - "127.0.0.1:${SEARXNG_PORT:-8080}:8080"
-    volumes:
-      - ./searxng:/etc/searxng:ro
-    environment:
-      - SEARXNG_BASE_URL=http://searxng:8080/
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-        reservations:
-          memory: 64M
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      flux_network:
-        aliases:
-          - searxng
-          - flux_searxng
-
 volumes:
   postgres_data:
     name: flux_postgres_data
     driver: local
   redis_data:
     name: flux_redis_data
-    driver: local
-  flux_latex_tectonic_cache:
-    name: flux_latex_tectonic_cache
     driver: local
   flux_clsi_scratch:
     name: flux_clsi_scratch

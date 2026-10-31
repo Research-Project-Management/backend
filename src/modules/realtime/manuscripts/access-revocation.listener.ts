@@ -1,8 +1,6 @@
 import {
   Injectable,
   Logger,
-  Inject,
-  forwardRef,
   Optional,
 } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
@@ -37,7 +35,6 @@ export class AccessRevocationListener {
 
   constructor(
     private readonly realtimeAccess: RealtimeAccessService,
-    @Inject(forwardRef(() => ManuscriptsGateway))
     private readonly gateway: ManuscriptsGateway,
     @Optional() private readonly roomStore?: RoomStore,
   ) {}

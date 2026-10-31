@@ -318,6 +318,65 @@ export class IntegrationsService {
     await this.repo.deleteConnection(userId, provider);
   }
 
+  async connectZoteroApiKey(
+    userId: string,
+    dto: { zoteroUserId: string; apiKey: string },
+  ): Promise<{ success: boolean; accountName: string }> {
+    const cleanUserId = dto.zoteroUserId.trim();
+    const cleanApiKey = dto.apiKey.trim();
+    if (!cleanUserId || !cleanApiKey) {
+      throw new BadRequestException(
+        'Zotero User ID and Personal API Key are required.',
+      );
+    }
+
+    try {
+      const testRes = await fetch(
+        `https://api.zotero.org/users/${encodeURIComponent(cleanUserId)}/items/top?limit=1`,
+        {
+          headers: {
+            'Zotero-API-Key': cleanApiKey,
+            'Zotero-API-Version': '3',
+            'User-Agent': 'FluxResearchPlatform/1.0 (https://flux.study)',
+          },
+        },
+      );
+
+      if (!testRes.ok) {
+        if (testRes.status === 403 || testRes.status === 401) {
+          throw new BadRequestException(
+            'Invalid Zotero User ID or API Key. Please verify your credentials at zotero.org/settings/keys',
+          );
+        }
+        throw new BadRequestException(
+          `Zotero API returned status ${testRes.status}: ${testRes.statusText}`,
+        );
+      }
+    } catch (err: unknown) {
+      if (err instanceof BadRequestException) throw err;
+      throw new BadRequestException(
+        `Failed to connect to Zotero API: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const accountName = `Zotero (${cleanUserId})`;
+    const encryptedAccess = encryptToken(cleanApiKey);
+
+    await this.repo.upsertConnection({
+      userId,
+      provider: 'zotero',
+      accessToken: encryptedAccess,
+      providerUserId: cleanUserId,
+      accountName,
+      metadata: { connectedVia: 'api_key' },
+    });
+
+    return {
+      success: true,
+      accountName,
+    };
+  }
+
   async getValidAccessToken(
     userId: string,
     conn: UserIntegration,

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import {
   IIntegrationProvider,
@@ -41,37 +41,23 @@ export class MendeleyProvider implements IIntegrationProvider {
 
   private readonly clientId: string;
   private readonly clientSecret: string;
-  private readonly isMockMode: boolean;
 
   constructor() {
     this.clientId = process.env.MENDELEY_CLIENT_ID || '';
     this.clientSecret = process.env.MENDELEY_CLIENT_SECRET || '';
-    this.isMockMode =
-      process.env.NODE_ENV !== 'production' &&
-      (!this.clientId || !this.clientSecret);
-
-    if (this.isMockMode) {
-      this.logger.warn(
-        'Mendeley client credentials not configured. Operating in development mock/sandbox mode.',
-      );
-    }
   }
 
   async initiateOAuth(
     userId: string,
     redirectUri: string,
   ): Promise<OAuthInitiationResult> {
-    const state = `state_${userId}_${randomBytes(8).toString('hex')}`;
-
-    if (this.isMockMode) {
-      const mockCode = `mock_code_${randomBytes(8).toString('hex')}`;
-      const mockAuthUrl = `${redirectUri}?code=${mockCode}&state=${state}`;
-      return {
-        authUrl: mockAuthUrl,
-        state,
-      };
+    if (!this.clientId || !this.clientSecret) {
+      throw new BadRequestException(
+        'Mendeley OAuth credentials (MENDELEY_CLIENT_ID / MENDELEY_CLIENT_SECRET) are not configured on the server.',
+      );
     }
 
+    const state = `state_${userId}_${randomBytes(8).toString('hex')}`;
     const authUrl = `https://api.mendeley.com/oauth/authorize?client_id=${encodeURIComponent(
       this.clientId,
     )}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=all&state=${encodeURIComponent(
@@ -91,16 +77,10 @@ export class MendeleyProvider implements IIntegrationProvider {
     secret?: string;
     redirectUri: string;
   }): Promise<OAuthExchangeResult> {
-    if (this.isMockMode) {
-      return {
-        accessToken: `mendeley_mock_token_${randomBytes(16).toString('hex')}`,
-        refreshToken: `mendeley_mock_refresh_${randomBytes(16).toString('hex')}`,
-        expiresInSeconds: 3600,
-        providerUserId: 'mendeley_user_883921',
-        accountName: 'Mendeley Researcher (Sandbox)',
-        accountEmail: 'researcher@mendeley.sandbox',
-        metadata: { isMock: true, provider: 'mendeley' },
-      };
+    if (!this.clientId || !this.clientSecret) {
+      throw new BadRequestException(
+        'Mendeley OAuth credentials are not configured on the server.',
+      );
     }
 
     try {
@@ -137,7 +117,6 @@ export class MendeleyProvider implements IIntegrationProvider {
         expires_in?: number;
       };
 
-      // Fetch user profile from Mendeley
       let accountName = 'Mendeley User';
       let accountEmail = 'user@mendeley.com';
       let providerUserId = 'mendeley_profile';
@@ -197,16 +176,10 @@ export class MendeleyProvider implements IIntegrationProvider {
   }
 
   async refreshAccessToken(refreshToken: string): Promise<OAuthExchangeResult> {
-    if (this.isMockMode) {
-      return {
-        accessToken: `mendeley_mock_token_${randomBytes(16).toString('hex')}`,
-        refreshToken: `mendeley_mock_refresh_${randomBytes(16).toString('hex')}`,
-        expiresInSeconds: 3600,
-        providerUserId: 'mendeley_user_883921',
-        accountName: 'Mendeley Researcher (Sandbox)',
-        accountEmail: 'researcher@mendeley.sandbox',
-        metadata: { isMock: true, provider: 'mendeley' },
-      };
+    if (!this.clientId || !this.clientSecret) {
+      throw new BadRequestException(
+        'Mendeley OAuth credentials are not configured on the server.',
+      );
     }
 
     try {
@@ -258,20 +231,8 @@ export class MendeleyProvider implements IIntegrationProvider {
 
   async fetchCollections(
     decryptedToken: string,
-    providerUserId: string,
+    _providerUserId: string,
   ): Promise<RemoteCollectionItem[]> {
-    if (this.isMockMode) {
-      return [
-        { id: 'mendeley_f1', name: 'Thesis Literature Review', itemCount: 18 },
-        {
-          id: 'mendeley_f2',
-          name: 'Biomedical Imaging & Deep Learning',
-          itemCount: 32,
-        },
-        { id: 'mendeley_f3', name: 'Journal Draft 2026', itemCount: 7 },
-      ];
-    }
-
     try {
       const url = 'https://api.mendeley.com/folders?limit=100';
       const response = await fetch(url, {
@@ -310,30 +271,10 @@ export class MendeleyProvider implements IIntegrationProvider {
 
   async fetchCollectionBibtex(
     decryptedToken: string,
-    providerUserId: string,
+    _providerUserId: string,
     collectionId: string,
   ): Promise<string> {
-    if (this.isMockMode) {
-      return `@article{he2016deep,
-  title={Deep residual learning for image recognition},
-  author={He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
-  journal={Proceedings of the IEEE conference on computer vision and pattern recognition},
-  pages={770--778},
-  year={2016}
-}
-
-@article{ronneberger2015u,
-  title={U-net: Convolutional networks for biomedical image segmentation},
-  author={Ronneberger, Olaf and Fischer, Philipp and Brox, Thomas},
-  journal={Medical image computing and computer-assisted intervention},
-  pages={234--241},
-  year={2015},
-  publisher={Springer}
-}`;
-    }
-
     try {
-      // First attempt: fetch directly as BibTeX
       const bibtexUrl = `https://api.mendeley.com/documents?folder_id=${encodeURIComponent(
         collectionId,
       )}&view=bib&limit=100`;
@@ -358,7 +299,6 @@ export class MendeleyProvider implements IIntegrationProvider {
         return await response.text();
       }
 
-      // If returned as JSON documents, parse and format as BibTeX
       const docs = (await response.json()) as MendeleyDocument[];
       return this.convertDocumentsToBibtex(docs);
     } catch (err: unknown) {
@@ -371,7 +311,7 @@ export class MendeleyProvider implements IIntegrationProvider {
 
   private convertDocumentsToBibtex(docs: MendeleyDocument[]): string {
     if (!Array.isArray(docs) || docs.length === 0) {
-      return '% Empty Mendeley collection\n';
+      return '';
     }
 
     return docs

@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHmac, randomBytes } from 'crypto';
 import {
   IIntegrationProvider,
@@ -37,7 +37,6 @@ export class ZoteroProvider implements IIntegrationProvider {
 
   private readonly clientKey: string;
   private readonly clientSecret: string;
-  private readonly isMockMode: boolean;
 
   private readonly inMemoryStore = new Map<
     string,
@@ -56,43 +55,22 @@ export class ZoteroProvider implements IIntegrationProvider {
   constructor(@Optional() private readonly redis?: RedisCacheService) {
     this.clientKey = process.env.ZOTERO_CLIENT_KEY || '';
     this.clientSecret = process.env.ZOTERO_CLIENT_SECRET || '';
-    this.isMockMode =
-      process.env.NODE_ENV !== 'production' &&
-      (!this.clientKey || !this.clientSecret);
-
-    if (this.isMockMode) {
-      this.logger.warn(
-        'Zotero client credentials not configured. Operating in development mock/sandbox mode.',
-      );
-    }
   }
 
   async initiateOAuth(
     userId: string,
     redirectUri: string,
   ): Promise<OAuthInitiationResult> {
-    if (this.isMockMode) {
-      const mockToken = `mock_req_${randomBytes(8).toString('hex')}`;
-      const state = `state_${userId}_${randomBytes(8).toString('hex')}`;
-      const mockAuthUrl = `${redirectUri}?oauth_token=${mockToken}&oauth_verifier=mock_verified&state=${state}`;
-      this.cleanExpiredInMemoryTokens();
-      this.inMemoryStore.set(mockToken, {
-        secret: 'mock_secret',
-        userId,
-        expiresAt: Date.now() + 15 * 60 * 1000,
-      });
-      return {
-        authUrl: mockAuthUrl,
-        state,
-        requestTokenSecret: 'mock_secret',
-      };
+    if (!this.clientKey || !this.clientSecret) {
+      throw new BadRequestException(
+        'Zotero OAuth credentials (ZOTERO_CLIENT_KEY / ZOTERO_CLIENT_SECRET) are not configured on the server. Please connect using a Personal API Key.',
+      );
     }
 
     try {
       const state = `state_${userId}_${randomBytes(8).toString('hex')}`;
       const requestTokenUrl = 'https://www.zotero.org/oauth/request';
 
-      // Include state in callback URL if possible so Zotero can preserve it
       let effectiveCallback = redirectUri;
       try {
         const url = new URL(redirectUri);
@@ -128,8 +106,8 @@ export class ZoteroProvider implements IIntegrationProvider {
       });
 
       if (!response.ok) {
-        throw new Error(
-          `Failed to request Zotero token: ${response.status} ${response.statusText}`,
+        throw new BadRequestException(
+          `Zotero OAuth endpoint rejected request (${response.status} ${response.statusText}). Please connect using your Zotero Personal API Key.`,
         );
       }
 
@@ -142,7 +120,6 @@ export class ZoteroProvider implements IIntegrationProvider {
         throw new Error('Zotero did not return an oauth_token');
       }
 
-      // Preserve requestTokenSecret & userId for OAuth 1.0a access exchange (15 min TTL)
       this.cleanExpiredInMemoryTokens();
       this.inMemoryStore.set(requestToken, {
         secret: requestTokenSecret || '',
@@ -158,7 +135,6 @@ export class ZoteroProvider implements IIntegrationProvider {
         );
       }
 
-      // Official Zotero OAuth authorize endpoint with scoped permissions
       const authUrl = `https://www.zotero.org/oauth/authorize?oauth_token=${encodeURIComponent(
         requestToken,
       )}&library_access=1&notes_access=1&write_access=1&all_groups=read`;
@@ -183,17 +159,10 @@ export class ZoteroProvider implements IIntegrationProvider {
     secret?: string;
     redirectUri: string;
   }): Promise<OAuthExchangeResult> {
-    if (this.isMockMode) {
-      const mockEntry = this.inMemoryStore.get(params.codeOrToken);
-      this.inMemoryStore.delete(params.codeOrToken);
-      return {
-        accessToken: `zotero_mock_key_${randomBytes(16).toString('hex')}`,
-        providerUserId: '1234567',
-        accountName: 'Zotero Researcher (Sandbox)',
-        accountEmail: 'researcher@zotero.sandbox',
-        metadata: { isMock: true },
-        userId: mockEntry?.userId,
-      };
+    if (!this.clientKey || !this.clientSecret) {
+      throw new BadRequestException(
+        'Zotero OAuth credentials are not configured on the server.',
+      );
     }
 
     try {
@@ -302,22 +271,13 @@ export class ZoteroProvider implements IIntegrationProvider {
     decryptedToken: string,
     providerUserId: string,
   ): Promise<RemoteCollectionItem[]> {
-    if (this.isMockMode) {
-      return [
-        { id: 'all', name: 'My Library (All Items)', itemCount: 65 },
-        { id: 'COLL_1', name: 'My Publications', itemCount: 12 },
-        { id: 'COLL_2', name: 'Deep Learning & NLP', itemCount: 45 },
-        { id: 'COLL_3', name: 'Quantum Information', itemCount: 8 },
-      ];
-    }
-
     try {
       const results: RemoteCollectionItem[] = [];
 
       // 1. Probe total item count in user's root personal library
       try {
         const rootHeadRes = await fetch(
-          `https://api.zotero.org/users/${providerUserId}/items/top?limit=1`,
+          `https://api.zotero.org/users/${encodeURIComponent(providerUserId)}/items/top?limit=1`,
           {
             headers: {
               'Zotero-API-Key': decryptedToken,
@@ -352,7 +312,7 @@ export class ZoteroProvider implements IIntegrationProvider {
       let totalCollections = 0;
 
       do {
-        const url = `https://api.zotero.org/users/${providerUserId}/collections?limit=${limit}&start=${start}`;
+        const url = `https://api.zotero.org/users/${encodeURIComponent(providerUserId)}/collections?limit=${limit}&start=${start}`;
         const response = await fetch(url, {
           headers: {
             'Zotero-API-Key': decryptedToken,
@@ -391,7 +351,7 @@ export class ZoteroProvider implements IIntegrationProvider {
       // 3. Fetch user's group libraries
       try {
         const groupsRes = await fetch(
-          `https://api.zotero.org/users/${providerUserId}/groups`,
+          `https://api.zotero.org/users/${encodeURIComponent(providerUserId)}/groups`,
           {
             headers: {
               'Zotero-API-Key': decryptedToken,
@@ -459,23 +419,6 @@ export class ZoteroProvider implements IIntegrationProvider {
     providerUserId: string,
     collectionId: string,
   ): Promise<string> {
-    if (this.isMockMode) {
-      return `@article{vaswani2017attention,
-  title={Attention is all you need},
-  author={Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N and Kaiser, {\\L}ukasz and Polosukhin, Illia},
-  journal={Advances in neural information processing systems},
-  volume={30},
-  year={2017}
-}
-
-@article{devlin2018bert,
-  title={BERT: Pre-training of deep bidirectional transformers for language understanding},
-  author={Devlin, Jacob and Chang, Ming-Wei and Lee, Kenton and Toutanova, Kristina},
-  journal={arXiv preprint arXiv:1810.04805},
-  year={2018}
-}`;
-    }
-
     try {
       let baseUrl = '';
 
@@ -485,9 +428,9 @@ export class ZoteroProvider implements IIntegrationProvider {
         const colKey = parts[2] || 'all';
 
         if (colKey === 'all' || !colKey) {
-          baseUrl = `https://api.zotero.org/groups/${groupId}/items/top`;
+          baseUrl = `https://api.zotero.org/groups/${encodeURIComponent(groupId)}/items/top`;
         } else {
-          baseUrl = `https://api.zotero.org/groups/${groupId}/collections/${colKey}/items/top`;
+          baseUrl = `https://api.zotero.org/groups/${encodeURIComponent(groupId)}/collections/${encodeURIComponent(colKey)}/items/top`;
         }
       } else {
         if (
@@ -496,9 +439,9 @@ export class ZoteroProvider implements IIntegrationProvider {
           collectionId === 'library' ||
           collectionId === 'root'
         ) {
-          baseUrl = `https://api.zotero.org/users/${providerUserId}/items/top`;
+          baseUrl = `https://api.zotero.org/users/${encodeURIComponent(providerUserId)}/items/top`;
         } else {
-          baseUrl = `https://api.zotero.org/users/${providerUserId}/collections/${collectionId}/items/top`;
+          baseUrl = `https://api.zotero.org/users/${encodeURIComponent(providerUserId)}/collections/${encodeURIComponent(collectionId)}/items/top`;
         }
       }
 
@@ -536,7 +479,7 @@ export class ZoteroProvider implements IIntegrationProvider {
         }
 
         start += limit;
-      } while (start < totalResults && start < 2000); // 2000 items maximum safety limit
+      } while (start < totalResults && start < 2000);
 
       return bibtexChunks.join('\n\n');
     } catch (err: unknown) {
@@ -546,8 +489,6 @@ export class ZoteroProvider implements IIntegrationProvider {
       throw err;
     }
   }
-
-  // --- OAuth 1.0a Helpers (RFC 5849 compliant) ---
 
   private buildOAuthParams(
     custom: Record<string, string>,

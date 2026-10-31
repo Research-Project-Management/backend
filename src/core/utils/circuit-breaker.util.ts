@@ -20,7 +20,7 @@ export class CircuitBreakerOpenException extends Error {
 
 /**
  * Lightweight in-memory Circuit Breaker to protect downstream microservices
- * (e.g. CLSI LaTeX Compiler, External SLM/LLM Engine, SearXNG) from cascading failures.
+ * (e.g. CLSI LaTeX Compiler, External SLM/LLM Engine) from cascading failures.
  */
 export class CircuitBreaker {
   private readonly name: string;

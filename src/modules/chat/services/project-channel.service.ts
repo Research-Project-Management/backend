@@ -237,12 +237,12 @@ export class ProjectChannelService {
   }
 
   /**
-   * Get all channels of a project.
+   * Get all channels of a project. Automatically provisions default #general channel if none exists.
    */
   async getProjectChannels(projectId: string, userId: string) {
     await this.checkProjectAccess(projectId, userId);
 
-    return this.prisma.conversation.findMany({
+    let channels = await this.prisma.conversation.findMany({
       where: {
         projectId,
         type: ConversationType.project_channel,
@@ -256,8 +256,85 @@ export class ProjectChannelService {
             isPinned: true,
           },
         },
+        _count: {
+          select: { members: true },
+        },
       },
       orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+    });
+
+    if (channels.length === 0) {
+      // Auto-provision default #general channel
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        include: { members: true },
+      });
+
+      if (project) {
+        const userIds = new Set<string>();
+        if (project.createdById) userIds.add(project.createdById);
+        project.members.forEach((m) => userIds.add(m.userId));
+        if (userId) userIds.add(userId);
+
+        const newChannel = await this.prisma.conversation.create({
+          data: {
+            type: ConversationType.project_channel,
+            name: 'general',
+            topic: 'General project discussions and coordination',
+            projectId,
+            isDefault: true,
+            createdById: project.createdById || userId,
+            members: {
+              create: Array.from(userIds).map((uId) => ({
+                userId: uId,
+                role:
+                  uId === (project.createdById || userId)
+                    ? ConversationMemberRole.owner
+                    : ConversationMemberRole.member,
+              })),
+            },
+          },
+          include: {
+            members: {
+              where: { userId },
+              select: {
+                lastReadAt: true,
+                isMuted: true,
+                isPinned: true,
+              },
+            },
+            _count: {
+              select: { members: true },
+            },
+          },
+        });
+        channels = [newChannel];
+      }
+    }
+
+    const projectInfo = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { name: true, identifier: true },
+    });
+
+    return channels.map((ch) => {
+      const membership = ch.members?.[0];
+      return {
+        id: ch.id,
+        type: ch.type,
+        name: ch.name,
+        topic: ch.topic,
+        avatar: ch.avatar,
+        projectId: ch.projectId,
+        projectName: projectInfo?.name || null,
+        projectIdentifier: projectInfo?.identifier || null,
+        isDefault: ch.isDefault,
+        memberCount: ch._count?.members || 1,
+        unreadCount: 0,
+        isMuted: membership?.isMuted || false,
+        isPinned: membership?.isPinned || false,
+        updatedAt: ch.updatedAt ? ch.updatedAt.toISOString() : new Date().toISOString(),
+      };
     });
   }
 

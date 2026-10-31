@@ -27,6 +27,7 @@ import {
 } from './providers/integration-provider.interface';
 import { InitiateOAuthQueryDto } from './dto/initiate-oauth.dto';
 import { SyncCollectionDto } from './dto/sync-collection.dto';
+import { ConnectApiKeyDto } from './dto/connect-api-key.dto';
 import {
   CreateGithubRepoDto,
   LinkGithubRepoDto,
@@ -310,6 +311,17 @@ export class IntegrationsController {
     }
 
     return await this.service.syncProjectCollection(userId, provider, dto);
+  }
+
+  @Post('zotero/api-key')
+  @ApiOperation({
+    summary: 'Connect Zotero account directly via personal API key',
+  })
+  async connectZoteroApiKey(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ConnectApiKeyDto,
+  ) {
+    return await this.service.connectZoteroApiKey(userId, dto);
   }
 
   @Get(':provider/collections/:collectionId/bibtex')

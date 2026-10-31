@@ -403,12 +403,25 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
       where.linkedToType = { equals: FileScope.Project, mode: 'insensitive' };
       where.linkedToId = filter.projectId;
     } else {
-      // Personal Drive: exclude project-scoped, library-scoped, and paper-scoped files
-      where.NOT = [
-        { linkedToType: { equals: FileScope.Project, mode: 'insensitive' } },
-        { linkedToType: { equals: FileScope.Library, mode: 'insensitive' } },
-        { linkedToType: { equals: FileScope.Paper, mode: 'insensitive' } },
-      ];
+      // Personal Drive: include files with null linkedToType, 'drive', or anything outside project/library/paper
+      andConditions.push({
+        OR: [
+          { linkedToType: null },
+          { linkedToType: { equals: FileScope.Personal, mode: 'insensitive' } },
+          {
+            linkedToType: {
+              notIn: [
+                FileScope.Project,
+                FileScope.Library,
+                FileScope.Paper,
+                'project',
+                'library',
+                'paper',
+              ],
+            },
+          },
+        ],
+      });
     }
 
     if (andConditions.length > 0) {

@@ -2,8 +2,6 @@ import {
   Injectable,
   Logger,
   Optional,
-  forwardRef,
-  Inject,
 } from '@nestjs/common';
 import {
   LiveCollaborationPort,
@@ -22,7 +20,6 @@ export class LiveCollaborationProvider extends LiveCollaborationPort {
     private readonly yjs: YjsService,
     private readonly rooms: RoomStore,
     @Optional()
-    @Inject(forwardRef(() => ManuscriptsGateway))
     private readonly gateway?: ManuscriptsGateway,
   ) {
     super();

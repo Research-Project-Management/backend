@@ -56,13 +56,23 @@ export class ProjectResourceResolver {
             resolvedResourceProjects.set(`node:${pageId}`, node.projectId);
             authoritativePageId = node.docId || node.id;
           } else {
-            // Legacy support: check if the pageId is actually a project ID
-            const project = await this.prisma.project.findUnique({
+            // Check if the pageId is a ManuscriptFile ID (e.g. when restoring a deleted binary file)
+            const file = await this.prisma.manuscriptFile?.findUnique?.({
               where: { id: pageId },
-              select: { id: true },
+              select: { id: true, projectId: true },
             });
-            if (project?.id) {
-              resolvedResourceProjects.set(`project:${pageId}`, project.id);
+            if (file?.projectId) {
+              resolvedResourceProjects.set(`file:${pageId}`, file.projectId);
+              authoritativePageId = file.id;
+            } else {
+              // Legacy support: check if the pageId is actually a project ID
+              const project = await this.prisma.project.findUnique({
+                where: { id: pageId },
+                select: { id: true },
+              });
+              if (project?.id) {
+                resolvedResourceProjects.set(`project:${pageId}`, project.id);
+              }
             }
           }
         }

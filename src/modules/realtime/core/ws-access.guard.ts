@@ -3,9 +3,7 @@ import {
   CanActivate,
   ExecutionContext,
   Logger,
-  Inject,
   Optional,
-  forwardRef,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Socket } from 'socket.io';
@@ -198,7 +196,6 @@ export class WsAccessGuard implements CanActivate {
 
   constructor(
     private readonly reflector: Reflector,
-    @Inject(forwardRef(() => RealtimeAccessService))
     private readonly realtimeAccess: RealtimeAccessService,
     @Optional()
     private readonly rateLimiter?: WsRateLimiter,

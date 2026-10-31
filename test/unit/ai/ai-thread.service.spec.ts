@@ -47,7 +47,7 @@ describe('ThreadService (Server-Authoritative Invariants)', () => {
         id: 'msg-2',
         chatId: mockChatId,
         role: 'assistant' as const,
-        content: 'The methodology utilizes Tectonic compilation...',
+        content: 'The methodology utilizes LaTeX compilation...',
         sources: [],
         widgets: [],
         selectionContext: null,

@@ -32,7 +32,7 @@
 | **Distributed Job Queues** | [BullMQ](https://docs.bullmq.io/) 6 | `@nestjs/bullmq@11.x`, `bullmq@6.x` | Heavy task offloading, exponential backoff, Dead Letter Queue (DLQ), sandboxed runners |
 | **Real-time Collaboration** | [Socket.IO](https://socket.io/) 4 + [Yjs](https://yjs.dev/) | `@socket.io/redis-adapter@8.x`, `yjs@13.x` | Conflict-free Replicated Data Types (CRDT) for LaTeX & rich-text editing, multi-server scaling |
 | **Object Storage** | [AWS S3 SDK v3](https://aws.amazon.com/sdk-for-javascript/) | `@aws-sdk/client-s3@3.x`, `@aws-sdk/s3-request-presigner` | Direct Presigned URL generation compatible with Cloudflare R2 and AWS S3 |
-| **Compilation Sidecar** | [CLSI](https://github.com/overleaf/clsi) + [Tectonic](https://tectonic-typesetting.github.io/) | Sidecar Container (Port 3013) | Isolated XeTeX/Tectonic engine for fast, reproducible PDF compilation |
+| **Compilation Sidecar** | [CLSI](https://github.com/overleaf/clsi) + [TeX Live](https://www.tug.org/texlive/) | Sidecar Container (Port 3013) | Isolated TeX Live (latexmk, pdflatex, xelatex, lualatex) engine for fast, reproducible PDF compilation |
 | **Citation & Bibliometrics**| [Citation.js](https://citation.js.org/) | `@citation-js/core@0.7.x` | BibTeX, CSL-JSON, and RIS parsing, extraction, and formatting |
 | **Documentation & Contract**| [Swagger / OpenAPI 3.0](https://swagger.io/) | `@fastify/swagger@9.x`, `@fastify/swagger-ui@6.x` | Automated interactive API specifications served at `/docs` |
 | **Testing** | [Jest](https://jestjs.io/) 30 | `jest@30.x`, `ts-jest@29.x` | Feature-scoped test suites, db-suites integration, and smoke test suites |
