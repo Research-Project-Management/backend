@@ -2,6 +2,8 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import {
   Injectable,
   Logger,
+  Inject,
+  forwardRef,
   OnApplicationBootstrap,
   OnApplicationShutdown,
 } from '@nestjs/common';
@@ -17,6 +19,11 @@ import {
   LIBRARY_INGESTION_JOB,
 } from '@/modules/library/ingestion/types/ingestion.types';
 import { isNonRetryableIngestionError } from '@/modules/library/ingestion/types/ingestion.errors';
+import {
+  clearRunStatusTransition,
+  markRunStatusTransitioned,
+  transitionRunToFailedIfActive,
+} from './ingestion-run-reporter.service';
 import { QueuedIngestionJob } from './queue.service';
 import { PipelineService } from './pipeline.service';
 
@@ -158,7 +165,7 @@ export class IngestionSagaSession {
       }
     }
 
-    this.aggregate.completeCompensation();
+    this.aggregate.completeCompensation(!this.isFinalAttempt);
 
     try {
       await this.repo.updateRunStatus(
@@ -172,6 +179,7 @@ export class IngestionSagaSession {
           ...(this.isFinalAttempt ? { completedAt: new Date() } : {}),
         },
       );
+      markRunStatusTransitioned(this.runId);
     } catch (statusErr: unknown) {
       const statusMsg =
         statusErr instanceof Error ? statusErr.message : String(statusErr);
@@ -225,6 +233,7 @@ export class IngestionQueueConsumer
   private readonly logger = new Logger(IngestionQueueConsumer.name);
 
   constructor(
+    @Inject(forwardRef(() => PipelineService))
     private readonly pipeline: PipelineService,
     private readonly repo: IngestionRepository,
   ) {
@@ -274,6 +283,7 @@ export class IngestionQueueConsumer
     );
 
     try {
+      clearRunStatusTransition(runId);
       await this.repo
         .updateRunStatus(projectId, runId, IngestionStatus.RUNNING)
         .catch((statusErr: unknown) => {
@@ -305,37 +315,20 @@ export class IngestionQueueConsumer
         `[BULLMQ_ERROR] Ingestion run ${runId} failed after ${elapsed}s (isLast: ${isTerminalFailure}): ${msg}`,
       );
 
-      const alreadyTransitioned = Boolean(
-        (err as { __runStatusTransitioned?: boolean } | null | undefined)
-          ?.__runStatusTransitioned,
-      );
-
-      if (!alreadyTransitioned) {
-        await this.repo
-          .updateRunStatus(
-            projectId,
-            runId,
-            isTerminalFailure
-              ? IngestionStatus.FAILED_FINAL
-              : IngestionStatus.FAILED_RETRYABLE,
-            {
-              lastError:
-                msg ||
-                (isTerminalFailure
-                  ? 'Ingestion pipeline execution failed permanently'
-                  : 'Ingestion pipeline execution failed (retryable)'),
-            },
-          )
-          .catch((updateErr: unknown) => {
-            const updateMsg =
-              updateErr instanceof Error
-                ? updateErr.message
-                : String(updateErr);
-            this.logger.error(
-              `Failed to update run status for failed run ${runId}: ${updateMsg}`,
-            );
-          });
-      }
+      await transitionRunToFailedIfActive({
+        repo: this.repo,
+        scopeId: projectId,
+        runId,
+        status: isTerminalFailure
+          ? IngestionStatus.FAILED_FINAL
+          : IngestionStatus.FAILED_RETRYABLE,
+        lastError:
+          msg ||
+          (isTerminalFailure
+            ? 'Ingestion pipeline execution failed permanently'
+            : 'Ingestion pipeline execution failed (retryable)'),
+        logger: this.logger,
+      });
 
       throw err;
     }

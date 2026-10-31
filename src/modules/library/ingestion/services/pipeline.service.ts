@@ -3,6 +3,7 @@ import {
   Logger,
   Optional,
   Inject,
+  forwardRef,
   BadRequestException,
 } from '@nestjs/common';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
@@ -46,7 +47,7 @@ import {
   resolveScope,
   getSubmissionPayloadLabel,
   getSubmissionPayloadSize,
-  markErrStatusTransitioned,
+  markRunStatusTransitioned,
   createSingleItemExecutionLog,
 } from './ingestion-run-reporter.service';
 
@@ -72,6 +73,7 @@ export class PipelineService {
     @Inject(EXTRACTION_FACADE)
     private readonly extractionGateway?: IExtractionFacade,
     @Optional()
+    @Inject(forwardRef(() => IngestionSagaOrchestrator))
     sagaOrchestrator?: IngestionSagaOrchestrator,
     @Optional()
     private readonly retractionScanner?: RetractionScannerProvider,
@@ -134,7 +136,8 @@ export class PipelineService {
     envelope: IngestionSubmissionEnvelope,
     options?: { isFinalAttempt?: boolean },
   ): Promise<void> {
-    const explicitFinalAttempt = options?.isFinalAttempt ?? envelope?.isFinalAttempt;
+    const explicitFinalAttempt =
+      options?.isFinalAttempt ?? envelope?.isFinalAttempt;
     let succeeded = false;
     let caughtError: unknown = null;
     try {
@@ -148,24 +151,49 @@ export class PipelineService {
       const retryable = !nonRetryable && this.isRetryableError(err);
       const errMsg = err instanceof Error ? err.message : String(err);
       if (explicitFinalAttempt === false && nonRetryable) {
-        await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.FAILED_FINAL, {
-          lastError: errMsg,
-          completedAt: new Date(),
-        }).catch((e: unknown) => this.logger.warn(`Failed to update run status for run ${runId}: ${e instanceof Error ? e.message : String(e)}`));
+        await this.repo
+          .updateRunStatus(scopeId, runId, IngestionStatus.FAILED_FINAL, {
+            lastError: errMsg,
+            completedAt: new Date(),
+          })
+          .catch((e: unknown) =>
+            this.logger.warn(
+              `Failed to update run status for run ${runId}: ${e instanceof Error ? e.message : String(e)}`,
+            ),
+          );
       } else if (explicitFinalAttempt === undefined && retryable) {
-        await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.FAILED_RETRYABLE, {
-          lastError: errMsg,
-        }).catch((e: unknown) => this.logger.warn(`Failed to update run status for run ${runId}: ${e instanceof Error ? e.message : String(e)}`));
+        await this.repo
+          .updateRunStatus(scopeId, runId, IngestionStatus.FAILED_RETRYABLE, {
+            lastError: errMsg,
+          })
+          .catch((e: unknown) =>
+            this.logger.warn(
+              `Failed to update run status for run ${runId}: ${e instanceof Error ? e.message : String(e)}`,
+            ),
+          );
       }
-      markErrStatusTransitioned(err);
+      markRunStatusTransitioned(runId);
       throw err;
     } finally {
-      const nonRetryable = caughtError ? this.isNonRetryableError(caughtError) : false;
-      const retryable = caughtError && !nonRetryable ? this.isRetryableError(caughtError) : false;
-      if (succeeded || explicitFinalAttempt === true || nonRetryable || (explicitFinalAttempt === undefined && !retryable)) {
+      const nonRetryable = caughtError
+        ? this.isNonRetryableError(caughtError)
+        : false;
+      const retryable =
+        caughtError && !nonRetryable
+          ? this.isRetryableError(caughtError)
+          : false;
+      if (
+        succeeded ||
+        explicitFinalAttempt === true ||
+        nonRetryable ||
+        (explicitFinalAttempt === undefined && !retryable)
+      ) {
         await this.cleanupOffloadedPayload(envelope);
       }
-      if (Date.now() - this.lastGcRunAt > PipelineService.GC_THROTTLE_INTERVAL_MS) {
+      if (
+        Date.now() - this.lastGcRunAt >
+        PipelineService.GC_THROTTLE_INTERVAL_MS
+      ) {
         this.lastGcRunAt = Date.now();
         void this.runTerminalMaintenanceGc(envelope);
       }
@@ -200,9 +228,21 @@ export class PipelineService {
   ): Promise<void> {
     try {
       if (this.urlCapture?.cleanupExpiredPreviews) {
-        await this.urlCapture.cleanupExpiredPreviews(7).catch((e: unknown) => this.logger.warn(`[PipelineGC] Failed to cleanup expired previews: ${e instanceof Error ? e.message : String(e)}`));
+        await this.urlCapture
+          .cleanupExpiredPreviews(7)
+          .catch((e: unknown) =>
+            this.logger.warn(
+              `[PipelineGC] Failed to cleanup expired previews: ${e instanceof Error ? e.message : String(e)}`,
+            ),
+          );
       }
-      await this.repo.purgeOldRuns(7).catch((e: unknown) => this.logger.warn(`[PipelineGC] Failed to purge old runs: ${e instanceof Error ? e.message : String(e)}`));
+      await this.repo
+        .purgeOldRuns(7)
+        .catch((e: unknown) =>
+          this.logger.warn(
+            `[PipelineGC] Failed to purge old runs: ${e instanceof Error ? e.message : String(e)}`,
+          ),
+        );
     } catch {
       // Non-critical background GC
     }
@@ -221,9 +261,7 @@ export class PipelineService {
       .catch(() => null);
 
     const existingInputParams = existingRun?.inputParams as
-      | Record<string, unknown>
-      | null
-      | undefined;
+      Record<string, unknown> | null | undefined;
     const aggregate = existingRun
       ? IngestionRunAggregate.reconstitute({
           id: existingRun.id,
@@ -255,41 +293,43 @@ export class PipelineService {
     });
 
     // Stage 1: IDENTIFY & NORMALIZE
-    const {
-      initialCandidates: normalizedCandidates,
-      sanitizedOverrides,
-    } = await session.executeStep(
-      'IDENTIFY',
-      async () => {
-        const identifiedCandidates = await this.identify.execute({
-          runId,
-          payload: envelope.payload,
-          scopeId,
-          userId: resolvedScope.userId,
-          projectId: resolvedScope.projectId,
-        });
-        const overrides = sanitizeOverrides(envelope.overrides);
-        const candidates = identifiedCandidates.map((candidate) =>
-          applyUserOverridesToCandidate(candidate, overrides, this.normalizer),
-        );
-
-        if (candidates.length === 0) {
-          throw new BadRequestException(
-            'No valid bibliographic metadata could be identified from input',
+    const { initialCandidates: normalizedCandidates, sanitizedOverrides } =
+      await session.executeStep(
+        'IDENTIFY',
+        async () => {
+          const identifiedCandidates = await this.identify.execute({
+            runId,
+            payload: envelope.payload,
+            scopeId,
+            userId: resolvedScope.userId,
+            projectId: resolvedScope.projectId,
+          });
+          const overrides = sanitizeOverrides(envelope.overrides);
+          const candidates = identifiedCandidates.map((candidate) =>
+            applyUserOverridesToCandidate(
+              candidate,
+              overrides,
+              this.normalizer,
+            ),
           );
-        }
 
-        return {
-          initialCandidates: candidates,
-          sanitizedOverrides: overrides,
-        };
-      },
-      {
-        outputSnapshot: (res) => ({
-          candidateCount: res.initialCandidates.length,
-        }),
-      },
-    );
+          if (candidates.length === 0) {
+            throw new BadRequestException(
+              'No valid bibliographic metadata could be identified from input',
+            );
+          }
+
+          return {
+            initialCandidates: candidates,
+            sanitizedOverrides: overrides,
+          };
+        },
+        {
+          outputSnapshot: (res) => ({
+            candidateCount: res.initialCandidates.length,
+          }),
+        },
+      );
 
     // =========================================================================
     // Stage 2: RESOLVE (Unified Deduplication, Authoritative Enrich & Canonical Reconcile)
@@ -311,8 +351,15 @@ export class PipelineService {
           envelope.payload.kind !== 'CONNECTOR';
 
         // 1. Early Deduplication Check (Fast-path for single item: O(1) in-catalog match)
-        let earlyMatch: DuplicateMatchResult = { matchType: 'NO_MATCH', confidence: 0 };
-        if (isSingleCandidate && normalizedCandidates[0]?.normalizedMetadata && this.resolve.match) {
+        let earlyMatch: DuplicateMatchResult = {
+          matchType: 'NO_MATCH',
+          confidence: 0,
+        };
+        if (
+          isSingleCandidate &&
+          normalizedCandidates[0]?.normalizedMetadata &&
+          this.resolve.match
+        ) {
           earlyMatch = await this.resolve.match({
             scope: resolvedScope,
             proposedItem: normalizedCandidates[0].normalizedMetadata,
@@ -594,7 +641,10 @@ export class PipelineService {
                 ?.__wasPreExistingMatch,
             ) ||
             matchResult?.matchType === 'EXACT' ||
-            Boolean(matchResult?.targetItemId && item?.id === matchResult.targetItemId);
+            Boolean(
+              matchResult?.targetItemId &&
+              item?.id === matchResult.targetItemId,
+            );
           if (item?.id && !wasPreExisting && this.catalogGateway?.deleteItem) {
             this.logger.warn(
               `[SAGA_COMPENSATION] Rolling back committed item ${item.id} for run ${runId}`,
@@ -641,7 +691,7 @@ export class PipelineService {
             fileId: finalFileIdentifier,
             filename: finalFilename,
             payloadSize,
-            existingRecord: createdItem as unknown as Record<string, unknown>,
+            existingRecord: createdItem,
             assignCollections: false,
           },
         );

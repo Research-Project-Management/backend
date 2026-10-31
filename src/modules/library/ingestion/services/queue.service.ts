@@ -2,6 +2,8 @@ import {
   Injectable,
   Logger,
   Optional,
+  Inject,
+  forwardRef,
   OnModuleInit,
   OnModuleDestroy,
   ServiceUnavailableException,
@@ -20,6 +22,10 @@ import {
   LIBRARY_INGESTION_JOB,
 } from '@/modules/library/ingestion/types/ingestion.types';
 import { isRetryableIngestionError } from '@/modules/library/ingestion/types/ingestion.errors';
+import {
+  clearRunStatusTransition,
+  transitionRunToFailedIfActive,
+} from './ingestion-run-reporter.service';
 
 export interface QueuedIngestionJob {
   runId: string;
@@ -48,6 +54,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private readonly maxConcurrency: number;
 
   constructor(
+    @Inject(forwardRef(() => PipelineService))
     private readonly pipeline: PipelineService,
     private readonly repo: IngestionRepository,
     @Optional() private readonly configService?: ConfigService,
@@ -353,6 +360,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const startTime = Date.now();
 
     try {
+      clearRunStatusTransition(runId);
       this.logger.log(
         `[QUEUE_START] Executing run ${runId} (active: ${this.activeCount}/${this.maxConcurrency}, remaining queued: ${this.queue.length})`,
       );
@@ -378,28 +386,17 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(
         `[QUEUE_ERROR] Run ${runId} failed after ${elapsed}s: ${msg}`,
       );
-      const alreadyTransitioned = Boolean(
-        (err as { __runStatusTransitioned?: boolean } | null | undefined)
-          ?.__runStatusTransitioned,
-      );
-      if (!alreadyTransitioned) {
-        const targetStatus = this.isRetryablePipelineError(err, envelope)
-          ? IngestionStatus.FAILED_RETRYABLE
-          : IngestionStatus.FAILED_FINAL;
-        await this.repo
-          .updateRunStatus(projectId, runId, targetStatus, {
-            lastError: msg || 'Ingestion pipeline execution failed',
-          })
-          .catch((updateErr: unknown) => {
-            const updateMsg =
-              updateErr instanceof Error
-                ? updateErr.message
-                : String(updateErr);
-            this.logger.error(
-              `Failed to update run status for failed run ${runId}: ${updateMsg}`,
-            );
-          });
-      }
+      const targetStatus = this.isRetryablePipelineError(err, envelope)
+        ? IngestionStatus.FAILED_RETRYABLE
+        : IngestionStatus.FAILED_FINAL;
+      await transitionRunToFailedIfActive({
+        repo: this.repo,
+        scopeId: projectId,
+        runId,
+        status: targetStatus,
+        lastError: msg || 'Ingestion pipeline execution failed',
+        logger: this.logger,
+      });
     } finally {
       this.runningRunIds.delete(runId);
       this.activeCount--;

@@ -1,6 +1,8 @@
 import {
   Injectable,
   Logger,
+  Inject,
+  forwardRef,
   NotFoundException,
   BadRequestException,
   ConflictException,
@@ -44,14 +46,57 @@ export function getSubmissionPayloadSize(
     : 0;
 }
 
-export function markErrStatusTransitioned(err: unknown): void {
-  if (err && typeof err === 'object') {
-    Object.defineProperty(err, '__runStatusTransitioned', {
-      value: true,
-      enumerable: false,
-      configurable: true,
-    });
+const transitionedRunIds = new Set<string>();
+const MAX_TRANSITIONED_RUN_CACHE = 1000;
+
+export function clearRunStatusTransition(runId: string): void {
+  if (!runId) return;
+  transitionedRunIds.delete(runId);
+}
+
+export function markRunStatusTransitioned(runId: string): void {
+  if (!runId) return;
+  if (transitionedRunIds.size >= MAX_TRANSITIONED_RUN_CACHE) {
+    const oldest = transitionedRunIds.values().next().value;
+    if (oldest !== undefined) {
+      transitionedRunIds.delete(oldest);
+    }
   }
+  transitionedRunIds.add(runId);
+}
+
+export function consumeRunStatusTransition(runId: string): boolean {
+  if (!runId || !transitionedRunIds.has(runId)) return false;
+  transitionedRunIds.delete(runId);
+  return true;
+}
+
+export async function transitionRunToFailedIfActive(params: {
+  repo: IngestionRepository;
+  scopeId: string;
+  runId: string;
+  status: IngestionStatus;
+  lastError: string;
+  completedAt?: Date;
+  logger?: Logger;
+}): Promise<boolean> {
+  const { repo, scopeId, runId, status, lastError, completedAt, logger } =
+    params;
+  if (consumeRunStatusTransition(runId)) {
+    return false;
+  }
+  await repo
+    .updateRunStatus(scopeId, runId, status, {
+      lastError,
+      ...(completedAt ? { completedAt } : {}),
+    })
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger?.error(
+        `Failed to update run status to ${status} for run ${runId}: ${msg}`,
+      );
+    });
+  return true;
 }
 
 export function createSingleItemExecutionLog(params: {
@@ -122,6 +167,7 @@ export class IngestionRunReporterService {
 
   constructor(
     private readonly repo: IngestionRepository,
+    @Inject(forwardRef(() => QueueService))
     private readonly queue: QueueService,
   ) {}
 
@@ -134,6 +180,24 @@ export class IngestionRunReporterService {
       return executionLog as IngestionExecutionLog;
     }
     return {};
+  }
+
+  async transitionRunToFailedIfActive(
+    scopeId: string,
+    runId: string,
+    status: IngestionStatus,
+    lastError: string,
+    completedAt?: Date,
+  ): Promise<boolean> {
+    return transitionRunToFailedIfActive({
+      repo: this.repo,
+      scopeId,
+      runId,
+      status,
+      lastError,
+      completedAt,
+      logger: this.logger,
+    });
   }
 
   async getRunStatus(

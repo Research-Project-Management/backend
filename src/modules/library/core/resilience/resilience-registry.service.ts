@@ -71,14 +71,40 @@ export class ResilienceRegistryService {
    * Normalizes provider names and known academic hostnames to canonical registry keys.
    */
   public normalizeKey(key: string): string {
-    const cleaned = (key || '')
-      .trim()
+    const trimmed = (key || '').trim();
+    if (trimmed.toLowerCase().startsWith('feed:')) {
+      return `feed:${trimmed.slice(5).trim()}`;
+    }
+    const cleaned = trimmed
       .toLowerCase()
       .replace(/^(https?:\/\/)/i, '')
       .replace(/\/.*$/, '')
       .replace(/:\d+$/, '')
       .replace(/\.+$/, '');
     return ResilienceRegistryService.HOST_TO_PROVIDER_MAP[cleaned] ?? cleaned;
+  }
+
+  public getBreakersByPrefix(prefix: string): Map<string, CircuitBreaker> {
+    const normalizedPrefix = prefix.toLowerCase();
+    const buildSnapshot = (): Map<string, CircuitBreaker> => {
+      const out = new Map<string, CircuitBreaker>();
+      for (const [k, v] of this.breakers.entries()) {
+        if (k.toLowerCase().startsWith(normalizedPrefix)) {
+          out.set(k.slice(prefix.length), v);
+        }
+      }
+      return out;
+    };
+    return new Proxy(new Map<string, CircuitBreaker>(), {
+      get: (_target, prop) => {
+        const snapshot = buildSnapshot();
+        if (prop === 'size') return snapshot.size;
+        if (prop === 'get') return (key: string) => this.breakers.get(this.normalizeKey(`${prefix}${key}`));
+        if (prop === 'has') return (key: string) => this.breakers.has(this.normalizeKey(`${prefix}${key}`));
+        const val = Reflect.get(snapshot, prop, snapshot);
+        return typeof val === 'function' ? val.bind(snapshot) : val;
+      },
+    });
   }
 
   private touchDynamicHost(name: string): void {
