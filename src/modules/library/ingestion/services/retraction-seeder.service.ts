@@ -16,15 +16,30 @@ export interface RetractionSeedResult {
   deltaDois?: string[];
 }
 
-export function parseRfc4180Csv(
+export function* iterateRfc4180Csv(
   csvText: string,
-): Array<Record<string, string>> {
-  const rows: string[][] = [];
+): Generator<Record<string, string>> {
+  let headers: string[] | null = null;
   let currentRow: string[] = [];
   let currentField = '';
   let inQuotes = false;
   let i = 0;
   const len = csvText.length;
+
+  const emitRow = (row: string[]): Record<string, string> | null => {
+    if (!row.some((f) => f.trim().length > 0)) {
+      return null;
+    }
+    if (!headers) {
+      headers = row.map((h) => h.trim().replace(/^[\uFEFF]/, ''));
+      return null;
+    }
+    const record: Record<string, string> = {};
+    for (let c = 0; c < headers.length; c++) {
+      record[headers[c]] = row[c] !== undefined ? row[c].trim() : '';
+    }
+    return record;
+  };
 
   while (i < len) {
     const char = csvText[i];
@@ -53,17 +68,15 @@ export function parseRfc4180Csv(
         }
         currentRow.push(currentField);
         currentField = '';
-        if (currentRow.some((f) => f.trim().length > 0)) {
-          rows.push(currentRow);
-        }
+        const rec = emitRow(currentRow);
         currentRow = [];
+        if (rec) yield rec;
       } else if (char === '\n') {
         currentRow.push(currentField);
         currentField = '';
-        if (currentRow.some((f) => f.trim().length > 0)) {
-          rows.push(currentRow);
-        }
+        const rec = emitRow(currentRow);
         currentRow = [];
+        if (rec) yield rec;
       } else {
         currentField += char;
       }
@@ -73,26 +86,15 @@ export function parseRfc4180Csv(
 
   if (currentField.length > 0 || currentRow.length > 0) {
     currentRow.push(currentField);
-    if (currentRow.some((f) => f.trim().length > 0)) {
-      rows.push(currentRow);
-    }
+    const rec = emitRow(currentRow);
+    if (rec) yield rec;
   }
+}
 
-  if (rows.length < 2) return [];
-
-  const headers = rows[0].map((h) => h.trim().replace(/^[\uFEFF]/, ''));
-  const result: Array<Record<string, string>> = [];
-
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r];
-    const record: Record<string, string> = {};
-    for (let c = 0; c < headers.length; c++) {
-      record[headers[c]] = row[c] !== undefined ? row[c].trim() : '';
-    }
-    result.push(record);
-  }
-
-  return result;
+export function parseRfc4180Csv(
+  csvText: string,
+): Array<Record<string, string>> {
+  return Array.from(iterateRfc4180Csv(csvText));
 }
 
 export function cleanRetractionReason(rawReason?: string): string {
@@ -144,8 +146,8 @@ export class RetractionSeederService {
     options?: { chunkSize?: number; warmCache?: boolean },
   ): Promise<RetractionSeedResult> {
     const startTime = Date.now();
-    const rows = parseRfc4180Csv(csvContent);
     const chunkSize = options?.chunkSize ?? 1000;
+    let totalRows = 0;
     let validRecords = 0;
     let inserted = 0;
 
@@ -164,7 +166,8 @@ export class RetractionSeederService {
       return count;
     };
 
-    for (const row of rows) {
+    for (const row of iterateRfc4180Csv(csvContent)) {
+      totalRows++;
       const rawDoi = row['OriginalPaperDOI'] || row['OriginalPaperDoi'];
       if (!rawDoi || /unavailable/i.test(rawDoi)) continue;
 
@@ -239,11 +242,11 @@ export class RetractionSeederService {
 
     const durationMs = Date.now() - startTime;
     this.logger.log(
-      `Retraction Watch CSV Seeding complete: ${rows.length} rows parsed, ${validRecords} valid DOIs, ${inserted} inserted, ${deltaDois.length} delta DOIs in ${durationMs}ms`,
+      `Retraction Watch CSV Seeding complete: ${totalRows} rows parsed, ${validRecords} valid DOIs, ${inserted} inserted, ${deltaDois.length} delta DOIs in ${durationMs}ms`,
     );
 
     return {
-      totalRows: rows.length,
+      totalRows,
       validRecords,
       inserted,
       durationMs,

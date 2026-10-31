@@ -18,7 +18,7 @@ import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import { RetractionSeederService } from '@/modules/library/ingestion/services/retraction-seeder.service';
-import { invalidateIngestionItemCache } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
+import { invalidateIngestionItemCache } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 
 export interface RetractionSyncOptions {
   maxDays?: number;
@@ -78,7 +78,11 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     // Initial delay of 2 minutes after boot before first background scan
     this.initTimer = setTimeout(() => {
       this.initTimer = null;
-      this.syncDailyRetractionDelta().catch((err: unknown) => {
+      const initialTask =
+        process.env.ENABLE_RETRACTION_GITLAB_DUMP === 'true'
+          ? this.syncDailyRetractionDelta()
+          : this.syncAllStaleItems();
+      initialTask.catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Initial background retraction sync error: ${msg}`);
       });

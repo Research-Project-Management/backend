@@ -27,6 +27,7 @@ export interface RemoteCompileRequest {
 export class RemoteClsiClientAdapter {
   private readonly logger = new Logger(RemoteClsiClientAdapter.name);
   private readonly remoteClsiUrl: string;
+  private readonly remoteClsiUrls: string[];
   private readonly logParser = new CompileLogAnalyzer();
   private readonly circuitBreaker = new CircuitBreaker({
     name: 'RemoteCLSI',
@@ -38,14 +39,26 @@ export class RemoteClsiClientAdapter {
     @Optional() private readonly configService?: ConfigService,
     @Optional() private readonly cache?: RedisCacheService,
   ) {
-    this.remoteClsiUrl =
+    const rawConfigured =
       this.configService?.get<string>('CLSI_REMOTE_URL') ||
       this.configService?.get<string>('CLSI_URL') ||
+      process.env.CLSI_REMOTE_URL ||
+      process.env.CLSI_URL ||
       '';
+    this.remoteClsiUrls = rawConfigured
+      .split(',')
+      .map((u) =>
+        u
+          .trim()
+          .replace(/^['"]+|['"]+$/g, '')
+          .replace(/\/+$/, ''),
+      )
+      .filter(Boolean);
+    this.remoteClsiUrl = this.remoteClsiUrls[0] || '';
   }
 
   public isEnabled(): boolean {
-    return Boolean(this.remoteClsiUrl);
+    return this.remoteClsiUrls.length > 0;
   }
 
   /**
@@ -56,24 +69,42 @@ export class RemoteClsiClientAdapter {
     operationName: string,
     fn: (baseUrl: string) => Promise<T | null>,
   ): Promise<T | null> {
-    if (!this.remoteClsiUrl) return null;
+    if (this.remoteClsiUrls.length === 0) return null;
     if (this.circuitBreaker.isOpen()) {
       this.logger.warn(
         `Remote CLSI Circuit Breaker is OPEN. Fast-failing ${operationName} request to local pipeline.`,
       );
       return null;
     }
-    try {
-      const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
-      return await fn(baseUrl);
-    } catch (err: unknown) {
-      this.circuitBreaker.recordFailure(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Remote CLSI ${operationName} failed: ${msg}. Falling back to local pipeline.`,
-      );
-      return null;
+    let lastErr: unknown = null;
+    for (const candidateUrl of this.remoteClsiUrls) {
+      try {
+        const baseUrl = candidateUrl.replace(/\/+$/, '');
+        const res = await fn(baseUrl);
+        if (res !== null) {
+          return res;
+        }
+      } catch (err: unknown) {
+        lastErr = err;
+        const cause = (err as { cause?: { code?: string; message?: string } })
+          ?.cause;
+        const causeDetail = cause
+          ? ` (${cause.code || ''} ${cause.message || ''})`.trim()
+          : '';
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Remote CLSI ${operationName} candidate ${candidateUrl} failed: ${msg} ${causeDetail}`.trim(),
+        );
+      }
     }
+    if (lastErr) {
+      this.circuitBreaker.recordFailure(lastErr);
+      const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+      this.logger.warn(
+        `Remote CLSI ${operationName} failed across all candidates: ${msg}. Falling back to local pipeline.`,
+      );
+    }
+    return null;
   }
 
   private resolveUrl(baseUrl: string, targetUrl: string): string {
@@ -137,7 +168,7 @@ export class RemoteClsiClientAdapter {
     sourceArg?: string,
     mergedFilesArg?: Record<string, string | Buffer>,
     dtoArg?: CompileManuscriptDto,
-    engineArg?: string | undefined,
+    engineArg?: string,
     cacheKeyArg?: string,
     signalArg?: AbortSignal,
   ): Promise<CompilePipelineResult | null> {
@@ -254,7 +285,8 @@ export class RemoteClsiClientAdapter {
             typeof rawResult.logs === 'string' && rawResult.logs.length > 0
               ? Promise.resolve(rawResult.logs)
               : this.fetchRemoteText(baseUrl, logEntry?.url),
-            typeof rawResult.synctex === 'string' && rawResult.synctex.length > 0
+            typeof rawResult.synctex === 'string' &&
+            rawResult.synctex.length > 0
               ? Promise.resolve(rawResult.synctex)
               : this.fetchRemoteBuffer(baseUrl, synctexEntry?.url),
           ]);
@@ -339,17 +371,26 @@ export class RemoteClsiClientAdapter {
       }
 
       if (response) {
-        this.circuitBreaker.recordFailure(new Error(`HTTP ${response.status}`));
-        this.logger.warn(
-          `Remote CLSI responded with HTTP ${response.status}. Falling back to local pipeline.`,
-        );
-      } else if (lastError) {
-        this.circuitBreaker.recordFailure(lastError);
-        this.logger.warn(
-          `Remote CLSI compile failed: ${lastError.message}. Falling back to local pipeline.`,
-        );
+        throw new Error(`HTTP ${response.status}`);
+      }
+      if (lastError) {
+        throw lastError;
       }
       return null;
+    });
+  }
+
+  public async tryRemoteHealthCheck(): Promise<Record<string, unknown> | null> {
+    return this.guarded('healthCheck', async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/status`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000),
+      });
+      if (response.ok) {
+        this.circuitBreaker.recordSuccess();
+        return (await response.json()) as Record<string, unknown>;
+      }
+      throw new Error(`HTTP ${response.status}`);
     });
   }
 

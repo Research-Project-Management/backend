@@ -313,10 +313,7 @@ export class ClsiService implements OnModuleDestroy {
     try {
       while (Date.now() - startTime < effectiveTimeoutMs) {
         if (this.activeQueueJobIds.get(projectId) !== jobId) {
-          throw new HttpException(
-            'Compilation superseded or cancelled',
-            409,
-          );
+          throw new HttpException('Compilation superseded or cancelled', 409);
         }
         const state = await job.getState();
         if (state === 'completed') {
@@ -439,7 +436,11 @@ export class ClsiService implements OnModuleDestroy {
       _userId,
       this.realtimeService,
       async (signal, onLogChunk) => {
-        if (this.realtimeService && projectId && !projectId.startsWith('adhoc-')) {
+        if (
+          this.realtimeService &&
+          projectId &&
+          !projectId.startsWith('adhoc-')
+        ) {
           try {
             await this.realtimeService.flushProjectBeforeCompile(projectId);
           } catch (err: unknown) {
@@ -529,7 +530,11 @@ export class ClsiService implements OnModuleDestroy {
       }
       if (result.logs) {
         writes.push(
-          fs.writeFile(path.join(scratchDir, 'output.log'), result.logs, 'utf8'),
+          fs.writeFile(
+            path.join(scratchDir, 'output.log'),
+            result.logs,
+            'utf8',
+          ),
         );
       }
       if (writes.length > 0) {
@@ -921,6 +926,12 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public async getHealthReport() {
+    if (this.remoteClient.isEnabled()) {
+      const remoteHealth = await this.remoteClient.tryRemoteHealthCheck();
+      if (remoteHealth && remoteHealth.status === 'healthy') {
+        return remoteHealth;
+      }
+    }
     return this.healthCheck.checkHealth();
   }
 
