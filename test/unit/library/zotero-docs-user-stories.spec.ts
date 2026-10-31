@@ -26,8 +26,8 @@ import { CommandRepository } from '@/modules/library/catalog/repositories/comman
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { ItemRelationsService } from '@/modules/library/catalog/services/item-relations.service';
 import { ItemTypeConversionService } from '@/modules/library/catalog/services/item-type-conversion.service';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
-import { QueryClassifier } from '@/modules/library/ingestion/parsers/query.classifier';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
+import { QueryClassifier } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import {
   normalizeDoi,
   normalizeArxivId,

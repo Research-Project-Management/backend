@@ -23,7 +23,7 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
-import { AnnotationType } from '@/modules/library/extraction/types/annotations.types';
+import { AnnotationType } from '@/modules/library/extraction/types/extraction.types';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { PdfAnnotationImporterService } from '@/modules/library/extraction/services/pdf-annotation-importer.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';

@@ -6,10 +6,10 @@ import {
   normalizeAcademicTitleCase,
   inferItemTypeFromPdfSignals,
 } from '@/modules/library/core';
-import { SubmissionPayload } from '@/modules/library/ingestion/types/submission.types';
-import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { SubmissionPayload } from '@/modules/library/ingestion/types/ingestion.types';
+import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { createCandidate } from './candidate-builder.helper';
+import { createCandidate } from '../domain/candidate-builder.helper';
 
 export interface ExtractedPdfMetadata {
   title?: string;

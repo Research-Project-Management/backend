@@ -21,9 +21,7 @@ import { ExtractionFacade, EXTRACTION_FACADE } from './extraction.facade';
 import { AttachmentsService } from './services/attachments.service';
 import { AttachmentRenamerService } from './services/attachment-renamer.service';
 import { WebSnapshotService } from './services/web-snapshot.service';
-import { OcrPreprocessorService } from './services/ocr-preprocessor.service';
 import { OcrWorkerPoolService } from './services/ocr-worker-pool.service';
-import { OcrSandwichPdfService } from './services/ocr-sandwich-pdf.service';
 import { TrustedExtractionService } from './services/trusted-extraction.service';
 import { AnnotationsService } from './services/annotations.service';
 import { PdfAnnotationImporterService } from './services/pdf-annotation-importer.service';
@@ -38,7 +36,11 @@ import { AnnotationsRepository } from './repositories/annotations.repository';
 // Providers & Infrastructure
 import { PdfProvider } from './providers/pdf.provider';
 import { PdfTextMetadataExtractor } from './providers/pdf-text-metadata.extractor';
-import { OcrProvider } from './providers/ocr.provider';
+import {
+  OcrProvider,
+  OcrPreprocessorService,
+  OcrSandwichPdfService,
+} from './providers/ocr.provider';
 import {
   ExtractionHandler,
   EXTRACTION_EVENT_TYPES,

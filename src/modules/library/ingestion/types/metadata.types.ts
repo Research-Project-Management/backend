@@ -4,10 +4,20 @@
  * Self-contained: defines all types, interfaces, tokens, and execution models.
  */
 
+import {
+  CreatorCreditInput,
+  CreatorInput,
+  CreatorType,
+  ItemMetadata as CanonicalItemMetadata,
+} from '@/modules/library/core';
+
+export type { CreatorCreditInput, CreatorInput, CreatorType };
+
 // Tokens
 
 export const METADATA_PORT = Symbol('METADATA_PORT');
 export const METADATA_PROVIDERS = Symbol('METADATA_PROVIDERS');
+export const WEB_FETCH_PORT = Symbol('WEB_FETCH_PORT');
 
 // Query Types
 
@@ -18,15 +28,6 @@ export interface ClassifiedQuery {
   clean: string;
   type: QueryType;
 }
-
-import {
-  CreatorCreditInput,
-  CreatorInput,
-  CreatorType,
-  ItemMetadata as CanonicalItemMetadata,
-} from '@/modules/library/core';
-
-export type { CreatorCreditInput, CreatorInput, CreatorType };
 
 export interface Provenance {
   provider?: string;
@@ -44,15 +45,92 @@ export interface Provenance {
 
 export type ItemMetadata = CanonicalItemMetadata;
 
-// Reconciliation Types
+// Candidate & Reconciliation Types
+
+export type CandidateSourceKind =
+  | 'IDENTIFIER'
+  | 'RECORD'
+  | 'URL'
+  | 'FILE'
+  | 'PROVIDER'
+  | 'CONNECTOR';
+
+export interface FieldEvidence {
+  path?: string;
+  value?: unknown;
+  rawValue?: unknown;
+  normalizedValue: unknown;
+  confidence: number;
+  sourceProvider: string;
+  retrievedAt?: string;
+  warnings?: string[];
+  isUserOverride?: boolean;
+}
 
 export interface MetadataCandidate {
-  id: string;
-  sourceProvider: string;
-  metadata: ItemMetadata;
-  confidenceScore: number;
+  candidateId: string;
+  sourceKind: CandidateSourceKind;
+  sourceName: string; // Crossref, OpenAlex, PubMed, BibTeX, RIS, etc.
+  sourceProvider?: string;
+  sourceRecordId?: string;
+  retrievedAt: string;
+  schemaVersion?: string;
+  rawEvidenceRef?: string;
+  rawMetadata?: Record<string, unknown>;
+  fields: Record<string, FieldEvidence>;
+  normalizedMetadata: ItemMetadata;
+  confidenceScore?: number;
+  overallConfidence?: number;
+  id?: string;
+  metadata?: ItemMetadata;
   rawPayload?: unknown;
-  fetchedAt: string;
+  fetchedAt?: string;
+}
+
+export type NormalizedMetadataCandidate = MetadataCandidate;
+
+export interface CandidateValidationError {
+  field: string;
+  message: string;
+  rawValue?: unknown;
+}
+
+export interface MetadataConflictDetail {
+  field: string;
+  description: string;
+  severity: 'low' | 'medium' | 'high';
+  variants: {
+    sourceProvider: string;
+    value: unknown;
+    confidenceScore: number;
+  }[];
+}
+
+export type MetadataConflict = MetadataConflictDetail;
+
+export interface ReconciliationDecision {
+  selectedFields: Record<string, FieldEvidence>;
+  rejectedFields: Record<string, FieldEvidence[]>;
+  conflicts: MetadataConflictDetail[];
+  proposedItem: ItemMetadata;
+  decidedAt: string;
+  policyVersion: string;
+}
+
+export interface DuplicateMatchResult {
+  matchType: 'EXACT' | 'PROBABLE' | 'NO_MATCH';
+  confidence: number;
+  targetItemId?: string;
+  targetItemTitle?: string;
+  matchReason?:
+    | 'DOI_EXACT'
+    | 'ARXIV_EXACT'
+    | 'ISBN_EXACT'
+    | 'PMID_EXACT'
+    | 'TITLE_FUZZY'
+    | 'FILE_HASH'
+    | 'NONE';
+  evidence?: Record<string, unknown>;
 }
 
 export interface FieldAssertion {
@@ -62,17 +140,6 @@ export interface FieldAssertion {
   confidenceScore: number;
   isUserOverride: boolean;
   timestamp: string;
-}
-
-export interface MetadataConflict {
-  field: string;
-  description: string;
-  severity: 'low' | 'medium' | 'high';
-  variants: {
-    sourceProvider: string;
-    value: unknown;
-    confidenceScore: number;
-  }[];
 }
 
 export interface ConflictReport {
@@ -193,4 +260,61 @@ export interface MetadataProvider {
     request: MetadataRequest,
     signal?: AbortSignal,
   ): Promise<ProviderResult | null>;
+}
+
+// Web Fetch Ladder Contracts
+
+export interface WebFetchOptions {
+  scopeId?: string;
+  userId?: string;
+  preferredFilename?: string;
+  timeoutMs?: number;
+  skipStealth?: boolean;
+}
+
+export interface MirrorBibliographicMetadata {
+  title?: string;
+  abstract?: string;
+  authors?: string[];
+  year?: number;
+  doi?: string;
+  pmid?: string;
+  pmcid?: string;
+  journal?: string;
+  isOpenAccess?: boolean;
+  pdfUrl?: string;
+  sourceMirror:
+    | 'EuropePMC'
+    | 'arXiv'
+    | 'PubMedCentral'
+    | 'OpenMirror'
+    | 'CrossRef'
+    | 'OpenAlex';
+}
+
+export interface WebFetchResponse {
+  url: string;
+  finalUrl: string;
+  status: number;
+  isBlocked: boolean;
+  wafKind?: string;
+  bodyText?: string;
+  bodyBuffer?: Buffer;
+  isPdf: boolean;
+  contentType?: string;
+  ladderStepReached: 0 | 1 | 2 | 3 | 4;
+  promptUploadPdf?: boolean;
+  derivedIdentifier?: {
+    doi?: string;
+    arxivId?: string;
+    pmid?: string;
+    pmcid?: string;
+  };
+  mirrorMetadata?: MirrorBibliographicMetadata;
+  headers?: Record<string, string>;
+  warnings?: string[];
+}
+
+export interface IWebFetchPort {
+  fetch(url: string, options?: WebFetchOptions): Promise<WebFetchResponse>;
 }

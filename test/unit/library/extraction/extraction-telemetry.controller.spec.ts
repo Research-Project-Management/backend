@@ -4,7 +4,7 @@ import { ExtractionTelemetryController } from '@/modules/library/extraction/cont
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
 import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
-import { TrustedExtractionResult } from '@/modules/library/extraction/types/trusted-extraction.types';
+import { TrustedExtractionResult } from '@/modules/library/extraction/types/extraction.types';
 
 describe('ExtractionTelemetryController', () => {
   let controller: ExtractionTelemetryController;

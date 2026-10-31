@@ -308,7 +308,8 @@ export class CitationService {
   }
 
   /**
-   * Formats citation directly for a stored Item by ID.
+   * Formats citation directly for a stored Item by ID using a 3-tier resolution chain:
+   * Tier 1 (CslEngine) -> Tier 2 (Publisher DOI Content Negotiation) -> Tier 3 (Registry Fallback).
    */
   async formatItemById(
     userId: string,
@@ -330,39 +331,67 @@ export class CitationService {
       throw new NotFoundException('Item not found in library');
     }
 
-    // Tier 1: Official In-Process CSL Engine (Instant, Offline-capable, Consistent with library metadata)
-    if (this.cslEngine) {
-      try {
-        await this.cslEngine.ensureTemplate(
-          styleId,
-          effectiveProjectId || userId,
-        );
-        const cslItem = CslJsonMapper.toCsl(item);
-        const engineRes = this.cslEngine.format(cslItem, styleId, index);
-        if (engineRes && engineRes.bibliography) {
-          return {
-            styleId,
-            inText: engineRes.inText,
-            bibliography: engineRes.bibliography,
-            bibliographyHtml: engineRes.bibliographyHtml,
-            source: 'csl-engine',
-          };
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `CslEngineService format error for item ${item.id}: ${message}. Falling back to publisher DOI.`,
-        );
-      }
+    const scopeId = effectiveProjectId || userId;
+    const tiers: ReadonlyArray<() => Promise<FormattedCitationResult | null>> =
+      [
+        () => this.tryFormatViaCslEngineTier(item, styleId, index, scopeId),
+        () => this.tryFormatViaDoiPublisherTier(item, styleId),
+      ];
+
+    for (const runTier of tiers) {
+      const result = await runTier();
+      if (result) return result;
     }
 
-    // Tier 2: Fallback to publisher DOI content negotiation if engine had an issue and DOI exists
+    return this.formatItem(
+      item as unknown as CitationItemInput,
+      styleId,
+      index,
+    );
+  }
+
+  private async tryFormatViaCslEngineTier(
+    item: CatalogItemRecord,
+    styleId: CitationStyleId,
+    index: number,
+    scopeId?: string,
+  ): Promise<FormattedCitationResult | null> {
+    if (!this.cslEngine) return null;
+    try {
+      await this.cslEngine.ensureTemplate(styleId, scopeId);
+      const cslItem = CslJsonMapper.toCsl(item);
+      const engineRes = this.cslEngine.format(cslItem, styleId, index);
+      if (engineRes && engineRes.bibliography) {
+        return {
+          styleId,
+          inText: engineRes.inText,
+          bibliography: engineRes.bibliography,
+          bibliographyHtml: engineRes.bibliographyHtml,
+          source: 'csl-engine',
+        };
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `CslEngineService format error for item ${item.id}: ${message}. Falling back to publisher DOI.`,
+      );
+    }
+    return null;
+  }
+
+  private async tryFormatViaDoiPublisherTier(
+    item: CatalogItemRecord,
+    styleId: CitationStyleId,
+  ): Promise<FormattedCitationResult | null> {
     if (
-      item.doi &&
-      this.doiService &&
-      styleId !== 'bibtex' &&
-      styleId !== 'ris'
+      !item.doi ||
+      !this.doiService ||
+      styleId === 'bibtex' ||
+      styleId === 'ris'
     ) {
+      return null;
+    }
+    try {
       const doiCitation = await this.doiService.resolveCitation(
         item.doi,
         styleId,
@@ -378,13 +407,10 @@ export class CitationService {
           source: 'publisher',
         };
       }
+    } catch {
+      // Fall through to next tier
     }
-
-    return this.formatItem(
-      item as unknown as CitationItemInput,
-      styleId,
-      index,
-    );
+    return null;
   }
 
   /**
@@ -479,43 +505,13 @@ export class CitationService {
 
     await Promise.all(
       missingEntries.map(async ({ item, index }) => {
-        let formatted: FormattedCitationResult | undefined;
-
-        // Fallback to publisher DOI content negotiation
-        if (
-          item.doi &&
-          this.doiService &&
-          styleId !== 'bibtex' &&
-          styleId !== 'ris'
-        ) {
-          try {
-            const doiCitation = await this.doiService.resolveCitation(
-              item.doi,
-              styleId,
-            );
-            if (doiCitation) {
-              formatted = {
-                styleId,
-                inText:
-                  doiCitation.inText ||
-                  `(${item.contributors?.[0]?.lastName || 'Anonymous'}, ${item.year || 'n.d.'})`,
-                bibliography: doiCitation.bibliography,
-                bibliographyHtml: doiCitation.bibliographyHtml,
-                source: 'publisher',
-              };
-            }
-          } catch {
-            // ignore
-          }
-        }
-
-        if (!formatted) {
-          formatted = this.formatItem(
+        const formatted =
+          (await this.tryFormatViaDoiPublisherTier(item, styleId)) ??
+          this.formatItem(
             item as unknown as CitationItemInput,
             styleId,
             index + 1,
           );
-        }
 
         citationMap.set(item.id, formatted);
       }),

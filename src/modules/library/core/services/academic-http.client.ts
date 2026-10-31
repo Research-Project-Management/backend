@@ -1,8 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SsrfGuardService } from './ssrf-guard.service';
 import { ResilienceRegistryService } from '../resilience/resilience-registry.service';
-import { LibraryConfigService } from '../config/library.config';
+import { LibraryConfigService, libraryConfig } from '../config/library.config';
 import { ExternalProviderException } from '../errors/domain.exception';
+
+/**
+ * Canonical Academic Polite Pool Email and User-Agent configuration.
+ * Used for CrossRef, OpenAlex, PubMed, Unpaywall, DOI content negotiation,
+ * Retraction Watch, and academic crawler polite pools.
+ */
+export function getAcademicContactEmail(): string {
+  return libraryConfig().academic.contactEmail;
+}
+
+export function getAcademicUserAgent(subsystem = 'Platform'): string {
+  const email = getAcademicContactEmail();
+  return `FluxResearch${subsystem}/1.0 (mailto:${email}; https://flux.study)`;
+}
 
 export interface AcademicHttpRequestOptions {
   method?: 'GET' | 'POST' | 'HEAD';

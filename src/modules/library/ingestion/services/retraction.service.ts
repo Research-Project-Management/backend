@@ -7,13 +7,17 @@ import {
 } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 import {
-  LIBRARY_REDIS_KEYS,
   CATALOG_FACADE,
   ICatalogFacade,
   ITEM_CACHE_INVALIDATOR,
   IItemCacheInvalidator,
-  normalizeProjectScopeId,
 } from '@/modules/library/core';
+import { invalidateIngestionItemCache } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
+import {
+  calculateMetadataQualityScore,
+  diagnoseBibliographicQualityIssues,
+  QUALITY_RULE_BIT,
+} from '@/modules/library/ingestion/domain/metadata.validator';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import {
@@ -28,13 +32,148 @@ import {
 import {
   FlagRetractionDto,
   BatchCheckRetractionDto,
-} from '@/modules/library/ingestion/dto/retraction.dto';
+} from '@/modules/library/ingestion/dto/ingestion.dto';
 import {
   RetractionCheckResult,
   RetractionStats,
   RetractionDetails,
   RetractionNature,
-} from '@/modules/library/ingestion/types/retraction.types';
+} from '@/modules/library/ingestion/types/ingestion.types';
+
+export interface CompletenessAnalysis {
+  score: number; // 0 - 100
+  level: 'complete' | 'adequate' | 'minimal';
+  missingKeyFields: string[];
+  presentFieldsCount: number;
+  totalFieldsCount: number;
+}
+
+export interface QualityAuditReport {
+  totalItems: number;
+  averageQualityScore: number;
+  healthReport: {
+    missingDoi: number;
+    missingAbstract: number;
+    missingYear: number;
+  };
+}
+
+@Injectable()
+export class QualityService {
+  constructor(
+    @Optional()
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
+  ) {}
+
+  /**
+   * Calculates completeness score for an item based on its type definition.
+   */
+  calculateItemCompleteness(
+    item: Record<string, unknown>,
+  ): CompletenessAnalysis {
+    const itemType =
+      typeof item.itemType === 'string'
+        ? item.itemType
+        : typeof item.type === 'string'
+          ? item.type
+          : 'journalArticle';
+    const fields = this.catalogGateway?.getOrderedFields
+      ? this.catalogGateway.getOrderedFields(itemType)
+      : [];
+
+    if (!fields || fields.length === 0) {
+      return {
+        score: 50,
+        level: 'adequate',
+        missingKeyFields: [],
+        presentFieldsCount: 1,
+        totalFieldsCount: 1,
+      };
+    }
+
+    const typeSpecificKeys = (fields as Array<{ key: string }>)
+      .filter((f) => !['title', 'date', 'url', 'doi'].includes(f.key))
+      .slice(0, 5)
+      .map((f) => f.key);
+
+    const evaluation = calculateMetadataQualityScore(item, {
+      typeSpecificKeys,
+    });
+
+    return {
+      score: evaluation.score,
+      level: evaluation.level,
+      missingKeyFields: evaluation.missingKeyFields,
+      presentFieldsCount: evaluation.presentFieldsCount,
+      totalFieldsCount: fields.length,
+    };
+  }
+
+  async getQualityAudit(userId: string, projectId?: string) {
+    const items = this.catalogGateway
+      ? await this.catalogGateway.findQualityAuditItems(userId, 2000, projectId)
+      : [];
+
+    let totalScore = 0;
+    let missingDoi = 0;
+    let missingAbstract = 0;
+    let missingYear = 0;
+    let missingAuthors = 0;
+    let healthyItems = 0;
+    const flaggedItems: Array<{
+      itemId: string;
+      title: string;
+      issues: string[];
+    }> = [];
+
+    for (const it of items) {
+      const { evaluation, issues, isHealthy } =
+        diagnoseBibliographicQualityIssues(
+          it as unknown as Record<string, unknown>,
+        );
+
+      const issueMask = evaluation.missingIssueMask;
+      if (issueMask & QUALITY_RULE_BIT.authors) missingAuthors += 1;
+      if (issueMask & QUALITY_RULE_BIT.year) missingYear += 1;
+      if (issueMask & QUALITY_RULE_BIT.doi) missingDoi += 1;
+      if (issueMask & QUALITY_RULE_BIT.abstract) missingAbstract += 1;
+
+      if (isHealthy) {
+        healthyItems += 1;
+      } else {
+        flaggedItems.push({
+          itemId: it.id,
+          title: it.title || 'Untitled',
+          issues,
+        });
+      }
+
+      totalScore += evaluation.score;
+    }
+
+    const averageQualityScore =
+      items.length > 0 ? Math.round(totalScore / items.length) : 100;
+
+    return {
+      totalItems: items.length,
+      healthyItems,
+      averageQualityScore,
+      healthScorePercentage: averageQualityScore,
+      missingDoiCount: missingDoi,
+      missingYearCount: missingYear,
+      missingAuthorsCount: missingAuthors,
+      missingAbstractCount: missingAbstract,
+      missingPdfCount: 0,
+      flaggedItems,
+      healthReport: {
+        missingDoi,
+        missingAbstract,
+        missingYear,
+      },
+    };
+  }
+}
 
 @Injectable()
 export class RetractionService {
@@ -59,60 +198,16 @@ export class RetractionService {
     userId: string,
     projectId?: string,
   ): Promise<void> {
-    if (itemIds.length === 0) return;
-    const invalidator =
-      this.cacheCoordinator?.invalidateForWrite
-        ? this.cacheCoordinator
-        : this.catalogGateway?.invalidateForWrite
-          ? this.catalogGateway
-          : undefined;
-    if (invalidator?.invalidateForWrite) {
-      await invalidator.invalidateForWrite({
-        userId,
-        projectId,
-        itemIds,
-      });
-      return;
-    }
-    if (!this.cache) return;
-    try {
-      const validProjectId = normalizeProjectScopeId(projectId);
-      const scopeId = validProjectId || userId;
-      const tasks: Promise<unknown>[] = [];
-      for (const itemId of itemIds) {
-        tasks.push(
-          this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
-          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
-        );
-      }
-      tasks.push(
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(scopeId)),
-        this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(scopeId)),
-      );
-      if (validProjectId) {
-        tasks.push(
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
-          ),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(userId)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
-          this.cache.del(
-            LIBRARY_REDIS_KEYS.searchVersion(`proj:${validProjectId}`),
-          ),
-          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(userId)),
-        );
-      }
-      await Promise.all(tasks);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to invalidate retraction cache: ${msg}`);
-    }
+    await invalidateIngestionItemCache({
+      itemIds,
+      userId,
+      projectId,
+      cacheCoordinator: this.cacheCoordinator,
+      catalogGateway: this.catalogGateway,
+      cache: this.cache,
+      logger: this.logger,
+      contextLabel: 'retraction cache',
+    });
   }
 
   async checkItem(
@@ -131,7 +226,6 @@ export class RetractionService {
       !Array.isArray(item.metadata)
         ? (item.metadata as Record<string, unknown>)
         : {};
-    // Do not overwrite manual retraction unless manually unflagged
     if (meta.isRetracted && meta.retractionNature === 'manual') {
       return {
         itemId,
@@ -194,8 +288,6 @@ export class RetractionService {
       };
     }
 
-    // Unknown (no DOI/PMID, offline, timeout): keep the stored status and
-    // do not bump retractionCheckedAt.
     return {
       itemId,
       isRetracted: Boolean(meta.isRetracted),
@@ -263,7 +355,6 @@ export class RetractionService {
               );
               updatedItemIds.push(item.id);
             }
-            // unknown: leave stored status untouched
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             this.logger.warn(`Error scanning item ${item.id}: ${msg}`);

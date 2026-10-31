@@ -4,12 +4,14 @@ import {
   normalizeArxivId,
   normalizePmid,
   normalizeIsbn,
+  ItemProvenancePolicy,
+  PREPRINT_SERVER_VENUE_REGEX,
 } from '@/modules/library/core';
 import { ItemsMapper } from '@/modules/library/catalog';
 import {
   DuplicateClusterResult,
   DuplicateClusterItem,
-} from '@/modules/library/ingestion/types/curation.types';
+} from '@/modules/library/ingestion/types/ingestion.types';
 import {
   normalizeTitleForDedupe,
   extractContributorAuthors,
@@ -17,9 +19,120 @@ import {
   calculateTitleSimilarity,
   hasConflictingPartOrSupplementMarkers,
 } from './deduplication.domain';
-import { PREPRINT_SERVER_VENUE_REGEX } from './field-reconciliation.strategies';
 
 export { PREPRINT_SERVER_VENUE_REGEX };
+
+const EFFECTIVE_FIELD_COUPLED_FALLBACKS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  abstract: ['abstractNote'],
+  abstractNote: ['abstract'],
+  publicationTitle: [
+    'journal',
+    'proceedingsTitle',
+    'bookTitle',
+    'repository',
+    'venue',
+  ],
+  journal: ['publicationTitle'],
+  proceedingsTitle: ['publicationTitle'],
+  bookTitle: ['publicationTitle'],
+  repository: ['publicationTitle'],
+  year: ['date', 'publicationDate'],
+  date: ['publicationDate', 'year'],
+  publicationDate: ['date', 'year'],
+};
+
+function isNonEmptyFieldValue(val: unknown): boolean {
+  return val !== undefined && val !== null && val !== '';
+}
+
+export function asMetaObject(val: unknown): Record<string, unknown> {
+  return val && typeof val === 'object' && !Array.isArray(val)
+    ? (val as Record<string, unknown>)
+    : {};
+}
+
+export interface EffectiveFieldLookupOptions {
+  excludeGenericsFromSpecificTarget?: boolean;
+}
+
+export function getEffectiveItemField(
+  item: unknown,
+  field: string,
+  metaOverride?: Record<string, unknown>,
+  options?: EffectiveFieldLookupOptions,
+): unknown {
+  const rec = asMetaObject(item);
+  const topVal = rec[field];
+  if (isNonEmptyFieldValue(topVal)) {
+    return topVal;
+  }
+  const meta = metaOverride || asMetaObject(rec.metadata);
+  const metaVal = meta[field];
+  if (isNonEmptyFieldValue(metaVal)) {
+    return metaVal;
+  }
+
+  const excludeGenerics = options?.excludeGenericsFromSpecificTarget === true;
+  const coupledAliases = Array.from(
+    new Set([
+      ...ItemProvenancePolicy.getCoupledFieldAliases(field),
+      ...(EFFECTIVE_FIELD_COUPLED_FALLBACKS[field] ?? []),
+    ]),
+  ).filter((alias) => {
+    if (excludeGenerics) {
+      if ((field === 'date' || field === 'publicationDate') && alias === 'year') {
+        return false;
+      }
+      if (
+        (field === 'bookTitle' ||
+          field === 'proceedingsTitle' ||
+          field === 'repository') &&
+        alias === 'publicationTitle'
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
+  for (const alias of coupledAliases) {
+    const aliasTop = rec[alias];
+    if (isNonEmptyFieldValue(aliasTop)) {
+      return aliasTop;
+    }
+    const aliasMeta = meta[alias];
+    if (isNonEmptyFieldValue(aliasMeta)) {
+      return aliasMeta;
+    }
+  }
+
+  const lowerField = field.trim().toLowerCase();
+  if (
+    (lowerField === 'doi' ||
+      lowerField === 'isbn' ||
+      lowerField === 'issn' ||
+      lowerField === 'pmid' ||
+      lowerField === 'pmcid' ||
+      lowerField === 'arxivid' ||
+      lowerField === 'arxiv') &&
+    Array.isArray(rec.identifiers)
+  ) {
+    const targetIdType = lowerField === 'arxivid' ? 'arxiv' : lowerField;
+    for (const ident of rec.identifiers as Array<Record<string, unknown>>) {
+      if (!ident || typeof ident !== 'object') continue;
+      const rawType = String(ident.type ?? ident.identifierType ?? '')
+        .trim()
+        .toLowerCase();
+      const normType = rawType === 'arxivid' ? 'arxiv' : rawType;
+      if (normType === targetIdType && isNonEmptyFieldValue(ident.value)) {
+        return ident.value;
+      }
+    }
+  }
+
+  return undefined;
+}
 
 export interface RawDuplicateCluster {
   clusterId: string;
@@ -27,6 +140,65 @@ export interface RawDuplicateCluster {
   confidence: number;
   recommendedMasterId: string;
   rawGroup: DuplicateCandidateItem[];
+}
+
+/**
+ * Guarded Disjoint-Set Union (Union-Find with Path Compression) for Equivalence Clustering.
+ */
+export class DisjointSet<T> {
+  private readonly parent: Int32Array;
+  private readonly members: number[][];
+
+  constructor(private readonly items: readonly T[]) {
+    const n = items.length;
+    this.parent = new Int32Array(n);
+    this.members = Array.from({ length: n }, (_, i) => {
+      this.parent[i] = i;
+      return [i];
+    });
+  }
+
+  find(i: number): number {
+    let root = i;
+    while (this.parent[root] !== root) root = this.parent[root];
+    let curr = i;
+    while (curr !== root) {
+      const next = this.parent[curr];
+      this.parent[curr] = root;
+      curr = next;
+    }
+    return root;
+  }
+
+  tryUnion(
+    i: number,
+    j: number,
+    isCompatible: (a: T, b: T) => boolean,
+  ): boolean {
+    const rootI = this.find(i);
+    const rootJ = this.find(j);
+    if (rootI === rootJ) return true;
+    for (const idxA of this.members[rootI]) {
+      for (const idxB of this.members[rootJ]) {
+        if (!isCompatible(this.items[idxA], this.items[idxB])) return false;
+      }
+    }
+    const [keep, merge] = rootI < rootJ ? [rootI, rootJ] : [rootJ, rootI];
+    this.parent[merge] = keep;
+    this.members[keep].push(...this.members[merge]);
+    this.members[merge] = [];
+    return true;
+  }
+
+  extractClusters(): T[][] {
+    const clusters: T[][] = [];
+    for (let i = 0; i < this.items.length; i++) {
+      if (this.parent[i] === i && this.members[i].length > 1) {
+        clusters.push(this.members[i].map((idx) => this.items[idx]));
+      }
+    }
+    return clusters;
+  }
 }
 
 export function isPreprintDoiValue(doi?: string | null): boolean {
@@ -215,9 +387,8 @@ export function collectExactIdentifierClusters(params: {
     getIdFn: (it: DuplicateCandidateItem) => string | null | undefined,
     matchReason: 'EXACT_DOI' | 'EXACT_ARXIV' | 'EXACT_PMID' | 'EXACT_ISBN',
   ) => {
-    // Absorb ungrouped items matching an existing Tier 0 INGESTION_SUSPECT cluster's exact identifier
+    // Absorb ungrouped items matching an existing Tier 0/Tier 1 cluster's exact identifier (transitive equivalence)
     for (const rc of rawClusters) {
-      if (rc.matchReason !== 'INGESTION_SUSPECT') continue;
       const clusterIds = new Set<string>();
       for (const member of rc.rawGroup) {
         const cleanMemberId = String(getIdFn(member) || '')
@@ -264,47 +435,31 @@ export function collectExactIdentifierClusters(params: {
     }
 
     map.forEach((matchedItems, idVal) => {
-      if (matchedItems.length <= 1) return;
-      const visitedInBucket = new Set<string>();
+      const available = matchedItems.filter((it) => !groupedItemIds.has(it.id));
+      if (available.length <= 1) return;
 
-      for (let i = 0; i < matchedItems.length; i++) {
-        const seed = matchedItems[i];
-        if (visitedInBucket.has(seed.id) || groupedItemIds.has(seed.id)) {
-          continue;
+      const dsu = new DisjointSet(available);
+      for (let i = 0; i < available.length; i++) {
+        for (let j = i + 1; j < available.length; j++) {
+          dsu.tryUnion(
+            i,
+            j,
+            (a, b) =>
+              (!isDismissedPair || !isDismissedPair(a, b)) &&
+              areCompatibleIdentifierDuplicates(a, b, idType),
+          );
         }
+      }
 
-        const compatibleGroup: DuplicateCandidateItem[] = [seed];
-        for (let j = i + 1; j < matchedItems.length; j++) {
-          const candidate = matchedItems[j];
-          if (
-            visitedInBucket.has(candidate.id) ||
-            groupedItemIds.has(candidate.id)
-          ) {
-            continue;
-          }
-          if (
-            compatibleGroup.every(
-              (existing) =>
-                (!isDismissedPair || !isDismissedPair(candidate, existing)) &&
-                areCompatibleIdentifierDuplicates(candidate, existing, idType),
-            )
-          ) {
-            compatibleGroup.push(candidate);
-            visitedInBucket.add(candidate.id);
-          }
-        }
-
-        if (compatibleGroup.length > 1) {
-          visitedInBucket.add(seed.id);
-          compatibleGroup.forEach((m) => groupedItemIds.add(m.id));
-          rawClusters.push({
-            clusterId: `${idType}-${idVal.replace(/[^a-z0-9]/g, '-').substring(0, 32)}`,
-            matchReason,
-            confidence: 1.0,
-            recommendedMasterId: computeRecommendedMasterId(compatibleGroup),
-            rawGroup: compatibleGroup,
-          });
-        }
+      for (const compatibleGroup of dsu.extractClusters()) {
+        compatibleGroup.forEach((m) => groupedItemIds.add(m.id));
+        rawClusters.push({
+          clusterId: `${idType}-${idVal.replace(/[^a-z0-9]/g, '-').substring(0, 32)}`,
+          matchReason,
+          confidence: 1.0,
+          recommendedMasterId: computeRecommendedMasterId(compatibleGroup),
+          rawGroup: compatibleGroup,
+        });
       }
     });
   };
@@ -374,58 +529,52 @@ export function collectFuzzyTitleYearAuthorClusters(params: {
   }
 
   fuzzyBuckets.forEach((bucket, key) => {
-    if (bucket.length <= 1) return;
-    const visited = new Set<string>();
+    const available = bucket.filter((it) => !groupedItemIds.has(it.id));
+    if (available.length <= 1) return;
 
-    for (let i = 0; i < bucket.length; i++) {
-      const itemA = bucket[i];
-      if (visited.has(itemA.id) || groupedItemIds.has(itemA.id)) continue;
-
-      const group = [itemA];
-      for (let j = i + 1; j < bucket.length; j++) {
-        const itemB = bucket[j];
-        if (visited.has(itemB.id) || groupedItemIds.has(itemB.id)) continue;
-
-        const isCompatibleWithAll = group.every((member) => {
-          if (isDismissedPair(member, itemB)) return false;
-          if (hasConflictingTier2BibliographicEvidence(member, itemB)) {
-            return false;
-          }
-          if (
-            hasConflictingPartOrSupplementMarkers(
-              member.title || '',
-              itemB.title || '',
-            )
-          ) {
-            return false;
-          }
-          const isPreprintEvolution =
-            isPreprintCandidateItem(member) || isPreprintCandidateItem(itemB);
-          const maxYearGap = isPreprintEvolution ? 3 : 1;
-          const yearMatch =
-            member.year == null ||
-            itemB.year == null ||
-            Math.abs(member.year - itemB.year) <= maxYearGap;
-          if (!yearMatch) return false;
-          return calculateTitleSimilarity(member.title, itemB.title) >= 0.88;
-        });
-
-        if (isCompatibleWithAll) {
-          group.push(itemB);
-          visited.add(itemB.id);
-        }
+    const isFuzzyCompatible = (
+      member: DuplicateCandidateItem,
+      itemB: DuplicateCandidateItem,
+    ): boolean => {
+      if (isDismissedPair(member, itemB)) return false;
+      if (hasConflictingTier2BibliographicEvidence(member, itemB)) {
+        return false;
       }
-
-      if (group.length > 1) {
-        group.forEach((g) => groupedItemIds.add(g.id));
-        rawClusters.push({
-          clusterId: `fuzzy-${key.replace(/[^a-z0-9]/g, '-').substring(0, 24)}-${itemA.id.substring(0, 8)}`,
-          matchReason: 'FUZZY_TITLE_YEAR_AUTHOR',
-          confidence: 0.85,
-          recommendedMasterId: computeRecommendedMasterId(group),
-          rawGroup: group,
-        });
+      if (
+        hasConflictingPartOrSupplementMarkers(
+          member.title || '',
+          itemB.title || '',
+        )
+      ) {
+        return false;
       }
+      const isPreprintEvolution =
+        isPreprintCandidateItem(member) || isPreprintCandidateItem(itemB);
+      const maxYearGap = isPreprintEvolution ? 3 : 1;
+      const yearMatch =
+        member.year == null ||
+        itemB.year == null ||
+        Math.abs(member.year - itemB.year) <= maxYearGap;
+      if (!yearMatch) return false;
+      return calculateTitleSimilarity(member.title, itemB.title) >= 0.88;
+    };
+
+    const dsu = new DisjointSet(available);
+    for (let i = 0; i < available.length; i++) {
+      for (let j = i + 1; j < available.length; j++) {
+        dsu.tryUnion(i, j, isFuzzyCompatible);
+      }
+    }
+
+    for (const group of dsu.extractClusters()) {
+      group.forEach((g) => groupedItemIds.add(g.id));
+      rawClusters.push({
+        clusterId: `fuzzy-${key.replace(/[^a-z0-9]/g, '-').substring(0, 24)}-${group[0].id.substring(0, 8)}`,
+        matchReason: 'FUZZY_TITLE_YEAR_AUTHOR',
+        confidence: 0.85,
+        recommendedMasterId: computeRecommendedMasterId(group),
+        rawGroup: group,
+      });
     }
   });
 }

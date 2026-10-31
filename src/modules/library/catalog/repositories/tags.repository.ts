@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, TagType } from '@prisma/client';
 import { normalizeProjectScopeId } from '@/modules/library/core';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { resolveOrCreateTags } from '@/modules/library/catalog/domain/command-payload.builder';
 
 @Injectable()

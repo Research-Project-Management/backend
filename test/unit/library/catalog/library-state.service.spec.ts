@@ -5,7 +5,7 @@ import { StateRepository } from '@/modules/library/catalog/repositories/state.re
 import {
   ReadingStatus,
   StateData,
-} from '@/modules/library/catalog/types/state.types';
+} from '@/modules/library/catalog/types/catalog.types';
 import {
   formatStateDate,
   isValidRating,
@@ -139,6 +139,18 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
               findStatesForItems: jest.fn(),
               upsertState: jest.fn(),
               deleteState: jest.fn(),
+              transferItemStates: jest.fn(
+                (
+                  sourceItemIds: string[],
+                  targetItemId: string,
+                  tx?: unknown,
+                ) =>
+                  new StateRepository({} as never).transferItemStates(
+                    sourceItemIds,
+                    targetItemId,
+                    tx as never,
+                  ),
+              ),
             },
           },
           { provide: TransactionService, useValue: mockLibraryTx },

@@ -19,7 +19,7 @@ import {
   UpdateFeedSubDto,
   MarkItemReadDto,
   MarkAllReadDto,
-} from '../dto/feeds.dto';
+} from '../dto/ingestion.dto';
 
 export { SubscribeFeedDto, UpdateFeedSubDto, MarkItemReadDto, MarkAllReadDto };
 

@@ -29,7 +29,7 @@ import {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
   CaptureSnapshotDto,
-} from '@/modules/library/extraction/dto/attachments.dto';
+} from '@/modules/library/extraction/dto/annotations.dto';
 // Services
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { WebSnapshotService } from '@/modules/library/extraction/services/web-snapshot.service';

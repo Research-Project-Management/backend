@@ -11,7 +11,7 @@ import { AttachmentsService } from './attachments.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 import { ExternalProviderException } from '@/modules/library/core/errors/domain.exception';
-import { AttachmentStorageException } from '@/modules/library/extraction/types/attachments.types';
+import { AttachmentStorageException } from '@/modules/library/extraction/types/extraction.types';
 import { buildStandaloneSnapshotHtml } from '@/modules/library/extraction/extractors/snapshot-template.helper';
 
 export interface SnapshotResult {

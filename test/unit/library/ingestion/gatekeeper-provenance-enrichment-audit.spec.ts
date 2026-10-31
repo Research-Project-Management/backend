@@ -9,9 +9,8 @@ import {
   buildReResolvePatch,
 } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 import { MetadataResolverService } from '@/modules/library/ingestion/services/metadata-resolver.service';
-import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
-import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
-import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
+import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
+import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
 import { ExtractionMetadataSynchronizer } from '@/modules/library/extraction/services/extraction-metadata.synchronizer';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 
@@ -310,9 +309,9 @@ describe('Gatekeeper Auditor G1 — Provenance, Locks, Authority, Enrichment & P
       expect(res.updated).toBe(true);
       expect(res.rejectedCitedDoi).toBeUndefined();
 
-      // ReconcileStage also preserves external candidate when corroborated by author + year
-      const reconcileStage = new ReconcileStage(new ReconciliationPolicy());
-      const decision = await reconcileStage.execute([
+      // ResolveStage also preserves external candidate when corroborated by author + year
+      const reconcileStage = new ResolveStage();
+      const decision = await reconcileStage.coalesceAndVerify([
         {
           candidateId: 'file-1',
           sourceKind: 'FILE',
@@ -370,7 +369,7 @@ describe('Gatekeeper Auditor G1 — Provenance, Locks, Authority, Enrichment & P
         }),
       };
 
-      const enrichStage = new EnrichStage(mockMetadataService as never);
+      const enrichStage = new ResolveStage(mockMetadataService as never);
       const enriched = await enrichStage.execute({
         scopeId: 'user-1',
         candidates: [

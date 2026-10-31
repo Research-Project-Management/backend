@@ -10,7 +10,7 @@ import {
   CreateIngestionReviewCaseData,
   IngestionScope,
   parseRunScope,
-} from '@/modules/library/ingestion/domain/duplicate-merge.helper';
+} from '@/modules/library/ingestion/domain/duplicate-merge.domain';
 export type { CreateIngestionRunData, CreateIngestionStageData, CreateIngestionReviewCaseData, IngestionScope };
 export { parseRunScope };
 

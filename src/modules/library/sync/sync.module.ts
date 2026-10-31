@@ -5,19 +5,21 @@ import { CoreModule as AppCoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
 
 import { LIBRARY_OUTBOX_QUEUE } from './domain/outbox.domain';
-import { OutboxQueueConsumer } from './services/outbox-queue.consumer';
 import { TransactionService } from './services/transaction.service';
 import { ChangeLogRepository } from './repositories/changelog.repository';
 import { OutboxRepository } from './repositories/outbox.repository';
-import { OutboxWorker } from './services/outbox.worker';
-import { OutboxDispatcher } from './services/outbox.dispatcher';
+import {
+  OutboxWorker,
+  OutboxDispatcher,
+  OutboxMetrics,
+  OutboxQueueConsumer,
+} from './services/outbox.worker';
 import {
   OUTBOX_REGISTRY_PORT,
   LIBRARY_EVENT_TYPES,
   UNIT_OF_WORK,
   IDEMPOTENT_CONSUMER,
 } from '@/modules/library/core';
-import { OutboxMetrics } from './services/outbox.metrics';
 import { SyncController } from './controllers/sync.controller';
 import { IdempotentConsumerService } from './services/idempotent-consumer.service';
 import { shouldRunWorkerConsumers } from '@/core';

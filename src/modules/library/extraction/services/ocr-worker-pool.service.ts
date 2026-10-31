@@ -14,7 +14,7 @@ import {
   OcrBoundingBox,
   OcrWord,
   OcrWorkerPoolOptions,
-} from '@/modules/library/extraction/types/ocr.types';
+} from '@/modules/library/extraction/types/extraction.types';
 import {
   SubsystemUnavailableException,
   LibraryConfigService,

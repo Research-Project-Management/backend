@@ -3,8 +3,10 @@ import {
   isValidMimeType,
   isPdfMimeType,
 } from '@/modules/library/extraction';
-import { IngestionStatusVo } from '@/modules/library/ingestion/domain/ingestion-status.vo';
-import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import {
+  IngestionRunAggregate,
+  IngestionStatusVo,
+} from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
 import { sanitizeSearchQuery } from '@/modules/library/search';
 import {
   normalizeCitationStyleId,

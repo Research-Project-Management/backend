@@ -12,13 +12,14 @@ import {
   TransactionHelpers,
   CATALOG_FACADE,
   ICatalogFacade,
-  IItemCacheInvalidator, ITEM_CACHE_INVALIDATOR,
-  LIBRARY_REDIS_KEYS,
+  IItemCacheInvalidator,
+  ITEM_CACHE_INVALIDATOR,
   normalizeProjectScopeId,
   extractFileIdFromUrl,
+  executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
-import { CreateAttachmentInput } from '@/modules/library/extraction/types/attachments.types';
+import { CreateAttachmentInput } from '@/modules/library/extraction/types/extraction.types';
 import {
   validateAttachmentInvariants,
   inferAttachmentTypeFromFilename,
@@ -31,13 +32,13 @@ import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
-} from '@/modules/library/extraction/dto/attachments.dto';
+} from '@/modules/library/extraction/dto/annotations.dto';
 import {
   UserId,
   ItemId,
   AttachmentId,
   ProjectId,
-} from '@/modules/library/core/types/branded.types';
+} from '@/modules/library/core';
 import { AttachmentRenamerService } from './attachment-renamer.service';
 
 export type { CreateAttachmentInput };
@@ -297,53 +298,15 @@ export class AttachmentsService {
     projectId?: string,
   ): Promise<void> {
     if (!itemId) return;
-    const invalidator = this.cacheCoordinator?.invalidateForWrite ? this.cacheCoordinator : this.catalogGateway?.invalidateForWrite ? this.catalogGateway : undefined;
-    if (invalidator?.invalidateForWrite) {
-      await invalidator.invalidateForWrite({ userId, projectId, itemIds: [itemId] });
-      return;
-    }
-    if (!this.cache) return;
-    try {
-      const validProjectId = normalizeProjectScopeId(projectId);
-      const scopeId = validProjectId || userId;
-      const countsScopeKey = validProjectId
-        ? `proj:${validProjectId}`
-        : `user:${userId}`;
-      await Promise.all([
-        this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
-        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
-        ...(scopeId
-          ? [
-              this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-              this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeId)),
-              this.cache.delPattern(
-                LIBRARY_REDIS_KEYS.countsPattern(countsScopeKey),
-              ),
-              this.cache.delPattern(
-                LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeId),
-              ),
-              this.cache.delPattern(
-                LIBRARY_REDIS_KEYS.searchItemsPattern(scopeId),
-              ),
-            ]
-          : []),
-        ...(validProjectId
-          ? [
-              this.cache.delPattern(
-                LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
-              ),
-              this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-              this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(userId)),
-            ]
-          : []),
-      ]);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Failed to invalidate item cache after attachment mutation (${itemId}): ${message}`,
-      );
-    }
+    await executeStandardLibraryCacheInvalidation(
+      this.cacheCoordinator ?? this.catalogGateway,
+      this.cache,
+      { userId, projectId, itemIds: [itemId] },
+      (message) =>
+        this.logger.warn(
+          `Failed to invalidate item cache after attachment mutation (${itemId}): ${message}`,
+        ),
+    );
   }
 
   async getItemAttachments(
@@ -592,29 +555,7 @@ export class AttachmentsService {
       },
     );
 
-    if (this.cacheCoordinator?.invalidateForWrite) {
-      await this.cacheCoordinator.invalidateForWrite({ userId, projectId, itemIds: [itemId] });
-    } else if (this.catalogGateway?.invalidateForWrite) {
-      await this.catalogGateway.invalidateForWrite({ userId, projectId, itemIds: [itemId] });
-    } else if (this.cache) {
-      const validProjectId = normalizeProjectScopeId(projectId);
-      const scopeId = validProjectId || userId;
-      await Promise.all([
-        this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
-        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
-        this.cache.del(`library:item:${itemId}:attachments`),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-        ...(validProjectId
-          ? [
-              this.cache.delPattern(
-                LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
-              ),
-              this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-            ]
-          : []),
-      ]);
-    }
+    await this.invalidateAttachmentItemCache(itemId, userId, projectId);
 
     return { success: true };
   }

@@ -1,4 +1,3 @@
-import { parseMedlineDate, enrichFromEuropePmc } from './pubmed.helper';
 import { Injectable, Optional } from '@nestjs/common';
 import {
   MetadataRequest,
@@ -18,13 +17,97 @@ import {
   normalizePageRange,
   parseCreatorString,
   normalizeAcademicTags,
-} from '@/modules/library/core';
-import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import {
   getAcademicContactEmail,
   getAcademicUserAgent,
-} from '@/modules/library/core/constants/academic-client.constants';
+} from '@/modules/library/core';
+import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { AbstractAcademicProvider } from './abstract-academic.provider';
+
+export function parseMedlineDate(raw: string): string | undefined {
+  const str = raw.trim();
+  if (!str) return undefined;
+  const MONTHS: Record<string, string> = {
+    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+  };
+  const iso = str.match(/^(\d{4})[/-](\d{1,2})(?:[/-](\d{1,2}))?/);
+  if (iso) {
+    const m = iso[2].padStart(2, '0');
+    return iso[3] ? `${iso[1]}-${m}-${iso[3].padStart(2, '0')}` : `${iso[1]}-${m}`;
+  }
+  const med = str.match(/^(\d{4})(?:\s+([A-Za-z]{3})[a-z]*(?:\s+(\d{1,2}))?)?/);
+  if (!med) return str;
+  const year = med[1];
+  const month = med[2] ? MONTHS[med[2].toLowerCase()] : undefined;
+  if (!month) return med[2] ? str : year;
+  return med[3] ? `${year}-${month}-${med[3].padStart(2, '0')}` : `${year}-${month}`;
+}
+
+export async function enrichFromEuropePmc(
+  result: ProviderResult,
+  cleanPmid: string,
+  rawTags: string[],
+  httpClient?: AcademicHttpClient,
+  signal?: AbortSignal,
+): Promise<void> {
+  try {
+    const epmcUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=EXT_ID:${encodeURIComponent(cleanPmid)}%20AND%20SRC:MED&resultType=core&format=json`;
+    const headers = {
+      'User-Agent': getAcademicUserAgent('PubMed'),
+      Accept: 'application/json',
+    };
+    const response = httpClient
+      ? (await httpClient.request(epmcUrl, { headers, signal })).response
+      : await fetch(epmcUrl, { headers, signal });
+    if (!response.ok) return;
+    const data = (await response.json()) as {
+      resultList?: {
+        result?: Array<{
+          abstractText?: string;
+          meshHeadingList?: {
+            meshHeading?: Array<{
+              descriptorName?: string;
+              meshQualifierList?: {
+                meshQualifier?: Array<{ qualifierName?: string }>;
+              };
+            }>;
+          };
+          keywordList?: { keyword?: Array<string | null> };
+        }>;
+      };
+    };
+    const item = data?.resultList?.result?.[0];
+    if (!item) return;
+
+    for (const mh of item.meshHeadingList?.meshHeading || []) {
+      const desc = cleanBibliographicText(mh.descriptorName || '');
+      if (!desc) continue;
+      const quals = mh.meshQualifierList?.meshQualifier || [];
+      if (quals.length > 0) {
+        for (const q of quals) {
+          const qual = cleanBibliographicText(q.qualifierName || '');
+          if (qual) rawTags.push(`${desc}/${qual}`);
+        }
+      } else {
+        rawTags.push(desc);
+      }
+    }
+
+    for (const kw of item.keywordList?.keyword || []) {
+      if (typeof kw === 'string') {
+        const cleaned = cleanBibliographicText(kw);
+        if (cleaned) rawTags.push(cleaned);
+      }
+    }
+
+    if (!result.metadata.abstract && typeof item.abstractText === 'string') {
+      const cleanedAbs = cleanAbstractText(item.abstractText);
+      if (cleanedAbs) result.metadata.abstract = cleanedAbs;
+    }
+  } catch {
+    // EuropePMC fallback enrichment skipped
+  }
+}
 
 @Injectable()
 export class PubMedProvider extends AbstractAcademicProvider {
@@ -108,9 +191,7 @@ export class PubMedProvider extends AbstractAcademicProvider {
     const endpoint = isPmc ? 'pmc' : 'pubmed';
     const numericId = isPmc ? id.replace(/^PMC/i, '') : id;
     let url = `https://api.ncbi.nlm.nih.gov/lit/ctxp/v1/${endpoint}/?format=csl&id=${encodeURIComponent(numericId)}`;
-    if (this.apiKey) {
-      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
-    }
+    if (this.apiKey) url += `&api_key=${encodeURIComponent(this.apiKey)}`;
 
     const headers = {
       'User-Agent': getAcademicUserAgent('PubMed'),
@@ -118,9 +199,7 @@ export class PubMedProvider extends AbstractAcademicProvider {
     };
 
     const response = await this.executeHttpFetch(url, signal, headers);
-
-    if (response.status === 404) return null;
-    if (!response.ok) return null;
+    if (response.status === 404 || !response.ok) return null;
 
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('text/html')) return null;
@@ -141,9 +220,7 @@ export class PubMedProvider extends AbstractAcademicProvider {
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
     let url = `${this.eutilsBaseUrl}?db=pubmed&id=${encodeURIComponent(cleanPmid)}&retmode=json&tool=FluxAcademic&email=${encodeURIComponent(this.email)}`;
-    if (this.apiKey) {
-      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
-    }
+    if (this.apiKey) url += `&api_key=${encodeURIComponent(this.apiKey)}`;
 
     const headers = {
       'User-Agent': getAcademicUserAgent('PubMed'),
@@ -151,7 +228,6 @@ export class PubMedProvider extends AbstractAcademicProvider {
     };
 
     const response = await this.executeHttpFetch(url, signal, headers);
-
     if (response.status === 404) return null;
 
     const contentType = response.headers.get('content-type') || '';
@@ -260,14 +336,12 @@ export class PubMedProvider extends AbstractAcademicProvider {
     let year: number | null = null;
     let publicationDate: string | undefined;
     const dateParts = [
-      (
-        data.issued as
-          { 'date-parts'?: Array<Array<string | number>> } | undefined
-      )?.['date-parts']?.[0],
-      (
-        data['epub-date'] as
-          { 'date-parts'?: Array<Array<string | number>> } | undefined
-      )?.['date-parts']?.[0],
+      (data.issued as { 'date-parts'?: Array<Array<string | number>> } | undefined)?.[
+        'date-parts'
+      ]?.[0],
+      (data['epub-date'] as { 'date-parts'?: Array<Array<string | number>> } | undefined)?.[
+        'date-parts'
+      ]?.[0],
     ].find((parts) => Array.isArray(parts) && Boolean(parts[0]));
     if (dateParts && dateParts[0] != null) {
       year = Number(dateParts[0]);
@@ -318,8 +392,7 @@ export class PubMedProvider extends AbstractAcademicProvider {
         ? data.publisher.trim()
         : undefined;
     const place =
-      typeof data['publisher-place'] === 'string' &&
-      data['publisher-place'].trim()
+      typeof data['publisher-place'] === 'string' && data['publisher-place'].trim()
         ? data['publisher-place'].trim()
         : undefined;
     const volume =
@@ -481,18 +554,13 @@ export class PubMedProvider extends AbstractAcademicProvider {
     }
 
     const canonicalUrl = `https://pubmed.ncbi.nlm.nih.gov/${cleanPmid}/`;
-
     const fullJournalName =
-      typeof item.fulljournalname === 'string'
-        ? item.fulljournalname
-        : undefined;
+      typeof item.fulljournalname === 'string' ? item.fulljournalname : undefined;
     const sourceStr = typeof item.source === 'string' ? item.source : undefined;
     const volumeStr = typeof item.volume === 'string' ? item.volume : undefined;
     const issueStr = typeof item.issue === 'string' ? item.issue : undefined;
     const pagesStr =
-      typeof item.pages === 'string'
-        ? normalizePageRange(item.pages)
-        : undefined;
+      typeof item.pages === 'string' ? normalizePageRange(item.pages) : undefined;
     const issnStr = typeof item.issn === 'string' ? item.issn : undefined;
 
     const rawAbstract =
@@ -551,22 +619,16 @@ export class PubMedProvider extends AbstractAcademicProvider {
         ? rawBase
         : 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
       let url = `${base}/efetch.fcgi?db=pubmed&id=${encodeURIComponent(cleanPmid)}&retmode=xml&tool=FluxAcademic&email=${encodeURIComponent(this.email)}`;
-      if (this.apiKey) {
-        url += `&api_key=${encodeURIComponent(this.apiKey)}`;
-      }
+      if (this.apiKey) url += `&api_key=${encodeURIComponent(this.apiKey)}`;
       const headers = {
         'User-Agent': getAcademicUserAgent('PubMed'),
         Accept: 'application/xml, text/xml, */*',
       };
       const response = await this.executeHttpFetch(url, signal, headers);
-      let xml = '';
-      if (response.ok) {
-        xml = await response.text();
-      }
+      const xml = response.ok ? await response.text() : '';
       const rawTags: string[] = [];
 
       if (xml && xml.includes('<PubmedArticle')) {
-        // 1. Extract MeSH headings (<MeshHeading> -> <DescriptorName> + <QualifierName>)
         const meshBlocks =
           xml.match(/<MeshHeading>[\s\S]*?<\/MeshHeading>/gi) || [];
         for (const block of meshBlocks) {
@@ -589,7 +651,6 @@ export class PubMedProvider extends AbstractAcademicProvider {
           }
         }
 
-        // 2. Extract Author Keywords (<Keyword>)
         const kwMatches = Array.from(
           xml.matchAll(/<Keyword(?:\s+[^>]*)?>([\s\S]*?)<\/Keyword>/gi),
         );
@@ -598,7 +659,6 @@ export class PubMedProvider extends AbstractAcademicProvider {
           if (kw) rawTags.push(kw);
         }
 
-        // 3. Extract full Abstract if missing from ctxp/esummary
         if (!result.metadata.abstract) {
           const absParts: string[] = [];
           const absMatches = Array.from(
@@ -619,7 +679,6 @@ export class PubMedProvider extends AbstractAcademicProvider {
           }
         }
       } else {
-        // Fallback to EuropePMC REST API when NCBI efetch.fcgi returns HTML error/rate-limit diagnostic
         await enrichFromEuropePmc(
           result,
           cleanPmid,

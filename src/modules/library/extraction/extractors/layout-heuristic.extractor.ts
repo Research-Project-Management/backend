@@ -162,14 +162,9 @@ export class LayoutHeuristicExtractor {
         };
       };
 
-      const allLines = lineBuckets.map(toPositionedLine);
-      const col0Lines = allLines
-        .filter((l) => l.column === 0)
-        .sort((a, b) => b.y - a.y);
-      const col1Lines = allLines
-        .filter((l) => l.column === 1)
-        .sort((a, b) => b.y - a.y);
-      const lines: PositionedTextLine[] = [...col0Lines, ...col1Lines];
+      const lines: PositionedTextLine[] = lineBuckets
+        .map(toPositionedLine)
+        .sort((a, b) => a.column - b.column || b.y - a.y);
 
       if (lines.length === 0) return {};
 

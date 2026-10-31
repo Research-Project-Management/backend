@@ -13,7 +13,7 @@ import {
   CreateNoteData,
   UpdateNoteData,
   ExtractLiteratureNoteResult,
-} from '@/modules/library/catalog/types/notes.types';
+} from '@/modules/library/catalog/types/catalog.types';
 import {
   formatLiteratureNoteMarkdown,
   FormatNoteOptions,

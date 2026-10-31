@@ -10,13 +10,13 @@ import {
 import {
   IngestionSubmissionEnvelope,
   IngestionAcceptedResult,
-  SubmissionPayload,
-} from '@/modules/library/ingestion/types/submission.types';
+} from '@/modules/library/ingestion/types/ingestion.types';
 import {
   IngestionCommand,
   IngestionResult,
   IngestionRunSnapshot,
 } from '@/modules/library/ingestion/types/ingestion.types';
+import { SubmissionEnvelopeFactory } from '@/modules/library/ingestion/domain/submission-envelope.factory';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { IngestionStatus, IngestionRun, Prisma } from '@prisma/client';
 import { PipelineService } from './pipeline.service';
@@ -44,7 +44,7 @@ import {
   IngestionRunReporterService,
   IngestionRunProgressResult,
 } from './ingestion-run-reporter.service';
-import { isRetryableIngestionError } from '@/modules/library/ingestion/domain/ingestion-error.classifier';
+import { isRetryableIngestionError } from '@/modules/library/ingestion/types/ingestion.errors';
 
 @Injectable()
 export class IngestionService {
@@ -462,152 +462,14 @@ export class IngestionService {
     projectId: string,
     command: IngestionCommand,
   ): IngestionSubmissionEnvelope {
-    let payload: SubmissionPayload;
-    switch (command.source) {
-      case 'doi':
-        payload = {
-          kind: 'IDENTIFIER',
-          identifierType: 'DOI',
-          value: command.doi || '',
-        };
-        break;
-      case 'arxiv':
-        payload = {
-          kind: 'IDENTIFIER',
-          identifierType: 'ARXIV',
-          value: ('arxivId' in command ? command.arxivId : '') || '',
-        };
-        break;
-      case 'pmid':
-        payload = {
-          kind: 'IDENTIFIER',
-          identifierType: 'PMID',
-          value: ('pmid' in command ? command.pmid : '') || '',
-        };
-        break;
-      case 'isbn':
-        payload = {
-          kind: 'IDENTIFIER',
-          identifierType: 'ISBN',
-          value: ('isbn' in command ? command.isbn : '') || '',
-        };
-        break;
-      case 'url':
-        payload = {
-          kind: 'URL',
-          url: command.url || '',
-          previewToken:
-            'previewToken' in command ? command.previewToken : undefined,
-        };
-        break;
-      case 'bibtex':
-        payload = {
-          kind: 'RECORD',
-          format: 'BIBTEX',
-          content: command.content || '',
-        };
-        break;
-      case 'ris':
-        payload = {
-          kind: 'RECORD',
-          format: 'RIS',
-          content: command.content || '',
-        };
-        break;
-      case 'csl_json':
-        payload = {
-          kind: 'RECORD',
-          format: 'CSL_JSON',
-          content: ('content' in command ? command.content : '') || '',
-        };
-        break;
-      case 'endnote_xml':
-        payload = {
-          kind: 'RECORD',
-          format: 'ENDNOTE_XML',
-          content: ('content' in command ? command.content : '') || '',
-        };
-        break;
-      case 'mods':
-        payload = {
-          kind: 'RECORD',
-          format: 'MODS',
-          content: ('content' in command ? command.content : '') || '',
-        };
-        break;
-      case 'zotero_rdf':
-      case 'rdf':
-        payload = {
-          kind: 'RECORD',
-          format: 'ZOTERO_RDF',
-          content: ('content' in command ? command.content : '') || '',
-        };
-        break;
-      case 'medline':
-      case 'nbib':
-        payload = {
-          kind: 'RECORD',
-          format: 'MEDLINE',
-          content: ('content' in command ? command.content : '') || '',
-        };
-        break;
-      case 'csv':
-        payload = {
-          kind: 'RECORD',
-          format: 'CSV',
-          content: ('content' in command ? command.content : '') || '',
-        };
-        break;
-      case 'pdf':
-        payload = {
-          kind: 'FILE',
-          fileId: command.fileId || '',
-          filename: command.filename,
-        };
-        break;
-      case 'zotero':
-        payload = {
-          kind: 'CONNECTOR',
-          connectionId:
-            ('connectionId' in command ? command.connectionId : '') || '',
-          externalObjectId:
-            ('externalItemKey' in command ? command.externalItemKey : '') || '',
-          externalVersion: '1',
-        };
-        break;
-      default:
-        throw new BadRequestException(
-          `Unsupported ingestion source: ${String((command as { source?: unknown }).source)}`,
-        );
-    }
+    return this.buildEnvelope(projectId, command);
+  }
 
-    const rawOverrides =
-      'overrides' in command &&
-      command.overrides &&
-      typeof command.overrides === 'object'
-        ? (command.overrides as Record<string, unknown>)
-        : undefined;
-    const overrideCollectionIds = Array.isArray(rawOverrides?.collectionIds)
-      ? (rawOverrides.collectionIds as string[])
-      : typeof rawOverrides?.collectionId === 'string' &&
-          rawOverrides.collectionId.trim()
-        ? [rawOverrides.collectionId.trim()]
-        : undefined;
-    const overrideTagIds = Array.isArray(rawOverrides?.tagIds)
-      ? (rawOverrides.tagIds as string[])
-      : undefined;
-
-    return {
-      projectId,
-      userId: command.userId,
-      idempotencyKey: command.idempotencyKey,
-      payload,
-      collectionIds: command.collectionId
-        ? [command.collectionId]
-        : overrideCollectionIds,
-      tagIds: overrideTagIds,
-      overrides: rawOverrides,
-    };
+  private buildEnvelope(
+    projectId: string,
+    command: IngestionCommand,
+  ): IngestionSubmissionEnvelope {
+    return SubmissionEnvelopeFactory.fromCommand(projectId, command);
   }
 
   async captureUrl(

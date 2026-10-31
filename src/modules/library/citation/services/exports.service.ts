@@ -14,23 +14,22 @@ import {
   ExportItemRecord,
 } from '@/modules/library/citation/repositories/exports.repository';
 import { CitationService } from './citation.service';
-import { ExportLibraryDto } from '@/modules/library/citation/dto/exports.dto';
+import { ExportLibraryDto } from '@/modules/library/citation/dto/citation.dto';
 import { PdfBakerService } from './pdf-baker.service';
 import {
   ExportResult,
   BurnableAnnotation,
   ExportFormatType,
-} from '@/modules/library/citation/types/exports.types';
+} from '@/modules/library/citation/types/citation.types';
 import {
   resolveExportFormatStrategy,
-  toCitationItemInput,
   formatItemsAsBibtex,
 } from '@/modules/library/citation/domain/export-format.strategies';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import {
   extractItemCitationAliases,
   resolveEmittedCitationEntries,
-} from '@/modules/library/citation/domain/citation-key-resolver.domain';
+} from '@/modules/library/citation/domain/citation.domain';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 
 export type { BurnableAnnotation, ExportResult };
@@ -456,30 +455,19 @@ export class ExportsService {
       };
     }
 
-    const strategy = resolveExportFormatStrategy(format);
-    let content: string;
-    if (strategy && format !== 'bibtex' && format !== 'ris') {
-      const exported = strategy.exportItems({
-        items: emittedEntries.map(({ item: it, emitCiteKey }) => ({
-          ...it,
-          citationKey: emitCiteKey,
-        })),
-        timestamp: new Date().toISOString().split('T')[0],
-        truncated: false,
-        citationFormatter: this.citationService,
-      });
-      content = exported.content;
-    } else {
-      const targetStyle = format === 'ris' ? 'ris' : 'bibtex';
-      const entries = emittedEntries.map(({ item: it, emitCiteKey }) => {
-        const res = this.citationService.formatItem(
-          toCitationItemInput(it, emitCiteKey),
-          targetStyle,
-        );
-        return res.bibliography;
-      });
-      content = entries.join(targetStyle === 'ris' ? '\n' : '\n\n');
-    }
+    const strategy =
+      resolveExportFormatStrategy(format) ??
+      resolveExportFormatStrategy('bibtex')!;
+    const itemsToExport = emittedEntries.map(({ item: it, emitCiteKey }) => ({
+      ...it,
+      citationKey: emitCiteKey,
+    }));
+    const exported = strategy.export(itemsToExport, {
+      timestamp: new Date().toISOString().split('T')[0],
+      truncated: false,
+      citationFormatter: this.citationService,
+    });
+    const content = exported.content;
 
     return {
       content,

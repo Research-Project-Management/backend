@@ -1,7 +1,8 @@
 import { DuplicateDetectorService, getEffectiveItemField } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { applyMergedUpdatesAndClearDuplicateCitationKeyCollision, rewireMergedItemRelations, syncMergedContributors, syncMergedIdentifiersInTx } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
-import { MetadataAndCreatorBackfillMergeStep, MergePipelineContext } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
+import { backfillMetadataAndCreatorsStep, MergePipelineContext } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
+import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
 import { StateService } from '@/modules/library/catalog/services/state.service';
 import { buildImportItemPayload } from '@/modules/library/catalog/services/item-curation.service';
 
@@ -147,7 +148,6 @@ describe('Horizontal Frond 2 — Deduplication, Curation Merge & Undo-Merge Saga
     });
 
     it('upgrades Master placeholder title from duplicate, clears isFilenameTitle, stamps scalarSelections provenance, and sorts backfill donors by authority', async () => {
-      const step = new MetadataAndCreatorBackfillMergeStep();
       const mockTx = {
         contributor: {
           findMany: jest.fn().mockResolvedValue([]),
@@ -252,7 +252,7 @@ describe('Horizontal Frond 2 — Deduplication, Curation Merge & Undo-Merge Saga
         reassignedNoteIds: [],
       } as any;
 
-      await step.execute(ctx);
+      await backfillMetadataAndCreatorsStep(ctx);
 
       expect(ctx.backfillFields.title).toBe('Authoritative Crossref Title');
       expect(ctx.primaryMeta.isFilenameTitle).toBe(false);
@@ -522,7 +522,10 @@ describe('Horizontal Frond 2 — Deduplication, Curation Merge & Undo-Merge Saga
     });
 
     it('preserves maxCurrentPage = null in StateService.transferUserItemStates when all states have null/0 currentPage', async () => {
-      const stateService = new StateService({} as any, {} as any);
+      const stateService = new StateService(
+        new StateRepository({} as never),
+        {} as never,
+      );
       const mockTx = {
         state: {
           findMany: jest.fn().mockResolvedValue([

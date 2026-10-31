@@ -12,7 +12,7 @@ import {
   SubmissionKind,
   IdentifierType,
   RecordFormat,
-} from '@/modules/library/ingestion/types/submission.types';
+} from '@/modules/library/ingestion/types/ingestion.types';
 
 export class IngestionSubmissionDto {
   @Transform(({ value, obj }) => {

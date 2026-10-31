@@ -1,7 +1,7 @@
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import {
   ItemTypeConversionService,
   buildTypeConversionUpdatePayload,

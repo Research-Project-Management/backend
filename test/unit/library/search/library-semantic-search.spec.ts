@@ -1,7 +1,7 @@
 import { SearchService } from '@/modules/library/search/services/search.service';
 import { SearchFacade } from '@/modules/library/search/search.facade';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
-import { FullTextProvider } from '@/modules/library/search/services/full-text.provider';
+import { FullTextProvider } from '@/modules/library/search/services/search.service';
 
 describe('Library Search Module Architecture & Isolation', () => {
   let searchService: SearchService;

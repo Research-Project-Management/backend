@@ -1,19 +1,323 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createCanvas } from '@napi-rs/canvas';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+import sharp from 'sharp';
+import os from 'os';
 import {
   libraryConfig,
   LibraryConfigService,
 } from '@/modules/library/core/config/library.config';
-import { OcrPreprocessorService } from '@/modules/library/extraction/services/ocr-preprocessor.service';
 import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
-import { OcrSandwichPdfService } from '@/modules/library/extraction/services/ocr-sandwich-pdf.service';
 import {
   OcrBlock,
   OcrPageResult,
   OcrPreprocessOptions,
   OcrWord,
   PageScanDetection,
-} from '@/modules/library/extraction/types/ocr.types';
+} from '@/modules/library/extraction/types/extraction.types';
+
+try {
+  sharp.cache({ memory: 64, items: 250, files: 20 });
+  sharp.simd(true);
+  const safeConcurrency = Math.max(
+    1,
+    Math.min(4, (os.cpus()?.length || 2) - 1),
+  );
+  sharp.concurrency(safeConcurrency);
+} catch {
+  // Graceful fallback if native libvips binding restricts re-configuration
+}
+
+export interface PreprocessResult {
+  buffer: Buffer;
+  orientationAngle: number;
+  skewAngle: number;
+  width: number;
+  height: number;
+}
+
+@Injectable()
+export class OcrPreprocessorService {
+  private readonly logger = new Logger(OcrPreprocessorService.name);
+
+  async preprocess(
+    imageBuffer: Buffer,
+    options: OcrPreprocessOptions = {},
+  ): Promise<PreprocessResult> {
+    const startTime = Date.now();
+    const opts: Required<OcrPreprocessOptions> = {
+      autoRotate: options.autoRotate ?? true,
+      deskew: options.deskew ?? true,
+      contrastEnhance: options.contrastEnhance ?? true,
+      denoise: options.denoise ?? true,
+      binarize: options.binarize ?? true,
+      trimBorders: options.trimBorders ?? false,
+    };
+
+    let pipeline = sharp(imageBuffer);
+    const metadata = await pipeline.metadata();
+    const currentWidth = metadata.width || 1000;
+    const currentHeight = metadata.height || 1400;
+    const orientationAngle = 0;
+    let skewAngle = 0;
+
+    if (opts.autoRotate) {
+      pipeline = pipeline.rotate();
+    }
+
+    if (opts.deskew && currentWidth > 100 && currentHeight > 100) {
+      try {
+        skewAngle = await this.estimateDeskewAngle(imageBuffer);
+        if (Math.abs(skewAngle) >= 0.5) {
+          pipeline = pipeline.rotate(-skewAngle, { background: '#ffffff' });
+          this.logger.debug(
+            `Deskew applied: rotated ${(-skewAngle).toFixed(1)}° to correct scan skew`,
+          );
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Deskew calculation skipped: ${message}`);
+      }
+    }
+
+    pipeline = pipeline.removeAlpha().grayscale();
+
+    if (opts.contrastEnhance) {
+      pipeline = pipeline.normalize().linear(1.15, -10);
+    }
+
+    if (opts.denoise) {
+      pipeline = pipeline.median(1);
+    }
+
+    if (opts.binarize) {
+      pipeline = pipeline.threshold(160);
+    }
+
+    if (opts.trimBorders) {
+      pipeline = pipeline.trim({ threshold: 25 });
+    }
+
+    const { data: processedBuffer, info: processedInfo } = await pipeline
+      .png()
+      .toBuffer({ resolveWithObject: true });
+
+    this.logger.debug(
+      `Image preprocessed in ${Date.now() - startTime}ms (${processedInfo.width}x${processedInfo.height})`,
+    );
+
+    return {
+      buffer: processedBuffer,
+      orientationAngle,
+      skewAngle,
+      width: processedInfo.width || currentWidth,
+      height: processedInfo.height || currentHeight,
+    };
+  }
+
+  async estimateDeskewAngle(
+    imageBuffer: Buffer,
+    minAngle = -10,
+    maxAngle = 10,
+    step = 1,
+  ): Promise<number> {
+    const thumbWidth = 400;
+    const thumbBuffer = await sharp(imageBuffer)
+      .resize({ width: thumbWidth, withoutEnlargement: true })
+      .grayscale()
+      .normalize()
+      .threshold(160)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const { data, info } = thumbBuffer;
+    const { width, height } = info;
+
+    let bestAngle = 0;
+    let maxVariance = -1;
+
+    for (let angle = minAngle; angle <= maxAngle; angle += step) {
+      const rad = (angle * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const rowSums = new Float64Array(height);
+      const rowCounts = new Int32Array(height);
+
+      const stepX = 2;
+      const stepY = 2;
+      const midX = width / 2;
+      const midY = height / 2;
+
+      for (let y = 0; y < height; y += stepY) {
+        for (let x = 0; x < width; x += stepX) {
+          const pixelVal = data[y * width + x];
+          const isDark = pixelVal < 128 ? 1 : 0;
+
+          const dx = x - midX;
+          const dy = y - midY;
+          const rotY = Math.round(midY - dx * sin + dy * cos);
+
+          if (rotY >= 0 && rotY < height) {
+            rowSums[rotY] += isDark;
+            rowCounts[rotY]++;
+          }
+        }
+      }
+
+      let sum = 0;
+      let sumSq = 0;
+      let count = 0;
+      for (let i = 0; i < height; i++) {
+        if (rowCounts[i] > 0) {
+          const density = rowSums[i] / rowCounts[i];
+          sum += density;
+          sumSq += density * density;
+          count++;
+        }
+      }
+
+      if (count > 0) {
+        const mean = sum / count;
+        const variance = sumSq / count - mean * mean;
+        if (variance > maxVariance) {
+          maxVariance = variance;
+          bestAngle = angle;
+        }
+      }
+    }
+
+    return bestAngle;
+  }
+}
+
+@Injectable()
+export class OcrSandwichPdfService {
+  private readonly logger = new Logger(OcrSandwichPdfService.name);
+
+  async generateSearchablePdf(
+    originalPdfBuffer: Buffer,
+    pageResults: OcrPageResult[],
+    imageDimensionsMap?: Map<number, { width: number; height: number }>,
+  ): Promise<Buffer> {
+    const ocrPages = pageResults.filter(
+      (p) => p.wasOcr && (p.words.length > 0 || p.blocks.length > 0),
+    );
+    if (ocrPages.length === 0) {
+      return originalPdfBuffer;
+    }
+
+    try {
+      const startTime = Date.now();
+      const pdfDoc = await PDFDocument.load(originalPdfBuffer, {
+        ignoreEncryption: true,
+      });
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const totalDocPages = pdfDoc.getPageCount();
+
+      for (const pageResult of ocrPages) {
+        if (pageResult.pageIndex < 0 || pageResult.pageIndex >= totalDocPages) {
+          continue;
+        }
+
+        const pdfPage = pdfDoc.getPage(pageResult.pageIndex);
+        const pdfWidth = pdfPage.getWidth();
+        const pdfHeight = pdfPage.getHeight();
+
+        const imgDim =
+          pageResult.imageWidth && pageResult.imageHeight
+            ? { width: pageResult.imageWidth, height: pageResult.imageHeight }
+            : imageDimensionsMap?.get(pageResult.pageIndex) || {
+                width: pdfWidth * 2,
+                height: pdfHeight * 2,
+              };
+
+        const scaleX = pdfWidth / Math.max(1, imgDim.width);
+        const scaleY = pdfHeight / Math.max(1, imgDim.height);
+
+        if (pageResult.words && pageResult.words.length > 0) {
+          for (const word of pageResult.words) {
+            const sanitized = this.sanitizeForPdf(word.text);
+            if (!sanitized) continue;
+
+            const boxHeight = Math.max(
+              1,
+              (word.bbox.y1 - word.bbox.y0) * scaleY,
+            );
+            const pdfX = Math.max(0, word.bbox.x0 * scaleX);
+            const pdfY = Math.max(0, pdfHeight - word.bbox.y1 * scaleY);
+            const fontSize = Math.max(2, Math.min(boxHeight * 0.85, 36));
+
+            try {
+              pdfPage.drawText(sanitized, {
+                x: pdfX,
+                y: pdfY,
+                size: fontSize,
+                font,
+                opacity: 0,
+              });
+            } catch {
+              // Ignore word drawing error
+            }
+          }
+        } else {
+          for (const block of pageResult.blocks) {
+            for (const line of block.lines) {
+              const sanitized = this.sanitizeForPdf(line.text);
+              if (!sanitized) continue;
+
+              const boxHeight = Math.max(
+                1,
+                (line.bbox.y1 - line.bbox.y0) * scaleY,
+              );
+              const pdfX = Math.max(0, line.bbox.x0 * scaleX);
+              const pdfY = Math.max(0, pdfHeight - line.bbox.y1 * scaleY);
+              const fontSize = Math.max(2, Math.min(boxHeight * 0.85, 36));
+
+              try {
+                pdfPage.drawText(sanitized, {
+                  x: pdfX,
+                  y: pdfY,
+                  size: fontSize,
+                  font,
+                  opacity: 0,
+                });
+              } catch {
+                // Ignore line drawing error
+              }
+            }
+          }
+        }
+      }
+
+      const pdfBytes = await pdfDoc.save();
+      const resultBuffer = Buffer.from(
+        pdfBytes.buffer,
+        pdfBytes.byteOffset,
+        pdfBytes.byteLength,
+      );
+      this.logger.log(
+        `Generated Searchable Sandwich PDF for ${ocrPages.length} scanned pages in ${Date.now() - startTime}ms (size: ${(resultBuffer.length / 1024).toFixed(1)} KB)`,
+      );
+      return resultBuffer;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Failed to generate searchable Sandwich PDF: ${message}. Falling back to original PDF buffer.`,
+      );
+      return originalPdfBuffer;
+    }
+  }
+
+  private sanitizeForPdf(text: string): string {
+    if (!text) return '';
+    return text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[đĐ]/g, (m) => (m === 'đ' ? 'd' : 'D'))
+      .replace(/[^\x20-\x7E\xA0-\xFF]/g, ' ')
+      .trim();
+  }
+}
 
 export interface PdfPageProxyLike {
   getViewport(params: { scale: number }): { width: number; height: number };
@@ -25,25 +329,21 @@ export interface PdfPageProxyLike {
   cleanup?: () => void;
 }
 
-/**
- * Production-grade OCR Provider for Flux Library.
- * Features:
- * - Smart hybrid page detection (sparse text + scanned images).
- * - Multi-worker concurrent scheduling via OcrWorkerPoolService.
- * - Comprehensive image preprocessing (deskew, contrast, denoise, binarize).
- * - Searchable "Sandwich" PDF generation for downstream structured extraction.
- * - Word & line bounding boxes and confidence score provenance.
- */
 @Injectable()
 export class OcrProvider {
   private readonly logger = new Logger(OcrProvider.name);
+  private readonly preprocessor?: OcrPreprocessorService;
+  private readonly sandwichPdf?: OcrSandwichPdfService;
 
   constructor(
     @Optional() private readonly workerPool?: OcrWorkerPoolService,
-    @Optional() private readonly preprocessor?: OcrPreprocessorService,
-    @Optional() private readonly sandwichPdf?: OcrSandwichPdfService,
+    @Optional() preprocessor?: OcrPreprocessorService,
+    @Optional() sandwichPdf?: OcrSandwichPdfService,
     @Optional() private readonly configService?: LibraryConfigService,
-  ) {}
+  ) {
+    this.preprocessor = preprocessor;
+    this.sandwichPdf = sandwichPdf;
+  }
 
   get enabled(): boolean {
     const value =
@@ -65,9 +365,6 @@ export class OcrProvider {
       : 3;
   }
 
-  /**
-   * Evaluates whether a PDF page is image-only, hybrid, or born-digital.
-   */
   async detectScannedPage(
     page: {
       pageNumber?: number;
@@ -132,9 +429,6 @@ export class OcrProvider {
     };
   }
 
-  /**
-   * Recognizes multiple scanned PDF pages sequentially, yielding the event loop every 5 pages.
-   */
   async recognizeScannedPdfPages(
     pages: PdfPageProxyLike[],
     options?: OcrPreprocessOptions,
@@ -151,9 +445,6 @@ export class OcrProvider {
     return results;
   }
 
-  /**
-   * Renders a PDF page into a PNG image buffer and immediately releases native Skia backing memory.
-   */
   async renderPdfPageToImage(page: PdfPageProxyLike): Promise<{
     buffer: Buffer;
     width: number;
@@ -191,9 +482,6 @@ export class OcrProvider {
     }
   }
 
-  /**
-   * Performs full OCR recognition on a single PDF page with image preprocessing and worker pool.
-   */
   async recognizePdfPage(
     page: PdfPageProxyLike,
     pageIndex = 0,

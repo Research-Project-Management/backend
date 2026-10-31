@@ -6,7 +6,7 @@ import { IngestionRepository } from '../../../../src/modules/library/ingestion/r
 import { FeedsRepository } from '../../../../src/modules/library/ingestion/repositories/feeds.repository';
 import { FeedRetrievalService } from '../../../../src/modules/library/ingestion/services/feed-retrieval.service';
 import { MetadataResolverService } from '../../../../src/modules/library/ingestion/services/metadata-resolver.service';
-import { EnrichStage } from '../../../../src/modules/library/ingestion/stages/enrich.stage';
+import { ResolveStage } from '../../../../src/modules/library/ingestion/stages/resolve.stage';
 import { CommitStage } from '../../../../src/modules/library/ingestion/stages/commit.stage';
 import { serializeSubRunRecordPayload } from '../../../../src/modules/library/ingestion/services/pipeline-batch.executor';
 
@@ -553,8 +553,8 @@ describe('System Design Phase 4 Loop 2 — Extraction, Ingestion, Feeds & Retrac
       expect(patchArg.extraFields.arxivId).toBeNull();
     });
 
-    it('SD2-06: EnrichStage preserves UserOverride fields in emitted provider candidates and keeps fields and normalizedMetadata consistent', async () => {
-      const enrichStage = new EnrichStage({
+    it('SD2-06: ResolveStage preserves UserOverride fields in emitted provider candidates and keeps fields and normalizedMetadata consistent', async () => {
+      const enrichStage = new ResolveStage({
         resolve: jest.fn().mockResolvedValue({
           provider: 'crossref',
           canonicalId: '10.1000/test-enrich',

@@ -10,7 +10,7 @@ import {
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
-} from '@/modules/library/catalog/types/items.constants';
+} from '@/modules/library/catalog/types/catalog.types';
 import type { CreatorCreditInput } from '@/modules/library/core/types/bibliographic.types';
 
 export interface AttachmentLike {

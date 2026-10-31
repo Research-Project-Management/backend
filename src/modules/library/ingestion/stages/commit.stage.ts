@@ -26,7 +26,7 @@ import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/ded
 import {
   IWorkflowStage,
   CommitStageInput,
-} from '@/modules/library/ingestion/types/workflow-stage.types';
+} from '@/modules/library/ingestion/types/ingestion.types';
 import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 
 export type LibraryItemSource =

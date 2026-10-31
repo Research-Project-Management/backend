@@ -8,7 +8,7 @@ import {
 import {
   CslItemData,
   CslName,
-} from '@/modules/library/citation/types/csl-json.types';
+} from '@/modules/library/citation/types/citation.types';
 import { CslRepositoryService } from './csl-repository.service';
 import {
   CslLocaleLoaderService,

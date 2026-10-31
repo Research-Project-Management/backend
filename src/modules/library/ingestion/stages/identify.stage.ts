@@ -8,15 +8,20 @@ import {
 import {
   SubmissionPayload,
   RecordFormat,
-} from '@/modules/library/ingestion/types/submission.types';
+  SubmissionKind,
+  IdentifierType,
+  IWorkflowStage,
+  IdentifyStageInput,
+} from '@/modules/library/ingestion/types/ingestion.types';
 import {
   MetadataCandidate,
   FieldEvidence,
-} from '@/modules/library/ingestion/types/metadata-candidate.types';
-import { DoiParser } from '@/modules/library/ingestion/parsers/doi.parser';
+} from '@/modules/library/ingestion/types/metadata.types';
 import {
   BibtexParser,
   ParsedBibtexEntry,
+  DoiParser,
+  QueryClassifier,
 } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
@@ -29,20 +34,17 @@ import {
   normalizePmid,
   normalizePmcid,
   normalizeIsbn,
+  deriveDoiFromPublisherUrl,
   gunzipAsync,
 } from '@/modules/library/core';
-import {
-  IWorkflowStage,
-  IdentifyStageInput,
-} from '@/modules/library/ingestion/types/workflow-stage.types';
+import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import {
   createCandidate,
   buildEvidenceFields,
   mapBibtexToRawRecord,
   applyUserOverridesToCandidate,
-} from './candidate-builder.helper';
+} from '../domain/candidate-builder.helper';
 import { IdentifyFileResolver, cleanPdfTitle } from './identify-file.resolver';
-import { IdentifyUrlResolver } from './identify-url.resolver';
 
 export {
   type ExtractedPdfMetadata,
@@ -53,7 +55,198 @@ export {
   buildEvidenceFields,
   mapBibtexToRawRecord,
   applyUserOverridesToCandidate,
-} from './candidate-builder.helper';
+} from '../domain/candidate-builder.helper';
+
+@Injectable()
+export class IdentifyUrlResolver {
+  private readonly logger = new Logger(IdentifyUrlResolver.name);
+
+  constructor(
+    private readonly normalizer: NormalizationPolicy,
+    @Optional() private readonly urlScraper?: UrlMetadataScraperService,
+  ) {}
+
+  async resolve(
+    payload: SubmissionPayload & { kind: 'URL' },
+    scopeId?: string,
+    options?: { forceScrape?: boolean },
+  ): Promise<MetadataCandidate> {
+    const classified = QueryClassifier.classify(payload.url);
+    let extractedRaw: Record<string, unknown> = { url: payload.url };
+
+    if (classified.type === 'DOI') extractedRaw.doi = classified.clean;
+    else if (classified.type === 'ARXIV')
+      extractedRaw.arxivId = classified.clean;
+    else if (classified.type === 'PMID') extractedRaw.pmid = classified.clean;
+    else if (classified.type === 'ISBN') extractedRaw.isbn = classified.clean;
+
+    if (!extractedRaw.doi && !extractedRaw.arxivId && !extractedRaw.pmid) {
+      const urlDoi = deriveDoiFromPublisherUrl(payload.url);
+      if (urlDoi) extractedRaw.doi = urlDoi;
+    }
+
+    const hasDirectIdentifier = Boolean(
+      extractedRaw.doi || extractedRaw.arxivId || extractedRaw.pmid,
+    );
+
+    if ((!hasDirectIdentifier || options?.forceScrape) && this.urlScraper) {
+      try {
+        const scraped = await this.urlScraper.scrape(payload.url, {
+          scopeId,
+          preferredFilename: payload.filename,
+        });
+
+        extractedRaw = {
+          ...extractedRaw,
+          ...scraped,
+          url: payload.url,
+          filename: scraped.filename || payload.filename,
+          fileUrl: scraped.pdfUrl || (scraped.isPdf ? payload.url : undefined),
+        };
+      } catch (scrapeErr: unknown) {
+        const message =
+          scrapeErr instanceof Error ? scrapeErr.message : String(scrapeErr);
+        this.logger.warn(
+          `UrlMetadataScraper error for "${payload.url}": ${message}`,
+        );
+      }
+    }
+
+    const normalized = this.normalizer.normalize(extractedRaw);
+    if (typeof extractedRaw.fileId === 'string')
+      normalized.fileId = extractedRaw.fileId;
+    if (typeof extractedRaw.filename === 'string')
+      normalized.filename = extractedRaw.filename;
+    if (typeof extractedRaw.fileUrl === 'string')
+      normalized.fileUrl = extractedRaw.fileUrl;
+    if (
+      !normalized.fileUrl &&
+      typeof payload.url === 'string' &&
+      /\.pdf(?:$|\?)/i.test(payload.url)
+    ) {
+      normalized.fileUrl = payload.url;
+    }
+
+    const hasIdentifier = Boolean(
+      normalized.doi || normalized.arxivId || normalized.pmid,
+    );
+    const hasTitle = Boolean(
+      normalized.title && normalized.title !== 'Untitled Document',
+    );
+
+    if (extractedRaw.isBlocked && !hasIdentifier) {
+      normalized.extraFields = {
+        ...(normalized.extraFields || {}),
+        isBlocked: true,
+        wafKind: extractedRaw.wafKind,
+        promptUploadPdf: true,
+        ladderStepReached: extractedRaw.ladderStepReached,
+      };
+    }
+
+    const confidenceScore = hasIdentifier
+      ? 1.0
+      : extractedRaw.isBlocked
+        ? 0.2
+        : hasTitle
+          ? 0.88
+          : 0.7;
+
+    const sourceKind = hasIdentifier ? 'IDENTIFIER' : 'URL';
+    const sourceName = hasIdentifier ? 'DirectIdentifier' : 'UrlCapture';
+    const sourceRecordId = hasIdentifier
+      ? (normalized.doi as string) ||
+        (normalized.arxivId as string) ||
+        (normalized.pmid as string) ||
+        payload.url
+      : payload.url;
+
+    return createCandidate({
+      sourceKind,
+      sourceName,
+      sourceRecordId,
+      rawMetadata: extractedRaw,
+      normalizedMetadata: normalized,
+      confidenceScore,
+      normalizer: this.normalizer,
+    });
+  }
+}
+
+type IdentifierCandidateApplier = (
+  rawValue: string,
+  doiParser: DoiParser,
+) => { fieldKey: 'doi' | 'arxivId' | 'pmid' | 'isbn'; cleanValue: string };
+
+export const IDENTIFIER_CANDIDATE_APPLIERS: Readonly<
+  Record<IdentifierType, IdentifierCandidateApplier>
+> = {
+  DOI: (rawValue, doiParser) => ({
+    fieldKey: 'doi',
+    cleanValue: doiParser.normalize(rawValue),
+  }),
+  ARXIV: (rawValue) => ({
+    fieldKey: 'arxivId',
+    cleanValue:
+      normalizeArxivId(rawValue) ||
+      rawValue.replace(/^arxiv:\s*/i, '').trim(),
+  }),
+  PMID: (rawValue) => ({
+    fieldKey: 'pmid',
+    cleanValue:
+      normalizePmcid(rawValue) ||
+      normalizePmid(rawValue) ||
+      rawValue.replace(/^(?:pmcid|pmc|pmid):\s*/i, '').trim(),
+  }),
+  ISBN: (rawValue) => ({
+    fieldKey: 'isbn',
+    cleanValue:
+      normalizeIsbn(rawValue) ||
+      rawValue
+        .replace(/[-\s]/g, '')
+        .replace(/^isbn:?\s*/i, '')
+        .trim(),
+  }),
+};
+
+interface IdentifyExecutionContext {
+  scopeId?: string;
+  userId?: string;
+  projectId?: string;
+}
+
+type IdentifyPayloadStrategy<K extends SubmissionKind = SubmissionKind> = (
+  stage: IdentifyStage,
+  payload: Extract<SubmissionPayload, { kind: K }>,
+  context: IdentifyExecutionContext,
+) => Promise<MetadataCandidate[]>;
+
+export const IDENTIFY_PAYLOAD_STRATEGIES: {
+  readonly [K in SubmissionKind]: IdentifyPayloadStrategy<K>;
+} = {
+  IDENTIFIER: async (stage, payload) => {
+    const candidate = stage.buildIdentifierCandidate(
+      payload.identifierType,
+      payload.value,
+    );
+    return candidate ? [candidate] : [];
+  },
+  RECORD: async (stage, payload, context) =>
+    stage.identifyRecordPayload(payload, context),
+  URL: async (stage, payload, context) => {
+    const candidate = await stage.resolveUrlCandidate(payload, context.scopeId);
+    return candidate ? [candidate] : [];
+  },
+  FILE: async (stage, payload, context) => {
+    const candidate = await stage.resolveFileCandidate(
+      payload,
+      context.scopeId,
+      context,
+    );
+    return candidate ? [candidate] : [];
+  },
+  CONNECTOR: async (stage, payload) => stage.identifyConnectorPayload(payload),
+};
 
 @Injectable()
 export class IdentifyStage implements IWorkflowStage<
@@ -105,12 +298,9 @@ export class IdentifyStage implements IWorkflowStage<
     return this.formatRegistry.detectRecordFormat(content, hintFormat);
   }
 
-  /**
-   * Executes identification and initial format translation into candidate envelopes.
-   */
   async execute(input: IdentifyStageInput): Promise<MetadataCandidate[]> {
     const { runId: _runId, payload, scopeId, userId, projectId } = input;
-    const context = {
+    const context: IdentifyExecutionContext = {
       scopeId,
       userId,
       projectId:
@@ -119,133 +309,86 @@ export class IdentifyStage implements IWorkflowStage<
           ? scopeId
           : undefined),
     };
+
+    const strategy = IDENTIFY_PAYLOAD_STRATEGIES[payload.kind] as
+      | IdentifyPayloadStrategy
+      | undefined;
+    if (!strategy) return [];
+    return strategy(this, payload, context);
+  }
+
+  async identifyRecordPayload(
+    payload: SubmissionPayload & { kind: 'RECORD' },
+    context: IdentifyExecutionContext,
+  ): Promise<MetadataCandidate[]> {
+    const recordContent = await this.resolveRecordContent(payload, context);
+    const envelopes = await this.formatRegistry.parseEnvelopes(
+      recordContent,
+      payload.format,
+    );
+    return envelopes.map((env) =>
+      this.createCandidate({
+        sourceKind: 'RECORD',
+        sourceName: env.sourceName,
+        sourceRecordId: env.sourceRecordId,
+        rawMetadata: env.rawMetadata,
+        confidenceScore: env.confidenceScore,
+      }),
+    );
+  }
+
+  identifyConnectorPayload(
+    payload: SubmissionPayload & { kind: 'CONNECTOR' },
+  ): MetadataCandidate[] {
     const candidates: MetadataCandidate[] = [];
-
-    switch (payload.kind) {
-      case 'IDENTIFIER': {
-        const candidate = this.buildIdentifierCandidate(
-          payload.identifierType,
-          payload.value,
+    const connectorRaw = payload as unknown as Record<string, unknown>;
+    const inlineContent =
+      typeof connectorRaw.content === 'string' ? connectorRaw.content : '';
+    if (inlineContent.trim()) {
+      const parsedList = this.bibtexParser.parse(inlineContent);
+      for (const item of parsedList) {
+        candidates.push(
+          this.createCandidate({
+            sourceKind: 'RECORD',
+            sourceName: connectorRaw.connectionId
+              ? `Connector:${String(connectorRaw.connectionId)}`
+              : 'ZoteroConnector',
+            sourceRecordId:
+              item.citationKey ||
+              item.doi ||
+              payload.externalObjectId ||
+              undefined,
+            rawMetadata: this.mapBibtexToRaw(item),
+            confidenceScore: 0.95,
+          }),
         );
-        if (candidate) candidates.push(candidate);
-        break;
       }
-
-      case 'RECORD': {
-        const recordContent = await this.resolveRecordContent(payload, context);
-        const envelopes = await this.formatRegistry.parseEnvelopes(
-          recordContent,
-          payload.format,
-        );
-        for (const env of envelopes) {
-          candidates.push(
-            this.createCandidate({
-              sourceKind: 'RECORD',
-              sourceName: env.sourceName,
-              sourceRecordId: env.sourceRecordId,
-              rawMetadata: env.rawMetadata,
-              confidenceScore: env.confidenceScore,
-            }),
-          );
-        }
-        break;
-      }
-
-      case 'URL': {
-        const candidate = await this.resolveUrlCandidate(payload, scopeId);
-        if (candidate) candidates.push(candidate);
-        break;
-      }
-
-      case 'FILE': {
-        const candidate = await this.resolveFileCandidate(
-          payload,
-          scopeId,
-          context,
-        );
-        if (candidate) candidates.push(candidate);
-        break;
-      }
-
-      case 'CONNECTOR': {
-        const connectorRaw = payload as unknown as Record<string, unknown>;
-        const inlineContent =
-          typeof connectorRaw.content === 'string' ? connectorRaw.content : '';
-        if (inlineContent.trim()) {
-          const parsedList = this.bibtexParser.parse(inlineContent);
-          for (const item of parsedList) {
-            candidates.push(
-              this.createCandidate({
-                sourceKind: 'RECORD',
-                sourceName: connectorRaw.connectionId
-                  ? `Connector:${String(connectorRaw.connectionId)}`
-                  : 'ZoteroConnector',
-                sourceRecordId:
-                  item.citationKey ||
-                  item.doi ||
-                  payload.externalObjectId ||
-                  undefined,
-                rawMetadata: this.mapBibtexToRaw(item),
-                confidenceScore: 0.95,
-              }),
-            );
-          }
-        } else if (payload.externalObjectId) {
-          const idCandidate =
-            this.buildIdentifierCandidate('DOI', payload.externalObjectId) ||
-            this.createCandidate({
-              sourceKind: 'RECORD',
-              sourceName: 'ZoteroConnector',
-              sourceRecordId: payload.externalObjectId,
-              rawMetadata: {
-                title: `Zotero Item (${payload.externalObjectId})`,
-                citationKey: payload.externalObjectId,
-              },
-              confidenceScore: 0.85,
-            });
-          if (idCandidate) candidates.push(idCandidate);
-        }
-        break;
-      }
+    } else if (payload.externalObjectId) {
+      const idCandidate =
+        this.buildIdentifierCandidate('DOI', payload.externalObjectId) ||
+        this.createCandidate({
+          sourceKind: 'RECORD',
+          sourceName: 'ZoteroConnector',
+          sourceRecordId: payload.externalObjectId,
+          rawMetadata: {
+            title: `Zotero Item (${payload.externalObjectId})`,
+            citationKey: payload.externalObjectId,
+          },
+          confidenceScore: 0.85,
+        });
+      if (idCandidate) candidates.push(idCandidate);
     }
-
     return candidates;
   }
 
-  // Helper Resolvers
-
-  private buildIdentifierCandidate(
+  buildIdentifierCandidate(
     type: string,
     rawValue: string,
   ): MetadataCandidate | null {
-    let fieldKey: 'doi' | 'arxivId' | 'pmid' | 'isbn';
-    let cleanValue = rawValue;
+    const applier = IDENTIFIER_CANDIDATE_APPLIERS[type as IdentifierType];
+    if (!applier) return null;
 
-    if (type === 'DOI') {
-      fieldKey = 'doi';
-      cleanValue = this.doiParser.normalize(rawValue);
-    } else if (type === 'ARXIV') {
-      fieldKey = 'arxivId';
-      cleanValue =
-        normalizeArxivId(rawValue) ||
-        rawValue.replace(/^arxiv:\s*/i, '').trim();
-    } else if (type === 'PMID') {
-      fieldKey = 'pmid';
-      cleanValue =
-        normalizePmcid(rawValue) ||
-        normalizePmid(rawValue) ||
-        rawValue.replace(/^(?:pmcid|pmc|pmid):\s*/i, '').trim();
-    } else if (type === 'ISBN') {
-      fieldKey = 'isbn';
-      cleanValue =
-        normalizeIsbn(rawValue) ||
-        rawValue
-          .replace(/[-\s]/g, '')
-          .replace(/^isbn:?\s*/i, '')
-          .trim();
-    } else {
-      return null;
-    }
+    const { fieldKey, cleanValue } = applier(rawValue, this.doiParser);
 
     const rawMetadata = { [fieldKey]: rawValue };
     const normalizedMetadata = this.normalizer.normalize({
@@ -309,7 +452,7 @@ export class IdentifyStage implements IWorkflowStage<
     return content;
   }
 
-  private async resolveUrlCandidate(
+  async resolveUrlCandidate(
     payload: SubmissionPayload & { kind: 'URL' },
     scopeId?: string,
   ): Promise<MetadataCandidate | null> {
@@ -325,7 +468,7 @@ export class IdentifyStage implements IWorkflowStage<
     return this.urlResolver.resolve(payload, scopeId, { forceScrape: true });
   }
 
-  private async resolveFileCandidate(
+  async resolveFileCandidate(
     payload: SubmissionPayload & { kind: 'FILE' },
     scopeId?: string,
     context?: { userId?: string; projectId?: string; scopeId?: string },

@@ -1,6 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { ItemsController } from '@/modules/library/catalog/controllers/items.controller';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 
 describe('ItemsController (Hexagonal Driver Adapter)', () => {
   let controller: ItemsController;

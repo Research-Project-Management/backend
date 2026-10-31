@@ -8,7 +8,7 @@ import {
   deriveFirstAuthor,
 } from '@/modules/library/catalog/domain/command-payload.builder';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import {
   ItemTypeConversionService,

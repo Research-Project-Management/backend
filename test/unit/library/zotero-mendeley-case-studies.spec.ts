@@ -2,7 +2,7 @@ import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser'
 import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { DuplicatePolicy } from '@/modules/library/ingestion/policies/duplicate.policy';
+import { DuplicatePolicy } from '@/modules/library/ingestion/policies/metadata.policy';
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';

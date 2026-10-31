@@ -2,13 +2,13 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { Prisma, Annotation } from '@prisma/client';
 import { normalizeProjectScopeId } from '@/modules/library/core';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 import {
   CreateNoteData,
   UpdateNoteData,
-} from '@/modules/library/catalog/types/notes.types';
+} from '@/modules/library/catalog/types/catalog.types';
 
 export type { CreateNoteData, UpdateNoteData };
 

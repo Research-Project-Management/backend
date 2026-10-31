@@ -18,7 +18,7 @@ import { OcrProvider } from './ocr.provider';
 import {
   OcrPageResult,
   OcrBlock,
-} from '@/modules/library/extraction/types/ocr.types';
+} from '@/modules/library/extraction/types/extraction.types';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
 import {
   PdfTextMetadataExtractor,

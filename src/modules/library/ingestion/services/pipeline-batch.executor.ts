@@ -1,11 +1,10 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
-import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
+import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
 import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
-import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
-import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
+import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
 import { IngestionSagaSession } from './ingestion-saga.orchestrator';
 import { IngestionStatus, Prisma } from '@prisma/client';
@@ -13,8 +12,12 @@ import {
   buildEnrichmentPatch,
   mapPayloadToSource,
 } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
-import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
-import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
+import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+  MetadataCoalescePolicy,
+  verifyCandidateMatch,
+} from '@/modules/library/core';
 
 function extractSurname(raw: unknown): string {
   if (!raw) return '';
@@ -45,7 +48,7 @@ function isCompatibleTitleProviderMatch(
   recordCand: MetadataCandidate,
   providerCand: MetadataCandidate,
 ): boolean {
-  return ReconciliationPolicy.verifyCandidateMatch(recordCand, providerCand);
+  return verifyCandidateMatch(recordCand, providerCand);
 }
 
 export function serializeSubRunRecordPayload(
@@ -69,8 +72,7 @@ export class PipelineBatchExecutor {
 
   constructor(
     private readonly repo: IngestionRepository,
-    private readonly reconcile: ReconcileStage,
-    private readonly match: MatchStage,
+    private readonly resolveStage: ResolveStage,
     private readonly commit: CommitStage,
     private readonly sideEffects: PipelineSideEffectsService,
     @Optional()
@@ -328,11 +330,16 @@ export class PipelineBatchExecutor {
         }
 
         const candidatesForRecord = [initialCand, ...Array.from(matchedSet)];
-        const itemDecision = await this.reconcile.execute(candidatesForRecord);
-        const matchRes = await this.match.execute({
-          scope: resolvedScope,
-          proposedItem: itemDecision.proposedItem,
-        });
+        const itemDecision =
+          typeof this.resolveStage?.coalesceAndVerify === 'function'
+            ? await this.resolveStage.coalesceAndVerify(candidatesForRecord)
+            : MetadataCoalescePolicy.coalesceCandidates(candidatesForRecord);
+        const matchRes = this.resolveStage?.match
+          ? await this.resolveStage.match({
+              scope: resolvedScope,
+              proposedItem: itemDecision.proposedItem,
+            })
+          : { matchType: 'NO_MATCH' as const, confidence: 0 };
 
         if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
           await this.sideEffects.scanRetraction(itemDecision.proposedItem, {

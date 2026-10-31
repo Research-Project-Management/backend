@@ -11,7 +11,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { shouldRunWorkerConsumers } from '@/core';
 import { libraryConfig } from '@/modules/library/core/config/library.config';
-import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
 import { PipelineService } from './pipeline.service';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { IngestionStatus } from '@prisma/client';
@@ -19,7 +19,7 @@ import {
   LIBRARY_INGESTION_QUEUE,
   LIBRARY_INGESTION_JOB,
 } from '@/modules/library/ingestion/types/ingestion.types';
-import { isRetryableIngestionError } from '@/modules/library/ingestion/domain/ingestion-error.classifier';
+import { isRetryableIngestionError } from '@/modules/library/ingestion/types/ingestion.errors';
 
 export interface QueuedIngestionJob {
   runId: string;

@@ -8,7 +8,7 @@ import { CslJsonMapper } from './csl-json.mapper';
 import {
   CslFallbackFormatter,
   ICslFallbackFormatter,
-} from './csl-style-formatter.domain';
+} from '../services/csl-style-formatter.service';
 
 export interface CitationStyleDefinition {
   id: CitationStyleId;

@@ -9,6 +9,7 @@ import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repo
 import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,
+  executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { cleanSingleTag } from '@/modules/library/core/domain/tag.domain';
@@ -20,7 +21,7 @@ import {
   TagId,
   ItemId,
   ProjectId,
-} from '@/modules/library/core/types/branded.types';
+} from '@/modules/library/core';
 import { ItemCacheCoordinator } from './item-cache.coordinator';
 
 @Injectable()
@@ -41,65 +42,16 @@ export class TagsService {
       ? itemId.filter(Boolean).map(String)
       : itemId
         ? [String(itemId)]
-        : [];
-    if (this.cacheCoordinator) {
-      await this.cacheCoordinator.invalidateForWrite({
+        : undefined;
+    await executeStandardLibraryCacheInvalidation(
+      this.cacheCoordinator,
+      this.cache,
+      {
         userId: String(userId),
         projectId: projectId ? String(projectId) : undefined,
-        itemIds: itemIds.length > 0 ? itemIds : undefined,
-      });
-      return;
-    }
-    if (this.cache) {
-      await Promise.all([
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(userId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(userId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
-        this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(userId)),
-      ]);
-      if (itemIds.length > 0) {
-        await Promise.all(
-          itemIds.flatMap((id) => [
-            this.cache!.del(LIBRARY_REDIS_KEYS.item(id)),
-            this.cache!.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
-            this.cache!.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
-          ]),
-        );
-      }
-      const validProjectId = normalizeProjectScopeId(projectId);
-      if (validProjectId) {
-        await Promise.all([
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.tagsPattern(`proj:${validProjectId}`),
-          ),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(validProjectId)),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
-          ),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.itemsPattern(validProjectId),
-          ),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.countsPattern(validProjectId),
-          ),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.countsPattern(`proj:${validProjectId}`),
-          ),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.searchFacetsPattern(validProjectId),
-          ),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.searchItemsPattern(validProjectId),
-          ),
-          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(validProjectId)),
-          this.cache.del(
-            LIBRARY_REDIS_KEYS.searchVersion(`proj:${validProjectId}`),
-          ),
-        ]);
-      }
-    }
+        itemIds,
+      },
+    );
   }
 
   async getTags(

@@ -2,16 +2,14 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   RetractionDetails,
   RetractionLookupResult,
-} from '@/modules/library/ingestion/types/retraction.types';
+} from '@/modules/library/ingestion/types/ingestion.types';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
-import {
-  getAcademicContactEmail,
-  getAcademicUserAgent,
-} from '@/modules/library/core/constants/academic-client.constants';
 import {
   normalizeDoi,
   normalizePmid,
   AcademicHttpClient,
+  getAcademicContactEmail,
+  getAcademicUserAgent,
 } from '@/modules/library/core';
 
 @Injectable()

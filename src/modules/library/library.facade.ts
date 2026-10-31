@@ -3,8 +3,8 @@ import { CatalogFacade } from './catalog/catalog.facade';
 import { SearchFacade } from './search/search.facade';
 import { CitationFacade } from './citation/citation.facade';
 import { ExtractionFacade } from './extraction/extraction.facade';
-import { ExportLibraryDto } from './citation/dto/exports.dto';
-import { ExportResult } from './citation/types/exports.types';
+import { ExportLibraryDto } from './citation/dto/citation.dto';
+import { ExportResult } from './citation/types/citation.types';
 import { ExtractedPdfDocument, formatAuthors } from './core';
 
 export interface LibraryItemSummary {

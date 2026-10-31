@@ -1,6 +1,6 @@
 import { SearchService } from '@/modules/library/search/services/search.service';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
-import { FullTextProvider } from '@/modules/library/search/services/full-text.provider';
+import { FullTextProvider } from '@/modules/library/search/services/search.service';
 import {
   ScopeSpecification,
   SearchSpecificationBuilder,
@@ -16,7 +16,7 @@ import { NotesRepository } from '@/modules/library/catalog/repositories/notes.re
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { LayoutHeuristicExtractor } from '@/modules/library/extraction/extractors/layout-heuristic.extractor';
 import { ScientificChunkingService } from '@/modules/ai/ingestion/services/scientific-chunking.service';
 import { ReferenceMatcherService } from '@/modules/library/extraction/services/reference-matcher.service';

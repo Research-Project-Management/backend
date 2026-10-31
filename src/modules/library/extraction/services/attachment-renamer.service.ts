@@ -13,7 +13,6 @@ import {
   ICatalogFacade,
   ITEM_CACHE_INVALIDATOR,
   IItemCacheInvalidator,
-  LIBRARY_REDIS_KEYS,
   LIBRARY_EVENT_TYPES,
   normalizeProjectScopeId,
   formatAttachmentFilename,
@@ -21,18 +20,19 @@ import {
   sanitizeFilenameStem,
   DEFAULT_RENAME_PATTERN,
   TransactionHelpers,
+  executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
-} from '@/modules/library/extraction/dto/attachments.dto';
+} from '@/modules/library/extraction/dto/annotations.dto';
 import {
   UserId,
   AttachmentId,
   ProjectId,
-} from '@/modules/library/core/types/branded.types';
+} from '@/modules/library/core';
 
 interface LegacyTransactionHelpers {
   appendChange?: (
@@ -74,49 +74,13 @@ export class AttachmentRenamerService {
     userId: string,
     projectId?: string,
   ): Promise<void> {
-    const invalidator =
-      this.cacheCoordinator?.invalidateForWrite
-        ? this.cacheCoordinator
-        : this.catalogGateway?.invalidateForWrite
-          ? this.catalogGateway
-          : undefined;
-    if (invalidator?.invalidateForWrite) {
-      await invalidator.invalidateForWrite({
-        userId,
-        projectId,
-        itemIds: [itemId],
-      });
-      return;
-    }
-    if (!this.cache) return;
-    try {
-      const validProjectId = normalizeProjectScopeId(projectId);
-      const scopeId = validProjectId || userId;
-      const tasks: Promise<unknown>[] = [
-        this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
-        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
-        this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(itemId)),
-        this.cache.del(`library:item:${itemId}:attachments`),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(scopeId)),
-      ];
-      if (validProjectId) {
-        tasks.push(
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
-          ),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.searchItemsPattern(`proj:${validProjectId}`),
-          ),
-        );
-      }
-      await Promise.all(tasks);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to invalidate attachment rename cache: ${msg}`);
-    }
+    await executeStandardLibraryCacheInvalidation(
+      this.cacheCoordinator ?? this.catalogGateway,
+      this.cache,
+      { userId, projectId, itemIds: [itemId] },
+      (msg) =>
+        this.logger.warn(`Failed to invalidate attachment rename cache: ${msg}`),
+    );
   }
 
   private async assertItemExists(

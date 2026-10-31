@@ -42,6 +42,43 @@ const PERSONAL_LIBRARY_PERMISSIONS: LibraryPermissionsContract = {
   canAnnotate: true,
 };
 
+const PERM_BIT: Readonly<Record<string, number>> = {
+  [Permission.LIBRARY_READ]: 1 << 0,
+  [Permission.LIBRARY_UPLOAD]: 1 << 1,
+  [Permission.LIBRARY_UPDATE]: 1 << 2,
+  [Permission.LIBRARY_DELETE]: 1 << 3,
+  [Permission.LIBRARY_EXPORT]: 1 << 4,
+  [Permission.LIBRARY_ANNOTATE]: 1 << 5,
+};
+
+const ROLE_PERM_MASK: Readonly<
+  Record<'owner' | 'coordinator' | 'contributor' | 'reviewer', number>
+> = {
+  reviewer:
+    PERM_BIT[Permission.LIBRARY_READ] |
+    PERM_BIT[Permission.LIBRARY_EXPORT] |
+    PERM_BIT[Permission.LIBRARY_ANNOTATE],
+  contributor:
+    PERM_BIT[Permission.LIBRARY_READ] |
+    PERM_BIT[Permission.LIBRARY_UPLOAD] |
+    PERM_BIT[Permission.LIBRARY_UPDATE] |
+    PERM_BIT[Permission.LIBRARY_EXPORT] |
+    PERM_BIT[Permission.LIBRARY_ANNOTATE],
+  coordinator:
+    PERM_BIT[Permission.LIBRARY_READ] |
+    PERM_BIT[Permission.LIBRARY_UPLOAD] |
+    PERM_BIT[Permission.LIBRARY_UPDATE] |
+    PERM_BIT[Permission.LIBRARY_EXPORT] |
+    PERM_BIT[Permission.LIBRARY_ANNOTATE],
+  owner:
+    PERM_BIT[Permission.LIBRARY_READ] |
+    PERM_BIT[Permission.LIBRARY_UPLOAD] |
+    PERM_BIT[Permission.LIBRARY_UPDATE] |
+    PERM_BIT[Permission.LIBRARY_DELETE] |
+    PERM_BIT[Permission.LIBRARY_EXPORT] |
+    PERM_BIT[Permission.LIBRARY_ANNOTATE],
+};
+
 const applyJitter = (ttl: number): number =>
   libraryConfig().app.isTest
     ? ttl
@@ -127,36 +164,47 @@ export class ItemQueryService {
       resolvedRole ? String(resolvedRole).toLowerCase() : 'reviewer'
     ) as 'owner' | 'coordinator' | 'contributor' | 'reviewer';
 
-    const hasPerm = (perm: Permission, roleDefault: boolean): boolean => {
-      if (normalizedRole === 'owner') return true;
-      if (overrides && typeof overrides[perm] === 'boolean') {
-        return overrides[perm];
-      }
+    let mask: number;
+    if (normalizedRole === 'owner') {
+      mask = ROLE_PERM_MASK.owner;
+    } else {
       if (Array.isArray(effectivePerms)) {
-        return effectivePerms.includes(perm);
+        mask = 0;
+        for (const p of effectivePerms) {
+          mask |= PERM_BIT[p] ?? 0;
+        }
+      } else if (this.accessService?.hasPermission) {
+        mask = 0;
+        for (const [perm, bit] of Object.entries(PERM_BIT)) {
+          if (
+            this.accessService.hasPermission(
+              normalizedRole,
+              perm as Permission,
+              overrides,
+            )
+          ) {
+            mask |= bit;
+          }
+        }
+      } else {
+        mask = ROLE_PERM_MASK[normalizedRole] ?? ROLE_PERM_MASK.reviewer;
       }
-      if (this.accessService?.hasPermission) {
-        return this.accessService.hasPermission(
-          normalizedRole,
-          perm,
-          overrides,
-        );
+
+      if (overrides) {
+        for (const [perm, bit] of Object.entries(PERM_BIT)) {
+          if (typeof overrides[perm] === 'boolean') {
+            mask = overrides[perm] ? mask | bit : mask & ~bit;
+          }
+        }
       }
-      return roleDefault;
-    };
+    }
 
-    const isWriteRole =
-      normalizedRole === 'owner' ||
-      normalizedRole === 'coordinator' ||
-      normalizedRole === 'contributor';
-    const isOwnerRole = normalizedRole === 'owner';
-
-    const canRead = hasPerm(Permission.LIBRARY_READ, true);
-    const canUpload = hasPerm(Permission.LIBRARY_UPLOAD, isWriteRole);
-    const canUpdate = hasPerm(Permission.LIBRARY_UPDATE, isWriteRole);
-    const canPurge = hasPerm(Permission.LIBRARY_DELETE, isOwnerRole);
-    const canExport = hasPerm(Permission.LIBRARY_EXPORT, true);
-    const canAnnotate = hasPerm(Permission.LIBRARY_ANNOTATE, true);
+    const canRead = (mask & PERM_BIT[Permission.LIBRARY_READ]) !== 0;
+    const canUpload = (mask & PERM_BIT[Permission.LIBRARY_UPLOAD]) !== 0;
+    const canUpdate = (mask & PERM_BIT[Permission.LIBRARY_UPDATE]) !== 0;
+    const canPurge = (mask & PERM_BIT[Permission.LIBRARY_DELETE]) !== 0;
+    const canExport = (mask & PERM_BIT[Permission.LIBRARY_EXPORT]) !== 0;
+    const canAnnotate = (mask & PERM_BIT[Permission.LIBRARY_ANNOTATE]) !== 0;
 
     return {
       scope: 'project',

@@ -7,7 +7,7 @@ import {
   TCVN_CSL,
   TCVN_NUMERIC_CSL,
 } from '@/modules/library/citation/data/official-styles.data';
-import { VI_VN_LOCALE } from '@/modules/library/citation/data/official-locales.data';
+import { VI_VN_LOCALE } from '@/modules/library/citation/data/official-styles.data';
 import {
   BUILTIN_SPECIAL_STYLES,
   NUMERIC_STYLE_TOKENS,

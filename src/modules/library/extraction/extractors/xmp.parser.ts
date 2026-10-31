@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { decodeHtmlEntities } from '@/modules/library/core/domain/academic-text.domain';
-import { RawXmpMetadata } from '@/modules/library/extraction/types/trusted-extraction.types';
+import { RawXmpMetadata } from '@/modules/library/extraction/types/extraction.types';
 
 /**
  * High-performance, zero-dependency XMP (Extensible Metadata Platform) XML parser.

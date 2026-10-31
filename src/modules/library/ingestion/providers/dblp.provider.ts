@@ -13,8 +13,8 @@ import {
   AcademicHttpClient,
   LibraryConfigService,
   libraryConfig,
+  getAcademicUserAgent,
 } from '@/modules/library/core';
-import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import { AbstractAcademicProvider } from './abstract-academic.provider';
 
 /**

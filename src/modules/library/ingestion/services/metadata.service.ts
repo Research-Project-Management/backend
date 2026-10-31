@@ -4,7 +4,6 @@ import {
   MetadataPort,
   FieldProvenance,
   ItemMetadata,
-  MetadataCandidate,
   MetadataProvider,
   MetadataRequest,
   ProviderExecutionResult,
@@ -13,7 +12,7 @@ import {
   ResolvedMetadata,
   Provenance,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { QueryClassifier } from '@/modules/library/ingestion/parsers/query.classifier';
+import { QueryClassifier } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import {
   deriveDoiFromPublisherUrl,
   formatCanonicalId,
@@ -21,14 +20,16 @@ import {
   normalizeDoi,
   normalizePmcid,
   normalizePmid,
+  resolveBidirectionalBaseFields,
+  resolveFieldAliases,
   titleSimilarity,
+  finalizeReconciledBibliographicMetadata,
 } from '@/modules/library/core';
 import {
   MetadataRoutingPolicy,
   METADATA_POLICY_VERSION,
 } from '@/modules/library/ingestion/policies/metadata.policy';
 import { MetadataCache } from '@/modules/library/ingestion/repositories/metadata.cache';
-import { MetadataReconciliationService } from './metadata-reconciliation.service';
 import { MetadataExecutorService } from './metadata-executor.service';
 import { validateMetadata } from '@/modules/library/ingestion/domain/metadata.validator';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
@@ -42,7 +43,6 @@ export class MetadataService implements MetadataPort {
     @Inject(METADATA_PROVIDERS)
     providers: MetadataProvider[],
     private readonly cache: MetadataCache,
-    private readonly reconciler: MetadataReconciliationService,
     private readonly executor: MetadataExecutorService,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
   ) {
@@ -338,22 +338,16 @@ export class MetadataService implements MetadataPort {
       }
     }
 
-    // 11. Validate and convert candidates
-    const validCandidates: MetadataCandidate[] = [];
+    // 11. Validate and coalesce primary + supplemental graph provider results
+    const validResults: Array<ProviderResult & { metadata: ItemMetadata }> = [];
     for (const res of candidateResults) {
       const valid = validateMetadata(res.metadata);
       if (valid) {
-        validCandidates.push({
-          id: `${res.provider.toLowerCase()}:${res.identifier}`,
-          sourceProvider: res.provider,
-          metadata: valid,
-          confidenceScore: res.confidence,
-          fetchedAt: res.fetchedAt,
-        });
+        validResults.push({ ...res, metadata: valid });
       }
     }
 
-    if (validCandidates.length === 0) {
+    if (validResults.length === 0) {
       this.logResolution({
         queryType: classified.type,
         outcome: 'invalid_candidates',
@@ -364,37 +358,75 @@ export class MetadataService implements MetadataPort {
       return null;
     }
 
-    // 12. Immutable reconciliation
-    const reconciled = this.reconciler.reconcile(validCandidates, {});
-
-    // 13. Field-level provenance map
+    // 12. Single-pass priority coalesce (primary[k] ?? secondary[k])
+    const primaryResult = validResults[0];
+    const coalescedRecord: Record<string, unknown> = {};
     const fieldProvenance: Record<string, FieldProvenance> = {};
-    for (const assertion of reconciled.assertions) {
-      const candidate = validCandidates.find(
-        (c) => c.sourceProvider === assertion.sourceProvider,
-      );
-      fieldProvenance[assertion.field] = {
-        provider: assertion.sourceProvider as ProviderName,
-        fetchedAt: candidate?.fetchedAt || assertion.timestamp,
-        identifier: candidate?.id || assertion.sourceProvider,
-        confidence: assertion.confidenceScore,
-      };
+
+    for (const res of validResults) {
+      const clonedMeta: Record<string, unknown> = { ...res.metadata };
+      const candType = String(clonedMeta.itemType || 'journalArticle');
+      resolveFieldAliases(clonedMeta);
+      resolveBidirectionalBaseFields(clonedMeta, candType, undefined, false);
+
+      for (const [field, val] of Object.entries(clonedMeta)) {
+        if (val === undefined || val === null || val === '') continue;
+        if (Array.isArray(val) && val.length === 0) continue;
+
+        const existingVal = coalescedRecord[field];
+        const isExistingEmpty =
+          existingVal === undefined ||
+          existingVal === null ||
+          existingVal === '' ||
+          (Array.isArray(existingVal) && existingVal.length === 0);
+
+        if (isExistingEmpty) {
+          coalescedRecord[field] = Array.isArray(val)
+            ? [...val]
+            : typeof val === 'object'
+              ? { ...(val as Record<string, unknown>) }
+              : val;
+          fieldProvenance[field] = {
+            provider: res.provider,
+            fetchedAt: res.fetchedAt,
+            identifier: `${res.provider.toLowerCase()}:${res.identifier}`,
+            confidence: res.confidence,
+          };
+        }
+      }
     }
 
-    const primaryCandidate = validCandidates[0];
+    const resolvedItemType = String(
+      coalescedRecord.itemType || 'journalArticle',
+    );
+    resolveBidirectionalBaseFields(
+      coalescedRecord,
+      resolvedItemType,
+      undefined,
+      false,
+    );
+    finalizeReconciledBibliographicMetadata(coalescedRecord);
+
     const finalMetadata: ItemMetadata = {
-      ...reconciled.metadata,
+      title: (coalescedRecord.title as string) || 'Untitled Document',
+      authors: Array.isArray(coalescedRecord.authors)
+        ? [...(coalescedRecord.authors as string[])]
+        : [],
+      year: (coalescedRecord.year as number | null) ?? null,
+      itemType: String(coalescedRecord.itemType || resolvedItemType),
+      ...coalescedRecord,
       provenance: {
-        originProvider: primaryCandidate.sourceProvider,
+        originProvider: primaryResult.provider,
         resolvedAt: new Date().toISOString(),
         canonicalId,
-        confidenceScore: primaryCandidate.confidenceScore,
+        confidenceScore: primaryResult.confidence,
         isOpenAccess: Boolean(
-          reconciled.metadata.openAccessPdfUrl ||
-          (reconciled.metadata.provenance as Provenance | undefined)
-            ?.isOpenAccess,
+          coalescedRecord.openAccessPdfUrl ||
+          (coalescedRecord.provenance as Provenance | undefined)?.isOpenAccess,
         ),
-        openAccessPdfUrl: reconciled.metadata.openAccessPdfUrl,
+        openAccessPdfUrl: coalescedRecord.openAccessPdfUrl as
+          | string
+          | undefined,
       },
     };
 
@@ -415,8 +447,8 @@ export class MetadataService implements MetadataPort {
       queryType: classified.type,
       outcome: 'found',
       cacheOutcome,
-      primaryProvider: primaryCandidate.sourceProvider,
-      providerCount: validCandidates.length,
+      primaryProvider: primaryResult.provider,
+      providerCount: validResults.length,
       durationMs: Date.now() - startedAt,
     });
 

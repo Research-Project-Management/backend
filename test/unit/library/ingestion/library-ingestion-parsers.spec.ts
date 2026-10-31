@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DoiParser } from '@/modules/library/ingestion/parsers/doi.parser';
+import { DoiParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';

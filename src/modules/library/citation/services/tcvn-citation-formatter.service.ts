@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   CslItemData,
   CslName,
-} from '@/modules/library/citation/types/csl-json.types';
+} from '@/modules/library/citation/types/citation.types';
 import {
   VIETNAMESE_SURNAMES_PREFIX_REGEX,
   hasVietnameseDiacritics,

@@ -12,7 +12,7 @@ import {
   AttachmentExtractionStatus,
 } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import {
   extractFileIdFromUrl,
   normalizeProjectScopeId,

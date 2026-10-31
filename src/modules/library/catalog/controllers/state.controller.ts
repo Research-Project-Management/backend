@@ -19,7 +19,7 @@ import { StateService } from '@/modules/library/catalog/services/state.service';
 import {
   UpdateStateDto,
   GetBatchStatesDto,
-} from '@/modules/library/catalog/dto/state.dto';
+} from '@/modules/library/catalog/dto/tags.dto';
 
 @ApiTags('Library Reading State')
 @ApiBearerAuth('JWT-auth')

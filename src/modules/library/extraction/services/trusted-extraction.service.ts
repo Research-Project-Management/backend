@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   ITrustedExtractorPort,
   TrustedExtractionResult,
-} from '@/modules/library/extraction/types/trusted-extraction.types';
+} from '@/modules/library/extraction/types/extraction.types';
 import { ItemMetadata } from '@/modules/library/core';
 import { XmpParser } from '@/modules/library/extraction/extractors/xmp.parser';
 import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
@@ -14,7 +14,7 @@ import {
   IPdfExtractionTier,
   PdfExtractionTierContext,
   runPdfExtractionTierChain,
-} from '@/modules/library/extraction/domain/pdf-extraction-tier.chain';
+} from '@/modules/library/extraction/domain/attachments.domain';
 import { extractText, getDocumentProxy } from 'unpdf';
 import {
   cleanAuthorName,

@@ -5,7 +5,7 @@ import {
   DomainEventEnvelope,
 } from '@/modules/library/core';
 import { SearchService } from '@/modules/library/search/services/search.service';
-import { PageTextExtraction } from '@/modules/library/search/services/full-text.provider';
+import { PageTextExtraction } from '@/modules/library/search/services/search.service';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 
 /**

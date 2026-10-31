@@ -7,8 +7,8 @@ import {
   ExternalProviderException,
   LIBRARY_REDIS_KEYS,
   normalizeDoi,
+  getAcademicUserAgent,
 } from '@/modules/library/core';
-import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
 
 export interface DoiCitationResult {

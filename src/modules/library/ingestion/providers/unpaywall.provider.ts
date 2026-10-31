@@ -13,12 +13,10 @@ import {
   AcademicHttpClient,
   LibraryConfigService,
   libraryConfig,
-} from '@/modules/library/core';
-import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import {
   getAcademicContactEmail,
   getAcademicUserAgent,
-} from '@/modules/library/core/constants/academic-client.constants';
+} from '@/modules/library/core';
+import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 
 @Injectable()
 export class UnpaywallProvider implements MetadataProvider {

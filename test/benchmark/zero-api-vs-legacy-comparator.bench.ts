@@ -1,4 +1,4 @@
-﻿/**
+/**
  * test/benchmark/zero-api-vs-legacy-comparator.bench.ts
  *
  * EMPIRICAL BENCHMARK SUITE:

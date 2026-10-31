@@ -78,7 +78,7 @@ const COLOR_LABEL_MAP: Record<string, string> = {
   grey: '⬜ Notes',
 };
 
-import { parseAnnotationSortIndex as canonicalParseAnnotationSortIndex } from '@/modules/library/core/domain/sort-index.domain';
+import { parseAnnotationSortIndex as canonicalParseAnnotationSortIndex } from '@/modules/library/core';
 
 export function parseAnnotationSortIndex(
   sortIndex: string | null | undefined,

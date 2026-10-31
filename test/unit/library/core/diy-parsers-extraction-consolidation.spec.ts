@@ -18,7 +18,7 @@ import {
 } from '@/modules/library/core';
 import { getEffectiveItemField } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { ReferenceMatcherService } from '@/modules/library/extraction/services/reference-matcher.service';
-import { evalAnyFieldCondition } from '@/modules/library/catalog/domain/condition-operators.strategy';
+import { evalAnyFieldCondition } from '@/modules/library/catalog/domain/condition-evaluator.engine';
 import { TextSearchSpecification } from '@/modules/library/search/domain/item-specifications';
 
 describe('DIY Parsers, Extraction, Academic Domain & Citation Consolidation (SH2-01..04)', () => {

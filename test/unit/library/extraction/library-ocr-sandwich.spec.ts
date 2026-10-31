@@ -1,6 +1,6 @@
-import { OcrSandwichPdfService } from '@/modules/library/extraction/services/ocr-sandwich-pdf.service';
+import { OcrSandwichPdfService } from '@/modules/library/extraction/providers/ocr.provider';
 import { PDFDocument } from 'pdf-lib';
-import { OcrPageResult } from '@/modules/library/extraction/types/ocr.types';
+import { OcrPageResult } from '@/modules/library/extraction/types/extraction.types';
 
 describe('OcrSandwichPdfService', () => {
   let service: OcrSandwichPdfService;

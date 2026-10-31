@@ -14,11 +14,11 @@ import {
   applyMergedUpdatesAndClearDuplicateCitationKeyCollision,
 } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
 import {
-  MetadataAndCreatorBackfillMergeStep,
+  backfillMetadataAndCreatorsStep,
   DuplicateMergeStepContext,
 } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import type { ICatalogFacade, TransactionHelpers } from '@/modules/library/core';
 import type { TransactionService } from '@/modules/library/sync';
@@ -327,7 +327,6 @@ describe('Gatekeeper GE3 Audit — Deduplication, Merge Guards & Round-Trip Item
 
   describe('Fix 3: MetadataAndCreatorBackfillMergeStep, syncMergedContributors & SYSTEM_RESERVED_MERGE_KEYS', () => {
     it('3A: backfills full ISO date and bookTitle/proceedingsTitle even when primary has year or publicationTitle, and upgrades preprint publicationTitle to peer-reviewed journal', async () => {
-      const step = new MetadataAndCreatorBackfillMergeStep();
       const mockTx = {
         contributor: {
           count: jest.fn().mockResolvedValue(1),
@@ -405,7 +404,7 @@ describe('Gatekeeper GE3 Audit — Deduplication, Merge Guards & Round-Trip Item
         now: new Date('2025-01-01T00:00:00.000Z'),
       };
 
-      await step.execute(ctx);
+      await backfillMetadataAndCreatorsStep(ctx);
 
       expect(backfillFields.date).toBe('2024-05-15');
       expect(backfillFields.bookTitle).toBe(

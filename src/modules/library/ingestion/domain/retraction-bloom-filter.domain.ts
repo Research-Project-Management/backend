@@ -34,7 +34,7 @@ export class RetractionBloomFilter {
   /**
    * 32-bit FNV-1a Hash function
    */
-  private static fnv1a(str: string, seed = 0x811c9dc5): number {
+  public static fnv1a(str: string, seed = 0x811c9dc5): number {
     let hash = seed;
     for (let i = 0; i < str.length; i++) {
       hash ^= str.charCodeAt(i);

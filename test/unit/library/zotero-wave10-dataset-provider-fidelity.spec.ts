@@ -4,8 +4,8 @@ import { SemanticScholarProvider } from '@/modules/library/ingestion/providers/s
 import { OpenLibraryProvider } from '@/modules/library/ingestion/providers/openlibrary.provider';
 import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { MetadataReconciliationService } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { parseCreatorString } from '@/modules/library/core/domain/author.domain';
 import { stripLatexBraces } from '@/modules/library/core/domain/academic-text.domain';
@@ -406,13 +406,13 @@ describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Reme
     });
 
     it('reconciles SemanticScholar candidates with proper weights and harmonizes creators/authors and Zotero baseField venue/publisher', () => {
-      const service = new MetadataReconciliationService();
+      const policy = new ReconciliationPolicy();
       const candidates: MetadataCandidate[] = [
         fromPartial<MetadataCandidate>({
-          sourceProvider: 'SemanticScholar',
+          sourceName: 'SemanticScholar',
           confidenceScore: 0.92,
-          fetchedAt: new Date().toISOString(),
-          metadata: {
+          retrievedAt: new Date().toISOString(),
+          normalizedMetadata: {
             title: 'Neural Scaling Laws in Practice',
             authors: ['Jared Kaplan', 'Sam McCandlish'],
             year: 2024,
@@ -426,18 +426,20 @@ describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Reme
         }),
       ];
 
-      const result = service.reconcile(candidates);
-      expect(result.metadata.title).toBe('Neural Scaling Laws in Practice');
-      expect(result.metadata.proceedingsTitle).toBe(
+      const result = policy.reconcile(candidates);
+      expect(result.proposedItem.title).toBe('Neural Scaling Laws in Practice');
+      expect(result.proposedItem.proceedingsTitle).toBe(
         'Advances in Neural Information Processing Systems',
       );
-      expect(result.metadata.creators).toHaveLength(2);
-      expect(result.metadata.creators![0]).toMatchObject({
+      expect(result.proposedItem.creators).toHaveLength(2);
+      expect(
+        (result.proposedItem.creators as Record<string, unknown>[])[0],
+      ).toMatchObject({
         firstName: 'Jared',
         lastName: 'Kaplan',
         creatorType: 'author',
       });
-      expect(result.metadata.citationCount).toBe(512);
+      expect(result.proposedItem.citationCount).toBe(512);
     });
   });
 

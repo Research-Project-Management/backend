@@ -23,7 +23,7 @@ import {
   BulkDetachItemsDto,
   CopyCollectionDto,
 } from '@/modules/library/catalog/dto/collections.dto';
-import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
+import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/catalog.types';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { normalizeProjectScopeId } from '@/modules/library/core';

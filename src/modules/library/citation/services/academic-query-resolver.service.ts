@@ -15,13 +15,11 @@ import {
   AcademicHttpClient,
   METADATA_PORT,
   normalizeDoi,
+  getAcademicContactEmail,
+  getAcademicUserAgent,
 } from '@/modules/library/core';
 import { DoiContentNegotiationService } from './doi-content-negotiation.service';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import {
-  getAcademicContactEmail,
-  getAcademicUserAgent,
-} from '@/modules/library/core/constants/academic-client.constants';
 
 export interface MetadataPortResolveResult {
   metadata?: Record<string, unknown>;

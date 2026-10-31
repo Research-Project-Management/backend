@@ -2,7 +2,7 @@ import {
   readSafeResponseBuffer,
   MAX_SAFE_HTTP_PAYLOAD_BYTES,
   PayloadTooLargeException,
-} from '@/modules/library/core/utils/stream-buffer.util';
+} from '@/modules/library/core';
 import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
 
 describe('OS-Level Resource Management & Stream Buffer Safety', () => {

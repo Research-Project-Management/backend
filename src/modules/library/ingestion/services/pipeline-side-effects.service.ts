@@ -13,8 +13,8 @@ import {
 } from '@/modules/library/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
-import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
-import { ReconciliationDecision } from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
+import { ReconciliationDecision } from '@/modules/library/ingestion/types/metadata.types';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
 import { UrlMetadataScraperService } from './url-metadata-scraper.service';
 
@@ -483,6 +483,88 @@ export class PipelineSideEffectsService {
         }
       }),
     );
+  }
+
+  /**
+   * Unified post-persistence side-effect pipeline executed by both ENRICH_EXISTING
+   * and post-COMMIT branches (`attachFile`, `autoCaptureWebAssets`, `materializeNotes`,
+   * `assignItemToCollection`).
+   */
+  async runPostPersistSideEffects(
+    itemId: string,
+    context: {
+      userId: string;
+      projectId?: string;
+      envelope: IngestionSubmissionEnvelope;
+    },
+    candidate: Record<string, unknown>,
+    options: {
+      fileId?: string;
+      filename?: string;
+      payloadSize?: number;
+      existingRecord?: Record<string, unknown> | null;
+      assignCollections?: boolean;
+    },
+  ): Promise<void> {
+    const { userId, projectId, envelope } = context;
+    const {
+      fileId,
+      filename,
+      payloadSize,
+      existingRecord,
+      assignCollections,
+    } = options;
+
+    const mergedMetadata: Record<string, unknown> = {
+      ...(existingRecord || {}),
+      ...candidate,
+    };
+
+    await this.attachFile(
+      userId,
+      projectId,
+      itemId,
+      fileId,
+      filename,
+      payloadSize,
+      mergedMetadata,
+    );
+
+    const existingFileId =
+      fileId ||
+      (typeof existingRecord?.fileId === 'string'
+        ? existingRecord.fileId
+        : undefined);
+
+    await this.autoCaptureWebAssets({
+      userId,
+      projectId,
+      itemId,
+      payloadKind: envelope.payload.kind,
+      sourceUrl:
+        envelope.payload.kind === 'URL' ? envelope.payload.url : undefined,
+      proposedItem: mergedMetadata,
+      existingFileId,
+      overrides: envelope.overrides,
+    });
+
+    await this.materializeNotes(
+      userId,
+      projectId,
+      itemId,
+      candidate.notes as Array<string | { content?: string }>,
+      existingRecord,
+    );
+
+    if (
+      assignCollections &&
+      envelope.collectionIds &&
+      envelope.collectionIds.length > 0
+    ) {
+      for (const colId of envelope.collectionIds) {
+        await this.assignItemToCollection(userId, colId, itemId, projectId);
+      }
+    }
   }
 
   async handleBlockedSubmission(params: {

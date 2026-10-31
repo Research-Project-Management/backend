@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
-import { ItemsMapper } from './items.mapper';
+import { ItemsMapper } from '../domain/items.mapper';
 import {
   TypeConversionPreview,
   FieldMappingChange,
@@ -11,12 +11,12 @@ import {
   ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
   REVERSE_FIELD_ALIASES,
-} from '@/modules/library/catalog/types/items.constants';
+} from '@/modules/library/catalog/types/catalog.types';
 import {
   ItemFieldDefinition,
   CreatorTypeDefinition,
 } from '@/modules/library/core/types/schema.types';
-import { applyStructuralTypeConversionRules } from './type-conversion-rules.domain';
+import { applyStructuralTypeConversionRules } from '../domain/type-conversion-rules.domain';
 
 export interface IItemTransformerPort {
   getItemFieldValue(item: Record<string, unknown>, key: string): unknown;

@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { MirrorBibliographicMetadata } from '@/modules/library/ingestion/types/web-fetch.types';
+import { MirrorBibliographicMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import {
   AcademicHttpClient,
   cleanAbstractText,

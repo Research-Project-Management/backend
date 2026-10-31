@@ -1,9 +1,9 @@
-import { ExportItemRecord } from './export-item.types';
 import {
   CsvExportItem,
   ExportFormatType,
+  ExportItemRecord,
   ExportResult,
-} from '@/modules/library/citation/types/exports.types';
+} from '@/modules/library/citation/types/citation.types';
 import { CitationItemInput } from '@/modules/library/citation/types/citation.types';
 import { CslJsonMapper, CslSourceItem } from './csl-json.mapper';
 
@@ -129,16 +129,28 @@ export interface ICitationFormatterPort {
   ): { bibliography: string };
 }
 
+export interface ExportStrategyOptions {
+  timestamp?: string;
+  truncated?: boolean;
+  citationFormatter?: ICitationFormatterPort;
+  citationKeyMap?: Map<string, string>;
+}
+
 export interface IExportFormatStrategy {
   readonly format: ExportFormatType;
   readonly aliases?: readonly string[];
   readonly extension: string;
   readonly mimeType: string;
+  export(
+    items: ExportItemRecord[],
+    options?: ExportStrategyOptions,
+  ): ExportResult;
   exportItems(params: {
     items: ExportItemRecord[];
     timestamp: string;
     truncated?: boolean;
     citationFormatter: ICitationFormatterPort;
+    citationKeyMap?: Map<string, string>;
   }): ExportResult;
 }
 
@@ -186,9 +198,14 @@ export function toCitationItemInput(
 export function formatItemsAsBibtex(
   items: ExportItemRecord[],
   citationFormatter: ICitationFormatterPort,
+  citationKeyMap?: Map<string, string>,
 ): string {
   const entries = items.map((it) => {
-    const res = citationFormatter.formatItem(toCitationItemInput(it), 'bibtex');
+    const overrideKey = citationKeyMap?.get(it.id) || it.citationKey || undefined;
+    const res = citationFormatter.formatItem(
+      toCitationItemInput(it, overrideKey),
+      'bibtex',
+    );
     return res.bibliography;
   });
   return entries.join('\n\n');
@@ -199,18 +216,36 @@ export class BibtexExportStrategy implements IExportFormatStrategy {
   readonly extension = 'bib';
   readonly mimeType = 'application/x-bibtex';
 
+  export(
+    items: ExportItemRecord[],
+    options: ExportStrategyOptions = {},
+  ): ExportResult {
+    return this.exportItems({
+      items,
+      timestamp: options.timestamp ?? new Date().toISOString().split('T')[0],
+      truncated: options.truncated,
+      citationFormatter:
+        options.citationFormatter ?? {
+          formatItem: () => ({ bibliography: '' }),
+        },
+      citationKeyMap: options.citationKeyMap,
+    });
+  }
+
   exportItems(params: {
     items: ExportItemRecord[];
     timestamp: string;
     truncated?: boolean;
     citationFormatter: ICitationFormatterPort;
+    citationKeyMap?: Map<string, string>;
   }): ExportResult {
-    const { items, timestamp, truncated, citationFormatter } = params;
+    const { items, timestamp, truncated, citationFormatter, citationKeyMap } =
+      params;
     return {
       format: 'bibtex',
       filename: `library-export-${timestamp}.bib`,
       mimeType: this.mimeType,
-      content: formatItemsAsBibtex(items, citationFormatter),
+      content: formatItemsAsBibtex(items, citationFormatter, citationKeyMap),
       itemCount: items.length,
       truncated,
     };
@@ -222,15 +257,38 @@ export class RisExportStrategy implements IExportFormatStrategy {
   readonly extension = 'ris';
   readonly mimeType = 'application/x-research-info-systems';
 
+  export(
+    items: ExportItemRecord[],
+    options: ExportStrategyOptions = {},
+  ): ExportResult {
+    return this.exportItems({
+      items,
+      timestamp: options.timestamp ?? new Date().toISOString().split('T')[0],
+      truncated: options.truncated,
+      citationFormatter:
+        options.citationFormatter ?? {
+          formatItem: () => ({ bibliography: '' }),
+        },
+      citationKeyMap: options.citationKeyMap,
+    });
+  }
+
   exportItems(params: {
     items: ExportItemRecord[];
     timestamp: string;
     truncated?: boolean;
     citationFormatter: ICitationFormatterPort;
+    citationKeyMap?: Map<string, string>;
   }): ExportResult {
-    const { items, timestamp, truncated, citationFormatter } = params;
+    const { items, timestamp, truncated, citationFormatter, citationKeyMap } =
+      params;
     const entries = items.map((it) => {
-      const res = citationFormatter.formatItem(toCitationItemInput(it), 'ris');
+      const overrideKey =
+        citationKeyMap?.get(it.id) || it.citationKey || undefined;
+      const res = citationFormatter.formatItem(
+        toCitationItemInput(it, overrideKey),
+        'ris',
+      );
       return res.bibliography;
     });
 
@@ -251,14 +309,29 @@ export class CslJsonExportStrategy implements IExportFormatStrategy {
   readonly extension = 'json';
   readonly mimeType = 'application/json';
 
+  export(
+    items: ExportItemRecord[],
+    options: ExportStrategyOptions = {},
+  ): ExportResult {
+    return this.exportItems({
+      items,
+      timestamp: options.timestamp ?? new Date().toISOString().split('T')[0],
+      truncated: options.truncated,
+      citationKeyMap: options.citationKeyMap,
+    });
+  }
+
   exportItems(params: {
     items: ExportItemRecord[];
     timestamp: string;
     truncated?: boolean;
+    citationKeyMap?: Map<string, string>;
   }): ExportResult {
-    const { items, timestamp, truncated } = params;
+    const { items, timestamp, truncated, citationKeyMap } = params;
     const cslList = items.map((it) => {
-      const rawCsl = { ...CslJsonMapper.toCsl(it) };
+      const overrideKey = citationKeyMap?.get(it.id);
+      const itemWithKey = overrideKey ? { ...it, citationKey: overrideKey } : it;
+      const rawCsl = { ...CslJsonMapper.toCsl(itemWithKey) };
       const arxivId =
         typeof rawCsl._arxivId === 'string' ? rawCsl._arxivId.trim() : '';
       if (arxivId) {
@@ -295,17 +368,36 @@ export class CsvExportStrategy implements IExportFormatStrategy {
   readonly extension = 'csv';
   readonly mimeType = 'text/csv; charset=utf-8';
 
+  export(
+    items: ExportItemRecord[],
+    options: ExportStrategyOptions = {},
+  ): ExportResult {
+    return this.exportItems({
+      items,
+      timestamp: options.timestamp ?? new Date().toISOString().split('T')[0],
+      truncated: options.truncated,
+      citationKeyMap: options.citationKeyMap,
+    });
+  }
+
   exportItems(params: {
     items: ExportItemRecord[];
     timestamp: string;
     truncated?: boolean;
+    citationKeyMap?: Map<string, string>;
   }): ExportResult {
-    const { items, timestamp, truncated } = params;
+    const { items, timestamp, truncated, citationKeyMap } = params;
+    const mappedItems = citationKeyMap
+      ? items.map((it) => {
+          const overrideKey = citationKeyMap.get(it.id);
+          return overrideKey ? { ...it, citationKey: overrideKey } : it;
+        })
+      : items;
     return {
       format: 'csv',
       filename: `library-export-${timestamp}.csv`,
       mimeType: this.mimeType,
-      content: formatCsvExport(items),
+      content: formatCsvExport(mappedItems),
       itemCount: items.length,
       truncated,
     };
@@ -316,6 +408,17 @@ export class MarkdownExportStrategy implements IExportFormatStrategy {
   readonly format: ExportFormatType = 'markdown';
   readonly extension = 'md';
   readonly mimeType = 'text/markdown';
+
+  export(
+    items: ExportItemRecord[],
+    options: ExportStrategyOptions = {},
+  ): ExportResult {
+    return this.exportItems({
+      items,
+      timestamp: options.timestamp ?? new Date().toISOString().split('T')[0],
+      truncated: options.truncated,
+    });
+  }
 
   exportItems(params: {
     items: ExportItemRecord[];

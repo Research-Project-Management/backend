@@ -13,9 +13,9 @@ import { CommandRepository } from '@/modules/library/catalog/repositories/comman
 import { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 import {
   LIBRARY_EVENT_TYPES,
-  LIBRARY_REDIS_KEYS,
   TransactionHelpers,
   normalizeProjectScopeId,
+  executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { ItemCacheCoordinator } from './item-cache.coordinator';
@@ -38,43 +38,12 @@ export class ItemRelationsService {
     projectId?: string,
   ): Promise<void> {
     if (itemIds.length === 0) return;
-    if (this.cacheCoordinator && userId) {
-      await this.cacheCoordinator.invalidateBulkItemsCache(
-        itemIds,
-        userId,
-        projectId,
-      );
-      return;
-    }
-    if (!this.cache) return;
-    const uniqueIds = Array.from(new Set(itemIds.filter(Boolean)));
-    try {
-      const validProjectId = normalizeProjectScopeId(projectId);
-      const tasks: Promise<unknown>[] = uniqueIds.flatMap((id) => [
-        this.cache!.del(LIBRARY_REDIS_KEYS.item(id)),
-        this.cache!.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
-        this.cache!.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
-      ]);
-      if (userId) {
-        tasks.push(
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-        );
-      }
-      if (validProjectId) {
-        tasks.push(
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.itemsPattern(validProjectId),
-          ),
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
-          ),
-        );
-      }
-      await Promise.all(tasks);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to invalidate relation caches: ${msg}`);
-    }
+    await executeStandardLibraryCacheInvalidation(
+      this.cacheCoordinator,
+      this.cache,
+      { userId, projectId, itemIds },
+      (msg) => this.logger.warn(`Failed to invalidate relation caches: ${msg}`),
+    );
   }
 
   async getRelatedItems(userId: string, itemId: string, projectId?: string) {

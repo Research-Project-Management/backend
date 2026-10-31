@@ -1,4 +1,4 @@
-import { resolveProviderFieldWeight } from './source-weights.catalog';
+import { resolveProviderFieldWeight } from './metadata-coalesce.policy';
 import { isPlaceholderItemTitle } from './academic-title.domain';
 import { TypeConversionPreview } from '@/modules/library/core/types/bibliographic.types';
 
@@ -357,14 +357,14 @@ export class ItemProvenancePolicy {
       const weight = resolveProviderFieldWeight(provider, fieldKey);
       const confidence =
         typeof fieldProv.confidence === 'number' ? fieldProv.confidence : 0.85;
-      return weight * confidence;
+      return Math.min(0.99, weight * confidence);
     }
 
     const meta = extractMetaContainer(itemOrMeta);
     const itemSource = String(
       meta.engineUsed || meta.sourceProvider || meta.source || 'Unknown',
     );
-    return resolveProviderFieldWeight(itemSource, fieldKey) * 0.85;
+    return Math.min(0.99, resolveProviderFieldWeight(itemSource, fieldKey) * 0.85);
   }
 
   /**

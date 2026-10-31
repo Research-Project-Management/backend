@@ -1,9 +1,11 @@
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { setMyPublicationInClient } from '@/modules/library/catalog/repositories/command-relations.helper';
+import {
+  setMyPublicationInClient,
+  syncUpdatedIdentifiers,
+} from '@/modules/library/catalog/repositories/command-relations.helper';
 import {
   calculateIdentifierChanges,
   normalizeItemIdentifiers,
-  syncUpdatedIdentifiers,
 } from '@/modules/library/catalog/domain/identifier-change.helper';
 import { harmonizeDomainMetadataAndIdentifiersPartial } from '@/modules/library/catalog/domain/item-bibliographic.mapper';
 import { ConditionEvaluatorEngine } from '@/modules/library/catalog/domain/condition-evaluator.engine';

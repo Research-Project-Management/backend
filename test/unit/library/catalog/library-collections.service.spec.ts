@@ -11,7 +11,7 @@ import { PrismaService } from '@/core';
 import {
   sanitizeCollectionName,
   sanitizeCollectionDescription,
-} from '@/modules/library/catalog/domain/collections.domain';
+} from '@/modules/library/catalog/domain/tree.engine';
 
 describe('Library Collections — Tree Invariants & Sanitization', () => {
   describe('Collection Sanitization Utilities', () => {

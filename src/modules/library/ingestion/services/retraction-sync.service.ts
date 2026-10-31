@@ -4,16 +4,21 @@ import {
   OnModuleInit,
   OnModuleDestroy,
   Optional,
+  Inject,
 } from '@nestjs/common';
 import { RedisCacheService, shouldRunWorkerConsumers } from '@/core';
 import {
-  LIBRARY_REDIS_KEYS,
+  CATALOG_FACADE,
+  ICatalogFacade,
+  ITEM_CACHE_INVALIDATOR,
+  IItemCacheInvalidator,
   normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import { RetractionSeederService } from '@/modules/library/ingestion/services/retraction-seeder.service';
+import { invalidateIngestionItemCache } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
 
 export interface RetractionSyncOptions {
   maxDays?: number;
@@ -54,6 +59,12 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     private readonly scanner: RetractionScannerProvider,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly seeder?: RetractionSeederService,
+    @Optional()
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
+    @Optional()
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
   ) {}
 
   onModuleInit(): void {
@@ -156,14 +167,16 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
             now,
           );
           updatedCount++;
-          if (this.cache) {
-            await this.cache
-              .del(LIBRARY_REDIS_KEYS.item(item.id))
-              .catch(() => {});
-            await this.cache
-              .del(LIBRARY_REDIS_KEYS.itemDetails(item.id))
-              .catch(() => {});
-          }
+          await invalidateIngestionItemCache({
+            itemIds: [item.id],
+            userId: (item as { userId?: string | null }).userId,
+            projectId: (item as { projectId?: string | null }).projectId,
+            cacheCoordinator: this.cacheCoordinator,
+            catalogGateway: this.catalogGateway,
+            cache: this.cache,
+            logger: this.logger,
+            contextLabel: 'delta retraction sync',
+          });
         }
       }
     }
@@ -308,45 +321,36 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    if (this.cache && updatedItems.length > 0) {
-      try {
-        const scopesToInvalidate = new Set<string>();
-        const tasks: Promise<unknown>[] = [];
-        for (const item of updatedItems) {
-          tasks.push(
-            this.cache.del(LIBRARY_REDIS_KEYS.item(item.id)),
-            this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(item.id)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(item.id)),
-          );
-          const validProjectId = normalizeProjectScopeId(item.projectId);
-          if (validProjectId) {
-            scopesToInvalidate.add(validProjectId);
-            scopesToInvalidate.add(`proj:${validProjectId}`);
-          }
-          if (item.userId) {
-            scopesToInvalidate.add(item.userId);
-          }
+    if (updatedItems.length > 0) {
+      const groupedByScope = new Map<
+        string,
+        { userId?: string | null; projectId?: string | null; itemIds: string[] }
+      >();
+      for (const item of updatedItems) {
+        const validProjectId = normalizeProjectScopeId(item.projectId);
+        const scopeKey = `${item.userId || ''}:${validProjectId || ''}`;
+        const existingGroup = groupedByScope.get(scopeKey);
+        if (existingGroup) {
+          existingGroup.itemIds.push(item.id);
+        } else {
+          groupedByScope.set(scopeKey, {
+            userId: item.userId,
+            projectId: validProjectId,
+            itemIds: [item.id],
+          });
         }
-        for (const scopeKey of scopesToInvalidate) {
-          tasks.push(
-            this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(scopeKey)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeKey)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeKey)),
-            this.cache.delPattern(
-              LIBRARY_REDIS_KEYS.searchItemsPattern(scopeKey),
-            ),
-            this.cache.delPattern(
-              LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeKey),
-            ),
-          );
-        }
-        await Promise.all(tasks);
-      } catch (cacheErr: unknown) {
-        const msg =
-          cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
-        this.logger.warn(
-          `Failed to invalidate Redis caches during retraction sync: ${msg}`,
-        );
+      }
+      for (const group of groupedByScope.values()) {
+        await invalidateIngestionItemCache({
+          itemIds: group.itemIds,
+          userId: group.userId,
+          projectId: group.projectId,
+          cacheCoordinator: this.cacheCoordinator,
+          catalogGateway: this.catalogGateway,
+          cache: this.cache,
+          logger: this.logger,
+          contextLabel: 'during retraction sync',
+        });
       }
     }
 

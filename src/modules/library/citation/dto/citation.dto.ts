@@ -5,13 +5,17 @@ import {
   IsNumber,
   IsArray,
   IsObject,
+  IsBoolean,
   ArrayMaxSize,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   CitationItemInput,
   CitationStyleId,
+  ExportFormatType,
 } from '@/modules/library/citation/types/citation.types';
+
+export type { ExportFormatType };
 
 export class FormatCitationDto {
   @ApiProperty({ description: 'Item metadata to format citation from' })
@@ -47,4 +51,34 @@ export class FormatBatchCitationDto {
   @IsOptional()
   @IsString()
   styleId?: CitationStyleId;
+}
+
+export class ExportLibraryDto {
+  @IsString()
+  format!: ExportFormatType;
+
+  @IsOptional()
+  @IsBoolean()
+  includeNotes?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  itemIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  collectionId?: string;
+
+  @IsOptional()
+  @IsString()
+  tagId?: string;
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  limit?: number;
 }

@@ -4,7 +4,7 @@ import { LibraryCoreModule } from '@/modules/library/core/core.module';
 
 // Controllers
 import { ItemsController } from './controllers/items.controller';
-import { LibraryPermissionsController } from './controllers/library-workspace.controller';
+import { LibraryWorkspaceController } from './controllers/library-workspace.controller';
 import { ItemCurationController } from './controllers/item-curation.controller';
 import { CollectionsController } from './controllers/collections.controller';
 import { TagController } from './controllers/tags.controller';
@@ -26,25 +26,23 @@ import { ItemCurationService } from './services/item-curation.service';
 import { ItemRelationsService } from './services/item-relations.service';
 import { CollectionsService } from './services/collections.service';
 import { TagsService } from './services/tags.service';
-import { TypesService } from './services/types.service';
+import { TypesService, LibraryBootstrapService } from './services/types.service';
 import { StateService } from './services/state.service';
 import { SavedSearchesService } from './services/saved-searches.service';
 import { ZoteroSchemaValidatorService } from './services/zotero-schema-validator.service';
 import { NotesService } from './services/notes.service';
-import { LibraryBootstrapService } from './services/library-bootstrap.service';
 
 // Engines & Mappers
 import { TreeEngine } from './domain/tree.engine';
 import { ConditionEvaluatorEngine } from './domain/condition-evaluator.engine';
 import { ItemsMapper } from './domain/items.mapper';
-import { ItemTransformer } from './domain/item.transformer';
+import { ItemTransformer } from './services/item.transformer';
 
 // Repositories
 import { CommandRepository } from './repositories/command.repository';
 import {
   QueryRepository,
   ItemMatchQueryRepository,
-  ItemRelationsQueryRepository,
   ItemListQueryRepository,
 } from './repositories/query.repository';
 import { CollectionsRepository } from './repositories/collections.repository';
@@ -55,14 +53,14 @@ import { NotesRepository } from './repositories/notes.repository';
 
 // Facade
 import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
-import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core/ports/catalog.port';
+import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core';
 
 @Module({
   imports: [CoreModule, LibraryCoreModule],
   controllers: [
     ItemCurationController,
     ItemsController,
-    LibraryPermissionsController,
+    LibraryWorkspaceController,
     CollectionsController,
     TagController,
     TypeController,
@@ -109,7 +107,6 @@ import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core/ports/catalog.por
     // Repositories
     CommandRepository,
     ItemMatchQueryRepository,
-    ItemRelationsQueryRepository,
     ItemListQueryRepository,
     QueryRepository,
     CollectionsRepository,

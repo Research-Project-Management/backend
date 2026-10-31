@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common';
-import { CoreModule } from '@/core';
+import { CoreModule, shouldRunWorkerConsumers } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
 import { CatalogModule } from '@/modules/library/catalog/catalog.module';
 import { ExtractionModule } from '@/modules/library/extraction/extraction.module';
 import { BullModule } from '@nestjs/bullmq';
 import { LIBRARY_INGESTION_QUEUE_STANDARD } from './types/ingestion.types';
-import { shouldRunWorkerConsumers } from '@/core';
 
 // Facade
 import { IngestionFacade, INGESTION_FACADE } from './ingestion.facade';
@@ -15,7 +14,7 @@ import { IngestionController } from './controllers/ingestion.controller';
 import { CurationController } from './controllers/curation.controller';
 import { RetractionController } from './controllers/retraction.controller';
 import { FeedsController } from './controllers/feeds.controller';
-import { FeedsService } from './services/feeds.service';
+import { FeedsService, FeedsEngine } from './services/feeds.service';
 
 import { IngestionService } from './services/ingestion.service';
 import { PipelineService } from './services/pipeline.service';
@@ -23,22 +22,21 @@ import { PipelineSideEffectsService } from './services/pipeline-side-effects.ser
 import { PipelineBatchExecutor } from './services/pipeline-batch.executor';
 import { MetadataResolverService } from './services/metadata-resolver.service';
 import { IngestionRunReporterService } from './services/ingestion-run-reporter.service';
-import { IngestionSagaOrchestrator } from './services/ingestion-saga.orchestrator';
+import {
+  IngestionSagaOrchestrator,
+  IngestionQueueConsumer,
+} from './services/ingestion-saga.orchestrator';
 import { QueueService } from './services/queue.service';
 import { UrlCaptureService } from './services/url-capture.service';
 import { FeedRetrievalService } from './services/feed-retrieval.service';
-import { FeedsEngine } from './services/feeds.engine';
 import { UrlMetadataScraperService } from './services/url-metadata-scraper.service';
 import { PublisherDomExtractor } from './services/publisher-dom.extractor';
 import { HtmlMetaTagExtractor } from './services/html-meta-tag.extractor';
-import { IngestionQueueConsumer } from './services/ingestion-queue.consumer';
-import { MetadataReconciliationService } from './services/metadata-reconciliation.service';
 import { MetadataExecutorService } from './services/metadata-executor.service';
 import { MetadataService } from './services/metadata.service';
 import { DuplicateDetectorService } from './services/duplicate-detector.service';
 import { DuplicateMergerService } from './services/duplicate-merger.service';
-import { QualityService } from './services/quality.service';
-import { RetractionService } from './services/retraction.service';
+import { RetractionService, QualityService } from './services/retraction.service';
 import { RetractionDatabaseService } from './services/retraction-database.service';
 import { RetractionSyncService } from './services/retraction-sync.service';
 import { RetractionSeederService } from './services/retraction-seeder.service';
@@ -49,7 +47,6 @@ import {
   WebMirrorResolverService,
 } from './services/web-fetch-ladder.service';
 import { DomainRateLimiterService } from './services/domain-rate-limiter.service';
-import { WEB_FETCH_PORT } from './types/web-fetch.types';
 
 // Repositories
 import { IngestionRepository } from './repositories/ingestion.repository';
@@ -61,25 +58,21 @@ import { FeedsRepository } from './repositories/feeds.repository';
 import {
   METADATA_PROVIDERS,
   METADATA_PORT,
+  WEB_FETCH_PORT,
   MetadataProvider,
 } from './types/metadata.types';
 
 // Parsers & Policies & Stages & Providers
-import { DoiParser } from './parsers/doi.parser';
-import { BibtexParser } from './parsers/bibtex.parser';
+import { BibtexParser, DoiParser } from './parsers/bibtex.parser';
 import { RisParser } from './parsers/ris.parser';
 import { CslParser } from './parsers/csl.parser';
 import { XmlLegacyFormatsParser } from './parsers/xml-legacy-formats.parser';
 import { BibliographyFormatRegistry } from './parsers/bibliography-format.registry';
 import { NormalizationPolicy } from './policies/normalization.policy';
-import { ReconciliationPolicy } from './policies/reconciliation.policy';
-import { DuplicatePolicy } from './policies/duplicate.policy';
-import { IdentifyStage } from './stages/identify.stage';
+import { DuplicatePolicy } from './policies/metadata.policy';
+import { IdentifyStage, IdentifyUrlResolver } from './stages/identify.stage';
 import { IdentifyFileResolver } from './stages/identify-file.resolver';
-import { IdentifyUrlResolver } from './stages/identify-url.resolver';
-import { EnrichStage } from './stages/enrich.stage';
-import { ReconcileStage } from './stages/reconcile.stage';
-import { MatchStage } from './stages/match.stage';
+import { ResolveStage } from './stages/resolve.stage';
 import { CommitStage } from './stages/commit.stage';
 import { UrlCaptureProvider } from './providers/url-capture.provider';
 import { CrossRefProvider } from './providers/crossref.provider';
@@ -158,20 +151,16 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     XmlLegacyFormatsParser,
     BibliographyFormatRegistry,
     { provide: NormalizationPolicy, useClass: NormalizationPolicy },
-    { provide: ReconciliationPolicy, useClass: ReconciliationPolicy },
     { provide: DuplicatePolicy, useClass: DuplicatePolicy },
     IdentifyFileResolver,
     IdentifyUrlResolver,
     IdentifyStage,
-    EnrichStage,
-    ReconcileStage,
-    MatchStage,
+    ResolveStage,
     CommitStage,
     UrlCaptureProvider,
 
     // Metadata Providers & Enrichment
     DomainRateLimiterService,
-    MetadataReconciliationService,
     MetadataExecutorService,
     CrossRefProvider,
     ArxivProvider,

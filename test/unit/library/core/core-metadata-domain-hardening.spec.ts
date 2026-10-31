@@ -26,8 +26,7 @@ import {
   ItemProvenancePolicy,
   COUPLED_METADATA_ALIASES,
 } from '@/modules/library/core/domain/item-provenance.domain';
-import { resolveProviderFieldWeight } from '@/modules/library/core/domain/source-weights.catalog';
-import { buildAnnotationSortIndex } from '@/modules/library/core/domain/sort-index.domain';
+import { resolveProviderFieldWeight, buildAnnotationSortIndex } from '@/modules/library/core';
 import { REVERSE_FIELD_ALIASES } from '@/modules/library/core/types/schema.constants';
 
 describe('Core Metadata Domain Hardening (Loop 2 Regression Suite)', () => {

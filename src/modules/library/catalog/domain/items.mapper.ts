@@ -3,7 +3,7 @@ import type { ItemDetail } from '@/modules/library/core/types/bibliographic.type
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
-} from '@/modules/library/catalog/types/items.constants';
+} from '@/modules/library/catalog/types/catalog.types';
 import {
   cleanCommentText,
   convertAcademicHtmlToMarkdown,

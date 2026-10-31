@@ -22,9 +22,10 @@ import {
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
 import {
   DEFAULT_DUPLICATE_MERGE_STEPS,
-  RetractionSurvivalMergeStep,
-  MetadataAndCreatorBackfillMergeStep,
-  AuditSnapshotBuilder,
+  applyRetractionSurvivalStep,
+  backfillMetadataAndCreatorsStep,
+  consolidateItemMetadataStep,
+  buildMergeAuditTrail,
   executeDuplicateMergePipeline,
 } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
 import {
@@ -35,17 +36,8 @@ import {
   ToConferencePaperConversionRule,
   ToJournalArticleConversionRule,
 } from '@/modules/library/catalog/domain/type-conversion-rules.domain';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
-import {
-  FIELD_RECONCILIATION_STRATEGIES,
-  resolveFieldReconciliationStrategy,
-  ExtraFieldsMergeReconciliationStrategy,
-  AppendOnlyUniqueArrayReconciliationStrategy,
-  CreatorCompletenessReconciliationStrategy,
-  ScalarTrustHierarchyReconciliationStrategy,
-} from '@/modules/library/ingestion/domain/field-reconciliation.strategies';
-import { MetadataReconciliationService } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import {
   CompositeSpecification,
@@ -68,7 +60,7 @@ import {
   PdfExtractionTierContext,
   runPdfExtractionTierChain,
   IPdfExtractionTier,
-} from '@/modules/library/extraction/domain/pdf-extraction-tier.chain';
+} from '@/modules/library/extraction/domain/attachments.domain';
 import { DblpProvider } from '@/modules/library/ingestion/providers/dblp.provider';
 import { CrossRefProvider } from '@/modules/library/ingestion/providers/crossref.provider';
 import { OpenAlexProvider } from '@/modules/library/ingestion/providers/openalex.provider';
@@ -84,13 +76,13 @@ import {
   calculateMetadataQualityScore,
   diagnoseBibliographicQualityIssues,
 } from '@/modules/library/ingestion/domain/metadata.validator';
-import { QualityService } from '@/modules/library/ingestion/services/quality.service';
+import { QualityService } from '@/modules/library/ingestion/services/retraction.service';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import { resolveExtraPlainText } from '@/modules/library/catalog/domain/creator-tag-payload.builder';
 import { ItemTypeConversionService } from '@/modules/library/catalog/services/item-type-conversion.service';
 import { syncMergedIdentifiersInTx } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
-import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
+import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
 import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 
 describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
@@ -448,7 +440,7 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
       expect(primaryMeta.retractionNature).toBe('retraction');
       expect(primaryMeta.extra).toBe('Archive: CERN\nPMID: 12345');
 
-      const audit = AuditSnapshotBuilder.build({
+      const audit = buildMergeAuditTrail({
         primary: {
           id: 'primary-1',
           doi: '10.1000/test',
@@ -477,12 +469,8 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
       ]);
       expect(audit.consolidatedAttachments).toBe(1);
       expect(audit.backfilledFields).toContain('publisher');
-      expect(new RetractionSurvivalMergeStep().stepName).toBe(
-        'RETRACTION_AND_PUBLICATION_SURVIVAL',
-      );
-      expect(new MetadataAndCreatorBackfillMergeStep().stepName).toBe(
-        'METADATA_AND_CREATOR_BACKFILL',
-      );
+      expect(typeof applyRetractionSurvivalStep).toBe('function');
+      expect(typeof backfillMetadataAndCreatorsStep).toBe('function');
     });
   });
 
@@ -562,47 +550,34 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
       expect(confCtx.projectedItem.proceedingsTitle).toBe('NeurIPS 2026');
     });
 
-    it('resolves and executes all 4 Field Reconciliation Strategies cleanly', () => {
-      expect(FIELD_RECONCILIATION_STRATEGIES).toHaveLength(4);
-      expect(resolveFieldReconciliationStrategy('extraFields')).toBeInstanceOf(
-        ExtraFieldsMergeReconciliationStrategy,
-      );
-      expect(resolveFieldReconciliationStrategy('tags')).toBeInstanceOf(
-        AppendOnlyUniqueArrayReconciliationStrategy,
-      );
-      expect(resolveFieldReconciliationStrategy('notes')).toBeInstanceOf(
-        AppendOnlyUniqueArrayReconciliationStrategy,
-      );
-      expect(resolveFieldReconciliationStrategy('creators')).toBeInstanceOf(
-        CreatorCompletenessReconciliationStrategy,
-      );
-      expect(resolveFieldReconciliationStrategy('authors')).toBeInstanceOf(
-        CreatorCompletenessReconciliationStrategy,
-      );
-      expect(resolveFieldReconciliationStrategy('title')).toBeInstanceOf(
-        ScalarTrustHierarchyReconciliationStrategy,
-      );
-
-      const reconciliationService = new MetadataReconciliationService();
-      const result = reconciliationService.reconcile([
+    it('reconciles 3-tier priority coalesce (extraFields merge, additive tags/notes union, creator completeness upgrade) cleanly', () => {
+      const policy = new ReconciliationPolicy();
+      const result = policy.reconcile([
         {
-          id: 'c1',
-          sourceProvider: 'local_pdf',
+          candidateId: 'c1',
+          sourceKind: 'FILE',
+          sourceName: 'local_pdf',
           confidenceScore: 0.95,
-          metadata: {
+          retrievedAt: '2026-10-26T00:00:00.000Z',
+          schemaVersion: '1.0.0',
+          fields: {},
+          normalizedMetadata: {
             title: 'Attention Is All You Need',
             authors: ['A. Vaswani'],
             tags: ['Transformers', 'Deep Learning'],
             notes: [{ content: 'Initial extraction note' }],
             extraFields: { localKey: 'v1', sharedKey: 'from-local' },
           },
-          fetchedAt: '2026-10-26T00:00:00.000Z',
         },
         {
-          id: 'c2',
-          sourceProvider: 'crossref',
+          candidateId: 'c2',
+          sourceKind: 'PROVIDER',
+          sourceName: 'crossref',
           confidenceScore: 0.9,
-          metadata: {
+          retrievedAt: '2026-10-26T00:00:00.000Z',
+          schemaVersion: '1.0.0',
+          fields: {},
+          normalizedMetadata: {
             title: 'Attention Is All You Need',
             authors: ['Ashish Vaswani', 'Noam Shazeer', 'Niki Parmar'],
             tags: ['deep learning', 'NLP'],
@@ -612,17 +587,16 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
             ],
             extraFields: { crossrefKey: 'v2', sharedKey: 'from-crossref' },
           },
-          fetchedAt: '2026-10-26T00:00:00.000Z',
         },
       ]);
 
-      expect(result.metadata.authors).toEqual([
+      expect(result.proposedItem.authors).toEqual([
         'Ashish Vaswani',
         'Noam Shazeer',
         'Niki Parmar',
       ]);
-      expect(result.metadata.notes).toHaveLength(2);
-      expect(result.metadata.extraFields).toEqual(
+      expect(result.proposedItem.notes).toHaveLength(2);
+      expect(result.proposedItem.extraFields).toEqual(
         expect.objectContaining({
           localKey: 'v1',
           crossrefKey: 'v2',
@@ -1204,7 +1178,7 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
       );
 
       const backfillFields: Record<string, unknown> = {};
-      await new MetadataAndCreatorBackfillMergeStep().execute({
+      await backfillMetadataAndCreatorsStep({
         tx: mockTx as never,
         primary: { id: 'primary-1', metadata: {} },
         duplicates: [
@@ -1385,11 +1359,6 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
 
   describe('Cycle-3 BE-SYS-META1 through BE-SYS-META5 Architectural & Consistency Verification', () => {
     it('BE-SYS-META1: consolidates ItemMetadata rows by reassigning unique providers to primary during merge', async () => {
-      const { ItemMetadataConsolidationMergeStep } = await import(
-        '@/modules/library/ingestion/domain/duplicate-merge.steps'
-      );
-
-      const step = new ItemMetadataConsolidationMergeStep();
       const updatedMetadata: Array<{ where: { id: string }; data: { itemId: string } }> = [];
       const mockTxMeta = {
         itemMetadata: {
@@ -1418,7 +1387,7 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
         uniqueDupIds: ['dup-1'],
         offloadedFileIdsToDelete: [] as string[],
       };
-      await step.execute(stepCtx as never);
+      await consolidateItemMetadataStep(stepCtx as never);
       expect(updatedMetadata).toHaveLength(1);
       expect(updatedMetadata[0]).toEqual({
         where: { id: 'meta-d1' },
@@ -1534,14 +1503,14 @@ describe('Library Backend Deepened Design Patterns (BE-P1 to BE-P4)', () => {
     });
 
     it('BE-SYS-META3: ReconciliationPolicy harmonizes aliases/base-fields without double-weighting EnrichedProvider, and TrustedExtractionService executes via runPdfExtractionTierChain', async () => {
-      const { ReconciliationPolicy } = await import(
-        '@/modules/library/ingestion/policies/reconciliation.policy'
+      const { MetadataCoalescePolicy: ReconciliationPolicy } = await import(
+        '@/modules/library/core'
       );
       const { TrustedExtractionService } = await import(
         '@/modules/library/extraction/services/trusted-extraction.service'
       );
       const tierChainMod = await import(
-        '@/modules/library/extraction/domain/pdf-extraction-tier.chain'
+        '@/modules/library/extraction/domain/attachments.domain'
       );
 
       const policy = new ReconciliationPolicy();

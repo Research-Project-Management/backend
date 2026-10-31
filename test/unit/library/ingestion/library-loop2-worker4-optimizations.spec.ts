@@ -1,22 +1,16 @@
 import { BadRequestException } from '@nestjs/common';
 import { IngestionStatus, Prisma } from '@prisma/client';
-import { buildEvidenceFields } from '@/modules/library/ingestion/stages/candidate-builder.helper';
+import { buildEvidenceFields } from '@/modules/library/ingestion/domain/candidate-builder.helper';
 import { PipelineService } from '@/modules/library/ingestion/services/pipeline.service';
 import { QueueService } from '@/modules/library/ingestion/services/queue.service';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
+import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
 import {
+  MetadataCoalescePolicy as ReconciliationPolicy,
   selectAuthoritativeCreatorVariant,
   countFullGivenNames,
-  AppendOnlyUniqueArrayReconciliationStrategy,
-  ScalarTrustHierarchyReconciliationStrategy,
-  WeightedFieldVariant,
-} from '@/modules/library/ingestion/domain/field-reconciliation.strategies';
-import {
   finalizeReconciledBibliographicMetadata,
-  MetadataReconciliationService,
-} from '@/modules/library/ingestion/services/metadata-reconciliation.service';
-import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
-import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
+} from '@/modules/library/core';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import {
   collectExactIdentifierClusters,
@@ -24,9 +18,9 @@ import {
   RawDuplicateCluster,
 } from '@/modules/library/ingestion/domain/duplicate-clustering.helper';
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
-import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
-import { DuplicatePolicy } from '@/modules/library/ingestion/policies/duplicate.policy';
+import { DuplicatePolicy } from '@/modules/library/ingestion/policies/metadata.policy';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
+import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
 import { StateService } from '@/modules/library/catalog/services/state.service';
 import { MetadataService } from '@/modules/library/ingestion/services/metadata.service';
 import { MetadataExecutorService } from '@/modules/library/ingestion/services/metadata-executor.service';
@@ -79,8 +73,6 @@ describe('Loop 2 Worker 4 — Ingestion, Reconciliation, Deduplication & Merge O
       const pipeline = new PipelineService(
         repoMock as never,
         identifyMock as never,
-        {} as never,
-        {} as never,
         {} as never,
         {} as never,
         undefined,
@@ -279,103 +271,111 @@ describe('Loop 2 Worker 4 — Ingestion, Reconciliation, Deduplication & Merge O
       expect((resolvedRecord.creators as unknown[]).length).toBe(3);
     });
 
-    it('ScalarTrustHierarchyReconciliationStrategy filters boilerplate abstracts and upgrades <60 char snippets to complete authoritative abstracts', () => {
-      const strategy = new ScalarTrustHierarchyReconciliationStrategy();
+    it('ReconciliationPolicy filters boilerplate abstracts and upgrades <60 char snippets to complete authoritative abstracts', () => {
+      const policy = new ReconciliationPolicy();
       const longAbstract =
         'We introduce a novel transformer architecture for long-horizon scientific reasoning across multimodal molecular graphs, achieving state-of-the-art accuracy on 14 benchmarks with linear memory scaling.';
 
       // 1. Boilerplate filtering ("N/A", "Abstract not available.")
-      const boilerplateVariants: WeightedFieldVariant[] = [
+      const decision1 = policy.reconcile([
         {
-          candidate: {
-            id: 'c1',
-            sourceProvider: 'CrossRef',
-            confidenceScore: 0.95,
-            metadata: {} as never,
-            fetchedAt: new Date().toISOString(),
+          candidateId: 'c1',
+          sourceKind: 'PROVIDER',
+          sourceName: 'CrossRef',
+          confidenceScore: 0.95,
+          retrievedAt: new Date().toISOString(),
+          schemaVersion: '1.0.0',
+          fields: {},
+          normalizedMetadata: {
+            title: 'Paper Title',
+            abstract: 'Abstract not available.',
           },
-          val: 'Abstract not available.',
-          effectiveWeight: 0.95,
         },
         {
-          candidate: {
-            id: 'c2',
-            sourceProvider: 'OpenAlex',
-            confidenceScore: 0.85,
-            metadata: {} as never,
-            fetchedAt: new Date().toISOString(),
+          candidateId: 'c2',
+          sourceKind: 'PROVIDER',
+          sourceName: 'OpenAlex',
+          confidenceScore: 0.85,
+          retrievedAt: new Date().toISOString(),
+          schemaVersion: '1.0.0',
+          fields: {},
+          normalizedMetadata: {
+            title: 'Paper Title',
+            abstract: longAbstract,
           },
-          val: longAbstract,
-          effectiveWeight: 0.8,
         },
-      ];
+      ]);
 
-      const outcome1 = strategy.reconcileField('abstract', boilerplateVariants);
-      expect(outcome1.value).toBe(longAbstract);
-      expect(outcome1.assertion.sourceProvider).toBe('OpenAlex');
+      expect(decision1.proposedItem.abstract).toBe(longAbstract);
+      expect(decision1.selectedFields.abstract.sourceProvider).toBe('OpenAlex');
 
       // 2. Short snippet (< 60 chars) upgraded to >=150 char authoritative abstract
-      const snippetVariants: WeightedFieldVariant[] = [
+      const decision2 = policy.reconcile([
         {
-          candidate: {
-            id: 'c1',
-            sourceProvider: 'CrossRef',
-            confidenceScore: 0.95,
-            metadata: {} as never,
-            fetchedAt: new Date().toISOString(),
+          candidateId: 'c1',
+          sourceKind: 'PROVIDER',
+          sourceName: 'CrossRef',
+          confidenceScore: 0.95,
+          retrievedAt: new Date().toISOString(),
+          schemaVersion: '1.0.0',
+          fields: {},
+          normalizedMetadata: {
+            title: 'Paper Title',
+            abstract: 'Short teaser snippet only.',
           },
-          val: 'Short teaser snippet only.',
-          effectiveWeight: 0.95,
         },
         {
-          candidate: {
-            id: 'c2',
-            sourceProvider: 'PubMed',
-            confidenceScore: 0.9,
-            metadata: {} as never,
-            fetchedAt: new Date().toISOString(),
+          candidateId: 'c2',
+          sourceKind: 'PROVIDER',
+          sourceName: 'PubMed',
+          confidenceScore: 0.9,
+          retrievedAt: new Date().toISOString(),
+          schemaVersion: '1.0.0',
+          fields: {},
+          normalizedMetadata: {
+            title: 'Paper Title',
+            abstract: longAbstract,
           },
-          val: longAbstract,
-          effectiveWeight: 0.85,
         },
-      ];
+      ]);
 
-      const outcome2 = strategy.reconcileField('abstract', snippetVariants);
-      expect(outcome2.value).toBe(longAbstract);
-      expect(outcome2.assertion.sourceProvider).toBe('PubMed');
+      expect(decision2.proposedItem.abstract).toBe(longAbstract);
+      expect(decision2.selectedFields.abstract.sourceProvider).toBe('PubMed');
     });
 
-    it('AppendOnlyUniqueArrayReconciliationStrategy respects isUserOverride without appending provider tags', () => {
-      const strategy = new AppendOnlyUniqueArrayReconciliationStrategy();
-      const variants: WeightedFieldVariant[] = [
+    it('ReconciliationPolicy respects isUserOverride without appending provider tags', () => {
+      const policy = new ReconciliationPolicy();
+      const decision = policy.reconcile([
         {
-          candidate: {
-            id: 'u1',
-            sourceProvider: 'UserOverride',
-            confidenceScore: 1.0,
-            metadata: {} as never,
-            fetchedAt: new Date().toISOString(),
+          candidateId: 'u1',
+          sourceKind: 'RECORD',
+          sourceName: 'UserOverride',
+          confidenceScore: 1.0,
+          retrievedAt: new Date().toISOString(),
+          schemaVersion: '1.0.0',
+          fields: {},
+          normalizedMetadata: {
+            title: 'Paper Title',
+            tags: ['curated-tag'],
           },
-          val: ['curated-tag'],
-          effectiveWeight: 10.0,
-          isUserOverride: true,
         },
         {
-          candidate: {
-            id: 'p1',
-            sourceProvider: 'OpenAlex',
-            confidenceScore: 0.9,
-            metadata: {} as never,
-            fetchedAt: new Date().toISOString(),
+          candidateId: 'p1',
+          sourceKind: 'PROVIDER',
+          sourceName: 'OpenAlex',
+          confidenceScore: 0.9,
+          retrievedAt: new Date().toISOString(),
+          schemaVersion: '1.0.0',
+          fields: {},
+          normalizedMetadata: {
+            title: 'Paper Title',
+            tags: ['noisy-auto-tag-1', 'noisy-auto-tag-2'],
           },
-          val: ['noisy-auto-tag-1', 'noisy-auto-tag-2'],
-          effectiveWeight: 0.8,
         },
-      ];
+      ]);
 
-      const outcome = strategy.reconcileField('tags', variants);
-      expect(outcome.value).toEqual(['curated-tag']);
-      expect(outcome.assertion.isUserOverride).toBe(true);
+      expect(decision.proposedItem.tags).toEqual(['curated-tag']);
+      expect(decision.selectedFields.tags.isUserOverride).toBe(true);
     });
 
     it('EnrichStage and ReconciliationPolicy preserve upstream provider identity (CrossRef, PubMed) in FieldEvidence and fieldProvenance', async () => {
@@ -403,7 +403,7 @@ describe('Loop 2 Worker 4 — Ingestion, Reconciliation, Deduplication & Merge O
         }),
       };
 
-      const enrichStage = new EnrichStage(
+      const enrichStage = new ResolveStage(
         metadataPortMock as never,
         new NormalizationPolicy(),
       );
@@ -575,12 +575,15 @@ describe('Loop 2 Worker 4 — Ingestion, Reconciliation, Deduplication & Merge O
         }),
       };
 
-      const matchStage = new MatchStage(
+      const resolveStage = new ResolveStage(
+        undefined,
+        undefined,
+        undefined,
         new DuplicatePolicy(),
         catalogGatewayMock as never,
       );
 
-      const decision = await matchStage.execute({
+      const decision = await resolveStage.match({
         scope: 'user-1',
         proposedItem: {
           title: 'Deep Learning for Medical Imaging in Radiology',
@@ -698,7 +701,7 @@ describe('Loop 2 Worker 4 — Ingestion, Reconciliation, Deduplication & Merge O
               itemId: 'item-2',
               isStarred: false,
               rating: null,
-              readStatus: 'skimmed',
+              readStatus: 'reading',
               currentPage: 3,
               scrollPosition: null,
               lastOpenedAt: null,
@@ -713,7 +716,10 @@ describe('Loop 2 Worker 4 — Ingestion, Reconciliation, Deduplication & Merge O
         },
       };
 
-      const stateService = new StateService({} as never, {} as never);
+      const stateService = new StateService(
+        new StateRepository({} as never),
+        {} as never,
+      );
       await stateService.transferUserItemStates(
         mockTx as unknown as Prisma.TransactionClient,
         ['item-2'],
@@ -723,7 +729,7 @@ describe('Loop 2 Worker 4 — Ingestion, Reconciliation, Deduplication & Merge O
       expect(upserted.get('user-unrated')).toEqual(
         expect.objectContaining({
           rating: null,
-          readStatus: 'skimmed',
+          readStatus: 'reading',
           currentPage: 3,
         }),
       );
@@ -774,7 +780,6 @@ describe('Loop 2 Worker 4 — Ingestion, Reconciliation, Deduplication & Merge O
       const metadataService = new MetadataService(
         [providerMock as never],
         cacheMock as never,
-        new MetadataReconciliationService(),
         executorMock as never,
       );
 

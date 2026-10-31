@@ -1,5 +1,7 @@
-import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
-import { IngestionStatusVo } from '@/modules/library/ingestion/domain/ingestion-status.vo';
+import {
+  IngestionRunAggregate,
+  IngestionStatusVo,
+} from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
 import {
   IngestionSagaOrchestrator,
   IngestionSagaSession,
@@ -232,11 +234,6 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
           },
         ]),
       };
-      mockEnrich = {
-        execute: jest
-          .fn()
-          .mockImplementation((input) => Promise.resolve(input.candidates)),
-      };
       mockReconcile = {
         execute: jest.fn().mockResolvedValue({
           proposedItem: { title: 'Deep Learning', doi: '10.1038/nature123' },
@@ -248,6 +245,17 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         execute: jest.fn().mockResolvedValue({
           matchType: 'NONE',
         }),
+      };
+      mockEnrich = {
+        execute: jest
+          .fn()
+          .mockImplementation((input) => Promise.resolve(input.candidates)),
+        coalesceAndVerify: jest
+          .fn()
+          .mockImplementation((cands) => mockReconcile.execute(cands)),
+        match: jest
+          .fn()
+          .mockImplementation((input) => mockMatch.execute(input)),
       };
       mockCommit = {
         execute: jest.fn().mockResolvedValue({
@@ -269,8 +277,6 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         mockRepo,
         mockIdentify,
         mockEnrich,
-        mockReconcile,
-        mockMatch,
         mockCommit,
         mockCatalogFacade,
         mockContentFacade,
@@ -393,8 +399,6 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         mockRepo,
         mockIdentify,
         mockEnrich,
-        mockReconcile,
-        mockMatch,
         mockCommit,
         mockCatalogFacade,
         mockContentFacade,

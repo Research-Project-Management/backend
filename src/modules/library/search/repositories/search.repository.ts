@@ -6,9 +6,9 @@ import { Prisma } from '@prisma/client';
 import {
   SearchOptions,
   FacetResult,
-} from '@/modules/library/search/types/search.types';
-import { SearchSpecificationBuilder } from '@/modules/library/search/domain/search-specification.builder';
+} from '@/modules/library/search/dto/search.dto';
 import {
+  SearchSpecificationBuilder,
   TextSearchSpecification,
   sanitizeSearchQuery,
 } from '@/modules/library/search/domain/item-specifications';

@@ -24,15 +24,9 @@ import {
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/curation.dto';
-import { PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/curation.types';
-import {
-  invalidateMergedItemsCache,
-  recordMergedAssetSyncEventsInTx,
-  softDeleteDuplicatesAndRecordOutboxInTx,
-  updateAndReloadMergedPrimaryInTx,
-} from '@/modules/library/ingestion/domain/duplicate-merge.helper';
-import { UserId, ProjectId } from '@/modules/library/core/types/branded.types';
+import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/ingestion.dto';
+import { PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/ingestion.types';
+import { UserId, ProjectId } from '@/modules/library/core';
 import { asMetaObject } from './duplicate-detector.service';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
@@ -46,13 +40,18 @@ import {
   consolidateUserPublications,
   syncMergedIdentifiersInTx,
   applyMergedUpdatesAndClearDuplicateCitationKeyCollision,
+  invalidateMergedItemsCache,
+  buildMergeAuditTrail,
 } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
 import {
-  AuditSnapshotBuilder,
   DuplicateMergeStepContext,
   executeDuplicateMergePipeline,
+  recordMergedAssetSyncEventsInTx,
+  softDeleteDuplicatesAndRecordOutboxInTx,
+  updateAndReloadMergedPrimaryInTx,
 } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
 import { ItemsMapper } from '@/modules/library/catalog';
+import { RetractionBloomFilter } from '@/modules/library/ingestion/domain/retraction-bloom-filter.domain';
 
 export type { ContributorShape };
 export {
@@ -184,14 +183,11 @@ export class DuplicateMergerService {
         try {
           const lockKeys = Array.from(
             new Set(
-              [primary.id, ...uniqueDupIds].map((lockTargetId) => {
-                let hash = 0;
-                for (let i = 0; i < lockTargetId.length; i++) {
-                  hash = (hash << 5) - hash + lockTargetId.charCodeAt(i);
-                  hash |= 0;
-                }
-                return BigInt(hash & 0x7fffffff);
-              }),
+              [primary.id, ...uniqueDupIds].map((lockTargetId) =>
+                BigInt(
+                  (RetractionBloomFilter.fnv1a(lockTargetId) | 0) & 0x7fffffff,
+                ),
+              ),
             ),
           ).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
           if (lockKeys.length > 0) {
@@ -439,7 +435,7 @@ export class DuplicateMergerService {
           version: updatedPrimary.version,
           data: domainPrimary,
         });
-        const audit: PrismaMergeAuditTrail = AuditSnapshotBuilder.build({
+        const audit: PrismaMergeAuditTrail = buildMergeAuditTrail({
           primary,
           duplicates,
           uniqueDupIds,
@@ -459,28 +455,16 @@ export class DuplicateMergerService {
     );
 
     // Invalidate Redis cache immediately after DB transaction commits before slow S3 cleanup
-    const invalidator =
-      this.cacheCoordinator?.invalidateForWrite
-        ? this.cacheCoordinator
-        : this.catalogGateway?.invalidateForWrite
-          ? this.catalogGateway
-          : undefined;
-    if (invalidator?.invalidateForWrite) {
-      await invalidator.invalidateForWrite({
-        userId: String(userId),
-        projectId: effectiveProjectId,
-        itemIds: [primary.id, ...uniqueDupIds],
-      });
-    } else {
-      await invalidateMergedItemsCache({
-        cache: this.cache,
-        logger: this.logger,
-        primaryId: primary.id,
-        uniqueDupIds,
-        userId: String(userId),
-        effectiveProjectId,
-      });
-    }
+    await invalidateMergedItemsCache({
+      cache: this.cache,
+      cacheCoordinator: this.cacheCoordinator,
+      catalogGateway: this.catalogGateway,
+      logger: this.logger,
+      primaryId: primary.id,
+      uniqueDupIds,
+      userId: String(userId),
+      effectiveProjectId,
+    });
 
     const filesToCleanup = Array.from(
       new Set([...reassignedOrphanFileIds, ...offloadedFileIdsToDelete]),

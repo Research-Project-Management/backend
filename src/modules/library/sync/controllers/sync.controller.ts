@@ -14,10 +14,12 @@ import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 import { SyncQueryDto } from '@/modules/library/sync/dto/sync-query.dto';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
-import { OutboxWorker } from '@/modules/library/sync/services/outbox.worker';
-import { OutboxMetrics } from '@/modules/library/sync/services/outbox.metrics';
+import {
+  OutboxWorker,
+  OutboxMetrics,
+} from '@/modules/library/sync/services/outbox.worker';
 import { compactLibraryChanges } from '@/modules/library/sync/domain/outbox.domain';
-import { normalizeProjectScopeId } from '@/modules/library/core/domain/scope.specification';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 
 function parseSafeBigInt(val?: string): bigint | undefined {
   if (!val) return undefined;

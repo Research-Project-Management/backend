@@ -1,6 +1,6 @@
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
-import { CslItemData } from '@/modules/library/citation/types/csl-json.types';
+import { CslItemData } from '@/modules/library/citation/types/citation.types';
 
 describe('Vietnamese & Cultural Citation Engine', () => {
   let engine: CslEngineService;
@@ -590,7 +590,7 @@ describe('Vietnamese & Cultural Citation Engine', () => {
     });
 
     it('extracts multiple citation key alias lines, parses comma-containing institutions and month ranges, and escapes BibTeX special characters safely', () => {
-      const { extractItemCitationAliases } = require('@/modules/library/citation/domain/citation-key-resolver.domain');
+      const { extractItemCitationAliases } = require('@/modules/library/citation/domain/citation.domain');
       const { CslStyleFormatterService } = require('@/modules/library/citation/services/csl-style-formatter.service');
       const { TcvnCitationFormatterService } = require('@/modules/library/citation/services/tcvn-citation-formatter.service');
 

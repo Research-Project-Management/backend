@@ -25,8 +25,8 @@ import { IngestionRepository } from '@/modules/library/ingestion/repositories/in
 import {
   DuplicateClusterResult,
   DuplicateClusterItem,
-} from '@/modules/library/ingestion/types/curation.types';
-import { UserId, ProjectId } from '@/modules/library/core/types/branded.types';
+} from '@/modules/library/ingestion/types/ingestion.types';
+import { UserId, ProjectId } from '@/modules/library/core';
 import {
   normalizeTitleForDedupe,
   tokenizeTitleWords,
@@ -54,119 +54,14 @@ import {
   normalizeNumericLocatorToken,
   normalizeIssueToken,
   isLocalOrElectronicPageRange,
+  asMetaObject,
+  EffectiveFieldLookupOptions,
+  getEffectiveItemField,
 } from '@/modules/library/ingestion/domain/duplicate-clustering.helper';
+import { invalidateIngestionItemCache } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
 
-const EFFECTIVE_FIELD_COUPLED_FALLBACKS: Readonly<
-  Record<string, readonly string[]>
-> = {
-  abstract: ['abstractNote'],
-  abstractNote: ['abstract'],
-  publicationTitle: [
-    'journal',
-    'proceedingsTitle',
-    'bookTitle',
-    'repository',
-    'venue',
-  ],
-  journal: ['publicationTitle'],
-  proceedingsTitle: ['publicationTitle'],
-  bookTitle: ['publicationTitle'],
-  repository: ['publicationTitle'],
-  year: ['date', 'publicationDate'],
-  date: ['publicationDate', 'year'],
-  publicationDate: ['date', 'year'],
-};
-
-function isNonEmptyFieldValue(val: unknown): boolean {
-  return val !== undefined && val !== null && val !== '';
-}
-
-export function asMetaObject(val: unknown): Record<string, unknown> {
-  return val && typeof val === 'object' && !Array.isArray(val)
-    ? (val as Record<string, unknown>)
-    : {};
-}
-
-export interface EffectiveFieldLookupOptions {
-  excludeGenericsFromSpecificTarget?: boolean;
-}
-
-export function getEffectiveItemField(
-  item: unknown,
-  field: string,
-  metaOverride?: Record<string, unknown>,
-  options?: EffectiveFieldLookupOptions,
-): unknown {
-  const rec = asMetaObject(item);
-  const topVal = rec[field];
-  if (isNonEmptyFieldValue(topVal)) {
-    return topVal;
-  }
-  const meta = metaOverride || asMetaObject(rec.metadata);
-  const metaVal = meta[field];
-  if (isNonEmptyFieldValue(metaVal)) {
-    return metaVal;
-  }
-
-  const excludeGenerics = options?.excludeGenericsFromSpecificTarget === true;
-  const coupledAliases = Array.from(
-    new Set([
-      ...ItemProvenancePolicy.getCoupledFieldAliases(field),
-      ...(EFFECTIVE_FIELD_COUPLED_FALLBACKS[field] ?? []),
-    ]),
-  ).filter((alias) => {
-    if (excludeGenerics) {
-      if ((field === 'date' || field === 'publicationDate') && alias === 'year') {
-        return false;
-      }
-      if (
-        (field === 'bookTitle' ||
-          field === 'proceedingsTitle' ||
-          field === 'repository') &&
-        alias === 'publicationTitle'
-      ) {
-        return false;
-      }
-    }
-    return true;
-  });
-  for (const alias of coupledAliases) {
-    const aliasTop = rec[alias];
-    if (isNonEmptyFieldValue(aliasTop)) {
-      return aliasTop;
-    }
-    const aliasMeta = meta[alias];
-    if (isNonEmptyFieldValue(aliasMeta)) {
-      return aliasMeta;
-    }
-  }
-
-  const lowerField = field.trim().toLowerCase();
-  if (
-    (lowerField === 'doi' ||
-      lowerField === 'isbn' ||
-      lowerField === 'issn' ||
-      lowerField === 'pmid' ||
-      lowerField === 'pmcid' ||
-      lowerField === 'arxivid' ||
-      lowerField === 'arxiv') &&
-    Array.isArray(rec.identifiers)
-  ) {
-    const targetIdType = lowerField === 'arxivid' ? 'arxiv' : lowerField;
-    for (const ident of rec.identifiers as Array<Record<string, unknown>>) {
-      if (!ident || typeof ident !== 'object') continue;
-      const rawType = String(ident.type ?? ident.identifierType ?? '')
-        .trim()
-        .toLowerCase();
-      const normType = rawType === 'arxivid' ? 'arxiv' : rawType;
-      if (normType === targetIdType && isNonEmptyFieldValue(ident.value)) {
-        return ident.value;
-      }
-    }
-  }
-
-  return undefined;
-}
+export { asMetaObject, getEffectiveItemField };
+export type { EffectiveFieldLookupOptions };
 
 @Injectable()
 export class DuplicateDetectorService {
@@ -333,44 +228,44 @@ export class DuplicateDetectorService {
     return Boolean(issueA && issueB && issueA !== issueB);
   }
 
+  private static readonly MASTER_TYPE_WEIGHT: Readonly<Record<string, number>> =
+    {
+      journalArticle: 50,
+      book: 40,
+      bookSection: 40,
+      conferencePaper: 40,
+      thesis: 40,
+      patent: 40,
+      report: 40,
+      preprint: 10,
+      manuscript: 10,
+      workingPaper: 10,
+      webpage: 10,
+    };
+
+  private scoreMasterCandidate(item: DuplicateCandidateItem): number {
+    const type = this.resolveItemType(item);
+    const meta = asMetaObject(item.metadata);
+    return (
+      (DuplicateDetectorService.MASTER_TYPE_WEIGHT[type] ?? 25) +
+      (item.doi ? (this.isPreprintDoi(item.doi) ? 10 : 30) : 0) +
+      (getEffectiveItemField(item, 'publicationTitle', meta) ? 10 : 0) +
+      (getEffectiveItemField(item, 'abstract', meta) ? 10 : 0) +
+      (item.year ? 5 : 0) +
+      Math.min(10, Object.keys(meta).length) +
+      (isPlaceholderItemTitle(item.title) || meta.isFilenameTitle === true
+        ? -25
+        : 0)
+    );
+  }
+
   computeRecommendedMasterId(group: DuplicateCandidateItem[]): string {
     if (group.length === 0) return '';
     let bestId = group[0].id;
     let bestScore = -Infinity;
 
     for (const item of group) {
-      const type = this.resolveItemType(item);
-      const meta = asMetaObject(item.metadata);
-      let score =
-        type === 'journalArticle'
-          ? 50
-          : [
-                'book',
-                'bookSection',
-                'conferencePaper',
-                'thesis',
-                'patent',
-                'report',
-              ].includes(type)
-            ? 40
-            : ['preprint', 'manuscript', 'workingPaper', 'webpage'].includes(
-                  type,
-                )
-              ? 10
-              : 25;
-
-      if (item.doi) {
-        score += this.isPreprintDoi(item.doi) ? 10 : 30;
-      }
-      if (getEffectiveItemField(item, 'publicationTitle', meta)) score += 10;
-      if (getEffectiveItemField(item, 'abstract', meta)) score += 10;
-      if (item.year) score += 5;
-      score += Math.min(10, Object.keys(meta).length);
-
-      if (isPlaceholderItemTitle(item.title) || meta.isFilenameTitle === true) {
-        score -= 25;
-      }
-
+      const score = this.scoreMasterCandidate(item);
       if (score > bestScore) {
         bestScore = score;
         bestId = item.id;
@@ -520,34 +415,16 @@ export class DuplicateDetectorService {
       );
     }
 
-    const invalidator = this.cacheCoordinator?.invalidateForWrite ? this.cacheCoordinator : this.catalogGateway?.invalidateForWrite ? this.catalogGateway : undefined;
-    if (invalidator?.invalidateForWrite) {
-      await invalidator.invalidateForWrite({ userId: String(userId), projectId: effectiveProjectId, itemIds: uniqueIds });
-    } else if (this.cache) {
-      try {
-        const scopeKey = effectiveProjectId
-          ? `proj:${effectiveProjectId}`
-          : String(userId);
-        const tasks: Promise<unknown>[] = [
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeKey)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(String(userId))),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(effectiveProjectId || String(userId))),
-        ];
-        for (const id of uniqueIds) {
-          tasks.push(
-            this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
-            this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
-          );
-        }
-        await Promise.all(tasks);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `Failed to invalidate cache after dismissing duplicates: ${msg}`,
-        );
-      }
-    }
+    await invalidateIngestionItemCache({
+      itemIds: uniqueIds,
+      userId: String(userId),
+      projectId: effectiveProjectId,
+      cacheCoordinator: this.cacheCoordinator,
+      catalogGateway: this.catalogGateway,
+      cache: this.cache,
+      logger: this.logger,
+      contextLabel: 'after dismissing duplicates',
+    });
 
     return { dismissed: true, itemIds: uniqueIds };
   }

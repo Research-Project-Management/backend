@@ -5,8 +5,8 @@ import {
   FormattedCitationResult,
   CitationStyleId,
 } from './types/citation.types';
-import { ExportLibraryDto } from './dto/exports.dto';
-import { ExportResult } from './types/exports.types';
+import { ExportLibraryDto } from './dto/citation.dto';
+import { ExportResult } from './types/citation.types';
 import {
   CITATION_FACADE,
   ICitationFacade as ICoreCitationFacade,

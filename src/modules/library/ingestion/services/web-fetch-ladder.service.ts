@@ -10,7 +10,7 @@ import {
   WebFetchOptions,
   WebFetchResponse,
   MirrorBibliographicMetadata,
-} from '@/modules/library/ingestion/types/web-fetch.types';
+} from '@/modules/library/ingestion/types/metadata.types';
 import { IngestionVerifierService } from './ingestion-verifier.service';
 import {
   SsrfGuardService,

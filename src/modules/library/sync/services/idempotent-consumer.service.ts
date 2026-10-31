@@ -5,7 +5,7 @@ import {
   IIdempotentConsumer,
   IdempotentConsumerOptions,
   IdempotentResult,
-} from '@/modules/library/core/ports/idempotent-consumer.port';
+} from '@/modules/library/core';
 import { OutboxRepository } from '../repositories/outbox.repository';
 
 export type { IdempotentConsumerOptions, IdempotentResult };

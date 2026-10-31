@@ -1,17 +1,14 @@
-import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
-import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
+import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
 import { IngestionVerifierService } from '@/modules/library/ingestion/services/ingestion-verifier.service';
-import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 
-describe('ReconcileStage with IngestionVerifierService', () => {
-  let stage: ReconcileStage;
-  let policy: ReconciliationPolicy;
+describe('ResolveStage with IngestionVerifierService', () => {
+  let stage: ResolveStage;
   let verifier: IngestionVerifierService;
 
   beforeEach(() => {
-    policy = new ReconciliationPolicy();
     verifier = new IngestionVerifierService();
-    stage = new ReconcileStage(policy, verifier);
+    stage = new ResolveStage(undefined, undefined, verifier);
   });
 
   it('performs cross-verification scoring for PDF + external provider candidate', async () => {
@@ -52,7 +49,7 @@ describe('ReconcileStage with IngestionVerifierService', () => {
       confidenceScore: 0.95,
     };
 
-    const decision = await stage.execute([fileCandidate, webCandidate]);
+    const decision = await stage.coalesceAndVerify([fileCandidate, webCandidate]);
 
     expect(decision).toBeDefined();
     expect(decision.proposedItem.title).toBe('Attention Is All You Need');
@@ -90,7 +87,7 @@ describe('ReconcileStage with IngestionVerifierService', () => {
       confidenceScore: 0.92,
     };
 
-    const decision = await stage.execute([fileCandidate]);
+    const decision = await stage.coalesceAndVerify([fileCandidate]);
 
     expect(decision.proposedItem.title).toBe(
       'Deep Residual Learning for Image Recognition',
@@ -122,7 +119,7 @@ describe('ReconcileStage with IngestionVerifierService', () => {
       confidenceScore: 0.3,
     };
 
-    const decision = await stage.execute([blockedUrlCandidate]);
+    const decision = await stage.coalesceAndVerify([blockedUrlCandidate]);
 
     const extra = decision.proposedItem.extraFields!;
     expect(extra.ingestionStatus).toBe('BLOCKED');
@@ -167,7 +164,7 @@ describe('ReconcileStage with IngestionVerifierService', () => {
       confidenceScore: 0.95,
     };
 
-    const decision = await stage.execute([
+    const decision = await stage.coalesceAndVerify([
       fileCandidate,
       externalCitedCandidate,
     ]);

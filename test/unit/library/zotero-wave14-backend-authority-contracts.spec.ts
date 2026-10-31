@@ -1,11 +1,11 @@
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import {
   DuplicateDetectorService,
 } from '@/modules/library/ingestion/services/duplicate-detector.service';
-import { QualityService } from '@/modules/library/ingestion/services/quality.service';
+import { QualityService } from '@/modules/library/ingestion/services/retraction.service';
 import { Permission, Role } from '@/modules/project/access';
 
 describe('Wave 14 — Backend Authority Contracts (Permissions, Duplicates Hydration, Type Conversion Preview, Facet Counts)', () => {

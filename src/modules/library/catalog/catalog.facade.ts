@@ -16,22 +16,20 @@ import {
   CreateItemData,
   UpdateItemData,
 } from '@/modules/library/core/types/bibliographic.types';
-import { NoteEntity, CreateNoteData } from './types/notes.types';
+import { NoteEntity, CreateNoteData } from './types/catalog.types';
 import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';
-import { LibraryItemSource } from '@/modules/library/core';
 import {
+  LibraryItemSource,
   CATALOG_FACADE,
   ICatalogFacade,
   CatalogItemSummary,
-} from '@/modules/library/core/ports/catalog.port';
+} from '@/modules/library/core';
 export { CATALOG_FACADE };
 export type { ICatalogFacade, CatalogItemSummary };
 import { ItemsMapper } from './domain/items.mapper';
 export { ItemsMapper };
-export {
-  resolveOrCreateTags,
-  deriveFirstAuthor,
-} from './domain/creator-tag-payload.builder';
+export { deriveFirstAuthor } from './domain/creator-tag-payload.builder';
+export { resolveOrCreateTags } from './repositories/command-relations.helper';
 
 /**
  * Public Facade for Catalog Bounded Context.

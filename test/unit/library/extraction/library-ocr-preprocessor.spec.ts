@@ -1,4 +1,4 @@
-import { OcrPreprocessorService } from '@/modules/library/extraction/services/ocr-preprocessor.service';
+import { OcrPreprocessorService } from '@/modules/library/extraction/providers/ocr.provider';
 import { createCanvas } from '@napi-rs/canvas';
 import sharp from 'sharp';
 

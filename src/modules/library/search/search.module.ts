@@ -6,9 +6,8 @@ import { SearchFacade, SEARCH_FACADE } from './search.facade';
 import { SearchController } from './controllers/search.controller';
 
 // Services & Infrastructure
-import { SearchService } from './services/search.service';
+import { SearchService, FullTextProvider } from './services/search.service';
 import { SearchRepository } from './repositories/search.repository';
-import { FullTextProvider } from './services/full-text.provider';
 import { SearchEventsSubscriber } from './subscribers/search-events.subscriber';
 
 /**

@@ -21,7 +21,7 @@ import {
 import {
   EXTRACTION_FACADE,
   IExtractionFacade,
-} from '@/modules/library/core/ports/extraction.port';
+} from '@/modules/library/core';
 export { EXTRACTION_FACADE };
 export type { IExtractionFacade };
 

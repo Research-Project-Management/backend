@@ -4,7 +4,7 @@ import { QueryRepository } from '@/modules/library/catalog/repositories/query.re
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { TypesService } from './types.service';
 import { ItemCacheCoordinator } from './item-cache.coordinator';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import {
   ItemDetail,
@@ -15,7 +15,7 @@ import {
   ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
   REVERSE_FIELD_ALIASES,
-} from '@/modules/library/catalog/types/items.constants';
+} from '@/modules/library/catalog/types/catalog.types';
 import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,

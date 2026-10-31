@@ -30,7 +30,7 @@ import {
   getEffectiveBaseFieldMap,
   extractExtraKeyValues,
 } from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
-import { normalizeCreators } from './creator-normalization.policy';
+import { normalizeCreators } from './metadata.policy';
 
 export { normalizeCreators };
 

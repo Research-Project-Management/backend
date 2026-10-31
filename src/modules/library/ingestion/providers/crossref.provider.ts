@@ -17,9 +17,9 @@ import {
   libraryConfig,
   CSL_TYPE_TO_ITEM_TYPE,
   normalizePageRange,
+  getAcademicContactEmail,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import { getAcademicContactEmail } from '@/modules/library/core/constants/academic-client.constants';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import { AbstractAcademicProvider } from './abstract-academic.provider';
 

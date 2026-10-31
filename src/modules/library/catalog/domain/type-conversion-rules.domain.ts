@@ -5,7 +5,7 @@ import {
 import {
   FIELD_ALIASES,
   REVERSE_FIELD_ALIASES,
-} from '@/modules/library/catalog/types/items.constants';
+} from '@/modules/library/catalog/types/catalog.types';
 
 export interface TypeConversionRuleContext {
   sourceType: string;

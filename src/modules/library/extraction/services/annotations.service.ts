@@ -15,15 +15,15 @@ import {
   BatchAnnotationsResult,
   AnnotationType,
   UpsertAnnotationItem,
-} from '@/modules/library/extraction/types/annotations.types';
+} from '@/modules/library/extraction/types/extraction.types';
 import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
 import {
   TransactionHelpers,
-  LIBRARY_REDIS_KEYS,
   ITEM_CACHE_INVALIDATOR,
   IItemCacheInvalidator,
   CATALOG_FACADE,
   ICatalogFacade,
+  executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { AttachmentsService } from './attachments.service';
@@ -51,46 +51,16 @@ export class AnnotationsService {
     userId?: string,
     projectId?: string,
   ): Promise<void> {
-    if (itemId) {
-      const invalidator =
-        this.cacheCoordinator?.invalidateForWrite
-          ? this.cacheCoordinator
-          : this.catalogGateway?.invalidateForWrite
-            ? this.catalogGateway
-            : undefined;
-      if (invalidator?.invalidateForWrite && userId) {
-        try {
-          await invalidator.invalidateForWrite({
-            userId,
-            projectId,
-            itemIds: [itemId],
-          });
-        } catch {
-          // Ignore cache invalidation errors
-        }
-      }
-    }
-    if (!this.cache) return;
-    try {
-      const tasks: Promise<unknown>[] = [
-        this.cache.del(`library:attachment:${attachmentId}:annotations`),
-      ];
-      if (itemId) {
-        tasks.push(
-          this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
-          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
-          this.cache.del(LIBRARY_REDIS_KEYS.itemAttachments(itemId)),
-        );
-        if (typeof this.cache.delPattern === 'function') {
-          tasks.push(
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
-          );
-        }
-      }
-      await Promise.all(tasks);
-    } catch {
-      // Ignore cache invalidation errors
-    }
+    await executeStandardLibraryCacheInvalidation(
+      this.cacheCoordinator ?? this.catalogGateway,
+      this.cache,
+      {
+        userId,
+        projectId,
+        itemIds: itemId ? [itemId] : undefined,
+        extraKeys: [`library:attachment:${attachmentId}:annotations`],
+      },
+    );
   }
 
   // Queries

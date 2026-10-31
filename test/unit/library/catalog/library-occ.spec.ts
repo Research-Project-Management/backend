@@ -3,7 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { PrismaService } from '@/core';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { fromPartial } from '@total-typescript/shoehorn';
 
 describe('Library OCC (Optimistic Concurrency Control) Pattern', () => {

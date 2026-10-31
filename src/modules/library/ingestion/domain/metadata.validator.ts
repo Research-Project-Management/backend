@@ -60,15 +60,19 @@ export function validateMetadata(metadata: unknown): ItemMetadata | null {
   return normalized;
 }
 
+export const QUALITY_RULE_BIT = {
+  title: 1 << 0,
+  authors: 1 << 1,
+  year: 1 << 2,
+  identifier: 1 << 3,
+  doi: 1 << 4,
+  context: 1 << 5,
+  abstract: 1 << 6,
+} as const;
+
 export interface IBibliographicQualityRule {
-  readonly id:
-    | 'title'
-    | 'authors'
-    | 'year'
-    | 'identifier'
-    | 'doi'
-    | 'context'
-    | 'abstract';
+  readonly id: keyof typeof QUALITY_RULE_BIT;
+  readonly bit: number;
   readonly fieldKey?: string;
   readonly issueCode?: string;
   readonly weight: number;
@@ -79,6 +83,7 @@ export const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
   [
     {
       id: 'title',
+      bit: QUALITY_RULE_BIT.title,
       fieldKey: 'title',
       issueCode: 'missing_title',
       weight: 25,
@@ -88,6 +93,7 @@ export const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
     },
     {
       id: 'authors',
+      bit: QUALITY_RULE_BIT.authors,
       fieldKey: 'authors',
       issueCode: 'missing_authors',
       weight: 25,
@@ -101,6 +107,7 @@ export const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
     },
     {
       id: 'year',
+      bit: QUALITY_RULE_BIT.year,
       fieldKey: 'year',
       issueCode: 'missing_year',
       weight: 15,
@@ -117,6 +124,7 @@ export const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
     },
     {
       id: 'identifier',
+      bit: QUALITY_RULE_BIT.identifier,
       fieldKey: 'identifier',
       weight: 15,
       isSatisfied(item: Record<string, unknown>): boolean {
@@ -133,6 +141,7 @@ export const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
     },
     {
       id: 'doi',
+      bit: QUALITY_RULE_BIT.doi,
       issueCode: 'missing_doi',
       weight: 0,
       isSatisfied(item: Record<string, unknown>): boolean {
@@ -141,6 +150,7 @@ export const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
     },
     {
       id: 'context',
+      bit: QUALITY_RULE_BIT.context,
       weight: 10,
       isSatisfied(item: Record<string, unknown>): boolean {
         return Boolean(
@@ -155,6 +165,7 @@ export const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
     },
     {
       id: 'abstract',
+      bit: QUALITY_RULE_BIT.abstract,
       fieldKey: 'abstract',
       issueCode: 'missing_abstract',
       weight: 10,
@@ -170,6 +181,8 @@ export interface MetadataQualityEvaluation {
   missingKeyFields: string[];
   issues: string[];
   presentFieldsCount: number;
+  satisfiedMask: number;
+  missingIssueMask: number;
   hasTitle: boolean;
   hasAuthors: boolean;
   hasYear: boolean;
@@ -190,14 +203,12 @@ export function calculateMetadataQualityScore(
   const issues: string[] = [];
   let presentCount = 0;
   let totalScore = 0;
-
-  const satisfiedById = new Map<IBibliographicQualityRule['id'], boolean>();
+  let satisfiedMask = 0;
+  let missingIssueMask = 0;
 
   for (const rule of BIBLIOGRAPHIC_QUALITY_RULES) {
-    const satisfied = rule.isSatisfied(item);
-    satisfiedById.set(rule.id, satisfied);
-
-    if (satisfied) {
+    if (rule.isSatisfied(item)) {
+      satisfiedMask |= rule.bit;
       if (rule.weight > 0) {
         const effectiveWeight =
           rule.id === 'abstract' && options?.typeSpecificKeys?.length
@@ -212,6 +223,7 @@ export function calculateMetadataQualityScore(
       }
       if (rule.issueCode) {
         issues.push(rule.issueCode);
+        missingIssueMask |= rule.bit;
       }
     }
   }
@@ -252,13 +264,15 @@ export function calculateMetadataQualityScore(
     missingKeyFields,
     issues,
     presentFieldsCount: presentCount,
-    hasTitle: Boolean(satisfiedById.get('title')),
-    hasAuthors: Boolean(satisfiedById.get('authors')),
-    hasYear: Boolean(satisfiedById.get('year')),
-    hasIdentifier: Boolean(satisfiedById.get('identifier')),
-    hasDoi: Boolean(satisfiedById.get('doi')),
-    hasContext: Boolean(satisfiedById.get('context')),
-    hasAbstract: Boolean(satisfiedById.get('abstract')),
+    satisfiedMask,
+    missingIssueMask,
+    hasTitle: (satisfiedMask & QUALITY_RULE_BIT.title) !== 0,
+    hasAuthors: (satisfiedMask & QUALITY_RULE_BIT.authors) !== 0,
+    hasYear: (satisfiedMask & QUALITY_RULE_BIT.year) !== 0,
+    hasIdentifier: (satisfiedMask & QUALITY_RULE_BIT.identifier) !== 0,
+    hasDoi: (satisfiedMask & QUALITY_RULE_BIT.doi) !== 0,
+    hasContext: (satisfiedMask & QUALITY_RULE_BIT.context) !== 0,
+    hasAbstract: (satisfiedMask & QUALITY_RULE_BIT.abstract) !== 0,
   };
 }
 

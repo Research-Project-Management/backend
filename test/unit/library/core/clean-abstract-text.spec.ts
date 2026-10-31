@@ -1,4 +1,4 @@
-﻿import { cleanAbstractText } from '@/modules/library/core';
+import { cleanAbstractText } from '@/modules/library/core';
 
 describe('cleanAbstractText - Comprehensive Academic Abstract Normalization', () => {
   describe('1. LaTeX and Mathematical Formula Preservation', () => {

@@ -3,7 +3,7 @@ import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   WEB_FETCH_PORT,
   IWebFetchPort,
-} from '@/modules/library/ingestion/types/web-fetch.types';
+} from '@/modules/library/ingestion/types/metadata.types';
 import {
   SsrfGuardService,
   DEFAULT_BROWSER_FETCH_HEADERS,

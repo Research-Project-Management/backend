@@ -3,9 +3,9 @@ import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-reg
 import { MetadataQualityGate } from '@/modules/library/extraction/extractors/metadata-quality.gate';
 import { LayoutHeuristicExtractor } from '@/modules/library/extraction/extractors/layout-heuristic.extractor';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
-import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
-import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
-import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
+import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
+import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { extractText, getDocumentProxy } from 'unpdf';
 
 jest.mock('unpdf', () => ({
@@ -641,7 +641,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
         resolve: jest.fn(),
       };
 
-      const enrichStage = new EnrichStage(mockMetadataService);
+      const enrichStage = new ResolveStage(mockMetadataService);
 
       const candidates: MetadataCandidate[] = [
         {

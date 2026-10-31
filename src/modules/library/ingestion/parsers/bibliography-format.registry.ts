@@ -1,10 +1,10 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { RecordFormat } from '@/modules/library/ingestion/types/submission.types';
+import { RecordFormat } from '@/modules/library/ingestion/types/ingestion.types';
 import { BibtexParser } from './bibtex.parser';
 import { RisParser } from './ris.parser';
 import { CslParser } from './csl.parser';
 import { XmlLegacyFormatsParser } from './xml-legacy-formats.parser';
-import { mapBibtexToRawRecord } from '@/modules/library/ingestion/stages/candidate-builder.helper';
+import { mapBibtexToRawRecord } from '@/modules/library/ingestion/domain/candidate-builder.helper';
 
 export interface ParsedBibliographyRecordEnvelope {
   sourceName: string;

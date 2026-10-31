@@ -4,7 +4,7 @@ import { Prisma, ReadStatus } from '@prisma/client';
 import {
   StateEntity,
   UpsertStateData,
-} from '@/modules/library/catalog/types/state.types';
+} from '@/modules/library/catalog/types/catalog.types';
 import { pickPreferredMergedState } from '@/modules/library/catalog/domain/state.domain';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 

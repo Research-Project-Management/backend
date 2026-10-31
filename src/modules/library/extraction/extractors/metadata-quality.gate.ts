@@ -4,7 +4,7 @@ import {
   isNoiseAuthorName,
 } from '@/modules/library/core';
 import { isValidIsbnChecksum } from '@/modules/library/core/domain/identifier.domain';
-import { QualityScoreBreakdown } from '@/modules/library/extraction/types/trusted-extraction.types';
+import { QualityScoreBreakdown } from '@/modules/library/extraction/types/extraction.types';
 
 export interface EvaluationResult {
   breakdown: QualityScoreBreakdown;
@@ -125,54 +125,76 @@ export class MetadataQualityGate {
   }
 
   public static evaluate(metadata: ItemMetadata): EvaluationResult {
-    const titleScore = this.evaluateTitle(metadata.title);
-    const authorScore = this.evaluateAuthors(
-      metadata.authors,
-      metadata.creators,
-    );
-    const identifierScore = this.evaluateIdentifier(
-      metadata.doi,
-      metadata.arxivId,
-      metadata.pmid,
-      metadata.isbn,
-    );
-    const yearScore = this.evaluateYear(metadata.year);
-    const venueScore = this.evaluateVenue(
-      metadata.journal || metadata.publicationTitle,
-      metadata.publisher,
-      metadata.conferenceName,
-    );
+    const dimensions = [
+      {
+        key: 'titleScore' as const,
+        weight: this.WEIGHT_TITLE,
+        minValid: 0.7,
+        missingField: 'title',
+        score: this.evaluateTitle(metadata.title),
+      },
+      {
+        key: 'authorScore' as const,
+        weight: this.WEIGHT_AUTHOR,
+        minValid: 0.5,
+        missingField: 'authors',
+        score: this.evaluateAuthors(metadata.authors, metadata.creators),
+      },
+      {
+        key: 'identifierScore' as const,
+        weight: this.WEIGHT_IDENTIFIER,
+        minValid: 0.01,
+        missingField: 'doi/arxivId',
+        score: this.evaluateIdentifier(
+          metadata.doi,
+          metadata.arxivId,
+          metadata.pmid,
+          metadata.isbn,
+        ),
+      },
+      {
+        key: 'yearScore' as const,
+        weight: this.WEIGHT_YEAR,
+        minValid: 0.01,
+        missingField: 'year',
+        score: this.evaluateYear(metadata.year),
+      },
+      {
+        key: 'venueScore' as const,
+        weight: this.WEIGHT_VENUE,
+        minValid: 0.01,
+        missingField: 'journal/publisher',
+        score: this.evaluateVenue(
+          metadata.journal || metadata.publicationTitle,
+          metadata.publisher,
+          metadata.conferenceName,
+        ),
+      },
+    ];
 
-    const totalRaw =
-      titleScore * this.WEIGHT_TITLE +
-      authorScore * this.WEIGHT_AUTHOR +
-      identifierScore * this.WEIGHT_IDENTIFIER +
-      yearScore * this.WEIGHT_YEAR +
-      venueScore * this.WEIGHT_VENUE;
+    let totalRaw = 0;
+    const missingFields: string[] = [];
+    const scoresByKey = {} as Record<
+      (typeof dimensions)[number]['key'],
+      number
+    >;
+
+    for (const d of dimensions) {
+      totalRaw += d.weight * d.score;
+      scoresByKey[d.key] = d.score;
+      if (d.score < d.minValid) {
+        missingFields.push(d.missingField);
+      }
+    }
 
     const totalScore = Math.round(totalRaw * 100) / 100;
 
-    const missingFields: string[] = [];
-    if (titleScore < 0.7) missingFields.push('title');
-    if (authorScore < 0.5) missingFields.push('authors');
-    if (identifierScore === 0) missingFields.push('doi/arxivId');
-    if (yearScore === 0) missingFields.push('year');
-    if (venueScore === 0) missingFields.push('journal/publisher');
-
-    const isSelfSufficient = totalScore >= this.SELF_SUFFICIENCY_THRESHOLD;
-
-    const breakdown: QualityScoreBreakdown = {
-      titleScore,
-      authorScore,
-      identifierScore,
-      yearScore,
-      venueScore,
-      totalScore,
-    };
-
     return {
-      breakdown,
-      isSelfSufficient,
+      breakdown: {
+        ...scoresByKey,
+        totalScore,
+      },
+      isSelfSufficient: totalScore >= this.SELF_SUFFICIENCY_THRESHOLD,
       missingFields,
     };
   }

@@ -112,13 +112,11 @@ describe('Multi-Tier Metadata Cache & Local Database Resolution', () => {
   describe('MetadataService Local Database Historical Resolution', () => {
     let service: MetadataService;
     let mockCache: MetadataCache;
-    let mockReconciler: any;
     let mockExecutor: any;
     let mockPrisma: any;
 
     beforeEach(() => {
       mockCache = new MetadataCache(undefined);
-      mockReconciler = { reconcile: jest.fn() };
       mockExecutor = { execute: jest.fn() };
 
       mockPrisma = {
@@ -130,7 +128,6 @@ describe('Multi-Tier Metadata Cache & Local Database Resolution', () => {
       service = new MetadataService(
         [],
         mockCache,
-        mockReconciler,
         mockExecutor,
       );
     });

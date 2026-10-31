@@ -2,8 +2,8 @@ import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
 import { normalizeProjectScopeId } from '@/modules/library/core';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
-import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
+import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
+import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/catalog.types';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 
 export interface CreateCollectionInput {

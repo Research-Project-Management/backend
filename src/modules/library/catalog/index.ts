@@ -18,7 +18,6 @@ export * from './dto/collections.dto';
 export * from './dto/tags.dto';
 export * from './dto/notes.dto';
 export * from './dto/saved-search.dto';
-export * from './dto/state.dto';
 
 // Services
 export * from './services/items.service';
@@ -28,6 +27,7 @@ export * from './services/item-type-conversion.service';
 export * from './services/item-curation.service';
 export * from './services/item-relations.service';
 export * from './services/item-cache.coordinator';
+export * from './services/item.transformer';
 export * from './services/collections.service';
 export * from './services/tags.service';
 export * from './services/types.service';
@@ -46,20 +46,14 @@ export * from './repositories/saved-searches.repository';
 export * from './repositories/state.repository';
 
 // Types
-export * from './types/items.constants';
-export * from './types/collections.types';
-export * from './types/tags.types';
-export * from './types/notes.types';
+export * from './types/catalog.types';
 export * from './types/saved-search.types';
-export * from './types/state.types';
 
 // Domain
 export * from './domain/tree.engine';
 export * from './domain/condition-evaluator.engine';
 export * from './domain/items.mapper';
-export * from './domain/item.transformer';
 export * from './domain/notes.domain';
-export * from './domain/collections.domain';
 export * from './domain/state.domain';
 export * from './domain/command-payload.builder';
 export * from './domain/creator-tag-payload.builder';

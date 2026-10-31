@@ -349,6 +349,184 @@ export function convertReferToRis(content: string): string {
   return risLines.join('\n');
 }
 
+export type RisDirectFieldKey =
+  | 'journalAbbr'
+  | 'volume'
+  | 'issue'
+  | 'startPage'
+  | 'endPage'
+  | 'doi'
+  | 'publisher'
+  | 'place'
+  | 'language'
+  | 'rawM1'
+  | 'rawU1'
+  | 'rawC3'
+  | 'edition'
+  | 'callNumber'
+  | 'archive';
+
+export const RIS_DIRECT_FIELD_MAP: Readonly<Record<string, RisDirectFieldKey>> =
+  {
+    J2: 'journalAbbr',
+    JA: 'journalAbbr',
+    VL: 'volume',
+    IS: 'issue',
+    SP: 'startPage',
+    EP: 'endPage',
+    DO: 'doi',
+    PB: 'publisher',
+    INST: 'publisher',
+    CY: 'place',
+    AD: 'place',
+    LA: 'language',
+    M1: 'rawM1',
+    U1: 'rawU1',
+    C3: 'rawC3',
+    ET: 'edition',
+    CN: 'callNumber',
+    CA: 'callNumber',
+    C1: 'callNumber',
+    L4: 'archive',
+  };
+
+export type RisTagHandler = (
+  record: FallbackRisRecord,
+  value: string,
+  tag: string,
+) => void;
+
+const handleRisDateTag: RisTagHandler = (record, value) => {
+  const parsedDate = parseRisDateString(value);
+  if (parsedDate.year && !record.year) {
+    record.year = parsedDate.year;
+  }
+  if (parsedDate.publicationDate) {
+    if (
+      !record.publicationDate ||
+      parsedDate.publicationDate.length > record.publicationDate.length
+    ) {
+      record.publicationDate = parsedDate.publicationDate;
+    }
+  }
+};
+
+const handleRisPublicationTitleTag: RisTagHandler = (record, value) => {
+  record.publicationTitle = value;
+  record.journal = value;
+};
+
+const handleRisAccessionOrCustomIdTag: RisTagHandler = (record, value, tag) => {
+  const ids = extractIdentifiersFromText(tag, value, record.isPubMedDb);
+  if (ids.pmcid) record.pmcid = ids.pmcid;
+  if (ids.pmid) record.pmid = ids.pmid;
+  if (ids.arxivId && !record.arxivId) {
+    record.arxivId = ids.arxivId;
+  }
+};
+
+const handleRisUrlTag: RisTagHandler = (record, value, tag) => {
+  if (!record.url) record.url = value;
+  const ids = extractIdentifiersFromText(tag, value);
+  if (ids.arxivId && !record.arxivId) {
+    record.arxivId = ids.arxivId;
+  }
+};
+
+const handleRisSeriesTag: RisTagHandler = (record, value) => {
+  record.series = value;
+  if (!record.rawC3) record.rawC3 = value;
+};
+
+const handleRisNoteTag: RisTagHandler = (record, value, tag) => {
+  if (!record.rawNotes) record.rawNotes = [];
+  record.rawNotes.push(value);
+  const ids = extractIdentifiersFromText(tag, value);
+  if (ids.pmcid && !record.pmcid) record.pmcid = ids.pmcid;
+  if (ids.pmid && !record.pmid) record.pmid = ids.pmid;
+  if (ids.arxivId && !record.arxivId) record.arxivId = ids.arxivId;
+};
+
+const handleRisAbstractTag: RisTagHandler = (record, value) => {
+  record.abstract = (record.abstract ? record.abstract + ' ' : '') + value;
+};
+
+export const RIS_TAG_HANDLERS: Record<string, RisTagHandler> = {
+  ID: (record, value) => {
+    if (value) record.citationKey = value;
+  },
+  TI: (record, value) => {
+    if (value) record.title = value;
+  },
+  T1: (record, value) => {
+    if (value) record.title = value;
+  },
+  ST: (record, value) => {
+    if (value) record.shortTitle = value;
+  },
+  AU: (record, value) => {
+    if (value) record.rawAuthors.push(value);
+  },
+  A1: (record, value) => {
+    if (value) record.rawAuthors.push(value);
+  },
+  ED: (record, value) => {
+    if (value) {
+      if (!record.rawEditors) record.rawEditors = [];
+      record.rawEditors.push(value);
+    }
+  },
+  A2: (record, value) => {
+    if (value) {
+      if (!record.rawEditors) record.rawEditors = [];
+      record.rawEditors.push(value);
+    }
+  },
+  PY: handleRisDateTag,
+  Y1: handleRisDateTag,
+  DA: handleRisDateTag,
+  Y2: (record, value) => {
+    record.accessedAt = value.replace(/\//g, '-');
+  },
+  JO: handleRisPublicationTitleTag,
+  JF: handleRisPublicationTitleTag,
+  T2: handleRisPublicationTitleTag,
+  BT: handleRisPublicationTitleTag,
+  SN: (record, value) => {
+    record.rawSn = value;
+    if (value.replace(/[^0-9X]/gi, '').length === 8) {
+      record.issn = value;
+    } else {
+      record.isbn = value;
+    }
+  },
+  M3: (record, value, tag) => {
+    record.rawM3 = value;
+    const ids = extractIdentifiersFromText(tag, value, record.isPubMedDb);
+    if (ids.pmcid && !record.pmcid) record.pmcid = ids.pmcid;
+    if (ids.pmid && !record.pmid) record.pmid = ids.pmid;
+    if (ids.arxivId && !record.arxivId) record.arxivId = ids.arxivId;
+  },
+  DB: (record, value) => {
+    if (/pubmed|medline|ncbi/i.test(value)) {
+      record.isPubMedDb = true;
+    }
+  },
+  AN: handleRisAccessionOrCustomIdTag,
+  C2: handleRisAccessionOrCustomIdTag,
+  UR: handleRisUrlTag,
+  L1: handleRisUrlTag,
+  T3: handleRisSeriesTag,
+  SE: handleRisSeriesTag,
+  KW: (record, value) => {
+    record.rawTags.push(value);
+  },
+  RN: handleRisNoteTag,
+  N1: handleRisNoteTag,
+  AB: handleRisAbstractTag,
+  N2: handleRisAbstractTag,
+};
+
 export class RisFallbackParser {
   /**
    * Resilient line-by-line parser for non-standard RIS dialect variations
@@ -426,187 +604,15 @@ export class RisFallbackParser {
 
       if (!currentRecord) continue;
 
-      switch (tag) {
-        case 'ID':
-          if (value) currentRecord.citationKey = value;
-          break;
-        case 'TI':
-        case 'T1':
-          if (value) currentRecord.title = value;
-          break;
-        case 'ST':
-          if (value) currentRecord.shortTitle = value;
-          break;
-        case 'AU':
-        case 'A1':
-          if (value) currentRecord.rawAuthors.push(value);
-          break;
-        case 'ED':
-        case 'A2':
-          if (value) {
-            if (!currentRecord.rawEditors) currentRecord.rawEditors = [];
-            currentRecord.rawEditors.push(value);
-          }
-          break;
-        case 'PY':
-        case 'Y1':
-        case 'DA': {
-          const parsedDate = parseRisDateString(value);
-          if (parsedDate.year && !currentRecord.year) {
-            currentRecord.year = parsedDate.year;
-          }
-          if (parsedDate.publicationDate) {
-            if (
-              !currentRecord.publicationDate ||
-              parsedDate.publicationDate.length >
-                currentRecord.publicationDate.length
-            ) {
-              currentRecord.publicationDate = parsedDate.publicationDate;
-            }
-          }
-          break;
-        }
-        case 'Y2':
-          currentRecord.accessedAt = value.replace(/\//g, '-');
-          break;
-        case 'JO':
-        case 'JF':
-        case 'T2':
-        case 'BT':
-          currentRecord.publicationTitle = value;
-          currentRecord.journal = value;
-          break;
-        case 'J2':
-        case 'JA':
-          currentRecord.journalAbbr = value;
-          break;
-        case 'VL':
-          currentRecord.volume = value;
-          break;
-        case 'IS':
-          currentRecord.issue = value;
-          break;
-        case 'SP':
-          currentRecord.startPage = value;
-          break;
-        case 'EP':
-          currentRecord.endPage = value;
-          break;
-        case 'DO':
-          currentRecord.doi = value;
-          break;
-        case 'PB':
-        case 'INST':
-          currentRecord.publisher = value;
-          break;
-        case 'CY':
-        case 'AD':
-          currentRecord.place = value;
-          break;
-        case 'LA':
-          currentRecord.language = value;
-          break;
-        case 'SN':
-          currentRecord.rawSn = value;
-          if (value.replace(/[^0-9X]/gi, '').length === 8) {
-            currentRecord.issn = value;
-          } else {
-            currentRecord.isbn = value;
-          }
-          break;
-        case 'M1':
-          currentRecord.rawM1 = value;
-          break;
-        case 'M3': {
-          currentRecord.rawM3 = value;
-          const ids = extractIdentifiersFromText(
-            tag,
-            value,
-            currentRecord.isPubMedDb,
-          );
-          if (ids.pmcid && !currentRecord.pmcid)
-            currentRecord.pmcid = ids.pmcid;
-          if (ids.pmid && !currentRecord.pmid) currentRecord.pmid = ids.pmid;
-          if (ids.arxivId && !currentRecord.arxivId) {
-            currentRecord.arxivId = ids.arxivId;
-          }
-          break;
-        }
-        case 'U1':
-          currentRecord.rawU1 = value;
-          break;
-        case 'C3':
-          currentRecord.rawC3 = value;
-          break;
-        case 'DB':
-          if (/pubmed|medline|ncbi/i.test(value)) {
-            currentRecord.isPubMedDb = true;
-          }
-          break;
-        case 'AN':
-        case 'C2': {
-          const ids = extractIdentifiersFromText(
-            tag,
-            value,
-            currentRecord.isPubMedDb,
-          );
-          if (ids.pmcid) currentRecord.pmcid = ids.pmcid;
-          if (ids.pmid) currentRecord.pmid = ids.pmid;
-          if (ids.arxivId && !currentRecord.arxivId) {
-            currentRecord.arxivId = ids.arxivId;
-          }
-          break;
-        }
-        case 'UR':
-        case 'L1': {
-          if (!currentRecord.url) currentRecord.url = value;
-          const ids = extractIdentifiersFromText(tag, value);
-          if (ids.arxivId && !currentRecord.arxivId) {
-            currentRecord.arxivId = ids.arxivId;
-          }
-          break;
-        }
-        case 'ET':
-          currentRecord.edition = value;
-          break;
-        case 'CN':
-        case 'CA':
-        case 'C1':
-          currentRecord.callNumber = value;
-          break;
-        case 'L4':
-          currentRecord.archive = value;
-          break;
-        case 'T3':
-        case 'SE':
-          currentRecord.series = value;
-          if (!currentRecord.rawC3) currentRecord.rawC3 = value;
-          break;
-        case 'KW':
-          currentRecord.rawTags.push(value);
-          break;
-        case 'RN':
-        case 'N1': {
-          if (!currentRecord.rawNotes) currentRecord.rawNotes = [];
-          currentRecord.rawNotes.push(value);
-          const ids = extractIdentifiersFromText(tag, value);
-          if (ids.pmcid && !currentRecord.pmcid) {
-            currentRecord.pmcid = ids.pmcid;
-          }
-          if (ids.pmid && !currentRecord.pmid) {
-            currentRecord.pmid = ids.pmid;
-          }
-          if (ids.arxivId && !currentRecord.arxivId) {
-            currentRecord.arxivId = ids.arxivId;
-          }
-          break;
-        }
-        case 'AB':
-        case 'N2':
-          currentRecord.abstract =
-            (currentRecord.abstract ? currentRecord.abstract + ' ' : '') +
-            value;
-          break;
+      const handler = RIS_TAG_HANDLERS[tag];
+      if (handler) {
+        handler(currentRecord, value, tag);
+        continue;
+      }
+
+      const directField = RIS_DIRECT_FIELD_MAP[tag];
+      if (directField) {
+        currentRecord[directField] = value;
       }
     }
 

@@ -2,7 +2,7 @@ import {
   CslItemData,
   CslName,
   CslDate,
-} from '@/modules/library/citation/types/csl-json.types';
+} from '@/modules/library/citation/types/citation.types';
 import {
   CSL_TYPE_MAP,
   VIETNAMESE_FAMILY_NAMES,

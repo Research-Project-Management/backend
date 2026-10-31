@@ -23,7 +23,6 @@ import {
   ItemMatchQueryRepository,
   MatchCandidateResult,
 } from './item-match-query.repository';
-import { ItemRelationsQueryRepository } from './item-relations-query.repository';
 import { ItemListQueryRepository } from './item-list-query.repository';
 
 export type { ItemFilterOptions } from './item-filter-where.builder';
@@ -33,11 +32,7 @@ export {
 } from './item-filter-where.builder';
 export type { MatchCandidateResult } from './item-match-query.repository';
 export { ItemMatchQueryRepository } from './item-match-query.repository';
-export { ItemRelationsQueryRepository } from './item-relations-query.repository';
 export { ItemListQueryRepository } from './item-list-query.repository';
-
-
-
 
 @Injectable()
 export class QueryRepository {
@@ -47,7 +42,6 @@ export class QueryRepository {
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
     private readonly matchRepo: ItemMatchQueryRepository = new ItemMatchQueryRepository(),
-    private readonly relationsRepo: ItemRelationsQueryRepository = new ItemRelationsQueryRepository(),
     private readonly listRepo: ItemListQueryRepository = new ItemListQueryRepository(),
   ) {}
 
@@ -587,7 +581,7 @@ export class QueryRepository {
   }
 
   async getRelations(itemId: string, tx?: Prisma.TransactionClient): Promise<Record<string, unknown>[]> {
-    return this.relationsRepo.getRelations(this.getClient(tx), itemId);
+    return this.matchRepo.getRelations(this.getClient(tx), itemId);
   }
 
   async findQualityAuditItems(userId?: string, limit: number = 2000, projectId?: string, tx?: Prisma.TransactionClient) {

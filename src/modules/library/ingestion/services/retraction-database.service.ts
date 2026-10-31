@@ -6,7 +6,7 @@ import {
   RetractionDetails,
   RetractionNature,
   RetractionSource,
-} from '@/modules/library/ingestion/types/retraction.types';
+} from '@/modules/library/ingestion/types/ingestion.types';
 import { normalizeDoi, normalizePmid } from '@/modules/library/core';
 import { RetractionBloomFilter } from '../domain/retraction-bloom-filter.domain';
 

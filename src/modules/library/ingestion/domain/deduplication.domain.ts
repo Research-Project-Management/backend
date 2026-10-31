@@ -216,6 +216,51 @@ export function tokenizeTitleWords(str?: string | null): string[] {
 }
 
 /**
+ * 1D Rolling-Row Levenshtein Distance ($O(N)$ space, zero 2D matrix heap allocations).
+ */
+export function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+
+  const dp = new Uint16Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    let prevDiag = dp[0];
+    dp[0] = i;
+    const charA = a.charCodeAt(i - 1);
+    for (let j = 1; j <= n; j++) {
+      const temp = dp[j];
+      const cost = charA === b.charCodeAt(j - 1) ? 0 : 1;
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prevDiag + cost);
+      prevDiag = temp;
+    }
+  }
+
+  return dp[n];
+}
+
+function computeTokenSortRatioFromTokens(
+  rawTokensA: readonly string[],
+  rawTokensB: readonly string[],
+): number {
+  if (rawTokensA.length === 0 || rawTokensB.length === 0) return 0.0;
+  const sortedA = [...rawTokensA].sort().join(' ');
+  const sortedB = [...rawTokensB].sort().join(' ');
+  if (!sortedA || !sortedB) return 0.0;
+  if (sortedA === sortedB) return 1.0;
+
+  const maxLen = Math.max(sortedA.length, sortedB.length);
+  if (maxLen === 0) return 1.0;
+
+  const dist = levenshteinDistance(sortedA, sortedB);
+  return Math.max(0, 1 - dist / maxLen);
+}
+
+/**
  * Calculates Token Sort Ratio similarity between two titles.
  * Sorts unique normalized word tokens alphabetically to eliminate word-order sensitivity.
  */
@@ -224,37 +269,10 @@ export function calculateTokenSortRatio(
   b?: string | null,
 ): number {
   if (!a || !b) return 0.0;
-  const tokensA = tokenizeTitleWords(a).sort().join(' ');
-  const tokensB = tokenizeTitleWords(b).sort().join(' ');
-  if (!tokensA || !tokensB) return 0.0;
-  if (tokensA === tokensB) return 1.0;
-
-  const maxLen = Math.max(tokensA.length, tokensB.length);
-  if (maxLen === 0) return 1.0;
-
-  // Levenshtein distance on sorted tokens
-  const m = tokensA.length;
-  const n = tokensB.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () =>
-    new Array<number>(n + 1).fill(0),
+  return computeTokenSortRatioFromTokens(
+    tokenizeTitleWords(a),
+    tokenizeTitleWords(b),
   );
-
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = tokensA[i - 1] === tokensB[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,
-        dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + cost,
-      );
-    }
-  }
-
-  const dist = dp[m][n];
-  return Math.max(0, 1 - dist / maxLen);
 }
 
 const ROMAN_NUMERAL_TO_ARABIC: Readonly<Record<string, string>> = {
@@ -468,13 +486,18 @@ export function calculateTitleSimilarity(
     return 0.0;
   }
 
-  // Fast path: Token sort ratio gives high fidelity on academic papers
-  const tokenSortScore = calculateTokenSortRatio(titleA, titleB);
+  // Tokenize once and share across Token Sort Ratio & Jaccard Word Set Overlap
+  const rawTokensA = tokenizeTitleWords(titleA);
+  const rawTokensB = tokenizeTitleWords(titleB);
+
+  const tokenSortScore = computeTokenSortRatioFromTokens(
+    rawTokensA,
+    rawTokensB,
+  );
   if (tokenSortScore >= 0.88) return tokenSortScore;
 
-  // Fallback / complement: Jaccard word set overlap
-  const wordsA = new Set(tokenizeTitleWords(titleA));
-  const wordsB = new Set(tokenizeTitleWords(titleB));
+  const wordsA = new Set(rawTokensA);
+  const wordsB = new Set(rawTokensB);
   if (wordsA.size === 0 || wordsB.size === 0) {
     const rawA = titleA.toLowerCase().trim();
     const rawB = titleB.toLowerCase().trim();
@@ -489,7 +512,8 @@ export function calculateTitleSimilarity(
   for (const w of wordsA) {
     if (wordsB.has(w)) intersection++;
   }
-  const union = new Set([...wordsA, ...wordsB]).size;
+  // Inclusion–Exclusion Principle: |A ∪ B| = |A| + |B| - |A ∩ B|
+  const union = wordsA.size + wordsB.size - intersection;
   const jaccard = union > 0 ? intersection / union : 0.0;
 
   return Math.max(jaccard, tokenSortScore);

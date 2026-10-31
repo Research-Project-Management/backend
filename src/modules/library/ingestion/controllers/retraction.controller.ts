@@ -15,7 +15,7 @@ import {
   FlagRetractionDto,
   BatchCheckRetractionDto,
   SyncRetractionDto,
-} from '@/modules/library/ingestion/dto/retraction.dto';
+} from '@/modules/library/ingestion/dto/ingestion.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 

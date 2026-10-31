@@ -1,9 +1,72 @@
 import { decodeHtmlEntities } from './academic-text.domain';
 
 /**
- * Shared TipTap / ProseMirror Document Utilities
+ * Shared TipTap / ProseMirror Document Utilities & Zotero Annotation Sort Index Utilities
  * Framework-agnostic document format transformers used across Library contexts.
  */
+
+export const COORD_SCALE = 10_000;
+export const PAGE_PAD = 4;
+export const COORD_PAD = 5;
+export const MAX_SORT_PAGE = 9_999;
+export const MAX_SORT_COORD = 99_999;
+
+export interface ParsedSortIndex {
+  page: number;
+  y: number;
+  x: number;
+}
+
+/**
+ * Build a Zotero-compatible annotation sort index string ("PPPP|YYYYY|XXXXX").
+ */
+export function buildAnnotationSortIndex(
+  pageIndex: number,
+  y = 0,
+  x = 0,
+): string {
+  const safePage = Number.isFinite(pageIndex) ? pageIndex : 0;
+  const safeY = Number.isFinite(y) ? y : 0;
+  const safeX = Number.isFinite(x) ? x : 0;
+  const p = String(
+    Math.min(MAX_SORT_PAGE, Math.max(0, Math.round(safePage))),
+  ).padStart(PAGE_PAD, '0');
+  const yy = String(
+    Math.min(MAX_SORT_COORD, Math.max(0, Math.round(safeY * COORD_SCALE))),
+  ).padStart(COORD_PAD, '0');
+  const xx = String(
+    Math.min(MAX_SORT_COORD, Math.max(0, Math.round(safeX * COORD_SCALE))),
+  ).padStart(COORD_PAD, '0');
+  return `${p}|${yy}|${xx}`;
+}
+
+/**
+ * Parse a sort index string back into its components.
+ * Returns null if the format is invalid.
+ */
+export function parseAnnotationSortIndex(
+  sortIndex?: string | null,
+): ParsedSortIndex | null {
+  if (!sortIndex) return null;
+  const parts = sortIndex.split('|');
+  if (parts.length !== 3) return null;
+
+  const [p, yy, xx] = parts.map(Number);
+  if ([p, yy, xx].some(isNaN)) return null;
+
+  return {
+    page: p,
+    y: yy / COORD_SCALE,
+    x: xx / COORD_SCALE,
+  };
+}
+
+/**
+ * Compare two sort index strings lexicographically.
+ */
+export function compareSortIndex(indexA: string, indexB: string): number {
+  return indexA < indexB ? -1 : indexA > indexB ? 1 : 0;
+}
 
 export interface TipTapInlineNode {
   type: 'text';
@@ -66,8 +129,6 @@ function parseInlineMarkdownNodes(rawText: string): TipTapInlineNode[] {
 
 /**
  * Builds standard TipTap ProseMirror document JSON structure from markdown/text.
- * TipTap paragraph nodes require `content: [{ type: 'text', text: '...' }]`,
- * NOT a bare `text` string property on the paragraph node itself.
  */
 export function buildTipTapDocFromText(text: string): Record<string, unknown> {
   const trimmed = (text || '').trim();

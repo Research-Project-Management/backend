@@ -12,7 +12,6 @@ export * from './domain/attachments.domain';
 export * from './domain/annotation.normalizer';
 
 // DTOs
-export * from './dto/attachments.dto';
 export * from './dto/annotations.dto';
 
 // Services
@@ -21,9 +20,7 @@ export * from './services/attachment-renamer.service';
 export * from './services/annotations.service';
 export * from './services/pdf-annotation-importer.service';
 export * from './services/web-snapshot.service';
-export * from './services/ocr-preprocessor.service';
 export * from './services/ocr-worker-pool.service';
-export * from './services/ocr-sandwich-pdf.service';
 export * from './services/trusted-extraction.service';
 export * from './services/reference-matcher.service';
 export * from './services/extraction-metadata.synchronizer';
@@ -49,7 +46,4 @@ export * from './providers/ocr.provider';
 export * from './subscribers/item-lifecycle.subscriber';
 
 // Types
-export * from './types/attachments.types';
-export * from './types/annotations.types';
-export * from './types/trusted-extraction.types';
-export * from './types/ocr.types';
+export * from './types/extraction.types';

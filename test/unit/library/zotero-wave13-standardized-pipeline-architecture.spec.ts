@@ -9,7 +9,7 @@ import {
   SCHEMA_V42_DATA,
 } from '@/modules/library/core';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { MetadataReconciliationService } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
+import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
 import { toItemData } from '@/modules/library/ingestion/stages/commit.stage';
 import {
   buildCommandCreateInput,
@@ -23,7 +23,7 @@ import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.ty
 
 describe('Wave 13: Standardized Pipeline Architecture & Single-Source-of-Truth Harmonizer', () => {
   const normalizationPolicy = new NormalizationPolicy();
-  const reconciliationService = new MetadataReconciliationService();
+  const reconciliationPolicy = new ReconciliationPolicy();
 
   const mockPrismaClient = {
     tag: {
@@ -481,11 +481,11 @@ describe('Wave 13: Standardized Pipeline Architecture & Single-Source-of-Truth H
       expect(ALL_RECONCILABLE_METADATA_FIELDS).toContain('artworkMedium');
 
       // Reconcile a legal case where only Zotero type-specific fields are provided
-      const reconciledCase = reconciliationService.reconcile([
+      const reconciledCase = reconciliationPolicy.reconcile([
         fromPartial<MetadataCandidate>({
-          sourceProvider: 'ZoteroSync',
+          sourceName: 'ZoteroSync',
           confidenceScore: 0.95,
-          metadata: {
+          normalizedMetadata: {
             itemType: 'case',
             caseName: 'Marbury v. Madison',
             court: 'Supreme Court of the United States',
@@ -511,20 +511,20 @@ describe('Wave 13: Standardized Pipeline Architecture & Single-Source-of-Truth H
       ]);
 
       // Must NOT fall back to 'Untitled Document' when caseName is present
-      expect(reconciledCase.metadata.title).toBe('Marbury v. Madison');
+      expect(reconciledCase.proposedItem.title).toBe('Marbury v. Madison');
       expect(
-        (reconciledCase.metadata as Record<string, unknown>).caseName,
+        (reconciledCase.proposedItem as Record<string, unknown>).caseName,
       ).toBe('Marbury v. Madison');
-      expect((reconciledCase.metadata as Record<string, unknown>).court).toBe(
-        'Supreme Court of the United States',
-      );
-      expect(reconciledCase.metadata.publicationTitle).toBe('Cranch');
-      expect(reconciledCase.metadata.volume).toBe('5');
-      expect(reconciledCase.metadata.pages).toBe('137');
-      expect(reconciledCase.metadata.issue).toBe('1803-SCOTUS-1');
+      expect(
+        (reconciledCase.proposedItem as Record<string, unknown>).court,
+      ).toBe('Supreme Court of the United States');
+      expect(reconciledCase.proposedItem.publicationTitle).toBe('Cranch');
+      expect(reconciledCase.proposedItem.volume).toBe('5');
+      expect(reconciledCase.proposedItem.pages).toBe('137');
+      expect(reconciledCase.proposedItem.issue).toBe('1803-SCOTUS-1');
 
       // Handoff to CommitStage.toItemData
-      const commitPayload = toItemData(reconciledCase.metadata, {
+      const commitPayload = toItemData(reconciledCase.proposedItem, {
         userId: 'user-1',
       });
       expect(commitPayload.title).toBe('Marbury v. Madison');

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import { BurnableAnnotation } from '@/modules/library/citation/types/exports.types';
+import { BurnableAnnotation } from '@/modules/library/citation/types/citation.types';
 
 export type { BurnableAnnotation };
 

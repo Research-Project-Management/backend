@@ -6,13 +6,13 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
-import { UpdateStateDto } from '@/modules/library/catalog/dto/state.dto';
+import { UpdateStateDto } from '@/modules/library/catalog/dto/tags.dto';
 import {
   StateData,
   ReadingStatus,
   StateEntity,
   UpsertStateData,
-} from '@/modules/library/catalog/types/state.types';
+} from '@/modules/library/catalog/types/catalog.types';
 import {
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,

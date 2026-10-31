@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import {
   MetadataCandidate,
   FieldEvidence,
-} from '@/modules/library/ingestion/types/metadata-candidate.types';
+} from '@/modules/library/ingestion/types/metadata.types';
 import { ParsedBibtexEntry } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { ItemProvenancePolicy } from '@/modules/library/core';

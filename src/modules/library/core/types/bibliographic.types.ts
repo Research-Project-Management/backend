@@ -3,7 +3,7 @@
  * Aligned with Zotero v42 schema and CSL v1.0.2 standards.
  */
 import type { Prisma } from '@prisma/client';
-import type { TransactionHelpers } from '../ports/unit-of-work.port';
+import type { TransactionHelpers } from '../ports';
 
 export enum IngestionSource {
   Manual = 'Manual',
@@ -689,4 +689,4 @@ export interface ItemDetail {
   [key: string]: unknown;
 }
 
-export * from './bibliographic-conversion.types';
+export * from './schema.types';

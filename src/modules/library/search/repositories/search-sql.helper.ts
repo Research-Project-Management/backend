@@ -3,7 +3,7 @@ import { isUuid as isValidUuid } from '@/core';
 import {
   SearchOptions,
   FacetResult,
-} from '@/modules/library/search/types/search.types';
+} from '@/modules/library/search/dto/search.dto';
 import { isProjectScopeId, LIBRARY_REDIS_KEYS } from '@/modules/library/core';
 import { extractSearchQueryIdentifiers } from '@/modules/library/search/domain/item-specifications';
 

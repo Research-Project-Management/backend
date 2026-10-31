@@ -12,7 +12,7 @@ import { ExportsService } from '@/modules/library/citation/services/exports.serv
 import {
   ExportLibraryDto,
   ExportFormatType,
-} from '@/modules/library/citation/dto/exports.dto';
+} from '@/modules/library/citation/dto/citation.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { normalizeProjectScopeId } from '@/modules/library/core';

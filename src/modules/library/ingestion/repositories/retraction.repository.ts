@@ -12,7 +12,7 @@ import {
   RetractionDetails,
   RetractionNature,
   RetractionStats,
-} from '@/modules/library/ingestion/types/retraction.types';
+} from '@/modules/library/ingestion/types/ingestion.types';
 
 interface ItemRetractionMetadata {
   pmid?: string | null;

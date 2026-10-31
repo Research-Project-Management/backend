@@ -1,4 +1,4 @@
-﻿import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-capture.provider';
+import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-capture.provider';
 import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 

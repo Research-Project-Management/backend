@@ -6,7 +6,7 @@ import {
   EXPORT_CHUNK_SIZE,
   EXPORT_MAX_ITEMS,
   ExportItemRecord,
-} from '../domain/export-item.types';
+} from '../types/citation.types';
 
 export { EXPORT_CHUNK_SIZE, EXPORT_MAX_ITEMS };
 export type { ExportItemRecord };

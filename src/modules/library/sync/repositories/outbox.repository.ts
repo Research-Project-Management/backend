@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { OutboxStatus, OutboxEvent, Prisma } from '@prisma/client';
-import { uuidv7 } from '@/modules/library/core';
-import { PublishOutboxInput as CorePublishOutboxInput } from '@/modules/library/core/ports/unit-of-work.port';
+import { uuidv7, PublishOutboxInput as CorePublishOutboxInput } from '@/modules/library/core';
 
 export interface OutboxPublishInput extends CorePublishOutboxInput {
   dedupeKey?: string | null;

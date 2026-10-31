@@ -2,7 +2,7 @@ import {
   StateData,
   ReadingStatus,
   VALID_READING_TRANSITIONS,
-} from '@/modules/library/catalog/types/state.types';
+} from '@/modules/library/catalog/types/catalog.types';
 
 export function isValidStateTransition(
   current: ReadingStatus,
@@ -105,63 +105,90 @@ export interface PreferredMergedState {
   latestReadAt: Date | null;
 }
 
+const STATUS_RANK: Readonly<Record<string, 0 | 1 | 2>> = {
+  unread: 0,
+  reading: 1,
+  completed: 2,
+};
+
+const RANK_TO_STATUS = ['unread', 'reading', 'completed'] as const;
+
+/**
+ * Single-pass $O(N)$ Finite Lattice Join over user item states.
+ */
 export function pickPreferredMergedState(
   states: ReadonlyArray<MergeableUserItemState>,
 ): PreferredMergedState {
-  const positiveRatings = states
-    .map((s) => s.rating)
-    .filter((r): r is number => typeof r === 'number' && r > 0);
-  const maxRating: number | null =
-    positiveRatings.length > 0
-      ? Math.max(...positiveRatings)
-      : states.length > 0 && states.every((s) => s.rating === 0)
-        ? 0
-        : null;
-  const isStarred = states.some((s) => Boolean(s.isStarred));
-  const isCompleted = states.some((s) => s.readStatus === 'completed');
-  const isReading = states.some((s) => s.readStatus === 'reading');
-  const readStatus = isCompleted
-    ? 'completed'
-    : isReading
-      ? 'reading'
-      : 'unread';
+  let isStarred = false;
+  let maxPosRating = 0;
+  let allZeroRating = states.length > 0;
+  let maxStatusRank: 0 | 1 | 2 = 0;
+  let maxCurrentPage: number | null = null;
+  let latestReadAt: Date | null = null;
+  let latestReadTs = -Infinity;
+  let latestOpenedAt: Date | null = null;
+  let latestOpenedTs = -Infinity;
 
-  const latestReadAt =
-    states
-      .map((s) => s.lastReadAt)
-      .filter((d): d is Date => d instanceof Date)
-      .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+  let latestScroll: unknown = undefined;
+  let bestScrollReadTs = -1;
+  let bestScrollOpenTs = -1;
+  let bestScrollPage = -Infinity;
 
-  const latestOpenedAt =
-    states
-      .map((s) => s.lastOpenedAt)
-      .filter((d): d is Date => d instanceof Date)
-      .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+  for (const s of states) {
+    if (s.isStarred) isStarred = true;
 
-  const validPages = states
-    .map((s) => s.currentPage)
-    .filter((p): p is number => typeof p === 'number' && p > 0);
-  const maxCurrentPage = validPages.length > 0 ? Math.max(...validPages) : null;
-  const statesWithScroll = states.filter(
-    (s) => s.scrollPosition !== null && s.scrollPosition !== undefined,
-  );
-  statesWithScroll.sort((a, b) => {
-    const readA = a.lastReadAt ? a.lastReadAt.getTime() : 0;
-    const readB = b.lastReadAt ? b.lastReadAt.getTime() : 0;
-    if (readB !== readA) return readB - readA;
+    if (typeof s.rating === 'number' && s.rating > 0) {
+      if (s.rating > maxPosRating) maxPosRating = s.rating;
+      allZeroRating = false;
+    } else if (s.rating !== 0) {
+      allZeroRating = false;
+    }
 
-    const openA = a.lastOpenedAt ? a.lastOpenedAt.getTime() : 0;
-    const openB = b.lastOpenedAt ? b.lastOpenedAt.getTime() : 0;
-    if (openB !== openA) return openB - openA;
+    const rank = s.readStatus ? (STATUS_RANK[s.readStatus] ?? 0) : 0;
+    if (rank > maxStatusRank) maxStatusRank = rank;
 
-    return (b.currentPage || 1) - (a.currentPage || 1);
-  });
-  const latestScroll = statesWithScroll[0]?.scrollPosition;
+    if (
+      typeof s.currentPage === 'number' &&
+      s.currentPage > 0 &&
+      (maxCurrentPage === null || s.currentPage > maxCurrentPage)
+    ) {
+      maxCurrentPage = s.currentPage;
+    }
+
+    const readTs = s.lastReadAt instanceof Date ? s.lastReadAt.getTime() : 0;
+    if (s.lastReadAt instanceof Date && readTs > latestReadTs) {
+      latestReadTs = readTs;
+      latestReadAt = s.lastReadAt;
+    }
+
+    const openTs =
+      s.lastOpenedAt instanceof Date ? s.lastOpenedAt.getTime() : 0;
+    if (s.lastOpenedAt instanceof Date && openTs > latestOpenedTs) {
+      latestOpenedTs = openTs;
+      latestOpenedAt = s.lastOpenedAt;
+    }
+
+    if (s.scrollPosition !== null && s.scrollPosition !== undefined) {
+      const page = s.currentPage || 1;
+      const isBetterScroll =
+        latestScroll === undefined ||
+        readTs > bestScrollReadTs ||
+        (readTs === bestScrollReadTs &&
+          (openTs > bestScrollOpenTs ||
+            (openTs === bestScrollOpenTs && page > bestScrollPage)));
+      if (isBetterScroll) {
+        latestScroll = s.scrollPosition;
+        bestScrollReadTs = readTs;
+        bestScrollOpenTs = openTs;
+        bestScrollPage = page;
+      }
+    }
+  }
 
   return {
     isStarred,
-    maxRating,
-    readStatus,
+    maxRating: maxPosRating > 0 ? maxPosRating : allZeroRating ? 0 : null,
+    readStatus: RANK_TO_STATUS[maxStatusRank],
     maxCurrentPage,
     latestScroll,
     latestOpenedAt,

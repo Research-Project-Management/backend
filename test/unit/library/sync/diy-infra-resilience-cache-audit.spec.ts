@@ -6,7 +6,7 @@ import { AcademicHttpClient } from '@/modules/library/core/services/academic-htt
 import { MetadataExecutorService } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { DblpProvider } from '@/modules/library/ingestion/providers/dblp.provider';
 import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
-import { FeedsEngine } from '@/modules/library/ingestion/services/feeds.engine';
+import { FeedsEngine } from '@/modules/library/ingestion/services/feeds.service';
 import { DoiContentNegotiationService } from '@/modules/library/citation/services/doi-content-negotiation.service';
 import { MetadataCache } from '@/modules/library/ingestion/repositories/metadata.cache';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';

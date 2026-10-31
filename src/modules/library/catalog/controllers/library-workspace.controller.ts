@@ -5,7 +5,7 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { CursorPaginationQueryDto } from '@/modules/library/catalog/dto/items.dto';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
-import { LibraryBootstrapService } from '@/modules/library/catalog/services/library-bootstrap.service';
+import { LibraryBootstrapService } from '@/modules/library/catalog/services/types.service';
 
 export interface RequestWithAccessHint {
   role?: string;
@@ -119,11 +119,11 @@ export function buildGetItemsOptions(
   };
 }
 
-@ApiTags('Library Permissions')
+@ApiTags('Library Workspace')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/library', 'api/v1/projects/:projectId/library'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
-export class LibraryPermissionsController {
+export class LibraryWorkspaceController {
   constructor(
     private readonly queryService: ItemQueryService,
     private readonly bootstrapService?: LibraryBootstrapService,
@@ -183,3 +183,6 @@ export class LibraryPermissionsController {
     );
   }
 }
+
+export { LibraryWorkspaceController as LibraryPermissionsController };
+

@@ -4,11 +4,151 @@ import {
   RectCoords,
   CreateAnnotationData,
   UpdateAnnotationData,
-} from '@/modules/library/extraction/types/annotations.types';
+} from '@/modules/library/extraction/types/extraction.types';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 
 export const DEFAULT_ANNOTATION_COLOR = '#ffd400';
 const HEX_COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
+
+export interface NormalizedRectBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Extracts canonical top-left anchor { x1, y1 } from either a 4-number tuple [x1, y1, x2, y2],
+ * an array of rect objects [{ x1, y1, ... }], or a single rect object.
+ */
+export function extractTopLeftAnchor(
+  rectCoords: unknown,
+): { x1: number; y1: number } | null {
+  if (!rectCoords) return null;
+  if (Array.isArray(rectCoords)) {
+    if (rectCoords.length === 0) return null;
+    if (
+      rectCoords.length === 4 &&
+      rectCoords.every((c) => typeof c === 'number' && Number.isFinite(c))
+    ) {
+      const [x1, y1, x2, y2] = rectCoords as [number, number, number, number];
+      return { x1: Math.min(x1, x2), y1: Math.min(y1, y2) };
+    }
+    const first = rectCoords[0];
+    if (first && typeof first === 'object' && !Array.isArray(first)) {
+      const r = first as Record<string, unknown>;
+      const rawX = Number(r.x1 ?? r.x);
+      const rawY = Number(r.y1 ?? r.y);
+      if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
+        return { x1: rawX, y1: rawY };
+      }
+    }
+    return null;
+  }
+  if (typeof rectCoords === 'object') {
+    const r = rectCoords as Record<string, unknown>;
+    const rawX = Number(r.x1 ?? r.x);
+    const rawY = Number(r.y1 ?? r.y);
+    if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
+      return { x1: rawX, y1: rawY };
+    }
+  }
+  return null;
+}
+
+/**
+ * Normalizes a single rect item (4-number tuple or object) into a canonical NormalizedRectBox.
+ */
+export function normalizeSingleRectBox(
+  item: unknown,
+): NormalizedRectBox | null {
+  if (
+    Array.isArray(item) &&
+    item.length === 4 &&
+    item.every((n) => typeof n === 'number')
+  ) {
+    const [x1, y1, x2, y2] = item as [number, number, number, number];
+    return {
+      x1,
+      y1,
+      x2,
+      y2,
+      width: Math.max(0, x2 - x1),
+      height: Math.max(0, y2 - y1),
+    };
+  }
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    const r = item as Record<string, unknown>;
+    const x1 =
+      typeof r.x1 === 'number'
+        ? r.x1
+        : typeof r.x === 'number'
+          ? r.x
+          : undefined;
+    const y1 =
+      typeof r.y1 === 'number'
+        ? r.y1
+        : typeof r.y === 'number'
+          ? r.y
+          : undefined;
+    const w = typeof r.width === 'number' ? r.width : undefined;
+    const h = typeof r.height === 'number' ? r.height : undefined;
+    const x2 =
+      typeof r.x2 === 'number'
+        ? r.x2
+        : x1 !== undefined && w !== undefined
+          ? x1 + w
+          : undefined;
+    const y2 =
+      typeof r.y2 === 'number'
+        ? r.y2
+        : y1 !== undefined && h !== undefined
+          ? y1 + h
+          : undefined;
+    if (
+      x1 !== undefined &&
+      y1 !== undefined &&
+      x2 !== undefined &&
+      y2 !== undefined
+    ) {
+      return {
+        x1,
+        y1,
+        x2,
+        y2,
+        width: w ?? Math.max(0, x2 - x1),
+        height: h ?? Math.max(0, y2 - y1),
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Normalizes arbitrary rectCoords JSON into an array of NormalizedRectBox objects.
+ */
+export function normalizeRectCoordsToBoxes(
+  rc: unknown,
+): NormalizedRectBox[] {
+  const rects: NormalizedRectBox[] = [];
+  if (Array.isArray(rc)) {
+    if (rc.length === 4 && rc.every((n) => typeof n === 'number')) {
+      const single = normalizeSingleRectBox(rc);
+      if (single) rects.push(single);
+    } else {
+      for (const entry of rc) {
+        const mapped = normalizeSingleRectBox(entry);
+        if (mapped) rects.push(mapped);
+      }
+    }
+  } else if (rc && typeof rc === 'object') {
+    const single = normalizeSingleRectBox(rc);
+    if (single) rects.push(single);
+  }
+  return rects;
+}
 
 /**
  * AnnotationNormalizer — Deep Module for annotation payload formatting,

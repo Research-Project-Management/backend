@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { asMetaObject } from '@/modules/library/ingestion/services/duplicate-detector.service';
+import { asMetaObject } from './duplicate-clustering.helper';
 import {
   normalizeDoi,
   normalizeArxivId,
@@ -9,6 +9,8 @@ import {
   normalizeIssn,
   parseCreatorString,
   ItemProvenancePolicy,
+  countFullGivenNames,
+  isBetterAuthorListCandidate,
 } from '@/modules/library/core';
 
 export interface ContributorShape {
@@ -154,20 +156,6 @@ export async function syncMergedContributors(
     }
   }
 
-  const isFullGiven = (fn: string) =>
-    fn
-      .replace(/[.,]/g, '')
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-      .some((t) => t.length >= 2 && !/^[A-Z]+$/.test(t));
-  const countFullGiven = (list: Array<ContributorShape | string>) =>
-    list.reduce(
-      (acc, c, idx) =>
-        acc + (isFullGiven(mapContributorInput(c, idx).firstName) ? 1 : 0),
-      0,
-    );
-
   const primaryContribCount =
     typeof tx.contributor?.count === 'function'
       ? await tx.contributor.count({ where: { itemId: primaryId } })
@@ -185,7 +173,7 @@ export async function syncMergedContributors(
           list.length > 0,
           ['authors', 'contributors'],
         ),
-        fullGivenCount: countFullGiven(list),
+        fullGivenCount: countFullGivenNames(list),
       };
     })
     .filter((e) => e.list.length > 0)
@@ -213,15 +201,14 @@ export async function syncMergedContributors(
       true,
       ['authors', 'contributors'],
     );
-    const primaryFullGiven = countFullGiven(primaryContribs);
-    const highAuthAdvantage = primaryAuth > 1 ? 15 : 0.14;
-    const shouldUpgrade =
-      (bestDonor.auth >= primaryAuth &&
-        bestDonor.list.length >= primaryContribs.length &&
-        (bestDonor.fullGivenCount > primaryFullGiven ||
-          bestDonor.list.length > primaryContribs.length)) ||
-      (bestDonor.auth > primaryAuth + highAuthAdvantage &&
-        bestDonor.list.length > 0);
+    const shouldUpgrade = isBetterAuthorListCandidate(
+      bestDonor.auth,
+      bestDonor.list.length,
+      bestDonor.fullGivenCount,
+      primaryAuth,
+      primaryContribs.length,
+      countFullGivenNames(primaryContribs),
+    );
     if (shouldUpgrade) {
       await tx.contributor.deleteMany({ where: { itemId: primaryId } });
       const data = bestDonor.list.map(mapContributorInput);

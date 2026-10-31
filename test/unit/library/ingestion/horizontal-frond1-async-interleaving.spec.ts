@@ -1,5 +1,5 @@
 import { CommitStage, toItemData } from '@/modules/library/ingestion/stages/commit.stage';
-import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
+import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
 import { PipelineBatchExecutor } from '@/modules/library/ingestion/services/pipeline-batch.executor';
 import { PipelineSideEffectsService } from '@/modules/library/ingestion/services/pipeline-side-effects.service';
 import {
@@ -10,7 +10,7 @@ import { MetadataResolverService } from '@/modules/library/ingestion/services/me
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { ExtractionMetadataSynchronizer } from '@/modules/library/extraction/services/extraction-metadata.synchronizer';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
-import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 
 describe('Horizontal Frond 1 — Async Pipeline, Batch Executor, Extraction Synchronizer & Retraction Interleaving', () => {
   describe('Fix 1: CommitStage vs PipelineSideEffectsService.attachFile Short-Circuit', () => {
@@ -125,7 +125,7 @@ describe('Horizontal Frond 1 — Async Pipeline, Batch Executor, Extraction Sync
         }),
       };
 
-      const enrichStage = new EnrichStage(mockMetadataService as never);
+      const enrichStage = new ResolveStage(mockMetadataService as never);
       const partialBibRecord: MetadataCandidate = {
         candidateId: 'rec-partial-1',
         sourceKind: 'RECORD',
@@ -160,8 +160,8 @@ describe('Horizontal Frond 1 — Async Pipeline, Batch Executor, Extraction Sync
         updateRunStatus: jest.fn().mockResolvedValue(undefined),
         createReviewCase: jest.fn().mockResolvedValue(undefined),
       };
-      const reconcileMock = {
-        execute: jest.fn().mockImplementation(async (cands: MetadataCandidate[]) => {
+      const resolveMock = {
+        coalesceAndVerify: jest.fn().mockImplementation(async (cands: MetadataCandidate[]) => {
           const provider = cands.find((c) => c.sourceKind === 'PROVIDER');
           const base = cands[0];
           return {
@@ -171,9 +171,7 @@ describe('Horizontal Frond 1 — Async Pipeline, Batch Executor, Extraction Sync
             },
           };
         }),
-      };
-      const matchMock = {
-        execute: jest.fn().mockResolvedValue({ matchType: 'NONE' }),
+        match: jest.fn().mockResolvedValue({ matchType: 'NONE' }),
       };
       let counter = 0;
       const commitMock = {
@@ -190,8 +188,7 @@ describe('Horizontal Frond 1 — Async Pipeline, Batch Executor, Extraction Sync
 
       const executor = new PipelineBatchExecutor(
         repoMock as never,
-        reconcileMock as never,
-        matchMock as never,
+        resolveMock as never,
         commitMock as never,
         sideEffectsMock as never,
       );
@@ -266,7 +263,7 @@ describe('Horizontal Frond 1 — Async Pipeline, Batch Executor, Extraction Sync
       });
 
       expect(commitMock.execute).toHaveBeenCalledTimes(2);
-      const reconcileSecondCallCands = reconcileMock.execute.mock.calls[1][0] as MetadataCandidate[];
+      const reconcileSecondCallCands = resolveMock.coalesceAndVerify.mock.calls[1][0] as MetadataCandidate[];
       expect(reconcileSecondCallCands).toHaveLength(1);
       expect(reconcileSecondCallCands[0].candidateId).toBe('cand-2');
     });

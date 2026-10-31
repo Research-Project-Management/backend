@@ -3,11 +3,11 @@ import { Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';
 import { CreateCollectionDto, UpdateCollectionDto, AssignItemsToCollectionDto, CopyCollectionDto } from '@/modules/library/catalog/dto/collections.dto';
-import { CollectionDeleteStrategy, CollectionTreeNode } from '@/modules/library/catalog/types/collections.types';
-import { normalizeParentId, sanitizeCollectionName, sanitizeCollectionDescription } from '@/modules/library/catalog/domain/collections.domain';
+import { CollectionDeleteStrategy, CollectionTreeNode } from '@/modules/library/catalog/types/catalog.types';
+import { normalizeParentId, sanitizeCollectionName, sanitizeCollectionDescription } from '@/modules/library/catalog/domain/tree.engine';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import { RedisCacheService } from '@/core';
-import { normalizeProjectScopeId, isProjectScopeId, LIBRARY_EVENT_TYPES, TransactionHelpers } from '@/modules/library/core';
+import { normalizeProjectScopeId, isProjectScopeId, LIBRARY_EVENT_TYPES, TransactionHelpers, executeStandardLibraryCacheInvalidation } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { ItemCacheCoordinator } from './item-cache.coordinator';
@@ -17,7 +17,7 @@ import {
   executeDeleteCollectionWithCascade,
   executeCopyCollectionSubtree,
   transferCollectionItemMembershipsInTx,
-} from '@/modules/library/catalog/domain/collection-membership.helper';
+} from './collection-membership.helper';
 @Injectable()
 export class CollectionsService {
   constructor(
@@ -37,45 +37,15 @@ export class CollectionsService {
     projectId?: string,
     itemIds?: string[],
   ): Promise<void> {
-    if (this.cacheCoordinator) {
-      await this.cacheCoordinator.invalidateForWrite({
+    await executeStandardLibraryCacheInvalidation(
+      this.cacheCoordinator,
+      this.cache,
+      {
         userId,
-        projectId,
+        projectId: this.resolveValidProjectId(projectId) ?? projectId,
         itemIds,
-      });
-      return;
-    }
-    if (!this.cache) return;
-    const effectiveProjectId = this.resolveValidProjectId(projectId);
-    const scopeId = effectiveProjectId ? `proj:${effectiveProjectId}` : userId;
-    await Promise.all([
-      this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(userId)),
-      this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(`u:${userId}`)),
-      this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-      this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(userId)),
-      this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
-      this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
-      this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(userId)),
-      ...(effectiveProjectId
-        ? [
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(effectiveProjectId)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(effectiveProjectId)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(effectiveProjectId)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(effectiveProjectId)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(effectiveProjectId)),
-            this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(effectiveProjectId)),
-            this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(scopeId)),
-          ]
-        : []),
-      ...(itemIds && itemIds.length > 0
-        ? Array.from(new Set(itemIds)).flatMap((id) => [
-            this.cache!.del(LIBRARY_REDIS_KEYS.item(id)),
-            this.cache!.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
-            this.cache!.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
-          ])
-        : []),
-    ]);
+      },
+    );
   }
   async getCollections(userId: string, projectId?: string) {
     const effectiveProjectId = this.resolveValidProjectId(projectId);

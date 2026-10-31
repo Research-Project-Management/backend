@@ -6,7 +6,7 @@ import { QueryRepository } from '@/modules/library/catalog/repositories/query.re
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { CatalogFacade } from '@/modules/library/catalog/catalog.facade';
@@ -233,6 +233,8 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       expect(queryRepo.findItemMetadataByProviders).toHaveBeenCalledWith(
         mockItemId,
         expect.arrayContaining(['pdf_fulltext']),
+        undefined,
+        { userId: mockUserId, projectId: null },
       );
       expect(cache.set).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),

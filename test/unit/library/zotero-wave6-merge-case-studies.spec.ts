@@ -20,7 +20,7 @@ import type { ItemService } from '@/modules/library/catalog/services/items.servi
 import type { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import type { TypesService } from '@/modules/library/catalog/services/types.service';
 import { CurationController } from '@/modules/library/ingestion/controllers/curation.controller';
-import type { QualityService } from '@/modules/library/ingestion/services/quality.service';
+import type { QualityService } from '@/modules/library/ingestion/services/retraction.service';
 import { PROJECT_ROLES_KEY } from '@/modules/project/access';
 
 describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Studies (Personal, Project & Systematic Review Benchmarks)', () => {

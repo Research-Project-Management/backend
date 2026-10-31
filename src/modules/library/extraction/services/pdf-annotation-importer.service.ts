@@ -9,7 +9,8 @@ import { AnnotationsRepository } from '@/modules/library/extraction/repositories
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { AnnotationsService } from './annotations.service';
-import { AnnotationType } from '@/modules/library/extraction/types/annotations.types';
+import { AnnotationType } from '@/modules/library/extraction/types/extraction.types';
+import { extractTopLeftAnchor } from '@/modules/library/extraction/domain/annotation.normalizer';
 import {
   extractFileIdFromUrl,
   normalizeProjectScopeId,
@@ -204,12 +205,6 @@ export class PdfAnnotationImporterService {
             const normX1 = primaryRect.x1;
             const normY1 = primaryRect.y1;
 
-            interface RectCoordLike {
-              x1?: number;
-              y1?: number;
-              x?: number;
-              y?: number;
-            }
             interface ExistingAnnotationLike {
               pageIndex?: number;
               type?: string;
@@ -220,29 +215,14 @@ export class PdfAnnotationImporterService {
               (ea: ExistingAnnotationLike) => {
                 if (ea.pageIndex !== pageIndex || ea.type !== mappedType)
                   return false;
-                if (!Array.isArray(ea.rectCoords) || ea.rectCoords.length === 0)
-                  return false;
-
-                // Handle 4-number tuple [x1, y1, x2, y2]
-                if (
-                  ea.rectCoords.length === 4 &&
-                  typeof ea.rectCoords[0] === 'number' &&
-                  typeof ea.rectCoords[1] === 'number'
-                ) {
-                  return (
-                    Math.abs(ea.rectCoords[0] - normX1) < 0.02 &&
-                    Math.abs(ea.rectCoords[1] - normY1) < 0.02
-                  );
-                }
-
-                // Handle array of rect objects [{ x1, y1, ... }]
-                const first = ea.rectCoords[0] as RectCoordLike | undefined;
-                if (!first || typeof first !== 'object') return false;
-                const firstX1 = first.x1 ?? first.x ?? 0;
-                const firstY1 = first.y1 ?? first.y ?? 0;
+                const anchor = extractTopLeftAnchor(ea.rectCoords);
+                if (!anchor) return false;
+                // Chebyshev (L_infinity) distance: max(|x1 - x1'|, |y1 - y1'|) < 0.005
                 return (
-                  Math.abs(firstX1 - normX1) < 0.02 &&
-                  Math.abs(firstY1 - normY1) < 0.02
+                  Math.max(
+                    Math.abs(anchor.x1 - normX1),
+                    Math.abs(anchor.y1 - normY1),
+                  ) < 0.005
                 );
               },
             );

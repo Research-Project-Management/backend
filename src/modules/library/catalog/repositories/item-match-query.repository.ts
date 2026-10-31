@@ -392,4 +392,97 @@ export class ItemMatchQueryRepository {
       })),
     };
   }
+
+  private static readonly RECIPROCAL_RELATION_TYPE_MAP: Readonly<
+    Record<string, string>
+  > = {
+    cites: 'cited_by',
+    cited_by: 'cites',
+    is_preprint_of: 'is_published_version_of',
+    is_published_version_of: 'is_preprint_of',
+    rebuts: 'rebutted_by',
+    extends: 'extended_by',
+    replicates: 'replicated_by',
+    uses_dataset: 'dataset_used_by',
+    survey_of: 'reviewed_in',
+    supplements: 'supplemented_by',
+    is_translation_of: 'translated_as',
+  };
+
+  async getRelations(
+    client: PrismaClientOrTx | undefined,
+    itemId: string,
+  ): Promise<Record<string, unknown>[]> {
+    if (!isUuid(itemId)) return [];
+    const activeClient = this.getClient(client);
+    const contributorInclude = {
+      contributors: {
+        where: { creatorType: 'author' },
+        orderBy: { orderIndex: 'asc' as const },
+      },
+    };
+    const relations = await activeClient.itemRelation.findMany({
+      where: {
+        OR: [
+          { sourceItemId: itemId, targetItem: { deletedAt: null } },
+          { targetItemId: itemId, sourceItem: { deletedAt: null } },
+        ],
+      },
+      include: {
+        sourceItem: { include: contributorInclude },
+        targetItem: { include: contributorInclude },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!relations?.length) return [];
+
+    const seenPeerIds = new Set<string>();
+    const result: Record<string, unknown>[] = [];
+
+    for (const r of relations) {
+      const isOutgoing = r.sourceItemId === itemId;
+      const peerItem = isOutgoing ? r.targetItem : r.sourceItem;
+      if (!peerItem || peerItem.id === itemId || seenPeerIds.has(peerItem.id)) {
+        continue;
+      }
+      seenPeerIds.add(peerItem.id);
+
+      const rawType = r.relationType as string;
+      const effectiveRelationType = isOutgoing
+        ? rawType
+        : (ItemMatchQueryRepository.RECIPROCAL_RELATION_TYPE_MAP[rawType] ??
+          rawType);
+
+      const authorNames = (peerItem.contributors || [])
+        .map(
+          (c: {
+            fullName: string | null;
+            firstName: string | null;
+            lastName: string | null;
+          }) =>
+            c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+        )
+        .filter(Boolean);
+
+      result.push({
+        id: peerItem.id,
+        relationId: r.id,
+        targetItemId: peerItem.id,
+        title: peerItem.title || 'Untitled Item',
+        authors: authorNames,
+        year: peerItem.year,
+        doi: peerItem.doi,
+        itemType: peerItem.itemType,
+        citationKey: peerItem.citationKey,
+        relationType: effectiveRelationType,
+        direction: isOutgoing ? 'outgoing' : 'incoming',
+        description: r.description || '',
+        linkedAt: r.createdAt ? r.createdAt.toISOString() : undefined,
+        targetItem: peerItem,
+      });
+    }
+
+    return result;
+  }
 }

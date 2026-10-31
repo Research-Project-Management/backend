@@ -1,41 +1,108 @@
-import {
-  Injectable,
-  Logger,
-  Optional,
-  OnApplicationBootstrap,
-  OnApplicationShutdown,
-  OnModuleDestroy,
-} from '@nestjs/common';
+import { Injectable, Logger, Optional, OnApplicationBootstrap, OnApplicationShutdown, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
-import { OutboxMetrics } from './outbox.metrics';
-import { OutboxStatus } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
+import { Job, Queue } from 'bullmq';
+import { OutboxEvent, OutboxStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import {
-  LIBRARY_OUTBOX_QUEUE,
-  LIBRARY_OUTBOX_JOB,
-} from '@/modules/library/sync/domain/outbox.domain';
-import {
-  OutboxRepository,
-  ClaimedOutboxEvent,
-} from '../repositories/outbox.repository';
+import { LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB } from '@/modules/library/sync/domain/outbox.domain';
+import { OutboxRepository, ClaimedOutboxEvent } from '../repositories/outbox.repository';
 import { ChangeLogRepository } from '../repositories/changelog.repository';
-import {
-  libraryConfig,
-  LibraryConfigService,
-} from '@/modules/library/core/config/library.config';
+import { libraryConfig, LibraryConfigService } from '@/modules/library/core/config/library.config';
 import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
-
-import { OutboxDispatchHandler } from '@/modules/library/core';
+import { DomainEventEnvelope, OutboxDispatchHandler } from '@/modules/library/core';
 import { shouldRunWorkerConsumers } from '@/core';
 import {
   handleMissingOutboxHandler,
   handleOutboxDispatchFailure,
   executeOutboxGarbageCollection,
   buildOutboxDiagnosticSummary,
-} from '../domain/outbox-event.handlers';
+} from '../domain/outbox.domain';
+
 export type { OutboxDispatchHandler };
+
+@Injectable()
+export class OutboxMetrics {
+  private readonly logger = new Logger(OutboxMetrics.name);
+  private readonly counters = new Map<string, number>();
+  private readonly gauges = new Map<string, number>();
+
+  incrementCounter(name: string, value: number = 1): number {
+    const next = (this.counters.get(name) || 0) + value;
+    this.counters.set(name, next);
+    return next;
+  }
+
+  getCounter(name: string): number {
+    return this.counters.get(name) || 0;
+  }
+
+  setGauge(name: string, value: number) {
+    this.gauges.set(name, value);
+  }
+
+  getGauge(name: string): number {
+    return this.gauges.get(name) || 0;
+  }
+
+  recordOutboxDispatch(durationMs: number, success: boolean) {
+    const safeDuration = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
+    this.incrementCounter('outbox.dispatch.total', 1);
+    this.incrementCounter(success ? 'outbox.dispatch.succeeded' : 'outbox.dispatch.failed', 1);
+    this.incrementCounter('outbox.dispatch.duration_ms.sum', safeDuration);
+    this.setGauge('outbox.dispatch.last_duration_ms', safeDuration);
+    this.setGauge('outbox.dispatch.last_timestamp_ms', Date.now());
+    this.logger.debug(`[OutboxMetrics] Outbox dispatch executed in ${safeDuration}ms (success=${success})`);
+  }
+
+  getSnapshot() {
+    return {
+      dispatchedTotal: this.getCounter('outbox.dispatch.total'),
+      succeededTotal: this.getCounter('outbox.dispatch.succeeded'),
+      failedTotal: this.getCounter('outbox.dispatch.failed'),
+      totalDurationMs: this.getCounter('outbox.dispatch.duration_ms.sum'),
+      lastDurationMs: this.getGauge('outbox.dispatch.last_duration_ms'),
+      lastDispatchAt: this.getGauge('outbox.dispatch.last_timestamp_ms'),
+    };
+  }
+}
+
+@Injectable()
+export class OutboxDispatcher implements OutboxDispatchHandler {
+  private readonly logger = new Logger(OutboxDispatcher.name);
+
+  constructor(
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+    @Optional() private readonly metricsService?: OutboxMetrics,
+  ) {}
+
+  async publish<T = unknown>(envelope: DomainEventEnvelope<T>): Promise<void> {
+    this.logger.debug(
+      `[DomainEventDispatcher] Dispatched ${envelope.eventType} for aggregate ${envelope.aggregateId} (scope: ${envelope.scopeId || envelope.projectId || envelope.userId})`,
+    );
+    if (this.eventEmitter) await this.eventEmitter.emitAsync(envelope.eventType, envelope);
+    this.metricsService?.incrementCounter('outbox_dispatched_total');
+  }
+
+  handle(event: OutboxEvent, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+      return Promise.reject(
+        new SubsystemUnavailableException(`Handler execution aborted for event ${event.id} (lease lost)`, { eventId: event.id }),
+      );
+    }
+    return this.publish({
+      eventId: event.id,
+      userId: event.userId,
+      projectId: event.projectId ?? undefined,
+      scopeId: event.projectId || event.userId,
+      aggregateId: event.aggregateId,
+      eventType: event.eventType,
+      payload: event.payload,
+      createdAt: event.createdAt,
+      schemaVersion: 1,
+    });
+  }
+}
 
 @Injectable()
 export class OutboxWorker
@@ -46,7 +113,7 @@ export class OutboxWorker
   private defaultHandler?: OutboxDispatchHandler;
   private readonly maxRetries = 5;
   private static readonly CONCURRENCY = 5;
-  private static readonly GC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+  private static readonly GC_INTERVAL_MS = 60 * 60 * 1000;
   private readonly workerId: string;
   private readonly repo: OutboxRepository;
 
@@ -113,10 +180,6 @@ export class OutboxWorker
     return [...registered];
   }
 
-  /**
-   * Immediately dispatches or enqueues newly written outbox events.
-   * Triggered upon PostgreSQL transaction commit from TransactionService.
-   */
   async notifyEvents(eventIds: string[]): Promise<void> {
     if (!eventIds || eventIds.length === 0) return;
 
@@ -164,16 +227,11 @@ export class OutboxWorker
     }
   }
 
-  /**
-   * Processes a single OutboxEvent by ID with atomic CAS claiming.
-   * Idempotent: safe to run from BullMQ or in-memory runner.
-   */
   async processEventById(
     eventId: string,
     options?: { rethrowOnRetryableFailure?: boolean },
   ): Promise<boolean> {
     const event = await this.repo.findById(eventId);
-
     if (!event || event.status === OutboxStatus.PUBLISHED) {
       return true;
     }
@@ -189,9 +247,7 @@ export class OutboxWorker
       leaseMs,
       Boolean(options?.rethrowOnRetryableFailure),
     );
-    if (!claimed) {
-      return true;
-    }
+    if (!claimed) return true;
 
     const effectiveHandlers = this.getEffectiveHandlers(event.eventType);
     if (effectiveHandlers.length === 0) {
@@ -212,9 +268,7 @@ export class OutboxWorker
       { recordDispatchMetrics: true },
     );
 
-    if (result.status === 'published') {
-      return true;
-    }
+    if (result.status === 'published') return true;
     if (result.status === 'fencingAborted') {
       this.logger.warn(
         `[OutboxWorker] Fencing token check aborted duplicate publication for event ${eventId} (workerId: ${this.workerId}). Another worker has claimed or committed it.`,
@@ -240,11 +294,7 @@ export class OutboxWorker
     | { status: 'published' }
     | { status: 'leaseLost' }
     | { status: 'fencingAborted' }
-    | {
-        status: 'failed';
-        outcome: 'deadLettered' | 'retried';
-        error: unknown;
-      }
+    | { status: 'failed'; outcome: 'deadLettered' | 'retried'; error: unknown }
   > {
     const abortController = new AbortController();
     let isLeaseLost = false;
@@ -293,9 +343,7 @@ export class OutboxWorker
       }
 
       const published = await this.repo.markPublished(event.id, this.workerId);
-      if (!published) {
-        return { status: 'fencingAborted' };
-      }
+      if (!published) return { status: 'fencingAborted' };
       if (options?.recordDispatchMetrics) {
         this.metricsService?.recordOutboxDispatch(durationMs, true);
       }
@@ -384,9 +432,7 @@ export class OutboxWorker
   }
 
   startGcSweep(intervalMs: number = OutboxWorker.GC_INTERVAL_MS) {
-    if (this.gcTimer) {
-      clearInterval(this.gcTimer);
-    }
+    if (this.gcTimer) clearInterval(this.gcTimer);
     this.gcTimer = setInterval(() => {
       void this.runDatabaseGarbageCollection();
     }, intervalMs);
@@ -456,9 +502,7 @@ export class OutboxWorker
   }
 
   startPolling(intervalMs: number = 2000) {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-    }
+    if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = setInterval(() => {
       void this.pollAndProcess();
     }, intervalMs);
@@ -528,9 +572,7 @@ export class OutboxWorker
     const effectiveHandlers = this.getEffectiveHandlers(event.eventType);
     if (effectiveHandlers.length === 0) {
       const outcome = await this.handleMissingHandler(event);
-      if (outcome === 'deadLettered') {
-        deadLettered++;
-      }
+      if (outcome === 'deadLettered') deadLettered++;
       return { processed, failed, deadLettered, reclaimed };
     }
 
@@ -572,8 +614,6 @@ export class OutboxWorker
       return { processed: 0, failed: 0, deadLettered: 0, reclaimed: 0 };
     }
 
-    // Group claimed items by aggregateId so events for the same aggregate stay strictly ordered
-    // while independent aggregates process concurrently with bounded concurrency (CONCURRENCY = 5).
     const aggregateGroups = new Map<string, ClaimedOutboxEvent[]>();
     for (const item of claimedItems) {
       const aggKey = item.event.aggregateId || item.event.id;
@@ -609,7 +649,6 @@ export class OutboxWorker
     });
 
     await Promise.all(workers);
-
     return { processed, failed, deadLettered, reclaimed };
   }
 
@@ -624,5 +663,61 @@ export class OutboxWorker
     this.stopPolling();
     this.stopGcSweep();
     this.logger.log(`Outbox consumer [${this.workerId}] shut down gracefully.`);
+  }
+}
+
+@Processor(LIBRARY_OUTBOX_QUEUE, { concurrency: 5 })
+export class OutboxQueueConsumer
+  extends WorkerHost
+  implements OnApplicationBootstrap, OnApplicationShutdown
+{
+  private readonly logger = new Logger(OutboxQueueConsumer.name);
+
+  constructor(private readonly outboxWorker: OutboxWorker) {
+    super();
+  }
+
+  onApplicationBootstrap() {
+    try {
+      this.worker?.on('error', (err) => {
+        this.logger.warn(
+          `Outbox BullMQ Worker connection notice: ${err.message}`,
+        );
+      });
+      this.logger.log(
+        `OutboxQueueConsumer registered with BullMQ on queue: ${LIBRARY_OUTBOX_QUEUE} (concurrency: 5)`,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(`OutboxQueueConsumer worker listener skipped: ${msg}`);
+    }
+  }
+
+  async onApplicationShutdown() {
+    try {
+      if (this.worker) {
+        this.logger.log('Closing OutboxQueueConsumer worker on shutdown...');
+        await this.worker.close();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Error closing OutboxQueueConsumer worker: ${msg}`);
+    }
+  }
+
+  async process(
+    job: Job<{ eventId: string; eventType?: string }>,
+  ): Promise<void> {
+    if (job.name !== LIBRARY_OUTBOX_JOB && job.name !== '__default__') {
+      this.logger.debug(`Ignoring unknown job name: ${job.name}`);
+      return;
+    }
+
+    const { eventId } = job.data;
+    if (!eventId) return;
+
+    await this.outboxWorker.processEventById(eventId, {
+      rethrowOnRetryableFailure: true,
+    });
   }
 }

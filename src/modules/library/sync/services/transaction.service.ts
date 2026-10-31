@@ -3,20 +3,20 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '@/core';
 import { Prisma, LibraryChange, Tombstone, OutboxStatus } from '@prisma/client';
-import { uuidv7 } from '@/modules/library/core';
-import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
 import {
-  LIBRARY_OUTBOX_JOB,
-  LIBRARY_OUTBOX_QUEUE,
-} from '@/modules/library/sync/domain/outbox.domain';
-import {
+  uuidv7,
   IUnitOfWork,
   TransactionHelpers,
   AppendChangeEntry,
   AppendChangeInput,
   RecordTombstoneEntry,
   RecordTombstoneInput,
-} from '@/modules/library/core/ports/unit-of-work.port';
+} from '@/modules/library/core';
+import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
+import {
+  LIBRARY_OUTBOX_JOB,
+  LIBRARY_OUTBOX_QUEUE,
+} from '@/modules/library/sync/domain/outbox.domain';
 import {
   OutboxRepository,
   PublishOutboxInput,

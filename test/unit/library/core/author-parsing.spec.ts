@@ -1,4 +1,4 @@
-﻿import {
+import {
   cleanAuthorName,
   splitAuthorString,
   parseCreatorString,

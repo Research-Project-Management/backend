@@ -2,8 +2,8 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';
 import { AssignItemsToCollectionDto } from '@/modules/library/catalog/dto/collections.dto';
-import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
-import { normalizeParentId } from '@/modules/library/catalog/domain/collections.domain';
+import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/catalog.types';
+import { normalizeParentId } from '@/modules/library/catalog/domain/tree.engine';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import {
   normalizeProjectScopeId,

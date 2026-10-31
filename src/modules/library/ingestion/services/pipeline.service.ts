@@ -5,16 +5,14 @@ import {
   Inject,
   BadRequestException,
 } from '@nestjs/common';
-import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
-import { DuplicateMatchResult } from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
+import { DuplicateMatchResult } from '@/modules/library/ingestion/types/metadata.types';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   IdentifyStage,
   applyUserOverridesToCandidate,
 } from '@/modules/library/ingestion/stages/identify.stage';
-import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
-import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
-import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
+import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
 import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
@@ -24,6 +22,7 @@ import {
   ICatalogFacade,
   EXTRACTION_FACADE,
   IExtractionFacade,
+  MetadataCoalescePolicy,
 } from '@/modules/library/core';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
@@ -37,7 +36,7 @@ import {
 import {
   isNonRetryableIngestionError,
   isRetryableIngestionError,
-} from '@/modules/library/ingestion/domain/ingestion-error.classifier';
+} from '@/modules/library/ingestion/types/ingestion.errors';
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import { PipelineBatchExecutor } from './pipeline-batch.executor';
 import { UrlCaptureService } from './url-capture.service';
@@ -49,7 +48,7 @@ import {
   getSubmissionPayloadSize,
   markErrStatusTransitioned,
   createSingleItemExecutionLog,
-} from './pipeline-scope.helper';
+} from './ingestion-run-reporter.service';
 
 @Injectable()
 export class PipelineService {
@@ -64,9 +63,7 @@ export class PipelineService {
   constructor(
     private readonly repo: IngestionRepository,
     private readonly identify: IdentifyStage,
-    private readonly enrich: EnrichStage,
-    private readonly reconcile: ReconcileStage,
-    private readonly match: MatchStage,
+    private readonly resolve: ResolveStage,
     private readonly commit: CommitStage,
     @Optional()
     @Inject(CATALOG_FACADE)
@@ -104,8 +101,7 @@ export class PipelineService {
       batchExecutor ??
       new PipelineBatchExecutor(
         repo,
-        reconcile,
-        match,
+        resolve,
         commit,
         this.sideEffects,
         catalogGateway,
@@ -316,8 +312,8 @@ export class PipelineService {
 
         // 1. Early Deduplication Check (Fast-path for single item: O(1) in-catalog match)
         let earlyMatch: DuplicateMatchResult = { matchType: 'NO_MATCH', confidence: 0 };
-        if (isSingleCandidate && normalizedCandidates[0]?.normalizedMetadata) {
-          earlyMatch = await this.match.execute({
+        if (isSingleCandidate && normalizedCandidates[0]?.normalizedMetadata && this.resolve.match) {
+          earlyMatch = await this.resolve.match({
             scope: resolvedScope,
             proposedItem: normalizedCandidates[0].normalizedMetadata,
           });
@@ -333,7 +329,7 @@ export class PipelineService {
         }
 
         // 2. Authoritative Single-Hit Enrichment (Only for NEW items)
-        const enriched = await this.enrich.execute({
+        const enriched = await this.resolve.execute({
           scopeId,
           candidates: normalizedCandidates,
         });
@@ -379,17 +375,21 @@ export class PipelineService {
           };
         }
 
-        // 4. Canonical Reconciliation (Produces field provenance & proposed item)
-        const decision = await this.reconcile.execute(enriched);
+        // 4. Canonical Coalesce & Verification (Produces field provenance & proposed item)
+        const decision =
+          typeof this.resolve.coalesceAndVerify === 'function'
+            ? await this.resolve.coalesceAndVerify(enriched)
+            : MetadataCoalescePolicy.coalesceCandidates(enriched);
 
         // 5. Secondary Match check if identifier was discovered during enrich/reconcile
         let finalMatch = earlyMatch;
         if (
           earlyMatch.matchType !== 'EXACT' &&
           decision.proposedItem?.doi &&
-          !normalizedCandidates[0]?.normalizedMetadata?.doi
+          !normalizedCandidates[0]?.normalizedMetadata?.doi &&
+          this.resolve.match
         ) {
-          finalMatch = await this.match.execute({
+          finalMatch = await this.resolve.match({
             scope: resolvedScope,
             proposedItem: decision.proposedItem,
           });
@@ -501,58 +501,22 @@ export class PipelineService {
               );
             }
 
-            await this.sideEffects.attachFile(
-              resolvedScope.userId,
-              resolvedScope.projectId,
+            await this.sideEffects.runPostPersistSideEffects(
               targetItemId,
-              finalFileIdentifier,
-              finalFilename,
-              payloadSize,
               {
-                ...(existingRec || {}),
-                ...candidateItem,
+                userId: resolvedScope.userId,
+                projectId: resolvedScope.projectId,
+                envelope,
+              },
+              candidateItem,
+              {
+                fileId: finalFileIdentifier,
+                filename: finalFilename,
+                payloadSize,
+                existingRecord: existingRec,
+                assignCollections: true,
               },
             );
-
-            await this.sideEffects.autoCaptureWebAssets({
-              userId: resolvedScope.userId,
-              projectId: resolvedScope.projectId,
-              itemId: targetItemId,
-              payloadKind: envelope.payload.kind,
-              sourceUrl:
-                envelope.payload.kind === 'URL'
-                  ? envelope.payload.url
-                  : undefined,
-              proposedItem: {
-                ...(existingRec || {}),
-                ...candidateItem,
-              },
-              existingFileId:
-                finalFileIdentifier ||
-                (typeof existingRec?.fileId === 'string'
-                  ? existingRec.fileId
-                  : undefined),
-              overrides: envelope.overrides,
-            });
-
-            await this.sideEffects.materializeNotes(
-              resolvedScope.userId,
-              resolvedScope.projectId,
-              targetItemId,
-              candidateItem.notes as Array<string | { content?: string }>,
-              existingRec,
-            );
-
-            if (envelope.collectionIds && envelope.collectionIds.length > 0) {
-              for (const colId of envelope.collectionIds) {
-                await this.sideEffects.assignItemToCollection(
-                  resolvedScope.userId,
-                  colId,
-                  targetItemId,
-                  resolvedScope.projectId,
-                );
-              }
-            }
           }
 
           const exactSourceLabel =
@@ -665,42 +629,21 @@ export class PipelineService {
       }
 
       if (createdItem?.id) {
-        await this.sideEffects.attachFile(
-          resolvedScope.userId,
-          resolvedScope.projectId,
+        await this.sideEffects.runPostPersistSideEffects(
           createdItem.id,
-          finalFileIdentifier,
-          finalFilename,
-          payloadSize,
           {
-            ...(itemToCommit || {}),
-            ...(createdItem as unknown as Record<string, unknown>),
+            userId: resolvedScope.userId,
+            projectId: resolvedScope.projectId,
+            envelope,
           },
-        );
-
-        await this.sideEffects.autoCaptureWebAssets({
-          userId: resolvedScope.userId,
-          projectId: resolvedScope.projectId,
-          itemId: createdItem.id,
-          payloadKind: envelope.payload.kind,
-          sourceUrl:
-            envelope.payload.kind === 'URL'
-              ? envelope.payload.url
-              : undefined,
-          proposedItem: {
-            ...(itemToCommit || {}),
-            ...(createdItem as unknown as Record<string, unknown>),
+          itemToCommit || {},
+          {
+            fileId: finalFileIdentifier,
+            filename: finalFilename,
+            payloadSize,
+            existingRecord: createdItem as unknown as Record<string, unknown>,
+            assignCollections: false,
           },
-          existingFileId: finalFileIdentifier,
-          overrides: envelope.overrides,
-        });
-
-        await this.sideEffects.materializeNotes(
-          resolvedScope.userId,
-          resolvedScope.projectId,
-          createdItem.id,
-          itemToCommit?.notes as Array<string | { content?: string }>,
-          createdItem,
         );
       }
 

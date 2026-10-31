@@ -11,13 +11,13 @@ import {
 } from '@nestjs/common';
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
-import { QualityService } from '@/modules/library/ingestion/services/quality.service';
+import { QualityService } from '@/modules/library/ingestion/services/retraction.service';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
 import {
   MergeDuplicatesDto,
   DismissDuplicatesDto,
   UpdateReviewCaseStatusDto,
-} from '@/modules/library/ingestion/dto/curation.dto';
+} from '@/modules/library/ingestion/dto/ingestion.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';

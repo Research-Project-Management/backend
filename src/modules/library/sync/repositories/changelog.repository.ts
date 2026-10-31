@@ -12,8 +12,8 @@ import {
   AppendChangeInput,
   RecordTombstoneEntry,
   RecordTombstoneInput,
-} from '@/modules/library/core/ports/unit-of-work.port';
-import { normalizeProjectScopeId } from '@/modules/library/core/domain/scope.specification';
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
 
 export type { AppendChangeInput, RecordTombstoneInput };
 

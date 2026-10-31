@@ -24,17 +24,15 @@ import {
 import type { ExportItemRecord } from '../../../src/modules/library/citation/repositories/exports.repository';
 import { PipelineService } from '../../../src/modules/library/ingestion/services/pipeline.service';
 import { IdentifyStage } from '../../../src/modules/library/ingestion/stages/identify.stage';
-import { EnrichStage } from '../../../src/modules/library/ingestion/stages/enrich.stage';
-import { ReconcileStage } from '../../../src/modules/library/ingestion/stages/reconcile.stage';
-import { MatchStage } from '../../../src/modules/library/ingestion/stages/match.stage';
+import { ResolveStage } from '../../../src/modules/library/ingestion/stages/resolve.stage';
 import { CommitStage } from '../../../src/modules/library/ingestion/stages/commit.stage';
 import { BibtexParser } from '../../../src/modules/library/ingestion/parsers/bibtex.parser';
 import { RisParser } from '../../../src/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '../../../src/modules/library/ingestion/parsers/csl.parser';
-import { DoiParser } from '../../../src/modules/library/ingestion/parsers/doi.parser';
+import { DoiParser } from '../../../src/modules/library/ingestion/parsers/bibtex.parser';
 import { NormalizationPolicy } from '../../../src/modules/library/ingestion/policies/normalization.policy';
-import { ReconciliationPolicy } from '../../../src/modules/library/ingestion/policies/reconciliation.policy';
-import { DuplicatePolicy } from '../../../src/modules/library/ingestion/policies/duplicate.policy';
+import { MetadataCoalescePolicy as ReconciliationPolicy } from '../../../src/modules/library/core';
+import { DuplicatePolicy } from '../../../src/modules/library/ingestion/policies/metadata.policy';
 import { ItemsMapper } from '../../../src/modules/library/catalog/domain/items.mapper';
 
 describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & Errata Guard, Bulk Curation & Hierarchy Operations, and 1,000-Item Scale Benchmark', () => {
@@ -1653,8 +1651,6 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
           throw new Error('Unexpected blocking external HTTP call during structured batch import');
         }),
       };
-      const enrichStage = new EnrichStage(metadataPortSpy as never, normalizer);
-      const reconcileStage = new ReconcileStage(new ReconciliationPolicy());
 
       const catalogGatewayMock = {
         getPrimaryCreatorType: jest.fn().mockReturnValue('author'),
@@ -1696,7 +1692,7 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
               id: newId,
               ...data,
               metadata: data.extraFields || {},
-              contributors: (data.creators as any[]) || [],
+              contributors: (data.creators as unknown[]) || [],
               createdAt: new Date(),
               updatedAt: new Date(),
             };
@@ -1708,7 +1704,7 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
                 collectionAssignments.set(cId, set);
               }
             }
-            return ItemsMapper.toDomain(record as any);
+            return ItemsMapper.toDomain(record as never);
           },
         ),
         assignItemsToCollection: jest.fn().mockImplementation(
@@ -1720,7 +1716,10 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
         ),
       };
 
-      const matchStage = new MatchStage(
+      const resolveStage = new ResolveStage(
+        metadataPortSpy as never,
+        normalizer,
+        undefined,
         new DuplicatePolicy(),
         catalogGatewayMock as never,
       );
@@ -1765,9 +1764,7 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
       const pipeline = new PipelineService(
         repoMock as never,
         identifyStage,
-        enrichStage,
-        reconcileStage,
-        matchStage,
+        resolveStage,
         commitStage,
         catalogGatewayMock as never,
         undefined,

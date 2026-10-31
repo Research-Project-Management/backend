@@ -14,7 +14,7 @@ import { buildItemSearchCondition } from '@/modules/library/catalog/repositories
 import { ExtractionMetadataSynchronizer } from '@/modules/library/extraction/services/extraction-metadata.synchronizer';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import { LibraryFacade } from '@/modules/library/library.facade';
-import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
+import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
 import {
   buildEnrichmentPatch,
   buildReResolvePatch,
@@ -24,10 +24,10 @@ import {
   FullTextProvider,
   isSafeSearchRegex,
   parseSafeSearchRegex,
-} from '@/modules/library/search/services/full-text.provider';
+} from '@/modules/library/search/services/search.service';
 import { TextSearchSpecification } from '@/modules/library/search/domain/item-specifications';
 import { buildSearchFtsSqlQuery } from '@/modules/library/search/repositories/search-sql.helper';
-import { MetadataAndCreatorBackfillMergeStep } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
+import { backfillMetadataAndCreatorsStep } from '@/modules/library/ingestion/domain/duplicate-merge.steps';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslStyleFormatterService } from '@/modules/library/citation/services/csl-style-formatter.service';
 import {
@@ -39,7 +39,7 @@ import {
   applyUserOverridesToCandidate,
 } from '@/modules/library/ingestion/stages/identify.stage';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
+import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
 import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
 
@@ -768,7 +768,6 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
     });
 
     it('Pillar 3 (DuplicateMerger & Citation): promotes user-locked fields from secondary duplicates and exports complete BibTeX identifiers', async () => {
-      const step = new MetadataAndCreatorBackfillMergeStep();
       const primaryMeta: Record<string, unknown> = {
         title: 'Auto-Imported Title',
         fieldProvenance: {
@@ -777,7 +776,7 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
       };
       const backfillFields: Record<string, unknown> = {};
 
-      await step.execute({
+      await backfillMetadataAndCreatorsStep({
         tx: {
           contributor: { count: jest.fn().mockResolvedValue(1) },
         } as never,
@@ -1140,7 +1139,7 @@ describe('Wave 15 — Unified Metadata Write-Path Gatekeepers & Identifier Searc
         }),
       };
 
-      const enrichStage = new EnrichStage(
+      const enrichStage = new ResolveStage(
         mockMetadataService as never,
         normalizer,
       );

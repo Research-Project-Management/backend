@@ -28,12 +28,9 @@ import { isUUID } from 'class-validator';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
-import {
-  SubmissionPayload,
-  IdentifierType,
-  RecordFormat,
-} from '@/modules/library/ingestion/types/submission.types';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
 import { IngestionCommand } from '@/modules/library/ingestion/types/ingestion.types';
+import { SubmissionEnvelopeFactory } from '@/modules/library/ingestion/domain/submission-envelope.factory';
 
 /**
  * Unified Library Ingestion Controller.
@@ -84,69 +81,27 @@ export class IngestionController {
       this.validateProjectId(queryProjectId) ||
       this.validateProjectId(dto.projectId);
 
-    let payload: SubmissionPayload;
-    switch (dto.kind) {
-      case 'IDENTIFIER':
-        payload = {
-          kind: 'IDENTIFIER',
-          identifierType: (
-            dto.identifierType || 'DOI'
-          ).toUpperCase() as IdentifierType,
-          value: (dto.value || dto.identifierValue || '').trim(),
-        };
-        break;
-      case 'RECORD':
-        payload = {
-          kind: 'RECORD',
-          format: (
-            dto.format ||
-            dto.recordFormat ||
-            'BIBTEX'
-          ).toUpperCase() as RecordFormat,
-          content: dto.content || dto.rawRecord || '',
-        };
-        break;
-      case 'URL':
-        payload = {
-          kind: 'URL',
-          url: dto.url || '',
-          previewToken: dto.previewToken,
-          filename: dto.filename,
-        };
-        break;
-      case 'FILE':
-        payload = {
-          kind: 'FILE',
-          fileId: dto.fileId || '',
-          filename: dto.filename,
-        };
-        break;
-      case 'CONNECTOR':
-        payload = {
-          kind: 'CONNECTOR',
-          connectionId: dto.connectionId || '',
-          externalObjectId: dto.externalObjectId || '',
-          externalVersion: dto.externalVersion || '',
-        };
-        break;
-      default:
-        throw new BadRequestException(
-          'Unknown ingestion kind: ' + String((dto as { kind?: unknown }).kind),
-        );
-    }
-
-    const effectiveCollectionIds =
-      dto.collectionIds ?? (dto.collectionId ? [dto.collectionId] : undefined);
-
-    return this.ingestionService.submit({
-      projectId: effectiveProjectId,
+    const envelope = this.buildEnvelope(
+      dto,
       userId,
-      idempotencyKey: effectiveIdempotencyKey,
-      payload,
-      collectionIds: effectiveCollectionIds,
-      tagIds: dto.tagIds,
-      overrides: dto.overrides,
-      contractVersion: dto.contractVersion,
+      effectiveProjectId,
+      effectiveIdempotencyKey,
+    );
+
+    return this.ingestionService.submit(envelope);
+  }
+
+  private buildEnvelope(
+    dto: IngestionSubmissionDto,
+    userId: string,
+    projectId?: string,
+    idempotencyKey?: string,
+  ): IngestionSubmissionEnvelope {
+    return SubmissionEnvelopeFactory.fromSubmissionDto({
+      dto,
+      userId,
+      projectId,
+      idempotencyKey,
     });
   }
 
@@ -223,157 +178,29 @@ export class IngestionController {
       this.validateProjectId(paramProjectId) ||
       this.validateProjectId(queryProjectId) ||
       this.validateProjectId(dto.projectId);
-    let command: IngestionCommand;
 
-    const overrideObj =
-      dto.overrides && typeof dto.overrides === 'object' ? dto.overrides : {};
-    const effectiveCollectionId =
-      dto.collectionId ||
-      (typeof overrideObj.collectionId === 'string'
-        ? overrideObj.collectionId
-        : undefined);
-
-    switch (dto.source) {
-      case 'doi':
-        command = {
-          source: 'doi',
-          projectId: effectiveProjectId,
-          userId,
-          doi: dto.doi || '',
-          collectionId: effectiveCollectionId,
-          overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      case 'arxiv':
-        command = {
-          source: 'arxiv',
-          projectId: effectiveProjectId,
-          userId,
-          arxivId: dto.arxivId || '',
-          collectionId: effectiveCollectionId,
-          overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      case 'pmid':
-        command = {
-          source: 'pmid',
-          projectId: effectiveProjectId,
-          userId,
-          pmid: dto.pmid || '',
-          collectionId: effectiveCollectionId,
-          overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      case 'isbn':
-        command = {
-          source: 'isbn',
-          projectId: effectiveProjectId,
-          userId,
-          isbn: dto.isbn || '',
-          collectionId: effectiveCollectionId,
-          overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      case 'url':
-        command = {
-          source: 'url',
-          projectId: effectiveProjectId,
-          userId,
-          url: dto.url || '',
-          previewToken: dto.previewToken,
-          overrides: dto.overrides,
-          collectionId: effectiveCollectionId,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      case 'bibtex':
-        command = {
-          source: 'bibtex',
-          projectId: effectiveProjectId,
-          userId,
-          content: dto.content || dto.bibtex || '',
-          collectionId: effectiveCollectionId,
-          overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      case 'ris':
-        command = {
-          source: 'ris',
-          projectId: effectiveProjectId,
-          userId,
-          content: dto.content || dto.ris || '',
-          collectionId: effectiveCollectionId,
-          overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      case 'csl_json':
-      case 'endnote_xml':
-      case 'mods':
-      case 'zotero_rdf':
-      case 'medline':
-      case 'csv':
-        command = {
-          source: dto.source,
-          projectId: effectiveProjectId,
-          userId,
-          content: dto.content || '',
-          collectionId: effectiveCollectionId,
-          overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      case 'pdf':
-        command = {
-          source: 'pdf',
-          projectId: effectiveProjectId,
-          userId,
-          fileId: dto.fileId,
-          filename: dto.filename,
-          collectionId: effectiveCollectionId,
-          overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      case 'zotero':
-        command = {
-          source: 'zotero',
-          projectId: effectiveProjectId,
-          userId,
-          connectionId: dto.connectionId,
-          externalItemKey: dto.externalItemKey,
-          collectionId: effectiveCollectionId,
-          overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      default:
-        command = {
-          source: dto.source,
-          projectId: effectiveProjectId,
-          userId,
-          collectionId: effectiveCollectionId,
-          overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-    }
+    const command = this.mapUnifiedDtoToCommand(
+      dto,
+      userId,
+      effectiveProjectId,
+      effectiveIdempotencyKey,
+    );
 
     return this.ingestionService.ingest(command);
+  }
+
+  private mapUnifiedDtoToCommand(
+    dto: UnifiedIngestionDto,
+    userId: string,
+    projectId?: string,
+    idempotencyKey?: string,
+  ): IngestionCommand {
+    return SubmissionEnvelopeFactory.mapUnifiedDtoToCommand({
+      dto,
+      userId,
+      projectId,
+      idempotencyKey,
+    });
   }
 
   @Post('capture-url')

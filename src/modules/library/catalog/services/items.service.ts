@@ -34,7 +34,7 @@ import {
   executeBulkRestoreInTx,
   executeBulkPurgeInTx,
   executePurgeExpiredTrashInTx,
-} from '@/modules/library/catalog/domain/item-write-lifecycle.helper';
+} from './item-curation.service';
 export type { ItemTransactionContext };
 @Injectable()
 export class ItemService {

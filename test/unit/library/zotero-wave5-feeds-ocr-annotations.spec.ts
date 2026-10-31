@@ -13,8 +13,8 @@ import { ItemQueryService } from '@/modules/library/catalog/services/item-query.
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { OcrProvider } from '@/modules/library/extraction/providers/ocr.provider';
-import { OcrSandwichPdfService } from '@/modules/library/extraction/services/ocr-sandwich-pdf.service';
-import { FullTextProvider } from '@/modules/library/search/services/full-text.provider';
+import { OcrSandwichPdfService } from '@/modules/library/extraction/providers/ocr.provider';
+import { FullTextProvider } from '@/modules/library/search/services/search.service';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
@@ -25,7 +25,7 @@ import { PdfBakerService } from '@/modules/library/citation/services/pdf-baker.s
 import { ExportsService } from '@/modules/library/citation/services/exports.service';
 import { buildAnnotationSortIndex } from '@/modules/library/core';
 import { fromPartial } from '@total-typescript/shoehorn';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import type { PrismaService } from '@/core';
 import type { TransactionHelpers } from '@/modules/library/core';
 import type { TransactionService } from '@/modules/library/sync';
