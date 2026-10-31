@@ -172,7 +172,6 @@ export class LatexmkEngine extends BaseLatexEngine {
       options.stopOnFirstError ? '-halt-on-error' : '-interaction=batchmode',
       ...(options.stopOnFirstError ? [] : ['-f']),
       ...(options.syntaxOnly ? ['-draftmode'] : []),
-      '--',
       safeMainFile,
     ];
 
