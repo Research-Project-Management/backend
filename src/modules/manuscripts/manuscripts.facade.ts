@@ -24,7 +24,7 @@ import { ClsiService } from './clsi/services/clsi.service';
 import { ProjectHistoryService } from './project-history/project-history.service';
 import { CitationsService } from './citations/citations.service';
 import { ExportImportService } from './export-import/export-import.service';
-import { ProjectWorkspaceCollectorService } from './core/services/workspace-collector.service';
+import { WorkspaceCollectorService } from './core/services/workspace-collector.service';
 import { ManuscriptDomainEventBus } from './core/events/event-bus.service';
 
 import { CreateNodeDto, MoveNodeDto, RenameNodeDto } from './structure/dto/node.dto';
@@ -44,7 +44,7 @@ export class ManuscriptsFacade {
     public readonly projectHistory: ProjectHistoryService,
     public readonly citations: CitationsService,
     public readonly exportImport: ExportImportService,
-    public readonly workspaceCollector: ProjectWorkspaceCollectorService,
+    public readonly workspaceCollector: WorkspaceCollectorService,
     public readonly domainEvents: ManuscriptDomainEventBus,
   ) {}
 

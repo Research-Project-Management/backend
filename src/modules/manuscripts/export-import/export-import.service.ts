@@ -23,16 +23,17 @@ import {
   validateExtractedArchiveEntries,
   IncludedProjectDoc,
   ExportFormattedDocResult,
-  transpileLatexDocumentForExport,
+  transpileLatexDocument,
 } from './domain';
-import { PkzipEngineAdapter } from './services/pkzip-engine.adapter';
-import { DocumentTranspilerAdapter } from './services/document-transpiler.adapter';
+import { ZipAdapter } from './services/zip.adapter';
+import { TranspilerAdapter } from './services/transpiler.adapter';
 import {
   ManuscriptAggregatorAdapter,
   ManuscriptHydratorAdapter,
 } from './repositories/aggregator.repository';
 import { TemplatesService } from '@/modules/manuscripts/templates/templates.service';
 import { TemplateNotFoundException } from '@/modules/manuscripts/templates/domain';
+import { ProjectHistoryService } from '@/modules/manuscripts/project-history/project-history.service';
 import {
   ExportZipQueryDto,
   ImportSummaryResponseDto,
@@ -86,21 +87,23 @@ export class ExportImportService {
   private readonly hydrator: IManuscriptHydratorPort;
   private readonly templatesService?: TemplatesService;
   private readonly transpiler: IDocumentTranspilerPort;
+  private readonly projectHistoryService?: ProjectHistoryService;
 
   constructor(
     aggregator: ManuscriptAggregatorAdapter,
-    zipEngine: PkzipEngineAdapter = new PkzipEngineAdapter(),
+    zipEngine: ZipAdapter = new ZipAdapter(),
     hydrator: ManuscriptHydratorAdapter,
     @Optional() templatesService?: TemplatesService,
-    @Optional() transpiler?: DocumentTranspilerAdapter,
+    @Optional() transpiler?: TranspilerAdapter,
+    @Optional() projectHistoryService?: ProjectHistoryService,
   ) {
     this.aggregator = aggregator;
     this.zipEngine = zipEngine;
     this.hydrator = hydrator;
     this.templatesService = templatesService;
     this.transpiler =
-      transpiler ??
-      new DocumentTranspilerAdapter(this.zipEngine as PkzipEngineAdapter);
+      transpiler ?? new TranspilerAdapter(this.zipEngine as ZipAdapter);
+    this.projectHistoryService = projectHistoryService;
   }
 
   public async collectProjectEntries(
@@ -147,7 +150,8 @@ export class ExportImportService {
     hasPdf: boolean;
     resolvedName: string;
   } {
-    const cleanArxiv = query?.cleanArxiv ?? false;
+    const cleanArxiv =
+      (query?.cleanArxiv ?? false) || query?.mode?.toLowerCase() === 'arxiv';
     const projectName = query?.projectName;
 
     if (files.length === 0) {
@@ -178,8 +182,9 @@ export class ExportImportService {
     projectId: string,
     query?: ExportZipQueryDto,
   ): Promise<ExportProjectZipOutput> {
+    const cleanArxiv =
+      (query?.cleanArxiv ?? false) || query?.mode?.toLowerCase() === 'arxiv';
     const includePdf = query?.includePdf ?? false;
-    const cleanArxiv = query?.cleanArxiv ?? false;
 
     const collected = await this.aggregator.collectProjectEntries(
       projectId,
@@ -213,8 +218,24 @@ export class ExportImportService {
     projectId: string,
     query?: ExportZipQueryDto,
   ): Promise<ExportProjectZipStreamOutput> {
+    if (query?.version && this.projectHistoryService) {
+      const versionResult =
+        await this.projectHistoryService.exportVersionZipStream(
+          projectId,
+          Number(query.version),
+          query.projectName,
+        );
+      return {
+        zipStream: versionResult.zipStream,
+        projectName: versionResult.filename.replace(/\.zip$/i, ''),
+        fileCount: versionResult.fileCount,
+        hasCompiledPdf: false,
+      };
+    }
+
+    const cleanArxiv =
+      (query?.cleanArxiv ?? false) || query?.mode?.toLowerCase() === 'arxiv';
     const includePdf = query?.includePdf ?? false;
-    const cleanArxiv = query?.cleanArxiv ?? false;
 
     const collected = await this.aggregator.collectLazyProjectEntries(
       projectId,
@@ -333,6 +354,6 @@ export class ExportImportService {
     format: string;
     projectDocs?: IncludedProjectDoc[];
   }): ExportFormattedDocResult {
-    return transpileLatexDocumentForExport(params);
+    return transpileLatexDocument(params);
   }
 }

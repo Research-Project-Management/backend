@@ -14,7 +14,7 @@ export interface ResolvedManuscriptUser {
 }
 
 @Injectable()
-export class ManuscriptUserResolverService {
+export class UserResolverService {
   constructor(
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly identityFacade?: IdentityFacade,
@@ -81,3 +81,6 @@ export class ManuscriptUserResolverService {
     return result;
   }
 }
+
+/** @deprecated Use UserResolverService */
+export { UserResolverService as ManuscriptUserResolverService };

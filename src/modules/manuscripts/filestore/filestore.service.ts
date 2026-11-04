@@ -8,6 +8,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
+import { NodePathVo } from '@/modules/manuscripts/structure/domain';
 import { FilestoreRepository } from './filestore.repository';
 import {
   ManuscriptFile,
@@ -97,7 +98,7 @@ export class FilestoreService {
       stream,
       mimeType,
       'manuscript-files',
-      { syncStructureNode: options?.syncStructureNode ?? false },
+      { syncStructureNode: options?.syncStructureNode ?? true },
     );
   }
 
@@ -186,6 +187,10 @@ export class FilestoreService {
     )(fileEntity, options);
 
     if (options?.syncStructureNode !== false) {
+      const parsedPath = NodePathVo.parse(
+        saved.name || 'unnamed.bin',
+        'unnamed.bin',
+      );
       this.eventEmitter?.emit('manuscripts.file-tree.change', {
         projectId,
         change: {
@@ -193,8 +198,8 @@ export class FilestoreService {
           node: {
             id: saved.id,
             fileId: saved.id,
-            name: saved.name,
-            path: `/${saved.name.replace(/^\/+/, '')}`,
+            name: parsedPath.leafName,
+            path: parsedPath.normalizedPath,
           },
         },
       });

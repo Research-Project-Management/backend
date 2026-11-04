@@ -47,11 +47,11 @@ model ManuscriptDocReview {
 model ManuscriptTrackChange {
   id           String                 @id @default(uuid(7)) @db.Uuid
   projectId    String                 @map("project_id") @db.Uuid
-  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_review_project_id")
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_track_changes_project_id")
   pageId       String?                @map("page_id") @db.Uuid
   page         ManuscriptPage?        @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_track_changes_page_id")
   docId        String                 @map("doc_id") @db.Uuid
-  doc       ManuscriptDoc @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_review_doc_id")
+  doc       ManuscriptDoc @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_track_changes_doc_id")
   type         ManuscriptChangeType
   status       ManuscriptChangeStatus @default(pending)
   text         String                 @db.Text
@@ -66,6 +66,7 @@ model ManuscriptTrackChange {
   updatedAt    DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([projectId, docId, status, createdAt], map: "idx_manuscript_changes_lookup")
+  @@index([projectId, startLine, startCol, createdAt], map: "idx_manuscript_changes_proj_line_created")
   @@index([pageId, docId, status, createdAt], map: "idx_manuscript_changes_page_lookup")
   @@index([docId, status, createdAt(sort: Desc)], map: "idx_manuscript_changes_doc_id")
   @@index([createdById], map: "idx_manuscript_changes_author")
@@ -75,11 +76,11 @@ model ManuscriptTrackChange {
 model ManuscriptCommentThread {
   id           String    @id @default(uuid(7)) @db.Uuid
   projectId    String    @map("project_id") @db.Uuid
-  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_review_project_id")
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_comment_threads_project_id")
   pageId       String?   @map("page_id") @db.Uuid
   page         ManuscriptPage? @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_comment_threads_page_id")
   docId        String    @map("doc_id") @db.Uuid
-  doc       ManuscriptDoc @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_review_doc_id")
+  doc       ManuscriptDoc @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_comment_threads_doc_id")
   quote        String?   @db.Text
   startLine    Int       @map("start_line")
   startCol     Int       @map("start_col")
@@ -95,6 +96,7 @@ model ManuscriptCommentThread {
   replies ManuscriptCommentReply[]
 
   @@index([projectId, docId, isResolved, createdAt], map: "idx_manuscript_comments_lookup")
+  @@index([projectId, startLine, createdAt], map: "idx_manuscript_comments_proj_line_created")
   @@index([pageId, docId, isResolved, createdAt], map: "idx_manuscript_comments_page_lookup")
   @@index([docId, isResolved, createdAt(sort: Desc)], map: "idx_manuscript_comments_doc_id")
   @@index([createdById], map: "idx_manuscript_comments_author")

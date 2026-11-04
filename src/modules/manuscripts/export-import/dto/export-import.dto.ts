@@ -4,8 +4,15 @@
  */
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsBoolean, IsOptional } from 'class-validator';
-import { Transform } from 'class-transformer';
+import {
+  IsString,
+  IsNotEmpty,
+  IsBoolean,
+  IsOptional,
+  IsInt,
+  Min,
+} from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 
 export class ExportZipQueryDto {
   @ApiPropertyOptional({
@@ -26,6 +33,22 @@ export class ExportZipQueryDto {
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   cleanArxiv?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Export mode (e.g. "arxiv" or "standard")',
+  })
+  @IsOptional()
+  @IsString()
+  mode?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional historical version number to export as ZIP',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version?: number;
 
   @ApiPropertyOptional({ description: 'Custom archive file name' })
   @IsOptional()

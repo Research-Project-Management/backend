@@ -485,7 +485,10 @@ export function applyBatchSuggestionsToLines(
   return lines;
 }
 
-export const TextSuggestionMutator = {
+export const SuggestionMutator = {
   applySuggestionToLines,
   applyBatchSuggestionsToLines,
 } as const;
+
+/** @deprecated Use `SuggestionMutator` */
+export const TextSuggestionMutator = SuggestionMutator;

@@ -42,8 +42,8 @@ export interface ReplaceDocumentsParams {
 }
 
 @Injectable()
-export class ManuscriptSearchReplaceService {
-  private readonly logger = new Logger(ManuscriptSearchReplaceService.name);
+export class SearchReplaceService {
+  private readonly logger = new Logger(SearchReplaceService.name);
   private readonly liveCollab: LiveCollaborationPort;
 
   constructor(
@@ -58,7 +58,6 @@ export class ManuscriptSearchReplaceService {
       | unknown,
     @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
     @Optional()
-    @Inject(LIVE_COLLABORATION_PORT)
     injectedLiveCollab?: LiveCollaborationPort,
   ) {
     let resolved: LiveCollaborationPort | null | undefined = injectedLiveCollab;
@@ -206,9 +205,22 @@ export class ManuscriptSearchReplaceService {
       let totalMatches = 0;
       let truncated = false;
 
+      const hydratedLinesByDocId = new Map<string, string[]>();
+      const coldDocs = docs.filter((d) => d.inStorage);
+      if (coldDocs.length > 1) {
+        await Promise.all(
+          coldDocs.map(async (d) => {
+            const lines = await this.getHydratedDocLines(projectId, d);
+            hydratedLinesByDocId.set(d.id, lines);
+          }),
+        );
+      }
+
       for (const doc of docs) {
         if (truncated) break;
-        const lines = await this.getHydratedDocLines(projectId, doc);
+        const lines =
+          hydratedLinesByDocId.get(doc.id) ??
+          (await this.getHydratedDocLines(projectId, doc));
         const matches = [];
 
         for (let i = 0; i < lines.length; i++) {
@@ -322,59 +334,82 @@ export class ManuscriptSearchReplaceService {
     const affectedFileIds: string[] = [];
     const failedFileIds: string[] = [];
 
-    for (const doc of docs) {
-      const docLines = await this.getHydratedDocLines(projectId, doc);
-      const rawContent = docLines.join('\n');
-      const { text: newContent, count } = replaceInText(
-        rawContent,
-        query,
-        replaceWith,
-        opts,
-      );
-      if (count === 0) continue;
+    const hydratedDocLinesList = await Promise.all(
+      docs.map((doc) => this.getHydratedDocLines(projectId, doc)),
+    );
 
-      const lines = newContent.split('\n');
-      try {
-        const result = await this.docstoreService.updateDoc(projectId, doc.id, {
-          lines,
-          version: doc.version + 1,
-          expectedRev: doc.rev,
-        });
-        if (this.domainEventBus) {
-          await this.domainEventBus.publish({
-            type: 'manuscript.document.mutated',
+    const perDocOutcomes = await Promise.all(
+      docs.map(async (doc, idx) => {
+        const docLines = hydratedDocLinesList[idx];
+        const rawContent = docLines.join('\n');
+        const { text: newContent, count } = replaceInText(
+          rawContent,
+          query,
+          replaceWith,
+          opts,
+        );
+        if (count === 0) {
+          return { status: 'skipped' as const, docId: doc.id, count: 0 };
+        }
+
+        const lines = newContent.split('\n');
+        try {
+          const result = await this.docstoreService.updateDoc(
             projectId,
-            docId: doc.id,
-            lines,
-            version: result.doc?.version ?? doc.version + 1,
-            source: 'search-replace',
-            occurredAt: Date.now(),
-          });
-        } else {
-          await this.syncLiveDoc(projectId, doc.id, lines);
-        }
-        totalOccurrencesReplaced += count;
-        affectedFileIds.push(doc.id);
-
-        if (this.eventEmitter) {
-          try {
-            this.eventEmitter.emit('manuscripts.project.event', {
+            doc.id,
+            {
+              lines,
+              version: doc.version + 1,
+              expectedRev: doc.rev,
+            },
+          );
+          if (this.domainEventBus) {
+            await this.domainEventBus.publish({
+              type: 'manuscript.document.mutated',
               projectId,
-              event: 'doc:content-updated',
-              payload: {
-                docId: doc.id,
-                version: result.doc?.version,
-                content: newContent,
-              },
+              docId: doc.id,
+              lines,
+              version: result.doc?.version ?? doc.version + 1,
+              source: 'search-replace',
+              occurredAt: Date.now(),
             });
-          } catch {
-            // non-blocking
+          } else {
+            await this.syncLiveDoc(projectId, doc.id, lines);
           }
+
+          if (this.eventEmitter) {
+            try {
+              this.eventEmitter.emit('manuscripts.project.event', {
+                projectId,
+                event: 'doc:content-updated',
+                payload: {
+                  docId: doc.id,
+                  version: result.doc?.version,
+                  content: newContent,
+                },
+              });
+            } catch {
+              // non-blocking
+            }
+          }
+
+          return { status: 'updated' as const, docId: doc.id, count };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.error(
+            `Batch replace failed for doc ${doc.id}: ${message}`,
+          );
+          return { status: 'failed' as const, docId: doc.id, count: 0 };
         }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.error(`Batch replace failed for doc ${doc.id}: ${message}`);
-        failedFileIds.push(doc.id);
+      }),
+    );
+
+    for (const outcome of perDocOutcomes) {
+      if (outcome.status === 'updated') {
+        totalOccurrencesReplaced += outcome.count;
+        affectedFileIds.push(outcome.docId);
+      } else if (outcome.status === 'failed') {
+        failedFileIds.push(outcome.docId);
       }
     }
 
@@ -388,3 +423,6 @@ export class ManuscriptSearchReplaceService {
     };
   }
 }
+
+/** @deprecated Use SearchReplaceService */
+export { SearchReplaceService as ManuscriptSearchReplaceService };

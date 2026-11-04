@@ -17,7 +17,7 @@ import {
 } from './citations.controller';
 import { CitationsService } from './citations.service';
 import { CitationsRepository } from './citations.repository';
-import { RegexAstBibtexParser, CrossrefArxivResolverAdapter } from './domain';
+import { BibtexParser, IdentifierResolver } from './domain';
 
 @Module({
   imports: [
@@ -32,14 +32,14 @@ import { RegexAstBibtexParser, CrossrefArxivResolverAdapter } from './domain';
   providers: [
     CitationsRepository,
     CitationsService,
-    RegexAstBibtexParser,
-    CrossrefArxivResolverAdapter,
+    BibtexParser,
+    IdentifierResolver,
   ],
   exports: [
     CitationsService,
     CitationsRepository,
-    RegexAstBibtexParser,
-    CrossrefArxivResolverAdapter,
+    BibtexParser,
+    IdentifierResolver,
   ],
 })
 export class CitationsModule {}

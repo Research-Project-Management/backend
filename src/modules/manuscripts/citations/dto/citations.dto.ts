@@ -3,8 +3,16 @@
  * Data Transfer Objects for Citations & Bibliography operations.
  */
 
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsArray,
+  IsNotEmpty,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { StructuredCitationEntryInput } from '../domain';
 
 export class CitationQueryDto {
   @ApiPropertyOptional({
@@ -165,3 +173,156 @@ export class SyncLibraryResultDto {
   @ApiPropertyOptional({ type: [String] })
   conflicts?: string[];
 }
+
+export class RefactorCitationKeyDto {
+  @ApiProperty({ description: 'Current citation key to replace' })
+  @IsString()
+  @IsNotEmpty({ message: 'oldKey is required' })
+  oldKey!: string;
+
+  @ApiProperty({ description: 'New citation key to rename to' })
+  @IsString()
+  @IsNotEmpty({ message: 'newKey is required' })
+  newKey!: string;
+}
+
+export class RefactorCitationKeyResultDto {
+  @ApiProperty()
+  oldKey!: string;
+
+  @ApiProperty()
+  newKey!: string;
+
+  @ApiProperty()
+  totalReplacements!: number;
+
+  @ApiProperty()
+  affectedFiles!: Array<{
+    docId: string;
+    path: string;
+    count: number;
+    newContent: string;
+  }>;
+}
+
+export class UpsertCitationEntriesDto {
+  @ApiPropertyOptional({
+    description: 'Single structured citation or library item to upsert',
+  })
+  @IsObject()
+  @IsOptional()
+  entry?: StructuredCitationEntryInput;
+
+  @ApiPropertyOptional({
+    description: 'Multiple structured citations or library items to upsert',
+  })
+  @IsArray()
+  @IsOptional()
+  entries?: StructuredCitationEntryInput[];
+
+  @ApiPropertyOptional({
+    description: 'Raw BibTeX string to parse and upsert into the target .bib file',
+  })
+  @IsString()
+  @IsOptional()
+  rawBibtex?: string;
+
+  @ApiPropertyOptional({
+    description: 'Target .bib filename',
+    default: 'references.bib',
+  })
+  @IsString()
+  @IsOptional()
+  targetBibFile?: string;
+
+  @ApiPropertyOptional({
+    description: 'Target .bib filename alias',
+    default: 'references.bib',
+  })
+  @IsString()
+  @IsOptional()
+  targetFilename?: string;
+}
+
+export class UpsertCitationEntriesResultDto {
+  @ApiProperty()
+  filePath!: string;
+
+  @ApiPropertyOptional()
+  docId?: string;
+
+  @ApiProperty()
+  syncedCount!: number;
+
+  @ApiProperty({ type: [BibEntryDto] })
+  entries!: BibEntryDto[];
+
+  @ApiProperty()
+  formattedBibtex!: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  conflicts?: string[];
+}
+
+export class InjectBibliographyDto {
+  @ApiPropertyOptional({
+    description: 'Target document ID in project docstore to update directly',
+  })
+  @IsString()
+  @IsOptional()
+  docId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Current document content (if not reading from docstore)',
+  })
+  @IsString()
+  @IsOptional()
+  content?: string;
+
+  @ApiPropertyOptional({
+    description: 'File path hint to auto-detect LaTeX vs Markdown',
+  })
+  @IsString()
+  @IsOptional()
+  filePath?: string;
+
+  @ApiPropertyOptional({
+    description: 'Explicit format override (latex or markdown)',
+  })
+  @IsString()
+  @IsOptional()
+  format?: 'latex' | 'markdown';
+
+  @ApiPropertyOptional({
+    description: 'Citation style ID (auto, auto-numeric, ieee, apa, etc.)',
+  })
+  @IsString()
+  @IsOptional()
+  styleId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Custom section heading title for Markdown',
+  })
+  @IsString()
+  @IsOptional()
+  headingTitle?: string;
+
+  @ApiPropertyOptional({
+    description: 'Pre-formatted plain bibliography text',
+  })
+  @IsString()
+  @IsOptional()
+  bibliographyText?: string;
+
+  @ApiPropertyOptional({
+    description: 'Structured list of citations with keys and formatted bibliography strings',
+  })
+  @IsArray()
+  @IsOptional()
+  citations?: Array<{
+    key?: string;
+    inText?: string;
+    bibliography?: string;
+  }>;
+}
+

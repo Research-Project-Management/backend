@@ -171,6 +171,14 @@ export interface RestoreResult {
   restoredDocIds: string[];
 }
 
+export interface RestoreSingleFileResult {
+  path: string;
+  docId?: string | null;
+  fileId?: string | null;
+  content?: string;
+  rev?: number;
+}
+
 export abstract class IProjectRestorerPort {
   /**
    * Applies the files and structure from an immutable snapshot onto the current project.
@@ -179,4 +187,14 @@ export abstract class IProjectRestorerPort {
     projectId: string,
     snapshot: Snapshot,
   ): Promise<RestoreResult>;
+
+  /**
+   * Restores a single file from an immutable snapshot onto the current project.
+   */
+  abstract restoreSingleFileToState?(
+    projectId: string,
+    snapshot: Snapshot,
+    pathname: string,
+    hintFileId?: string,
+  ): Promise<RestoreSingleFileResult>;
 }

@@ -1,7 +1,7 @@
 /**
  * filestore/adapters/filestore.adapters.ts
  * Driven Storage & Content-Hashing Adapters for Manuscripts Filestore:
- * - CryptoGitBlobHasherAdapter (Port: IContentHasherPort)
+ * - ContentHasherAdapter (Port: IContentHasherPort)
  * - LocalDiskBinaryStorageAdapter (Port: IBinaryStoragePort)
  * - S3BinaryStorageAdapter (Port: IBinaryStoragePort)
  */
@@ -37,7 +37,7 @@ import {
 } from '../filestore.types';
 
 @Injectable()
-export class CryptoGitBlobHasherAdapter extends IContentHasherPort {
+export class ContentHasherAdapter extends IContentHasherPort {
   public async hashStream(stream: Readable): Promise<StreamHashResult> {
     const tempDir = path.join(os.tmpdir(), 'flux-filestore-spool');
     await fs.promises.mkdir(tempDir, { recursive: true });
@@ -132,6 +132,8 @@ export class CryptoGitBlobHasherAdapter extends IContentHasherPort {
     return StorageKey.fromHash(hash, prefix);
   }
 }
+
+export { ContentHasherAdapter as CryptoGitBlobHasherAdapter };
 
 @Injectable()
 export class LocalDiskBinaryStorageAdapter extends IBinaryStoragePort {

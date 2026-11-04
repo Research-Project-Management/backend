@@ -96,6 +96,29 @@ export class DiagnosticsController {
     return this.diagnosticsService.lintDocument(dto);
   }
 
+  @Post(['projects/:projectId/lint-doc', ':projectId/lint-doc'])
+  @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
+  @RequireRole(Role.REVIEWER)
+  @UserRateLimit('search-replace')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Statically lint a single document against project citations and labels',
+  })
+  @ApiResponse({ status: 200, type: DiagnosticReportDto })
+  public async lintProjectDocument(
+    @Param('projectId') routeProjectId: string,
+    @Body() dto: LintDocumentDto,
+    @ResolvedProject() project?: string | { id?: string },
+  ): Promise<DiagnosticReportDto> {
+    const targetProjectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
+    return await this.diagnosticsService.lintProjectDocument(
+      targetProjectId,
+      dto,
+    );
+  }
+
   @Post(['projects/:projectId/lint', ':projectId/lint'])
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.REVIEWER)

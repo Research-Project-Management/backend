@@ -1,7 +1,7 @@
 /**
  * project-history/project-history.service.ts
  * Deep Module Service orchestrating Manuscript Project History directly via ProjectHistoryRepository
- * and pure MyersDiffEngine.
+ * and pure DiffEngine.
  */
 
 import {
@@ -9,7 +9,9 @@ import {
   Logger,
   Optional,
   ConflictException,
+  NotFoundException,
 } from '@nestjs/common';
+import { Readable } from 'node:stream';
 import { ProjectHistoryRepository } from './project-history.repository';
 import {
   ManuscriptCollectorAdapter,
@@ -20,7 +22,7 @@ import {
   VersionLabel,
   VersionNotFoundException,
   DuplicateLabelException,
-  MyersDiffEngine,
+  DiffEngine,
 } from './domain';
 import {
   CreateSnapshotDto,
@@ -28,24 +30,26 @@ import {
   VersionListItemDto,
   VersionLabelDto,
   DiffResponseDto,
+  RestoreSingleFileDto,
+  RestoreSingleFileResponseDto,
 } from './dto/history.dto';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
-import { ManuscriptUserResolverService } from '@/modules/manuscripts/core/services/user-resolver.service';
+import { UserResolverService } from '@/modules/manuscripts/core/services/user-resolver.service';
 
 @Injectable()
 export class ProjectHistoryService {
   private readonly logger = new Logger(ProjectHistoryService.name);
-  private readonly diffEngine: MyersDiffEngine;
+  private readonly diffEngine: DiffEngine;
 
   constructor(
     private readonly repository: ProjectHistoryRepository,
     private readonly collector: ManuscriptCollectorAdapter,
     private readonly restorer: ManuscriptRestorerAdapter,
     @Optional() private readonly realtimeService?: RealtimeFacade,
-    @Optional() private readonly userResolver?: ManuscriptUserResolverService,
-    @Optional() diffEngine?: MyersDiffEngine,
+    @Optional() private readonly userResolver?: UserResolverService,
+    @Optional() diffEngine?: DiffEngine,
   ) {
-    this.diffEngine = diffEngine ?? new MyersDiffEngine();
+    this.diffEngine = diffEngine ?? new DiffEngine();
   }
 
   public async createSnapshot(
@@ -146,15 +150,14 @@ export class ProjectHistoryService {
     userId?: string | null,
   ): Promise<VersionLabelDto> {
     const cleanLabel = label.trim();
-    const snapshot = await this.repository.findByVersion(projectId, version);
+    const [snapshot, existing] = await Promise.all([
+      this.repository.findByVersion(projectId, version),
+      this.repository.findLabelByName(projectId, cleanLabel),
+    ]);
     if (!snapshot) {
       throw new VersionNotFoundException(projectId, version);
     }
 
-    const existing = await this.repository.findLabelByName(
-      projectId,
-      cleanLabel,
-    );
     if (existing && existing.version !== version) {
       throw new DuplicateLabelException(projectId, cleanLabel);
     }
@@ -220,6 +223,100 @@ export class ProjectHistoryService {
       restoredSnapshot: this.toDetailDto(targetSnapshot),
       newSnapshot: this.toDetailDto(newSnapshot),
       restoreResult,
+    };
+  }
+
+  public async restoreSingleFile(
+    projectId: string,
+    targetVersion: number,
+    dto: RestoreSingleFileDto,
+    userId?: string | null,
+  ): Promise<RestoreSingleFileResponseDto> {
+    const targetSnapshot = await this.repository.findByVersion(
+      projectId,
+      targetVersion,
+    );
+    if (!targetSnapshot) {
+      throw new VersionNotFoundException(projectId, targetVersion);
+    }
+
+    if (typeof this.restorer.restoreSingleFileToState !== 'function') {
+      throw new NotFoundException('Single-file restore adapter not configured');
+    }
+
+    let restoredFile;
+    try {
+      restoredFile = await this.restorer.restoreSingleFileToState(
+        projectId,
+        targetSnapshot,
+        dto.pathname,
+        dto.fileId,
+      );
+    } catch (err: unknown) {
+      throw new NotFoundException(
+        (err as Error)?.message ||
+          `File ${dto.pathname} not found in version ${targetVersion}`,
+      );
+    }
+
+    const newSnapshot = await this.createSnapshotDirect({
+      projectId,
+      summary: `Restored ${dto.pathname} from Version ${targetVersion}`,
+      createdById: userId || null,
+      isAutomatic: false,
+    });
+
+    this.realtimeService?.broadcastSnapshotCreated(projectId, {
+      version: newSnapshot.version,
+      summary: newSnapshot.summary,
+      label: null,
+    });
+
+    return {
+      path: restoredFile.path,
+      version: targetVersion,
+      newVersion: newSnapshot.version,
+      docId: restoredFile.docId ?? null,
+      fileId: restoredFile.fileId ?? null,
+      content: restoredFile.content,
+      rev: restoredFile.rev,
+    };
+  }
+
+  public async exportVersionZipStream(
+    projectId: string,
+    version: number,
+    projectName?: string,
+  ): Promise<{
+    zipStream: Readable;
+    filename: string;
+    fileCount: number;
+  }> {
+    const snapshot = await this.repository.findByVersion(projectId, version);
+    if (!snapshot) {
+      throw new VersionNotFoundException(projectId, version);
+    }
+
+    const { zipStream, fileCount } = this.collector.createSnapshotZipStream(
+      projectId,
+      snapshot,
+    );
+
+    const baseName =
+      (projectName || 'manuscript')
+        .replace(/[^\w\s-]/g, '')
+        .trim()
+        .replace(/\s+/g, '_') || 'manuscript';
+    const labelSuffix =
+      snapshot.labels && snapshot.labels.length > 0
+        ? `-${snapshot.labels[0].label.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_')}`
+        : `-v${version}`;
+    const filename = `${baseName}${labelSuffix}.zip`;
+
+    return {
+      zipStream,
+      filename,
+      fileCount,
     };
   }
 

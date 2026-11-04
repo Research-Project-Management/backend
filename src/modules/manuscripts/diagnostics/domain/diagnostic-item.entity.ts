@@ -104,12 +104,21 @@ export interface QuickFixVo {
   replacementText: string;
 }
 
+export type DiagnosticWarningSubtype =
+  | 'font'
+  | 'package'
+  | 'citation'
+  | 'reference'
+  | 'badbox';
+
 export interface DiagnosticItemProps {
   id?: string;
   file: string;
   line: number | null;
   column?: number | null;
   severity: DiagnosticSeverityType | DiagnosticSeverityVo;
+  category?: DiagnosticSeverityType;
+  warningSubtype?: DiagnosticWarningSubtype;
   message: string;
   context?: string;
   code?: string;
@@ -123,6 +132,8 @@ export class DiagnosticItem {
   public readonly line: number | null;
   public readonly column: number | null;
   public readonly severity: DiagnosticSeverityVo;
+  public readonly category: DiagnosticSeverityType;
+  public readonly warningSubtype?: DiagnosticWarningSubtype;
   public readonly message: string;
   public readonly context?: string;
   public readonly code?: string;
@@ -142,6 +153,8 @@ export class DiagnosticItem {
       props.severity instanceof DiagnosticSeverityVo
         ? props.severity
         : DiagnosticSeverityVo.fromString(props.severity);
+    this.category = props.category || this.severity.value;
+    this.warningSubtype = props.warningSubtype;
     this.message = (props.message || '').trim();
     this.context = props.context;
     this.code = props.code;
@@ -156,6 +169,8 @@ export class DiagnosticItem {
       line: this.line,
       column: this.column,
       severity: this.severity.value,
+      category: this.category,
+      warningSubtype: this.warningSubtype,
       message: this.message,
       context: this.context,
       code: this.code,

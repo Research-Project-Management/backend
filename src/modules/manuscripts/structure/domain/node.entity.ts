@@ -14,6 +14,8 @@ export type ManuscriptNodeType = 'FOLDER' | 'DOC' | 'FILE';
 
 export interface SerializedTreeNode {
   id: string;
+  projectId?: string;
+  pageId?: string | null;
   name: string;
   path: string;
   type: ManuscriptNodeType;
@@ -30,6 +32,7 @@ export interface SerializedTreeNode {
 export interface ManuscriptNodeProps {
   id: string;
   projectId: string;
+  pageId?: string | null;
   parentId?: string | null;
   type: ManuscriptNodeType;
   name: string;
@@ -67,12 +70,36 @@ export class ManuscriptNodeEntity {
 
   constructor(props: ManuscriptNodeProps) {
     NodePathVo.validateFilename(props.name);
+
+    if (props.type === 'FOLDER') {
+      if (props.docId || props.fileId) {
+        throw new StructureError(
+          'FOLDER node cannot reference a docId or fileId',
+        );
+      }
+      if (props.isRootDoc) {
+        throw new StructureError('FOLDER node cannot be marked as root document');
+      }
+    } else if (props.type === 'DOC') {
+      if (props.fileId) {
+        throw new StructureError('DOC node cannot reference a fileId');
+      }
+    } else if (props.type === 'FILE') {
+      if (props.docId) {
+        throw new StructureError('FILE node cannot reference a docId');
+      }
+      if (props.isRootDoc) {
+        throw new StructureError('FILE node cannot be marked as root document');
+      }
+    }
+
     this.props = {
       ...props,
+      pageId: props.pageId ?? props.projectId,
       path: NodePathVo.normalize(props.path),
       depth: NodePathVo.depth(props.path),
       isRootDoc: props.isRootDoc ?? false,
-      sizeBytes: props.sizeBytes ?? 0,
+      sizeBytes: props.type === 'FOLDER' ? 0 : (props.sizeBytes ?? 0),
       sortOrder: props.sortOrder ?? 0,
       createdAt: props.createdAt ?? new Date(),
       updatedAt: props.updatedAt ?? new Date(),
@@ -85,6 +112,10 @@ export class ManuscriptNodeEntity {
 
   public get projectId(): string {
     return this.props.projectId;
+  }
+
+  public get pageId(): string | null {
+    return this.props.pageId ?? this.props.projectId;
   }
 
   public get parentId(): string | null {
@@ -202,6 +233,9 @@ export class ManuscriptNodeEntity {
   }
 
   public markAsRootDoc(isRoot: boolean): void {
+    if (isRoot) {
+      this.assertCanBeRootDoc();
+    }
     this.props.isRootDoc = isRoot;
   }
 
@@ -253,6 +287,8 @@ export class ManuscriptNodeEntity {
   public toTreeNode(children: SerializedTreeNode[] = []): SerializedTreeNode {
     return {
       id: this.id,
+      projectId: this.projectId,
+      pageId: this.pageId,
       name: this.name,
       path: this.path,
       type: this.type,
@@ -271,6 +307,7 @@ export class ManuscriptNodeEntity {
     return {
       id: this.id,
       projectId: this.projectId,
+      pageId: this.pageId,
       parentId: this.parentId,
       type: this.type,
       name: this.name,

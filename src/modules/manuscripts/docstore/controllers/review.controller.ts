@@ -39,15 +39,15 @@ import { ManuscriptChangeType } from '@prisma/client';
 import { UpdateReviewStatusDto } from '../dto/review-status.dto';
 import { AuthenticatedRequest, isUuid } from '@/core';
 import { DocstoreService } from '../docstore.service';
-import { ManuscriptPageService } from '@/modules/manuscripts/core/services/page.service';
-import { ManuscriptUserResolverService } from '@/modules/manuscripts/core/services/user-resolver.service';
+import { PageService } from '@/modules/manuscripts/core/services/page.service';
+import { UserResolverService } from '@/modules/manuscripts/core/services/user-resolver.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
 } from '@/modules/manuscripts/core';
-import { ManuscriptPageScopeRepository } from '../repositories/scope.repository';
+import { ScopeRepository } from '../repositories/scope.repository';
 import { TrackChangesService } from '@/modules/manuscripts/track-changes/track-changes.service';
 import { TrackChangesRepository } from '@/modules/manuscripts/track-changes/track-changes.repository';
 import {
@@ -64,6 +64,7 @@ import {
   formatSuggestionItemDto,
   getDocReviewStatusWithFallback,
   updateDocReviewStatusWithCas,
+  buildProjectReviewOverview,
 } from './review.helpers';
 
 export interface CreateSuggestionBody {
@@ -83,15 +84,15 @@ export interface CreateSuggestionBody {
 @Controller('api/v1/manuscripts')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
-export class PagesReviewController {
-  private readonly logger = new Logger(PagesReviewController.name);
+export class ReviewController {
+  private readonly logger = new Logger(ReviewController.name);
   private readonly liveCollab: LiveCollaborationPort;
 
   constructor(
     private readonly docstoreService: DocstoreService,
-    private readonly pageScopeRepo: ManuscriptPageScopeRepository,
-    private readonly userResolver: ManuscriptUserResolverService,
-    private readonly pageService: ManuscriptPageService,
+    private readonly pageScopeRepo: ScopeRepository,
+    private readonly userResolver: UserResolverService,
+    private readonly pageService: PageService,
     @Optional()
     private readonly trackChangesService?: TrackChangesService,
     @Optional()
@@ -1241,10 +1242,12 @@ export class PagesReviewController {
   /**
    * POST /api/v1/manuscripts/pages/:pageId/suggestions/accept-all
    * POST /api/v1/manuscripts/docs/:pageId/suggestions/accept-all
+   * POST /api/v1/manuscripts/projects/:projectId/docs/:pageId/suggestions/accept-all
    */
   @Post([
     'pages/:pageId/suggestions/accept-all',
     'docs/:pageId/suggestions/accept-all',
+    'projects/:projectId/docs/:pageId/suggestions/accept-all',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
@@ -1252,25 +1255,28 @@ export class PagesReviewController {
     @Param('pageId') pageId: string,
     @Body() body: { suggestionIds?: string[] },
     @ResolvedProject() authorizedProjectId: string | { id: string } | null,
+    @Param('projectId') routeProjectId?: string,
     @Req() req?: AuthenticatedRequest,
   ) {
     const resolvedCount = await this.batchResolvePageSuggestions(
       pageId,
-      authorizedProjectId,
+      routeProjectId || authorizedProjectId,
       true,
       body?.suggestionIds,
       req?.user?.id || req?.user?.sub || null,
     );
-    return { ok: true, acceptedCount: resolvedCount };
+    return { ok: true, acceptedCount: resolvedCount, resolvedCount };
   }
 
   /**
    * POST /api/v1/manuscripts/pages/:pageId/suggestions/reject-all
    * POST /api/v1/manuscripts/docs/:pageId/suggestions/reject-all
+   * POST /api/v1/manuscripts/projects/:projectId/docs/:pageId/suggestions/reject-all
    */
   @Post([
     'pages/:pageId/suggestions/reject-all',
     'docs/:pageId/suggestions/reject-all',
+    'projects/:projectId/docs/:pageId/suggestions/reject-all',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
@@ -1278,16 +1284,104 @@ export class PagesReviewController {
     @Param('pageId') pageId: string,
     @Body() body: { suggestionIds?: string[] },
     @ResolvedProject() authorizedProjectId: string | { id: string } | null,
+    @Param('projectId') routeProjectId?: string,
     @Req() req?: AuthenticatedRequest,
   ) {
     const resolvedCount = await this.batchResolvePageSuggestions(
       pageId,
-      authorizedProjectId,
+      routeProjectId || authorizedProjectId,
       false,
       body?.suggestionIds,
       req?.user?.id || req?.user?.sub || null,
     );
-    return { ok: true, rejectedCount: resolvedCount };
+    return { ok: true, rejectedCount: resolvedCount, resolvedCount };
+  }
+
+  /**
+   * POST /api/v1/manuscripts/pages/:pageId/suggestions/batch-resolve
+   * POST /api/v1/manuscripts/docs/:pageId/suggestions/batch-resolve
+   * POST /api/v1/manuscripts/projects/:projectId/docs/:pageId/suggestions/batch-resolve
+   */
+  @Post([
+    'pages/:pageId/suggestions/batch-resolve',
+    'docs/:pageId/suggestions/batch-resolve',
+    'projects/:projectId/docs/:pageId/suggestions/batch-resolve',
+  ])
+  @RequireRole(Role.CONTRIBUTOR)
+  @HttpCode(HttpStatus.OK)
+  async batchResolveSuggestions(
+    @Param('pageId') pageId: string,
+    @Body()
+    body: {
+      action: 'accept' | 'reject' | 'accept_all' | 'reject_all';
+      suggestionIds?: string[];
+    },
+    @ResolvedProject() authorizedProjectId: string | { id: string } | null,
+    @Param('projectId') routeProjectId?: string,
+    @Req() req?: AuthenticatedRequest,
+  ) {
+    const isAccept =
+      body?.action === 'accept' || body?.action === 'accept_all';
+    const resolvedCount = await this.batchResolvePageSuggestions(
+      pageId,
+      routeProjectId || authorizedProjectId,
+      isAccept,
+      body?.suggestionIds,
+      req?.user?.id || req?.user?.sub || null,
+    );
+    return {
+      ok: true,
+      action: isAccept ? 'accept' : 'reject',
+      resolvedCount,
+      acceptedCount: isAccept ? resolvedCount : 0,
+      rejectedCount: isAccept ? 0 : resolvedCount,
+    };
+  }
+
+  /**
+   * GET /api/v1/manuscripts/projects/:projectId/review-overview
+   * GET /api/v1/manuscripts/pages/:projectId/review-overview
+   * GET /api/v1/manuscripts/docs/:projectId/review-overview
+   */
+  @Get([
+    'projects/:projectId/review-overview',
+    'pages/:projectId/review-overview',
+    'docs/:projectId/review-overview',
+  ])
+  @RequireRole(Role.REVIEWER)
+  async getProjectReviewOverview(
+    @Param('projectId') routeProjectId: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+  ) {
+    const resolvedActive = this.resolveActiveProjectId(authorizedProjectId);
+    const targetProjectId =
+      resolvedActive ||
+      (isUuid(routeProjectId)
+        ? (await this.pageService.resolveProjectId(routeProjectId)) ||
+          routeProjectId
+        : routeProjectId);
+
+    if (!targetProjectId || !isUuid(targetProjectId)) {
+      return {
+        projectId: targetProjectId || routeProjectId,
+        files: [],
+        totals: {
+          openCommentsCount: 0,
+          resolvedCommentsCount: 0,
+          pendingSuggestionsCount: 0,
+          acceptedSuggestionsCount: 0,
+          rejectedSuggestionsCount: 0,
+          totalVisibleCount: 0,
+          totalResolvedCount: 0,
+        },
+      };
+    }
+
+    return buildProjectReviewOverview({
+      pageScopeRepo: this.pageScopeRepo,
+      projectId: targetProjectId,
+      resolveUserNames: (userIds) => this.resolveUserNames(userIds),
+    });
   }
 
   private async batchResolvePageSuggestions(
@@ -1500,3 +1594,6 @@ export class PagesReviewController {
     return { ok: true, docId, projectId, review: updatedReview };
   }
 }
+
+/** @deprecated Use ReviewController */
+export { ReviewController as PagesReviewController };

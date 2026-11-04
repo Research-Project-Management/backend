@@ -17,9 +17,9 @@ import {
 } from '@/modules/manuscripts/core';
 import { SpellingRepository } from './spelling.repository';
 import {
-  AcademicSpellEngine,
+  SpellEngine,
   LanguageCodeVo,
-  LatexProseTokenizer,
+  LatexTokenizer,
   SpellingReport,
 } from './domain';
 import {
@@ -40,8 +40,8 @@ export interface CheckSpellingQuery {
 
 @Injectable()
 export class SpellingService {
-  private readonly tokenizer: LatexProseTokenizer;
-  private readonly spellEngine: AcademicSpellEngine;
+  private readonly tokenizer: LatexTokenizer;
+  private readonly spellEngine: SpellEngine;
 
   constructor(
     @Optional() private readonly repository?: SpellingRepository,
@@ -49,11 +49,11 @@ export class SpellingService {
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly liveCollab?: LiveCollaborationPort,
-    @Optional() tokenizer?: LatexProseTokenizer,
-    @Optional() spellEngine?: AcademicSpellEngine,
+    @Optional() tokenizer?: LatexTokenizer,
+    @Optional() spellEngine?: SpellEngine,
   ) {
-    this.tokenizer = tokenizer ?? new LatexProseTokenizer();
-    this.spellEngine = spellEngine ?? new AcademicSpellEngine(this.tokenizer);
+    this.tokenizer = tokenizer ?? new LatexTokenizer();
+    this.spellEngine = spellEngine ?? new SpellEngine(this.tokenizer);
   }
 
   private get repo(): SpellingRepository {
@@ -90,14 +90,16 @@ export class SpellingService {
     }
 
     const customWordSet = new Set<string>();
-    if (query.projectId) {
-      const pWords = await this.repo.listProjectWords(query.projectId);
-      for (const w of pWords) customWordSet.add(w.toLowerCase());
-    }
-    if (query.userId) {
-      const uWords = await this.repo.listUserWords(query.userId);
-      for (const w of uWords) customWordSet.add(w.toLowerCase());
-    }
+    const [pWords, uWords] = await Promise.all([
+      query.projectId
+        ? this.repo.listProjectWords(query.projectId)
+        : Promise.resolve([]),
+      query.userId
+        ? this.repo.listUserWords(query.userId)
+        : Promise.resolve([]),
+    ]);
+    for (const w of pWords) customWordSet.add(w.toLowerCase());
+    for (const w of uWords) customWordSet.add(w.toLowerCase());
 
     return this.spellEngine.checkText(
       sourceText,
@@ -150,7 +152,7 @@ export class SpellingService {
     projectId: string,
     word: string,
   ): Promise<void> {
-    const cleaned = AcademicSpellEngine.validateCustomWord(word);
+    const cleaned = SpellEngine.validateCustomWord(word);
     await this.repo.addProjectWord(projectId, cleaned);
   }
 
@@ -184,7 +186,7 @@ export class SpellingService {
    * Adds a custom word to the user dictionary.
    */
   public async learnUserWord(userId: string, word: string): Promise<void> {
-    const cleaned = AcademicSpellEngine.validateCustomWord(word);
+    const cleaned = SpellEngine.validateCustomWord(word);
     await this.repo.addUserWord(userId, cleaned);
   }
 

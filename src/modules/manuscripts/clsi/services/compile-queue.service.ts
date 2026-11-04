@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/services/compile-fair-queue.service.ts
+ * modules/manuscripts/clsi/services/compile-queue.service.ts
  * Application Service: Fair-Queue & Per-Tenant Fair Semaphore orchestrator for LaTeX compilation in CLSI.
  */
 
@@ -40,8 +40,8 @@ export interface CompileQueueConfig {
 }
 
 @Injectable()
-export class CompileFairQueue implements OnModuleDestroy {
-  private readonly logger = new Logger(CompileFairQueue.name);
+export class CompileQueueService implements OnModuleDestroy {
+  private readonly logger = new Logger(CompileQueueService.name);
   private readonly inFlightCompiles = new Map<string, InFlightCompileSession>();
   private readonly compileTimestamps = new Map<string, number[]>();
 
@@ -273,3 +273,6 @@ export class CompileFairQueue implements OnModuleDestroy {
     }
   }
 }
+
+/** @deprecated Use CompileQueueService */
+export { CompileQueueService as CompileFairQueue };

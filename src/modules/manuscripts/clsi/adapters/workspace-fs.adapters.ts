@@ -3,7 +3,7 @@
  * Driven File-System & Scratch Workspace Adapters for CLSI:
  * - ProjectLockManager & ProjectLockTimeoutError (.project-lock concurrency guard)
  * - DiskUsageCleaner (LRU scratch directory garbage collection)
- * - OverleafOutputFileFinder (Port: IOutputFileFinder)
+ * - OutputFileFinder (Port: IOutputFileFinder)
  * - createZipStreamFromDisk (PKZIP disk artifact stream helper)
  */
 
@@ -13,9 +13,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
 import {
-  createPkZipStream,
-  PkZipEntry,
-} from '../../core/utils/pkzip-builder';
+  createZipStream,
+  ZipEntry,
+} from '../../core/utils/zip-builder';
 import { IOutputFileFinder, DiscoveredOutputFile } from '../domain';
 
 // ─────────────────────────────────────────────────────────────────
@@ -336,7 +336,7 @@ export class DiskUsageCleaner {
 // Output File Finder (Overleaf OutputFileFinder parity)
 // ─────────────────────────────────────────────────────────────────
 
-export class OverleafOutputFileFinder implements IOutputFileFinder {
+export class OutputFileFinder implements IOutputFileFinder {
   private static readonly IGNORED_NAMES = new Set([
     '.project-lock',
     '.clsi-manifest.json',
@@ -380,7 +380,7 @@ export class OverleafOutputFileFinder implements IOutputFileFinder {
     }
 
     for (const entry of entries) {
-      if (OverleafOutputFileFinder.IGNORED_NAMES.has(entry.name)) {
+      if (OutputFileFinder.IGNORED_NAMES.has(entry.name)) {
         continue;
       }
 
@@ -420,6 +420,9 @@ export class OverleafOutputFileFinder implements IOutputFileFinder {
   }
 }
 
+/** @deprecated Use OutputFileFinder */
+export { OutputFileFinder as OverleafOutputFileFinder };
+
 // ─────────────────────────────────────────────────────────────────
 // PKZIP Disk Artifact Stream Helper
 // ─────────────────────────────────────────────────────────────────
@@ -431,7 +434,7 @@ export interface ZipDiskEntry {
 }
 
 export function createZipStreamFromDisk(files: ZipDiskEntry[]): Readable {
-  const pkEntries: PkZipEntry[] = files.map((entry) => ({
+  const pkEntries: ZipEntry[] = files.map((entry) => ({
     path: entry.relPath,
     date: entry.date,
     getData: async () => {
@@ -447,5 +450,5 @@ export function createZipStreamFromDisk(files: ZipDiskEntry[]): Readable {
     },
   }));
 
-  return createPkZipStream(pkEntries);
+  return createZipStream(pkEntries);
 }

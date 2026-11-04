@@ -280,6 +280,7 @@ export class ByteRange {
 export interface CreateManuscriptFileProps {
   id?: string;
   projectId: string;
+  pageId?: string | null;
   name: string;
   mimeType: string;
   sizeBytes: number;
@@ -296,6 +297,7 @@ export interface CreateManuscriptFileProps {
 export class ManuscriptFile {
   private readonly _id: string;
   private readonly _projectId: string;
+  private readonly _pageId: string | null;
   private _name: string;
   private _mimeType: string;
   private readonly _sizeBytes: number;
@@ -318,6 +320,7 @@ export class ManuscriptFile {
 
     this._id = props.id ?? crypto.randomUUID();
     this._projectId = props.projectId;
+    this._pageId = props.pageId ?? null;
     this._name = ManuscriptFile.sanitizeFilename(props.name);
     this._mimeType = props.mimeType || 'application/octet-stream';
     this._sizeBytes = props.sizeBytes;
@@ -369,6 +372,9 @@ export class ManuscriptFile {
   }
   public get projectId(): string {
     return this._projectId;
+  }
+  public get pageId(): string | null {
+    return this._pageId;
   }
   public get name(): string {
     return this._name;

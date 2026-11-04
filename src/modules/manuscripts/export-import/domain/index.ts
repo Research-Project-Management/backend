@@ -4,4 +4,4 @@
  */
 
 export * from './archive-validator';
-export * from './latex-export-transpiler';
+export * from './latex.transpiler';

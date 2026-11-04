@@ -1,7 +1,7 @@
 /**
  * modules/manuscripts/docstore/controllers/doc.helpers.ts
  * Co-located helper, mapping, tree-building, and sub-operation functions
- * for PagesDocController.
+ * for DocController.
  */
 
 import {
@@ -16,7 +16,7 @@ import { NodePathVo } from '@/modules/manuscripts/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/manuscripts/structure/structure.repository';
 import { DocstoreService } from '../docstore.service';
 import { DocModifiedError } from '../domain';
-import { ManuscriptPageScopeRepository } from '../repositories/scope.repository';
+import { ScopeRepository } from '../repositories/scope.repository';
 
 export interface PageDocRanges {
   labels?: Array<{ id: string; name?: string; color?: string }>;
@@ -39,6 +39,13 @@ export async function resolveProjectIdByEntityId(
   id: string,
 ): Promise<string | null> {
   if (!isUuid(id)) return null;
+  const page = await Promise.resolve(
+    prisma.manuscriptPage?.findUnique?.({
+      where: { id },
+      select: { projectId: true },
+    }),
+  ).catch(() => null);
+  if (page?.projectId) return page.projectId;
   const doc = await prisma.manuscriptDoc.findUnique({
     where: { id },
     select: { projectId: true },
@@ -100,6 +107,30 @@ export async function findPageRecordWithNode(
         include: { node: true },
       });
 
+      if (!record && prisma.manuscriptPage?.findUnique) {
+        const pageRow = await Promise.resolve(
+          prisma.manuscriptPage.findUnique({
+            where: { id: pageId },
+            select: { rootDocId: true, projectId: true, deleted: true },
+          }),
+        ).catch(() => null);
+        if (
+          pageRow &&
+          !pageRow.deleted &&
+          pageRow.projectId === targetProjectId &&
+          pageRow.rootDocId
+        ) {
+          record = await prisma.manuscriptDoc.findFirst({
+            where: {
+              id: pageRow.rootDocId,
+              projectId: targetProjectId,
+              deleted: false,
+            },
+            include: { node: true },
+          });
+        }
+      }
+
       if (!record) {
         const rootNode = await prisma.manuscriptNode.findFirst({
           where: { projectId: targetProjectId, isRootDoc: true },
@@ -130,10 +161,27 @@ export async function findPageRecordWithNode(
   }
 
   if (isUuid(pageId)) {
-    return prisma.manuscriptDoc.findUnique({
+    const direct = await prisma.manuscriptDoc.findUnique({
       where: { id: pageId },
       include: { node: true },
     });
+    if (direct) return direct;
+
+    if (prisma.manuscriptPage?.findUnique) {
+      const pageRow = await Promise.resolve(
+        prisma.manuscriptPage.findUnique({
+          where: { id: pageId },
+          select: { rootDocId: true, deleted: true },
+        }),
+      ).catch(() => null);
+      if (pageRow && !pageRow.deleted && pageRow.rootDocId) {
+        return prisma.manuscriptDoc.findUnique({
+          where: { id: pageRow.rootDocId },
+          include: { node: true },
+        });
+      }
+    }
+    return null;
   }
 
   return null;
@@ -266,9 +314,11 @@ export async function applyPageMetadataAndTitleUpdates(
     const runTitleSync = async (
       db: Pick<PrismaService, 'manuscriptDoc' | 'manuscriptNode'>,
     ) => {
-      const parentId = isExplicitPathChange
-        ? await ensurePrismaFolderChain(db, record.projectId, targetParsed.folderChain)
-        : undefined;
+      const parentId = await ensurePrismaFolderChain(
+        db,
+        record.projectId,
+        targetParsed.folderChain,
+      );
       await db.manuscriptNode?.updateMany({
         where: {
           projectId: record.projectId,
@@ -278,7 +328,7 @@ export async function applyPageMetadataAndTitleUpdates(
           name: targetParsed.leafName,
           path: targetParsed.normalizedPath,
           depth: targetParsed.depth,
-          ...(parentId !== undefined ? { parentId } : {}),
+          ...(isExplicitPathChange || parentId !== null ? { parentId } : {}),
         },
       });
       await db.manuscriptDoc?.update({
@@ -334,6 +384,27 @@ export async function applyPageMetadataAndTitleUpdates(
         data: { ranges: updatedRanges },
       })
       .catch(() => null);
+  }
+
+  if (
+    (cleanTitle || body.status || body.description !== undefined) &&
+    prisma.manuscriptPage?.updateMany
+  ) {
+    await Promise.resolve(
+      prisma.manuscriptPage.updateMany({
+        where: {
+          projectId: record.projectId,
+          OR: [{ id: pageId }, { rootDocId: pageId }],
+        },
+        data: {
+          ...(cleanTitle ? { title: cleanTitle } : {}),
+          ...(body.status ? { status: body.status } : {}),
+          ...(body.description !== undefined
+            ? { description: body.description }
+            : {}),
+        },
+      }),
+    ).catch(() => null);
   }
 
   return { cleanTitle, existingRanges };
@@ -816,14 +887,12 @@ export async function duplicateSourcePageAndNode(
   }
   const computedDepth = parsedSource.depth;
 
-  const hydratedSourceLines = await hydratePageDocLines(
-    docstoreService,
-    source,
-  );
-
-  const sourceNode = await prisma.manuscriptNode.findFirst({
-    where: { projectId: source.projectId, docId: pageId },
-  });
+  const [hydratedSourceLines, sourceNode] = await Promise.all([
+    hydratePageDocLines(docstoreService, source),
+    prisma.manuscriptNode.findFirst({
+      where: { projectId: source.projectId, docId: pageId },
+    }),
+  ]);
 
   const { createdDoc: newDoc, createdNodeId } = await prisma.$transaction(async (tx) => {
     const createdDoc = await tx.manuscriptDoc.create({
@@ -935,7 +1004,7 @@ export async function resolveProjectLabels(
 
 export async function resolveAndAssignLabelsForDoc(
   prisma: PrismaService,
-  pageScopeRepo: ManuscriptPageScopeRepository,
+  pageScopeRepo: ScopeRepository,
   projectId: string,
   pageId: string,
   labelIds: string[],

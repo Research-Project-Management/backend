@@ -131,14 +131,15 @@ export class CompileManuscriptDto {
 }
 
 export class ClsiWordCountDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'LaTeX source to count words from (max 15MB)',
   })
+  @IsOptional()
   @IsString()
   @MaxLength(15 * 1024 * 1024, {
     message: 'LaTeX source exceeds maximum allowed size of 15MB',
   })
-  source!: string;
+  source?: string;
 
   @ApiPropertyOptional({
     description: 'Project UUID for resolving multi-file \\input / \\include',
@@ -146,4 +147,117 @@ export class ClsiWordCountDto {
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filename for reporting (default: document.tex)',
+  })
+  @IsOptional()
+  @IsString()
+  filename?: string;
+
+  @ApiPropertyOptional({
+    description: 'Whether to include bibliography/bibitem words in totalWords',
+  })
+  @IsOptional()
+  @IsBoolean()
+  includeBib?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Optional virtual files map (filename -> content) for project word count',
+  })
+  @IsOptional()
+  @IsObject()
+  files?: Record<string, string>;
 }
+
+export class ClsiAiTransformDto {
+  @ApiProperty({
+    description: 'Academic writing action type',
+    enum: [
+      'academic-tone',
+      'make-concise',
+      'fix-grammar',
+      'translate-english',
+      'custom',
+    ],
+  })
+  @IsString()
+  action!:
+    | 'academic-tone'
+    | 'make-concise'
+    | 'fix-grammar'
+    | 'translate-english'
+    | 'custom';
+
+  @ApiProperty({ description: 'Selected LaTeX/Markdown text to transform' })
+  @IsString()
+  selectedText!: string;
+
+  @ApiPropertyOptional({ description: 'Custom instruction when action is custom' })
+  @IsOptional()
+  @IsString()
+  customPrompt?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  contextBefore?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  contextAfter?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  documentTitle?: string;
+}
+
+export class ClsiAiFixErrorDto {
+  @ApiProperty({ description: 'Compiler error message' })
+  @IsString()
+  errorMessage!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  errorLine?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  errorFile?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  detail?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  surroundingCode?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  fullCode?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  pageId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  projectId?: string;
+}
+
+export class ClsiAiGenerateTableDto {
+  @ApiProperty({ description: 'Natural language description of the table' })
+  @IsString()
+  prompt!: string;
+}
+

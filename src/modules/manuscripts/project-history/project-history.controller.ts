@@ -19,7 +19,9 @@ import {
   ParseIntPipe,
   UseGuards,
   Req,
+  Res,
 } from '@nestjs/common';
+import { FastifyReply } from 'fastify';
 import {
   ApiTags,
   ApiOperation,
@@ -37,6 +39,8 @@ import {
   CreateSnapshotDto,
   LabelVersionDto,
   RestoreVersionDto,
+  RestoreSingleFileDto,
+  RestoreSingleFileResponseDto,
   DiffQueryDto,
   DiffResponseDto,
   SnapshotDetailDto,
@@ -228,6 +232,75 @@ export class ProjectHistoryController {
         dto.targetVersion,
         userId,
       );
+    } catch (err) {
+      this.handleError(err);
+    }
+  }
+
+  @Post('versions/:version/restore-file')
+  @RequireRole(Role.CONTRIBUTOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Atomically restore a single file from a historical version snapshot and record a new snapshot',
+  })
+  @ApiResponse({ status: 200, type: RestoreSingleFileResponseDto })
+  async restoreSingleFile(
+    @Param('projectId') projectId: string,
+    @Param('version', ParseIntPipe) version: number,
+    @Body() dto: RestoreSingleFileDto,
+    @Req() req?: AuthenticatedRequest,
+  ): Promise<RestoreSingleFileResponseDto> {
+    try {
+      const userId =
+        req?.user?.sub || req?.user?.id || req?.user?.userId || null;
+      return await this.historyService.restoreSingleFile(
+        projectId,
+        version,
+        dto,
+        userId,
+      );
+    } catch (err) {
+      this.handleError(err);
+    }
+  }
+
+  @Get('versions/:version/export-zip')
+  @RequireRole(Role.REVIEWER)
+  @ApiOperation({
+    summary:
+      'Export historical version snapshot as a streaming PKZIP archive',
+  })
+  async exportVersionZip(
+    @Param('projectId') projectId: string,
+    @Param('version', ParseIntPipe) version: number,
+    @Query('projectName') projectName: string | undefined,
+    @Res() res: FastifyReply,
+  ): Promise<void> {
+    try {
+      const result = await this.historyService.exportVersionZipStream(
+        projectId,
+        version,
+        projectName,
+      );
+
+      res.header('Content-Type', 'application/zip');
+      res.header(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(result.filename)}"`,
+      );
+
+      if ('raw' in res && Boolean((res as unknown as { raw?: unknown }).raw)) {
+        return res.send(result.zipStream);
+      } else {
+        const chunks: Buffer[] = [];
+        for await (const chunk of result.zipStream) {
+          chunks.push(Buffer.from(chunk));
+        }
+        const fullBuffer = Buffer.concat(chunks);
+        res.header('Content-Length', fullBuffer.length.toString());
+        return res.send(fullBuffer);
+      }
     } catch (err) {
       this.handleError(err);
     }

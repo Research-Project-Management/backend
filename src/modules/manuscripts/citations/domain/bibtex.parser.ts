@@ -1,5 +1,5 @@
 /**
- * citations/domain/regex-ast-bibtex.parser.ts
+ * citations/domain/bibtex.parser.ts
  * Zero-dependency, pure TypeScript BibTeX parser and serializer.
  * Robust against nested braces, multiline fields, quotes, and comments.
  */
@@ -8,7 +8,7 @@ import { IBibtexParserPort } from './citations.ports';
 import { BibEntry } from './bib-entry.entity';
 import { CitationKeyVo } from './citation-key';
 
-export class RegexAstBibtexParser implements IBibtexParserPort {
+export class BibtexParser implements IBibtexParserPort {
   private static readonly STANDARD_MONTH_MACROS: Record<string, string> = {
     jan: 'January',
     feb: 'February',
@@ -33,7 +33,7 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
     const entries: BibEntry[] = [];
     const cleanSource = this.stripComments(rawBibtex);
     const stringMacros: Record<string, string> = {
-      ...RegexAstBibtexParser.STANDARD_MONTH_MACROS,
+      ...BibtexParser.STANDARD_MONTH_MACROS,
     };
 
     // 1. Pre-scan @string{key = value} or @string(key = value) macro definitions
@@ -297,7 +297,7 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
   ): string {
     const targetKey = key.trim().toLowerCase();
     const ranges: Array<{ start: number; end: number }> = [];
-    const maskedText = RegexAstBibtexParser.maskCommentsPreserveLength(text);
+    const maskedText = BibtexParser.maskCommentsPreserveLength(text);
     const entryStartRegex = /@([a-zA-Z]+)\s*\{\s*([^,\s]+)\s*,/g;
 
     let match: RegExpExecArray | null;
@@ -311,7 +311,7 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
         continue;
       }
       const openIdx = match.index + match[0].indexOf('{');
-      const closeIdx = RegexAstBibtexParser.findMatchingClosingBrace(
+      const closeIdx = BibtexParser.findMatchingClosingBrace(
         maskedText,
         openIdx,
       );
@@ -346,7 +346,7 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
   }
 
   private findMatchingClosingBrace(text: string, openBraceIdx: number): number {
-    return RegexAstBibtexParser.findMatchingClosingBrace(text, openBraceIdx);
+    return BibtexParser.findMatchingClosingBrace(text, openBraceIdx);
   }
 
   /**
@@ -391,3 +391,5 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
     return result.join('\n');
   }
 }
+
+export { BibtexParser as RegexAstBibtexParser };

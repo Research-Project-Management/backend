@@ -3,15 +3,22 @@
  * Deep Service orchestrating Citations, BibTeX, DOI/arXiv resolution & Library sync.
  */
 
-import { Injectable, Optional, Logger } from '@nestjs/common';
+import { Injectable, Optional, Logger, BadRequestException } from '@nestjs/common';
 import { CitationsRepository } from './citations.repository';
 import {
-  AcademicIdentifierVo,
+  IdentifierVo,
   BibEntry,
-  CrossrefArxivResolverAdapter,
+  IdentifierResolver,
   IIdentifierResolverPort,
   IdentifierNotFoundException,
-  RegexAstBibtexParser,
+  InvalidBibtexException,
+  BibtexParser,
+  validateCitationKey,
+  buildBibEntryFromInput,
+  buildBibliographySection,
+  injectBibliographyIntoDocument,
+  isLatexDocument,
+  InjectBibliographyResult,
 } from './domain';
 import {
   CitationQueryDto,
@@ -20,22 +27,27 @@ import {
   BibEntryDto,
   CitationValidationDto,
   SyncLibraryResultDto,
+  RefactorCitationKeyDto,
+  RefactorCitationKeyResultDto,
+  UpsertCitationEntriesDto,
+  UpsertCitationEntriesResultDto,
+  InjectBibliographyDto,
 } from './dto/citations.dto';
 
 @Injectable()
 export class CitationsService {
   private readonly logger = new Logger(CitationsService.name);
-  private readonly bibParser: RegexAstBibtexParser;
+  private readonly bibParser: BibtexParser;
   private readonly identifierResolver: IIdentifierResolverPort;
 
   constructor(
     private readonly repository: CitationsRepository,
-    @Optional() bibParser?: RegexAstBibtexParser,
-    @Optional() identifierResolver?: CrossrefArxivResolverAdapter,
+    @Optional() bibParser?: BibtexParser,
+    @Optional() identifierResolver?: IdentifierResolver,
   ) {
-    this.bibParser = bibParser ?? new RegexAstBibtexParser();
+    this.bibParser = bibParser ?? new BibtexParser();
     this.identifierResolver =
-      identifierResolver ?? new CrossrefArxivResolverAdapter();
+      identifierResolver ?? new IdentifierResolver();
   }
 
   /**
@@ -78,7 +90,7 @@ export class CitationsService {
     projectId: string,
     dto: ResolveIdentifierDto,
   ): Promise<{ entry: BibEntryDto; filePath: string; identifierType: string }> {
-    const idVo = AcademicIdentifierVo.parse(dto.identifier);
+    const idVo = IdentifierVo.parse(dto.identifier);
     if (idVo.type === 'unknown') {
       throw new IdentifierNotFoundException(dto.identifier);
     }
@@ -182,6 +194,7 @@ export class CitationsService {
     const rawBibtex = await this.repository.fetchCollectionBibtex(
       userId,
       dto.collectionId,
+      projectId,
     );
 
     const entries = this.bibParser.parse(rawBibtex);
@@ -218,8 +231,8 @@ export class CitationsService {
   /**
    * List available collections for user from external library.
    */
-  public async listUserLibraryCollections(userId: string) {
-    return this.repository.listCollections(userId);
+  public async listUserLibraryCollections(userId: string, projectId?: string) {
+    return this.repository.listCollections(userId, projectId);
   }
 
   /**
@@ -242,5 +255,142 @@ export class CitationsService {
     return bibFiles
       .flatMap((b) => b.entries.map((e) => e.toBibtexString()))
       .join('\n\n');
+  }
+
+  /**
+   * Atomically refactor a citation key across all project .bib and .tex/.md files.
+   */
+  public async refactorCitationKey(
+    projectId: string,
+    dto: RefactorCitationKeyDto,
+  ): Promise<RefactorCitationKeyResultDto> {
+    const oldKey = (dto.oldKey || '').trim();
+    const newKey = (dto.newKey || '').trim();
+    const validation = validateCitationKey(newKey, oldKey);
+    if (!validation.isValid) {
+      throw new InvalidBibtexException(
+        validation.error || 'Invalid citation key',
+      );
+    }
+
+    const { affectedFiles, totalReplacements } =
+      await this.repository.refactorCitationKey(projectId, oldKey, newKey);
+
+    return {
+      oldKey,
+      newKey,
+      totalReplacements,
+      affectedFiles,
+    };
+  }
+
+  /**
+   * Format and upsert structured citation entries or raw BibTeX into the project's .bib file.
+   */
+  public async upsertEntries(
+    projectId: string,
+    dto: UpsertCitationEntriesDto,
+  ): Promise<UpsertCitationEntriesResultDto> {
+    const targetFile =
+      dto.targetBibFile || dto.targetFilename || 'references.bib';
+    const domainEntries: BibEntry[] = [];
+
+    if (dto.rawBibtex && dto.rawBibtex.trim()) {
+      const parsed = this.bibParser.parse(dto.rawBibtex);
+      domainEntries.push(...parsed);
+    }
+
+    if (dto.entry) {
+      domainEntries.push(buildBibEntryFromInput(dto.entry));
+    }
+
+    if (Array.isArray(dto.entries)) {
+      for (const item of dto.entries) {
+        domainEntries.push(buildBibEntryFromInput(item));
+      }
+    }
+
+    if (domainEntries.length === 0) {
+      throw new BadRequestException(
+        'At least one entry or rawBibtex must be provided',
+      );
+    }
+
+    const syncResult = await this.repository.appendEntriesToBib(
+      projectId,
+      domainEntries,
+      targetFile,
+    );
+
+    const filePath =
+      typeof syncResult === 'string' ? syncResult : syncResult?.filePath;
+    const docId =
+      typeof syncResult === 'object' ? syncResult?.docId : undefined;
+    const conflicts = Array.isArray(syncResult?.conflicts)
+      ? syncResult.conflicts
+      : [];
+
+    const formattedBibtex = domainEntries
+      .map((e) => e.toBibtexString())
+      .join('\n\n');
+
+    return {
+      filePath,
+      docId,
+      syncedCount: domainEntries.length,
+      entries: domainEntries.map((e) => e.toJSON() as BibEntryDto),
+      formattedBibtex,
+      conflicts,
+    };
+  }
+
+  /**
+   * Build and inject a formatted bibliography section (\bibitem or Markdown ## References)
+   * into a document, optionally persisting to DocstoreService when docId is provided.
+   */
+  public async injectBibliography(
+    projectId: string | null,
+    dto: InjectBibliographyDto,
+  ): Promise<InjectBibliographyResult> {
+    let currentContent = dto.content ?? '';
+    let filePath = dto.filePath;
+
+    if (projectId && dto.docId && !dto.content) {
+      const docData = await this.repository.getDocContent(projectId, dto.docId);
+      if (docData) {
+        currentContent = docData.content;
+        if (!filePath) filePath = docData.path;
+      }
+    }
+
+    const format =
+      dto.format ||
+      (isLatexDocument(currentContent, filePath) ? 'latex' : 'markdown');
+
+    const newSection = buildBibliographySection({
+      bibliographyText: dto.bibliographyText,
+      format,
+      styleId: dto.styleId,
+      headingTitle: dto.headingTitle,
+      citations: dto.citations,
+    });
+
+    const result = injectBibliographyIntoDocument({
+      currentContent,
+      newSection,
+      format,
+    });
+
+    if (projectId && dto.docId) {
+      await this.repository
+        .updateDocContent(projectId, dto.docId, result.nextContent)
+        .catch((err: unknown) => {
+          this.logger.warn(
+            `Failed to persist injected bibliography to doc ${dto.docId}: ${(err as Error)?.message}`,
+          );
+        });
+    }
+
+    return result;
   }
 }

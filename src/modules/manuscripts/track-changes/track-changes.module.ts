@@ -6,7 +6,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
-import { PagesReviewController } from '@/modules/manuscripts/docstore/controllers/review.controller';
+import { ReviewController } from '@/modules/manuscripts/docstore/controllers/review.controller';
 
 import { TrackChangesController } from './track-changes.controller';
 import { TrackChangesService } from './track-changes.service';
@@ -18,7 +18,7 @@ import {
 
 @Module({
   imports: [PrismaModule, DocstoreModule],
-  controllers: [TrackChangesController, PagesReviewController],
+  controllers: [TrackChangesController, ReviewController],
   providers: [
     TrackChangesService,
     TrackChangesRepository,

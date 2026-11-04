@@ -31,9 +31,10 @@ import {
 import { AuthenticatedRequest } from '@/core';
 import { DocstoreService } from '../docstore.service';
 import {
-  ManuscriptPageService,
+  PageService,
   UpdatePageContentParams,
   CreatePageFileParams,
+  ImportFromProjectParams,
   CreateProjectPageParams,
   PageDocRanges,
 } from '@/modules/manuscripts/core/services/page.service';
@@ -45,9 +46,9 @@ export type { PageDocRanges };
 @Controller('api/v1/manuscripts')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
-export class PagesDocController {
+export class DocController {
   constructor(
-    private readonly pageService: ManuscriptPageService,
+    private readonly pageService: PageService,
     private readonly docstoreService: DocstoreService,
   ) {}
 
@@ -209,6 +210,37 @@ export class PagesDocController {
     );
   }
 
+  /**
+   * POST /api/v1/manuscripts/projects/:projectId/files/import-from-project
+   * POST /api/v1/manuscripts/pages/:projectId/files/import-from-project
+   * POST /api/v1/manuscripts/docs/:projectId/files/import-from-project
+   */
+  @Post([
+    'projects/:projectId/files/import-from-project',
+    'pages/:projectId/files/import-from-project',
+    'docs/:projectId/files/import-from-project',
+  ])
+  @RequireRole(Role.CONTRIBUTOR)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      'Import/copy a document or binary file from another project on the server',
+  })
+  async importFileFromProject(
+    @Param('projectId') projectId: string,
+    @Body() body: ImportFromProjectParams,
+    @Req() req: AuthenticatedRequest,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+  ) {
+    const userId = req?.user?.id || req?.user?.sub || null;
+    return this.pageService.importFileFromProject(
+      projectId,
+      body,
+      authorizedProjectId,
+      userId,
+    );
+  }
+
   // ─── 2. PROJECT PAGES CRUD & LABELS ──────────────────────────────────────────
 
   /**
@@ -363,3 +395,6 @@ export class PagesDocController {
     return this.pageService.removePageLabel(projectId, pageId, labelId);
   }
 }
+
+/** @deprecated Use DocController */
+export { DocController as PagesDocController };

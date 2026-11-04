@@ -14,6 +14,8 @@ import {
   DuplicateNodePathError,
   NodeNotFoundError,
   RootDocNotFoundError,
+  LatexOutlineExtractor,
+  LatexOutlineEntryDto,
 } from './domain';
 import {
   CreateNodeDto,
@@ -30,10 +32,88 @@ import {
 } from '@/modules/manuscripts/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
+import { BibtexParser } from '@/modules/manuscripts/citations/domain';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { StructureRepository } from './structure.repository';
 
 export type { CompilationPayload };
+
+export interface ProjectSymbolLabelDto {
+  key: string;
+  file: string;
+  line: number;
+  context?: string;
+}
+
+export interface ProjectSymbolCitationDto {
+  key: string;
+  type: string;
+  title?: string;
+  author?: string;
+  year?: string;
+  journal?: string;
+  booktitle?: string;
+  publisher?: string;
+  doi?: string;
+  url?: string;
+  abstract?: string;
+  volume?: string;
+  number?: string;
+  pages?: string;
+  file: string;
+  line: number;
+  raw?: string;
+}
+
+export interface ProjectSymbolCommandDto {
+  name: string;
+  argCount?: number;
+  hasDefault?: boolean;
+  defaultValue?: string;
+  expansion?: string;
+  file: string;
+  line: number;
+  signature: string;
+}
+
+export interface ProjectSymbolEnvironmentDto {
+  name: string;
+  argCount?: number;
+  file: string;
+  line: number;
+}
+
+export interface ProjectSymbolPackageDto {
+  name: string;
+  options?: string;
+  file: string;
+  line: number;
+}
+
+export interface ProjectSymbolOutlineDto {
+  title: string;
+  level: number;
+  levelName: string;
+  file: string;
+  line: number;
+  from: number;
+  children?: ProjectSymbolOutlineDto[];
+}
+
+export interface ProjectSymbolsResponseDto {
+  rootDocPath: string | null;
+  labels: ProjectSymbolLabelDto[];
+  citations: ProjectSymbolCitationDto[];
+  customCommands: ProjectSymbolCommandDto[];
+  customEnvironments: ProjectSymbolEnvironmentDto[];
+  packages: ProjectSymbolPackageDto[];
+  bibliographies: string[];
+  includedFiles: string[];
+  imageFiles: string[];
+  files: string[];
+  images: string[];
+  outline: ProjectSymbolOutlineDto[];
+}
 
 @Injectable()
 export class StructureService {
@@ -48,18 +128,18 @@ export class StructureService {
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional()
     @Inject(ManuscriptDomainEventBus)
-    _legacyOrEventBus?: ManuscriptDomainEventBus | unknown,
-    @Optional() domainEventBus?: ManuscriptDomainEventBus,
+    domainEventBus?: ManuscriptDomainEventBus | unknown,
+    @Optional()
+    legacyEventBus?: ManuscriptDomainEventBus,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly injectedLiveCollab?: LiveCollaborationPort,
   ) {
     const resolvedBus =
-      domainEventBus ??
-      (_legacyOrEventBus &&
-      typeof (_legacyOrEventBus as ManuscriptDomainEventBus).publish ===
-        'function'
-        ? (_legacyOrEventBus as ManuscriptDomainEventBus)
+      legacyEventBus ??
+      (domainEventBus &&
+      typeof (domainEventBus as ManuscriptDomainEventBus).publish === 'function'
+        ? (domainEventBus as ManuscriptDomainEventBus)
         : undefined);
     this.domainEventBus =
       resolvedBus ?? new ManuscriptDomainEventBus(this.injectedLiveCollab);
@@ -70,8 +150,25 @@ export class StructureService {
     return FileTreeBuilder.buildTreeHierarchy(nodes);
   }
 
-  public async getAllNodes(projectId: string): Promise<ManuscriptNodeEntity[]> {
-    return await this.repository.getAllNodes(projectId);
+  public async getAllNodes(
+    projectId: string,
+    parentId?: string,
+  ): Promise<ManuscriptNodeEntity[]> {
+    const nodes = await this.repository.getAllNodes(projectId);
+    const trimmedParentId = parentId?.trim();
+    if (!trimmedParentId) {
+      return nodes;
+    }
+    if (trimmedParentId === 'root' || trimmedParentId === 'null') {
+      return nodes.filter((n) => n.parentId === null);
+    }
+    const isKnownFolder = nodes.some(
+      (n) => n.id === trimmedParentId && n.isFolder(),
+    );
+    if (isKnownFolder) {
+      return nodes.filter((n) => n.parentId === trimmedParentId);
+    }
+    return nodes;
   }
 
   public async getNodeById(
@@ -319,12 +416,24 @@ export class StructureService {
       throw new StructureError('Cannot mkdirp root directory');
     }
 
-    let currentPath = '';
+    const segmentEntries: Array<{ segment: string; path: string }> = [];
+    let runningPath = '';
+    for (const segment of parsed.segments) {
+      runningPath = NodePathVo.join(runningPath, segment);
+      segmentEntries.push({ segment, path: runningPath });
+    }
+
+    const existingNodes = await Promise.all(
+      segmentEntries.map((entry) =>
+        this.repository.findByPath(projectId, entry.path),
+      ),
+    );
+
     let parentNode: ManuscriptNodeEntity | null = null;
 
-    for (const segment of parsed.segments) {
-      currentPath = NodePathVo.join(currentPath, segment);
-      let found = await this.repository.findByPath(projectId, currentPath);
+    for (let i = 0; i < segmentEntries.length; i++) {
+      const { segment, path: currentPath } = segmentEntries[i];
+      let found = existingNodes[i];
 
       if (found && !found.isFolder()) {
         throw new DuplicateNodePathError(currentPath);
@@ -741,5 +850,425 @@ export class StructureService {
       node,
     });
     return node;
+  }
+
+  public async getProjectSymbols(
+    projectId: string,
+  ): Promise<ProjectSymbolsResponseDto> {
+    const { nodes, docsToScan, rootDocPath } =
+      await this.loadProjectDocsContext(projectId);
+
+    const labelsMap = new Map<string, ProjectSymbolLabelDto>();
+    const citationsMap = new Map<string, ProjectSymbolCitationDto>();
+    const commandsMap = new Map<string, ProjectSymbolCommandDto>();
+    const envsMap = new Map<string, ProjectSymbolEnvironmentDto>();
+    const packagesMap = new Map<string, ProjectSymbolPackageDto>();
+    const bibliographiesSet = new Set<string>();
+    const includedFilesSet = new Set<string>();
+    const imageFilesSet = new Set<string>();
+    const allFilesSet = new Set<string>(docsToScan.keys());
+    const outline: ProjectSymbolOutlineDto[] = [];
+
+    const IMAGE_EXT_RE = /\.(png|jpe?g|pdf|eps|svg|gif|bmp|webp|tikz)$/i;
+    const SECTION_LEVELS: Record<string, number> = {
+      part: 0,
+      chapter: 1,
+      section: 2,
+      subsection: 3,
+      subsubsection: 4,
+      paragraph: 5,
+      subparagraph: 6,
+    };
+
+    const bibParser = new BibtexParser();
+
+    // Collect all known file paths from structure tree
+    for (const node of nodes) {
+      if (node.isFolder()) continue;
+      const relPath = FileTreeBuilder.toRelativeCompilerPath(node.path);
+      if (!relPath) continue;
+      allFilesSet.add(relPath);
+      if (IMAGE_EXT_RE.test(relPath)) {
+        imageFilesSet.add(relPath);
+      }
+      if (relPath.toLowerCase().endsWith('.bib')) {
+        bibliographiesSet.add(relPath);
+      }
+    }
+
+    for (const [filePath, lines] of docsToScan.entries()) {
+      const lowerPath = filePath.toLowerCase();
+      const rawContent = lines.join('\n');
+
+      if (lowerPath.endsWith('.bib')) {
+        bibliographiesSet.add(filePath);
+        const parsedEntries = bibParser.parse(rawContent);
+        for (const entry of parsedEntries) {
+          const json = entry.toJSON();
+          citationsMap.set(json.key, {
+            key: json.key,
+            type: json.entryType,
+            title: json.title,
+            author: json.author,
+            year: json.year,
+            journal: json.journal,
+            booktitle: json.fields?.booktitle,
+            publisher: json.fields?.publisher,
+            doi: json.doi,
+            url: json.fields?.url,
+            abstract: json.fields?.abstract,
+            volume: json.fields?.volume,
+            number: json.fields?.number,
+            pages: json.fields?.pages,
+            file: filePath,
+            line: 1,
+            raw: json.rawBibtex,
+          });
+        }
+        continue;
+      }
+
+      if (
+        !lowerPath.endsWith('.tex') &&
+        !lowerPath.endsWith('.sty') &&
+        !lowerPath.endsWith('.cls') &&
+        !lowerPath.endsWith('.ltx') &&
+        !lowerPath.endsWith('.bib')
+      ) {
+        continue;
+      }
+
+      let offset = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const rawLine = lines[i] ?? '';
+        const lineNum = i + 1;
+        // Strip unescaped % comments
+        let cleanLine = rawLine;
+        for (let c = 0; c < rawLine.length; c++) {
+          if (rawLine[c] === '%' && (c === 0 || rawLine[c - 1] !== '\\')) {
+            cleanLine = rawLine.slice(0, c);
+            break;
+          }
+        }
+
+        if (cleanLine.trim().length > 0) {
+          // 1. Labels: \label{...}
+          const labelRe = /\\label\s*\{\s*([^}]+?)\s*\}/g;
+          let m: RegExpExecArray | null;
+          while ((m = labelRe.exec(cleanLine)) !== null) {
+            const key = m[1].trim();
+            if (key && !labelsMap.has(key)) {
+              labelsMap.set(key, {
+                key,
+                file: filePath,
+                line: lineNum,
+                context: cleanLine.trim().slice(0, 120),
+              });
+            }
+          }
+
+          // 2. Custom commands: \newcommand, \renewcommand, \providecommand, \DeclareRobustCommand, \DeclareMathOperator, \def
+          const cmdRe =
+            /\\(?:newcommand|renewcommand|providecommand|DeclareRobustCommand)\*?\s*\{?\s*(\\[a-zA-Z@]+)\s*\}?(?:\s*\[(\d+)\])?(?:\s*\[([^\]]*)\])?/g;
+          while ((m = cmdRe.exec(cleanLine)) !== null) {
+            const name = m[1].trim();
+            const argCount = m[2] ? parseInt(m[2], 10) : 0;
+            const hasDefault = m[3] !== undefined;
+            const defaultValue = m[3];
+            const signature =
+              argCount > 0
+                ? `${name}${hasDefault ? `[${defaultValue}]` : ''}${'{...}'.repeat(Math.max(0, argCount - (hasDefault ? 1 : 0)))}`
+                : name;
+            commandsMap.set(name, {
+              name,
+              argCount,
+              hasDefault,
+              defaultValue,
+              file: filePath,
+              line: lineNum,
+              signature,
+            });
+          }
+
+          const mathOpRe =
+            /\\DeclareMathOperator\*?\s*\{\s*(\\[a-zA-Z@]+)\s*\}\s*\{\s*([^}]*)\s*\}/g;
+          while ((m = mathOpRe.exec(cleanLine)) !== null) {
+            const name = m[1].trim();
+            commandsMap.set(name, {
+              name,
+              argCount: 0,
+              expansion: m[2]?.trim(),
+              file: filePath,
+              line: lineNum,
+              signature: name,
+            });
+          }
+
+          const defRe = /\\(?:g?def|edef|xdef)\s*(\\[a-zA-Z@]+)(?:#\d+)*/g;
+          while ((m = defRe.exec(cleanLine)) !== null) {
+            const name = m[1].trim();
+            if (!commandsMap.has(name)) {
+              commandsMap.set(name, {
+                name,
+                argCount: 0,
+                file: filePath,
+                line: lineNum,
+                signature: name,
+              });
+            }
+          }
+
+          // 3. Custom environments: \newenvironment, \renewenvironment
+          const envRe =
+            /\\(?:newenvironment|renewenvironment)\*?\s*\{\s*([^}]+?)\s*\}(?:\s*\[(\d+)\])?/g;
+          while ((m = envRe.exec(cleanLine)) !== null) {
+            const name = m[1].trim();
+            const argCount = m[2] ? parseInt(m[2], 10) : 0;
+            envsMap.set(name, {
+              name,
+              argCount,
+              file: filePath,
+              line: lineNum,
+            });
+          }
+
+          // 4. Packages: \usepackage[opts]{pkg1,pkg2} or \RequirePackage
+          const pkgRe =
+            /\\(?:usepackage|RequirePackage)\s*(?:\[([^\]]*)\])?\s*\{\s*([^}]+?)\s*\}/g;
+          while ((m = pkgRe.exec(cleanLine)) !== null) {
+            const options = m[1]?.trim();
+            const pkgList = m[2]
+              .split(',')
+              .map((p) => p.trim())
+              .filter(Boolean);
+            for (const pkgName of pkgList) {
+              if (!packagesMap.has(pkgName)) {
+                packagesMap.set(pkgName, {
+                  name: pkgName,
+                  options,
+                  file: filePath,
+                  line: lineNum,
+                });
+              }
+            }
+          }
+
+          // 5. Included files & bibliographies
+          const includeRe =
+            /\\(?:input|include|subfile|includeonly)\s*\{\s*([^}]+?)\s*\}/g;
+          while ((m = includeRe.exec(cleanLine)) !== null) {
+            const rawInc = m[1].trim();
+            if (rawInc) {
+              includedFilesSet.add(
+                rawInc.endsWith('.tex') ? rawInc : `${rawInc}.tex`,
+              );
+            }
+          }
+
+          const bibCmdRe =
+            /\\(?:bibliography|addbibresource|nobibliography)\s*(?:\[[^\]]*\])?\s*\{\s*([^}]+?)\s*\}/g;
+          while ((m = bibCmdRe.exec(cleanLine)) !== null) {
+            const bibTargets = m[1]
+              .split(',')
+              .map((b) => b.trim())
+              .filter(Boolean);
+            for (const b of bibTargets) {
+              bibliographiesSet.add(b.endsWith('.bib') ? b : `${b}.bib`);
+            }
+          }
+
+          // 6. Outline headings: \part, \chapter, \section, \subsection, \subsubsection, \paragraph, \subparagraph
+          const secRe =
+            /\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?(?:\[[^\]]*\])?\{([^}]*)\}/g;
+          while ((m = secRe.exec(cleanLine)) !== null) {
+            const levelName = m[1];
+            const title = m[2].trim();
+            outline.push({
+              title: title || levelName,
+              level: SECTION_LEVELS[levelName] ?? 2,
+              levelName,
+              file: filePath,
+              line: lineNum,
+              from: offset + m.index,
+            });
+          }
+
+          // 7. Inline \bibitem[label]{key}
+          const bibitemRe = /\\bibitem\s*(?:\[[^\]]*\])?\s*\{\s*([^}]+?)\s*\}/g;
+          while ((m = bibitemRe.exec(cleanLine)) !== null) {
+            const key = m[1].trim();
+            if (key && !citationsMap.has(key)) {
+              citationsMap.set(key, {
+                key,
+                type: 'bibitem',
+                title: key,
+                file: filePath,
+                line: lineNum,
+              });
+            }
+          }
+        }
+
+        offset += rawLine.length + 1;
+      }
+    }
+
+    const files = Array.from(allFilesSet);
+    const imageFiles = Array.from(imageFilesSet);
+
+    return {
+      rootDocPath,
+      labels: Array.from(labelsMap.values()),
+      citations: Array.from(citationsMap.values()),
+      customCommands: Array.from(commandsMap.values()),
+      customEnvironments: Array.from(envsMap.values()),
+      packages: Array.from(packagesMap.values()),
+      bibliographies: Array.from(bibliographiesSet),
+      includedFiles: Array.from(includedFilesSet),
+      imageFiles,
+      files,
+      images: imageFiles,
+      outline,
+    };
+  }
+
+  private async loadProjectDocsContext(projectId: string): Promise<{
+    nodes: ManuscriptNodeEntity[];
+    allDocs: Awaited<ReturnType<DocstoreService['getAllDocs']>>;
+    docContentsMap: Map<string, string[]>;
+    docsToScan: Map<string, string[]>;
+    rootDocPath: string | null;
+  }> {
+    const [nodes, allDocs] = await Promise.all([
+      this.repository.getAllNodes(projectId),
+      this.docstoreService
+        ? this.docstoreService.getAllDocs(projectId).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+
+    const docContentsMap = new Map<string, string[]>();
+    for (const d of allDocs) {
+      const dId = d.id || d._id;
+      if (dId && Array.isArray(d.lines)) {
+        docContentsMap.set(dId, d.lines);
+      }
+      if (d.path && Array.isArray(d.lines)) {
+        const cleanPath = NodePathVo.toRelative(d.path);
+        if (!docContentsMap.has(cleanPath)) {
+          docContentsMap.set(cleanPath, d.lines);
+        }
+      }
+    }
+
+    let rootNode = nodes.find((n) => n.isRootDoc) ?? null;
+    if (!rootNode) {
+      rootNode = await this.autoDetectRootDoc(
+        projectId,
+        docContentsMap,
+        nodes,
+      ).catch(() => null);
+    }
+    const rootDocPath = rootNode
+      ? FileTreeBuilder.toRelativeCompilerPath(rootNode.path)
+      : null;
+
+    const docsToScan = new Map<string, string[]>();
+    for (const node of nodes) {
+      if (!node.isDoc()) continue;
+      const relPath = FileTreeBuilder.toRelativeCompilerPath(node.path);
+      const lines =
+        (node.docId ? docContentsMap.get(node.docId) : undefined) ||
+        docContentsMap.get(node.id) ||
+        docContentsMap.get(relPath);
+      if (lines) {
+        docsToScan.set(relPath, lines);
+      }
+    }
+    for (const d of allDocs) {
+      const relPath = NodePathVo.toRelative(d.path || '');
+      if (relPath && Array.isArray(d.lines) && !docsToScan.has(relPath)) {
+        docsToScan.set(relPath, d.lines);
+      }
+    }
+
+    return { nodes, allDocs, docContentsMap, docsToScan, rootDocPath };
+  }
+
+  public async getProjectOutline(
+    projectId: string,
+    options?: { filePath?: string; docId?: string; content?: string },
+  ): Promise<{
+    rootDocPath: string | null;
+    entries: LatexOutlineEntryDto[];
+    tree: LatexOutlineEntryDto[];
+  }> {
+    if (options?.content !== undefined) {
+      const targetFile = options.filePath || 'main.tex';
+      const entries = LatexOutlineExtractor.extractFromContent(
+        options.content,
+        targetFile,
+      );
+      return {
+        rootDocPath: targetFile,
+        entries,
+        tree: LatexOutlineExtractor.buildOutlineTree(entries),
+      };
+    }
+
+    const { nodes, docContentsMap, docsToScan, rootDocPath } =
+      await this.loadProjectDocsContext(projectId);
+
+    if (options?.docId) {
+      const lines = docContentsMap.get(options.docId);
+      if (lines) {
+        const matchingNode = nodes.find(
+          (n) => n.docId === options.docId || n.id === options.docId,
+        );
+        const relPath = matchingNode
+          ? FileTreeBuilder.toRelativeCompilerPath(matchingNode.path)
+          : options.filePath || 'main.tex';
+        const entries = LatexOutlineExtractor.extractFromContent(
+          lines.join('\n'),
+          relPath,
+        );
+        return {
+          rootDocPath,
+          entries,
+          tree: LatexOutlineExtractor.buildOutlineTree(entries),
+        };
+      }
+    }
+
+    if (options?.filePath) {
+      const cleanFilter = NodePathVo.toRelative(options.filePath);
+      const matchedLines =
+        docsToScan.get(cleanFilter) ??
+        Array.from(docsToScan.entries()).find(
+          ([k]) => k === cleanFilter || k.endsWith(`/${cleanFilter}`),
+        )?.[1];
+      const entries = LatexOutlineExtractor.extractFromContent(
+        matchedLines ? matchedLines.join('\n') : '',
+        cleanFilter,
+      );
+      return {
+        rootDocPath,
+        entries,
+        tree: LatexOutlineExtractor.buildOutlineTree(entries),
+      };
+    }
+
+    const allEntries: LatexOutlineEntryDto[] = [];
+    for (const [relPath, lines] of docsToScan.entries()) {
+      if (!relPath.toLowerCase().endsWith('.tex')) continue;
+      allEntries.push(
+        ...LatexOutlineExtractor.extractFromContent(lines.join('\n'), relPath),
+      );
+    }
+
+    return {
+      rootDocPath,
+      entries: allEntries,
+      tree: LatexOutlineExtractor.buildOutlineTree(allEntries),
+    };
   }
 }

@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/repositories/incremental-workspace.repository.ts
+ * modules/manuscripts/clsi/repositories/workspace.repository.ts
  * Repository managing local filesystem scratch workspaces with Overleaf ResourceWriter
  * incremental MD5 hashing, auxiliary artifact preservation, project locks, disk usage cleaning,
  * output file discovery, and PKZIP streaming.
@@ -9,17 +9,13 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { Readable } from 'stream';
 import {
   IWorkspaceManager,
   WorkspaceFile,
   WorkspaceSyncStats,
   AuxFileInfo,
-  IOutputFileFinder,
-  DiscoveredOutputFile,
 } from '../domain';
 import { SafePath } from '../domain/safe-path';
-import { createPkZipStream, PkZipEntry } from '@/modules/manuscripts/core';
 import { mapWithConcurrency } from '@/core/utils/concurrency.util';
 
 export interface ProjectManifest {
@@ -68,7 +64,7 @@ const PRE_COMPILE_PURGE_FILES = [
   'output.synctex.gz',
 ];
 
-export class OverleafIncrementalWorkspace implements IWorkspaceManager {
+export class WorkspaceRepository implements IWorkspaceManager {
   constructor(
     private readonly baseScratchDir: string = path.join(
       os.tmpdir(),
@@ -396,6 +392,9 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
   }
 }
 
+/** @deprecated Use WorkspaceRepository */
+export { WorkspaceRepository as OverleafIncrementalWorkspace };
+
 export {
   type LockOptions,
   ProjectLockManager,
@@ -403,6 +402,7 @@ export {
   type CleanStats,
   type DiskUsageOptions,
   DiskUsageCleaner,
+  OutputFileFinder,
   OverleafOutputFileFinder,
   type ZipDiskEntry,
   createZipStreamFromDisk,

@@ -12,6 +12,7 @@ import { resolveProjectLabels } from '../controllers/doc.helpers';
 
 export interface CreateProjectPageParams {
   title?: string;
+  description?: string;
   content?: string;
   status?: string;
   labels?: string[];
@@ -20,7 +21,7 @@ export interface CreateProjectPageParams {
 }
 
 @Injectable()
-export class ManuscriptProjectBootstrapService {
+export class BootstrapService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly docstoreService: DocstoreService,
@@ -174,7 +175,10 @@ export class ManuscriptProjectBootstrapService {
   /**
    * Automatically creates references.bib in the project if it does not already exist
    */
-  public async ensureExampleReferencesBib(projectId: string): Promise<void> {
+  public async ensureExampleReferencesBib(
+    projectId: string,
+    pageId?: string,
+  ): Promise<void> {
     const bibPath = '/references.bib';
     try {
       const existing = await this.prisma.manuscriptNode.findFirst({
@@ -207,11 +211,13 @@ export class ManuscriptProjectBootstrapService {
           path: bibPath,
           text: bibContent,
           version: 1,
+          ...(pageId && this.prisma.manuscriptPage ? { pageId } : {}),
         });
 
         await this.prisma.manuscriptNode.create({
           data: {
             projectId,
+            ...(pageId && this.prisma.manuscriptPage ? { pageId } : {}),
             name: 'references.bib',
             path: bibPath,
             depth: 1,
@@ -273,14 +279,26 @@ export class ManuscriptProjectBootstrapService {
       );
     }
 
-    // Ensure project settings are configured with Overleaf standard defaults
+    // Ensure project settings are configured with Overleaf standard defaults and
+    // determine whether a root document already exists for this project in parallel
+    const [proj, fetchedExistingNodes] = await Promise.all([
+      Promise.resolve(
+        this.prisma.project?.findUnique?.({
+          where: { id: projectId },
+          select: { settings: true },
+        }),
+      ).catch(() => null),
+      Promise.resolve(
+        this.prisma.manuscriptNode?.findMany?.({
+          where: { projectId, type: 'DOC' },
+          select: { path: true, isRootDoc: true },
+        }),
+      ).catch(() => []),
+    ]);
+
     try {
-      const proj = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: { settings: true },
-      });
       const settings = (proj?.settings as Record<string, unknown>) || {};
-      if (!settings.manuscript) {
+      if (!settings.manuscript && this.prisma.project?.update) {
         await this.prisma.project.update({
           where: { id: projectId },
           data: {
@@ -300,12 +318,9 @@ export class ManuscriptProjectBootstrapService {
       // Non-fatal
     }
 
-    // Determine whether a root document already exists for this project
-    const existingNodes =
-      (await this.prisma.manuscriptNode?.findMany?.({
-        where: { projectId, type: 'DOC' },
-        select: { path: true, isRootDoc: true },
-      })) ?? [];
+    const existingNodes = Array.isArray(fetchedExistingNodes)
+      ? fetchedExistingNodes
+      : [];
     const hasExistingRoot = existingNodes.some((n) => n.isRootDoc);
     const existingPaths = new Set(
       existingNodes.map((n) => (n.path || '').toLowerCase()),
@@ -338,6 +353,7 @@ export class ManuscriptProjectBootstrapService {
     const createdNode = await this.prisma.manuscriptNode.create({
       data: {
         projectId,
+        ...(this.prisma.manuscriptPage ? { pageId: doc._id } : {}),
         name: targetName,
         path: targetPath,
         depth: 1,
@@ -348,11 +364,57 @@ export class ManuscriptProjectBootstrapService {
       },
     });
 
+    if (
+      this.prisma.manuscriptPage?.upsert ||
+      this.prisma.manuscriptPage?.create
+    ) {
+      const pagePayload = {
+        id: doc._id,
+        projectId,
+        rootDocId: doc._id,
+        title: pageTitle,
+        description: body?.description ?? null,
+        status: body?.status || 'draft',
+        compiler: 'pdflatex',
+        texLiveVersion: '2024',
+        spellCheckLanguage: 'en_US',
+        createdById: userId && isUuid(userId) ? userId : null,
+      };
+      await Promise.resolve(
+        this.prisma.manuscriptPage.upsert
+          ? this.prisma.manuscriptPage.upsert({
+              where: { id: doc._id },
+              create: pagePayload,
+              update: {
+                rootDocId: doc._id,
+                title: pageTitle,
+                ...(body?.description !== undefined
+                  ? { description: body.description }
+                  : {}),
+                ...(body?.status ? { status: body.status } : {}),
+              },
+            })
+          : this.prisma.manuscriptPage.create({
+              data: pagePayload,
+            }),
+      ).catch(() => null);
+
+      if (this.prisma.manuscriptDoc?.update) {
+        await Promise.resolve(
+          this.prisma.manuscriptDoc.update({
+            where: { id: doc._id },
+            data: { pageId: doc._id },
+          }),
+        ).catch(() => null);
+      }
+    }
+
     if (isRootDoc && createdNode?.id && this.prisma.manuscriptNode?.updateMany) {
       await Promise.resolve(
         this.prisma.manuscriptNode.updateMany({
           where: {
             projectId,
+            ...(this.prisma.manuscriptPage ? { pageId: doc._id } : {}),
             isRootDoc: true,
             id: { not: createdNode.id },
           },
@@ -381,3 +443,6 @@ export class ManuscriptProjectBootstrapService {
     };
   }
 }
+
+/** @deprecated Use BootstrapService */
+export { BootstrapService as ManuscriptProjectBootstrapService };

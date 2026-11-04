@@ -5,7 +5,7 @@
 
 import { BibEntry } from './bib-entry.entity';
 import { BibliographyFile } from './bibliography-file.entity';
-import { AcademicIdentifierVo } from './academic-identifier';
+import { IdentifierVo } from './identifier';
 
 export interface IBibtexParserPort {
   /**
@@ -42,7 +42,7 @@ export interface IIdentifierResolverPort {
    * Resolves a DOI or arXiv identifier against CrossRef / arXiv public APIs.
    * Returns a populated BibEntry entity or null if not found.
    */
-  resolve(identifier: AcademicIdentifierVo): Promise<BibEntry | null>;
+  resolve(identifier: IdentifierVo): Promise<BibEntry | null>;
 }
 
 export interface LibraryCollectionSummary {

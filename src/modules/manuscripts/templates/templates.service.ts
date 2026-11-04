@@ -141,8 +141,31 @@ export class TemplatesService {
       );
     }
 
-    const mainFile = dto.mainFile || 'main.tex';
-    const files = dto.files || {};
+    let files: Record<string, string> = { ...(dto.files || {}) };
+    if (
+      dto.projectId &&
+      typeof this.repository.collectProjectTemplateFiles === 'function'
+    ) {
+      const projectFiles = await this.repository.collectProjectTemplateFiles(
+        dto.projectId,
+      );
+      files = { ...projectFiles, ...files };
+    }
+
+    let mainFile = dto.mainFile || 'main.tex';
+    if (Object.keys(files).length > 0 && !files[mainFile]) {
+      const normalizedMain = mainFile.replace(/^\/+/, '');
+      if (files[normalizedMain]) {
+        mainFile = normalizedMain;
+      } else if (dto.projectId) {
+        const firstTex = Object.keys(files).find((k) =>
+          k.toLowerCase().endsWith('.tex'),
+        );
+        if (firstTex) {
+          mainFile = firstTex;
+        }
+      }
+    }
 
     if (Object.keys(files).length > 0 && !files[mainFile]) {
       throw new InvalidTemplateException(

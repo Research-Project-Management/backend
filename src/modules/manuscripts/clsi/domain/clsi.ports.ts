@@ -9,11 +9,23 @@ import { SandboxProfile } from './sandbox-profile';
 export interface CompilerDiagnostic {
   file?: string;
   line: number | null;
+  column?: number;
   message: string;
   context?: string;
-  severity: 'error' | 'warning' | 'info';
+  severity: 'error' | 'warning' | 'badbox' | 'info';
+  category?: 'error' | 'warning' | 'badbox' | 'info';
+  warningSubtype?: 'font' | 'package' | 'citation' | 'reference' | 'badbox';
   code?: string;
   suggestion?: string;
+  quickFix?: {
+    description: string;
+    replacementText: string;
+  };
+  explanation?: {
+    title: string;
+    whyItHappened: string;
+    howToFix: string;
+  };
 }
 
 export interface ILogParser {
@@ -52,10 +64,34 @@ export interface ISyncTexProcessor {
   ): ReverseSyncPoint | null;
 }
 
+export interface WordCountSection {
+  title: string;
+  level: string;
+  line: number;
+  words: number;
+}
+
+export interface WordCountFileStats {
+  id: string;
+  title: string;
+  path?: string;
+  words: number;
+  wordsInText: number;
+  wordsInHeaders: number;
+  wordsInCaptions: number;
+  wordsInBibliography?: number;
+  headers: number;
+  floats: number;
+  math: number;
+  mathInlines: number;
+  mathDisplayed: number;
+}
+
 export interface WordCountStats {
   wordsInText: number;
   wordsInHeaders: number;
   wordsInCaptions: number;
+  wordsInBibliography?: number;
   headers: number;
   floats: number;
   mathInlines: number;
@@ -63,11 +99,19 @@ export interface WordCountStats {
   totalWords: number;
   charactersWithSpaces: number;
   charactersNoSpaces: number;
+  cjkCharacters?: number;
+  readingTimeMinutes?: number;
+  sections?: WordCountSection[];
+  perFileStats?: WordCountFileStats[];
   rawOutput: string;
 }
 
 export interface IWordCounter {
-  count(source: string, filename?: string): WordCountStats;
+  count(
+    source: string,
+    filename?: string,
+    options?: { includeBib?: boolean },
+  ): WordCountStats;
 }
 
 export interface DiscoveredOutputFile {

@@ -29,6 +29,7 @@ model ManuscriptNode {
   doc    ManuscriptDoc?  @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_nodes_doc_id")
   fileId String?         @unique(map: "uq_manuscript_nodes_file_id") @map("file_id") @db.Uuid
   file   ManuscriptFile? @relation(fields: [fileId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_nodes_file_id")
+  linkedFile ManuscriptLinkedFile?
 
   isRootDoc Boolean @default(false) @map("is_root_doc")
   sizeBytes Int     @default(0) @map("size_bytes")
@@ -39,11 +40,13 @@ model ManuscriptNode {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([projectId, path], map: "uq_manuscript_nodes_project_path")
-  @@index([pageId, path], map: "idx_manuscript_nodes_page_path")
-  @@index([projectId, depth, sortOrder], map: "idx_manuscript_nodes_project_tree")
-  @@index([pageId, depth, sortOrder], map: "idx_manuscript_nodes_page_tree")
-  @@index([projectId, parentId], map: "idx_manuscript_nodes_project_parent")
-  @@index([projectId, type], map: "idx_manuscript_nodes_project_type")
+  @@unique([pageId, path], map: "uq_manuscript_nodes_page_path")
+  @@index([projectId, parentId, name], map: "idx_manuscript_nodes_parent_name")
+  @@index([pageId, parentId, name], map: "idx_manuscript_nodes_page_parent_name")
+  @@index([projectId, depth, sortOrder, name], map: "idx_manuscript_nodes_project_tree")
+  @@index([pageId, depth, sortOrder, name], map: "idx_manuscript_nodes_page_tree")
+  @@index([projectId, type, isRootDoc(sort: Desc), sortOrder], map: "idx_manuscript_nodes_proj_type_root_sort")
+  @@index([pageId, type, isRootDoc(sort: Desc), sortOrder], map: "idx_manuscript_nodes_page_type_root_sort")
   @@index([projectId, isRootDoc], map: "idx_manuscript_nodes_project_root")
   @@map("manuscript_nodes")
 }

@@ -26,9 +26,15 @@ import {
   IProjectCollectorPort,
   IProjectRestorerPort,
   RestoreResult,
+  RestoreSingleFileResult,
   Snapshot,
   FileSnapshotVo,
 } from '../domain';
+import { Readable } from 'node:stream';
+import {
+  createZipStream,
+  type ZipEntry,
+} from '@/modules/manuscripts/core';
 
 const COLLECT_CONCURRENCY = 6;
 
@@ -45,7 +51,6 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
     @Optional()
-    @Inject(LIVE_COLLABORATION_PORT)
     liveCollab?: LiveCollaborationPort,
   ) {
     super();
@@ -128,6 +133,70 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
 
     return filesMap;
   }
+
+  public createSnapshotZipStream(
+    projectId: string,
+    snapshot: Snapshot,
+  ): { zipStream: Readable; fileCount: number } {
+    const entries: ZipEntry[] = [];
+    const snapshotFiles = snapshot.files;
+
+    for (const [filePath, fileVo] of snapshotFiles.entries()) {
+      const relPath = filePath.replace(/^\/+/, '');
+      if (!relPath) continue;
+
+      if (fileVo.type === 'doc') {
+        const textContent = (fileVo.lines || ['']).join('\n');
+        entries.push({
+          path: relPath,
+          data: Buffer.from(textContent, 'utf8'),
+          date: snapshot.createdAt,
+        });
+      } else if (fileVo.type === 'file' && fileVo.fileId) {
+        const fileId = fileVo.fileId;
+        entries.push({
+          path: relPath,
+          date: snapshot.createdAt,
+          getData: async () => {
+            try {
+              const streamResult = await this.filestoreService.openReadStream(
+                projectId,
+                fileId,
+              );
+              const chunks: Buffer[] = [];
+              for await (const chunk of streamResult.stream) {
+                chunks.push(
+                  Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
+                );
+              }
+              return Buffer.concat(chunks);
+            } catch (err) {
+              this.logger.warn(
+                `Failed to read historical file ${fileId} (${relPath}) for snapshot ZIP: ${err}`,
+              );
+              return null;
+            }
+          },
+        });
+      }
+    }
+
+    if (entries.length === 0) {
+      entries.push({
+        path: 'main.tex',
+        data: Buffer.from(
+          '\\documentclass{article}\n\\begin{document}\n\\end{document}',
+          'utf8',
+        ),
+        date: snapshot.createdAt,
+      });
+    }
+
+    return {
+      zipStream: createZipStream(entries),
+      fileCount: entries.length,
+    };
+  }
 }
 
 @Injectable()
@@ -149,7 +218,6 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     @Optional()
     private readonly historyRepository?: ProjectHistoryRepository,
     @Optional()
-    @Inject(IDistributedLockPort)
     private readonly distributedLock?: IDistributedLockPort,
   ) {
     super();
@@ -162,6 +230,78 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
 
   private getLiveCollab(): LiveCollaborationPort {
     return this.liveCollab;
+  }
+
+  private async undeleteDocRecord(
+    projectId: string,
+    docId?: string | null,
+  ): Promise<void> {
+    if (!docId || !this.prisma?.manuscriptDoc?.updateMany) return;
+    await this.prisma.manuscriptDoc
+      .updateMany({
+        where: { id: docId, projectId },
+        data: { deleted: false, deletedAt: null },
+      })
+      .catch(() => {});
+  }
+
+  private async undeleteFileRecord(
+    projectId: string,
+    fileId?: string | null,
+  ): Promise<void> {
+    if (!fileId || !this.prisma?.manuscriptFile?.updateMany) return;
+    await this.prisma.manuscriptFile
+      .updateMany({
+        where: { id: fileId, projectId },
+        data: { deleted: false, deletedAt: null },
+      })
+      .catch(() => {});
+  }
+
+  private async restoreOrCreateDoc(
+    projectId: string,
+    filePath: string,
+    lines: string[],
+    candidateDocId?: string | null,
+  ): Promise<{
+    docId: string | null;
+    rev?: number;
+    version?: number;
+  }> {
+    let targetDocId = candidateDocId ?? null;
+    let syncedRev: number | undefined;
+    let syncedVersion: number | undefined;
+
+    if (targetDocId) {
+      const updated = await this.docstoreService
+        .updateDoc(projectId, targetDocId, { lines })
+        .catch(() => {
+          targetDocId = null;
+          return null;
+        });
+      if (updated) {
+        syncedRev = updated.rev ?? updated.doc?.rev;
+        syncedVersion = updated.doc?.version;
+      }
+    }
+
+    if (!targetDocId) {
+      const createdDoc = await this.docstoreService.createDoc(projectId, {
+        path: filePath,
+        lines,
+      });
+      const createdRef = createdDoc as {
+        id?: string;
+        _id?: string;
+        rev?: number;
+        version?: number;
+      };
+      targetDocId = createdRef.id || createdRef._id || null;
+      syncedRev = createdRef.rev;
+      syncedVersion = createdRef.version;
+    }
+
+    return { docId: targetDocId, rev: syncedRev, version: syncedVersion };
   }
 
   public async restoreToState(
@@ -212,37 +352,48 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     if (resolvedHistoryRepo || this.prisma) {
       try {
         const backupFilesMap = new Map<string, FileSnapshotVo>();
-        for (const node of currentNodes) {
-          if (node.isFolder()) continue;
-          if (node.isDoc() && node.docId) {
-            try {
-              const doc = await this.docstoreService.getDoc(
-                projectId,
-                node.docId,
-              );
-              backupFilesMap.set(
-                node.path,
-                FileSnapshotVo.createDoc(
-                  node.path,
+        const backupEntries = await mapWithConcurrency(
+          currentNodes,
+          8,
+          async (node) => {
+            if (node.isFolder()) return null;
+            if (node.isDoc() && node.docId) {
+              try {
+                const doc = await this.docstoreService.getDoc(
+                  projectId,
                   node.docId,
-                  doc.lines || [''],
-                  doc.hash || '',
-                  node.isRootDoc,
+                );
+                return {
+                  path: node.path,
+                  vo: FileSnapshotVo.createDoc(
+                    node.path,
+                    node.docId,
+                    doc.lines || [''],
+                    doc.hash || '',
+                    node.isRootDoc,
+                  ),
+                };
+              } catch {
+                // ignore doc fetch errors during safety backup
+                return null;
+              }
+            } else if (node.type === 'FILE' && node.fileId) {
+              return {
+                path: node.path,
+                vo: FileSnapshotVo.createFile(
+                  node.path,
+                  node.fileId,
+                  node.hash || '',
+                  node.sizeBytes || 0,
                 ),
-              );
-            } catch {
-              // ignore doc fetch errors during safety backup
+              };
             }
-          } else if (node.type === 'FILE' && node.fileId) {
-            backupFilesMap.set(
-              node.path,
-              FileSnapshotVo.createFile(
-                node.path,
-                node.fileId,
-                node.hash || '',
-                node.sizeBytes || 0,
-              ),
-            );
+            return null;
+          },
+        );
+        for (const item of backupEntries) {
+          if (item) {
+            backupFilesMap.set(item.path, item.vo);
           }
         }
 
@@ -316,16 +467,21 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
       }
     }
 
-    for (const node of currentNodes) {
-      if (!node.isFolder() && !snapshotFiles.has(node.path)) {
-        try {
-          await this.structureService.deleteNode(projectId, node.id);
-        } catch (err) {
-          this.logger.warn(
-            `Could not delete post-snapshot node ${node.path} (${node.id}): ${err}`,
-          );
-        }
-      }
+    const postSnapshotFileNodes = currentNodes.filter(
+      (node) => !node.isFolder() && !snapshotFiles.has(node.path),
+    );
+    if (postSnapshotFileNodes.length > 0) {
+      await Promise.all(
+        postSnapshotFileNodes.map(async (node) => {
+          try {
+            await this.structureService.deleteNode(projectId, node.id);
+          } catch (err) {
+            this.logger.warn(
+              `Could not delete post-snapshot node ${node.path} (${node.id}): ${err}`,
+            );
+          }
+        }),
+      );
     }
 
     const orphanFolders = currentNodes
@@ -347,13 +503,30 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
       }
     }
 
+    const ensuredParentDirs = new Set<string>(['/']);
+    for (const node of currentNodes) {
+      if (node.isFolder() && requiredFolders.has(node.path)) {
+        ensuredParentDirs.add(node.path);
+      }
+    }
+
     for (const [filePath, fileVo] of snapshotFiles.entries()) {
       const fileName = pathPosix.basename(filePath);
       const parentDir = pathPosix.dirname(filePath);
 
-      if (parentDir && parentDir !== '.' && parentDir !== '/') {
+      if (
+        parentDir &&
+        parentDir !== '.' &&
+        parentDir !== '/' &&
+        !ensuredParentDirs.has(parentDir)
+      ) {
         try {
           await this.structureService.mkdirp(projectId, parentDir);
+          let cur = parentDir;
+          while (cur && cur !== '.' && cur !== '/') {
+            ensuredParentDirs.add(cur);
+            cur = pathPosix.dirname(cur);
+          }
         } catch (err) {
           this.logger.warn(`Could not ensure directory ${parentDir}: ${err}`);
         }
@@ -362,32 +535,19 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
       const existingNode = currentByPath.get(filePath);
 
       if (fileVo.type === 'doc') {
+        const lines = fileVo.lines || [''];
         let docIdToSync: string | null = null;
         let syncedRev: number | undefined;
         let syncedVersion: number | undefined;
-        if (fileVo.docId && this.prisma?.manuscriptDoc?.updateMany) {
-          await this.prisma.manuscriptDoc
-            .updateMany({
-              where: { id: fileVo.docId, projectId },
-              data: { deleted: false, deletedAt: null },
-            })
-            .catch(() => {});
-        }
+
+        await this.undeleteDocRecord(projectId, fileVo.docId);
+
         if (existingNode && existingNode.isDoc() && existingNode.docId) {
-          if (this.prisma?.manuscriptDoc?.updateMany) {
-            await this.prisma.manuscriptDoc
-              .updateMany({
-                where: { id: existingNode.docId, projectId },
-                data: { deleted: false, deletedAt: null },
-              })
-              .catch(() => {});
-          }
+          await this.undeleteDocRecord(projectId, existingNode.docId);
           const updated = await this.docstoreService.updateDoc(
             projectId,
             existingNode.docId,
-            {
-              lines: fileVo.lines || [''],
-            },
+            { lines },
           );
           syncedRev = updated?.rev ?? updated?.doc?.rev;
           syncedVersion = updated?.doc?.version;
@@ -402,46 +562,24 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
             await this.structureService.deleteNode(projectId, existingNode.id);
           }
 
-          let targetDocId: string | null = fileVo.docId ?? null;
-          if (targetDocId) {
-            const updated = await this.docstoreService
-              .updateDoc(projectId, targetDocId, {
-                lines: fileVo.lines || [''],
-              })
-              .catch(() => {
-                targetDocId = null;
-                return null;
-              });
-            if (updated) {
-              syncedRev = updated.rev ?? updated.doc?.rev;
-              syncedVersion = updated.doc?.version;
-            }
-          }
-          if (!targetDocId) {
-            const createdDoc = await this.docstoreService.createDoc(projectId, {
-              path: filePath,
-              lines: fileVo.lines || [''],
-            });
-            const createdRef = createdDoc as {
-              id?: string;
-              _id?: string;
-              rev?: number;
-              version?: number;
-            };
-            targetDocId = createdRef.id || createdRef._id || null;
-            syncedRev = createdRef.rev;
-            syncedVersion = createdRef.version;
-          }
-          if (targetDocId) {
-            docIdToSync = targetDocId;
-            restoredDocIds.push(targetDocId);
+          const { docId, rev, version } = await this.restoreOrCreateDoc(
+            projectId,
+            filePath,
+            lines,
+            fileVo.docId,
+          );
+          syncedRev = rev;
+          syncedVersion = version;
+          if (docId) {
+            docIdToSync = docId;
+            restoredDocIds.push(docId);
           }
 
           const newNode = await this.structureService.createNode(projectId, {
             name: fileName,
             path: filePath,
             type: 'DOC',
-            docId: targetDocId ?? undefined,
+            docId: docId ?? undefined,
             isRootDoc: fileVo.isRootDoc,
           });
 
@@ -456,7 +594,7 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
               type: 'manuscript.document.mutated',
               projectId,
               docId: docIdToSync,
-              lines: fileVo.lines || [''],
+              lines,
               rev: syncedRev,
               version: syncedVersion,
               source: 'history-restore',
@@ -464,23 +602,12 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
             });
           } else {
             await this.getLiveCollab()
-              .applyExternalText(
-                projectId,
-                docIdToSync,
-                (fileVo.lines || ['']).join('\n'),
-              )
+              .applyExternalText(projectId, docIdToSync, lines.join('\n'))
               .catch(() => false);
           }
         }
       } else if (fileVo.type === 'file' && fileVo.fileId) {
-        if (this.prisma?.manuscriptFile?.updateMany) {
-          await this.prisma.manuscriptFile
-            .updateMany({
-              where: { id: fileVo.fileId, projectId },
-              data: { deleted: false, deletedAt: null },
-            })
-            .catch(() => {});
-        }
+        await this.undeleteFileRecord(projectId, fileVo.fileId);
         if (existingNode) {
           if (
             existingNode.type !== 'FILE' ||
@@ -522,5 +649,156 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
       restoredFilesCount: snapshotFiles.size,
       restoredDocIds,
     };
+  }
+
+  public async restoreSingleFileToState(
+    projectId: string,
+    snapshot: Snapshot,
+    pathname: string,
+    hintFileId?: string,
+  ): Promise<RestoreSingleFileResult> {
+    const normalizedPath = pathname.startsWith('/')
+      ? pathname
+      : `/${pathname}`;
+    const fileVo =
+      snapshot.getFile(normalizedPath) ??
+      Array.from(snapshot.files.values()).find(
+        (f) =>
+          f.path === normalizedPath ||
+          f.path.replace(/^\/+/, '') === normalizedPath.replace(/^\/+/, '') ||
+          (hintFileId && (f.docId === hintFileId || f.fileId === hintFileId)),
+      ) ??
+      null;
+
+    if (!fileVo) {
+      throw new Error(
+        `File '${pathname}' was not found in version ${snapshot.version} snapshot.`,
+      );
+    }
+
+    const targetPath = fileVo.path;
+    const fileName = pathPosix.basename(targetPath);
+    const parentDir = pathPosix.dirname(targetPath);
+
+    if (parentDir && parentDir !== '.' && parentDir !== '/') {
+      try {
+        await this.structureService.mkdirp(projectId, parentDir);
+      } catch (err) {
+        this.logger.warn(`Could not ensure directory ${parentDir}: ${err}`);
+      }
+    }
+
+    const currentNodes = await this.structureService.getAllNodes(projectId);
+    const existingNode =
+      currentNodes.find(
+        (n) =>
+          n.path === targetPath ||
+          n.path.replace(/^\/+/, '') === targetPath.replace(/^\/+/, ''),
+      ) ?? null;
+
+    if (fileVo.type === 'doc') {
+      const lines = fileVo.lines || [''];
+      const content = lines.join('\n');
+      let docIdToSync: string | null = null;
+      let syncedRev: number | undefined;
+      let syncedVersion: number | undefined;
+
+      if (existingNode?.docId) {
+        await this.getLiveCollab()
+          .flushDocs(projectId, [existingNode.docId])
+          .catch(() => []);
+      }
+
+      await this.undeleteDocRecord(projectId, fileVo.docId);
+
+      if (existingNode && existingNode.isDoc() && existingNode.docId) {
+        await this.undeleteDocRecord(projectId, existingNode.docId);
+        const updated = await this.docstoreService.updateDoc(
+          projectId,
+          existingNode.docId,
+          { lines },
+        );
+        syncedRev = updated?.rev ?? updated?.doc?.rev;
+        syncedVersion = updated?.doc?.version;
+        docIdToSync = existingNode.docId;
+      } else {
+        if (existingNode) {
+          await this.structureService.deleteNode(projectId, existingNode.id);
+        }
+
+        const { docId, rev, version } = await this.restoreOrCreateDoc(
+          projectId,
+          targetPath,
+          lines,
+          fileVo.docId ?? hintFileId,
+        );
+        docIdToSync = docId;
+        syncedRev = rev;
+        syncedVersion = version;
+
+        await this.structureService.createNode(projectId, {
+          name: fileName,
+          path: targetPath,
+          type: 'DOC',
+          docId: docId ?? undefined,
+          isRootDoc: fileVo.isRootDoc,
+        });
+      }
+
+      if (docIdToSync) {
+        await this.getLiveCollab()
+          .applyExternalText(projectId, docIdToSync, content)
+          .catch(() => false);
+
+        if (this.domainEventBus) {
+          await this.domainEventBus.publish({
+            type: 'manuscript.document.mutated',
+            projectId,
+            docId: docIdToSync,
+            lines,
+            rev: syncedRev,
+            version: syncedVersion,
+            source: 'history-restore',
+            occurredAt: Date.now(),
+          });
+        }
+      }
+
+      return {
+        path: targetPath,
+        docId: docIdToSync,
+        content,
+        rev: syncedRev,
+      };
+    } else if (fileVo.type === 'file' && fileVo.fileId) {
+      await this.undeleteFileRecord(projectId, fileVo.fileId);
+      if (existingNode) {
+        if (
+          existingNode.type !== 'FILE' ||
+          existingNode.fileId !== fileVo.fileId
+        ) {
+          await this.structureService.deleteNode(projectId, existingNode.id);
+          await this.structureService.createNode(projectId, {
+            name: fileName,
+            path: targetPath,
+            type: 'FILE',
+            fileId: fileVo.fileId,
+          });
+        }
+      } else {
+        await this.structureService.createNode(projectId, {
+          name: fileName,
+          path: targetPath,
+          type: 'FILE',
+          fileId: fileVo.fileId,
+        });
+      }
+      return {
+        path: targetPath,
+        fileId: fileVo.fileId,
+      };
+    }
+
+    return { path: targetPath };
   }
 }

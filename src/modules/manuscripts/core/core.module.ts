@@ -9,40 +9,52 @@
 import { Global, Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { IdentityModule } from '@/modules/identity/identity.module';
+import { NotificationsModule } from '@/modules/notifications/notifications.module';
+import { RealtimeModule } from '@/modules/realtime/realtime.module';
 import { ManuscriptsConfigService } from './config/manuscripts.config';
-import { ProjectWorkspaceCollectorService } from './services/workspace-collector.service';
+import { WorkspaceCollectorService } from './services/workspace-collector.service';
 import { ManuscriptDomainEventBus } from './events/event-bus.service';
-import { ManuscriptUserResolverService } from './services/user-resolver.service';
+import { UserResolverService } from './services/user-resolver.service';
 import {
   IDistributedLockPort,
   InMemoryDistributedLockAdapter,
 } from './ports/distributed-lock.port';
-import { RedisDistributedLockAdapter } from './adapters/redis-distributed-lock.adapter';
+import { RedisLockAdapter } from './adapters/redis-lock.adapter';
 
-import { ManuscriptCleanupListener } from './services/cleanup.listener';
+import { CleanupListener } from './services/cleanup.listener';
 
 @Global()
 @Module({
-  imports: [PrismaModule, IdentityModule],
+  imports: [
+    PrismaModule,
+    IdentityModule,
+    NotificationsModule,
+    RealtimeModule,
+  ],
   providers: [
     ManuscriptsConfigService,
-    ProjectWorkspaceCollectorService,
+    WorkspaceCollectorService,
     ManuscriptDomainEventBus,
-    ManuscriptUserResolverService,
-    ManuscriptCleanupListener,
-    RedisDistributedLockAdapter,
+    UserResolverService,
+    CleanupListener,
+    RedisLockAdapter,
     {
       provide: IDistributedLockPort,
-      useClass: RedisDistributedLockAdapter,
+      useClass: RedisLockAdapter,
     },
   ],
   exports: [
     ManuscriptsConfigService,
-    ProjectWorkspaceCollectorService,
+    WorkspaceCollectorService,
     ManuscriptDomainEventBus,
-    ManuscriptUserResolverService,
+    UserResolverService,
     IDistributedLockPort,
-    RedisDistributedLockAdapter,
+    RedisLockAdapter,
+    NotificationsModule,
+    RealtimeModule,
   ],
 })
 export class ManuscriptsCoreModule {}
+
+/** @deprecated Use ManuscriptsCoreModule */
+export { ManuscriptsCoreModule as CoreModule };

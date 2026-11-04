@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/export-import/domain/latex-export-transpiler.ts
+ * modules/manuscripts/export-import/domain/latex.transpiler.ts
  * Pure in-process domain functions for resolving LaTeX child document macros
  * (\input, \include, \subfile) and transpiling LaTeX into Markdown, HTML, and DOCX buffers.
  */
@@ -7,9 +7,9 @@
 import * as path from 'path';
 import { escapeLatex } from '@/modules/manuscripts/core';
 import {
-  buildPkZipBuffer,
-  type PkZipEntry,
-} from '@/modules/manuscripts/core/utils/pkzip-builder';
+  buildZipBuffer,
+  type ZipEntry,
+} from '@/modules/manuscripts/core/utils/zip-builder';
 
 export { escapeLatex };
 
@@ -184,8 +184,8 @@ export function convertLatexToHtml(latex: string, title?: string): string {
 /**
  * Builds an in-memory PKZIP buffer from raw zip entries.
  */
-export function buildMinimalZip(entries: PkZipEntry[]): Buffer {
-  return buildPkZipBuffer(entries);
+export function buildMinimalZip(entries: ZipEntry[]): Buffer {
+  return buildZipBuffer(entries);
 }
 
 /**
@@ -501,7 +501,7 @@ export const defaultExportFormatRegistry = new ExportFormatRegistry();
  * Pure transpilation of a LaTeX document (with optional child document resolution)
  * into the requested export format (tex, md, html, docx) via `ExportFormatRegistry`.
  */
-export function transpileLatexDocumentForExport(params: {
+export function transpileLatexDocument(params: {
   rawFilename: string;
   content: string;
   format: string;
@@ -528,13 +528,20 @@ export function transpileLatexDocumentForExport(params: {
   });
 }
 
-export const LatexExportTranspiler = {
+/** @deprecated Use `transpileLatexDocument` */
+export const transpileLatexDocumentForExport = transpileLatexDocument;
+
+export const LatexTranspiler = {
   escapeXml,
   convertLatexToMarkdown,
   convertLatexToHtml,
   buildMinimalZip,
   convertLatexToDocxBuffer,
   resolveIncludedLatexContent,
+  transpileLatexDocument,
   transpileLatexDocumentForExport,
   defaultExportFormatRegistry,
 } as const;
+
+/** @deprecated Use `LatexTranspiler` */
+export const LatexExportTranspiler = LatexTranspiler;

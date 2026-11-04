@@ -55,6 +55,45 @@ export class RestoreVersionDto {
   targetVersion!: number;
 }
 
+export class RestoreSingleFileDto {
+  @ApiProperty({
+    description: 'Relative path of the file in the version snapshot to restore',
+  })
+  @IsString()
+  @IsNotEmpty()
+  pathname!: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional document or file identifier hint',
+  })
+  @IsString()
+  @IsOptional()
+  fileId?: string;
+}
+
+export class RestoreSingleFileResponseDto {
+  @ApiProperty()
+  path!: string;
+
+  @ApiProperty()
+  version!: number;
+
+  @ApiProperty()
+  newVersion!: number;
+
+  @ApiPropertyOptional({ nullable: true })
+  docId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  fileId?: string | null;
+
+  @ApiPropertyOptional()
+  content?: string;
+
+  @ApiPropertyOptional()
+  rev?: number;
+}
+
 export class VersionLabelDto {
   @ApiProperty()
   id!: string;

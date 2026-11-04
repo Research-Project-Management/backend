@@ -32,11 +32,11 @@ import {
   ReverseSyncDto,
 } from './modules/manuscripts/clsi/dto/synctex.dto';
 import {
-  OverleafIncrementalWorkspace,
+  WorkspaceRepository,
   DiskUsageCleaner,
   createZipStreamFromDisk,
   ZipDiskEntry,
-} from './modules/manuscripts/clsi/repositories/incremental-workspace.repository';
+} from './modules/manuscripts/clsi/repositories/workspace.repository';
 import {
   CompilePipeline,
   LocalProcessRunner,
@@ -51,7 +51,7 @@ import { ClsiMetrics } from './modules/manuscripts/clsi/domain/clsi.metrics';
 @Injectable()
 export class ClsiStandaloneService {
   private readonly logger = new Logger(ClsiStandaloneService.name);
-  private readonly workspace: OverleafIncrementalWorkspace;
+  private readonly workspace: WorkspaceRepository;
   private readonly pipeline: CompilePipeline;
   private readonly synctexParser: SyncTexProcessor;
   private readonly wordCounter: TexWordCounter;
@@ -66,7 +66,7 @@ export class ClsiStandaloneService {
       '/tmp/clsi-scratch';
     const latexmkBin = process.env.LATEXMK_BIN || 'latexmk';
 
-    this.workspace = new OverleafIncrementalWorkspace(scratchDir);
+    this.workspace = new WorkspaceRepository(scratchDir);
     const runner = new LocalProcessRunner();
     const latexmkEngine = new LatexmkEngine(runner, latexmkBin, 'pdflatex');
     const logParser = new CompileLogAnalyzer();
@@ -209,6 +209,15 @@ export class ClsiStandaloneService {
   }
 
   public getWordCount(dto: ClsiWordCountDto) {
+    if (dto.files && Object.keys(dto.files).length > 0 && !dto.source) {
+      return {
+        success: true,
+        stats: this.wordCounter.countProject(dto.files, {
+          rootFile: dto.filename || 'main.tex',
+          includeBib: dto.includeBib,
+        }),
+      };
+    }
     if (!dto.source || !dto.source.trim()) {
       return {
         success: true,
@@ -216,6 +225,7 @@ export class ClsiStandaloneService {
           wordsInText: 0,
           wordsInHeaders: 0,
           wordsInCaptions: 0,
+          wordsInBibliography: 0,
           headers: 0,
           floats: 0,
           mathInlines: 0,
@@ -223,13 +233,20 @@ export class ClsiStandaloneService {
           totalWords: 0,
           charactersWithSpaces: 0,
           charactersNoSpaces: 0,
+          cjkCharacters: 0,
+          readingTimeMinutes: 0,
+          sections: [],
           rawOutput: 'Empty document (0 words)',
         },
       };
     }
     return {
       success: true,
-      stats: this.wordCounter.count(dto.source),
+      stats: this.wordCounter.count(
+        dto.source,
+        dto.filename || 'document.tex',
+        { includeBib: dto.includeBib },
+      ),
     };
   }
 

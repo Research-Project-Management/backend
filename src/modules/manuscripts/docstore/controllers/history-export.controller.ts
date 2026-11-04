@@ -35,15 +35,15 @@ import {
 import { AuthenticatedRequest, isUuid } from '@/core';
 import { createHash } from 'crypto';
 import { DocstoreService } from '../docstore.service';
-import { ManuscriptUserResolverService } from '@/modules/manuscripts/core/services/user-resolver.service';
-import { ManuscriptPageScopeRepository } from '../repositories/scope.repository';
+import { UserResolverService } from '@/modules/manuscripts/core/services/user-resolver.service';
+import { ScopeRepository } from '../repositories/scope.repository';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
 } from '@/modules/manuscripts/core';
-import { ManuscriptPageService } from '@/modules/manuscripts/core/services/page.service';
+import { PageService } from '@/modules/manuscripts/core/services/page.service';
 import { ExportImportService } from '@/modules/manuscripts/export-import/export-import.service';
 import { resolveIncludedLatexContent } from '@/modules/manuscripts/export-import/domain';
 import { ProjectHistoryService } from '@/modules/manuscripts/project-history/project-history.service';
@@ -61,15 +61,15 @@ import {
 @Controller('api/v1/manuscripts')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
-export class PagesHistoryExportController {
-  private readonly logger = new Logger(PagesHistoryExportController.name);
+export class HistoryExportController {
+  private readonly logger = new Logger(HistoryExportController.name);
   private readonly liveCollab: LiveCollaborationPort;
 
   constructor(
     private readonly docstoreService: DocstoreService,
-    private readonly pageScopeRepo: ManuscriptPageScopeRepository,
-    private readonly userResolver: ManuscriptUserResolverService,
-    private readonly pageService: ManuscriptPageService,
+    private readonly pageScopeRepo: ScopeRepository,
+    private readonly userResolver: UserResolverService,
+    private readonly pageService: PageService,
     @Optional()
     private readonly projectHistoryService?: ProjectHistoryService,
     @Optional()
@@ -260,8 +260,10 @@ export class PagesHistoryExportController {
       return snap;
     };
 
-    const snapFrom = await loadSnap(from);
-    const snapTo = await loadSnap(to);
+    const [snapFrom, snapTo] = await Promise.all([
+      loadSnap(from),
+      loadSnap(to),
+    ]);
     if (!snapFrom && !snapTo) {
       throw new BadRequestException(
         'At least one valid version id (from/to) is required',
@@ -559,18 +561,17 @@ export class PagesHistoryExportController {
   ) {
     if (!isUuid(versionId)) throw new BadRequestException('Invalid version ID');
     const activeProjectId = this.resolveActiveProjectId(project);
-    const snap = activeProjectId
-      ? await this.pageScopeRepo.findSnapshotInProject(
-          activeProjectId,
-          versionId,
-        )
-      : null;
+    const [snap, doc] = await Promise.all([
+      activeProjectId
+        ? this.pageScopeRepo.findSnapshotInProject(activeProjectId, versionId)
+        : null,
+      isUuid(pageId) && activeProjectId
+        ? this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
+        : null,
+    ]);
     if (!snap) throw new NotFoundException(`Snapshot ${versionId} not found`);
 
     const files = (snap.files as Record<string, unknown>) || {};
-    const doc = isUuid(pageId) && activeProjectId
-      ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
-      : null;
 
     if (doc) {
       if (snap.projectId !== doc.projectId) {
@@ -588,13 +589,13 @@ export class PagesHistoryExportController {
       // Pre-restore auto-snapshot to guarantee non-destructive recovery (hydrating cold-storage if needed)
       if (this.historyRepo) {
         try {
-          const latestVersion = await this.historyRepo.getLatestVersion(
-            doc.projectId,
-          );
+          const [latestVersion, hydratedDoc] = await Promise.all([
+            this.historyRepo.getLatestVersion(doc.projectId),
+            this.docstoreService
+              .getDoc(doc.projectId, doc.id)
+              .catch(() => null),
+          ]);
           const nextVersion = latestVersion + 1;
-          const hydratedDoc = await this.docstoreService
-            .getDoc(doc.projectId, doc.id)
-            .catch(() => null);
           const currentLines = Array.isArray(hydratedDoc?.lines)
             ? hydratedDoc.lines
             : Array.isArray(doc.lines)
@@ -1061,3 +1062,6 @@ export class PagesHistoryExportController {
     };
   }
 }
+
+/** @deprecated Use HistoryExportController */
+export { HistoryExportController as PagesHistoryExportController };

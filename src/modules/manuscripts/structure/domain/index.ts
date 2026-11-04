@@ -8,3 +8,4 @@ export * from './node.entity';
 export * from './node-path';
 export * from './structure.errors';
 export * from './structure.ports';
+export * from './latex-outline.extractor';

@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/core/adapters/redis-distributed-lock.adapter.ts
+ * modules/manuscripts/core/adapters/redis-lock.adapter.ts
  *
  * Distributed Lock Port Adapter using Redis SET NX PX + Lua atomic unlock.
  * Gracefully falls back to InMemoryDistributedLockAdapter when Redis
@@ -16,8 +16,8 @@ import {
 import * as crypto from 'crypto';
 
 @Injectable()
-export class RedisDistributedLockAdapter extends IDistributedLockPort {
-  private readonly logger = new Logger(RedisDistributedLockAdapter.name);
+export class RedisLockAdapter extends IDistributedLockPort {
+  private readonly logger = new Logger(RedisLockAdapter.name);
   private readonly inMemoryFallback = new InMemoryDistributedLockAdapter();
 
   /**
@@ -82,7 +82,7 @@ export class RedisDistributedLockAdapter extends IDistributedLockPort {
             const currentClient = this.redis!.getClient();
             if (currentClient) {
               await currentClient.eval(
-                RedisDistributedLockAdapter.UNLOCK_LUA_SCRIPT,
+                RedisLockAdapter.UNLOCK_LUA_SCRIPT,
                 1,
                 key,
                 token,
@@ -143,3 +143,6 @@ export class RedisDistributedLockAdapter extends IDistributedLockPort {
     }
   }
 }
+
+/** @deprecated Use RedisLockAdapter */
+export { RedisLockAdapter as RedisDistributedLockAdapter };

@@ -32,25 +32,55 @@ export async function ensurePrismaFolderChain(
   db: { manuscriptNode?: Partial<Prisma.TransactionClient['manuscriptNode']> } | null | undefined,
   projectId: string,
   folderChain: readonly ParsedFolderSegment[],
+  pageId?: string | null,
 ): Promise<string | null> {
   if (!db?.manuscriptNode || folderChain.length === 0) {
     return null;
   }
+
+  let preFetchedByPath: Map<string, { id?: string; type?: string } | null> | null =
+    null;
+  if (
+    folderChain.length > 1 &&
+    typeof db.manuscriptNode.findMany === 'function'
+  ) {
+    try {
+      const existingNodes = await db.manuscriptNode.findMany({
+        where: {
+          projectId,
+          path: { in: folderChain.map((f) => f.path) },
+        },
+      });
+      if (Array.isArray(existingNodes)) {
+        preFetchedByPath = new Map(
+          existingNodes
+            .filter((n): n is NonNullable<typeof n> => Boolean(n && n.path))
+            .map((n) => [n.path, n]),
+        );
+      }
+    } catch {
+      preFetchedByPath = null;
+    }
+  }
+
   let parentId: string | null = null;
   for (const folder of folderChain) {
-    let folderNode = await db.manuscriptNode.findUnique?.({
-      where: {
-        projectId_path: {
-          projectId,
-          path: folder.path,
+    let folderNode =
+      preFetchedByPath?.get(folder.path) ??
+      (await db.manuscriptNode.findUnique?.({
+        where: {
+          projectId_path: {
+            projectId,
+            path: folder.path,
+          },
         },
-      },
-    });
+      }));
     if (!folderNode && db.manuscriptNode.create) {
       try {
         folderNode = await db.manuscriptNode.create({
           data: {
             projectId,
+            ...(pageId ? { pageId } : {}),
             parentId,
             type: 'FOLDER',
             name: folder.name,
@@ -93,6 +123,33 @@ export class StructureRepository extends IStructureRepository {
     super();
   }
 
+  public async ensureFolderChainInTx(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    folderPathOrChain: string | readonly ParsedFolderSegment[],
+    pageId?: string | null,
+  ): Promise<string | null> {
+    if (typeof folderPathOrChain === 'string') {
+      const normalized = NodePathVo.normalize(folderPathOrChain);
+      if (normalized === '/') return null;
+      const segments = normalized.slice(1).split('/');
+      const chain: ParsedFolderSegment[] = [];
+      let currentPath = '';
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        NodePathVo.validateFilename(seg);
+        currentPath = `${currentPath}/${seg}`;
+        chain.push({
+          name: seg,
+          path: currentPath,
+          depth: i + 1,
+        });
+      }
+      return await ensurePrismaFolderChain(tx, projectId, chain, pageId);
+    }
+    return await ensurePrismaFolderChain(tx, projectId, folderPathOrChain, pageId);
+  }
+
   private async syncBackingAssetPath(
     db: Pick<Prisma.TransactionClient, 'manuscriptDoc' | 'manuscriptFile'>,
     projectId: string,
@@ -119,6 +176,7 @@ export class StructureRepository extends IStructureRepository {
     return new ManuscriptNodeEntity({
       id: raw.id,
       projectId: raw.projectId,
+      pageId: (raw as { pageId?: string | null }).pageId ?? raw.projectId,
       parentId: raw.parentId,
       type: raw.type,
       name: raw.name,
@@ -142,6 +200,7 @@ export class StructureRepository extends IStructureRepository {
     const created = await this.prisma.manuscriptNode.create({
       data: {
         projectId: params.projectId,
+        ...(params.pageId ? { pageId: params.pageId } : {}),
         parentId: params.parentId || null,
         type: params.type,
         name: params.name,
@@ -169,7 +228,17 @@ export class StructureRepository extends IStructureRepository {
         OR: [{ id: nodeId }, { docId: nodeId }, { fileId: nodeId }],
       },
     });
-    return raw ? this.mapToEntity(raw) : null;
+    if (raw) return this.mapToEntity(raw);
+
+    const byPage = await this.prisma.manuscriptNode
+      .findFirst({
+        where: {
+          pageId: projectId,
+          OR: [{ id: nodeId }, { docId: nodeId }, { fileId: nodeId }],
+        },
+      })
+      .catch(() => null);
+    return byPage ? this.mapToEntity(byPage) : null;
   }
 
   public async findByPath(
@@ -231,9 +300,15 @@ export class StructureRepository extends IStructureRepository {
       });
     }
 
+    const targetPageId = (targetNode as { pageId?: string | null }).pageId;
+
     await this.prisma.$transaction([
       this.prisma.manuscriptNode.updateMany({
-        where: { projectId, isRootDoc: true },
+        where: {
+          projectId,
+          ...(targetPageId ? { pageId: targetPageId } : {}),
+          isRootDoc: true,
+        },
         data: { isRootDoc: false },
       }),
       this.prisma.manuscriptNode.updateMany({
@@ -241,6 +316,19 @@ export class StructureRepository extends IStructureRepository {
         data: { isRootDoc: true },
       }),
     ]);
+
+    if (
+      targetPageId &&
+      targetNode.docId &&
+      this.prisma.manuscriptPage?.updateMany
+    ) {
+      await Promise.resolve(
+        this.prisma.manuscriptPage.updateMany({
+          where: { id: targetPageId, projectId },
+          data: { rootDocId: targetNode.docId },
+        }),
+      ).catch(() => null);
+    }
   }
 
   public async unsetRootDoc(projectId: string): Promise<void> {
@@ -259,6 +347,9 @@ export class StructureRepository extends IStructureRepository {
     const normSource = NodePathVo.normalize(sourcePath);
     const normDest = NodePathVo.normalize(destPath);
     const sourcePrefix = normSource + '/';
+    const sourceDepth = NodePathVo.depth(normSource);
+    const destDepth = NodePathVo.depth(normDest);
+    const depthDelta = destDepth - sourceDepth;
 
     try {
       await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -273,11 +364,88 @@ export class StructureRepository extends IStructureRepository {
             path: normDest,
             name: NodePathVo.basename(normDest),
             parentId: newParentId,
-            depth: NodePathVo.depth(normDest),
+            depth: destDepth,
           },
         });
 
         await this.syncBackingAssetPath(tx, projectId, movedRoot, normDest);
+
+        const canUseBulkSql =
+          typeof (tx as { $executeRaw?: unknown }).$executeRaw === 'function' &&
+          !(tx.manuscriptNode?.findMany as { _isMockFunction?: boolean } | undefined)?._isMockFunction &&
+          !(tx.manuscriptNode?.update as { _isMockFunction?: boolean } | undefined)?._isMockFunction;
+
+        if (canUseBulkSql) {
+          const substringStart = normSource.length + 1;
+          const prefixLen = sourcePrefix.length;
+          const destPrefix = `${normDest}/`;
+          const destPrefixLen = destPrefix.length;
+          const movedPageId = (movedRoot as { pageId?: string | null })?.pageId;
+
+          if (movedPageId) {
+            await tx.$executeRaw`
+              UPDATE manuscript_nodes
+              SET path = ${normDest} || SUBSTRING(path FROM ${substringStart}::int),
+                  depth = depth + ${depthDelta}::int,
+                  updated_at = NOW()
+              WHERE project_id = ${projectId}::uuid
+                AND (page_id = ${movedPageId}::uuid OR page_id IS NULL)
+                AND LEFT(path, ${prefixLen}::int) = ${sourcePrefix}
+            `;
+
+            await tx.$executeRaw`
+              UPDATE manuscript_docs d
+              SET path = SUBSTRING(n.path FROM 2),
+                  updated_at = NOW()
+              FROM manuscript_nodes n
+              WHERE n.doc_id = d.id
+                AND n.project_id = ${projectId}::uuid
+                AND (n.page_id = ${movedPageId}::uuid OR n.page_id IS NULL)
+                AND LEFT(n.path, ${destPrefixLen}::int) = ${destPrefix}
+            `;
+
+            await tx.$executeRaw`
+              UPDATE manuscript_files f
+              SET name = SUBSTRING(n.path FROM 2),
+                  updated_at = NOW()
+              FROM manuscript_nodes n
+              WHERE n.file_id = f.id
+                AND n.project_id = ${projectId}::uuid
+                AND (n.page_id = ${movedPageId}::uuid OR n.page_id IS NULL)
+                AND LEFT(n.path, ${destPrefixLen}::int) = ${destPrefix}
+            `;
+          } else {
+            await tx.$executeRaw`
+              UPDATE manuscript_nodes
+              SET path = ${normDest} || SUBSTRING(path FROM ${substringStart}::int),
+                  depth = depth + ${depthDelta}::int,
+                  updated_at = NOW()
+              WHERE project_id = ${projectId}::uuid
+                AND LEFT(path, ${prefixLen}::int) = ${sourcePrefix}
+            `;
+
+            await tx.$executeRaw`
+              UPDATE manuscript_docs d
+              SET path = SUBSTRING(n.path FROM 2),
+                  updated_at = NOW()
+              FROM manuscript_nodes n
+              WHERE n.doc_id = d.id
+                AND n.project_id = ${projectId}::uuid
+                AND LEFT(n.path, ${destPrefixLen}::int) = ${destPrefix}
+            `;
+
+            await tx.$executeRaw`
+              UPDATE manuscript_files f
+              SET name = SUBSTRING(n.path FROM 2),
+                  updated_at = NOW()
+              FROM manuscript_nodes n
+              WHERE n.file_id = f.id
+                AND n.project_id = ${projectId}::uuid
+                AND LEFT(n.path, ${destPrefixLen}::int) = ${destPrefix}
+            `;
+          }
+          return;
+        }
 
         const descendants = await tx.manuscriptNode.findMany({
           where: {

@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/spelling/domain/academic-spell.engine.ts
- * Pure domain AcademicSpellEngine & LatexProseTokenizer.
+ * modules/manuscripts/spelling/domain/spell.engine.ts
+ * Pure domain SpellEngine & LatexTokenizer.
  * Zero I/O, zero NestJS imports.
  */
 
@@ -9,13 +9,13 @@ import {
   UnsupportedLanguageException,
 } from './spelling.errors';
 import {
-  ACADEMIC_SHARED_WORDS,
-  ENGLISH_COMMON_WORDS,
-  VIETNAMESE_COMMON_WORDS,
-  FRENCH_ACADEMIC_WORDS,
-  GERMAN_ACADEMIC_WORDS,
-  SPANISH_ACADEMIC_WORDS,
-} from './academic-dictionaries';
+  SHARED_DICTIONARY_WORDS,
+  ENGLISH_WORDS,
+  VIETNAMESE_WORDS,
+  FRENCH_WORDS,
+  GERMAN_WORDS,
+  SPANISH_WORDS,
+} from './dictionaries';
 
 export class LanguageCodeVo {
   private static readonly SUPPORTED_CODES = new Set([
@@ -170,7 +170,7 @@ export class SpellingReport {
   }
 }
 
-export class LatexProseTokenizer {
+export class LatexTokenizer {
   private static readonly TECHNICAL_ARG_COMMANDS = [
     'cite',
     'citep',
@@ -317,7 +317,7 @@ export class LatexProseTokenizer {
     );
     result = result.replace(/\\\([^)\n]+\\\)/g, (m) => ' '.repeat(m.length));
 
-    for (const cmd of LatexProseTokenizer.TECHNICAL_ARG_COMMANDS) {
+    for (const cmd of LatexTokenizer.TECHNICAL_ARG_COMMANDS) {
       const pattern = new RegExp(
         `\\\\${cmd}\\*?(?:\\[[^\\]]*\\])*\\{[^\\}]*\\}`,
         'g',
@@ -350,7 +350,7 @@ export interface LanguageMorphologyProfile {
   getStems(word: string): string[];
 }
 
-export class LanguageSpellProfileRegistry {
+export class LanguageProfileRegistry {
   private readonly profiles = new Map<string, LanguageMorphologyProfile>();
   private fallbackProfile!: LanguageMorphologyProfile;
 
@@ -372,26 +372,26 @@ export class LanguageSpellProfileRegistry {
   }
 }
 
-export class AcademicSpellEngine {
+export class SpellEngine {
   private readonly englishDictionary: Set<string>;
   private readonly vietnameseDictionary: Set<string>;
   private readonly frenchDictionary: Set<string>;
   private readonly germanDictionary: Set<string>;
   private readonly spanishDictionary: Set<string>;
-  private readonly profileRegistry = new LanguageSpellProfileRegistry();
+  private readonly profileRegistry = new LanguageProfileRegistry();
   private readonly lengthBuckets = new Map<
     Set<string>,
     Map<number, string[]>
   >();
-  private readonly tokenizer: LatexProseTokenizer;
+  private readonly tokenizer: LatexTokenizer;
 
-  constructor(tokenizer?: LatexProseTokenizer) {
+  constructor(tokenizer?: LatexTokenizer) {
     this.englishDictionary = new Set<string>();
     this.vietnameseDictionary = new Set<string>();
     this.frenchDictionary = new Set<string>();
     this.germanDictionary = new Set<string>();
     this.spanishDictionary = new Set<string>();
-    this.tokenizer = tokenizer ?? new LatexProseTokenizer();
+    this.tokenizer = tokenizer ?? new LatexTokenizer();
     this.seedDictionaries();
     this.initLanguageProfiles();
   }
@@ -462,7 +462,7 @@ export class AcademicSpellEngine {
     language?: string,
     customWords: Iterable<string> = [],
     maxSuggestions = 5,
-    tokenizerOverride?: LatexProseTokenizer,
+    tokenizerOverride?: LatexTokenizer,
   ): SpellingReport {
     const langVo = LanguageCodeVo.create(language);
 
@@ -907,7 +907,7 @@ export class AcademicSpellEngine {
   }
 
   private seedDictionaries(): void {
-    for (const w of ACADEMIC_SHARED_WORDS) {
+    for (const w of SHARED_DICTIONARY_WORDS) {
       const lower = w.toLowerCase();
       this.englishDictionary.add(lower);
       this.vietnameseDictionary.add(lower);
@@ -916,23 +916,23 @@ export class AcademicSpellEngine {
       this.spanishDictionary.add(lower);
     }
 
-    for (const w of ENGLISH_COMMON_WORDS) {
+    for (const w of ENGLISH_WORDS) {
       this.englishDictionary.add(w.toLowerCase());
     }
 
-    for (const w of VIETNAMESE_COMMON_WORDS) {
+    for (const w of VIETNAMESE_WORDS) {
       this.vietnameseDictionary.add(w.toLowerCase().normalize('NFC'));
     }
 
-    for (const w of FRENCH_ACADEMIC_WORDS) {
+    for (const w of FRENCH_WORDS) {
       this.frenchDictionary.add(w.toLowerCase().normalize('NFC'));
     }
 
-    for (const w of GERMAN_ACADEMIC_WORDS) {
+    for (const w of GERMAN_WORDS) {
       this.germanDictionary.add(w.toLowerCase().normalize('NFC'));
     }
 
-    for (const w of SPANISH_ACADEMIC_WORDS) {
+    for (const w of SPANISH_WORDS) {
       this.spanishDictionary.add(w.toLowerCase().normalize('NFC'));
     }
 
@@ -957,3 +957,9 @@ export class AcademicSpellEngine {
     }
   }
 }
+
+export {
+  LatexTokenizer as LatexProseTokenizer,
+  LanguageProfileRegistry as LanguageSpellProfileRegistry,
+  SpellEngine as AcademicSpellEngine,
+};

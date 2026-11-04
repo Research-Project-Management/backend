@@ -7,6 +7,7 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { isUuid } from '@/core';
 import { PrismaService } from '@/core/infrastructure/database/prisma.service';
 import { RedisCacheService } from '@/core/infrastructure/redis/redis.service';
 import type Redis from 'ioredis';
@@ -79,11 +80,14 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
         const persistedUrl =
           entity.url ??
           (entity.collectionId ? `collection:${entity.collectionId}` : null);
+        const validNodeUuid =
+          entity.nodeId && isUuid(entity.nodeId) ? entity.nodeId : undefined;
         await this.prisma.manuscriptLinkedFile.upsert({
           where: { id: entity.id },
           create: {
             id: entity.id,
             projectId: entity.projectId,
+            ...(validNodeUuid ? { nodeId: validNodeUuid } : {}),
             name: entity.name,
             provider: entity.provider,
             url: persistedUrl,
@@ -96,6 +100,7 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
             updatedAt: entity.updatedAt,
           },
           update: {
+            ...(validNodeUuid ? { nodeId: validNodeUuid } : {}),
             name: entity.name,
             provider: entity.provider,
             url: persistedUrl,
@@ -250,9 +255,16 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
 
     if (this.prisma) {
       try {
-        const record = await this.prisma.manuscriptLinkedFile.findFirst({
-          where: { projectId, targetPath: nodeId },
-        });
+        const record =
+          (await this.prisma.manuscriptLinkedFile.findFirst({
+            where: {
+              projectId,
+              OR: [{ id: nodeId }, { targetPath: nodeId }],
+            },
+          })) ??
+          (await this.prisma.manuscriptLinkedFile.findFirst({
+            where: { projectId, targetPath: nodeId },
+          }));
         if (record) {
           const entity = this.mapFromPrisma(record);
           this.saveToMemoryStore(entity);
@@ -399,7 +411,8 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
       provider: (record.provider as 'url' | 'zotero' | 'mendeley') || 'url',
       url: resolvedUrl,
       collectionId: resolvedCollectionId,
-      nodeId: record.targetPath,
+      nodeId:
+        (record as { nodeId?: string | null }).nodeId ?? record.targetPath,
       docId: record.targetDocId,
       fileId: record.targetFileId,
       status: record.syncError

@@ -13,7 +13,7 @@ import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   ManuscriptDomainEventBus,
-  ProjectWorkspaceCollectorService,
+  WorkspaceCollectorService,
 } from '@/modules/manuscripts/core';
 import {
   IManuscriptAggregatorPort,
@@ -66,7 +66,7 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly liveCollab?: LiveCollaborationPort,
     @Optional()
-    private readonly workspaceCollector?: ProjectWorkspaceCollectorService,
+    private readonly workspaceCollector?: WorkspaceCollectorService,
   ) {
     super();
   }
@@ -329,6 +329,35 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     const wrapperPrefix = this.detectSingleWrapperFolder(entries);
     const createdDirs = new Set<string>(['/']);
 
+    let preFetchedNodesByPath: Map<string, ManuscriptNodeEntity> | null = null;
+    if (typeof this.structureService.getAllNodes === 'function') {
+      try {
+        const allNodes = await this.structureService.getAllNodes(projectId);
+        if (Array.isArray(allNodes) && allNodes.length > 0) {
+          preFetchedNodesByPath = new Map();
+          for (const n of allNodes) {
+            if (n?.path) {
+              preFetchedNodesByPath.set(n.path, n);
+              if (n.type === 'FOLDER') {
+                createdDirs.add(n.path);
+              }
+            }
+          }
+        }
+      } catch {
+        preFetchedNodesByPath = null;
+      }
+    }
+
+    const resolveExistingNodeByPath = async (
+      normalizedPath: string,
+    ): Promise<ManuscriptNodeEntity | null> => {
+      if (preFetchedNodesByPath && preFetchedNodesByPath.has(normalizedPath)) {
+        return preFetchedNodesByPath.get(normalizedPath) ?? null;
+      }
+      return this.structureService.getNodeByPath(projectId, normalizedPath);
+    };
+
     for (const entry of entries) {
       let cleanRelPath = entry.path.replace(/^\/+/, '');
       if (wrapperPrefix) {
@@ -347,23 +376,28 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
 
       if (parentDir !== '/' && parentDir !== '.' && !createdDirs.has(parentDir)) {
         await this.structureService.mkdirp(projectId, parentDir);
-        createdDirs.add(parentDir);
+        let cur = parentDir;
+        while (cur && cur !== '/' && cur !== '.') {
+          createdDirs.add(cur);
+          cur = path.posix.dirname(cur);
+        }
       }
 
       if (entry.isDirectory) {
         if (!createdDirs.has(normalizedPath)) {
           await this.structureService.mkdirp(projectId, normalizedPath);
-          createdDirs.add(normalizedPath);
+          let cur = normalizedPath;
+          while (cur && cur !== '/' && cur !== '.') {
+            createdDirs.add(cur);
+            cur = path.posix.dirname(cur);
+          }
         }
         totalFolders++;
         continue;
       }
 
       const storageType = entry.getStorageType();
-      const existingNode = await this.structureService.getNodeByPath(
-        projectId,
-        normalizedPath,
-      );
+      const existingNode = await resolveExistingNodeByPath(normalizedPath);
 
       if (storageType === 'doc') {
         const text = entry.data.toString('utf8').replace(/^\uFEFF/, '');
@@ -411,6 +445,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
           await this.structureService
             .deleteNode(projectId, existingNode.id)
             .catch(() => undefined);
+          preFetchedNodesByPath?.delete(normalizedPath);
         }
 
         const doc = await this.docstoreService.createDoc(projectId, {
@@ -418,12 +453,18 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
           lines,
         });
 
-        await this.structureService.createNode(projectId, {
-          path: normalizedPath,
-          name: baseName,
-          type: 'DOC',
-          docId: doc._id,
-        });
+        const createdDocNode = await this.structureService.createNode(
+          projectId,
+          {
+            path: normalizedPath,
+            name: baseName,
+            type: 'DOC',
+            docId: doc._id,
+          },
+        );
+        if (createdDocNode && preFetchedNodesByPath) {
+          preFetchedNodesByPath.set(normalizedPath, createdDocNode);
+        }
 
         if (this.domainEventBus) {
           await this.domainEventBus.publish({
@@ -491,6 +532,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
           await this.structureService
             .deleteNode(projectId, existingNode.id)
             .catch(() => undefined);
+          preFetchedNodesByPath?.delete(normalizedPath);
         }
 
         const file = await this.filestoreService.uploadFileFromBuffer(
@@ -500,17 +542,30 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
           mimeType,
         );
 
-        const alreadyCreated = await this.structureService.getNodeByPath(
-          projectId,
-          normalizedPath,
-        );
+        const alreadyCreated =
+          (await this.structureService.getNodeByPath(
+            projectId,
+            normalizedPath,
+          )) ??
+          (file?.id
+            ? await this.structureService
+                .getNodeById(projectId, file.id)
+                .catch(() => null)
+            : null);
         if (!alreadyCreated) {
-          await this.structureService.createNode(projectId, {
-            path: normalizedPath,
-            name: baseName,
-            type: 'FILE',
-            fileId: file.id,
-          });
+          const createdFileNode = await this.structureService
+            .createNode(projectId, {
+              path: normalizedPath,
+              name: baseName,
+              type: 'FILE',
+              fileId: file.id,
+            })
+            .catch(() => undefined);
+          if (createdFileNode && preFetchedNodesByPath) {
+            preFetchedNodesByPath.set(normalizedPath, createdFileNode);
+          }
+        } else if (preFetchedNodesByPath) {
+          preFetchedNodesByPath.set(normalizedPath, alreadyCreated);
         }
         totalFiles++;
       }

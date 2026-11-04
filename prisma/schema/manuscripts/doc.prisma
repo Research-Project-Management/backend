@@ -17,22 +17,24 @@ model ManuscriptDoc {
   hash       String?         @db.VarChar(64)
   sizeBytes  Int             @default(0) @map("size_bytes")
   inStorage  Boolean         @default(false) @map("in_storage")
-  storageKey String?         @map("storage_key") @db.VarChar(500)
+  storageKey String?         @map("storage_key") @db.VarChar(512)
   deleted    Boolean         @default(false)
   deletedAt  DateTime?       @map("deleted_at") @db.Timestamptz(6)
   createdAt  DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
-  node       ManuscriptNode?
+  node            ManuscriptNode?
+  rootForPages    ManuscriptPage[]          @relation("PageRootDoc")
+  linkedTargets   ManuscriptLinkedFile[]
   trackChanges    ManuscriptTrackChange[]
   commentThreads  ManuscriptCommentThread[]
   notifications   ManuscriptNotification[]
   docReview       ManuscriptDocReview?
 
   @@index([projectId, deleted, updatedAt], map: "idx_manuscript_docs_proj_del_updated")
+  @@index([projectId, deleted, createdAt], map: "idx_manuscript_docs_proj_del_created")
   @@index([projectId, deleted, deletedAt(sort: Desc)], map: "idx_manuscript_docs_proj_del_deleted_at")
   @@index([projectId, deleted, path], map: "idx_manuscript_docs_proj_del_path")
   @@index([pageId, deleted, path], map: "idx_manuscript_docs_page_del_path")
   @@index([projectId, inStorage], map: "idx_manuscript_docs_project_storage")
-  @@index([projectId, path], map: "idx_manuscript_docs_project_path")
   @@map("manuscript_docs")
 }

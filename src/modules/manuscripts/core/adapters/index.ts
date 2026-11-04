@@ -1,1 +1,1 @@
-export * from './redis-distributed-lock.adapter';
+export * from './redis-lock.adapter';

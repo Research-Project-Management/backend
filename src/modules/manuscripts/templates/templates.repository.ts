@@ -33,7 +33,7 @@ import {
   TemplateCategoryString,
   TemplateCategoryVo,
   CompilerType,
-  OFFICIAL_TEMPLATE_CATALOG,
+  TEMPLATE_CATALOG,
 } from './domain';
 
 @Injectable()
@@ -58,7 +58,7 @@ export class TemplatesRepository
   }
 
   private seedOfficialCatalog(): void {
-    for (const d of OFFICIAL_TEMPLATE_CATALOG) {
+    for (const d of TEMPLATE_CATALOG) {
       const entity = ManuscriptTemplateEntity.create({
         id: d.id,
         versionId: d.versionId,
@@ -202,7 +202,7 @@ export class TemplatesRepository
       dbIdsAndSlugs.add(e.versionId.toLowerCase());
     }
     const nonDuplicateOfficial = matchingOfficial.filter((t) => {
-      const def = OFFICIAL_TEMPLATE_CATALOG.find((d) => d.id === t.id);
+      const def = TEMPLATE_CATALOG.find((d) => d.id === t.id);
       return (
         !dbIdsAndSlugs.has(t.id.toLowerCase()) &&
         !dbIdsAndSlugs.has(t.versionId.toLowerCase()) &&
@@ -291,7 +291,7 @@ export class TemplatesRepository
       dbIdsAndSlugs.add(e.versionId.toLowerCase());
     }
     const nonDuplicateOfficial = matchingOfficial.filter((t) => {
-      const def = OFFICIAL_TEMPLATE_CATALOG.find((d) => d.id === t.id);
+      const def = TEMPLATE_CATALOG.find((d) => d.id === t.id);
       return (
         !dbIdsAndSlugs.has(t.id.toLowerCase()) &&
         !dbIdsAndSlugs.has(t.versionId.toLowerCase()) &&
@@ -357,6 +357,66 @@ export class TemplatesRepository
         downloadCount: { increment: 1 },
       },
     });
+  }
+
+  /**
+   * Collects all text documents (.tex, .bib, .sty, .cls, .bst, .def, .cfg, .md)
+   * of an existing project from DocstoreService & StructureService to snapshot as a template.
+   */
+  async collectProjectTemplateFiles(
+    projectId: string,
+  ): Promise<Record<string, string>> {
+    const collected: Record<string, string> = {};
+    if (!this.docstoreService) {
+      return collected;
+    }
+
+    const pathByDocId = new Map<string, string>();
+    const [nodesResult, docsResult] = await Promise.all([
+      this.structureService
+        ? this.structureService.getAllNodes(projectId).catch(() => [])
+        : Promise.resolve([]),
+      this.docstoreService.getAllDocs(projectId).catch((err: unknown) => {
+        this.logger.warn(
+          `Failed to collect project files for template from ${projectId}: ${(err as Error)?.message}`,
+        );
+        return [];
+      }),
+    ]);
+
+    for (const n of nodesResult) {
+      if (n.isDoc() && n.docId) {
+        const cleanPath = (n.path || n.name || '').replace(/^\/+/, '');
+        if (cleanPath) {
+          pathByDocId.set(n.docId, cleanPath);
+        }
+      }
+    }
+
+    const allowedExt = new Set([
+      'tex',
+      'latex',
+      'bib',
+      'sty',
+      'cls',
+      'bst',
+      'def',
+      'cfg',
+      'md',
+      'rnw',
+      'qmd',
+    ]);
+    for (const doc of docsResult) {
+      const rawPath =
+        pathByDocId.get(doc._id) || (doc.path || '').replace(/^\/+/, '');
+      if (!rawPath) continue;
+      const ext = rawPath.split('.').pop()?.toLowerCase() || '';
+      if (allowedExt.has(ext) || !rawPath.includes('.')) {
+        collected[rawPath] = (doc.lines || []).join('\n');
+      }
+    }
+
+    return collected;
   }
 
   async instantiate(
@@ -446,6 +506,7 @@ export class TemplatesRepository
       );
 
       try {
+        const folderIdCache = new Map<string, string>();
         for (const [filePath, content] of fileEntries) {
           const normalizedPath = filePath.startsWith('/')
             ? filePath
@@ -456,11 +517,19 @@ export class TemplatesRepository
 
           if (parts.length > 0) {
             const dirPath = `/${parts.join('/')}`;
-            const dirNode = await structureService.mkdirp(
-              finalProjectId,
-              dirPath,
-            );
-            parentFolderId = dirNode.id;
+            const cachedDirId = folderIdCache.get(dirPath);
+            if (cachedDirId) {
+              parentFolderId = cachedDirId;
+            } else {
+              const dirNode = await structureService.mkdirp(
+                finalProjectId,
+                dirPath,
+              );
+              parentFolderId = dirNode.id;
+              if (dirNode?.id) {
+                folderIdCache.set(dirPath, dirNode.id);
+              }
+            }
           }
 
           const isRootDoc =

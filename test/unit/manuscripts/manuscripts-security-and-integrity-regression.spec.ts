@@ -37,10 +37,10 @@ import {
   FileSnapshotVo,
   Snapshot,
 } from '@/modules/manuscripts/project-history/domain';
-import { sanitizePkZipPath } from '@/modules/manuscripts/core/utils/pkzip-builder';
+import { sanitizePkZipPath } from '@/modules/manuscripts/core/utils/zip-builder';
 import { RemoteClsiClientAdapter } from '@/modules/manuscripts/clsi/services/remote-clsi.client';
 import { ClsiWorkspacePlannerService } from '@/modules/manuscripts/clsi/services/workspace-planner.service';
-import { planDbFileSet } from '@/modules/manuscripts/clsi/domain/compile-fileset.planner';
+import { planDbFileSet } from '@/modules/manuscripts/clsi/domain/fileset.planner';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
 import {

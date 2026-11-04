@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { PkzipEngineAdapter } from '@/modules/manuscripts/export-import/services/pkzip-engine.adapter';
+import { PkzipEngineAdapter } from '@/modules/manuscripts/export-import/services/zip.adapter';
 import { ManuscriptCleanupListener } from '@/modules/manuscripts/core/services/cleanup.listener';
 import { YjsUpdateValidator } from '@/modules/realtime/manuscripts/yjs-update-validator';
 import { YjsService } from '@/modules/realtime/manuscripts/yjs.service';

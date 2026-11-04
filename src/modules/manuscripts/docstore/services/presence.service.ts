@@ -45,8 +45,8 @@ export interface HeartbeatBody {
 }
 
 @Injectable()
-export class ManuscriptPresenceService implements OnModuleDestroy {
-  private readonly logger = new Logger(ManuscriptPresenceService.name);
+export class PresenceService implements OnModuleDestroy {
+  private readonly logger = new Logger(PresenceService.name);
   private static readonly HTTP_PRESENCE_TTL_MS = 60_000;
   private static readonly MAX_HTTP_PRESENCE_ENTRIES = 5000;
   private static readonly httpPresence = new Map<string, ActivePresenceUser>();
@@ -101,7 +101,7 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
   private async resolveProjectId(id: string): Promise<string | null> {
     if (!isUuid(id)) return null;
 
-    const cached = ManuscriptPresenceService.projectIdCache.get(id);
+    const cached = PresenceService.projectIdCache.get(id);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.projectId;
     }
@@ -119,25 +119,25 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
       resolved = node?.projectId ?? null;
     }
 
-    if (ManuscriptPresenceService.projectIdCache.size > 2000) {
+    if (PresenceService.projectIdCache.size > 2000) {
       const now = Date.now();
-      for (const [k, v] of ManuscriptPresenceService.projectIdCache) {
+      for (const [k, v] of PresenceService.projectIdCache) {
         if (v.expiresAt <= now) {
-          ManuscriptPresenceService.projectIdCache.delete(k);
+          PresenceService.projectIdCache.delete(k);
         }
       }
-      if (ManuscriptPresenceService.projectIdCache.size > 2000) {
-        const oldestKey = ManuscriptPresenceService.projectIdCache
+      if (PresenceService.projectIdCache.size > 2000) {
+        const oldestKey = PresenceService.projectIdCache
           .keys()
           .next().value;
         if (oldestKey !== undefined) {
-          ManuscriptPresenceService.projectIdCache.delete(oldestKey);
+          PresenceService.projectIdCache.delete(oldestKey);
         }
       }
     }
-    ManuscriptPresenceService.projectIdCache.set(id, {
+    PresenceService.projectIdCache.set(id, {
       projectId: resolved,
-      expiresAt: Date.now() + ManuscriptPresenceService.PROJECT_ID_CACHE_TTL_MS,
+      expiresAt: Date.now() + PresenceService.PROJECT_ID_CACHE_TTL_MS,
     });
 
     return resolved;
@@ -205,7 +205,7 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     }
 
     this.presenceCache.set(cacheKey, {
-      expiresAt: now + ManuscriptPresenceService.PRESENCE_CACHE_TTL_MS,
+      expiresAt: now + PresenceService.PRESENCE_CACHE_TTL_MS,
       promise,
     });
     return promise;
@@ -221,12 +221,12 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     const now = Date.now();
     const byUser = new Map<string, LivePresenceUser | ActivePresenceUser>();
 
-    for (const [key, user] of ManuscriptPresenceService.httpPresence) {
+    for (const [key, user] of PresenceService.httpPresence) {
       if (
         now - user.lastSeen >
-        ManuscriptPresenceService.HTTP_PRESENCE_TTL_MS
+        PresenceService.HTTP_PRESENCE_TTL_MS
       ) {
-        ManuscriptPresenceService.httpPresence.delete(key);
+        PresenceService.httpPresence.delete(key);
       } else if (
         user.fileId === pageId &&
         (!authorizedProjectId ||
@@ -278,32 +278,32 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
       await this.verifyPageInProject(pageId, authorizedProjectId);
     }
     if (
-      ManuscriptPresenceService.httpPresence.size >=
-      ManuscriptPresenceService.MAX_HTTP_PRESENCE_ENTRIES
+      PresenceService.httpPresence.size >=
+      PresenceService.MAX_HTTP_PRESENCE_ENTRIES
     ) {
       // Evict expired entries first, then evict the oldest entry (FIFO/LRU)
       const now = Date.now();
-      for (const [k, v] of ManuscriptPresenceService.httpPresence) {
-        if (now - v.lastSeen > ManuscriptPresenceService.HTTP_PRESENCE_TTL_MS) {
-          ManuscriptPresenceService.httpPresence.delete(k);
+      for (const [k, v] of PresenceService.httpPresence) {
+        if (now - v.lastSeen > PresenceService.HTTP_PRESENCE_TTL_MS) {
+          PresenceService.httpPresence.delete(k);
         }
       }
       if (
-        ManuscriptPresenceService.httpPresence.size >=
-        ManuscriptPresenceService.MAX_HTTP_PRESENCE_ENTRIES
+        PresenceService.httpPresence.size >=
+        PresenceService.MAX_HTTP_PRESENCE_ENTRIES
       ) {
-        const oldestKey = ManuscriptPresenceService.httpPresence
+        const oldestKey = PresenceService.httpPresence
           .keys()
           .next().value;
         if (oldestKey !== undefined) {
-          ManuscriptPresenceService.httpPresence.delete(oldestKey);
+          PresenceService.httpPresence.delete(oldestKey);
         }
       }
     }
     const presenceKey = authorizedProjectId
       ? `${authorizedProjectId}:${pageId}:${userId}`
       : `${pageId}:${userId}`;
-    ManuscriptPresenceService.httpPresence.set(presenceKey, {
+    PresenceService.httpPresence.set(presenceKey, {
       id: userId,
       name: userName,
       color: body?.color || '#2563EB',
@@ -328,9 +328,9 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
       await this.verifyPageInProject(pageId, authorizedProjectId);
     }
     if (userId) {
-      ManuscriptPresenceService.httpPresence.delete(`${pageId}:${userId}`);
+      PresenceService.httpPresence.delete(`${pageId}:${userId}`);
       if (authorizedProjectId) {
-        ManuscriptPresenceService.httpPresence.delete(
+        PresenceService.httpPresence.delete(
           `${authorizedProjectId}:${pageId}:${userId}`,
         );
       }
@@ -444,3 +444,6 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     rawRequest.on('close', cleanup);
   }
 }
+
+/** @deprecated Use PresenceService */
+export { PresenceService as ManuscriptPresenceService };

@@ -10,6 +10,7 @@ import {
 
 export interface CreateNodeParams {
   projectId: string;
+  pageId?: string | null;
   parentId?: string | null;
   type: ManuscriptNodeType;
   name: string;

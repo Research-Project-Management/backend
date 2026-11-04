@@ -1,13 +1,19 @@
 /**
- * modules/manuscripts/spelling/domain/academic-dictionaries.ts
+ * modules/manuscripts/spelling/domain/dictionaries.ts
  * Pure domain vocabulary lists for academic, LaTeX, scientific, and multi-language spell checking.
  * Zero I/O, zero NestJS imports.
  */
 
-export { ENGLISH_COMMON_WORDS } from './dictionaries/english-common.dictionary';
-export { VIETNAMESE_COMMON_WORDS } from './dictionaries/vietnamese-common.dictionary';
+export {
+  ENGLISH_WORDS,
+  ENGLISH_COMMON_WORDS,
+} from './dictionaries/english.dictionary';
+export {
+  VIETNAMESE_WORDS,
+  VIETNAMESE_COMMON_WORDS,
+} from './dictionaries/vietnamese.dictionary';
 
-export const ACADEMIC_SHARED_WORDS: readonly string[] = [
+export const SHARED_DICTIONARY_WORDS: readonly string[] = [
   // Core LaTeX & Publishing
   'latex',
   'overleaf',
@@ -834,7 +840,10 @@ export const ACADEMIC_SHARED_WORDS: readonly string[] = [
   'hello',
 ];
 
-export const FRENCH_ACADEMIC_WORDS: readonly string[] = [
+export const ACADEMIC_SHARED_WORDS = SHARED_DICTIONARY_WORDS;
+export const ACADEMIC_DICTIONARY_WORDS = SHARED_DICTIONARY_WORDS;
+
+export const FRENCH_WORDS: readonly string[] = [
   'le',
   'la',
   'les',
@@ -1042,7 +1051,9 @@ export const FRENCH_ACADEMIC_WORDS: readonly string[] = [
   'deuxièmement',
 ];
 
-export const GERMAN_ACADEMIC_WORDS: readonly string[] = [
+export const FRENCH_ACADEMIC_WORDS = FRENCH_WORDS;
+
+export const GERMAN_WORDS: readonly string[] = [
   'der',
   'die',
   'das',
@@ -1257,7 +1268,9 @@ export const GERMAN_ACADEMIC_WORDS: readonly string[] = [
   'beispielsweise',
 ];
 
-export const SPANISH_ACADEMIC_WORDS: readonly string[] = [
+export const GERMAN_ACADEMIC_WORDS = GERMAN_WORDS;
+
+export const SPANISH_WORDS: readonly string[] = [
   'el',
   'la',
   'los',
@@ -1498,3 +1511,5 @@ export const SPANISH_ACADEMIC_WORDS: readonly string[] = [
   'particularmente',
   'finalmente',
 ];
+
+export const SPANISH_ACADEMIC_WORDS = SPANISH_WORDS;

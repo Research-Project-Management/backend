@@ -16,7 +16,7 @@ import { SpellingService } from './spelling.service';
 import { SpellingRepository } from './spelling.repository';
 
 // Domain
-import { LatexProseTokenizer, AcademicSpellEngine } from './domain';
+import { LatexTokenizer, SpellEngine } from './domain';
 
 @Module({
   imports: [PrismaModule, DocstoreModule],
@@ -24,14 +24,14 @@ import { LatexProseTokenizer, AcademicSpellEngine } from './domain';
   providers: [
     SpellingService,
     SpellingRepository,
-    LatexProseTokenizer,
-    AcademicSpellEngine,
+    LatexTokenizer,
+    SpellEngine,
   ],
   exports: [
     SpellingService,
     SpellingRepository,
-    LatexProseTokenizer,
-    AcademicSpellEngine,
+    LatexTokenizer,
+    SpellEngine,
   ],
 })
 export class SpellingModule {}

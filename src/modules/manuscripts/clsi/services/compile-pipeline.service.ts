@@ -24,8 +24,8 @@ import {
 } from '../domain/clsi.ports';
 import {
   ProjectLockManager,
-  OverleafOutputFileFinder,
-} from '../repositories/incremental-workspace.repository';
+  OutputFileFinder,
+} from '../repositories/workspace.repository';
 import { TexEngineDetector } from '../domain/tex-engine.detector';
 import { CompileLogAnalyzer } from '@/modules/manuscripts/diagnostics/domain';
 import { BibBackendDetector } from '../domain/bib-backend.detector';
@@ -454,7 +454,7 @@ export class CompilePipeline {
     private readonly latexmkEngine: ILatexEngine,
     private readonly logParser: ILogParser = new CompileLogAnalyzer(),
     private readonly projectLockManager: ProjectLockManager = new ProjectLockManager(),
-    private readonly outputFileFinder: IOutputFileFinder = new OverleafOutputFileFinder(),
+    private readonly outputFileFinder: IOutputFileFinder = new OutputFileFinder(),
   ) {}
 
   public async runWithProjectLock<T>(

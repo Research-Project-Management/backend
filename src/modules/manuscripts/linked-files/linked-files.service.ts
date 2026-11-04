@@ -26,7 +26,7 @@ import { StructureService } from '@/modules/manuscripts/structure/structure.serv
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { CitationsService } from '@/modules/manuscripts/citations/citations.service';
-import { LineArrayEngine } from '@/modules/manuscripts/docstore/domain';
+import { LineArray } from '@/modules/manuscripts/docstore/domain';
 import {
   TEXT_EXTENSIONS,
   LIVE_COLLABORATION_PORT,
@@ -69,13 +69,17 @@ export class LinkedFilesService {
         }
         try {
           const linkedList = await this.repository.findByProject(event.projectId);
-          for (const linked of linkedList) {
-            if (
+          const toDelete = linkedList.filter(
+            (linked) =>
               (linked.docId && deletedDocIds.has(linked.docId)) ||
-              (linked.fileId && deletedFileIds.has(linked.fileId))
-            ) {
-              await this.repository.delete(event.projectId, linked.id);
-            }
+              (linked.fileId && deletedFileIds.has(linked.fileId)),
+          );
+          if (toDelete.length > 0) {
+            await Promise.all(
+              toDelete.map((linked) =>
+                this.repository.delete(event.projectId, linked.id),
+              ),
+            );
           }
         } catch {
           // Ignore cleanup errors
@@ -445,7 +449,7 @@ export class LinkedFilesService {
             ?.flushDocs(projectId, [linkedFile.docId])
             .catch(() => []);
           const textContent = download.buffer.toString('utf8');
-          const lines = LineArrayEngine.textToLines(textContent);
+          const lines = LineArray.textToLines(textContent);
           const currentDoc = await this.docstoreService!.getDoc(
             projectId,
             linkedFile.docId,
@@ -636,16 +640,22 @@ export class LinkedFilesService {
     let succeeded = 0;
     let failed = 0;
 
-    for (const item of items) {
-      try {
-        await this.refresh(projectId, item.id, userId);
-        succeeded++;
-      } catch (err: unknown) {
-        failed++;
-        this.logger.warn(
-          `Refresh failed for linked file ${item.id} (${item.name}): ${(err as Error)?.message}`,
-        );
-      }
+    const outcomes = await Promise.all(
+      items.map(async (item) => {
+        try {
+          await this.refresh(projectId, item.id, userId);
+          return true;
+        } catch (err: unknown) {
+          this.logger.warn(
+            `Refresh failed for linked file ${item.id} (${item.name}): ${(err as Error)?.message}`,
+          );
+          return false;
+        }
+      }),
+    );
+    for (const ok of outcomes) {
+      if (ok) succeeded++;
+      else failed++;
     }
 
     return {
@@ -672,16 +682,22 @@ export class LinkedFilesService {
     let succeeded = 0;
     let failed = 0;
 
-    for (const item of autoFiles) {
-      try {
-        await this.refresh(item.projectId, item.id);
-        succeeded++;
-      } catch (err: unknown) {
-        failed++;
-        this.logger.warn(
-          `Auto-refresh failed for linked file ${item.id} (${item.name}): ${(err as Error)?.message}`,
-        );
-      }
+    const outcomes = await Promise.all(
+      autoFiles.map(async (item) => {
+        try {
+          await this.refresh(item.projectId, item.id);
+          return true;
+        } catch (err: unknown) {
+          this.logger.warn(
+            `Auto-refresh failed for linked file ${item.id} (${item.name}): ${(err as Error)?.message}`,
+          );
+          return false;
+        }
+      }),
+    );
+    for (const ok of outcomes) {
+      if (ok) succeeded++;
+      else failed++;
     }
 
     return { total: autoFiles.length, succeeded, failed };

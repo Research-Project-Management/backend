@@ -17,6 +17,7 @@ export interface ParsedFolderSegment {
 export interface ParsedNodePath {
   readonly normalizedPath: string;
   readonly relativePath: string;
+  readonly name: string;
   readonly leafName: string;
   readonly parentPath: string;
   readonly segments: readonly string[];
@@ -84,6 +85,7 @@ export class NodePathVo {
         return {
           normalizedPath: `/${fallbackLeaf}`,
           relativePath: fallbackLeaf,
+          name: fallbackLeaf,
           leafName: fallbackLeaf,
           parentPath: '/',
           segments: [fallbackLeaf],
@@ -95,6 +97,7 @@ export class NodePathVo {
       return {
         normalizedPath: '/',
         relativePath: '',
+        name: '',
         leafName: '',
         parentPath: '/',
         segments: [],
@@ -129,6 +132,7 @@ export class NodePathVo {
     return {
       normalizedPath,
       relativePath: normalizedPath.slice(1),
+      name: leafName,
       leafName,
       parentPath,
       segments,
@@ -145,6 +149,13 @@ export class NodePathVo {
   public static toRelative(p: string): string {
     const norm = NodePathVo.normalize(p);
     return norm === '/' ? '' : norm.slice(1);
+  }
+
+  /**
+   * Alias for `toRelative`: converts a canonical path into a relative path without leading `/`.
+   */
+  public static toRelativePath(rawPath: string): string {
+    return NodePathVo.toRelative(rawPath);
   }
 
   /**

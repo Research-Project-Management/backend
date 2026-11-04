@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/compile-fileset.planner.ts
+ * modules/manuscripts/clsi/domain/fileset.planner.ts
  * Pure in-process planning of the file set and content-independent fingerprint
  * handed to the LaTeX compilation pipeline.
  */

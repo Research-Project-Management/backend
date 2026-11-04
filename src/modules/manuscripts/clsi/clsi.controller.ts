@@ -30,7 +30,13 @@ import {
 import { FastifyReply } from 'fastify';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { ClsiService } from './services/clsi.service';
-import { CompileManuscriptDto, ClsiWordCountDto } from './dto/clsi.dto';
+import {
+  CompileManuscriptDto,
+  ClsiWordCountDto,
+  ClsiAiTransformDto,
+  ClsiAiFixErrorDto,
+  ClsiAiGenerateTableDto,
+} from './dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 
 @ApiTags('Manuscripts - CLSI')
@@ -85,8 +91,17 @@ export class ClsiController {
   @ApiOperation({
     summary: 'Calculate academic word count and metrics (texcount parity)',
   })
-  async wordCount(@Body() dto: ClsiWordCountDto) {
-    return this.clsiService.getWordCount(dto);
+  async wordCount(
+    @Body() dto: ClsiWordCountDto,
+    @Param('projectId') routeProjectId?: string,
+    @ResolvedProject() project?: string | { id?: string },
+  ) {
+    const authorizedProjectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
+    if (authorizedProjectId && !dto.projectId) {
+      dto.projectId = authorizedProjectId;
+    }
+    return this.clsiService.getWordCount(dto, authorizedProjectId);
   }
 
   @Post(['synctex/forward', 'projects/:projectId/clsi/synctex/forward'])
@@ -236,5 +251,43 @@ export class ClsiController {
     const staleStats = await this.clsiService.cleanStaleScratch();
     const quotaStats = await this.clsiService.enforceScratchQuota();
     return { staleStats, quotaStats };
+  }
+
+  @Post('clsi/ai/transform')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
+  @NoProjectContext()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Transform academic LaTeX/Markdown text while masking math, citation, and reference macros',
+  })
+  async transformAcademicText(@Body() dto: ClsiAiTransformDto) {
+    return this.clsiService.transformAcademicText(dto);
+  }
+
+  @Post('clsi/ai/fix-error')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
+  @NoProjectContext()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Analyze a LaTeX compilation error and suggest an automated or heuristic fix',
+  })
+  async fixLatexError(@Body() dto: ClsiAiFixErrorDto) {
+    return this.clsiService.fixLatexError(dto);
+  }
+
+  @Post('clsi/ai/generate-table')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
+  @NoProjectContext()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Generate a clean LaTeX tabular or TSV table from a prompt',
+  })
+  async generateLatexTable(@Body() dto: ClsiAiGenerateTableDto) {
+    return this.clsiService.generateLatexTable(dto);
   }
 }

@@ -13,8 +13,8 @@ import {
 } from '@prisma/client';
 
 @Injectable()
-export class ManuscriptPageScopeRepository {
-  private readonly logger = new Logger(ManuscriptPageScopeRepository.name);
+export class ScopeRepository {
+  private readonly logger = new Logger(ScopeRepository.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -56,6 +56,17 @@ export class ManuscriptPageScopeRepository {
         },
       });
       if (doc) return doc;
+
+      const byPageScope = await this.prisma.manuscriptDoc
+        .findFirst({
+          where: {
+            pageId: projectId,
+            deleted: false,
+            OR: [{ id: identifier }, { node: { id: identifier } }],
+          },
+        })
+        .catch(() => null);
+      if (byPageScope) return byPageScope;
     }
 
     // Try path lookup scoped strictly to projectId
@@ -63,7 +74,7 @@ export class ManuscriptPageScopeRepository {
       ? identifier.slice(1)
       : identifier;
 
-    return this.prisma.manuscriptDoc.findFirst({
+    const byProjectPath = await this.prisma.manuscriptDoc.findFirst({
       where: {
         projectId,
         deleted: false,
@@ -74,6 +85,21 @@ export class ManuscriptPageScopeRepository {
         ],
       },
     });
+    if (byProjectPath) return byProjectPath;
+
+    return this.prisma.manuscriptDoc
+      .findFirst({
+        where: {
+          pageId: projectId,
+          deleted: false,
+          OR: [
+            { path: identifier },
+            { path: normalizedPath },
+            { path: `/${normalizedPath}` },
+          ],
+        },
+      })
+      .catch(() => null);
   }
 
   /**
@@ -239,17 +265,31 @@ export class ManuscriptPageScopeRepository {
     versionOrId: string | number,
   ): Promise<(ManuscriptSnapshot & { labels?: ManuscriptLabel[] }) | null> {
     if (typeof versionOrId === 'number' || !isNaN(Number(versionOrId))) {
-      return this.prisma.manuscriptSnapshot.findFirst({
+      const snap = await this.prisma.manuscriptSnapshot.findFirst({
         where: { projectId, version: Number(versionOrId) },
         include: { labels: true },
       });
+      if (snap) return snap;
+      return this.prisma.manuscriptSnapshot
+        .findFirst({
+          where: { pageId: projectId, version: Number(versionOrId) },
+          include: { labels: true },
+        })
+        .catch(() => null);
     }
 
     if (isUUID(String(versionOrId))) {
-      return this.prisma.manuscriptSnapshot.findFirst({
+      const snap = await this.prisma.manuscriptSnapshot.findFirst({
         where: { id: String(versionOrId), projectId },
         include: { labels: true },
       });
+      if (snap) return snap;
+      return this.prisma.manuscriptSnapshot
+        .findFirst({
+          where: { id: String(versionOrId), pageId: projectId },
+          include: { labels: true },
+        })
+        .catch(() => null);
     }
 
     return null;
@@ -264,8 +304,75 @@ export class ManuscriptPageScopeRepository {
   ): Promise<ManuscriptFile | null> {
     if (!isUUID(fileId)) return null;
 
-    return this.prisma.manuscriptFile.findFirst({
+    const file = await this.prisma.manuscriptFile.findFirst({
       where: { id: fileId, projectId, deleted: false },
     });
+    if (file) return file;
+    return this.prisma.manuscriptFile
+      .findFirst({
+        where: { id: fileId, pageId: projectId, deleted: false },
+      })
+      .catch(() => null);
+  }
+
+  /**
+   * Fetches all documents, structure nodes, comment threads, and track changes
+   * for a project in parallel to power the project-wide review overview.
+   */
+  async getProjectReviewOverviewData(projectId: string) {
+    let targetProjectId = projectId;
+    if (this.prisma.manuscriptPage?.findUnique) {
+      const page = await Promise.resolve(
+        this.prisma.manuscriptPage.findUnique({
+          where: { id: projectId },
+          select: { projectId: true },
+        }),
+      ).catch(() => null);
+      if (page?.projectId) {
+        targetProjectId = page.projectId;
+      }
+    }
+
+    const [docs, nodes, allThreads, allChanges] = await Promise.all([
+      this.prisma.manuscriptDoc.findMany({
+        where: { projectId: targetProjectId, deleted: false },
+        select: { id: true, path: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.manuscriptNode.findMany({
+        where: { projectId: targetProjectId, type: 'DOC' },
+        select: {
+          id: true,
+          docId: true,
+          name: true,
+          path: true,
+          isRootDoc: true,
+          sortOrder: true,
+        },
+        orderBy: [{ isRootDoc: 'desc' }, { sortOrder: 'asc' }],
+      }),
+      this.prisma.manuscriptCommentThread.findMany({
+        where: { projectId: targetProjectId },
+        include: {
+          replies: {
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+        orderBy: [{ startLine: 'asc' }, { createdAt: 'asc' }],
+      }),
+      this.prisma.manuscriptTrackChange.findMany({
+        where: { projectId: targetProjectId },
+        orderBy: [
+          { startLine: 'asc' },
+          { startCol: 'asc' },
+          { createdAt: 'asc' },
+        ],
+      }),
+    ]);
+
+    return { docs, nodes, allThreads, allChanges };
   }
 }
+
+/** @deprecated Use ScopeRepository */
+export { ScopeRepository as ManuscriptPageScopeRepository };

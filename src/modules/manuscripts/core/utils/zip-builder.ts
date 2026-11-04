@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/core/utils/pkzip-builder.ts
+ * modules/manuscripts/core/utils/zip-builder.ts
  * Canonical, zero-dependency PKZIP 2.0 binary packing and streaming utilities
  * powered by Node.js built-in zlib (Shared Kernel of Manuscripts).
  */
@@ -40,7 +40,7 @@ export function toDosDateTime(d: Date = new Date()): {
 /**
  * Normalizes a relative archive path and strips path-traversal sequences.
  */
-export function sanitizePkZipPath(relPath: string): string {
+export function sanitizeZipPath(relPath: string): string {
   return relPath
     .replace(/\\/g, '/')
     .split('/')
@@ -48,7 +48,7 @@ export function sanitizePkZipPath(relPath: string): string {
     .join('/');
 }
 
-export interface PkZipEntry {
+export interface ZipEntry {
   path: string;
   data?: Buffer | string;
   getData?: () => Promise<Buffer | string | null>;
@@ -139,13 +139,13 @@ export function packEndOfCentralDirectory(params: {
 /**
  * Synchronously builds a compliant PKZIP 2.0 binary Buffer from in-memory entries.
  */
-export function buildPkZipBuffer(entries: PkZipEntry[]): Buffer {
+export function buildZipBuffer(entries: ZipEntry[]): Buffer {
   const localChunks: Buffer[] = [];
   const cdChunks: Buffer[] = [];
   let offset = 0;
 
   for (const entry of entries) {
-    const cleanPath = sanitizePkZipPath(entry.path);
+    const cleanPath = sanitizeZipPath(entry.path);
     if (!cleanPath) continue;
 
     const nameBuf = Buffer.from(cleanPath, 'utf8');
@@ -205,14 +205,14 @@ export function buildPkZipBuffer(entries: PkZipEntry[]): Buffer {
  * Creates a streaming PKZIP 2.0 Readable stream with backpressure support.
  * If an entry's `getData()` resolves to `null`, that entry is skipped gracefully.
  */
-export function createPkZipStream(entries: PkZipEntry[]): Readable {
+export function createZipStream(entries: ZipEntry[]): Readable {
   return Readable.from(
     (async function* generatePkZipChunks() {
       const cdChunks: Buffer[] = [];
       let offset = 0;
 
       for (const entry of entries) {
-        const cleanPath = sanitizePkZipPath(entry.path);
+        const cleanPath = sanitizeZipPath(entry.path);
         if (!cleanPath) continue;
 
         let rawData: Buffer;
@@ -289,3 +289,11 @@ export function createPkZipStream(entries: PkZipEntry[]): Readable {
     })(),
   );
 }
+
+/** @deprecated Use ZipEntry, sanitizeZipPath, buildZipBuffer, createZipStream */
+export {
+  type ZipEntry as PkZipEntry,
+  sanitizeZipPath as sanitizePkZipPath,
+  buildZipBuffer as buildPkZipBuffer,
+  createZipStream as createPkZipStream,
+};

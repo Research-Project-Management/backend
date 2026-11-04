@@ -3,6 +3,6 @@
  * Barrel export for pure domain logic in spelling.
  */
 
-export * from './academic-dictionaries';
-export * from './academic-spell.engine';
+export * from './dictionaries';
+export * from './spell.engine';
 export * from './spelling.errors';

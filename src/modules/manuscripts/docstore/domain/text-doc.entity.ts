@@ -9,6 +9,7 @@ import { WorkspaceFile } from '@/modules/manuscripts/core';
 export interface TextDocProps {
   id: string;
   projectId: string;
+  pageId?: string | null;
   path: string;
   lines: string[];
   rev: number;
@@ -27,6 +28,7 @@ export interface TextDocProps {
 export class TextDoc {
   private _id: string;
   private _projectId: string;
+  private _pageId: string | null;
   private _path: string;
   private _lines: string[];
   private _rev: number;
@@ -44,6 +46,7 @@ export class TextDoc {
   constructor(props: TextDocProps) {
     this._id = props.id;
     this._projectId = props.projectId;
+    this._pageId = props.pageId ?? props.projectId;
     this._path = props.path.replace(/\\/g, '/').replace(/^\/+/, '');
     this._lines = props.lines || [];
     this._rev = props.rev ?? 0;
@@ -64,6 +67,9 @@ export class TextDoc {
   }
   public get projectId(): string {
     return this._projectId;
+  }
+  public get pageId(): string | null {
+    return this._pageId;
   }
   public get path(): string {
     return this._path;

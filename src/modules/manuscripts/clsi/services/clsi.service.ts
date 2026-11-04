@@ -21,8 +21,16 @@ import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { RedisCacheService } from '@/core';
-import { CompileManuscriptDto, ClsiWordCountDto } from '../dto/clsi.dto';
+import { PrismaService, RedisCacheService } from '@/core';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
+import {
+  CompileManuscriptDto,
+  ClsiWordCountDto,
+  ClsiAiTransformDto,
+  ClsiAiFixErrorDto,
+  ClsiAiGenerateTableDto,
+} from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import {
   SyncPoint,
@@ -30,16 +38,28 @@ import {
   WordCountStats,
 } from '../domain/clsi.ports';
 import {
-  OverleafIncrementalWorkspace,
+  WorkspaceRepository,
   DiskUsageCleaner,
   DiskUsageOptions,
   createZipStreamFromDisk,
   ZipDiskEntry,
-} from '../repositories/incremental-workspace.repository';
-import { CompileLogAnalyzer } from '@/modules/manuscripts/diagnostics/domain';
+} from '../repositories/workspace.repository';
+import {
+  CompileLogAnalyzer,
+  SyntaxLinter,
+} from '@/modules/manuscripts/diagnostics/domain';
+import {
+  maskLatexEntities,
+  getAiSystemPrompt,
+  applyFallbackTransform,
+  fixLatexError,
+  AiActionResult,
+  AiErrorFixResult,
+} from '../domain/ai-assistant';
+import { EngineService } from '@/modules/ai/engine/engine.service';
 import { SyncTexProcessor } from '../domain/synctex.parser';
 import { TexWordCounter } from '../domain/tex-word.counter';
-import { PlannedFileSet } from '../domain/compile-fileset.planner';
+import { PlannedFileSet } from '../domain/fileset.planner';
 import {
   CompilePipeline,
   CompilePipelineResult,
@@ -48,11 +68,11 @@ import {
   LatexmkEngine,
   ClsiHealthCheck,
 } from './compile-pipeline.service';
-import { CompileFairQueue } from './compile-fair-queue.service';
+import { CompileQueueService } from './compile-queue.service';
 import { ClsiMetrics } from '../domain/clsi.metrics';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { RemoteClsiClientAdapter } from './remote-clsi.client';
-import { ClsiWorkspacePlannerService } from './workspace-planner.service';
+import { WorkspacePlannerService } from './workspace-planner.service';
 import {
   parseSandboxConfig,
   buildSandboxProfileFromConfig,
@@ -63,12 +83,13 @@ export type ClsiCompileResult = CompilePipelineResult;
 @Injectable()
 export class ClsiService implements OnModuleDestroy {
   private readonly logger = new Logger(ClsiService.name);
-  private readonly workspace: OverleafIncrementalWorkspace;
+  private readonly workspace: WorkspaceRepository;
   private readonly pipeline: CompilePipeline;
   private readonly logParser: CompileLogAnalyzer;
+  private readonly syntaxLinter: SyntaxLinter = new SyntaxLinter();
   private readonly synctexParser: SyncTexProcessor;
   private readonly wordCounter: TexWordCounter;
-  private readonly fairQueue: CompileFairQueue;
+  private readonly fairQueue: CompileQueueService;
   private readonly synctexDiskCache = new Map<
     string,
     { mtimeMs: number; size: number; content: string }
@@ -78,7 +99,7 @@ export class ClsiService implements OnModuleDestroy {
   private readonly healthCheck: ClsiHealthCheck;
   private readonly metrics: ClsiMetrics = ClsiMetrics.getInstance();
   private readonly remoteClient: RemoteClsiClientAdapter;
-  private readonly workspacePlanner: ClsiWorkspacePlannerService;
+  private readonly workspacePlanner: WorkspacePlannerService;
 
   constructor(
     private readonly configService: ConfigService,
@@ -88,8 +109,8 @@ export class ClsiService implements OnModuleDestroy {
     @InjectQueue(MANUSCRIPT_CLSI_QUEUE)
     private readonly compileQueue?: Queue,
     @Optional() remoteClient?: RemoteClsiClientAdapter,
-    @Optional() workspacePlanner?: ClsiWorkspacePlannerService,
-    @Optional() workspace?: OverleafIncrementalWorkspace,
+    @Optional() workspacePlanner?: WorkspacePlannerService,
+    @Optional() workspace?: WorkspaceRepository,
     @Optional() latexmkEngine?: LatexmkEngine,
     @Optional() logParser?: CompileLogAnalyzer,
     @Optional() synctexProcessor?: SyncTexProcessor,
@@ -97,9 +118,20 @@ export class ClsiService implements OnModuleDestroy {
     @Optional() diskUsageCleaner?: DiskUsageCleaner,
     @Optional() healthCheck?: ClsiHealthCheck,
     @Optional() pipeline?: CompilePipeline,
-    @Optional() fairQueue?: CompileFairQueue,
+    @Optional() fairQueue?: CompileQueueService,
+    @Optional()
+    private readonly aiEngine?: EngineService & {
+      generate?: (params: {
+        prompt: string;
+        systemInstruction?: string;
+        temperature?: number;
+      }) => Promise<{ text?: string } | null | undefined>;
+    },
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly docstoreService?: DocstoreService,
+    @Optional() private readonly filestoreService?: FilestoreService,
   ) {
-    this.fairQueue = fairQueue ?? new CompileFairQueue();
+    this.fairQueue = fairQueue ?? new CompileQueueService();
     const rawMode = this.configService
       .get<string>('CLSI_SANDBOX_MODE')
       ?.toLowerCase();
@@ -144,17 +176,17 @@ export class ClsiService implements OnModuleDestroy {
       this.configService.get<string>('LATEXMK_BIN') || 'latexmk';
 
     // Workspace & Real Sandbox/Engine seams
-    this.workspace = workspace ?? new OverleafIncrementalWorkspace(scratchDir);
+    this.workspace = workspace ?? new WorkspaceRepository(scratchDir);
 
     this.remoteClient =
       remoteClient ??
       new RemoteClsiClientAdapter(this.configService, this.cache);
     this.workspacePlanner =
       workspacePlanner ??
-      new ClsiWorkspacePlannerService(
-        undefined,
-        undefined,
-        undefined,
+      new WorkspacePlannerService(
+        this.prisma,
+        this.docstoreService,
+        this.filestoreService,
         this.realtimeService,
         this.workspace,
       );
@@ -796,11 +828,88 @@ export class ClsiService implements OnModuleDestroy {
     return { success: true, result: point };
   }
 
-  public getWordCount(dto: ClsiWordCountDto): {
+  public async getWordCount(
+    dto: ClsiWordCountDto,
+    authorizedProjectId?: string,
+  ): Promise<{
     success: boolean;
     stats?: WordCountStats;
     error?: string;
-  } {
+  }> {
+    const explicitDtoProjectId = dto.projectId;
+    if (
+      authorizedProjectId &&
+      explicitDtoProjectId &&
+      explicitDtoProjectId !== authorizedProjectId
+    ) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'PROJECT_CONTEXT_MISMATCH',
+        message: 'Authorized project context does not match word count payload',
+      });
+    }
+    const projectId = authorizedProjectId || explicitDtoProjectId;
+
+    // Multi-file project word count if files map is provided or projectId is provided without explicit single-file source
+    if (
+      (dto.files && Object.keys(dto.files).length > 0) ||
+      (projectId && projectId !== 'default' && dto.source === undefined)
+    ) {
+      let stringFiles: Record<string, string> = {};
+      let rootFile = dto.filename || 'main.tex';
+
+      if (projectId && projectId !== 'default') {
+        try {
+          const plan = await this.workspacePlanner.planFiles(projectId, {
+            projectId,
+            files: dto.files,
+          });
+          rootFile = plan.mainFile || rootFile;
+          const hydrated = await this.workspacePlanner.hydrateFiles(
+            projectId,
+            plan,
+          );
+          for (const [filePath, val] of Object.entries(hydrated)) {
+            if (typeof val === 'string') {
+              stringFiles[filePath] = val;
+            }
+          }
+        } catch {
+          if (dto.files) {
+            stringFiles = { ...dto.files };
+          }
+        }
+      } else if (dto.files) {
+        stringFiles = { ...dto.files };
+      }
+
+      const stats = this.wordCounter.countProject(stringFiles, {
+        rootFile,
+        includeBib: dto.includeBib,
+      });
+
+      // If single source was also passed along with files, compute single-file stats for `stats` while attaching `perFileStats`
+      if (dto.source !== undefined) {
+        const singleStats = this.wordCounter.count(
+          dto.source,
+          dto.filename || rootFile,
+          { includeBib: dto.includeBib },
+        );
+        return {
+          success: true,
+          stats: {
+            ...singleStats,
+            perFileStats: stats.perFileStats,
+          },
+        };
+      }
+
+      return {
+        success: true,
+        stats,
+      };
+    }
+
     if (!dto.source || !dto.source.trim()) {
       return {
         success: true,
@@ -808,6 +917,7 @@ export class ClsiService implements OnModuleDestroy {
           wordsInText: 0,
           wordsInHeaders: 0,
           wordsInCaptions: 0,
+          wordsInBibliography: 0,
           headers: 0,
           floats: 0,
           mathInlines: 0,
@@ -815,12 +925,48 @@ export class ClsiService implements OnModuleDestroy {
           totalWords: 0,
           charactersWithSpaces: 0,
           charactersNoSpaces: 0,
+          cjkCharacters: 0,
+          readingTimeMinutes: 0,
+          sections: [],
           rawOutput: 'Empty document (0 words)',
         },
       };
     }
 
-    const stats = this.wordCounter.count(dto.source);
+    const stats = this.wordCounter.count(
+      dto.source,
+      dto.filename || 'document.tex',
+      { includeBib: dto.includeBib },
+    );
+
+    if (projectId && projectId !== 'default') {
+      try {
+        const plan = await this.workspacePlanner.planFiles(projectId, {
+          projectId,
+          files: dto.files,
+        });
+        const hydrated = await this.workspacePlanner.hydrateFiles(
+          projectId,
+          plan,
+        );
+        const stringFiles: Record<string, string> = {};
+        for (const [filePath, val] of Object.entries(hydrated)) {
+          if (typeof val === 'string') {
+            stringFiles[filePath] = val;
+          }
+        }
+        if (Object.keys(stringFiles).length > 0) {
+          const projectStats = this.wordCounter.countProject(stringFiles, {
+            rootFile: plan.mainFile,
+            includeBib: dto.includeBib,
+          });
+          stats.perFileStats = projectStats.perFileStats;
+        }
+      } catch {
+        // Ignore project hydration failure when counting single source
+      }
+    }
+
     return {
       success: true,
       stats,
@@ -966,5 +1112,214 @@ export class ClsiService implements OnModuleDestroy {
     );
     res.header('Content-Type', 'application/zip');
     return res.send(zipStream);
+  }
+
+  /**
+   * Server-side LaTeX AI academic writing transformation:
+   * Masks LaTeX math, citations, and references, applies academic strategy via EngineService
+   * (with heuristic fallback), and unmasks all LaTeX entities verbatim.
+   */
+  public async transformAcademicText(
+    dto: ClsiAiTransformDto,
+  ): Promise<AiActionResult> {
+    const { action, selectedText, customPrompt } = dto;
+    const trimmed = (selectedText || '').trim();
+
+    if (!trimmed) {
+      return {
+        success: false,
+        originalText: selectedText,
+        suggestedText: selectedText,
+        explanation: 'No text selected.',
+        action,
+        diffSummary: {
+          charsOriginal: 0,
+          charsSuggested: 0,
+          wordsOriginal: 0,
+          wordsSuggested: 0,
+        },
+      };
+    }
+
+    const { maskedText, unmask } = maskLatexEntities(trimmed);
+    let suggestedResult = '';
+    let explanation = '';
+
+    if (this.aiEngine && typeof this.aiEngine.generate === 'function') {
+      try {
+        const systemPrompt = getAiSystemPrompt(action, customPrompt);
+        const promptText = `Text to edit:\n"""\n${maskedText}\n"""`;
+        const aiRes = await this.aiEngine.generate({
+          prompt: promptText,
+          systemInstruction: systemPrompt,
+          temperature: 0.3,
+        });
+        const rawAiText = (aiRes?.text || '').trim();
+        if (rawAiText.length > 0) {
+          suggestedResult = unmask(
+            rawAiText.replace(/^"""\s*|\s*"""$/g, ''),
+          );
+          explanation = `Applied ${action.replace('-', ' ')} via AI Copilot.`;
+        }
+      } catch {
+        // Fallback to server-side heuristic transformation
+      }
+    }
+
+    if (!suggestedResult) {
+      const fallbackMasked = applyFallbackTransform(maskedText, action);
+      suggestedResult = unmask(fallbackMasked);
+      explanation = `Enhanced ${action.replace('-', ' ')} using Academic Heuristic Rules.`;
+    }
+
+    const wordsOriginal = trimmed.split(/\s+/).filter(Boolean).length;
+    const wordsSuggested = suggestedResult.split(/\s+/).filter(Boolean).length;
+
+    return {
+      success: true,
+      originalText: selectedText,
+      suggestedText: suggestedResult,
+      explanation,
+      action,
+      diffSummary: {
+        charsOriginal: trimmed.length,
+        charsSuggested: suggestedResult.length,
+        wordsOriginal,
+        wordsSuggested,
+      },
+    };
+  }
+
+  /**
+   * Server-side LaTeX compiler error remediation:
+   * Queries EngineService for structured JSON fix, falls back to FastSyntaxLinter.autoFix
+   * and expert heuristic rules.
+   */
+  public async fixLatexError(
+    dto: ClsiAiFixErrorDto,
+  ): Promise<AiErrorFixResult> {
+    if (this.aiEngine && typeof this.aiEngine.generate === 'function') {
+      const prompt = [
+        'You are an expert LaTeX debugging assistant (Overleaf Error Assist).',
+        'Analyze the following LaTeX compiler error and suggest an immediate, surgical fix.',
+        `File: ${dto.errorFile || 'main.tex'}`,
+        `Line: ${dto.errorLine || 'unknown'}`,
+        `Error Message: ${dto.errorMessage}`,
+        dto.detail ? `Detail: ${dto.detail}` : '',
+        dto.surroundingCode
+          ? `\nSurrounding Code:\n\`\`\`latex\n${dto.surroundingCode}\n\`\`\``
+          : '',
+        '',
+        'Reply ONLY with a valid JSON object in this exact schema (no markdown fences, pure JSON):',
+        '{',
+        '  "explanation": "Brief 1-2 sentence description of what caused the error and how to fix it",',
+        '  "originalSnippet": "Exact code line(s) that should be replaced",',
+        '  "fixedSnippet": "The corrected code line(s)",',
+        `  "startLine": ${dto.errorLine || 1},`,
+        `  "endLine": ${dto.errorLine || 1},`,
+        '  "confidence": "high"',
+        '}',
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      try {
+        const aiRes = await this.aiEngine.generate({
+          prompt,
+          temperature: 0.2,
+        });
+        const jsonText = (aiRes?.text || '')
+          .replace(/^```json\s*/i, '')
+          .replace(/^```\s*/, '')
+          .replace(/\s*```$/, '')
+          .trim();
+
+        if (jsonText) {
+          const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+          if (
+            parsed &&
+            typeof parsed === 'object' &&
+            parsed.explanation &&
+            parsed.fixedSnippet !== undefined
+          ) {
+            const explanation = String(parsed.explanation)
+              .trim()
+              .replace(/^Error on line \d+:\s*/i, '')
+              .replace(/^LaTeX Error:\s*/i, '')
+              .trim();
+
+            return {
+              explanation: explanation || String(parsed.explanation),
+              originalSnippet: String(parsed.originalSnippet || ''),
+              fixedSnippet: String(parsed.fixedSnippet || ''),
+              startLine: Number(parsed.startLine) || dto.errorLine || 1,
+              endLine: Number(parsed.endLine) || dto.errorLine || 1,
+              confidence:
+                parsed.confidence === 'high' ||
+                parsed.confidence === 'medium' ||
+                parsed.confidence === 'low'
+                  ? parsed.confidence
+                  : 'high',
+            };
+          }
+        }
+      } catch {
+        // Fall through to autoFix & heuristic
+      }
+    }
+
+    if (dto.surroundingCode) {
+      const autoFixRes = this.syntaxLinter.autoFix(dto.surroundingCode);
+      if (
+        autoFixRes.isFixed &&
+        autoFixRes.fixedSource !== dto.surroundingCode
+      ) {
+        return {
+          explanation:
+            autoFixRes.appliedFixes.length > 0
+              ? autoFixRes.appliedFixes.map((f) => f.description).join('; ')
+              : 'Applied automated LaTeX syntax repair via Manuscript Diagnostics.',
+          originalSnippet: dto.surroundingCode,
+          fixedSnippet: autoFixRes.fixedSource,
+          startLine: dto.errorLine || 1,
+          endLine: dto.errorLine || 1,
+          confidence: 'medium',
+        };
+      }
+    }
+
+    return fixLatexError(dto);
+  }
+
+  /**
+   * Server-side LaTeX table generator from a natural language prompt.
+   */
+  public async generateLatexTable(
+    dto: ClsiAiGenerateTableDto,
+  ): Promise<{ table: string }> {
+    const systemPrompt = `You are an expert academic LaTeX assistant. Generate a clean LaTeX tabular or TSV table according to the user request.
+Output ONLY the clean LaTeX tabular code starting with \\begin{tabular} and ending with \\end{tabular} or TSV data with tabs and newlines. Do not wrap in markdown quotes or add conversational preamble.`;
+
+    if (this.aiEngine && typeof this.aiEngine.generate === 'function') {
+      try {
+        const aiRes = await this.aiEngine.generate({
+          prompt: dto.prompt,
+          systemInstruction: systemPrompt,
+          temperature: 0.3,
+        });
+        const table = (aiRes?.text || '')
+          .replace(/```latex\n?|```tsv\n?|```\n?/g, '')
+          .trim();
+        if (table) {
+          return { table };
+        }
+      } catch {
+        // Fallback below
+      }
+    }
+
+    return {
+      table: `\\begin{tabular}{lll}\n\\hline\nColumn 1 & Column 2 & Column 3 \\\\\n\\hline\nValue 1 & Value 2 & Value 3 \\\\\n\\hline\n\\end{tabular}`,
+    };
   }
 }

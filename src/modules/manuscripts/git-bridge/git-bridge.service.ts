@@ -294,35 +294,48 @@ export class GitBridgeService {
         );
     }
 
-    const files: Array<{ path: string; content: Buffer }> = [];
-    for (const node of nodes) {
-      if (node.type === 'FOLDER' || node.path === '/') continue;
-      const repoPath = toRepoPath(node.path);
-      if (node.docId) {
-        try {
-          const doc = await this.docstore.getDoc(projectId, node.docId);
-          if (doc.deleted) continue;
-          files.push({
-            path: repoPath,
-            content: Buffer.from((doc.lines || []).join('\n'), 'utf8'),
-          });
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`Skipping doc ${node.path}: ${msg}`);
+    const candidateNodes = nodes.filter(
+      (node) => node.type !== 'FOLDER' && node.path !== '/',
+    );
+    const materializedEntries = await Promise.all(
+      candidateNodes.map(async (node) => {
+        const repoPath = toRepoPath(node.path);
+        if (node.docId) {
+          try {
+            const doc = await this.docstore.getDoc(projectId, node.docId);
+            if (doc.deleted) return null;
+            return {
+              path: repoPath,
+              content: Buffer.from((doc.lines || []).join('\n'), 'utf8'),
+            };
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`Skipping doc ${node.path}: ${msg}`);
+            return null;
+          }
+        } else if (node.fileId) {
+          try {
+            const { stream } = await this.filestore.openReadStream(
+              projectId,
+              node.fileId,
+            );
+            return {
+              path: repoPath,
+              content: await streamToBuffer(stream),
+            };
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`Skipping file ${node.path}: ${msg}`);
+            return null;
+          }
         }
-      } else if (node.fileId) {
-        try {
-          const { stream } = await this.filestore.openReadStream(
-            projectId,
-            node.fileId,
-          );
-          files.push({ path: repoPath, content: await streamToBuffer(stream) });
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`Skipping file ${node.path}: ${msg}`);
-        }
-      }
-    }
+        return null;
+      }),
+    );
+
+    const files = materializedEntries.filter(
+      (f): f is { path: string; content: Buffer } => f !== null,
+    );
     return this.gitCli.commitSnapshot(
       projectId,
       files,
@@ -406,16 +419,16 @@ export class GitBridgeService {
       }
     }
 
-    // 3. Capture pre-push Memento of affected nodes/docs and execute via SagaRunner
-    const mementos = new Map<string, NodeEntryMemento>();
-    for (const item of stagedChanges) {
-      if (mementos.has(item.projectPath)) continue;
-      const memento = await this.captureEntryMemento(
-        projectId,
-        item.projectPath,
-      );
-      mementos.set(item.projectPath, memento);
-    }
+    // 3. Capture pre-push Memento of affected nodes/docs in parallel and execute via SagaRunner
+    const uniqueProjectPaths = Array.from(
+      new Set(stagedChanges.map((item) => item.projectPath)),
+    );
+    const capturedMementos = await Promise.all(
+      uniqueProjectPaths.map((p) => this.captureEntryMemento(projectId, p)),
+    );
+    const mementos = new Map<string, NodeEntryMemento>(
+      uniqueProjectPaths.map((p, idx) => [p, capturedMementos[idx]]),
+    );
 
     const result: PushApplyResult = { created: [], updated: [], deleted: [] };
     const saga = new SagaRunner({

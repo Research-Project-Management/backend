@@ -274,6 +274,23 @@ export class ManuscriptTemplateEntity {
   }
 
   toPlainObject() {
+    const fileEntries = Object.entries(this._files);
+    const normalizedMain = this._mainFile.replace(/^\/+/, '');
+    const mainTex =
+      this._files[this._mainFile] ??
+      this._files[normalizedMain] ??
+      this._files[`/${normalizedMain}`] ??
+      fileEntries.find(([k]) => k.toLowerCase().endsWith('.tex'))?.[1] ??
+      fileEntries[0]?.[1] ??
+      '';
+    const bibTex = fileEntries.find(([k]) =>
+      k.toLowerCase().endsWith('.bib'),
+    )?.[1];
+    const docClassMatch = mainTex.match(
+      /\\documentclass(?:\[[^\]]*\])?\{([^}]+)\}/,
+    );
+    const badge = docClassMatch?.[1] || this._tags[0] || this._compiler;
+
     return {
       id: this._id,
       versionId: this._versionId,
@@ -288,6 +305,10 @@ export class ManuscriptTemplateEntity {
       fileCount: Object.keys(this._files).length,
       thumbnailUrl: this._thumbnailUrl,
       author: this._author,
+      publisher: this._author,
+      badge,
+      mainTex,
+      bibTex,
       tags: this._tags,
       isOfficial: this._isOfficial,
       downloadCount: this._downloadCount,

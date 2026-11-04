@@ -12,8 +12,11 @@ export * from './dto/export-import.dto';
 export * from './repositories/aggregator.repository';
 
 // Services & Adapters
-export { PkzipEngineAdapter } from './services/pkzip-engine.adapter';
-export { DocumentTranspilerAdapter } from './services/document-transpiler.adapter';
+export { ZipAdapter, PkzipEngineAdapter } from './services/zip.adapter';
+export {
+  TranspilerAdapter,
+  DocumentTranspilerAdapter,
+} from './services/transpiler.adapter';
 
 // Domain (Pure in-process computation, validation, & ports)
 export {
@@ -42,7 +45,9 @@ export {
   buildMinimalZip,
   convertLatexToDocxBuffer,
   resolveIncludedLatexContent,
+  transpileLatexDocument,
   transpileLatexDocumentForExport,
+  LatexTranspiler,
   LatexExportTranspiler,
 } from './domain';
 export type {

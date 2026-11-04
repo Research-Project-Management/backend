@@ -11,6 +11,7 @@ import {
   Optional,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   InternalServerErrorException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -24,9 +25,9 @@ import {
 import { NodePathVo } from '@/modules/manuscripts/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/manuscripts/structure/structure.repository';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { ManuscriptPageScopeRepository } from '@/modules/manuscripts/docstore/repositories/scope.repository';
+import { ScopeRepository } from '@/modules/manuscripts/docstore/repositories/scope.repository';
 import {
-  ManuscriptProjectBootstrapService,
+  BootstrapService,
   CreateProjectPageParams,
 } from '@/modules/manuscripts/docstore/services/bootstrap.service';
 import {
@@ -65,28 +66,36 @@ export interface CreatePageFileParams {
   content?: string;
 }
 
+export interface ImportFromProjectParams {
+  sourceProjectId?: string;
+  sourceFileId: string;
+  targetName?: string;
+  targetPath?: string;
+  parentPageId?: string;
+}
+
 export type { CreateProjectPageParams, PageDocRanges };
 
 @Injectable()
-export class ManuscriptPageService {
-  private readonly logger = new Logger(ManuscriptPageService.name);
+export class PageService {
+  private readonly logger = new Logger(PageService.name);
   private readonly liveCollab: LiveCollaborationPort;
   private readonly domainEventBus: ManuscriptDomainEventBus;
-  private readonly pageScopeRepo: ManuscriptPageScopeRepository;
+  private readonly pageScopeRepo: ScopeRepository;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly docstoreService: DocstoreService,
-    private readonly projectBootstrapService: ManuscriptProjectBootstrapService,
+    private readonly projectBootstrapService: BootstrapService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
-    @Optional() pageScopeRepo?: ManuscriptPageScopeRepository,
+    @Optional() pageScopeRepo?: ScopeRepository,
     @Optional() domainEventBus?: ManuscriptDomainEventBus,
   ) {
     this.pageScopeRepo =
-      pageScopeRepo || new ManuscriptPageScopeRepository(prisma);
+      pageScopeRepo || new ScopeRepository(prisma);
     this.liveCollab =
       liveCollabOrLegacyRef &&
       typeof (liveCollabOrLegacyRef as LiveCollaborationPort)
@@ -613,6 +622,18 @@ export class ManuscriptPageService {
                 },
               })
               .catch(() => null),
+            Promise.resolve(
+              this.prisma.manuscriptPage?.updateMany?.({
+                where: {
+                  projectId: doc.projectId,
+                  OR: [{ id: pageId }, { rootDocId: doc.id }, { rootDocId: pageId }],
+                },
+                data: {
+                  deleted: true,
+                  deletedAt: new Date(),
+                },
+              }),
+            ).catch(() => null),
           ]);
 
           if (deletedRootDoc) {
@@ -865,4 +886,209 @@ export class ManuscriptPageService {
     }
     return { labels: [] };
   }
+
+  /**
+   * 13. IMPORT FILE / DOC FROM ANOTHER PROJECT
+   */
+  public async importFileFromProject(
+    targetProjectOrPageId: string,
+    body: ImportFromProjectParams,
+    authorizedProjectId?: string | { id: string } | null,
+    userId?: string | null,
+  ) {
+    const sourceFileId = (body?.sourceFileId || '').trim();
+    if (!sourceFileId) {
+      throw new BadRequestException('sourceFileId is required');
+    }
+
+    const targetProjectId =
+      this.resolveActiveProjectId(authorizedProjectId) ||
+      (await resolveProjectIdByEntityId(this.prisma, targetProjectOrPageId));
+
+    if (!targetProjectId) {
+      throw new NotFoundException(
+        `Target project not found for ${targetProjectOrPageId}`,
+      );
+    }
+
+    // 1. Locate source node, doc, or binary file
+    let sourceDoc = isUuid(sourceFileId)
+      ? await this.prisma.manuscriptDoc.findFirst({
+          where: { id: sourceFileId, deleted: false },
+          include: { node: true },
+        })
+      : null;
+
+    let sourceBinaryFile =
+      !sourceDoc && isUuid(sourceFileId)
+        ? await this.prisma.manuscriptFile.findFirst({
+            where: { id: sourceFileId, deleted: false },
+          })
+        : null;
+
+    if (!sourceDoc && !sourceBinaryFile && isUuid(sourceFileId)) {
+      const sourceNode = await this.prisma.manuscriptNode.findUnique({
+        where: { id: sourceFileId },
+        include: { doc: true },
+      });
+      if (sourceNode?.doc && !sourceNode.doc.deleted) {
+        sourceDoc = { ...sourceNode.doc, node: sourceNode };
+      } else if (sourceNode?.fileId) {
+        sourceBinaryFile = await this.prisma.manuscriptFile.findFirst({
+          where: { id: sourceNode.fileId, deleted: false },
+        });
+      }
+    }
+
+    if (!sourceDoc && !sourceBinaryFile) {
+      throw new NotFoundException(`Source file ${sourceFileId} not found`);
+    }
+
+    const resolvedSourceProjectId =
+      sourceDoc?.projectId || sourceBinaryFile?.projectId;
+    if (
+      body.sourceProjectId &&
+      isUuid(body.sourceProjectId) &&
+      resolvedSourceProjectId &&
+      body.sourceProjectId !== resolvedSourceProjectId
+    ) {
+      const altSourceProjectId = await resolveProjectIdByEntityId(
+        this.prisma,
+        body.sourceProjectId,
+      );
+      if (altSourceProjectId && altSourceProjectId !== resolvedSourceProjectId) {
+        throw new ForbiddenException(
+          'Source file does not belong to specified sourceProjectId',
+        );
+      }
+    }
+
+    // Verify user has access to source project if userId is provided and projects differ
+    if (
+      userId &&
+      resolvedSourceProjectId &&
+      resolvedSourceProjectId !== targetProjectId
+    ) {
+      const sourceProject = await this.prisma.project
+        .findFirst({
+          where: {
+            id: resolvedSourceProjectId,
+            OR: [
+              { createdById: userId },
+              { members: { some: { userId } } },
+            ],
+          },
+          select: { id: true },
+        })
+        .catch(() => ({ id: resolvedSourceProjectId }));
+      if (!sourceProject) {
+        throw new ForbiddenException(
+          'Access denied to source project for file import',
+        );
+      }
+    }
+
+    if (sourceDoc) {
+      const live = this.getLiveCollaboration();
+      if (live && sourceDoc.projectId) {
+        await live.flushDocs(sourceDoc.projectId, [sourceDoc.id]).catch(() => []);
+      }
+      const lines = await this.getHydratedDocLines(sourceDoc);
+      const content = lines.join('\n');
+      const rawTargetName =
+        body.targetPath ||
+        body.targetName ||
+        sourceDoc.node?.path ||
+        sourceDoc.path ||
+        sourceDoc.node?.name ||
+        'imported.tex';
+
+      return await this.createPageFile(
+        body.parentPageId || targetProjectId,
+        {
+          title: rawTargetName.replace(/^\/+/, ''),
+          name: rawTargetName.replace(/^\/+/, ''),
+          content,
+        },
+        targetProjectId,
+      );
+    }
+
+    // Binary file copy via CAS reference in target project
+    const bin = sourceBinaryFile!;
+    const rawTargetName =
+      body.targetPath || body.targetName || bin.name || 'imported.bin';
+    const parsed = NodePathVo.parse(rawTargetName, 'imported.bin');
+
+    const createdRecord = await this.prisma.$transaction(async (tx) => {
+      const parentId = await ensurePrismaFolderChain(
+        tx,
+        targetProjectId,
+        parsed.folderChain,
+      );
+
+      const newFile = await tx.manuscriptFile.create({
+        data: {
+          projectId: targetProjectId,
+          name: parsed.relativePath || parsed.leafName,
+          mimeType: bin.mimeType,
+          sizeBytes: bin.sizeBytes,
+          hash: bin.hash,
+          storageKey: bin.storageKey,
+          bucketName: bin.bucketName,
+          rev: 0,
+          deleted: false,
+        },
+      });
+
+      const node = await tx.manuscriptNode.create({
+        data: {
+          projectId: targetProjectId,
+          parentId,
+          name: parsed.leafName,
+          path: parsed.normalizedPath,
+          depth: parsed.depth,
+          type: 'FILE',
+          fileId: newFile.id,
+          sizeBytes: bin.sizeBytes,
+          hash: bin.hash,
+        },
+      });
+
+      return { newFile, node };
+    });
+
+    this.eventEmitter?.emit('manuscripts.file-tree.change', {
+      projectId: targetProjectId,
+      change: {
+        action: 'create',
+        node: {
+          id: createdRecord.node.id,
+          fileId: createdRecord.newFile.id,
+          name: parsed.leafName,
+          path: parsed.normalizedPath,
+          type: 'FILE',
+        },
+      },
+    });
+
+    return {
+      file: {
+        id: createdRecord.newFile.id,
+        nodeId: createdRecord.node.id,
+        fileId: createdRecord.newFile.id,
+        title: parsed.relativePath || parsed.leafName,
+        name: parsed.leafName,
+        path: parsed.normalizedPath,
+        type: 'FILE',
+        sizeBytes: bin.sizeBytes,
+        mimeType: bin.mimeType,
+        createdAt: createdRecord.newFile.createdAt.toISOString(),
+        updatedAt: createdRecord.newFile.updatedAt.toISOString(),
+      },
+    };
+  }
 }
+
+/** @deprecated Use PageService */
+export { PageService as ManuscriptPageService };

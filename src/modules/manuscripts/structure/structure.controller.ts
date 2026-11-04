@@ -10,6 +10,7 @@ import {
   Patch,
   Delete,
   Param,
+  Query,
   Body,
   HttpStatus,
   HttpCode,
@@ -107,14 +108,63 @@ export class StructureController {
     );
   }
 
+  @Get('symbols')
+  @ApiOperation({
+    summary:
+      'Get unified project symbol catalog (labels, citations, commands, environments, packages, outline, files)',
+  })
+  async getProjectSymbols(
+    @Param('projectId') projectId: string,
+    @ResolvedProject() resolvedProject?: string | { id?: string },
+  ) {
+    return this.execute(projectId, resolvedProject, (targetId) =>
+      this.structureService.getProjectSymbols(targetId),
+    );
+  }
+
+  @Get('outline')
+  @ApiOperation({
+    summary:
+      'Get structured LaTeX document outline (sections, figures, tables, slides, appendices)',
+  })
+  async getProjectOutline(
+    @Param('projectId') projectId: string,
+    @Query('filePath') filePath?: string,
+    @Query('docId') docId?: string,
+    @ResolvedProject() resolvedProject?: string | { id?: string },
+  ) {
+    return this.execute(projectId, resolvedProject, (targetId) =>
+      this.structureService.getProjectOutline(targetId, { filePath, docId }),
+    );
+  }
+
+  @Post('outline')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Extract structured LaTeX document outline from live buffer or project file',
+  })
+  async extractOutline(
+    @Param('projectId') projectId: string,
+    @Body() body: { content?: string; filePath?: string; docId?: string },
+    @ResolvedProject() resolvedProject?: string | { id?: string },
+  ) {
+    return this.execute(projectId, resolvedProject, (targetId) =>
+      this.structureService.getProjectOutline(targetId, body),
+    );
+  }
+
   @Get('nodes')
   @ApiOperation({ summary: 'Get flat list of all nodes in project' })
   async getAllNodes(
     @Param('projectId') projectId: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
+    @Query('parentId') parentId?: string,
   ) {
     return this.execute(projectId, resolvedProject, async (targetId) => {
-      const nodes = await this.structureService.getAllNodes(targetId);
+      const nodes = parentId
+        ? await this.structureService.getAllNodes(targetId, parentId)
+        : await this.structureService.getAllNodes(targetId);
       return nodes.map((n) => n.toJSON());
     });
   }

@@ -48,6 +48,11 @@ export class CreateDocDto {
   @IsOptional()
   ranges?: DocRanges;
 
+  @ApiPropertyOptional({ description: 'Owning ManuscriptPage UUID' })
+  @IsOptional()
+  @IsString()
+  pageId?: string | null;
+
   tx?: Prisma.TransactionClient;
 }
 

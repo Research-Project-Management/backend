@@ -7,8 +7,10 @@
 import {
   DiagnosticItem,
   DiagnosticSeverityVo,
+  DiagnosticWarningSubtype,
   ErrorExplanationVo,
   ErrorExplanationProps,
+  QuickFixVo,
 } from './diagnostic-item.entity';
 import { DiagnosticReport } from './diagnostic-report.entity';
 import { LogLineVo } from './log-line';
@@ -20,6 +22,140 @@ import {
   CompilerDiagnostic,
   ILogParser,
 } from '@/modules/manuscripts/clsi/domain/clsi.ports';
+
+const PKG_LOOKUP: Record<string, string> = {
+  includegraphics: 'graphicx',
+  graphicspath: 'graphicx',
+  rotatebox: 'graphicx',
+  scalebox: 'graphicx',
+  resizebox: 'graphicx',
+  textcolor: 'xcolor',
+  colorbox: 'xcolor',
+  definecolor: 'xcolor',
+  rowcolor: 'xcolor',
+  cellcolor: 'xcolor',
+  href: 'hyperref',
+  url: 'hyperref',
+  hyperref: 'hyperref',
+  toprule: 'booktabs',
+  midrule: 'booktabs',
+  bottomrule: 'booktabs',
+  cmidrule: 'booktabs',
+  multirow: 'multirow',
+  SI: 'siunitx',
+  si: 'siunitx',
+  num: 'siunitx',
+  ang: 'siunitx',
+  qty: 'siunitx',
+  unit: 'siunitx',
+  mathbb: 'amssymb',
+  mathcal: 'amssymb',
+  mathfrak: 'amssymb',
+  checkmark: 'amssymb',
+  leqslant: 'amssymb',
+  geqslant: 'amssymb',
+  text: 'amsmath',
+  dfrac: 'amsmath',
+  tfrac: 'amsmath',
+  binom: 'amsmath',
+  DeclareMathOperator: 'amsmath',
+  numberwithin: 'amsmath',
+  boldsymbol: 'amsmath',
+  bm: 'bm',
+  cancel: 'cancel',
+  bcancel: 'cancel',
+  xcancel: 'cancel',
+  sout: 'ulem',
+  uwave: 'ulem',
+  ul: 'soul',
+  hl: 'soul',
+  st: 'soul',
+  todo: 'todonotes',
+  lstinputlisting: 'listings',
+  lstset: 'listings',
+  mintinline: 'minted',
+  inputminted: 'minted',
+  subfloat: 'subfig',
+  subfigure: 'subcaption',
+  subtable: 'subcaption',
+  FloatBarrier: 'placeins',
+  lipsum: 'lipsum',
+  blindtext: 'blindtext',
+  fontawesome: 'fontawesome5',
+  faIcon: 'fontawesome5',
+  tikz: 'tikz',
+  usetikzlibrary: 'tikz',
+  pgfplotsset: 'pgfplots',
+  citep: 'natbib',
+  citet: 'natbib',
+  citeauthor: 'natbib',
+  citeyear: 'natbib',
+  parencite: 'biblatex',
+  textcite: 'biblatex',
+  footcite: 'biblatex',
+  addbibresource: 'biblatex',
+  printbibliography: 'biblatex',
+  enquote: 'csquotes',
+  cleveref: 'cleveref',
+  cref: 'cleveref',
+  Cref: 'cleveref',
+  SetAlgoLined: 'algorithm2e',
+  KwResult: 'algorithm2e',
+  KwData: 'algorithm2e',
+  State: 'algpseudocode',
+  Ensure: 'algpseudocode',
+  Require: 'algpseudocode',
+  newacronym: 'glossaries',
+  newglossaryentry: 'glossaries',
+  gls: 'glossaries',
+};
+
+const ENV_PKG_LOOKUP: Record<string, string> = {
+  align: 'amsmath',
+  'align*': 'amsmath',
+  gather: 'amsmath',
+  'gather*': 'amsmath',
+  multline: 'amsmath',
+  'multline*': 'amsmath',
+  flalign: 'amsmath',
+  'flalign*': 'amsmath',
+  alignat: 'amsmath',
+  'alignat*': 'amsmath',
+  split: 'amsmath',
+  cases: 'amsmath',
+  matrix: 'amsmath',
+  pmatrix: 'amsmath',
+  bmatrix: 'amsmath',
+  Bmatrix: 'amsmath',
+  vmatrix: 'amsmath',
+  Vmatrix: 'amsmath',
+  smallmatrix: 'amsmath',
+  subequations: 'amsmath',
+  proof: 'amsthm',
+  lstlisting: 'listings',
+  minted: 'minted',
+  tikzpicture: 'tikz',
+  axis: 'pgfplots',
+  semilogyaxis: 'pgfplots',
+  loglogaxis: 'pgfplots',
+  subfigure: 'subcaption',
+  subtable: 'subcaption',
+  tabularx: 'tabularx',
+  longtable: 'longtable',
+  sidewaystable: 'rotating',
+  sidewaysfigure: 'rotating',
+  landscape: 'pdflscape',
+  algorithm: 'algorithm',
+  algorithmic: 'algpseudocode',
+  algorithm2e: 'algorithm2e',
+  frame: 'beamer',
+  block: 'beamer',
+  columns: 'beamer',
+  multicols: 'multicol',
+  wrapfigure: 'wrapfig',
+  wraptable: 'wrapfig',
+  comment: 'verbatim',
+};
 
 export interface RuleDefinition extends ErrorExplanationProps {
   patterns: RegExp[];
@@ -403,24 +539,122 @@ export class CompileLogAnalyzer implements ILogParser {
           .trim();
       }
       const { code, suggestion } = this.generateSuggestion(message, context);
-      const severity: 'error' | 'warning' | 'info' = item.severity.isError()
-        ? 'error'
-        : item.severity.isWarning()
-          ? 'warning'
-          : 'info';
+      const severity: 'error' | 'warning' | 'badbox' | 'info' =
+        item.severity.isError()
+          ? 'error'
+          : item.severity.isWarning()
+            ? 'warning'
+            : item.severity.isBadbox()
+              ? 'badbox'
+              : 'info';
       const resolvedCode = code || item.code;
       const resolvedSuggestion = suggestion || item.explanation?.suggestedFix;
 
       return {
         file: item.file,
         line: item.line,
+        ...(item.column ? { column: item.column } : {}),
         message,
         context,
         severity,
+        category: item.category || severity,
+        ...(item.warningSubtype ? { warningSubtype: item.warningSubtype } : {}),
         ...(resolvedCode ? { code: resolvedCode } : {}),
         ...(resolvedSuggestion ? { suggestion: resolvedSuggestion } : {}),
+        ...(item.quickFix ? { quickFix: item.quickFix } : {}),
+        ...(item.explanation
+          ? {
+              explanation: {
+                title: item.explanation.title,
+                whyItHappened: item.explanation.explanation,
+                howToFix:
+                  item.explanation.suggestedFix ||
+                  item.explanation.commonCauses[0] ||
+                  '',
+              },
+            }
+          : {}),
       };
     });
+  }
+
+  private static classifyWarningSubtype(
+    rawLineOrMessage: string,
+  ): DiagnosticWarningSubtype | undefined {
+    const text = rawLineOrMessage.toLowerCase();
+    if (
+      text.includes('overfull \\hbox') ||
+      text.includes('underfull \\hbox') ||
+      text.includes('overfull \\vbox') ||
+      text.includes('underfull \\vbox')
+    ) {
+      return 'badbox';
+    }
+    if (text.includes('latex font warning')) {
+      return 'font';
+    }
+    if (
+      text.includes('citation') &&
+      (text.includes('undefined') || text.includes('biber'))
+    ) {
+      return 'citation';
+    }
+    if (
+      (text.includes('reference') && text.includes('undefined')) ||
+      text.includes('label(s) may have changed')
+    ) {
+      return 'reference';
+    }
+    if (text.includes('package ') || text.includes('class ')) {
+      return 'package';
+    }
+    return undefined;
+  }
+
+  private static generateQuickFix(
+    message: string,
+    context: string,
+  ): QuickFixVo | undefined {
+    const combined = `${message}\n${context}`;
+
+    if (/undefined control sequence/i.test(combined)) {
+      const cmdMatches = Array.from(combined.matchAll(/\\([a-zA-Z@]+)/g));
+      for (let idx = cmdMatches.length - 1; idx >= 0; idx--) {
+        const cmd = cmdMatches[idx]?.[1];
+        if (cmd && PKG_LOOKUP[cmd]) {
+          const pkg = PKG_LOOKUP[cmd];
+          return {
+            description: `Add \\usepackage{${pkg}} to preamble`,
+            replacementText: `\\usepackage{${pkg}}`,
+          };
+        }
+      }
+    }
+
+    const envUndefMatch = combined.match(/environment\s+[`']?([^`'\s}]+)[`']?\s+undefined/i);
+    if (envUndefMatch && envUndefMatch[1]) {
+      const envName = envUndefMatch[1].trim();
+      const pkg = ENV_PKG_LOOKUP[envName];
+      if (pkg) {
+        return {
+          description: `Add \\usepackage{${pkg}} for \\begin{${envName}}`,
+          replacementText: `\\usepackage{${pkg}}`,
+        };
+      }
+    }
+
+    const envMismatchMatch = combined.match(
+      /\\begin\{([^}]+)\}\s*(?:on input line \d+\s*)?ended by \\end\{([^}]+)\}/i,
+    );
+    if (envMismatchMatch && envMismatchMatch[1] && envMismatchMatch[2]) {
+      const expectedEnv = envMismatchMatch[1].trim();
+      return {
+        description: `Replace with \\end{${expectedEnv}}`,
+        replacementText: `\\end{${expectedEnv}}`,
+      };
+    }
+
+    return undefined;
   }
 
   private generateSuggestion(
@@ -567,16 +801,22 @@ export class CompileLogAnalyzer implements ILogParser {
           .join('\n');
         const explanation =
           this.explainer?.explain(rawMessage, context) || undefined;
+        const quickFix = CompileLogAnalyzer.generateQuickFix(
+          rawMessage,
+          context,
+        );
 
         diagnostics.push(
           new DiagnosticItem({
             file: errorFile,
             line: errorLine,
             severity: DiagnosticSeverityVo.error(),
+            category: 'error',
             message: rawMessage,
             context,
             code: explanation?.code,
             explanation,
+            quickFix,
           }),
         );
         if (isDiagnosticLine) scanParensLeftToRight(cleanedLine);
@@ -607,16 +847,22 @@ export class CompileLogAnalyzer implements ILogParser {
         const context = contextLines.join('\n');
         const explanation =
           this.explainer?.explain(rawMessage, context) || undefined;
+        const quickFix = CompileLogAnalyzer.generateQuickFix(
+          rawMessage,
+          context,
+        );
 
         diagnostics.push(
           new DiagnosticItem({
             file: currentFile,
             line: errorLine,
             severity: DiagnosticSeverityVo.error(),
+            category: 'error',
             message: rawMessage,
             context,
             code: explanation?.code,
             explanation,
+            quickFix,
           }),
         );
         if (isDiagnosticLine) scanParensLeftToRight(cleanedLine);
@@ -659,12 +905,17 @@ export class CompileLogAnalyzer implements ILogParser {
 
         const explanation =
           this.explainer?.explain(warnMsg, context) || undefined;
+        const warningSubtype = CompileLogAnalyzer.classifyWarningSubtype(
+          `${line} ${warnMsg}`,
+        );
 
         diagnostics.push(
           new DiagnosticItem({
             file: currentFile,
             line: warnLine,
             severity: DiagnosticSeverityVo.warning(),
+            category: 'warning',
+            warningSubtype,
             message: `LaTeX Warning: ${warnMsg}`,
             context,
             code: explanation?.code,
@@ -691,6 +942,7 @@ export class CompileLogAnalyzer implements ILogParser {
             file: bibFile,
             line: bibLine,
             severity: DiagnosticSeverityVo.error(),
+            category: 'error',
             message: line.trim(),
             context: line,
           }),
@@ -706,6 +958,8 @@ export class CompileLogAnalyzer implements ILogParser {
             file: currentFile,
             line: null,
             severity: DiagnosticSeverityVo.warning(),
+            category: 'warning',
+            warningSubtype: 'citation',
             message: `Biber Warning: ${biberWarnMatch[1].trim()}`,
             context: line,
           }),
@@ -723,6 +977,8 @@ export class CompileLogAnalyzer implements ILogParser {
             file: currentFile,
             line: lineNum,
             severity: DiagnosticSeverityVo.badbox(),
+            category: 'badbox',
+            warningSubtype: 'badbox',
             message: line.trim(),
             context: line,
             code: explanation?.code,

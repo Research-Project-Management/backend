@@ -118,4 +118,8 @@ export class CreateTemplateDto {
   @IsOptional()
   @IsObject()
   files?: Record<string, string>;
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }

@@ -12,15 +12,16 @@ import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config
 import { CoreModule as AppCoreModule } from '@/core';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
+import { EngineModule } from '@/modules/ai/engine/engine.module';
 import { ClsiController } from './clsi.controller';
 import { ClsiService } from './services/clsi.service';
 import { RemoteClsiClientAdapter } from './services/remote-clsi.client';
-import { ClsiWorkspacePlannerService } from './services/workspace-planner.service';
+import { WorkspacePlannerService } from './services/workspace-planner.service';
 import { ClsiCompileProcessor } from './processors/clsi-compile.processor';
 import {
-  OverleafIncrementalWorkspace,
+  WorkspaceRepository,
   DiskUsageCleaner,
-} from './repositories/incremental-workspace.repository';
+} from './repositories/workspace.repository';
 import {
   CompilePipeline,
   LocalProcessRunner,
@@ -34,7 +35,7 @@ import {
   buildSandboxProfileFromConfig,
   ClsiSandboxConfig,
 } from './services/sandbox/sandbox-config';
-import { CompileFairQueue } from './services/compile-fair-queue.service';
+import { CompileQueueService } from './services/compile-queue.service';
 
 export const CLSI_SANDBOX_CONFIG = Symbol('CLSI_SANDBOX_CONFIG');
 export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
@@ -49,6 +50,7 @@ const inProcessClsiWorkers =
     AppCoreModule,
     DocstoreModule,
     FilestoreModule,
+    EngineModule,
     BullModule.registerQueue({
       name: MANUSCRIPT_CLSI_QUEUE,
     }),
@@ -56,7 +58,7 @@ const inProcessClsiWorkers =
   controllers: [ClsiController],
   providers: [
     RemoteClsiClientAdapter,
-    ClsiWorkspacePlannerService,
+    WorkspacePlannerService,
     {
       provide: CLSI_SANDBOX_CONFIG,
       useFactory: (configService: ConfigService): ClsiSandboxConfig => {
@@ -99,9 +101,9 @@ const inProcessClsiWorkers =
       inject: [ConfigService],
     },
     {
-      provide: OverleafIncrementalWorkspace,
+      provide: WorkspaceRepository,
       useFactory: (sandboxConfig: ClsiSandboxConfig) =>
-        new OverleafIncrementalWorkspace(sandboxConfig.scratchDir),
+        new WorkspaceRepository(sandboxConfig.scratchDir),
       inject: [CLSI_SANDBOX_CONFIG],
     },
     {
@@ -143,19 +145,19 @@ const inProcessClsiWorkers =
     {
       provide: CompilePipeline,
       useFactory: (
-        workspace: OverleafIncrementalWorkspace,
+        workspace: WorkspaceRepository,
         latexmkEngine: LatexmkEngine,
       ) => new CompilePipeline(workspace, latexmkEngine),
-      inject: [OverleafIncrementalWorkspace, LatexmkEngine],
+      inject: [WorkspaceRepository, LatexmkEngine],
     },
-    CompileFairQueue,
+    CompileQueueService,
     ClsiService,
     ...inProcessClsiWorkers,
   ],
   exports: [
     ClsiService,
     RemoteClsiClientAdapter,
-    ClsiWorkspacePlannerService,
+    WorkspacePlannerService,
     BullModule,
   ],
 })

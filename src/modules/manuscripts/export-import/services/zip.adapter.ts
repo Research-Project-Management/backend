@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/export-import/services/pkzip-engine.adapter.ts
+ * modules/manuscripts/export-import/services/zip.adapter.ts
  * Infrastructure / Adapter: PKZIP streaming & buffer engine implementing IZipEnginePort.
  */
 
@@ -7,8 +7,8 @@ import * as zlib from 'node:zlib';
 import { Readable } from 'node:stream';
 import { Injectable, Logger } from '@nestjs/common';
 import {
-  buildPkZipBuffer,
-  createPkZipStream,
+  buildZipBuffer,
+  createZipStream,
 } from '@/modules/manuscripts/core';
 import {
   IZipEnginePort,
@@ -22,15 +22,15 @@ import {
 } from '../domain/archive-validator';
 
 @Injectable()
-export class PkzipEngineAdapter extends IZipEnginePort {
-  private readonly logger = new Logger(PkzipEngineAdapter.name);
+export class ZipAdapter extends IZipEnginePort {
+  private readonly logger = new Logger(ZipAdapter.name);
 
   public buildZip(entries: RawZipEntryInput[]): Buffer {
-    return buildPkZipBuffer(entries);
+    return buildZipBuffer(entries);
   }
 
   public createZipStream(entries: RawZipEntryInput[]): Readable {
-    return createPkZipStream(entries);
+    return createZipStream(entries);
   }
 
   public extractZip(zipBuffer: Buffer): ArchiveEntryVo[] {
@@ -206,3 +206,5 @@ export class PkzipEngineAdapter extends IZipEnginePort {
     return entries;
   }
 }
+
+export { ZipAdapter as PkzipEngineAdapter };

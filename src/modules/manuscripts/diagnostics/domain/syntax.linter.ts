@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/diagnostics/domain/fast-syntax.linter.ts
+ * modules/manuscripts/diagnostics/domain/syntax.linter.ts
  * Pure domain static syntax linter & pre-compile auto-fixer for LaTeX documents.
  * Zero I/O, zero NestJS imports.
  */
@@ -116,7 +116,7 @@ export interface ILatexLineAutoFixRule {
   ): string;
 }
 
-export class FastSyntaxLinter {
+export class SyntaxLinter {
   private readonly explainer?: ErrorExplainerLike;
   private readonly lineAutoFixRules: ILatexLineAutoFixRule[] = [];
 
@@ -164,8 +164,14 @@ export class FastSyntaxLinter {
     source: string,
     filename = 'main.tex',
     knownBibKeys?: Set<string>,
+    knownLabels?: Set<string>,
   ): DiagnosticReport {
-    const items = this.lint(source ?? '', filename || 'main.tex', knownBibKeys);
+    const items = this.lint(
+      source ?? '',
+      filename || 'main.tex',
+      knownBibKeys,
+      knownLabels,
+    );
     return new DiagnosticReport({
       items,
       rawLog: undefined,
@@ -176,9 +182,15 @@ export class FastSyntaxLinter {
     source: string,
     filename = 'main.tex',
     knownBibKeys?: Set<string>,
+    knownLabels?: Set<string>,
   ): DiagnosticItem[] {
     const diagnostics: DiagnosticItem[] = [];
+    if (/^%novalidate\b/m.test(source)) {
+      return diagnostics;
+    }
+
     const lines = source.split('\n');
+    const seenLabelsInDoc = new Set<string>();
 
     const envStack: Array<{ name: string; line: number }> = [];
     const braceStack: Array<{ line: number; col: number }> = [];
@@ -192,10 +204,24 @@ export class FastSyntaxLinter {
     };
 
     let ifFalseDepth = 0;
+    let inNovalidateBlock = false;
 
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
       const lineNum = lineIdx + 1;
       const rawLine = lines[lineIdx] || '';
+
+      const trimmedComment = rawLine.trim();
+      if (trimmedComment === '%begin novalidate') {
+        inNovalidateBlock = true;
+        continue;
+      }
+      if (trimmedComment === '%end novalidate') {
+        inNovalidateBlock = false;
+        continue;
+      }
+      if (inNovalidateBlock) {
+        continue;
+      }
 
       if (this.isLineInVerbatim(rawLine, envStack)) {
         continue;
@@ -220,6 +246,15 @@ export class FastSyntaxLinter {
         lineNum,
         filename,
         knownBibKeys,
+        diagnostics,
+      );
+      this.lintLabelsAndRefs(
+        codeOnly,
+        rawLine,
+        lineNum,
+        filename,
+        seenLabelsInDoc,
+        knownLabels,
         diagnostics,
       );
       this.scanLineCharacters(
@@ -396,11 +431,18 @@ export class FastSyntaxLinter {
       if (m[1]) {
         const keys = m[1].split(',').map((k) => k.trim());
         for (const key of keys) {
-          if (key && key !== '*' && !knownBibKeys.has(key)) {
+          if (
+            key &&
+            key !== '*' &&
+            !knownBibKeys.has(key) &&
+            !knownBibKeys.has(key.toLowerCase())
+          ) {
+            const colIdx = rawLine.indexOf(key, m.index ?? 0);
             diagnostics.push(
               new DiagnosticItem({
                 file: filename,
                 line: lineNum,
+                column: colIdx >= 0 ? colIdx + 1 : null,
                 severity: DiagnosticSeverityVo.warning(),
                 message: `Citation key "${key}" not found in project bibliography (.bib) files.`,
                 context: rawLine.trim(),
@@ -411,6 +453,65 @@ export class FastSyntaxLinter {
                   description: `Add bibliography entry @article{${key}, ...} to references.bib`,
                   replacementText: key,
                 },
+              }),
+            );
+          }
+        }
+      }
+    }
+  }
+
+  private lintLabelsAndRefs(
+    codeOnly: string,
+    rawLine: string,
+    lineNum: number,
+    filename: string,
+    seenLabelsInDoc: Set<string>,
+    knownLabels: Set<string> | undefined,
+    diagnostics: DiagnosticItem[],
+  ): void {
+    const labelMatches = codeOnly.matchAll(/\\label\{([^}]+)\}/g);
+    for (const lm of labelMatches) {
+      const labelKey = (lm[1] || '').trim();
+      if (!labelKey) continue;
+      if (seenLabelsInDoc.has(labelKey)) {
+        const colIdx = rawLine.indexOf(labelKey, lm.index ?? 0);
+        diagnostics.push(
+          new DiagnosticItem({
+            file: filename,
+            line: lineNum,
+            column: colIdx >= 0 ? colIdx + 1 : null,
+            severity: DiagnosticSeverityVo.error(),
+            message: `Duplicate label "${labelKey}". Label was already declared earlier in this file.`,
+            context: rawLine.trim(),
+            code: 'DUPLICATE_LABEL',
+          }),
+        );
+      } else {
+        seenLabelsInDoc.add(labelKey);
+      }
+    }
+
+    if (!knownLabels || knownLabels.size === 0) return;
+
+    const refMatches = codeOnly.matchAll(
+      /\\(?:ref|eqref|autoref|cref|Cref|pageref|vref)\*?\{([^}]+)\}/g,
+    );
+    for (const rm of refMatches) {
+      if (rm[1]) {
+        const labels = rm[1].split(',').map((l) => l.trim());
+        for (const label of labels) {
+          if (label && !knownLabels.has(label) && !seenLabelsInDoc.has(label)) {
+            const colIdx = rawLine.indexOf(label, rm.index ?? 0);
+            diagnostics.push(
+              new DiagnosticItem({
+                file: filename,
+                line: lineNum,
+                column: colIdx >= 0 ? colIdx + 1 : null,
+                severity: DiagnosticSeverityVo.warning(),
+                message: `Reference label "${label}" is not defined in any project file.`,
+                context: rawLine.trim(),
+                code: 'UNDEFINED_REFERENCE',
               }),
             );
           }
@@ -947,3 +1048,6 @@ export class FastSyntaxLinter {
     return result;
   }
 }
+
+/** @deprecated Use SyntaxLinter */
+export { SyntaxLinter as FastSyntaxLinter };

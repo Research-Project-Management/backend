@@ -21,7 +21,7 @@ import {
   IDocHasher,
   TextDoc,
   DocRanges,
-  LineArrayEngine,
+  LineArray,
   NoopDiffChecker,
   DocstoreMetrics,
   DocstoreMetricsSummary,
@@ -39,7 +39,7 @@ import {
 import {
   IncludedProjectDoc,
   ExportFormattedDocResult,
-  transpileLatexDocumentForExport,
+  transpileLatexDocument,
 } from '@/modules/manuscripts/export-import/domain';
 import {
   CreateDocDto,
@@ -263,14 +263,15 @@ export class DocstoreService {
     dto: CreateDocDto,
   ): Promise<DocResponseDto> {
     const lines =
-      dto.lines || (dto.text ? LineArrayEngine.textToLines(dto.text) : ['']);
-    LineArrayEngine.validateLinesSize(lines);
+      dto.lines || (dto.text ? LineArray.textToLines(dto.text) : ['']);
+    LineArray.validateLinesSize(lines);
 
     const hash = this.docHasher
       ? this.docHasher.computeHash(lines)
       : computeDocSha256(lines);
     const doc = await this.docRepository.createDoc({
       projectId,
+      ...(dto.pageId ? { pageId: dto.pageId } : {}),
       path: dto.path,
       lines,
       version: dto.version ?? 0,
@@ -292,7 +293,7 @@ export class DocstoreService {
     const ranges = dto.ranges;
     const expectedRev = dto.expectedRev ?? dto.rev;
 
-    LineArrayEngine.validateLinesSize(lines);
+    LineArray.validateLinesSize(lines);
 
     let currentDoc = await this.docRepository.getDoc(projectId, docId);
     if (!currentDoc) {
@@ -427,7 +428,7 @@ export class DocstoreService {
     format: string;
     projectDocs?: IncludedProjectDoc[];
   }): ExportFormattedDocResult {
-    return transpileLatexDocumentForExport(params);
+    return transpileLatexDocument(params);
   }
 
   public async archiveDoc(projectId: string, docId: string): Promise<void> {
@@ -495,14 +496,12 @@ export class DocstoreService {
 
   public async archiveAllDocs(projectId: string): Promise<number> {
     const docs = await this.docRepository.getAllDocs(projectId);
-    let count = 0;
     const clearLines = this.docPersistor.isDurableStorageConfigured
       ? this.docPersistor.isDurableStorageConfigured()
       : true;
 
-    for (const doc of docs) {
-      if (doc.inStorage) continue;
-
+    const candidates = docs.filter((doc) => !doc.inStorage);
+    const payloads = candidates.map((doc) => {
       const payload = JSON.stringify({
         lines: doc.lines,
         ranges: doc.ranges,
@@ -514,27 +513,38 @@ export class DocstoreService {
           `Null byte detected when archiving doc ${doc.id}`,
         );
       }
+      return { doc, payload };
+    });
 
-      const key = `${projectId}/${doc.id}.json`;
-      const sourceMd5 = crypto.createHash('md5').update(payload).digest('hex');
-      const stream = Readable.from(Buffer.from(payload, 'utf8'));
+    const results = await mapWithConcurrency(
+      payloads,
+      COLD_HYDRATION_CONCURRENCY,
+      async ({ doc, payload }) => {
+        const key = `${projectId}/${doc.id}.json`;
+        const sourceMd5 = crypto
+          .createHash('md5')
+          .update(payload)
+          .digest('hex');
+        const stream = Readable.from(Buffer.from(payload, 'utf8'));
 
-      await this.docPersistor.sendStream(key, stream, { sourceMd5 });
-      const archived = await this.docRepository.markAsArchived(
-        projectId,
-        doc.id,
-        key,
-        doc.rev,
-        clearLines,
-      );
-      if (archived) {
-        count++;
-      } else {
-        this.logger.warn(
-          `Skipped marking document ${doc.id} as archived due to concurrent rev modification`,
+        await this.docPersistor.sendStream(key, stream, { sourceMd5 });
+        const archived = await this.docRepository.markAsArchived(
+          projectId,
+          doc.id,
+          key,
+          doc.rev,
+          clearLines,
         );
-      }
-    }
+        if (!archived) {
+          this.logger.warn(
+            `Skipped marking document ${doc.id} as archived due to concurrent rev modification`,
+          );
+        }
+        return archived ? 1 : 0;
+      },
+    );
+
+    const count = results.reduce<number>((sum, v) => sum + v, 0);
 
     this.logger.log(
       `Archived ${count} documents for project ${projectId} to S3 cold tier`,
@@ -544,15 +554,17 @@ export class DocstoreService {
 
   public async unArchiveAllDocs(projectId: string): Promise<number> {
     const docs = await this.docRepository.getAllDocs(projectId);
-    let count = 0;
+    const coldDocs = docs.filter((doc) => doc.inStorage);
 
-    for (const doc of docs) {
-      if (doc.inStorage) {
+    await mapWithConcurrency(
+      coldDocs,
+      COLD_HYDRATION_CONCURRENCY,
+      async (doc) => {
         await this.getDocEntity(projectId, doc.id);
-        count++;
-      }
-    }
+      },
+    );
 
+    const count = coldDocs.length;
     this.logger.log(`Unarchived ${count} documents for project ${projectId}`);
     return count;
   }

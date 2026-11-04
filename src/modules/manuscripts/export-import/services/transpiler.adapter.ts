@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/export-import/domain/document-transpiler.ts
+ * modules/manuscripts/export-import/services/transpiler.adapter.ts
  * Pure in-process transpiler converting Word (.docx) and Markdown (.md) documents
  * into compilable LaTeX projects without external CLI dependencies.
  */
@@ -20,19 +20,19 @@ import {
   escapeLatex,
   sanitizeLatexUrl,
   unescapeXml,
-} from '../domain/latex-export-transpiler';
-import { PkzipEngineAdapter } from './pkzip-engine.adapter';
+} from '../domain/latex.transpiler';
+import { ZipAdapter } from './zip.adapter';
 
 export { escapeLatex, sanitizeLatexUrl, unescapeXml };
 
 @Injectable()
-export class DocumentTranspilerAdapter extends IDocumentTranspilerPort {
-  private readonly logger = new Logger(DocumentTranspilerAdapter.name);
+export class TranspilerAdapter extends IDocumentTranspilerPort {
+  private readonly logger = new Logger(TranspilerAdapter.name);
   private readonly zipEngine: IZipEnginePort;
 
-  constructor(@Optional() zipEngine?: PkzipEngineAdapter) {
+  constructor(@Optional() zipEngine?: ZipAdapter) {
     super();
-    this.zipEngine = zipEngine ?? new PkzipEngineAdapter();
+    this.zipEngine = zipEngine ?? new ZipAdapter();
   }
 
   /**
@@ -530,4 +530,5 @@ ${latexBody.join('\n')}
   }
 }
 
+export { TranspilerAdapter as DocumentTranspilerAdapter };
 export type { TranspiledProjectResult };

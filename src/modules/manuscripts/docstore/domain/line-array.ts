@@ -7,7 +7,7 @@
 
 import { DocTooLargeError, NullByteDetectedError } from './doc.errors';
 
-export class LineArrayEngine {
+export class LineArray {
   public static readonly DEFAULT_MAX_DOC_LENGTH = 2 * 1024 * 1024; // 2MB default text limit (Overleaf parity)
 
   /**
@@ -19,7 +19,7 @@ export class LineArrayEngine {
    */
   public static textToLines(
     rawText: string,
-    maxDocLength: number = LineArrayEngine.DEFAULT_MAX_DOC_LENGTH,
+    maxDocLength: number = LineArray.DEFAULT_MAX_DOC_LENGTH,
   ): string[] {
     if (!rawText) return [''];
 
@@ -57,7 +57,7 @@ export class LineArrayEngine {
    */
   public static validateLinesSize(
     lines: string[],
-    maxDocLength: number = LineArrayEngine.DEFAULT_MAX_DOC_LENGTH,
+    maxDocLength: number = LineArray.DEFAULT_MAX_DOC_LENGTH,
   ): number {
     let totalLineBytes = 0;
     for (let i = 0; i < lines.length; i++) {
@@ -90,4 +90,7 @@ export class LineArrayEngine {
   }
 }
 
-export const textToLines = LineArrayEngine.textToLines;
+export const textToLines = LineArray.textToLines;
+
+/** @deprecated Use LineArray */
+export { LineArray as LineArrayEngine };

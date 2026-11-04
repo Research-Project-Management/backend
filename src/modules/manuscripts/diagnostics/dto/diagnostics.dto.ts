@@ -3,7 +3,7 @@
  * Data Transfer Objects for Diagnostics API endpoints.
  */
 
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class ParseLogDto {
@@ -30,9 +30,17 @@ export class ParseLogDto {
 }
 
 export class LintDocumentDto {
-  @ApiProperty({ description: 'LaTeX source content to statically lint' })
+  @ApiPropertyOptional({ description: 'LaTeX source content to statically lint' })
   @IsString()
-  source!: string;
+  @IsOptional()
+  source?: string;
+
+  @ApiPropertyOptional({
+    description: 'LaTeX content alias for source',
+  })
+  @IsString()
+  @IsOptional()
+  content?: string;
 
   @ApiPropertyOptional({
     description: 'Target filename for lint reports',
@@ -41,6 +49,36 @@ export class LintDocumentDto {
   @IsString()
   @IsOptional()
   filename?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional project ID to cross-check citations and labels against',
+  })
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional document ID in DocstoreService',
+  })
+  @IsString()
+  @IsOptional()
+  docId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional known bibliography keys override',
+    type: [String],
+  })
+  @IsArray()
+  @IsOptional()
+  knownBibKeys?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Optional known label names override',
+    type: [String],
+  })
+  @IsArray()
+  @IsOptional()
+  knownLabels?: string[];
 }
 
 export class ErrorExplanationDto {
@@ -81,6 +119,14 @@ export class DiagnosticItemDto {
 
   @ApiProperty({ enum: ['error', 'warning', 'info', 'badbox'] })
   severity!: string;
+
+  @ApiPropertyOptional({ enum: ['error', 'warning', 'info', 'badbox'] })
+  category?: string;
+
+  @ApiPropertyOptional({
+    enum: ['font', 'package', 'citation', 'reference', 'badbox'],
+  })
+  warningSubtype?: string;
 
   @ApiProperty()
   message!: string;

@@ -1,10 +1,10 @@
 /**
- * templates/domain/official-template.catalog.ts
+ * templates/domain/template.catalog.ts
  * Single source of truth for embedded official LaTeX academic templates,
  * shared across TemplatesModule and ExportImportModule.
  */
 
-export interface OfficialTemplateDefinition {
+export interface TemplateDefinition {
   /** Primary UUID for database / TemplatesModule */
   id: string;
   /** Semantic slug ID used by ExportImportModule */
@@ -38,13 +38,16 @@ export interface OfficialTemplateDefinition {
   files: Record<string, string>;
 }
 
-export const OFFICIAL_TEMPLATE_CATALOG: readonly OfficialTemplateDefinition[] =
+/** @deprecated Use `TemplateDefinition` */
+export type OfficialTemplateDefinition = TemplateDefinition;
+
+export const TEMPLATE_CATALOG: readonly TemplateDefinition[] =
   [
     {
       id: '10000000-0000-0000-0000-000000000001',
       slug: 'ieee-transactions',
       versionId: 'tmpl-ieee-tran-v1',
-      aliases: ['ieee', 'ieee-tran', 'bare_jrnl'],
+      aliases: ['ieee', 'ieee-tran', 'ieee-conference', 'bare_jrnl'],
       name: 'IEEE Transactions Article',
       title: 'IEEE Transactions Journal Template',
       category: 'journal',
@@ -262,7 +265,7 @@ Welcome to your new manuscript project. Edit this file to begin authoring.
       id: '10000000-0000-0000-0000-000000000005',
       slug: 'masters-thesis',
       versionId: 'tmpl-thesis-v1',
-      aliases: ['thesis', 'phd-thesis', 'dissertation'],
+      aliases: ['thesis', 'phd-thesis', 'dissertation', 'thesis-dissertation'],
       name: 'Master & PhD Dissertation',
       title: 'Master / PhD Thesis & Dissertation',
       category: 'thesis',
@@ -689,4 +692,83 @@ Worker node sandboxing provides robust tenant isolation without throughput degra
 \\end{document}`,
       },
     },
+    {
+      id: '10000000-0000-0000-0000-000000000013',
+      slug: 'ieee-conference',
+      versionId: 'tmpl-ieee-conf-v1',
+      aliases: ['ieee-conf', 'ieee-symposium'],
+      name: 'IEEE Conference Paper (2-Column)',
+      title: 'IEEE Conference Paper (2-Column)',
+      category: 'conference',
+      description:
+        'Standard IEEE 2-column format for conference proceedings, symposiums, and technical workshops.',
+      compiler: 'pdflatex',
+      imageName: 'texlive/texlive:latest',
+      mainFile: 'main.tex',
+      author: 'IEEE',
+      tags: ['ieee', 'conference', '2-column', 'IEEEtran'],
+      isOfficial: true,
+      downloadCount: 1680,
+      files: {
+        'main.tex': `\\documentclass[conference]{IEEEtran}
+\\usepackage{cite}
+\\usepackage{amsmath,amssymb,amsfonts}
+\\usepackage{algorithmic}
+\\usepackage{graphicx}
+\\usepackage{textcomp}
+\\usepackage{xcolor}
+
+\\begin{document}
+
+\\title{Conference Paper Title*\\\\
+{\\footnotesize \\textsuperscript{*}Note: Sub-title as needed}}
+
+\\author{\\IEEEauthorblockN{First Author}
+\\IEEEauthorblockA{\\textit{Dept. of Computer Science} \\\\
+\\textit{Flux Research Lab}\\\\
+Hanoi, Vietnam \\\\
+author@flux.org}
+}
+
+\\maketitle
+
+\\begin{abstract}
+This document provides guidelines for preparing IEEE conference papers using LaTeX. The abstract should summarize the primary research problem, methodology, and key quantitative findings.
+\\end{abstract}
+
+\\begin{IEEEkeywords}
+machine learning, distributed systems, research collaboration
+\\end{IEEEkeywords}
+
+\\section{Introduction}
+Welcome to your new research manuscript on Flux. This template adheres to the IEEE conference publishing guidelines. Collaborative authoring is supported natively in real-time.
+
+\\section{Related Work}
+Prior investigations have explored Overleaf-like collaborative editing platforms \\cite{vaswani2017attention}.
+
+\\section{Methodology}
+Detail your scientific methodology, formulas, and experimental setup here:
+\\begin{equation}
+  \\mathcal{L}(\\theta) = -\\sum_{i=1}^{N} y_i \\log \\hat{y}_i + (1 - y_i) \\log(1 - \\hat{y}_i)
+\\end{equation}
+
+\\section{Conclusion}
+Summarize the primary contributions and future outlook of this work.
+
+\\bibliographystyle{IEEEtran}
+\\bibliography{references}
+
+\\end{document}`,
+        'references.bib': `@article{vaswani2017attention,
+  title={Attention is all you need},
+  author={Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N and Kaiser, {\\L}ukasz and Polosukhin, Illia},
+  journal={Advances in neural information processing systems},
+  volume={30},
+  year={2017}
+}`,
+      },
+    },
   ];
+
+/** @deprecated Use `TEMPLATE_CATALOG` */
+export const OFFICIAL_TEMPLATE_CATALOG = TEMPLATE_CATALOG;

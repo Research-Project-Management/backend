@@ -20,14 +20,14 @@ import {
   planInlineFileSet,
   linesToText,
   PlannedFileSet,
-} from '../domain/compile-fileset.planner';
+} from '../domain/fileset.planner';
 import { FileSnapshotVo } from '@/modules/manuscripts/project-history/domain/file-snapshot';
-import { OverleafIncrementalWorkspace } from '../repositories/incremental-workspace.repository';
+import { WorkspaceRepository } from '../repositories/workspace.repository';
 import { SafePath } from '../domain/safe-path';
 
 @Injectable()
-export class ClsiWorkspacePlannerService {
-  private readonly logger = new Logger(ClsiWorkspacePlannerService.name);
+export class WorkspacePlannerService {
+  private readonly logger = new Logger(WorkspacePlannerService.name);
   private readonly lastAutoSnapshotTimes = new Map<string, number>();
   private readonly lastSnapshotHashes = new Map<string, string>();
   private static readonly MAX_TRACKED_PROJECTS = 1000;
@@ -37,7 +37,7 @@ export class ClsiWorkspacePlannerService {
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly filestoreService?: FilestoreService,
     @Optional() private readonly realtimeService?: RealtimeFacade,
-    @Optional() private readonly workspace?: OverleafIncrementalWorkspace,
+    @Optional() private readonly workspace?: WorkspaceRepository,
   ) {}
 
   /**
@@ -160,31 +160,34 @@ export class ClsiWorkspacePlannerService {
         where: { id: { in: dbIds } },
         select: { id: true, lines: true, inStorage: true, sizeBytes: true },
       });
-      for (const row of rows) {
-        const hasInlineLines = Array.isArray(row.lines) && row.lines.length > 0;
-        if (row.inStorage && row.sizeBytes > 0 && !hasInlineLines) {
-          if (this.docstoreService) {
-            try {
-              const hydratedDoc = await this.docstoreService.getDoc(
-                projectId,
-                row.id,
-              );
-              contentById.set(row.id, linesToText(hydratedDoc.lines));
-              continue;
-            } catch (err: unknown) {
-              const msg = err instanceof Error ? err.message : String(err);
+      await Promise.all(
+        rows.map(async (row) => {
+          const hasInlineLines =
+            Array.isArray(row.lines) && row.lines.length > 0;
+          if (row.inStorage && row.sizeBytes > 0 && !hasInlineLines) {
+            if (this.docstoreService) {
+              try {
+                const hydratedDoc = await this.docstoreService.getDoc(
+                  projectId,
+                  row.id,
+                );
+                contentById.set(row.id, linesToText(hydratedDoc.lines));
+                return;
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err);
+                this.logger.warn(
+                  `Failed to unarchive cold-storage doc ${row.id} via DocstoreService: ${msg}`,
+                );
+              }
+            } else {
               this.logger.warn(
-                `Failed to unarchive cold-storage doc ${row.id} via DocstoreService: ${msg}`,
+                `Cold-storage doc ${row.id} (${row.sizeBytes}B) has no inline body and DocstoreService is unavailable; compiling as empty.`,
               );
             }
-          } else {
-            this.logger.warn(
-              `Cold-storage doc ${row.id} (${row.sizeBytes}B) has no inline body and DocstoreService is unavailable; compiling as empty.`,
-            );
           }
-        }
-        contentById.set(row.id, linesToText(row.lines));
-      }
+          contentById.set(row.id, linesToText(row.lines));
+        }),
+      );
     }
 
     const out: Record<string, string | Buffer> = {};
@@ -456,7 +459,7 @@ export class ClsiWorkspacePlannerService {
       // Bounded cache maintenance to prevent memory leaks across thousands of projects
       if (
         this.lastAutoSnapshotTimes.size >=
-        ClsiWorkspacePlannerService.MAX_TRACKED_PROJECTS
+        WorkspacePlannerService.MAX_TRACKED_PROJECTS
       ) {
         const oldestKey = this.lastAutoSnapshotTimes.keys().next().value;
         if (oldestKey) {
@@ -478,3 +481,6 @@ export class ClsiWorkspacePlannerService {
     }
   }
 }
+
+/** @deprecated Use WorkspacePlannerService */
+export { WorkspacePlannerService as ClsiWorkspacePlannerService };

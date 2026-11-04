@@ -13,11 +13,11 @@ import { ClsiModule } from '@/modules/manuscripts/clsi/clsi.module';
 import { TemplatesModule } from '@/modules/manuscripts/templates/templates.module';
 import { TemplatesService } from '@/modules/manuscripts/templates/templates.service';
 import { ProjectHistoryModule } from '@/modules/manuscripts/project-history/project-history.module';
-import { PagesHistoryExportController } from '@/modules/manuscripts/docstore/controllers/history-export.controller';
+import { HistoryExportController } from '@/modules/manuscripts/docstore/controllers/history-export.controller';
 
 // Adapters & Repositories
-import { PkzipEngineAdapter } from './services/pkzip-engine.adapter';
-import { DocumentTranspilerAdapter } from './services/document-transpiler.adapter';
+import { ZipAdapter } from './services/zip.adapter';
+import { TranspilerAdapter } from './services/transpiler.adapter';
 import {
   ManuscriptAggregatorAdapter,
   ManuscriptHydratorAdapter,
@@ -37,10 +37,10 @@ import { ExportImportController } from './export-import.controller';
     TemplatesModule,
     ProjectHistoryModule,
   ],
-  controllers: [ExportImportController, PagesHistoryExportController],
+  controllers: [ExportImportController, HistoryExportController],
   providers: [
-    PkzipEngineAdapter,
-    DocumentTranspilerAdapter,
+    ZipAdapter,
+    TranspilerAdapter,
     ManuscriptAggregatorAdapter,
     ManuscriptHydratorAdapter,
     ExportImportService,
@@ -49,8 +49,8 @@ import { ExportImportController } from './export-import.controller';
     ExportImportService,
     ManuscriptAggregatorAdapter,
     ManuscriptHydratorAdapter,
-    PkzipEngineAdapter,
-    DocumentTranspilerAdapter,
+    ZipAdapter,
+    TranspilerAdapter,
   ],
 })
 export class ExportImportModule {}

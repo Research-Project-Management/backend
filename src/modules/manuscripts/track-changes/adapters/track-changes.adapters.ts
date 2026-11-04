@@ -38,7 +38,6 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
     liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
     @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
     @Optional()
-    @Inject(LIVE_COLLABORATION_PORT)
     liveCollab?: LiveCollaborationPort,
   ) {
     super();

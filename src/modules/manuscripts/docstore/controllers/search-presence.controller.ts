@@ -32,20 +32,20 @@ import {
 } from '@/core';
 import type { FastifyReply } from 'fastify';
 import {
-  ManuscriptPresenceService,
+  PresenceService,
   HeartbeatBody,
 } from '../services/presence.service';
-import { ManuscriptSearchReplaceService } from '../services/search-replace.service';
+import { SearchReplaceService } from '../services/search-replace.service';
 
 @ApiTags('Manuscripts - Pages Search & Presence')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/manuscripts')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
-export class PagesSearchPresenceController {
+export class SearchPresenceController {
   constructor(
-    private readonly presenceService: ManuscriptPresenceService,
-    private readonly searchReplaceService: ManuscriptSearchReplaceService,
+    private readonly presenceService: PresenceService,
+    private readonly searchReplaceService: SearchReplaceService,
   ) {}
 
   private resolveProjectId(
@@ -228,3 +228,6 @@ export class PagesSearchPresenceController {
     return this.searchReplaceService.replaceDocuments(targetProjectId, body);
   }
 }
+
+/** @deprecated Use SearchPresenceController */
+export { SearchPresenceController as PagesSearchPresenceController };

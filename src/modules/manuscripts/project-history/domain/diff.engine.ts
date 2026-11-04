@@ -1,5 +1,5 @@
 /**
- * project-history/domain/myers-diff.engine.ts
+ * project-history/domain/diff.engine.ts
  * Pure, side-effect-free Myers LCS line-diff and intra-line word-diff engine
  * for comparing Manuscript Snapshots.
  */
@@ -15,7 +15,7 @@ import {
 } from './project-history.ports';
 
 @Injectable()
-export class MyersDiffEngine {
+export class DiffEngine {
   /**
    * Compares two snapshots and identifies all added, deleted, modified, and renamed files.
    */
@@ -569,6 +569,8 @@ export class MyersDiffEngine {
   }
 }
 
+export { DiffEngine as MyersDiffEngine };
+
 export type DiffOp = { type: 'equal' | 'add' | 'remove'; line: string };
 
 export interface DiffHunk {
@@ -586,14 +588,14 @@ export interface LineDiffResult {
   stats: { additions: number; deletions: number; unchanged: number };
 }
 
-const sharedMyersEngine = new MyersDiffEngine();
+const sharedDiffEngine = new DiffEngine();
 
 function splitLines(text: string): string[] {
   return text.length === 0 ? [] : text.split('\n');
 }
 
 export function diffLines(a: string[], b: string[]): DiffOp[] {
-  return sharedMyersEngine.computeMyersLCS(a, b).map((op) => ({
+  return sharedDiffEngine.computeMyersLCS(a, b).map((op) => ({
     type:
       op.type === 'added' ? 'add' : op.type === 'deleted' ? 'remove' : 'equal',
     line: op.text,

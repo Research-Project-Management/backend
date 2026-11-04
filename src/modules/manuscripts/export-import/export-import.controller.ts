@@ -113,7 +113,61 @@ export class ExportImportController {
     }
   }
 
-  @Post(':projectId/import/zip')
+  private async extractUploadPayload(
+    req: FastifyRequest,
+    defaultFileName: string,
+    errorMessage: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const multipartReq = req as FastifyRequest & {
+      isMultipart?: () => boolean;
+      file?: () => Promise<
+        { filename?: string; toBuffer: () => Promise<Buffer> } | undefined
+      >;
+    };
+    const isMultipart =
+      typeof multipartReq.isMultipart === 'function'
+        ? multipartReq.isMultipart()
+        : Boolean(multipartReq.isMultipart);
+
+    if (isMultipart && typeof multipartReq.file === 'function') {
+      const part = await multipartReq.file();
+      if (!part) {
+        throw new BadRequestException('No file found in multipart upload.');
+      }
+      return {
+        buffer: await part.toBuffer(),
+        filename: part.filename || defaultFileName,
+      };
+    }
+
+    if (Buffer.isBuffer(req.body)) {
+      return { buffer: req.body, filename: defaultFileName };
+    }
+
+    if (
+      typeof req.body === 'object' &&
+      req.body !== null &&
+      'buffer' in req.body
+    ) {
+      const bodyWithBuffer = req.body as {
+        buffer?: unknown;
+        filename?: string;
+      };
+      if (Buffer.isBuffer(bodyWithBuffer.buffer)) {
+        return {
+          buffer: bodyWithBuffer.buffer,
+          filename:
+            typeof bodyWithBuffer.filename === 'string'
+              ? bodyWithBuffer.filename
+              : defaultFileName,
+        };
+      }
+    }
+
+    throw new BadRequestException(errorMessage);
+  }
+
+  @Post([':projectId/import/zip', ':projectId/extract-zip'])
   @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('import')
@@ -127,37 +181,11 @@ export class ExportImportController {
     @Query('preferredRootDoc') preferredRootDoc?: string,
   ): Promise<ImportSummaryResponseDto> {
     try {
-      let zipBuffer: Buffer;
-
-      const multipartReq = req as FastifyRequest & {
-        isMultipart?: () => boolean;
-        file?: () => Promise<{ toBuffer: () => Promise<Buffer> } | undefined>;
-      };
-      const isMultipart =
-        typeof multipartReq.isMultipart === 'function'
-          ? multipartReq.isMultipart()
-          : Boolean(multipartReq.isMultipart);
-
-      if (isMultipart && typeof multipartReq.file === 'function') {
-        const part = await multipartReq.file();
-        if (!part) {
-          throw new BadRequestException('No file found in multipart upload.');
-        }
-        zipBuffer = await part.toBuffer();
-      } else if (Buffer.isBuffer(req.body)) {
-        zipBuffer = req.body;
-      } else if (
-        typeof req.body === 'object' &&
-        req.body !== null &&
-        'buffer' in req.body &&
-        Buffer.isBuffer(req.body.buffer)
-      ) {
-        zipBuffer = (req.body as { buffer: Buffer }).buffer;
-      } else {
-        throw new BadRequestException(
-          'Expected ZIP archive binary payload or multipart form data.',
-        );
-      }
+      const { buffer: zipBuffer } = await this.extractUploadPayload(
+        req,
+        'archive.zip',
+        'Expected ZIP archive binary payload or multipart form data.',
+      );
 
       return await this.service.importProjectZip(
         projectId,
@@ -204,53 +232,12 @@ export class ExportImportController {
     @Query('format') format?: 'docx' | 'md',
   ): Promise<ImportSummaryResponseDto> {
     try {
-      let fileBuffer: Buffer;
-      let fileName = 'document.docx';
-
-      const multipartReq = req as FastifyRequest & {
-        isMultipart?: () => boolean;
-        file?: () => Promise<
-          { filename: string; toBuffer: () => Promise<Buffer> } | undefined
-        >;
-      };
-      const isMultipart =
-        typeof multipartReq.isMultipart === 'function'
-          ? multipartReq.isMultipart()
-          : Boolean(multipartReq.isMultipart);
-
-      if (isMultipart && typeof multipartReq.file === 'function') {
-        const part = await multipartReq.file();
-        if (!part) {
-          throw new BadRequestException('No file found in multipart upload.');
-        }
-        fileName = part.filename || fileName;
-        fileBuffer = await part.toBuffer();
-      } else if (Buffer.isBuffer(req.body)) {
-        fileBuffer = req.body;
-      } else if (
-        typeof req.body === 'object' &&
-        req.body !== null &&
-        'buffer' in req.body
-      ) {
-        const bodyWithBuffer = req.body as {
-          buffer?: unknown;
-          filename?: string;
-        };
-        if (Buffer.isBuffer(bodyWithBuffer.buffer)) {
-          fileBuffer = bodyWithBuffer.buffer;
-          if (typeof bodyWithBuffer.filename === 'string') {
-            fileName = bodyWithBuffer.filename;
-          }
-        } else {
-          throw new BadRequestException(
-            'Expected document binary payload or multipart form data.',
-          );
-        }
-      } else {
-        throw new BadRequestException(
+      const { buffer: fileBuffer, filename: fileName } =
+        await this.extractUploadPayload(
+          req,
+          'document.docx',
           'Expected document binary payload or multipart form data.',
         );
-      }
 
       return await this.service.convertDocument({
         projectId,

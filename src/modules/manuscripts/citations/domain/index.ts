@@ -1,10 +1,12 @@
 export * from './bibtex.formatter';
 export * from './citations.ports';
-export * from './regex-ast-bibtex.parser';
-export * from './crossref-arxiv.resolver';
+export * from './bibtex.parser';
+export * from './identifier.resolver';
 export * from './bib-entry.entity';
 export * from './bibliography-file.entity';
 export * from './citation-key';
-export * from './academic-identifier';
+export * from './identifier';
 export * from './author-list';
 export * from './citations.errors';
+export * from './citation-operations';
+

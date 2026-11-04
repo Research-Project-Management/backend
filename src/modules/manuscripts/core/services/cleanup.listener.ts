@@ -8,7 +8,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService, RedisCacheService } from '@/core';
-import { ProjectWorkspaceCollectorService } from './workspace-collector.service';
+import { WorkspaceCollectorService } from './workspace-collector.service';
 import { FilestoreRepository } from '../../filestore/filestore.repository';
 import { IDocPersistor } from '../../docstore/domain';
 
@@ -18,13 +18,13 @@ interface ProjectDeletedEvent {
 }
 
 @Injectable()
-export class ManuscriptCleanupListener {
-  private readonly logger = new Logger(ManuscriptCleanupListener.name);
+export class CleanupListener {
+  private readonly logger = new Logger(CleanupListener.name);
 
   constructor(
     private readonly prisma: PrismaService,
     @Optional()
-    private readonly workspaceCollector?: ProjectWorkspaceCollectorService,
+    private readonly workspaceCollector?: WorkspaceCollectorService,
     @Optional()
     private readonly redis?: RedisCacheService,
     @Optional()
@@ -67,36 +67,43 @@ export class ManuscriptCleanupListener {
       const docPersistor = this.resolveDocPersistor();
 
       let projectDocs: Array<{ id: string; inStorage?: boolean; storageKey?: string | null }> = [];
-      if (this.prisma.manuscriptDoc?.findMany) {
-        try {
-          projectDocs = await this.prisma.manuscriptDoc.findMany({
-            where: { projectId },
-            select: { id: true, inStorage: true, storageKey: true },
-          });
-          if (this.workspaceCollector && Array.isArray(projectDocs) && projectDocs.length > 0) {
-            await Promise.all(
-              projectDocs.map((d) =>
-                this.workspaceCollector!
-                  .evictDoc(projectId, d.id)
-                  .catch(() => undefined),
-              ),
-            );
-          }
-        } catch {
-          // Non-blocking Yjs eviction before DB cleanup
-        }
-      }
-
       let projectFiles: Array<{ id: string; hash: string; storageKey: string; bucketName: string }> = [];
-      if (filestoreRepo && this.prisma.manuscriptFile?.findMany) {
-        try {
-          projectFiles = await this.prisma.manuscriptFile.findMany({
-            where: { projectId },
-            select: { id: true, hash: true, storageKey: true, bucketName: true },
-          });
-        } catch {
-          // Non-blocking file lookup before DB cleanup
-        }
+
+      const [fetchedDocs, fetchedFiles] = await Promise.all([
+        this.prisma.manuscriptDoc?.findMany
+          ? Promise.resolve(
+              this.prisma.manuscriptDoc.findMany({
+                where: { projectId },
+                select: { id: true, inStorage: true, storageKey: true },
+              }),
+            ).catch(() => [])
+          : Promise.resolve([]),
+        filestoreRepo && this.prisma.manuscriptFile?.findMany
+          ? Promise.resolve(
+              this.prisma.manuscriptFile.findMany({
+                where: { projectId },
+                select: {
+                  id: true,
+                  hash: true,
+                  storageKey: true,
+                  bucketName: true,
+                },
+              }),
+            ).catch(() => [])
+          : Promise.resolve([]),
+      ]);
+
+      projectDocs = Array.isArray(fetchedDocs) ? fetchedDocs : [];
+      projectFiles = Array.isArray(fetchedFiles) ? fetchedFiles : [];
+
+      if (this.workspaceCollector && projectDocs.length > 0) {
+        await Promise.all(
+          projectDocs.map((d) =>
+            this.workspaceCollector!
+              .evictDoc(projectId, d.id)
+              .catch(() => undefined),
+          ),
+        );
       }
 
       const operations = [
@@ -117,35 +124,45 @@ export class ManuscriptCleanupListener {
       ];
       await this.prisma.$transaction(operations);
 
-      // Garbage-collect cold-tier doc archives
+      // Garbage-collect cold-tier doc archives in parallel
       if (docPersistor?.deleteObject && projectDocs.length > 0) {
-        for (const d of projectDocs) {
-          if (d.inStorage && d.storageKey) {
-            await Promise.resolve(docPersistor.deleteObject(d.storageKey)).catch(
-              () => undefined,
-            );
-          }
-        }
+        await Promise.all(
+          projectDocs.map((d) =>
+            d.inStorage && d.storageKey
+              ? Promise.resolve(docPersistor.deleteObject(d.storageKey)).catch(
+                  () => undefined,
+                )
+              : Promise.resolve(),
+          ),
+        );
       }
 
-      // Garbage-collect unreferenced CAS binary blobs
+      // Garbage-collect unreferenced CAS binary blobs in parallel
       if (filestoreRepo && projectFiles.length > 0) {
         const seenStorageKeys = new Set<string>();
+        const uniqueFiles: typeof projectFiles = [];
         for (const f of projectFiles) {
           if (!f.storageKey || seenStorageKeys.has(f.storageKey)) continue;
           seenStorageKeys.add(f.storageKey);
-          try {
-            const remainingRefs = await filestoreRepo.countReferencesByHash(f.hash);
-            if (remainingRefs === 0) {
-              await filestoreRepo.deleteObject(
-                f.bucketName || 'manuscript-files',
-                f.storageKey,
-              );
-            }
-          } catch {
-            // Non-blocking CAS GC
-          }
+          uniqueFiles.push(f);
         }
+        await Promise.all(
+          uniqueFiles.map(async (f) => {
+            try {
+              const remainingRefs = await filestoreRepo.countReferencesByHash(
+                f.hash,
+              );
+              if (remainingRefs === 0) {
+                await filestoreRepo.deleteObject(
+                  f.bucketName || 'manuscript-files',
+                  f.storageKey,
+                );
+              }
+            } catch {
+              // Non-blocking CAS GC
+            }
+          }),
+        );
       }
 
       if (this.redis?.isReady?.()) {
@@ -165,3 +182,6 @@ export class ManuscriptCleanupListener {
     }
   }
 }
+
+/** @deprecated Use CleanupListener */
+export { CleanupListener as ManuscriptCleanupListener };

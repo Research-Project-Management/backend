@@ -3,7 +3,7 @@
  * Pure domain logic, entities, value objects, exceptions, and ports for Project History.
  */
 
-export * from './myers-diff.engine';
+export * from './diff.engine';
 export * from './snapshot-normalizer';
 export * from './snapshot.entity';
 export * from './version-label.entity';

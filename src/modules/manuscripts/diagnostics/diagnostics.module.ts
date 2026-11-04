@@ -9,7 +9,7 @@ import { DiagnosticsService } from './diagnostics.service';
 import {
   ErrorKnowledgeBase,
   CompileLogAnalyzer,
-  FastSyntaxLinter,
+  SyntaxLinter,
 } from './domain';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 
@@ -24,9 +24,9 @@ import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
       useFactory: (kb: ErrorKnowledgeBase) => new CompileLogAnalyzer(kb),
     },
     {
-      provide: FastSyntaxLinter,
+      provide: SyntaxLinter,
       inject: [ErrorKnowledgeBase],
-      useFactory: (kb: ErrorKnowledgeBase) => new FastSyntaxLinter(kb),
+      useFactory: (kb: ErrorKnowledgeBase) => new SyntaxLinter(kb),
     },
     DiagnosticsService,
   ],
@@ -34,7 +34,7 @@ import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
     DiagnosticsService,
     ErrorKnowledgeBase,
     CompileLogAnalyzer,
-    FastSyntaxLinter,
+    SyntaxLinter,
   ],
 })
 export class DiagnosticsModule {}

@@ -13,7 +13,7 @@ import {
   HtmlExportStrategy,
   PlainTexExportStrategy,
   transpileLatexDocumentForExport,
-} from '../../../src/modules/manuscripts/export-import/domain/latex-export-transpiler';
+} from '../../../src/modules/manuscripts/export-import/domain/latex.transpiler';
 import { ExportImportService } from '../../../src/modules/manuscripts/export-import/export-import.service';
 import {
   BaseLatexEngine,
@@ -24,7 +24,7 @@ import {
   AcademicSpellEngine,
   LanguageSpellProfileRegistry,
   LanguageCodeVo,
-} from '../../../src/modules/manuscripts/spelling/domain/academic-spell.engine';
+} from '../../../src/modules/manuscripts/spelling/domain/spell.engine';
 import {
   ReviewTransitionPolicy,
   defaultReviewTransitionPolicy,
@@ -34,9 +34,9 @@ import { TemplatesRepository } from '../../../src/modules/manuscripts/templates/
 import {
   CrossrefArxivResolverAdapter,
   createResilientFetch,
-} from '../../../src/modules/manuscripts/citations/domain/crossref-arxiv.resolver';
-import { AcademicIdentifierVo } from '../../../src/modules/manuscripts/citations/domain/academic-identifier';
-import { FastSyntaxLinter } from '../../../src/modules/manuscripts/diagnostics/domain/fast-syntax.linter';
+} from '../../../src/modules/manuscripts/citations/domain/identifier.resolver';
+import { AcademicIdentifierVo } from '../../../src/modules/manuscripts/citations/domain/identifier';
+import { FastSyntaxLinter } from '../../../src/modules/manuscripts/diagnostics/domain/syntax.linter';
 import {
   classifyEvent,
   EVENT_RATE_CLASS_MAP,

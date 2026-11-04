@@ -39,6 +39,7 @@ export class DocstoreRepository {
     return new TextDoc({
       id: record.id,
       projectId: record.projectId,
+      pageId: (record as { pageId?: string | null }).pageId ?? record.projectId,
       path: record.path,
       lines: rawLines,
       rev: record.rev,
@@ -149,6 +150,7 @@ export class DocstoreRepository {
     const record = await client.manuscriptDoc.create({
       data: {
         projectId: data.projectId,
+        ...(data.pageId ? { pageId: data.pageId } : {}),
         path: cleanPath,
         lines: data.lines,
         rev: 1,
@@ -354,7 +356,11 @@ export class DocstoreRepository {
         : null;
     }
     if (patch.name !== undefined) {
-      updateData.path = patch.name.replace(/\\/g, '/').replace(/^\/+/, '');
+      const parsedName = NodePathVo.parse(
+        patch.name || 'document.tex',
+        'document.tex',
+      );
+      updateData.path = parsedName.relativePath;
     }
     if (patch.ranges !== undefined) {
       const existingRanges = (current.ranges as DocRanges) || {};
@@ -401,7 +407,7 @@ export class DocstoreRepository {
             name: parsed.leafName,
             path: parsed.normalizedPath,
             depth: parsed.depth,
-            ...(parentId !== undefined ? { parentId } : {}),
+            parentId: parentId ?? null,
           },
         })
         ?.catch(() => undefined);
@@ -469,6 +475,14 @@ export class DocstoreRepository {
   }
 
   public async destroyDoc(projectId: string, docId: string): Promise<boolean> {
+    await this.prisma.manuscriptNode
+      ?.deleteMany({
+        where: {
+          projectId,
+          OR: [{ docId }, { id: docId }],
+        },
+      })
+      ?.catch(() => undefined);
     const result = await this.prisma.manuscriptDoc.deleteMany({
       where: { id: docId, projectId },
     });

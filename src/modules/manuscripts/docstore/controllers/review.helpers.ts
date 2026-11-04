@@ -1,7 +1,7 @@
 /**
  * modules/manuscripts/docstore/controllers/review.helpers.ts
  * Co-located formatting, validation, resolution, and docstore-patching helpers
- * for PagesReviewController.
+ * for ReviewController.
  */
 
 import {
@@ -25,7 +25,7 @@ import {
   isReviewTransitionAllowed,
   defaultReviewTransitionPolicy,
 } from '../dto/review-status.dto';
-import { ManuscriptPageScopeRepository } from '../repositories/scope.repository';
+import { ScopeRepository } from '../repositories/scope.repository';
 
 export type ResolvedUserMap = Map<
   string,
@@ -450,4 +450,207 @@ export async function updateDocReviewStatusWithCas(params: {
   });
 
   return { review: updatedReview, previousStatus: prevReview.status };
+}
+
+export async function buildProjectReviewOverview(params: {
+  pageScopeRepo: ScopeRepository;
+  projectId: string;
+  resolveUserNames: (
+    userIds: (string | null | undefined)[],
+  ) => Promise<ResolvedUserMap>;
+}) {
+  const { pageScopeRepo, projectId, resolveUserNames } = params;
+
+  const { docs, nodes, allThreads, allChanges } =
+    typeof pageScopeRepo.getProjectReviewOverviewData === 'function'
+      ? await pageScopeRepo.getProjectReviewOverviewData(projectId)
+      : await (async () => {
+          const prisma = pageScopeRepo.getPrisma();
+          const [d, n, t, c] = await Promise.all([
+            prisma.manuscriptDoc.findMany({
+              where: { projectId, deleted: false },
+              select: { id: true, path: true },
+              orderBy: { createdAt: 'asc' },
+            }),
+            prisma.manuscriptNode.findMany({
+              where: { projectId, type: 'DOC' },
+              select: {
+                id: true,
+                docId: true,
+                name: true,
+                path: true,
+                isRootDoc: true,
+                sortOrder: true,
+              },
+              orderBy: [{ isRootDoc: 'desc' }, { sortOrder: 'asc' }],
+            }),
+            prisma.manuscriptCommentThread.findMany({
+              where: { projectId },
+              include: {
+                replies: {
+                  orderBy: { createdAt: 'asc' },
+                },
+              },
+              orderBy: [{ startLine: 'asc' }, { createdAt: 'asc' }],
+            }),
+            prisma.manuscriptTrackChange.findMany({
+              where: { projectId },
+              orderBy: [
+                { startLine: 'asc' },
+                { startCol: 'asc' },
+                { createdAt: 'asc' },
+              ],
+            }),
+          ]);
+          return { docs: d, nodes: n, allThreads: t, allChanges: c };
+        })();
+
+  const userIds: (string | null | undefined)[] = [];
+  for (const t of allThreads) {
+    userIds.push(t.createdById);
+    for (const r of t.replies || []) {
+      userIds.push(r.createdById);
+    }
+  }
+  for (const c of allChanges) {
+    userIds.push(c.createdById, c.resolvedById);
+  }
+  const userMap = await resolveUserNames(userIds);
+
+  const docMetaMap = new Map<
+    string,
+    { docId: string; title: string; path: string; isRootDoc: boolean }
+  >();
+  for (const node of nodes) {
+    const dId = node.docId || node.id;
+    const cleanTitle = (node.path || node.name || 'document.tex').replace(
+      /^\/+/,
+      '',
+    );
+    docMetaMap.set(dId, {
+      docId: dId,
+      title: cleanTitle,
+      path: node.path || `/${cleanTitle}`,
+      isRootDoc: Boolean(node.isRootDoc),
+    });
+  }
+  for (const doc of docs) {
+    if (!docMetaMap.has(doc.id)) {
+      const cleanTitle = (doc.path || 'document.tex').replace(/^\/+/, '');
+      docMetaMap.set(doc.id, {
+        docId: doc.id,
+        title: cleanTitle,
+        path: doc.path || `/${cleanTitle}`,
+        isRootDoc: cleanTitle === 'main.tex',
+      });
+    }
+  }
+
+  const threadsByDoc = new Map<
+    string,
+    ReturnType<typeof formatCommentThreadDto>[]
+  >();
+  for (const t of allThreads) {
+    const formatted = formatCommentThreadDto(t, userMap, {
+      includeAvatar: true,
+      includeDocId: true,
+    });
+    const list = threadsByDoc.get(t.docId) || [];
+    list.push(formatted);
+    threadsByDoc.set(t.docId, list);
+  }
+
+  const changesByDoc = new Map<
+    string,
+    ReturnType<typeof formatSuggestionItemDto>[]
+  >();
+  for (const c of allChanges) {
+    const formatted = formatSuggestionItemDto(c, userMap);
+    const list = changesByDoc.get(c.docId) || [];
+    list.push(formatted);
+    changesByDoc.set(c.docId, list);
+  }
+
+  for (const dId of [...threadsByDoc.keys(), ...changesByDoc.keys()]) {
+    if (!docMetaMap.has(dId)) {
+      docMetaMap.set(dId, {
+        docId: dId,
+        title: 'document.tex',
+        path: '/document.tex',
+        isRootDoc: false,
+      });
+    }
+  }
+
+  let totalOpenComments = 0;
+  let totalResolvedComments = 0;
+  let totalPendingSuggestions = 0;
+  let totalAcceptedSuggestions = 0;
+  let totalRejectedSuggestions = 0;
+
+  const files = Array.from(docMetaMap.values()).map((meta) => {
+    const comments = threadsByDoc.get(meta.docId) || [];
+    const suggestions = changesByDoc.get(meta.docId) || [];
+
+    const openCommentsCount = comments.filter(
+      (c) => c.status !== 'resolved',
+    ).length;
+    const resolvedCommentsCount = comments.filter(
+      (c) => c.status === 'resolved',
+    ).length;
+    const pendingSuggestionsCount = suggestions.filter(
+      (s) => s.status === 'pending',
+    ).length;
+    const acceptedSuggestionsCount = suggestions.filter(
+      (s) => s.status === 'accepted',
+    ).length;
+    const rejectedSuggestionsCount = suggestions.filter(
+      (s) => s.status === 'rejected',
+    ).length;
+
+    totalOpenComments += openCommentsCount;
+    totalResolvedComments += resolvedCommentsCount;
+    totalPendingSuggestions += pendingSuggestionsCount;
+    totalAcceptedSuggestions += acceptedSuggestionsCount;
+    totalRejectedSuggestions += rejectedSuggestionsCount;
+
+    return {
+      docId: meta.docId,
+      fileId: meta.docId,
+      title: meta.title,
+      path: meta.path,
+      isRootDoc: meta.isRootDoc,
+      comments,
+      suggestions,
+      counts: {
+        openCommentsCount,
+        resolvedCommentsCount,
+        pendingSuggestionsCount,
+        acceptedSuggestionsCount,
+        rejectedSuggestionsCount,
+        totalVisibleCount: openCommentsCount + pendingSuggestionsCount,
+        totalResolvedCount:
+          resolvedCommentsCount +
+          acceptedSuggestionsCount +
+          rejectedSuggestionsCount,
+      },
+    };
+  });
+
+  return {
+    projectId,
+    files,
+    totals: {
+      openCommentsCount: totalOpenComments,
+      resolvedCommentsCount: totalResolvedComments,
+      pendingSuggestionsCount: totalPendingSuggestions,
+      acceptedSuggestionsCount: totalAcceptedSuggestions,
+      rejectedSuggestionsCount: totalRejectedSuggestions,
+      totalVisibleCount: totalOpenComments + totalPendingSuggestions,
+      totalResolvedCount:
+        totalResolvedComments +
+        totalAcceptedSuggestions +
+        totalRejectedSuggestions,
+    },
+  };
 }

@@ -12,7 +12,7 @@ import {
   FilestoreRepository,
   LocalDiskBinaryStorageAdapter,
   S3BinaryStorageAdapter,
-  CryptoGitBlobHasherAdapter,
+  ContentHasherAdapter,
 } from './filestore.repository';
 import { IBinaryStoragePort } from './filestore.types';
 
@@ -20,7 +20,7 @@ import { IBinaryStoragePort } from './filestore.types';
   imports: [ConfigModule, PrismaModule],
   controllers: [FilestoreController],
   providers: [
-    CryptoGitBlobHasherAdapter,
+    ContentHasherAdapter,
     {
       provide: IBinaryStoragePort,
       useFactory: (configService: ConfigService) => {
@@ -52,7 +52,7 @@ import { IBinaryStoragePort } from './filestore.types';
   exports: [
     FilestoreService,
     FilestoreRepository,
-    CryptoGitBlobHasherAdapter,
+    ContentHasherAdapter,
     IBinaryStoragePort,
   ],
 })

@@ -16,7 +16,7 @@ import {
   ManuscriptCollectorAdapter,
   ManuscriptRestorerAdapter,
 } from './adapters/project-history.adapters';
-import { MyersDiffEngine } from './domain';
+import { DiffEngine } from './domain';
 
 @Module({
   imports: [PrismaModule, StructureModule, DocstoreModule, FilestoreModule],
@@ -24,7 +24,7 @@ import { MyersDiffEngine } from './domain';
   providers: [
     ProjectHistoryService,
     ProjectHistoryRepository,
-    MyersDiffEngine,
+    DiffEngine,
     ManuscriptCollectorAdapter,
     ManuscriptRestorerAdapter,
   ],

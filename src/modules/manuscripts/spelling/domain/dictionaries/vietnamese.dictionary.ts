@@ -1,14 +1,14 @@
 /**
- * vietnamese-common.dictionary.ts
+ * vietnamese.dictionary.ts
  *
  * Comprehensive foundational Vietnamese syllable & vocabulary wordlist
- * for AcademicSpellEngineAdapter.
+ * for SpellEngine.
  *
  * Contains high-frequency standard Vietnamese academic, scientific, mathematical,
  * engineering, computing, thesis/dissertation, publishing, and standard linguistic syllables.
  */
 
-export const VIETNAMESE_COMMON_WORDS: readonly string[] = [
+export const VIETNAMESE_WORDS: readonly string[] = [
   'a',
   'à',
   'ả',
@@ -7448,3 +7448,5 @@ export const VIETNAMESE_COMMON_WORDS: readonly string[] = [
   'yếu',
   'yệu',
 ];
+
+export { VIETNAMESE_WORDS as VIETNAMESE_COMMON_WORDS };

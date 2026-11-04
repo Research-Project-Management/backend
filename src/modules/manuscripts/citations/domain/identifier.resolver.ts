@@ -1,13 +1,13 @@
 /**
- * citations/domain/crossref-arxiv.resolver.ts
+ * citations/domain/identifier.resolver.ts
  * Resolver resolving DOI, arXiv, and ISBN identifiers via public academic APIs
  * (CrossRef Content Negotiation, arXiv Atom Export API, and OpenLibrary Books API).
  */
 
 import { IIdentifierResolverPort } from './citations.ports';
-import { AcademicIdentifierVo } from './academic-identifier';
+import { IdentifierVo } from './identifier';
 import { BibEntry } from './bib-entry.entity';
-import { RegexAstBibtexParser } from './regex-ast-bibtex.parser';
+import { BibtexParser } from './bibtex.parser';
 import { sanitizeCitationKey } from './bibtex.formatter';
 
 interface CrossrefDateParts {
@@ -112,27 +112,27 @@ export function createResilientFetch(
 /**
  * Chain of Responsibility Pattern: Academic Identifier Resolution Handler
  */
-export interface IIdentifierResolutionHandler {
+export interface IIdentifierHandler {
   readonly name: string;
-  setNext(handler: IIdentifierResolutionHandler): IIdentifierResolutionHandler;
-  handle(identifier: AcademicIdentifierVo): Promise<BibEntry | null>;
+  setNext(handler: IIdentifierHandler): IIdentifierHandler;
+  handle(identifier: IdentifierVo): Promise<BibEntry | null>;
 }
 
-export abstract class BaseIdentifierResolutionHandler
-  implements IIdentifierResolutionHandler
+export abstract class BaseIdentifierHandler
+  implements IIdentifierHandler
 {
   public abstract readonly name: string;
-  private nextHandler?: IIdentifierResolutionHandler;
+  private nextHandler?: IIdentifierHandler;
 
   public setNext(
-    handler: IIdentifierResolutionHandler,
-  ): IIdentifierResolutionHandler {
+    handler: IIdentifierHandler,
+  ): IIdentifierHandler {
     this.nextHandler = handler;
     return handler;
   }
 
   public async handle(
-    identifier: AcademicIdentifierVo,
+    identifier: IdentifierVo,
   ): Promise<BibEntry | null> {
     if (this.canHandle(identifier)) {
       const resolved = await this.tryResolve(identifier);
@@ -146,9 +146,9 @@ export abstract class BaseIdentifierResolutionHandler
     return null;
   }
 
-  protected abstract canHandle(identifier: AcademicIdentifierVo): boolean;
+  protected abstract canHandle(identifier: IdentifierVo): boolean;
   protected abstract tryResolve(
-    identifier: AcademicIdentifierVo,
+    identifier: IdentifierVo,
   ): Promise<BibEntry | null>;
 }
 
@@ -176,22 +176,22 @@ export function buildResolvedCitationKey(
   return sanitizeCitationKey(fallback.replace(/\//g, '_')) || 'ref';
 }
 
-export class CrossrefBibtexResolutionHandler extends BaseIdentifierResolutionHandler {
+export class CrossrefBibtexHandler extends BaseIdentifierHandler {
   public readonly name = 'CrossrefBibtexContentNegotiation';
 
   constructor(
     private readonly fetchFn: FetchLikeFn,
-    private readonly parser = new RegexAstBibtexParser(),
+    private readonly parser = new BibtexParser(),
   ) {
     super();
   }
 
-  protected canHandle(identifier: AcademicIdentifierVo): boolean {
+  protected canHandle(identifier: IdentifierVo): boolean {
     return identifier.isDoi();
   }
 
   protected async tryResolve(
-    identifier: AcademicIdentifierVo,
+    identifier: IdentifierVo,
   ): Promise<BibEntry | null> {
     const contactMailto = process.env.CROSSREF_MAILTO || 'support@flux.app';
     try {
@@ -219,19 +219,19 @@ export class CrossrefBibtexResolutionHandler extends BaseIdentifierResolutionHan
   }
 }
 
-export class CrossrefJsonResolutionHandler extends BaseIdentifierResolutionHandler {
+export class CrossrefJsonHandler extends BaseIdentifierHandler {
   public readonly name = 'CrossrefRestJsonApi';
 
   constructor(private readonly fetchFn: FetchLikeFn) {
     super();
   }
 
-  protected canHandle(identifier: AcademicIdentifierVo): boolean {
+  protected canHandle(identifier: IdentifierVo): boolean {
     return identifier.isDoi();
   }
 
   protected async tryResolve(
-    identifier: AcademicIdentifierVo,
+    identifier: IdentifierVo,
   ): Promise<BibEntry | null> {
     const cleanDoi = identifier.clean;
     try {
@@ -334,19 +334,19 @@ export class CrossrefJsonResolutionHandler extends BaseIdentifierResolutionHandl
   }
 }
 
-export class ArxivAtomResolutionHandler extends BaseIdentifierResolutionHandler {
+export class ArxivHandler extends BaseIdentifierHandler {
   public readonly name = 'ArxivAtomExportApi';
 
   constructor(private readonly fetchFn: FetchLikeFn) {
     super();
   }
 
-  protected canHandle(identifier: AcademicIdentifierVo): boolean {
+  protected canHandle(identifier: IdentifierVo): boolean {
     return identifier.isArxiv();
   }
 
   protected async tryResolve(
-    identifier: AcademicIdentifierVo,
+    identifier: IdentifierVo,
   ): Promise<BibEntry | null> {
     const cleanArxivId = identifier.clean;
     try {
@@ -425,19 +425,19 @@ export interface OpenLibraryBookItem {
   url?: string;
 }
 
-export class OpenLibraryIsbnResolutionHandler extends BaseIdentifierResolutionHandler {
+export class OpenLibraryIsbnHandler extends BaseIdentifierHandler {
   public readonly name = 'OpenLibraryBooksApi';
 
   constructor(private readonly fetchFn: FetchLikeFn) {
     super();
   }
 
-  protected canHandle(identifier: AcademicIdentifierVo): boolean {
+  protected canHandle(identifier: IdentifierVo): boolean {
     return identifier.isIsbn();
   }
 
   protected async tryResolve(
-    identifier: AcademicIdentifierVo,
+    identifier: IdentifierVo,
   ): Promise<BibEntry | null> {
     const cleanIsbn = identifier.clean;
     try {
@@ -493,20 +493,20 @@ export class OpenLibraryIsbnResolutionHandler extends BaseIdentifierResolutionHa
   }
 }
 
-export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
-  private readonly headHandler: IIdentifierResolutionHandler;
+export class IdentifierResolver implements IIdentifierResolverPort {
+  private readonly headHandler: IIdentifierHandler;
 
   constructor(
     fetchFn: FetchLikeFn = createResilientFetch(),
-    customChainHead?: IIdentifierResolutionHandler,
+    customChainHead?: IIdentifierHandler,
   ) {
     if (customChainHead) {
       this.headHandler = customChainHead;
     } else {
-      const bibtexHandler = new CrossrefBibtexResolutionHandler(fetchFn);
-      const jsonHandler = new CrossrefJsonResolutionHandler(fetchFn);
-      const arxivHandler = new ArxivAtomResolutionHandler(fetchFn);
-      const isbnHandler = new OpenLibraryIsbnResolutionHandler(fetchFn);
+      const bibtexHandler = new CrossrefBibtexHandler(fetchFn);
+      const jsonHandler = new CrossrefJsonHandler(fetchFn);
+      const arxivHandler = new ArxivHandler(fetchFn);
+      const isbnHandler = new OpenLibraryIsbnHandler(fetchFn);
       bibtexHandler
         .setNext(jsonHandler)
         .setNext(arxivHandler)
@@ -516,11 +516,21 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
   }
 
   public async resolve(
-    identifier: AcademicIdentifierVo,
+    identifier: IdentifierVo,
   ): Promise<BibEntry | null> {
     return this.headHandler.handle(identifier);
   }
 }
+
+export type { IIdentifierHandler as IIdentifierResolutionHandler };
+export {
+  IdentifierResolver as CrossrefArxivResolverAdapter,
+  BaseIdentifierHandler as BaseIdentifierResolutionHandler,
+  CrossrefBibtexHandler as CrossrefBibtexResolutionHandler,
+  CrossrefJsonHandler as CrossrefJsonResolutionHandler,
+  ArxivHandler as ArxivAtomResolutionHandler,
+  OpenLibraryIsbnHandler as OpenLibraryIsbnResolutionHandler,
+};
 
 /** "Ashish Vaswani" -> "Vaswani, Ashish"; keeps lowercase particles with the family name. */
 function toFamilyGiven(name: string): string {

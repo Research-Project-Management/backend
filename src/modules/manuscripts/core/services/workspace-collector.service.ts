@@ -14,8 +14,8 @@ import {
 } from '../ports/live-collaboration.port';
 
 @Injectable()
-export class ProjectWorkspaceCollectorService {
-  private readonly logger = new Logger(ProjectWorkspaceCollectorService.name);
+export class WorkspaceCollectorService {
+  private readonly logger = new Logger(WorkspaceCollectorService.name);
   private readonly liveCollab: LiveCollaborationPort;
 
   constructor(
@@ -88,3 +88,6 @@ export class ProjectWorkspaceCollectorService {
     }
   }
 }
+
+/** @deprecated Use WorkspaceCollectorService */
+export { WorkspaceCollectorService as ProjectWorkspaceCollectorService };

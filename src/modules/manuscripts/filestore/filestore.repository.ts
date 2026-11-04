@@ -22,12 +22,14 @@ import {
   StorageKey,
 } from './filestore.types';
 import {
+  ContentHasherAdapter,
   CryptoGitBlobHasherAdapter,
   LocalDiskBinaryStorageAdapter,
   S3BinaryStorageAdapter,
 } from './adapters/filestore.adapters';
 
 export {
+  ContentHasherAdapter,
   CryptoGitBlobHasherAdapter,
   LocalDiskBinaryStorageAdapter,
   S3BinaryStorageAdapter,
@@ -38,6 +40,7 @@ export class ManuscriptFileMapper {
     return ManuscriptFile.reconstitute({
       id: row.id,
       projectId: row.projectId,
+      pageId: (row as { pageId?: string | null }).pageId ?? null,
       name: row.name,
       mimeType: row.mimeType,
       sizeBytes: row.sizeBytes,
@@ -55,6 +58,7 @@ export class ManuscriptFileMapper {
   public static toPersistence(entity: ManuscriptFile): {
     id: string;
     projectId: string;
+    pageId?: string | null;
     name: string;
     mimeType: string;
     sizeBytes: number;
@@ -68,6 +72,7 @@ export class ManuscriptFileMapper {
     return {
       id: entity.id,
       projectId: entity.projectId,
+      ...(entity.pageId ? { pageId: entity.pageId } : {}),
       name: entity.name,
       mimeType: entity.mimeType,
       sizeBytes: entity.sizeBytes,
@@ -85,16 +90,16 @@ export class ManuscriptFileMapper {
 export class FilestoreRepository extends IManuscriptFileRepository {
   private readonly logger = new Logger(FilestoreRepository.name);
   private readonly storage: IBinaryStoragePort;
-  private readonly hasher: CryptoGitBlobHasherAdapter;
+  private readonly hasher: ContentHasherAdapter;
 
   constructor(
     private readonly prisma: PrismaService,
     @Optional() @Inject(IBinaryStoragePort) storage?: IBinaryStoragePort,
-    @Optional() hasher?: CryptoGitBlobHasherAdapter,
+    @Optional() hasher?: ContentHasherAdapter,
   ) {
     super();
     this.storage = storage ?? new LocalDiskBinaryStorageAdapter();
-    this.hasher = hasher ?? new CryptoGitBlobHasherAdapter();
+    this.hasher = hasher ?? new ContentHasherAdapter();
   }
 
   public async hashStream(stream: Readable): Promise<StreamHashResult> {
@@ -163,6 +168,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       create: {
         id: data.id,
         projectId: data.projectId,
+        ...(data.pageId ? { pageId: data.pageId } : {}),
         name: data.name,
         mimeType: data.mimeType,
         sizeBytes: data.sizeBytes,
@@ -174,6 +180,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         deletedAt: data.deletedAt,
       },
       update: {
+        ...(data.pageId ? { pageId: data.pageId } : {}),
         name: data.name,
         mimeType: data.mimeType,
         sizeBytes: data.sizeBytes,
@@ -196,6 +203,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
   private async syncFileNode(data: {
     id: string;
     projectId: string;
+    pageId?: string | null;
     name: string;
     sizeBytes: number;
     hash: string;
@@ -226,16 +234,26 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       });
 
       if (existingByFileId) {
+        const pathChanged = existingByFileId.path !== parsed.normalizedPath;
+        const nextParentId = pathChanged
+          ? await ensurePrismaFolderChain(
+              this.prisma,
+              data.projectId,
+              parsed.folderChain,
+              data.pageId,
+            )
+          : undefined;
         await this.prisma.manuscriptNode.updateMany?.({
           where: { id: existingByFileId.id, projectId: data.projectId },
           data: {
             sizeBytes: data.sizeBytes,
             hash: data.hash,
-            ...(existingByFileId.path !== parsed.normalizedPath
+            ...(pathChanged
               ? {
                   name: parsed.leafName,
                   path: parsed.normalizedPath,
                   depth: parsed.depth,
+                  parentId: nextParentId ?? null,
                 }
               : {}),
           },
@@ -247,6 +265,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         this.prisma,
         data.projectId,
         parsed.folderChain,
+        data.pageId,
       );
 
       const existingByPath = await this.prisma.manuscriptNode.findUnique?.({
@@ -276,6 +295,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         await this.prisma.manuscriptNode.create({
           data: {
             projectId: data.projectId,
+            ...(data.pageId ? { pageId: data.pageId } : {}),
             parentId,
             type: 'FILE',
             name: parsed.leafName,

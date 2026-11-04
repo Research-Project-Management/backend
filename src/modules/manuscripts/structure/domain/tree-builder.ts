@@ -209,7 +209,7 @@ export class FileTreeBuilder {
   }
 }
 
-export class HeuristicRootDocDetector {
+export class RootDocDetector {
   public detectRootDoc(
     nodes: readonly ManuscriptNodeEntity[],
     docContents: Map<string, string[]>,
@@ -217,3 +217,5 @@ export class HeuristicRootDocDetector {
     return FileTreeBuilder.detectRootDoc(nodes, docContents);
   }
 }
+
+export { RootDocDetector as HeuristicRootDocDetector };

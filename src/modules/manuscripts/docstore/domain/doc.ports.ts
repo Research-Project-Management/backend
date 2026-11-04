@@ -10,6 +10,7 @@ import { DocRanges } from './doc-range';
 
 export interface CreateDocData {
   projectId: string;
+  pageId?: string | null;
   path: string;
   lines: string[];
   version?: number;

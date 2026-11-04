@@ -1,16 +1,16 @@
 /**
- * english-common.dictionary.ts
+ * english.dictionary.ts
  *
- * Comprehensive foundational English wordlist for AcademicSpellEngineAdapter.
+ * Comprehensive foundational English wordlist for SpellEngine.
  * Contains high-frequency standard English vocabulary, pronouns, prepositions,
  * auxiliary verbs, conjunctions, core nouns, verbs, adjectives, adverbs,
  * LaTeX terms, Beamer slide commands, and machine learning/mathematics vocabulary.
  *
- * Combined with the morphological stem analyzer in AcademicSpellEngineAdapter,
+ * Combined with the morphological stem analyzer in SpellEngine,
  * this covers >50,000 common English and scientific inflections.
  */
 
-export const ENGLISH_COMMON_WORDS: readonly string[] = [
+export const ENGLISH_WORDS: readonly string[] = [
   // Pronouns & Determiners
   'i',
   'you',
@@ -3674,3 +3674,5 @@ export const ENGLISH_COMMON_WORDS: readonly string[] = [
   'youth',
   'zone',
 ];
+
+export { ENGLISH_WORDS as ENGLISH_COMMON_WORDS };

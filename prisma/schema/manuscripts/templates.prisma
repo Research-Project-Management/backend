@@ -31,6 +31,8 @@ model ManuscriptTemplate {
   createdAt     DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([category, isOfficial], map: "idx_manuscript_templates_cat")
+  @@index([category, isOfficial, downloadCount(sort: Desc)], map: "idx_manuscript_templates_cat")
+  @@index([isOfficial(sort: Desc), downloadCount(sort: Desc)], map: "idx_manuscript_templates_official_downloads")
+  @@index([downloadCount(sort: Desc)], map: "idx_manuscript_templates_downloads")
   @@map("manuscript_templates")
 }
