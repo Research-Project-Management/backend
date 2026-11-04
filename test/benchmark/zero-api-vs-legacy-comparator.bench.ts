@@ -21,7 +21,7 @@ import {
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
-  normalizeAcademicTitleCase,
+  normalizeTitleCase,
   splitAuthorString,
   cleanAbstractText,
   extractYearFromDate,
@@ -302,7 +302,7 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
             l.length > 15 && !l.startsWith('arXiv:') && !l.startsWith('http'),
         );
         const cleanTitle = candidateTitle
-          ? normalizeAcademicTitleCase(candidateTitle)
+          ? normalizeTitleCase(candidateTitle)
           : undefined;
 
         // 3. Year extraction

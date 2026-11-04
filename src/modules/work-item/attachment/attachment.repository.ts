@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { EntityType, Prisma } from '@prisma/client';
-import { CreateAttachmentDto } from './dto/create-attachment.dto';
+import { CreateAttachmentDto } from './dto/attachment.dto';
 import {
   USER_MINIMAL_SELECT,
   mapUserMinimal,
@@ -58,39 +58,6 @@ export class AttachmentRepository {
     return res ? mapAttachment(res) : null;
   }
 
-  async findMany(
-    where: {
-      entityType?: EntityType;
-      entityId?: string;
-      projectId?: string;
-    },
-    skip = 0,
-    take = 50,
-  ) {
-    const filter: Prisma.EntityAttachmentWhereInput = {
-      ...(where.entityType && { entityType: where.entityType }),
-      ...(where.entityId && { entityId: where.entityId }),
-      ...(where.projectId && { projectId: where.projectId }),
-    };
-
-    const [total, items] = await Promise.all([
-      this.prisma.entityAttachment.count({ where: filter }),
-      this.prisma.entityAttachment.findMany({
-        where: filter,
-        skip,
-        take,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          author: {
-            select: USER_MINIMAL_SELECT,
-          },
-        },
-      }),
-    ]);
-
-    return { total, items: items.map(mapAttachment) };
-  }
-
   async findByEntity(entityType: EntityType, entityId: string) {
     const items = await this.prisma.entityAttachment.findMany({
       where: {
@@ -110,15 +77,6 @@ export class AttachmentRepository {
   async delete(id: string) {
     return this.prisma.entityAttachment.delete({
       where: { id },
-    });
-  }
-
-  async deleteByEntity(entityType: EntityType, entityId: string) {
-    return this.prisma.entityAttachment.deleteMany({
-      where: {
-        entityType,
-        entityId,
-      },
     });
   }
 

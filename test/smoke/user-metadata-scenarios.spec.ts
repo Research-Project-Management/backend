@@ -1,4 +1,4 @@
-import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
@@ -13,7 +13,7 @@ import {
   normalizeIsbn,
   normalizePmid,
 } from '@/modules/library/core';
-import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
+import { RegexExtractor } from '@/modules/library/core/domain/regex.extractor';
 import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { buildMockLibraryItem } from '@test/factories';

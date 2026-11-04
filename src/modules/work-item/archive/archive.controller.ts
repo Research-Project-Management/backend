@@ -19,7 +19,7 @@ import {
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { ArchiveService } from './archive.service';
-import { BulkArchiveDto } from './dto/bulk-archive.dto';
+import { BulkArchiveDto } from './dto/archive.dto';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('work-items')
@@ -82,7 +82,7 @@ export class ArchiveController {
     if (projectId && !bulkArchiveDto.projectId) {
       bulkArchiveDto.projectId = projectId;
     }
-    return this.archiveService.bulkArchiveWorkItems(bulkArchiveDto, userId);
+    return this.archiveService.bulkArchive(bulkArchiveDto, userId);
   }
 
   @Post([
@@ -100,7 +100,7 @@ export class ArchiveController {
     if (projectId && !bulkArchiveDto.projectId) {
       bulkArchiveDto.projectId = projectId;
     }
-    return this.archiveService.bulkRestoreWorkItems(bulkArchiveDto, userId);
+    return this.archiveService.bulkRestore(bulkArchiveDto, userId);
   }
 
   @Get([

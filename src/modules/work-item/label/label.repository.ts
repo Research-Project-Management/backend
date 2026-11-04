@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, WorkItemLabel as Label } from '@prisma/client';
-import { LabelWithChildren, ReorderLabelItem } from './types/label.types';
+import { LabelWithChildren, ReorderLabelItem } from './dto/label.dto';
 
 @Injectable()
 export class LabelRepository {

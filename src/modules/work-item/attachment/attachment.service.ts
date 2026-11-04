@@ -11,42 +11,46 @@ import type { FastifyRequest } from 'fastify';
 import { AttachmentRepository } from './attachment.repository';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 
-import { PrismaService, isUuid } from '@/core';
+import { PrismaService, RedisCacheService, isUuid } from '@/core';
 import {
   AddAttachmentDto,
   AttachPageDto,
   AttachPaperDto,
   AttachFileDto,
   AttachLinkDto,
+  PresignAttachmentDto,
+  PresignedAttachmentResponse,
 } from './dto/attachment.dto';
-import { CreateAttachmentDto } from './dto/create-attachment.dto';
-import { PresignAttachmentDto } from './dto/presign-attachment.dto';
-import { QueryAttachmentDto } from './dto/query-attachment.dto';
-import { PresignedAttachmentResponse } from './types/attachment.types';
 import { EntityType } from '@prisma/client';
-import { formatWorkItem } from '@/modules/work-item/core/utils/work-item.util';
+import { formatWorkItem } from '@/modules/work-item/core/utils/core.util';
 import {
   formatEntityAttachments,
   getAttachmentMeta,
-} from '@/modules/work-item/core/utils/attachment-format.util';
+} from '@/modules/work-item/core/utils/attachment.util';
 import { USER_MINIMAL_SELECT } from '@/modules/work-item/common/types/shared.types';
+import { invalidateWorkItemCache } from '@/modules/work-item/common/constants/redis.constant';
 
 @Injectable()
 export class AttachmentService {
   private readonly logger = new Logger(AttachmentService.name);
 
   constructor(
-    private readonly repository: AttachmentRepository,
+    private readonly attachmentRepository: AttachmentRepository,
     private readonly prismaService: PrismaService,
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
     @Optional() private readonly eventEmitter?: EventEmitter2,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
+  private async invalidateCache(projectId?: string | null, workItemId?: string) {
+    await invalidateWorkItemCache(this.cache, { projectId, workItemId });
+  }
+
   private async findWorkItem(workItemId: string) {
-    if (this.repository.findWorkItem) {
-      const found = await this.repository.findWorkItem(workItemId);
+    if (this.attachmentRepository.findWorkItem) {
+      const found = await this.attachmentRepository.findWorkItem(workItemId);
       if (found) return found;
     }
     if (!this.prismaService?.workItem) return null;
@@ -97,7 +101,8 @@ export class AttachmentService {
     }
 
     const cleanName = dto.filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const contentType = dto.contentType || 'application/octet-stream';
+    const contentType =
+      dto.contentType || dto.mimeType || 'application/octet-stream';
 
     if (this.storagePort?.getPresignedUploadUrl) {
       const presigned = await this.storagePort.getPresignedUploadUrl({
@@ -106,12 +111,15 @@ export class AttachmentService {
         mimeType: contentType,
         sizeBytes: dto.size || 0,
       });
+      const fileUrl = `/api/v1/storage/files/${presigned.fileUuid}/content`;
       return {
         signedUrl: presigned.uploadUrl,
+        uploadUrl: presigned.uploadUrl,
         storageKey: presigned.storageKey,
-        fileUrl: `/api/v1/storage/files/${presigned.fileUuid}/content`,
-        entityType: dto.entityType,
-        entityId: dto.entityId,
+        fileUrl,
+        publicUrl: fileUrl,
+        entityType: dto.entityType || EntityType.work_item,
+        entityId: dto.entityId || '',
       };
     }
 
@@ -185,7 +193,7 @@ export class AttachmentService {
     const finalKey = uploadRes.path;
     const fileId = uploadRes.fileId;
 
-    const attachment = await this.repository.create(
+    const attachment = await this.attachmentRepository.create(
       {
         entityType,
         entityId: resolvedEntityId,
@@ -204,6 +212,10 @@ export class AttachmentService {
       },
       authorId,
     );
+
+    if (entityType === EntityType.work_item) {
+      await this.invalidateCache(resolvedProjectId, resolvedEntityId);
+    }
 
     this.emitAttachmentEvent('attachment.created', {
       attachmentId: attachment.id,
@@ -229,24 +241,10 @@ export class AttachmentService {
     };
   }
 
-  /**
-   * Commits attachment metadata after client direct upload.
-   */
-  async createAttachment(dto: CreateAttachmentDto, authorId: string) {
-    const attachment = await this.repository.create(dto, authorId);
-    this.emitAttachmentEvent('attachment.created', {
-      attachmentId: attachment.id,
-      entityType: dto.entityType,
-      entityId: dto.entityId,
-      authorId,
-    });
-    return attachment;
-  }
-
   private async getFormattedWorkItem(workItemId: string) {
     const basic = await this.requireWorkItem(workItemId);
-    const workItem = this.repository.findWorkItemWithDetails
-      ? await this.repository.findWorkItemWithDetails(basic.id)
+    const workItem = this.attachmentRepository.findWorkItemWithDetails
+      ? await this.attachmentRepository.findWorkItemWithDetails(basic.id)
       : await this.prismaService?.workItem?.findUnique({
           where: { id: basic.id },
           include: {
@@ -275,10 +273,11 @@ export class AttachmentService {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const records = await this.repository.findByEntity(
+    const records = await this.attachmentRepository.findByEntity(
       EntityType.work_item,
       basic.id,
     );
+    await this.invalidateCache(basic.projectId, basic.id);
     return formatWorkItem({
       ...workItem,
       attachments: formatEntityAttachments(records),
@@ -303,7 +302,7 @@ export class AttachmentService {
    */
   async getAttachments(workItemId: string) {
     const workItem = await this.requireWorkItem(workItemId);
-    const records = await this.repository.findByEntity(
+    const records = await this.attachmentRepository.findByEntity(
       EntityType.work_item,
       workItem.id,
     );
@@ -330,7 +329,7 @@ export class AttachmentService {
     authorId: string,
   ) {
     const workItem = await this.requireWorkItem(workItemId);
-    const attachment = await this.repository.create(
+    const attachment = await this.attachmentRepository.create(
       {
         entityType: EntityType.work_item,
         entityId: workItem.id,
@@ -344,6 +343,8 @@ export class AttachmentService {
       },
       authorId,
     );
+
+    await this.invalidateCache(workItem.projectId, workItem.id);
 
     this.emitAttachmentEvent('attachment.created', {
       attachmentId: attachment.id,
@@ -363,8 +364,10 @@ export class AttachmentService {
     attachmentId: string,
     authorId: string,
   ) {
-    await this.requireWorkItem(workItemId);
-    return this.deleteAttachment(attachmentId, authorId);
+    const workItem = await this.requireWorkItem(workItemId);
+    const res = await this.deleteAttachment(attachmentId, authorId);
+    await this.invalidateCache(workItem.projectId, workItem.id);
+    return res;
   }
 
   private async linkEntity(
@@ -374,8 +377,8 @@ export class AttachmentService {
     description?: string,
   ): Promise<void> {
     try {
-      if (this.repository.upsertEntityLink) {
-        await this.repository.upsertEntityLink(
+      if (this.attachmentRepository.upsertEntityLink) {
+        await this.attachmentRepository.upsertEntityLink(
           workItemId,
           entityType,
           entityId,
@@ -407,8 +410,8 @@ export class AttachmentService {
     entityId: string,
   ): Promise<void> {
     try {
-      if (this.repository.deleteEntityLink) {
-        await this.repository.deleteEntityLink(
+      if (this.attachmentRepository.deleteEntityLink) {
+        await this.attachmentRepository.deleteEntityLink(
           workItemId,
           entityType,
           entityId,
@@ -436,7 +439,7 @@ export class AttachmentService {
       entityType === 'page' ? EntityType.page : EntityType.paper;
     const label = entityType === 'page' ? 'Page' : 'Paper';
 
-    const records = await this.repository.findByEntity(
+    const records = await this.attachmentRepository.findByEntity(
       EntityType.work_item,
       workItem.id,
     );
@@ -444,7 +447,7 @@ export class AttachmentService {
       (r) => r.id === targetId || getAttachmentMeta(r)[metaKey] === targetId,
     );
     if (target) {
-      await this.repository.delete(target.id);
+      await this.attachmentRepository.delete(target.id);
     }
 
     const resolvedEntityId = getAttachmentMeta(target)[metaKey] || targetId;
@@ -461,7 +464,7 @@ export class AttachmentService {
     const title = dto.title?.trim() || 'Untitled Page';
     const pageId = dto.pageId;
 
-    const attachment = await this.repository.create(
+    const attachment = await this.attachmentRepository.create(
       {
         entityType: EntityType.work_item,
         entityId: workItem.id,
@@ -500,7 +503,7 @@ export class AttachmentService {
     const paperId = dto.paperId;
     const url = dto.doi ? `https://doi.org/${dto.doi}` : '';
 
-    const attachment = await this.repository.create(
+    const attachment = await this.attachmentRepository.create(
       {
         entityType: EntityType.work_item,
         entityId: workItem.id,
@@ -548,7 +551,7 @@ export class AttachmentService {
         ? parseInt(dto.size, 10) || 0
         : dto.size || 0;
 
-    const attachment = await this.repository.create(
+    const attachment = await this.attachmentRepository.create(
       {
         entityType: EntityType.work_item,
         entityId: workItem.id,
@@ -579,7 +582,7 @@ export class AttachmentService {
 
   async detachFile(workItemId: string, fileId: string, authorId?: string) {
     const workItem = await this.requireWorkItem(workItemId);
-    const records = await this.repository.findByEntity(
+    const records = await this.attachmentRepository.findByEntity(
       EntityType.work_item,
       workItem.id,
     );
@@ -593,7 +596,7 @@ export class AttachmentService {
     if (target) {
       await this.deleteAttachment(target.id, authorId);
     } else {
-      await this.repository.delete(fileId).catch(() => undefined);
+      await this.attachmentRepository.delete(fileId).catch(() => undefined);
     }
 
     return this.buildAttachmentMutationResponse(
@@ -606,7 +609,7 @@ export class AttachmentService {
     const workItem = await this.requireWorkItem(workItemId);
     const title = dto.title?.trim() || dto.url;
 
-    const attachment = await this.repository.create(
+    const attachment = await this.attachmentRepository.create(
       {
         entityType: EntityType.work_item,
         entityId: workItem.id,
@@ -638,7 +641,7 @@ export class AttachmentService {
     _authorId?: string,
   ) {
     const workItem = await this.requireWorkItem(workItemId);
-    const records = await this.repository.findByEntity(
+    const records = await this.attachmentRepository.findByEntity(
       EntityType.work_item,
       workItem.id,
     );
@@ -654,7 +657,7 @@ export class AttachmentService {
       (!Number.isNaN(idx) ? linkRecords[idx] : undefined);
 
     if (target) {
-      await this.repository.delete(target.id);
+      await this.attachmentRepository.delete(target.id);
     }
 
     return this.buildAttachmentMutationResponse(
@@ -664,36 +667,10 @@ export class AttachmentService {
   }
 
   /**
-   * Retrieves list of attachments matching filters.
-   */
-  async getAttachmentsFiltered(query: QueryAttachmentDto) {
-    const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 50;
-    const skip = (page - 1) * limit;
-
-    return this.repository.findMany(
-      {
-        entityType: query.entityType,
-        entityId: query.entityId,
-        projectId: query.projectId,
-      },
-      skip,
-      limit,
-    );
-  }
-
-  /**
-   * Retrieves all attachments for a specific entity.
-   */
-  async getAttachmentsForEntity(entityType: EntityType, entityId: string) {
-    return this.repository.findByEntity(entityType, entityId);
-  }
-
-  /**
    * Retrieves a single attachment by ID.
    */
   async getAttachmentById(id: string) {
-    const attachment = await this.repository.findById(id);
+    const attachment = await this.attachmentRepository.findById(id);
     if (!attachment) {
       throw new NotFoundException(`Attachment ${id} not found`);
     }
@@ -704,7 +681,7 @@ export class AttachmentService {
    * Deletes an attachment from database and underlying storage.
    */
   async deleteAttachment(id: string, authorId?: string) {
-    const attachment = await this.repository.findById(id);
+    const attachment = await this.attachmentRepository.findById(id);
     if (!attachment) {
       throw new NotFoundException(`Attachment ${id} not found`);
     }
@@ -733,7 +710,11 @@ export class AttachmentService {
       }
     }
 
-    await this.repository.delete(id);
+    await this.attachmentRepository.delete(id);
+
+    if (attachment.entityType === EntityType.work_item) {
+      await this.invalidateCache(attachment.projectId, attachment.entityId);
+    }
 
     this.emitAttachmentEvent('attachment.deleted', {
       attachmentId: id,
@@ -749,8 +730,8 @@ export class AttachmentService {
    * Retrieves all work items linked to a specific entity (e.g. page or paper).
    */
   async getWorkItemsByLinkedEntity(entityType: EntityType, entityId: string) {
-    const links = this.repository.findLinkedWorkItems
-      ? await this.repository.findLinkedWorkItems(entityType, entityId)
+    const links = this.attachmentRepository.findLinkedWorkItems
+      ? await this.attachmentRepository.findLinkedWorkItems(entityType, entityId)
       : this.prismaService?.workItemEntityLink
         ? await this.prismaService.workItemEntityLink.findMany({
             where: { entityType, entityId },

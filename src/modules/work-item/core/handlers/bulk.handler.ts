@@ -1,32 +1,43 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Optional } from '@nestjs/common';
 import { CoreRepository } from '@/modules/work-item/core/core.repository';
-import { EventDispatcher } from './event.dispatcher';
+import { EventHandler } from './event.handler';
 import {
   BulkUpdateWorkItemDto,
   BulkUpdatePayload,
   BulkDeleteWorkItemDto,
-} from '@/modules/work-item/core/dto/bulk.dto';
-import { mapPriority } from '@/modules/work-item/core/utils/work-item.util';
-import { isStateCompleted } from '@/modules/work-item/common/utils/state-completion.util';
-import { isUuid } from '@/core';
+} from '@/modules/work-item/core/dto/core.dto';
+import { mapPriority } from '@/modules/work-item/core/utils/core.util';
+import {
+  isStateCompleted,
+  matchProjectState,
+} from '@/modules/work-item/state/utils/state.util';
+import { normalizeStringIds } from '@/modules/work-item/common/types/shared.types';
+import { invalidateWorkItemCache } from '@/modules/work-item/common/constants/redis.constant';
+import { RedisCacheService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class BulkHandler {
   constructor(
-    private readonly workItemRepository: CoreRepository,
-    private readonly eventDispatcher: EventDispatcher,
+    private readonly coreRepository: CoreRepository,
+    private readonly eventHandler: EventHandler,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
   private normalizeIds(rawIds: string[]): string[] {
-    return Array.from(
-      new Set(
-        (Array.isArray(rawIds) ? rawIds : [])
-          .filter((id): id is string => typeof id === 'string')
-          .map((id) => id.trim())
-          .filter(Boolean),
-      ),
-    ).sort();
+    return normalizeStringIds(rawIds);
+  }
+
+  private async notifyCacheInvalidated(
+    projectId: string | undefined,
+    onInvalidateCache?: (projectId: string) => Promise<void>,
+  ): Promise<void> {
+    if (!projectId) return;
+    if (onInvalidateCache) {
+      await onInvalidateCache(projectId);
+      return;
+    }
+    await invalidateWorkItemCache(this.cache, { projectId });
   }
 
   private async resolveEffectiveProjectId(
@@ -35,7 +46,7 @@ export class BulkHandler {
   ): Promise<string> {
     if (projectId) return projectId;
     if (rawIds.length > 0) {
-      const firstItem = await this.workItemRepository.findWorkItemById(
+      const firstItem = await this.coreRepository.findWorkItemById(
         rawIds[0],
       );
       if (firstItem) return firstItem.projectId;
@@ -51,30 +62,45 @@ export class BulkHandler {
     onInvalidateCache?: (projectId: string) => Promise<void>,
   ) {
     const validIds = this.normalizeIds(rawIds).filter(isUuid);
-    const allItems = await this.workItemRepository.findWorkItemsByIds(validIds);
+    const allItems = await this.coreRepository.findWorkItemsByIds(validIds);
     const items = effectiveProjectId
       ? allItems.filter((t) => t.projectId === effectiveProjectId)
       : allItems;
 
+    let canonicalLabelName = labelId;
+    if (
+      effectiveProjectId &&
+      typeof this.coreRepository.findLabelsByIds === 'function'
+    ) {
+      const matchedLabels = await this.coreRepository
+        .findLabelsByIds(effectiveProjectId, [labelId])
+        .catch(() => []);
+      if (matchedLabels.length > 0 && matchedLabels[0].name) {
+        canonicalLabelName = matchedLabels[0].name;
+      }
+    }
+
     await Promise.all(
       items.map((t) => {
         const current = Array.isArray(t.labels) ? t.labels : [];
+        const hasLabel =
+          current.includes(canonicalLabelName) || current.includes(labelId);
         if (mode === 'add') {
-          if (current.includes(labelId)) return Promise.resolve();
-          return this.workItemRepository.updateWorkItem(t.id, {
-            labels: [...current, labelId],
+          if (hasLabel) return Promise.resolve();
+          return this.coreRepository.updateWorkItem(t.id, {
+            labels: [...current, canonicalLabelName],
           });
         }
-        if (!current.includes(labelId)) return Promise.resolve();
-        return this.workItemRepository.updateWorkItem(t.id, {
-          labels: current.filter((l) => l !== labelId),
+        if (!hasLabel) return Promise.resolve();
+        return this.coreRepository.updateWorkItem(t.id, {
+          labels: current.filter(
+            (l) => l !== canonicalLabelName && l !== labelId,
+          ),
         });
       }),
     );
 
-    if (effectiveProjectId && onInvalidateCache) {
-      await onInvalidateCache(effectiveProjectId);
-    }
+    await this.notifyCacheInvalidated(effectiveProjectId, onInvalidateCache);
 
     return {
       message:
@@ -124,7 +150,7 @@ export class BulkHandler {
     }
 
     const rawProject = effectiveProjectId
-      ? await this.workItemRepository.findProjectWithColumns(effectiveProjectId)
+      ? await this.coreRepository.findProjectWithStates(effectiveProjectId)
       : null;
     const canonicalProjectId = rawProject?.id || effectiveProjectId;
 
@@ -133,20 +159,19 @@ export class BulkHandler {
       columnId?: string;
     } = {};
     if (payload.columnId !== undefined) {
-      const targetState = rawProject?.states?.find(
-        (s) =>
-          s.id === payload.columnId ||
-          s.name.toLowerCase() === payload.columnId?.toLowerCase() ||
-          s.group.toLowerCase() === payload.columnId?.toLowerCase(),
+      const targetState = matchProjectState(
+        rawProject?.states,
+        payload.columnId,
+        false,
       );
       data.columnId = targetState ? targetState.id : payload.columnId;
       data.completed = targetState
-        ? targetState.group === 'completed'
+        ? isStateCompleted(targetState)
         : isStateCompleted(data.columnId);
     } else if (payload.completed !== undefined) {
       if (payload.completed) {
-        const completedState = rawProject?.states?.find(
-          (s) => s.group === 'completed',
+        const completedState = rawProject?.states?.find((s) =>
+          isStateCompleted(s),
         );
         if (completedState) {
           data.columnId = completedState.id;
@@ -168,7 +193,7 @@ export class BulkHandler {
       if (!payload.assigneeId) {
         data.assigneeId = null;
       } else if (isUuid(payload.assigneeId)) {
-        const isMember = await this.workItemRepository.isProjectMember(
+        const isMember = await this.coreRepository.isProjectMember(
           canonicalProjectId,
           payload.assigneeId,
         );
@@ -196,15 +221,13 @@ export class BulkHandler {
     }
 
     const targetProjId = canonicalProjectId || effectiveProjectId || projectId;
-    const result = await this.workItemRepository.bulkUpdateWorkItems(
+    const result = await this.coreRepository.bulkUpdateWorkItems(
       targetProjId,
       rawIds,
       data,
     );
-    if (targetProjId && onInvalidateCache) {
-      await onInvalidateCache(targetProjId);
-    }
-    this.eventDispatcher.emitBulkUpdated(targetProjId, userId, rawIds);
+    await this.notifyCacheInvalidated(targetProjId, onInvalidateCache);
+    this.eventHandler.emitBulkUpdated(targetProjId, userId, rawIds);
     return {
       message: `${result.count} work items updated successfully`,
       count: result.count,
@@ -228,14 +251,12 @@ export class BulkHandler {
       throw new BadRequestException('Project context required for bulk delete');
     }
 
-    const result = await this.workItemRepository.bulkDeleteWorkItems(
+    const result = await this.coreRepository.bulkDeleteWorkItems(
       effectiveProjectId,
       rawIds,
     );
-    if (onInvalidateCache) {
-      await onInvalidateCache(effectiveProjectId);
-    }
-    this.eventDispatcher.emitBulkDeleted(effectiveProjectId, userId, rawIds);
+    await this.notifyCacheInvalidated(effectiveProjectId, onInvalidateCache);
+    this.eventHandler.emitBulkDeleted(effectiveProjectId, userId, rawIds);
     return {
       message: `${result.count} work items deleted successfully`,
       count: result.count,

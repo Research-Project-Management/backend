@@ -1,13 +1,29 @@
-import {
-  DEFAULT_WORK_ITEM_STATES,
-  StateGroup,
-  STATE_GROUPS,
-  WorkItemState,
-} from '@/modules/work-item/state/types/state.types';
+import { StateGroup, STATE_GROUPS } from '@/modules/work-item/state/types/state.types';
+
+/**
+ * Declarative keyword rules for inferring StateGroup from state identifiers or names (OCP).
+ */
+export const STATE_GROUP_KEYWORD_RULES: ReadonlyArray<{
+  group: StateGroup;
+  keywords: ReadonlyArray<string>;
+}> = [
+  { group: 'backlog', keywords: ['backlog'] },
+  {
+    group: 'completed',
+    keywords: ['done', 'completed', 'complete', 'closed', 'resolved'],
+  },
+  {
+    group: 'cancelled',
+    keywords: ['cancel', 'rejected', 'abandon', 'wontfix', "won't fix"],
+  },
+  {
+    group: 'started',
+    keywords: ['doing', 'progress', 'started', 'review', 'testing', 'qa', 'dev'],
+  },
+];
 
 /**
  * Automatically infers the state group from a state identifier or name.
- * Used for migrating legacy Project workItemColumns into state groups.
  */
 export function inferStateGroup(
   id?: string | null,
@@ -15,40 +31,10 @@ export function inferStateGroup(
 ): StateGroup {
   const combined = `${id || ''} ${name || ''}`.toLowerCase().trim();
 
-  if (combined.includes('backlog')) {
-    return 'backlog';
-  }
-
-  if (
-    combined.includes('done') ||
-    combined.includes('completed') ||
-    combined.includes('complete') ||
-    combined.includes('closed') ||
-    combined.includes('resolved')
-  ) {
-    return 'completed';
-  }
-
-  if (
-    combined.includes('cancel') ||
-    combined.includes('rejected') ||
-    combined.includes('abandon') ||
-    combined.includes('wontfix') ||
-    combined.includes("won't fix")
-  ) {
-    return 'cancelled';
-  }
-
-  if (
-    combined.includes('doing') ||
-    combined.includes('progress') ||
-    combined.includes('started') ||
-    combined.includes('review') ||
-    combined.includes('testing') ||
-    combined.includes('qa') ||
-    combined.includes('dev')
-  ) {
-    return 'started';
+  for (const rule of STATE_GROUP_KEYWORD_RULES) {
+    if (rule.keywords.some((kw) => combined.includes(kw))) {
+      return rule.group;
+    }
   }
 
   // Fallback for To Do / New / Unstarted
@@ -65,105 +51,6 @@ export function isValidStateGroup(value: unknown): value is StateGroup {
 }
 
 /**
- * Safely parses and normalizes raw JSON data from Project.workItemColumns
- * into full WorkItemState objects.
- */
-export function parseWorkItemStates(raw: unknown): WorkItemState[] {
-  if (!raw || !Array.isArray(raw) || raw.length === 0) {
-    return [...DEFAULT_WORK_ITEM_STATES];
-  }
-
-  const items = raw as unknown[];
-  const result: WorkItemState[] = [];
-
-  for (let index = 0; index < items.length; index++) {
-    const item = items[index];
-    if (!item || typeof item !== 'object') continue;
-
-    const rawObj = item as Record<string, unknown>;
-    const rawId =
-      typeof rawObj.id === 'string' && rawObj.id.trim()
-        ? rawObj.id.trim()
-        : `state-${index + 1}`;
-
-    const rawName =
-      typeof rawObj.name === 'string' && rawObj.name.trim()
-        ? rawObj.name.trim()
-        : typeof rawObj.title === 'string' && rawObj.title.trim()
-          ? rawObj.title.trim()
-          : `Status ${index + 1}`;
-
-    const rawColor =
-      typeof rawObj.color === 'string' && rawObj.color.trim()
-        ? rawObj.color.trim()
-        : typeof rawObj.accentColor === 'string' && rawObj.accentColor.trim()
-          ? rawObj.accentColor.trim()
-          : '#6366F1';
-
-    const group: StateGroup = isValidStateGroup(rawObj.group)
-      ? rawObj.group
-      : inferStateGroup(rawId, rawName);
-
-    const sequence =
-      typeof rawObj.sequence === 'number' && !isNaN(rawObj.sequence)
-        ? rawObj.sequence
-        : (index + 1) * 1000;
-
-    const isDefault = Boolean(rawObj.isDefault);
-    const description =
-      typeof rawObj.description === 'string' ? rawObj.description : undefined;
-
-    result.push({
-      id: rawId,
-      name: rawName,
-      title: rawName,
-      color: rawColor,
-      accentColor: rawColor,
-      group,
-      sequence,
-      isDefault,
-      description,
-    });
-  }
-
-  if (result.length === 0) {
-    return [...DEFAULT_WORK_ITEM_STATES];
-  }
-
-  // Ensure exactly one state is flagged as default
-  const defaultCount = result.filter((state) => state.isDefault).length;
-  if (defaultCount === 0) {
-    // Pick backlog or first unstarted as default
-    const preferredDefault =
-      result.find((state) => state.group === 'backlog') ||
-      result.find((state) => state.group === 'unstarted') ||
-      result[0];
-    preferredDefault.isDefault = true;
-  } else if (defaultCount > 1) {
-    // Keep only the first default
-    let foundFirst = false;
-    for (const state of result) {
-      if (state.isDefault) {
-        if (!foundFirst) {
-          foundFirst = true;
-        } else {
-          state.isDefault = false;
-        }
-      }
-    }
-  }
-
-  // Sort by sequence ascending
-  result.sort(
-    (firstState, secondState) => firstState.sequence - secondState.sequence,
-  );
-
-  return result;
-}
-
-export { isStateCompleted } from '@/modules/work-item/common/utils/state-completion.util';
-
-/**
  * Generates a URL-friendly unique slug from a state name.
  */
 export function generateStateSlug(name: string): string {
@@ -173,4 +60,172 @@ export function generateStateSlug(name: string): string {
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+export interface StateMinimalDescriptor {
+  id: string;
+  name: string;
+  group: string;
+  isDefault?: boolean;
+  projectId?: string;
+}
+
+/**
+ * Determines whether a given state, state group, or work-item record represents a 'completed' state.
+ */
+export function isStateCompleted(
+  stateOrGroup?:
+    | {
+        group?: string | null;
+        state?: { group?: string | null } | null;
+        columnId?: string | null;
+        completed?: boolean | null;
+      }
+    | string
+    | null,
+): boolean {
+  if (!stateOrGroup) return false;
+
+  if (typeof stateOrGroup === 'string') {
+    const normalized = stateOrGroup.toLowerCase().trim();
+    return normalized === 'completed' || normalized === 'done';
+  }
+
+  if (typeof stateOrGroup === 'object') {
+    if ('group' in stateOrGroup && typeof stateOrGroup.group === 'string') {
+      return stateOrGroup.group.toLowerCase() === 'completed';
+    }
+    if (
+      'state' in stateOrGroup &&
+      stateOrGroup.state &&
+      typeof stateOrGroup.state === 'object' &&
+      typeof stateOrGroup.state.group === 'string'
+    ) {
+      return stateOrGroup.state.group.toLowerCase() === 'completed';
+    }
+    if ('columnId' in stateOrGroup || 'completed' in stateOrGroup) {
+      return (
+        stateOrGroup.columnId === 'done' ||
+        stateOrGroup.columnId === 'completed' ||
+        Boolean(stateOrGroup.completed)
+      );
+    }
+  }
+
+  return false;
+}
+
+export function matchProjectState<T extends StateMinimalDescriptor>(
+  states: T[] | undefined,
+  columnId?: string,
+  allowFuzzyKeywords = false,
+): T | undefined {
+  if (!states || !columnId) return undefined;
+  const normalizedCol = columnId.toLowerCase().trim();
+  return states.find(
+    (s) =>
+      s.id === columnId ||
+      s.name.toLowerCase() === normalizedCol ||
+      s.group.toLowerCase() === normalizedCol ||
+      (allowFuzzyKeywords &&
+        (s.name.toLowerCase().replace(/[\s_-]+/g, '_') ===
+          normalizedCol.replace(/[\s_-]+/g, '_') ||
+          (normalizedCol.includes('progress') && s.group === 'started') ||
+          (normalizedCol.includes('todo') && s.group === 'unstarted') ||
+          (normalizedCol.includes('done') && s.group === 'completed'))),
+  );
+}
+
+export async function resolveStateAndCompletionTransition(options: {
+  projectId: string;
+  states?: StateMinimalDescriptor[];
+  columnId?: string;
+  completed?: boolean;
+  isCreate: boolean;
+  existingStateGroup?: string;
+  existingColumnId?: string;
+  existingCompleted?: boolean;
+  findStateById?: (
+    stateId: string,
+    projectId?: string,
+  ) => Promise<StateMinimalDescriptor | null>;
+  loadProjectStates?: (
+    projectId: string,
+  ) => Promise<StateMinimalDescriptor[] | undefined>;
+}): Promise<{ columnId?: string; isCompleted?: boolean }> {
+  const { projectId, columnId, completed, isCreate } = options;
+  let states = options.states;
+
+  if (isCreate) {
+    const defaultState = states?.find((s) => s.isDefault) || states?.[0];
+    let targetState =
+      matchProjectState(states, columnId, true) || defaultState;
+
+    if (completed === true && !isStateCompleted(targetState)) {
+      const completedState = states?.find((s) => isStateCompleted(s));
+      if (completedState) targetState = completedState;
+    } else if (completed === false && isStateCompleted(targetState)) {
+      if (defaultState && !isStateCompleted(defaultState)) {
+        targetState = defaultState;
+      }
+    }
+
+    const resolvedCol = targetState
+      ? targetState.id
+      : columnId || defaultState?.id || 'backlog';
+    const isCompleted = targetState
+      ? isStateCompleted(targetState)
+      : isStateCompleted(resolvedCol || '');
+    return { columnId: resolvedCol, isCompleted };
+  }
+
+  if (columnId !== undefined) {
+    let targetState: StateMinimalDescriptor | null | undefined =
+      options.findStateById
+        ? await options.findStateById(columnId, projectId)
+        : null;
+    if (!targetState || (targetState.projectId && targetState.projectId !== projectId)) {
+      if (!states && options.loadProjectStates) {
+        states = await options.loadProjectStates(projectId);
+      }
+      targetState = matchProjectState(states, columnId, false);
+    }
+    const resolvedCol = targetState ? targetState.id : columnId;
+    const isCompleted = targetState
+      ? isStateCompleted(targetState)
+      : isStateCompleted(resolvedCol);
+    return { columnId: resolvedCol, isCompleted };
+  }
+
+  if (completed !== undefined) {
+    if (!states && options.loadProjectStates) {
+      states = await options.loadProjectStates(projectId);
+    }
+    const isCurrentlyCompleted = isStateCompleted({
+      group: options.existingStateGroup,
+      columnId: options.existingColumnId,
+      completed: options.existingCompleted,
+    });
+
+    if (completed && !isCurrentlyCompleted) {
+      const completedState = states?.find((s) => isStateCompleted(s));
+      return {
+        columnId: completedState?.id,
+        isCompleted: true,
+      };
+    }
+    if (!completed && isCurrentlyCompleted) {
+      const unstartedState =
+        states?.find((s) => s.isDefault) ||
+        states?.find((s) => s.group === 'unstarted') ||
+        states?.[0];
+      return {
+        columnId: unstartedState?.id,
+        isCompleted: false,
+      };
+    }
+    return { isCompleted: completed };
+  }
+
+  return {};
 }

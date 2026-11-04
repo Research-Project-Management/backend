@@ -1,7 +1,7 @@
-import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
-import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
+import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
 import {
@@ -16,7 +16,7 @@ import {
 import {
   ARXIV_CATEGORY_MAP,
   resolveCanonicalArxivCategory,
-  normalizeAcademicTags,
+  normalizeTags,
   cleanSingleTag,
 } from '@/modules/library/core';
 import { formatLiteratureNoteMarkdown } from '@/modules/library/catalog/domain/notes.domain';
@@ -206,7 +206,7 @@ describe('Comprehensive Library End-to-End (E2E) Feature Matrix Simulation', () 
       abstract: cleanAbstractText(raw.abstract || ''),
       extra: (validated.sanitizedItem as any).extra || '',
       creators: raw.creators || [],
-      tags: normalizeAcademicTags(raw.tags || []),
+      tags: normalizeTags(raw.tags || []),
       collections: raw.collections || [],
       citationKey,
       version: 1,
@@ -249,7 +249,7 @@ describe('Comprehensive Library End-to-End (E2E) Feature Matrix Simulation', () 
     const updated: E2EItem = {
       ...item,
       ...patch,
-      tags: patch.tags ? normalizeAcademicTags(patch.tags) : item.tags,
+      tags: patch.tags ? normalizeTags(patch.tags) : item.tags,
       version: item.version + 1,
       updatedAt: new Date(),
     };
@@ -445,7 +445,7 @@ describe('Comprehensive Library End-to-End (E2E) Feature Matrix Simulation', () 
       const mergedCollections = Array.from(
         new Set([...item1.collections, ...item2.collections]),
       );
-      const mergedTags = normalizeAcademicTags([...item1.tags, ...item2.tags]);
+      const mergedTags = normalizeTags([...item1.tags, ...item2.tags]);
 
       const mergedMaster = updateItem(
         item1.id,

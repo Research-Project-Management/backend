@@ -12,8 +12,10 @@ import { LabelService } from '@/modules/work-item/label/label.service';
 import { LabelRepository } from '@/modules/work-item/label/label.repository';
 import { StateService } from '@/modules/work-item/state/state.service';
 import { CommentService } from '@/modules/work-item/comment/comment.service';
-import { HistoryService } from '@/modules/work-item/history/history.service';
-import { summarizeDiff } from '@/modules/work-item/history/utils/diff.util';
+import {
+  HistoryService,
+  summarizeDiff,
+} from '@/modules/work-item/history/history.service';
 import { WorkItemFacade } from '@/modules/work-item/work-item.facade';
 import { CoreService } from '@/modules/work-item/core/core.service';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
@@ -119,7 +121,7 @@ describe('Work-Item Submodules Comprehensive Unit Suite', () => {
       mockRepo.findWorkItemsByIds.mockResolvedValue(items);
       mockRepo.bulkArchive.mockResolvedValue({ count: 2 });
 
-      const res = await service.bulkArchiveWorkItems(
+      const res = await service.bulkArchive(
         { workItemIds: ['wi-1', 'wi-2'], reason: 'Sprint cleanup' },
         'user-1',
       );
@@ -721,7 +723,7 @@ describe('Work-Item Submodules Comprehensive Unit Suite', () => {
         content,
       });
 
-      const res = await service.createWorkItemComment('wi-1', 'user-1', {
+      const res = await service.createComment('wi-1', 'user-1', {
         content,
       });
 
@@ -755,11 +757,11 @@ describe('Work-Item Submodules Comprehensive Unit Suite', () => {
       );
 
       await expect(
-        service.deleteWorkItemComment('cmt-1', 'non-owner-user'),
+        service.deleteComment('cmt-1', 'non-owner-user'),
       ).rejects.toThrow(ForbiddenException);
 
       mockCommentRepo.findProjectMemberRole.mockResolvedValueOnce('owner');
-      const delRes = await service.deleteWorkItemComment('cmt-1', 'owner-user');
+      const delRes = await service.deleteComment('cmt-1', 'owner-user');
       expect(delRes.success).toBe(true);
     });
 
@@ -774,7 +776,7 @@ describe('Work-Item Submodules Comprehensive Unit Suite', () => {
       );
 
       // Add reaction from user-1
-      const reactRes = await service.reactToWorkItemComment('cmt-1', 'user-1', {
+      const reactRes = await service.reactToComment('cmt-1', 'user-1', {
         emoji: '👍',
       });
       expect((reactRes.comment.reactions as any)['👍']).toEqual([
@@ -789,7 +791,7 @@ describe('Work-Item Submodules Comprehensive Unit Suite', () => {
         email: 'u1@example.com',
         avatar: null,
       });
-      const replyRes = await service.addWorkItemReply('cmt-1', 'user-1', {
+      const replyRes = await service.addReply('cmt-1', 'user-1', {
         content: 'LGTM!',
       });
       expect(replyRes.comment.replies).toHaveLength(1);

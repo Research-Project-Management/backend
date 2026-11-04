@@ -1,7 +1,7 @@
-import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
-import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
+import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
 import {

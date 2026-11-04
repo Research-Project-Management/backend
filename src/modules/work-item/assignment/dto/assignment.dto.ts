@@ -1,5 +1,24 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
+import { WorkItem, Role } from '@prisma/client';
+
+export interface AssignWorkItemResult {
+  workItem: WorkItem;
+  previousAssigneeId: string | null;
+  newAssigneeId: string | null;
+}
+
+export interface BulkAssignResult {
+  updatedCount: number;
+  workItemIds: string[];
+  assigneeId: string | null;
+}
+
+export const ELIGIBLE_ASSIGNEE_ROLES: readonly Role[] = [
+  Role.owner,
+  Role.coordinator,
+  Role.contributor,
+] as const;
 
 export class AssignWorkItemDto {
   @ApiPropertyOptional({

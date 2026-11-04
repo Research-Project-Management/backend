@@ -1,11 +1,11 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { WorkItem } from '@prisma/client';
-import { UpdateWorkItemDto } from '@/modules/work-item/core/dto/update.dto';
-import { mapPriority } from '@/modules/work-item/core/utils/work-item.util';
+import { UpdateWorkItemDto } from '@/modules/work-item/core/dto/core.dto';
+import { mapPriority } from '@/modules/work-item/core/utils/core.util';
 
 @Injectable()
-export class EventDispatcher {
+export class EventHandler {
   constructor(@Optional() private readonly eventEmitter?: EventEmitter2) {}
 
   emitWorkItemCreated(params: {
@@ -96,6 +96,7 @@ export class EventDispatcher {
     existing: WorkItem,
     updateDto: UpdateWorkItemDto,
     userId?: string,
+    resolvedColumnId?: string,
   ) {
     if (!this.eventEmitter) return;
 
@@ -106,16 +107,15 @@ export class EventDispatcher {
       projectId: existing.projectId,
     };
 
-    if (
-      updateDto.columnId !== undefined &&
-      updateDto.columnId !== existing.columnId
-    ) {
+    const nextColumnId =
+      resolvedColumnId !== undefined ? resolvedColumnId : updateDto.columnId;
+    if (nextColumnId !== undefined && nextColumnId !== existing.columnId) {
       this.eventEmitter.emit('work-item.state.changed', {
         ...baseEvent,
         verb: 'transitioned',
         field: 'state',
         oldValue: existing.columnId,
-        newValue: updateDto.columnId,
+        newValue: nextColumnId,
       });
     }
 
@@ -150,6 +150,19 @@ export class EventDispatcher {
         field: 'description',
         oldValue: existing.content || '',
         newValue: newContent,
+      });
+    }
+
+    if (
+      updateDto.assigneeId !== undefined &&
+      updateDto.assigneeId !== existing.assigneeId
+    ) {
+      this.eventEmitter.emit('work-item.assignee.changed', {
+        ...baseEvent,
+        verb: 'updated',
+        field: 'assignee',
+        oldValue: existing.assigneeId || '',
+        newValue: updateDto.assigneeId || '',
       });
     }
 

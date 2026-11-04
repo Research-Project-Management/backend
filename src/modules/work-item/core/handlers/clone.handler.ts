@@ -2,13 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CoreRepository } from '@/modules/work-item/core/core.repository';
 import { IdHandler } from './id.handler';
-import type { WorkItemWithRelations } from '@/modules/work-item/core/types/work-item.types';
+import type { WorkItemWithRelations } from '@/modules/work-item/core/types/core.types';
 
 @Injectable()
 export class CloneHandler {
   constructor(
     private readonly idHandler: IdHandler,
-    private readonly repository: CoreRepository,
+    private readonly coreRepository: CoreRepository,
   ) {}
 
   async buildCloneData(
@@ -25,10 +25,10 @@ export class CloneHandler {
     if (!isSameProject) {
       const sourceState =
         sourceWorkItem.state ??
-        (await this.repository.findStateWithGroup(sourceWorkItem.columnId));
+        (await this.coreRepository.findStateWithGroup(sourceWorkItem.columnId));
 
       const targetStates =
-        (await this.repository.findProjectStates(targetProjectId)) || [];
+        (await this.coreRepository.findProjectStates(targetProjectId)) || [];
 
       const matchedState =
         targetStates.find(

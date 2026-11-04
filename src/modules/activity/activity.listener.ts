@@ -38,7 +38,9 @@ export class ActivityListener {
       `Received activity event: ${event.verb} on ${event.entityType}:${event.entityId}`,
     );
 
-    await this.activityService.recordEvent(event);
+    if (event.actorId && event.entityId) {
+      await this.activityService.recordEvent(event);
+    }
     await this.invalidateAnalyticsCache(event.projectId, event.actorId);
   }
 
@@ -48,6 +50,13 @@ export class ActivityListener {
   ) {
     if (event instanceof DomainActivityEvent) {
       return this.handleGenericActivity(event);
+    }
+    if (event?.entityType === 'project') {
+      await this.invalidateAnalyticsCache(
+        event.projectId,
+        event.actorId || event.authorId,
+      );
+      return;
     }
     const entityId = event?.entityId || event?.workItemId;
     if (entityId) {
@@ -199,10 +208,15 @@ export class ActivityListener {
   ) {
     try {
       if (projectId) {
+        await this.redisCache.del(`flux:analytics:proj:${projectId}:insights`);
+        await this.redisCache.del(`flux:analytics:proj:${projectId}:overview`);
+        await this.redisCache.delPattern(`flux:analytics:proj:${projectId}:*`);
         await this.redisCache.del(`analytics:project:${projectId}:insights`);
         await this.redisCache.delPattern(`analytics:project:${projectId}:*`);
       }
       if (userId) {
+        await this.redisCache.del(`flux:analytics:user:${userId}:overview`);
+        await this.redisCache.delPattern(`flux:analytics:user:${userId}:*`);
         await this.redisCache.del(`analytics:user:${userId}:overview`);
         await this.redisCache.delPattern(`analytics:user:${userId}:*`);
       }

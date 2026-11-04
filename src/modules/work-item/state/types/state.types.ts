@@ -30,21 +30,19 @@ export interface WorkItemState {
   accentColor?: string | null;
 }
 
+export const STATE_GROUP_DEFAULT_ICONS: Readonly<Record<StateGroup, string>> = {
+  backlog: 'circle-dashed',
+  unstarted: 'circle',
+  started: 'circle-dot',
+  completed: 'check-circle',
+  cancelled: 'x-circle',
+};
+
 export function getStateDefaultIcon(group: string): string {
-  switch (group) {
-    case 'backlog':
-      return 'circle-dashed';
-    case 'unstarted':
-      return 'circle';
-    case 'started':
-      return 'circle-dot';
-    case 'completed':
-      return 'check-circle';
-    case 'cancelled':
-      return 'x-circle';
-    default:
-      return 'circle';
-  }
+  return (
+    STATE_GROUP_DEFAULT_ICONS[group as StateGroup] ||
+    STATE_GROUP_DEFAULT_ICONS.unstarted
+  );
 }
 
 export const DEFAULT_WORK_ITEM_STATES: WorkItemState[] = [
@@ -109,8 +107,3 @@ export const DEFAULT_WORK_ITEM_STATES: WorkItemState[] = [
     description: 'Items abandoned, duplicate, or rejected',
   },
 ];
-
-export interface StateWorkItemCount {
-  stateId: string;
-  count: number;
-}

@@ -23,15 +23,15 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Observable, Subject, fromEvent } from 'rxjs';
 import { map, filter, takeUntil } from 'rxjs/operators';
 import { CoreService } from './core.service';
-import { CreateWorkItemDto } from './dto/create.dto';
-import { UpdateWorkItemDto } from './dto/update.dto';
-import { QueryWorkItemDto } from './dto/query.dto';
 import {
+  CreateWorkItemDto,
+  UpdateWorkItemDto,
+  QueryWorkItemDto,
   ReorderWorkItemDto,
   BulkUpdateWorkItemDto,
   BulkDeleteWorkItemDto,
   DuplicateWorkItemDto,
-} from './dto/bulk.dto';
+} from './dto/core.dto';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
@@ -45,7 +45,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   private wildcardListener?: (event: Record<string, unknown>) => void;
 
   constructor(
-    private readonly workItemService: CoreService,
+    private readonly coreService: CoreService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
@@ -55,12 +55,14 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
         this.workItemEvents$.next(event);
       };
       this.eventEmitter.on('work-item.**', this.wildcardListener);
+      this.eventEmitter.on('state.**', this.wildcardListener);
     }
   }
 
   onModuleDestroy() {
     if (this.eventEmitter && this.wildcardListener) {
       this.eventEmitter.off('work-item.**', this.wildcardListener);
+      this.eventEmitter.off('state.**', this.wildcardListener);
     }
   }
 
@@ -96,7 +98,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     @CurrentUser('id') userId: string,
     @Query() queryWorkItemDto: QueryWorkItemDto,
   ) {
-    return this.workItemService.getUserWorkItems(userId, queryWorkItemDto);
+    return this.coreService.getUserWorkItems(userId, queryWorkItemDto);
   }
 
   @Get('projects/:projectId/work-items')
@@ -109,10 +111,20 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     @Param('projectId') projectId: string,
     @Query() queryWorkItemDto: QueryWorkItemDto,
   ) {
-    return this.workItemService.getProjectWorkItems(
+    return this.coreService.getProjectWorkItems(
       projectId,
       queryWorkItemDto,
     );
+  }
+
+  @Get('projects/:projectId/work-items/analytics')
+  @UseGuards(ProjectAccessGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary: 'Get project work item analytics and dimensional breakdowns',
+  })
+  async getProjectWorkItemAnalytics(@Param('projectId') projectId: string) {
+    return this.coreService.getWorkItemAnalytics(projectId);
   }
 
   @Get(['work-items/:workItemId', 'projects/:projectId/work-items/:workItemId'])
@@ -120,7 +132,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get a single work item by ID or identifier' })
   async getWorkItemById(@Param('workItemId') workItemId: string) {
-    return this.workItemService.getWorkItemById(workItemId);
+    return this.coreService.getWorkItemById(workItemId);
   }
 
   @Post('projects/:projectId/work-items')
@@ -133,7 +145,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     @CurrentUser('id') userId: string,
     @Body() createWorkItemDto: CreateWorkItemDto,
   ) {
-    return this.workItemService.createWorkItem(
+    return this.coreService.createWorkItem(
       projectId,
       userId,
       createWorkItemDto,
@@ -149,7 +161,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     @CurrentUser('id') userId: string,
     @Body() updateWorkItemDto: UpdateWorkItemDto,
   ) {
-    return this.workItemService.updateWorkItem(
+    return this.coreService.updateWorkItem(
       workItemId,
       updateWorkItemDto,
       userId,
@@ -168,7 +180,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.workItemService.deleteWorkItem(workItemId, userId);
+    return this.coreService.deleteWorkItem(workItemId, userId);
   }
 
   @Post(['work-items/:workItemId/children', 'work-items/:workItemId/sub-items'])
@@ -183,7 +195,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     @CurrentUser('id') userId: string,
     @Body() createWorkItemDto: CreateWorkItemDto,
   ) {
-    return this.workItemService.createChildWorkItem(
+    return this.coreService.createChildWorkItem(
       workItemId,
       userId,
       createWorkItemDto,
@@ -203,15 +215,17 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     @Body('workItemId') workItemIdFromBody: string | undefined,
     @Param('workItemId') workItemIdFromParam: string | undefined,
     @Body() reorderWorkItemDto: ReorderWorkItemDto,
+    @CurrentUser('id') userId?: string,
   ) {
     const targetWorkItemId =
       workItemIdFromBody ||
       workItemIdFromParam ||
       reorderWorkItemDto?.workItemId ||
       '';
-    return this.workItemService.reorderWorkItem(
+    return this.coreService.reorderWorkItem(
       targetWorkItemId,
       reorderWorkItemDto,
+      userId,
     );
   }
 
@@ -227,7 +241,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   ) {
     const effectiveProjectId =
       projectId || bulkUpdateWorkItemDto.projectId || '';
-    return this.workItemService.bulkUpdate(
+    return this.coreService.bulkUpdate(
       effectiveProjectId,
       bulkUpdateWorkItemDto,
       userId,
@@ -249,7 +263,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   ) {
     const effectiveProjectId =
       projectId || bulkDeleteWorkItemDto.projectId || '';
-    return this.workItemService.bulkDelete(
+    return this.coreService.bulkDelete(
       effectiveProjectId,
       bulkDeleteWorkItemDto,
       userId,
@@ -269,7 +283,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     const targetProjectId =
       duplicateWorkItemDto?.destinationProjectId ||
       duplicateWorkItemDto?.projectId;
-    return this.workItemService.duplicateWorkItem(
+    return this.coreService.duplicateWorkItem(
       workItemId,
       userId,
       targetProjectId,
@@ -281,6 +295,6 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Convert a child work item to a root work item' })
   async convertToRootWorkItem(@Param('workItemId') workItemId: string) {
-    return this.workItemService.convertToRootWorkItem(workItemId);
+    return this.coreService.convertToRootWorkItem(workItemId);
   }
 }

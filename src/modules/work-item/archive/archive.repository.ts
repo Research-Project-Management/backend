@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import {
   USER_MINIMAL_SELECT,
   buildWorkItemIdOrIdentifierWhere,
+  resolveCanonicalProjectId,
 } from '@/modules/work-item/common/types/shared.types';
 
 @Injectable()
@@ -13,17 +14,7 @@ export class ArchiveRepository {
   async resolveProjectId(
     projectIdOrIdentifier: string,
   ): Promise<string | null> {
-    if (isUuid(projectIdOrIdentifier)) {
-      return projectIdOrIdentifier;
-    }
-    const project = await this.prisma.project.findFirst({
-      where: {
-        identifier: { equals: projectIdOrIdentifier, mode: 'insensitive' },
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
-    return project?.id || null;
+    return resolveCanonicalProjectId(this.prisma, projectIdOrIdentifier);
   }
 
   async findWorkItemWithProject(workItemId: string) {
@@ -71,13 +62,18 @@ export class ArchiveRepository {
     });
   }
 
-  private async bulkSetArchiveState(workItemIds: string[], archived: boolean) {
+  private async bulkSetArchiveState(
+    workItemIds: string[],
+    archived: boolean,
+    projectId?: string,
+  ) {
     const validIds = workItemIds.filter(isUuid);
     if (validIds.length === 0) return { count: 0 };
 
     return this.prisma.workItem.updateMany({
       where: {
         id: { in: validIds },
+        ...(projectId && isUuid(projectId) ? { projectId } : {}),
         deletedAt: null,
       },
       data: { archivedAt: archived ? new Date() : null },
@@ -92,12 +88,12 @@ export class ArchiveRepository {
     return this.setArchiveState(workItemId, false);
   }
 
-  async bulkArchive(workItemIds: string[]) {
-    return this.bulkSetArchiveState(workItemIds, true);
+  async bulkArchive(workItemIds: string[], projectId?: string) {
+    return this.bulkSetArchiveState(workItemIds, true, projectId);
   }
 
-  async bulkRestore(workItemIds: string[]) {
-    return this.bulkSetArchiveState(workItemIds, false);
+  async bulkRestore(workItemIds: string[], projectId?: string) {
+    return this.bulkSetArchiveState(workItemIds, false, projectId);
   }
 
   async findArchivedWorkItems(

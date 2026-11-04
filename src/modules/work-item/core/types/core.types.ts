@@ -137,6 +137,26 @@ export type WorkItemWithRelations = Prisma.WorkItemGetPayload<{
     childWorkItems: {
       select: typeof CHILD_WORK_ITEM_SELECT;
     };
+    outgoingRelations: {
+      select: {
+        id: true;
+        sourceId: true;
+        targetId: true;
+        type: true;
+        createdAt: true;
+        targetWorkItem: { select: { id: true; title: true; identifier: true } };
+      };
+    };
+    incomingRelations: {
+      select: {
+        id: true;
+        sourceId: true;
+        targetId: true;
+        type: true;
+        createdAt: true;
+        sourceWorkItem: { select: { id: true; title: true; identifier: true } };
+      };
+    };
     project: { select: { id: true } };
   };
 }> & {
@@ -181,18 +201,26 @@ export interface WorkItemResponse {
 }
 
 export interface WorkItemFilterOptions {
+  workItems?: string | string[];
+  ids?: string | string[];
   columnId?: string | string[];
   state?: string | string[];
   stateGroup?: string | string[];
   priority?: WorkItemPriority | WorkItemPriority[];
   assigneeId?: string | string[] | null;
   assignees?: string | string[] | null;
+  subscribers?: string | string[];
+  mentions?: string | string[];
   labels?: string | string[];
+  attach?: string | string[];
   createdById?: string | string[];
   authorId?: string | string[];
-  parentWorkItemId?: string | null;
-  dueDate?: string;
-  startDate?: string;
+  parentWorkItemId?: string | string[] | null;
+  parent?: string | string[] | null;
+  dueDate?: string | string[];
+  startDate?: string | string[];
+  createdAt?: string | string[];
+  updatedAt?: string | string[];
   orderBy?: string;
   orderDirection?: 'asc' | 'desc';
   completed?: boolean;

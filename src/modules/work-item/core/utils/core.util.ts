@@ -1,4 +1,48 @@
 import { WorkItemPriority, Prisma } from '@prisma/client';
+import { BadRequestException } from '@nestjs/common';
+import type { WorkItemWithRelations } from '@/modules/work-item/core/types/core.types';
+
+export const MAX_HIERARCHY_DEPTH = 10;
+
+export interface HierarchyParentStub {
+  id: string;
+  parentWorkItemId?: string | null;
+}
+
+export async function validateHierarchyCycle(
+  targetWorkItemId: string,
+  initialParent: HierarchyParentStub,
+  findWorkItemById: (
+    id: string,
+  ) => Promise<HierarchyParentStub | WorkItemWithRelations | null>,
+  maxDepth: number = MAX_HIERARCHY_DEPTH,
+): Promise<void> {
+  if (initialParent.id === targetWorkItemId) {
+    throw new BadRequestException(
+      'A work item cannot be set as its own parent',
+    );
+  }
+
+  let curr: HierarchyParentStub | null = initialParent;
+  const visited = new Set<string>([targetWorkItemId, initialParent.id]);
+  let depth = 1;
+
+  while (curr && curr.parentWorkItemId) {
+    if (visited.has(curr.parentWorkItemId)) {
+      throw new BadRequestException(
+        'Cannot set a descendant or cyclical ancestor as the parent work item',
+      );
+    }
+    depth += 1;
+    if (depth > maxDepth) {
+      throw new BadRequestException(
+        `Hierarchy depth cannot exceed ${maxDepth} levels`,
+      );
+    }
+    visited.add(curr.parentWorkItemId);
+    curr = await findWorkItemById(curr.parentWorkItemId);
+  }
+}
 
 export const PRIORITY_MAP: Record<string, WorkItemPriority> = {
   none: WorkItemPriority.none,
@@ -21,7 +65,9 @@ import type {
   ChildWorkItemMinimal,
   StateMinimal,
   ParentWorkItemMinimal,
-} from '@/modules/work-item/core/types/work-item.types';
+} from '@/modules/work-item/core/types/core.types';
+import { mapUserMinimal } from '@/modules/work-item/common/types/shared.types';
+import { isStateCompleted } from '@/modules/work-item/state/utils/state.util';
 
 export type { WorkItemResponse };
 
@@ -189,26 +235,26 @@ export const formatWorkItem = (
 ): WorkItemResponse | null => {
   if (!record) return null;
 
-  const assignee = record.assignee
-    ? {
-        id: record.assignee.id,
-        name: record.assignee.profile?.name ?? record.assignee.name ?? 'User',
-        email: record.assignee.email || null,
-        avatar:
-          record.assignee.profile?.avatar ?? record.assignee.avatar ?? null,
-      }
-    : null;
+  const assignee = mapUserMinimal(record.assignee);
 
   const assignees: UserMinimal[] =
     Array.isArray(record.assignees) && record.assignees.length > 0
       ? record.assignees.map((a) => {
           const u = a.user || a;
-          return {
-            id: u.id || '',
-            name: u.profile?.name ?? u.name ?? 'User',
-            email: u.email || null,
-            avatar: u.profile?.avatar ?? u.avatar ?? null,
-          };
+          return (
+            mapUserMinimal({
+              id: u.id || '',
+              name: u.name,
+              email: u.email,
+              avatar: u.avatar,
+              profile: u.profile,
+            }) || {
+              id: u.id || '',
+              name: 'User',
+              email: null,
+              avatar: null,
+            }
+          );
         })
       : assignee
         ? [assignee]
@@ -223,9 +269,7 @@ export const formatWorkItem = (
           ? [record.assigneeId]
           : [];
 
-  const isCompleted = record.state?.group
-    ? record.state.group === 'completed'
-    : record.columnId === 'done' || Boolean(record.completed);
+  const isCompleted = isStateCompleted(record);
 
   const stateGroup =
     record.state?.group || (isCompleted ? 'completed' : 'unstarted');
@@ -234,9 +278,7 @@ export const formatWorkItem = (
     record.childWorkItems,
   )
     ? record.childWorkItems.map((child: RawWorkItemRecord) => {
-        const childIsCompleted = child.state?.group
-          ? child.state.group === 'completed'
-          : child.columnId === 'done' || Boolean(child.completed);
+        const childIsCompleted = isStateCompleted(child);
         return {
           id: child.id || '',
           title: child.title || '',
@@ -248,18 +290,7 @@ export const formatWorkItem = (
             child.state?.group ||
             (childIsCompleted ? 'completed' : 'unstarted'),
           assigneeId: child.assigneeId || null,
-          assignee: child.assignee
-            ? {
-                id: child.assignee.id,
-                name:
-                  child.assignee.profile?.name ?? child.assignee.name ?? 'User',
-                email: child.assignee.email ?? null,
-                avatar:
-                  child.assignee.profile?.avatar ??
-                  child.assignee.avatar ??
-                  null,
-              }
-            : null,
+          assignee: mapUserMinimal(child.assignee),
           state: child.state
             ? {
                 id: child.state.id || '',
@@ -288,6 +319,20 @@ export const formatWorkItem = (
 
   const labels = resolveLabels(record, labelLookup);
 
+  const jsonSubtypeMap = new Map<string, string>();
+  if (Array.isArray(record.relations)) {
+    for (const jr of record.relations as Array<{
+      targetWorkItemId?: string;
+      targetId?: string;
+      type?: string;
+    }>) {
+      const tId = jr?.targetWorkItemId || jr?.targetId;
+      if (tId && typeof jr?.type === 'string') {
+        jsonSubtypeMap.set(tId, jr.type);
+      }
+    }
+  }
+
   const relations =
     (Array.isArray(record.outgoingRelations) &&
       record.outgoingRelations.length > 0) ||
@@ -296,8 +341,9 @@ export const formatWorkItem = (
       ? [
           ...(record.outgoingRelations || []).map((r) => ({
             id: r.id,
-            type: r.type,
+            type: jsonSubtypeMap.get(r.targetId) || r.type,
             targetId: r.targetId,
+            targetWorkItemId: r.targetId,
             targetWorkItem: r.targetWorkItem
               ? {
                   id: r.targetWorkItem.id,
@@ -309,12 +355,14 @@ export const formatWorkItem = (
           ...(record.incomingRelations || []).map((r) => ({
             id: r.id,
             type:
-              r.type === 'blocks'
+              jsonSubtypeMap.get(r.sourceId) ||
+              (r.type === 'blocks'
                 ? 'blocked_by'
                 : r.type === 'blocked_by'
                   ? 'blocks'
-                  : r.type,
+                  : r.type),
             targetId: r.sourceId,
+            targetWorkItemId: r.sourceId,
             targetWorkItem: r.sourceWorkItem
               ? {
                   id: r.sourceWorkItem.id,
@@ -428,5 +476,77 @@ export const formatWorkItem = (
 };
 
 import { deriveProjectPrefix } from '@/modules/project/core/utils/identifier.util';
+
+export function calculateWorkItemAnalytics(items: unknown[]) {
+  const byStateGroup: Record<string, number> = {
+    backlog: 0,
+    unstarted: 0,
+    started: 0,
+    completed: 0,
+    cancelled: 0,
+  };
+  const byPriority: Record<string, number> = {
+    none: 0,
+    low: 0,
+    medium: 0,
+    high: 0,
+    urgent: 0,
+  };
+
+  let completedCount = 0;
+  let cancelledCount = 0;
+  let overdueCount = 0;
+  let totalTimeSpent = 0;
+  const now = Date.now();
+
+  for (const rawItem of items) {
+    const item = rawItem as {
+      stateGroup?: string | null;
+      priority?: string | null;
+      completed?: boolean | null;
+      dueDate?: string | Date | null;
+      timeSpent?: number | null;
+    };
+    const group = (
+      typeof item.stateGroup === 'string' ? item.stateGroup : 'unstarted'
+    ).toLowerCase();
+    byStateGroup[group] = (byStateGroup[group] || 0) + 1;
+
+    const prio = (
+      typeof item.priority === 'string' ? item.priority : 'none'
+    ).toLowerCase();
+    byPriority[prio] = (byPriority[prio] || 0) + 1;
+
+    const isDone = Boolean(item.completed) || group === 'completed';
+    if (isDone) {
+      completedCount += 1;
+    } else if (group === 'cancelled') {
+      cancelledCount += 1;
+    } else if (item.dueDate && new Date(item.dueDate).getTime() < now) {
+      overdueCount += 1;
+    }
+
+    if (typeof item.timeSpent === 'number' && !isNaN(item.timeSpent)) {
+      totalTimeSpent += item.timeSpent;
+    }
+  }
+
+  const total = items.length;
+  const actionableTotal = Math.max(0, total - cancelledCount);
+  const completionRate =
+    actionableTotal > 0
+      ? Math.round((completedCount / actionableTotal) * 100)
+      : 0;
+
+  return {
+    total,
+    completed: completedCount,
+    overdue: overdueCount,
+    completionRate,
+    totalTimeSpent: Number(totalTimeSpent.toFixed(2)),
+    byStateGroup,
+    byPriority,
+  };
+}
 
 export { deriveProjectPrefix };

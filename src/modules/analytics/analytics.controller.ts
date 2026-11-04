@@ -12,12 +12,17 @@ import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Analytics')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/analytics')
+@Controller(['api/v1/analytics', 'api/analytics', 'api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
-  @Get(['projects/:projectId', 'project/:projectId'])
+  @Get([
+    'projects/:projectId/analytics',
+    'project/:projectId/analytics',
+    'projects/:projectId',
+    'project/:projectId',
+  ])
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
@@ -27,7 +32,11 @@ export class AnalyticsController {
     return this.analyticsService.getProjectAnalytics(projectId);
   }
 
-  @Get(['projects/:projectId/overview', 'project/:projectId/overview'])
+  @Get([
+    'projects/:projectId/analytics/overview',
+    'projects/:projectId/overview',
+    'project/:projectId/overview',
+  ])
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get project aggregate metrics overview' })
@@ -41,7 +50,11 @@ export class AnalyticsController {
     return this.analyticsService.getUserOverview(userId);
   }
 
-  @Get(['projects/:projectId/labels', 'project/:projectId/labels'])
+  @Get([
+    'projects/:projectId/analytics/labels',
+    'projects/:projectId/labels',
+    'project/:projectId/labels',
+  ])
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
@@ -51,7 +64,11 @@ export class AnalyticsController {
     return this.analyticsService.getLabelDistribution(projectId);
   }
 
-  @Get(['projects/:projectId/timeseries', 'project/:projectId/timeseries'])
+  @Get([
+    'projects/:projectId/analytics/timeseries',
+    'projects/:projectId/timeseries',
+    'project/:projectId/timeseries',
+  ])
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get daily WorkItem creation and completion trend' })
@@ -79,4 +96,3 @@ export class AnalyticsController {
     return this.analyticsService.getTimeSeries(projectId, fromDate, toDate);
   }
 }
-

@@ -18,13 +18,14 @@ import {
   ApiOperation,
   ApiParam,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/identity/auth';
-import { CurrentUser } from '@/modules/identity/auth';
+import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { DraftService } from './draft.service';
-import { CreateDraftDto } from './dto/create-draft.dto';
-import { UpdateDraftDto } from './dto/update-draft.dto';
-import { PublishDraftDto } from './dto/publish-draft.dto';
-import { QueryDraftDto } from './dto/query-draft.dto';
+import {
+  CreateDraftDto,
+  UpdateDraftDto,
+  PublishDraftDto,
+  QueryDraftDto,
+} from './dto/draft.dto';
 
 @ApiTags('work-items')
 @ApiBearerAuth('JWT-auth')

@@ -5,8 +5,7 @@ import { CoreRepository } from './core.repository';
 import { IdHandler } from './handlers/id.handler';
 import { RankHandler } from './handlers/rank.handler';
 import { CloneHandler } from './handlers/clone.handler';
-import { EventDispatcher } from './handlers/event.dispatcher';
-import { AttachmentSyncHandler } from './handlers/attachment-sync.handler';
+import { EventHandler } from './handlers/event.handler';
 import { SyncHandler } from './handlers/sync.handler';
 import { BulkHandler } from './handlers/bulk.handler';
 
@@ -18,8 +17,7 @@ import { BulkHandler } from './handlers/bulk.handler';
     IdHandler,
     RankHandler,
     CloneHandler,
-    EventDispatcher,
-    AttachmentSyncHandler,
+    EventHandler,
     SyncHandler,
     BulkHandler,
   ],
@@ -29,8 +27,7 @@ import { BulkHandler } from './handlers/bulk.handler';
     IdHandler,
     RankHandler,
     CloneHandler,
-    EventDispatcher,
-    AttachmentSyncHandler,
+    EventHandler,
     SyncHandler,
     BulkHandler,
   ],

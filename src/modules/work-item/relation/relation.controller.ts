@@ -28,6 +28,24 @@ import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 export class RelationController {
   constructor(private readonly relationService: RelationService) {}
 
+  @Get([
+    'projects/:projectId/work-items/cpm',
+    'work-items/project/:projectId/cpm',
+  ])
+  @UseGuards(ProjectAccessGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary:
+      'Compute server-side Critical Path Method (CPM), DAG topological sort, cycle detection, and schedule violations for a project',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Project CPM analysis and dependency violations',
+  })
+  async getProjectCpm(@Param('projectId') projectId: string) {
+    return this.relationService.getProjectCpmAnalysis(projectId);
+  }
+
   @Get('work-items/:workItemId/relations')
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')

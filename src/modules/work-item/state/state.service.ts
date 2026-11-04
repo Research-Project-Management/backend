@@ -18,7 +18,10 @@ import {
   getStateDefaultIcon,
 } from './types/state.types';
 import { generateStateSlug, isValidStateGroup } from './utils/state.util';
-import { invalidateWorkItemCache } from '@/modules/work-item/common/constants/redis-keys.constant';
+import {
+  WORK_ITEM_REDIS_KEYS,
+  invalidateWorkItemCache,
+} from '@/modules/work-item/common/constants/redis.constant';
 
 @Injectable()
 export class StateService {
@@ -521,9 +524,6 @@ export class StateService {
   private async invalidateProjectStateCache(projectId: string): Promise<void> {
     if (!this.cache) return;
     await invalidateWorkItemCache(this.cache, { projectId });
-    await Promise.allSettled([
-      this.cache.del(`flux:project:${projectId}`),
-      this.cache.del(`flux:project:overview:${projectId}`),
-    ]);
+    await this.cache.del(WORK_ITEM_REDIS_KEYS.states(projectId)).catch(() => null);
   }
 }

@@ -14,11 +14,34 @@ import {
 } from './dto/comment.dto';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import {
-  parseCommentReplies,
-  CommentReply,
-  CommentAuthor,
-} from './types/comment.types';
+
+export interface CommentAuthor {
+  id: string;
+  name: string;
+  email?: string | null;
+  avatar?: string | null;
+}
+
+export interface CommentReply {
+  id: string;
+  content: string;
+  author: CommentAuthor | null;
+  createdAt: string;
+}
+
+export function parseCommentReplies(raw: unknown): CommentReply[] {
+  if (!raw || !Array.isArray(raw)) return [];
+  const list: unknown[] = raw;
+  return list.filter(
+    (item: unknown): item is CommentReply =>
+      typeof item === 'object' &&
+      item !== null &&
+      'id' in item &&
+      typeof (item as Record<string, unknown>).id === 'string' &&
+      'content' in item &&
+      typeof (item as Record<string, unknown>).content === 'string',
+  );
+}
 
 /**
  * Parses @mention tokens from comment content.
@@ -48,6 +71,17 @@ export class CommentService {
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
+  private isProjectCreatorForComment(
+    comment: {
+      workItem?: {
+        project?: { createdById?: string | null } | null;
+      } | null;
+    },
+    userId: string,
+  ): boolean {
+    return comment.workItem?.project?.createdById === userId;
+  }
+
   private async assertCanModifyComment(
     commentId: string,
     userId: string,
@@ -64,15 +98,14 @@ export class CommentService {
       return comment;
     }
 
-    const workItem = comment.workItem;
-
-    if (workItem?.project?.createdById === userId) {
+    if (this.isProjectCreatorForComment(comment, userId)) {
       return comment;
     }
 
-    if (workItem?.projectId) {
+    const projectId = comment.workItem?.projectId;
+    if (projectId) {
       const projectRole = await this.commentRepository.findProjectMemberRole(
-        workItem.projectId,
+        projectId,
         userId,
       );
       if (projectRole === 'owner') {
@@ -98,13 +131,13 @@ export class CommentService {
     };
   }
 
-  async getWorkItemComments(workItemId: string) {
+  async getComments(workItemId: string) {
     const comments =
       await this.commentRepository.findWorkItemComments(workItemId);
     return { comments };
   }
 
-  async createWorkItemComment(
+  async createComment(
     workItemId: string,
     userId: string,
     createCommentDto: CreateCommentDto,
@@ -138,7 +171,7 @@ export class CommentService {
     return { comment };
   }
 
-  async updateWorkItemComment(
+  async updateComment(
     commentId: string,
     userId: string,
     updateCommentDto: UpdateCommentDto,
@@ -165,7 +198,7 @@ export class CommentService {
     return { comment };
   }
 
-  async deleteWorkItemComment(commentId: string, userId: string) {
+  async deleteComment(commentId: string, userId: string) {
     const existing = await this.assertCanModifyComment(
       commentId,
       userId,
@@ -183,7 +216,7 @@ export class CommentService {
     return { success: true };
   }
 
-  async addWorkItemReply(
+  async addReply(
     commentId: string,
     userId: string,
     addReplyDto: AddReplyDto,
@@ -205,7 +238,7 @@ export class CommentService {
     return { comment };
   }
 
-  async reactToWorkItemComment(
+  async reactToComment(
     commentId: string,
     userId: string,
     reactCommentDto: ReactCommentDto,

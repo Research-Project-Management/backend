@@ -259,6 +259,34 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async setNx(
+    key: string,
+    value: string,
+    ttlSeconds?: number,
+  ): Promise<boolean> {
+    if (!this.isReady() || !this.redisClient) {
+      if (this.memoryCache.has(key)) return false;
+      this.setMemoryCache(key, value, ttlSeconds);
+      return true;
+    }
+    try {
+      const res =
+        ttlSeconds && ttlSeconds > 0
+          ? await this.redisClient.set(key, value, 'EX', ttlSeconds, 'NX')
+          : await this.redisClient.set(key, value, 'NX');
+      if (res === 'OK') {
+        this.setMemoryCache(key, value, ttlSeconds);
+        return true;
+      }
+      return false;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `SETNX failed for key "${key}": ${getErrorMessage(err)}`,
+      );
+      return false;
+    }
+  }
+
   async incr(key: string): Promise<number> {
     if (!this.isReady() || !this.redisClient) {
       const current = this.memoryCache.get(key);

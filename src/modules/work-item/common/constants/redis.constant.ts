@@ -42,10 +42,14 @@ export const WORK_ITEM_REDIS_KEYS = {
   projectOverview: (projectId: string) => `flux:proj:overview:${projectId}`,
 
   /**
-   * Aliases for cleaner shorthand
+   * Project analytics cache keys
    */
-  list: (projectId: string) => `flux:wi:work-items:${projectId}`,
-  item: (id: string) => `flux:wi:work-item:${id}`,
+  analyticsProjectInsights: (projectId: string) =>
+    `flux:analytics:proj:${projectId}:insights`,
+  analyticsProjectOverview: (projectId: string) =>
+    `flux:analytics:proj:${projectId}:overview`,
+  analyticsUserOverview: (userId: string) =>
+    `flux:analytics:user:${userId}:overview`,
 } as const;
 
 export async function invalidateWorkItemCache(
@@ -54,6 +58,7 @@ export async function invalidateWorkItemCache(
     projectId?: string | null;
     workItemId?: string | null;
     identifier?: string | null;
+    userId?: string | null;
   },
 ): Promise<void> {
   if (!cache) return;
@@ -61,6 +66,11 @@ export async function invalidateWorkItemCache(
   if (options.projectId) {
     keys.add(WORK_ITEM_REDIS_KEYS.projectWorkItems(options.projectId));
     keys.add(WORK_ITEM_REDIS_KEYS.projectOverview(options.projectId));
+    keys.add(WORK_ITEM_REDIS_KEYS.analyticsProjectInsights(options.projectId));
+    keys.add(WORK_ITEM_REDIS_KEYS.analyticsProjectOverview(options.projectId));
+  }
+  if (options.userId) {
+    keys.add(WORK_ITEM_REDIS_KEYS.analyticsUserOverview(options.userId));
   }
   if (options.workItemId) {
     keys.add(WORK_ITEM_REDIS_KEYS.workItem(options.workItemId));

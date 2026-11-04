@@ -30,19 +30,19 @@ export class CommentController {
   @Get('work-items/:workItemId/comments')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get all comments for a work item' })
-  async getWorkItemComments(@Param('workItemId') workItemId: string) {
-    return this.commentService.getWorkItemComments(workItemId);
+  async getComments(@Param('workItemId') workItemId: string) {
+    return this.commentService.getComments(workItemId);
   }
 
   @Post('work-items/:workItemId/comments')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Add a comment to a work item' })
-  async createWorkItemComment(
+  async createComment(
     @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
     @Body() createCommentDto: CreateCommentDto,
   ) {
-    return this.commentService.createWorkItemComment(
+    return this.commentService.createComment(
       workItemId,
       userId,
       createCommentDto,
@@ -52,12 +52,12 @@ export class CommentController {
   @Put('work-items/comments/:commentId')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Update a WorkItem comment' })
-  async updateWorkItemComment(
+  async updateComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
     @Body() updateCommentDto: UpdateCommentDto,
   ) {
-    return this.commentService.updateWorkItemComment(
+    return this.commentService.updateComment(
       commentId,
       userId,
       updateCommentDto,
@@ -67,33 +67,33 @@ export class CommentController {
   @Delete('work-items/comments/:commentId')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Delete a WorkItem comment' })
-  async deleteWorkItemComment(
+  async deleteComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.commentService.deleteWorkItemComment(commentId, userId);
+    return this.commentService.deleteComment(commentId, userId);
   }
 
   @Post('work-items/comments/:commentId/replies')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Reply to a WorkItem comment' })
-  async addWorkItemReply(
+  async addReply(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
     @Body() addReplyDto: AddReplyDto,
   ) {
-    return this.commentService.addWorkItemReply(commentId, userId, addReplyDto);
+    return this.commentService.addReply(commentId, userId, addReplyDto);
   }
 
   @Post('work-items/comments/:commentId/reactions')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'React to a WorkItem comment with emoji' })
-  async reactToWorkItemComment(
+  async reactToComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
     @Body() reactCommentDto: ReactCommentDto,
   ) {
-    return this.commentService.reactToWorkItemComment(
+    return this.commentService.reactToComment(
       commentId,
       userId,
       reactCommentDto,

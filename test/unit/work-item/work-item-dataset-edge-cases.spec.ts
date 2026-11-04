@@ -10,9 +10,11 @@ import { RelationService } from '@/modules/work-item/relation/relation.service';
 import { ArchiveService } from '@/modules/work-item/archive/archive.service';
 import { AssignmentService } from '@/modules/work-item/assignment/assignment.service';
 import { LabelService } from '@/modules/work-item/label/label.service';
-import { HistoryService } from '@/modules/work-item/history/history.service';
-import { summarizeDiff } from '@/modules/work-item/history/utils/diff.util';
-import { validateHierarchyCycle } from '@/modules/work-item/core/utils/hierarchy.util';
+import {
+  HistoryService,
+  summarizeDiff,
+} from '@/modules/work-item/history/history.service';
+import { validateHierarchyCycle } from '@/modules/work-item/core/utils/core.util';
 
 describe('Work-Item Real-World Dataset & Edge-Case Experimentation Suite', () => {
   // ═══════════════════════════════════════════════════════════════════════════
@@ -450,8 +452,8 @@ describe('Work-Item Real-World Dataset & Edge-Case Experimentation Suite', () =>
         ).rejects.toThrow('Hierarchy depth cannot exceed 10 levels');
       });
 
-      it('should convert sub-item to root (convertSubItemToRoot) and clear parentWorkItemId', async () => {
-        const result = await coreService.convertSubItemToRoot(UUID_2);
+      it('should convert sub-item to root (convertToRootWorkItem) and clear parentWorkItemId', async () => {
+        const result = await coreService.convertToRootWorkItem(UUID_2);
         expect(mockCoreRepo.disconnectParentWorkItem).toHaveBeenCalledWith(
           UUID_2,
         );
@@ -623,7 +625,7 @@ describe('Work-Item Real-World Dataset & Edge-Case Experimentation Suite', () =>
       it('should deduplicate and canonically sort duplicate workItemIds in BulkHandler, ArchiveService, and AssignmentService', async () => {
         // 1. BulkHandler deduplication
         const mockCoreRepo: any = {
-          findProjectWithColumns: jest.fn().mockResolvedValue({
+          findProjectWithStates: jest.fn().mockResolvedValue({
             id: PROJ_ID,
             states: [{ id: 'done', name: 'Done', group: 'completed' }],
           }),
@@ -660,7 +662,7 @@ describe('Work-Item Real-World Dataset & Edge-Case Experimentation Suite', () =>
           bulkArchive: jest.fn().mockResolvedValue({ count: 2 }),
         };
         const archiveService = new ArchiveService(mockArchiveRepo);
-        await archiveService.bulkArchiveWorkItems(
+        await archiveService.bulkArchive(
           { workItemIds: [ID_B, ID_A, ID_B] },
           'user-1',
         );

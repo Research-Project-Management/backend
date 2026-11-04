@@ -1,10 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { WorkItem, ProjectMember } from '@prisma/client';
-import {
-  ProjectSettingsWithAssignee,
-  ELIGIBLE_ASSIGNEE_ROLES,
-} from './types/assignment.types';
+import { ELIGIBLE_ASSIGNEE_ROLES } from './dto/assignment.dto';
 import {
   USER_MINIMAL_SELECT,
   mapUserMinimal,
@@ -34,12 +31,6 @@ export type WorkItemWithProject = WorkItem & {
 @Injectable()
 export class AssignmentRepository {
   constructor(private readonly prismaService: PrismaService) {}
-
-  async findWorkItem(workItemId: string): Promise<WorkItem | null> {
-    return this.prismaService.workItem.findFirst({
-      where: buildWorkItemIdOrIdentifierWhere(workItemId),
-    });
-  }
 
   async findWorkItemWithProject(
     workItemId: string,
@@ -214,19 +205,6 @@ export class AssignmentRepository {
 
       return result.count;
     });
-  }
-
-  async getProjectSettings(
-    projectId: string,
-  ): Promise<ProjectSettingsWithAssignee | null> {
-    const project = await this.prismaService.project.findUnique({
-      where: { id: projectId },
-      select: { settings: true },
-    });
-    if (!project || !project.settings || typeof project.settings !== 'object') {
-      return null;
-    }
-    return project.settings as ProjectSettingsWithAssignee;
   }
 
   /**

@@ -15,8 +15,6 @@ import {
   AssignWorkItemResult,
   BulkAssignResult,
   ELIGIBLE_ASSIGNEE_ROLES,
-} from './types/assignment.types';
-import {
   BulkAssignWorkItemDto,
   SetAssigneesDto,
   AddAssigneeDto,
@@ -24,7 +22,7 @@ import {
 import {
   WORK_ITEM_REDIS_KEYS,
   invalidateWorkItemCache,
-} from '@/modules/work-item/common/constants/redis-keys.constant';
+} from '@/modules/work-item/common/constants/redis.constant';
 
 @Injectable()
 export class AssignmentService {
@@ -273,7 +271,7 @@ export class AssignmentService {
           this.cache!.del(WORK_ITEM_REDIS_KEYS.workItem(id)),
         ),
         this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
-        this.cache.del(`flux:wi:proj:${projectId}`),
+        this.cache.del(WORK_ITEM_REDIS_KEYS.projectOverview(projectId)),
       ]);
     }
 
@@ -299,29 +297,6 @@ export class AssignmentService {
         user: member.user,
       })),
     };
-  }
-
-  /**
-   * Resolves the default assignee for a project if configured in settings.
-   * Verifies that the default assignee is still an active eligible member.
-   */
-  async resolveDefaultAssignee(projectId: string): Promise<string | null> {
-    const settings =
-      await this.assignmentRepository.getProjectSettings(projectId);
-    if (!settings || !settings.defaultAssigneeId) {
-      return null;
-    }
-
-    const member = await this.assignmentRepository.findProjectMember(
-      projectId,
-      settings.defaultAssigneeId,
-    );
-
-    if (!member || !ELIGIBLE_ASSIGNEE_ROLES.includes(member.role)) {
-      return null;
-    }
-
-    return settings.defaultAssigneeId;
   }
 
   // ── MULTI-ASSIGNEE METHODS ──────────────────────────────────────────────────
@@ -502,7 +477,12 @@ export class AssignmentService {
     workItemId: string,
     userId: string,
     subscribe: boolean,
-  ): Promise<{ subscribers: string[] }> {
+  ): Promise<{
+    subscribers: string[];
+    subscriberIds: string[];
+    workItem: Record<string, unknown>;
+    item: Record<string, unknown>;
+  }> {
     const item = await this.requireProjectWorkItem(projectId, workItemId);
 
     const currentSubscribers: string[] = Array.isArray(item.subscriberIds)
@@ -510,7 +490,13 @@ export class AssignmentService {
       : [];
 
     if (subscribe && currentSubscribers.includes(userId)) {
-      return { subscribers: currentSubscribers };
+      const unchangedItem = { ...item, subscriberIds: currentSubscribers };
+      return {
+        subscribers: currentSubscribers,
+        subscriberIds: currentSubscribers,
+        workItem: unchangedItem,
+        item: unchangedItem,
+      };
     }
 
     const updated = subscribe
@@ -531,7 +517,13 @@ export class AssignmentService {
     };
     this.eventEmitter?.emit('work-item.updated', payload);
 
-    return { subscribers: updated };
+    const updatedItem = { ...item, subscriberIds: updated };
+    return {
+      subscribers: updated,
+      subscriberIds: updated,
+      workItem: updatedItem,
+      item: updatedItem,
+    };
   }
 
   /**
@@ -541,7 +533,12 @@ export class AssignmentService {
     projectId: string,
     workItemId: string,
     userId: string,
-  ): Promise<{ subscribers: string[] }> {
+  ): Promise<{
+    subscribers: string[];
+    subscriberIds: string[];
+    workItem: Record<string, unknown>;
+    item: Record<string, unknown>;
+  }> {
     return this.updateSubscription(projectId, workItemId, userId, true);
   }
 
@@ -552,7 +549,12 @@ export class AssignmentService {
     projectId: string,
     workItemId: string,
     userId: string,
-  ): Promise<{ subscribers: string[] }> {
+  ): Promise<{
+    subscribers: string[];
+    subscriberIds: string[];
+    workItem: Record<string, unknown>;
+    item: Record<string, unknown>;
+  }> {
     return this.updateSubscription(projectId, workItemId, userId, false);
   }
 }

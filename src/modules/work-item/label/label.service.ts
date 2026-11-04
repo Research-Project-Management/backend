@@ -13,14 +13,14 @@ import {
   ReorderLabelsDto,
   CreateLabelDto,
   UpdateLabelDto,
+  LabelWithChildren,
 } from './dto/label.dto';
 import { WorkItemLabel as Label } from '@prisma/client';
 import { RedisCacheService } from '@/core';
 import {
   WORK_ITEM_REDIS_KEYS,
   invalidateWorkItemCache,
-} from '@/modules/work-item/common/constants/redis-keys.constant';
-import { LabelWithChildren } from './types/label.types';
+} from '@/modules/work-item/common/constants/redis.constant';
 
 export const DEFAULT_LABEL_PALETTE = [
   '#ef4444', // Red

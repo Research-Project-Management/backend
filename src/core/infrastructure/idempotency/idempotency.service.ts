@@ -72,7 +72,10 @@ export class IdempotencyService {
           };
         }
       } catch (err: unknown) {
-        if (err instanceof ConflictException || err instanceof UnprocessableEntityException) {
+        if (
+          err instanceof ConflictException ||
+          err instanceof UnprocessableEntityException
+        ) {
           throw err;
         }
         const msg = err instanceof Error ? err.message : String(err);
@@ -80,14 +83,12 @@ export class IdempotencyService {
       }
     }
 
-    // 2. Check Database Record using compound unique constraint [userId, idempotencyKey]
-    const record = await this.prisma.idempotencyRecord.findUnique({
-      where: {
-        userId_idempotencyKey: {
-          userId,
-          idempotencyKey,
-        },
-      },
+    // 2. Check Database Record scoped by (projectId, idempotencyKey) or (userId, projectId: null, idempotencyKey)
+    const scopeWhere = projectId
+      ? { projectId, idempotencyKey }
+      : { userId, projectId: null, idempotencyKey };
+    const record = await this.prisma.idempotencyRecord.findFirst({
+      where: scopeWhere,
     });
 
     if (record) {
@@ -104,8 +105,8 @@ export class IdempotencyService {
         record.requestHash !== requestHash
       ) {
         throw new UnprocessableEntityException(
-              'Idempotency key reused with different request payload',
-            );
+          'Idempotency key reused with different request payload',
+        );
       }
 
       if (record.status === 'in_progress') {
@@ -134,29 +135,36 @@ export class IdempotencyService {
   ): Promise<void> {
     const expiresAt = new Date(Date.now() + this.DEFAULT_TTL_SEC * 1000);
 
-    // Save to DB atomically using compound unique constraint [userId, idempotencyKey]
-    await this.prisma.idempotencyRecord.upsert({
-      where: {
-        userId_idempotencyKey: {
-          userId,
-          idempotencyKey,
-        },
-      },
-      update: {
-        status: 'in_progress',
-        requestHash,
-        expiresAt,
-        projectId: projectId ?? null,
-      },
-      create: {
-        idempotencyKey,
-        userId,
-        projectId: projectId ?? null,
-        requestHash,
-        status: 'in_progress',
-        expiresAt,
-      },
+    // Save to DB scoped by (projectId, idempotencyKey) or (userId, projectId: null, idempotencyKey)
+    const scopeWhere = projectId
+      ? { projectId, idempotencyKey }
+      : { userId, projectId: null, idempotencyKey };
+    const existing = await this.prisma.idempotencyRecord.findFirst({
+      where: scopeWhere,
+      select: { id: true },
     });
+    if (existing) {
+      await this.prisma.idempotencyRecord.update({
+        where: { id: existing.id },
+        data: {
+          status: 'in_progress',
+          requestHash,
+          expiresAt,
+          projectId: projectId ?? null,
+        },
+      });
+    } else {
+      await this.prisma.idempotencyRecord.create({
+        data: {
+          idempotencyKey,
+          userId,
+          projectId: projectId ?? null,
+          requestHash,
+          status: 'in_progress',
+          expiresAt,
+        },
+      });
+    }
 
     // Save to Redis
     const redisKey = this.getRedisKey(idempotencyKey, userId, projectId);
@@ -181,32 +189,43 @@ export class IdempotencyService {
     const ttl = input.ttlSeconds || this.DEFAULT_TTL_SEC;
     const expiresAt = new Date(Date.now() + ttl * 1000);
 
-    await this.prisma.idempotencyRecord.upsert({
-      where: {
-        userId_idempotencyKey: {
+    const scopeWhere = input.projectId
+      ? { projectId: input.projectId, idempotencyKey: input.idempotencyKey }
+      : {
           userId: input.userId,
+          projectId: null,
           idempotencyKey: input.idempotencyKey,
-        },
-      },
-      update: {
-        status: 'succeeded',
-        statusCode: input.statusCode,
-        responseBody:
-          (input.responseBody as Prisma.InputJsonValue) ?? Prisma.JsonNull,
-        expiresAt,
-      },
-      create: {
-        idempotencyKey: input.idempotencyKey,
-        userId: input.userId,
-        projectId: input.projectId ?? null,
-        requestHash: input.requestHash,
-        statusCode: input.statusCode,
-        responseBody:
-          (input.responseBody as Prisma.InputJsonValue) ?? Prisma.JsonNull,
-        status: 'succeeded',
-        expiresAt,
-      },
+        };
+    const existing = await this.prisma.idempotencyRecord.findFirst({
+      where: scopeWhere,
+      select: { id: true },
     });
+    if (existing) {
+      await this.prisma.idempotencyRecord.update({
+        where: { id: existing.id },
+        data: {
+          status: 'succeeded',
+          statusCode: input.statusCode,
+          responseBody:
+            (input.responseBody as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+          expiresAt,
+        },
+      });
+    } else {
+      await this.prisma.idempotencyRecord.create({
+        data: {
+          idempotencyKey: input.idempotencyKey,
+          userId: input.userId,
+          projectId: input.projectId ?? null,
+          requestHash: input.requestHash,
+          statusCode: input.statusCode,
+          responseBody:
+            (input.responseBody as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+          status: 'succeeded',
+          expiresAt,
+        },
+      });
+    }
 
     const redisKey = this.getRedisKey(
       input.idempotencyKey,

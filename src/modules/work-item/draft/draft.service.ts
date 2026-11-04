@@ -8,10 +8,12 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DraftRepository } from './draft.repository';
 import { CoreService } from '@/modules/work-item/core/core.service';
-import { CreateDraftDto } from './dto/create-draft.dto';
-import { UpdateDraftDto } from './dto/update-draft.dto';
-import { PublishDraftDto } from './dto/publish-draft.dto';
-import { QueryDraftDto } from './dto/query-draft.dto';
+import {
+  CreateDraftDto,
+  UpdateDraftDto,
+  PublishDraftDto,
+  QueryDraftDto,
+} from './dto/draft.dto';
 
 @Injectable()
 export class DraftService {
@@ -19,7 +21,7 @@ export class DraftService {
 
   constructor(
     private readonly draftRepository: DraftRepository,
-    private readonly workItemService: CoreService,
+    private readonly coreService: CoreService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
@@ -87,7 +89,7 @@ export class DraftService {
     const targetColumn =
       publishDraftDto.columnId || draft.columnId || 'backlog';
 
-    const result = await this.workItemService.createWorkItem(
+    const result = await this.coreService.createWorkItem(
       targetProjectId,
       authorId,
       {

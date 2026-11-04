@@ -4,6 +4,7 @@ import { EntityType } from '@prisma/client';
 import {
   USER_MINIMAL_SELECT,
   mapUserMinimal,
+  resolveWorkItemUuid as resolveSharedWorkItemUuid,
 } from '@/modules/work-item/common/types/shared.types';
 
 @Injectable()
@@ -13,17 +14,10 @@ export class HistoryRepository {
   async resolveWorkItemUuid(
     workItemIdOrIdentifier: string,
   ): Promise<string | null> {
-    if (isUuid(workItemIdOrIdentifier)) {
-      return workItemIdOrIdentifier;
-    }
-    const item = await this.prismaService.workItem.findFirst({
-      where: {
-        identifier: { equals: workItemIdOrIdentifier, mode: 'insensitive' },
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
-    return item?.id || null;
+    return resolveSharedWorkItemUuid(
+      this.prismaService,
+      workItemIdOrIdentifier,
+    );
   }
 
   async findWorkItemActivityEvents(

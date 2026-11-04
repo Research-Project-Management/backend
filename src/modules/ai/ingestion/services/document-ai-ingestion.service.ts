@@ -169,9 +169,13 @@ export class DocumentAiIngestionService {
       // 8. Propagate ragDocId and metadata to linked Library Attachment & Item via LibraryFacade
       if (isIndexed && ragDocId) {
         try {
+          const scope = {
+            userId: event.authorId,
+            projectId: event.projectId ?? undefined,
+          };
           const attachment =
             typeof this.libraryFacade.findAttachmentByFileId === 'function'
-              ? await this.libraryFacade.findAttachmentByFileId(fileId)
+              ? await this.libraryFacade.findAttachmentByFileId(fileId, scope)
               : await this.prisma.attachment.findFirst({
                   where: { fileId, deletedAt: null },
                   select: { id: true, itemId: true, metadata: true },
@@ -184,13 +188,18 @@ export class DocumentAiIngestionService {
                 ragDocId,
                 ragStatus: 'indexed',
               },
+              scope,
             );
 
             if (attachment.itemId) {
-              await this.libraryFacade.updateItemAiMetadata(attachment.itemId, {
-                ragDocId,
-                ragStatus: 'indexed',
-              });
+              await this.libraryFacade.updateItemAiMetadata(
+                attachment.itemId,
+                {
+                  ragDocId,
+                  ragStatus: 'indexed',
+                },
+                scope,
+              );
             }
           }
         } catch (propagateErr) {

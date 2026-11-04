@@ -11,6 +11,17 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { WorkItemLabel as Label } from '@prisma/client';
+
+export interface LabelWithChildren extends Label {
+  children?: Label[];
+  parent?: Label | null;
+}
+
+export interface ReorderLabelItem {
+  id: string;
+  sortOrder: number;
+}
 
 // ── Project-Scoped DTOs ───────────────────────────────────────────────────────
 

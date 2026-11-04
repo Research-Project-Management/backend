@@ -4,7 +4,6 @@ import {
   BadRequestException,
   ConflictException,
   Optional,
-  Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RedisCacheService } from '@/core';
@@ -17,7 +16,12 @@ import {
   EnrichedRelationItem,
   TIMELINE_RELATION_TYPES,
 } from './types/relation.types';
-import { invalidateWorkItemCache } from '@/modules/work-item/common/constants/redis-keys.constant';
+import {
+  analyzeProjectCriticalPath,
+  CpmAnalysisResponseDto,
+  evaluateRelationConstraintViolation,
+} from './utils/relation.util';
+import { invalidateWorkItemCache } from '@/modules/work-item/common/constants/redis.constant';
 import * as crypto from 'crypto';
 
 export const INVERSE_RELATION_MAP: Record<string, RelationType> = {
@@ -58,8 +62,6 @@ const DUPLICATE_INVERSE_TYPES = new Set<string>(['duplicated_by']);
 
 @Injectable()
 export class RelationService {
-  private readonly logger = new Logger(RelationService.name);
-
   constructor(
     private readonly relationRepository: RelationRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
@@ -136,6 +138,26 @@ export class RelationService {
     }
 
     return Array.from(byTarget.values());
+  }
+
+  async getProjectCpmAnalysis(
+    projectId: string,
+  ): Promise<CpmAnalysisResponseDto> {
+    const workItems =
+      typeof this.relationRepository.findProjectWorkItemsForCpm === 'function'
+        ? await this.relationRepository.findProjectWorkItemsForCpm(projectId)
+        : [];
+
+    const cpmItems = workItems.map((item) => ({
+      id: item.id,
+      title: item.title,
+      startDate: item.startDate,
+      dueDate: item.dueDate,
+      completed: item.completed,
+      relations: this.extractRelations(item),
+    }));
+
+    return analyzeProjectCriticalPath(cpmItems);
   }
 
   async getWorkItemRelations(
@@ -632,120 +654,23 @@ export class RelationService {
       const targetStart = target?.startDate ? new Date(target.startDate) : null;
       const targetDue = target?.dueDate ? new Date(target.dueDate) : null;
 
-      let isViolated = false;
-      let reason = '';
-
-      if (target) {
-        switch (String(relation.type).toLowerCase()) {
-          case 'blocks':
-          case 'finish_to_start':
-            if (
-              sourceDue &&
-              targetStart &&
-              sourceDue.getTime() > targetStart.getTime()
-            ) {
-              isViolated = true;
-              reason = `Due date (${sourceDue.toDateString()}) overlaps target start (${targetStart.toDateString()})`;
-            }
-            break;
-          case 'blocked_by':
-            if (
-              sourceStart &&
-              targetDue &&
-              targetDue.getTime() > sourceStart.getTime()
-            ) {
-              isViolated = true;
-              reason = `Blocker due date (${targetDue.toDateString()}) overlaps start (${sourceStart.toDateString()})`;
-            } else if (
-              !sourceStart &&
-              sourceDue &&
-              targetStart &&
-              sourceDue.getTime() > targetStart.getTime()
-            ) {
-              isViolated = true;
-              reason = `Due date (${sourceDue.toDateString()}) overlaps target start (${targetStart.toDateString()})`;
-            }
-            break;
-          case 'start_to_start':
-            if (
-              sourceStart &&
-              targetStart &&
-              sourceStart.getTime() > targetStart.getTime()
-            ) {
-              isViolated = true;
-              reason = `Predecessor start (${sourceStart.toDateString()}) exceeds successor start (${targetStart.toDateString()})`;
-            }
-            break;
-          case 'starts_before':
-            if (
-              sourceStart &&
-              targetStart &&
-              sourceStart.getTime() >= targetStart.getTime()
-            ) {
-              isViolated = true;
-              reason = `Must start before target (${targetStart.toDateString()}) but starts on ${sourceStart.toDateString()}`;
-            }
-            break;
-          case 'starts_after':
-            if (
-              sourceStart &&
-              targetStart &&
-              sourceStart.getTime() <= targetStart.getTime()
-            ) {
-              isViolated = true;
-              reason = `Must start after target (${targetStart.toDateString()}) but starts on ${sourceStart.toDateString()}`;
-            }
-            break;
-          case 'finish_to_finish':
-            if (
-              sourceDue &&
-              targetDue &&
-              sourceDue.getTime() > targetDue.getTime()
-            ) {
-              isViolated = true;
-              reason = `Predecessor due date (${sourceDue.toDateString()}) exceeds successor due date (${targetDue.toDateString()})`;
-            }
-            break;
-          case 'finishes_before':
-            if (
-              sourceDue &&
-              targetDue &&
-              sourceDue.getTime() >= targetDue.getTime()
-            ) {
-              isViolated = true;
-              reason = `Must finish before target (${targetDue.toDateString()}) but finishes on ${sourceDue.toDateString()}`;
-            }
-            break;
-          case 'finishes_after':
-            if (
-              sourceDue &&
-              targetDue &&
-              sourceDue.getTime() <= targetDue.getTime()
-            ) {
-              isViolated = true;
-              reason = `Must finish after target (${targetDue.toDateString()}) but finishes on ${sourceDue.toDateString()}`;
-            }
-            break;
-          case 'start_to_finish':
-            if (
-              sourceStart &&
-              targetDue &&
-              sourceStart.getTime() > targetDue.getTime()
-            ) {
-              isViolated = true;
-              reason = `Predecessor start (${sourceStart.toDateString()}) exceeds successor due date (${targetDue.toDateString()})`;
-            }
-            break;
-        }
-      }
+      const evaluated = target
+        ? evaluateRelationConstraintViolation(
+            relation.type,
+            sourceStart,
+            sourceDue,
+            targetStart,
+            targetDue,
+          )
+        : { isViolated: false, reason: '' };
 
       return {
         relationId: relation.id || '',
         type: relation.type,
         targetWorkItemId: relation.targetWorkItemId,
         targetTitle: target?.title || 'Unknown',
-        reason,
-        isViolated,
+        reason: evaluated.reason,
+        isViolated: evaluated.isViolated,
       };
     });
 

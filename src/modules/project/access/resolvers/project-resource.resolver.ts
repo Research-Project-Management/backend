@@ -235,12 +235,16 @@ export class ProjectResourceResolver {
       const isLibraryContext =
         typeof request.url === 'string' && request.url.includes('/library');
       if (isLibraryContext) {
+        const urlLower = typeof request.url === 'string' ? request.url.toLowerCase() : '';
         const itemId =
           (typeof request.params?.itemId === 'string' &&
             request.params.itemId) ||
           (typeof request.body?.itemId === 'string' && request.body.itemId) ||
           (typeof request.body?.primaryItemId === 'string' &&
-            request.body.primaryItemId);
+            request.body.primaryItemId) ||
+          (urlLower.includes('/items/') &&
+            typeof request.params?.id === 'string' &&
+            request.params.id);
         if (itemId && isUUID(itemId) && (this.prisma as any).item?.findUnique) {
           const item = await this.prisma.item.findUnique({
             where: { id: itemId },
@@ -255,7 +259,10 @@ export class ProjectResourceResolver {
           (typeof request.params?.attachmentId === 'string' &&
             request.params.attachmentId) ||
           (typeof request.body?.attachmentId === 'string' &&
-            request.body.attachmentId);
+            request.body.attachmentId) ||
+          (urlLower.includes('/attachments/') &&
+            typeof request.params?.id === 'string' &&
+            request.params.id);
         if (
           attachmentId &&
           isUUID(attachmentId) &&
@@ -277,7 +284,10 @@ export class ProjectResourceResolver {
           (typeof request.params?.collectionId === 'string' &&
             request.params.collectionId) ||
           (typeof request.body?.collectionId === 'string' &&
-            request.body.collectionId);
+            request.body.collectionId) ||
+          (urlLower.includes('/collections/') &&
+            typeof request.params?.id === 'string' &&
+            request.params.id);
         if (
           collectionId &&
           isUUID(collectionId) &&
@@ -296,9 +306,11 @@ export class ProjectResourceResolver {
         }
 
         const annotationId =
-          typeof request.params?.annotationId === 'string'
-            ? request.params.annotationId
-            : undefined;
+          (typeof request.params?.annotationId === 'string' &&
+            request.params.annotationId) ||
+          (urlLower.includes('/annotations/') &&
+            typeof request.params?.id === 'string' &&
+            request.params.id);
         if (
           annotationId &&
           isUUID(annotationId) &&
@@ -315,6 +327,39 @@ export class ProjectResourceResolver {
               `annotation:${annotationId}`,
               annotation.attachment.item.projectId,
             );
+          }
+        }
+
+        const noteId =
+          urlLower.includes('/notes/') &&
+          typeof request.params?.id === 'string' &&
+          request.params.id;
+        if (noteId && isUUID(noteId) && (this.prisma as any).note?.findUnique) {
+          const note = await this.prisma.note.findUnique({
+            where: { id: noteId },
+            select: { item: { select: { projectId: true } } },
+          });
+          if (note?.item?.projectId) {
+            resolvedResourceProjects.set(`note:${noteId}`, note.item.projectId);
+          }
+        }
+
+        const runId =
+          (typeof request.params?.runId === 'string' && request.params.runId) ||
+          (urlLower.includes('/ingestion/') &&
+            typeof request.params?.id === 'string' &&
+            request.params.id);
+        if (
+          runId &&
+          isUUID(runId) &&
+          (this.prisma as any).ingestionRun?.findUnique
+        ) {
+          const run = await this.prisma.ingestionRun.findUnique({
+            where: { id: runId },
+            select: { projectId: true },
+          });
+          if (run?.projectId) {
+            resolvedResourceProjects.set(`ingestionRun:${runId}`, run.projectId);
           }
         }
 

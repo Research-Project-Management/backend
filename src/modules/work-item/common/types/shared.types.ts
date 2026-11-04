@@ -65,3 +65,80 @@ export function buildWorkItemIdOrIdentifierWhere(
         ...extra,
       };
 }
+
+export function buildProjectIdOrIdentifierWhere(
+  projectIdOrIdentifier: string,
+  extra: Record<string, unknown> = { deletedAt: null },
+): Prisma.ProjectWhereInput {
+  return isUuid(projectIdOrIdentifier)
+    ? { id: projectIdOrIdentifier, ...extra }
+    : {
+        identifier: { equals: projectIdOrIdentifier, mode: 'insensitive' },
+        ...extra,
+      };
+}
+
+export function normalizeStringIds(rawIds: unknown): string[] {
+  return Array.from(
+    new Set(
+      (Array.isArray(rawIds) ? rawIds : [])
+        .filter((id): id is string => typeof id === 'string')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ).sort();
+}
+
+export async function resolveCanonicalProjectId(
+  prisma: {
+    project?: {
+      findFirst?: (args: {
+        where: Prisma.ProjectWhereInput;
+        select: { id: true };
+      }) => Promise<{ id: string } | null>;
+    };
+  },
+  projectIdOrIdentifier: string,
+): Promise<string | null> {
+  if (!projectIdOrIdentifier) return null;
+  if (isUuid(projectIdOrIdentifier)) {
+    return projectIdOrIdentifier;
+  }
+  if (!prisma.project?.findFirst) return null;
+  try {
+    const project = await prisma.project.findFirst({
+      where: buildProjectIdOrIdentifierWhere(projectIdOrIdentifier),
+      select: { id: true },
+    });
+    return project?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveWorkItemUuid(
+  prisma: {
+    workItem?: {
+      findFirst?: (args: {
+        where: Prisma.WorkItemWhereInput;
+        select: { id: true };
+      }) => Promise<{ id: string } | null>;
+    };
+  },
+  idOrIdentifier: string,
+): Promise<string | null> {
+  if (!idOrIdentifier) return null;
+  if (isUuid(idOrIdentifier)) {
+    return idOrIdentifier;
+  }
+  if (!prisma.workItem?.findFirst) return null;
+  try {
+    const item = await prisma.workItem.findFirst({
+      where: buildWorkItemIdOrIdentifierWhere(idOrIdentifier),
+      select: { id: true },
+    });
+    return item?.id ?? null;
+  } catch {
+    return null;
+  }
+}

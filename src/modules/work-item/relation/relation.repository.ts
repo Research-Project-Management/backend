@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { WorkItem, Prisma, WorkItemRelationType } from '@prisma/client';
 import { WorkItemRelationItem } from './types/relation.types';
-import { buildWorkItemIdOrIdentifierWhere } from '@/modules/work-item/common/types/shared.types';
+import {
+  buildWorkItemIdOrIdentifierWhere,
+  resolveCanonicalProjectId as resolveSharedProjectId,
+} from '@/modules/work-item/common/types/shared.types';
 
 export type WorkItemWithRelationalLinks = WorkItem & {
   outgoingRelations?: Array<{
@@ -27,6 +30,47 @@ export class RelationRepository {
 
   get prisma(): PrismaService {
     return this.prismaService;
+  }
+
+  async resolveCanonicalProjectId(projectId: string): Promise<string | null> {
+    return resolveSharedProjectId(this.prismaService, projectId);
+  }
+
+  async findProjectWorkItemsForCpm(
+    projectId: string,
+  ): Promise<WorkItemWithRelationalLinks[]> {
+    const canonicalProjectId = await this.resolveCanonicalProjectId(projectId);
+    if (!canonicalProjectId) return [];
+    return this.prismaService.workItem.findMany({
+      where: {
+        projectId: canonicalProjectId,
+        deletedAt: null,
+        archivedAt: null,
+      },
+      include: {
+        outgoingRelations: {
+          where: { targetWorkItem: { deletedAt: null } },
+          select: {
+            id: true,
+            sourceId: true,
+            targetId: true,
+            type: true,
+            createdAt: true,
+          },
+        },
+        incomingRelations: {
+          where: { sourceWorkItem: { deletedAt: null } },
+          select: {
+            id: true,
+            sourceId: true,
+            targetId: true,
+            type: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: [{ rank: 'asc' }, { createdAt: 'asc' }],
+    });
   }
 
   async findWorkItem(

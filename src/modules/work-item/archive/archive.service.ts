@@ -8,12 +8,13 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityType } from '@prisma/client';
 import { ArchiveRepository } from './archive.repository';
-import { BulkArchiveDto } from './dto/bulk-archive.dto';
+import { BulkArchiveDto } from './dto/archive.dto';
 import { RedisCacheService } from '@/core';
 import {
   WORK_ITEM_REDIS_KEYS,
   invalidateWorkItemCache,
-} from '@/modules/work-item/common/constants/redis-keys.constant';
+} from '@/modules/work-item/common/constants/redis.constant';
+import { normalizeStringIds } from '@/modules/work-item/common/types/shared.types';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 
 @Injectable()
@@ -108,14 +109,7 @@ export class ArchiveService {
     const actionLabel = archive ? 'archive' : 'restore';
     const verb = archive ? 'archived' : 'restored';
     const rawIds = bulkArchiveDto.workItemIds || bulkArchiveDto.ids || [];
-    const ids = Array.from(
-      new Set(
-        (Array.isArray(rawIds) ? rawIds : [])
-          .filter((id): id is string => typeof id === 'string')
-          .map((id) => id.trim())
-          .filter(Boolean),
-      ),
-    ).sort();
+    const ids = normalizeStringIds(rawIds);
     if (ids.length === 0) {
       throw new BadRequestException(
         `No work item IDs provided to ${actionLabel}`,
@@ -129,8 +123,18 @@ export class ArchiveService {
     }
 
     const result = archive
-      ? await this.archiveRepository.bulkArchive(ids)
-      : await this.archiveRepository.bulkRestore(ids);
+      ? bulkArchiveDto.projectId
+        ? await this.archiveRepository.bulkArchive(
+            ids,
+            bulkArchiveDto.projectId,
+          )
+        : await this.archiveRepository.bulkArchive(ids)
+      : bulkArchiveDto.projectId
+        ? await this.archiveRepository.bulkRestore(
+            ids,
+            bulkArchiveDto.projectId,
+          )
+        : await this.archiveRepository.bulkRestore(ids);
     await this.invalidateWorkItemsBulk(workItems);
 
     if (this.eventEmitter) {
@@ -178,11 +182,11 @@ export class ArchiveService {
     return this.setArchiveState(workItemId, userId, false);
   }
 
-  async bulkArchiveWorkItems(bulkArchiveDto: BulkArchiveDto, userId: string) {
+  async bulkArchive(bulkArchiveDto: BulkArchiveDto, userId: string) {
     return this.bulkSetArchiveState(bulkArchiveDto, userId, true);
   }
 
-  async bulkRestoreWorkItems(bulkArchiveDto: BulkArchiveDto, userId: string) {
+  async bulkRestore(bulkArchiveDto: BulkArchiveDto, userId: string) {
     return this.bulkSetArchiveState(bulkArchiveDto, userId, false);
   }
 

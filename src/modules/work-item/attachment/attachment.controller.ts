@@ -26,8 +26,8 @@ import {
   AttachPaperDto,
   AttachFileDto,
   AttachLinkDto,
+  PresignAttachmentDto,
 } from './dto/attachment.dto';
-import { PresignAttachmentDto } from './dto/presign-attachment.dto';
 import { EntityType } from '@prisma/client';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 

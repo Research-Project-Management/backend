@@ -19,7 +19,7 @@ import * as decoding from 'lib0/decoding';
 
 import { RedisCacheService } from '@/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { LineArrayEngine, DocNotFoundError } from '@/modules/manuscripts/docstore/domain';
+import { LineArray, DocNotFoundError } from '@/modules/manuscripts/docstore/domain';
 import { YjsUpdateValidator } from './yjs-update-validator';
 import {
   YjsCursorDiffEngine,
@@ -1049,7 +1049,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
       const tasks: Promise<unknown>[] = [];
 
       if (this.docstoreService) {
-        const lines = LineArrayEngine.textToLines(flushedText);
+        const lines = LineArray.textToLines(flushedText);
         if (
           session.currentVersion === undefined ||
           session.lastFlushedRev === undefined

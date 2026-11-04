@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
 import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
-import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
+import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
 import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import { WebFetchLadderService } from '@/modules/library/ingestion/services/web-fetch-ladder.service';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
@@ -359,7 +359,7 @@ async function runBenchmark() {
     '================================================================\n',
   );
 
-  const trusted = new TrustedExtractionService();
+  const trusted = new PdfMetadataExtractor();
   const pdfProvider = new PdfProvider(undefined, trusted);
   const webFetchLadder = new WebFetchLadderService();
   const extractionGateway = {
