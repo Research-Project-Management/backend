@@ -14,18 +14,18 @@ import {
   cleanAbstractText,
   cleanBibliographicText,
   TITLE_MATCH_THRESHOLD,
-  AcademicHttpClient,
+  HttpClient,
   LibraryConfigService,
   libraryConfig,
   normalizePageRange,
   parseCreatorString,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { AbstractAcademicProvider } from './abstract-academic.provider';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
+import { BaseMetadataProvider } from './base-metadata.provider';
 
 @Injectable()
-export class OpenAlexProvider extends AbstractAcademicProvider {
+export class OpenAlexProvider extends BaseMetadataProvider {
   readonly id: ProviderName = 'OpenAlex';
   readonly capabilities: ProviderCapability = {
     queryTypes: ['DOI', 'TITLE', 'ARXIV', 'PMID'],
@@ -37,7 +37,7 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
   private readonly BASE_URL = 'https://api.openalex.org/works';
 
   constructor(
-    @Optional() httpClient?: AcademicHttpClient,
+    @Optional() httpClient?: HttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {
     super(httpClient);
@@ -99,7 +99,7 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
       return this.fetchByUrl(query.trim(), signal);
     }
 
-    return this.searchByTitle(query, signal);
+    return this.searchByTitle(query, signal, request);
   }
 
   async fetchByPmcid(
@@ -299,6 +299,7 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
   private async searchByTitle(
     title: string,
     signal?: AbortSignal,
+    request?: MetadataRequest,
   ): Promise<ProviderResult | null> {
     const cleanTitle = title.trim();
     if (!cleanTitle) return null;
@@ -347,6 +348,25 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
             ? candidate.display_name
             : undefined,
       TITLE_MATCH_THRESHOLD,
+      {
+        authorHint: request?.authorHint,
+        yearHint: request?.yearHint,
+        getAuthors: (candidate) =>
+          Array.isArray(candidate.authorships)
+            ? (
+                candidate.authorships as Array<{
+                  author?: { display_name?: string };
+                }>
+              )
+                .map((a) => a?.author?.display_name)
+                .filter(Boolean)
+            : [],
+        getYear: (candidate) =>
+          typeof candidate.publication_year === 'number' ||
+          typeof candidate.publication_year === 'string'
+            ? candidate.publication_year
+            : undefined,
+      },
     );
     if (!item) {
       this.logger.debug(
@@ -568,7 +588,7 @@ export class OpenAlexProvider extends AbstractAcademicProvider {
       }
     }
 
-    const keywords = normalizeAcademicTags(rawKeywords);
+    const keywords = normalizeTags(rawKeywords);
 
     const creators = authors.map((name, idx) =>
       parseCreatorString(name, idx, 'author'),

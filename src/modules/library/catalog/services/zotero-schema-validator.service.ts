@@ -1,23 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { TypesService } from './types.service';
-import {
-  SchemaValidationResult,
-  CreatorHarmonizationChange,
-  CreatorTypeDefinition,
-  ItemFieldDefinition,
-} from '@/modules/library/core/types/schema.types';
-import {
-  FIELD_ALIASES,
-  REVERSE_FIELD_ALIASES,
-} from '@/modules/library/core/types/schema.constants';
-import {
-  CreatorCreditInput,
-  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
-  INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
-  getEffectiveBaseFieldMap,
-  getEffectiveReverseBaseFieldMap,
-  getValidCreatorMapForType,
-} from '@/modules/library/core';
+import { SchemaValidationResult, CreatorHarmonizationChange, CreatorTypeDefinition, ItemFieldDefinition, ItemTypeDefinition, SchemaRegistrySnapshot } from '@/modules/library/core/types/schema.types';
+import { FIELD_ALIASES, REVERSE_FIELD_ALIASES, SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
+import { CreatorCreditInput, CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, INTERNAL_SYSTEM_AND_TELEMETRY_KEYS, getEffectiveBaseFieldMap, getEffectiveReverseBaseFieldMap, getValidCreatorMapForType, normalizeCanonicalItemType } from '@/modules/library/core';
 
 const SYSTEM_AND_TELEMETRY_KEYS = new Set([
   ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
@@ -120,6 +104,145 @@ const UNIVERSAL_FIELDS = new Set([
   'primaryCategory',
   'categories',
 ]);
+
+@Injectable()
+export class TypesService {
+  private readonly snapshot: SchemaRegistrySnapshot = SCHEMA_V42_DATA;
+
+  getVersion(): number {
+    return this.snapshot.version;
+  }
+
+
+  getSnapshot(): SchemaRegistrySnapshot {
+    return this.snapshot;
+  }
+
+  getAllItemTypes(includeSpecial = false): ItemTypeDefinition[] {
+    const types = Object.values(this.snapshot.itemTypes);
+    if (includeSpecial) {
+      return types;
+    }
+    return types.filter((t: ItemTypeDefinition) => t.isBibliographic);
+  }
+
+  getItemType(itemType: string): ItemTypeDefinition | undefined {
+    if (!itemType) return undefined;
+    const normalized = this.normalizeTypeKey(itemType);
+    return this.snapshot.itemTypes[normalized];
+  }
+
+  isValidItemType(itemType: string): boolean {
+    if (!itemType) return false;
+    const normalized = this.normalizeTypeKey(itemType);
+    return Object.prototype.hasOwnProperty.call(
+      this.snapshot.itemTypes,
+      normalized,
+    );
+  }
+
+  isBibliographic(itemType: string): boolean {
+    const def = this.getItemType(itemType);
+    return def?.isBibliographic ?? false;
+  }
+
+  isSpecial(itemType: string): boolean {
+    const def = this.getItemType(itemType);
+    return def?.isSpecial ?? false;
+  }
+
+  getOrderedFields(itemType: string): ItemFieldDefinition[] {
+    const def = this.getItemType(itemType);
+    return def ? [...def.fields] : [];
+  }
+
+  isValidFieldForType(itemType: string, fieldKey: string): boolean {
+    const def = this.getItemType(itemType);
+    if (!def) return false;
+    return def.fields.some((f: ItemFieldDefinition) => f.key === fieldKey);
+  }
+
+  getValidCreatorTypes(itemType: string): CreatorTypeDefinition[] {
+    const def = this.getItemType(itemType);
+    return def ? [...def.creatorTypes] : [];
+  }
+
+  getPrimaryCreatorType(itemType: string): string {
+    const def = this.getItemType(itemType);
+    return def?.primaryCreatorType ?? 'author';
+  }
+
+  isValidCreatorType(itemType: string, creatorType: string): boolean {
+    const valid = this.getValidCreatorTypes(itemType);
+    return valid.some((c) => c.creatorType === creatorType);
+  }
+
+  getBaseFieldMapping(itemType: string): Record<string, string> {
+    const normalized = this.normalizeTypeKey(itemType);
+    return {
+      ...getEffectiveBaseFieldMap(normalized),
+      ...(this.snapshot.baseFieldMappings[normalized] || {}),
+    };
+  }
+
+  getReverseBaseFieldMapping(itemType: string): Record<string, string> {
+    const normalized = this.normalizeTypeKey(itemType);
+    return {
+      ...getEffectiveReverseBaseFieldMap(normalized),
+      ...(this.snapshot.reverseBaseFieldMappings[normalized] || {}),
+    };
+  }
+
+  getBaseFieldFor(itemType: string, fieldKey: string): string | undefined {
+    const reverse = this.getReverseBaseFieldMapping(itemType);
+    return reverse[fieldKey] || fieldKey;
+  }
+
+  getTypeSpecificFieldFor(
+    itemType: string,
+    baseField: string,
+  ): string | undefined {
+    const mapping = this.getBaseFieldMapping(itemType);
+    return mapping[baseField] || baseField;
+  }
+
+  resolveBaseFieldMapping(
+    fromType: string,
+    toType: string,
+    fieldKey: string,
+  ): { targetField: string; baseSemantic: string } | undefined {
+    const baseField = this.getBaseFieldFor(fromType, fieldKey);
+    if (!baseField) return undefined;
+    const targetField = this.getTypeSpecificFieldFor(toType, baseField);
+    if (!targetField) return undefined;
+    return {
+      targetField,
+      baseSemantic: baseField,
+    };
+  }
+
+
+
+  normalizeItemType(rawType: string | undefined | null): string {
+    return normalizeCanonicalItemType(rawType, this.snapshot.itemTypes);
+  }
+
+
+
+
+
+
+  private normalizeTypeKey(key: string): string {
+    if (this.snapshot.itemTypes[key]) {
+      return key;
+    }
+    const lower = key.toLowerCase();
+    const found = Object.keys(this.snapshot.itemTypes).find(
+      (k) => k.toLowerCase() === lower,
+    );
+    return found || key;
+  }
+}
 
 @Injectable()
 export class ZoteroSchemaValidatorService {

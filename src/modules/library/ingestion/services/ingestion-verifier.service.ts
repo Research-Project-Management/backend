@@ -1,15 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
-import { calculateMetadataQualityScore } from '@/modules/library/ingestion/domain/metadata.validator';
-import {
-  titleSimilarity,
-  TITLE_MATCH_THRESHOLD,
-  parseCreatorString,
-} from '@/modules/library/core';
-import {
-  BOT_CHALLENGE_TITLE_RE,
-  BOT_CHALLENGE_HTML_RE,
-} from '@/modules/library/core/domain/academic-text.lexicon';
+import { calculateMetadataQualityScore, diagnoseBibliographicQualityIssues, QUALITY_RULE_BIT } from '@/modules/library/ingestion/domain/metadata.validator';
+import { titleSimilarity, TITLE_MATCH_THRESHOLD, parseCreatorString, CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
+import { BOT_CHALLENGE_TITLE_RE, BOT_CHALLENGE_HTML_RE } from '@/modules/library/core/domain/text.lexicon';
 
 export interface PdfFingerprint {
   doi?: string;
@@ -441,5 +434,97 @@ export class IngestionVerifierService {
     }
 
     return { isBlocked: false, promptUploadPdf: false };
+  }
+}
+
+export interface CompletenessAnalysis {
+  score: number; // 0 - 100
+  level: 'complete' | 'adequate' | 'minimal';
+  missingKeyFields: string[];
+  presentFieldsCount: number;
+  totalFieldsCount: number;
+}
+
+export interface QualityAuditReport {
+  totalItems: number;
+  averageQualityScore: number;
+  healthReport: {
+    missingDoi: number;
+    missingAbstract: number;
+    missingYear: number;
+  };
+}
+
+@Injectable()
+export class QualityService {
+  constructor(
+    @Optional()
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
+  ) {}
+
+
+  async getQualityAudit(userId: string, projectId?: string) {
+    const items = this.catalogGateway
+      ? await this.catalogGateway.findQualityAuditItems(userId, 2000, projectId)
+      : [];
+
+    let totalScore = 0;
+    let missingDoi = 0;
+    let missingAbstract = 0;
+    let missingYear = 0;
+    let missingAuthors = 0;
+    let healthyItems = 0;
+    const flaggedItems: Array<{
+      itemId: string;
+      title: string;
+      issues: string[];
+    }> = [];
+
+    for (const it of items) {
+      const { evaluation, issues, isHealthy } =
+        diagnoseBibliographicQualityIssues(
+          it as unknown as Record<string, unknown>,
+        );
+
+      const issueMask = evaluation.missingIssueMask;
+      if (issueMask & QUALITY_RULE_BIT.authors) missingAuthors += 1;
+      if (issueMask & QUALITY_RULE_BIT.year) missingYear += 1;
+      if (issueMask & QUALITY_RULE_BIT.doi) missingDoi += 1;
+      if (issueMask & QUALITY_RULE_BIT.abstract) missingAbstract += 1;
+
+      if (isHealthy) {
+        healthyItems += 1;
+      } else {
+        flaggedItems.push({
+          itemId: it.id,
+          title: it.title || 'Untitled',
+          issues,
+        });
+      }
+
+      totalScore += evaluation.score;
+    }
+
+    const averageQualityScore =
+      items.length > 0 ? Math.round(totalScore / items.length) : 100;
+
+    return {
+      totalItems: items.length,
+      healthyItems,
+      averageQualityScore,
+      healthScorePercentage: averageQualityScore,
+      missingDoiCount: missingDoi,
+      missingYearCount: missingYear,
+      missingAuthorsCount: missingAuthors,
+      missingAbstractCount: missingAbstract,
+      missingPdfCount: 0,
+      flaggedItems,
+      healthReport: {
+        missingDoi,
+        missingAbstract,
+        missingYear,
+      },
+    };
   }
 }

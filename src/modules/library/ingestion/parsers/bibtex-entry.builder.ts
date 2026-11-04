@@ -4,7 +4,7 @@ import {
   parseCreatorString,
   mapCslTypeToZoteroItemType,
 } from '@/modules/library/core';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 
 export interface ParsedBibtexEntry {
   citationKey?: string;
@@ -425,7 +425,7 @@ export function buildParsedBibtexEntry(
   } else if (typeof rawKeywords === 'string' && rawKeywords.trim()) {
     rawKeywordCandidates.push(cleanBibtexField(rawKeywords));
   }
-  const normalizedKeywords = normalizeAcademicTags(rawKeywordCandidates);
+  const normalizedKeywords = normalizeTags(rawKeywordCandidates);
   const keywords =
     normalizedKeywords.length > 0 ? normalizedKeywords : undefined;
 
@@ -488,7 +488,7 @@ export function buildParsedBibtexEntry(
       : undefined);
 
   const publisher =
-    cleanBibtexField(csl?.publisher || rawFields.publisher) ||
+    cleanBibtexField(rawFields.publisher || csl?.publisher) ||
     university ||
     institution ||
     undefined;
@@ -517,10 +517,10 @@ export function buildParsedBibtexEntry(
 
   const containerTitle =
     cleanBibtexField(
-      csl?.['container-title'] ||
-        rawFields.journal ||
+      rawFields.journal ||
         rawFields.journaltitle ||
-        rawFields.booktitle,
+        rawFields.booktitle ||
+        csl?.['container-title'],
     ) || undefined;
 
   const bookTitle =

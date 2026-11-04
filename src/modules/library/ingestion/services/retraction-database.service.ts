@@ -8,7 +8,7 @@ import {
   RetractionSource,
 } from '@/modules/library/ingestion/types/ingestion.types';
 import { normalizeDoi, normalizePmid } from '@/modules/library/core';
-import { RetractionBloomFilter } from '../domain/retraction-bloom-filter.domain';
+import { RetractionBloomFilter } from '../domain/metadata.validator';
 
 export interface RetractionSeedItem {
   doi: string;
@@ -519,7 +519,4 @@ export class RetractionDatabaseService implements OnModuleInit {
     this.bloomFilter.add(key);
   }
 
-  getBloomFilter(): RetractionBloomFilter {
-    return this.bloomFilter;
-  }
 }

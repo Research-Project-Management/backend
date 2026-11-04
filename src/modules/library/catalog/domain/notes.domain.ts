@@ -1,15 +1,25 @@
 /**
  * Pure utility functions for the Notes submodule.
  */
+import { parseAnnotationSortIndex as canonicalParseAnnotationSortIndex } from '@/modules/library/core';
+import { stripNoteHtml } from '@/modules/library/core/domain/renamer.domain';
+
+export { stripNoteHtml };
 
 export interface NoteAnnotationSource {
   id?: string;
   attachmentId?: string;
-  pageIndex: number;
+  type?: string | null;
+  pageIndex?: number | null;
+  pageNumber?: number | null;
+  pageLabel?: string | null;
   annotationSortIndex?: string | null;
   color?: string | null;
   quoteText?: string | null;
+  selectedText?: string | null;
+  text?: string | null;
   comment?: string | null;
+  tags?: string[] | null;
   createdAt?: Date | null;
 }
 
@@ -18,15 +28,19 @@ export interface NoteItemSource {
   title?: string | null;
   citekey?: string | null;
   citationKey?: string | null;
+  firstAuthor?: string | null;
+  authors?: string[] | null;
   creators?: Array<{
     firstName?: string | null;
     lastName?: string | null;
     fullName?: string | null;
+    name?: string | null;
   }>;
   contributors?: Array<{
     firstName?: string | null;
     lastName?: string | null;
     fullName?: string | null;
+    name?: string | null;
   }>;
   year?: number | null;
   doi?: string | null;
@@ -78,22 +92,17 @@ const COLOR_LABEL_MAP: Record<string, string> = {
   grey: '⬜ Notes',
 };
 
-import { parseAnnotationSortIndex as canonicalParseAnnotationSortIndex } from '@/modules/library/core';
-
 export function parseAnnotationSortIndex(
   sortIndex: string | null | undefined,
 ): {
   y: number;
   x: number;
+  charOffset?: number;
 } {
   const parsed = canonicalParseAnnotationSortIndex(sortIndex);
   if (!parsed) return { y: 0, x: 0 };
-  return { y: parsed.y, x: parsed.x };
+  return { y: parsed.y, x: parsed.x, charOffset: parsed.charOffset };
 }
-
-import { stripNoteHtml } from '@/modules/library/core/domain/tiptap.domain';
-
-export { stripNoteHtml };
 
 export function sanitizeNoteTitle(title?: string | null): string {
   if (!title || typeof title !== 'string') return 'Untitled Note';
@@ -183,6 +192,8 @@ export function sanitizeNoteContent(content?: string | null): string {
         'width',
         'height',
       ],
+      ALLOWED_URI_REGEXP:
+        /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|flux|zotero):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
       ALLOW_DATA_ATTR: false,
     })
     .replace(/^(\s*)(?:&gt;)+/gm, (match, ws: string) => {
@@ -192,70 +203,134 @@ export function sanitizeNoteContent(content?: string | null): string {
     .trim();
 }
 
-export function validateTipTapDoc(doc: unknown): boolean {
-  if (!doc || typeof doc !== 'object') return false;
-  const d = doc as Record<string, unknown>;
-  if (d.type !== 'doc') return false;
-  if (!Array.isArray(d.content)) return false;
-  for (const node of d.content) {
-    if (
-      !node ||
-      typeof node !== 'object' ||
-      typeof (node as Record<string, unknown>).type !== 'string'
-    ) {
-      return false;
-    }
-  }
-  return true;
+export function isLiteratureNoteCandidate(
+  note:
+    | {
+        id?: unknown;
+        title?: unknown;
+        content?: unknown;
+        contentMd?: unknown;
+        tags?: unknown;
+        deletedAt?: unknown;
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!note || typeof note !== 'object' || note.deletedAt) return false;
+  const tags = Array.isArray(note.tags) ? note.tags : [];
+  if (tags.includes('literature-note')) return true;
+  const title = typeof note.title === 'string' ? note.title.trim() : '';
+  if (title.startsWith('Literature Notes')) return true;
+  const content =
+    typeof note.contentMd === 'string'
+      ? note.contentMd.trim()
+      : typeof note.content === 'string'
+        ? note.content.trim()
+        : '';
+  return content.startsWith('# Literature Notes:');
 }
 
-export function formatLiteratureNoteMarkdown(
+function resolveAnnotationPageIndex(ann: NoteAnnotationSource): number {
+  if (typeof ann.pageIndex === 'number' && Number.isFinite(ann.pageIndex) && ann.pageIndex >= 0) {
+    return ann.pageIndex;
+  }
+  if (typeof ann.pageNumber === 'number' && Number.isFinite(ann.pageNumber) && ann.pageNumber >= 1) {
+    return ann.pageNumber - 1;
+  }
+  return 0;
+}
+
+function resolveAnnotationQuoteText(ann: NoteAnnotationSource): string {
+  const raw = ann.quoteText ?? ann.selectedText ?? ann.text ?? '';
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+function extractFamilyNameFromFullName(rawName?: string | null): string | null {
+  if (!rawName || typeof rawName !== 'string') return null;
+  const trimmed = rawName.trim();
+  if (!trimmed) return null;
+  if (trimmed.includes(',')) {
+    return trimmed.split(',')[0].trim() || null;
+  }
+  const parts = trimmed.split(/\s+/);
+  return parts[parts.length - 1] || null;
+}
+
+function resolveItemCitationAuthorInfo(item: NoteItemSource): {
+  authorList: string;
+  authorCitationBase: string;
+} {
+  const creatorObjects =
+    Array.isArray(item.creators) && item.creators.length > 0
+      ? item.creators
+      : Array.isArray(item.contributors) && item.contributors.length > 0
+        ? item.contributors
+        : null;
+
+  let authorList = 'Unknown';
+  let firstAuthorLastName = 'Unknown';
+  let hasMultipleAuthors = false;
+
+  if (creatorObjects && creatorObjects.length > 0) {
+    const formattedNames = creatorObjects
+      .map(
+        (c) =>
+          c.fullName?.trim() ||
+          c.name?.trim() ||
+          `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+      )
+      .filter(Boolean);
+    if (formattedNames.length > 0) {
+      authorList = formattedNames.join(', ');
+    }
+    const first = creatorObjects[0];
+    firstAuthorLastName =
+      first.lastName?.trim() ||
+      extractFamilyNameFromFullName(first.fullName || first.name) ||
+      first.firstName?.trim() ||
+      'Unknown';
+    hasMultipleAuthors = creatorObjects.length > 1;
+  } else if (Array.isArray(item.authors) && item.authors.length > 0) {
+    const cleanAuthors = item.authors
+      .map((a) => (typeof a === 'string' ? a.trim() : ''))
+      .filter(Boolean);
+    if (cleanAuthors.length > 0) {
+      authorList = cleanAuthors.join(', ');
+      firstAuthorLastName =
+        extractFamilyNameFromFullName(cleanAuthors[0]) || 'Unknown';
+      hasMultipleAuthors = cleanAuthors.length > 1;
+    }
+  } else if (typeof item.firstAuthor === 'string' && item.firstAuthor.trim()) {
+    authorList = item.firstAuthor.trim();
+    firstAuthorLastName =
+      extractFamilyNameFromFullName(item.firstAuthor) || 'Unknown';
+  }
+
+  const citationYear = item.year ? String(item.year) : 'n.d.';
+  const authorCitationBase = `${firstAuthorLastName}${hasMultipleAuthors ? ' et al.' : ''}, ${citationYear}`;
+  return { authorList, authorCitationBase };
+}
+
+export function formatAnnotationBlocksMarkdown(
   item: NoteItemSource,
   annotations: NoteAnnotationSource[],
   options?: FormatNoteOptions,
 ): string {
-  const authorList =
-    Array.isArray(item.creators) && item.creators.length > 0
-      ? item.creators
-          .map(
-            (c) =>
-              c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-          )
-          .join(', ')
-      : Array.isArray(item.contributors) && item.contributors.length > 0
-        ? item.contributors
-            .map(
-              (c) =>
-                c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-            )
-            .join(', ')
-        : 'Unknown';
-
-  const doi =
-    item.doi ||
-    item.identifiers?.find((id) => id.type.toLowerCase() === 'doi')?.value ||
-    'N/A';
-
-  const headerLines: string[] = [
-    `# Literature Notes: ${item.title || 'Untitled'}`,
-    '',
-    `**Authors:** ${authorList}  `,
-    `**Year:** ${item.year || 'N/A'} | **DOI:** ${doi}`,
-  ];
-
-  const citekey = item.citationKey || item.citekey;
-  if (citekey) {
-    headerLines.push(`**@citekey:** ${citekey}`);
-  }
-
-  headerLines.push('', '---', '', '## Extracted Highlights & Annotations', '');
-
-  const lines: string[] = headerLines;
+  const lines: string[] = [];
 
   const sorted = [...annotations].sort((a, b) => {
-    if (a.pageIndex !== b.pageIndex) return a.pageIndex - b.pageIndex;
+    const pageA = resolveAnnotationPageIndex(a);
+    const pageB = resolveAnnotationPageIndex(b);
+    if (pageA !== pageB) return pageA - pageB;
     const coordA = parseAnnotationSortIndex(a.annotationSortIndex);
     const coordB = parseAnnotationSortIndex(b.annotationSortIndex);
+    if (
+      coordA.charOffset !== undefined &&
+      coordB.charOffset !== undefined &&
+      coordA.charOffset !== coordB.charOffset
+    ) {
+      return coordA.charOffset - coordB.charOffset;
+    }
     if (coordA.y !== coordB.y) return coordA.y - coordB.y;
     if (coordA.x !== coordB.x) return coordA.x - coordB.x;
     const tA = a.createdAt ? a.createdAt.getTime() : 0;
@@ -263,22 +338,7 @@ export function formatLiteratureNoteMarkdown(
     return tA - tB;
   });
 
-  const firstCreator =
-    Array.isArray(item.creators) && item.creators.length > 0
-      ? item.creators[0]
-      : null;
-  const firstAuthorName = firstCreator
-    ? firstCreator.lastName ||
-      firstCreator.fullName?.split(' ').slice(-1)[0] ||
-      'Unknown'
-    : Array.isArray(item.contributors) && item.contributors.length > 0
-      ? item.contributors[0].lastName || 'Unknown'
-      : 'Unknown';
-  const hasMultipleAuthors =
-    (Array.isArray(item.creators) && item.creators.length > 1) ||
-    (Array.isArray(item.contributors) && item.contributors.length > 1);
-  const citationYear = item.year ? String(item.year) : 'n.d.';
-  const authorCitationBase = `${firstAuthorName}${hasMultipleAuthors ? ' et al.' : ''}, ${citationYear}`;
+  const { authorCitationBase } = resolveItemCitationAuthorInfo(item);
 
   const showColorHeaders =
     options?.tagColor !== false && options?.tagColor !== 'false';
@@ -288,12 +348,14 @@ export function formatLiteratureNoteMarkdown(
   let currentColor: string | null = null;
 
   for (const ann of sorted) {
-    const pageNum = ann.pageIndex + 1;
+    const resolvedPageIndex = resolveAnnotationPageIndex(ann);
+    const pageNum = resolvedPageIndex + 1;
+    const displayPageLabel = ann.pageLabel?.trim() || String(pageNum);
 
-    if (ann.pageIndex !== currentPage) {
-      currentPage = ann.pageIndex;
+    if (resolvedPageIndex !== currentPage) {
+      currentPage = resolvedPageIndex;
       currentColor = null;
-      lines.push(`### Page ${pageNum}`);
+      lines.push(`### Page ${displayPageLabel}`);
       lines.push('');
     }
 
@@ -311,7 +373,7 @@ export function formatLiteratureNoteMarkdown(
       }
     }
 
-    const citationLabel = `(${authorCitationBase}, p. ${pageNum})`;
+    const citationLabel = `(${authorCitationBase}, p. ${displayPageLabel})`;
     const protocol = options?.protocol || 'flux';
     const targetItemId = item.id || ann.attachmentId || '';
     const attachmentParam = ann.attachmentId
@@ -335,18 +397,97 @@ export function formatLiteratureNoteMarkdown(
         : `flux://open-pdf${projectPrefix}/library/papers?${attachmentParam}page=${pageNum}&annotation=${ann.id || ''}`;
     }
     const citationLink = `[${citationLabel}](${backlinkUrl})`;
+    const quoteText = resolveAnnotationQuoteText(ann);
 
-    if (ann.quoteText) {
-      lines.push(`> "${ann.quoteText.trim().replace(/\n+/g, '\n> ')}"`);
+    if (quoteText) {
+      lines.push(`> "${quoteText.replace(/\n+/g, '\n> ')}"`);
       lines.push(`> — ${citationLink}`);
+      lines.push('');
+      if (showComments && ann.comment && ann.comment.trim()) {
+        lines.push(`**Note:** ${ann.comment.trim()}`);
+        lines.push('');
+      }
+    } else if (showComments && ann.comment && ann.comment.trim()) {
+      lines.push(`**Note:** ${ann.comment.trim()} — ${citationLink}`);
+      lines.push('');
+    } else {
+      lines.push(`- ${citationLink}`);
       lines.push('');
     }
 
-    if (showComments && ann.comment) {
-      lines.push(`**Note:** ${ann.comment.trim()}`);
-      lines.push('');
+    if (Array.isArray(ann.tags) && ann.tags.length > 0) {
+      const cleanTags = ann.tags
+        .map((t) => (typeof t === 'string' ? t.trim() : ''))
+        .filter(Boolean);
+      if (cleanTags.length > 0) {
+        lines.push(`**Tags:** ${cleanTags.map((t) => `\`#${t}\``).join(' ')}`);
+        lines.push('');
+      }
     }
   }
 
   return lines.join('\n');
+}
+
+export function formatLiteratureNoteMarkdown(
+  item: NoteItemSource,
+  annotations: NoteAnnotationSource[],
+  options?: FormatNoteOptions,
+): string {
+  const { authorList } = resolveItemCitationAuthorInfo(item);
+
+  const doi =
+    item.doi ||
+    item.identifiers?.find((id) => id.type.toLowerCase() === 'doi')?.value ||
+    'N/A';
+
+  const headerLines: string[] = [
+    `# Literature Notes: ${item.title || 'Untitled'}`,
+    '',
+    `**Authors:** ${authorList}  `,
+    `**Year:** ${item.year || 'N/A'} | **DOI:** ${doi}`,
+  ];
+
+  const citekey = item.citationKey || item.citekey;
+  if (citekey) {
+    headerLines.push(`**@citekey:** ${citekey}`);
+  }
+
+  headerLines.push('', '---', '', '## Extracted Highlights & Annotations', '');
+
+  const body = formatAnnotationBlocksMarkdown(item, annotations, options);
+  return body ? [...headerLines, body].join('\n') : headerLines.join('\n');
+}
+
+export function appendAnnotationsToLiteratureNoteMarkdown(
+  item: NoteItemSource,
+  existingMarkdown: string,
+  allAnnotations: NoteAnnotationSource[],
+  options?: FormatNoteOptions,
+): { markdown: string; addedCount: number } {
+  const trimmedExisting = (existingMarkdown || '').trim();
+  if (!trimmedExisting) {
+    return {
+      markdown: formatLiteratureNoteMarkdown(item, allAnnotations, options),
+      addedCount: allAnnotations.length,
+    };
+  }
+
+  const unreferencedAnnotations = allAnnotations.filter(
+    (a) => !a.id || !trimmedExisting.includes(`annotation=${a.id}`),
+  );
+  if (unreferencedAnnotations.length === 0) {
+    return { markdown: trimmedExisting, addedCount: 0 };
+  }
+
+  const deltaBlocks = formatAnnotationBlocksMarkdown(
+    item,
+    unreferencedAnnotations,
+    options,
+  ).trim();
+
+  return {
+    markdown: deltaBlocks ? `${trimmedExisting}\n\n${deltaBlocks}` : trimmedExisting,
+    addedCount: unreferencedAnnotations.length,
+  };
 }

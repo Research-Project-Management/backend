@@ -1,6 +1,5 @@
-import { registerAs } from '@nestjs/config';
+import { registerAs, ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 export interface LibraryConfig {
   app: {
@@ -42,29 +41,9 @@ export interface LibraryConfig {
     concurrency: number;
   };
   extraction: {
-    ocrMaxWorkers: number;
-    ocrTimeoutMs: number;
-    mextractTimeoutMs: number;
     pdfMaxPages: number;
     webFetchTimeoutMs: number;
     pdfMaxIndexPages: number;
-  };
-  ocr: {
-    enabled?: string;
-    maxPages: number;
-    renderScale: number;
-    concurrency: number;
-    languages?: string;
-    tesseractLangPath?: string;
-  };
-  mextract: {
-    modelName: string;
-    apiUrl?: string;
-  };
-  webFetch: {
-    stealthScraperUrl?: string;
-    headlessScraperUrl?: string;
-    flaresolverrUrl?: string;
   };
   capture: {
     secret?: string;
@@ -145,9 +124,6 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
       concurrency: Number(process.env.INGESTION_QUEUE_CONCURRENCY) || 4,
     },
     extraction: {
-      ocrMaxWorkers: Number(process.env.OCR_MAX_WORKERS) || 2,
-      ocrTimeoutMs: Number(process.env.OCR_TIMEOUT_MS) || 60000,
-      mextractTimeoutMs: Number(process.env.MEXTRACT_TIMEOUT_MS) || 15000,
       pdfMaxPages: Number(process.env.PDF_MAX_PAGES) || 100,
       webFetchTimeoutMs: Number(process.env.WEB_FETCH_TIMEOUT_MS) || 10000,
       pdfMaxIndexPages: Number.parseInt(
@@ -156,24 +132,6 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
           '100',
         10,
       ),
-    },
-    ocr: {
-      enabled: process.env.PDF_OCR_ENABLED,
-      maxPages: Number.parseInt(process.env.PDF_OCR_MAX_PAGES || '200', 10),
-      renderScale: Number.parseFloat(process.env.PDF_OCR_RENDER_SCALE || '3'),
-      concurrency: Number.parseInt(process.env.PDF_OCR_CONCURRENCY || '2', 10),
-      languages: process.env.PDF_OCR_LANGUAGES,
-      tesseractLangPath: process.env.TESSERACT_LANG_PATH,
-    },
-    mextract: {
-      modelName:
-        process.env.MEXTRACT_MODEL_NAME || 'Xenova/Qwen2.5-0.5B-Instruct',
-      apiUrl: process.env.MEXTRACT_API_URL,
-    },
-    webFetch: {
-      stealthScraperUrl: process.env.STEALTH_SCRAPER_URL,
-      headlessScraperUrl: process.env.HEADLESS_SCRAPER_URL,
-      flaresolverrUrl: process.env.FLARESOLVERR_URL,
     },
     capture: {
       secret: process.env.URL_CAPTURE_SECRET,
@@ -222,18 +180,6 @@ export class LibraryConfigService {
     return this.config.extraction;
   }
 
-  get ocr() {
-    return this.config.ocr;
-  }
-
-  get mextract() {
-    return this.config.mextract;
-  }
-
-  get webFetch() {
-    return this.config.webFetch;
-  }
-
   get capture() {
     return this.config.capture;
   }
@@ -246,3 +192,79 @@ export class LibraryConfigService {
     return this.config.http;
   }
 }
+
+/**
+ * Redis Key Namespaces for Library Module (redis-core convention)
+ * Colon-separated hierarchical structure with user/project scope isolation.
+ */
+export const LIBRARY_REDIS_KEYS = {
+  // Collections
+  collections: (projectId: string) => `library:${projectId}:collections`,
+  collectionTree: (projectId: string) =>
+    `library:${projectId}:collections:tree`,
+  collectionsPattern: (projectId: string) =>
+    `library:${projectId}:collections*`,
+
+  // Tags
+  tags: (projectId: string) => `library:${projectId}:tags`,
+  tagsPattern: (projectId: string) => `library:${projectId}:tags*`,
+
+  // Saved Searches
+  savedSearches: (scopeId: string) => `library:${scopeId}:saved-searches`,
+  savedSearchesPattern: (scopeId: string) =>
+    `library:${scopeId}:saved-searches*`,
+
+  // Feed Subscriptions
+  feedSubscriptions: (userId: string) =>
+    `library:user:${userId}:feed-subscriptions`,
+
+  // Item Types (Static system registry)
+  itemTypes: (includeSpecial: boolean) =>
+    `library:system:item-types:${includeSpecial ? 'all' : 'bibliographic'}`,
+
+  // Items Cache (Cache-Aside Pattern)
+  item: (itemId: string) => `library:item:${itemId}`,
+  itemDetails: (itemId: string) => `library:item:${itemId}:details`,
+  itemFulltext: (itemId: string) => `library:item:${itemId}:fulltext`,
+  itemAttachments: (itemId: string) => `library:item:${itemId}:attachments`,
+  itemNotes: (itemId: string) => `library:item:${itemId}:notes`,
+  itemUserOverlay: (itemId: string, userId: string) =>
+    `library:item:${itemId}:u:${userId}`,
+  itemsList: (scopeKey: string, optionsHash: string) =>
+    `library:${scopeKey}:items:list:${optionsHash}`,
+  itemsPattern: (scopeKey: string) => `library:${scopeKey}:items*`,
+  itemPattern: (itemId: string) => `library:item:${itemId}*`,
+  counts: (userId: string, projectId?: string | null) =>
+    projectId
+      ? `library:counts:proj:${projectId}:u:${userId}`
+      : userId.startsWith('proj:') || userId.startsWith('user:')
+        ? `library:counts:${userId}`
+        : `library:counts:user:${userId}`,
+  countsPattern: (scopeId: string) => `library:counts:*${scopeId}*`,
+
+  // Search & Facets Cache
+  searchItems: (scopeKey: string, version: string, filterHash: string) =>
+    `library:search:items:${scopeKey}:v${version}:${filterHash}`,
+  searchFacets: (scopeKey: string, version: string, filterHash: string) =>
+    `library:search:facets:${scopeKey}:v${version}:${filterHash}`,
+  searchFacetsPattern: (scopeId: string) =>
+    `library:search:facets:*${scopeId}*`,
+  searchItemsPattern: (scopeId: string) => `library:search:items:*${scopeId}*`,
+  searchVersion: (scopeKey: string) => `library:search:version:${scopeKey}`,
+
+  // Sync Sequence & Retention Checkpoints (High-Concurrency CDC Polling)
+  syncSequence: (scopeKey: string) => `library:sync:seq:${scopeKey}`,
+  minRetainedSequence: (scopeKey: string) =>
+    `library:sync:min-seq:${scopeKey}`,
+
+  // Citation & CSL Styles Cache
+  doiNegotiation: (format: string, doi: string) =>
+    format === 'meta'
+      ? `library:doi-cn:meta:${doi}`
+      : `library:doi-cn:cite:${format}:${doi}`,
+  cslStyleXml: (styleName: string, scopeId?: string) =>
+    scopeId ? `csl:xml:${scopeId}:${styleName}` : `csl:xml:${styleName}`,
+  cslCustomStylesList: (scopeId?: string) =>
+    scopeId ? `csl:${scopeId}:custom-styles-list` : 'csl:custom-styles-list',
+  cslStylesCatalogIndex: () => 'csl:catalog:styles-index',
+};

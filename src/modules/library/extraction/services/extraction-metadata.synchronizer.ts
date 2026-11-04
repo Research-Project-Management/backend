@@ -15,6 +15,7 @@ import {
   UNIT_OF_WORK,
   IUnitOfWork,
   ItemsMapper,
+  executeWithPostCommit,
 } from '@/modules/library/core';
 import {
   buildExtractedMetadataSyncPlan,
@@ -82,11 +83,6 @@ export class ExtractionMetadataSynchronizer {
         textContent?: string;
         text?: string;
       }>;
-      ocrProvenance?: {
-        totalOcrPages?: number;
-        ocrPages?: number;
-        digitalPages?: number;
-      };
       metadata?: {
         rawText?: string;
         keywords?: string[];
@@ -136,22 +132,27 @@ export class ExtractionMetadataSynchronizer {
       engineUsed?: string;
     },
     options?: { skipOutboxPublish?: boolean; skipCacheInvalidation?: boolean },
-  ): Promise<{ outboxPublished: boolean; cacheInvalidated: boolean }> {
+  ): Promise<{
+    outboxPublished: boolean;
+    cacheInvalidated: boolean;
+    itemMutated: boolean;
+  }> {
     let outboxPublished = false;
     let cacheInvalidated = false;
+    let itemMutated = false;
     if (
-      (doc.references && doc.references.length > 0) ||
-      (doc.sections && doc.sections.length > 0) ||
-      (doc.figures && doc.figures.length > 0) ||
-      (doc.tables && doc.tables.length > 0) ||
-      (doc.formulas && doc.formulas.length > 0) ||
-      (doc.fullText && doc.fullText.trim().length > 0) ||
-      (doc.pages && doc.pages.length > 0) ||
-      (doc.metadata?.rawText && doc.metadata.rawText.trim().length > 0) ||
-      (doc.metadata?.keywords && doc.metadata.keywords.length > 0) ||
-      (doc.metadata?.notes && doc.metadata.notes.length > 0) ||
+      (doc?.references && doc.references.length > 0) ||
+      (doc?.sections && doc.sections.length > 0) ||
+      (doc?.figures && doc.figures.length > 0) ||
+      (doc?.tables && doc.tables.length > 0) ||
+      (doc?.formulas && doc.formulas.length > 0) ||
+      (doc?.fullText && doc.fullText.trim().length > 0) ||
+      (doc?.pages && doc.pages.length > 0) ||
+      (doc?.metadata?.rawText && doc.metadata.rawText.trim().length > 0) ||
+      (doc?.metadata?.keywords && doc.metadata.keywords.length > 0) ||
+      (doc?.metadata?.notes && doc.metadata.notes.length > 0) ||
       Boolean(
-        doc.metadata &&
+        doc?.metadata &&
         (doc.metadata.title ||
           doc.metadata.doi ||
           doc.metadata.abstract ||
@@ -162,23 +163,13 @@ export class ExtractionMetadataSynchronizer {
     ) {
       try {
         const combinedPlainText =
-          extractionResult.text ??
-          doc.fullText ??
-          (Array.isArray(doc.pages) && doc.pages.length > 0
+          extractionResult?.text ??
+          doc?.fullText ??
+          (Array.isArray(doc?.pages) && doc.pages.length > 0
             ? doc.pages.map((p) => p.text ?? p.textContent ?? '').join('\n')
-            : (doc.metadata?.rawText ?? ''));
+            : (doc?.metadata?.rawText ?? ''));
 
-        const ocrPagesCount =
-          doc.ocrProvenance?.ocrPages ?? doc.ocrProvenance?.totalOcrPages ?? 0;
-        const digitalPagesCount =
-          doc.ocrProvenance?.digitalPages ??
-          Math.max(0, (doc.pages?.length ?? 0) - ocrPagesCount);
-        const isScanned = Boolean(
-          doc.ocrProvenance && ocrPagesCount > 0 && digitalPagesCount === 0,
-        );
-        const ocrStatus =
-          doc.ocrProvenance && ocrPagesCount > 0 ? 'completed' : 'none';
-        const normalizedPages = Array.isArray(doc.pages)
+        const normalizedPages = Array.isArray(doc?.pages)
           ? doc.pages.map((p, idx) => ({
               pageNumber:
                 p.pageNumber ??
@@ -187,41 +178,42 @@ export class ExtractionMetadataSynchronizer {
             }))
           : [];
         const resolvedSections =
-          extractionResult.sections && extractionResult.sections.length > 0
+          extractionResult?.sections && extractionResult.sections.length > 0
             ? extractionResult.sections
-            : (doc.sections ?? []);
+            : (doc?.sections ?? []);
 
         const fulltextTree = {
-          title: doc.metadata?.title,
-          abstract: doc.metadata?.abstract,
-          creators: doc.metadata?.creators,
-          doi: doc.metadata?.doi,
-          arxivId: doc.metadata?.arxivId,
-          year: doc.metadata?.year,
-          keywords: doc.metadata?.keywords,
-          notes: doc.metadata?.notes,
-          isScanned,
-          ocrStatus,
+          title: doc?.metadata?.title,
+          abstract: doc?.metadata?.abstract,
+          creators: doc?.metadata?.creators,
+          doi: doc?.metadata?.doi,
+          arxivId: doc?.metadata?.arxivId,
+          year: doc?.metadata?.year,
+          keywords: doc?.metadata?.keywords,
+          notes: doc?.metadata?.notes,
           sections: resolvedSections,
-          figures: extractionResult.figures ?? doc.figures ?? [],
-          tables: extractionResult.tables ?? doc.tables ?? [],
-          formulas: extractionResult.formulas ?? doc.formulas ?? [],
-          references: extractionResult.references ?? doc.references ?? [],
+          figures: extractionResult?.figures ?? doc?.figures ?? [],
+          tables: extractionResult?.tables ?? doc?.tables ?? [],
+          formulas: extractionResult?.formulas ?? doc?.formulas ?? [],
+          references: extractionResult?.references ?? doc?.references ?? [],
           pages: normalizedPages,
-          markdown: extractionResult.markdown ?? '',
+          markdown: extractionResult?.markdown ?? '',
           plainText: combinedPlainText,
           pageCount:
-            extractionResult.pageCount ??
-            doc.metadata?.numberOfPages ??
+            extractionResult?.pageCount ??
+            doc?.metadata?.numberOfPages ??
             normalizedPages.length,
         };
 
         let payloadToSave: Record<string, unknown> = {
           ...fulltextTree,
+          attachmentId: attachment.id,
           referenceCount: fulltextTree.references.length,
         };
 
         // Claim Check Pattern: Offload heavy full-text tree to Object Storage
+        let uploadedFileId: string | undefined;
+        let uploadedByteSize: number | undefined;
         if (this.storagePort?.uploadFile) {
           try {
             const jsonBuffer = Buffer.from(
@@ -235,15 +227,18 @@ export class ExtractionMetadataSynchronizer {
             const uploadResult = await this.storagePort.uploadFile({
               userId: ownerUserId,
               projectId: ownerProjectId,
-              filename: `pdf_fulltext_${attachment.itemId}.json.gz`,
+              filename: `pdf_fulltext_${attachment.itemId}_${attachment.id}.json.gz`,
               buffer: compressed,
               mimeType: 'application/gzip',
               source: 'reader.pdf_fulltext',
             });
 
             if (uploadResult?.fileId) {
+              uploadedFileId = uploadResult.fileId;
+              uploadedByteSize = compressed.length;
               payloadToSave = {
                 isOffloaded: true,
+                attachmentId: attachment.id,
                 fileId: uploadResult.fileId,
                 url: uploadResult.url,
                 storageKey: uploadResult.path,
@@ -251,8 +246,6 @@ export class ExtractionMetadataSynchronizer {
                 uncompressedSize: jsonBuffer.length,
                 title: doc.metadata?.title,
                 abstract: doc.metadata?.abstract,
-                isScanned,
-                ocrStatus,
                 referenceCount: fulltextTree.references.length,
                 pageCount: fulltextTree.pageCount,
               };
@@ -298,6 +291,26 @@ export class ExtractionMetadataSynchronizer {
             payloadToSave as unknown as Prisma.InputJsonValue,
           );
 
+        if (this.extractionRepo.upsertAttachmentStructure) {
+          await this.extractionRepo.upsertAttachmentStructure({
+            attachmentId: attachment.id,
+            itemId: attachment.itemId,
+            pageCount:
+              typeof fulltextTree.pageCount === 'number'
+                ? fulltextTree.pageCount
+                : 0,
+            qualityScore: extractionResult?.qualityScore,
+            engineUsed: extractionResult?.engineUsed,
+            sections: fulltextTree.sections as Prisma.InputJsonValue,
+            figures: fulltextTree.figures as Prisma.InputJsonValue,
+            tables: fulltextTree.tables as Prisma.InputJsonValue,
+            formulas: fulltextTree.formulas as Prisma.InputJsonValue,
+            references: fulltextTree.references as Prisma.InputJsonValue,
+            fulltextFileId: uploadedFileId ?? null,
+            fulltextByteSize: uploadedByteSize ?? null,
+          });
+        }
+
         if (
           savedFulltextRecord &&
           'supersededFileIds' in savedFulltextRecord &&
@@ -320,8 +333,9 @@ export class ExtractionMetadataSynchronizer {
         // Save native metadata extraction provenance record
         await this.extractionRepo.saveMetadataSourceRecord(
           attachment.itemId,
-          'mextract',
+          'pdf_metadata',
           {
+            attachmentId: attachment.id,
             title: doc.metadata?.title,
             abstract: doc.metadata?.abstract,
             creators: doc.metadata?.creators,
@@ -505,78 +519,53 @@ export class ExtractionMetadataSynchronizer {
         };
 
         if (hasAnyMutation) {
-          let postCommitRegistered = false;
+          itemMutated = true;
           if (this.libraryTx && ownerUserId) {
-            await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-              await runSideEffects(tx, true);
-              const updatedItem = await this.extractionRepo.updateItem(
-                attachment.itemId,
-                itemPatch,
-                tx,
-              );
-              const domainSnapshot = ItemsMapper.toDomain({
-                ...(attachment.item || {}),
-                ...updatedItem,
-              });
-              await helpers.appendChange(eventScope, {
-                entityType: 'Item',
-                entityId: updatedItem.id,
-                action: 'update',
-                version: updatedItem.version,
-                data: domainSnapshot,
-              });
-              if (!options?.skipOutboxPublish) {
-                await helpers.publishOutbox(
-                  eventScope,
-                  updatedItem.id,
-                  LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-                  {
-                    itemId: updatedItem.id,
-                    userId: ownerUserId,
-                    projectId: ownerProjectId,
-                    attachmentId: attachment.id,
-                    updatedFields: Object.keys(itemPatch),
-                    updatedAt: new Date().toISOString(),
-                    source: 'extraction.metadata_sync',
-                  },
+            await executeWithPostCommit(
+              this.libraryTx,
+              async (tx, helpers) => {
+                await runSideEffects(tx, true);
+                const updatedItem = await this.extractionRepo.updateItem(
+                  attachment.itemId,
+                  itemPatch,
+                  tx,
                 );
-                outboxPublished = true;
-              }
-              if (helpers?.onAfterCommit) {
-                postCommitRegistered = true;
-                helpers.onAfterCommit(() => invalidateSyncedItemCache());
-              }
-            });
+                const domainSnapshot = ItemsMapper.toDomain({
+                  ...(attachment.item || {}),
+                  ...updatedItem,
+                });
+                await helpers.appendChange(eventScope, {
+                  entityType: 'Item',
+                  entityId: updatedItem.id,
+                  action: 'update',
+                  version: updatedItem.version,
+                  data: domainSnapshot,
+                });
+                if (!options?.skipOutboxPublish) {
+                  await helpers.publishOutbox(
+                    eventScope,
+                    updatedItem.id,
+                    LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+                    {
+                      itemId: updatedItem.id,
+                      userId: ownerUserId,
+                      projectId: ownerProjectId,
+                      attachmentId: attachment.id,
+                      updatedFields: Object.keys(itemPatch),
+                      updatedAt: new Date().toISOString(),
+                      source: 'extraction.metadata_sync',
+                    },
+                  );
+                  outboxPublished = true;
+                }
+              },
+              () => invalidateSyncedItemCache(),
+            );
           } else {
             await runSideEffects(undefined, true);
             await this.extractionRepo.updateItem(attachment.itemId, itemPatch);
-          }
-
-          if (!postCommitRegistered) {
             await invalidateSyncedItemCache();
           }
-        } else if (
-          !options?.skipOutboxPublish &&
-          this.libraryTx &&
-          ownerUserId
-        ) {
-          await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
-            await helpers.publishOutbox(
-              eventScope,
-              attachment.itemId,
-              LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-              {
-                itemId: attachment.itemId,
-                userId: ownerUserId,
-                projectId: ownerProjectId,
-                attachmentId: attachment.id,
-                updatedFields: [],
-                updatedAt: new Date().toISOString(),
-                source: 'extraction.metadata_sync',
-              },
-            );
-            outboxPublished = true;
-          });
         }
       } catch (fulltextErr: unknown) {
         const message =
@@ -588,7 +577,7 @@ export class ExtractionMetadataSynchronizer {
         );
       }
     }
-    return { outboxPublished, cacheInvalidated };
+    return { outboxPublished, cacheInvalidated, itemMutated };
   }
 
   buildMetadataSyncPlan(

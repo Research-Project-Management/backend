@@ -3,11 +3,11 @@ import { RedisCacheService } from '@/core';
 import type { ReferenceData } from '@/modules/library/citation/types/citation.types';
 import { normalizeWork } from '@/modules/library/citation/domain/citation.domain';
 import {
-  AcademicHttpClient,
+  HttpClient,
   ExternalProviderException,
   LIBRARY_REDIS_KEYS,
   normalizeDoi,
-  getAcademicUserAgent,
+  getUserAgent,
 } from '@/modules/library/core';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
 
@@ -27,7 +27,7 @@ export class DoiContentNegotiationService {
     @Optional()
     private readonly resilienceRegistry?: ResilienceRegistryService,
     @Optional()
-    private readonly httpClient?: AcademicHttpClient,
+    private readonly httpClient?: HttpClient,
     @Optional()
     private readonly redisCache?: RedisCacheService,
   ) {}
@@ -136,7 +136,7 @@ export class DoiContentNegotiationService {
         const url = `https://doi.org/${encodeURIComponent(doi)}`;
         const headers = {
           Accept: acceptHeader,
-          'User-Agent': getAcademicUserAgent('Research'),
+          'User-Agent': getUserAgent('Research'),
         };
         const response = this.httpClient
           ? (
@@ -150,8 +150,6 @@ export class DoiContentNegotiationService {
               headers,
               signal: controller.signal,
             });
-
-        clearTimeout(timer);
 
         if (response.status === 404) {
           return null;
@@ -171,9 +169,19 @@ export class DoiContentNegotiationService {
           return null;
         }
 
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
+          return null;
+        }
+
         const rawText = await response.text();
         const cleanedText = rawText.trim();
-        if (!cleanedText || cleanedText.startsWith('<!DOCTYPE html>')) {
+        const lowerText = cleanedText.toLowerCase();
+        if (
+          !cleanedText ||
+          lowerText.startsWith('<!doctype') ||
+          lowerText.startsWith('<html')
+        ) {
           return null; // Received HTML error page rather than bibliography
         }
 
@@ -198,9 +206,8 @@ export class DoiContentNegotiationService {
           .catch(() => {});
 
         return result;
-      } catch (err: unknown) {
+      } finally {
         clearTimeout(timer);
-        throw err;
       }
     };
 
@@ -289,7 +296,7 @@ export class DoiContentNegotiationService {
         const headers = {
           Accept:
             'application/vnd.citationstyles.csl+json, application/citeproc+json, application/json',
-          'User-Agent': getAcademicUserAgent('Research'),
+          'User-Agent': getUserAgent('Research'),
         };
         const response = this.httpClient
           ? (
@@ -304,11 +311,13 @@ export class DoiContentNegotiationService {
               signal: controller.signal,
             });
 
-        clearTimeout(timer);
-
-        if (response.status === 404) return null;
+        if (response.status === 404) {
+          clearTimeout(timer);
+          return null;
+        }
 
         if (response.status === 429 || response.status >= 500) {
+          clearTimeout(timer);
           throw new ExternalProviderException(
             `doi.org metadata HTTP ${response.status}`,
             {
@@ -318,12 +327,19 @@ export class DoiContentNegotiationService {
           );
         }
 
-        if (!response.ok) return null;
+        if (!response.ok) {
+          clearTimeout(timer);
+          return null;
+        }
 
         const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('text/html')) return null;
+        if (contentType.includes('text/html')) {
+          clearTimeout(timer);
+          return null;
+        }
 
         const json = (await response.json()) as unknown;
+        clearTimeout(timer);
         if (!json || typeof json !== 'object') return null;
 
         const result = normalizeWork(json, doi);

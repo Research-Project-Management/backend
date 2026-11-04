@@ -605,7 +605,11 @@ export function firstAuthorMatches(authorA: string, authorB: string): boolean {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z]/g, '');
   if (!normA || !normB) return false;
-  if (normA === normB || normA.includes(normB) || normB.includes(normA)) {
+  if (normA === normB) {
+    return true;
+  }
+  const minLen = Math.min(normA.length, normB.length);
+  if (minLen >= 4 && (normA.includes(normB) || normB.includes(normA))) {
     return true;
   }
   return jaroWinkler(normA, normB) >= 0.85;

@@ -115,12 +115,15 @@ export class HtmlMetaTagExtractor {
     };
     const jsonLd = this.publisherDomExtractor.extractJsonLdMetadata(html);
     const coins = this.publisherDomExtractor.extractCoinsMetadata(html);
+    const embeddedScript =
+      this.publisherDomExtractor.extractEmbeddedScriptMetadata(html);
     const result: Partial<ScrapedUrlResult> = {};
 
     let rawTitle =
       first('citation_title', 'eprints.title', 'dc.title', 'dcterms.title') ||
       jsonLd.title ||
       coins.title ||
+      embeddedScript.title ||
       first('og:title', 'twitter:title');
     if (!rawTitle) {
       const titleTagMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
@@ -155,6 +158,9 @@ export class HtmlMetaTagExtractor {
     if (rawAuthors.length === 0 && coins.authors?.length) {
       rawAuthors = coins.authors;
     }
+    if (rawAuthors.length === 0 && embeddedScript.authors?.length) {
+      rawAuthors = embeddedScript.authors;
+    }
     const authors = this.dedupeNames(rawAuthors);
     const editors = this.dedupeNames(
       all('citation_editor', 'eprints.editors_name'),
@@ -180,6 +186,7 @@ export class HtmlMetaTagExtractor {
       ...all('dc.identifier', 'dcterms.identifier', 'eprints.id_number'),
       jsonLd.doi,
       coins.doi,
+      embeddedScript.doi,
     ]) {
       const d = cand ? normalizeDoi(cand) : undefined;
       if (d) {
@@ -279,7 +286,8 @@ export class HtmlMetaTagExtractor {
         'prism.onlinedate',
       ) ||
       jsonLd.date ||
-      coins.date;
+      coins.date ||
+      embeddedScript.date;
     if (rawDate) {
       result.publicationDate = rawDate.trim();
       result.year = extractYearFromDate(rawDate);
@@ -345,7 +353,9 @@ export class HtmlMetaTagExtractor {
     if (rights) result.rights = rights;
 
     const fallbackVenue = this.cleanText(
-      jsonLd.publicationTitle || coins.publicationTitle,
+      jsonLd.publicationTitle ||
+        coins.publicationTitle ||
+        embeddedScript.publicationTitle,
     );
     if (conferenceName) result.conferenceName = conferenceName;
     if (bookTitle) result.bookTitle = bookTitle;
@@ -368,7 +378,9 @@ export class HtmlMetaTagExtractor {
       'eprints.publisher',
       'prism.publisher',
     );
-    const cleanPub = this.cleanText(pub || jsonLd.publisher);
+    const cleanPub = this.cleanText(
+      pub || jsonLd.publisher || coins.publisher || embeddedScript.publisher,
+    );
     if (cleanPub) {
       result.publisher = cleanPub;
     }
@@ -414,7 +426,8 @@ export class HtmlMetaTagExtractor {
     const volume =
       first('citation_volume', 'prism.volume', 'eprints.volume') ||
       jsonLd.volume ||
-      coins.volume;
+      coins.volume ||
+      embeddedScript.volume;
     if (volume) result.volume = volume;
 
     const issue =
@@ -425,7 +438,8 @@ export class HtmlMetaTagExtractor {
         'eprints.number',
       ) ||
       jsonLd.issue ||
-      coins.issue;
+      coins.issue ||
+      embeddedScript.issue;
     if (issue) result.issue = issue;
 
     const pages =
@@ -433,7 +447,8 @@ export class HtmlMetaTagExtractor {
       this.joinPages(first('prism.startingpage'), first('prism.endingpage')) ||
       first('prism.pagerange', 'eprints.pagerange') ||
       jsonLd.pages ||
-      coins.pages;
+      coins.pages ||
+      embeddedScript.pages;
     if (pages) result.pages = pages;
 
     const language =
@@ -470,6 +485,8 @@ export class HtmlMetaTagExtractor {
       result.itemType = jsonLd.itemType;
     } else if (coins.itemType) {
       result.itemType = coins.itemType;
+    } else if (embeddedScript.itemType) {
+      result.itemType = embeddedScript.itemType;
     } else if (/\/blogs?\//i.test(pageUrl)) {
       result.itemType = 'blogPost';
     }
@@ -504,7 +521,8 @@ export class HtmlMetaTagExtractor {
         'dc.description',
       ) ||
       jsonLd.abstract ||
-      coins.abstract;
+      coins.abstract ||
+      embeddedScript.abstract;
     if (!rawAbstract) {
       const og = first('og:description');
       if (og && og.length >= 200) rawAbstract = og;
@@ -520,6 +538,9 @@ export class HtmlMetaTagExtractor {
     }
     if (keywordValues.length === 0 && jsonLd.keywords?.length) {
       keywordValues = jsonLd.keywords;
+    }
+    if (keywordValues.length === 0 && embeddedScript.keywords?.length) {
+      keywordValues = embeddedScript.keywords;
     }
     let keywords = this.splitKeywords(keywordValues);
     if (keywords.length === 0) {

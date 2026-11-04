@@ -158,34 +158,21 @@ export function toCitationItemInput(
   it: ExportItemRecord,
   overrideKey?: string,
 ): CitationItemInput {
-  const csl = CslJsonMapper.toCsl(it);
-  const effectiveKey =
-    overrideKey ||
-    it.citationKey ||
-    (typeof csl['citation-key'] === 'string' ? csl['citation-key'] : undefined);
+  const effectiveKey = overrideKey || it.citationKey || undefined;
   return {
     ...(it as unknown as Record<string, unknown>),
     id: effectiveKey || it.id,
     itemType: it.itemType ?? 'journalArticle',
     title: it.title,
-    authors: CslJsonMapper.getAuthorNames(it),
-    publicationTitle: it.publicationTitle ?? csl['container-title'],
-    publisher: csl.publisher,
+    publicationTitle: it.publicationTitle ?? undefined,
+    publisher: it.publisher ?? undefined,
     year: it.year ?? undefined,
-    volume: csl.volume !== undefined ? String(csl.volume) : undefined,
-    issue: csl.issue !== undefined ? String(csl.issue) : undefined,
-    pages: csl.page,
-    doi: it.doi || csl.DOI || undefined,
-    isbn: csl.ISBN || undefined,
-    issn: csl.ISSN || undefined,
-    pmid: csl.PMID || undefined,
-    pmcid: csl.PMCID || undefined,
-    arxivId: typeof csl._arxivId === 'string' ? csl._arxivId : undefined,
-    edition: csl.edition !== undefined ? String(csl.edition) : undefined,
-    place: csl['publisher-place'] || undefined,
-    series: csl['collection-title'] || undefined,
-    url: it.url ?? csl.URL ?? undefined,
-    abstract: it.abstract ?? csl.abstract ?? undefined,
+    volume: it.volume ?? undefined,
+    issue: it.issue ?? undefined,
+    pages: it.pages ?? undefined,
+    doi: it.doi ?? undefined,
+    url: it.url ?? undefined,
+    abstract: it.abstract ?? undefined,
     citationKey: effectiveKey,
     contributors: it.contributors,
     creators: it.contributors,

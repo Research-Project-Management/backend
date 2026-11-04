@@ -39,7 +39,7 @@ model IngestionRun {
   maxRetries      Int             @default(3) @map("max_retries")
   nextRetryAt     DateTime?       @map("next_retry_at") @db.Timestamptz(6)
   itemId          String?         @map("item_id") @db.Uuid
-  item            Item?           @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  item            Item?           @relation(fields: [itemId], references: [id], onDelete: SetNull, map: "fk_ingestion_runs_item_id")
   lastError       String?         @map("last_error")
   executionLog    Json?           @map("execution_log") @db.JsonB
   reviewData      Json?           @map("review_data") @db.JsonB

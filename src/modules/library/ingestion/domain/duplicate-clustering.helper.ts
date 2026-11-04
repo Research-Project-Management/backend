@@ -4,6 +4,7 @@ import {
   normalizeArxivId,
   normalizePmid,
   normalizeIsbn,
+  isRejectedCitedIdentifier,
   ItemProvenancePolicy,
   PREPRINT_SERVER_VENUE_REGEX,
   ItemsMapper,
@@ -64,13 +65,24 @@ export function getEffectiveItemField(
   options?: EffectiveFieldLookupOptions,
 ): unknown {
   const rec = asMetaObject(item);
+  const meta = metaOverride || asMetaObject(rec.metadata);
+  const lowerField = field.trim().toLowerCase();
+  const isIdentifierLookup =
+    lowerField === 'doi' || lowerField === 'isbn' || lowerField === 'issn' ||
+    lowerField === 'pmid' || lowerField === 'pmcid' || lowerField === 'arxivid' || lowerField === 'arxiv';
+  const rejectedCitedDoi = meta.rejectedCitedDoi ?? rec.rejectedCitedDoi;
+  const isBlockedIdentifier = (val: unknown): boolean =>
+    isIdentifierLookup &&
+    Boolean(rejectedCitedDoi) &&
+    isRejectedCitedIdentifier(val, rejectedCitedDoi) &&
+    !ItemProvenancePolicy.inspectFieldUserLock(meta, field).locked;
+
   const topVal = rec[field];
-  if (isNonEmptyFieldValue(topVal)) {
+  if (isNonEmptyFieldValue(topVal) && !isBlockedIdentifier(topVal)) {
     return topVal;
   }
-  const meta = metaOverride || asMetaObject(rec.metadata);
   const metaVal = meta[field];
-  if (isNonEmptyFieldValue(metaVal)) {
+  if (isNonEmptyFieldValue(metaVal) && !isBlockedIdentifier(metaVal)) {
     return metaVal;
   }
 
@@ -98,26 +110,16 @@ export function getEffectiveItemField(
   });
   for (const alias of coupledAliases) {
     const aliasTop = rec[alias];
-    if (isNonEmptyFieldValue(aliasTop)) {
+    if (isNonEmptyFieldValue(aliasTop) && !isBlockedIdentifier(aliasTop)) {
       return aliasTop;
     }
     const aliasMeta = meta[alias];
-    if (isNonEmptyFieldValue(aliasMeta)) {
+    if (isNonEmptyFieldValue(aliasMeta) && !isBlockedIdentifier(aliasMeta)) {
       return aliasMeta;
     }
   }
 
-  const lowerField = field.trim().toLowerCase();
-  if (
-    (lowerField === 'doi' ||
-      lowerField === 'isbn' ||
-      lowerField === 'issn' ||
-      lowerField === 'pmid' ||
-      lowerField === 'pmcid' ||
-      lowerField === 'arxivid' ||
-      lowerField === 'arxiv') &&
-    Array.isArray(rec.identifiers)
-  ) {
+  if (isIdentifierLookup && Array.isArray(rec.identifiers)) {
     const targetIdType = lowerField === 'arxivid' ? 'arxiv' : lowerField;
     for (const ident of rec.identifiers as Array<Record<string, unknown>>) {
       if (!ident || typeof ident !== 'object') continue;
@@ -125,7 +127,7 @@ export function getEffectiveItemField(
         .trim()
         .toLowerCase();
       const normType = rawType === 'arxivid' ? 'arxiv' : rawType;
-      if (normType === targetIdType && isNonEmptyFieldValue(ident.value)) {
+      if (normType === targetIdType && isNonEmptyFieldValue(ident.value) && !isBlockedIdentifier(ident.value)) {
         return ident.value;
       }
     }

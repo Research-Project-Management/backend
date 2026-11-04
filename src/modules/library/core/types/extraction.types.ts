@@ -1,13 +1,6 @@
 import type { AttachmentExtractionStatus as PrismaExtractionStatus } from '@prisma/client';
-import type {
-  BibliographicReference,
-  DocumentSection,
-  DocumentFigure,
-  DocumentTable,
-  DocumentFormula,
-  AcademicCreator,
-  ItemMetadata,
-} from './bibliographic.types';
+import type { BibliographicReference, DocumentSection, DocumentFigure, DocumentTable, DocumentFormula, ItemCreator, ItemMetadata } from './bibliographic.types';
+import { BaseDomainException } from '@/modules/library/core/errors/domain.exception';
 
 export type AttachmentKind = 'stored_file' | 'linked_resource' | 'snapshot';
 
@@ -95,8 +88,11 @@ export type AnnotationType =
 export interface AnnotationEntity {
   id: string;
   attachmentId: string;
+  itemId?: string | null;
+  imageFileId?: string | null;
   type: AnnotationType;
   pageIndex: number;
+  pageLabel?: string | null;
   annotationSortIndex?: string | null;
   color: string;
   quoteText?: string | null;
@@ -122,8 +118,11 @@ export interface AnnotationEntity {
 export interface CreateAnnotationData {
   id?: string;
   attachmentId: string;
+  itemId?: string;
+  imageFileId?: string | null;
   type?: AnnotationType;
   pageIndex: number;
+  pageLabel?: string;
   y?: number;
   x?: number;
   color?: string;
@@ -136,11 +135,15 @@ export interface CreateAnnotationData {
 }
 
 export interface UpdateAnnotationData {
+  type?: AnnotationType;
+  pageIndex?: number;
+  pageLabel?: string;
   color?: string;
   quoteText?: string;
   comment?: string;
   tags?: string[];
   rectCoords?: unknown;
+  imageFileId?: string | null;
   y?: number;
   x?: number;
   annotationSortIndex?: string;
@@ -148,8 +151,11 @@ export interface UpdateAnnotationData {
 
 export interface UpsertAnnotationItem {
   id?: string;
+  itemId?: string;
+  imageFileId?: string | null;
   type?: AnnotationType;
   pageIndex: number;
+  pageLabel?: string;
   y?: number;
   x?: number;
   color?: string;
@@ -157,6 +163,7 @@ export interface UpsertAnnotationItem {
   comment?: string;
   tags?: string[];
   rectCoords?: unknown;
+  annotationSortIndex?: string;
   expectedVersion?: number;
 }
 
@@ -179,7 +186,7 @@ export interface ExtractedPdfMetadata {
   pmid?: string;
   title?: string;
   authors?: string[];
-  creators?: AcademicCreator[];
+  creators?: ItemCreator[];
   year?: number;
   publicationDate?: string;
   publisher?: string;
@@ -209,27 +216,6 @@ export interface ExtractedPdfMetadata {
   engineUsed?: string;
 }
 
-export interface OcrPageProvenance {
-  pageIndex: number;
-  confidence: number;
-  orientationAngle: number;
-  skewAngle: number;
-  preprocessed: boolean;
-  textLength: number;
-  lineCount: number;
-  wordCount: number;
-  executionTimeMs: number;
-}
-
-export interface OcrProvenanceData {
-  totalOcrPages: number;
-  ocrPages?: number;
-  digitalPages?: number;
-  avgConfidence: number;
-  executionTimeMs: number;
-  pages: OcrPageProvenance[];
-}
-
 export interface ExtractedPdfDocument {
   metadata: ExtractedPdfMetadata;
   pages: Array<{
@@ -244,8 +230,6 @@ export interface ExtractedPdfDocument {
   figures?: DocumentFigure[];
   tables?: DocumentTable[];
   formulas?: DocumentFormula[];
-  ocrProvenance?: OcrProvenanceData;
-  searchablePdfBuffer?: Buffer;
   fullText?: string;
 }
 
@@ -265,16 +249,15 @@ export interface QualityScoreBreakdown {
  * Extraction engine tags indicating which local tier produced the metadata.
  */
 export type ExtractionEngineKind =
-  | 'XMP_BINARY'
-  | 'ACADEMIC_REGEX'
-  | 'LAYOUT_HEURISTIC'
-  | 'MEXTRACT_SLM'
+  | 'XMP'
+  | 'REGEX'
+  | 'LAYOUT'
   | 'HYBRID';
 
 /**
  * Full provenance audit for local-first trusted extraction.
  */
-export interface TrustedExtractionProvenance {
+export interface PdfMetadataExtractionProvenance {
   extractedAt: string;
   engineUsed: ExtractionEngineKind;
   executionTimeMs: number;
@@ -288,11 +271,6 @@ export interface TrustedExtractionProvenance {
     detectedIsbn?: string;
     matchedPublisherBanner?: string;
     maxFontSize?: number;
-    mextract?: {
-      engine: string;
-      confidence: number;
-      durationMs: number;
-    };
     [key: string]: unknown;
   };
 }
@@ -300,7 +278,7 @@ export interface TrustedExtractionProvenance {
 /**
  * Canonical result contract returned by the TrustedExtractor port.
  */
-export interface TrustedExtractionResult {
+export interface PdfMetadataExtractionResult {
   metadata: ItemMetadata;
   quality: QualityScoreBreakdown;
 
@@ -313,5 +291,43 @@ export interface TrustedExtractionResult {
   isSelfSufficient: boolean;
   missingFields?: string[];
 
-  provenance: TrustedExtractionProvenance;
+  provenance: PdfMetadataExtractionProvenance;
+}
+
+/**
+ * Raw XMP XML packet parsing representation.
+ */
+export interface RawXmpMetadata {
+  doi?: string;
+  title?: string;
+  authors?: string[];
+  publicationDate?: string;
+  year?: number;
+  publisher?: string;
+  journal?: string;
+  description?: string;
+  keywords?: string[];
+  rawPacket?: string;
+}
+
+export interface IPdfMetadataExtractorPort {
+  extract(
+    buffer: Buffer,
+    preferredFilename?: string,
+  ): Promise<PdfMetadataExtractionResult>;
+}
+
+export type RectCoords = [number, number, number, number];
+
+export class AttachmentInvariantError extends BaseDomainException {
+  public override name = 'AttachmentInvariantError';
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+export class AttachmentStorageException extends BaseDomainException {
+  constructor(message: string) {
+    super(message);
+  }
 }

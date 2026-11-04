@@ -15,21 +15,25 @@ import {
 import { QueryClassifier } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import {
   deriveDoiFromPublisherUrl,
+  extractNormalizedAuthorSurnames,
   formatCanonicalId,
+  isPaperLevelKeywordSource,
   normalizeArxivId,
   normalizeDoi,
   normalizePmcid,
   normalizePmid,
+  normalizeTags,
   resolveBidirectionalBaseFields,
   resolveFieldAliases,
   titleSimilarity,
   finalizeReconciledBibliographicMetadata,
+  ALIAS_EVIDENCE_FALLBACK_KEYS,
 } from '@/modules/library/core';
 import {
   MetadataRoutingPolicy,
   METADATA_POLICY_VERSION,
 } from '@/modules/library/ingestion/policies/metadata.policy';
-import { MetadataCache } from '@/modules/library/ingestion/repositories/metadata.cache';
+import { MetadataCache } from '@/modules/library/ingestion/services/retraction-seeder.service';
 import { MetadataExecutorService } from './metadata-executor.service';
 import { validateMetadata } from '@/modules/library/ingestion/domain/metadata.validator';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
@@ -211,9 +215,12 @@ export class MetadataService implements MetadataPort {
       }
     }
 
-    // 7. Enrichment (if authoritative found results)
-    if (candidateResults.length > 0 && tiers.enrichment.length > 0) {
-      const primaryMeta = candidateResults[0]?.metadata;
+    // 7. Enrichment (if authoritative found results, or gap-triggered OpenAlex enrichment when CrossRef lacks abstract/author keywords)
+    if (candidateResults.length > 0) {
+      const primaryResult = candidateResults[0];
+      const primaryMeta = primaryResult?.metadata;
+      const effectiveEnrichmentIds: ProviderName[] = [...tiers.enrichment];
+
       const primaryAuthoritativeTitle = primaryMeta?.title;
       const primaryDoi = primaryMeta?.doi
         ? normalizeDoi(primaryMeta.doi)
@@ -223,58 +230,112 @@ export class MetadataService implements MetadataPort {
           d &&
           /^10\.(?:48550\/arxiv\.|1101\/|21203\/|26434\/|20944\/)/i.test(d),
         );
-      const enrichmentProviders = tiers.enrichment
-        .map((id) => this.providerMap.get(id))
-        .filter(
-          (p): p is MetadataProvider =>
-            p !== undefined && p.supports(classified.type),
-        )
-        .slice(0, MetadataRoutingPolicy.PARALLEL_LIMIT);
 
-      const enrichmentExecs = await Promise.all(
-        enrichmentProviders.map((provider) =>
-          this.executor.execute(
-            provider,
-            { ...request, query: classified.clean, queryType: classified.type },
-            request.signal,
+      if (
+        classified.type === 'ARXIV' &&
+        primaryDoi &&
+        !isPreprintDoi(primaryDoi) &&
+        !effectiveEnrichmentIds.includes('CrossRef')
+      ) {
+        effectiveEnrichmentIds.unshift('CrossRef');
+      }
+
+      if (
+        effectiveEnrichmentIds.length === 0 &&
+        primaryResult &&
+        (classified.type === 'DOI' || classified.type === 'TITLE')
+      ) {
+        const hasFullAbstract =
+          typeof primaryMeta?.abstract === 'string' &&
+          primaryMeta.abstract.trim().length >= 60;
+        const hasPaperLevelKeywords =
+          isPaperLevelKeywordSource(primaryResult.provider) &&
+          Array.isArray(primaryMeta?.keywords) &&
+          primaryMeta.keywords.length > 0;
+        if (!hasFullAbstract || !primaryMeta?.openAccessPdfUrl || !hasPaperLevelKeywords) {
+          effectiveEnrichmentIds.push('OpenAlex');
+        }
+      }
+
+      if (effectiveEnrichmentIds.length > 0) {
+        const upgradeToDoiQuery =
+          (classified.type === 'TITLE' && Boolean(primaryDoi)) ||
+          (classified.type === 'ARXIV' &&
+            Boolean(primaryDoi) &&
+            !isPreprintDoi(primaryDoi));
+        const enrichmentQuery =
+          upgradeToDoiQuery && primaryDoi ? primaryDoi : classified.clean;
+        const enrichmentQueryType = upgradeToDoiQuery ? 'DOI' : classified.type;
+
+        const enrichmentProviders = effectiveEnrichmentIds
+          .map((id) => this.providerMap.get(id))
+          .filter(
+            (p): p is MetadataProvider =>
+              p !== undefined && p.supports(enrichmentQueryType),
+          )
+          .slice(0, MetadataRoutingPolicy.PARALLEL_LIMIT);
+
+        const enrichmentExecs = await Promise.all(
+          enrichmentProviders.map((provider) =>
+            this.executor.execute(
+              provider,
+              {
+                ...request,
+                query: enrichmentQuery,
+                queryType: enrichmentQueryType,
+              },
+              request.signal,
+            ),
           ),
-        ),
-      );
+        );
 
-      for (const execResult of enrichmentExecs) {
-        allExecutions.push(execResult);
-        if (execResult.status === 'found' && execResult.result) {
-          const enrichedMeta = execResult.result.metadata;
-          // Guard against enrichment provider returning a different work (e.g. a paper citing the arXiv preprint)
-          const enrichedTitle = enrichedMeta?.title;
-          if (
-            primaryAuthoritativeTitle &&
-            enrichedTitle &&
-            !this.isTitleSimilar(primaryAuthoritativeTitle, enrichedTitle) &&
-            !this.isTitleSimilar(enrichedTitle, primaryAuthoritativeTitle)
-          ) {
-            continue;
+        const primarySurnames = extractNormalizedAuthorSurnames(primaryMeta);
+        for (const execResult of enrichmentExecs) {
+          allExecutions.push(execResult);
+          if (execResult.status === 'found' && execResult.result) {
+            const enrichedMeta = execResult.result.metadata;
+            // Guard against enrichment provider returning a different work (e.g. a paper citing the arXiv preprint)
+            const enrichedTitle = enrichedMeta?.title;
+            if (
+              primaryAuthoritativeTitle &&
+              enrichedTitle &&
+              !this.isTitleSimilar(primaryAuthoritativeTitle, enrichedTitle) &&
+              !this.isTitleSimilar(enrichedTitle, primaryAuthoritativeTitle)
+            ) {
+              continue;
+            }
+            const enrichedDoi = enrichedMeta?.doi
+              ? normalizeDoi(enrichedMeta.doi)
+              : undefined;
+            if (
+              primaryDoi &&
+              enrichedDoi &&
+              primaryDoi !== enrichedDoi &&
+              !isPreprintDoi(primaryDoi) &&
+              !isPreprintDoi(enrichedDoi)
+            ) {
+              continue;
+            }
+            if (
+              primaryMeta?.year &&
+              enrichedMeta?.year &&
+              Math.abs(Number(primaryMeta.year) - Number(enrichedMeta.year)) > 3
+            ) {
+              continue;
+            }
+            if (enrichmentQueryType === 'TITLE') {
+              const enrichedSurnames =
+                extractNormalizedAuthorSurnames(enrichedMeta);
+              if (
+                primarySurnames.size > 0 &&
+                enrichedSurnames.size > 0 &&
+                ![...primarySurnames].some((s) => enrichedSurnames.has(s))
+              ) {
+                continue;
+              }
+            }
+            candidateResults.push(execResult.result);
           }
-          const enrichedDoi = enrichedMeta?.doi
-            ? normalizeDoi(enrichedMeta.doi)
-            : undefined;
-          if (
-            primaryDoi &&
-            enrichedDoi &&
-            primaryDoi !== enrichedDoi &&
-            !isPreprintDoi(primaryDoi) &&
-            !isPreprintDoi(enrichedDoi)
-          ) {
-            continue;
-          }
-          if (
-            primaryMeta?.year &&
-            enrichedMeta?.year &&
-            Math.abs(Number(primaryMeta.year) - Number(enrichedMeta.year)) > 3
-          ) {
-            continue;
-          }
-          candidateResults.push(execResult.result);
         }
       }
     }
@@ -365,9 +426,15 @@ export class MetadataService implements MetadataPort {
 
     for (const res of validResults) {
       const clonedMeta: Record<string, unknown> = { ...res.metadata };
-      const candType = String(clonedMeta.itemType || 'journalArticle');
       resolveFieldAliases(clonedMeta);
-      resolveBidirectionalBaseFields(clonedMeta, candType, undefined, false);
+
+      // If primary result was a preprint (e.g. arXiv) and a secondary authoritative registry (e.g. CrossRef)
+      // resolved the published version via publishedDoi, upgrade itemType and published venue/date fields.
+      const isPublishedUpgrade =
+        coalescedRecord.itemType === 'preprint' &&
+        typeof clonedMeta.itemType === 'string' &&
+        clonedMeta.itemType !== 'preprint' &&
+        res.provider === 'CrossRef';
 
       for (const [field, val] of Object.entries(clonedMeta)) {
         if (val === undefined || val === null || val === '') continue;
@@ -380,7 +447,54 @@ export class MetadataService implements MetadataPort {
           existingVal === '' ||
           (Array.isArray(existingVal) && existingVal.length === 0);
 
-        if (isExistingEmpty) {
+        // Prefer paper-specific author/concept keywords (OpenAlex, PubMed, arXiv, SemanticScholar)
+        // over journal-level subject categories when both are present.
+        if (
+          (field === 'keywords' || field === 'tags') &&
+          !isExistingEmpty &&
+          Array.isArray(val) &&
+          val.length > 0 &&
+          isPaperLevelKeywordSource(res.provider)
+        ) {
+          const existingProv = fieldProvenance[field]?.provider;
+          if (!isPaperLevelKeywordSource(existingProv)) {
+            coalescedRecord[field] = [...val];
+            fieldProvenance[field] = {
+              provider: res.provider,
+              fetchedAt: res.fetchedAt,
+              identifier: `${res.provider.toLowerCase()}:${res.identifier}`,
+              confidence: res.confidence,
+            };
+            continue;
+          }
+          const mergedTags = normalizeTags([
+            ...(Array.isArray(existingVal) ? (existingVal as string[]) : []),
+            ...(val as string[]),
+          ]);
+          if (mergedTags.length > 0) {
+            coalescedRecord[field] = mergedTags;
+          }
+          continue;
+        }
+
+        const shouldUpgradePublishedField =
+          isPublishedUpgrade &&
+          (field === 'itemType' ||
+            field === 'publicationTitle' ||
+            field === 'journal' ||
+            field === 'proceedingsTitle' ||
+            field === 'conferenceName' ||
+            field === 'publisher' ||
+            field === 'volume' ||
+            field === 'issue' ||
+            field === 'pages' ||
+            field === 'year' ||
+            field === 'publicationDate' ||
+            field === 'date' ||
+            field === 'issn' ||
+            field === 'isbn');
+
+        if (isExistingEmpty || shouldUpgradePublishedField) {
           coalescedRecord[field] = Array.isArray(val)
             ? [...val]
             : typeof val === 'object'
@@ -406,6 +520,20 @@ export class MetadataService implements MetadataPort {
       false,
     );
     finalizeReconciledBibliographicMetadata(coalescedRecord);
+
+    // Backfill fieldProvenance for any canonical/base-mapped alias fields synthesized during finalization
+    for (const [key, val] of Object.entries(coalescedRecord)) {
+      if (val === undefined || val === null || val === '') continue;
+      if (!fieldProvenance[key]) {
+        const aliasKeys = ALIAS_EVIDENCE_FALLBACK_KEYS[key] || [];
+        for (const ak of aliasKeys) {
+          if (fieldProvenance[ak]) {
+            fieldProvenance[key] = { ...fieldProvenance[ak] };
+            break;
+          }
+        }
+      }
+    }
 
     const finalMetadata: ItemMetadata = {
       title: (coalescedRecord.title as string) || 'Untitled Document',

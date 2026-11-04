@@ -6,11 +6,11 @@ import {
   ItemDetail,
   ItemSummary,
 } from '@/modules/library/core/types/bibliographic.types';
-import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
+import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 import {
   ItemFilterOptions,
   buildItemWhereClause,
-} from './item-filter-where.builder';
+} from './notes.repository';
 
 export type PrismaClientOrTx = Prisma.TransactionClient | PrismaService;
 
@@ -137,6 +137,12 @@ export class ItemListQueryRepository {
         requestedFields &&
         (requestedFields.has('notes') || requestedFields.has('notesList')),
       );
+    const shouldIncludeRelations =
+      !requestedFields ||
+      requestedFields.has('relations') ||
+      requestedFields.has('outgoingRel') ||
+      requestedFields.has('incomingRel') ||
+      requestedFields.has('seeAlso');
 
     const relationPeerSelect = {
       id: true,
@@ -149,10 +155,34 @@ export class ItemListQueryRepository {
         orderBy: { orderIndex: 'asc' as const },
       },
       itemTags: {
-        include: { tag: true },
+        select: {
+          tagId: true,
+          type: true,
+          tag: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
+              shortcut: true,
+              type: true,
+            },
+          },
+        },
       },
       collectionItems: {
-        include: { collection: true },
+        select: {
+          collectionId: true,
+          sortOrder: true,
+          collection: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
+              icon: true,
+              parentId: true,
+            },
+          },
+        },
       },
       attachments: {
         where: { deletedAt: null },
@@ -160,13 +190,19 @@ export class ItemListQueryRepository {
       identifiers: true,
       publications: {
         where: { userId: effectiveUserId },
+        select: { itemId: true },
+        take: 1,
       },
-      outgoingRel: {
-        include: { targetItem: { select: relationPeerSelect } },
-      },
-      incomingRel: {
-        include: { sourceItem: { select: relationPeerSelect } },
-      },
+      ...(shouldIncludeRelations
+        ? {
+            outgoingRel: {
+              include: { targetItem: { select: relationPeerSelect } },
+            },
+            incomingRel: {
+              include: { sourceItem: { select: relationPeerSelect } },
+            },
+          }
+        : {}),
       ...(shouldIncludeNotes
         ? {
             notesList: {
@@ -197,7 +233,7 @@ export class ItemListQueryRepository {
           lastReadAt: { not: null },
           item: recentItemWhere,
         },
-        orderBy: { lastReadAt: 'desc' },
+        orderBy: [{ lastReadAt: 'desc' }, { itemId: 'desc' }],
         take: limit + 1,
         include: {
           item: {
@@ -230,14 +266,19 @@ export class ItemListQueryRepository {
     }
 
     let sortField = options.orderBy || 'createdAt';
-    if (sortField === 'authors') {
+    if (sortField === 'authors' || sortField === 'creator') {
       sortField = 'firstAuthor';
     } else if (sortField === 'publication') {
       sortField = 'publicationTitle';
     } else if (sortField === 'dateDeleted') {
       sortField = 'deletedAt';
+    } else if (sortField === 'dateAdded') {
+      sortField = 'createdAt';
+    } else if (sortField === 'dateModified') {
+      sortField = 'updatedAt';
     }
-    const sortDir = options.orderDirection === 'asc' ? 'asc' : 'desc';
+    const sortDir: Prisma.SortOrder =
+      options.orderDirection === 'asc' ? 'asc' : 'desc';
     const allowedSortFields = [
       'title',
       'year',
@@ -251,8 +292,19 @@ export class ItemListQueryRepository {
     const safeSortField = allowedSortFields.includes(sortField)
       ? sortField
       : 'createdAt';
+    const nullableSortFields = new Set([
+      'year',
+      'citationKey',
+      'publicationTitle',
+      'firstAuthor',
+      'deletedAt',
+    ]);
+    const primaryOrderBy: Prisma.ItemOrderByWithRelationInput =
+      nullableSortFields.has(safeSortField)
+        ? { [safeSortField]: { sort: sortDir, nulls: 'last' } }
+        : { [safeSortField]: sortDir };
     const orderByClause: Prisma.ItemOrderByWithRelationInput[] = [
-      { [safeSortField]: sortDir },
+      primaryOrderBy,
       { id: sortDir },
     ];
 

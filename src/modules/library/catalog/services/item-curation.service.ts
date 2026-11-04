@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
-import { ItemCacheCoordinator } from './item-cache.coordinator';
+import { ItemCacheCoordinator } from './library-bootstrap.service';
 import { ItemQueryService } from './item-query.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
@@ -23,13 +23,14 @@ import {
   IUnitOfWork,
   buildItemCreatedOutboxPayload,
   normalizeProjectScopeId,
+  ItemsMapper,
 } from '@/modules/library/core';
-import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import {
   ImportSourceItem,
   buildImportItemPayload,
   prepareItemAiMetadataPatch,
 } from '@/modules/library/catalog/domain/command-payload.builder';
+import { executeEmptyTrashInTx } from '../repositories/command-bulk.operations';
 
 export type { ImportSourceItem };
 export { buildImportItemPayload };
@@ -355,7 +356,7 @@ export class ItemCurationService {
   }
 
   /**
-   * Retrieves raw provenance metadata records for an item across all providers (arXiv, MeXtract, CrossRef).
+   * Retrieves raw provenance metadata records for an item across all providers (arXiv, pdf_metadata, CrossRef).
    */
   async getMetadataSources(userId: string, itemId: string, projectId?: string) {
     const item = await this.query.findById(userId, itemId, projectId);
@@ -378,21 +379,42 @@ export class ItemCurationService {
     };
   }
 
+  /**
+   * Fail-closed tenant check. When a scope is supplied the owner MUST be known
+   * and match; an unknown owner is treated as out-of-scope (never as in-scope).
+   */
+  private isOwnedWithinScope(
+    owner: { userId?: string | null; projectId?: string | null } | null | undefined,
+    scope?: { userId?: string; projectId?: string },
+  ): boolean {
+    if (!scope || (!scope.userId && !scope.projectId)) return true;
+    if (!owner) return false;
+    if (scope.userId && owner.userId !== scope.userId) return false;
+    if (scope.projectId && owner.projectId !== scope.projectId) return false;
+    return true;
+  }
+
   async findAttachmentByFileId(
     fileId: string,
+    scope?: { userId?: string; projectId?: string },
   ): Promise<{ id: string; itemId: string; metadata?: unknown } | null> {
     if (!fileId) return null;
-    return this.query.findAttachmentByFileId(fileId);
+    const result = await this.query.findAttachmentByFileId(fileId);
+    if (!result) return null;
+    if (!this.isOwnedWithinScope(result.item, scope)) return null;
+    return { id: result.id, itemId: result.itemId, metadata: result.metadata };
   }
 
   async updateAttachmentProcessingStatus(
     attachmentId: string,
     status: string,
     metadataPatch?: Record<string, unknown>,
+    scope?: { userId?: string; projectId?: string },
   ): Promise<void> {
     if (!attachmentId) return;
     const existing = await this.query.findAttachmentById(attachmentId);
     if (!existing) return;
+    if (!this.isOwnedWithinScope(existing.item, scope)) return;
 
     const currentMeta =
       existing.metadata &&
@@ -425,10 +447,12 @@ export class ItemCurationService {
   async updateItemAiMetadata(
     itemId: string,
     aiMetadataPatch: Record<string, unknown>,
+    scope?: { userId?: string; projectId?: string },
   ): Promise<void> {
     if (!itemId) return;
     const existing = await this.query.findItemForAiMetadata(itemId);
     if (!existing) return;
+    if (!this.isOwnedWithinScope(existing, scope)) return;
 
     const currentMeta =
       existing.metadata &&
@@ -517,223 +541,46 @@ export class ItemCurationService {
       await invalidateUpdatedItemCache();
     }
   }
-}
 
-export async function executeBulkSoftDeleteInTx(params: {
-  command: CommandRepository;
-  userId: string;
-  itemIds: string[];
-  tx: Prisma.TransactionClient;
-  helpers: TransactionHelpers;
-  validProjectId?: string;
-}) {
-  const { command, userId, itemIds, tx, helpers, validProjectId } = params;
-  const res = await command.softDeleteMany(userId, itemIds, tx, validProjectId);
-  if (res.succeededIds.length > 0) {
-    const eventScope = { userId, projectId: validProjectId };
-    const deletedAt = new Date();
-    const deletedIso = deletedAt.toISOString();
-    await helpers.recordTombstonesBatch(
-      eventScope,
-      res.succeededIds.map((entityId) => ({ entityType: 'Item', entityId })),
-    );
-    await helpers.appendChangesBatch(
-      eventScope,
-      res.succeededIds.map((id) => ({
-        entityType: 'Item',
-        entityId: id,
-        action: 'delete',
-        version: 0,
-        data: { id, deletedAt: deletedIso },
-      })),
-    );
-    await helpers.publishOutboxBatch(
-      eventScope,
-      res.succeededIds.map((id) => ({
-        aggregateId: id,
-        eventType: LIBRARY_EVENT_TYPES.ITEM_DELETED,
-        payload: { id, deletedAt, projectId: validProjectId },
-      })),
-    );
-  }
-  return res;
-}
-
-export async function executeBulkRestoreInTx(params: {
-  command: CommandRepository;
-  query: QueryRepository;
-  userId: string;
-  itemIds: string[];
-  tx: Prisma.TransactionClient;
-  helpers: TransactionHelpers;
-  validProjectId?: string;
-}) {
-  const { command, query, userId, itemIds, tx, helpers, validProjectId } =
-    params;
-  const res = await command.restoreMany(userId, itemIds, tx, validProjectId);
-  if (res.restoredItems.length > 0) {
-    const restoredFullItems = await query.findByIds(
-      userId,
-      res.succeededIds,
-      validProjectId,
-      tx,
-      false,
-    );
-    const fullItemMap = new Map(
-      (restoredFullItems || []).map((it) => [it.id, it]),
-    );
-    const restoredAt = new Date().toISOString();
-    await helpers.appendChangesBatch(
-      res.restoredItems.map((restored) => {
-        const effectiveProjectId =
-          validProjectId || restored.projectId || undefined;
-        const fullItem = fullItemMap.get(restored.id);
-        return {
+  async emptyTrash(userId: string, projectId?: string) {
+    const validProjectId = normalizeProjectScopeId(projectId);
+    let ranPostCommitHook = false;
+    const { succeededIds, failedIds, fileIdsToDelete } =
+      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        ranPostCommitHook = Boolean(helpers.onAfterCommit);
+        const res = await executeEmptyTrashInTx({
+          command: this.command,
           userId,
-          projectId: effectiveProjectId,
-          entityType: 'Item',
-          entityId: restored.id,
-          action: 'update' as const,
-          version: restored.version,
-          data: fullItem
-            ? ItemsMapper.toDomain(fullItem)
-            : {
-                id: restored.id,
-                version: restored.version,
-                projectId: effectiveProjectId,
-              },
-        };
-      }),
-    );
-    await helpers.removeTombstonesBatch(
-      { userId, projectId: validProjectId },
-      'Item',
-      res.restoredItems.map((r) => r.id),
-    );
-    await helpers.publishOutboxBatch(
-      res.restoredItems.map((restored) => {
-        const effectiveProjectId =
-          validProjectId || restored.projectId || undefined;
-        return {
-          userId,
-          projectId: effectiveProjectId,
-          aggregateId: restored.id,
-          eventType: LIBRARY_EVENT_TYPES.ITEM_RESTORED,
-          payload: {
-            itemId: restored.id,
-            userId,
-            projectId: effectiveProjectId,
-            restoredAt,
-          },
-        };
-      }),
-    );
+          tx,
+          helpers,
+          validProjectId,
+        });
+        if (res.succeededIds.length > 0) {
+          helpers.onAfterCommit?.(() =>
+            this.cacheCoordinator.invalidateBulkItemsCache(
+              res.succeededIds,
+              userId,
+              validProjectId,
+            ),
+          );
+        }
+        return res;
+      });
+    if (succeededIds.length > 0 && !ranPostCommitHook) {
+      await this.cacheCoordinator.invalidateBulkItemsCache(
+        succeededIds,
+        userId,
+        validProjectId,
+      );
+    }
+    if (fileIdsToDelete.length > 0) {
+      await this.command.deleteStorageFilesBatch(fileIdsToDelete);
+    }
+    return {
+      success: true,
+      purgedCount: succeededIds.length,
+      succeededIds,
+      failedIds,
+    };
   }
-  return res;
-}
-
-export async function executeBulkPurgeInTx(params: {
-  command: CommandRepository;
-  userId: string;
-  itemIds: string[];
-  tx: Prisma.TransactionClient;
-  helpers: TransactionHelpers;
-  validProjectId?: string;
-}) {
-  const { command, userId, itemIds, tx, helpers, validProjectId } = params;
-  const res = await command.purgeMany(userId, itemIds, tx, validProjectId);
-  if (res.succeededIds.length > 0) {
-    const eventScope = { userId, projectId: validProjectId };
-    const purgedAt = new Date().toISOString();
-    await helpers.recordTombstonesBatch(
-      eventScope,
-      res.succeededIds.map((entityId) => ({ entityType: 'Item', entityId })),
-    );
-    await helpers.appendChangesBatch(
-      eventScope,
-      res.succeededIds.map((entityId) => ({
-        entityType: 'Item',
-        entityId,
-        action: 'delete',
-        version: 0,
-      })),
-    );
-    await helpers.publishOutboxBatch(
-      eventScope,
-      res.succeededIds.map((id, idx) => ({
-        aggregateId: id,
-        eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
-        payload: {
-          itemId: id,
-          itemIds: res.succeededIds,
-          userId,
-          projectId: validProjectId,
-          filePaths: idx === 0 ? res.storagePaths : [],
-          purgedAt,
-        },
-      })),
-    );
-  }
-  return res;
-}
-
-export async function executePurgeExpiredTrashInTx(params: {
-  command: CommandRepository;
-  retentionDays: number;
-  limit: number;
-  tx: Prisma.TransactionClient;
-  helpers: TransactionHelpers;
-}) {
-  const { command, retentionDays, limit, tx, helpers } = params;
-  const res = await command.purgeExpiredTrash(retentionDays, limit, tx);
-  const expiredItems = res.expiredItems ?? [];
-  const toTombstone = (
-    rows: Array<{ id: string; userId: string; projectId?: string | null }> = [],
-    entityType: string,
-  ) =>
-    rows.map((r) => ({
-      userId: r.userId,
-      projectId: r.projectId ?? undefined,
-      entityType,
-      entityId: r.id,
-    }));
-
-  const tombstoneInputs = [
-    ...toTombstone(expiredItems, 'Item'),
-    ...toTombstone(res.expiredNotes, 'Note'),
-    ...toTombstone(res.expiredCollections, 'Collection'),
-  ];
-
-  if (tombstoneInputs.length > 0) {
-    await helpers.recordTombstonesBatch(tombstoneInputs);
-    await helpers.appendChangesBatch(
-      tombstoneInputs.map((entry) => ({
-        ...entry,
-        action: 'delete' as const,
-        version: 0,
-      })),
-    );
-  }
-
-  if (expiredItems.length > 0) {
-    const purgedAt = new Date().toISOString();
-    const allExpiredItemIds = expiredItems.map((it) => it.id);
-    await helpers.publishOutboxBatch(
-      expiredItems.map((it, idx) => ({
-        userId: it.userId,
-        projectId: it.projectId ?? undefined,
-        aggregateId: it.id,
-        eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
-        payload: {
-          itemId: it.id,
-          itemIds: allExpiredItemIds,
-          userId: it.userId,
-          projectId: it.projectId ?? undefined,
-          filePaths: idx === 0 ? res.storagePaths : [],
-          purgedAt,
-        },
-      })),
-    );
-  }
-  return res;
 }

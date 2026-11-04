@@ -29,7 +29,7 @@ model Feed {
 model FeedItem {
   id               String              @id @default(uuid(7)) @db.Uuid
   feedId           String              @db.Uuid @map("feed_id")
-  feed             Feed                @relation(fields: [feedId], references: [id], onDelete: Cascade)
+  feed             Feed                @relation(fields: [feedId], references: [id], onDelete: Cascade, map: "fk_feed_items_feed_id")
 
   guid             String              @map("guid") // Unique key per feed (DOI / arXiv ID / URL)
   title            String
@@ -42,13 +42,14 @@ model FeedItem {
   abstract         String?             @db.Text
   license          String?             @map("license")
   comments         String?             @map("comments")
+  metadata         Json?               @default("{}") @db.JsonB
   publishedAt      DateTime            @map("published_at") @db.Timestamptz(6)
   createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
 
   readStates       FeedItemReadState[]
 
   @@unique([feedId, guid])
-  @@index([feedId, publishedAt(sort: Desc)])
+  @@index([feedId, publishedAt(sort: Desc), id(sort: Desc)])
   @@index([publishedAt])
   @@index([guid])
   @@index([doi])
@@ -60,8 +61,9 @@ model FeedItem {
 model FeedSubscription {
   id                 String    @id @default(uuid(7)) @db.Uuid
   userId             String    @db.Uuid @map("user_id")
+  projectId          String?   @db.Uuid @map("project_id")
   feedId             String    @db.Uuid @map("feed_id")
-  feed               Feed      @relation(fields: [feedId], references: [id], onDelete: Cascade)
+  feed               Feed      @relation(fields: [feedId], references: [id], onDelete: Cascade, map: "fk_feed_subscriptions_feed_id")
 
   customTitle        String?   @map("custom_title")
   cleanupReadAfter   Int       @default(30) @map("cleanup_read_after")   // Days to keep read items (Zotero standard)
@@ -72,6 +74,7 @@ model FeedSubscription {
 
   @@unique([userId, feedId])
   @@index([userId, createdAt(sort: Desc)])
+  @@index([projectId])
   @@index([feedId])
   @@map("feed_subscriptions")
 }
@@ -80,10 +83,13 @@ model FeedItemReadState {
   id               String    @id @default(uuid(7)) @db.Uuid
   userId           String    @db.Uuid @map("user_id")
   itemId           String    @db.Uuid @map("item_id")
-  item             FeedItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item             FeedItem  @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_feed_item_read_states_item_id")
+  isRead           Boolean   @default(true) @map("is_read")
+  savedItemId      String?   @db.Uuid @map("saved_item_id")
   readAt           DateTime  @default(now()) @map("read_at") @db.Timestamptz(6)
 
   @@unique([userId, itemId])
-  @@index([itemId])
+  @@index([itemId, userId, readAt])
+  @@index([userId, savedItemId])
   @@map("feed_item_read_states")
 }

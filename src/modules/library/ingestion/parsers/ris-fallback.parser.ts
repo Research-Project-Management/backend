@@ -3,7 +3,7 @@ import {
   normalizeDoi,
   parseCreatorString,
 } from '@/modules/library/core';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { CreatorInput } from '@/modules/library/ingestion/types/metadata.types';
 import { RisItem } from './ris.parser';
 
@@ -670,7 +670,7 @@ export class RisFallbackParser {
       pages = record.startPage || record.endPage;
     }
 
-    const tags = normalizeAcademicTags(record.rawTags);
+    const tags = normalizeTags(record.rawTags);
 
     const consolidatedNotes: Array<{ content: string; source?: string }> = [];
     const seenNotes = new Set<string>();

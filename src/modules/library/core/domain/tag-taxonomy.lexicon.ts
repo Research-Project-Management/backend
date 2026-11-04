@@ -232,8 +232,7 @@ for (const [code, subDiscipline] of Object.entries(
 }
 
 // 2. Structural Document Noise Blacklist (Non-Keywords / Parsing Artifacts)
-export const NOISE_TAG_WORDS = new Set([
-  // Placeholders / Empty / Null indicators
+export const HARD_INVALID_TAG_WORDS = new Set([
   'undefined',
   'null',
   'n/a',
@@ -247,18 +246,30 @@ export const NOISE_TAG_WORDS = new Set([
   'nil',
   'empty',
   'void',
-  'sample',
-  'test',
-  'draft',
   'untitled',
   'etc',
   'etc.',
-  'various',
-  'others',
-  'and others',
   'et al',
   'et al.',
   'et-al',
+  'keywords',
+  'keyword',
+  'index terms',
+  'key words',
+  'all rights reserved',
+  'copyright',
+  'downloaded',
+  'downloaded from',
+]);
+
+export const NOISE_TAG_WORDS = new Set([
+  ...HARD_INVALID_TAG_WORDS,
+  'sample',
+  'test',
+  'draft',
+  'various',
+  'others',
+  'and others',
 
   // Document sections & structural headers
   'introduction',

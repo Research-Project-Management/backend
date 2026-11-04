@@ -6,12 +6,12 @@ import {
   normalizeDoi,
   normalizePmid,
   normalizePmcid,
-  normalizeAcademicTags,
+  normalizeTags,
 } from '@/modules/library/core';
 import { parseCreatorString } from '@/modules/library/core';
-import { AcademicCreator } from '@/modules/library/core/types/bibliographic.types';
+import { ItemCreator } from '@/modules/library/core/types/bibliographic.types';
 
-export type FeedFormat = 'rss2' | 'rss1-rdf' | 'atom';
+type FeedFormat = 'rss2' | 'rss1-rdf' | 'atom';
 
 export interface ParsedFeedEntry {
   id: string;
@@ -24,7 +24,7 @@ export interface ParsedFeedEntry {
   pmcid?: string;
   primaryCategory?: string;
   authors: string[];
-  creators: AcademicCreator[];
+  creators: ItemCreator[];
   abstract?: string;
   publicationTitle?: string;
   volume?: string;
@@ -38,7 +38,7 @@ export interface ParsedFeedEntry {
   isRead?: boolean;
 }
 
-export interface ParsedAcademicFeed {
+export interface ParsedFeed {
   format: FeedFormat;
   feedTitle?: string;
   feedUrl?: string;
@@ -71,7 +71,7 @@ export interface FeedPromotionCatalogPort {
       title: string;
       itemType: string;
       authors: string[];
-      creators?: AcademicCreator[];
+      creators?: ItemCreator[];
       year?: number;
       doi?: string;
       arxivId?: string;
@@ -316,10 +316,10 @@ function resolveIdentifiers(params: {
  */
 function parseFeedAuthors(rawAuthors: string[]): {
   authors: string[];
-  creators: AcademicCreator[];
+  creators: ItemCreator[];
 } {
   const authors: string[] = [];
-  const creators: AcademicCreator[] = [];
+  const creators: ItemCreator[] = [];
   const seen = new Set<string>();
 
   for (const raw of rawAuthors) {
@@ -511,7 +511,7 @@ function parseFeedEntryXml(
     ? decodeHtmlEntities(primaryCatMatch[1].trim())
     : atomCategories[0] || rssCategories[0];
 
-  const keywords = normalizeAcademicTags([
+  const keywords = normalizeTags([
     ...atomCategories,
     ...rssCategories,
     ...(primaryCategory ? [primaryCategory] : []),
@@ -587,7 +587,7 @@ function parseFeedEntryXml(
  * Parses an RSS 2.0, RDF/RSS 1.0 (PRISM/Dublin Core), or Atom 1.0 XML feed
  * into normalized academic feed entries ready for Zotero feed preview or library promotion.
  */
-export function parseAcademicFeedXml(xml: string): ParsedAcademicFeed {
+export function parseFeedXml(xml: string): ParsedFeed {
   if (!xml || typeof xml !== 'string') {
     return { format: 'rss2', entries: [] };
   }
@@ -677,12 +677,12 @@ export async function promoteFeedEntryToLibrary(
     }
   }
 
-  const combinedTags = normalizeAcademicTags([
+  const combinedTags = normalizeTags([
     ...(entry.keywords || []),
     ...(options.tags || []),
   ]);
 
-  const normalizedCreators: AcademicCreator[] =
+  const normalizedCreators: ItemCreator[] =
     Array.isArray(entry.creators) && entry.creators.length > 0
       ? entry.creators.map((c, idx) => {
           if (

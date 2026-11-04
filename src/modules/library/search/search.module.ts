@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
-import { SearchFacade, SEARCH_FACADE } from './search.facade';
+import { SearchFacade, SEARCH_FACADE } from './controllers/search.controller';
 
 // Presentation
 import { SearchController } from './controllers/search.controller';
@@ -8,7 +8,7 @@ import { SearchController } from './controllers/search.controller';
 // Services & Infrastructure
 import { SearchService, FullTextProvider } from './services/search.service';
 import { SearchRepository } from './repositories/search.repository';
-import { SearchEventsSubscriber } from './subscribers/search-events.subscriber';
+import { SearchEventsSubscriber } from './services/search.service';
 
 /**
  * Search Bounded Context Unified Module (Generic Domain).

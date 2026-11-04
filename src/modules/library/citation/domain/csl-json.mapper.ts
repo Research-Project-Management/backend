@@ -3,22 +3,21 @@ import {
   CslName,
   CslDate,
 } from '@/modules/library/citation/types/citation.types';
+import { isUuid } from '@/core';
 import {
   CSL_TYPE_MAP,
   CSL_CREATOR_MAP,
   SCHEMA_V42_DATA,
   harmonizeZoteroFields,
-  normalizeAcademicTags,
+  normalizeTags,
   VIETNAMESE_FAMILY_NAMES,
   VIETNAMESE_COMPOUND_SURNAMES,
   VIETNAMESE_MIDDLE_NAMES,
   isVietnameseName,
   parseCreatorString,
   isInstitutionName,
+  generateCitationKey,
 } from '@/modules/library/core';
-
-export const ITEM_TYPE_TO_CSL_TYPE: Record<string, string> = CSL_TYPE_MAP;
-
 import {
   ContributorLike,
   EXTRA_DIRECT_CSL_STRING_KEYS,
@@ -26,6 +25,7 @@ import {
   CslNameMapper,
   CslExtraMapper,
 } from './csl-name-extra.mapper';
+
 export type { ContributorLike };
 export {
   EXTRA_DIRECT_CSL_STRING_KEYS,
@@ -33,6 +33,8 @@ export {
   CslNameMapper,
   CslExtraMapper,
 };
+
+export const ITEM_TYPE_TO_CSL_TYPE: Record<string, string> = CSL_TYPE_MAP;
 
 export interface CslSourceItem {
   id?: string | null;
@@ -448,16 +450,25 @@ export class CslJsonMapper {
           ).keywords
         : undefined;
 
-    const rawKeywordsSources = [
-      item.tags,
-      item.keywords,
-      Array.isArray(item.itemTags) && item.itemTags.length > 0
-        ? item.itemTags.map((it) => it.tag?.name || it.name)
-        : undefined,
-      metaKeywords,
-      effectiveExtra.keywords,
-      effectiveExtra.tags,
-    ];
+    const hasExplicitTagsOverride = Array.isArray(item.tags);
+
+    const rawKeywordsSources = hasExplicitTagsOverride
+      ? [
+          Array.isArray(item.itemTags) && item.itemTags.length > 0
+            ? item.itemTags.map((it) => it.tag?.name || it.name)
+            : undefined,
+          item.tags,
+        ]
+      : [
+          Array.isArray(item.itemTags) && item.itemTags.length > 0
+            ? item.itemTags.map((it) => it.tag?.name || it.name)
+            : undefined,
+          item.tags,
+          item.keywords,
+          metaKeywords,
+          effectiveExtra.keywords,
+          effectiveExtra.tags,
+        ];
 
     const kwInput: Array<string | { name?: string; tag?: string }> = [];
     for (const src of rawKeywordsSources) {
@@ -470,7 +481,7 @@ export class CslJsonMapper {
       }
     }
     if (kwInput.length > 0) {
-      const kwStrings = normalizeAcademicTags(kwInput);
+      const kwStrings = normalizeTags(kwInput);
       if (kwStrings.length > 0) {
         csl.keyword = kwStrings.join(', ');
         csl._keywords = kwStrings;
@@ -601,6 +612,37 @@ export class CslJsonMapper {
             cslRecord['title-short'] === undefined
           ) {
             cslRecord['title-short'] = rawVal;
+          }
+        }
+      }
+    }
+
+    if (!csl['citation-key']) {
+      const explicitCiteKey = getStr('citationKey', 'citation-key', 'citekey');
+      if (explicitCiteKey && !isUuid(explicitCiteKey)) {
+        csl.id = explicitCiteKey;
+        csl['citation-key'] = explicitCiteKey;
+      } else {
+        const derivedYear = csl.issued?.['date-parts']?.[0]?.[0] ?? item.year;
+        const fallbackAuthors =
+          csl.author && csl.author.length > 0
+            ? csl.author.map((a) => ({
+                family: a.family,
+                lastName: a.family || a.literal,
+                fullName: a.literal,
+              }))
+            : item.authors;
+        const synthesizedKey = generateCitationKey({
+          creators: rawContributors,
+          authors: fallbackAuthors,
+          year: derivedYear,
+          publicationDate: rawPubDate,
+          title: csl.title !== 'Untitled' ? csl.title : undefined,
+        });
+        if (synthesizedKey && synthesizedKey !== 'anonndwork') {
+          csl['citation-key'] = synthesizedKey;
+          if (!item.citationKey && (!csl.id || isUuid(csl.id) || csl.id.startsWith('item_'))) {
+            csl.id = synthesizedKey;
           }
         }
       }

@@ -22,7 +22,7 @@ import { IngestionStatus, IngestionRun, Prisma } from '@prisma/client';
 import { PipelineService } from './pipeline.service';
 import { QueueService } from './queue.service';
 import { UrlCaptureService } from './url-capture.service';
-import { ConfirmCapturedUrlDto } from '@/modules/library/ingestion/dto/capture-url.dto';
+import { ConfirmCapturedUrlDto } from '@/modules/library/ingestion/dto/ingestion.dto';
 import {
   CATALOG_FACADE,
   ICatalogFacade,
@@ -44,16 +44,14 @@ import {
   IngestionRunReporterService,
   IngestionRunProgressResult,
   clearRunStatusTransition,
-} from './ingestion-run-reporter.service';
-import { isRetryableIngestionError } from '@/modules/library/ingestion/types/ingestion.errors';
+} from './ingestion-saga.orchestrator';
+import { isRetryableIngestionError } from '@/modules/library/ingestion/types/metadata.types';
 
 @Injectable()
 export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
   private readonly metadataResolver: MetadataResolverService;
   private readonly runReporter: IngestionRunReporterService;
-  private submissionCountSinceLastGc = 0;
-  private static readonly GC_SUBMISSION_INTERVAL = 25;
 
   constructor(
     private readonly repo: IngestionRepository,
@@ -89,6 +87,13 @@ export class IngestionService {
    */
   public computeRequestHash(envelope: IngestionSubmissionEnvelope): string {
     const projectId = envelope.projectId ?? '';
+    const userId = envelope.userId;
+    if (!userId) {
+      throw new BadRequestException(
+        'User context (userId) is required for ingestion submission',
+      );
+    }
+    let offloadedFileId: string | undefined;
     return createHash('sha256')
       .update(
         JSON.stringify({
@@ -125,6 +130,8 @@ export class IngestionService {
     };
   }
 
+  private readonly inFlightIdempotencyLocks = new Map<string, Promise<IngestionAcceptedResult>>();
+
   /**
    * Primary Fast-Path Submission Entry Point (Async 202 Contract)
    */
@@ -138,8 +145,38 @@ export class IngestionService {
       );
     }
 
-    const projectId = envelope.projectId ?? '';
     const idempotencyKey = envelope.idempotencyKey?.trim();
+    if (idempotencyKey) {
+      const lockKey = `${envelope.userId}::${envelope.projectId ?? 'personal'}::${idempotencyKey}`;
+      const inFlight = this.inFlightIdempotencyLocks.get(lockKey);
+      if (inFlight) {
+        return inFlight;
+      }
+      const promise = this.executeSubmit(envelope, idempotencyKey, options);
+      this.inFlightIdempotencyLocks.set(lockKey, promise);
+      try {
+        return await promise;
+      } finally {
+        this.inFlightIdempotencyLocks.delete(lockKey);
+      }
+    }
+
+    return this.executeSubmit(envelope, undefined, options);
+  }
+
+  private async executeSubmit(
+    envelope: IngestionSubmissionEnvelope,
+    idempotencyKey?: string,
+    options?: { enqueue?: boolean; skipAsyncDispatch?: boolean },
+  ): Promise<IngestionAcceptedResult> {
+    const projectId = envelope.projectId ?? '';
+    const userId = envelope.userId;
+    if (!userId) {
+      throw new BadRequestException(
+        'User context (userId) is required for ingestion submission',
+      );
+    }
+    let offloadedFileId: string | undefined;
 
     const requestHash = this.computeRequestHash(envelope);
 
@@ -167,7 +204,7 @@ export class IngestionService {
         const rawBuffer = Buffer.from(envelope.payload.content, 'utf-8');
         const compressed = await gzipAsync(rawBuffer);
         const uploadResult = await this.storagePort.uploadFile({
-          userId: envelope.userId,
+          userId,
           projectId: envelope.projectId || undefined,
           filename: `ingest_${envelope.payload.format.toLowerCase()}_${randomUUID().slice(0, 8)}.json.gz`,
           buffer: compressed,
@@ -176,6 +213,7 @@ export class IngestionService {
         });
 
         if (uploadResult?.fileId) {
+          offloadedFileId = uploadResult.fileId;
           effectivePayload = {
             kind: 'RECORD',
             format: envelope.payload.format,
@@ -228,6 +266,9 @@ export class IngestionService {
 
       // If a concurrent request inserted with the exact same (userId, projectId, idempotencyKey), Prisma throws P2002
       if (idempotencyKey && isP2002) {
+        if (offloadedFileId && this.storagePort?.deleteFile) {
+          this.storagePort.deleteFile(offloadedFileId).catch(() => {});
+        }
         const raceRun = await this.repo.findRunByIdempotencyKey(
           { userId: envelope.userId, projectId: envelope.projectId ?? null },
           idempotencyKey,
@@ -235,6 +276,9 @@ export class IngestionService {
         if (raceRun) {
           return this.verifyAndMapExistingRun(raceRun, requestHash);
         }
+      }
+      if (offloadedFileId && this.storagePort?.deleteFile) {
+        this.storagePort.deleteFile(offloadedFileId).catch(() => {});
       }
       throw err;
     }
@@ -272,14 +316,6 @@ export class IngestionService {
               );
             });
         });
-    }
-
-    this.submissionCountSinceLastGc++;
-    if (
-      this.submissionCountSinceLastGc >= IngestionService.GC_SUBMISSION_INTERVAL
-    ) {
-      this.submissionCountSinceLastGc = 0;
-      void this.runMaintenanceGc().catch(() => undefined);
     }
 
     return {
@@ -339,9 +375,30 @@ export class IngestionService {
    * Unified synchronous/direct ingestion entry point.
    * Delegates to modern IngestionPipelineRunner via mapped envelope.
    */
-  async ingest(command: IngestionCommand): Promise<IngestionResult> {
-    const projectId = command.projectId || command.userId || '';
-    const envelope = this.mapCommandToEnvelope(projectId, command);
+  async ingest(
+    commandOrUserId: IngestionCommand | string,
+    payloadOrOptions?: IngestionCommand | { projectId?: string },
+    options?: { projectId?: string },
+  ): Promise<IngestionResult> {
+    const command: IngestionCommand =
+      typeof commandOrUserId === 'string' &&
+      payloadOrOptions &&
+      typeof payloadOrOptions === 'object' &&
+      'source' in payloadOrOptions
+        ? {
+            ...payloadOrOptions,
+            userId: payloadOrOptions.userId || commandOrUserId,
+            projectId:
+              options?.projectId ?? payloadOrOptions.projectId ?? undefined,
+          }
+        : (commandOrUserId as IngestionCommand);
+
+    const rawProjectId =
+      command.projectId && command.projectId !== command.userId
+        ? command.projectId
+        : options?.projectId;
+    const projectId = rawProjectId || '';
+    const envelope = SubmissionEnvelopeFactory.fromCommand(projectId, command);
 
     const submissionRes = await this.submit(envelope, {
       enqueue: false,
@@ -396,8 +453,9 @@ export class IngestionService {
       const targetStatus = isRetryable
         ? IngestionStatus.FAILED_RETRYABLE
         : IngestionStatus.FAILED_FINAL;
+      const runScope = projectId || envelope.userId || '';
       await this.runReporter.transitionRunToFailedIfActive(
-        projectId,
+        runScope,
         runId,
         targetStatus,
         errMsg,
@@ -412,7 +470,10 @@ export class IngestionService {
       };
     }
 
-    const updatedRun = await this.repo.findRunById(projectId, runId);
+    const updatedRun = await this.repo.findRunById(
+      { userId: envelope.userId, projectId: projectId || undefined },
+      runId,
+    );
     const itemId = updatedRun?.itemId ?? undefined;
     const item =
       itemId && this.catalogGateway
@@ -441,20 +502,6 @@ export class IngestionService {
     envelope?: IngestionSubmissionEnvelope,
   ): boolean {
     return isRetryableIngestionError(err, envelope, this.pipeline);
-  }
-
-  private mapCommandToEnvelope(
-    projectId: string,
-    command: IngestionCommand,
-  ): IngestionSubmissionEnvelope {
-    return this.buildEnvelope(projectId, command);
-  }
-
-  private buildEnvelope(
-    projectId: string,
-    command: IngestionCommand,
-  ): IngestionSubmissionEnvelope {
-    return SubmissionEnvelopeFactory.fromCommand(projectId, command);
   }
 
   async captureUrl(
@@ -495,55 +542,16 @@ export class IngestionService {
     expiredPreviewsDeleted: number;
     purgedRuns: number;
   }> {
-    let deletedClaimCheckBlob = false;
-    const payload = options?.envelope?.payload;
-    const claimCheckFileId =
-      payload?.kind === 'RECORD' &&
-      payload.isOffloaded === true &&
-      typeof payload.fileId === 'string'
-        ? payload.fileId
-        : undefined;
-
-    if (claimCheckFileId && this.storagePort?.deleteFile) {
-      try {
-        await this.storagePort.deleteFile(claimCheckFileId);
-        deletedClaimCheckBlob = true;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `[MaintenanceGC] Failed to delete claim-check blob ${claimCheckFileId}: ${msg}`,
-        );
-      }
+    if (typeof this.pipeline?.runMaintenanceGc === 'function') {
+      return this.pipeline.runMaintenanceGc(options);
     }
-
-    let expiredPreviewsDeleted = 0;
-    try {
-      expiredPreviewsDeleted = await this.urlCapture.cleanupExpiredPreviews(
-        options?.retentionDays ?? 0,
-      );
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `[MaintenanceGC] Failed to reap expired capture previews: ${msg}`,
-      );
-    }
-
-    let purgedRuns = 0;
-    try {
-      const retentionDays = options?.retentionDays ?? 7;
-      purgedRuns = await this.repo.purgeOldRuns(retentionDays);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `[MaintenanceGC] Failed to purge old ingestion runs: ${msg}`,
-      );
-    }
-
-    return {
-      deletedClaimCheckBlob,
-      expiredPreviewsDeleted,
-      purgedRuns,
-    };
+    const expiredPreviewsDeleted = await this.urlCapture
+      .cleanupExpiredPreviews(options?.retentionDays ?? 0)
+      .catch(() => 0);
+    const purgedRuns = await this.repo
+      .purgeOldRuns(options?.retentionDays ?? 7)
+      .catch(() => 0);
+    return { deletedClaimCheckBlob: false, expiredPreviewsDeleted, purgedRuns };
   }
 
   /**

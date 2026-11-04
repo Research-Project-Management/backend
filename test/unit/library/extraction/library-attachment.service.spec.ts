@@ -289,7 +289,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(result).toEqual({
         status: 'PENDING',
         attachmentId: 'att-1',
-        message: 'Re-extraction and OCR job queued successfully',
+        message: 'Re-extraction job queued successfully',
       });
       expect(mockPrisma.attachment.update).toHaveBeenCalledWith({
         where: { id: 'att-1' },
@@ -520,6 +520,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
     beforeEach(() => {
       mockAttachmentsService = {
+        assertItemExists: jest.fn().mockResolvedValue(undefined),
         createAttachment: jest.fn().mockResolvedValue({
           id: 'att-snap-1',
           fileId: 'storage-file-123',
@@ -545,9 +546,10 @@ describe('Library Attachments & Storage Integration Suite', () => {
     });
 
     it('should prioritize uploadFile to record CAS storageNode and fileId', async () => {
+      const validItemUuid = '11111111-1111-4111-8111-111111111111';
       const res = await snapshotService.captureAndAttach(
         'https://arxiv.org/abs/2301.00001',
-        'item-1',
+        validItemUuid,
         'user-1',
       );
 
@@ -661,9 +663,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
         markFailed: jest.fn().mockResolvedValue({ id: 'att-1' }),
         findScopePapers: jest.fn().mockResolvedValue([]),
         upsertItemCitationRelation: jest.fn().mockResolvedValue({}),
-        recordSearchablePdfRevision: jest
-          .fn()
-          .mockResolvedValue({ id: 'rev-2' }),
       };
       mockPdf = {
         extractDocumentFromBuffer: jest.fn().mockResolvedValue({
@@ -700,51 +699,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(mockExtractionRepo.updateAttachmentFileId).toHaveBeenCalledWith(
         'att-1',
         'storage-file-123',
-      );
-    });
-
-    it('should upload searchablePdfBuffer to storage and record attachment revision when OCR produces a sandwich PDF', async () => {
-      mockPdf.extractDocumentFromBuffer.mockResolvedValue({
-        metadata: { title: 'Scanned Document' },
-        pages: [{ pageNumber: 1, text: 'Recognized Text' }],
-        references: [],
-        sections: [],
-        ocrProvenance: {
-          totalOcrPages: 1,
-          avgConfidence: 95,
-          executionTimeMs: 250,
-          pages: [],
-        },
-        searchablePdfBuffer: Buffer.from(
-          '%PDF-1.4 Searchable Sandwich PDF content',
-        ),
-      });
-
-      await handler.handle(
-        fromPartial({
-          id: 'event-ocr-1',
-          aggregateId: 'att-1',
-          eventType: 'library.attachment.extraction_requested',
-          payload: { attachmentId: 'att-1' },
-        }),
-      );
-
-      expect(mockStoragePort.uploadFile).toHaveBeenCalledWith(
-        expect.objectContaining({
-          buffer: expect.any(Buffer),
-          mimeType: 'application/pdf',
-          source: 'reader.ocr_sandwich',
-        }),
-      );
-      expect(
-        mockExtractionRepo.recordSearchablePdfRevision,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          attachmentId: 'att-1',
-          fileId: 'storage-file-123',
-          url: '/api/v1/storage/files/storage-file-123/content',
-          comment: expect.stringContaining('OCR Sandwich PDF'),
-        }),
       );
     });
   });

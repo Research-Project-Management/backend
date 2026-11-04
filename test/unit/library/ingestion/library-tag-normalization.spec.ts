@@ -1,13 +1,13 @@
 import {
   cleanSingleTag,
-  normalizeAcademicTags,
+  normalizeTags,
   toCanonicalTagKey,
   resolveArxivTaxonomyTag,
   stripLatexMarkup,
   stripTagPrefixes,
   MAX_TAG_LENGTH,
 } from '@/modules/library/core';
-import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import { ItemsMapper } from '@/modules/library/core';
 import { toItemData } from '@/modules/library/ingestion/stages/commit.stage';
 
 describe('Library Academic Tag & Subject Taxonomy Engine', () => {
@@ -103,7 +103,7 @@ describe('Library Academic Tag & Subject Taxonomy Engine', () => {
     it('should split compound tags by comma, semicolon, bullet, pipe, or space-surrounded slashes', () => {
       const raw =
         'Machine Learning; Natural Language Processing, Computer Vision • Deep Learning | Robotics / Reinforcement Learning';
-      const result = normalizeAcademicTags([raw]);
+      const result = normalizeTags([raw]);
       expect(result).toEqual([
         'Machine Learning',
         'Natural Language Processing',
@@ -116,12 +116,12 @@ describe('Library Academic Tag & Subject Taxonomy Engine', () => {
 
     it('should preserve safe domain slashes without spaces (e.g. TCP/IP, Client/Server architecture)', () => {
       const raw = 'TCP/IP; Client/Server architecture';
-      const result = normalizeAcademicTags([raw]);
+      const result = normalizeTags([raw]);
       expect(result).toEqual(['TCP/IP', 'Client/Server architecture']);
     });
 
     it('should deduplicate case-insensitively and upgrade all-lowercase tag if explicit uppercase/mixed-case appears in the same batch', () => {
-      const result = normalizeAcademicTags([
+      const result = normalizeTags([
         'iclr',
         'ICLR',
         'neurips',
@@ -282,16 +282,16 @@ describe('Library Academic Tag & Subject Taxonomy Engine', () => {
     });
   });
 
-  describe('8. AcademicRegexCatalog Keywords Boundary & ASJC Noise Filtering', () => {
+  describe('8. RegexExtractor Keywords Boundary & ASJC Noise Filtering', () => {
     it('should not extract mid-sentence "keywords" in prose as tags, and should extract line-anchored Keywords', async () => {
-      const { AcademicRegexCatalog } =
-        await import('@/modules/library/core/domain/academic-regex.catalog');
+      const { RegexExtractor } =
+        await import('@/modules/library/core/domain/regex.extractor');
 
       const proseWithMidSentenceKeywords =
         'Abstract: In this paper we study how search keywords in large database systems affect query latency.\n' +
         'Keywords: Deep Learning, Convolutional Neural Networks, cs.CV, Multidisciplinary, General Medicine';
 
-      const scanned = AcademicRegexCatalog.scan(proseWithMidSentenceKeywords);
+      const scanned = RegexExtractor.scan(proseWithMidSentenceKeywords);
       expect(scanned.keywords).toEqual([
         'Deep Learning',
         'Convolutional Neural Networks',

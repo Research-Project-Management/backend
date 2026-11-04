@@ -26,6 +26,7 @@ import {
   BulkPurgeItemsDto,
   BulkTrashItemsDto,
   BulkRestoreItemsDto,
+  ImportItemIdsDto,
 } from '@/modules/library/catalog/dto/items.dto';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
@@ -40,7 +41,7 @@ import {
 
 export {
   type RequestWithAccessHint,
-  type ItemsListQuery,
+  ItemsListQuery,
   extractRequestAccessHint,
   buildGetItemsOptions,
   LibraryPermissionsController,
@@ -106,7 +107,7 @@ export class ItemsController {
   async importItems(
     @CurrentUser('id') userId: string,
     @Param('projectId') paramProjectId: string,
-    @Body() body: { itemIds: string[] },
+    @Body() body: ImportItemIdsDto,
     @Query('projectId') queryProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
@@ -281,6 +282,18 @@ export class ItemsController {
       queryProjectId,
       paramProjectId,
     );
+  }
+
+  @Delete('trash')
+  @ProjectRoles('owner')
+  @ApiOperation({ summary: 'Permanently empty all trashed items in scope' })
+  async emptyTrash(
+    @CurrentUser('id') userId: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    return this.itemService.emptyTrash(userId, projectId);
   }
 
   @Delete(':id')

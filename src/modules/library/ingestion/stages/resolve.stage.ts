@@ -12,6 +12,7 @@ import { IWorkflowStage, ResolveStageInput, ResolveMatchInput } from '@/modules/
 import {
   CATALOG_FACADE, ICatalogFacade, isPlaceholderItemTitle, ALIAS_EVIDENCE_FALLBACK_KEYS,
   MetadataCoalescePolicy, evaluateCitationTrap, extractNormalizedAuthorSurnames,
+  isSameCanonicalIdentifier,
 } from '@/modules/library/core';
 
 const VENUE_METADATA_KEYS = [
@@ -27,7 +28,7 @@ const VENUE_EXTRA_KEYS = [
 
 export interface CandidateEnrichmentReadiness {
   shouldSkip: boolean;
-  skipReason?: 'complete_or_client_resolved' | 'self_sufficient_pdf';
+  skipReason?: 'complete_or_client_resolved';
   isFilenameTitle: boolean;
   hasTitle: boolean;
   hasAuthors: boolean;
@@ -61,10 +62,13 @@ export function evaluateCandidateEnrichmentReadiness(
   const isCompleteStructuredRecord =
     candidate.sourceKind === 'RECORD' && hasTitle &&
     ((hasAuthors && hasVenueAndYear && hasAbstract) || (isBulkRecordBatch && (hasAuthors || hasYearOrDate)));
+  const isAlreadyResolvedByMirror =
+    extra.alreadyResolvedByMirror === true && hasTitle && (hasAuthors || hasYearOrDate);
   const isAlreadyComplete =
     candidate.sourceKind !== 'FILE' &&
     ((candidate.sourceKind !== 'RECORD' && hasTitle && hasAuthors && hasVenueAndYear && (candidate.confidenceScore ?? 0) >= 0.9) ||
-      isCompleteStructuredRecord);
+      isCompleteStructuredRecord ||
+      isAlreadyResolvedByMirror);
   const isClientResolved =
     extra.resolutionSource === 'client' || candidate.sourceName === 'ClientResolved' ||
     (candidate as unknown as { rawMetadata?: Record<string, unknown> })?.rawMetadata?.resolutionSource === 'client' ||
@@ -72,10 +76,6 @@ export function evaluateCandidateEnrichmentReadiness(
   const hasExtractedTags = Boolean(
     (Array.isArray(meta.tags) && meta.tags.length > 0) || (Array.isArray(meta.keywords) && meta.keywords.length > 0),
   );
-  const isSelfSufficientPdf =
-    candidate.sourceKind === 'FILE' && !hasAuthoritativeId &&
-    (candidate.sourceName === 'TrustedPaper' || meta.isSelfSufficient === true || extra.isSelfSufficient === true) &&
-    hasTitle && hasAuthors && hasVenueAndYear && hasExtractedTags;
   const trimmedTitle = rawTitle?.trim();
   const isCredibleTitle =
     !isFilenameTitle && Boolean(trimmedTitle) && trimmedTitle!.length >= 10 && !isPlaceholderItemTitle(trimmedTitle) &&
@@ -83,7 +83,6 @@ export function evaluateCandidateEnrichmentReadiness(
     !/\(will\s+be\s+inserted\s+by\s+the\s+editor\)/i.test(trimmedTitle!) && !/^\d{4}\s*\d{4,5}(v\d+)?$/i.test(trimmedTitle!);
   const base = { isFilenameTitle, hasTitle, hasAuthors, hasYearOrDate, hasVenueAndYear, hasAuthoritativeId, hasExtractedTags, isCredibleTitle };
   if (isAlreadyComplete || isClientResolved) return { shouldSkip: true, skipReason: 'complete_or_client_resolved', ...base };
-  if (isSelfSufficientPdf) return { shouldSkip: true, skipReason: 'self_sufficient_pdf', ...base };
   return { shouldSkip: false, ...base };
 }
 
@@ -224,7 +223,26 @@ export class ResolveStage implements IWorkflowStage<ResolveStageInput, MetadataC
         if (!primaryCandidate) continue;
 
         try {
-          const resolved = await metadataService.resolve({ query, scopeId });
+          const primaryMeta = (primaryCandidate.normalizedMetadata || {}) as Record<string, unknown>;
+          const rawAuthors =
+            Array.isArray(primaryMeta.authors) && primaryMeta.authors.length > 0
+              ? (primaryMeta.authors as string[])
+              : Array.isArray(primaryMeta.creators)
+                ? (primaryMeta.creators as Array<{ lastName?: string; fullName?: string; name?: string }>)
+                    .map((c) => c.lastName || c.fullName || c.name || '')
+                    .filter(Boolean)
+                : [];
+          const authorHint = rawAuthors.length > 0 ? rawAuthors.slice(0, 3).join('; ') : undefined;
+          const yearHint =
+            typeof primaryMeta.year === 'number' || typeof primaryMeta.year === 'string'
+              ? primaryMeta.year
+              : undefined;
+          const resolved = await metadataService.resolve({
+            query,
+            scopeId,
+            ...(authorHint ? { authorHint } : {}),
+            ...(yearHint !== undefined ? { yearHint } : {}),
+          });
           if (resolved && resolved.metadata) {
             if (resolved.queryType === 'TITLE' && !this.sharesAuthors(primaryCandidate, resolved.metadata)) {
               this.logger.warn(`Rejected title-only enrichment for "${query}": resolved authors do not match the uploaded document.`);
@@ -332,7 +350,7 @@ export class ResolveStage implements IWorkflowStage<ResolveStageInput, MetadataC
             isFilenameFallback,
           );
           if (trap.isTrap) {
-            citationTrapRejectedDoi = trap.rejectedDoi;
+            citationTrapRejectedDoi = trap.rejectedDoi || trap.rejectedIdentifier;
             this.logger.warn(
               `[ResolveStage] Page-1 Citation Disambiguation Mismatch: Discarding external candidate ${cand.candidateId} (title="${cand.normalizedMetadata.title}") which conflicts with local PDF title "${fileCandidate.normalizedMetadata.title}" (similarity=${(trap.similarity * 100).toFixed(0)}%).`,
             );
@@ -344,31 +362,45 @@ export class ResolveStage implements IWorkflowStage<ResolveStageInput, MetadataC
       activeCandidates = remaining;
 
       if (citationTrapRejectedDoi) {
-        const survivingHasDoi = activeCandidates.some(
-          (c) => c !== fileCandidate && c.normalizedMetadata?.doi && c.normalizedMetadata.doi.toLowerCase() === citationTrapRejectedDoi!.toLowerCase(),
-        );
+        const trapIdKeys = ['doi', 'arxivId', 'pmid', 'isbn'] as const;
+        for (const idKey of trapIdKeys) {
+          const localVal = fileCandidate.normalizedMetadata?.[idKey];
+          if (typeof localVal === 'string' && localVal.trim()) {
+            const survivingHasId = activeCandidates.some(
+              (c) => c !== fileCandidate && isSameCanonicalIdentifier(c.normalizedMetadata?.[idKey], localVal),
+            );
+            if (!survivingHasId) {
+              delete fileCandidate.normalizedMetadata[idKey];
+              if (fileCandidate.fields?.[idKey]) delete fileCandidate.fields[idKey];
+            }
+          }
+        }
         if (fileCandidate.normalizedMetadata) {
-          if (!survivingHasDoi) delete fileCandidate.normalizedMetadata.doi;
-          fileCandidate.normalizedMetadata.extraFields = {
+          const nextExtra = {
             ...(fileCandidate.normalizedMetadata.extraFields || {}),
             disambiguationWarning: 'Page-1 cited paper DOI mismatch discarded. Preserved original PDF layout metadata.',
             rejectedCitedDoi: citationTrapRejectedDoi,
           };
+          fileCandidate.normalizedMetadata.extraFields = nextExtra;
+          if (fileCandidate.fields?.extraFields) {
+            fileCandidate.fields.extraFields.value = nextExtra;
+            fileCandidate.fields.extraFields.normalizedValue = nextExtra;
+          }
         }
-        if (fileCandidate.fields?.doi && !survivingHasDoi) delete fileCandidate.fields.doi;
       }
     }
 
     const decision = MetadataCoalescePolicy.coalesceCandidates(activeCandidates);
-    if (!this.verifier) return Promise.resolve(decision);
-
     const proposed = decision.proposedItem;
     if (citationTrapRejectedDoi) {
-      const survivingMatchesProposedDoi = activeCandidates.some(
-        (c) => c !== fileCandidate && c.normalizedMetadata?.doi && proposed.doi && c.normalizedMetadata.doi.toLowerCase() === String(proposed.doi).toLowerCase(),
-      );
-      if (!survivingMatchesProposedDoi && (!proposed.doi || String(proposed.doi).toLowerCase() === citationTrapRejectedDoi.toLowerCase())) {
-        delete proposed.doi;
+      for (const idKey of ['doi', 'arxivId', 'pmid', 'isbn'] as const) {
+        const propVal = proposed[idKey];
+        if (typeof propVal === 'string' && propVal.trim()) {
+          const survivingMatchesProposedId = activeCandidates.some(
+            (c) => c !== fileCandidate && isSameCanonicalIdentifier(c.normalizedMetadata?.[idKey], propVal),
+          );
+          if (!survivingMatchesProposedId) delete proposed[idKey];
+        }
       }
       proposed.extraFields = {
         ...(proposed.extraFields || {}),
@@ -376,6 +408,8 @@ export class ResolveStage implements IWorkflowStage<ResolveStageInput, MetadataC
         rejectedCitedDoi: citationTrapRejectedDoi,
       };
     }
+
+    if (!this.verifier) return Promise.resolve(decision);
 
     const urlCandidate = activeCandidates.find((c) => c.sourceKind === 'URL');
     const externalCandidates = activeCandidates.filter((c) => c.sourceKind === 'PROVIDER' || c.sourceName === 'EnrichedProvider');
@@ -413,17 +447,30 @@ export class ResolveStage implements IWorkflowStage<ResolveStageInput, MetadataC
   }
 
   reconcile(candidates: MetadataCandidate[]): Promise<ReconciliationDecision> { return this.coalesceAndVerify(candidates); }
-  resolveCandidateDecision(candidates: MetadataCandidate[]): Promise<ReconciliationDecision> { return this.coalesceAndVerify(candidates); }
 
   private sharesAuthors(candidate: MetadataCandidate, resolved: unknown): boolean {
     const meta = candidate.normalizedMetadata || {};
+    const resolvedRec = (resolved && typeof resolved === 'object' ? resolved : {}) as Record<string, unknown>;
     const own = extractNormalizedAuthorSurnames(meta.authors?.length ? meta.authors : meta.creators);
     const theirs = extractNormalizedAuthorSurnames(
-      (resolved as { authors?: unknown; creators?: unknown }).authors ?? (resolved as { creators?: unknown }).creators,
+      resolvedRec.authors ?? resolvedRec.creators,
     );
-    if (own.size === 0 || theirs.size === 0) return true;
+    const ownYear = Number(meta.year || 0);
+    const theirYear = Number(resolvedRec.year || 0);
+    const hasYearConflict =
+      ownYear >= 1000 && theirYear >= 1000 && Math.abs(ownYear - theirYear) > 1;
+    const ownTitle = typeof meta.title === 'string' ? meta.title.trim() : '';
+    const theirTitle = typeof resolvedRec.title === 'string' ? resolvedRec.title.trim() : '';
+    const sim = ownTitle && theirTitle ? calculateTitleSimilarity(ownTitle, theirTitle) : 1;
+
+    if (own.size === 0 || theirs.size === 0) {
+      if (hasYearConflict) return false;
+      if (own.size === 0 && ownTitle && theirTitle && sim < 0.85) return false;
+      return true;
+    }
     let shared = 0;
     for (const name of own) if (theirs.has(name)) shared++;
-    return shared / Math.min(own.size, theirs.size) >= 0.5;
+    if (shared / Math.min(own.size, theirs.size) >= 0.5) return true;
+    return sim >= 0.92 && !hasYearConflict;
   }
 }

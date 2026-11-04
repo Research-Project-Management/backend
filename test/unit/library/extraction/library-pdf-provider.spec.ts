@@ -1,6 +1,8 @@
 import { getDocumentProxy, getMeta } from 'unpdf';
 import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
 import { PdfTextMetadataExtractor } from '@/modules/library/extraction/providers/pdf-text-metadata.extractor';
+import { LayoutExtractor } from '@/modules/library/extraction/extractors/layout.extractor';
+import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
 import { ExtractionMetadataSynchronizer } from '@/modules/library/extraction/services/extraction-metadata.synchronizer';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 
@@ -43,32 +45,6 @@ describe('PdfProvider', () => {
     expect(result.pages[29].textContent).toContain('Page 30');
   });
 
-  it('uses OCR when a page has no usable text layer', async () => {
-    mockedGetMeta.mockResolvedValue({ info: {} });
-    const page = {
-      getTextContent: jest.fn().mockResolvedValue({ items: [] }),
-    };
-    mockedGetDocumentProxy.mockResolvedValue({
-      numPages: 1,
-      getPage: jest.fn().mockResolvedValue(page),
-    });
-    const ocr = {
-      enabled: true,
-      maxPages: 50,
-      recognizePdfPage: jest
-        .fn()
-        .mockResolvedValue('Scanned article text from OCR'),
-    };
-
-    const provider = new PdfProvider(ocr as any);
-    const result = await provider.extractDocumentFromBuffer(
-      Buffer.from('%PDF scan'),
-    );
-
-    expect(ocr.recognizePdfPage).toHaveBeenCalledWith(page, 0);
-    expect(result.pages[0].textContent).toBe('Scanned article text from OCR');
-  });
-
   it('keeps header-only identification bounded to the first three pages', async () => {
     mockedGetMeta.mockResolvedValue({ info: {} });
     const getPage = jest.fn(async () => ({
@@ -102,7 +78,7 @@ describe('PdfProvider', () => {
       extract: jest.fn(),
     };
 
-    const provider = new PdfProvider(undefined, trustedExtractor as never);
+    const provider = new PdfProvider(trustedExtractor as never);
     const result = await provider.extractDocumentFromBuffer(
       Buffer.from('%PDF fixture'),
       { headerOnly: true, skipTrustedExtraction: true },
@@ -298,6 +274,121 @@ describe('PdfProvider', () => {
           plainText: 'A'.repeat(100_000),
           markdown: 'B'.repeat(100_000),
         }),
+      );
+    });
+  });
+
+  describe('Zotero recognizePDF Parity (Pre-OCR Sandwich PDF Text Layer & Un-OCR Scanned PDF Handling)', () => {
+    it('extracts Title, Authors, and DOI from a pre-OCR Sandwich PDF text layer via PDF.js getTextContent() and leaves pure un-OCR scanned PDFs with filename fallback', async () => {
+      const sandwichTextItems = [
+        {
+          str: 'DOI: 10.1038/s41586-025-09999-z',
+          transform: [10, 0, 0, 10, 50, 740],
+          hasEOL: true,
+        },
+        {
+          str: 'Geometric Deep Learning on Scanned Scientific Manuscripts',
+          transform: [22, 0, 0, 22, 50, 680],
+          hasEOL: true,
+        },
+        {
+          str: 'Minh Hoang Nguyen, Elena Rostova',
+          transform: [12, 0, 0, 12, 50, 640],
+          hasEOL: true,
+        },
+        {
+          str: 'Abstract—We study geometric layout extraction on pre-OCR sandwich PDFs via standard PDF.js text items.',
+          transform: [10, 0, 0, 10, 50, 590],
+          hasEOL: true,
+        },
+      ];
+
+      const layoutFields =
+        LayoutExtractor.extractFromRawItems(sandwichTextItems);
+      expect(layoutFields.title).toBe(
+        'Geometric Deep Learning on Scanned Scientific Manuscripts',
+      );
+      expect(layoutFields.authors).toEqual([
+        'Minh Hoang Nguyen',
+        'Elena Rostova',
+      ]);
+      expect(layoutFields.abstract).toContain('pre-OCR sandwich PDFs');
+      expect(layoutFields.maxFontSize).toBeCloseTo(22, 0);
+
+      const sandwichDocProxy = {
+        numPages: 1,
+        getPage: jest.fn().mockResolvedValue({
+          cleanup: jest.fn(),
+          getTextContent: jest.fn().mockResolvedValue({
+            items: sandwichTextItems,
+          }),
+        }),
+      };
+
+      const extractor = new PdfMetadataExtractor();
+      const sandwichResult = await extractor.extract(
+        Buffer.from('%PDF-1.7 sandwich'),
+        'scan_001.pdf',
+        sandwichDocProxy as never,
+      );
+
+      expect(sandwichResult.metadata.doi).toBe('10.1038/s41586-025-09999-z');
+      expect(sandwichResult.metadata.title).toBe(
+        'Geometric Deep Learning on Scanned Scientific Manuscripts',
+      );
+      expect(sandwichResult.metadata.authors).toEqual([
+        'Minh Hoang Nguyen',
+        'Elena Rostova',
+      ]);
+
+      const pureScannedDocProxy = {
+        numPages: 1,
+        getPage: jest.fn().mockResolvedValue({
+          cleanup: jest.fn(),
+          getTextContent: jest.fn().mockResolvedValue({ items: [] }),
+        }),
+      };
+      const pureScannedResult = await extractor.extract(
+        Buffer.from('%PDF-1.7 pure-scan'),
+        'scan_001.pdf',
+        pureScannedDocProxy as never,
+      );
+      expect(pureScannedResult.metadata.doi).toBeUndefined();
+      expect(pureScannedResult.metadata.title).toBe('scan 001');
+      expect(pureScannedResult.provenance.rawMatches?.titleFromFilename).toBe(
+        true,
+      );
+    });
+
+    it('strips repeated running headers and footers across multi-page front matter', () => {
+      const page1 = [
+        'ACM Transactions on Information Systems — Page 1',
+        'Scalable Hybrid Retrieval With Neural Sparse Representations',
+        'David Park, Lin Chen',
+        'Abstract—We study sparse-dense hybrid retrieval models.',
+        'Copyright 2025 ACM — Page 1 of 18',
+      ].join('\n');
+
+      const page2 = [
+        'ACM Transactions on Information Systems — Page 2',
+        '1. Introduction',
+        'Hybrid retrieval combines lexical and semantic matching.',
+        'Copyright 2025 ACM — Page 2 of 18',
+      ].join('\n');
+
+      const stripped =
+        LayoutExtractor.stripRunningHeadersAndFootersFromText([
+          page1,
+          page2,
+        ]);
+
+      expect(stripped.signatures.size).toBeGreaterThanOrEqual(2);
+      expect(stripped.cleanedText).not.toContain(
+        'ACM Transactions on Information Systems — Page 1',
+      );
+      expect(stripped.cleanedText).not.toContain('Page 1 of 18');
+      expect(stripped.cleanedText).toContain(
+        'Scalable Hybrid Retrieval With Neural Sparse Representations',
       );
     });
   });

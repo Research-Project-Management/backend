@@ -21,7 +21,7 @@ import {
   MetadataRoutingPolicy,
   SsrfBlockedDomainException,
 } from '@/modules/library/ingestion/policies/metadata.policy';
-import { DomainRateLimiterService } from './domain-rate-limiter.service';
+import { DomainRateLimiterService } from './feed-retrieval.service';
 import {
   deriveDoiFromPublisherUrl,
   deriveDirectPdfUrl,
@@ -30,9 +30,8 @@ import {
   normalizePmid,
   normalizePmcid,
   isBotChallengePage,
-  AcademicHttpClient,
+  HttpClient,
   LibraryConfigService,
-  libraryConfig,
   readSafeResponseBuffer,
   readSafeResponseText,
 } from '@/modules/library/core';
@@ -46,33 +45,13 @@ export { WebMirrorResolverService };
 
 const DEFAULT_FETCH_TIMEOUT_MS = 14000;
 
-interface FlareSolverrResponse {
-  status?: string;
-  solution?: {
-    url?: string;
-    response?: string;
-    status?: number;
-  };
-}
-
-interface StealthProxyJsonResponse {
-  url?: string;
-  finalUrl?: string;
-  html?: string;
-  body?: string;
-  text?: string;
-  content?: string;
-  status?: number;
-}
-
 /**
- * Enterprise Web Retrieval Ladder Service.
- * Implements the 5-step fallback ladder designed in ingestion_pipeline_design.md:
- * - Ladder 0: Offline Identifier Derivation (0đ, 0ms, no network)
- * - Ladder 1: Direct Plain HTTP Fetch with realistic browser headers & SSRF protection (0đ)
- * - Ladder 2: Open Academic Mirror Resolver (EuropePMC / arXiv Open API, 0đ)
- * - Ladder 3: External Stealth Proxy / Headless Fetcher (conditional, quota-guarded)
- * - Ladder 4: Graceful BLOCKED State with prompt for user PDF upload (0đ)
+ * Web Retrieval Ladder Service.
+ * Implements the fallback ladder:
+ * - Ladder 0: Offline Identifier Derivation (0ms, no network)
+ * - Ladder 1: Direct Plain HTTP Fetch with realistic browser headers & SSRF protection
+ * - Ladder 2: Open Bibliographic Mirror Resolver (EuropePMC / CrossRef / arXiv / OpenAlex)
+ * - Ladder 4: Graceful BLOCKED State with prompt for user PDF upload
  */
 @Injectable()
 export class WebFetchLadderService implements IWebFetchPort {
@@ -84,7 +63,7 @@ export class WebFetchLadderService implements IWebFetchPort {
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
     @Optional() private readonly verifier?: IngestionVerifierService,
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() private readonly httpClient?: HttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
     @Optional() mirrorResolver?: WebMirrorResolverService,
     @Optional() private readonly crossRefProvider?: CrossRefProvider,
@@ -239,97 +218,6 @@ export class WebFetchLadderService implements IWebFetchPort {
     url?: string;
   }): Promise<MirrorBibliographicMetadata | null> {
     return (await this.mirrorResolver?.resolveOpenAlex(target)) ?? null;
-  }
-
-  /**
-   * Ladder Step 3: External Stealth Proxy / Headless Fetcher fallback.
-   * Leverages optional containerized stealth scraper (FlareSolverr / Browserless / headless microservice).
-   */
-  private async executeStealthFetch(
-    url: string,
-  ): Promise<{ text?: string; status: number } | null> {
-    await this.assertSafeUrl(url);
-
-    const stealthEndpoint =
-      this.configService?.webFetch.stealthScraperUrl ||
-      this.configService?.webFetch.headlessScraperUrl ||
-      this.configService?.webFetch.flaresolverrUrl ||
-      libraryConfig().webFetch.stealthScraperUrl ||
-      libraryConfig().webFetch.headlessScraperUrl ||
-      libraryConfig().webFetch.flaresolverrUrl;
-
-    if (!stealthEndpoint) {
-      return null;
-    }
-
-    try {
-      const signal = AbortSignal.timeout(15000);
-      const isFlareSolverr =
-        stealthEndpoint.toLowerCase().includes('flaresolverr') ||
-        stealthEndpoint.endsWith('/v1');
-
-      if (isFlareSolverr) {
-        const res = await fetch(stealthEndpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            cmd: 'request.get',
-            url,
-            maxTimeout: 14000,
-          }),
-          signal,
-        });
-
-        if (!res.ok) return null;
-        const json = (await res.json()) as FlareSolverrResponse;
-        if (json?.solution?.url) {
-          await this.assertSafeUrl(json.solution.url);
-        }
-        if (json?.status === 'ok' && json?.solution?.response) {
-          return {
-            text: json.solution.response,
-            status: json.solution.status || 200,
-          };
-        }
-      } else {
-        const res = await fetch(stealthEndpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'text/html,application/json',
-          },
-          body: JSON.stringify({ url }),
-          signal,
-        });
-
-        if (!res.ok) return null;
-        const contentType = (
-          res.headers.get('content-type') || ''
-        ).toLowerCase();
-        if (contentType.includes('application/json')) {
-          const json = (await res.json()) as StealthProxyJsonResponse;
-          const resolvedUrl = json.finalUrl || json.url;
-          if (resolvedUrl) {
-            await this.assertSafeUrl(resolvedUrl);
-          }
-          const text = json.html || json.body || json.text || json.content;
-          if (text) {
-            return { text, status: json.status || res.status };
-          }
-        } else {
-          const text = await res.text();
-          return { text, status: res.status };
-        }
-      }
-    } catch (err: unknown) {
-      if (this.isSsrfError(err)) {
-        throw err;
-      }
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Stealth fetch attempt failed for "${url}": ${msg}`);
-    }
-
-    return null;
   }
 
   /**
@@ -563,44 +451,6 @@ export class WebFetchLadderService implements IWebFetchPort {
           mirrorMetadata,
           warnings,
         };
-      }
-    }
-
-    // Ladder Step 3: Stealth / External Proxy Fetcher
-    if (!options?.skipStealth) {
-      this.logger.log(
-        `[Ladder Step 3] Attempting stealth proxy fetch for "${canonicalUrl}"...`,
-      );
-      const stealthRes = await this.executeStealthFetch(canonicalUrl);
-      if (stealthRes?.text) {
-        const stealthBlocked =
-          this.verifier?.detectBlockedStatus(
-            finalUrl,
-            stealthRes.text,
-            stealthRes.status,
-          )?.isBlocked || isBotChallengePage(stealthRes.text);
-        if (!stealthBlocked) {
-          this.logger.log(
-            `[Ladder Step 3] Stealth fetch succeeded for "${canonicalUrl}".`,
-          );
-          return {
-            url: canonicalUrl,
-            finalUrl,
-            status: stealthRes.status,
-            isBlocked: false,
-            isPdf: false,
-            bodyText: stealthRes.text,
-            ladderStepReached: 3,
-            derivedIdentifier,
-            warnings,
-          };
-        }
-        const blockedWarning =
-          'Stealth proxy returned a WAF / Cloudflare bot-challenge page.';
-        warnings.push(blockedWarning);
-        this.logger.warn(
-          `[Ladder Step 3] ${blockedWarning} Escalating to Ladder Step 4...`,
-        );
       }
     }
 

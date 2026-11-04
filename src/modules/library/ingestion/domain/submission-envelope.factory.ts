@@ -7,7 +7,7 @@ import {
   SubmissionKind,
 } from '@/modules/library/ingestion/types/ingestion.types';
 import { IngestionCommand } from '@/modules/library/ingestion/types/ingestion.types';
-import { IngestionSubmissionDto } from '@/modules/library/ingestion/dto/submission.dto';
+import { IngestionSubmissionDto } from '@/modules/library/ingestion/dto/ingestion.dto';
 import { UnifiedIngestionDto } from '@/modules/library/ingestion/dto/ingestion.dto';
 
 type SubmissionPayloadBuilder = (dto: IngestionSubmissionDto) => SubmissionPayload;

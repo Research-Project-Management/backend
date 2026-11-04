@@ -15,24 +15,33 @@ import {
   UpdateSavedSearchDto,
   PreviewSavedSearchDto,
   ExecuteSavedSearchQueryDto,
-} from '@/modules/library/catalog/dto/saved-search.dto';
-import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+} from '@/modules/library/catalog/types/catalog.types';
+import { ItemsMapper } from '@/modules/library/core';
 import {
   SavedSearchConditionGroup,
   ExecuteSavedSearchOptions,
-} from '@/modules/library/catalog/types/saved-search.types';
+} from '@/modules/library/catalog/types/catalog.types';
 import {
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
   UNIT_OF_WORK,
   IUnitOfWork,
   normalizeProjectScopeId,
+  libraryConfig,
+  SingleFlightCoalescer,
 } from '@/modules/library/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 
 @Injectable()
 export class SavedSearchesService {
   private readonly logger = new Logger(SavedSearchesService.name);
+  private readonly singleFlight = new SingleFlightCoalescer();
+
+  private applyJitter(ttl: number): number {
+    return libraryConfig().app.isTest
+      ? ttl
+      : Math.max(1, Math.floor(ttl * (0.9 + Math.random() * 0.2)));
+  }
 
   constructor(
     private readonly repo: SavedSearchesRepository,
@@ -54,12 +63,14 @@ export class SavedSearchesService {
     userId: string,
     group: SavedSearchConditionGroup,
     projectId?: string,
+    precomputedDescendantMap?: Map<string, string[]>,
   ): Promise<Prisma.ItemWhereInput> {
     const referencedColIds = this.evaluator.extractReferencedCollectionIds(group);
     const descendantMap =
-      referencedColIds.length > 0 && this.repo.findCollectionDescendantsMap
+      precomputedDescendantMap ??
+      (referencedColIds.length > 0 && this.repo.findCollectionDescendantsMap
         ? await this.repo.findCollectionDescendantsMap(userId, projectId, referencedColIds)
-        : new Map<string, string[]>();
+        : new Map<string, string[]>());
     return this.evaluator.compile(userId, group, projectId, descendantMap);
   }
 
@@ -178,14 +189,39 @@ export class SavedSearchesService {
     },
   >(userId: string, searches: T[], fallbackProjectId?: string): Promise<T[]> {
     if (!Array.isArray(searches) || searches.length === 0) return searches;
-    await Promise.all(
-      searches.map(async (saved) => {
-        if (
-          typeof saved.cachedCount === 'number' &&
-          (saved.cachedCount > 0 || saved.lastEvaluatedAt != null)
-        ) {
-          return;
+    const uninitializedSearches = searches.filter(
+      (saved) => saved.cachedCount == null && saved.lastEvaluatedAt == null,
+    );
+    if (uninitializedSearches.length === 0) return searches;
+
+    const allReferencedColIds = new Set<string>();
+    for (const saved of uninitializedSearches) {
+      if (
+        saved.conditions &&
+        typeof saved.conditions === 'object' &&
+        !Array.isArray(saved.conditions)
+      ) {
+        for (const cid of this.evaluator.extractReferencedCollectionIds(
+          saved.conditions as SavedSearchConditionGroup,
+        )) {
+          allReferencedColIds.add(cid);
         }
+      }
+    }
+    const sharedEffectiveProj = normalizeProjectScopeId(
+      fallbackProjectId || uninitializedSearches[0]?.projectId || undefined,
+    );
+    const sharedDescendantMap =
+      allReferencedColIds.size > 0 && this.repo.findCollectionDescendantsMap
+        ? await this.repo.findCollectionDescendantsMap(
+            userId,
+            sharedEffectiveProj,
+            Array.from(allReferencedColIds),
+          )
+        : new Map<string, string[]>();
+
+    await Promise.all(
+      uninitializedSearches.map(async (saved) => {
         if (
           !saved.conditions ||
           typeof saved.conditions !== 'object' ||
@@ -201,6 +237,7 @@ export class SavedSearchesService {
             userId,
             saved.conditions as SavedSearchConditionGroup,
             effectiveProj,
+            sharedDescendantMap,
           );
           const count = await this.repo.countMatchingItems(where);
           if (typeof count === 'number') {
@@ -222,14 +259,14 @@ export class SavedSearchesService {
     const validProjectId = normalizeProjectScopeId(projectId);
     const scopeKey = validProjectId || userId;
     const cacheKey = LIBRARY_REDIS_KEYS.savedSearches(scopeKey);
-    const loadAndRefresh = async () => {
-      const list = await this.repo.findAll(userId, validProjectId);
-      return this.refreshSavedSearchCounts(userId, list, validProjectId);
+    const loadSavedSearches = async () => {
+      return this.repo.findAll(userId, validProjectId);
     };
-    if (this.cache) {
-      return this.cache.wrap(cacheKey, loadAndRefresh, 300);
-    }
-    return loadAndRefresh();
+    return this.singleFlight.execute(cacheKey, () =>
+      this.cache
+        ? this.cache.wrap(cacheKey, loadSavedSearches, this.applyJitter(300))
+        : loadSavedSearches(),
+    );
   }
 
   async findById(userId: string, id: string, projectId?: string) {
@@ -411,7 +448,9 @@ export class SavedSearchesService {
         dto.conditions.scopeOptions || dto.scopeOptions;
     }
 
-    const effectiveProjectId = projectId || dto.projectId;
+    const effectiveProjectId = normalizeProjectScopeId(
+      projectId || dto.projectId,
+    );
     const where = await this.compileConditions(
       userId,
       dto.conditions,
@@ -449,13 +488,16 @@ export class SavedSearchesService {
     dto: ExecuteSavedSearchQueryDto,
     projectId?: string,
   ) {
-    const effectiveProjectId = projectId || dto.projectId;
+    const effectiveProjectId = normalizeProjectScopeId(
+      projectId || dto.projectId,
+    );
     const savedSearch = await this.findById(userId, id, effectiveProjectId);
     const conditions =
       savedSearch.conditions as unknown as SavedSearchConditionGroup;
 
-    const queryProjectId =
-      effectiveProjectId || savedSearch.projectId || undefined;
+    const queryProjectId = normalizeProjectScopeId(
+      effectiveProjectId || savedSearch.projectId,
+    );
     const where = await this.compileConditions(
       userId,
       conditions,
@@ -486,11 +528,13 @@ export class SavedSearchesService {
       ),
     ]);
 
-    // Update cached count asynchronously
-    this.repo.updateCachedCount(id, count).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to update cached count: ${message}`);
-    });
+    // Update cached count asynchronously only if it changed
+    if (savedSearch.cachedCount !== count) {
+      this.repo.updateCachedCount(id, count).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to update cached count: ${message}`);
+      });
+    }
 
     return {
       savedSearch,

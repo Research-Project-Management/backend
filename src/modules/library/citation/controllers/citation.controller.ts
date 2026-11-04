@@ -1,29 +1,12 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Query,
-  UseGuards,
-  NotFoundException,
-  BadRequestException,
-  Header,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards, NotFoundException, BadRequestException, Header } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { CitationService } from '@/modules/library/citation/services/citation.service';
-import {
-  FormatCitationDto,
-  FormatBatchCitationDto,
-} from '@/modules/library/citation/dto/citation.dto';
+import { FormatCitationDto, FormatBatchCitationDto, ExportLibraryDto, ExportByKeysDto, ExportFormatType } from '@/modules/library/citation/types/citation.types';
 import { normalizeCitationStyleId } from '@/modules/library/citation/domain/citation.domain';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import {
-  ProjectAccessGuard,
-  ProjectRoles,
-  ProjectRole,
-} from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles, ProjectRole } from '@/modules/project/access';
+import { ExportsService } from '@/modules/library/citation/services/exports.service';
 
 @ApiTags('Library Citation')
 @ApiBearerAuth()
@@ -115,10 +98,26 @@ export class CitationController {
     ProjectRole.REVIEWER,
   )
   format(@Body() dto: FormatCitationDto) {
+    const hasContext = Boolean(
+      dto.locator ||
+        dto.label ||
+        dto.prefix ||
+        dto.suffix ||
+        dto.suppressAuthor,
+    );
     return this.citationService.formatItemAsync(
       dto.item,
       dto.styleId || 'apa-7th',
       dto.index || 1,
+      hasContext
+        ? {
+            locator: dto.locator,
+            label: dto.label,
+            prefix: dto.prefix,
+            suffix: dto.suffix,
+            suppressAuthor: dto.suppressAuthor,
+          }
+        : undefined,
     );
   }
 
@@ -238,6 +237,11 @@ export class CitationController {
     @Param('itemId') itemId: string,
     @Query('style') style?: string,
     @Query('index') index?: string,
+    @Query('locator') locator?: string,
+    @Query('label') label?: string,
+    @Query('prefix') prefix?: string,
+    @Query('suffix') suffix?: string,
+    @Query('suppressAuthor') suppressAuthor?: string,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') routeProjectId?: string,
   ) {
@@ -248,12 +252,26 @@ export class CitationController {
     const projectId =
       normalizeProjectScopeId(queryProjectId) ||
       normalizeProjectScopeId(routeProjectId);
+    const isSuppressAuthor =
+      suppressAuthor === 'true' || suppressAuthor === '1';
+    const hasContext = Boolean(
+      locator || label || prefix || suffix || isSuppressAuthor,
+    );
     const res = await this.citationService.formatItemById(
       userId,
       itemId,
       styleId,
       numIndex,
       projectId,
+      hasContext
+        ? {
+            locator,
+            label,
+            prefix,
+            suffix,
+            suppressAuthor: isSuppressAuthor,
+          }
+        : undefined,
     );
     return {
       ...res,
@@ -294,6 +312,122 @@ export class CitationController {
       ids,
       styleId,
       projectId,
+    );
+  }
+}
+
+@ApiTags('Library Exports')
+@ApiBearerAuth()
+@Controller([
+  'api/v1/library/exports',
+  'api/v1/projects/:projectId/library/exports',
+])
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
+export class ExportsController {
+  constructor(private readonly exportsService: ExportsService) {}
+
+  @Get('items/:itemId/annotated-pdf')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  async exportAnnotatedPdf(
+    @CurrentUser('id') userId: string,
+    @Param('itemId') itemId: string,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Query('attachmentId') attachmentId?: string,
+  ) {
+    const effectiveProjectId = normalizeProjectScopeId(
+      routeProjectId || queryProjectId,
+    );
+    return this.exportsService.exportAnnotatedItemPdf(
+      userId,
+      itemId,
+      undefined,
+      effectiveProjectId,
+      attachmentId,
+    );
+  }
+
+  @Post()
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  async exportLibrary(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ExportLibraryDto,
+    @Param('projectId') routeProjectId?: string,
+  ) {
+    if (routeProjectId && !dto.projectId) {
+      dto.projectId = routeProjectId;
+    }
+    return this.exportsService.exportLibrary(userId, dto);
+  }
+
+  @Post('by-keys')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  async exportCitationsBibtex(
+    @CurrentUser('id') userId: string,
+    @Body() body: ExportByKeysDto,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+  ) {
+    const effectiveProjectId = normalizeProjectScopeId(
+      routeProjectId || body.projectId || queryProjectId,
+    );
+    const result = await this.exportsService.exportByCitationKeys(
+      userId,
+      body.keys || [],
+      effectiveProjectId,
+      body.format || 'bibtex',
+    );
+    return {
+      ...result,
+      itemCount: result.itemCount ?? result.count,
+      filename: result.filename ?? 'references.bib',
+      bibtex: result.content,
+    };
+  }
+
+  @Get()
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  async exportLibraryGet(
+    @CurrentUser('id') userId: string,
+    @Param('projectId') routeProjectId?: string,
+    @Query('format') format?: ExportFormatType,
+    @Query('collectionId') collectionIdQuery?: string,
+    @Query('tagId') tagId?: string,
+    @Query('projectId') projectIdQuery?: string,
+  ) {
+    const effectiveProjectId = normalizeProjectScopeId(
+      routeProjectId || projectIdQuery,
+    );
+    const effectiveFormat = format || 'bibtex';
+    const queryDto: ExportLibraryDto = {
+      format: effectiveFormat,
+      collectionId: collectionIdQuery,
+      tagId,
+      projectId: effectiveProjectId,
+    };
+
+    const result = await this.exportsService.exportLibrary(userId, queryDto);
+
+    return {
+      ...result,
+      bibtex: result.content,
+      total: result.itemCount,
+      filename: result.filename,
+    };
+  }
+
+  @Get(':collectionId/export-bundle')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  async getCollectionBundle(
+    @CurrentUser('id') userId: string,
+    @Param('collectionId') collectionId: string,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+  ) {
+    return this.exportsService.exportBundle(
+      userId,
+      collectionId,
+      normalizeProjectScopeId(routeProjectId || queryProjectId),
     );
   }
 }

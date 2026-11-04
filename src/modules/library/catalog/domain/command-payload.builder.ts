@@ -2,7 +2,7 @@ import { Prisma, TagType } from '@prisma/client';
 import { generateCitationKey } from '@/modules/library/core/domain/identifier.domain';
 import {
   cleanAbstractText, getEffectiveBaseFieldMap, getEffectiveReverseBaseFieldMap,
-  getPrimaryCreatorRoleForType, getValidCreatorMapForType, harmonizeZoteroFields, sanitizeItemTitle,
+  getPrimaryCreatorRoleForType, getValidCreatorMapForType, harmonizeZoteroFields, normalizeTags, sanitizeItemTitle,
 } from '@/modules/library/core';
 import {
   ITEM_COLUMN_METADATA_FIELDS, FIELD_ALIASES, BASE_FIELD_MAPPINGS, parseAccessDate, TagInput,
@@ -13,22 +13,19 @@ import {
   extractNonColumnExtraFields, convertHtmlToMarkdown, buildTipTapDocFromText, prepareNotesToCreate,
   prepareAttachmentsToCreate, deriveFirstAuthor, prepareContributorsToCreate, applyManualEditProvenanceLocks,
   prepareItemAiMetadataPatch, buildImportItemPayload, buildTagTypeMap, ResolvedTag,
-  ImportSourceItem, AiMetadataPatchPreparation,
+  ImportSourceItem, AiMetadataPatchPreparation, IGNORED_SYSTEM_KEYS,
 } from './creator-tag-payload.builder';
 import {
   buildDeduplicatedIdentifiers, buildCollectionItemsUpdatePatch, syncMetadataIdentifierAliases,
   IDENTIFIER_URI_BUILDERS, calculateIdentifierChanges, buildMyPublicationMetadata, applyMetadataProvenanceAndTelemetry,
+  cleanExtraFromClearedIds,
 } from './identifier-change.helper';
 
 export * from './creator-tag-payload.builder';
 export type { ResolvedTag, ImportSourceItem, AiMetadataPatchPreparation };
 export {
   ITEM_COLUMN_METADATA_FIELDS, IDENTIFIER_URI_BUILDERS, buildDeduplicatedIdentifiers, calculateIdentifierChanges,
-  buildMyPublicationMetadata, buildCollectionItemsUpdatePatch, syncMetadataIdentifierAliases,
-  isUuid, cleanSingleIdentifier, extractExtraKeyValues, normalizeItemIdentifiers, resolveExtraPlainText,
-  extractNonColumnExtraFields, convertHtmlToMarkdown, buildTipTapDocFromText, prepareNotesToCreate,
-  prepareAttachmentsToCreate, deriveFirstAuthor, prepareContributorsToCreate, buildTagTypeMap,
-  applyManualEditProvenanceLocks, prepareItemAiMetadataPatch, buildImportItemPayload,
+  buildMyPublicationMetadata, buildCollectionItemsUpdatePatch, syncMetadataIdentifierAliases, cleanExtraFromClearedIds,
 };
 
 export interface CanonicalCommandFields {
@@ -47,7 +44,6 @@ export interface CanonicalCommandFields {
 export const VENUE_BASE_FIELDS: ReadonlyArray<string> = Array.from(
   new Set([...Object.values(BASE_FIELD_MAPPINGS).map((m) => m.publicationTitle).filter(Boolean), 'reporter', 'code']),
 );
-export const ALL_MAPPED_PUB_TITLE_KEYS: ReadonlyArray<string> = VENUE_BASE_FIELDS;
 export const ALL_MAPPED_PUBLISHER_KEYS: ReadonlyArray<string> = Array.from(
   new Set(Object.values(BASE_FIELD_MAPPINGS).map((m) => m.publisher).filter(Boolean)),
 );
@@ -160,18 +156,26 @@ export function resolveCanonicalCommandFields(
       ? null
       : candidateType && candidateType.toLowerCase() !== targetItemType.toLowerCase() ? candidateType : undefined;
 
-  const harmonizedProbe = harmonizeZoteroFields(
-    { ...dataRecord, itemType: targetItemType, extraFields: { ...effectiveExtraFields, ...dataExtra } },
-    { itemType: targetItemType, syncExtraFields: true },
-  );
-  const probeRec = harmonizedProbe as Record<string, unknown>;
-  const syncedExtra: Record<string, unknown> = { ...(harmonizedProbe.extraFields && typeof harmonizedProbe.extraFields === 'object' ? harmonizedProbe.extraFields : {}) };
-  for (const hk of ['numPages', 'numberOfPages', 'authority', 'issuingAuthority', 'originalDate', 'status']) {
-    if (probeRec[hk] !== undefined && syncedExtra[hk] === undefined) syncedExtra[hk] = probeRec[hk];
-  }
-  for (const [k, v] of Object.entries(syncedExtra)) {
-    if (v !== undefined && effectiveExtraFields[k] === undefined && !ITEM_COLUMN_METADATA_FIELDS.has(k) && !FIELD_ALIASES[k]) {
-      effectiveExtraFields[k] = v;
+  if (!(dataRecord as { isPreNormalized?: boolean }).isPreNormalized) {
+    const harmonizedProbe = harmonizeZoteroFields(
+      { ...dataRecord, itemType: targetItemType, extraFields: { ...effectiveExtraFields, ...dataExtra } },
+      { itemType: targetItemType, syncExtraFields: true },
+    );
+    const probeRec = harmonizedProbe as Record<string, unknown>;
+    const syncedExtra: Record<string, unknown> = { ...(harmonizedProbe.extraFields && typeof harmonizedProbe.extraFields === 'object' ? harmonizedProbe.extraFields : {}) };
+    for (const hk of ['numPages', 'numberOfPages', 'authority', 'issuingAuthority', 'originalDate', 'status']) {
+      if (probeRec[hk] !== undefined && syncedExtra[hk] === undefined) syncedExtra[hk] = probeRec[hk];
+    }
+    for (const [k, v] of Object.entries(syncedExtra)) {
+      if (
+        v !== undefined &&
+        effectiveExtraFields[k] === undefined &&
+        !IGNORED_SYSTEM_KEYS.has(k) &&
+        !ITEM_COLUMN_METADATA_FIELDS.has(k) &&
+        !FIELD_ALIASES[k]
+      ) {
+        effectiveExtraFields[k] = v;
+      }
     }
   }
 
@@ -186,12 +190,18 @@ export function resolveCanonicalCommandFields(
   };
 }
 
+const SERVER_RESERVED_METADATA_KEYS = new Set([
+  'mergedIntoId', 'mergedCitationKeys', 'mergeHistory', 'isRetracted', 'retractionNature', 'retractionDetails',
+  'retractionCheckedAt', 'uploadedById', 'tags', 'keywords', 'labels', 'keywordsList', 'itemTags', 'zoteroTags',
+]);
+
 export function buildMetadataPartial(params: {
   mode: 'create' | 'update'; baseMeta: Record<string, unknown>; data: CreateItemData | UpdateItemData;
   canonical: CanonicalCommandFields; ids: ReturnType<typeof normalizeItemIdentifiers>;
   rawTags?: (TagInput | null | undefined)[]; existingRawExtra?: string | null; uploadedById?: string;
+  existingProjectId?: string | null;
 }): Record<string, unknown> {
-  const { mode, baseMeta, data, canonical, ids, existingRawExtra, uploadedById } = params;
+  const { mode, baseMeta, data, canonical, ids, existingRawExtra, uploadedById, existingProjectId } = params;
   const isCreate = mode === 'create';
   const dataRecord = data as Record<string, unknown>;
   const dataExtra = data.extraFields && typeof data.extraFields === 'object' ? data.extraFields : {};
@@ -204,7 +214,11 @@ export function buildMetadataPartial(params: {
       : val !== null && val !== '' && typeof val !== 'boolean' && Number.isFinite(Number(val)) && Number(val) >= 0 ? Number(val) : null;
 
   const result: Record<string, unknown> = { ...baseMeta };
-  if (data.metadata && typeof data.metadata === 'object') Object.assign(result, data.metadata);
+  if (data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)) {
+    for (const [key, val] of Object.entries(data.metadata as Record<string, unknown>)) {
+      if (!SERVER_RESERVED_METADATA_KEYS.has(key)) result[key] = val;
+    }
+  }
   const setIfDefined = (key: string, val: unknown) => { if (val !== undefined) result[key] = val; };
 
   if (canonical.itemType !== 'preprint') {
@@ -269,7 +283,10 @@ export function buildMetadataPartial(params: {
 
   setIfDefined('citationCount', formatPositiveCount(data.citationCount));
   setIfDefined('referenceCount', formatPositiveCount(data.referenceCount));
-  if (!isCreate && data.isMyPublication !== undefined) result.isMyPublication = data.isMyPublication;
+  const isSharedProjectItem = Boolean(existingProjectId || (data as { projectId?: string | null }).projectId);
+  if (!isCreate && data.isMyPublication !== undefined && !isSharedProjectItem) {
+    result.isMyPublication = data.isMyPublication;
+  }
 
   const { effectiveExtraFields } = canonical;
   const extraPatchWithTombstones: Record<string, unknown> = { ...(effectiveExtraFields || {}), ...(dataExtra || {}) };
@@ -292,6 +309,17 @@ export function buildMetadataPartial(params: {
       resolvedExtra !== undefined
         ? resolvedExtra
         : data.extra !== undefined || hasEffectiveExtraPatch ? '' : (existingRawExtra ?? '');
+  } else if (!isCreate && data.extra === undefined) {
+    const clearedIds = new Set<string>(
+      (['doi', 'isbn', 'issn', 'pmid', 'pmcid', 'arxivId'] as const).filter((k) => ids[k] === null || ids[k] === ''),
+    );
+    const existingExtraStr =
+      typeof result.extra === 'string' && result.extra
+        ? result.extra
+        : typeof existingRawExtra === 'string' && existingRawExtra ? existingRawExtra : '';
+    if (clearedIds.size > 0 && existingExtraStr) {
+      result.extra = cleanExtraFromClearedIds(existingExtraStr, clearedIds);
+    }
   }
 
   if (effectiveExtraFields && typeof effectiveExtraFields === 'object') Object.assign(result, effectiveExtraFields);
@@ -382,6 +410,16 @@ export function buildMetadataPartial(params: {
   if (isCreate) {
     if (data.relations) result.relations = data.relations;
     if ('seeAlso' in data && data.seeAlso) result.seeAlso = data.seeAlso;
+  }
+  delete result.labels;
+  delete result.keywordsList;
+  delete result.zoteroTags;
+  delete result.itemTags;
+  if (params.rawTags !== undefined) {
+    const isSystemUpdate = Boolean(dataRecord.__isSystemUpdate) || typeof dataRecord.__updateSource === 'string';
+    const cleanMetaTags = normalizeTags(params.rawTags, { allowManualAcademicTerms: !isSystemUpdate });
+    result.tags = cleanMetaTags;
+    result.keywords = cleanMetaTags;
   }
   return result;
 }
@@ -487,14 +525,25 @@ export function buildCommandCreateInput(
   const effectiveCitationKey =
     options?.disambiguatedCitationKey !== undefined ? options.disambiguatedCitationKey : rawCitationKey;
 
+  const resolvedCreatedById =
+    data.uploadedById && isUuid(data.uploadedById) ? data.uploadedById : userId && isUuid(userId) ? userId : null;
+
   const createData = {
-    userId, title: resolvedCreateTitle, itemType: resolvedItemType,
+    userId,
+    ...(resolvedCreatedById ? { createdById: resolvedCreatedById } : {}),
+    title: resolvedCreateTitle, itemType: resolvedItemType,
     ...(resolvedPubTitle ? { publicationTitle: resolvedPubTitle } : {}),
-    year: resolvedCreateYear, doi: ids.doi || null, abstract: canonical.rawAbstract || null,
+    year: resolvedCreateYear,
+    doi: ids.doi || null, isbn: ids.isbn || null, issn: ids.issn || null,
+    pmid: ids.pmid || null, pmcid: ids.pmcid || null, arxivId: ids.arxivId || null,
+    abstract: canonical.rawAbstract || null,
     url: (canonical.rawUrl ?? '').trim() || null,
     citationKey: effectiveCitationKey,
     metadata: metadataPayload as Prisma.InputJsonValue,
     hasFile, attachmentCount: attachmentsToCreate.length, noteCount: notes.length, firstAuthor,
+    ...(data.isRetracted !== undefined || (metadataPayload as Record<string, unknown>)?.isRetracted !== undefined
+      ? { isRetracted: Boolean(data.isRetracted ?? (metadataPayload as Record<string, unknown>)?.isRetracted) }
+      : {}),
     projectId: effectiveProjectId, version: 1,
     ...(uniqueCollectionIds.length > 0
       ? { collectionItems: { create: uniqueCollectionIds.map((cid, idx) => ({ collectionId: cid, sortOrder: idx })) } }
@@ -503,6 +552,7 @@ export function buildCommandCreateInput(
     ...(resolvedTags.length > 0 ? { itemTags: { create: resolvedTags.map(({ id, type }) => ({ tagId: id, type })) } } : {}),
     ...(attachmentsToCreate.length > 0 ? { attachments: { create: attachmentsToCreate } } : {}),
     ...(notes.length > 0 ? { notesList: { create: notes } } : {}),
+    ...(identifiersToCreate.length > 0 ? { identifiers: { create: identifiersToCreate } } : {}),
   } as unknown as Prisma.ItemUncheckedCreateInput;
 
   return { createData, resolvedFileId, identifiersToCreate, rawCitationKey };
@@ -522,7 +572,11 @@ export function buildCommandUpdateInput(
 
   const ids = normalizeItemIdentifiers(data, { preserveOnInvalid: true });
   const targetItemType = (data.itemType ?? data.type ?? existing.itemType ?? existing.type ?? 'journalArticle') as string;
-  const rawTags = data.tags || data.keywords || data.labels;
+  const rawItemTags = Array.isArray(dataRecord.itemTags) ? (dataRecord.itemTags as TagInput[]) : undefined;
+  const baseRawTags = data.tags || data.keywords || data.labels;
+  const rawTags =
+    rawItemTags && Array.isArray(baseRawTags) && rawItemTags.length === baseRawTags.length && baseRawTags.every((t) => typeof t === 'string')
+      ? rawItemTags : baseRawTags ?? rawItemTags;
 
   let existingMeta: Record<string, unknown> = {};
   if (existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)) {
@@ -561,7 +615,7 @@ export function buildCommandUpdateInput(
       : [];
 
   const updatedMetadata = buildMetadataPartial({
-    mode: 'update', baseMeta: existingMeta, data, canonical, ids, rawTags, existingRawExtra,
+    mode: 'update', baseMeta: existingMeta, data, canonical, ids, rawTags, existingRawExtra, existingProjectId,
   });
 
   const existingContributorsList = (
@@ -625,7 +679,9 @@ export function buildCommandUpdateInput(
   const contributorsToUpdate = prepareContributorsToCreate(effectiveUpdateDataForCreators, targetItemType, existingContributorsList);
   const collectionItemsPatch = buildCollectionItemsUpdatePatch(data);
 
+  const resolvedUpdatedById = userId && isUuid(userId) ? userId : undefined;
   const updateData: Prisma.ItemUpdateInput = {
+    ...(resolvedUpdatedById ? { updatedById: resolvedUpdatedById } : {}),
     title: canonical.rawTitle !== undefined ? sanitizeItemTitle(canonical.rawTitle) || (existing.title as string) : (existing.title as string),
     itemType: targetItemType,
     ...(canonical.rawPubTitle !== undefined
@@ -636,6 +692,11 @@ export function buildCommandUpdateInput(
       ? data.year === null || String(data.year).trim() === '' ? null : Number(data.year)
       : canonical.rawPubDate !== undefined ? canonical.extractedYear : existing.year) as number | null | undefined,
     doi: (ids.doi !== undefined ? ids.doi || null : existing.doi) as string | null | undefined,
+    isbn: (ids.isbn !== undefined ? ids.isbn || null : existing.isbn) as string | null | undefined,
+    issn: (ids.issn !== undefined ? ids.issn || null : existing.issn) as string | null | undefined,
+    pmid: (ids.pmid !== undefined ? ids.pmid || null : existing.pmid) as string | null | undefined,
+    pmcid: (ids.pmcid !== undefined ? ids.pmcid || null : existing.pmcid) as string | null | undefined,
+    arxivId: (ids.arxivId !== undefined ? ids.arxivId || null : existing.arxivId) as string | null | undefined,
     abstract: cleanAbstract as string | null | undefined,
     url: (canonical.rawUrl !== undefined ? canonical.rawUrl?.trim() || null : existing.url) as string | null | undefined,
     citationKey: (canonical.suppliedCitationKey !== undefined ? canonical.suppliedCitationKey : existing.citationKey) as string | null | undefined,
@@ -661,12 +722,19 @@ export function buildCommandUpdateInput(
           hasFile: true,
         }
       : {}),
-    ...(data.isRetracted !== undefined || data.retractionCheckedAt !== undefined
+    ...(data.isRetracted !== undefined || data.retractionCheckedAt !== undefined || updatedMetadata.isRetracted !== undefined
       ? {
-          retractionCheckedAt:
-            data.retractionCheckedAt === null && data.isRetracted === undefined
-              ? null
-              : data.retractionCheckedAt ? new Date(data.retractionCheckedAt as string | number | Date) : new Date(),
+          ...(data.isRetracted !== undefined || updatedMetadata.isRetracted !== undefined
+            ? { isRetracted: Boolean(data.isRetracted ?? updatedMetadata.isRetracted) }
+            : {}),
+          ...(data.isRetracted !== undefined || data.retractionCheckedAt !== undefined
+            ? {
+                retractionCheckedAt:
+                  data.retractionCheckedAt === null && data.isRetracted === undefined
+                    ? null
+                    : data.retractionCheckedAt ? new Date(data.retractionCheckedAt as string | number | Date) : new Date(),
+              }
+            : {}),
         }
       : {}),
     ...(options?.skipVersionIncrement ? {} : { version: { increment: 1 } }),
@@ -674,5 +742,3 @@ export function buildCommandUpdateInput(
 
   return { updateData, cleanIds: ids, rawTags };
 }
-
-export const buildUpdateItemPayload = buildCommandUpdateInput;

@@ -71,7 +71,6 @@ export async function syncMergedContributors(
   primaryMeta?: Record<string, unknown>,
 ): Promise<Array<Record<string, unknown>>> {
   const mapInput = (c: ContributorShape | string, idx: number) => mapContributorInputForPrimary(primaryId, c, idx);
-
   if (Array.isArray(chosenContributors)) {
     await tx.contributor.deleteMany({ where: { itemId: primaryId } });
     if (chosenContributors.length === 0) {
@@ -83,18 +82,12 @@ export async function syncMergedContributors(
     syncContributorsToMeta(primaryMeta, data);
     return data;
   }
-
   const effectivePrimaryMeta = primaryMeta ?? asMetaObject(primary?.metadata);
-  const isPrimaryCreatorsLocked = ItemProvenancePolicy.isFieldLocked(
-    effectivePrimaryMeta, 'creators', ['authors', 'contributors'],
-  );
-
+  const isPrimaryCreatorsLocked = ItemProvenancePolicy.isFieldLocked(effectivePrimaryMeta, 'creators', ['authors', 'contributors']);
   if (!isPrimaryCreatorsLocked) {
     for (const dup of duplicates) {
       const dupMeta = asMetaObject(dup.metadata);
-      const locked =
-        ItemProvenancePolicy.inspectFieldUserLock(dupMeta, 'creators').locked ||
-        ItemProvenancePolicy.inspectFieldUserLock(dupMeta, 'authors').locked;
+      const locked = ItemProvenancePolicy.inspectFieldUserLock(dupMeta, 'creators').locked || ItemProvenancePolicy.inspectFieldUserLock(dupMeta, 'authors').locked;
       if (locked) {
         const dupContribs = extractItemContributors(dup);
         if (dupContribs.length > 0) {
@@ -196,6 +189,12 @@ export async function syncMergedIdentifiersInTx(params: {
       ),
     );
   }
+
+  if (desiredByType.has('arxiv') && topLevelData.arxivId === undefined) topLevelData.arxivId = desiredByType.get('arxiv')!.value;
+  if (desiredByType.has('pmid') && topLevelData.pmid === undefined) topLevelData.pmid = desiredByType.get('pmid')!.value;
+  if (desiredByType.has('pmcid') && topLevelData.pmcid === undefined) topLevelData.pmcid = desiredByType.get('pmcid')!.value;
+  if (desiredByType.has('isbn') && topLevelData.isbn === undefined) topLevelData.isbn = desiredByType.get('isbn')!.value;
+  if (desiredByType.has('issn') && topLevelData.issn === undefined) topLevelData.issn = desiredByType.get('issn')!.value;
 }
 
 export async function rewireMergedItemRelations(
@@ -372,7 +371,10 @@ export async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext
   const { tx, primary, uniqueDupIds } = ctx;
   const [primaryMetaRows, dupMetas] = await Promise.all([
     tx.itemMetadata?.findMany
-      ? tx.itemMetadata.findMany({ where: { itemId: primary.id } })
+      ? tx.itemMetadata.findMany({
+          where: { itemId: primary.id },
+          select: { sourceProvider: true },
+        })
       : (async () => {
           const first = await tx.itemMetadata?.findFirst?.({ where: { itemId: primary.id } });
           return first ? [first] : [];
@@ -380,7 +382,7 @@ export async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext
     tx.itemMetadata?.findMany
       ? tx.itemMetadata.findMany({
           where: { itemId: { in: uniqueDupIds } },
-          select: { id: true, itemId: true, sourceProvider: true, rawPayload: true },
+          select: { id: true, itemId: true, sourceProvider: true },
         })
       : Promise.resolve([]),
   ]);
@@ -483,7 +485,7 @@ export async function backfillMetadataAndCreatorsStep(ctx: DuplicateMergeStepCon
 }
 
 export function applyRetractionSurvivalStep(ctx: DuplicateMergeStepContext): void {
-  const { duplicates, uniqueDupIds, primaryMeta, backfillFields, now } = ctx;
+  const { primary, duplicates, uniqueDupIds, primaryMeta, backfillFields, now } = ctx;
 
   for (const dup of duplicates) {
     const dupMeta = asMetaObject(dup.metadata);
@@ -496,6 +498,7 @@ export function applyRetractionSurvivalStep(ctx: DuplicateMergeStepContext): voi
       }
     }
 
+    const dupCheckedAt = (dup as { retractionCheckedAt?: Date | string | null }).retractionCheckedAt;
     if (
       (dup as { isRetracted?: boolean }).isRetracted ||
       dupMeta.isRetracted ||
@@ -509,9 +512,20 @@ export function applyRetractionSurvivalStep(ctx: DuplicateMergeStepContext): voi
           primaryMeta[rKey] = dupMeta[rKey];
         }
       }
-    } else if (!primaryMeta.retractionCheckedAt && dupMeta.retractionCheckedAt) {
-      primaryMeta.retractionCheckedAt = dupMeta.retractionCheckedAt;
+      if (!primaryMeta.retractionCheckedAt && dupCheckedAt) {
+        primaryMeta.retractionCheckedAt =
+          dupCheckedAt instanceof Date ? dupCheckedAt.toISOString() : String(dupCheckedAt);
+      }
+    } else if (!primaryMeta.retractionCheckedAt && (dupMeta.retractionCheckedAt || dupCheckedAt)) {
+      primaryMeta.retractionCheckedAt =
+        dupMeta.retractionCheckedAt ??
+        (dupCheckedAt instanceof Date ? dupCheckedAt.toISOString() : String(dupCheckedAt));
     }
+  }
+  const primaryCheckedAt = (primary as { retractionCheckedAt?: Date | string | null }).retractionCheckedAt;
+  if (!primaryMeta.retractionCheckedAt && primaryCheckedAt) {
+    primaryMeta.retractionCheckedAt =
+      primaryCheckedAt instanceof Date ? primaryCheckedAt.toISOString() : String(primaryCheckedAt);
   }
 
   const currentHistory = Array.isArray(primaryMeta.mergeHistory) ? (primaryMeta.mergeHistory as unknown[]) : [];
@@ -545,11 +559,15 @@ export async function recordMergedAssetSyncEventsInTx(params: {
 }): Promise<void> {
   const { tx, helpers, eventScope, initialNotes, initialAttachments } = params;
 
-  const survivingNotes =
+  const [survivingNotes, survivingAttachments] = await Promise.all([
     initialNotes.length > 0
-      ? (await tx.note?.findMany?.({ where: { id: { in: initialNotes.map((n) => n.id) } } })) || []
-      : [];
-  const survivingNoteMap = new Map(survivingNotes.map((n) => [n.id, n]));
+      ? tx.note?.findMany?.({ where: { id: { in: initialNotes.map((n) => n.id) } } }) ?? Promise.resolve([])
+      : Promise.resolve([]),
+    initialAttachments.length > 0
+      ? tx.attachment?.findMany?.({ where: { id: { in: initialAttachments.map((a) => a.id) } } }) ?? Promise.resolve([])
+      : Promise.resolve([]),
+  ]);
+  const survivingNoteMap = new Map((survivingNotes || []).map((n) => [n.id, n]));
 
   const assetChangeEntries: Array<{
     entityType: 'Note' | 'Attachment';
@@ -576,11 +594,7 @@ export async function recordMergedAssetSyncEventsInTx(params: {
     }
   }
 
-  const survivingAttachments =
-    initialAttachments.length > 0
-      ? (await tx.attachment?.findMany?.({ where: { id: { in: initialAttachments.map((a) => a.id) } } })) || []
-      : [];
-  const survivingAttachmentMap = new Map(survivingAttachments.map((a) => [a.id, a]));
+  const survivingAttachmentMap = new Map((survivingAttachments || []).map((a) => [a.id, a]));
 
   for (const initAtt of initialAttachments) {
     const survivor = survivingAttachmentMap.get(initAtt.id);
@@ -614,12 +628,27 @@ export async function recordMergedAssetSyncEventsInTx(params: {
   }
 }
 
+export async function loadFinalRelationsForPrimary(client: Prisma.TransactionClient, primaryId: string) {
+  const [attachments, notes] = await Promise.all([
+    client.attachment?.findMany
+      ? client.attachment.findMany({ where: { itemId: primaryId, deletedAt: null } })
+      : Promise.resolve([]),
+    client.note?.findMany
+      ? client.note.findMany({ where: { itemId: primaryId, deletedAt: null } })
+      : Promise.resolve([]),
+  ]);
+  const attachmentCount = Array.isArray(attachments) ? attachments.length : 0;
+  const noteCount = Array.isArray(notes) ? notes.length : 0;
+  return {
+    attachments: Array.isArray(attachments) ? attachments : [],
+    notes: Array.isArray(notes) ? notes : [],
+    attachmentCount, hasFile: attachmentCount > 0, noteCount,
+  };
+}
+
 export async function updateAndReloadMergedPrimaryInTx(params: {
-  tx: Prisma.TransactionClient;
-  primaryId: string;
-  userId: string;
-  topLevelData: Record<string, unknown>;
-  primaryMeta: Record<string, unknown>;
+  tx: Prisma.TransactionClient; primaryId: string; userId: string;
+  topLevelData: Record<string, unknown>; primaryMeta: Record<string, unknown>;
 }) {
   const { tx, primaryId, userId, topLevelData, primaryMeta } = params;
   const updatedPrimary = await tx.item.update({
@@ -633,7 +662,7 @@ export async function updateAndReloadMergedPrimaryInTx(params: {
       collectionItems: { include: { collection: true } },
       itemTags: { include: { tag: true } },
       notesList: { where: { deletedAt: null } },
-      attachments: { include: { revisions: true } },
+      attachments: { where: { deletedAt: null }, include: { revisions: true } },
       identifiers: true,
       states: { where: { userId }, take: 1 },
     },
@@ -642,14 +671,10 @@ export async function updateAndReloadMergedPrimaryInTx(params: {
 }
 
 export async function softDeleteDuplicatesAndRecordOutboxInTx(params: {
-  tx: Prisma.TransactionClient;
-  helpers: TransactionHelpers;
-  eventScope: { userId: string; projectId?: string };
-  primaryId: string;
-  duplicates: Array<{ id: string; metadata?: unknown }>;
-  userId: string;
-  effectiveProjectId?: string;
-  now: Date;
+  tx: Prisma.TransactionClient; helpers: TransactionHelpers;
+  eventScope: { userId: string; projectId?: string }; primaryId: string;
+  duplicates: Array<{ id: string; metadata?: unknown }>; userId: string;
+  effectiveProjectId?: string; now: Date;
 }): Promise<void> {
   const { tx, helpers, eventScope, primaryId, duplicates, userId, effectiveProjectId, now } = params;
 
@@ -669,22 +694,15 @@ export async function softDeleteDuplicatesAndRecordOutboxInTx(params: {
 
   const dupTombstones = duplicates.map((dup) => ({ entityType: 'Item' as const, entityId: dup.id }));
   const dupChangeEntries = duplicates.map((dup, idx) => ({
-    entityType: 'Item' as const,
-    entityId: dup.id,
-    action: 'delete' as const,
-    version: softDeletedDuplicates[idx].version,
-    data: softDeletedDuplicates[idx],
+    entityType: 'Item' as const, entityId: dup.id, action: 'delete' as const,
+    version: softDeletedDuplicates[idx].version, data: softDeletedDuplicates[idx],
   }));
   const dupOutboxEvents = duplicates.map((dup) => ({
     aggregateId: dup.id,
     eventType: 'library.item.merged_into',
     payload: {
-      duplicateId: dup.id,
-      primaryId,
-      mergedIntoId: primaryId,
-      reason: 'merged_into',
-      userId,
-      projectId: effectiveProjectId,
+      duplicateId: dup.id, primaryId, mergedIntoId: primaryId,
+      reason: 'merged_into', userId, projectId: effectiveProjectId,
     },
   }));
 
@@ -715,6 +733,7 @@ export class DuplicateMergeRepository {
   readonly applyRetractionSurvivalStep = applyRetractionSurvivalStep;
   readonly executeDuplicateMergePipeline = executeDuplicateMergePipeline;
   readonly recordMergedAssetSyncEventsInTx = recordMergedAssetSyncEventsInTx;
+  readonly loadFinalRelationsForPrimary = loadFinalRelationsForPrimary;
   readonly updateAndReloadMergedPrimaryInTx = updateAndReloadMergedPrimaryInTx;
   readonly softDeleteDuplicatesAndRecordOutboxInTx = softDeleteDuplicatesAndRecordOutboxInTx;
   readonly invalidateIngestionItemCache = invalidateIngestionItemCache;

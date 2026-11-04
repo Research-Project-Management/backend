@@ -84,7 +84,7 @@ export const EXTRA_FALLBACK_CSL_STRING_KEYS: Record<string, keyof CslItemData> =
 const INSTITUTIONAL_PATTERN =
   /(?:^|[\s,;(])(?:\b(?:organization|consortium|association|institute|university|laboratory|committee|team|group|corporation|inc\.|llc|agency|department|ministry|academy|bureau|council|center|centre|foundation|society|openai|google|microsoft|meta|deepmind|who|unesco|ieee|acm)\b|(?:đại học|học viện|viện|trung tâm|bộ giáo dục|bộ y tế|bộ khoa học|bộ|trường|tổng cục|cục|sở|ngân hàng|ban quản lý|hội đồng|liên minh))(?=$|[\s,;.)])/i;
 const DEGREE_REGEX =
-  /^(?:(?:p?gs|ts(?:kh)?|ths|cn|ks|bs|dr|prof|ph\.?d)(?:\.|\b)\s*)+/gi;
+  /^(?:(?:p?gs|ts(?:kh)?|ths|dr|prof|ph\.?d)(?:\.|\b)\s*|(?:cn|ks|bs)\.\s*)+/gi;
 
 const MONTH_MAP: Record<string, number> = {
   jan: 1,

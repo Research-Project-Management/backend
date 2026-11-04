@@ -16,8 +16,10 @@ model Collection {
   icon        String?      @default("")
   sortOrder   Int          @default(0) @map("sort_order")
   createdById String?      @map("created_by_id") @db.Uuid
+  updatedById String?      @map("updated_by_id") @db.Uuid
+  deletedById String?      @map("deleted_by_id") @db.Uuid
   parentId    String?      @map("parent_id") @db.Uuid
-  parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: SetNull, map: "fk_collections_parent_id")
   children    Collection[] @relation("CollectionHierarchy")
   userId      String       @map("user_id") @db.Uuid
   projectId   String?      @map("project_id") @db.Uuid
@@ -33,15 +35,14 @@ model Collection {
   @@index([userId, projectId, deletedAt, createdAt])
   @@index([projectId, deletedAt, parentId, sortOrder])
   @@index([projectId, deletedAt, createdAt])
-  @@index([deletedAt])
   @@map("collections")
 }
 
 model CollectionItem {
   collectionId String     @map("collection_id") @db.Uuid
-  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade, map: "fk_collection_items_collection_id")
   itemId       String     @map("item_id") @db.Uuid
-  item         Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item         Item       @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_collection_items_item_id")
   sortOrder    Int        @default(0) @map("sort_order")
   addedAt      DateTime   @default(now()) @map("added_at") @db.Timestamptz(6)
 
@@ -52,21 +53,23 @@ model CollectionItem {
 }
 
 model Tag {
-  id          String    @id @default(uuid(7)) @db.Uuid
-  name        String
-  color       String?   @default("#3b82f6")
-  shortcut    Int?      @map("shortcut")
-  type        TagType   @default(manual)
-  userId      String    @map("user_id") @db.Uuid
-  projectId   String?   @map("project_id") @db.Uuid
-  createdById String?   @map("created_by_id") @db.Uuid
-  version     Int       @default(1)
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id             String    @id @default(uuid(7)) @db.Uuid
+  name           String
+  normalizedName String    @default("") @map("normalized_name")
+  color          String?   @default("#3b82f6")
+  shortcut       Int?      @map("shortcut")
+  type           TagType   @default(manual)
+  userId         String    @map("user_id") @db.Uuid
+  projectId      String?   @map("project_id") @db.Uuid
+  createdById    String?   @map("created_by_id") @db.Uuid
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   itemTags    ItemTag[]
 
-  @@unique([userId, name, projectId])
+  @@unique([userId, projectId, normalizedName])
+  @@index([projectId, normalizedName])
   @@index([userId, projectId, name])
   @@index([projectId, name])
   @@map("tags")
@@ -74,9 +77,9 @@ model Tag {
 
 model ItemTag {
   tagId      String   @map("tag_id") @db.Uuid
-  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade, map: "fk_item_tags_tag_id")
   itemId     String   @map("item_id") @db.Uuid
-  item       Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item       Item     @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_item_tags_item_id")
   type       TagType  @default(manual)
   assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
 
@@ -104,11 +107,13 @@ model SavedSearch {
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
   userId          String    @map("user_id") @db.Uuid
   projectId       String?   @map("project_id") @db.Uuid
+  createdById     String?   @map("created_by_id") @db.Uuid
+  updatedById     String?   @map("updated_by_id") @db.Uuid
+  deletedById     String?   @map("deleted_by_id") @db.Uuid
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([userId, projectId, deletedAt, isPinned(sort: Desc), name])
   @@index([projectId, deletedAt, isPinned(sort: Desc), name])
-  @@index([deletedAt])
   @@map("saved_searches")
 }

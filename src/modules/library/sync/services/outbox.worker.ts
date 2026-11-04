@@ -1,11 +1,20 @@
-import { Injectable, Logger, Optional, OnApplicationBootstrap, OnApplicationShutdown, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  OnApplicationBootstrap,
+  OnApplicationShutdown,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job, Queue } from 'bullmq';
-import { OutboxEvent, OutboxStatus } from '@prisma/client';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { OutboxStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB } from '@/modules/library/sync/domain/outbox.domain';
+import {
+  LIBRARY_OUTBOX_QUEUE,
+  LIBRARY_OUTBOX_JOB,
+} from '@/modules/library/sync/services/transaction.service';
 import {
   OutboxRepository,
   ClaimedOutboxEvent,
@@ -15,95 +24,27 @@ import {
   buildOutboxDiagnosticSummary,
 } from '../repositories/outbox.repository';
 import { ChangeLogRepository } from '../repositories/changelog.repository';
-import { libraryConfig, LibraryConfigService } from '@/modules/library/core/config/library.config';
+import {
+  libraryConfig,
+  LibraryConfigService,
+} from '@/modules/library/core/config/library.config';
 import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
-import { DomainEventEnvelope, OutboxDispatchHandler } from '@/modules/library/core';
+import { OutboxDispatchHandler } from '@/modules/library/core';
 import { shouldRunWorkerConsumers } from '@/core';
+import {
+  OutboxMetrics,
+  OutboxDispatcher,
+  OutboxQueueConsumer,
+  OutboxBullProcessor,
+} from './idempotent-consumer.service';
 
 export type { OutboxDispatchHandler };
-
-@Injectable()
-export class OutboxMetrics {
-  private readonly logger = new Logger(OutboxMetrics.name);
-  private readonly counters = new Map<string, number>();
-  private readonly gauges = new Map<string, number>();
-
-  incrementCounter(name: string, value: number = 1): number {
-    const next = (this.counters.get(name) || 0) + value;
-    this.counters.set(name, next);
-    return next;
-  }
-
-  getCounter(name: string): number {
-    return this.counters.get(name) || 0;
-  }
-
-  setGauge(name: string, value: number) {
-    this.gauges.set(name, value);
-  }
-
-  getGauge(name: string): number {
-    return this.gauges.get(name) || 0;
-  }
-
-  recordOutboxDispatch(durationMs: number, success: boolean) {
-    const safeDuration = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
-    this.incrementCounter('outbox.dispatch.total', 1);
-    this.incrementCounter(success ? 'outbox.dispatch.succeeded' : 'outbox.dispatch.failed', 1);
-    this.incrementCounter('outbox.dispatch.duration_ms.sum', safeDuration);
-    this.setGauge('outbox.dispatch.last_duration_ms', safeDuration);
-    this.setGauge('outbox.dispatch.last_timestamp_ms', Date.now());
-    this.logger.debug(`[OutboxMetrics] Outbox dispatch executed in ${safeDuration}ms (success=${success})`);
-  }
-
-  getSnapshot() {
-    return {
-      dispatchedTotal: this.getCounter('outbox.dispatch.total'),
-      succeededTotal: this.getCounter('outbox.dispatch.succeeded'),
-      failedTotal: this.getCounter('outbox.dispatch.failed'),
-      totalDurationMs: this.getCounter('outbox.dispatch.duration_ms.sum'),
-      lastDurationMs: this.getGauge('outbox.dispatch.last_duration_ms'),
-      lastDispatchAt: this.getGauge('outbox.dispatch.last_timestamp_ms'),
-    };
-  }
-}
-
-@Injectable()
-export class OutboxDispatcher implements OutboxDispatchHandler {
-  private readonly logger = new Logger(OutboxDispatcher.name);
-
-  constructor(
-    @Optional() private readonly eventEmitter?: EventEmitter2,
-    @Optional() private readonly metricsService?: OutboxMetrics,
-  ) {}
-
-  async publish<T = unknown>(envelope: DomainEventEnvelope<T>): Promise<void> {
-    this.logger.debug(
-      `[DomainEventDispatcher] Dispatched ${envelope.eventType} for aggregate ${envelope.aggregateId} (scope: ${envelope.scopeId || envelope.projectId || envelope.userId})`,
-    );
-    if (this.eventEmitter) await this.eventEmitter.emitAsync(envelope.eventType, envelope);
-    this.metricsService?.incrementCounter('outbox_dispatched_total');
-  }
-
-  handle(event: OutboxEvent, signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted) {
-      return Promise.reject(
-        new SubsystemUnavailableException(`Handler execution aborted for event ${event.id} (lease lost)`, { eventId: event.id }),
-      );
-    }
-    return this.publish({
-      eventId: event.id,
-      userId: event.userId,
-      projectId: event.projectId ?? undefined,
-      scopeId: event.projectId || event.userId,
-      aggregateId: event.aggregateId,
-      eventType: event.eventType,
-      payload: event.payload,
-      createdAt: event.createdAt,
-      schemaVersion: 1,
-    });
-  }
-}
+export {
+  OutboxMetrics,
+  OutboxDispatcher,
+  OutboxQueueConsumer,
+  OutboxBullProcessor,
+};
 
 @Injectable()
 export class OutboxWorker
@@ -111,6 +52,10 @@ export class OutboxWorker
 {
   private readonly logger = new Logger(OutboxWorker.name);
   private readonly handlers = new Map<string, OutboxDispatchHandler[]>();
+  private readonly completedHandlersByEvent = new Map<
+    string,
+    Set<OutboxDispatchHandler>
+  >();
   private defaultHandler?: OutboxDispatchHandler;
   private readonly maxRetries = 5;
   private static readonly CONCURRENCY = 5;
@@ -175,8 +120,12 @@ export class OutboxWorker
 
   private getEffectiveHandlers(eventType: string): OutboxDispatchHandler[] {
     const registered = this.handlers.get(eventType) ?? [];
-    if (this.defaultHandler && !registered.includes(this.defaultHandler)) {
-      return [...registered, this.defaultHandler];
+    const specialized = registered.filter((h) => h !== this.defaultHandler);
+    if (specialized.length > 0) {
+      return specialized;
+    }
+    if (this.defaultHandler) {
+      return [this.defaultHandler];
     }
     return [...registered];
   }
@@ -330,13 +279,33 @@ export class OutboxWorker
 
     const start = performance.now();
     try {
-      await Promise.all(
-        effectiveHandlers.map((h) => h.handle(event, abortController.signal)),
+      const completedSet =
+        this.completedHandlersByEvent.get(event.id) ??
+        new Set<OutboxDispatchHandler>();
+      const remainingHandlers = effectiveHandlers.filter(
+        (h) => !completedSet.has(h),
       );
+
+      for (const handler of remainingHandlers) {
+        if (abortController.signal.aborted || isLeaseLost) {
+          throw new SubsystemUnavailableException(
+            `Handler execution aborted for event ${event.id} (lease lost)`,
+            { eventId: event.id },
+          );
+        }
+        await handler.handle(event, abortController.signal);
+        completedSet.add(handler);
+        if (this.completedHandlersByEvent.size > 2000) {
+          const oldestKey = this.completedHandlersByEvent.keys().next().value;
+          if (oldestKey) this.completedHandlersByEvent.delete(oldestKey);
+        }
+        this.completedHandlersByEvent.set(event.id, completedSet);
+      }
+
       clearInterval(heartbeatTimer);
       const durationMs = Math.round(performance.now() - start);
 
-      if (isLeaseLost) {
+      if (isLeaseLost || abortController.signal.aborted) {
         this.logger.error(
           `Worker [${this.workerId}] refused to publish event ${event.id} due to lost lease.`,
         );
@@ -344,6 +313,7 @@ export class OutboxWorker
       }
 
       const published = await this.repo.markPublished(event.id, this.workerId);
+      this.completedHandlersByEvent.delete(event.id);
       if (!published) return { status: 'fencingAborted' };
       if (options?.recordDispatchMetrics) {
         this.metricsService?.recordOutboxDispatch(durationMs, true);
@@ -355,13 +325,16 @@ export class OutboxWorker
       if (options?.recordDispatchMetrics) {
         this.metricsService?.recordOutboxDispatch(durationMs, false);
       }
-      if (isLeaseLost) {
+      if (isLeaseLost || abortController.signal.aborted) {
         this.logger.error(
           `Worker [${this.workerId}] aborted error handling for event ${event.id} due to lost lease.`,
         );
         return { status: 'leaseLost' };
       }
       const outcome = await this.handleDispatchFailure(event, err);
+      if (outcome === 'deadLettered') {
+        this.completedHandlersByEvent.delete(event.id);
+      }
       return { status: 'failed', outcome, error: err };
     }
   }
@@ -568,6 +541,16 @@ export class OutboxWorker
       this.logger.warn(
         `Reclaimed expired PROCESSING event ${event.id} (type: ${event.eventType}, previousWorker: ${event.claimedBy || 'unknown'})`,
       );
+      if (event.retryCount >= this.maxRetries) {
+        await this.repo.markDeadLetter(
+          event.id,
+          event.retryCount,
+          'Lease expired repeatedly (poison event)',
+          this.workerId,
+        );
+        deadLettered++;
+        return { processed, failed, deadLettered, reclaimed };
+      }
     }
 
     const effectiveHandlers = this.getEffectiveHandlers(event.eventType);
@@ -664,61 +647,5 @@ export class OutboxWorker
     this.stopPolling();
     this.stopGcSweep();
     this.logger.log(`Outbox consumer [${this.workerId}] shut down gracefully.`);
-  }
-}
-
-@Processor(LIBRARY_OUTBOX_QUEUE, { concurrency: 5 })
-export class OutboxQueueConsumer
-  extends WorkerHost
-  implements OnApplicationBootstrap, OnApplicationShutdown
-{
-  private readonly logger = new Logger(OutboxQueueConsumer.name);
-
-  constructor(private readonly outboxWorker: OutboxWorker) {
-    super();
-  }
-
-  onApplicationBootstrap() {
-    try {
-      this.worker?.on('error', (err) => {
-        this.logger.warn(
-          `Outbox BullMQ Worker connection notice: ${err.message}`,
-        );
-      });
-      this.logger.log(
-        `OutboxQueueConsumer registered with BullMQ on queue: ${LIBRARY_OUTBOX_QUEUE} (concurrency: 5)`,
-      );
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.debug(`OutboxQueueConsumer worker listener skipped: ${msg}`);
-    }
-  }
-
-  async onApplicationShutdown() {
-    try {
-      if (this.worker) {
-        this.logger.log('Closing OutboxQueueConsumer worker on shutdown...');
-        await this.worker.close();
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Error closing OutboxQueueConsumer worker: ${msg}`);
-    }
-  }
-
-  async process(
-    job: Job<{ eventId: string; eventType?: string }>,
-  ): Promise<void> {
-    if (job.name !== LIBRARY_OUTBOX_JOB && job.name !== '__default__') {
-      this.logger.debug(`Ignoring unknown job name: ${job.name}`);
-      return;
-    }
-
-    const { eventId } = job.data;
-    if (!eventId) return;
-
-    await this.outboxWorker.processEventById(eventId, {
-      rethrowOnRetryableFailure: true,
-    });
   }
 }

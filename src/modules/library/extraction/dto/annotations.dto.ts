@@ -1,26 +1,6 @@
-import {
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  IsNumber,
-  IsBoolean,
-  Min,
-  Max,
-  MaxLength,
-  Matches,
-  IsArray,
-  IsUUID,
-  ValidateNested,
-  ArrayMaxSize,
-  ArrayMinSize,
-} from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, IsNumber, Min, Max, MaxLength, Matches, IsArray, IsUUID, ValidateNested, ArrayMaxSize, ArrayMinSize, IsBoolean } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import {
-  AnnotationType,
-  type LinkMode,
-  type AttachmentType,
-} from '@/modules/library/extraction/types/extraction.types';
+import { AnnotationType, LinkMode, AttachmentType } from '@prisma/client';
 
 // Shared color validator & named-color canonicalizer
 
@@ -54,7 +34,10 @@ export function normalizeAnnotationType(
   const lower = value.trim().toLowerCase();
   if (lower === 'box' || lower === 'area' || lower === 'image')
     return AnnotationType.rect;
-  if (lower === 'strikethrough') return AnnotationType.strike;
+  if (lower === 'strikethrough' || lower === 'strikeout')
+    return AnnotationType.strike;
+  if (lower === 'squiggly') return AnnotationType.underline;
+  if (lower === 'caret') return AnnotationType.note;
   if (lower === 'freetext') return AnnotationType.text;
   if (lower === 'drawing' || lower === 'pen') return AnnotationType.ink;
   return lower as AnnotationType;
@@ -90,6 +73,16 @@ export class CreateAnnotationDto {
   @Min(1)
   @IsOptional()
   pageNumber?: number;
+
+  @IsString()
+  @MaxLength(64)
+  @IsOptional()
+  pageLabel?: string;
+
+  @IsString()
+  @MaxLength(64)
+  @IsOptional()
+  annotationSortIndex?: string;
 
   /**
    * Y position in page-relative coordinates [0, 1].
@@ -171,6 +164,52 @@ export class CreateAnnotationDto {
 // Update
 
 export class UpdateAnnotationDto {
+  @IsEnum(AnnotationType)
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => normalizeAnnotationType(value))
+  type?: AnnotationType;
+
+  @Transform(
+    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+      if (typeof value === 'number' && !Number.isNaN(value)) return value;
+      if (typeof obj?.pageNumber === 'number' && obj.pageNumber >= 1) {
+        return obj.pageNumber - 1;
+      }
+      return value;
+    },
+  )
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  pageIndex?: number;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  pageNumber?: number;
+
+  @IsString()
+  @MaxLength(64)
+  @IsOptional()
+  pageLabel?: string;
+
+  @IsString()
+  @MaxLength(64)
+  @IsOptional()
+  annotationSortIndex?: string;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @IsOptional()
+  y?: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @IsOptional()
+  x?: number;
+
   @Transform(({ value }: { value: unknown }) => transformAnnotationColor(value))
   @IsString()
   @Matches(COLOR_REGEX, { message: COLOR_MSG })
@@ -265,6 +304,16 @@ export class UpsertAnnotationItemDto {
   @Min(1)
   @IsOptional()
   pageNumber?: number;
+
+  @IsString()
+  @MaxLength(64)
+  @IsOptional()
+  pageLabel?: string;
+
+  @IsString()
+  @MaxLength(64)
+  @IsOptional()
+  annotationSortIndex?: string;
 
   @IsNumber()
   @Min(0)
@@ -361,8 +410,6 @@ export class BatchAnnotationsDto {
   deletes!: string[];
 }
 
-// Attachments DTOs
-
 export const SAFE_ATTACHMENT_URL_REGEX = /^(?:https?:\/\/|\/api\/(?!\/))/i;
 const SAFE_ATTACHMENT_URL_MSG =
   'Attachment URL must use http://, https://, or a relative /api/... path';
@@ -381,7 +428,7 @@ export class CreateAttachmentDto {
   title?: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   itemId?: string;
 
   @IsString()
@@ -396,15 +443,15 @@ export class CreateAttachmentDto {
   @IsOptional()
   fileHash?: string;
 
-  @IsString()
+  @IsUUID()
   @IsOptional()
   fileId?: string;
 
-  @IsString()
+  @IsEnum(LinkMode)
   @IsOptional()
   linkMode?: LinkMode;
 
-  @IsString()
+  @IsEnum(AttachmentType)
   @IsOptional()
   attachmentType?: AttachmentType;
 
@@ -426,6 +473,7 @@ export class CaptureSnapshotDto {
 export class RenameAttachmentDto {
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   filename?: string;
 
   @IsString()
@@ -435,12 +483,14 @@ export class RenameAttachmentDto {
 
 export class BatchRenameAttachmentsDto {
   @IsArray()
-  @IsString({ each: true })
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
   @IsOptional()
   itemIds?: string[];
 
   @IsArray()
-  @IsString({ each: true })
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
   @IsOptional()
   attachmentIds?: string[];
 

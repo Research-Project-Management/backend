@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
+import { syncItemDenormalizedCountsInClient } from '@/modules/library/core';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 @Injectable()
@@ -10,18 +11,14 @@ export class AttachmentsRepository {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Optional() @Inject(STORAGE_PORT) private readonly storagePort?: IStoragePort,
   ) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
   }
 
-  async findUnique<
-    I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude,
-  >(
+  async findUnique<I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude>(
     id: string,
     includeOptions?: Prisma.Subset<I, Prisma.AttachmentInclude>,
     tx?: Prisma.TransactionClient,
@@ -30,69 +27,31 @@ export class AttachmentsRepository {
     return client.attachment.findUnique({
       where: { id },
       include: includeOptions,
-    }) as unknown as Promise<Prisma.AttachmentGetPayload<{
-      include: I;
-    }> | null>;
+    }) as unknown as Promise<Prisma.AttachmentGetPayload<{ include: I }> | null>;
   }
 
-  async findFirst<
-    I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude,
-  >(
+  async findFirst<I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude>(
     where: Prisma.AttachmentWhereInput,
     include?: Prisma.Subset<I, Prisma.AttachmentInclude>,
     tx?: Prisma.TransactionClient,
   ): Promise<Prisma.AttachmentGetPayload<{ include: I }> | null> {
     const client = this.getClient(tx);
-    return client.attachment.findFirst({
-      where,
-      include,
-    }) as unknown as Promise<Prisma.AttachmentGetPayload<{
-      include: I;
-    }> | null>;
+    return client.attachment.findFirst({ where, include }) as unknown as Promise<
+      Prisma.AttachmentGetPayload<{ include: I }> | null
+    >;
   }
 
   async findManyByItemId(itemId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.attachment.findMany({
       where: { itemId, deletedAt: null },
-      include: {
-        revisions: { orderBy: { revisionNumber: 'desc' } },
-      },
+      include: { revisions: { orderBy: { revisionNumber: 'desc' } } },
     });
   }
 
-  async syncItemAttachmentCounts(
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-  ): Promise<void> {
+  async syncItemAttachmentCounts(itemId: string, tx?: Prisma.TransactionClient): Promise<void> {
     if (!itemId) return;
-    const client = this.getClient(tx);
-    if (!client.attachment || !client.item) {
-      return;
-    }
-    const rawCount = client.attachment?.count
-      ? await client.attachment.count({
-          where: { itemId, deletedAt: null },
-        })
-      : 1;
-    const activeCount = Math.max(0, rawCount);
-    if (client.item?.updateMany) {
-      await client.item.updateMany({
-        where: { id: itemId },
-        data: {
-          hasFile: activeCount > 0,
-          attachmentCount: activeCount,
-        },
-      });
-    } else if (client.item?.update) {
-      await client.item.update({
-        where: { id: itemId },
-        data: {
-          hasFile: activeCount > 0,
-          attachmentCount: activeCount,
-        },
-      });
-    }
+    await syncItemDenormalizedCountsInClient(this.getClient(tx), itemId, { attachments: true });
   }
 
   async create<I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude>(
@@ -103,106 +62,45 @@ export class AttachmentsRepository {
     const client = this.getClient(tx);
     const sanitizedData = { ...data } as Record<string, unknown>;
     if (sanitizedData.itemId && typeof sanitizedData.itemId === 'string') {
-      if (!sanitizedData.item) {
-        sanitizedData.item = { connect: { id: sanitizedData.itemId } };
-      }
+      if (!sanitizedData.item) sanitizedData.item = { connect: { id: sanitizedData.itemId } };
       delete sanitizedData.itemId;
     }
-    const targetItemId = (sanitizedData.item as { connect?: { id?: string } })
-      ?.connect?.id;
-    const targetFileId =
-      typeof sanitizedData.fileId === 'string'
-        ? sanitizedData.fileId
-        : undefined;
+    const targetItemId = (sanitizedData.item as { connect?: { id?: string } })?.connect?.id;
+    const targetFileId = typeof sanitizedData.fileId === 'string' ? sanitizedData.fileId : undefined;
     const isPrimaryPdf =
       sanitizedData.attachmentType === 'primary_pdf' ||
-      (!sanitizedData.attachmentType &&
-        sanitizedData.mimeType === 'application/pdf');
+      (!sanitizedData.attachmentType && sanitizedData.mimeType === 'application/pdf');
 
-    // Prevent duplicate attachment rows when the same physical fileId is already attached to this item
-    if (
-      targetItemId &&
-      targetFileId &&
-      client.attachment?.findFirst &&
-      client.attachment?.update
-    ) {
+    if (targetItemId && targetFileId && client.attachment?.findFirst && client.attachment?.update) {
       const existingSameFile = await client.attachment.findFirst({
-        where: {
-          itemId: targetItemId,
-          fileId: targetFileId,
-          deletedAt: null,
-        },
+        where: { itemId: targetItemId, fileId: targetFileId, deletedAt: null },
       });
       if (existingSameFile) {
         if (isPrimaryPdf && client.attachment?.updateMany) {
           await client.attachment.updateMany({
-            where: {
-              itemId: targetItemId,
-              id: { not: existingSameFile.id },
-              attachmentType: 'primary_pdf',
-              deletedAt: null,
-            },
-            data: {
-              attachmentType: 'supplementary',
-            },
+            where: { itemId: targetItemId, id: { not: existingSameFile.id }, attachmentType: 'primary_pdf', deletedAt: null },
+            data: { attachmentType: 'supplementary' },
           });
         }
         const updatePayload: Record<string, unknown> = {};
-        if (
-          typeof sanitizedData.filename === 'string' &&
-          sanitizedData.filename
-        ) {
-          updatePayload.filename = sanitizedData.filename;
+        for (const strKey of ['filename', 'title', 'url', 'mimeType', 'attachmentType', 'fileHash'] as const) {
+          if (typeof sanitizedData[strKey] === 'string' && sanitizedData[strKey]) {
+            updatePayload[strKey] = sanitizedData[strKey];
+          }
         }
-        if (typeof sanitizedData.title === 'string' && sanitizedData.title) {
-          updatePayload.title = sanitizedData.title;
-        }
-        if (typeof sanitizedData.url === 'string' && sanitizedData.url) {
-          updatePayload.url = sanitizedData.url;
-        }
-        if (typeof sanitizedData.size === 'number') {
-          updatePayload.size = sanitizedData.size;
-        }
-        if (
-          typeof sanitizedData.mimeType === 'string' &&
-          sanitizedData.mimeType
-        ) {
-          updatePayload.mimeType = sanitizedData.mimeType;
-        }
-        if (
-          typeof sanitizedData.attachmentType === 'string' &&
-          sanitizedData.attachmentType
-        ) {
-          updatePayload.attachmentType = sanitizedData.attachmentType;
-        }
-        if (
-          typeof sanitizedData.fileHash === 'string' &&
-          sanitizedData.fileHash
-        ) {
-          updatePayload.fileHash = sanitizedData.fileHash;
-        }
-        if (
-          sanitizedData.metadata &&
-          typeof sanitizedData.metadata === 'object'
-        ) {
+        if (typeof sanitizedData.size === 'number') updatePayload.size = sanitizedData.size;
+        if (sanitizedData.metadata && typeof sanitizedData.metadata === 'object') {
           const existingMeta =
-            existingSameFile.metadata &&
-            typeof existingSameFile.metadata === 'object' &&
-            !Array.isArray(existingSameFile.metadata)
+            existingSameFile.metadata && typeof existingSameFile.metadata === 'object' && !Array.isArray(existingSameFile.metadata)
               ? (existingSameFile.metadata as Record<string, unknown>)
               : {};
-          updatePayload.metadata = {
-            ...existingMeta,
-            ...(sanitizedData.metadata as Record<string, unknown>),
-          };
+          updatePayload.metadata = { ...existingMeta, ...(sanitizedData.metadata as Record<string, unknown>) };
         }
         const updated = (await client.attachment.update({
           where: { id: existingSameFile.id },
           data: updatePayload,
           include,
-        })) as Prisma.AttachmentGetPayload<{ include: I }> & {
-          itemId?: string;
-        };
+        })) as Prisma.AttachmentGetPayload<{ include: I }> & { itemId?: string };
         await this.syncItemAttachmentCounts(targetItemId, tx);
         return updated;
       }
@@ -210,36 +108,23 @@ export class AttachmentsRepository {
 
     if (targetItemId && isPrimaryPdf && client.attachment?.updateMany) {
       await client.attachment.updateMany({
-        where: {
-          itemId: targetItemId,
-          attachmentType: 'primary_pdf',
-          deletedAt: null,
-        },
-        data: {
-          attachmentType: 'supplementary',
-        },
+        where: { itemId: targetItemId, attachmentType: 'primary_pdf', deletedAt: null },
+        data: { attachmentType: 'supplementary' },
       });
     }
     const created = (await client.attachment.create({
       data: sanitizedData as Prisma.AttachmentCreateInput,
       include,
     })) as Prisma.AttachmentGetPayload<{ include: I }> & { itemId?: string };
-    if (created?.itemId) {
-      await this.syncItemAttachmentCounts(created.itemId, tx);
-    }
+    if (created?.itemId) await this.syncItemAttachmentCounts(created.itemId, tx);
     return created;
   }
 
-  async update(
-    id: string,
-    data: Prisma.AttachmentUpdateInput,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async update(id: string, data: Prisma.AttachmentUpdateInput, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
-    return client.attachment.update({
-      where: { id },
-      data,
-    });
+    const updated = await client.attachment.update({ where: { id }, data });
+    if (updated?.itemId) await this.syncItemAttachmentCounts(updated.itemId, tx);
+    return updated;
   }
 
   async delete(id: string, tx?: Prisma.TransactionClient) {
@@ -248,9 +133,7 @@ export class AttachmentsRepository {
       where: { id },
       select: { id: true, itemId: true, deletedAt: true },
     });
-    const deleted = await client.attachment.delete({
-      where: { id },
-    });
+    const deleted = await client.attachment.delete({ where: { id } });
     const itemId = deleted?.itemId || existing?.itemId;
     if (itemId && (!existing || !existing.deletedAt)) {
       await this.syncItemAttachmentCounts(itemId, tx);
@@ -262,31 +145,31 @@ export class AttachmentsRepository {
     fileId: string,
     excludeAttachmentId?: string,
     tx?: Prisma.TransactionClient,
+    excludeItemId?: string,
   ): Promise<number> {
     if (!fileId) return 0;
     const client = this.getClient(tx);
-    let count = 0;
-    if (client.attachment?.count) {
-      count += await client.attachment.count({
-        where: {
-          fileId,
-          ...(excludeAttachmentId
-            ? { id: { not: excludeAttachmentId }, itemId: { not: excludeAttachmentId } }
-            : {}),
-        },
-      });
-    }
-    if (client.attachmentRevision?.count) {
-      count += await client.attachmentRevision.count({
-        where: {
-          fileId,
-          ...(excludeAttachmentId
-            ? { attachmentId: { not: excludeAttachmentId } }
-            : {}),
-        },
-      });
-    }
-    return count;
+    const [attCount, revCount] = await Promise.all([
+      client.attachment?.count
+        ? client.attachment.count({
+            where: {
+              fileId,
+              ...(excludeAttachmentId ? { id: { not: excludeAttachmentId } } : {}),
+              ...(excludeItemId ? { itemId: { not: excludeItemId } } : {}),
+            },
+          })
+        : Promise.resolve(0),
+      client.attachmentRevision?.count
+        ? client.attachmentRevision.count({
+            where: {
+              fileId,
+              ...(excludeAttachmentId ? { attachmentId: { not: excludeAttachmentId } } : {}),
+              ...(excludeItemId ? { attachment: { itemId: { not: excludeItemId } } } : {}),
+            },
+          })
+        : Promise.resolve(0),
+    ]);
+    return attCount + revCount;
   }
 
   async reassignToItem(
@@ -423,6 +306,7 @@ export class AttachmentsRepository {
             where: { id: { in: annotIdsToMove } },
             data: {
               attachmentId: existingSurvivor.id,
+              itemId: targetItemId,
               version: { increment: 1 },
             },
           });
@@ -437,11 +321,84 @@ export class AttachmentsRepository {
             if (survivorFtsCount === 0) {
               await client.fullTextIndex.updateMany({
                 where: { attachmentId: att.id },
-                data: { attachmentId: existingSurvivor.id },
+                data: {
+                  attachmentId: existingSurvivor.id,
+                  itemId: targetItemId,
+                },
               });
             }
           } catch {
             // Ignore unique constraint collisions if survivor already has pages
+          }
+        }
+        if (client.attachmentStructure?.updateMany) {
+          try {
+            const survivorStruct = client.attachmentStructure.findUnique
+              ? await client.attachmentStructure.findUnique({
+                  where: { attachmentId: existingSurvivor.id },
+                })
+              : null;
+            if (!survivorStruct) {
+              await client.attachmentStructure.updateMany({
+                where: { attachmentId: att.id },
+                data: {
+                  attachmentId: existingSurvivor.id,
+                  itemId: targetItemId,
+                },
+              });
+            }
+          } catch {
+            // Ignore unique constraint collisions if survivor already has structure
+          }
+        }
+        if (client.attachmentReadingState?.findMany) {
+          try {
+            const dupReadingStates =
+              (await client.attachmentReadingState.findMany({
+                where: { attachmentId: att.id },
+              })) ?? [];
+            for (const rs of dupReadingStates) {
+              const existingSurvivorRs =
+                client.attachmentReadingState.findUnique
+                  ? await client.attachmentReadingState.findUnique({
+                      where: {
+                        userId_attachmentId: {
+                          userId: rs.userId,
+                          attachmentId: existingSurvivor.id,
+                        },
+                      },
+                    })
+                  : null;
+              if (!existingSurvivorRs) {
+                if (client.attachmentReadingState.update) {
+                  await client.attachmentReadingState.update({
+                    where: {
+                      userId_attachmentId: {
+                        userId: rs.userId,
+                        attachmentId: rs.attachmentId,
+                      },
+                    },
+                    data: {
+                      attachmentId: existingSurvivor.id,
+                      itemId: targetItemId,
+                    },
+                  });
+                } else if (client.attachmentReadingState.updateMany) {
+                  await client.attachmentReadingState.updateMany({
+                    where: {
+                      userId: rs.userId,
+                      attachmentId: rs.attachmentId,
+                    },
+                    data: {
+                      attachmentId: existingSurvivor.id,
+                      itemId: targetItemId,
+                    },
+                  });
+                }
+              }
+            }
+          } catch {
+            // Ignore unique constraint collisions
           }
         }
         // Soft-delete redundant duplicate attachment so original attachment rows are preserved in trash/audit
@@ -486,6 +443,7 @@ export class AttachmentsRepository {
         att.itemId !== targetItemId ||
         nextAttachmentType !== att.attachmentType
       ) {
+        const isMovingItem = att.itemId !== targetItemId;
         await client.attachment.update({
           where: { id: att.id },
           data: {
@@ -495,6 +453,26 @@ export class AttachmentsRepository {
               : {}),
           },
         });
+        if (isMovingItem) {
+          await Promise.all([
+            client.annotation?.updateMany?.({
+              where: { attachmentId: att.id },
+              data: { itemId: targetItemId },
+            }),
+            client.fullTextIndex?.updateMany?.({
+              where: { attachmentId: att.id },
+              data: { itemId: targetItemId },
+            }),
+            client.attachmentStructure?.updateMany?.({
+              where: { attachmentId: att.id },
+              data: { itemId: targetItemId },
+            }),
+            client.attachmentReadingState?.updateMany?.({
+              where: { attachmentId: att.id },
+              data: { itemId: targetItemId },
+            }),
+          ]);
+        }
       }
     }
 
@@ -557,7 +535,7 @@ export class AttachmentsRepository {
   ): Promise<void> {
     const run = async (client: Prisma.TransactionClient) => {
       await client.attachment.updateMany({
-        where: { itemId, attachmentType: 'primary_pdf' },
+        where: { itemId, attachmentType: 'primary_pdf', deletedAt: null },
         data: { attachmentType: 'supplementary' },
       });
       await client.attachment.update({
@@ -693,18 +671,19 @@ export class AttachmentsRepository {
   ): Promise<void> {
     if (!updates || updates.length === 0) return;
     const run = async (client: Prisma.TransactionClient) => {
-      await Promise.all(
-        updates.map((item) =>
-          this.applyAttachmentFilenameAndFileRename(item.id, item.filename, item.fileId, client),
-        ),
-      );
+      for (const item of updates) {
+        await this.applyAttachmentFilenameAndFileRename(item.id, item.filename, item.fileId, client);
+      }
     };
     if (tx) await run(tx);
     else await this.prisma.$transaction(run);
   }
 
   async deleteManyByItemId(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
-    return (await this.getClient(tx).attachment.deleteMany({ where: { itemId } })).count;
+    const client = this.getClient(tx);
+    const count = (await client.attachment.deleteMany({ where: { itemId } })).count;
+    await this.syncItemAttachmentCounts(itemId, client);
+    return count;
   }
 
   async softDeleteByItemId(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
@@ -718,14 +697,4 @@ export class AttachmentsRepository {
     return count;
   }
 
-  async restoreByItemId(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
-    const count = (
-      await this.getClient(tx).attachment.updateMany({
-        where: { itemId, deletedAt: { not: null } },
-        data: { deletedAt: null },
-      })
-    ).count;
-    await this.syncItemAttachmentCounts(itemId, tx);
-    return count;
-  }
 }

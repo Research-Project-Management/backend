@@ -6,12 +6,12 @@ import {
 } from '@nestjs/common';
 import { CollectionsService } from '@/modules/library/catalog/services/collections.service';
 import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';
-import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
+import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 import { PrismaService } from '@/core';
 import {
   sanitizeCollectionName,
   sanitizeCollectionDescription,
-} from '@/modules/library/catalog/domain/tree.engine';
+} from '@/modules/library/catalog/domain/state.domain';
 
 describe('Library Collections — Tree Invariants & Sanitization', () => {
   describe('Collection Sanitization Utilities', () => {
@@ -111,6 +111,32 @@ describe('Library Collections — Tree Invariants & Sanitization', () => {
       expect(tree[0].children[0].id).toBe('col-2');
       expect(tree[1].id).toBe('col-3');
       expect(tree[1].children).toHaveLength(0);
+    });
+
+    it('should deduplicate recursiveItemCount via Set union when an item belongs to both parent and child collection', () => {
+      const collections = [
+        {
+          id: 'col-parent',
+          name: 'Parent',
+          parentId: null,
+          _count: { collectionItems: 2 },
+          collectionItems: [{ itemId: 'item-shared' }, { itemId: 'item-p1' }],
+        },
+        {
+          id: 'col-child',
+          name: 'Child',
+          parentId: 'col-parent',
+          _count: { collectionItems: 2 },
+          collectionItems: [{ itemId: 'item-shared' }, { itemId: 'item-c1' }],
+        },
+      ];
+      const tree = treeEngine.buildTree(collections);
+      expect(tree).toHaveLength(1);
+      expect(tree[0].itemCount).toBe(2);
+      expect(tree[0].children[0].itemCount).toBe(2);
+      expect(tree[0].children[0].recursiveItemCount).toBe(2);
+      // Union of {item-shared, item-p1} and {item-shared, item-c1} is 3 unique items, not 4!
+      expect(tree[0].recursiveItemCount).toBe(3);
     });
 
     describe('getDescendantIds', () => {

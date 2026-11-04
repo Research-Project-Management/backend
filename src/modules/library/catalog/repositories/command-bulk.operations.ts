@@ -3,8 +3,13 @@ import { PrismaService } from '@/core';
 import {
   extractFileIdFromUrl,
   normalizeProjectScopeId,
+  LIBRARY_EVENT_TYPES,
+  TransactionHelpers,
+  ItemsMapper,
 } from '@/modules/library/core';
 import { isUuid } from '@/modules/library/catalog/domain/command-payload.builder';
+import type { CommandRepository } from './command.repository';
+import type { QueryRepository } from './query.repository';
 
 export class CommandBulkOperations {
   public static async collectStoragePathsForItems(
@@ -14,10 +19,18 @@ export class CommandBulkOperations {
     if (itemIds.length === 0) return [];
     const paths = new Set<string>();
 
-    const attachments = await client.attachment.findMany({
-      where: { itemId: { in: itemIds } },
-      select: { id: true, fileId: true, url: true },
-    });
+    const [attachments, metadataRecords] = await Promise.all([
+      client.attachment.findMany({
+        where: { itemId: { in: itemIds } },
+        select: { id: true, fileId: true, url: true },
+      }),
+      client.itemMetadata
+        ? client.itemMetadata.findMany({
+            where: { itemId: { in: itemIds } },
+            select: { rawPayload: true },
+          })
+        : Promise.resolve([]),
+    ]);
     const attachmentIds: string[] = [];
     for (const att of attachments) {
       if (att.id) attachmentIds.push(att.id);
@@ -36,22 +49,9 @@ export class CommandBulkOperations {
       }
     }
 
-    if (client.itemMetadata) {
-      const metadataRecords = await client.itemMetadata.findMany({
-        where: { itemId: { in: itemIds } },
-        select: { rawPayload: true },
-      });
-      for (const rec of metadataRecords) {
-        const raw = rec.rawPayload as
-          | (Record<string, unknown> & {
-              isOffloaded?: boolean;
-              fileId?: string;
-            })
-          | null;
-        if (raw?.isOffloaded && typeof raw.fileId === 'string' && raw.fileId) {
-          paths.add(raw.fileId);
-        }
-      }
+    for (const rec of metadataRecords) {
+      const raw = rec.rawPayload as (Record<string, unknown> & { isOffloaded?: boolean; fileId?: string }) | null;
+      if (raw?.isOffloaded && typeof raw.fileId === 'string' && raw.fileId) paths.add(raw.fileId);
     }
 
     const candidateFileIds = Array.from(paths);
@@ -59,33 +59,19 @@ export class CommandBulkOperations {
 
     if (typeof client.attachment.findMany === 'function') {
       const activeRefs = await client.attachment.findMany({
-        where: {
-          fileId: { in: candidateFileIds },
-          itemId: { notIn: itemIds },
-          deletedAt: null,
-        },
+        where: { fileId: { in: candidateFileIds }, itemId: { notIn: itemIds }, deletedAt: null },
         select: { fileId: true },
       });
-      const referencedSet = new Set(
-        (activeRefs || [])
-          .map((r) => r.fileId)
-          .filter((f): f is string => Boolean(f)),
-      );
+      const referencedSet = new Set((activeRefs || []).map((r) => r.fileId).filter((f): f is string => Boolean(f)));
       return candidateFileIds.filter((fid) => !referencedSet.has(fid));
     }
 
     const safePaths: string[] = [];
     for (const fileId of candidateFileIds) {
       const remainingRefs = await client.attachment.count({
-        where: {
-          fileId,
-          itemId: { notIn: itemIds },
-          deletedAt: null,
-        },
+        where: { fileId, itemId: { notIn: itemIds }, deletedAt: null },
       });
-      if (remainingRefs === 0) {
-        safePaths.push(fileId);
-      }
+      if (remainingRefs === 0) safePaths.push(fileId);
     }
     return safePaths;
   }
@@ -98,67 +84,40 @@ export class CommandBulkOperations {
   ): Promise<{ succeededIds: string[]; failedIds: string[] }> {
     const validUserId = isUuid(userId);
     const validIds = Array.from(new Set(itemIds.filter((id) => isUuid(id))));
-    if (!validUserId || validIds.length === 0) {
-      return { succeededIds: [], failedIds: [...itemIds] };
-    }
+    if (!validUserId || validIds.length === 0) return { succeededIds: [], failedIds: [...itemIds] };
 
     const validProjectId = normalizeProjectScopeId(projectId);
     const scopeFilter: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId }
-        : { userId, projectId: null };
+      validProjectId && isUuid(validProjectId) ? { projectId: validProjectId } : { userId, projectId: null };
 
     const existingItems = await client.item.findMany({
-      where: {
-        id: { in: validIds },
-        deletedAt: null,
-        ...scopeFilter,
-      },
+      where: { id: { in: validIds }, deletedAt: null, ...scopeFilter },
       select: { id: true },
     });
 
     const foundSet = new Set(existingItems.map((it) => it.id));
-    const succeededIds = itemIds.filter(
-      (id, idx) => foundSet.has(id) && itemIds.indexOf(id) === idx,
-    );
-    const failedIds = itemIds.filter(
-      (id, idx) => !foundSet.has(id) || itemIds.indexOf(id) !== idx,
-    );
+    const succeededIds = itemIds.filter((id, idx) => foundSet.has(id) && itemIds.indexOf(id) === idx);
+    const failedIds = itemIds.filter((id, idx) => !foundSet.has(id) || itemIds.indexOf(id) !== idx);
 
     if (succeededIds.length > 0) {
       const deletedAt = new Date();
       await client.item.updateMany({
-        where: {
-          id: { in: succeededIds },
-          deletedAt: null,
-          ...scopeFilter,
-        },
+        where: { id: { in: succeededIds }, deletedAt: null, ...scopeFilter },
         data: {
           deletedAt,
+          deletedById: userId,
+          noteCount: 0,
+          attachmentCount: 0,
+          hasFile: false,
           version: { increment: 1 },
         },
       });
 
       await Promise.all([
-        client.note?.updateMany?.({
-          where: {
-            itemId: { in: succeededIds },
-            deletedAt: null,
-          },
-          data: { deletedAt },
-        }),
-        client.attachment?.updateMany?.({
-          where: {
-            itemId: { in: succeededIds },
-            deletedAt: null,
-          },
-          data: { deletedAt },
-        }),
+        client.note?.updateMany?.({ where: { itemId: { in: succeededIds }, deletedAt: null }, data: { deletedAt } }),
+        client.attachment?.updateMany?.({ where: { itemId: { in: succeededIds }, deletedAt: null }, data: { deletedAt } }),
         client.annotation?.updateMany?.({
-          where: {
-            attachment: { itemId: { in: succeededIds } },
-            deletedAt: null,
-          },
+          where: { attachment: { itemId: { in: succeededIds } }, deletedAt: null },
           data: { deletedAt },
         }),
       ]);
@@ -173,11 +132,7 @@ export class CommandBulkOperations {
     itemIds: string[],
     projectId?: string,
   ): Promise<{
-    restoredItems: Array<{
-      id: string;
-      version: number;
-      projectId: string | null;
-    }>;
+    restoredItems: Array<{ id: string; version: number; projectId: string | null }>;
     succeededIds: string[];
     failedIds: string[];
   }> {
@@ -188,96 +143,43 @@ export class CommandBulkOperations {
     }
 
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeFilter: Prisma.ItemWhereInput = validProjectId
-      ? { projectId: validProjectId }
-      : { userId, projectId: null };
+    const scopeFilter: Prisma.ItemWhereInput = validProjectId ? { projectId: validProjectId } : { userId, projectId: null };
 
     const existingItems = await client.item.findMany({
-      where: {
-        id: { in: validIds },
-        deletedAt: { not: null },
-        ...scopeFilter,
-      },
-      select: {
-        id: true,
-        version: true,
-        projectId: true,
-        metadata: true,
-        deletedAt: true,
-      },
+      where: { id: { in: validIds }, deletedAt: { not: null }, ...scopeFilter },
+      select: { id: true, version: true, projectId: true, metadata: true, deletedAt: true },
     });
 
-    const restorableMap = new Map<
-      string,
-      {
-        id: string;
-        version: number;
-        projectId: string | null;
-        deletedAt: Date | null;
-      }
-    >();
+    const restorableMap = new Map<string, { id: string; version: number; projectId: string | null; deletedAt: Date | null }>();
     for (const item of existingItems) {
       const metadataObj =
-        item.metadata &&
-        typeof item.metadata === 'object' &&
-        !Array.isArray(item.metadata)
+        item.metadata && typeof item.metadata === 'object' && !Array.isArray(item.metadata)
           ? (item.metadata as Record<string, unknown>)
           : {};
-      if (
-        typeof metadataObj.mergedIntoId === 'string' &&
-        metadataObj.mergedIntoId
-      ) {
-        continue;
-      }
+      if (typeof metadataObj.mergedIntoId === 'string' && metadataObj.mergedIntoId) continue;
       restorableMap.set(item.id, {
-        id: item.id,
-        version: item.version + 1,
-        projectId: item.projectId,
-        deletedAt: item.deletedAt,
+        id: item.id, version: item.version + 1, projectId: item.projectId, deletedAt: item.deletedAt,
       });
     }
 
-    const succeededIds = itemIds.filter(
-      (id, idx) => restorableMap.has(id) && itemIds.indexOf(id) === idx,
-    );
-    const failedIds = itemIds.filter(
-      (id, idx) => !restorableMap.has(id) || itemIds.indexOf(id) !== idx,
-    );
+    const succeededIds = itemIds.filter((id, idx) => restorableMap.has(id) && itemIds.indexOf(id) === idx);
+    const failedIds = itemIds.filter((id, idx) => !restorableMap.has(id) || itemIds.indexOf(id) !== idx);
 
     if (succeededIds.length > 0) {
       await client.item.updateMany({
-        where: {
-          id: { in: succeededIds },
-          deletedAt: { not: null },
-          ...scopeFilter,
-        },
-        data: {
-          deletedAt: null,
-          version: { increment: 1 },
-        },
+        where: { id: { in: succeededIds }, deletedAt: { not: null }, ...scopeFilter },
+        data: { deletedAt: null, deletedById: null, updatedById: userId, version: { increment: 1 } },
       });
 
-      // Cascade un-delete child notes, attachments, annotations per item cutoff
       await Promise.all(
         succeededIds.flatMap((id) => {
           const itemDeletedAt = restorableMap.get(id)?.deletedAt;
-          const deletedFilter = itemDeletedAt
-            ? { gte: itemDeletedAt }
-            : { not: null };
+          const deletedFilter = itemDeletedAt ? { gte: itemDeletedAt } : { not: null };
           return [
-            client.note?.updateMany?.({
-              where: { itemId: id, deletedAt: deletedFilter },
-              data: { deletedAt: null },
-            }),
-            client.attachment?.updateMany?.({
-              where: { itemId: id, deletedAt: deletedFilter },
-              data: { deletedAt: null },
-            }),
+            client.note?.updateMany?.({ where: { itemId: id, deletedAt: deletedFilter }, data: { deletedAt: null } }),
+            client.attachment?.updateMany?.({ where: { itemId: id, deletedAt: deletedFilter }, data: { deletedAt: null } }),
             client.annotation?.updateMany?.({
-              where: {
-                attachment: { itemId: id },
-                deletedAt: deletedFilter,
-              },
+              where: { attachment: { itemId: id }, deletedAt: deletedFilter },
               data: { deletedAt: null },
             }),
           ];
@@ -286,36 +188,19 @@ export class CommandBulkOperations {
 
       const [noteGroups, attachmentGroups] = await Promise.all([
         client.note.groupBy({
-          by: ['itemId'],
-          where: {
-            itemId: { in: succeededIds },
-            deletedAt: null,
-          },
-          _count: { id: true },
+          by: ['itemId'], where: { itemId: { in: succeededIds }, deletedAt: null }, _count: { id: true },
         }),
         client.attachment.groupBy({
-          by: ['itemId'],
-          where: {
-            itemId: { in: succeededIds },
-            deletedAt: null,
-          },
-          _count: { id: true },
+          by: ['itemId'], where: { itemId: { in: succeededIds }, deletedAt: null }, _count: { id: true },
         }),
       ]);
       const noteCountMap = new Map<string, number>();
-      for (const ng of noteGroups) {
-        if (ng.itemId) noteCountMap.set(ng.itemId, ng._count.id);
-      }
+      for (const ng of noteGroups) if (ng.itemId) noteCountMap.set(ng.itemId, ng._count.id);
 
       const attachmentCountMap = new Map<string, number>();
-      for (const ag of attachmentGroups) {
-        if (ag.itemId) attachmentCountMap.set(ag.itemId, ag._count.id);
-      }
+      for (const ag of attachmentGroups) if (ag.itemId) attachmentCountMap.set(ag.itemId, ag._count.id);
 
-      const countBuckets = new Map<
-        string,
-        { nc: number; ac: number; ids: string[] }
-      >();
+      const countBuckets = new Map<string, { nc: number; ac: number; ids: string[] }>();
       for (const id of succeededIds) {
         const nc = noteCountMap.get(id) ?? 0;
         const ac = attachmentCountMap.get(id) ?? 0;
@@ -329,20 +214,13 @@ export class CommandBulkOperations {
         Array.from(countBuckets.values()).map(({ nc, ac, ids }) =>
           client.item.updateMany({
             where: { id: { in: ids } },
-            data: {
-              noteCount: nc,
-              attachmentCount: ac,
-              hasFile: ac > 0,
-            },
+            data: { noteCount: nc, attachmentCount: ac, hasFile: ac > 0 },
           }),
         ),
       );
     }
 
-    const restoredItems = succeededIds
-      .map((id) => restorableMap.get(id)!)
-      .filter(Boolean);
-
+    const restoredItems = succeededIds.map((id) => restorableMap.get(id)!).filter(Boolean);
     return { restoredItems, succeededIds, failedIds };
   }
 
@@ -440,54 +318,56 @@ export class CommandBulkOperations {
   }> {
     const cutoff = new Date(Date.now() - retentionDays * 86400 * 1000);
 
-    const expiredItems = await client.item.findMany({
-      where: { deletedAt: { lt: cutoff } },
-      select: { id: true, userId: true, projectId: true },
-      orderBy: { deletedAt: 'asc' },
-      take: limit,
-    });
+    const [expiredItems, expiredNotes, expiredCollections] = await Promise.all([
+      client.item.findMany({
+        where: { deletedAt: { lt: cutoff } },
+        select: { id: true, userId: true, projectId: true },
+        orderBy: { deletedAt: 'asc' },
+        take: limit,
+      }),
+      client.note.findMany({
+        where: { deletedAt: { lt: cutoff } },
+        select: { id: true, userId: true, projectId: true },
+        orderBy: { deletedAt: 'asc' },
+        take: limit,
+      }),
+      client.collection.findMany({
+        where: { deletedAt: { lt: cutoff } },
+        select: { id: true, userId: true, projectId: true },
+        orderBy: { deletedAt: 'asc' },
+        take: limit,
+      }),
+    ]);
     const expiredItemIds = expiredItems.map((it) => it.id);
 
-    let storagePaths: string[] = [];
-    let purgedItems = 0;
-    if (expiredItemIds.length > 0) {
-      storagePaths = await this.collectStoragePathsForItems(
-        client,
-        expiredItemIds,
-      );
-      const delItems = await client.item.deleteMany({
-        where: { id: { in: expiredItemIds } },
-      });
-      purgedItems = delItems.count;
-    }
-
-    const expiredNotes = await client.note.findMany({
-      where: { deletedAt: { lt: cutoff } },
-      select: { id: true, userId: true, projectId: true },
-      orderBy: { deletedAt: 'asc' },
-      take: limit,
-    });
-    let purgedNotes = 0;
-    if (expiredNotes.length > 0) {
-      const delNotes = await client.note.deleteMany({
-        where: { id: { in: expiredNotes.map((n) => n.id) } },
-      });
-      purgedNotes = delNotes.count;
-    }
-
-    const expiredCollections = await client.collection.findMany({
-      where: { deletedAt: { lt: cutoff } },
-      select: { id: true, userId: true, projectId: true },
-      orderBy: { deletedAt: 'asc' },
-      take: limit,
-    });
-    let purgedCollections = 0;
-    if (expiredCollections.length > 0) {
-      const delCollections = await client.collection.deleteMany({
-        where: { id: { in: expiredCollections.map((c) => c.id) } },
-      });
-      purgedCollections = delCollections.count;
-    }
+    const [itemPurgeRes, delNotes, delCollections] = await Promise.all([
+      expiredItemIds.length > 0
+        ? (async () => {
+            const paths = await this.collectStoragePathsForItems(
+              client,
+              expiredItemIds,
+            );
+            const delItems = await client.item.deleteMany({
+              where: { id: { in: expiredItemIds } },
+            });
+            return { paths, count: delItems.count };
+          })()
+        : Promise.resolve({ paths: [] as string[], count: 0 }),
+      expiredNotes.length > 0
+        ? client.note.deleteMany({
+            where: { id: { in: expiredNotes.map((n) => n.id) } },
+          })
+        : Promise.resolve({ count: 0 }),
+      expiredCollections.length > 0
+        ? client.collection.deleteMany({
+            where: { id: { in: expiredCollections.map((c) => c.id) } },
+          })
+        : Promise.resolve({ count: 0 }),
+    ]);
+    const storagePaths = itemPurgeRes.paths;
+    const purgedItems = itemPurgeRes.count;
+    const purgedNotes = delNotes.count;
+    const purgedCollections = delCollections.count;
 
     return {
       purgedItems,
@@ -499,4 +379,310 @@ export class CommandBulkOperations {
       expiredCollections,
     };
   }
+
+  public static async emptyTrash(
+    client: Prisma.TransactionClient | PrismaService,
+    userId: string,
+    projectId?: string,
+  ): Promise<{
+    succeededIds: string[];
+    failedIds: string[];
+    fileIdsToDelete: string[];
+    storagePaths: string[];
+  }> {
+    if (!isUuid(userId)) {
+      return {
+        succeededIds: [],
+        failedIds: [],
+        fileIdsToDelete: [],
+        storagePaths: [],
+      };
+    }
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeFilter: Prisma.ItemWhereInput = validProjectId
+      ? { projectId: validProjectId }
+      : { userId, projectId: null };
+
+    const trashedItems = await client.item.findMany({
+      where: {
+        deletedAt: { not: null },
+        ...scopeFilter,
+      },
+      select: { id: true, metadata: true },
+    });
+    const trashedIds = trashedItems
+      .filter((it) => {
+        const meta =
+          it.metadata &&
+          typeof it.metadata === 'object' &&
+          !Array.isArray(it.metadata)
+            ? (it.metadata as Record<string, unknown>)
+            : {};
+        return !(
+          typeof meta.mergedIntoId === 'string' &&
+          meta.mergedIntoId.trim().length > 0
+        );
+      })
+      .map((it) => it.id);
+    if (trashedIds.length === 0) {
+      return {
+        succeededIds: [],
+        failedIds: [],
+        fileIdsToDelete: [],
+        storagePaths: [],
+      };
+    }
+    return this.purgeMany(client, userId, trashedIds, projectId);
+  }
+}
+
+export async function executeBulkSoftDeleteInTx(params: {
+  command: CommandRepository;
+  userId: string;
+  itemIds: string[];
+  tx: Prisma.TransactionClient;
+  helpers: TransactionHelpers;
+  validProjectId?: string;
+}) {
+  const { command, userId, itemIds, tx, helpers, validProjectId } = params;
+  const res = await command.softDeleteMany(userId, itemIds, tx, validProjectId);
+  if (res.succeededIds.length > 0) {
+    const eventScope = { userId, projectId: validProjectId };
+    const deletedAt = new Date();
+    const deletedIso = deletedAt.toISOString();
+    await helpers.recordTombstonesBatch(
+      eventScope,
+      res.succeededIds.map((entityId) => ({ entityType: 'Item', entityId })),
+    );
+    await helpers.appendChangesBatch(
+      eventScope,
+      res.succeededIds.map((id) => ({
+        entityType: 'Item',
+        entityId: id,
+        action: 'delete',
+        version: 0,
+        data: { id, deletedAt: deletedIso },
+      })),
+    );
+    await helpers.publishOutboxBatch(
+      eventScope,
+      res.succeededIds.map((id) => ({
+        aggregateId: id,
+        eventType: LIBRARY_EVENT_TYPES.ITEM_DELETED,
+        payload: { id, deletedAt, projectId: validProjectId, cascadedInTx: true },
+      })),
+    );
+  }
+  return res;
+}
+
+export async function executeBulkRestoreInTx(params: {
+  command: CommandRepository;
+  query: QueryRepository;
+  userId: string;
+  itemIds: string[];
+  tx: Prisma.TransactionClient;
+  helpers: TransactionHelpers;
+  validProjectId?: string;
+}) {
+  const { command, query, userId, itemIds, tx, helpers, validProjectId } = params;
+  const res = await command.restoreMany(userId, itemIds, tx, validProjectId);
+  if (res.restoredItems.length > 0) {
+    const restoredFullItems = await query.findByIds(userId, res.succeededIds, validProjectId, tx, false);
+    const fullItemMap = new Map((restoredFullItems || []).map((it) => [it.id, it]));
+    const restoredAt = new Date().toISOString();
+    await helpers.appendChangesBatch(
+      res.restoredItems.map((restored) => {
+        const effectiveProjectId = validProjectId || restored.projectId || undefined;
+        const fullItem = fullItemMap.get(restored.id);
+        return {
+          userId,
+          projectId: effectiveProjectId,
+          entityType: 'Item',
+          entityId: restored.id,
+          action: 'update' as const,
+          version: restored.version,
+          data: fullItem
+            ? ItemsMapper.toDomain(fullItem)
+            : { id: restored.id, version: restored.version, projectId: effectiveProjectId },
+        };
+      }),
+    );
+    await helpers.removeTombstonesBatch(
+      { userId, projectId: validProjectId },
+      'Item',
+      res.restoredItems.map((r) => r.id),
+    );
+    await helpers.publishOutboxBatch(
+      res.restoredItems.map((restored) => {
+        const effectiveProjectId = validProjectId || restored.projectId || undefined;
+        return {
+          userId,
+          projectId: effectiveProjectId,
+          aggregateId: restored.id,
+          eventType: LIBRARY_EVENT_TYPES.ITEM_RESTORED,
+          payload: { itemId: restored.id, userId, projectId: effectiveProjectId, restoredAt, cascadedInTx: true },
+        };
+      }),
+    );
+  }
+  return res;
+}
+
+export async function executeBulkPurgeInTx(params: {
+  command: CommandRepository;
+  userId: string;
+  itemIds: string[];
+  tx: Prisma.TransactionClient;
+  helpers: TransactionHelpers;
+  validProjectId?: string;
+}) {
+  const { command, userId, itemIds, tx, helpers, validProjectId } = params;
+  const res = await command.purgeMany(userId, itemIds, tx, validProjectId);
+  if (res.succeededIds.length > 0) {
+    const eventScope = { userId, projectId: validProjectId };
+    const purgedAt = new Date().toISOString();
+    await helpers.recordTombstonesBatch(
+      eventScope,
+      res.succeededIds.map((entityId) => ({ entityType: 'Item', entityId })),
+    );
+    await helpers.appendChangesBatch(
+      eventScope,
+      res.succeededIds.map((entityId) => ({
+        entityType: 'Item',
+        entityId,
+        action: 'delete',
+        version: 0,
+      })),
+    );
+    await helpers.publishOutboxBatch(
+      eventScope,
+      res.succeededIds.map((id, idx) => ({
+        aggregateId: id,
+        eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
+        payload: {
+          itemId: id,
+          itemIds: res.succeededIds,
+          userId,
+          projectId: validProjectId,
+          filePaths: idx === 0 ? res.storagePaths : [],
+          purgedAt,
+          cascadedInTx: true,
+          storageDeletedInTx: true,
+        },
+      })),
+    );
+  }
+  return res;
+}
+
+export async function executeEmptyTrashInTx(params: {
+  command: CommandRepository;
+  userId: string;
+  tx: Prisma.TransactionClient;
+  helpers: TransactionHelpers;
+  validProjectId?: string;
+}) {
+  const { command, userId, tx, helpers, validProjectId } = params;
+  const res = await command.emptyTrash(userId, tx, validProjectId);
+  if (res.succeededIds.length > 0) {
+    const eventScope = { userId, projectId: validProjectId };
+    const purgedAt = new Date().toISOString();
+    await helpers.recordTombstonesBatch(
+      eventScope,
+      res.succeededIds.map((entityId) => ({ entityType: 'Item', entityId })),
+    );
+    await helpers.appendChangesBatch(
+      eventScope,
+      res.succeededIds.map((entityId) => ({
+        entityType: 'Item',
+        entityId,
+        action: 'delete',
+        version: 0,
+      })),
+    );
+    await helpers.publishOutboxBatch(
+      eventScope,
+      res.succeededIds.map((id, idx) => ({
+        aggregateId: id,
+        eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
+        payload: {
+          itemId: id,
+          itemIds: res.succeededIds,
+          userId,
+          projectId: validProjectId,
+          filePaths: idx === 0 ? res.storagePaths : [],
+          purgedAt,
+          cascadedInTx: true,
+          storageDeletedInTx: true,
+        },
+      })),
+    );
+  }
+  return res;
+}
+
+export const executeBulkHardDeleteInTx = executeBulkPurgeInTx;
+
+export async function executePurgeExpiredTrashInTx(params: {
+  command: CommandRepository;
+  retentionDays: number;
+  limit: number;
+  tx: Prisma.TransactionClient;
+  helpers: TransactionHelpers;
+}) {
+  const { command, retentionDays, limit, tx, helpers } = params;
+  const res = await command.purgeExpiredTrash(retentionDays, limit, tx);
+  const expiredItems = res.expiredItems ?? [];
+  const toTombstone = (
+    rows: Array<{ id: string; userId: string; projectId?: string | null }> = [],
+    entityType: string,
+  ) =>
+    rows.map((r) => ({
+      userId: r.userId,
+      projectId: r.projectId ?? undefined,
+      entityType,
+      entityId: r.id,
+    }));
+
+  const tombstoneInputs = [
+    ...toTombstone(expiredItems, 'Item'),
+    ...toTombstone(res.expiredNotes, 'Note'),
+    ...toTombstone(res.expiredCollections, 'Collection'),
+  ];
+
+  if (tombstoneInputs.length > 0) {
+    await helpers.recordTombstonesBatch(tombstoneInputs);
+    await helpers.appendChangesBatch(
+      tombstoneInputs.map((entry) => ({
+        ...entry,
+        action: 'delete' as const,
+        version: 0,
+      })),
+    );
+  }
+
+  if (expiredItems.length > 0) {
+    const purgedAt = new Date().toISOString();
+    const allExpiredItemIds = expiredItems.map((it) => it.id);
+    await helpers.publishOutboxBatch(
+      expiredItems.map((it, idx) => ({
+        userId: it.userId,
+        projectId: it.projectId ?? undefined,
+        aggregateId: it.id,
+        eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
+        payload: {
+          itemId: it.id,
+          itemIds: allExpiredItemIds,
+          userId: it.userId,
+          projectId: it.projectId ?? undefined,
+          filePaths: idx === 0 ? res.storagePaths : [],
+          purgedAt,
+          cascadedInTx: true,
+          storageDeletedInTx: true,
+        },
+      })),
+    );
+  }
+  return res;
 }

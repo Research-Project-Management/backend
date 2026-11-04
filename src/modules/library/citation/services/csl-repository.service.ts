@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 import {
-  AcademicHttpClient,
+  HttpClient,
   ExtractionProcessException,
   ExternalProviderException,
   LIBRARY_REDIS_KEYS,
@@ -18,6 +18,7 @@ import {
   CHICAGO_CSL,
   MLA_CSL,
 } from '@/modules/library/citation/data/official-styles.data';
+import { normalizeEngineStyleId } from '@/modules/library/citation/domain/citation.domain';
 
 export interface CslStyleMetadata {
   id: string;
@@ -48,134 +49,29 @@ function parseCslCategory(val?: unknown): CslStyleMetadata['category'] {
  * academic journals and publisher styles (Nature, Science, Cell, IEEE, ACM, Lancet, etc.).
  * Ensures instant search and rendering even when the network is restricted.
  */
-const POPULAR_ACADEMIC_STYLES: ReadonlyArray<CslStyleMetadata> = [
-  {
-    id: 'apa',
-    name: 'apa',
-    title: 'American Psychological Association 7th edition (APA)',
-    category: 'author-date',
-  },
-  {
-    id: 'apa-7th',
-    name: 'apa-7th',
-    title: 'APA 7th edition',
-    category: 'author-date',
-  },
-  {
-    id: 'ieee',
-    name: 'ieee',
-    title: 'IEEE (Institute of Electrical and Electronics Engineers)',
-    category: 'numeric',
-  },
+const POPULAR_STYLES: ReadonlyArray<CslStyleMetadata> = [
+  { id: 'apa', name: 'apa', title: 'American Psychological Association 7th edition (APA)', category: 'author-date' },
+  { id: 'apa-7th', name: 'apa-7th', title: 'APA 7th edition', category: 'author-date' },
+  { id: 'ieee', name: 'ieee', title: 'IEEE (Institute of Electrical and Electronics Engineers)', category: 'numeric' },
   { id: 'nature', name: 'nature', title: 'Nature', category: 'numeric' },
-  {
-    id: 'science',
-    name: 'science',
-    title: 'Science (AAAS)',
-    category: 'numeric',
-  },
-  {
-    id: 'cell',
-    name: 'cell',
-    title: 'Cell Press',
-    category: 'author-date',
-  },
-  {
-    id: 'the-lancet',
-    name: 'the-lancet',
-    title: 'The Lancet',
-    category: 'numeric',
-  },
-  {
-    id: 'plos-one',
-    name: 'plos-one',
-    title: 'PLOS ONE',
-    category: 'numeric',
-  },
-  {
-    id: 'pnas',
-    name: 'pnas',
-    title: 'Proceedings of the National Academy of Sciences (PNAS)',
-    category: 'numeric',
-  },
-  {
-    id: 'chicago',
-    name: 'chicago-author-date',
-    title: 'Chicago Manual of Style 17th/18th (Author-Date)',
-    category: 'author-date',
-  },
-  {
-    id: 'chicago-author-date',
-    name: 'chicago-author-date',
-    title: 'Chicago Manual of Style (Author-Date)',
-    category: 'author-date',
-  },
-  {
-    id: 'harvard',
-    name: 'harvard-cite-them-right',
-    title: 'Harvard (Cite Them Right 12th edition)',
-    category: 'author-date',
-  },
-  {
-    id: 'vancouver',
-    name: 'vancouver',
-    title: 'Vancouver (ICMJE Recommended)',
-    category: 'numeric',
-  },
-  {
-    id: 'mla',
-    name: 'modern-language-association',
-    title: 'MLA 9th edition (Modern Language Association)',
-    category: 'author-date',
-  },
-  {
-    id: 'mla-9th',
-    name: 'modern-language-association',
-    title: 'MLA 9th edition',
-    category: 'author-date',
-  },
-  {
-    id: 'acm-siggraph',
-    name: 'acm-siggraph',
-    title: 'ACM SIGGRAPH / Computer Graphics',
-    category: 'author-date',
-  },
-  {
-    id: 'association-for-computing-machinery',
-    name: 'association-for-computing-machinery',
-    title: 'ACM (Association for Computing Machinery)',
-    category: 'numeric',
-  },
-  {
-    id: 'american-chemical-society',
-    name: 'american-chemical-society',
-    title: 'ACS (American Chemical Society)',
-    category: 'numeric',
-  },
-  {
-    id: 'american-medical-association',
-    name: 'american-medical-association',
-    title: 'AMA (American Medical Association 11th edition)',
-    category: 'numeric',
-  },
-  {
-    id: 'american-institute-of-physics',
-    name: 'american-institute-of-physics',
-    title: 'American Institute of Physics (AIP)',
-    category: 'numeric',
-  },
-  {
-    id: 'biomed-central',
-    name: 'biomed-central',
-    title: 'BioMed Central (BMC)',
-    category: 'numeric',
-  },
-  {
-    id: 'british-medical-journal',
-    name: 'bmj',
-    title: 'British Medical Journal (BMJ)',
-    category: 'numeric',
-  },
+  { id: 'science', name: 'science', title: 'Science (AAAS)', category: 'numeric' },
+  { id: 'cell', name: 'cell', title: 'Cell Press', category: 'author-date' },
+  { id: 'the-lancet', name: 'the-lancet', title: 'The Lancet', category: 'numeric' },
+  { id: 'plos-one', name: 'plos-one', title: 'PLOS ONE', category: 'numeric' },
+  { id: 'pnas', name: 'pnas', title: 'Proceedings of the National Academy of Sciences (PNAS)', category: 'numeric' },
+  { id: 'chicago', name: 'chicago-author-date', title: 'Chicago Manual of Style 17th/18th (Author-Date)', category: 'author-date' },
+  { id: 'chicago-author-date', name: 'chicago-author-date', title: 'Chicago Manual of Style (Author-Date)', category: 'author-date' },
+  { id: 'harvard', name: 'harvard-cite-them-right', title: 'Harvard (Cite Them Right 12th edition)', category: 'author-date' },
+  { id: 'vancouver', name: 'vancouver', title: 'Vancouver (ICMJE Recommended)', category: 'numeric' },
+  { id: 'mla', name: 'modern-language-association', title: 'MLA 9th edition (Modern Language Association)', category: 'author-date' },
+  { id: 'mla-9th', name: 'modern-language-association', title: 'MLA 9th edition', category: 'author-date' },
+  { id: 'acm-siggraph', name: 'acm-siggraph', title: 'ACM SIGGRAPH / Computer Graphics', category: 'author-date' },
+  { id: 'association-for-computing-machinery', name: 'association-for-computing-machinery', title: 'ACM (Association for Computing Machinery)', category: 'numeric' },
+  { id: 'american-chemical-society', name: 'american-chemical-society', title: 'ACS (American Chemical Society)', category: 'numeric' },
+  { id: 'american-medical-association', name: 'american-medical-association', title: 'AMA (American Medical Association 11th edition)', category: 'numeric' },
+  { id: 'american-institute-of-physics', name: 'american-institute-of-physics', title: 'American Institute of Physics (AIP)', category: 'numeric' },
+  { id: 'biomed-central', name: 'biomed-central', title: 'BioMed Central (BMC)', category: 'numeric' },
+  { id: 'british-medical-journal', name: 'bmj', title: 'British Medical Journal (BMJ)', category: 'numeric' },
   {
     id: 'cambridge-university-press-author-date',
     name: 'cambridge-university-press-author-date',
@@ -279,12 +175,12 @@ export class CslRepositoryService implements OnModuleInit {
     @Inject(RedisCacheService)
     private readonly redisCache?: RedisCacheService,
     @Optional()
-    private readonly httpClient?: AcademicHttpClient,
+    private readonly httpClient?: HttpClient,
   ) {}
 
   onModuleInit() {
     this.logger.log(
-      `CSL Repository initialized with ${POPULAR_ACADEMIC_STYLES.length} popular academic styles (remote 10,000+ catalog lazy-loaded on demand).`,
+      `CSL Repository initialized with ${POPULAR_STYLES.length} popular academic styles (remote 10,000+ catalog lazy-loaded on demand).`,
     );
   }
 
@@ -304,11 +200,11 @@ export class CslRepositoryService implements OnModuleInit {
 
     // 2. If query is empty, return popular presets + any custom styles
     if (!q) {
-      return [...customStyles, ...POPULAR_ACADEMIC_STYLES].slice(0, limit);
+      return [...customStyles, ...POPULAR_STYLES].slice(0, limit);
     }
 
     // 3. Search in popular list and custom styles first
-    const localMatches = [...customStyles, ...POPULAR_ACADEMIC_STYLES].filter(
+    const localMatches = [...customStyles, ...POPULAR_STYLES].filter(
       (s) =>
         s.title.toLowerCase().includes(q) ||
         s.id.toLowerCase().includes(q) ||
@@ -387,23 +283,23 @@ export class CslRepositoryService implements OnModuleInit {
 
     // 2. Cache lookup (scoped custom style lookup first, then global official cache)
     if (this.redisCache) {
-      if (scopeId) {
-        const scoped = await this.redisCache.get<string>(
-          LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeId),
-        );
-        if (scoped && typeof scoped === 'string' && scoped.includes('<style')) {
-          return scoped;
-        }
-      } else {
-        const customCached = await this.redisCache.get<string>(
+      const scopeKey = scopeId?.trim() || 'global';
+      const scoped = await this.redisCache.get<string>(
+        LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey),
+      );
+      if (scoped && typeof scoped === 'string' && scoped.includes('<style')) {
+        return scoped;
+      }
+      if (!scopeId) {
+        const legacyCustom = await this.redisCache.get<string>(
           LIBRARY_REDIS_KEYS.cslStyleXml(normalized, 'custom'),
         );
         if (
-          customCached &&
-          typeof customCached === 'string' &&
-          customCached.includes('<style')
+          legacyCustom &&
+          typeof legacyCustom === 'string' &&
+          legacyCustom.includes('<style')
         ) {
-          return customCached;
+          return legacyCustom;
         }
       }
       const cached = await this.redisCache.get<string>(cacheKey);
@@ -529,6 +425,7 @@ export class CslRepositoryService implements OnModuleInit {
     const RESERVED_OFFICIAL_STYLES = new Set([
       'ieee',
       'nature',
+      'science',
       'chicago',
       'chicago-author-date',
       'mla',
@@ -536,11 +433,29 @@ export class CslRepositoryService implements OnModuleInit {
       'apa',
       'apa-7th',
       'vancouver',
+      'harvard',
       'harvard1',
+      'harvard-cite-them-right',
       'bibtex',
       'ris',
+      'cell',
+      'the-lancet',
+      'plos',
+      'plos-one',
+      'pnas',
+      'frontiers',
+      'springer',
+      'elsevier',
+      'tcvn',
+      'tcvn-author-date',
+      'tcvn-numeric',
+      'bo-giao-duc',
+      'vietnam',
+      'auto',
+      'auto-numeric',
     ]);
-    if (RESERVED_OFFICIAL_STYLES.has(slug)) {
+    const normalizedEngineId = normalizeEngineStyleId(slug);
+    if (RESERVED_OFFICIAL_STYLES.has(slug) || RESERVED_OFFICIAL_STYLES.has(normalizedEngineId)) {
       throw new ExtractionProcessException(
         `Cannot overwrite official built-in or standard CSL style ID: '${slug}'`,
       );
@@ -558,12 +473,14 @@ export class CslRepositoryService implements OnModuleInit {
       updated: new Date().toISOString(),
     };
 
+    const scopeKey = scopeId?.trim() || 'global';
+
     // Cache XML and metadata with user/project scope isolation
     if (this.redisCache) {
-      const xmlKey = LIBRARY_REDIS_KEYS.cslStyleXml(slug, scopeId || 'custom');
+      const xmlKey = LIBRARY_REDIS_KEYS.cslStyleXml(slug, scopeKey);
       await this.redisCache.set(xmlKey, cslXml, 86400 * 365);
-      const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeId);
-      const existing = await this.getCustomStyles(scopeId);
+      const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey);
+      const existing = await this.getCustomStyles(scopeKey);
       const updated = [meta, ...existing.filter((s) => s.id !== slug)].slice(
         0,
         CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE,
@@ -580,7 +497,8 @@ export class CslRepositoryService implements OnModuleInit {
   public async getCustomStyles(scopeId?: string): Promise<CslStyleMetadata[]> {
     if (!this.redisCache) return [];
     try {
-      const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeId);
+      const scopeKey = scopeId?.trim() || 'global';
+      const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey);
       const styles = await this.redisCache.get<CslStyleMetadata[]>(listKey);
       return Array.isArray(styles)
         ? styles.slice(0, CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE)
@@ -629,7 +547,7 @@ export class CslRepositoryService implements OnModuleInit {
       }
     }
 
-    return [...POPULAR_ACADEMIC_STYLES];
+    return [...POPULAR_STYLES];
   }
 
   /**
@@ -718,7 +636,7 @@ export class CslRepositoryService implements OnModuleInit {
       this.logger.warn(
         `Could not refresh remote CSL catalog: ${errMsg}. Using offline fallback.`,
       );
-      return POPULAR_ACADEMIC_STYLES.length;
+      return POPULAR_STYLES.length;
     } finally {
       this.isIndexLoading = false;
     }
@@ -726,15 +644,25 @@ export class CslRepositoryService implements OnModuleInit {
 
   private isValidCslXml(xml?: string): boolean {
     if (!xml || typeof xml !== 'string') return false;
+    if (xml.length > 512 * 1024) return false;
     const trimmed = xml.trim();
+    if (!trimmed || trimmed.length > 512 * 1024) return false;
+    const lower = trimmed.toLowerCase();
     return (
-      (trimmed.startsWith('<?xml') || trimmed.startsWith('<style')) &&
-      trimmed.includes('<style') &&
-      trimmed.includes('</style>') &&
-      /<title[\s\S]*?>[\s\S]*?<\/title>/i.test(trimmed) &&
-      /<id[\s\S]*?>[\s\S]*?<\/id>/i.test(trimmed) &&
-      (/<citation[\s\S]*?>[\s\S]*?<\/citation>/i.test(trimmed) ||
-        /<bibliography[\s\S]*?>[\s\S]*?<\/bibliography>/i.test(trimmed))
+      (lower.startsWith('<?xml') || lower.startsWith('<style')) &&
+      lower.includes('<style') &&
+      lower.includes('</style>') &&
+      (lower.includes('<info') ||
+        (lower.includes('<title') &&
+          lower.includes('</title>') &&
+          lower.includes('<id') &&
+          lower.includes('</id>'))) &&
+      lower.includes('<title') &&
+      lower.includes('</title>') &&
+      lower.includes('<id') &&
+      lower.includes('</id>') &&
+      ((lower.includes('<citation') && lower.includes('</citation>')) ||
+        (lower.includes('<bibliography') && lower.includes('</bibliography>')))
     );
   }
 }

@@ -1,4 +1,6 @@
 import { Prisma } from '@prisma/client';
+import { IsNotEmpty, IsOptional, IsString, IsNumber, IsArray, IsObject, IsBoolean, ArrayMaxSize, Min, Max, IsUUID } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export type CitationStyleId =
   | 'apa'
@@ -69,6 +71,15 @@ export interface CitationItemInput {
   /** Optional optimistic-lock / revision number; also part of the render cache key. */
   version?: number | string | null;
   [key: string]: unknown;
+}
+
+export interface CitationContextOptions {
+  locator?: string;
+  label?: string;
+  prefix?: string;
+  suffix?: string;
+  suppressAuthor?: boolean;
+  locale?: string;
 }
 
 export interface FormattedCitationResult {
@@ -156,7 +167,13 @@ export type ExportItemRecord = Prisma.ItemGetPayload<{
     notesList: { where: { deletedAt: null } };
     identifiers: true;
   };
-}>;
+}> & {
+  publisher?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  [key: string]: unknown;
+};
 
 export type ExportFormatType =
   | 'bibtex'
@@ -168,6 +185,7 @@ export type ExportFormatType =
 
 export interface BurnableAnnotation {
   pageIndex: number;
+  pageLabel?: string | null;
   type?: string;
   color?: string;
   quoteText?: string;
@@ -178,7 +196,7 @@ export interface BurnableAnnotation {
     width?: number;
     height?: number;
     rects?: Array<{ x: number; y: number; width: number; height: number }>;
-  };
+  } | unknown;
 }
 
 export interface CsvExportItem {
@@ -294,4 +312,116 @@ export interface CslItemData {
   language?: string;
   status?: string;
   [key: string]: unknown;
+}
+
+export class FormatCitationDto {
+  @ApiProperty({ description: 'Item metadata to format citation from' })
+  @IsNotEmpty()
+  @IsObject()
+  item!: CitationItemInput;
+
+  @ApiPropertyOptional({
+    description: 'Citation style ID (e.g. apa, ieee, nature, harvard)',
+    example: 'apa-7th',
+  })
+  @IsOptional()
+  @IsString()
+  styleId?: CitationStyleId;
+
+  @ApiPropertyOptional({ description: 'Citation position index', example: 1 })
+  @IsOptional()
+  @IsNumber()
+  index?: number;
+
+  @ApiPropertyOptional({ description: 'Pinpoint locator (e.g. page number "42")' })
+  @IsOptional()
+  @IsString()
+  locator?: string;
+
+  @ApiPropertyOptional({ description: 'Locator label (e.g. "page", "chapter", "section")' })
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  @ApiPropertyOptional({ description: 'In-text citation prefix (e.g. "see ")' })
+  @IsOptional()
+  @IsString()
+  prefix?: string;
+
+  @ApiPropertyOptional({ description: 'In-text citation suffix' })
+  @IsOptional()
+  @IsString()
+  suffix?: string;
+
+  @ApiPropertyOptional({ description: 'Suppress author in in-text citation' })
+  @IsOptional()
+  @IsBoolean()
+  suppressAuthor?: boolean;
+}
+
+export class FormatBatchCitationDto {
+  @ApiProperty({ description: 'Array of item metadata' })
+  @IsArray()
+  @IsNotEmpty()
+  @ArrayMaxSize(500)
+  items!: CitationItemInput[];
+
+  @ApiPropertyOptional({
+    description: 'Citation style ID',
+    example: 'apa-7th',
+  })
+  @IsOptional()
+  @IsString()
+  styleId?: CitationStyleId;
+}
+
+export class ExportLibraryDto {
+  @IsString()
+  format!: ExportFormatType;
+
+  @IsOptional()
+  @IsBoolean()
+  includeNotes?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  itemIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  collectionId?: string;
+
+  @IsOptional()
+  @IsString()
+  tagId?: string;
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(5000)
+  limit?: number;
+}
+
+export class ExportByKeysDto {
+  @ApiProperty({ description: 'List of citation keys to export' })
+  @IsArray()
+  @ArrayMaxSize(1000)
+  @IsString({ each: true })
+  keys!: string[];
+
+  @ApiPropertyOptional({ description: 'Project scope ID if exporting from a project' })
+  @IsOptional()
+  @IsString()
+  projectId?: string;
+
+  @ApiPropertyOptional({ description: 'Export format', example: 'bibtex' })
+  @IsOptional()
+  @IsString()
+  format?: ExportFormatType;
 }

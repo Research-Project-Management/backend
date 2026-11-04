@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { ExportLibraryDto } from './citation/dto/citation.dto';
+import { ExportLibraryDto } from './citation/types/citation.types';
 import { ExportResult } from './citation/types/citation.types';
 import {
   CATALOG_FACADE,
@@ -69,12 +69,17 @@ export interface ILibraryFacade {
     attachmentId: string,
     status: string,
     metadataPatch?: Record<string, unknown>,
+    scope?: { userId?: string; projectId?: string },
   ): Promise<void>;
   updateItemAiMetadata(
     itemId: string,
     aiMetadataPatch: Record<string, unknown>,
+    scope?: { userId?: string; projectId?: string },
   ): Promise<void>;
-  findAttachmentByFileId(fileId: string): Promise<{
+  findAttachmentByFileId(
+    fileId: string,
+    scope?: { userId?: string; projectId?: string },
+  ): Promise<{
     id: string;
     itemId: string;
     metadata?: unknown;
@@ -202,30 +207,36 @@ export class LibraryFacade implements ILibraryFacade {
     return this.extractionFacade.extractDocumentFromBuffer(buffer, options);
   }
 
-  async findAttachmentByFileId(fileId: string): Promise<{
+  async findAttachmentByFileId(
+    fileId: string,
+    scope?: { userId?: string; projectId?: string },
+  ): Promise<{
     id: string;
     itemId: string;
     metadata?: unknown;
   } | null> {
-    return this.catalogFacade.findAttachmentByFileId(fileId);
+    return this.catalogFacade.findAttachmentByFileId(fileId, scope);
   }
 
   async updateAttachmentProcessingStatus(
     attachmentId: string,
     status: string,
     metadataPatch?: Record<string, unknown>,
+    scope?: { userId?: string; projectId?: string },
   ): Promise<void> {
     await this.catalogFacade.updateAttachmentProcessingStatus(
       attachmentId,
       status,
       metadataPatch,
+      scope,
     );
   }
 
   async updateItemAiMetadata(
     itemId: string,
     aiMetadataPatch: Record<string, unknown>,
+    scope?: { userId?: string; projectId?: string },
   ): Promise<void> {
-    await this.catalogFacade.updateItemAiMetadata(itemId, aiMetadataPatch);
+    await this.catalogFacade.updateItemAiMetadata(itemId, aiMetadataPatch, scope);
   }
 }

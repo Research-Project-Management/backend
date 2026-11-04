@@ -8,13 +8,14 @@ import {
 import {
   CslItemData,
   CslName,
+  CitationContextOptions,
 } from '@/modules/library/citation/types/citation.types';
 import { CslRepositoryService } from './csl-repository.service';
 import {
   CslLocaleLoaderService,
   BUILTIN_SPECIAL_STYLES,
   NUMERIC_STYLE_TOKENS,
-} from './csl-locale-loader.service';
+} from './citation.service';
 import {
   CslStyleFormatterService,
   BIBTEX_ITEM_TYPE_MAP,
@@ -24,6 +25,15 @@ import {
 } from './csl-style-formatter.service';
 import { TcvnCitationFormatterService } from './tcvn-citation-formatter.service';
 
+interface CiteEntryOption {
+  id: string;
+  locator?: string;
+  label?: string;
+  prefix?: string;
+  suffix?: string;
+  'suppress-author'?: boolean;
+}
+
 interface CiteInstance {
   format(
     type: string,
@@ -31,7 +41,7 @@ interface CiteInstance {
       template?: string;
       lang?: string;
       format?: string;
-      entry?: string;
+      entry?: string | Array<string | CiteEntryOption>;
     },
   ): string;
 }
@@ -167,6 +177,7 @@ export class CslEngineService implements OnModuleInit {
     cslItem: CslItemData,
     style: string,
     index?: number,
+    context?: CitationContextOptions,
   ): string {
     const rawId =
       (typeof cslItem._itemId === 'string' ? cslItem._itemId : '') ||
@@ -175,15 +186,19 @@ export class CslEngineService implements OnModuleInit {
       cslItem.title ||
       '';
     const digest = this.getOrComputeContentFingerprint(cslItem);
-    return `${rawId}::${style}::${digest}${index !== undefined ? `::${index}` : ''}`;
+    const ctxSig = context
+      ? `::${context.locator || ''}:${context.label || ''}:${context.prefix || ''}:${context.suffix || ''}:${context.suppressAuthor ? '1' : '0'}:${context.locale || ''}`
+      : '';
+    return `${rawId}::${style}::${digest}${index !== undefined ? `::${index}` : ''}${ctxSig}`;
   }
 
   private getCacheKey(
     cslItem: CslItemData,
     style: string,
     index?: number,
+    context?: CitationContextOptions,
   ): string {
-    return this.buildCacheKey(cslItem, style, index);
+    return this.buildCacheKey(cslItem, style, index, context);
   }
 
   private getCached(key: string): EngineCitationResult | null {
@@ -245,15 +260,6 @@ export class CslEngineService implements OnModuleInit {
     return this.loader.normalizeStyle(styleId);
   }
 
-  public async formatAsync(
-    cslItem: CslItemData,
-    styleId: string = 'apa',
-    index: number = 1,
-    scopeId?: string,
-  ): Promise<EngineCitationResult> {
-    await this.ensureTemplate(styleId, scopeId);
-    return this.format(cslItem, styleId, index);
-  }
 
   public async formatBatchAsync(
     cslItems: CslItemData[],
@@ -274,41 +280,57 @@ export class CslEngineService implements OnModuleInit {
       return this.formatBatch(cslItems, styleId);
     }
 
-    const preformattedCitations: Array<{
-      id: string;
-      inText: string;
-      bibliography: string;
-      bibliographyHtml?: string;
-    }> = [];
-
-    for (let i = 0; i < cslItems.length; i++) {
-      if (
-        i > 0 &&
-        i % CslEngineService.EVENT_LOOP_YIELD_BATCH_SIZE === 0
-      ) {
-        await new Promise((resolve) => setImmediate(resolve));
-      }
-      const single = this.format(cslItems[i], normalizedStyle, i + 1);
-      preformattedCitations.push({
-        id: cslItems[i].id,
-        inText: single.inText,
-        bibliography: single.bibliography,
-        bibliographyHtml: single.bibliographyHtml,
-      });
+    // Yield to the event loop once before multi-item CSL rendering for large batches,
+    // then delegate directly to formatBatch(cslItems, styleId, undefined, scopeId) so
+    // `new Cite(cslItems)` runs as a true multi-item CSL processor (preserving CSL
+    // bibliography `<sort>`, numeric range collapsing `[1]-[3]`, and native disambiguation).
+    if (cslItems.length >= CslEngineService.EVENT_LOOP_YIELD_BATCH_SIZE) {
+      await new Promise((resolve) => setImmediate(resolve));
     }
 
-    return this.formatBatch(cslItems, styleId, preformattedCitations);
+    return this.formatBatch(cslItems, styleId, undefined, scopeId);
+  }
+
+  private buildCiteEntryParam(
+    entryId: string,
+    context?: CitationContextOptions,
+  ): string | Array<CiteEntryOption> {
+    if (
+      !context ||
+      (!context.locator &&
+        !context.prefix &&
+        !context.suffix &&
+        !context.suppressAuthor)
+    ) {
+      return entryId;
+    }
+    return [
+      {
+        id: entryId,
+        ...(context.locator
+          ? {
+              locator: context.locator.trim(),
+              label: context.label?.trim() || 'page',
+            }
+          : {}),
+        ...(context.prefix ? { prefix: context.prefix } : {}),
+        ...(context.suffix ? { suffix: context.suffix } : {}),
+        ...(context.suppressAuthor ? { 'suppress-author': true } : {}),
+      },
+    ];
   }
 
   public format(
     cslItem: CslItemData,
     styleId: string = 'apa',
     index: number = 1,
+    scopeId?: string,
+    context?: CitationContextOptions,
   ): EngineCitationResult {
     this.initTemplates();
-    const normalizedStyle = this.normalizeStyle(styleId);
+    const normalizedStyle = this.loader.getScopedStyleId(styleId, scopeId);
 
-    const cacheKey = this.getCacheKey(cslItem, normalizedStyle, index);
+    const cacheKey = this.getCacheKey(cslItem, normalizedStyle, index, context);
     const cached = this.getCached(cacheKey);
     if (cached) {
       return cached;
@@ -324,7 +346,7 @@ export class CslEngineService implements OnModuleInit {
           : isVn
             ? 'tcvn'
             : 'apa';
-      const result = this.format(cslItem, targetStyle, index);
+      const result = this.format(cslItem, targetStyle, index, scopeId, context);
       return this.setCache(cacheKey, { ...result, styleId: normalizedStyle });
     }
 
@@ -343,134 +365,67 @@ export class CslEngineService implements OnModuleInit {
     }
 
     if (normalizedStyle === 'tcvn' || normalizedStyle === 'tcvn-numeric') {
-      return this.setCache(
-        cacheKey,
-        this.formatter.formatTcvn(
-          cslItem,
-          normalizedStyle === 'tcvn-numeric',
-          index,
-        ),
+      const tcvnRes = this.formatter.formatTcvn(
+        cslItem,
+        normalizedStyle === 'tcvn-numeric',
+        index,
       );
+      if (context?.locator) {
+        const locPrefix =
+          !context.label || context.label === 'page' ? 'tr. ' : `${context.label} `;
+        tcvnRes.inText = tcvnRes.inText.replace(
+          /([)\]])$/,
+          `, ${locPrefix}${context.locator.trim()}$1`,
+        );
+      }
+      return this.setCache(cacheKey, tcvnRes);
     }
 
-    let citeInstance: CiteInstance | null = null;
-    try {
-      citeInstance = new Cite(cslItem);
-      const cite = citeInstance;
-      let bibliography = cite
-        .format('bibliography', { template: normalizedStyle, lang: 'en-US' })
-        .trim();
-      if (normalizedStyle === 'ieee') {
-        bibliography = bibliography.replace(/[\u201C\u201D]/g, '"');
-      }
+    const effectiveLang =
+      context?.locale?.trim() ||
+      this.loader.getStyleDefaultLocale(styleId, scopeId);
 
-      const bibliographyHtml = cite
-        .format('bibliography', {
-          template: normalizedStyle,
-          lang: 'en-US',
-          format: 'html',
-        })
-        .trim();
-
-      let inText = '';
-      try {
-        inText = cite
-          .format('citation', {
-            template: normalizedStyle,
-            lang: 'en-US',
-            entry: cslItem.id,
-          })
-          .trim();
-      } catch {
-        inText = `(${cslItem.author?.[0]?.family || 'Anonymous'}, ${cslItem.issued?.['date-parts']?.[0]?.[0] || 'n.d.'})`;
-      }
-
-      return this.setCache(cacheKey, {
-        styleId: normalizedStyle,
-        inText,
-        bibliography,
-        bibliographyHtml,
-        source: 'csl-engine',
-      });
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Failed to render CSL template ${normalizedStyle}: ${errMsg}. Falling back to smart formatter.`,
-      );
-
-      const authors = cslItem.author || [];
-      const firstAuthorFamily =
-        authors[0]?.family || authors[0]?.literal || 'Anonymous';
-      const authorListStr =
-        authors.length > 0
-          ? authors
-              .map((a: CslName) =>
-                `${a.family || a.literal || ''} ${a.given ? a.given[0] + '.' : ''}`.trim(),
-              )
-              .filter(Boolean)
-              .join(', ')
-          : 'Anonymous';
-      const year = cslItem.issued?.['date-parts']?.[0]?.[0] || 'n.d.';
-      const title = cslItem.title || 'Untitled Item';
-      const journal = cslItem['container-title'] || '';
-      const volume = cslItem.volume ? ` ${cslItem.volume}` : '';
-      const issue = cslItem.issue ? `(${cslItem.issue})` : '';
-      const page = cslItem.page ? `: ${cslItem.page}` : '';
-
-      if (NUMERIC_STYLE_TOKENS.some((s) => normalizedStyle.includes(s))) {
-        return this.setCache(cacheKey, {
-          styleId: normalizedStyle,
-          inText: `[${index}]`,
-          bibliography: `[${index}] ${authorListStr}. ${title}.${journal ? ` ${journal}.` : ''} ${year}${volume}${issue}${page}.`,
-          bibliographyHtml: `[${index}] ${this.formatter.escapeHtml(String(authorListStr))}. ${this.formatter.escapeHtml(String(title))}.${journal ? ` <i>${this.formatter.escapeHtml(String(journal))}</i>.` : ''} ${this.formatter.escapeHtml(String(year))}${this.formatter.escapeHtml(String(volume))}${this.formatter.escapeHtml(String(issue))}${this.formatter.escapeHtml(String(page))}.`,
-          source: 'csl-engine',
-        });
-      }
-
-      if (normalizedStyle.includes('harvard')) {
-        return this.setCache(cacheKey, {
-          styleId: normalizedStyle,
-          inText: `(${firstAuthorFamily}, ${year})`,
-          bibliography: `${authorListStr} (${year}) '${title}', ${journal}${volume}${issue}${cslItem.page ? `, pp. ${cslItem.page}` : ''}.`,
-          bibliographyHtml: `${this.formatter.escapeHtml(String(authorListStr))} (${this.formatter.escapeHtml(String(year))}) &lsquo;${this.formatter.escapeHtml(String(title))}&rsquo;, <i>${this.formatter.escapeHtml(String(journal))}</i>${this.formatter.escapeHtml(String(volume))}${this.formatter.escapeHtml(String(issue))}${cslItem.page ? `, pp. ${this.formatter.escapeHtml(String(cslItem.page))}` : ''}.`,
-          source: 'csl-engine',
-        });
-      }
-
-      const cite = citeInstance ?? new Cite(cslItem);
-      return this.setCache(cacheKey, {
-        styleId: normalizedStyle,
-        inText: cite
-          .format('citation', {
-            template: 'apa',
-            lang: 'en-US',
-            entry: cslItem.id,
-          })
-          .trim(),
-        bibliography: cite
-          .format('bibliography', { template: 'apa', lang: 'en-US' })
-          .trim(),
-        bibliographyHtml: cite
-          .format('bibliography', {
-            template: 'apa',
-            lang: 'en-US',
-            format: 'html',
-          })
-          .trim(),
-        source: 'csl-engine',
-      });
+    const cite = new Cite(cslItem);
+    const activeTemplate = this.loader.isStyleSupported(styleId, scopeId)
+      ? normalizedStyle
+      : 'apa';
+    let bibliography = cite
+      .format('bibliography', { template: activeTemplate, lang: effectiveLang })
+      .trim();
+    if (normalizedStyle === 'ieee') {
+      bibliography = bibliography.replace(/[\u201C\u201D]/g, '"');
     }
+
+    const bibliographyHtml = cite
+      .format('bibliography', {
+        template: activeTemplate,
+        lang: effectiveLang,
+        format: 'html',
+      })
+      .trim();
+
+    const inText = cite
+      .format('citation', {
+        template: activeTemplate,
+        lang: effectiveLang,
+        entry: this.buildCiteEntryParam(cslItem.id, context),
+      })
+      .trim();
+
+    return this.setCache(cacheKey, {
+      styleId: normalizedStyle,
+      inText,
+      bibliography,
+      bibliographyHtml,
+      source: 'csl-engine',
+    });
   }
 
   public formatBatch(
     cslItems: CslItemData[],
     styleId: string = 'apa',
-    preformattedCitations?: Array<{
-      id: string;
-      inText: string;
-      bibliography: string;
-      bibliographyHtml?: string;
-    }>,
+    _unused?: undefined,
+    scopeId?: string,
   ): {
     styleId: string;
     combinedInText: string;
@@ -484,11 +439,12 @@ export class CslEngineService implements OnModuleInit {
     }>;
   } {
     this.initTemplates();
-    const normalizedStyle = this.normalizeStyle(styleId);
+    const baseStyle = this.normalizeStyle(styleId);
+    const normalizedStyle = this.loader.getScopedStyleId(styleId, scopeId);
 
     if (cslItems.length === 0) {
       return {
-        styleId: normalizedStyle,
+        styleId: baseStyle,
         combinedInText: '',
         citations: [],
         bibliographyText: '',
@@ -496,8 +452,8 @@ export class CslEngineService implements OnModuleInit {
       };
     }
 
-    if (normalizedStyle === 'bibtex' || normalizedStyle === 'ris') {
-      const isBib = normalizedStyle === 'bibtex';
+    if (baseStyle === 'bibtex' || baseStyle === 'ris') {
+      const isBib = baseStyle === 'bibtex';
       const renderedList = cslItems.map((item) =>
         isBib
           ? this.formatter.formatBibtex(item)
@@ -505,7 +461,7 @@ export class CslEngineService implements OnModuleInit {
       );
       const bibliographyText = renderedList.join('\n\n');
       return {
-        styleId: normalizedStyle,
+        styleId: baseStyle,
         combinedInText: isBib
           ? `\\cite{${cslItems.map((item) => item.id).join(', ')}}`
           : cslItems.map((item) => item.title).join('; '),
@@ -520,12 +476,12 @@ export class CslEngineService implements OnModuleInit {
       };
     }
 
-    if (normalizedStyle === 'auto' || normalizedStyle === 'auto-numeric') {
+    if (baseStyle === 'auto' || baseStyle === 'auto-numeric') {
       const hasVn = cslItems.some((item) =>
         TcvnCitationFormatterService.isVietnameseItem(item),
       );
       const targetStyle =
-        normalizedStyle === 'auto-numeric'
+        baseStyle === 'auto-numeric'
           ? hasVn
             ? 'tcvn-numeric'
             : 'ieee'
@@ -533,55 +489,32 @@ export class CslEngineService implements OnModuleInit {
             ? 'tcvn'
             : 'apa';
       return {
-        ...this.formatBatch(cslItems, targetStyle),
-        styleId: normalizedStyle,
+        ...this.formatBatch(cslItems, targetStyle, undefined, scopeId),
+        styleId: baseStyle,
       };
     }
 
-    if (normalizedStyle === 'tcvn' || normalizedStyle === 'tcvn-numeric') {
+    if (baseStyle === 'tcvn' || baseStyle === 'tcvn-numeric') {
       return this.formatter.formatTcvnBatch(
         cslItems,
-        normalizedStyle === 'tcvn-numeric',
+        baseStyle === 'tcvn-numeric',
       );
     }
 
-    let cachedList:
-      | Array<{ id: string; inText: string; bibliography: string; bibliographyHtml?: string }>
-      | undefined;
-    const getFallbackCitation = (idx: number) => {
-      if (preformattedCitations?.[idx]) return preformattedCitations[idx];
-      const item = cslItems[idx];
-      const single = this.format(item, normalizedStyle, idx + 1);
-      return {
-        id: item.id,
-        inText: single.inText,
-        bibliography: single.bibliography,
-        bibliographyHtml: single.bibliographyHtml,
-      };
-    };
-    const buildAllFallbackCitations = () =>
-      (cachedList ??=
-        preformattedCitations ?? cslItems.map((_, idx) => getFallbackCitation(idx)));
-
-    const buildFallbackCombinedInText = (fallbackList: Array<{ inText: string }>) => {
-      const isNumeric = NUMERIC_STYLE_TOKENS.some((s) => normalizedStyle.includes(s));
-      if (isNumeric) return `[${cslItems.map((_, i) => i + 1).join(', ')}]`;
-      const inTexts = fallbackList.map((c) => c.inText.replace(/^\(|\)$/g, '')).filter(Boolean);
-      return `(${inTexts.join('; ')})`;
-    };
-
-    const isNumericStyle = NUMERIC_STYLE_TOKENS.some((s) => normalizedStyle.includes(s));
+    const isNumericStyle = NUMERIC_STYLE_TOKENS.some((s) => baseStyle.includes(s));
     const applyBatchYearDisambiguation = (
       list: Array<{ id: string; inText: string; bibliography: string; bibliographyHtml?: string }>,
     ) => {
       if (isNumericStyle || cslItems.length < 2) return list;
       const groups = new Map<string, number[]>();
-      cslItems.forEach((item, idx) => {
-        const firstAuthor = (item.author?.[0]?.family || item.author?.[0]?.literal || '').trim().toLowerCase();
-        const yearRaw = item.issued?.['date-parts']?.[0]?.[0];
+      list.forEach((entry, idx) => {
+        const item = cslItems[idx];
+        const yearRaw = item?.issued?.['date-parts']?.[0]?.[0];
         const yearStr = yearRaw !== undefined && yearRaw !== null ? String(yearRaw).trim() : '';
-        if (!firstAuthor || !/^\d{4}$/.test(yearStr)) return;
-        const key = `${firstAuthor}::${yearStr}`;
+        if (!/^\d{4}$/.test(yearStr)) return;
+        const normalizedInText = (entry.inText || '').replace(/^\(|\)$/g, '').trim().toLowerCase();
+        if (!normalizedInText) return;
+        const key = `${normalizedInText}::${yearStr}`;
         const arr = groups.get(key) ?? [];
         arr.push(idx);
         groups.set(key, arr);
@@ -590,7 +523,7 @@ export class CslEngineService implements OnModuleInit {
       const cloned = list.map((c) => ({ ...c }));
       for (const [key, indices] of groups.entries()) {
         if (indices.length < 2) continue;
-        const yearStr = key.split('::')[1];
+        const yearStr = key.split('::').pop()!;
         indices.forEach((itemIdx, pos) => {
           const suffix = String.fromCharCode(97 + (pos % 26));
           const suffixedYear = `${yearStr}${suffix}`;
@@ -601,88 +534,119 @@ export class CslEngineService implements OnModuleInit {
             entry.inText = entry.inText.replace(new RegExp(`\\b${yearStr}\\b`), suffixedYear);
           }
           if (!alreadyHasSuffixRe.test(entry.bibliography)) {
-            entry.bibliography = entry.bibliography.replace(
-              new RegExp(`(\\(\\s*${yearStr}|\\b${yearStr})\\b`),
-              (m) => `${m}${suffix}`,
-            );
+            const parenYearRe = new RegExp(`(\\(\\s*${yearStr})(\\s*[,)])`);
+            if (parenYearRe.test(entry.bibliography)) {
+              entry.bibliography = entry.bibliography.replace(parenYearRe, `$1${suffix}$2`);
+            } else {
+              entry.bibliography = entry.bibliography.replace(
+                new RegExp(`(\\b${yearStr})\\b`),
+                `$1${suffix}`,
+              );
+            }
           }
           if (entry.bibliographyHtml && !alreadyHasSuffixRe.test(entry.bibliographyHtml)) {
-            entry.bibliographyHtml = entry.bibliographyHtml.replace(
-              new RegExp(`(\\(\\s*${yearStr}|\\b${yearStr})\\b`),
-              (m) => `${m}${suffix}`,
-            );
+            const parenYearRe = new RegExp(`(\\(\\s*${yearStr})(\\s*[,)])`);
+            if (parenYearRe.test(entry.bibliographyHtml)) {
+              entry.bibliographyHtml = entry.bibliographyHtml.replace(
+                parenYearRe,
+                `$1${suffix}$2`,
+              );
+            } else {
+              entry.bibliographyHtml = entry.bibliographyHtml.replace(
+                new RegExp(`(\\b${yearStr})\\b`),
+                `$1${suffix}`,
+              );
+            }
           }
         });
       }
       return cloned;
     };
 
-    try {
-      if (preformattedCitations && preformattedCitations.length === cslItems.length) {
-        const batchCitations = applyBatchYearDisambiguation(preformattedCitations);
-        const bibliographyText = batchCitations.map((c) => c.bibliography).filter(Boolean).join('\n\n');
-        const bibliographyHtml = batchCitations.map((c) => c.bibliographyHtml || '').filter(Boolean).join('\n');
-        return {
-          styleId: normalizedStyle,
-          combinedInText: buildFallbackCombinedInText(batchCitations),
-          citations: batchCitations,
-          bibliographyText,
-          bibliographyHtml,
-        };
-      }
-
-      const cite = new Cite(cslItems);
-      const bibliographyText = cite.format('bibliography', { template: normalizedStyle, lang: 'en-US' }).trim();
-      const bibliographyHtml = cite
-        .format('bibliography', { template: normalizedStyle, lang: 'en-US', format: 'html' })
-        .trim();
-
-      const batchCitations = applyBatchYearDisambiguation(
-        cslItems.map((item, idx) => {
-          const tryFormatEntry = (type: string, format?: string): string => {
-            try {
-              return cite.format(type, { template: normalizedStyle, lang: 'en-US', ...(format ? { format } : {}), entry: item.id }).trim();
-            } catch {
-              return '';
-            }
-          };
-          const cit = tryFormatEntry('citation');
-          const bib = tryFormatEntry('bibliography');
-          const bibHtml = tryFormatEntry('bibliography', 'html');
-          const fallback = !cit || !bib || !bibHtml ? getFallbackCitation(idx) : undefined;
-          const itemInText = cit || fallback?.inText || '';
-          const rawBib = bib || fallback?.bibliography || '';
-          const itemBib = normalizedStyle === 'ieee' && bib ? rawBib.replace(/[\u201C\u201D]/g, '"') : rawBib;
-          const itemBibHtml = bibHtml || fallback?.bibliographyHtml;
-          return { id: item.id, inText: itemInText, bibliography: itemBib, bibliographyHtml: itemBibHtml };
-        }),
-      );
-
-      let combinedInText = '';
-      try {
-        combinedInText = cite.format('citation', { template: normalizedStyle, lang: 'en-US' }).trim();
-      } catch {
-        combinedInText = buildFallbackCombinedInText(batchCitations);
-      }
-
-      return {
-        styleId: normalizedStyle,
-        combinedInText,
-        citations: batchCitations,
-        bibliographyText,
-        bibliographyHtml,
-      };
-    } catch {
-      const citations = buildAllFallbackCitations();
-      const disambiguatedFallback = applyBatchYearDisambiguation(citations);
-      return {
-        styleId: normalizedStyle,
-        combinedInText: buildFallbackCombinedInText(disambiguatedFallback),
-        citations: disambiguatedFallback,
-        bibliographyText: disambiguatedFallback.map((c) => c.bibliography).join('\n\n'),
-        bibliographyHtml: '',
-      };
+    const effectiveLang = this.loader.getStyleDefaultLocale(styleId, scopeId);
+    const activeTemplate = this.loader.isStyleSupported(styleId, scopeId)
+      ? normalizedStyle
+      : 'apa';
+    const cite = new Cite(cslItems);
+    let bibliographyText = cite
+      .format('bibliography', { template: activeTemplate, lang: effectiveLang })
+      .trim();
+    if (baseStyle === 'ieee') {
+      bibliographyText = bibliographyText.replace(/[\u201C\u201D]/g, '"');
     }
+    const bibliographyHtml = cite
+      .format('bibliography', {
+        template: activeTemplate,
+        lang: effectiveLang,
+        format: 'html',
+      })
+      .trim();
+
+    const batchCitations = applyBatchYearDisambiguation(
+      cslItems.map((item) => {
+        const cacheKey = this.buildCacheKey(item, activeTemplate);
+        const cached = this.getCached(cacheKey);
+        if (cached) {
+          return {
+            id: item.id,
+            inText: cached.inText,
+            bibliography: cached.bibliography,
+            bibliographyHtml: cached.bibliographyHtml,
+          };
+        }
+
+        const cit = cite
+          .format('citation', {
+            template: activeTemplate,
+            lang: effectiveLang,
+            entry: item.id,
+          })
+          .trim();
+        const rawBib = cite
+          .format('bibliography', {
+            template: activeTemplate,
+            lang: effectiveLang,
+            entry: item.id,
+          })
+          .trim();
+        const bibHtml = cite
+          .format('bibliography', {
+            template: activeTemplate,
+            lang: effectiveLang,
+            format: 'html',
+            entry: item.id,
+          })
+          .trim();
+        const itemBib =
+          baseStyle === 'ieee' ? rawBib.replace(/[\u201C\u201D]/g, '"') : rawBib;
+        const entryResult = {
+          id: item.id,
+          inText: cit,
+          bibliography: itemBib,
+          bibliographyHtml: bibHtml,
+        };
+        this.setCache(cacheKey, {
+          styleId: baseStyle,
+          inText: cit,
+          bibliography: itemBib,
+          bibliographyHtml: bibHtml,
+          source: 'csl-engine',
+        });
+        return entryResult;
+      }),
+    );
+
+    const combinedInText = cite
+      .format('citation', { template: activeTemplate, lang: effectiveLang })
+      .trim();
+
+    return {
+      styleId: baseStyle,
+      combinedInText,
+      citations: batchCitations,
+      bibliographyText,
+      bibliographyHtml,
+    };
   }
 
   public formatBibtex(cslInput: CslItemData | CslItemData[]): string {

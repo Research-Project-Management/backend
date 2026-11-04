@@ -2,7 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { ExportsService } from '@/modules/library/citation/services/exports.service';
 import { CitationService } from '@/modules/library/citation/services/citation.service';
 import { ExportsRepository } from '@/modules/library/citation/repositories/exports.repository';
-import { CitationFacade } from '@/modules/library/citation/citation.facade';
+import { CitationFacade } from '@/modules/library/citation/services/citation.service';
 import { LibraryFacade } from '@/modules/library/library.facade';
 
 describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)', () => {
@@ -280,6 +280,79 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
         mockProjectId,
       );
       expect(result?.content).toContain('@article{vaswani2017attention,');
+    });
+  });
+
+  describe('PdfBakerService (W3C Top-Left to PDF Bottom-Left Coordinate Transformation)', () => {
+    it('should convert normalized [0, 1] top-left rects and single rect objects to PDF bottom-left coordinates', async () => {
+      const { PDFDocument } = await import('pdf-lib');
+      const { PdfBakerService } = await import(
+        '@/modules/library/citation/services/pdf-baker.service'
+      );
+      const baker = new PdfBakerService();
+
+      const doc = await PDFDocument.create();
+      doc.addPage([600, 800]);
+      const rawBytes = await doc.save();
+
+      // Test extractPdfRects directly via private helper or burnAnnotationsToPdf
+      const rectsFromSingle = (baker as any).extractPdfRects(
+        { x: 0.1, y: 0.2, width: 0.5, height: 0.05 },
+        600,
+        800,
+      );
+      expect(rectsFromSingle).toEqual([
+        {
+          x: 60,
+          y: (1 - 0.25) * 800, // 600
+          width: 300,
+          height: 40,
+        },
+      ]);
+
+      const rectsFromNested = (baker as any).extractPdfRects(
+        { rects: [{ x: 0.2, y: 0.1, width: 0.4, height: 0.05 }] },
+        600,
+        800,
+      );
+      expect(rectsFromNested).toEqual([
+        {
+          x: 120,
+          y: (1 - 0.15) * 800, // 680
+          width: 240,
+          height: 40,
+        },
+      ]);
+
+      const bakedBytes = await baker.burnAnnotationsToPdf(rawBytes, [
+        {
+          pageIndex: 0,
+          type: 'highlight',
+          color: '#ffd400',
+          comment: 'Important finding',
+          rectCoords: { x: 0.1, y: 0.2, width: 0.5, height: 0.05 },
+        },
+        {
+          pageIndex: 0,
+          type: 'underline',
+          color: '#2ea8e5',
+          rectCoords: { rects: [{ x: 0.2, y: 0.3, width: 0.4, height: 0.03 }] },
+        },
+      ]);
+      expect(bakedBytes.byteLength).toBeGreaterThan(rawBytes.byteLength);
+
+      // Verify 1-based Reader UI annotations (pageIndex: 1, pageLabel: "1") on a 1-page PDF are burned onto Page 1 (index 0)
+      const bakedOneBasedBytes = await baker.burnAnnotationsToPdf(rawBytes, [
+        {
+          pageIndex: 1,
+          pageLabel: '1',
+          type: 'highlight',
+          color: '#ffd400',
+          comment: 'Reader UI 1-based page annotation',
+          rectCoords: { x: 0.1, y: 0.2, width: 0.5, height: 0.05 },
+        },
+      ]);
+      expect(bakedOneBasedBytes.byteLength).toBeGreaterThan(rawBytes.byteLength);
     });
   });
 });

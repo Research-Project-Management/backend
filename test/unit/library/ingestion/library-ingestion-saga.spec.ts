@@ -7,7 +7,7 @@ import {
   IngestionSagaSession,
 } from '@/modules/library/ingestion/services/ingestion-saga.orchestrator';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { ICatalogFacade } from '@/modules/library/catalog/catalog.facade';
+import { ICatalogFacade } from '@/modules/library/catalog/services/library-bootstrap.service';
 import { IngestionStatus } from '@prisma/client';
 
 describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle', () => {

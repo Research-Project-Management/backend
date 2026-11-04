@@ -7,7 +7,7 @@ import { libraryConfig, LibraryConfigService } from './config/library.config';
 
 // Core Cross-Cutting Concerns
 import { SsrfGuardService } from './services/ssrf-guard.service';
-import { AcademicHttpClient } from './services/academic-http.client';
+import { HttpClient } from './services/ssrf-guard.service';
 
 // Resilience Patterns
 import { ResilienceRegistryService } from './resilience/resilience-registry.service';
@@ -26,13 +26,13 @@ import { ResilienceRegistryService } from './resilience/resilience-registry.serv
   providers: [
     LibraryConfigService,
     SsrfGuardService,
-    AcademicHttpClient,
+    HttpClient,
     ResilienceRegistryService,
   ],
   exports: [
     LibraryConfigService,
     SsrfGuardService,
-    AcademicHttpClient,
+    HttpClient,
     ResilienceRegistryService,
   ],
 })

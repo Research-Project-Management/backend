@@ -318,60 +318,6 @@ describe('WebFetchLadderService', () => {
     });
   });
 
-  describe('Ladder 3: Stealth Headless Fetcher Fallback', () => {
-    const originalEnv = process.env;
-
-    beforeEach(() => {
-      process.env = { ...originalEnv };
-    });
-
-    afterEach(() => {
-      process.env = originalEnv;
-    });
-
-    it('fetches via FlareSolverr when FLARESOLVERR_URL is configured', async () => {
-      process.env.FLARESOLVERR_URL = 'http://localhost:8191/v1';
-
-      const mockWafResponse = {
-        ok: false,
-        status: 403,
-        headers: new Headers({ 'content-type': 'text/html' }),
-        text: jest
-          .fn()
-          .mockResolvedValue(
-            '<html><title>Cloudflare Challenge</title></html>',
-          ),
-      };
-
-      const mockFlareSolverrResponse = {
-        status: 'ok',
-        solution: {
-          status: 200,
-          response:
-            '<html><head><title>Bypassed Cloudflare Article</title></head><body>Content</body></html>',
-        },
-      };
-
-      global.fetch = jest
-        .fn()
-        .mockResolvedValueOnce(mockWafResponse as any) // Step 1: plain fetch 403
-        .mockResolvedValueOnce({ ok: false, status: 404 } as any) // Step 2: Open mirror fails
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          json: jest.fn().mockResolvedValue(mockFlareSolverrResponse),
-        } as any); // Step 3: FlareSolverr bypass
-
-      const res = await service.fetch(
-        'https://heavy-waf-site.org/article/special',
-      );
-
-      expect(res.isBlocked).toBe(false);
-      expect(res.ladderStepReached).toBe(3);
-      expect(res.bodyText).toContain('Bypassed Cloudflare Article');
-    });
-  });
-
   describe('Ladder 4: Fallback BLOCKED State', () => {
     it('gracefully returns BLOCKED when WAF blocks and no mirror matches', async () => {
       // Step 1: Plain fetch returns Bot Challenge

@@ -1,176 +1,361 @@
-import {
-  Injectable,
-  NotFoundException,
-  Logger,
-  Optional,
-  Inject,
-} from '@nestjs/common';
-import { RedisCacheService } from '@/core';
-import {
-  CATALOG_FACADE,
-  ICatalogFacade,
-  ITEM_CACHE_INVALIDATOR,
-  IItemCacheInvalidator,
-} from '@/modules/library/core';
+import { Injectable, NotFoundException, Logger, Optional, Inject, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { RedisCacheService, shouldRunWorkerConsumers } from '@/core';
+import { CATALOG_FACADE, ICatalogFacade, ITEM_CACHE_INVALIDATOR, IItemCacheInvalidator, normalizeProjectScopeId } from '@/modules/library/core';
 import { invalidateIngestionItemCache } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
-import {
-  calculateMetadataQualityScore,
-  diagnoseBibliographicQualityIssues,
-  QUALITY_RULE_BIT,
-} from '@/modules/library/ingestion/domain/metadata.validator';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
-import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
-import {
-  RetractionDatabaseService,
-  RetractionDatabaseStats,
-} from './retraction-database.service';
-import {
-  RetractionSyncService,
-  RetractionSyncResult,
-  RetractionSyncOptions,
-} from './retraction-sync.service';
-import {
-  FlagRetractionDto,
-  BatchCheckRetractionDto,
-} from '@/modules/library/ingestion/dto/ingestion.dto';
-import {
-  RetractionCheckResult,
-  RetractionStats,
-  RetractionDetails,
-  RetractionNature,
-} from '@/modules/library/ingestion/types/ingestion.types';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/base-metadata.provider';
+import { RetractionDatabaseService, RetractionDatabaseStats } from './retraction-database.service';
+import { FlagRetractionDto, BatchCheckRetractionDto } from '@/modules/library/ingestion/dto/ingestion.dto';
+import { RetractionCheckResult, RetractionStats, RetractionDetails, RetractionNature } from '@/modules/library/ingestion/types/ingestion.types';
+import { libraryConfig } from '@/modules/library/core/config/library.config';
+import { RetractionSeederService } from '@/modules/library/ingestion/services/retraction-seeder.service';
 
-export interface CompletenessAnalysis {
-  score: number; // 0 - 100
-  level: 'complete' | 'adequate' | 'minimal';
-  missingKeyFields: string[];
-  presentFieldsCount: number;
-  totalFieldsCount: number;
+export interface RetractionSyncOptions {
+  maxDays?: number;
+  limit?: number;
+  concurrency?: number;
 }
 
-export interface QualityAuditReport {
-  totalItems: number;
-  averageQualityScore: number;
-  healthReport: {
-    missingDoi: number;
-    missingAbstract: number;
-    missingYear: number;
-  };
+export interface RetractionSyncResult {
+  totalEligible: number;
+  scanned: number;
+  newlyRetracted: number;
+  stillClean: number;
+  skippedManual: number;
+  /** Items with no DOI/PMID or whose lookup could not be completed; status left unchanged. */
+  skippedUnverified: number;
+  failed: number;
+  durationMs: number;
+}
+
+interface SyncCandidate {
+  id: string;
+  userId?: string | null;
+  projectId?: string | null;
+  doi?: string | null;
+  pmid?: string | null;
+  isRetracted?: boolean | null;
+  retractionNature?: string | null;
 }
 
 @Injectable()
-export class QualityService {
+export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(RetractionSyncService.name);
+  private initTimer: NodeJS.Timeout | null = null;
+  private syncTimer: NodeJS.Timeout | null = null;
+
   constructor(
+    private readonly repo: RetractionRepository,
+    private readonly scanner: RetractionScannerProvider,
+    @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly seeder?: RetractionSeederService,
+    @Optional()
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
     @Optional()
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway?: ICatalogFacade,
   ) {}
 
-  /**
-   * Calculates completeness score for an item based on its type definition.
-   */
-  calculateItemCompleteness(
-    item: Record<string, unknown>,
-  ): CompletenessAnalysis {
-    const itemType =
-      typeof item.itemType === 'string'
-        ? item.itemType
-        : typeof item.type === 'string'
-          ? item.type
-          : 'journalArticle';
-    const fields = this.catalogGateway?.getOrderedFields
-      ? this.catalogGateway.getOrderedFields(itemType)
-      : [];
+  onModuleInit(): void {
+    if (libraryConfig().app.isTest || !shouldRunWorkerConsumers()) return;
+    const intervalHours = libraryConfig().retraction.syncIntervalHours;
+    const intervalMs = Math.max(1, intervalHours) * 60 * 60 * 1000;
+    this.logger.log(
+      `Initializing background Retraction Sync worker (interval: ${intervalHours}h)`,
+    );
 
-    if (!fields || fields.length === 0) {
-      return {
-        score: 50,
-        level: 'adequate',
-        missingKeyFields: [],
-        presentFieldsCount: 1,
-        totalFieldsCount: 1,
-      };
-    }
+    // Initial delay of 2 minutes after boot before first background scan
+    this.initTimer = setTimeout(() => {
+      this.initTimer = null;
+      const initialTask = libraryConfig().retraction.enableGitlabDump
+        ? this.syncDailyRetractionDelta()
+        : this.syncAllStaleItems();
+      initialTask.catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Initial background retraction sync error: ${msg}`);
+      });
+    }, 120000);
+    this.initTimer.unref();
 
-    const typeSpecificKeys = (fields as Array<{ key: string }>)
-      .filter((f) => !['title', 'date', 'url', 'doi'].includes(f.key))
-      .slice(0, 5)
-      .map((f) => f.key);
-
-    const evaluation = calculateMetadataQualityScore(item, {
-      typeSpecificKeys,
-    });
-
-    return {
-      score: evaluation.score,
-      level: evaluation.level,
-      missingKeyFields: evaluation.missingKeyFields,
-      presentFieldsCount: evaluation.presentFieldsCount,
-      totalFieldsCount: fields.length,
-    };
+    this.syncTimer = setInterval(() => {
+      this.syncDailyRetractionDelta().catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Periodic background retraction sync error: ${msg}`);
+      });
+    }, intervalMs);
+    this.syncTimer.unref();
   }
 
-  async getQualityAudit(userId: string, projectId?: string) {
-    const items = this.catalogGateway
-      ? await this.catalogGateway.findQualityAuditItems(userId, 2000, projectId)
-      : [];
+  onModuleDestroy(): void {
+    if (this.initTimer) {
+      clearTimeout(this.initTimer);
+      this.initTimer = null;
+    }
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
+    }
+  }
 
-    let totalScore = 0;
-    let missingDoi = 0;
-    let missingAbstract = 0;
-    let missingYear = 0;
-    let missingAuthors = 0;
-    let healthyItems = 0;
-    const flaggedItems: Array<{
-      itemId: string;
-      title: string;
-      issues: string[];
-    }> = [];
-
-    for (const it of items) {
-      const { evaluation, issues, isHealthy } =
-        diagnoseBibliographicQualityIssues(
-          it as unknown as Record<string, unknown>,
-        );
-
-      const issueMask = evaluation.missingIssueMask;
-      if (issueMask & QUALITY_RULE_BIT.authors) missingAuthors += 1;
-      if (issueMask & QUALITY_RULE_BIT.year) missingYear += 1;
-      if (issueMask & QUALITY_RULE_BIT.doi) missingDoi += 1;
-      if (issueMask & QUALITY_RULE_BIT.abstract) missingAbstract += 1;
-
-      if (isHealthy) {
-        healthyItems += 1;
-      } else {
-        flaggedItems.push({
-          itemId: it.id,
-          title: it.title || 'Untitled',
-          issues,
-        });
+  /**
+   * Autonomous daily delta sync:
+   * 1. Updates local canonical retraction dataset if seeder is present.
+   * 2. Executes targeted Delta Set reconciliation on newly discovered retractions.
+   * 3. Scans stale user library items and reconciles against the updated dataset.
+   */
+  async syncDailyRetractionDelta(
+    options?: RetractionSyncOptions,
+  ): Promise<RetractionSyncResult> {
+    this.logger.log(
+      'Executing autonomous daily retraction delta synchronization',
+    );
+    if (this.seeder) {
+      try {
+        const seedResult = await this.seeder.seedFromGitlab();
+        if (seedResult.deltaDois && seedResult.deltaDois.length > 0) {
+          await this.reconcileDeltaRetractions(seedResult.deltaDois);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Automated Crossref dump sync skipped/failed: ${msg}`);
       }
+    }
+    return this.syncAllStaleItems(options);
+  }
 
-      totalScore += evaluation.score;
+  /**
+   * Targeted Delta Set Inverted Lookup ($O(|Δ|)): Instantly finds and flags user items
+   * that match newly added or updated retractions without scanning the entire library.
+   */
+  async reconcileDeltaRetractions(
+    newlyRetractedDois: string[],
+  ): Promise<number> {
+    if (!newlyRetractedDois || newlyRetractedDois.length === 0) return 0;
+    this.logger.log(
+      `Executing targeted Delta Set reconciliation for ${newlyRetractedDois.length} DOIs`,
+    );
+
+    const matchingItems = await this.repo.findItemsByDois(newlyRetractedDois);
+    if (!matchingItems.length) {
+      this.logger.log('Delta Set reconciliation: 0 user items affected.');
+      return 0;
     }
 
-    const averageQualityScore =
-      items.length > 0 ? Math.round(totalScore / items.length) : 100;
+    this.logger.warn(
+      `Delta Set reconciliation: Found ${matchingItems.length} user item(s) matching new retractions!`,
+    );
+    let updatedCount = 0;
+    const now = new Date();
+
+    for (const item of matchingItems) {
+      if (!item.isRetracted && item.doi) {
+        const lookupRes = await this.scanner.lookup(item.doi);
+        if (lookupRes.status === 'retracted') {
+          await this.repo.updateItemRetraction(
+            item.id,
+            true,
+            lookupRes.details.nature,
+            lookupRes.details,
+            now,
+          );
+          updatedCount++;
+          await invalidateIngestionItemCache({
+            itemIds: [item.id],
+            userId: (item as { userId?: string | null }).userId,
+            projectId: (item as { projectId?: string | null }).projectId,
+            cacheCoordinator: this.cacheCoordinator,
+            catalogGateway: this.catalogGateway,
+            cache: this.cache,
+            logger: this.logger,
+            contextLabel: 'delta retraction sync',
+          });
+        }
+      }
+    }
+
+    this.logger.log(
+      `Delta Set reconciliation complete: ${updatedCount} user item(s) updated.`,
+    );
+    return updatedCount;
+  }
+
+  /**
+   * Periodically scans stale items across all active users and projects.
+   */
+  async syncAllStaleItems(
+    options?: RetractionSyncOptions,
+  ): Promise<RetractionSyncResult> {
+    const startTime = Date.now();
+    const maxDays = options?.maxDays ?? 14;
+    const limit = options?.limit ?? 200;
+    const concurrency = this.resolveConcurrency(options);
+
+    const staleBefore = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000);
+    const items = await this.repo.findGlobalStaleItemsForSync(
+      staleBefore,
+      limit,
+    );
+
+    return this.processItems(items, concurrency, startTime);
+  }
+
+  /**
+   * Scans stale library items whose retraction status has not been checked
+   * within `maxDays` (default 14 days), re-evaluating them against local database & Crossref.
+   */
+  async syncStaleLibraryItems(
+    userId: string,
+    projectId?: string,
+    options?: RetractionSyncOptions,
+  ): Promise<RetractionSyncResult> {
+    const startTime = Date.now();
+    const maxDays = options?.maxDays ?? 14;
+    const limit = options?.limit ?? 100;
+    const concurrency = this.resolveConcurrency(options);
+
+    const staleBefore = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000);
+
+    const items = await this.repo.findStaleItemsForSync(
+      userId,
+      staleBefore,
+      projectId,
+      limit,
+    );
+
+    this.logger.log(
+      `Starting retraction delta sync: found ${items.length} eligible stale item(s) (stale threshold: ${maxDays} days, concurrency: ${concurrency})`,
+    );
+
+    const scopedItems = items.map((it) => ({
+      ...it,
+      userId: (it as { userId?: string }).userId || userId,
+      projectId: (it as { projectId?: string | null }).projectId ?? projectId,
+    }));
+
+    const result = await this.processItems(scopedItems, concurrency, startTime);
+
+    this.logger.log(
+      `Retraction delta sync finished in ${result.durationMs}ms: scanned=${result.scanned}, newlyRetracted=${result.newlyRetracted}, clean=${result.stillClean}, skippedManual=${result.skippedManual}, skippedUnverified=${result.skippedUnverified}, failed=${result.failed}`,
+    );
+
+    return result;
+  }
+
+  private resolveConcurrency(options?: RetractionSyncOptions): number {
+    return Math.max(1, Math.min(options?.concurrency ?? 3, 5));
+  }
+
+  /**
+   * Shared chunked-concurrency processor. Matches by DOI/PMID only; manual
+   * flags are preserved and unverifiable items keep their stored status.
+   */
+  private async processItems(
+    items: SyncCandidate[],
+    concurrency: number,
+    startTime: number,
+  ): Promise<RetractionSyncResult> {
+    let scanned = 0;
+    let newlyRetracted = 0;
+    let stillClean = 0;
+    let skippedManual = 0;
+    let skippedUnverified = 0;
+    let failed = 0;
+    const updatedItems: SyncCandidate[] = [];
+
+    for (let i = 0; i < items.length; i += concurrency) {
+      const chunk = items.slice(i, i + concurrency);
+      await Promise.all(
+        chunk.map(async (item) => {
+          // Preserve manual override flags
+          if (item.isRetracted && item.retractionNature === 'manual') {
+            skippedManual++;
+            return;
+          }
+
+          try {
+            const result = await this.scanner.lookup(item.doi, item.pmid);
+            const now = new Date();
+
+            if (result.status === 'retracted') {
+              if (!item.isRetracted) newlyRetracted++;
+              await this.repo.updateItemRetraction(
+                item.id,
+                true,
+                result.details.nature,
+                result.details,
+                now,
+              );
+              scanned++;
+              updatedItems.push(item);
+            } else if (result.status === 'clean') {
+              stillClean++;
+              await this.repo.updateItemRetraction(
+                item.id,
+                false,
+                null,
+                null,
+                now,
+              );
+              scanned++;
+              updatedItems.push(item);
+            } else {
+              skippedUnverified++;
+              scanned++;
+            }
+          } catch (err: unknown) {
+            failed++;
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(
+              `Failed to sync retraction status for item ${item.id} (${item.doi || item.pmid || 'no identifier'}): ${msg}`,
+            );
+          }
+        }),
+      );
+    }
+
+    if (updatedItems.length > 0) {
+      const groupedByScope = new Map<
+        string,
+        { userId?: string | null; projectId?: string | null; itemIds: string[] }
+      >();
+      for (const item of updatedItems) {
+        const validProjectId = normalizeProjectScopeId(item.projectId);
+        const scopeKey = `${item.userId || ''}:${validProjectId || ''}`;
+        const existingGroup = groupedByScope.get(scopeKey);
+        if (existingGroup) {
+          existingGroup.itemIds.push(item.id);
+        } else {
+          groupedByScope.set(scopeKey, {
+            userId: item.userId,
+            projectId: validProjectId,
+            itemIds: [item.id],
+          });
+        }
+      }
+      for (const group of groupedByScope.values()) {
+        await invalidateIngestionItemCache({
+          itemIds: group.itemIds,
+          userId: group.userId,
+          projectId: group.projectId,
+          cacheCoordinator: this.cacheCoordinator,
+          catalogGateway: this.catalogGateway,
+          cache: this.cache,
+          logger: this.logger,
+          contextLabel: 'during retraction sync',
+        });
+      }
+    }
 
     return {
-      totalItems: items.length,
-      healthyItems,
-      averageQualityScore,
-      healthScorePercentage: averageQualityScore,
-      missingDoiCount: missingDoi,
-      missingYearCount: missingYear,
-      missingAuthorsCount: missingAuthors,
-      missingAbstractCount: missingAbstract,
-      missingPdfCount: 0,
-      flaggedItems,
-      healthReport: {
-        missingDoi,
-        missingAbstract,
-        missingYear,
-      },
+      totalEligible: items.length,
+      scanned,
+      newlyRetracted,
+      stillClean,
+      skippedManual,
+      skippedUnverified,
+      failed,
+      durationMs: Date.now() - startTime,
     };
   }
 }
@@ -251,9 +436,13 @@ export class RetractionService {
     const effectiveProjectId = projectId || item.projectId || undefined;
 
     if (lookup.status === 'retracted') {
+      const isActuallyRetracted =
+        lookup.details.nature === 'retraction' ||
+        lookup.details.nature === 'Retraction' ||
+        lookup.details.nature === 'manual';
       await this.repo.updateItemRetraction(
         itemId,
-        true,
+        isActuallyRetracted,
         lookup.details.nature,
         lookup.details,
         now,
@@ -265,8 +454,8 @@ export class RetractionService {
       );
       return {
         itemId,
-        isRetracted: true,
-        status: 'retracted',
+        isRetracted: isActuallyRetracted,
+        status: isActuallyRetracted ? 'retracted' : 'clean',
         nature: lookup.details.nature,
         details: lookup.details,
         checkedAt: now,

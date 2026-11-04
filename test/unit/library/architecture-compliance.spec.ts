@@ -18,18 +18,57 @@ function walkSync(dir: string, fileList: string[] = []): string[] {
 describe('Library Architecture & Design Compliance Guardrails', () => {
   const libraryRoot = path.resolve(__dirname, '../../../src/modules/library');
   const allFiles = walkSync(libraryRoot);
+  const fileCache = new Map<string, { content: string; lines: string[]; normalizedPath: string; relPath: string }>();
+  for (const file of allFiles) {
+    const content = fs.readFileSync(file, 'utf-8');
+    fileCache.set(file, {
+      content,
+      lines: content.split(/\r?\n/),
+      normalizedPath: file.replace(/\\/g, '/'),
+      relPath: path.relative(libraryRoot, file).replace(/\\/g, '/'),
+    });
+  }
+
+  const feRoot = path.resolve(
+    __dirname,
+    '../../../../frontend/src/features/library',
+  );
+  function walkFrontend(dir: string, list: string[] = []): string[] {
+    if (!fs.existsSync(dir)) return list;
+    for (const entry of fs.readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      const st = fs.statSync(full);
+      if (st.isDirectory()) {
+        walkFrontend(full, list);
+      } else if (
+        (full.endsWith('.ts') || full.endsWith('.tsx')) &&
+        !full.endsWith('.spec.ts') &&
+        !full.endsWith('.test.ts')
+      ) {
+        list.push(full);
+      }
+    }
+    return list;
+  }
+  const feFiles = walkFrontend(feRoot);
+  const feFileCache = new Map<string, { content: string; lines: string[]; relPath: string }>();
+  for (const file of feFiles) {
+    const content = fs.readFileSync(file, 'utf-8');
+    feFileCache.set(file, {
+      content,
+      lines: content.split(/\r?\n/),
+      relPath: path.relative(feRoot, file).replace(/\\/g, '/'),
+    });
+  }
 
   it('SC-001: Zero process.env usage outside core/config/library.config.ts', () => {
     const violations: Array<{ file: string; line: number; match: string }> = [];
 
-    for (const file of allFiles) {
-      const normalizedPath = file.replace(/\\/g, '/');
+    for (const [file, { normalizedPath, lines }] of fileCache) {
       if (normalizedPath.endsWith('/core/config/library.config.ts')) {
         continue;
       }
 
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
       lines.forEach((line, index) => {
         if (line.includes('process.env')) {
           violations.push({
@@ -47,8 +86,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   it('SC-002: Zero direct PrismaService in controllers, stages, outbox workers, or fulltext providers', () => {
     const violations: Array<{ file: string; line: number; match: string }> = [];
 
-    for (const file of allFiles) {
-      const normalizedPath = file.replace(/\\/g, '/');
+    for (const [file, { normalizedPath, lines }] of fileCache) {
       const isBoundaryOrWorker =
         /\/controllers\//.test(normalizedPath) ||
         /\/stages\//.test(normalizedPath) ||
@@ -57,8 +95,6 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
 
       if (!isBoundaryOrWorker) continue;
 
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
       lines.forEach((line, index) => {
         if (/PrismaService/.test(line) && !line.trim().startsWith('//')) {
           violations.push({
@@ -76,16 +112,13 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   it('SC-002b: Zero direct repository injection in controllers or facades', () => {
     const violations: Array<{ file: string; line: number; match: string }> = [];
 
-    for (const file of allFiles) {
-      const normalizedPath = file.replace(/\\/g, '/');
+    for (const [file, { normalizedPath, lines }] of fileCache) {
       const isControllerOrFacade =
         /\/controllers\//.test(normalizedPath) ||
         normalizedPath.endsWith('.facade.ts');
 
       if (!isControllerOrFacade) continue;
 
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
       lines.forEach((line, index) => {
         // Must not inject repositories directly in controllers or facades
         if (
@@ -109,16 +142,13 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   it('SC-002c: Core domain & ports purity - no upward dependencies or framework coupling', () => {
     const violations: Array<{ file: string; line: number; match: string }> = [];
 
-    for (const file of allFiles) {
-      const normalizedPath = file.replace(/\\/g, '/');
+    for (const [file, { normalizedPath, lines }] of fileCache) {
       const isPureCore =
         normalizedPath.includes('/core/domain/') ||
         normalizedPath.includes('/core/ports/');
 
       if (!isPureCore) continue;
 
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
       lines.forEach((line, index) => {
         // No imports from extraction/ingestion/search/catalog/citation/sync
         // No imports from @nestjs/
@@ -143,9 +173,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   it('SC-003: Zero generic "throw new Error(" in library module (typed domain exceptions only)', () => {
     const violations: Array<{ file: string; line: number; match: string }> = [];
 
-    for (const file of allFiles) {
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
+    for (const [file, { lines }] of fileCache) {
       lines.forEach((line, index) => {
         if (
           /throw\s+new\s+Error\(/.test(line) &&
@@ -166,8 +194,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   it('SC-004: Decompose oversized files (> 750 lines, excluding static data catalogs/lexicons)', () => {
     const oversizedFiles: Array<{ file: string; lines: number }> = [];
 
-    for (const file of allFiles) {
-      const normalizedPath = file.replace(/\\/g, '/');
+    for (const [file, { normalizedPath, lines }] of fileCache) {
       // Exclude static lookup dictionaries
       if (
         normalizedPath.endsWith('.lexicon.ts') ||
@@ -177,8 +204,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         continue;
       }
 
-      const content = fs.readFileSync(file, 'utf-8');
-      const lineCount = content.split(/\r?\n/).length;
+      const lineCount = lines.length;
       if (lineCount > 750) {
         oversizedFiles.push({
           file: path.relative(libraryRoot, file),
@@ -193,7 +219,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     const violations: Array<{ file: string; line: number; match: string }> = [];
 
     const domainServiceFiles = allFiles.filter((file) => {
-      const normalized = file.replace(/\\/g, '/');
+      const normalized = fileCache.get(file)!.normalizedPath;
       return (
         normalized.endsWith('/catalog/services/items.service.ts') ||
         normalized.endsWith('/catalog/services/item-query.service.ts') ||
@@ -205,8 +231,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     });
 
     for (const file of domainServiceFiles) {
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
+      const { lines } = fileCache.get(file)!;
       lines.forEach((line, index) => {
         if (
           /typeof\s+(this\.\w+|helpers)\.\w+\s*===\s*['"]function['"]/.test(line) &&
@@ -243,15 +268,12 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     };
     const violations: Array<{ file: string; line: number; match: string }> = [];
 
-    for (const file of allFiles) {
-      const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
+    for (const [, { relPath, lines }] of fileCache) {
       const sourceContext = boundedContexts.find((ctx) =>
         relPath.startsWith(`${ctx}/`),
       );
       if (!sourceContext) continue;
 
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
       const isContextModuleFile =
         relPath === `${sourceContext}/${sourceContext}.module.ts`;
 
@@ -290,11 +312,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   it('SC-007: Zero explicit "any" type annotations or casts across all Library Backend files', () => {
     const violations: Array<{ file: string; line: number; match: string }> = [];
 
-    for (const file of allFiles) {
-      const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
-
+    for (const [, { relPath, lines }] of fileCache) {
       lines.forEach((line, index) => {
         const trimmed = line.trim();
         if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
@@ -311,40 +329,14 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     expect(violations).toEqual([]);
   });
 
-  it('SC-008: Frontend Library file size (<= 800 lines, excluding static *.types.ts) & zero explicit "any"', () => {
-    const feRoot = path.resolve(
-      __dirname,
-      '../../../../frontend/src/features/library',
-    );
+  it('SC-008: Frontend Library file size (<= 750 lines, excluding static *.types.ts) & zero explicit "any"', () => {
     if (!fs.existsSync(feRoot)) return;
 
-    function walkFrontend(dir: string, list: string[] = []): string[] {
-      for (const entry of fs.readdirSync(dir)) {
-        const full = path.join(dir, entry);
-        const st = fs.statSync(full);
-        if (st.isDirectory()) {
-          walkFrontend(full, list);
-        } else if (
-          (full.endsWith('.ts') || full.endsWith('.tsx')) &&
-          !full.endsWith('.spec.ts') &&
-          !full.endsWith('.test.ts')
-        ) {
-          list.push(full);
-        }
-      }
-      return list;
-    }
-
-    const feFiles = walkFrontend(feRoot);
     const sizeViolations: Array<{ file: string; lines: number }> = [];
     const anyViolations: Array<{ file: string; line: number; match: string }> = [];
 
-    for (const file of feFiles) {
-      const relPath = path.relative(feRoot, file).replace(/\\/g, '/');
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
-
-      if (!relPath.endsWith('.types.ts') && lines.length > 800) {
+    for (const [, { relPath, lines }] of feFileCache) {
+      if (!relPath.endsWith('.types.ts') && lines.length > 750) {
         sizeViolations.push({ file: relPath, lines: lines.length });
       }
 
@@ -370,19 +362,16 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     // AND zero PrismaService / RedisCacheService / Repository imports inside /domain/ across all bounded contexts
     const beDirectPrismaInServices: Array<{ file: string; line: number; match: string }> = [];
     const beInfraInDomainViolations: Array<{ file: string; line: number; match: string }> = [];
-    for (const file of allFiles) {
-      const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
-      const content = fs.readFileSync(file, 'utf-8');
-
+    for (const [, { relPath, lines }] of fileCache) {
       if (relPath.includes('/domain/')) {
-        content.split(/\r?\n/).forEach((line, index) => {
+        lines.forEach((line, index) => {
           const trimmed = line.trim();
           if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
           if (
             /\bPrismaService\b/.test(line) ||
             /\bRedisCacheService\b/.test(line) ||
             /from\s+['"][^'"]*\/repositories\//.test(line) ||
-            /\b(?:this\.prisma|tx)\.(?:item|collection|tag|note|attachment|annotation|userPublication|itemMetadata|contributor|itemIdentifier|itemRelation|outboxEvent|changeLog)\b/.test(
+            /\b(?:this\.prisma|tx|client)\.(?:item|collection|tag|note|attachment|annotation|userPublication|itemMetadata|contributor|itemIdentifier|itemRelation|outboxEvent|changeLog)\b/.test(
               line,
             )
           ) {
@@ -398,7 +387,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       if (!relPath.includes('/services/') || relPath.endsWith('sync/services/transaction.service.ts')) {
         continue;
       }
-      content.split(/\r?\n/).forEach((line, index) => {
+      lines.forEach((line, index) => {
         if (
           !line.trim().startsWith('//') &&
           (/this\.prisma\./.test(line) ||
@@ -416,39 +405,13 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     expect(beInfraInDomainViolations).toEqual([]);
 
     // 2. Frontend: Zero scattered useQueryClient, useQuery, useMutation, localStorage, or direct *Service.* in UI components
-    const feRoot = path.resolve(
-      __dirname,
-      '../../../../frontend/src/features/library',
-    );
     if (!fs.existsSync(feRoot)) return;
 
-    function walkFrontend(dir: string, list: string[] = []): string[] {
-      for (const entry of fs.readdirSync(dir)) {
-        const full = path.join(dir, entry);
-        const st = fs.statSync(full);
-        if (st.isDirectory()) {
-          walkFrontend(full, list);
-        } else if (
-          (full.endsWith('.ts') || full.endsWith('.tsx')) &&
-          !full.endsWith('.spec.ts') &&
-          !full.endsWith('.test.ts')
-        ) {
-          list.push(full);
-        }
-      }
-      return list;
-    }
-
-    const feFiles = walkFrontend(feRoot);
     const feUiViolations: Array<{ file: string; line: number; match: string }> = [];
     const feDomainStorageViolations: Array<{ file: string; line: number; match: string }> = [];
     const feLayerDirectionViolations: Array<{ file: string; line: number; match: string }> = [];
 
-    for (const file of feFiles) {
-      const relPath = path.relative(feRoot, file).replace(/\\/g, '/');
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
-
+    for (const [, { relPath, lines }] of feFileCache) {
       if (relPath.startsWith('ui/')) {
         lines.forEach((line, index) => {
           const trimmed = line.trim();
@@ -561,11 +524,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       line: number;
       match: string;
     }> = [];
-    for (const file of allFiles) {
-      const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
-      const content = fs.readFileSync(file, 'utf-8');
-      const lines = content.split(/\r?\n/);
-
+    for (const [, { relPath, lines }] of fileCache) {
       lines.forEach((line, index) => {
         const trimmed = line.trim();
         if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
@@ -636,6 +595,15 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   it('SC-012: Anti-Patchwork, Anti-Split-Brain & Workflow Order Guardrails (no dead pass-through shims, no multi-user metadata split-brain, no duplicate changelog writes, no double ingestion dispatch)', () => {
     const deletedPassThroughShims = [
       path.join(libraryRoot, 'extraction/domain/snapshot-template.helper.ts'),
+      path.join(libraryRoot, 'extraction/extractors/snapshot-template.helper.ts'),
+      path.join(libraryRoot, 'extraction/extractors/metadata-quality.gate.ts'),
+      path.join(libraryRoot, 'extraction/providers/pdf-bibliography.extractor.ts'),
+      path.join(libraryRoot, 'extraction/domain/extraction-tag-key.helper.ts'),
+      path.join(libraryRoot, 'ingestion/dto/index.ts'),
+      path.join(libraryRoot, 'ingestion/stages/identify-url.resolver.ts'),
+      path.join(libraryRoot, 'search/services/fulltext.provider.ts'),
+      path.join(libraryRoot, 'sync/services/outbox.metrics.ts'),
+      path.join(libraryRoot, 'sync/services/outbox-bull.processor.ts'),
       path.resolve(
         __dirname,
         '../../../../frontend/src/features/library/domain/curation-Duplicates.ts',
@@ -647,6 +615,258 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       path.resolve(
         __dirname,
         '../../../../frontend/src/features/library/ui/reader/reader-attachment.utils.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/sdk/clients/citation-extraction.client.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/sdk/clients/ingestion-sync.client.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/core/coordinator/reader/annotation-history.command.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/core/workflows/feed-entry-save.workflow.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/core/coordinator/panel-resize.coordinator.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/core/coordinator/inspector-collections.coordinator.ts',
+      ),
+      path.join(libraryRoot, 'catalog/services/collection-membership.helper.ts'),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/sdk/queries/catalog-placeholder.helper.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/core/coordinator/reader/use-viewer-search.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/inspector/ReaderInspector.tsx',
+      ),
+      path.join(libraryRoot, 'core/ports/citation.port.ts'),
+      path.join(libraryRoot, 'core/ports/extraction.port.ts'),
+      path.join(libraryRoot, 'core/ports/ingestion.port.ts'),
+      path.join(libraryRoot, 'core/ports/search.port.ts'),
+      path.join(libraryRoot, 'core/ports/sync.port.ts'),
+      path.join(libraryRoot, 'core/resilience/rate-limiter.ts'),
+      path.join(libraryRoot, 'core/resilience/single-flight.ts'),
+      path.join(libraryRoot, 'core/utils/stream-compression.util.ts'),
+      path.join(libraryRoot, 'core/utils/uuid.util.ts'),
+      path.join(libraryRoot, 'catalog/types/saved-search.types.ts'),
+      path.join(libraryRoot, 'catalog/dto/notes.dto.ts'),
+      path.join(libraryRoot, 'catalog/dto/tags.dto.ts'),
+      path.join(libraryRoot, 'catalog/dto/state.dto.ts'),
+      path.join(libraryRoot, 'catalog/dto/item-curation.dto.ts'),
+      path.join(libraryRoot, 'catalog/controllers/types.controller.ts'),
+      path.join(libraryRoot, 'catalog/controllers/state.controller.ts'),
+      path.join(libraryRoot, 'catalog/controllers/tags.controller.ts'),
+      path.join(libraryRoot, 'catalog/controllers/saved-searches.controller.ts'),
+      path.join(libraryRoot, 'catalog/domain/tree.engine.ts'),
+      path.join(libraryRoot, 'catalog/services/types.service.ts'),
+      path.join(libraryRoot, 'catalog/services/item-cache.coordinator.ts'),
+      path.join(libraryRoot, 'catalog/services/item-fulltext.service.ts'),
+      path.join(libraryRoot, 'citation/controllers/exports.controller.ts'),
+      path.join(libraryRoot, 'citation/domain/csl-style-registry.ts'),
+      path.join(libraryRoot, 'citation/services/csl-locale-loader.service.ts'),
+      path.join(libraryRoot, 'extraction/dto/attachments.dto.ts'),
+      path.join(libraryRoot, 'extraction/dto/multipart-upload.dto.ts'),
+      path.join(libraryRoot, 'extraction/controllers/extraction-telemetry.controller.ts'),
+      path.join(libraryRoot, 'ingestion/controllers/retraction.controller.ts'),
+      path.join(libraryRoot, 'ingestion/controllers/feeds.controller.ts'),
+      path.join(libraryRoot, 'ingestion/dto/submission.dto.ts'),
+      path.join(libraryRoot, 'ingestion/dto/capture-url.dto.ts'),
+      path.join(libraryRoot, 'ingestion/types/ingestion.errors.ts'),
+      path.join(libraryRoot, 'ingestion/domain/candidate-builder.helper.ts'),
+      path.join(libraryRoot, 'ingestion/domain/retraction-bloom-filter.domain.ts'),
+      path.join(libraryRoot, 'ingestion/parsers/medline-csv-formats.parser.ts'),
+      path.join(libraryRoot, 'ingestion/services/retraction-sync.service.ts'),
+      path.join(libraryRoot, 'ingestion/services/feeds.engine.ts'),
+      path.join(libraryRoot, 'ingestion/services/domain-rate-limiter.service.ts'),
+      path.join(libraryRoot, 'ingestion/services/quality.service.ts'),
+      path.join(libraryRoot, 'ingestion/services/ingestion-run-reporter.service.ts'),
+      path.join(libraryRoot, 'ingestion/providers/dblp.provider.ts'),
+      path.join(libraryRoot, 'ingestion/providers/openlibrary.provider.ts'),
+      path.join(libraryRoot, 'ingestion/providers/unpaywall.provider.ts'),
+      path.join(libraryRoot, 'sync/services/outbox.dispatcher.ts'),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/core/adapters/reader-storage.adapter.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/core/manager/library-command-snapshot.helper.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/domain/item-field-coupling.domain.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/domain/saved-search-schema.domain.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/domain/text.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/domain/types/saved-searches.types.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/sdk/clients/ingestion.client.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/sdk/clients/citation-exports.client.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/sdk/queries/cache-filter-matcher.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/inspector/fields/CreatorRowItem.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/inspector/fields/InlineField.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/modals/EditFeedModal.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/reader/ReaderLeftRail.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/reader/ReaderOutlinePanel.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/reader/viewer/TextSelectionToolbar.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/reader/viewer/epub-snapshot-utils.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/sidebar/CollectionContextMenu.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/sidebar/SavedSearchListSection.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/sidebar/SidebarHeader.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/content/ItemContextMenu.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/topbar/TopbarSearch.tsx',
+      ),
+      // Phase 3 Deep Module Consolidations (Backend)
+      path.join(libraryRoot, 'core/constants/redis-keys.constants.ts'),
+      path.join(libraryRoot, 'core/events/library-events.ts'),
+      path.join(libraryRoot, 'core/domain/item-type.domain.ts'),
+      path.join(libraryRoot, 'core/domain/tiptap.domain.ts'),
+      path.join(libraryRoot, 'core/services/http.client.ts'),
+      path.join(libraryRoot, 'core/types/ingestion.types.ts'),
+      path.join(libraryRoot, 'extraction/types/extraction.types.ts'),
+      path.join(libraryRoot, 'core/utils/cache-invalidation.helper.ts'),
+      path.join(libraryRoot, 'catalog/controllers/item-curation.controller.ts'),
+      path.join(libraryRoot, 'catalog/dto/saved-search.dto.ts'),
+      path.join(libraryRoot, 'catalog/repositories/state.repository.ts'),
+      path.join(libraryRoot, 'catalog/repositories/item-filter-where.builder.ts'),
+      path.join(libraryRoot, 'catalog/catalog.facade.ts'),
+      path.join(libraryRoot, 'citation/dto/citation.dto.ts'),
+      path.join(libraryRoot, 'citation/citation.facade.ts'),
+      path.join(libraryRoot, 'extraction/extractors/xmp.parser.ts'),
+      path.join(libraryRoot, 'extraction/extraction.facade.ts'),
+      path.join(libraryRoot, 'extraction/subscribers/item-lifecycle.subscriber.ts'),
+      path.join(libraryRoot, 'ingestion/ingestion.facade.ts'),
+      path.join(libraryRoot, 'ingestion/providers/retraction-scanner.provider.ts'),
+      path.join(libraryRoot, 'ingestion/commands/seed-retractions.command.ts'),
+      path.join(libraryRoot, 'ingestion/subscribers/retraction-item-events.subscriber.ts'),
+      path.join(libraryRoot, 'ingestion/repositories/metadata.cache.ts'),
+      path.join(libraryRoot, 'search/dto/search.dto.ts'),
+      path.join(libraryRoot, 'search/search.facade.ts'),
+      path.join(libraryRoot, 'search/subscribers/search-events.subscriber.ts'),
+      path.join(libraryRoot, 'sync/dto/sync-query.dto.ts'),
+      path.join(libraryRoot, 'sync/domain/outbox.domain.ts'),
+      // Phase 3 Deep Module Consolidations (Frontend)
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/core/store/feeds.store.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/domain/sort-items.domain.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/sdk/clients/search-sync-feeds.client.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/content/LibraryEmptyState.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/inspector/AttachmentPdfPreview.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/inspector/fields/DynamicInspectorField.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/modals/RetractionNoticeModal.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/modals/PaperBibtexDialog.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/modals/AddLinkModal.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/modals/CslStyleSearchModal.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/modals/MyPublicationModal.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/sidebar/ProjectLibrariesSection.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/domain/saved-search-evaluator.domain.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/core/coordinator/index.ts',
       ),
     ];
     for (const shimPath of deletedPassThroughShims) {
@@ -684,11 +904,9 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   it('SC-013: Hollywood Principle & Zero Shadow Backend Guardrails (Backend port inversion & Frontend server authority)', () => {
     // 1. Backend: Zero concrete ItemCacheCoordinator imports outside catalog/
     const cacheCoordinatorViolations: Array<{ file: string; line: number; match: string }> = [];
-    for (const file of allFiles) {
-      const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
+    for (const [, { relPath, lines }] of fileCache) {
       if (relPath.startsWith('catalog/')) continue;
-      const content = fs.readFileSync(file, 'utf-8');
-      content.split(/\r?\n/).forEach((line, index) => {
+      lines.forEach((line, index) => {
         if (!line.trim().startsWith('//') && /\bItemCacheCoordinator\b/.test(line)) {
           cacheCoordinatorViolations.push({
             file: relPath,
@@ -700,11 +918,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     }
     expect(cacheCoordinatorViolations).toEqual([]);
 
-    // 2. Frontend: Zero client-metadata-resolver shadow backend file or N+1 copySubtree in collection.coordinator
-    const feRoot = path.resolve(
-      __dirname,
-      '../../../../frontend/src/features/library',
-    );
+    // 2. Frontend: Zero client-metadata-resolver / saved-search-evaluator shadow backend files, zero client-side RSS/Atom XML parser or SavedSearch/SystemView evaluators, and zero N+1 copySubtree
     if (!fs.existsSync(feRoot)) return;
 
     const deletedShadowBackendFile = path.join(
@@ -712,6 +926,29 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       'core/services/client-metadata-resolver.service.ts',
     );
     expect(fs.existsSync(deletedShadowBackendFile)).toBe(false);
+    expect(
+      fs.existsSync(path.join(feRoot, 'domain/saved-search-evaluator.domain.ts')),
+    ).toBe(false);
+
+    const forbiddenShadowBackendSymbols: Array<{ file: string; line: number; match: string }> = [];
+    for (const [, { relPath, lines }] of feFileCache) {
+      lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+        if (
+          /\b(?:parseFeedXml|evaluateSavedSearch|filterItemsBySavedSearch|filterItemsBySystemView|CollectionTreeComposite)\b/.test(
+            line,
+          )
+        ) {
+          forbiddenShadowBackendSymbols.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        }
+      });
+    }
+    expect(forbiddenShadowBackendSymbols).toEqual([]);
 
     const collectionCoordinatorPath = path.join(
       feRoot,

@@ -10,48 +10,71 @@ enum ReadStatus {
 }
 
 model State {
-  userId         String     @map("user_id") @db.Uuid
-  itemId         String     @map("item_id") @db.Uuid
-  item           Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  readStatus     ReadStatus @default(unread) @map("read_status")
-  isStarred      Boolean    @default(false) @map("is_starred")
-  rating         Int?
-  currentPage    Int?       @map("current_page")
-  scrollPosition Json?      @map("scroll_position") @db.JsonB
-  lastOpenedAt   DateTime?  @map("last_opened_at") @db.Timestamptz(6)
-  lastReadAt     DateTime?  @map("last_read_at") @db.Timestamptz(6)
-  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  userId                 String     @map("user_id") @db.Uuid
+  itemId                 String     @map("item_id") @db.Uuid
+  item                   Item       @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_user_item_states_item_id")
+  readStatus             ReadStatus @default(unread) @map("read_status")
+  isStarred              Boolean    @default(false) @map("is_starred")
+  rating                 Int?
+  currentPage            Int?       @map("current_page")
+  scrollPosition         Json?      @map("scroll_position") @db.JsonB
+  lastActiveAttachmentId String?    @map("last_active_attachment_id") @db.Uuid
+  lastOpenedAt           DateTime?  @map("last_opened_at") @db.Timestamptz(6)
+  lastReadAt             DateTime?  @map("last_read_at") @db.Timestamptz(6)
+  createdAt              DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@id([userId, itemId])
   @@index([userId, isStarred])
   @@index([userId, readStatus])
-  @@index([userId, lastOpenedAt(sort: Desc)])
-  @@index([userId, lastReadAt(sort: Desc)])
+  @@index([userId, lastOpenedAt(sort: Desc), itemId(sort: Desc)])
+  @@index([userId, lastReadAt(sort: Desc), itemId(sort: Desc)])
   @@index([itemId])
   @@map("user_item_states")
+}
+
+model AttachmentReadingState {
+  userId        String     @map("user_id") @db.Uuid
+  attachmentId  String     @map("attachment_id") @db.Uuid
+  attachment    Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_att_reading_states_attachment_id")
+  itemId        String     @map("item_id") @db.Uuid
+  item          Item       @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_att_reading_states_item_id")
+  currentPage   Int        @default(1) @map("current_page")
+  scrollOffsetX Float      @default(0) @map("scroll_offset_x") @db.Real
+  scrollOffsetY Float      @default(0) @map("scroll_offset_y") @db.Real
+  zoomScale     Float      @default(1.0) @map("zoom_scale") @db.Real
+  rotation      Int        @default(0) @map("rotation") @db.SmallInt
+  viewMode      String     @default("continuous") @map("view_mode") @db.VarChar(32)
+  bookmarks     Json       @default("[]") @db.JsonB
+  version       Int        @default(1)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([userId, attachmentId])
+  @@index([userId, itemId])
+  @@map("attachment_reading_states")
 }
 
 model Note {
   id          String    @id @default(uuid(7)) @db.Uuid
   itemId      String?   @map("item_id") @db.Uuid
-  item        Item?     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item        Item?     @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_notes_item_id")
   title       String    @default("Untitled Note")
   contentMd   String    @default("") @map("content_md")
   contentJson Json?     @map("content_json") @db.JsonB
   tags        String[]  @default([])
   userId      String    @map("user_id") @db.Uuid
   createdById String?   @map("created_by_id") @db.Uuid
+  updatedById String?   @map("updated_by_id") @db.Uuid
+  deletedById String?   @map("deleted_by_id") @db.Uuid
   projectId   String?   @map("project_id") @db.Uuid
   version     Int       @default(1)
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  @@index([itemId, deletedAt, createdAt(sort: Desc)])
+  @@index([itemId, deletedAt, updatedAt(sort: Desc)])
   @@index([userId, projectId, deletedAt, updatedAt(sort: Desc)])
   @@index([projectId, deletedAt, updatedAt(sort: Desc)])
-  @@index([deletedAt])
   @@index([tags], type: Gin)
   @@map("notes")
 }

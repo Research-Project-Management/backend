@@ -1,4 +1,4 @@
-import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 

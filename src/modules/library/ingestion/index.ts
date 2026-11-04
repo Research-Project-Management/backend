@@ -1,11 +1,8 @@
 export * from './ingestion.module';
-export * from './ingestion.facade';
+export * from './controllers/ingestion.controller';
 
 // Controllers
-export * from './controllers/ingestion.controller';
 export * from './controllers/curation.controller';
-export * from './controllers/retraction.controller';
-export * from './controllers/feeds.controller';
 
 // Domain
 export * from './domain/ingestion-run.aggregate';
@@ -13,18 +10,14 @@ export * from './domain/deduplication.domain';
 export * from './domain/metadata.validator';
 export * from './domain/enrichment-patch.builder';
 export * from './domain/duplicate-merge.domain';
-export * from './domain/candidate-builder.helper';
 
 // DTOs
 export * from './dto/ingestion.dto';
-export * from './dto/submission.dto';
-export * from './dto/capture-url.dto';
 
 // Services
 export * from './services/ingestion.service';
 export * from './services/ingestion-verifier.service';
 export * from './services/ingestion-saga.orchestrator';
-export * from './services/ingestion-run-reporter.service';
 export * from './services/pipeline.service';
 export * from './services/pipeline-side-effects.service';
 export * from './services/pipeline-batch.executor';
@@ -35,21 +28,19 @@ export * from './services/metadata-resolver.service';
 export * from './services/url-metadata-scraper.service';
 export * from './services/url-capture.service';
 export * from './services/web-fetch-ladder.service';
-export * from './services/domain-rate-limiter.service';
+export * from './services/feed-retrieval.service';
 export * from './services/duplicate-detector.service';
 export * from './services/duplicate-merger.service';
 export * from './services/retraction.service';
 export * from './services/retraction-database.service';
-export * from './services/retraction-sync.service';
 export * from './services/feeds.service';
-export * from './services/feed-retrieval.service';
 
 // Repositories
 export * from './repositories/ingestion.repository';
 export * from './repositories/duplicate-merge.repository';
 export * from './repositories/retraction.repository';
 export * from './repositories/feeds.repository';
-export * from './repositories/metadata.cache';
+export * from './services/retraction-seeder.service';
 
 // Parsers
 export * from './parsers/bibtex.parser';
@@ -71,7 +62,6 @@ export {
   mergeReconciledNotesArrays,
   mergeReconciledExtraText,
   finalizeReconciledBibliographicMetadata,
-  finalizeBibliographicMetadata,
   evaluateCitationTrap,
   verifyTitleLookupCorroboration,
   verifyCandidateMatch,
@@ -79,6 +69,7 @@ export {
 } from '@/modules/library/core';
 
 // Stages
+export * from './stages/identify-file.resolver';
 export * from './stages/identify.stage';
 export * from './stages/resolve.stage';
 export * from './stages/commit.stage';
@@ -88,17 +79,12 @@ export * from './providers/crossref.provider';
 export * from './providers/arxiv.provider';
 export * from './providers/pubmed.provider';
 export * from './providers/openalex.provider';
-export * from './providers/openlibrary.provider';
-export * from './providers/unpaywall.provider';
-export * from './providers/url-capture.provider';
-export * from './providers/retraction-scanner.provider';
-export * from './providers/dblp.provider';
 export * from './providers/semantic-scholar.provider';
+export * from './providers/url-capture.provider';
+export * from './providers/base-metadata.provider';
 
 // Subscribers
-export * from './subscribers/retraction-item-events.subscriber';
 
 // Types
 export * from './types/metadata.types';
 export * from './types/ingestion.types';
-export * from './types/ingestion.errors';

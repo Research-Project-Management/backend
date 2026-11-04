@@ -12,7 +12,7 @@ import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annota
 import { TransactionHelpers, UNIT_OF_WORK } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { PrismaService } from '@/core';
-import { CATALOG_FACADE } from '@/modules/library/catalog/catalog.facade';
+import { CATALOG_FACADE } from '@/modules/library/catalog/services/library-bootstrap.service';
 
 describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';

@@ -103,6 +103,57 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
       expect(where.AND[1].OR[0]).toEqual({
         title: { contains: 'quantum computing', mode: 'insensitive' },
       });
+      // Default quick-search ('fields_tags') must include itemTags tag matching
+      expect(where.AND[1].OR).toContainEqual({
+        itemTags: {
+          some: {
+            tag: { name: { contains: 'quantum computing', mode: 'insensitive' } },
+          },
+        },
+      });
+    });
+
+    it('should include annotations quoteText and comment in everything searchMode', () => {
+      const where: any = queryRepo.buildWhereClause(userId, {
+        search: 'attention',
+        searchMode: 'everything',
+      });
+      expect(where.AND).toBeDefined();
+      expect(where.AND[0].OR).toContainEqual({
+        attachments: {
+          some: {
+            deletedAt: null,
+            OR: [
+              { filename: { contains: 'attention', mode: 'insensitive' } },
+              {
+                annotations: {
+                  some: {
+                    deletedAt: null,
+                    OR: [
+                      {
+                        quoteText: {
+                          contains: 'attention',
+                          mode: 'insensitive',
+                        },
+                      },
+                      {
+                        comment: { contains: 'attention', mode: 'insensitive' },
+                      },
+                    ],
+                  },
+                },
+              },
+              {
+                fullTextIndexes: {
+                  some: {
+                    textContent: { contains: 'attention', mode: 'insensitive' },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      });
     });
   });
 

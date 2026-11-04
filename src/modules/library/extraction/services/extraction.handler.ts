@@ -1,10 +1,9 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import crypto from 'crypto';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { OutboxEvent, Prisma } from '@prisma/client';
+import { OutboxEvent } from '@prisma/client';
 import {
   OutboxDispatchHandler,
   LIBRARY_EVENT_TYPES,
@@ -23,10 +22,11 @@ import {
   ExtractionProcessException,
   executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
-import { AttachmentStorageException } from '@/modules/library/extraction/types/extraction.types';
+import { AttachmentStorageException } from '@/modules/library/core/types/extraction.types';
 import { RedisCacheService } from '@/core';
 import { ReferenceMatcherService } from './reference-matcher.service';
 import { ExtractionMetadataSynchronizer } from './extraction-metadata.synchronizer';
+import { isRejectedCitedIdentifier } from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
 
 export const EXTRACTION_EVENT_TYPES = {
   EXTRACTION_REQUESTED: 'library.attachment.extraction_requested',
@@ -67,7 +67,11 @@ interface PostExtractionPipelineContext {
   effectiveProjectId?: string;
   scopeId: string;
   signal?: AbortSignal;
-  syncRes?: { outboxPublished?: boolean; cacheInvalidated?: boolean };
+  syncRes?: {
+    outboxPublished?: boolean;
+    cacheInvalidated?: boolean;
+    itemMutated?: boolean;
+  };
 }
 
 @Injectable()
@@ -335,9 +339,9 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           event: 'library.extraction.completed',
           attachmentId,
           itemId: attachment.itemId,
-          pageCount: doc.pages.length,
-          referenceCount: doc.references?.length ?? 0,
-          hasMetadata: Boolean(doc.metadata.doi || doc.metadata.title),
+          pageCount: doc?.pages?.length ?? 0,
+          referenceCount: doc?.references?.length ?? 0,
+          hasMetadata: Boolean(doc?.metadata?.doi || doc?.metadata?.title),
         }),
       );
     } catch (err: unknown) {
@@ -416,8 +420,6 @@ export class ExtractionHandler implements OutboxDispatchHandler {
 
   private async runPostExtractionPipeline(ctx: PostExtractionPipelineContext): Promise<void> {
     const steps: ReadonlyArray<(context: PostExtractionPipelineContext) => Promise<void>> = [
-      (c) => this.persistOcrProvenanceStep(c),
-      (c) => this.persistSearchableSandwichPdfStep(c),
       (c) => this.indexExtractedPagesStep(c),
       (c) => this.linkCitationsStep(c),
       (c) => this.markReadyAndSyncMetadataStep(c),
@@ -429,80 +431,9 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     }
   }
 
-  private async persistOcrProvenanceStep(ctx: PostExtractionPipelineContext): Promise<void> {
-    const { attachment, doc } = ctx;
-    if (!doc.ocrProvenance || doc.ocrProvenance.totalOcrPages <= 0) return;
-    try {
-      await this.extractionRepo.saveMetadataSourceRecord(
-        attachment.itemId,
-        'ocr_provenance',
-        doc.ocrProvenance as unknown as Prisma.InputJsonValue,
-      );
-      const existingMeta =
-        attachment.metadata && typeof attachment.metadata === 'object'
-          ? (attachment.metadata as Record<string, unknown>)
-          : {};
-      await this.extractionRepo.updateAttachmentMetadata(attachment.id, {
-        ...existingMeta,
-        ocr: {
-          totalOcrPages: doc.ocrProvenance.totalOcrPages,
-          avgConfidence: doc.ocrProvenance.avgConfidence,
-          executionTimeMs: doc.ocrProvenance.executionTimeMs,
-        },
-      });
-    } catch (ocrErr: unknown) {
-      const message = ocrErr instanceof Error ? ocrErr.message : String(ocrErr);
-      this.logger.warn(`Failed to save OCR provenance: ${message}`);
-    }
-  }
-
-  private async persistSearchableSandwichPdfStep(ctx: PostExtractionPipelineContext): Promise<void> {
-    const { attachment, doc } = ctx;
-    if (
-      !doc.searchablePdfBuffer ||
-      !doc.ocrProvenance ||
-      doc.ocrProvenance.totalOcrPages <= 0 ||
-      !this.storagePort?.uploadFile
-    ) {
-      return;
-    }
-    try {
-      const ownerUserId = attachment.item?.userId || 'system';
-      const ownerProjectId = attachment.item?.projectId || undefined;
-      const originalFilename = attachment.filename || 'document.pdf';
-      const uploadResult = await this.storagePort.uploadFile({
-        userId: ownerUserId,
-        projectId: ownerProjectId,
-        filename: originalFilename.toLowerCase().endsWith('.pdf')
-          ? originalFilename
-          : `${originalFilename}.pdf`,
-        buffer: doc.searchablePdfBuffer,
-        mimeType: 'application/pdf',
-        source: 'reader.ocr_sandwich',
-      });
-      if (uploadResult?.fileId) {
-        const hash = crypto.createHash('sha256').update(doc.searchablePdfBuffer).digest('hex');
-        await this.extractionRepo.recordSearchablePdfRevision({
-          attachmentId: attachment.id,
-          fileId: uploadResult.fileId,
-          url: uploadResult.url,
-          sizeBytes: BigInt(doc.searchablePdfBuffer.length),
-          fileHash: hash,
-          comment: `OCR Sandwich PDF (${doc.ocrProvenance.totalOcrPages} pages recognized, avg confidence ${doc.ocrProvenance.avgConfidence}%)`,
-        });
-        this.logger.log(
-          `[AttachmentExtraction] Successfully saved searchable OCR Sandwich PDF for attachment ${attachment.id} (new fileId: ${uploadResult.fileId})`,
-        );
-      }
-    } catch (sandwichErr: unknown) {
-      const message = sandwichErr instanceof Error ? sandwichErr.message : String(sandwichErr);
-      this.logger.warn(`Failed to persist searchable sandwich PDF for attachment ${attachment.id}: ${message}`);
-    }
-  }
-
   private async indexExtractedPagesStep(ctx: PostExtractionPipelineContext): Promise<void> {
     const { attachment, extractionResult } = ctx;
-    if (!Array.isArray(extractionResult.pages) || extractionResult.pages.length === 0) return;
+    if (!Array.isArray(extractionResult?.pages) || extractionResult.pages.length === 0) return;
 
     const normalizedPages = extractionResult.pages.map((p, idx) => ({
       pageIndex:
@@ -530,6 +461,18 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     itemId: string,
     normalizedPages: Array<{ pageIndex: number; pageNumber: number; textContent: string; charOffset: number }>,
   ): Promise<void> {
+    if (this.searchGateway?.indexAttachmentPages) {
+      await this.searchGateway.indexAttachmentPages(
+        attachmentId,
+        normalizedPages.map((p) => ({
+          pageIndex: p.pageIndex,
+          textContent: p.textContent,
+          charOffset: p.charOffset,
+          itemId,
+        })),
+      );
+      return;
+    }
     if (this.eventEmitter) {
       await this.emitEventDurable(EXTRACTION_EVENT_TYPES.PAGES_EXTRACTED, {
         attachmentId,
@@ -543,12 +486,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       });
       return;
     }
-    if (this.searchGateway?.indexAttachmentPages) {
-      await this.searchGateway.indexAttachmentPages(attachmentId, normalizedPages);
-      return;
-    }
     if (this.extractionRepo.indexAttachmentPages) {
-      await this.extractionRepo.indexAttachmentPages(attachmentId, normalizedPages);
+      await this.extractionRepo.indexAttachmentPages(attachmentId, normalizedPages, undefined, itemId);
     }
   }
 
@@ -560,7 +499,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         { eventId: event.id, attachmentId },
       );
     }
-    if (doc.references && doc.references.length > 0 && scopeId) {
+    if (doc?.references && doc.references.length > 0 && scopeId) {
       try {
         await this.linkInLibraryCitations(
           { userId: effectiveUserId, projectId: effectiveProjectId },
@@ -578,8 +517,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     const { attachment, doc, extractionResult } = ctx;
     ctx.syncRes = await this.metadataSync.offloadFullTextAndSyncMetadata(
       attachment,
-      doc,
-      extractionResult,
+      doc ?? {},
+      extractionResult ?? {},
       { skipOutboxPublish: false },
     );
     await this.extractionRepo.markReady(attachment.id);
@@ -626,16 +565,39 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       !Array.isArray(attachment.item.metadata)
         ? (attachment.item.metadata as Record<string, unknown>)
         : {};
-    const discoveredNewIdentifier = Boolean(
-      (doc.metadata?.doi && !attachment.item?.doi) ||
-        (doc.metadata?.arxivId &&
-          !(attachment.item as Record<string, unknown> | null)?.arxivId &&
-          !existingMetaObj.arxivId) ||
-        (doc.metadata?.pmid && !existingMetaObj.pmid) ||
-        (doc.metadata?.isbn && !existingMetaObj.isbn),
-    );
+    const itemRecord = (attachment.item || {}) as Record<string, unknown>;
+    const isSupplementary =
+      String((attachment as Record<string, unknown>).attachmentType || '')
+        .trim()
+        .toLowerCase() === 'supplementary';
+    const rejectedCitedId = existingMetaObj.rejectedCitedDoi;
+    const safeDoi =
+      doc?.metadata?.doi && !isRejectedCitedIdentifier(doc.metadata.doi, rejectedCitedId)
+        ? doc.metadata.doi
+        : undefined;
+    const safeArxiv =
+      doc?.metadata?.arxivId && !isRejectedCitedIdentifier(doc.metadata.arxivId, rejectedCitedId)
+        ? doc.metadata.arxivId
+        : undefined;
+    const safePmid =
+      doc?.metadata?.pmid && !isRejectedCitedIdentifier(doc.metadata.pmid, rejectedCitedId)
+        ? doc.metadata.pmid
+        : undefined;
+    const safeIsbn =
+      doc?.metadata?.isbn && !isRejectedCitedIdentifier(doc.metadata.isbn, rejectedCitedId)
+        ? doc.metadata.isbn
+        : undefined;
 
-    if (!syncRes?.outboxPublished) {
+    const discoveredNewIdentifier =
+      !isSupplementary &&
+      Boolean(
+        (safeDoi && !attachment.item?.doi && !existingMetaObj.doi) ||
+          (safeArxiv && !itemRecord.arxivId && !existingMetaObj.arxivId) ||
+          (safePmid && !itemRecord.pmid && !existingMetaObj.pmid) ||
+          (safeIsbn && !itemRecord.isbn && !existingMetaObj.isbn),
+      );
+
+    if (syncRes?.itemMutated && !syncRes?.outboxPublished) {
       await this.emitEventDurable(LIBRARY_EVENT_TYPES.ITEM_UPDATED, {
         eventId: event.id,
         userId: effectiveUserId,
@@ -649,9 +611,21 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       });
     }
 
+    const hasExtractedIdentifier = !isSupplementary && Boolean(safeDoi || safeArxiv || safePmid || safeIsbn);
+    const existingEngine = typeof existingMetaObj.engineUsed === 'string' ? existingMetaObj.engineUsed.trim() : '';
+    const alreadyResolvedByRegistry = Boolean(
+      existingMetaObj.isVerified ||
+        existingMetaObj.resolvedAt ||
+        (existingEngine.length > 0 && !['StagedPdf', 'LocalPDFExtraction', 'pdf_metadata'].includes(existingEngine)),
+    );
+
     if (
       this.eventEmitter &&
-      (discoveredNewIdentifier || (doc.metadata?.title && !existingMetaObj.isVerified))
+      !isSupplementary &&
+      (discoveredNewIdentifier ||
+        (hasExtractedIdentifier &&
+          Boolean(doc?.metadata?.title) &&
+          !alreadyResolvedByRegistry))
     ) {
       await this.emitEventDurable(LIBRARY_EVENT_TYPES.ATTACHMENT_METADATA_EXTRACTED, {
         userId: effectiveUserId,
@@ -659,21 +633,20 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         itemId: attachment.itemId,
         attachmentId: attachment.id,
         extractedMetadata: {
-          title: doc.metadata?.title,
-          doi: doc.metadata?.doi,
-          arxivId: doc.metadata?.arxivId,
-          pmid: doc.metadata?.pmid,
-          isbn: doc.metadata?.isbn,
-          issn: doc.metadata?.issn,
-          abstract: doc.metadata?.abstract,
-          year: doc.metadata?.year,
+          title: doc?.metadata?.title,
+          doi: safeDoi,
+          arxivId: safeArxiv,
+          pmid: safePmid,
+          isbn: safeIsbn,
+          issn: doc?.metadata?.issn,
+          abstract: doc?.metadata?.abstract,
+          year: doc?.metadata?.year,
           publicationTitle:
-            (doc.metadata as Record<string, unknown> | null)?.publicationTitle ||
-            doc.metadata?.journal,
-          authors: doc.metadata?.authors,
-          creators: doc.metadata?.creators,
+            (doc?.metadata as Record<string, unknown> | null)?.publicationTitle ||
+            doc?.metadata?.journal,
+          authors: doc?.metadata?.authors,
+          creators: doc?.metadata?.creators,
         },
-        isOcrDerived: Boolean(doc.ocrProvenance && doc.ocrProvenance.totalOcrPages > 0),
       });
     }
   }
@@ -692,6 +665,21 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Event listener error during ${eventName}: ${msg}`);
+      if (
+        this.searchGateway?.indexAttachmentPages &&
+        typeof payload === 'object' &&
+        payload &&
+        'attachmentId' in payload &&
+        'pages' in payload &&
+        Array.isArray((payload as { pages?: unknown }).pages)
+      ) {
+        await this.searchGateway
+          .indexAttachmentPages(
+            (payload as { attachmentId: string }).attachmentId,
+            (payload as { pages: Array<{ pageIndex: number; pageNumber: number; textContent: string; charOffset: number }> }).pages,
+          )
+          .catch(() => {});
+      }
     }
   }
 }

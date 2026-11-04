@@ -23,7 +23,7 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
-import { AnnotationType } from '@/modules/library/extraction/types/extraction.types';
+import { AnnotationType } from '@/modules/library/core/types/extraction.types';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { PdfAnnotationImporterService } from '@/modules/library/extraction/services/pdf-annotation-importer.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -123,6 +123,7 @@ export class AnnotationsController {
     ProjectRole.OWNER,
     ProjectRole.COORDINATOR,
     ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
   )
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create an annotation' })
@@ -144,6 +145,8 @@ export class AnnotationsController {
       attachmentId,
       type: body.type,
       pageIndex: body.pageIndex,
+      pageLabel: body.pageLabel,
+      annotationSortIndex: body.annotationSortIndex,
       y: body.y,
       x: body.x,
       color: body.color,
@@ -177,6 +180,7 @@ export class AnnotationsController {
     ProjectRole.OWNER,
     ProjectRole.COORDINATOR,
     ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
   )
   @ApiOperation({
     summary:
@@ -204,6 +208,7 @@ export class AnnotationsController {
 
     const {
       expectedVersion: _,
+      pageNumber: __,
       text,
       rects,
       boundingRect,
@@ -240,6 +245,7 @@ export class AnnotationsController {
     ProjectRole.OWNER,
     ProjectRole.COORDINATOR,
     ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
   )
   @ApiOperation({ summary: 'Soft-delete an annotation' })
   @ApiParam({ name: 'id', description: 'Annotation UUID' })
@@ -288,6 +294,7 @@ export class AnnotationsController {
     ProjectRole.OWNER,
     ProjectRole.COORDINATOR,
     ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
   )
   @ApiOperation({
     summary:
@@ -335,6 +342,7 @@ export class AnnotationsController {
     ProjectRole.OWNER,
     ProjectRole.COORDINATOR,
     ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
   )
   @ApiOperation({
     summary: 'Batch upsert/delete annotations via POST (alias for PUT /batch)',

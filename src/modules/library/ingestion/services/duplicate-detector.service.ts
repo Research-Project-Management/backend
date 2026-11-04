@@ -145,8 +145,17 @@ export class DuplicateDetectorService {
       typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
 
     if (idType === 'isbn') {
+      const doiA = normalizeDoi(toStr(getEffectiveItemField(itemA, 'doi', metaA)));
+      const doiB = normalizeDoi(toStr(getEffectiveItemField(itemB, 'doi', metaB)));
+      if (doiA && doiB && doiA !== doiB) return false;
+
       const involvesBookChapter =
-        typeA === 'bookSection' || typeB === 'bookSection' || typeA === 'chapter' || typeB === 'chapter';
+        typeA === 'bookSection' ||
+        typeB === 'bookSection' ||
+        typeA === 'chapter' ||
+        typeB === 'chapter' ||
+        typeA === 'conferencePaper' ||
+        typeB === 'conferencePaper';
       if (involvesBookChapter) {
         const titleSim = calculateTitleSimilarity(itemA.title, itemB.title);
         if (titleSim < 0.78) return false;
@@ -248,16 +257,50 @@ export class DuplicateDetectorService {
   private scoreMasterCandidate(item: DuplicateCandidateItem): number {
     const type = this.resolveItemType(item);
     const meta = asMetaObject(item.metadata);
+    const itemRec = item as unknown as Record<string, unknown>;
+    const isRetracted =
+      meta.isRetracted === true || itemRec.isRetracted === true;
+    const abstractText = String(
+      getEffectiveItemField(item, 'abstract', meta) || '',
+    ).trim();
+    const contributors = extractContributorAuthors(item);
+    const attachmentCount =
+      typeof itemRec.attachmentCount === 'number'
+        ? itemRec.attachmentCount
+        : Array.isArray(itemRec.attachments)
+          ? itemRec.attachments.length
+          : itemRec.hasFile === true || meta.hasFile === true
+            ? 1
+            : 0;
+    const noteCount =
+      typeof itemRec.noteCount === 'number'
+        ? itemRec.noteCount
+        : Array.isArray(itemRec.notesList)
+          ? itemRec.notesList.length
+          : 0;
+    const hasIdentifier = Boolean(
+      getEffectiveItemField(item, 'arxivId', meta) ||
+        getEffectiveItemField(item, 'pmid', meta) ||
+        getEffectiveItemField(item, 'isbn', meta),
+    );
+    const isPlaceholderOrFilename =
+      isPlaceholderItemTitle(item.title) || meta.isFilenameTitle === true;
+    const attachmentBonus =
+      attachmentCount > 0 ? (isPlaceholderOrFilename ? 5 : 25) : 0;
     return (
+      (isRetracted ? -1000 : 0) +
       (DuplicateDetectorService.MASTER_TYPE_WEIGHT[type] ?? 25) +
       (item.doi ? (this.isPreprintDoi(item.doi) ? 10 : 30) : 0) +
       (getEffectiveItemField(item, 'publicationTitle', meta) ? 10 : 0) +
-      (getEffectiveItemField(item, 'abstract', meta) ? 10 : 0) +
+      (abstractText ? (abstractText.length > 50 ? 15 : 10) : 0) +
       (item.year ? 5 : 0) +
+      (contributors.length > 0 ? 15 : 0) +
+      (getEffectiveItemField(item, 'publisher', meta) ? 5 : 0) +
+      (hasIdentifier ? 10 : 0) +
+      attachmentBonus +
+      (noteCount > 0 ? 15 : 0) +
       Math.min(10, Object.keys(meta).length) +
-      (isPlaceholderItemTitle(item.title) || meta.isFilenameTitle === true
-        ? -25
-        : 0)
+      (isPlaceholderOrFilename ? -25 : 0)
     );
   }
 
@@ -522,6 +565,7 @@ export class DuplicateDetectorService {
           String(userId),
           Array.from(groupedItemIds),
           effectiveProjectId,
+          { includeContent: false },
         );
         if (Array.isArray(fullRawItems)) {
           for (const raw of fullRawItems) {

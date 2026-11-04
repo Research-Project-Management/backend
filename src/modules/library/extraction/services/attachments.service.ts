@@ -1,45 +1,22 @@
 import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-  Inject,
-  Optional,
+  Injectable, Logger, NotFoundException, BadRequestException, Inject, Optional,
 } from '@nestjs/common';
 import { Prisma, AttachmentType } from '@prisma/client';
 import { RedisCacheService } from '@/core';
 import {
-  TransactionHelpers,
-  CATALOG_FACADE,
-  ICatalogFacade,
-  IItemCacheInvalidator,
-  ITEM_CACHE_INVALIDATOR,
-  normalizeProjectScopeId,
-  extractFileIdFromUrl,
-  executeStandardLibraryCacheInvalidation,
-  UNIT_OF_WORK,
-  IUnitOfWork,
+  TransactionHelpers, CATALOG_FACADE, ICatalogFacade, IItemCacheInvalidator,
+  ITEM_CACHE_INVALIDATOR, normalizeProjectScopeId, extractFileIdFromUrl,
+  executeStandardLibraryCacheInvalidation, UNIT_OF_WORK, IUnitOfWork,
+  LIBRARY_EVENT_TYPES, UserId, ItemId, AttachmentId, ProjectId,
 } from '@/modules/library/core';
-import { CreateAttachmentInput } from '@/modules/library/extraction/types/extraction.types';
+import { CreateAttachmentInput } from '@/modules/library/core/types/extraction.types';
 import {
-  validateAttachmentInvariants,
-  inferAttachmentTypeFromFilename,
+  validateAttachmentInvariants, inferAttachmentTypeFromFilename, isValidFileHash,
 } from '@/modules/library/extraction/domain/attachments.domain';
-
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
-
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import type {
-  RenameAttachmentDto,
-  BatchRenameAttachmentsDto,
-} from '@/modules/library/extraction/dto/annotations.dto';
-import {
-  UserId,
-  ItemId,
-  AttachmentId,
-  ProjectId,
-} from '@/modules/library/core';
+import type { RenameAttachmentDto, BatchRenameAttachmentsDto } from '@/modules/library/extraction/dto/annotations.dto';
 import { AttachmentRenamerService } from './attachment-renamer.service';
 
 export type { CreateAttachmentInput };
@@ -51,36 +28,18 @@ export class AttachmentsService {
   constructor(
     private readonly repo: AttachmentsRepository,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
-    @Optional()
-    @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
-    @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
-    @Optional()
-    private readonly renamerService?: AttachmentRenamerService,
-    @Optional()
-    private readonly cache?: RedisCacheService,
-    @Optional()
-    @Inject(ITEM_CACHE_INVALIDATOR)
-    private readonly cacheCoordinator?: IItemCacheInvalidator,
+    @Optional() @Inject(CATALOG_FACADE) private readonly catalogGateway?: ICatalogFacade,
+    @Optional() @Inject(STORAGE_PORT) private readonly storagePort?: IStoragePort,
+    @Optional() private readonly renamerService?: AttachmentRenamerService,
+    @Optional() private readonly cache?: RedisCacheService,
+    @Optional() @Inject(ITEM_CACHE_INVALIDATOR) private readonly cacheCoordinator?: IItemCacheInvalidator,
     @Optional() private readonly extractionRepo?: ExtractionRepository,
   ) {}
 
-  private async assertItemExists(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<void> {
+  public async assertItemExists(userId: string, itemId: string, projectId?: string): Promise<void> {
     if (this.catalogGateway) {
-      const exists = await this.catalogGateway.itemExists(
-        userId,
-        itemId,
-        projectId,
-      );
-      if (!exists) {
-        throw new NotFoundException(`Item ${itemId} not found`);
-      }
+      const exists = await this.catalogGateway.itemExists(userId, itemId, projectId);
+      if (!exists) throw new NotFoundException(`Item ${itemId} not found`);
     }
   }
 
@@ -119,10 +78,11 @@ export class AttachmentsService {
     // If incoming upload has a valid fileHash, reuse existing storage blob if available within the same user/project scope
     let storageKey = input.storageKey;
     let deduplicated = false;
-    if (input.fileHash && input.fileHash.trim().length >= 32) {
+    if (input.fileHash && isValidFileHash(input.fileHash)) {
       const existingWithHash = await this.repo.findFirst({
         fileHash: input.fileHash.trim(),
         storageKey: { not: null },
+        deletedAt: null,
         item: effectiveProjectId
           ? { projectId: effectiveProjectId, deletedAt: null }
           : { userId, projectId: null, deletedAt: null },
@@ -130,7 +90,7 @@ export class AttachmentsService {
       if (existingWithHash?.storageKey) {
         storageKey = existingWithHash.storageKey;
         deduplicated = true;
-        if (!resolvedFileId && existingWithHash.fileId) {
+        if (existingWithHash.fileId) {
           resolvedFileId = existingWithHash.fileId;
         }
       }
@@ -140,8 +100,8 @@ export class AttachmentsService {
       input.url && input.url.trim() !== ''
         ? input.url
         : resolvedFileId
-          ? projectId && projectId !== 'user'
-            ? `/api/v1/projects/${projectId}/library/files/${resolvedFileId}/content`
+          ? effectiveProjectId
+            ? `/api/v1/projects/${effectiveProjectId}/library/files/${resolvedFileId}/content`
             : `/api/v1/library/files/${resolvedFileId}/content`
           : '';
 
@@ -194,18 +154,37 @@ export class AttachmentsService {
     let postCommitRegistered = false;
     return this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+        const resolvedMimeType =
+          input.mimeType ??
+          (resolvedLinkMode === 'linked_url'
+            ? 'text/uri-list'
+            : 'application/pdf');
+        const isExtractablePdf =
+          resolvedMimeType === 'application/pdf' ||
+          input.filename?.toLowerCase().endsWith('.pdf');
+        const validCreatorId =
+          userId &&
+          userId !== 'system' &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            userId,
+          )
+            ? userId
+            : undefined;
         const createData: Prisma.AttachmentCreateInput = {
           item: { connect: { id: targetItemId } },
+          ...(validCreatorId ? { createdById: validCreatorId } : {}),
           linkMode: resolvedLinkMode,
           attachmentType: resolvedAttachmentType,
           filename: input.filename,
           url: effectiveUrl,
           storageKey: storageKey ?? undefined,
-          mimeType:
-            input.mimeType ??
-            (resolvedLinkMode === 'linked_url'
-              ? 'text/uri-list'
-              : 'application/pdf'),
+          mimeType: resolvedMimeType,
+          ...(!isExtractablePdf
+            ? {
+                extractionStatus: 'READY',
+                extractionCompletedAt: new Date(),
+              }
+            : {}),
           size: sizeBigInt,
           fileHash: input.fileHash ?? '',
           fileId: resolvedFileId,
@@ -214,6 +193,7 @@ export class AttachmentsService {
             : {}),
           revisions: {
             create: {
+              ...(validCreatorId ? { createdById: validCreatorId } : {}),
               revisionNumber: 1,
               url: effectiveUrl,
               fileHash: input.fileHash ?? '',
@@ -264,7 +244,7 @@ export class AttachmentsService {
         await helpers.publishOutbox(
           eventScope,
           attachment.id,
-          'library.attachment.created',
+          LIBRARY_EVENT_TYPES.ATTACHMENT_CREATED,
           serializedAttachment,
         );
 
@@ -272,7 +252,7 @@ export class AttachmentsService {
           await helpers.publishOutbox(
             eventScope,
             attachment.id,
-            'library.attachment.extraction_requested',
+            LIBRARY_EVENT_TYPES.ATTACHMENT_EXTRACTION_REQUESTED,
             {
               attachmentId: attachment.id,
               itemId: attachment.itemId,
@@ -327,15 +307,17 @@ export class AttachmentsService {
   ) {
     await this.assertItemExists(userId, itemId, projectId);
     const rawAttachments = await this.repo.findManyByItemId(itemId);
-    const attachments = rawAttachments.map((att) => ({
-      ...att,
-      size: Number(att.size),
-      fileSize: Number(att.size),
-      revisions: att.revisions?.map((rev) => ({
-        ...rev,
-        sizeBytes: Number(rev.sizeBytes),
-      })),
-    }));
+    const attachments = (rawAttachments || [])
+      .filter((att) => !att.deletedAt)
+      .map((att) => ({
+        ...att,
+        size: Number(att.size),
+        fileSize: Number(att.size),
+        revisions: att.revisions?.map((rev) => ({
+          ...rev,
+          sizeBytes: Number(rev.sizeBytes),
+        })),
+      }));
     return { attachments, total: attachments.length };
   }
 
@@ -345,19 +327,23 @@ export class AttachmentsService {
     attachmentId: AttachmentId | string,
     projectId?: ProjectId | string,
   ) {
-    const scopeItemWhere =
-      projectId && projectId !== 'user'
-        ? { projectId, deletedAt: null }
-        : { userId, projectId: null, deletedAt: null };
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeItemWhere = validProjectId
+      ? { projectId: validProjectId, deletedAt: null }
+      : { userId, projectId: null, deletedAt: null };
     const where: Prisma.AttachmentWhereInput = {
       id: attachmentId,
+      deletedAt: null,
       item: scopeItemWhere,
       ...(itemId ? { itemId } : {}),
     };
     const raw = await this.repo.findFirst(where, {
       revisions: { orderBy: { revisionNumber: 'desc' } },
     });
-    if (!raw) throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    const rawItem = (raw as { item?: { deletedAt?: Date | null } | null } | null)?.item;
+    if (!raw || raw.deletedAt || rawItem?.deletedAt) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
     const attachment = {
       ...raw,
       size: Number(raw.size),
@@ -376,12 +362,12 @@ export class AttachmentsService {
     projectId?: ProjectId | string,
   ) {
     if (!attachmentId) throw new BadRequestException('Attachment ID is required');
-    const scopeItemWhere =
-      projectId && projectId !== 'user'
-        ? { projectId, deletedAt: null }
-        : { userId, projectId: null, deletedAt: null };
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeItemWhere = validProjectId
+      ? { projectId: validProjectId, deletedAt: null }
+      : { userId, projectId: null, deletedAt: null };
     const attachment = await this.repo.findFirst(
-      { id: attachmentId, item: scopeItemWhere },
+      { id: attachmentId, deletedAt: null, item: scopeItemWhere },
       { item: true, revisions: true },
     );
     if (!attachment) throw new NotFoundException(`Attachment ${attachmentId} not found`);
@@ -394,7 +380,8 @@ export class AttachmentsService {
         if (revFileId) fileIdsToDelete.add(revFileId);
       }
     }
-    const effectiveProjectId = projectId || attachment.item?.projectId || undefined;
+    const effectiveProjectId =
+      validProjectId || normalizeProjectScopeId(attachment.item?.projectId) || undefined;
     let postCommitRegistered = false;
     const result = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
@@ -414,7 +401,7 @@ export class AttachmentsService {
         await helpers.publishOutbox(
           eventScope,
           attachment.id,
-          'library.attachment.deleted',
+          LIBRARY_EVENT_TYPES.ATTACHMENT_DELETED,
           { attachmentId: attachment.id, itemId: attachment.itemId, projectId: effectiveProjectId },
         );
         if (attachment.itemId && helpers?.onAfterCommit) {
@@ -523,14 +510,15 @@ export class AttachmentsService {
       { item: true },
       tx,
     );
-    if (!attachment) {
+    if (!attachment || attachment.deletedAt || (attachment.item && attachment.item.deletedAt)) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
     if (attachment.item) {
       const item = attachment.item;
-      if (projectId && projectId !== 'user') {
-        if (item.projectId !== projectId) {
+      const validProjectId = normalizeProjectScopeId(projectId);
+      if (validProjectId) {
+        if (item.projectId !== validProjectId) {
           throw new NotFoundException(`Attachment ${attachmentId} not found`);
         }
       } else if (item.projectId) {
@@ -549,49 +537,54 @@ export class AttachmentsService {
     attachmentId: AttachmentId | string,
     projectId?: ProjectId | string,
   ) {
-    const scopeItemWhere =
-      projectId && projectId !== 'user'
-        ? { projectId, deletedAt: null }
-        : { userId, projectId: null, deletedAt: null };
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const scopeItemWhere = effectiveProjectId
+      ? { projectId: effectiveProjectId, deletedAt: null }
+      : { userId, projectId: null, deletedAt: null };
     const attachment = await this.repo.findFirst({
       id: attachmentId,
       itemId,
+      deletedAt: null,
       item: scopeItemWhere,
     });
-    if (!attachment) {
+    if (!attachment || attachment.deletedAt || (attachment.item && attachment.item.deletedAt)) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
-
-    const effectiveProjectId =
-      projectId && projectId !== 'user' ? projectId : undefined;
 
     let postCommitRegistered = false;
     await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         await this.repo.setPrimaryAttachment(itemId, attachmentId, tx);
         const eventScope = { userId, projectId: effectiveProjectId };
+        const payload = {
+          id: attachmentId,
+          itemId,
+          attachmentType: AttachmentType.primary_pdf,
+        };
         await helpers.appendChange(eventScope, {
           entityType: 'Attachment',
           entityId: attachmentId,
           action: 'update',
           version: 1,
-          data: {
-            id: attachmentId,
-            itemId,
-            attachmentType: AttachmentType.primary_pdf,
-          },
+          data: payload,
         });
+        await helpers.publishOutbox?.(
+          eventScope,
+          attachmentId,
+          LIBRARY_EVENT_TYPES.ATTACHMENT_UPDATED,
+          payload,
+        );
         if (helpers?.onAfterCommit) {
           postCommitRegistered = true;
           helpers.onAfterCommit(() =>
-            this.invalidateAttachmentItemCache(itemId, userId, projectId),
+            this.invalidateAttachmentItemCache(itemId, userId, effectiveProjectId),
           );
         }
       },
     );
 
     if (!postCommitRegistered) {
-      await this.invalidateAttachmentItemCache(itemId, userId, projectId);
+      await this.invalidateAttachmentItemCache(itemId, userId, effectiveProjectId);
     }
 
     return { success: true };
@@ -704,7 +697,7 @@ export class AttachmentsService {
         await helpers.publishOutbox(
           eventScope,
           attachment.id,
-          'library.attachment.extraction_requested',
+          LIBRARY_EVENT_TYPES.ATTACHMENT_EXTRACTION_REQUESTED,
           {
             attachmentId: attachment.id,
             itemId: attachment.itemId,
@@ -715,7 +708,7 @@ export class AttachmentsService {
         return {
           status: 'PENDING',
           attachmentId: attachment.id,
-          message: 'Re-extraction and OCR job queued successfully',
+          message: 'Re-extraction job queued successfully',
         };
       },
     );

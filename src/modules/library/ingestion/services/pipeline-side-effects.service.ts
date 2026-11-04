@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/base-metadata.provider';
 import {
   CATALOG_FACADE,
   ICatalogFacade,
@@ -13,10 +13,102 @@ import {
 } from '@/modules/library/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
-import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
-import { ReconciliationDecision } from '@/modules/library/ingestion/types/metadata.types';
+import {
+  IngestionSubmissionEnvelope,
+} from '@/modules/library/ingestion/types/ingestion.types';
+import {
+  DuplicateMatchResult,
+  ReconciliationDecision,
+} from '@/modules/library/ingestion/types/metadata.types';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 import { UrlMetadataScraperService } from './url-metadata-scraper.service';
+
+export async function materializeDeduplicatedNotes(params: {
+  catalogGateway?: ICatalogFacade;
+  userId: string;
+  projectId?: string;
+  itemId: string;
+  notes?: unknown[];
+  createdItem?: Record<string, unknown> | null;
+  logger?: Logger;
+}): Promise<void> {
+  const { catalogGateway, userId, projectId, itemId, notes, createdItem, logger } = params;
+  if (!Array.isArray(notes) || notes.length === 0 || !catalogGateway?.createNote) {
+    return;
+  }
+
+  const existingNotes = Array.isArray(createdItem?.notes)
+    ? createdItem.notes
+    : Array.isArray(createdItem?.notesList)
+      ? createdItem.notesList
+      : [];
+  if (
+    (existingNotes.length === 0 &&
+      typeof createdItem?.noteCount === 'number' &&
+      createdItem.noteCount > 0) ||
+    (existingNotes.length >= notes.length &&
+      typeof createdItem?.noteCount === 'number' &&
+      createdItem.noteCount >= notes.length)
+  ) {
+    return;
+  }
+
+  const seenContents = new Set<string>();
+  for (const existingNote of existingNotes) {
+    if (typeof existingNote === 'string' && existingNote.trim()) {
+      seenContents.add(existingNote.trim().toLowerCase());
+    } else if (existingNote && typeof existingNote === 'object') {
+      const rec = existingNote as Record<string, unknown>;
+      const txt = rec.contentMd ?? rec.content ?? rec.note;
+      if (typeof txt === 'string' && txt.trim()) {
+        seenContents.add(txt.trim().toLowerCase());
+      }
+    }
+  }
+
+  for (const noteItem of notes) {
+    const rawContent =
+      typeof noteItem === 'object' && noteItem !== null
+        ? (noteItem as Record<string, unknown>).content
+        : undefined;
+    const rawNoteSource =
+      typeof noteItem === 'object' && noteItem !== null
+        ? (noteItem as Record<string, unknown>).source
+        : undefined;
+    const noteSource =
+      typeof rawNoteSource === 'string' || typeof rawNoteSource === 'number'
+        ? String(rawNoteSource)
+        : '';
+    const noteContent =
+      typeof noteItem === 'string'
+        ? noteItem
+        : typeof rawContent === 'string'
+          ? rawContent
+          : '';
+
+    const trimmed = noteContent.trim();
+    if (!trimmed || seenContents.has(trimmed.toLowerCase())) continue;
+    seenContents.add(trimmed.toLowerCase());
+
+    try {
+      await catalogGateway.createNote(userId, {
+        itemId,
+        contentMd: trimmed,
+        title: noteSource || 'Imported Note',
+        projectId,
+        createdById: userId,
+      });
+      logger?.log(
+        `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
+      );
+    } catch (err: unknown) {
+      logger?.warn(
+        `[NOTE] Failed to create note for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+}
 
 @Injectable()
 export class PipelineSideEffectsService {
@@ -73,7 +165,11 @@ export class PipelineSideEffectsService {
       });
 
       if (res.status === 'retracted' && res.details) {
-        proposedItem.isRetracted = true;
+        const isActuallyRetracted =
+          res.details.nature === 'retraction' ||
+          res.details.nature === 'Retraction' ||
+          res.details.nature === 'manual';
+        proposedItem.isRetracted = isActuallyRetracted;
         proposedItem.retractionNature = res.details.nature;
         proposedItem.retractionDetails = res.details;
         proposedItem.retractionCheckedAt = new Date().toISOString();
@@ -82,9 +178,15 @@ export class PipelineSideEffectsService {
           typeof proposedItem.title === 'number'
             ? String(proposedItem.title)
             : '';
-        this.logger.warn(
-          `[RETRACTION_INGESTION_GUARD] Flagged imported item "${titleStr}" as ${res.details.nature}`,
-        );
+        if (isActuallyRetracted) {
+          this.logger.warn(
+            `[RETRACTION_INGESTION_GUARD] Flagged imported item "${titleStr}" as ${res.details.nature}`,
+          );
+        } else {
+          this.logger.debug(
+            `[RETRACTION_INGESTION_GUARD] Item "${titleStr}" recorded update notice: ${res.details.nature}`,
+          );
+        }
       } else if (res.status === 'clean') {
         proposedItem.isRetracted = false;
         proposedItem.retractionCheckedAt = new Date().toISOString();
@@ -299,10 +401,18 @@ export class PipelineSideEffectsService {
               `[AUTO_OA_PDF] Downloaded & attached Open Access PDF (${scraped.fileId}) from ${candidateOaUrl} to item ${itemId}`,
             );
 
-            // In-house Semantic Extraction: If PDF has extracted keywords, automatically synchronize them into item tags
-            if (
+            // In-house Semantic Extraction: If PDF has extracted keywords not already on proposedItem, synchronize them into item tags
+            const existingKeywordsLower = new Set(
+              (Array.isArray(proposedItem?.keywords) ? proposedItem.keywords : Array.isArray(proposedItem?.tags) ? proposedItem.tags : [])
+                .map((k) => (typeof k === 'string' ? k.trim().toLowerCase() : ''))
+                .filter(Boolean),
+            );
+            const hasNewScrapedKeywords =
               Array.isArray(scraped.keywords) &&
-              scraped.keywords.length > 0 &&
+              scraped.keywords.some((k) => typeof k === 'string' && k.trim() && !existingKeywordsLower.has(k.trim().toLowerCase()));
+            if (
+              hasNewScrapedKeywords &&
+              Array.isArray(scraped.keywords) &&
               this.catalogGateway?.updateItem
             ) {
               try {
@@ -357,7 +467,8 @@ export class PipelineSideEffectsService {
       if (
         snapshotTargetUrl &&
         !isPdfDirectUrl &&
-        (payloadKind === 'URL' || (isWebOrientedType && !attachedPdfFileId))
+        isWebOrientedType &&
+        !attachedPdfFileId
       ) {
         try {
           await this.extractionGateway.captureWebSnapshot(
@@ -388,99 +499,15 @@ export class PipelineSideEffectsService {
     notes?: unknown[],
     createdItem?: Record<string, unknown> | null,
   ): Promise<void> {
-    if (
-      !Array.isArray(notes) ||
-      notes.length === 0 ||
-      !this.catalogGateway?.createNote
-    ) {
-      return;
-    }
-
-    const existingNotes = Array.isArray(createdItem?.notes)
-      ? createdItem.notes
-      : Array.isArray(createdItem?.notesList)
-        ? createdItem.notesList
-        : [];
-    if (
-      existingNotes.length === 0 &&
-      typeof createdItem?.noteCount === 'number' &&
-      createdItem.noteCount > 0
-    ) {
-      return;
-    }
-
-    const seenContents = new Set<string>();
-    for (const existingNote of existingNotes) {
-      if (typeof existingNote === 'string' && existingNote.trim()) {
-        seenContents.add(existingNote.trim().toLowerCase());
-      } else if (existingNote && typeof existingNote === 'object') {
-        const rec = existingNote as Record<string, unknown>;
-        const txt = rec.contentMd ?? rec.content ?? rec.note;
-        if (typeof txt === 'string' && txt.trim()) {
-          seenContents.add(txt.trim().toLowerCase());
-        }
-      }
-    }
-    const notesToCreate: Array<{
-      contentMd: string;
-      title: string;
-      noteSource: string;
-    }> = [];
-
-    for (const noteItem of notes) {
-      const rawContent =
-        typeof noteItem === 'object' && noteItem !== null
-          ? (noteItem as Record<string, unknown>).content
-          : undefined;
-      const rawNoteSource =
-        typeof noteItem === 'object' && noteItem !== null
-          ? (noteItem as Record<string, unknown>).source
-          : undefined;
-      const noteSource =
-        typeof rawNoteSource === 'string' || typeof rawNoteSource === 'number'
-          ? String(rawNoteSource)
-          : '';
-      const noteContent =
-        typeof noteItem === 'string'
-          ? noteItem
-          : typeof rawContent === 'string'
-            ? rawContent
-            : '';
-
-      const trimmed = noteContent.trim();
-      if (!trimmed || seenContents.has(trimmed.toLowerCase())) continue;
-      seenContents.add(trimmed.toLowerCase());
-      notesToCreate.push({
-        contentMd: trimmed,
-        title: noteSource || 'Imported Note',
-        noteSource,
-      });
-    }
-
-    const createNote = this.catalogGateway?.createNote?.bind(
-      this.catalogGateway,
-    );
-    if (!createNote) return;
-
-    for (const { contentMd, title, noteSource } of notesToCreate) {
-      try {
-        await createNote(userId, {
-          itemId,
-          contentMd,
-          title,
-          projectId,
-          createdById: userId,
-        });
-        this.logger.log(
-          `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
-        );
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `[NOTE] Failed to create note for item ${itemId}: ${msg}`,
-        );
-      }
-    }
+    return materializeDeduplicatedNotes({
+      catalogGateway: this.catalogGateway,
+      userId,
+      projectId,
+      itemId,
+      notes,
+      createdItem,
+      logger: this.logger,
+    });
   }
 
   /**
@@ -502,6 +529,7 @@ export class PipelineSideEffectsService {
       payloadSize?: number;
       existingRecord?: Record<string, unknown> | null;
       assignCollections?: boolean;
+      skipNotes?: boolean;
     },
   ): Promise<void> {
     const { userId, projectId, envelope } = context;
@@ -511,6 +539,7 @@ export class PipelineSideEffectsService {
       payloadSize,
       existingRecord,
       assignCollections,
+      skipNotes,
     } = options;
 
     const mergedMetadata: Record<string, unknown> = {
@@ -526,6 +555,7 @@ export class PipelineSideEffectsService {
       filename,
       payloadSize,
       mergedMetadata,
+      { rethrowOnError: envelope.payload.kind === 'FILE' },
     );
 
     const existingFileId =
@@ -546,20 +576,21 @@ export class PipelineSideEffectsService {
       overrides: envelope.overrides,
     });
 
-    await this.materializeNotes(
-      userId,
-      projectId,
-      itemId,
-      candidate.notes as Array<string | { content?: string }>,
-      existingRecord,
-    );
+    if (!skipNotes) {
+      await this.materializeNotes(
+        userId,
+        projectId,
+        itemId,
+        candidate.notes as Array<string | { content?: string }>,
+        existingRecord,
+      );
+    }
 
-    if (
-      assignCollections &&
-      envelope.collectionIds &&
-      envelope.collectionIds.length > 0
-    ) {
-      for (const colId of envelope.collectionIds) {
+    if (assignCollections && envelope.collectionIds?.length) {
+      const uniqueColIds = Array.from(
+        new Set(envelope.collectionIds.filter(Boolean)),
+      );
+      for (const colId of uniqueColIds) {
         await this.assignItemToCollection(userId, colId, itemId, projectId);
       }
     }
@@ -609,5 +640,91 @@ export class PipelineSideEffectsService {
 
     aggregate.recordProgress(0, 1);
     aggregate.complete();
+  }
+
+  /**
+   * Enriches an existing item upon an EXACT duplicate match (local retraction scan + additive field patch).
+   * Returns the fetched existing item record and the list of patched field keys.
+   */
+  async enrichExistingMatchedItem(params: {
+    userId: string;
+    projectId?: string;
+    targetItemId: string;
+    candidateItem?: Record<string, unknown>;
+  }): Promise<{
+    existingRecord?: Record<string, unknown> | null;
+    patchedFields: string[];
+  }> {
+    const { userId, projectId, targetItemId, candidateItem } = params;
+    await this.scanRetraction(candidateItem, { localOnly: true });
+
+    if (!this.catalogGateway?.getItem) {
+      return { patchedFields: [] };
+    }
+
+    const existing = await this.catalogGateway.getItem(
+      userId,
+      targetItemId,
+      projectId,
+    );
+    const existingRecord = existing as Record<string, unknown> | null | undefined;
+    const enrichPatch = buildEnrichmentPatch(
+      existingRecord,
+      candidateItem || {},
+    );
+    const patchedFields = Object.keys(enrichPatch);
+
+    if (patchedFields.length > 0 && this.catalogGateway.updateItem) {
+      await this.catalogGateway.updateItem(userId, targetItemId, enrichPatch, {
+        projectId,
+      });
+      this.logger.log(
+        `[EXACT_MERGE] Enriched item ${targetItemId} with ${patchedFields.join(', ')}`,
+      );
+    } else {
+      this.logger.log(
+        `[EXACT_MERGE] Item ${targetItemId} already fully populated — no patch needed`,
+      );
+    }
+
+    return { existingRecord, patchedFields };
+  }
+
+  /**
+   * Records a non-blocking human-in-the-loop review case when a PROBABLE fuzzy match is detected.
+   */
+  async recordProbableMatchReviewCase(params: {
+    scope: { userId: string; projectId?: string };
+    runId: string;
+    matchResult?: DuplicateMatchResult;
+    proposedMetadata?: Record<string, unknown>;
+    createdItemId?: string;
+  }): Promise<void> {
+    const { scope, runId, matchResult, proposedMetadata, createdItemId } =
+      params;
+    if (matchResult?.matchType !== 'PROBABLE' || !matchResult.targetItemId) {
+      return;
+    }
+
+    await this.repo
+      .createReviewCase(scope, runId, {
+        targetItemId: matchResult.targetItemId,
+        reason: `Probable match with existing item "${matchResult.targetItemTitle}"`,
+        evidence: {
+          matchReason: matchResult.matchReason,
+          confidence: matchResult.confidence,
+          details: matchResult.evidence,
+          ...(createdItemId ? { createdItemId } : {}),
+        } as unknown as Prisma.InputJsonValue,
+        options: {
+          proposedMetadata: proposedMetadata || {},
+        } as unknown as Prisma.InputJsonValue,
+        assignedToId: scope.userId,
+      })
+      .catch((rcErr: unknown) => {
+        this.logger.warn(
+          `Failed to create review case for run ${runId}: ${rcErr instanceof Error ? rcErr.message : String(rcErr)}`,
+        );
+      });
   }
 }

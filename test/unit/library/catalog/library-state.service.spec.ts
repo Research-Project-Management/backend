@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { StateService } from '@/modules/library/catalog/services/state.service';
-import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
+import { StateRepository } from '@/modules/library/catalog/repositories/saved-searches.repository';
 import {
   ReadingStatus,
   StateData,
@@ -395,6 +395,72 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
           },
         },
       });
+    });
+
+    it('transferUserItemStates should union bookmarks and byAttachment state across merged items', async () => {
+      const mockTx = {
+        state: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              userId: mockUserId,
+              itemId: 'item-older',
+              isStarred: false,
+              rating: 3,
+              readStatus: 'reading',
+              currentPage: 5,
+              scrollPosition: {
+                page: 5,
+                bookmarks: [2, { page: 5, label: 'Methodology' }],
+                byAttachment: { 'att-1': { page: 5, zoom: 1.25 } },
+              },
+              lastOpenedAt: new Date('2026-09-10'),
+              lastReadAt: new Date('2026-09-10'),
+            },
+            {
+              userId: mockUserId,
+              itemId: 'item-newer',
+              isStarred: true,
+              rating: 5,
+              readStatus: 'completed',
+              currentPage: 12,
+              scrollPosition: {
+                page: 12,
+                bookmarks: [5, { page: 9, label: 'Results' }],
+                byAttachment: { 'att-2': { page: 12, zoom: 1.5 } },
+              },
+              lastOpenedAt: new Date('2026-09-15'),
+              lastReadAt: new Date('2026-09-15'),
+            },
+          ]),
+          upsert: jest.fn().mockResolvedValue({}),
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      } as any;
+
+      await service.transferUserItemStates(
+        mockTx,
+        ['item-older'],
+        'item-newer',
+      );
+
+      expect(mockTx.state.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            scrollPosition: expect.objectContaining({
+              page: 12,
+              bookmarks: [
+                2,
+                { page: 5, label: 'Methodology' },
+                { page: 9, label: 'Results' },
+              ],
+              byAttachment: {
+                'att-1': { page: 5, zoom: 1.25 },
+                'att-2': { page: 12, zoom: 1.5 },
+              },
+            }),
+          }),
+        }),
+      );
     });
   });
 });

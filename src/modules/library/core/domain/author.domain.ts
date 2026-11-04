@@ -9,7 +9,7 @@ import {
   stripXmlAndHtmlTags,
   decodeHtmlEntities,
   stripLatexBraces,
-} from './academic-text.domain';
+} from './text.domain';
 import {
   INSTITUTION_REGEX,
   PREFIX_PARTICLES,

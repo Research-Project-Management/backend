@@ -10,7 +10,7 @@ import {
   ProviderExecutionStatus,
   ProviderName,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { DomainRateLimiterService } from './domain-rate-limiter.service';
+import { DomainRateLimiterService } from './feed-retrieval.service';
 
 function toAbortError(reason: unknown, fallbackMessage: string): Error {
   if (reason instanceof Error) return reason;

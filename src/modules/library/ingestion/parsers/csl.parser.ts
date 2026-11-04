@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { mapCslTypeToZoteroItemType } from '@/modules/library/core';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 
 export interface ParsedCslEntry {
   title: string;
@@ -455,7 +455,7 @@ export class CslParser {
 
   private extractKeywords(raw: unknown): string[] | undefined {
     if (Array.isArray(raw)) {
-      const list = normalizeAcademicTags(
+      const list = normalizeTags(
         raw.map((k) => {
           if (typeof k === 'string') return k;
           if (typeof k === 'object' && k !== null) {
@@ -471,7 +471,7 @@ export class CslParser {
       return list.length > 0 ? list : undefined;
     }
     if (typeof raw === 'string' && raw.trim()) {
-      const list = normalizeAcademicTags([raw]);
+      const list = normalizeTags([raw]);
       return list.length > 0 ? list : undefined;
     }
     return undefined;

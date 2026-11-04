@@ -1,12 +1,6 @@
-import {
-  Injectable,
-  Logger,
-  BadRequestException,
-  InternalServerErrorException,
-} from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, LibraryChange, Tombstone } from '@prisma/client';
-
 import {
   AppendChangeEntry,
   AppendChangeInput,
@@ -27,22 +21,28 @@ export class ChangeLogRepository {
     return tx || this.prisma;
   }
 
-  private resolveScope(
-    scope: { userId?: string; projectId?: string | null } | string,
-  ) {
+  private resolveScope(scope: { userId?: string; projectId?: string | null } | string) {
     if (typeof scope === 'string') {
-      if (scope.startsWith('proj:')) {
-        return { userId: undefined, projectId: scope.slice(5) };
-      }
-      if (scope.startsWith('user:')) {
-        return { userId: scope.slice(5), projectId: undefined };
-      }
+      if (scope.startsWith('proj:')) return { userId: undefined, projectId: scope.slice(5) };
+      if (scope.startsWith('user:')) return { userId: scope.slice(5), projectId: undefined };
       return { userId: scope, projectId: undefined };
     }
-    return {
-      userId: scope.userId,
-      projectId: normalizeProjectScopeId(scope.projectId),
-    };
+    return { userId: scope.userId, projectId: normalizeProjectScopeId(scope.projectId) };
+  }
+
+  private buildScopeWhere(userId?: string, projectId?: string | null): { userId?: string | null; projectId: string | null } {
+    return projectId ? { projectId } : { userId: userId || null, projectId: null };
+  }
+
+  private resolveActorId(userId?: string | null, explicitActorId?: string | null): string | null {
+    const candidate = (explicitActorId ?? userId ?? '').trim();
+    if (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate) &&
+      candidate !== '00000000-0000-0000-0000-000000000000'
+    ) {
+      return candidate;
+    }
+    return null;
   }
 
   async allocateNextSequence(
@@ -51,23 +51,15 @@ export class ChangeLogRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<bigint> {
     const count = typeof countOrTx === 'number' ? countOrTx : 1;
-    const client =
-      (typeof countOrTx !== 'number' ? countOrTx : tx) || this.prisma;
+    const client = (typeof countOrTx !== 'number' ? countOrTx : tx) || this.prisma;
     const { userId, projectId } = this.resolveScope(scope);
     const incrementBy = BigInt(count);
 
     if (projectId) {
       const record = await client.syncSequence.upsert({
         where: { projectId },
-        create: {
-          projectId,
-          currentSequence: incrementBy,
-        },
-        update: {
-          currentSequence: {
-            increment: incrementBy,
-          },
-        },
+        create: { projectId, currentSequence: incrementBy },
+        update: { currentSequence: { increment: incrementBy } },
         select: { currentSequence: true },
       });
       return record.currentSequence;
@@ -76,23 +68,14 @@ export class ChangeLogRepository {
     if (userId) {
       const record = await client.syncSequence.upsert({
         where: { userId },
-        create: {
-          userId,
-          currentSequence: incrementBy,
-        },
-        update: {
-          currentSequence: {
-            increment: incrementBy,
-          },
-        },
+        create: { userId, currentSequence: incrementBy },
+        update: { currentSequence: { increment: incrementBy } },
         select: { currentSequence: true },
       });
       return record.currentSequence;
     }
 
-    throw new BadRequestException(
-      'Sync scope must include either a valid userId or projectId',
-    );
+    throw new BadRequestException('Sync scope must include either a valid userId or projectId');
   }
 
   async allocateSequenceBatch(
@@ -105,9 +88,7 @@ export class ChangeLogRepository {
     const incrementBy = BigInt(count);
     const startSeq = endSeq - incrementBy + 1n;
     const sequences: bigint[] = [];
-    for (let i = 0n; i < incrementBy; i++) {
-      sequences.push(startSeq + i);
-    }
+    for (let i = 0n; i < incrementBy; i++) sequences.push(startSeq + i);
     return sequences;
   }
 
@@ -118,30 +99,17 @@ export class ChangeLogRepository {
   ): Promise<LibraryChange> {
     const client = this.getClient(tx);
     const { userId, projectId } = this.resolveScope(scope);
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
 
-    // If a tombstone already created a 'delete' LibraryChange for this entity in the same scope,
-    // update it in place ONLY if there is no newer change for this entity.
     if (entry.action === 'delete' && client.libraryChange?.findFirst) {
       const existingDeleteChange = await client.libraryChange.findFirst({
-        where: {
-          userId: userId || null,
-          projectId: projectId || null,
-          entityType: entry.entityType,
-          entityId: entry.entityId,
-          action: 'delete',
-        },
+        where: { ...scopeWhere, entityType: entry.entityType, entityId: entry.entityId, action: 'delete' },
         orderBy: { seq: 'desc' },
         select: { id: true, seq: true, data: true },
       });
       if (existingDeleteChange && client.libraryChange?.update) {
         const newerChange = await client.libraryChange.findFirst({
-          where: {
-            userId: userId || null,
-            projectId: projectId || null,
-            entityType: entry.entityType,
-            entityId: entry.entityId,
-            seq: { gt: existingDeleteChange.seq },
-          },
+          where: { ...scopeWhere, entityType: entry.entityType, entityId: entry.entityId, seq: { gt: existingDeleteChange.seq } },
           select: { id: true },
         });
         if (!newerChange) {
@@ -153,21 +121,20 @@ export class ChangeLogRepository {
                 : Prisma.DbNull;
           return client.libraryChange.update({
             where: { id: existingDeleteChange.id },
-            data: {
-              version: entry.version,
-              data: nextData,
-            },
+            data: { version: entry.version, data: nextData },
           });
         }
       }
     }
 
     const seq = await this.allocateNextSequence(scope, 1, tx);
+    const actorId = this.resolveActorId(userId, entry.actorId);
 
     return client.libraryChange.create({
       data: {
         seq,
         userId: userId || null,
+        actorId,
         projectId: projectId || null,
         entityType: entry.entityType,
         entityId: entry.entityId,
@@ -178,30 +145,14 @@ export class ChangeLogRepository {
     });
   }
 
-  async appendChangesBatch(
-    entries: AppendChangeInput[],
-    tx?: Prisma.TransactionClient,
-  ): Promise<number> {
+  async appendChangesBatch(entries: AppendChangeInput[], tx?: Prisma.TransactionClient): Promise<number> {
     if (!entries || entries.length === 0) return 0;
     const client = this.getClient(tx);
 
-    // Group by scope (projectId or userId) to allocate sequences in 1 query per scope
-    const byScope = new Map<
-      string,
-      {
-        scope: { userId?: string; projectId?: string | null };
-        items: AppendChangeInput[];
-      }
-    >();
-
+    const byScope = new Map<string, { scope: { userId?: string; projectId?: string | null }; items: AppendChangeInput[] }>();
     for (const entry of entries) {
-      const resolved = this.resolveScope({
-        userId: entry.userId,
-        projectId: entry.projectId,
-      });
-      const key = resolved.projectId
-        ? `proj:${resolved.projectId}`
-        : `user:${resolved.userId || ''}`;
+      const resolved = this.resolveScope({ userId: entry.userId, projectId: entry.projectId });
+      const key = resolved.projectId ? `proj:${resolved.projectId}` : `user:${resolved.userId || ''}`;
       let group = byScope.get(key);
       if (!group) {
         group = { scope: resolved, items: [] };
@@ -215,40 +166,23 @@ export class ChangeLogRepository {
 
     for (const group of byScope.values()) {
       const { userId, projectId } = group.scope;
+      const scopeWhere = this.buildScopeWhere(userId, projectId);
       const deleteEntries = group.items.filter((it) => it.action === 'delete');
-      const existingDeleteByKey = new Map<
-        string,
-        { id: string; data: unknown }
-      >();
+      const existingDeleteByKey = new Map<string, { id: string; data: unknown }>();
 
       if (deleteEntries.length > 0 && client.libraryChange?.findMany) {
-        const entityIds = Array.from(
-          new Set(deleteEntries.map((d) => d.entityId)),
-        );
+        const entityIds = Array.from(new Set(deleteEntries.map((d) => d.entityId)));
         const existingChanges = await client.libraryChange.findMany({
-          where: {
-            userId: userId || null,
-            projectId: projectId || null,
-            entityId: { in: entityIds },
-          },
+          where: { ...scopeWhere, entityId: { in: entityIds } },
           orderBy: { seq: 'desc' },
-          select: {
-            id: true,
-            entityType: true,
-            entityId: true,
-            action: true,
-            seq: true,
-            data: true,
-          },
+          select: { id: true, entityType: true, entityId: true, action: true, seq: true, data: true },
         });
         const seenKeys = new Set<string>();
         for (const ch of existingChanges) {
           const k = `${ch.entityType}:${ch.entityId}`;
           if (!seenKeys.has(k)) {
             seenKeys.add(k);
-            if (ch.action === 'delete') {
-              existingDeleteByKey.set(k, { id: ch.id, data: ch.data });
-            }
+            if (ch.action === 'delete') existingDeleteByKey.set(k, { id: ch.id, data: ch.data });
           }
         }
       }
@@ -256,10 +190,7 @@ export class ChangeLogRepository {
       const itemsNeedingNewRow: AppendChangeInput[] = [];
       const updatePromises: Promise<unknown>[] = [];
       for (const entry of group.items) {
-        const existingMatch =
-          entry.action === 'delete'
-            ? existingDeleteByKey.get(`${entry.entityType}:${entry.entityId}`)
-            : undefined;
+        const existingMatch = entry.action === 'delete' ? existingDeleteByKey.get(`${entry.entityType}:${entry.entityId}`) : undefined;
         if (existingMatch && client.libraryChange?.update) {
           const nextData =
             entry.data !== undefined && entry.data !== null
@@ -268,33 +199,23 @@ export class ChangeLogRepository {
                 ? (existingMatch.data as Prisma.InputJsonValue)
                 : Prisma.DbNull;
           updatePromises.push(
-            client.libraryChange.update({
-              where: { id: existingMatch.id },
-              data: {
-                version: entry.version,
-                data: nextData,
-              },
-            }),
+            client.libraryChange.update({ where: { id: existingMatch.id }, data: { version: entry.version, data: nextData } }),
           );
           updatedExistingCount++;
         } else {
           itemsNeedingNewRow.push(entry);
         }
       }
-      if (updatePromises.length > 0) {
-        await Promise.all(updatePromises);
-      }
+      if (updatePromises.length > 0) await Promise.all(updatePromises);
 
       if (itemsNeedingNewRow.length > 0) {
-        const seqs = await this.allocateSequenceBatch(
-          group.scope,
-          itemsNeedingNewRow.length,
-          tx,
-        );
+        const seqs = await this.allocateSequenceBatch(group.scope, itemsNeedingNewRow.length, tx);
         itemsNeedingNewRow.forEach((entry, idx) => {
+          const effectiveUserId = entry.userId || group.scope.userId || null;
           createRows.push({
             seq: seqs[idx],
-            userId: group.scope.userId || null,
+            userId: effectiveUserId,
+            actorId: this.resolveActorId(effectiveUserId, entry.actorId),
             projectId: group.scope.projectId || null,
             entityType: entry.entityType,
             entityId: entry.entityId,
@@ -306,20 +227,12 @@ export class ChangeLogRepository {
       }
     }
 
-    if (createRows.length === 0) {
-      return updatedExistingCount;
-    }
-
+    if (createRows.length === 0) return updatedExistingCount;
     if (client.libraryChange?.createMany) {
-      const res = await client.libraryChange.createMany({
-        data: createRows,
-      });
+      const res = await client.libraryChange.createMany({ data: createRows });
       return res.count + updatedExistingCount;
     }
-
-    for (const row of createRows) {
-      await client.libraryChange.create({ data: row });
-    }
+    for (const row of createRows) await client.libraryChange.create({ data: row });
     return createRows.length + updatedExistingCount;
   }
 
@@ -330,6 +243,7 @@ export class ChangeLogRepository {
   ): Promise<Tombstone> {
     const client = this.getClient(tx);
     const { userId, projectId } = this.resolveScope(scope);
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
 
     // Check if a 'delete' LibraryChange was already recorded for this entity in the same scope
     // and is still the latest change (no newer create/update occurred since).
@@ -341,8 +255,7 @@ export class ChangeLogRepository {
     if (client.libraryChange?.findFirst) {
       const candidate = await client.libraryChange.findFirst({
         where: {
-          userId: userId || null,
-          projectId: projectId || null,
+          ...scopeWhere,
           entityType: entry.entityType,
           entityId: entry.entityId,
           action: 'delete',
@@ -353,8 +266,7 @@ export class ChangeLogRepository {
       if (candidate) {
         const newerChange = await client.libraryChange.findFirst({
           where: {
-            userId: userId || null,
-            projectId: projectId || null,
+            ...scopeWhere,
             entityType: entry.entityType,
             entityId: entry.entityId,
             seq: { gt: candidate.seq },
@@ -370,6 +282,10 @@ export class ChangeLogRepository {
     const seq =
       existingDeleteChange?.seq ??
       (await this.allocateNextSequence(scope, 1, tx));
+    const effectiveDeletedById = this.resolveActorId(
+      userId,
+      entry.deletedById ?? entry.actorId,
+    );
 
     // Ensure a corresponding 'delete' entry exists in library_changes so GET /sync/changes observes all tombstones
     if (!existingDeleteChange && client.libraryChange?.create) {
@@ -377,6 +293,7 @@ export class ChangeLogRepository {
         data: {
           seq,
           userId: userId || null,
+          actorId: effectiveDeletedById,
           projectId: projectId || null,
           entityType: entry.entityType,
           entityId: entry.entityId,
@@ -400,8 +317,7 @@ export class ChangeLogRepository {
 
     const existing = await client.tombstone.findFirst({
       where: {
-        userId: userId || null,
-        projectId: projectId || null,
+        ...scopeWhere,
         entityType: entry.entityType,
         entityId: entry.entityId,
       },
@@ -414,7 +330,7 @@ export class ChangeLogRepository {
         data: {
           seq,
           deletedAt: new Date(),
-          deletedById: entry.deletedById ?? null,
+          deletedById: entry.deletedById ?? effectiveDeletedById,
         },
       });
     }
@@ -427,14 +343,13 @@ export class ChangeLogRepository {
           entityType: entry.entityType,
           entityId: entry.entityId,
           seq,
-          deletedById: entry.deletedById ?? null,
+          deletedById: entry.deletedById ?? effectiveDeletedById,
         },
       });
     } catch {
       const retryExisting = await client.tombstone.findFirst({
         where: {
-          userId: userId || null,
-          projectId: projectId || null,
+          ...scopeWhere,
           entityType: entry.entityType,
           entityId: entry.entityId,
         },
@@ -446,7 +361,7 @@ export class ChangeLogRepository {
           data: {
             seq,
             deletedAt: new Date(),
-            deletedById: entry.deletedById ?? null,
+            deletedById: entry.deletedById ?? effectiveDeletedById,
           },
         });
       }
@@ -491,6 +406,7 @@ export class ChangeLogRepository {
 
     for (const group of byScope.values()) {
       const { userId, projectId } = group.scope;
+      const scopeWhere = this.buildScopeWhere(userId, projectId);
       const entityIds = Array.from(
         new Set(group.items.map((it) => it.entityId)),
       );
@@ -502,8 +418,7 @@ export class ChangeLogRepository {
       if (client.tombstone?.deleteMany) {
         await client.tombstone.deleteMany({
           where: {
-            userId: userId || null,
-            projectId: projectId || null,
+            ...scopeWhere,
             entityType:
               entityTypes.length === 1
                 ? entityTypes[0]
@@ -514,22 +429,35 @@ export class ChangeLogRepository {
       }
 
       const existingDeleteSeqByKey = new Map<string, bigint>();
+      const batchCutoffMs = Date.now() - 2000;
       if (client.libraryChange?.findMany) {
         const existingChanges = await client.libraryChange.findMany({
           where: {
-            userId: userId || null,
-            projectId: projectId || null,
+            ...scopeWhere,
+            entityType:
+              entityTypes.length === 1
+                ? entityTypes[0]
+                : { in: entityTypes },
             entityId: { in: entityIds },
           },
           orderBy: { seq: 'desc' },
-          select: { entityType: true, entityId: true, action: true, seq: true },
+          select: {
+            entityType: true,
+            entityId: true,
+            action: true,
+            seq: true,
+            createdAt: true,
+          },
         });
         const seenKeys = new Set<string>();
         for (const ch of existingChanges) {
           const k = `${ch.entityType}:${ch.entityId}`;
           if (!seenKeys.has(k)) {
             seenKeys.add(k);
-            if (ch.action === 'delete') {
+            const isRecentBatchDelete =
+              ch.action === 'delete' &&
+              (!ch.createdAt || new Date(ch.createdAt).getTime() >= batchCutoffMs);
+            if (isRecentBatchDelete) {
               existingDeleteSeqByKey.set(k, ch.seq);
             }
           }
@@ -551,19 +479,25 @@ export class ChangeLogRepository {
         const k = `${entry.entityType}:${entry.entityId}`;
         const existingSeq = existingDeleteSeqByKey.get(k);
         const seq = existingSeq ?? allocatedSeqs[allocIdx++];
+        const effectiveUserId = entry.userId || userId || null;
+        const effectiveActorId = this.resolveActorId(
+          effectiveUserId,
+          entry.deletedById ?? entry.actorId,
+        );
         createRows.push({
-          userId: userId || null,
+          userId: effectiveUserId,
           projectId: projectId || null,
           entityType: entry.entityType,
           entityId: entry.entityId,
           seq,
           deletedAt,
-          deletedById: entry.deletedById ?? null,
+          deletedById: entry.deletedById ?? effectiveActorId,
         });
         if (existingSeq === undefined) {
           missingChangeRows.push({
             seq,
-            userId: userId || null,
+            userId: effectiveUserId,
+            actorId: effectiveActorId,
             projectId: projectId || null,
             entityType: entry.entityType,
             entityId: entry.entityId,
@@ -600,8 +534,9 @@ export class ChangeLogRepository {
   ): Promise<number> {
     const client = this.getClient(tx);
     const { userId, projectId } = this.resolveScope(scope);
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
     const res = await client.tombstone.deleteMany({
-      where: { userId: userId || null, projectId: projectId || null, entityType, entityId },
+      where: { ...scopeWhere, entityType, entityId },
     });
     return res.count;
   }
@@ -615,8 +550,9 @@ export class ChangeLogRepository {
     if (!entityIds || entityIds.length === 0) return 0;
     const client = this.getClient(tx);
     const { userId, projectId } = this.resolveScope(scope);
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
     const res = await client.tombstone.deleteMany({
-      where: { userId: userId || null, projectId: projectId || null, entityType, entityId: { in: entityIds } },
+      where: { ...scopeWhere, entityType, entityId: { in: entityIds } },
     });
     return res.count;
   }
@@ -626,33 +562,36 @@ export class ChangeLogRepository {
     batchLimit: number = 1000,
   ): Promise<{ purgedChanges: number; purgedTombstones: number }> {
     const cutoff = new Date(Date.now() - retentionDays * 86400 * 1000);
-    const oldChanges = await this.prisma.libraryChange.findMany({
-      where: { createdAt: { lt: cutoff } },
-      select: { id: true },
-      orderBy: { createdAt: 'asc' },
-      take: batchLimit,
-    });
-    let purgedChanges = 0;
-    if (oldChanges.length > 0) {
-      const delRes = await this.prisma.libraryChange.deleteMany({
-        where: { id: { in: oldChanges.map((c) => c.id) } },
-      });
-      purgedChanges = delRes.count;
-    }
-    const oldTombstones = await this.prisma.tombstone.findMany({
-      where: { deletedAt: { lt: cutoff } },
-      select: { id: true },
-      orderBy: { deletedAt: 'asc' },
-      take: batchLimit,
-    });
-    let purgedTombstones = 0;
-    if (oldTombstones.length > 0) {
-      const delRes = await this.prisma.tombstone.deleteMany({
-        where: { id: { in: oldTombstones.map((t) => t.id) } },
-      });
-      purgedTombstones = delRes.count;
-    }
-    return { purgedChanges, purgedTombstones };
+    const [oldChanges, oldTombstones] = await Promise.all([
+      this.prisma.libraryChange.findMany({
+        where: { createdAt: { lt: cutoff } },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+        take: batchLimit,
+      }),
+      this.prisma.tombstone.findMany({
+        where: { deletedAt: { lt: cutoff } },
+        select: { id: true },
+        orderBy: { deletedAt: 'asc' },
+        take: batchLimit,
+      }),
+    ]);
+    const [delChanges, delTombstones] = await Promise.all([
+      oldChanges.length > 0
+        ? this.prisma.libraryChange.deleteMany({
+            where: { id: { in: oldChanges.map((c) => c.id) } },
+          })
+        : Promise.resolve({ count: 0 }),
+      oldTombstones.length > 0
+        ? this.prisma.tombstone.deleteMany({
+            where: { id: { in: oldTombstones.map((t) => t.id) } },
+          })
+        : Promise.resolve({ count: 0 }),
+    ]);
+    return {
+      purgedChanges: delChanges.count,
+      purgedTombstones: delTombstones.count,
+    };
   }
 
   async getChangesSince(
@@ -667,7 +606,14 @@ export class ChangeLogRepository {
     const seqBigInt = typeof sinceSeq === 'bigint' ? sinceSeq : BigInt(sinceSeq);
     return this.prisma.libraryChange.findMany({
       where: {
-        ...(projectId ? { projectId } : { userId, projectId: null }),
+        ...(projectId
+          ? {
+              projectId,
+              ...(userId
+                ? { OR: [{ entityType: { notIn: ['State', 'state', 'STATE'] } }, { userId }, { userId: null }] }
+                : {}),
+            }
+          : { userId, projectId: null }),
         seq: { gt: seqBigInt },
       },
       orderBy: { seq: 'asc' },

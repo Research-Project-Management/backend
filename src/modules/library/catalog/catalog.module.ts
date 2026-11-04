@@ -5,37 +5,38 @@ import { LibraryCoreModule } from '@/modules/library/core/core.module';
 // Controllers
 import { ItemsController } from './controllers/items.controller';
 import { LibraryWorkspaceController } from './controllers/library-workspace.controller';
-import { ItemCurationController } from './controllers/item-curation.controller';
+import { ItemCurationController } from './controllers/collections.controller';
 import { CollectionsController } from './controllers/collections.controller';
-import { TagController } from './controllers/tags.controller';
-import { TypeController } from './controllers/types.controller';
+import { TagController } from './controllers/notes.controller';
+import { TypeController } from './controllers/library-workspace.controller';
 import {
   StateController,
   StateBatchController,
-} from './controllers/state.controller';
-import { SavedSearchesController } from './controllers/saved-searches.controller';
+} from './controllers/library-workspace.controller';
+import { SavedSearchesController } from './controllers/notes.controller';
 import { NoteController } from './controllers/notes.controller';
 
 // Services
 import { ItemService } from './services/items.service';
-import { ItemCacheCoordinator } from './services/item-cache.coordinator';
+import { ItemCacheCoordinator } from './services/library-bootstrap.service';
 import { ItemQueryService } from './services/item-query.service';
-import { ItemFulltextService } from './services/item-fulltext.service';
+import { ItemFulltextService } from './services/item-relations.service';
 import { ItemTypeConversionService } from './services/item-type-conversion.service';
 import { ItemCurationService } from './services/item-curation.service';
 import { ItemRelationsService } from './services/item-relations.service';
 import { CollectionsService } from './services/collections.service';
 import { TagsService } from './services/tags.service';
-import { TypesService, LibraryBootstrapService } from './services/types.service';
+import { TypesService } from './services/zotero-schema-validator.service';
+import { LibraryBootstrapService } from './services/library-bootstrap.service';
 import { StateService } from './services/state.service';
 import { SavedSearchesService } from './services/saved-searches.service';
 import { ZoteroSchemaValidatorService } from './services/zotero-schema-validator.service';
 import { NotesService } from './services/notes.service';
 
 // Engines & Mappers
-import { TreeEngine } from './domain/tree.engine';
+import { TreeEngine } from './domain/state.domain';
 import { ConditionEvaluatorEngine } from './domain/condition-evaluator.engine';
-import { ItemsMapper } from './domain/items.mapper';
+import { ItemsMapper } from '@/modules/library/core';
 import { ItemTransformer } from './services/item.transformer';
 
 // Repositories
@@ -47,12 +48,12 @@ import {
 } from './repositories/query.repository';
 import { CollectionsRepository } from './repositories/collections.repository';
 import { TagsRepository } from './repositories/tags.repository';
-import { StateRepository } from './repositories/state.repository';
+import { StateRepository } from './repositories/saved-searches.repository';
 import { SavedSearchesRepository } from './repositories/saved-searches.repository';
 import { NotesRepository } from './repositories/notes.repository';
 
 // Facade
-import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
+import { CatalogFacade, CATALOG_FACADE } from './services/library-bootstrap.service';
 import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core';
 
 @Global()

@@ -1,6 +1,7 @@
 import {
   Injectable,
   Inject,
+  Logger,
   Optional,
   BadRequestException,
 } from '@nestjs/common';
@@ -15,12 +16,13 @@ import {
   mergeCanonicalCreators,
   cleanAbstractText,
   cleanCommentText,
-  normalizeAcademicTags,
+  normalizeTags,
   getEffectiveBaseFieldMap,
   harmonizeZoteroFields,
   generateCitationKey,
   isPlaceholderItemTitle,
   CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
+  normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/deduplication.domain';
 import {
@@ -28,6 +30,7 @@ import {
   CommitStageInput,
 } from '@/modules/library/ingestion/types/ingestion.types';
 import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import { materializeDeduplicatedNotes } from '@/modules/library/ingestion/services/pipeline-side-effects.service';
 
 export type LibraryItemSource =
   | 'WEB_CAPTURE'
@@ -110,7 +113,7 @@ export function toItemData(
   options?: CommitStageOptions,
   primaryRole: string = 'author',
 ): CreateItemData {
-  const rawTags = normalizeAcademicTags(
+  const rawTags = normalizeTags(
     metadata.tags || metadata.keywords || metadata.labels || [],
   );
   const extraFields: Record<string, unknown> = {
@@ -215,7 +218,7 @@ export function toItemData(
     }
   }
 
-  return {
+  const result: CreateItemData = {
     ...syncedExtraFields,
     title: resolvedTitle,
     itemType: effectiveType,
@@ -338,6 +341,12 @@ export function toItemData(
         : null,
     retractionCheckedAt: metadata.retractionCheckedAt,
   };
+  Object.defineProperty(result, 'isPreNormalized', {
+    value: true,
+    enumerable: false,
+    configurable: true,
+  });
+  return result;
 }
 
 export interface CommitMatchedSideEffectsPort {
@@ -365,12 +374,24 @@ export interface CommitMatchedSideEffectsPort {
   ) => Promise<unknown>;
 }
 
+export type CommittedItemDetail = ItemDetail & {
+  wasPreExistingMatch?: boolean;
+};
+
+export function isPreExistingMatchItem(
+  item: ItemDetail | CommittedItemDetail | null | undefined,
+): boolean {
+  if (!item || typeof item !== 'object') return false;
+  return Boolean((item as CommittedItemDetail).wasPreExistingMatch);
+}
+
 @Injectable()
 export class CommitStage implements IWorkflowStage<
   CommitStageInput,
-  ItemDetail
+  CommittedItemDetail
 > {
   readonly stageName = 'COMMIT' as const;
+  private readonly logger = new Logger(CommitStage.name);
   constructor(
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway: ICatalogFacade,
@@ -378,7 +399,7 @@ export class CommitStage implements IWorkflowStage<
     private readonly sideEffects?: CommitMatchedSideEffectsPort,
   ) {}
 
-  async execute(input: CommitStageInput): Promise<ItemDetail> {
+  async execute(input: CommitStageInput): Promise<CommittedItemDetail> {
     const {
       scopeId: scope,
       item: actualMetadata,
@@ -396,13 +417,15 @@ export class CommitStage implements IWorkflowStage<
 
     if (typeof scope === 'object' && scope !== null) {
       effectiveUserId = scope.userId || actualOptions?.userId || '';
-      effectiveProjectId = scope.projectId || undefined;
+      effectiveProjectId = normalizeProjectScopeId(scope.projectId);
     } else {
+      const normalizedScopeProj = normalizeProjectScopeId(scope);
       const isProject =
-        Boolean(scope) && scope !== 'user' && scope !== actualOptions?.userId;
+        Boolean(normalizedScopeProj) &&
+        normalizedScopeProj !== actualOptions?.userId;
       effectiveUserId =
         actualOptions?.userId || (scope && !isProject ? scope : '');
-      effectiveProjectId = isProject ? scope : undefined;
+      effectiveProjectId = isProject ? normalizedScopeProj : undefined;
     }
 
     if (!effectiveUserId) {
@@ -418,7 +441,7 @@ export class CommitStage implements IWorkflowStage<
 
     if (
       !actualOptions?.skipPreMatch &&
-      (createData.doi || createData.arxivId) &&
+      (createData.doi || createData.arxivId || createData.pmid || createData.isbn) &&
       this.catalogGateway?.findMatchCandidates
     ) {
       try {
@@ -427,6 +450,8 @@ export class CommitStage implements IWorkflowStage<
           {
             doi: createData.doi,
             arxivId: createData.arxivId,
+            pmid: createData.pmid,
+            isbn: createData.isbn,
           },
         );
         const existingId = preMatch?.exactMatch?.id;
@@ -518,19 +543,8 @@ export class CommitStage implements IWorkflowStage<
     projectId: string | undefined,
     existingItem: ItemDetail,
     createData: CreateItemData,
-  ): Promise<ItemDetail> {
-    const markPreExisting = (target: ItemDetail): ItemDetail => {
-      if (target && typeof target === 'object') {
-        Object.defineProperty(target, '__wasPreExistingMatch', {
-          value: true,
-          enumerable: false,
-          configurable: true,
-        });
-      }
-      return target;
-    };
-
-    let resultItem = existingItem;
+  ): Promise<CommittedItemDetail> {
+    let resultItem: CommittedItemDetail = existingItem;
     if (this.catalogGateway?.updateItem) {
       try {
         const patch = buildEnrichmentPatch(existingItem, createData);
@@ -543,8 +557,9 @@ export class CommitStage implements IWorkflowStage<
           );
           if (updated) resultItem = updated;
         }
-      } catch {
-        // Non-critical additive enrichment on pre-match or P2002 race
+      } catch (enrichErr: unknown) {
+        const msg = enrichErr instanceof Error ? enrichErr.message : String(enrichErr);
+        this.logger.warn(`Failed to enrich pre-matched item ${existingItem.id}: ${msg}`);
       }
     }
 
@@ -569,48 +584,16 @@ export class CommitStage implements IWorkflowStage<
             createData.notes,
             existingRec,
           );
-        } else if (this.catalogGateway?.createNote) {
-          const existingNotes = Array.isArray(existingRec.notesList)
-            ? existingRec.notesList
-            : Array.isArray(existingRec.notes)
-              ? existingRec.notes
-              : [];
-          const seen = new Set<string>(
-            existingNotes
-              .map((n: unknown) =>
-                typeof n === 'string'
-                  ? n.trim().toLowerCase()
-                  : typeof n === 'object' && n !== null
-                    ? String(
-                        (n as Record<string, unknown>).contentMd ??
-                          (n as Record<string, unknown>).content ??
-                          '',
-                      )
-                        .trim()
-                        .toLowerCase()
-                    : '',
-              )
-              .filter(Boolean),
-          );
-          for (const rawNote of createData.notes) {
-            const contentMd =
-              typeof rawNote === 'string'
-                ? rawNote.trim()
-                : typeof rawNote === 'object' && rawNote !== null
-                  ? String(
-                      (rawNote as Record<string, unknown>).content ?? '',
-                    ).trim()
-                  : '';
-            if (!contentMd || seen.has(contentMd.toLowerCase())) continue;
-            seen.add(contentMd.toLowerCase());
-            await this.catalogGateway.createNote(userId, {
-              itemId: existingItem.id,
-              contentMd,
-              title: 'Imported Note',
-              projectId,
-              createdById: userId,
-            });
-          }
+        } else {
+          await materializeDeduplicatedNotes({
+            catalogGateway: this.catalogGateway,
+            userId,
+            projectId,
+            itemId: existingItem.id,
+            notes: createData.notes,
+            createdItem: existingRec,
+            logger: this.logger,
+          });
         }
       }
       if (
@@ -618,8 +601,10 @@ export class CommitStage implements IWorkflowStage<
         createData.collectionIds.length > 0 &&
         this.catalogGateway?.assignItemsToCollection
       ) {
-        for (const collectionId of createData.collectionIds) {
-          if (!collectionId) continue;
+        const uniqueCollectionIds = Array.from(
+          new Set(createData.collectionIds.filter(Boolean)),
+        );
+        for (const collectionId of uniqueCollectionIds) {
           await this.catalogGateway.assignItemsToCollection(
             userId,
             collectionId,
@@ -628,10 +613,14 @@ export class CommitStage implements IWorkflowStage<
           );
         }
       }
-    } catch {
-      // Non-critical side-effects on matched item enrichment
+    } catch (sideEffectErr: unknown) {
+      const msg = sideEffectErr instanceof Error ? sideEffectErr.message : String(sideEffectErr);
+      this.logger.warn(`Side-effects failed for matched item ${existingItem.id}: ${msg}`);
     }
 
-    return markPreExisting(resultItem);
+    return {
+      ...resultItem,
+      wasPreExistingMatch: true,
+    };
   }
 }

@@ -1,17 +1,17 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
-import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
+import {
+  CommitStage,
+  isPreExistingMatchItem,
+} from '@/modules/library/ingestion/stages/commit.stage';
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
 import { IngestionSagaSession } from './ingestion-saga.orchestrator';
 import { IngestionStatus, Prisma } from '@prisma/client';
-import {
-  buildEnrichmentPatch,
-  mapPayloadToSource,
-} from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import { mapPayloadToSource } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 import {
   CATALOG_FACADE,
   ICatalogFacade,
@@ -125,6 +125,10 @@ export class PipelineBatchExecutor {
       const existingRun = await this.repo.findRunById(scopeId, runId);
       const existingLog = existingRun?.executionLog as
         | {
+            committedKeys?: Record<
+              string,
+              { itemId?: string; status?: 'SUCCEEDED' | 'DUPLICATE' }
+            >;
             items?: Array<{
               title?: string;
               status?: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
@@ -134,6 +138,20 @@ export class PipelineBatchExecutor {
           }
         | null
         | undefined;
+      if (existingLog?.committedKeys && typeof existingLog.committedKeys === 'object') {
+        for (const [key, entry] of Object.entries(existingLog.committedKeys)) {
+          if (
+            key &&
+            entry?.itemId &&
+            (entry.status === 'SUCCEEDED' || entry.status === 'DUPLICATE')
+          ) {
+            committedRecordKeys.set(key, {
+              itemId: entry.itemId,
+              status: entry.status,
+            });
+          }
+        }
+      }
       if (Array.isArray(existingLog?.items)) {
         for (const prev of existingLog.items) {
           if (
@@ -342,43 +360,25 @@ export class PipelineBatchExecutor {
           : { matchType: 'NO_MATCH' as const, confidence: 0 };
 
         if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
-          await this.sideEffects.scanRetraction(itemDecision.proposedItem, {
-            localOnly: true,
-          });
-
-          if (this.catalogGateway) {
-            try {
-              const existing = await this.catalogGateway.getItem(
-                resolvedScope.userId,
-                matchRes.targetItemId,
-                resolvedScope.projectId,
-              );
-              const existingRec = existing as
-                Record<string, unknown> | null | undefined;
-              const enrichPatch = buildEnrichmentPatch(
-                existingRec,
-                itemDecision.proposedItem,
-              );
-              if (Object.keys(enrichPatch).length > 0) {
-                await this.catalogGateway.updateItem(
-                  resolvedScope.userId,
-                  matchRes.targetItemId,
-                  enrichPatch,
-                  { projectId: resolvedScope.projectId },
-                );
-              }
-              await this.sideEffects.materializeNotes(
-                resolvedScope.userId,
-                resolvedScope.projectId,
-                matchRes.targetItemId,
-                itemDecision.proposedItem?.notes,
-                existingRec,
-              );
-            } catch (enrichErr: unknown) {
-              this.logger.warn(
-                `Additive enrichment on duplicate item ${matchRes.targetItemId} failed: ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`,
-              );
-            }
+          try {
+            const { existingRecord: existingRec } =
+              await this.sideEffects.enrichExistingMatchedItem({
+                userId: resolvedScope.userId,
+                projectId: resolvedScope.projectId,
+                targetItemId: matchRes.targetItemId,
+                candidateItem: itemDecision.proposedItem,
+              });
+            await this.sideEffects.materializeNotes(
+              resolvedScope.userId,
+              resolvedScope.projectId,
+              matchRes.targetItemId,
+              itemDecision.proposedItem?.notes,
+              existingRec,
+            );
+          } catch (enrichErr: unknown) {
+            this.logger.warn(
+              `Additive enrichment on duplicate item ${matchRes.targetItemId} failed: ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`,
+            );
           }
 
           // Ensure duplicate items are assigned to target envelope collections
@@ -424,37 +424,30 @@ export class PipelineBatchExecutor {
             },
           });
           if (created?.id) {
-            if (matchRes.matchType === 'PROBABLE' && matchRes.targetItemId) {
-              await this.repo
-                .createReviewCase(resolvedScope, runId, {
-                  targetItemId: matchRes.targetItemId,
-                  reason: `Probable match with existing item "${matchRes.targetItemTitle}"`,
-                  evidence: {
-                    matchReason: matchRes.matchReason,
-                    confidence: matchRes.confidence,
-                    details: matchRes.evidence,
-                    createdItemId: created.id,
-                  } as unknown as Prisma.InputJsonValue,
-                  options: {
-                    proposedMetadata: itemDecision.proposedItem,
-                  } as unknown as Prisma.InputJsonValue,
-                  assignedToId: resolvedScope.userId,
-                })
-                .catch((rcErr: unknown) => {
-                  this.logger.warn(
-                    `Failed to create review case for run ${runId}: ${rcErr instanceof Error ? rcErr.message : String(rcErr)}`,
-                  );
-                });
+            const wasPreExisting = isPreExistingMatchItem(created);
+            if (!wasPreExisting) {
+              await this.sideEffects.recordProbableMatchReviewCase({
+                scope: resolvedScope,
+                runId,
+                matchResult: matchRes,
+                proposedMetadata: itemDecision.proposedItem,
+                createdItemId: created.id,
+              });
             }
             createdItemIds.push(created.id);
-            succeeded++;
+            const itemStatus = wasPreExisting ? 'DUPLICATE' : 'SUCCEEDED';
+            if (wasPreExisting) {
+              duplicates++;
+            } else {
+              succeeded++;
+            }
             committedRecordKeys.set(candidateKey, {
               itemId: created.id,
-              status: 'SUCCEEDED',
+              status: itemStatus,
             });
             progressItems.push({
               title: itemTitle,
-              status: 'SUCCEEDED',
+              status: itemStatus,
               itemId: created.id,
               candidateKey,
             });
@@ -507,6 +500,7 @@ export class PipelineBatchExecutor {
               percentage: Math.round((processed / total) * 100),
               status: 'RUNNING',
               currentTitle: itemTitle,
+              committedKeys: Object.fromEntries(committedRecordKeys),
               items: progressItems.slice(-20),
             });
           } catch (cpErr: unknown) {
@@ -521,13 +515,24 @@ export class PipelineBatchExecutor {
     await session.executeStep(
       'COMMIT',
       async () => {
+        const isAllFailed = succeeded === 0 && duplicates === 0 && failed > 0;
+        const finalStatus = isAllFailed
+          ? IngestionStatus.FAILED_FINAL
+          : IngestionStatus.COMPLETED;
         await this.repo.updateRunStatus(
           scopeId,
           runId,
-          IngestionStatus.COMPLETED,
+          finalStatus,
           {
             itemId: createdItemIds[0],
             completedAt: new Date(),
+            ...(isAllFailed
+              ? {
+                  lastError:
+                    progressItems.find((i) => i.error)?.error ||
+                    'All records in batch failed',
+                }
+              : {}),
             executionLog: {
               total,
               processed,
@@ -535,7 +540,8 @@ export class PipelineBatchExecutor {
               duplicates,
               failed,
               percentage: 100,
-              status: 'COMPLETED',
+              status: isAllFailed ? 'FAILED_FINAL' : 'COMPLETED',
+              committedKeys: Object.fromEntries(committedRecordKeys),
               items: progressItems.slice(-50),
             } as unknown as Prisma.InputJsonValue,
           },

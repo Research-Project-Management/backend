@@ -1,9 +1,16 @@
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import { formatLiteratureNoteMarkdown } from '@/modules/library/catalog/domain/notes.domain';
-import { buildTipTapDocFromText, stripNoteHtml } from '@/modules/library/core/domain/tiptap.domain';
+import {
+  buildTipTapDocFromText,
+  extractPlainTextFromTipTap,
+  stripNoteHtml,
+} from '@/modules/library/core/domain/renamer.domain';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
+import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
+import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
 import { PrismaService } from '@/core';
-import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import { ItemsMapper } from '@/modules/library/core';
 
 describe('Library Notes, Annotations & Deep Search Parity', () => {
   describe('1. SearchRepository - Zotero Parity Deep Full-Text Query Builder', () => {
@@ -189,6 +196,87 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
       expect(mapped.attachments[0].title).toBe('Author Manuscript PDF');
       expect(mapped.attachments[1].title).toBe('Publisher Webpage Snapshot');
       expect(mapped.primaryFile?.title).toBe('Author Manuscript PDF');
+    });
+
+    it('should synchronize contentMd from contentJson when updating a note with only contentJson', async () => {
+      const mockPrisma = {
+        note: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'note-1',
+            userId: '018f3a21-1234-7000-8000-000000000001',
+            projectId: null,
+            title: 'Old Title',
+            contentMd: 'Stale old markdown',
+            contentJson: { type: 'doc', content: [] },
+            tags: [],
+            version: 1,
+          }),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      const notesRepo = new NotesRepository(
+        mockPrisma as unknown as PrismaService,
+      );
+      const tiptapDoc = buildTipTapDocFromText(
+        'Updated first paragraph.\n\nUpdated second paragraph.',
+      );
+      expect(extractPlainTextFromTipTap(tiptapDoc)).toBe(
+        'Updated first paragraph.\n\nUpdated second paragraph.',
+      );
+
+      const updated = await notesRepo.update(
+        '018f3a21-1234-7000-8000-000000000001',
+        'note-1',
+        1,
+        { contentJson: tiptapDoc },
+      );
+
+      expect(updated.contentMd).toBe(
+        'Updated first paragraph.\n\nUpdated second paragraph.',
+      );
+    });
+
+    it('should omit rectCoords from SQL UPDATE when only comment/color/tags are updated and preserve image type', async () => {
+      const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const annRepo = new AnnotationsRepository({
+        annotation: { updateMany },
+      } as unknown as PrismaService);
+
+      const existing = {
+        id: 'ann-1',
+        attachmentId: 'att-1',
+        type: 'image' as const,
+        pageIndex: 1,
+        pageLabel: '1',
+        annotationSortIndex: '0001|01000|01000',
+        color: '#ffd400',
+        quoteText: '',
+        comment: 'Initial comment',
+        tags: [],
+        rectCoords: [{ x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.5, width: 0.4, height: 0.4 }],
+        authorId: 'user-1',
+        version: 1,
+        deletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await annRepo.update(
+        'ann-1',
+        1,
+        { comment: 'Updated comment without touching coords' },
+        undefined,
+        existing,
+      );
+
+      const updateCallData = updateMany.mock.calls[0][0].data;
+      expect(updateCallData.comment).toBe(
+        'Updated comment without touching coords',
+      );
+      expect('rectCoords' in updateCallData).toBe(false);
+
+      const normalizer = new AnnotationNormalizer();
+      expect(normalizer.parseType('image')).toBe('image');
     });
   });
 });

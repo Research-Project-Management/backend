@@ -142,11 +142,11 @@ describe('IngestionVerifierService', () => {
           'This paper presents a scalable, zero-network architecture for in-process academic document extraction.',
       };
 
-      const res = verifier.evaluateLocalResult(meta, 'XMP_BINARY', 1.0);
+      const res = verifier.evaluateLocalResult(meta, 'XMP', 1.0);
       expect(res.status).toBe('COMPLETE');
       expect(res.isVerified).toBe(true);
       expect(res.missingFields).toHaveLength(0);
-      expect(res.fieldProvenance.title.source).toBe('XMP_BINARY');
+      expect(res.fieldProvenance.title.source).toBe('XMP');
     });
 
     it('returns PARTIAL when local paper is an arXiv preprint lacking journal/venue', () => {

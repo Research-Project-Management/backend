@@ -1,29 +1,15 @@
 import { NotFoundException } from '@nestjs/common';
 import { Prisma, RelationType, TagType } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import {
-  normalizeProjectScopeId,
-  normalizeAcademicTags,
-} from '@/modules/library/core';
-import {
-  CreateItemData,
-  UpdateItemData,
-  ItemDetail,
-} from '@/modules/library/core/types/bibliographic.types';
+import { normalizeProjectScopeId, disambiguateCitationKey, normalizeTags, resolveOrCreateAutomaticTagsInClient } from '@/modules/library/core';
+import { CreateItemData, UpdateItemData, ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 import { TagInput } from '@/modules/library/catalog/types/catalog.types';
 import {
-  buildMyPublicationMetadata,
-  calculateIdentifierChanges,
-  normalizeItemIdentifiers,
+  buildMyPublicationMetadata, calculateIdentifierChanges, normalizeItemIdentifiers,
 } from '@/modules/library/catalog/domain/identifier-change.helper';
+import { ResolvedTag, buildTagTypeMap } from '@/modules/library/catalog/domain/creator-tag-payload.builder';
 import {
-  ResolvedTag,
-  buildTagTypeMap,
-} from '@/modules/library/catalog/domain/creator-tag-payload.builder';
-import {
-  buildCommandCreateInput,
-  extractUniqueCreateCollectionIds,
-  resolveCreateDefaultTagType,
+  buildCommandCreateInput, extractUniqueCreateCollectionIds, resolveCreateDefaultTagType,
 } from '@/modules/library/catalog/domain/command-payload.builder';
 
 export { buildTagTypeMap };
@@ -35,97 +21,25 @@ export async function resolveOrCreateTags(
   rawTagList: (TagInput | null | undefined)[],
   defaultTagType: TagType = TagType.manual,
   projectId?: string | null,
-): Promise<ResolvedTag[]> {
-  const normalizedTagNames = normalizeAcademicTags(rawTagList).slice(0, 500);
-  if (normalizedTagNames.length === 0) return [];
-  const effectiveProjectId =
-    projectId &&
-    projectId !== 'user' &&
-    projectId !== 'me' &&
-    projectId !== 'personal' &&
-    isUuid(projectId)
-      ? projectId
-      : null;
-  const scopeWhere: Prisma.TagWhereInput = effectiveProjectId
-    ? { projectId: effectiveProjectId }
-    : { userId, projectId: null };
-  const tagTypeMap = buildTagTypeMap(rawTagList);
-  const tagOrFilter = normalizedTagNames.map((name) => ({
-    name: { equals: name, mode: 'insensitive' as const },
-  }));
-  const preExistingTags =
-    (await client.tag.findMany({
-      where: { ...scopeWhere, OR: tagOrFilter },
-      select: { id: true, name: true, type: true },
-    })) || [];
-  const existingLowerNames = new Set(
-    preExistingTags
-      .map((t: { id: string; name?: string }) =>
-        typeof t.name === 'string' ? t.name.toLowerCase() : '',
-      )
-      .filter(Boolean),
-  );
-  const seenMissingLower = new Set<string>();
-  const missingTagNames = normalizedTagNames.filter((name) => {
-    const lower = name.toLowerCase();
-    if (existingLowerNames.has(lower) || seenMissingLower.has(lower)) {
-      return false;
-    }
-    seenMissingLower.add(lower);
-    return true;
-  });
-  if (missingTagNames.length > 0) {
-    if (typeof client.tag.createMany === 'function') {
-      await client.tag.createMany({
-        data: missingTagNames.map((name) => ({
-          userId,
-          createdById: userId,
-          name,
-          type: tagTypeMap.get(name.toLowerCase()) || defaultTagType,
-          projectId: effectiveProjectId,
-        })),
-        skipDuplicates: true,
-      });
-    } else {
-      for (const name of missingTagNames) {
-        try {
-          await client.tag.create({
-            data: {
-              userId,
-              createdById: userId,
-              name,
-              type: tagTypeMap.get(name.toLowerCase()) || defaultTagType,
-              projectId: effectiveProjectId,
-            },
-          });
-        } catch {
-          // Tag was created concurrently or already exists
-        }
-      }
-    }
-  }
-  const allMatchingTags =
-    missingTagNames.length > 0
-      ? (await client.tag.findMany({
-          where: { ...scopeWhere, OR: tagOrFilter },
-          select: { id: true, name: true, type: true },
-        })) || preExistingTags
-      : preExistingTags;
-  const dedupedByLower = new Map<string, ResolvedTag>();
-  for (const t of allMatchingTags as Array<{
-    id: string;
+  existingItemTags?: ReadonlyArray<{
+    tagId?: string;
+    type?: TagType | string | number;
     name?: string;
-    type?: TagType;
-  }>) {
-    const key = typeof t.name === 'string' ? t.name.toLowerCase() : t.id;
-    if (!dedupedByLower.has(key)) {
-      dedupedByLower.set(key, {
-        id: t.id,
-        type: tagTypeMap.get(key) || t.type || defaultTagType,
-      });
-    }
-  }
-  return Array.from(dedupedByLower.values());
+    tag?: { id?: string; name?: string; type?: TagType | string | number };
+  }>,
+): Promise<ResolvedTag[]> {
+  return resolveOrCreateAutomaticTagsInClient(
+    client,
+    userId,
+    rawTagList,
+    defaultTagType,
+    projectId,
+    {
+      allowManualAcademicTerms: defaultTagType !== TagType.automatic,
+      tagTypeMap: buildTagTypeMap(rawTagList),
+      existingItemTags,
+    },
+  );
 }
 
 export async function syncTagsForCatalogItem(
@@ -135,8 +49,16 @@ export async function syncTagsForCatalogItem(
   rawTags: (TagInput | null | undefined)[],
   defaultTagType: TagType = TagType.manual,
   projectId?: string | null,
+  existingItemTags?: ReadonlyArray<{
+    tagId?: string;
+    type?: TagType | string | number;
+    name?: string;
+    tag?: { id?: string; name?: string; type?: TagType | string | number };
+  }>,
 ): Promise<void> {
-  const normalizedTagsList = normalizeAcademicTags(rawTags);
+  const normalizedTagsList = normalizeTags(rawTags, {
+    allowManualAcademicTerms: defaultTagType !== TagType.automatic,
+  });
   if (normalizedTagsList.length === 0) {
     await client.itemTag.deleteMany({ where: { itemId } });
     return;
@@ -147,13 +69,46 @@ export async function syncTagsForCatalogItem(
     rawTags,
     defaultTagType,
     projectId,
+    existingItemTags,
   );
   if (resolvedTags.length === 0) {
     await client.itemTag.deleteMany({ where: { itemId } });
     return;
   }
+  const existingTypeByTagId = new Map<string, TagType>();
+  if (Array.isArray(existingItemTags)) {
+    for (const eit of existingItemTags) {
+      const tid = eit?.tagId ?? eit?.tag?.id;
+      const rawType = eit?.type ?? eit?.tag?.type;
+      if (tid) {
+        existingTypeByTagId.set(
+          tid,
+          rawType === 'automatic' || rawType === 1 || rawType === TagType.automatic
+            ? TagType.automatic
+            : TagType.manual,
+        );
+      }
+    }
+  }
+  const resolvedIds = resolvedTags.map((t) => t.id);
+  const changedTypeTagIds = resolvedTags
+    .filter((t) => {
+      const prevType = existingTypeByTagId.get(t.id);
+      return prevType !== undefined && prevType !== t.type;
+    })
+    .map((t) => t.id);
+
   await client.itemTag.deleteMany({
-    where: { itemId, tagId: { notIn: resolvedTags.map((t) => t.id) } },
+    where:
+      changedTypeTagIds.length > 0
+        ? {
+            itemId,
+            OR: [
+              { tagId: { notIn: resolvedIds } },
+              { tagId: { in: changedTypeTagIds } },
+            ],
+          }
+        : { itemId, tagId: { notIn: resolvedIds } },
   });
   await client.itemTag.createMany({
     data: resolvedTags.map((t) => ({ tagId: t.id, itemId, type: t.type })),
@@ -338,7 +293,7 @@ export async function putItemRelationInClient(
     relationType?: string;
     description?: string;
   },
-): Promise<void> {
+): Promise<{ id: string } | undefined> {
   const targetItemId = relation.targetItemId;
   if (
     !targetItemId ||
@@ -346,13 +301,26 @@ export async function putItemRelationInClient(
     !isUuid(targetItemId) ||
     itemId === targetItemId
   ) {
-    return;
+    return undefined;
   }
-  const source = await client.item.findUnique({
-    where: { id: itemId },
-    select: { userId: true },
-  });
-  if (!source) return;
+  const [source, target] = await Promise.all([
+    client.item.findUnique({
+      where: { id: itemId },
+      select: { userId: true, projectId: true, deletedAt: true },
+    }),
+    client.item.findUnique({
+      where: { id: targetItemId },
+      select: { userId: true, projectId: true, deletedAt: true },
+    }),
+  ]);
+  if (!source || source.deletedAt || !target || target.deletedAt) {
+    return undefined;
+  }
+  // Enforce strict scope boundary: target item must belong to the same project or personal library
+  const sameScope = source.projectId
+    ? target.projectId === source.projectId
+    : !target.projectId && target.userId === source.userId;
+  if (!sameScope) return undefined;
   const rawType = String(relation.relationType || '')
     .trim()
     .toLowerCase();
@@ -374,7 +342,7 @@ export async function putItemRelationInClient(
     ? (rawType as RelationType)
     : RelationType.related;
   const description = relation.description || '';
-  await client.itemRelation.upsert({
+  return client.itemRelation.upsert({
     where: {
       sourceItemId_targetItemId_relationType: {
         sourceItemId: itemId,
@@ -391,10 +359,12 @@ export async function removeItemRelationInClient(
   client: Prisma.TransactionClient | PrismaService,
   itemId: string,
   targetItemId: string,
+  relationType?: RelationType,
 ): Promise<void> {
   if (!isUuid(itemId) || !isUuid(targetItemId)) return;
   await client.itemRelation.deleteMany({
     where: {
+      ...(relationType ? { relationType } : {}),
       OR: [
         { sourceItemId: itemId, targetItemId },
         { sourceItemId: targetItemId, targetItemId: itemId },
@@ -482,10 +452,48 @@ export async function setMyPublicationInClient(
     (existing as { projectId?: string | null }).projectId ||
     options?.stripSharedPublicationFlag,
   );
+  if (isSharedProjectItem) {
+    const existingMetaObj =
+      typeof existing.metadata === 'object' &&
+      existing.metadata !== null &&
+      !Array.isArray(existing.metadata)
+        ? (existing.metadata as Record<string, unknown>)
+        : {};
+    const hasStaleSharedPubKeys = [
+      'isMyPublication',
+      'myPublicationDetails',
+      'publicationConfirmedAt',
+      'openAccessLicense',
+      'isPublicPublication',
+      'publicationContributorId',
+      'includeAttachmentsInMyPublications',
+      'includeNotesInMyPublications',
+      'authorshipConfirmed',
+    ].some((k) => k in existingMetaObj);
+    if (!hasStaleSharedPubKeys && typeof client.item?.findUnique === 'function') {
+      const reloaded = await client.item.findUnique({
+        where: { id },
+        include: buildCommandMutationInclude(userId),
+      });
+      if (reloaded) return reloaded;
+    }
+    const strippedMeta = buildMyPublicationMetadata(
+      existing.metadata,
+      false,
+      { ...options, stripSharedFlag: true },
+    );
+    return client.item.update({
+      where: { id },
+      data: {
+        metadata: strippedMeta as Prisma.InputJsonValue,
+      },
+      include: buildCommandMutationInclude(userId),
+    });
+  }
   const metadataObj = buildMyPublicationMetadata(
     existing.metadata,
     isMyPublication,
-    isSharedProjectItem ? { ...options, stripSharedFlag: true } : options,
+    options,
   );
   return client.item.update({
     where: { id },
@@ -497,73 +505,7 @@ export async function setMyPublicationInClient(
   });
 }
 
-/**
- * Automatically disambiguates citation keys against existing items in the project or user scope.
- * Follows BibTeX / BetterBibTeX convention: vaswani2017attention -> vaswani2017attentiona -> vaswani2017attentionb.
- */
-export async function disambiguateCitationKey(
-  client:
-    | Prisma.TransactionClient
-    | PrismaService
-    | { item?: { findMany?: Prisma.TransactionClient['item']['findMany'] } }
-    | null
-    | undefined,
-  baseKey: string | null | undefined,
-  scope: { userId: string; projectId?: string | null },
-  excludeItemId?: string,
-): Promise<string | null> {
-  if (!baseKey || !baseKey.trim()) return null;
-  const cleanKey = baseKey.trim();
-
-  if (typeof client?.item?.findMany !== 'function') {
-    return cleanKey;
-  }
-
-  const scopeWhere: Prisma.ItemWhereInput =
-    scope.projectId && isUuid(scope.projectId)
-      ? { projectId: scope.projectId }
-      : { userId: scope.userId, projectId: null };
-
-  const rows = await client.item.findMany({
-    where: {
-      ...scopeWhere,
-      deletedAt: null,
-      ...(excludeItemId ? { id: { not: excludeItemId } } : {}),
-      citationKey: { startsWith: cleanKey, mode: 'insensitive' },
-    },
-    select: { citationKey: true },
-    take: 500,
-  });
-  const existing = Array.isArray(rows) ? rows : [];
-
-  const existingKeys = new Set(
-    existing
-      .map((item: { citationKey?: string | null }) =>
-        item.citationKey?.toLowerCase(),
-      )
-      .filter((k: string | undefined): k is string => Boolean(k)),
-  );
-
-  if (!existingKeys.has(cleanKey.toLowerCase())) {
-    return cleanKey;
-  }
-
-  const alphabet = 'abcdefghijklmnopqrstuvwxyz';
-  for (let i = 0; i < alphabet.length; i++) {
-    const candidate = `${cleanKey}${alphabet[i]}`;
-    if (!existingKeys.has(candidate.toLowerCase())) {
-      return candidate;
-    }
-  }
-
-  let counter = 1;
-  while (existingKeys.has(`${cleanKey}-${counter}`.toLowerCase())) {
-    counter++;
-  }
-  return `${cleanKey}-${counter}`;
-}
-
-export { disambiguateCitationKey as disambiguate };
+export { disambiguateCitationKey, disambiguateCitationKey as disambiguate };
 
 export async function resolveCreateItemRelations(
   client: Prisma.TransactionClient | PrismaService,
@@ -576,20 +518,21 @@ export async function resolveCreateItemRelations(
     (data.projectId && isUuid(data.projectId) ? data.projectId : null);
   const rawTagList = [...(data.tags || []), ...(data.keywords || []), ...(data.labels || [])];
   const defaultTagType = resolveCreateDefaultTagType(data);
-  const resolvedTags = await resolveOrCreateTags(client, userId, rawTagList, defaultTagType, effectiveProjectId);
   const rawUniqueCollectionIds = extractUniqueCreateCollectionIds(data);
-  let validCollectionIds: ReadonlySet<string> | undefined;
-  if (rawUniqueCollectionIds.length > 0 && client.collection) {
-    const validCollections = await client.collection.findMany({
-      where: effectiveProjectId
-        ? { id: { in: rawUniqueCollectionIds }, projectId: effectiveProjectId, deletedAt: null }
-        : { id: { in: rawUniqueCollectionIds }, userId, projectId: null, deletedAt: null },
-      select: { id: true },
-    });
-    if (Array.isArray(validCollections)) {
-      validCollectionIds = new Set(validCollections.map((c) => c.id));
-    }
-  }
+  const [resolvedTags, validCollections] = await Promise.all([
+    resolveOrCreateTags(client, userId, rawTagList, defaultTagType, effectiveProjectId),
+    rawUniqueCollectionIds.length > 0 && client.collection
+      ? client.collection.findMany({
+          where: effectiveProjectId
+            ? { id: { in: rawUniqueCollectionIds }, projectId: effectiveProjectId, deletedAt: null }
+            : { id: { in: rawUniqueCollectionIds }, userId, projectId: null, deletedAt: null },
+          select: { id: true },
+        })
+      : Promise.resolve(undefined),
+  ]);
+  const validCollectionIds = Array.isArray(validCollections)
+    ? new Set(validCollections.map((c) => c.id))
+    : undefined;
   const built = buildCommandCreateInput(userId, data, { resolvedTags, validCollectionIds }, projectId);
   if (built.rawCitationKey) {
     built.createData.citationKey = await disambiguateCitationKey(client, built.rawCitationKey, {

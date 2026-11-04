@@ -3,7 +3,6 @@ import {
   MAX_SAFE_HTTP_PAYLOAD_BYTES,
   PayloadTooLargeException,
 } from '@/modules/library/core';
-import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
 
 describe('OS-Level Resource Management & Stream Buffer Safety', () => {
   describe('1. readSafeResponseBuffer Backpressure and Size Limits', () => {
@@ -92,37 +91,7 @@ describe('OS-Level Resource Management & Stream Buffer Safety', () => {
     });
   });
 
-  describe('2. OCR Worker Pool OS Process & Signal Lifecycle', () => {
-    let service: OcrWorkerPoolService;
-
-    beforeEach(() => {
-      service = new OcrWorkerPoolService();
-    });
-
-    it('computes safe concurrency bounded by OS cores and memory', () => {
-      expect(service.concurrency).toBeGreaterThanOrEqual(1);
-      expect(service.concurrency).toBeLessThanOrEqual(4);
-    });
-
-    it('terminates all individual workers on OS beforeApplicationShutdown signal', async () => {
-      const mockWorker1 = { terminate: jest.fn().mockResolvedValue(undefined) };
-      const mockWorker2 = { terminate: jest.fn().mockResolvedValue(undefined) };
-      const mockScheduler = { terminate: jest.fn().mockResolvedValue(undefined) };
-
-      (service as any).scheduler = mockScheduler;
-      (service as any).workers = [mockWorker1, mockWorker2];
-
-      await service.beforeApplicationShutdown('SIGTERM');
-
-      expect(mockWorker1.terminate).toHaveBeenCalled();
-      expect(mockWorker2.terminate).toHaveBeenCalled();
-      expect(mockScheduler.terminate).toHaveBeenCalled();
-      expect((service as any).workers).toEqual([]);
-      expect((service as any).scheduler).toBeUndefined();
-    });
-  });
-
-  describe('3. Zero-Copy TypedArray Buffer Slicing Invariant', () => {
+  describe('2. Zero-Copy TypedArray Buffer Slicing Invariant', () => {
     it('verifies that TypedArray view shares identical ArrayBuffer reference without heap duplication', () => {
       const originalBuffer = Buffer.from('PDF-HEADER-BODY-TRAILER-RESOURCES');
       const zeroCopyView = new Uint8Array(

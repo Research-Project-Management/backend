@@ -1,148 +1,35 @@
 import { Injectable } from '@nestjs/common';
 import { PDFDocument } from 'pdf-lib';
-import { getDocumentProxy } from 'unpdf';
 import {
   cleanAbstractText,
-  AcademicRegexCatalog,
+  RegexExtractor,
   splitAuthorString,
   cleanAuthorName,
   splitConcatenatedAuthors,
 } from '@/modules/library/core';
-import type { DocumentSection } from '@/modules/library/core/types/bibliographic.types';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
+import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
 import type { ExtractedPdfMetadata } from './pdf.provider';
+import {
+  extractPdfOutlineSections,
+  extractPdfBibliographyReferences,
+  type ExtractedPdfBibliographyReference,
+} from './pdf-outline.extractor';
 
-export async function extractPdfOutlineSections(
-  document: Awaited<ReturnType<typeof getDocumentProxy>>,
-  pages: Array<{
-    pageIndex: number;
-    pageNumber?: number;
-    textContent: string;
-  }>,
-): Promise<DocumentSection[]> {
-  const sections: DocumentSection[] = [];
-  const docProxy = document as unknown as {
-    getOutline?: () => Promise<
-      Array<{ title?: string; dest?: unknown; items?: unknown[] }> | null
-    >;
-    getDestination?: (dest: string) => Promise<unknown[] | null>;
-    getPageIndex?: (ref: unknown) => Promise<number>;
-  };
-
-  try {
-    if (typeof docProxy.getOutline === 'function') {
-      const outline = await docProxy.getOutline();
-      if (Array.isArray(outline) && outline.length > 0) {
-        const resolvePageNum = async (dest: unknown): Promise<number> => {
-          try {
-            let explicitDest = dest;
-            if (typeof dest === 'string' && typeof docProxy.getDestination === 'function') {
-              explicitDest = await docProxy.getDestination(dest);
-            }
-            if (Array.isArray(explicitDest) && explicitDest.length > 0) {
-              const ref = explicitDest[0];
-              if (typeof ref === 'number') return ref + 1;
-              if (ref && typeof ref === 'object' && typeof docProxy.getPageIndex === 'function') {
-                const idx = await docProxy.getPageIndex(ref);
-                if (typeof idx === 'number' && idx >= 0) return idx + 1;
-              }
-            }
-          } catch {
-            // Ignore destination resolution error
-          }
-          return 1;
-        };
-
-        let sectionCounter = 0;
-        const traverseOutline = async (
-          items: Array<{ title?: string; dest?: unknown; items?: unknown[] }>,
-          level: number,
-          prefix: string,
-        ) => {
-          for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            const rawTitle = typeof item?.title === 'string' ? item.title.replace(/\s+/g, ' ').trim() : '';
-            const num = prefix ? `${prefix}.${i + 1}` : `${i + 1}`;
-            if (rawTitle) {
-              sectionCounter++;
-              const pageNum = await resolvePageNum(item.dest);
-              sections.push({
-                id: `sec-${sectionCounter}`,
-                num,
-                title: rawTitle,
-                level,
-                page: pageNum,
-                pageNumber: pageNum,
-                paragraphs: [],
-              });
-            }
-            if (Array.isArray(item?.items) && item.items.length > 0) {
-              await traverseOutline(
-                item.items as Array<{ title?: string; dest?: unknown; items?: unknown[] }>,
-                level + 1,
-                num,
-              );
-            }
-          }
-        };
-
-        await traverseOutline(outline, 1, '');
-        if (sections.length > 0) return sections;
-      }
-    }
-  } catch {
-    // Fallback to heading heuristics below
-  }
-
-  const numberedHeadingRegex =
-    /^(?:(\d+(?:\.\d+){0,2}|[IVX]{1,4})\.?\s+)([A-Z][A-Za-z0-9\s,:;()\-–—/]{2,80})$/;
-  const canonicalHeadingRegex =
-    /^(Abstract|Introduction|Background|Related Work|Literature Review|Methodology|Methods|Materials and Methods|Experiments|Experimental Setup|Results|Results and Discussion|Evaluation|Discussion|Limitations|Conclusion|Conclusions|Future Work|Acknowledgments|Acknowledgements|References|Bibliography|Appendix)$/i;
-
-  let fallbackCounter = 0;
-  const seenTitles = new Set<string>();
-
-  for (const p of pages) {
-    const pageNum = p.pageNumber ?? p.pageIndex + 1;
-    const lines = (p.textContent || '')
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    for (const line of lines) {
-      if (line.length > 90) continue;
-      const numberedMatch = line.match(numberedHeadingRegex);
-      const canonicalMatch = !numberedMatch ? line.match(canonicalHeadingRegex) : null;
-
-      if (numberedMatch || canonicalMatch) {
-        const num = numberedMatch ? numberedMatch[1] : undefined;
-        const title = (numberedMatch ? numberedMatch[2] : canonicalMatch![1]).trim();
-        const dedupeKey = `${num || ''}:${title.toLowerCase()}`;
-        if (seenTitles.has(dedupeKey)) continue;
-        seenTitles.add(dedupeKey);
-
-        fallbackCounter++;
-        const level = num ? Math.min(3, num.split('.').length) : 1;
-        sections.push({
-          id: `sec-${fallbackCounter}`,
-          ...(num ? { num } : {}),
-          title,
-          level,
-          page: pageNum,
-          pageNumber: pageNum,
-          paragraphs: [],
-        });
-      }
-    }
-  }
-
-  return sections;
-}
+export {
+  extractPdfOutlineSections,
+  extractPdfBibliographyReferences,
+  type ExtractedPdfBibliographyReference,
+} from './pdf-outline.extractor';
 
 @Injectable()
 export class PdfTextMetadataExtractor {
   static readonly TEXT_SCAN_LIMIT = 50000;
+
+  extractBibliographyReferences(
+    fullText: string,
+  ): ExtractedPdfBibliographyReference[] {
+    return extractPdfBibliographyReferences(fullText);
+  }
 
   private findReferencesHeadingIndex(text: string): number {
     const pattern =
@@ -185,7 +72,7 @@ export class PdfTextMetadataExtractor {
       .replace(/(10\.\d{4,9})\s*\/\s*/g, '$1/')
       .replace(/(10\.\d{4,9}\/)\s+/g, '$1');
 
-    const catalogScan = AcademicRegexCatalog.scan(frontMatter);
+    const catalogScan = RegexExtractor.scan(frontMatter);
     if (catalogScan.doi) {
       return catalogScan.doi;
     }
@@ -208,7 +95,7 @@ export class PdfTextMetadataExtractor {
     const normalizedFrontMatter = frontMatter
       .replace(/(10\.\d{4,9})\s*\/\s*/g, '$1/')
       .replace(/(10\.\d{4,9}\/)\s*\n\s*/g, '$1');
-    const catalogScan = AcademicRegexCatalog.scan(normalizedFrontMatter);
+    const catalogScan = RegexExtractor.scan(normalizedFrontMatter);
     const metadata: ExtractedPdfMetadata = {};
     const doi = catalogScan.doi ?? this.extractFromText(normalizedFrontMatter);
     if (doi) metadata.doi = doi;
@@ -263,7 +150,7 @@ export class PdfTextMetadataExtractor {
       metadata.publisher = catalogScan.publisher;
     } else {
       const pubMatch = scannedText.match(
-        AcademicRegexCatalog.PUBLISHER_IMPRINT_PATTERN,
+        RegexExtractor.PUBLISHER_IMPRINT_PATTERN,
       );
       if (pubMatch) {
         metadata.publisher = (pubMatch[1] || pubMatch[0]).trim();
@@ -294,15 +181,14 @@ export class PdfTextMetadataExtractor {
       }
     }
 
-    const keywordsMatch = scannedText.match(
-      AcademicRegexCatalog.KEYWORDS_PATTERN,
+    const keywordsScanRegion = preRefText.slice(0, 8000);
+    const keywordsMatch = keywordsScanRegion.match(
+      RegexExtractor.KEYWORDS_PATTERN,
     );
     if (keywordsMatch?.[1]) {
-      const rawTokens = keywordsMatch[1]
-        .split(/[,;•|\n]/)
-        .map((k) => k.trim())
-        .filter((k) => k.length > 1 && k.split(/\s+/).length <= 7);
-      const normalized = normalizeAcademicTags(rawTokens);
+      const normalized = RegexExtractor.extractCleanKeywordsFromBlock(
+        keywordsMatch[1],
+      );
       if (normalized.length > 0) {
         metadata.keywords = normalized;
       }
@@ -329,13 +215,13 @@ export class PdfTextMetadataExtractor {
       abstractIndex !== -1 ? lines.slice(0, abstractIndex) : lines.slice(0, 25);
     const cleanLines = headerLines.filter((lineItem) => {
       if (
-        /^(arxiv[:\s._/-]*\d|https?:\/\/|\d+$|submitted to|accepted (as|at)|published as|proceedings of|ieee|acm|springer|elsevier|under review|provided proper)/i.test(
+        /^(arxiv[:\s._/-]*\d|https?:\/\/|\d+$|submitted to|accepted (as|at|manuscript)|published as|proceedings of|ieee|acm|springer|elsevier|under review|provided proper|downloaded from|authorized licensed use|journal pre-proof|research article|original article|review article|open access)/i.test(
           lineItem,
         )
       )
         return false;
       if (
-        /reproduce the tables and figures|permission to|copyright|all rights reserved|doi:\s*10\.|scholarly works/i.test(
+        /reproduce the tables and figures|permission to|copyright|all rights reserved|doi:\s*10\.|scholarly works|\bpage\s+\d+\s+of\s+\d+\b/i.test(
           lineItem,
         )
       )
@@ -464,6 +350,16 @@ export class PdfTextMetadataExtractor {
     }
 
     const fallback = this.extractMetadataFromBuffer(buffer);
+    const hasCoreMetadata = Boolean(
+      fallback.title &&
+      fallback.authors &&
+      fallback.authors.length > 0 &&
+      fallback.year,
+    );
+    if (hasCoreMetadata) {
+      return fallback;
+    }
+
     try {
       const pdfDoc = await PDFDocument.load(buffer, {
         ignoreEncryption: true,
@@ -477,7 +373,7 @@ export class PdfTextMetadataExtractor {
         if (
           cleanTitle.length > 3 &&
           !cleanTitle.toLowerCase().endsWith('.pdf') &&
-          !TrustedExtractionService.isBogusTitle(cleanTitle)
+          !PdfMetadataExtractor.isBogusTitle(cleanTitle)
         ) {
           pdfLibMeta.title = cleanTitle;
         }
@@ -508,11 +404,8 @@ export class PdfTextMetadataExtractor {
       const rawKeywords = pdfDoc.getKeywords();
       if (rawKeywords) {
         const cleanKeywordsStr = this.decodePdfInfoString(rawKeywords);
-        const tokens = cleanKeywordsStr
-          .split(/[,;•|]/)
-          .map((k) => k.trim())
-          .filter((k) => k.length > 1 && k.split(/\s+/).length <= 7);
-        const normalizedKw = normalizeAcademicTags(tokens);
+        const normalizedKw =
+          RegexExtractor.extractCleanKeywordsFromBlock(cleanKeywordsStr);
         if (normalizedKw.length > 0) {
           pdfLibMeta.keywords = normalizedKw;
         }
@@ -599,11 +492,8 @@ export class PdfTextMetadataExtractor {
         'Keywords',
       );
       if (decodedKeywords) {
-        const tokens = decodedKeywords
-          .split(/[,;•|]/)
-          .map((k) => k.trim())
-          .filter((k) => k.length > 1 && k.split(/\s+/).length <= 7);
-        const normalizedKw = normalizeAcademicTags(tokens);
+        const normalizedKw =
+          RegexExtractor.extractCleanKeywordsFromBlock(decodedKeywords);
         if (normalizedKw.length > 0) {
           extractedMetadataResult.keywords = normalizedKw;
         }

@@ -52,7 +52,7 @@ import {
   softDeleteDuplicatesAndRecordOutboxInTx,
   updateAndReloadMergedPrimaryInTx,
 } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
-import { RetractionBloomFilter } from '@/modules/library/ingestion/domain/retraction-bloom-filter.domain';
+import { RetractionBloomFilter } from '@/modules/library/ingestion/domain/metadata.validator';
 
 export type { ContributorShape };
 export {
@@ -317,6 +317,39 @@ export class DuplicateMergerService {
           (primary as { contributors?: Array<Record<string, unknown>> })
             .contributors ??
           [];
+
+        if (
+          Array.isArray(primaryContributors) &&
+          primaryContributors.length > 0 &&
+          typeof tx.userPublication?.findMany === 'function' &&
+          typeof tx.userPublication?.update === 'function'
+        ) {
+          const userPubs = await tx.userPublication.findMany({
+            where: { itemId: primary.id },
+          });
+          for (const pub of userPubs) {
+            const hasValidLink = primaryContributors.some(
+              (c) => (c as { id?: string }).id === pub.contributorId,
+            );
+            if (!hasValidLink) {
+              const defaultContribId = (
+                primaryContributors[0] as { id?: string }
+              )?.id;
+              if (defaultContribId) {
+                await tx.userPublication.update({
+                  where: {
+                    userId_itemId: {
+                      userId: pub.userId,
+                      itemId: pub.itemId,
+                    },
+                  },
+                  data: { contributorId: defaultContribId },
+                });
+              }
+            }
+          }
+        }
+
         const derivedFirstAuthor =
           Array.isArray(primaryContributors) &&
           primaryContributors.length === 0 &&
@@ -335,18 +368,26 @@ export class DuplicateMergerService {
                 itemType: String(effectiveMergedItemType),
               });
 
-        const [noteCount, attachmentCount] = await Promise.all([
-          tx.note?.count
-            ? tx.note.count({
-                where: { itemId: primary.id, deletedAt: null },
-              })
-            : Promise.resolve(undefined),
-          tx.attachment?.count
-            ? tx.attachment.count({
-                where: { itemId: primary.id, deletedAt: null },
-              })
-            : Promise.resolve(undefined),
-        ]);
+        const needNoteRecount =
+          !this.catalogGateway && Boolean(tx.note?.count);
+        const needAttachmentRecount =
+          !this.extractionGateway?.reassignContentToItem &&
+          Boolean(tx.attachment?.count);
+        const [noteCount, attachmentCount] =
+          needNoteRecount || needAttachmentRecount
+            ? await Promise.all([
+                needNoteRecount
+                  ? tx.note.count({
+                      where: { itemId: primary.id, deletedAt: null },
+                    })
+                  : Promise.resolve(undefined),
+                needAttachmentRecount
+                  ? tx.attachment.count({
+                      where: { itemId: primary.id, deletedAt: null },
+                    })
+                  : Promise.resolve(undefined),
+              ])
+            : [undefined, undefined];
 
         const { topLevelData } =
           await applyMergedUpdatesAndClearDuplicateCitationKeyCollision({
@@ -507,5 +548,43 @@ export class DuplicateMergerService {
     }
 
     return txResult;
+  }
+
+  async mergeDuplicatesBatch(
+    userId: UserId | string,
+    merges: MergeDuplicatesDto[],
+    projectId?: ProjectId | string,
+  ) {
+    if (!Array.isArray(merges) || merges.length === 0) {
+      throw new BadRequestException('merges must contain at least one merge group');
+    }
+    const results: Array<{
+      primaryItem: unknown;
+      mergedCount: number;
+      softDeletedItemIds: string[];
+    }> = [];
+    const failedGroups: Array<{ primaryItemId: string; error: string }> = [];
+    for (const dto of merges.slice(0, 50)) {
+      try {
+        const res = await this.mergeDuplicates(userId, dto, projectId);
+        results.push({
+          primaryItem: res.primaryItem,
+          mergedCount: res.mergedCount,
+          softDeletedItemIds: res.softDeletedItemIds,
+        });
+      } catch (err: unknown) {
+        failedGroups.push({
+          primaryItemId: dto.primaryItemId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return {
+      success: failedGroups.length === 0,
+      mergedGroupCount: results.length,
+      totalMergedItems: results.reduce((sum, r) => sum + r.mergedCount, 0),
+      results,
+      failedGroups,
+    };
   }
 }

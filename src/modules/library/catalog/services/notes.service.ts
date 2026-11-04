@@ -3,11 +3,12 @@ import {
   Inject,
   Logger,
   NotFoundException,
+  BadRequestException,
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
-import { ItemCacheCoordinator } from './item-cache.coordinator';
+import { ItemCacheCoordinator } from './library-bootstrap.service';
 import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import {
   CreateNoteData,
@@ -16,11 +17,13 @@ import {
 } from '@/modules/library/catalog/types/catalog.types';
 import {
   formatLiteratureNoteMarkdown,
+  appendAnnotationsToLiteratureNoteMarkdown,
+  isLiteratureNoteCandidate,
   FormatNoteOptions,
   sanitizeNoteTitle,
   sanitizeNoteContent,
 } from '@/modules/library/catalog/domain/notes.domain';
-import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
+import { buildTipTapDocFromText } from '@/modules/library/core/domain/renamer.domain';
 import {
   TransactionHelpers,
   UNIT_OF_WORK,
@@ -29,7 +32,7 @@ import {
   ConfigurationException,
   LIBRARY_EVENT_TYPES,
 } from '@/modules/library/core';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { ItemQueryService } from './item-query.service';
 
 @Injectable()
@@ -83,6 +86,15 @@ export class NotesService {
   }
 
   async createNote(userId: string, data: CreateNoteData) {
+    if (data.contentJson !== undefined && data.contentJson !== null) {
+      if (typeof data.contentJson !== 'object' || Array.isArray(data.contentJson)) {
+        throw new BadRequestException('contentJson must be a valid JSON object');
+      }
+      const serialized = JSON.stringify(data.contentJson);
+      if (serialized.length > 2_000_000) {
+        throw new BadRequestException('contentJson exceeds maximum size of 2MB');
+      }
+    }
     if (data.itemId && this.itemQuery) {
       const exists = await this.itemQuery.exists(
         userId,
@@ -154,6 +166,15 @@ export class NotesService {
     data: UpdateNoteData,
     projectId?: string,
   ) {
+    if (data.contentJson !== undefined && data.contentJson !== null) {
+      if (typeof data.contentJson !== 'object' || Array.isArray(data.contentJson)) {
+        throw new BadRequestException('contentJson must be a valid JSON object');
+      }
+      const serialized = JSON.stringify(data.contentJson);
+      if (serialized.length > 2_000_000) {
+        throw new BadRequestException('contentJson exceeds maximum size of 2MB');
+      }
+    }
     const resolvedVersion = data?.expectedVersion;
     const effectiveProjectId = normalizeProjectScopeId(projectId);
 
@@ -351,6 +372,13 @@ export class NotesService {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
+    const effectiveProjectId = normalizeProjectScopeId(
+      opts.projectId ||
+        ('projectId' in item && typeof item.projectId === 'string'
+          ? item.projectId
+          : undefined),
+    );
+
     const hasFilterOpts =
       Boolean(opts.attachmentId) ||
       Boolean(opts.annotationIds && opts.annotationIds.length > 0);
@@ -358,8 +386,13 @@ export class NotesService {
       ? await this.repo.findItemAnnotations(itemId, {
           attachmentId: opts.attachmentId,
           annotationIds: opts.annotationIds,
+          userId,
+          projectId: effectiveProjectId,
         })
-      : await this.repo.findItemAnnotations(itemId);
+      : await this.repo.findItemAnnotations(itemId, {
+          userId,
+          projectId: effectiveProjectId,
+        });
 
     if (typeof opts.tagColor === 'string' && opts.tagColor.trim()) {
       const targetColor = opts.tagColor.trim().toLowerCase();
@@ -378,55 +411,114 @@ export class NotesService {
       };
     }
 
-    const markdown = formatLiteratureNoteMarkdown(item, annotations, opts);
-    const effectiveProjectId = normalizeProjectScopeId(
-      opts.projectId ||
-        ('projectId' in item && typeof item.projectId === 'string'
-          ? item.projectId
-          : undefined),
+    const extractedAnnotationTags = annotations.flatMap((a) =>
+      Array.isArray(a.tags) ? a.tags : [],
     );
 
-    if (opts.noteId) {
-      const existingNote = await this.getNote(
-        userId,
-        opts.noteId,
-        effectiveProjectId,
-      );
-      if (existingNote) {
-        const mergedTags = normalizeAcademicTags([
-          ...(Array.isArray(existingNote.tags) ? existingNote.tags : []),
-          'literature-note',
-          'highlights',
-        ]);
-        const updatedNote = await this.updateNote(
-          userId,
-          existingNote.id,
-          {
-            expectedVersion: existingNote.version,
-            contentMd: markdown,
-            contentJson: buildTipTapDocFromText(markdown),
-            tags: mergedTags,
-          },
-          effectiveProjectId,
+    const itemRecord = item as unknown as Record<string, unknown>;
+    const rawItemNotes = Array.isArray(itemRecord.notes)
+      ? (itemRecord.notes as Array<Record<string, unknown>>)
+      : Array.isArray(itemRecord.notesList)
+        ? (itemRecord.notesList as Array<Record<string, unknown>>)
+        : [];
+
+    const candidateNoteId =
+      opts.noteId ||
+      (opts as { targetNoteId?: string }).targetNoteId ||
+      (() => {
+        const foundLit = rawItemNotes.find(
+          (n) => typeof n?.id === 'string' && isLiteratureNoteCandidate(n),
         );
+        return typeof foundLit?.id === 'string' ? foundLit.id : undefined;
+      })();
+
+    if (candidateNoteId) {
+      const preloadedCandidate = rawItemNotes.find(
+        (n) =>
+          n &&
+          n.id === candidateNoteId &&
+          !n.deletedAt &&
+          (typeof n.contentMd === 'string' || typeof n.content === 'string'),
+      );
+      const existingNote = preloadedCandidate
+        ? {
+            id: String(preloadedCandidate.id),
+            title:
+              typeof preloadedCandidate.title === 'string'
+                ? preloadedCandidate.title
+                : 'Literature Notes',
+            contentMd:
+              typeof preloadedCandidate.contentMd === 'string'
+                ? preloadedCandidate.contentMd
+                : String(preloadedCandidate.content ?? ''),
+            tags: Array.isArray(preloadedCandidate.tags)
+              ? (preloadedCandidate.tags as string[])
+              : [],
+            version:
+              typeof preloadedCandidate.version === 'number'
+                ? preloadedCandidate.version
+                : undefined,
+          }
+        : await this.getNote(
+            userId,
+            candidateNoteId,
+            effectiveProjectId,
+          ).catch(() => null);
+      if (existingNote) {
+        const mergedTags = normalizeTags(
+          [
+            ...(Array.isArray(existingNote.tags) ? existingNote.tags : []),
+            'literature-note',
+            'highlights',
+            ...extractedAnnotationTags,
+          ],
+          { allowManualAcademicTerms: true },
+        );
+        const existingContent = (existingNote.contentMd || '').trim();
+        const { markdown: nextMarkdown, addedCount } =
+          appendAnnotationsToLiteratureNoteMarkdown(
+            item,
+            existingContent,
+            annotations,
+            opts,
+          );
+
+        const updatedNote =
+          nextMarkdown !== existingContent ||
+          mergedTags.length !== (existingNote.tags?.length ?? 0)
+            ? await this.updateNote(
+                userId,
+                existingNote.id,
+                {
+                  expectedVersion: existingNote.version,
+                  contentMd: nextMarkdown,
+                  tags: mergedTags,
+                },
+                effectiveProjectId,
+              )
+            : existingNote;
         return {
           ...(updatedNote as unknown as Record<string, unknown>),
           success: true,
           noteId: updatedNote.id,
           totalExtracted: annotations.length,
+          addedCount,
           literatureNote: updatedNote,
-        } as ExtractLiteratureNoteResult;
+        } as unknown as ExtractLiteratureNoteResult;
       }
     }
 
+    const markdown = formatLiteratureNoteMarkdown(item, annotations, opts);
     const note = await this.createNote(userId, {
       itemId,
       projectId: effectiveProjectId,
       title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
       contentMd: markdown,
-      contentJson: buildTipTapDocFromText(markdown),
       createdById: userId,
-      tags: ['literature-note', 'highlights'],
+      tags: normalizeTags(
+        ['literature-note', 'highlights', ...extractedAnnotationTags],
+        { allowManualAcademicTerms: true },
+      ),
     });
 
     return {
@@ -438,12 +530,4 @@ export class NotesService {
     } as ExtractLiteratureNoteResult;
   }
 
-  async extractNoteFromAnnotations(
-    userId: string,
-    itemId: string,
-    options?: FormatNoteOptions,
-    projectId?: string,
-  ) {
-    return this.extractNotesFromAnnotations(userId, itemId, options, projectId);
-  }
 }

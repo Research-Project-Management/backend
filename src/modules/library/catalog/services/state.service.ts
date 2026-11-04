@@ -5,8 +5,8 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
-import { UpdateStateDto } from '@/modules/library/catalog/dto/tags.dto';
+import { StateRepository } from '@/modules/library/catalog/repositories/saved-searches.repository';
+import { UpdateStateDto } from '@/modules/library/catalog/dto/collections.dto';
 import {
   StateData,
   ReadingStatus,
@@ -18,6 +18,7 @@ import {
   UNIT_OF_WORK,
   IUnitOfWork,
   LIBRARY_EVENT_TYPES,
+  normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { ItemQueryService } from './item-query.service';
 import {
@@ -27,10 +28,12 @@ import {
   shouldAutoAdvanceToReading,
   isValidStateTransition,
   isValidScrollPosition,
+  mergeScrollPosition,
   pickPreferredMergedState,
 } from '@/modules/library/catalog/domain/state.domain';
 import { RedisCacheService } from '@/core';
-import { ItemCacheCoordinator } from './item-cache.coordinator';
+import { AccessService, Permission } from '@/modules/project/access';
+import { ItemCacheCoordinator } from './library-bootstrap.service';
 
 export { pickPreferredMergedState };
 
@@ -49,6 +52,13 @@ export class StateService {
     @Optional()
     @Inject(ItemCacheCoordinator)
     cacheCoordinator?: ItemCacheCoordinator,
+    @Optional()
+    private readonly accessService?: AccessService & {
+      verifyProjectAccess?: (
+        userId: string,
+        projectId: string,
+      ) => Promise<unknown>;
+    },
   ) {
     this.cacheCoordinator =
       cacheCoordinator ?? new ItemCacheCoordinator(this.cache);
@@ -58,8 +68,18 @@ export class StateService {
     itemId: string,
     userId: string,
     projectId?: string,
+    options?: {
+      skipScopeInvalidation?: boolean;
+      onlyUserStateOverlay?: boolean;
+      preserveContentCaches?: boolean;
+    },
   ): Promise<void> {
-    await this.cacheCoordinator.invalidateItemCache(itemId, userId, projectId);
+    await this.cacheCoordinator.invalidateItemCache(
+      itemId,
+      userId,
+      projectId,
+      options,
+    );
   }
 
   private toResponse(state?: StateEntity | null): StateData {
@@ -146,7 +166,39 @@ export class StateService {
         targetStatus === ReadingStatus.READING ||
         targetStatus === ReadingStatus.COMPLETED;
 
+      const resolvedAttachmentId =
+        dto.attachmentId?.trim() ||
+        (dto.scrollPosition &&
+        typeof dto.scrollPosition === 'object' &&
+        !Array.isArray(dto.scrollPosition) &&
+        typeof (dto.scrollPosition as Record<string, unknown>).attachmentId ===
+          'string'
+          ? (
+              (dto.scrollPosition as Record<string, unknown>)
+                .attachmentId as string
+            ).trim()
+          : undefined);
+
+      const mergedScrollPosition =
+        dto.scrollPosition !== undefined
+          ? mergeScrollPosition(
+              existing?.scrollPosition,
+              dto.scrollPosition,
+              resolvedAttachmentId,
+            )
+          : undefined;
+
+      if (
+        mergedScrollPosition !== undefined &&
+        !isValidScrollPosition(mergedScrollPosition)
+      ) {
+        throw new BadRequestException(
+          'scrollPosition payload exceeds maximum allowed size of 16KB or is invalid',
+        );
+      }
+
       const upsertData: UpsertStateData = {
+        ...(resolvedAttachmentId ? { attachmentId: resolvedAttachmentId } : {}),
         isStarred:
           dto.isStarred !== undefined ? dto.isStarred : existing?.isStarred,
         readStatus: targetStatus,
@@ -155,12 +207,18 @@ export class StateService {
             ? dto.rating
             : (existing?.rating ?? undefined),
         currentPage: dto.currentPage,
-        scrollPosition: dto.scrollPosition,
+        scrollPosition: mergedScrollPosition,
         lastOpenedAt: now,
         lastReadAt: isNowReadingOrCompleted
-          ? (existing?.lastReadAt ?? now)
-          : undefined,
+          ? now
+          : (existing?.lastReadAt ?? undefined),
       };
+
+      const isEphemeralProgressOnly =
+        dto.isStarred === undefined &&
+        dto.rating === undefined &&
+        dto.readStatus === undefined &&
+        targetStatus === currentStatus;
 
       const updated = await this.stateRepository.upsertState(
         userId,
@@ -169,50 +227,62 @@ export class StateService {
         tx,
       );
 
-      await helpers.appendChange(eventScope, {
-        entityType: 'State',
-        entityId: `${userId}:${itemId}`,
-        action: 'update',
-        version: 1,
-        data: updated,
-      });
+      if (!isEphemeralProgressOnly) {
+        await helpers.appendChange(eventScope, {
+          entityType: 'State',
+          entityId: `${userId}:${itemId}`,
+          action: 'update',
+          version: 1,
+          data: updated,
+        });
 
-      await helpers.publishOutbox(
-        eventScope,
-        itemId,
-        LIBRARY_EVENT_TYPES.READING_STATE_UPDATED,
-        {
+        await helpers.publishOutbox(
+          eventScope,
           itemId,
-          userId,
-          projectId: effectiveProjectId,
-          isStarred: updated.isStarred,
-          readStatus: updated.readStatus,
-          rating: updated.rating,
-          currentPage: updated.currentPage,
-          scrollPosition: updated.scrollPosition,
-          lastOpenedAt: updated.lastOpenedAt,
-          lastReadAt: updated.lastReadAt,
-        },
-      );
+          LIBRARY_EVENT_TYPES.READING_STATE_UPDATED,
+          {
+            itemId,
+            userId,
+            projectId: effectiveProjectId,
+            isStarred: updated.isStarred,
+            readStatus: updated.readStatus,
+            rating: updated.rating,
+            currentPage: updated.currentPage,
+            scrollPosition: updated.scrollPosition,
+            lastOpenedAt: updated.lastOpenedAt,
+            lastReadAt: updated.lastReadAt,
+          },
+        );
+      }
 
       helpers?.onAfterCommit?.(() =>
-        this.invalidateStateCache(itemId, userId, effectiveProjectId),
+        this.invalidateStateCache(itemId, userId, effectiveProjectId, {
+          skipScopeInvalidation: isEphemeralProgressOnly,
+          onlyUserStateOverlay: isEphemeralProgressOnly,
+          preserveContentCaches: true,
+        }),
       );
 
-      return this.toResponse(updated);
+      return {
+        response: this.toResponse(updated),
+        isEphemeralProgressOnly,
+      };
     };
 
     let ranPostCommitHook = false;
-    const result = await this.libraryTx.executeInTransaction(
-      async (tx, helpers) => {
+    const { response, isEphemeralProgressOnly } =
+      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
         ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         return execute(tx, helpers);
-      },
-    );
+      });
     if (!ranPostCommitHook) {
-      await this.invalidateStateCache(itemId, userId, effectiveProjectId);
+      await this.invalidateStateCache(itemId, userId, effectiveProjectId, {
+        skipScopeInvalidation: isEphemeralProgressOnly,
+        onlyUserStateOverlay: isEphemeralProgressOnly,
+        preserveContentCaches: true,
+      });
     }
-    return result;
+    return response;
   }
 
   async markAsRead(
@@ -309,6 +379,19 @@ export class StateService {
     projectId?: string,
   ): Promise<Record<string, StateData>> {
     if (!itemIds.length) return {};
+
+    const validProjectId = normalizeProjectScopeId(projectId);
+    if (validProjectId && this.accessService) {
+      if (typeof this.accessService.verifyProjectAccess === 'function') {
+        await this.accessService.verifyProjectAccess(userId, validProjectId);
+      } else if (typeof this.accessService.requirePermission === 'function') {
+        await this.accessService.requirePermission(
+          validProjectId,
+          userId,
+          Permission.LIBRARY_READ,
+        );
+      }
+    }
 
     const states = await this.stateRepository.findStatesForItems(
       userId,

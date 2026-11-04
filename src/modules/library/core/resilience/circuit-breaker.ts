@@ -232,3 +232,176 @@ export class CircuitBreaker {
     }
   }
 }
+
+export interface RateLimiterOptions {
+  name?: string;
+  capacity: number;
+  refillRatePerSec: number;
+}
+
+/**
+ * Token Bucket Rate Limiter.
+ *
+ * Enforces polite rate limits for academic external APIs (e.g. arXiv 1 req/3s, CrossRef 10 req/s, PubMed 3 req/s).
+ * Supports bursts up to `capacity` while smoothly replenishing tokens at `refillRatePerSec`.
+ */
+export class TokenBucketRateLimiter {
+  private readonly logger = new Logger(TokenBucketRateLimiter.name);
+  public readonly name: string;
+  public readonly capacity: number;
+  public readonly refillRatePerSec: number;
+
+  private tokens: number;
+  private lastRefillTimestamp: number;
+
+  constructor(options: RateLimiterOptions) {
+    this.name = options.name || 'default';
+    this.capacity = Math.max(1, options.capacity);
+    this.refillRatePerSec = Math.max(0.001, options.refillRatePerSec);
+    this.tokens = this.capacity;
+    this.lastRefillTimestamp = Date.now();
+  }
+
+
+  /**
+   * Attempts to acquire `count` tokens non-blockingly.
+   * Returns true if tokens were acquired, false otherwise.
+   */
+  public tryAcquire(count = 1): boolean {
+    this.refill();
+    if (this.tokens >= count) {
+      this.tokens -= count;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Acquires `count` tokens, waiting asynchronously if tokens are exhausted.
+   * Reserves virtual token deficit atomically so concurrent callers queue fairly without burst stampedes.
+   * Can be cancelled cooperatively via `signal`.
+   */
+  public async acquire(count = 1, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+      throw (
+        signal.reason || new Error('Aborted before acquiring rate limit token')
+      );
+    }
+
+    if (this.tryAcquire(count)) {
+      return;
+    }
+
+    // Reserve tokens up-front (allowing this.tokens to go negative as virtual debt)
+    // so concurrent callers calculate staggered wait times rather than waking up simultaneously.
+    this.refill();
+    this.tokens -= count;
+    const deficit = Math.max(0, -this.tokens);
+    const waitMs = Math.max(
+      10,
+      Math.ceil((deficit / this.refillRatePerSec) * 1000),
+    );
+
+    this.logger.debug(
+      `[RateLimiter:${this.name}] Rate limit reached. Waiting ${waitMs}ms for ${count} token(s).`,
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      let timer: NodeJS.Timeout | null = null;
+
+      const onAbort = () => {
+        if (timer) clearTimeout(timer);
+        // Refund the reserved tokens on abort
+        this.refill();
+        this.tokens = Math.min(this.capacity, this.tokens + count);
+        const reason =
+          signal?.reason instanceof Error
+            ? signal.reason
+            : new Error(
+                signal?.reason
+                  ? String(signal.reason)
+                  : `Aborted while waiting for rate limit token on "${this.name}"`,
+              );
+        reject(reason);
+      };
+
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      timer = setTimeout(() => {
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+        }
+        this.refill();
+        resolve();
+      }, waitMs);
+    });
+  }
+
+  public reset(): void {
+    this.tokens = this.capacity;
+    this.lastRefillTimestamp = Date.now();
+  }
+
+  private refill(): void {
+    const now = Date.now();
+    const elapsedSec = (now - this.lastRefillTimestamp) / 1000;
+    if (elapsedSec > 0) {
+      this.tokens = Math.min(
+        this.capacity,
+        this.tokens + elapsedSec * this.refillRatePerSec,
+      );
+      this.lastRefillTimestamp = now;
+    }
+  }
+}
+
+/**
+ * SingleFlightCoalescer — In-Process Request Coalescing / Stampede Protection.
+ *
+ * Ensures that when multiple concurrent callers request the same key at the exact same millisecond
+ * (e.g., 500 project collaborators polling `/library/sync/version` or reloading `/library/bootstrap`),
+ * only ONE underlying async factory executes while all concurrent callers await the shared Promise.
+ * Once the Promise settles (resolves or rejects), the in-flight entry is immediately evicted so
+ * subsequent callers observe fresh state or L1/L2 cache.
+ */
+export class SingleFlightCoalescer {
+  private readonly inFlight = new Map<string, Promise<unknown>>();
+
+  /**
+   * Executes `factory` for `key` if no request for `key` is currently in flight,
+   * or joins the existing in-flight Promise.
+   */
+  public execute<T>(key: string, factory: () => Promise<T>): Promise<T> {
+    const existing = this.inFlight.get(key);
+    if (existing) {
+      return existing as Promise<T>;
+    }
+
+    const promise = (async () => {
+      try {
+        return await factory();
+      } finally {
+        this.inFlight.delete(key);
+      }
+    })();
+
+    this.inFlight.set(key, promise);
+    return promise;
+  }
+
+  /**
+   * Returns the current number of active in-flight keys (useful for observability and testing).
+   */
+  public get inFlightCount(): number {
+    return this.inFlight.size;
+  }
+
+  /**
+   * Clears all tracked in-flight entries.
+   */
+  public clear(): void {
+    this.inFlight.clear();
+  }
+}

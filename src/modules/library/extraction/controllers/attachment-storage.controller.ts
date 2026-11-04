@@ -260,6 +260,27 @@ export class AttachmentStorageController {
     return { success: true };
   }
 
+  private parseByteRangeHeader(
+    rangeHeader?: string | string[],
+  ): { start: number; end?: number } | undefined {
+    const rawHeader = Array.isArray(rangeHeader) ? rangeHeader[0] : rangeHeader;
+    if (
+      rawHeader &&
+      typeof rawHeader === 'string' &&
+      /^bytes=\d+-\d*$/.test(rawHeader)
+    ) {
+      const parts = rawHeader.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : undefined;
+      if (!isNaN(start) && start >= 0) {
+        return end !== undefined && !isNaN(end) && end >= start
+          ? { start, end }
+          : { start };
+      }
+    }
+    return undefined;
+  }
+
   @Get(['files/:fileId', 'files/:fileId/content'])
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Stream binary content directly by fileId' })
@@ -270,24 +291,40 @@ export class AttachmentStorageController {
     @Param('projectId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
     @Query('projectId') queryProjectId?: string,
+    @Req() req?: FastifyRequest,
   ) {
     const projectId = paramProjectId || queryProjectId;
     if (!this.storagePort) {
       throw new NotFoundException('Storage port unavailable');
     }
 
+    const range = this.parseByteRangeHeader(req?.headers?.range);
+
     if (this.storagePort.getOwnedFileStream) {
-      const fileRecord = await this.storagePort.getOwnedFileStream({
+      const fileRecord = (await this.storagePort.getOwnedFileStream({
         fileId,
         userId,
         projectId,
-      });
+        ...(range
+          ? { range: range as { start: number; end: number } }
+          : {}),
+      })) as {
+        stream: NodeJS.ReadableStream;
+        mimeType: string;
+        size: number;
+        filename: string;
+        contentRange?: string;
+        isPartial?: boolean;
+      };
 
       return this.sendAttachmentPayload(res, {
         content: fileRecord.stream,
         filename: fileRecord.filename,
         size: fileRecord.size,
         mimeType: fileRecord.mimeType,
+        contentRange: fileRecord.contentRange,
+        isPartial:
+          fileRecord.isPartial ?? Boolean(fileRecord.contentRange),
       });
     }
 
@@ -298,11 +335,31 @@ export class AttachmentStorageController {
         projectId,
       });
 
+      let bufferContent = fileRecord.buffer;
+      let contentRange: string | undefined;
+      let isPartial = false;
+      const totalSize = fileRecord.size || bufferContent.length;
+
+      if (range && totalSize > 0) {
+        const start = Math.max(0, Math.min(range.start, totalSize - 1));
+        const end =
+          range.end !== undefined && range.end >= 0
+            ? Math.min(range.end, totalSize - 1)
+            : totalSize - 1;
+        if (start <= end) {
+          bufferContent = bufferContent.subarray(start, end + 1);
+          contentRange = `bytes ${start}-${end}/${totalSize}`;
+          isPartial = true;
+        }
+      }
+
       return this.sendAttachmentPayload(res, {
-        content: fileRecord.buffer,
+        content: bufferContent,
         filename: fileRecord.filename,
-        size: fileRecord.size,
+        size: isPartial ? bufferContent.length : totalSize,
         mimeType: fileRecord.mimeType,
+        contentRange,
+        isPartial,
       });
     }
 
@@ -338,11 +395,14 @@ export class AttachmentStorageController {
         attachment.fileId,
         3600,
       );
+      const isHtml =
+        attachment.mimeType === 'text/html' ||
+        (attachment.filename || '').toLowerCase().endsWith('.html');
       return {
         url: presignedUrl,
         expiresIn: 3600,
-        filename: attachment.filename || 'attachment.pdf',
-        mimeType: attachment.mimeType || 'application/pdf',
+        filename: attachment.filename || (isHtml ? 'snapshot.html' : 'attachment.pdf'),
+        mimeType: isHtml ? 'application/octet-stream' : attachment.mimeType || 'application/pdf',
       };
     }
 
@@ -399,27 +459,16 @@ export class AttachmentStorageController {
       const defaultFilename = attachment.filename || 'attachment.pdf';
       const defaultMimeType = attachment.mimeType;
 
-      const rangeHeader = req.headers.range;
-      let range: { start: number; end: number } | undefined;
-      if (
-        rangeHeader &&
-        typeof rangeHeader === 'string' &&
-        /^bytes=\d+-\d*$/.test(rangeHeader)
-      ) {
-        const parts = rangeHeader.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : undefined;
-        if (!isNaN(start)) {
-          range = { start, end: end ?? -1 };
-        }
-      }
+      const range = this.parseByteRangeHeader(req?.headers?.range);
 
       if (this.storagePort.getOwnedFileStream) {
         const fileRecord = (await this.storagePort.getOwnedFileStream({
           fileId: attachment.fileId,
           userId,
           projectId,
-          ...(range ? { range } : {}),
+          ...(range
+            ? { range: range as { start: number; end: number } }
+            : {}),
         })) as {
           stream: NodeJS.ReadableStream;
           mimeType: string;
@@ -456,7 +505,7 @@ export class AttachmentStorageController {
         if (range && totalSize > 0) {
           const start = Math.max(0, Math.min(range.start, totalSize - 1));
           const end =
-            range.end >= 0
+            range.end !== undefined && range.end >= 0
               ? Math.min(range.end, totalSize - 1)
               : totalSize - 1;
           if (start <= end) {
@@ -529,7 +578,7 @@ export class AttachmentStorageController {
       `${dispositionType}; filename="${encodeURIComponent(payload.filename)}"`,
     );
     res.header('Accept-Ranges', 'bytes');
-    res.header('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+    res.header('Cache-Control', 'private, max-age=3600');
     res.header('Vary', 'Authorization, Range');
 
     let contentLength = payload.size;

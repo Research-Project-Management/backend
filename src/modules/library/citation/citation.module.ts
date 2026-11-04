@@ -1,16 +1,16 @@
 import { Global, Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
-import { CitationFacade, CITATION_FACADE } from './citation.facade';
+import { CitationFacade, CITATION_FACADE } from './services/citation.service';
 
 // Presentation
 import { CitationController } from './controllers/citation.controller';
-import { ExportsController } from './controllers/exports.controller';
+import { ExportsController } from './controllers/citation.controller';
 
 // Services
 import {
   CitationService,
-  AcademicQueryResolverService,
+  QueryResolverService,
 } from './services/citation.service';
 import { DoiContentNegotiationService } from './services/doi-content-negotiation.service';
 import {
@@ -25,7 +25,7 @@ import { PdfBakerService } from './services/pdf-baker.service';
 import { ExportsRepository } from './repositories/exports.repository';
 
 // Domain
-import { CslStyleRegistry } from './domain/csl-style-registry';
+import { CslStyleRegistry } from './domain/citation.domain';
 
 /**
  * Citation Bounded Context Unified Module (Supporting Domain).
@@ -50,7 +50,7 @@ import { CslStyleRegistry } from './domain/csl-style-registry';
     },
     CslRepositoryService,
     CitationService,
-    AcademicQueryResolverService,
+    QueryResolverService,
     DoiContentNegotiationService,
     CslEngineService,
     CslLocaleLoaderService,

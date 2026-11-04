@@ -5,8 +5,7 @@ import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
-import { sanitizeItemTitle } from '@/modules/library/core';
-import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import { sanitizeItemTitle, ItemsMapper } from '@/modules/library/core';
 import {
   resolveExtraPlainText,
   extractNonColumnExtraFields,

@@ -1,11 +1,9 @@
-import {
-  Injectable,
-  Logger,
-  BadRequestException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
+import { LibraryConfigService, libraryConfig } from '@/modules/library/core/config/library.config';
+import { ExternalProviderException } from '@/modules/library/core/errors/domain.exception';
 
 export interface SsrfGuardOptions {
   requireHttps?: boolean;
@@ -173,8 +171,24 @@ export class SsrfGuardService {
     const maxRedirects = options.maxRedirects ?? 5;
     let currentUrl = startUrl;
     let lastResolvedIps: string[] | undefined;
+    let currentHeaders = init.headers ? new Headers(init.headers as HeadersInit) : new Headers();
+    let currentMethod = init.method || 'GET';
+    let currentBody = init.body;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
+      if (options.validateUrl) {
+        const validated = await options.validateUrl(currentUrl);
+        if (
+          validated &&
+          typeof validated === 'object' &&
+          'resolvedIps' in validated &&
+          Array.isArray((validated as { resolvedIps?: unknown }).resolvedIps)
+        ) {
+          lastResolvedIps = (validated as { resolvedIps: string[] })
+            .resolvedIps;
+        }
+      }
+
       if (options.beforeHop) {
         await options.beforeHop(currentUrl, init.signal);
       }
@@ -182,6 +196,9 @@ export class SsrfGuardService {
       const effectiveSignal = init.signal ?? AbortSignal.timeout(15000);
       const res = await fetch(currentUrl, {
         ...init,
+        method: currentMethod,
+        headers: currentHeaders,
+        body: currentBody,
         signal: effectiveSignal,
         redirect: 'manual',
       });
@@ -226,17 +243,20 @@ export class SsrfGuardService {
         );
       }
 
-      if (options.validateUrl) {
-        const validated = await options.validateUrl(nextUrl);
-        if (
-          validated &&
-          typeof validated === 'object' &&
-          'resolvedIps' in validated &&
-          Array.isArray((validated as { resolvedIps?: unknown }).resolvedIps)
-        ) {
-          lastResolvedIps = (validated as { resolvedIps: string[] })
-            .resolvedIps;
-        }
+      // Security: Strip authentication credentials on cross-origin redirects
+      const currentOrigin = new URL(currentUrl).origin;
+      const nextOrigin = new URL(nextUrl).origin;
+      if (nextOrigin !== currentOrigin) {
+        currentHeaders.delete('authorization');
+        currentHeaders.delete('cookie');
+        currentHeaders.delete('x-api-key');
+        currentHeaders.delete('proxy-authorization');
+      }
+
+      // RFC 7231: 301, 302, 303 redirects should switch method to GET and drop payload
+      if (status === 301 || status === 302 || status === 303) {
+        currentMethod = 'GET';
+        currentBody = undefined;
       }
 
       currentUrl = nextUrl;
@@ -298,8 +318,8 @@ export class SsrfGuardService {
   isPrivateOrReservedIp(ip: string): boolean {
     const normalized = ip.toLowerCase().trim();
 
-    // IPv4 Checks
-    if (normalized.includes('.')) {
+    // IPv4 Checks (only if not an IPv6 / IPv4-mapped address)
+    if (!normalized.includes(':') && normalized.includes('.')) {
       const parts = normalized.split('.').map((p) => parseInt(p, 10));
       if (
         parts.length !== 4 ||
@@ -533,5 +553,115 @@ export class SsrfGuardService {
     }
 
     return false;
+  }
+}
+
+/**
+ * Canonical Academic Polite Pool Email and User-Agent configuration.
+ * Used for CrossRef, OpenAlex, PubMed, Unpaywall, DOI content negotiation,
+ * Retraction Watch, and academic crawler polite pools.
+ */
+export function getContactEmail(): string {
+  return libraryConfig().academic.contactEmail;
+}
+
+export function getUserAgent(subsystem = 'Platform'): string {
+  const email = getContactEmail();
+  return `FluxResearch${subsystem}/1.0 (mailto:${email}; https://flux.study)`;
+}
+
+export interface HttpRequestOptions {
+  method?: 'GET' | 'POST' | 'HEAD';
+  headers?: Record<string, string>;
+  timeoutMs?: number;
+  maxRedirects?: number;
+  maxBytes?: number;
+  resilienceKey?: string;
+  requireSsrfCheck?: boolean;
+  body?: string | Buffer | URLSearchParams;
+  signal?: AbortSignal;
+}
+
+@Injectable()
+export class HttpClient {
+  private readonly logger = new Logger(HttpClient.name);
+
+  constructor(
+    private readonly ssrfGuard: SsrfGuardService,
+    private readonly resilience: ResilienceRegistryService,
+    private readonly config: LibraryConfigService,
+  ) {}
+
+  private getDefaultHeaders(): Record<string, string> {
+    return {
+      'User-Agent': this.config.academic.userAgent,
+      Accept: 'application/json, text/plain, */*',
+    };
+  }
+
+  private async fetchWithRedirects(
+    url: string,
+    options: HttpRequestOptions = {},
+    externalSignal?: AbortSignal,
+  ): Promise<{ response: Response; finalUrl: string }> {
+    const timeoutMs = options.timeoutMs ?? this.config.http.defaultTimeoutMs;
+    const maxRedirects = options.maxRedirects ?? this.config.http.maxRedirects;
+    const requireSsrf = options.requireSsrfCheck ?? true;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    const signals = [
+      controller.signal,
+      ...(options.signal ? [options.signal] : []),
+      ...(externalSignal ? [externalSignal] : []),
+    ];
+    const effectiveSignal =
+      signals.length > 1 && AbortSignal.any
+        ? AbortSignal.any(signals)
+        : controller.signal;
+
+    const init: RequestInit = {
+      method: options.method ?? 'GET',
+      headers: {
+        ...this.getDefaultHeaders(),
+        ...(options.headers || {}),
+      },
+      body: options.body as BodyInit | null | undefined,
+      signal: effectiveSignal,
+    };
+
+    try {
+      if (requireSsrf) {
+        return await this.ssrfGuard.safeFetchWithRedirects(url, init, {
+          maxRedirects,
+        });
+      }
+      return await SsrfGuardService.executeSafeRedirectFetch(url, init, {
+        maxRedirects,
+      });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      throw new ExternalProviderException(
+        `HTTP fetch failed for URL ${url}: ${errMsg}`,
+        { url, cause: errMsg },
+      );
+    } finally {
+      if (!externalSignal) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  async request(
+    url: string,
+    options: HttpRequestOptions = {},
+  ): Promise<{ response: Response; finalUrl: string }> {
+    const resilienceKey = options.resilienceKey ?? new URL(url).hostname;
+    return this.resilience.execute(
+      resilienceKey,
+      () => this.fetchWithRedirects(url, options),
+      { signal: options.signal },
+    );
   }
 }

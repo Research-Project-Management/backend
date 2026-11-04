@@ -1,6 +1,6 @@
 import { SyncController } from '@/modules/library/sync/controllers/sync.controller';
 import { TransactionService } from '@/modules/library/sync/services/transaction.service';
-import { SyncQueryDto } from '@/modules/library/sync/dto/sync-query.dto';
+import { SyncQueryDto } from '@/modules/library/sync/controllers/sync.controller';
 
 describe('SyncController (Library Distributed Sync API)', () => {
   let controller: SyncController;
@@ -137,6 +137,45 @@ describe('SyncController (Library Distributed Sync API)', () => {
       expect(result.count).toBe(2);
       expect(result.hasMore).toBe(true);
       expect(result.changes).toHaveLength(2);
+    });
+
+    it('should retain terminal delete event when an entity has create followed by delete in the same sync window', async () => {
+      const mockChanges = [
+        {
+          id: 'change-create',
+          seq: BigInt(10),
+          userId: 'user-123',
+          projectId: null,
+          entityType: 'item',
+          entityId: 'item-ephemeral',
+          action: 'create',
+          version: 1,
+          data: { title: 'Restored then Deleted' },
+          createdAt: new Date('2026-09-22T10:00:00Z'),
+        },
+        {
+          id: 'change-delete',
+          seq: BigInt(11),
+          userId: 'user-123',
+          projectId: null,
+          entityType: 'item',
+          entityId: 'item-ephemeral',
+          action: 'delete',
+          version: 2,
+          data: null,
+          createdAt: new Date('2026-09-22T10:01:00Z'),
+        },
+      ];
+
+      transactionServiceMock.getChangesSince.mockResolvedValue(mockChanges);
+
+      const result = await controller.getChanges('user-123', { since: '9' });
+      expect(result.count).toBe(1);
+      expect(result.changes[0]).toMatchObject({
+        entityId: 'item-ephemeral',
+        action: 'delete',
+        seq: '11',
+      });
     });
   });
 

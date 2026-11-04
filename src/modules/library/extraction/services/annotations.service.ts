@@ -15,7 +15,8 @@ import {
   BatchAnnotationsResult,
   AnnotationType,
   UpsertAnnotationItem,
-} from '@/modules/library/extraction/types/extraction.types';
+  AnnotationEntity,
+} from '@/modules/library/core/types/extraction.types';
 import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
 import {
   TransactionHelpers,
@@ -26,6 +27,8 @@ import {
   executeStandardLibraryCacheInvalidation,
   UNIT_OF_WORK,
   IUnitOfWork,
+  LIBRARY_EVENT_TYPES,
+  isUuid,
 } from '@/modules/library/core';
 import { AttachmentsService } from './attachments.service';
 
@@ -60,6 +63,7 @@ export class AnnotationsService {
         projectId,
         itemIds: itemId ? [itemId] : undefined,
         extraKeys: [`library:attachment:${attachmentId}:annotations`],
+        preserveContentCaches: true,
       },
     );
   }
@@ -79,6 +83,35 @@ export class AnnotationsService {
       undefined,
       projectId,
     );
+
+    const cacheKey = `library:attachment:${attachmentId}:annotations`;
+    if (this.cache) {
+      try {
+        const cached = await this.cache.get<AnnotationEntity[]>(cacheKey);
+        if (Array.isArray(cached)) {
+          return cached.filter(
+            (a) =>
+              (pageIndex === undefined || a.pageIndex === pageIndex) &&
+              (type === undefined || a.type === type),
+          );
+        }
+      } catch {
+        // Fallback to DB on cache read failure
+      }
+    }
+
+    if (pageIndex === undefined && type === undefined) {
+      const all = await this.annotationsRepo.findByAttachment(attachmentId);
+      if (this.cache) {
+        try {
+          await this.cache.set(cacheKey, all, 300);
+        } catch {
+          // Ignore cache write errors
+        }
+      }
+      return all;
+    }
+
     return this.annotationsRepo.findByAttachment(attachmentId, pageIndex, type);
   }
 
@@ -118,7 +151,10 @@ export class AnnotationsService {
         resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
 
-        const normalized = this.normalizer.normalizeCreateData(data);
+        const normalized = this.normalizer.normalizeCreateData({
+          ...data,
+          ...(resolvedItemId ? { itemId: resolvedItemId } : {}),
+        });
         const created = await this.annotationsRepo.create(normalized, tx);
 
         await helpers.appendChange(eventScope, {
@@ -132,7 +168,7 @@ export class AnnotationsService {
         await helpers.publishOutbox(
           eventScope,
           created.id,
-          'library.annotation.created',
+          LIBRARY_EVENT_TYPES.ANNOTATION_CREATED,
           created,
         );
 
@@ -198,7 +234,13 @@ export class AnnotationsService {
         resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
 
-        this.assertCanModifyAnnotation(userId, existing);
+        await this.assertCanModifyAnnotation(
+          userId,
+          existing,
+          effectiveProjectId,
+          false,
+          tx,
+        );
 
         const normalizedData = this.normalizer.normalizeUpdateData(data);
         const result = await this.annotationsRepo.update(
@@ -220,7 +262,7 @@ export class AnnotationsService {
         await helpers.publishOutbox(
           eventScope,
           result.id,
-          'library.annotation.updated',
+          LIBRARY_EVENT_TYPES.ANNOTATION_UPDATED,
           result,
         );
 
@@ -286,7 +328,13 @@ export class AnnotationsService {
         resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
 
-        this.assertCanModifyAnnotation(userId, existing);
+        await this.assertCanModifyAnnotation(
+          userId,
+          existing,
+          effectiveProjectId,
+          true,
+          tx,
+        );
 
         const isDeleted = await this.annotationsRepo.softDelete(
           id,
@@ -316,7 +364,7 @@ export class AnnotationsService {
           await helpers.publishOutbox(
             eventScope,
             id,
-            'library.annotation.deleted',
+            LIBRARY_EVENT_TYPES.ANNOTATION_DELETED,
             {
               id,
               attachmentId: existing.attachmentId,
@@ -385,8 +433,11 @@ export class AnnotationsService {
 
         const normalizedUpserts: UpsertAnnotationItem[] = data.upserts.map(
           (item) => {
-            if (item.id && item.expectedVersion !== undefined) {
+            if (item.id) {
               const normUpdate = this.normalizer.normalizeUpdateData({
+                type: item.type,
+                pageLabel: item.pageLabel,
+                annotationSortIndex: item.annotationSortIndex,
                 color: item.color,
                 quoteText: item.quoteText,
                 comment: item.comment,
@@ -408,6 +459,8 @@ export class AnnotationsService {
               attachmentId,
               type: item.type,
               pageIndex: item.pageIndex,
+              pageLabel: item.pageLabel,
+              annotationSortIndex: item.annotationSortIndex,
               y: item.y,
               x: item.x,
               color: item.color,
@@ -420,6 +473,8 @@ export class AnnotationsService {
             return {
               ...item,
               type: normCreate.type,
+              pageLabel: normCreate.pageLabel,
+              annotationSortIndex: normCreate.annotationSortIndex,
               color: normCreate.color,
               quoteText: normCreate.quoteText,
               comment: normCreate.comment,
@@ -512,21 +567,21 @@ export class AnnotationsService {
             userId,
             projectId: effectiveProjectId,
             aggregateId: annotation.id,
-            eventType: 'library.annotation.created',
+            eventType: LIBRARY_EVENT_TYPES.ANNOTATION_CREATED,
             payload: annotation,
           })),
           ...result.updated.map((annotation) => ({
             userId,
             projectId: effectiveProjectId,
             aggregateId: annotation.id,
-            eventType: 'library.annotation.updated',
+            eventType: LIBRARY_EVENT_TYPES.ANNOTATION_UPDATED,
             payload: annotation,
           })),
           ...result.deleted.map((id) => ({
             userId,
             projectId: effectiveProjectId,
             aggregateId: id,
-            eventType: 'library.annotation.deleted',
+            eventType: LIBRARY_EVENT_TYPES.ANNOTATION_DELETED,
             payload: {
               id,
               attachmentId,
@@ -579,14 +634,28 @@ export class AnnotationsService {
 
   // Auth helpers
 
-  private assertCanModifyAnnotation(
+  private async assertCanModifyAnnotation(
     userId: string,
     annotation: { authorId?: string | null },
+    projectId?: string,
+    isDelete = false,
+    tx?: Prisma.TransactionClient,
   ) {
-    if (annotation.authorId !== userId) {
-      throw new ForbiddenException(
-        'Only the annotation author can modify or delete this annotation',
-      );
+    if (annotation.authorId === userId) {
+      return;
     }
+    if (isDelete && projectId && isUuid(projectId)) {
+      const isAdmin = await this.annotationsRepo.isProjectAdmin(
+        userId,
+        projectId,
+        tx,
+      );
+      if (isAdmin) {
+        return;
+      }
+    }
+    throw new ForbiddenException(
+      'Only the annotation author (or project owner/coordinator) can modify or delete this annotation',
+    );
   }
 }

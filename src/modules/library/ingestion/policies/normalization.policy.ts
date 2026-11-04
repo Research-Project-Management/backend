@@ -17,14 +17,14 @@ import {
   normalizePmcid,
   normalizeIsbn,
   normalizeIssn,
-  normalizeAcademicTitleCase,
+  normalizeTitleCase,
   normalizeItemType,
   normalizePageRange,
   stripLatexBraces,
-  convertAcademicHtmlToMarkdown,
+  convertHtmlToMarkdown,
   INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
 } from '@/modules/library/core';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import {
   resolveBidirectionalBaseFields,
   getEffectiveBaseFieldMap,
@@ -152,7 +152,7 @@ export class NormalizationPolicy {
     if (rawTitleVal) {
       const cleanTitle = this.cleanString(rawTitleVal);
       if (cleanTitle) {
-        const formattedTitle = normalizeAcademicTitleCase(
+        const formattedTitle = normalizeTitleCase(
           stripLatexBraces(cleanTitle),
         );
         result.title = formattedTitle;
@@ -168,7 +168,7 @@ export class NormalizationPolicy {
         raw.shortTitle ?? getRawVal('shortTitle'),
       );
       if (cleanShort) {
-        result.shortTitle = normalizeAcademicTitleCase(
+        result.shortTitle = normalizeTitleCase(
           stripLatexBraces(cleanShort),
         );
       }
@@ -418,7 +418,7 @@ export class NormalizationPolicy {
     if (Array.isArray(raw.labels)) rawTagList.push(...(raw.labels as string[]));
 
     if (rawTagList.length > 0) {
-      const normalizedTags = normalizeAcademicTags(rawTagList);
+      const normalizedTags = normalizeTags(rawTagList);
       if (normalizedTags.length > 0) {
         result.tags = normalizedTags;
         result.keywords = normalizedTags;
@@ -461,7 +461,7 @@ export class NormalizationPolicy {
           (/<\/?[a-z][\s\S]*>/i.test(trimmedRaw) || trimmedRaw.includes('\n'))
         ) {
           // Preserve multi-paragraph / Markdown / HTML structure for Zotero notes
-          const md = convertAcademicHtmlToMarkdown(trimmedRaw);
+          const md = convertHtmlToMarkdown(trimmedRaw);
           cleanContent = cleanBannedString(md);
         } else {
           const clean = cleanCommentText(trimmedRaw);
@@ -492,7 +492,7 @@ export class NormalizationPolicy {
           noteItem.source = noteObj.source.trim();
         }
         if (Array.isArray(noteObj?.tags) && noteObj.tags.length > 0) {
-          noteItem.tags = normalizeAcademicTags(noteObj.tags as string[]);
+          noteItem.tags = normalizeTags(noteObj.tags as string[]);
         }
         cleanNotes.push(noteItem);
       }

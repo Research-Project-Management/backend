@@ -420,13 +420,6 @@ export interface PrismaMergeAuditTrail {
   timestamp: string;
 }
 
-export interface QualityAuditItemResult {
-  id: string;
-  title: string;
-  score: number;
-  missingFields: string[];
-}
-
 // ============================================================================
 // Retraction Contracts
 // ============================================================================

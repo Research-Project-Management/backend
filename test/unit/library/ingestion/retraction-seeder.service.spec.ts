@@ -76,10 +76,14 @@ cleanly"`;
       });
     });
 
-    it('should identify correction/erratum', () => {
+    it('should identify correction/erratum as non-retracted (Zotero parity)', () => {
       expect(parseRetractionNature('Correction')).toEqual({
         nature: 'correction',
-        isRetracted: true,
+        isRetracted: false,
+      });
+      expect(parseRetractionNature('Erratum')).toEqual({
+        nature: 'correction',
+        isRetracted: false,
       });
     });
 

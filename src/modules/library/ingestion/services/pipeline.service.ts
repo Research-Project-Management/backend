@@ -3,7 +3,6 @@ import {
   Logger,
   Optional,
   Inject,
-  forwardRef,
   BadRequestException,
 } from '@nestjs/common';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
@@ -14,9 +13,12 @@ import {
   applyUserOverridesToCandidate,
 } from '@/modules/library/ingestion/stages/identify.stage';
 import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
-import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
+import {
+  CommitStage,
+  isPreExistingMatchItem,
+} from '@/modules/library/ingestion/stages/commit.stage';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/base-metadata.provider';
 import {
   LibraryItemSource,
   CATALOG_FACADE,
@@ -25,19 +27,17 @@ import {
   IExtractionFacade,
   MetadataCoalescePolicy,
 } from '@/modules/library/core';
-import { IngestionStatus, Prisma } from '@prisma/client';
-import { isUUID } from 'class-validator';
+import { IngestionStatus } from '@prisma/client';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
 import { IngestionSagaOrchestrator } from './ingestion-saga.orchestrator';
 import {
   sanitizeOverrides,
-  buildEnrichmentPatch,
   mapPayloadToSource,
 } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 import {
   isNonRetryableIngestionError,
   isRetryableIngestionError,
-} from '@/modules/library/ingestion/types/ingestion.errors';
+} from '@/modules/library/ingestion/types/metadata.types';
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import { PipelineBatchExecutor } from './pipeline-batch.executor';
 import { UrlCaptureService } from './url-capture.service';
@@ -49,7 +49,7 @@ import {
   getSubmissionPayloadSize,
   markRunStatusTransitioned,
   createSingleItemExecutionLog,
-} from './ingestion-run-reporter.service';
+} from './ingestion-saga.orchestrator';
 
 @Injectable()
 export class PipelineService {
@@ -73,7 +73,6 @@ export class PipelineService {
     @Inject(EXTRACTION_FACADE)
     private readonly extractionGateway?: IExtractionFacade,
     @Optional()
-    @Inject(forwardRef(() => IngestionSagaOrchestrator))
     sagaOrchestrator?: IngestionSagaOrchestrator,
     @Optional()
     private readonly retractionScanner?: RetractionScannerProvider,
@@ -139,23 +138,26 @@ export class PipelineService {
     const explicitFinalAttempt =
       options?.isFinalAttempt ?? envelope?.isFinalAttempt;
     let succeeded = false;
-    let caughtError: unknown = null;
+    let preserveBlobForRetry = false;
     try {
       await this.executePipelineStages(runId, scopeId, envelope, {
         isFinalAttempt: explicitFinalAttempt ?? true,
       });
       succeeded = true;
     } catch (err: unknown) {
-      caughtError = err;
       const nonRetryable = this.isNonRetryableError(err);
       const retryable = !nonRetryable && this.isRetryableError(err);
       const errMsg = err instanceof Error ? err.message : String(err);
+      if (retryable && explicitFinalAttempt !== true) {
+        preserveBlobForRetry = true;
+      }
       if (explicitFinalAttempt === false && nonRetryable) {
         await this.repo
           .updateRunStatus(scopeId, runId, IngestionStatus.FAILED_FINAL, {
             lastError: errMsg,
             completedAt: new Date(),
           })
+          .then(() => markRunStatusTransitioned(runId))
           .catch((e: unknown) =>
             this.logger.warn(
               `Failed to update run status for run ${runId}: ${e instanceof Error ? e.message : String(e)}`,
@@ -166,28 +168,16 @@ export class PipelineService {
           .updateRunStatus(scopeId, runId, IngestionStatus.FAILED_RETRYABLE, {
             lastError: errMsg,
           })
+          .then(() => markRunStatusTransitioned(runId))
           .catch((e: unknown) =>
             this.logger.warn(
               `Failed to update run status for run ${runId}: ${e instanceof Error ? e.message : String(e)}`,
             ),
           );
       }
-      markRunStatusTransitioned(runId);
       throw err;
     } finally {
-      const nonRetryable = caughtError
-        ? this.isNonRetryableError(caughtError)
-        : false;
-      const retryable =
-        caughtError && !nonRetryable
-          ? this.isRetryableError(caughtError)
-          : false;
-      if (
-        succeeded ||
-        explicitFinalAttempt === true ||
-        nonRetryable ||
-        (explicitFinalAttempt === undefined && !retryable)
-      ) {
+      if (!preserveBlobForRetry) {
         await this.cleanupOffloadedPayload(envelope);
       }
       if (
@@ -195,14 +185,14 @@ export class PipelineService {
         PipelineService.GC_THROTTLE_INTERVAL_MS
       ) {
         this.lastGcRunAt = Date.now();
-        void this.runTerminalMaintenanceGc(envelope);
+        void this.runMaintenanceGc({ retentionDays: 7 }).catch(() => undefined);
       }
     }
   }
 
   private async cleanupOffloadedPayload(
-    envelope: IngestionSubmissionEnvelope,
-  ): Promise<void> {
+    envelope?: IngestionSubmissionEnvelope,
+  ): Promise<boolean> {
     const payload = envelope?.payload;
     const claimCheckFileId =
       payload?.kind === 'RECORD' &&
@@ -214,38 +204,47 @@ export class PipelineService {
     if (claimCheckFileId && this.storagePort?.deleteFile) {
       try {
         await this.storagePort.deleteFile(claimCheckFileId);
+        return true;
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `[PipelineGC] Failed to delete offloaded claim-check blob ${claimCheckFileId}: ${msg}`,
+          `[PipelineGC] Failed to delete offloaded claim-check blob ${claimCheckFileId}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
+    return false;
   }
 
-  private async runTerminalMaintenanceGc(
-    _envelope?: IngestionSubmissionEnvelope,
-  ): Promise<void> {
-    try {
-      if (this.urlCapture?.cleanupExpiredPreviews) {
-        await this.urlCapture
-          .cleanupExpiredPreviews(7)
-          .catch((e: unknown) =>
-            this.logger.warn(
-              `[PipelineGC] Failed to cleanup expired previews: ${e instanceof Error ? e.message : String(e)}`,
-            ),
-          );
-      }
-      await this.repo
-        .purgeOldRuns(7)
-        .catch((e: unknown) =>
-          this.logger.warn(
-            `[PipelineGC] Failed to purge old runs: ${e instanceof Error ? e.message : String(e)}`,
-          ),
-        );
-    } catch {
-      // Non-critical background GC
-    }
+  async runTerminalMaintenanceGc(retentionDays = 7): Promise<void> {
+    await this.runMaintenanceGc({ retentionDays });
+  }
+
+  async runMaintenanceGc(options?: {
+    envelope?: IngestionSubmissionEnvelope;
+    retentionDays?: number;
+  }): Promise<{
+    deletedClaimCheckBlob: boolean;
+    expiredPreviewsDeleted: number;
+    purgedRuns: number;
+  }> {
+    const retentionDays = options?.retentionDays ?? 7;
+    const deletedClaimCheckBlob = options?.envelope
+      ? await this.cleanupOffloadedPayload(options.envelope)
+      : false;
+    const expiredPreviewsDeleted = this.urlCapture?.cleanupExpiredPreviews
+      ? await this.urlCapture.cleanupExpiredPreviews(retentionDays).catch((err: unknown) => {
+          this.logger.warn(`[PipelineGC] Failed to cleanup expired previews: ${err instanceof Error ? err.message : String(err)}`);
+          return 0;
+        })
+      : 0;
+    const purgedRuns =
+      typeof this.repo?.purgeOldRuns === 'function'
+        ? await this.repo.purgeOldRuns(retentionDays).catch((err: unknown) => {
+            this.logger.warn(`[PipelineGC] Failed to purge old runs: ${err instanceof Error ? err.message : String(err)}`);
+            return 0;
+          })
+        : 0;
+
+    return { deletedClaimCheckBlob, expiredPreviewsDeleted, purgedRuns };
   }
 
   private async executePipelineStages(
@@ -355,6 +354,7 @@ export class PipelineService {
           matchType: 'NO_MATCH',
           confidence: 0,
         };
+        const rawNormMeta = (normalizedCandidates[0]?.normalizedMetadata || {}) as Record<string, unknown>;
         if (
           isSingleCandidate &&
           normalizedCandidates[0]?.normalizedMetadata &&
@@ -365,7 +365,17 @@ export class PipelineService {
             proposedItem: normalizedCandidates[0].normalizedMetadata,
           });
 
-          if (earlyMatch.matchType === 'EXACT' && earlyMatch.targetItemId) {
+          const rawCandExtra = (rawNormMeta.extraFields && typeof rawNormMeta.extraFields === 'object'
+            ? rawNormMeta.extraFields
+            : {}) as Record<string, unknown>;
+          const hasCredibleLocalTitle =
+            typeof rawNormMeta.title === 'string' &&
+            rawNormMeta.title.trim().length > 5 &&
+            !rawCandExtra.isFilenameTitle;
+          const deferFileEarlyMatch =
+            envelope.payload.kind === 'FILE' && !hasCredibleLocalTitle;
+
+          if (earlyMatch.matchType === 'EXACT' && earlyMatch.targetItemId && !deferFileEarlyMatch) {
             return {
               isDuplicate: true,
               isBatch: false,
@@ -396,13 +406,27 @@ export class PipelineService {
               scopeId,
             );
             if (scrapedFallback) {
-              enriched.push(
-                applyUserOverridesToCandidate(
-                  scrapedFallback,
-                  sanitizedOverrides,
-                  this.normalizer,
-                ),
+              const fallbackCandidate = applyUserOverridesToCandidate(
+                scrapedFallback,
+                sanitizedOverrides,
+                this.normalizer,
               );
+              enriched.push(fallbackCandidate);
+              // If HTML scrape discovered a new identifier not in the original URL, enrich it through ResolveStage
+              const fbMeta = (fallbackCandidate.normalizedMetadata || {}) as Record<string, unknown>;
+              const fbExtra = (fbMeta.extraFields || {}) as Record<string, unknown>;
+              const foundNewId = ['doi', 'arxivId', 'pmid', 'isbn'].some(
+                (k) => Boolean(fbMeta[k] && fbMeta[k] !== rawNormMeta[k]),
+              );
+              if (foundNewId && !fbExtra.alreadyResolvedByMirror) {
+                const fbEnriched = await this.resolve.execute({
+                  scopeId,
+                  candidates: [fallbackCandidate],
+                });
+                for (const ec of fbEnriched) {
+                  if (ec.sourceKind === 'PROVIDER') enriched.push(ec);
+                }
+              }
             }
           } catch {
             // Non-critical fallback scrape
@@ -428,12 +452,21 @@ export class PipelineService {
             ? await this.resolve.coalesceAndVerify(enriched)
             : MetadataCoalescePolicy.coalesceCandidates(enriched);
 
-        // 5. Secondary Match check if identifier was discovered during enrich/reconcile
-        let finalMatch = earlyMatch;
+        // 5. Secondary Match check if identifier was discovered or stripped during enrich/reconcile
+        const propRec = (decision.proposedItem || {}) as Record<string, unknown>;
+        const propExtra = (propRec.extraFields && typeof propRec.extraFields === 'object'
+          ? propRec.extraFields
+          : {}) as Record<string, unknown>;
+        const citationTrapTriggered = Boolean(propExtra.rejectedCitedDoi);
+        let finalMatch: DuplicateMatchResult = citationTrapTriggered
+          ? { matchType: 'NO_MATCH', confidence: 0 }
+          : earlyMatch;
+        const discoveredNewId = ['doi', 'arxivId', 'pmid', 'pmcid', 'isbn'].some(
+          (k) => Boolean(propRec[k] && !rawNormMeta[k]),
+        );
         if (
-          earlyMatch.matchType !== 'EXACT' &&
-          decision.proposedItem?.doi &&
-          !normalizedCandidates[0]?.normalizedMetadata?.doi &&
+          finalMatch.matchType !== 'EXACT' &&
+          (discoveredNewId || citationTrapTriggered) &&
           this.resolve.match
         ) {
           finalMatch = await this.resolve.match({
@@ -513,41 +546,15 @@ export class PipelineService {
       await session.executeStep(
         'ENRICH_EXISTING',
         async () => {
-          await this.sideEffects.scanRetraction(candidateItem, {
-            localOnly: true,
-          });
-          let patchedFields: string[] = [];
-          if (this.catalogGateway?.getItem) {
-            const existing = await this.catalogGateway.getItem(
-              resolvedScope.userId,
+          const { existingRecord: existingRec, patchedFields } =
+            await this.sideEffects.enrichExistingMatchedItem({
+              userId: resolvedScope.userId,
+              projectId: resolvedScope.projectId,
               targetItemId,
-              resolvedScope.projectId,
-            );
-            const existingRec = existing as
-              Record<string, unknown> | null | undefined;
-
-            const enrichPatch = buildEnrichmentPatch(
-              existingRec,
               candidateItem,
-            );
-            patchedFields = Object.keys(enrichPatch);
+            });
 
-            if (patchedFields.length > 0) {
-              await this.catalogGateway.updateItem(
-                resolvedScope.userId,
-                targetItemId,
-                enrichPatch,
-                { projectId: resolvedScope.projectId },
-              );
-              this.logger.log(
-                `[EXACT_MERGE] Enriched item ${targetItemId} with ${patchedFields.join(', ')}`,
-              );
-            } else {
-              this.logger.log(
-                `[EXACT_MERGE] Item ${targetItemId} already fully populated — no patch needed`,
-              );
-            }
-
+          if (this.catalogGateway?.getItem) {
             await this.sideEffects.runPostPersistSideEffects(
               targetItemId,
               {
@@ -636,10 +643,7 @@ export class PipelineService {
         outputSnapshot: (res) => ({ itemId: res?.id }),
         compensate: async (item) => {
           const wasPreExisting =
-            Boolean(
-              (item as { __wasPreExistingMatch?: boolean } | null | undefined)
-                ?.__wasPreExistingMatch,
-            ) ||
+            isPreExistingMatchItem(item) ||
             matchResult?.matchType === 'EXACT' ||
             Boolean(
               matchResult?.targetItemId &&
@@ -662,26 +666,17 @@ export class PipelineService {
     try {
       // PROBABLE fuzzy match → Non-blocking duplicate suspect review record (after COMMIT succeeds)
       if (matchResult?.matchType === 'PROBABLE' && matchResult.targetItemId) {
-        await this.repo.createReviewCase(resolvedScope, runId, {
-          targetItemId: matchResult.targetItemId,
-          reason: `Probable match with existing item "${matchResult.targetItemTitle}"`,
-          evidence: {
-            matchReason: matchResult.matchReason,
-            confidence: matchResult.confidence,
-            details: matchResult.evidence,
-            ...(createdItem?.id ? { createdItemId: createdItem.id } : {}),
-          } as unknown as Prisma.InputJsonValue,
-          options: {
-            proposedMetadata: itemToCommit,
-          } as unknown as Prisma.InputJsonValue,
-          assignedToId: resolvedScope.userId,
+        await this.sideEffects.recordProbableMatchReviewCase({
+          scope: resolvedScope,
+          runId,
+          matchResult,
+          proposedMetadata: itemToCommit,
+          createdItemId: createdItem?.id,
         });
       }
 
       if (createdItem?.id) {
-        const wasPreExistingMatch = Boolean(
-          (createdItem as { __wasPreExistingMatch?: boolean }).__wasPreExistingMatch,
-        );
+        const wasPreExistingMatch = isPreExistingMatchItem(createdItem);
         await this.sideEffects.runPostPersistSideEffects(
           createdItem.id,
           {
@@ -697,6 +692,7 @@ export class PipelineService {
             existingRecord: createdItem,
             assignCollections:
               wasPreExistingMatch && !this.catalogGateway?.assignItemsToCollection,
+            skipNotes: wasPreExistingMatch,
           },
         );
       }

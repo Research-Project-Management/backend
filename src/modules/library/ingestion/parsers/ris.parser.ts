@@ -3,14 +3,14 @@ import {
   ItemMetadata,
   CreatorInput,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { IngestionValidationException } from '@/modules/library/ingestion/types/ingestion.errors';
+import { IngestionValidationException } from '@/modules/library/ingestion/types/metadata.types';
 import {
   cleanAbstractText,
   mapCslTypeToZoteroItemType,
   normalizeDoi,
   parseCreatorString,
 } from '@/modules/library/core';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import {
   RisFallbackParser,
   mapRisTypeToItemType,
@@ -117,288 +117,35 @@ export class RisParser {
 
       const rawRecordBlocks = this.splitRawRecordBlocks(content);
 
+      if (rawRecordBlocks.length > 1 && data.length !== rawRecordBlocks.length) {
+        // citation-js either dropped or merged records. Parse each block independently
+        // so every record gets its correct citation-js Csl data + raw block pair.
+        const parsedItems: RisItem[] = [];
+        for (const blk of rawRecordBlocks) {
+          try {
+            const singleCite = new Cite(blk);
+            const singleData = singleCite.data || [];
+            if (singleData.length > 0) {
+              parsedItems.push(this.mapSingleCslItem(singleData[0], blk));
+            } else {
+              const fallback = RisFallbackParser.parse(blk);
+              parsedItems.push(...fallback);
+            }
+          } catch {
+            const fallback = RisFallbackParser.parse(blk);
+            parsedItems.push(...fallback);
+          }
+        }
+        if (parsedItems.length > 0) {
+          return parsedItems;
+        }
+      }
+
       return data.map((csl: CslRisItem, idx: number) => {
         const block =
           rawRecordBlocks[idx] ??
           (rawRecordBlocks.length === 1 ? rawRecordBlocks[0] : undefined);
-        const rawRec =
-          block && this.needsRawRecordEnrichment(csl, block)
-            ? RisFallbackParser.parseRawRecords(block)[0]
-            : undefined;
-
-        const rawAuthors: string[] = [];
-        const creators: CreatorInput[] = [];
-
-        (csl.author || []).forEach((a: CslRisPerson) => {
-          const family = a.family?.trim() || '';
-          const given = a.given?.trim() || '';
-          const fullName =
-            a.literal?.trim() ||
-            (family && given ? `${given} ${family}` : family || given);
-
-          if (fullName) {
-            rawAuthors.push(fullName);
-            creators.push({
-              firstName: given || undefined,
-              lastName: family || undefined,
-              fullName,
-              creatorType: 'author',
-              ...(a.literal && !family && !given ? { fieldMode: 1 } : {}),
-            });
-          }
-        });
-
-        const rawEditors: string[] = [];
-        const seenEditorKeys = new Set<string>();
-        const registerEditor = (
-          firstName?: string,
-          lastName?: string,
-          fullName?: string,
-          displayStr?: string,
-          fieldMode?: number,
-        ) => {
-          const cleanLast = (lastName || '').trim();
-          const cleanFirst = (firstName || '').trim();
-          const cleanFull = (
-            fullName ||
-            (cleanFirst && cleanLast
-              ? `${cleanFirst} ${cleanLast}`
-              : cleanLast || cleanFirst)
-          ).trim();
-          if (!cleanLast && !cleanFirst && !cleanFull) return;
-
-          const normKey = `${cleanLast.toLowerCase()}|${cleanFirst.toLowerCase()}|${cleanFull.toLowerCase()}`;
-          const altFull =
-            cleanLast && cleanFirst
-              ? `${cleanLast}, ${cleanFirst}`.toLowerCase()
-              : cleanFull.toLowerCase();
-          if (seenEditorKeys.has(normKey) || seenEditorKeys.has(altFull)) {
-            return;
-          }
-          seenEditorKeys.add(normKey);
-          seenEditorKeys.add(altFull);
-          seenEditorKeys.add(cleanFull.toLowerCase());
-
-          rawEditors.push((displayStr || cleanFull).trim());
-          creators.push({
-            firstName: cleanFirst || undefined,
-            lastName: cleanLast || undefined,
-            fullName: cleanFull,
-            creatorType: 'editor',
-            ...(fieldMode === 1 ? { fieldMode: 1 } : {}),
-          });
-        };
-
-        (csl.editor || []).forEach((e: CslRisPerson) => {
-          const family = e.family?.trim() || '';
-          const given = e.given?.trim() || '';
-          const literal = e.literal?.trim() || '';
-          const fullName =
-            literal ||
-            (family && given ? `${given} ${family}` : family || given);
-
-          if (fullName) {
-            registerEditor(
-              given || undefined,
-              family || undefined,
-              fullName,
-              fullName,
-              literal && !family && !given ? 1 : undefined,
-            );
-          }
-        });
-
-        for (const edStr of rawRec?.rawEditors || []) {
-          const cleanEdStr = edStr?.trim();
-          if (!cleanEdStr) continue;
-          const parsed = parseCreatorString(
-            cleanEdStr,
-            creators.length,
-            'editor',
-          );
-          registerEditor(
-            parsed.firstName || undefined,
-            parsed.lastName || undefined,
-            parsed.fullName || cleanEdStr,
-            cleanEdStr,
-            parsed.fieldMode === 1 ? 1 : undefined,
-          );
-        }
-
-        const rawKeywords: string[] = [...(rawRec?.rawTags || [])];
-        if (csl.keyword) {
-          if (Array.isArray(csl.keyword)) {
-            rawKeywords.push(
-              ...csl.keyword
-                .map((k: string) => String(k).trim())
-                .filter(Boolean),
-            );
-          } else if (typeof csl.keyword === 'string') {
-            rawKeywords.push(csl.keyword.trim());
-          }
-        }
-        const tags = normalizeAcademicTags(rawKeywords);
-
-        const dateParts = csl.issued?.['date-parts']?.[0];
-        let year = dateParts?.[0] != null ? Number(dateParts[0]) : undefined;
-        if (!year || Number.isNaN(year)) {
-          year = rawRec?.year;
-        }
-
-        let cslPubDate: string | undefined;
-        if (
-          Array.isArray(dateParts) &&
-          dateParts[0] != null &&
-          !Number.isNaN(Number(dateParts[0]))
-        ) {
-          const yStr = String(dateParts[0]).padStart(4, '0');
-          const mNum = dateParts[1] != null ? Number(dateParts[1]) : undefined;
-          const dNum = dateParts[2] != null ? Number(dateParts[2]) : undefined;
-          if (mNum && mNum >= 1 && mNum <= 12) {
-            const mStr = String(mNum).padStart(2, '0');
-            if (dNum && dNum >= 1 && dNum <= 31) {
-              cslPubDate = `${yStr}-${mStr}-${String(dNum).padStart(2, '0')}`;
-            } else {
-              cslPubDate = `${yStr}-${mStr}`;
-            }
-          } else {
-            cslPubDate = yStr;
-          }
-        }
-        const rawPubDate = rawRec?.publicationDate;
-        const publicationDate =
-          rawPubDate && (!cslPubDate || rawPubDate.length >= cslPubDate.length)
-            ? rawPubDate
-            : cslPubDate || (year ? String(year) : undefined);
-
-        let itemType = this.mapCslTypeToItemType(csl.type || 'article-journal');
-        const rawRisType = rawRec?.itemType;
-        if (
-          rawRisType === 'patent' ||
-          rawRisType === 'thesis' ||
-          rawRisType === 'report' ||
-          rawRisType === 'bookSection' ||
-          rawRisType === 'conferencePaper'
-        ) {
-          itemType = rawRisType;
-        }
-
-        const consolidatedNotes: Array<{ content: string; source?: string }> =
-          [];
-        const seenNotes = new Set<string>();
-        const addNote = (text?: string | null, source: string = 'ris') => {
-          if (!text || typeof text !== 'string') return;
-          const trimmed = text.trim();
-          if (trimmed && !seenNotes.has(trimmed)) {
-            seenNotes.add(trimmed);
-            consolidatedNotes.push({ content: trimmed, source });
-          }
-        };
-        for (const n of rawRec?.rawNotes || []) {
-          addNote(n, 'ris');
-        }
-        const rawNote = csl.note || csl.annote || csl.comment;
-        addNote(typeof rawNote === 'string' ? rawNote : undefined, 'ris');
-        const notes =
-          consolidatedNotes.length > 0 ? consolidatedNotes : undefined;
-
-        const sp = rawRec?.startPage;
-        const ep = rawRec?.endPage;
-        const combinedRawPages =
-          sp && ep && sp !== ep ? `${sp}-${ep}` : sp || ep;
-        const cslPages = csl.page ? String(csl.page).trim() : undefined;
-        const pages =
-          !cslPages || (!cslPages.includes('-') && sp && ep && sp !== ep)
-            ? combinedRawPages || cslPages
-            : cslPages;
-
-        const rawPublisher =
-          (csl.publisher ? String(csl.publisher).trim() : undefined) ||
-          rawRec?.publisher;
-        const rawIs =
-          (csl.issue ? String(csl.issue).trim() : undefined) || rawRec?.issue;
-        const rawT2 =
-          rawRec?.publicationTitle ||
-          (csl['container-title']
-            ? String(csl['container-title']).trim()
-            : undefined);
-        const rawC3 = rawRec?.rawC3;
-        const rawDoi = csl.DOI || rawRec?.doi || undefined;
-        const doi = rawDoi ? normalizeDoi(rawDoi) || rawDoi : undefined;
-
-        const typeSpecific = this.buildTypeSpecificFields({
-          itemType,
-          publisher: rawPublisher,
-          rawM1: rawRec?.rawM1,
-          rawM3: rawRec?.rawM3,
-          rawU1: rawRec?.rawU1,
-          rawIs,
-          rawSn: rawRec?.rawSn,
-          rawT2,
-          rawC3,
-        });
-
-        const cslAbstract = csl.abstract || undefined;
-        const rawRecAbstract = rawRec?.abstract;
-        const rawAbstract =
-          rawRecAbstract &&
-          (!cslAbstract ||
-            rawRecAbstract.replace(/\s+/g, ' ').length >
-              cslAbstract.replace(/\s+/g, ' ').length)
-            ? rawRecAbstract
-            : cslAbstract;
-
-        return {
-          itemType,
-          title: (csl.title || rawRec?.title || 'Untitled Reference').trim(),
-          shortTitle:
-            (csl['title-short']
-              ? String(csl['title-short']).trim()
-              : undefined) || rawRec?.shortTitle,
-          authors: rawAuthors,
-          creators,
-          editors: rawEditors.length > 0 ? rawEditors : undefined,
-          year,
-          publicationDate,
-          journal: rawT2,
-          publicationTitle: rawT2,
-          journalAbbr:
-            (csl['container-title-short']
-              ? String(csl['container-title-short']).trim()
-              : undefined) || rawRec?.journalAbbr,
-          publisher: rawPublisher,
-          ...typeSpecific,
-          place: csl['publisher-place'] || rawRec?.place || undefined,
-          volume: csl.volume ? String(csl.volume) : rawRec?.volume,
-          issue:
-            itemType === 'report' || itemType === 'patent' ? undefined : rawIs,
-          pages,
-          doi,
-          pmid: rawRec?.pmid,
-          pmcid: rawRec?.pmcid,
-          arxivId: rawRec?.arxivId,
-          isbn:
-            itemType === 'patent'
-              ? undefined
-              : csl.ISBN || rawRec?.isbn || undefined,
-          issn: csl.ISSN || rawRec?.issn || undefined,
-          url: csl.URL || rawRec?.url || undefined,
-          accessedAt: rawRec?.accessedAt,
-          abstract: cleanAbstractText(rawAbstract),
-          series: csl['collection-title'] || rawRec?.series || undefined,
-          edition:
-            (csl.edition ? String(csl.edition).trim() : undefined) ||
-            rawRec?.edition,
-          language:
-            (csl.language ? String(csl.language).trim() : undefined) ||
-            rawRec?.language,
-          rights: csl.rights ? String(csl.rights).trim() : undefined,
-          callNumber: csl['call-number'] || rawRec?.callNumber || undefined,
-          archive: csl.archive || rawRec?.archive || undefined,
-          tags,
-          keywords: tags,
-          notes,
-        };
+        return this.mapSingleCslItem(csl, block);
       });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -407,6 +154,287 @@ export class RisParser {
       );
       return this.fallbackParse(content);
     }
+  }
+
+  private mapSingleCslItem(csl: CslRisItem, block?: string): RisItem {
+    const rawRec =
+      block && this.needsRawRecordEnrichment(csl, block)
+        ? RisFallbackParser.parseRawRecords(block)[0]
+        : undefined;
+
+    const rawAuthors: string[] = [];
+    const creators: CreatorInput[] = [];
+
+    (csl.author || []).forEach((a: CslRisPerson) => {
+      const family = a.family?.trim() || '';
+      const given = a.given?.trim() || '';
+      const fullName =
+        a.literal?.trim() ||
+        (family && given ? `${given} ${family}` : family || given);
+
+      if (fullName) {
+        rawAuthors.push(fullName);
+        creators.push({
+          firstName: given || undefined,
+          lastName: family || undefined,
+          fullName,
+          creatorType: 'author',
+          ...(a.literal && !family && !given ? { fieldMode: 1 } : {}),
+        });
+      }
+    });
+
+    const rawEditors: string[] = [];
+    const seenEditorKeys = new Set<string>();
+    const registerEditor = (
+      firstName?: string,
+      lastName?: string,
+      fullName?: string,
+      displayStr?: string,
+      fieldMode?: number,
+    ) => {
+      const cleanLast = (lastName || '').trim();
+      const cleanFirst = (firstName || '').trim();
+      const cleanFull = (
+        fullName ||
+        (cleanFirst && cleanLast
+          ? `${cleanFirst} ${cleanLast}`
+          : cleanLast || cleanFirst)
+      ).trim();
+      if (!cleanLast && !cleanFirst && !cleanFull) return;
+
+      const normKey = `${cleanLast.toLowerCase()}|${cleanFirst.toLowerCase()}|${cleanFull.toLowerCase()}`;
+      const altFull =
+        cleanLast && cleanFirst
+          ? `${cleanLast}, ${cleanFirst}`.toLowerCase()
+          : cleanFull.toLowerCase();
+      if (seenEditorKeys.has(normKey) || seenEditorKeys.has(altFull)) {
+        return;
+      }
+      seenEditorKeys.add(normKey);
+      seenEditorKeys.add(altFull);
+      seenEditorKeys.add(cleanFull.toLowerCase());
+
+      rawEditors.push((displayStr || cleanFull).trim());
+      creators.push({
+        firstName: cleanFirst || undefined,
+        lastName: cleanLast || undefined,
+        fullName: cleanFull,
+        creatorType: 'editor',
+        ...(fieldMode === 1 ? { fieldMode: 1 } : {}),
+      });
+    };
+
+    (csl.editor || []).forEach((e: CslRisPerson) => {
+      const family = e.family?.trim() || '';
+      const given = e.given?.trim() || '';
+      const literal = e.literal?.trim() || '';
+      const fullName =
+        literal ||
+        (family && given ? `${given} ${family}` : family || given);
+
+      if (fullName) {
+        registerEditor(
+          given || undefined,
+          family || undefined,
+          fullName,
+          fullName,
+          literal && !family && !given ? 1 : undefined,
+        );
+      }
+    });
+
+    for (const edStr of rawRec?.rawEditors || []) {
+      const cleanEdStr = edStr?.trim();
+      if (!cleanEdStr) continue;
+      const parsed = parseCreatorString(
+        cleanEdStr,
+        creators.length,
+        'editor',
+      );
+      registerEditor(
+        parsed.firstName || undefined,
+        parsed.lastName || undefined,
+        parsed.fullName || cleanEdStr,
+        cleanEdStr,
+        parsed.fieldMode === 1 ? 1 : undefined,
+      );
+    }
+
+    const rawKeywords: string[] = [...(rawRec?.rawTags || [])];
+    if (csl.keyword) {
+      if (Array.isArray(csl.keyword)) {
+        rawKeywords.push(
+          ...csl.keyword
+            .map((k: string) => String(k).trim())
+            .filter(Boolean),
+        );
+      } else if (typeof csl.keyword === 'string') {
+        rawKeywords.push(csl.keyword.trim());
+      }
+    }
+    const tags = normalizeTags(rawKeywords);
+
+    const dateParts = csl.issued?.['date-parts']?.[0];
+    let year = dateParts?.[0] != null ? Number(dateParts[0]) : undefined;
+    if (!year || Number.isNaN(year)) {
+      year = rawRec?.year;
+    }
+
+    let cslPubDate: string | undefined;
+    if (
+      Array.isArray(dateParts) &&
+      dateParts[0] != null &&
+      !Number.isNaN(Number(dateParts[0]))
+    ) {
+      const yStr = String(dateParts[0]).padStart(4, '0');
+      const mNum = dateParts[1] != null ? Number(dateParts[1]) : undefined;
+      const dNum = dateParts[2] != null ? Number(dateParts[2]) : undefined;
+      if (mNum && mNum >= 1 && mNum <= 12) {
+        const mStr = String(mNum).padStart(2, '0');
+        if (dNum && dNum >= 1 && dNum <= 31) {
+          cslPubDate = `${yStr}-${mStr}-${String(dNum).padStart(2, '0')}`;
+        } else {
+          cslPubDate = `${yStr}-${mStr}`;
+        }
+      } else {
+        cslPubDate = yStr;
+      }
+    }
+    const rawPubDate = rawRec?.publicationDate;
+    const publicationDate =
+      rawPubDate && (!cslPubDate || rawPubDate.length >= cslPubDate.length)
+        ? rawPubDate
+        : cslPubDate || (year ? String(year) : undefined);
+
+    let itemType = this.mapCslTypeToItemType(csl.type || 'article-journal');
+    const rawRisType = rawRec?.itemType;
+    if (
+      rawRisType === 'patent' ||
+      rawRisType === 'thesis' ||
+      rawRisType === 'report' ||
+      rawRisType === 'bookSection' ||
+      rawRisType === 'conferencePaper'
+    ) {
+      itemType = rawRisType;
+    }
+
+    const consolidatedNotes: Array<{ content: string; source?: string }> =
+      [];
+    const seenNotes = new Set<string>();
+    const addNote = (text?: string | null, source: string = 'ris') => {
+      if (!text || typeof text !== 'string') return;
+      const trimmed = text.trim();
+      if (trimmed && !seenNotes.has(trimmed)) {
+        seenNotes.add(trimmed);
+        consolidatedNotes.push({ content: trimmed, source });
+      }
+    };
+    for (const n of rawRec?.rawNotes || []) {
+      addNote(n, 'ris');
+    }
+    const rawNote = csl.note || csl.annote || csl.comment;
+    addNote(typeof rawNote === 'string' ? rawNote : undefined, 'ris');
+    const notes =
+      consolidatedNotes.length > 0 ? consolidatedNotes : undefined;
+
+    const sp = rawRec?.startPage;
+    const ep = rawRec?.endPage;
+    const combinedRawPages =
+      sp && ep && sp !== ep ? `${sp}-${ep}` : sp || ep;
+    const cslPages = csl.page ? String(csl.page).trim() : undefined;
+    const pages =
+      !cslPages || (!cslPages.includes('-') && sp && ep && sp !== ep)
+        ? combinedRawPages || cslPages
+        : cslPages;
+
+    const rawPublisher =
+      (csl.publisher ? String(csl.publisher).trim() : undefined) ||
+      rawRec?.publisher;
+    const rawIs =
+      (csl.issue ? String(csl.issue).trim() : undefined) || rawRec?.issue;
+    const rawT2 =
+      rawRec?.publicationTitle ||
+      (csl['container-title']
+        ? String(csl['container-title']).trim()
+        : undefined);
+    const rawC3 = rawRec?.rawC3;
+    const rawDoi = csl.DOI || rawRec?.doi || undefined;
+    const doi = rawDoi ? normalizeDoi(rawDoi) || rawDoi : undefined;
+
+    const typeSpecific = this.buildTypeSpecificFields({
+      itemType,
+      publisher: rawPublisher,
+      rawM1: rawRec?.rawM1,
+      rawM3: rawRec?.rawM3,
+      rawU1: rawRec?.rawU1,
+      rawIs,
+      rawSn: rawRec?.rawSn,
+      rawT2,
+      rawC3,
+    });
+
+    const cslAbstract = csl.abstract || undefined;
+    const rawRecAbstract = rawRec?.abstract;
+    const rawAbstract =
+      rawRecAbstract &&
+      (!cslAbstract ||
+        rawRecAbstract.replace(/\s+/g, ' ').length >
+          cslAbstract.replace(/\s+/g, ' ').length)
+        ? rawRecAbstract
+        : cslAbstract;
+
+    return {
+      itemType,
+      title: (csl.title || rawRec?.title || 'Untitled Reference').trim(),
+      shortTitle:
+        (csl['title-short']
+          ? String(csl['title-short']).trim()
+          : undefined) || rawRec?.shortTitle,
+      authors: rawAuthors,
+      creators,
+      editors: rawEditors.length > 0 ? rawEditors : undefined,
+      year,
+      publicationDate,
+      journal: rawT2,
+      publicationTitle: rawT2,
+      journalAbbr:
+        (csl['container-title-short']
+          ? String(csl['container-title-short']).trim()
+          : undefined) || rawRec?.journalAbbr,
+      publisher: rawPublisher,
+      ...typeSpecific,
+      place: csl['publisher-place'] || rawRec?.place || undefined,
+      volume: csl.volume ? String(csl.volume) : rawRec?.volume,
+      issue:
+        itemType === 'report' || itemType === 'patent' ? undefined : rawIs,
+      pages,
+      doi,
+      pmid: rawRec?.pmid,
+      pmcid: rawRec?.pmcid,
+      arxivId: rawRec?.arxivId,
+      isbn:
+        itemType === 'patent'
+          ? undefined
+          : csl.ISBN || rawRec?.isbn || undefined,
+      issn: csl.ISSN || rawRec?.issn || undefined,
+      url: csl.URL || rawRec?.url || undefined,
+      accessedAt: rawRec?.accessedAt,
+      abstract: cleanAbstractText(rawAbstract),
+      series: csl['collection-title'] || rawRec?.series || undefined,
+      edition:
+        (csl.edition ? String(csl.edition).trim() : undefined) ||
+        rawRec?.edition,
+      language:
+        (csl.language ? String(csl.language).trim() : undefined) ||
+        rawRec?.language,
+      rights: csl.rights ? String(csl.rights).trim() : undefined,
+      callNumber: csl['call-number'] || rawRec?.callNumber || undefined,
+      archive: csl.archive || rawRec?.archive || undefined,
+      tags,
+      keywords: tags,
+      notes,
+    };
   }
 
   private splitRawRecordBlocks(content: string): string[] {

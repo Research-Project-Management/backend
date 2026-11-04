@@ -1,9 +1,13 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
-import { normalizeProjectScopeId, libraryConfig } from '@/modules/library/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
-import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import {
+  normalizeProjectScopeId,
+  libraryConfig,
+  ItemsMapper,
+  SingleFlightCoalescer,
+} from '@/modules/library/core';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { CursorPaginatedResult } from '@/modules/library/catalog/dto/items.dto';
 import {
   QualityAuditCandidateItem,
@@ -13,15 +17,9 @@ import {
 import { AccessService, Permission } from '@/modules/project/access';
 
 export interface LibraryPermissionsContract {
-  canRead: boolean;
-  canCreateItem: boolean;
-  canEditItem: boolean;
-  canDeleteItem: boolean;
-  canPurgeItem: boolean;
-  canManageCollections: boolean;
-  canImport: boolean;
-  canExport: boolean;
-  canAnnotate: boolean;
+  canRead: boolean; canCreateItem: boolean; canEditItem: boolean; canDeleteItem: boolean;
+  canPurgeItem: boolean; canManageCollections: boolean; canImport: boolean;
+  canExport: boolean; canAnnotate: boolean;
 }
 
 export interface LibraryScopeAccessContract {
@@ -31,15 +29,8 @@ export interface LibraryScopeAccessContract {
 }
 
 const PERSONAL_LIBRARY_PERMISSIONS: LibraryPermissionsContract = {
-  canRead: true,
-  canCreateItem: true,
-  canEditItem: true,
-  canDeleteItem: true,
-  canPurgeItem: true,
-  canManageCollections: true,
-  canImport: true,
-  canExport: true,
-  canAnnotate: true,
+  canRead: true, canCreateItem: true, canEditItem: true, canDeleteItem: true,
+  canPurgeItem: true, canManageCollections: true, canImport: true, canExport: true, canAnnotate: true,
 };
 
 const PERM_BIT: Readonly<Record<string, number>> = {
@@ -51,32 +42,17 @@ const PERM_BIT: Readonly<Record<string, number>> = {
   [Permission.LIBRARY_ANNOTATE]: 1 << 5,
 };
 
-const ROLE_PERM_MASK: Readonly<
-  Record<'owner' | 'coordinator' | 'contributor' | 'reviewer', number>
-> = {
-  reviewer:
-    PERM_BIT[Permission.LIBRARY_READ] |
-    PERM_BIT[Permission.LIBRARY_EXPORT] |
-    PERM_BIT[Permission.LIBRARY_ANNOTATE],
+const ROLE_PERM_MASK: Readonly<Record<'owner' | 'coordinator' | 'contributor' | 'reviewer', number>> = {
+  reviewer: PERM_BIT[Permission.LIBRARY_READ] | PERM_BIT[Permission.LIBRARY_EXPORT] | PERM_BIT[Permission.LIBRARY_ANNOTATE],
   contributor:
-    PERM_BIT[Permission.LIBRARY_READ] |
-    PERM_BIT[Permission.LIBRARY_UPLOAD] |
-    PERM_BIT[Permission.LIBRARY_UPDATE] |
-    PERM_BIT[Permission.LIBRARY_EXPORT] |
-    PERM_BIT[Permission.LIBRARY_ANNOTATE],
+    PERM_BIT[Permission.LIBRARY_READ] | PERM_BIT[Permission.LIBRARY_UPLOAD] | PERM_BIT[Permission.LIBRARY_UPDATE] |
+    PERM_BIT[Permission.LIBRARY_EXPORT] | PERM_BIT[Permission.LIBRARY_ANNOTATE],
   coordinator:
-    PERM_BIT[Permission.LIBRARY_READ] |
-    PERM_BIT[Permission.LIBRARY_UPLOAD] |
-    PERM_BIT[Permission.LIBRARY_UPDATE] |
-    PERM_BIT[Permission.LIBRARY_EXPORT] |
-    PERM_BIT[Permission.LIBRARY_ANNOTATE],
+    PERM_BIT[Permission.LIBRARY_READ] | PERM_BIT[Permission.LIBRARY_UPLOAD] | PERM_BIT[Permission.LIBRARY_UPDATE] |
+    PERM_BIT[Permission.LIBRARY_DELETE] | PERM_BIT[Permission.LIBRARY_EXPORT] | PERM_BIT[Permission.LIBRARY_ANNOTATE],
   owner:
-    PERM_BIT[Permission.LIBRARY_READ] |
-    PERM_BIT[Permission.LIBRARY_UPLOAD] |
-    PERM_BIT[Permission.LIBRARY_UPDATE] |
-    PERM_BIT[Permission.LIBRARY_DELETE] |
-    PERM_BIT[Permission.LIBRARY_EXPORT] |
-    PERM_BIT[Permission.LIBRARY_ANNOTATE],
+    PERM_BIT[Permission.LIBRARY_READ] | PERM_BIT[Permission.LIBRARY_UPLOAD] | PERM_BIT[Permission.LIBRARY_UPDATE] |
+    PERM_BIT[Permission.LIBRARY_DELETE] | PERM_BIT[Permission.LIBRARY_EXPORT] | PERM_BIT[Permission.LIBRARY_ANNOTATE],
 };
 
 const applyJitter = (ttl: number): number =>
@@ -90,6 +66,7 @@ const applyJitter = (ttl: number): number =>
 @Injectable()
 export class ItemQueryService {
   private readonly logger = new Logger(ItemQueryService.name);
+  private readonly singleFlight = new SingleFlightCoalescer();
 
   constructor(
     private readonly query: QueryRepository,
@@ -213,7 +190,7 @@ export class ItemQueryService {
         canRead,
         canCreateItem: canUpload,
         canEditItem: canUpdate,
-        canDeleteItem: canUpdate,
+        canDeleteItem: canPurge || canUpdate,
         canPurgeItem: canPurge,
         canManageCollections: canUpdate,
         canImport: canUpload,
@@ -244,34 +221,60 @@ export class ItemQueryService {
     role: 'owner' | 'coordinator' | 'contributor' | 'reviewer';
     permissions: LibraryPermissionsContract;
   }> {
+    const validProjectId = normalizeProjectScopeId(projectId);
     const cacheKey = LIBRARY_REDIS_KEYS.counts(userId, projectId);
 
-    const fetchCountsData = async () => {
-      const [unfiled, starred, trash, rawItemTypes] = await Promise.all([
+    const fetchProjectSharedCounts = async () => {
+      const [unfiled, trash, rawItemTypes] = await Promise.all([
         this.query.count(userId, { view: 'unfiled', projectId }),
-        this.query.count(userId, { view: 'starred', projectId }),
         this.query.count(userId, { view: 'trash', projectId }),
         this.query.countByItemType?.(userId, projectId),
       ]);
       const itemTypes = rawItemTypes || {};
       const typeCounts = Object.values(itemTypes);
       const total =
-        typeCounts.length > 0
+        rawItemTypes !== undefined && rawItemTypes !== null
           ? typeCounts.reduce((acc, count) => acc + count, 0)
           : await this.query.count(userId, { view: 'all', projectId });
       return {
         total,
         unfiled,
-        starred,
         trash,
         itemTypes,
       };
     };
 
+    const fetchCountsData = async () => {
+      if (validProjectId) {
+        const sharedProjectKey = LIBRARY_REDIS_KEYS.counts(
+          `proj:${validProjectId}`,
+        );
+        const [sharedCounts, starred] = await Promise.all([
+          this.singleFlight.execute(sharedProjectKey, fetchProjectSharedCounts),
+          this.query.count(userId, { view: 'starred', projectId }),
+        ]);
+        return {
+          ...sharedCounts,
+          starred,
+        };
+      }
+
+      const [sharedCounts, starred] = await Promise.all([
+        fetchProjectSharedCounts(),
+        this.query.count(userId, { view: 'starred', projectId }),
+      ]);
+      return {
+        ...sharedCounts,
+        starred,
+      };
+    };
+
     const [countsData, accessContract] = await Promise.all([
-      this.cache
-        ? this.cache.wrap(cacheKey, fetchCountsData, 15)
-        : fetchCountsData(),
+      this.singleFlight.execute(cacheKey, () =>
+        this.cache
+          ? this.cache.wrap(cacheKey, fetchCountsData, applyJitter(15))
+          : fetchCountsData(),
+      ),
       this.getPermissions(userId, projectId, accessHint),
     ]);
 
@@ -389,12 +392,17 @@ export class ItemQueryService {
       includeNotes?: boolean;
       isRetracted?: boolean;
       onlyFlagged?: boolean;
+      checkInProjectId?: string;
     },
   ): Promise<CursorPaginatedResult<ItemDetail | Record<string, unknown>>> {
     const limit = Math.min(options.limit ?? 50, 1000);
     const validProjectId = normalizeProjectScopeId(options.projectId);
+    const validCheckInProjectId = normalizeProjectScopeId(
+      options.checkInProjectId,
+    );
     const scopeKey = validProjectId ? `proj:${validProjectId}` : userId;
-    const canCache = !options.search && !options.cursor;
+    const canCache =
+      !options.search && !options.cursor && !validCheckInProjectId;
     const extraCacheParts = [
       validProjectId ? `u=${userId}` : '',
       options.page !== undefined && options.page > 1 ? `p=${options.page}` : '',
@@ -449,48 +457,98 @@ export class ItemQueryService {
       }
     }
 
-    const preResolvedCollectionIds =
-      options.collectionId &&
-      (!options.collectionIds || options.collectionIds.length === 0)
-        ? await this.query.resolveTargetCollectionIds?.(userId, options)
-        : undefined;
+    const executeListQuery = async (): Promise<
+      CursorPaginatedResult<ItemDetail | Record<string, unknown>>
+    > => {
+      const preResolvedCollectionIds =
+        options.collectionId &&
+        (!options.collectionIds || options.collectionIds.length === 0)
+          ? await this.query.resolveTargetCollectionIds?.(userId, options)
+          : undefined;
 
-    const queryOptions = {
-      ...options,
-      userId,
-      ...(preResolvedCollectionIds
-        ? { targetCollectionIds: preResolvedCollectionIds }
-        : {}),
-    };
-    const isInitialPage =
-      !options.cursor && (!options.page || options.page === 1);
-    const shouldCount = isInitialPage;
-    const [totalCount, rawItems] = await Promise.all([
-      shouldCount
-        ? this.query.count(userId, queryOptions)
-        : Promise.resolve(undefined),
-      this.query.findMany(userId, {
-        ...queryOptions,
-        limit,
-      }),
-    ]);
+      const queryOptions = {
+        ...options,
+        userId,
+        ...(preResolvedCollectionIds
+          ? { targetCollectionIds: preResolvedCollectionIds }
+          : {}),
+      };
+      const isInitialPage =
+        !options.cursor && (!options.page || options.page === 1);
+      const shouldCount = isInitialPage;
+      const [totalCount, rawItems] = await Promise.all([
+        shouldCount
+          ? this.query.count(userId, queryOptions)
+          : Promise.resolve(undefined),
+        this.query.findMany(userId, {
+          ...queryOptions,
+          limit,
+        }),
+      ]);
 
-    let hasNextPage = false;
-    let nextCursor: string | undefined;
+      let hasNextPage = false;
+      let nextCursor: string | undefined;
 
-    if (rawItems.length > limit) {
-      hasNextPage = true;
-      rawItems.pop();
-      nextCursor = rawItems[rawItems.length - 1]?.id;
-    }
+      if (rawItems.length > limit) {
+        hasNextPage = true;
+        rawItems.pop();
+        nextCursor = rawItems[rawItems.length - 1]?.id;
+      }
 
-    const items = rawItems
-      .slice(0, limit)
-      .map((it) => this.mapFlattenedState(it, userId))
-      .filter((it): it is NonNullable<typeof it> => it !== null);
+      let items = rawItems
+        .slice(0, limit)
+        .map((it) => this.mapFlattenedState(it, userId))
+        .filter((it): it is NonNullable<typeof it> => it !== null);
 
-    const result: CursorPaginatedResult<ItemDetail | Record<string, unknown>> =
-      {
+      if (validCheckInProjectId && items.length > 0) {
+        const existingInProject = await this.query.findDuplicatesInProject(
+          validCheckInProjectId,
+          items.map((it) => ({
+            doi: typeof it.doi === 'string' ? it.doi : null,
+            citationKey:
+              typeof it.citationKey === 'string' ? it.citationKey : null,
+            title: typeof it.title === 'string' ? it.title : null,
+          })),
+        );
+        const existingDois = new Set(
+          (existingInProject || [])
+            .map((e) => e.doi?.trim().toLowerCase())
+            .filter((v): v is string => Boolean(v)),
+        );
+        const existingCitationKeys = new Set(
+          (existingInProject || [])
+            .map((e) => e.citationKey?.trim().toLowerCase())
+            .filter((v): v is string => Boolean(v)),
+        );
+        const existingTitles = new Set(
+          (existingInProject || [])
+            .map((e) => e.title?.trim().toLowerCase())
+            .filter((v): v is string => Boolean(v)),
+        );
+
+        items = items.map((it) => {
+          const doi =
+            typeof it.doi === 'string' ? it.doi.trim().toLowerCase() : '';
+          const ck =
+            typeof it.citationKey === 'string'
+              ? it.citationKey.trim().toLowerCase()
+              : '';
+          const title =
+            typeof it.title === 'string' ? it.title.trim().toLowerCase() : '';
+          const alreadyInProject =
+            Boolean(doi && existingDois.has(doi)) ||
+            Boolean(ck && existingCitationKeys.has(ck)) ||
+            Boolean(title && existingTitles.has(title));
+          return {
+            ...it,
+            alreadyInProject,
+          };
+        });
+      }
+
+      const result: CursorPaginatedResult<
+        ItemDetail | Record<string, unknown>
+      > = {
         items,
         meta: {
           cursor: nextCursor,
@@ -499,25 +557,40 @@ export class ItemQueryService {
         },
       };
 
-    if (canCache && cacheKey && this.cache) {
-      try {
-        const listTtl = applyJitter(60);
-        await this.cache.set(cacheKey, result, listTtl);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.debug(`Cache set error for ${cacheKey}: ${message}`);
+      if (canCache && cacheKey && this.cache) {
+        try {
+          const listTtl = applyJitter(60);
+          await this.cache.set(cacheKey, result, listTtl);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.debug(`Cache set error for ${cacheKey}: ${message}`);
+        }
       }
+
+      return result;
+    };
+
+    if (canCache && cacheKey) {
+      return this.singleFlight.execute(cacheKey, executeListQuery);
     }
 
-    return result;
+    return executeListQuery();
   }
 
-  async getItemSnapshot(userId: string, itemId: string) {
-    return this.query.getItemSnapshot(userId, itemId);
+  async getItemSnapshot(
+    userId: string,
+    itemId: string,
+    projectId?: string | null,
+  ) {
+    return this.query.getItemSnapshot(userId, itemId, undefined, projectId);
   }
 
-  async getItemSnapshots(userId: string, itemIds: string[]) {
-    return this.query.getItemSnapshots(userId, itemIds);
+  async getItemSnapshots(
+    userId: string,
+    itemIds: string[],
+    projectId?: string | null,
+  ) {
+    return this.query.getItemSnapshots(userId, itemIds, undefined, projectId);
   }
 
   // IItemExistencePort Implementation
@@ -546,32 +619,21 @@ export class ItemQueryService {
     return this.query.existMany(userId, itemIds, undefined, projectId);
   }
 
-  async validateItemsBelongToUser(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-  ): Promise<{ valid: boolean; missingIds: string[] }> {
-    const existMap = await this.existMany(userId, itemIds, projectId);
-    const missingIds: string[] = [];
-    for (const id of itemIds) {
-      if (!existMap.get(id)) {
-        missingIds.push(id);
-      }
-    }
-    return {
-      valid: missingIds.length === 0,
-      missingIds,
-    };
-  }
-
   // IItemReadPort Implementation
 
   async findById(userId: string, itemId: string, projectId?: string) {
     return this.query.findById(userId, itemId, projectId);
   }
 
-  async findByIds(userId: string, itemIds: string[], projectId?: string) {
-    return this.query.findByIds(userId, itemIds, projectId);
+  async findByIds(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+    options?: { includeContent?: boolean },
+  ) {
+    return options?.includeContent !== undefined
+      ? this.query.findByIds(userId, itemIds, projectId, undefined, options.includeContent)
+      : this.query.findByIds(userId, itemIds, projectId);
   }
 
   async findByDoi(userId: string, doi: string, projectId?: string) {

@@ -581,45 +581,7 @@ export class UpdateItemDto extends PartialType(CreateItemDto) {
   expectedVersion?: number;
 }
 
-export class TypeConversionPreviewDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  targetType?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  targetItemType?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  retainUnmappedInExtra?: boolean;
-}
-
-export class TypeConversionDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  targetType?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  targetItemType?: string;
-
-  @IsOptional()
-  @IsNumber()
-  expectedVersion?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  retainUnmappedInExtra?: boolean;
-
-  @IsOptional()
-  @IsObject()
-  customFieldOverrides?: Record<string, unknown>;
-}
+export * from './item-query.dto';
 
 export { CursorPaginationQueryDto } from './item-query.dto';
 export type {
@@ -632,60 +594,3 @@ export type {
   DocumentReferenceDto,
   DocumentFulltextResponse,
 } from './item-query.dto';
-
-export class ParseCitationsDto {
-  @ApiPropertyOptional({
-    description:
-      'Raw unformatted citation text or multi-line bibliography string to parse via citation parser',
-    example:
-      'Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017). Attention is all you need. Advances in neural information processing systems, 30.',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100000)
-  citations?: string;
-
-  @ApiPropertyOptional({
-    description: 'Alias for citations',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100000)
-  rawCitations?: string;
-}
-
-export class BulkPurgeItemsDto {
-  @ApiProperty({
-    description: 'Array of item IDs to permanently delete from library/trash',
-    example: ['uuid-1', 'uuid-2'],
-  })
-  @IsArray()
-  @ArrayMaxSize(500)
-  @IsString({ each: true })
-  @MaxLength(100, { each: true })
-  itemIds!: string[];
-}
-
-export class BulkTrashItemsDto {
-  @ApiProperty({
-    description: 'Array of item IDs to move to trash',
-    example: ['uuid-1', 'uuid-2'],
-  })
-  @IsArray()
-  @ArrayMaxSize(500)
-  @IsString({ each: true })
-  @MaxLength(100, { each: true })
-  itemIds!: string[];
-}
-
-export class BulkRestoreItemsDto {
-  @ApiProperty({
-    description: 'Array of item IDs to restore from trash',
-    example: ['uuid-1', 'uuid-2'],
-  })
-  @IsArray()
-  @ArrayMaxSize(500)
-  @IsString({ each: true })
-  @MaxLength(100, { each: true })
-  itemIds!: string[];
-}

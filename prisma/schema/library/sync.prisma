@@ -23,7 +23,8 @@ model IdempotencyRecord {
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([userId, idempotencyKey])
+  @@unique([userId, projectId, idempotencyKey])
+  @@index([userId, idempotencyKey])
   @@index([projectId, idempotencyKey])
   @@index([expiresAt])
   @@map("idempotency_records")
@@ -44,6 +45,7 @@ model LibraryChange {
   seq         BigInt
   userId      String?  @map("user_id") @db.Uuid
   projectId   String?  @map("project_id") @db.Uuid
+  actorId     String?  @map("actor_id") @db.Uuid
   entityType  String   @map("entity_type")
   entityId    String   @map("entity_id")
   action      String
@@ -69,10 +71,9 @@ model Tombstone {
   deletedById String?   @map("deleted_by_id") @db.Uuid
   deletedAt   DateTime  @default(now()) @map("deleted_at") @db.Timestamptz(6)
 
-  @@unique([userId, projectId, entityType, entityId])
+  @@index([userId, projectId, entityType, entityId])
   @@index([userId, projectId, seq])
   @@index([projectId, seq])
-  @@index([userId, projectId, entityType, entityId])
   @@index([projectId, entityType, entityId])
   @@index([deletedAt])
   @@map("tombstones")
@@ -82,6 +83,7 @@ model OutboxEvent {
   id             String       @id @default(uuid(7)) @db.Uuid
   userId         String       @map("user_id") @db.Uuid
   projectId      String?      @map("project_id") @db.Uuid
+  actorId        String?      @map("actor_id") @db.Uuid
   aggregateId    String       @map("aggregate_id")
   eventType      String       @map("event_type")
   payload        Json         @db.JsonB
@@ -102,8 +104,5 @@ model OutboxEvent {
   @@index([status, leaseExpiresAt])
   @@index([status, scheduledAt, leaseExpiresAt])
   @@index([aggregateId, status])
-  @@index([userId, createdAt])
-  @@index([projectId, createdAt])
-  @@index([dedupeKey])
   @@map("outbox_events")
 }

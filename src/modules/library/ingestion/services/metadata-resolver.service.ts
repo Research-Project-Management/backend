@@ -5,7 +5,8 @@ import {
   ItemDetail, CATALOG_FACADE, ICatalogFacade, EXTRACTION_FACADE, IExtractionFacade,
   ReconcileExtractedCandidatePayload, normalizeDoi, normalizeArxivId, normalizePmid,
   normalizeIsbn, isPlaceholderItemTitle, ItemProvenancePolicy,
-  evaluateCitationTrap, verifyTitleLookupCorroboration,
+  evaluateCitationTrap, verifyTitleLookupCorroboration, isSameCanonicalIdentifier,
+  formatAttachmentFilename, DEFAULT_RENAME_PATTERN, RenamerItemMetadata,
 } from '@/modules/library/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { METADATA_PORT, MetadataPort, QueryType } from '@/modules/library/ingestion/types/metadata.types';
@@ -144,11 +145,33 @@ export class MetadataResolverService {
       throw new BadRequestException('MetadataService is unavailable for metadata re-resolution');
     }
 
+    const existingAuthors = Array.isArray(existingItem.creators)
+      ? existingItem.creators
+          .map(
+            (c: {
+              lastName?: string | null;
+              fullName?: string | null;
+              name?: string | null;
+            }) => c.lastName || c.fullName || c.name || '',
+          )
+          .filter(Boolean)
+      : [];
+    const authorHint =
+      existingAuthors.length > 0
+        ? existingAuthors.slice(0, 3).join('; ')
+        : undefined;
+    const yearHint =
+      typeof existingItem.year === 'number' && existingItem.year > 1000
+        ? existingItem.year
+        : undefined;
+
     const resolved = await this.metadataService.resolve({
       query,
       queryType,
       forceRefresh: options?.forceRefresh ?? options?.aggressive ?? true,
       scopeId: projectId || 'user',
+      ...(authorHint ? { authorHint } : {}),
+      ...(yearHint !== undefined ? { yearHint } : {}),
     });
 
     if (!resolved || !resolved.metadata) {
@@ -183,9 +206,34 @@ export class MetadataResolverService {
       }
     }
 
+    const resolvedProv = (
+      resolved.metadata as {
+        provenance?: { originProvider?: string; provider?: string };
+      }
+    ).provenance;
+    const resolvedOriginProvider =
+      (resolved.metadata as { sourceProvider?: string }).sourceProvider ||
+      resolvedProv?.originProvider ||
+      resolvedProv?.provider ||
+      (queryType === 'ARXIV'
+        ? 'arXiv'
+        : queryType === 'PMID'
+          ? 'PubMed'
+          : 'CrossRef');
+    const resolvedPayloadForPatch: Record<string, unknown> = {
+      ...(resolved.metadata as unknown as Record<string, unknown>),
+      sourceProvider: resolvedOriginProvider,
+      extraFields: {
+        ...((resolved.metadata.extraFields as Record<string, unknown>) || {}),
+        ...(resolved.provenance && Object.keys(resolved.provenance).length > 0
+          ? { fieldProvenance: resolved.provenance }
+          : {}),
+      },
+    };
+
     const { updateData, updatedFields } = buildReResolvePatch(
       existingItem as unknown as Record<string, unknown>,
-      resolved.metadata as unknown as Record<string, unknown>,
+      resolvedPayloadForPatch,
       { fields: options?.fields },
     );
 
@@ -234,15 +282,24 @@ export class MetadataResolverService {
           userId,
         });
         if (scraped?.isPdf && scraped.fileId) {
+          const fallbackFilename = scraped.filename || 'open-access.pdf';
+          const effectiveTitle = String(resolved.metadata.title || existingItem.title || '').trim();
+          const renamerInput: RenamerItemMetadata = {
+            title: effectiveTitle,
+            year: Number(resolved.metadata.year || existingItem.year) || undefined,
+            publicationTitle: String(resolved.metadata.publicationTitle || resolved.metadata.journal || existingItem.publicationTitle || '') || undefined,
+            doi: String(resolved.metadata.doi || existingItem.doi || '') || undefined,
+            contributors: (Array.isArray(existingItem.creators) ? existingItem.creators : []) as RenamerItemMetadata['contributors'],
+          };
+          const formattedFilename =
+            effectiveTitle && !isPlaceholderItemTitle(effectiveTitle)
+              ? formatAttachmentFilename(DEFAULT_RENAME_PATTERN, renamerInput, fallbackFilename)
+              : fallbackFilename;
           await this.extractionGateway.createAttachment(
             {
               itemId,
               fileId: scraped.fileId,
-              filename:
-                scraped.filename ||
-                (existingItem.title
-                  ? `${existingItem.title.slice(0, 60).replace(/[<>:"/\\|?*]/g, '')}.pdf`
-                  : 'open-access.pdf'),
+              filename: formattedFilename && formattedFilename.trim().length > 4 ? formattedFilename : fallbackFilename,
               url: getFileContentPath(scraped.fileId),
               mimeType: 'application/pdf',
               size: scraped.fileBuffer?.length || 0,
@@ -329,11 +386,6 @@ export class MetadataResolverService {
             : undefined;
     if (!query || !queryType) return { updated: false, updatedFields: [] };
 
-    const resolved = await this.metadataService
-      .resolve({ query, queryType, forceRefresh: false, scopeId: projectId || 'user' })
-      .catch(() => null);
-    if (!resolved?.metadata) return { updated: false, updatedFields: [] };
-
     const existingExtra: Record<string, unknown> = {
       ...(((existingItem as unknown as { metadata?: Record<string, unknown> }).metadata &&
       typeof (existingItem as unknown as { metadata?: Record<string, unknown> }).metadata === 'object'
@@ -343,6 +395,42 @@ export class MetadataResolverService {
         ? existingItem.extraFields
         : {}) as Record<string, unknown>),
     };
+
+    const existingRejectedCited = String(existingExtra.rejectedCitedDoi || '').trim();
+    if (
+      existingRejectedCited &&
+      isSameCanonicalIdentifier(existingRejectedCited, query)
+    ) {
+      const currentDoiNorm = normalizeDoi(String(existingItem.doi || existingExtra.doi || '').trim()) || '';
+      const isDoiLocked = ItemProvenancePolicy.isFieldLocked(existingItem, 'doi');
+      if (
+        currentDoiNorm &&
+        !isDoiLocked &&
+        isSameCanonicalIdentifier(currentDoiNorm, existingRejectedCited)
+      ) {
+        const nextExtra: Record<string, unknown> = { ...existingExtra, doi: null };
+        delete nextExtra.DOI;
+        await this.catalogGateway
+          .updateItem(
+            userId,
+            itemId,
+            {
+              doi: null,
+              extraFields: nextExtra,
+              __isSystemUpdate: true,
+              __updateSource: 'ingestion.citation_trap_guard',
+            },
+            { expectedVersion: existingItem.version, projectId: projectId || undefined },
+          )
+          .catch(() => undefined);
+      }
+      return { updated: false, updatedFields: [], rejectedCitedDoi: existingRejectedCited };
+    }
+
+    const resolved = await this.metadataService
+      .resolve({ query, queryType, forceRefresh: false, scopeId: projectId || 'user' })
+      .catch(() => null);
+    if (!resolved?.metadata) return { updated: false, updatedFields: [] };
 
     const pdfTitle = String(
       (typeof extractedMetadata.title === 'string' ? extractedMetadata.title : '') ||
@@ -397,14 +485,10 @@ export class MetadataResolverService {
       const resolvedPmidNorm = resolved.metadata.pmid ? (normalizePmid(resolved.metadata.pmid) || String(resolved.metadata.pmid).trim()).toLowerCase() : '';
       const resolvedIsbnNorm = resolved.metadata.isbn ? (normalizeIsbn(resolved.metadata.isbn) || String(resolved.metadata.isbn).trim()).toLowerCase() : '';
 
-      const clearDoi = Boolean(currentDoiNorm && !isIdLocked('doi') && ((cleanDoi && currentDoiNorm === cleanDoi.toLowerCase()) || (resolvedDoiNorm && currentDoiNorm === resolvedDoiNorm)));
-      const clearArxiv = Boolean(
-        currentArxivNorm && !isIdLocked('arxivId') &&
-          ((cleanArxiv && currentArxivNorm.replace(/v\d+$/i, '') === cleanArxiv.toLowerCase().replace(/v\d+$/i, '')) ||
-            (resolvedArxivNorm && currentArxivNorm.replace(/v\d+$/i, '') === resolvedArxivNorm.replace(/v\d+$/i, ''))),
-      );
-      const clearPmid = Boolean(currentPmidNorm && !isIdLocked('pmid') && ((cleanPmid && currentPmidNorm === cleanPmid.toLowerCase()) || (resolvedPmidNorm && currentPmidNorm === resolvedPmidNorm)));
-      const clearIsbn = Boolean(currentIsbnNorm && !isIdLocked('isbn') && ((cleanIsbn && currentIsbnNorm === cleanIsbn.toLowerCase()) || (resolvedIsbnNorm && currentIsbnNorm === resolvedIsbnNorm)));
+      const clearDoi = Boolean(currentDoiNorm && !isIdLocked('doi') && (isSameCanonicalIdentifier(currentDoiNorm, cleanDoi) || isSameCanonicalIdentifier(currentDoiNorm, resolvedDoiNorm)));
+      const clearArxiv = Boolean(currentArxivNorm && !isIdLocked('arxivId') && (isSameCanonicalIdentifier(currentArxivNorm, cleanArxiv) || isSameCanonicalIdentifier(currentArxivNorm, resolvedArxivNorm)));
+      const clearPmid = Boolean(currentPmidNorm && !isIdLocked('pmid') && (isSameCanonicalIdentifier(currentPmidNorm, cleanPmid) || isSameCanonicalIdentifier(currentPmidNorm, resolvedPmidNorm)));
+      const clearIsbn = Boolean(currentIsbnNorm && !isIdLocked('isbn') && (isSameCanonicalIdentifier(currentIsbnNorm, cleanIsbn) || isSameCanonicalIdentifier(currentIsbnNorm, resolvedIsbnNorm)));
 
       if (clearDoi || clearArxiv || clearPmid || clearIsbn) {
         const nextExtra: Record<string, unknown> = { ...existingExtra, rejectedCitedDoi };
@@ -432,14 +516,24 @@ export class MetadataResolverService {
       return { updated: false, updatedFields: [], rejectedCitedDoi };
     }
 
+    const resolvedProv = (
+      resolved.metadata as {
+        provenance?: { originProvider?: string; provider?: string };
+      }
+    ).provenance;
     const sourceProvider =
       (resolved.metadata as { sourceProvider?: string }).sourceProvider ||
+      resolvedProv?.originProvider ||
+      resolvedProv?.provider ||
       (queryType === 'ARXIV' ? 'arXiv' : queryType === 'PMID' ? 'PubMed' : 'CrossRef');
     const proposedPayload: Record<string, unknown> = {
       ...(resolved.metadata as unknown as Record<string, unknown>),
       sourceProvider,
       extraFields: {
         ...((resolved.metadata.extraFields as Record<string, unknown>) || {}),
+        ...(resolved.provenance && Object.keys(resolved.provenance).length > 0
+          ? { fieldProvenance: resolved.provenance }
+          : {}),
         engineUsed: sourceProvider,
         isVerified: true,
       },

@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
+import { buildTipTapDocFromText } from '@/modules/library/core/domain/renamer.domain';
 import {
   EntityNotFoundException,
   normalizeProjectScopeId,
@@ -11,6 +11,7 @@ import {
 } from '@/modules/library/core';
 import {
   sanitizeExtractedItemUpdateAgainstFreshState,
+  isRejectedCitedIdentifier,
   disambiguateCitationKey,
   resolveOrCreateTags,
 } from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
@@ -98,59 +99,139 @@ export class ExtractionRepository {
     sourceProvider: string,
     rawPayload: Prisma.InputJsonValue,
     tx?: Prisma.TransactionClient,
+    sourceUri?: string,
   ) {
-    const client = this.getClient(tx);
-    const existingRecords = await client.itemMetadata.findMany({
-      where: { itemId, sourceProvider },
-      select: { id: true, rawPayload: true },
-    });
-
-    const newFileId =
-      rawPayload &&
+    const resolvedSourceUri =
+      sourceUri?.trim() ||
+      (rawPayload &&
       typeof rawPayload === 'object' &&
       !Array.isArray(rawPayload) &&
-      typeof (rawPayload as Record<string, unknown>).fileId === 'string'
-        ? ((rawPayload as Record<string, unknown>).fileId as string)
-        : undefined;
+      typeof (rawPayload as Record<string, unknown>).attachmentId === 'string'
+        ? ((rawPayload as Record<string, unknown>).attachmentId as string).trim()
+        : undefined);
 
-    const supersededFileIds: string[] = [];
-    if (existingRecords.length > 0) {
-      for (const existing of existingRecords) {
-        const payloadObj =
-          existing.rawPayload &&
-          typeof existing.rawPayload === 'object' &&
-          !Array.isArray(existing.rawPayload)
-            ? (existing.rawPayload as Record<string, unknown>)
-            : null;
-        if (
-          payloadObj?.isOffloaded === true &&
-          typeof payloadObj.fileId === 'string' &&
-          payloadObj.fileId.length > 0 &&
-          payloadObj.fileId !== newFileId
-        ) {
-          supersededFileIds.push(payloadObj.fileId);
+    const execute = async (
+      client: Prisma.TransactionClient | PrismaService,
+    ) => {
+      const existingRecords = await client.itemMetadata.findMany({
+        where: {
+          itemId,
+          sourceProvider,
+          ...(resolvedSourceUri ? { sourceUri: resolvedSourceUri } : {}),
+        },
+        select: { id: true, rawPayload: true, sourceUri: true },
+      });
+
+      const newFileId =
+        rawPayload &&
+        typeof rawPayload === 'object' &&
+        !Array.isArray(rawPayload) &&
+        typeof (rawPayload as Record<string, unknown>).fileId === 'string'
+          ? ((rawPayload as Record<string, unknown>).fileId as string)
+          : undefined;
+
+      const supersededFileIds: string[] = [];
+      if (existingRecords.length > 0) {
+        for (const existing of existingRecords) {
+          const payloadObj =
+            existing.rawPayload &&
+            typeof existing.rawPayload === 'object' &&
+            !Array.isArray(existing.rawPayload)
+              ? (existing.rawPayload as Record<string, unknown>)
+              : null;
+          if (
+            payloadObj?.isOffloaded === true &&
+            typeof payloadObj.fileId === 'string' &&
+            payloadObj.fileId.length > 0 &&
+            payloadObj.fileId !== newFileId
+          ) {
+            supersededFileIds.push(payloadObj.fileId);
+          }
         }
+
+        await client.itemMetadata.deleteMany({
+          where: {
+            id: { in: existingRecords.map((r) => r.id) },
+          },
+        });
       }
 
-      await client.itemMetadata.deleteMany({
-        where: {
-          id: { in: existingRecords.map((r) => r.id) },
+      const created = await client.itemMetadata.create({
+        data: {
+          itemId,
+          sourceProvider,
+          ...(resolvedSourceUri ? { sourceUri: resolvedSourceUri } : {}),
+          rawPayload,
         },
       });
-    }
 
-    const created = await client.itemMetadata.create({
-      data: {
-        itemId,
-        sourceProvider,
-        rawPayload,
-      },
-    });
-
-    return {
-      ...created,
-      supersededFileIds,
+      return {
+        ...created,
+        supersededFileIds,
+      };
     };
+
+    if (tx) {
+      return execute(tx);
+    }
+    if (typeof this.prisma.$transaction === 'function') {
+      return this.prisma.$transaction((innerTx) => execute(innerTx));
+    }
+    return execute(this.prisma);
+  }
+
+  async upsertAttachmentStructure(
+    data: {
+      attachmentId: string;
+      itemId: string;
+      isScanned?: boolean;
+      ocrStatus?: string | null;
+      qualityScore?: number | null;
+      engineUsed?: string | null;
+      pageCount?: number;
+      sections?: Prisma.InputJsonValue;
+      figures?: Prisma.InputJsonValue;
+      tables?: Prisma.InputJsonValue;
+      formulas?: Prisma.InputJsonValue;
+      references?: Prisma.InputJsonValue;
+      fulltextFileId?: string | null;
+      fulltextByteSize?: number | null;
+    },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
+    if (typeof client.attachmentStructure?.upsert !== 'function') {
+      return null;
+    }
+    const payload = {
+      itemId: data.itemId,
+      ...(data.isScanned !== undefined ? { isScanned: data.isScanned } : {}),
+      ...(data.ocrStatus !== undefined ? { ocrStatus: data.ocrStatus } : {}),
+      ...(data.qualityScore !== undefined
+        ? { qualityScore: data.qualityScore }
+        : {}),
+      ...(data.engineUsed !== undefined ? { engineUsed: data.engineUsed } : {}),
+      ...(data.pageCount !== undefined ? { pageCount: data.pageCount } : {}),
+      ...(data.sections !== undefined ? { sections: data.sections } : {}),
+      ...(data.figures !== undefined ? { figures: data.figures } : {}),
+      ...(data.tables !== undefined ? { tables: data.tables } : {}),
+      ...(data.formulas !== undefined ? { formulas: data.formulas } : {}),
+      ...(data.references !== undefined ? { references: data.references } : {}),
+      ...(data.fulltextFileId !== undefined
+        ? { fulltextFileId: data.fulltextFileId }
+        : {}),
+      ...(data.fulltextByteSize !== undefined
+        ? { fulltextByteSize: data.fulltextByteSize }
+        : {}),
+    };
+    return client.attachmentStructure.upsert({
+      where: { attachmentId: data.attachmentId },
+      create: {
+        attachmentId: data.attachmentId,
+        ...payload,
+      },
+      update: payload,
+    });
   }
 
   async updateAttachmentMetadata(
@@ -187,6 +268,11 @@ export class ExtractionRepository {
         citationKey: true,
         title: true,
         doi: true,
+        arxivId: true,
+        pmid: true,
+        pmcid: true,
+        isbn: true,
+        issn: true,
         abstract: true,
         year: true,
         publicationTitle: true,
@@ -237,12 +323,26 @@ export class ExtractionRepository {
       pageIndex: number;
       textContent: string;
       charOffset?: number;
+      itemId?: string;
     }>,
     tx?: Prisma.TransactionClient,
+    itemId?: string,
   ): Promise<void> {
     if (!pages || pages.length === 0) return;
     const execute = async (client: Prisma.TransactionClient | PrismaService) => {
       if (!client.fullTextIndex?.deleteMany) return;
+      let resolvedItemId = itemId || pages[0]?.itemId;
+      if (!resolvedItemId && typeof client.attachment?.findUnique === 'function') {
+        try {
+          const att = await client.attachment.findUnique({
+            where: { id: attachmentId },
+            select: { itemId: true },
+          });
+          resolvedItemId = att?.itemId;
+        } catch {
+          // Ignore lookup failure in unit test mocks
+        }
+      }
       await client.fullTextIndex.deleteMany({
         where: { attachmentId },
       });
@@ -253,6 +353,7 @@ export class ExtractionRepository {
         await client.fullTextIndex.createMany({
           data: chunk.map((page, idx) => ({
             attachmentId,
+            ...(resolvedItemId ? { itemId: resolvedItemId } : {}),
             pageIndex: page.pageIndex ?? i + idx,
             textContent: (page.textContent || '').replace(/\0/g, ''),
             charOffset: page.charOffset ?? 0,
@@ -441,78 +542,6 @@ export class ExtractionRepository {
     return relation;
   }
 
-  async recordSearchablePdfRevision(
-    params: {
-      attachmentId: string;
-      fileId: string;
-      url: string;
-      sizeBytes: bigint;
-      fileHash: string;
-      comment?: string;
-    },
-    tx?: Prisma.TransactionClient,
-  ) {
-    const client = this.getClient(tx);
-    const attachment = await client.attachment.findUnique({
-      where: { id: params.attachmentId },
-      include: {
-        revisions: {
-          orderBy: { revisionNumber: 'desc' },
-          take: 1,
-        },
-      },
-    });
-
-    if (!attachment) {
-      throw new EntityNotFoundException('Attachment not found', {
-        attachmentId: params.attachmentId,
-      });
-    }
-
-    let latestRevisionNumber = attachment.revisions?.[0]?.revisionNumber ?? 0;
-    if (latestRevisionNumber === 0) {
-      await client.attachmentRevision.create({
-        data: {
-          attachmentId: attachment.id,
-          revisionNumber: 1,
-          fileId: attachment.fileId || null,
-          fileHash: attachment.fileHash || '',
-          sizeBytes: attachment.size ?? 0n,
-          url: attachment.url || '',
-          comment: 'Original scanned document',
-        },
-      });
-      latestRevisionNumber = 1;
-    }
-
-    const nextRevisionNumber = latestRevisionNumber + 1;
-
-    const revision = await client.attachmentRevision.create({
-      data: {
-        attachmentId: attachment.id,
-        revisionNumber: nextRevisionNumber,
-        fileId: params.fileId,
-        fileHash: params.fileHash,
-        sizeBytes: params.sizeBytes,
-        url: params.url,
-        comment:
-          params.comment || `OCR Sandwich PDF (Revision ${nextRevisionNumber})`,
-      },
-    });
-
-    await client.attachment.update({
-      where: { id: attachment.id },
-      data: {
-        fileId: params.fileId,
-        url: params.url,
-        size: params.sizeBytes,
-        fileHash: params.fileHash,
-      },
-    });
-
-    return revision;
-  }
-
   async countItemTags(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
     return this.getClient(tx).itemTag.count({ where: { itemId } });
   }
@@ -528,7 +557,7 @@ export class ExtractionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
     const client = this.getClient(tx);
-    const normalized = normalizeAcademicTags(params.rawTags);
+    const normalized = normalizeTags(params.rawTags);
     if (normalized.length === 0) return [];
 
     const resolvedTags = await resolveOrCreateTags(
@@ -651,11 +680,16 @@ export class ExtractionRepository {
     if (identifiers.length === 0) return;
     const rawClient = this.getClient(tx);
     const freshItem = rawClient.item?.findUnique
-      ? await rawClient.item.findUnique({ where: { id: itemId }, select: { doi: true, metadata: true } })
+      ? await rawClient.item.findUnique({
+          where: { id: itemId },
+          select: { doi: true, arxivId: true, pmid: true, pmcid: true, isbn: true, issn: true, metadata: true },
+        })
       : null;
     const freshMeta = freshItem?.metadata && typeof freshItem.metadata === 'object' && !Array.isArray(freshItem.metadata)
       ? (freshItem.metadata as Record<string, unknown>) : {};
+    const freshItemRec = (freshItem || {}) as Record<string, unknown>;
     const filtered = identifiers.filter((idObj) => {
+      if (isRejectedCitedIdentifier(idObj.value, freshMeta.rejectedCitedDoi)) return false;
       const lower = idObj.type.trim().toLowerCase();
       const t = lower === 'arxivid' || lower === 'arxiv' ? 'arxiv' : lower;
       const metaKey = t === 'arxiv' ? 'arxivId' : t;
@@ -667,7 +701,7 @@ export class ExtractionRepository {
         return false;
       }
       const existingVal =
-        t === 'doi' ? freshItem?.doi || freshMeta.doi : freshMeta[metaKey] || freshMeta[t];
+        t === 'doi' ? freshItem?.doi || freshMeta.doi : freshItemRec[metaKey] || freshMeta[metaKey] || freshMeta[t];
       if (
         existingVal &&
         String(existingVal).trim() &&

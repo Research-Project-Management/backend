@@ -1,31 +1,19 @@
 import { BadRequestException } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
-import { ExtractionTelemetryController } from '@/modules/library/extraction/controllers/extraction-telemetry.controller';
-import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
-import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
+import { ExtractionTelemetryController } from '@/modules/library/extraction/controllers/attachments.controller';
+import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
-import { TrustedExtractionResult } from '@/modules/library/extraction/types/extraction.types';
+import { PdfMetadataExtractionResult } from '@/modules/library/core/types/extraction.types';
 
 describe('ExtractionTelemetryController', () => {
   let controller: ExtractionTelemetryController;
-  let trustedExtractor: jest.Mocked<TrustedExtractionService>;
-  let ocrWorkerPool: jest.Mocked<OcrWorkerPoolService>;
+  let trustedExtractor: jest.Mocked<PdfMetadataExtractor>;
   let attachmentsService: jest.Mocked<AttachmentsService>;
 
   beforeEach(() => {
     trustedExtractor = {
       extract: jest.fn(),
-    } as unknown as jest.Mocked<TrustedExtractionService>;
-
-    ocrWorkerPool = {
-      getPoolStatus: jest.fn().mockReturnValue({
-        initialized: true,
-        destroyed: false,
-        activeWorkers: 2,
-        configuredConcurrency: 2,
-        defaultLanguages: ['vie', 'eng'],
-      }),
-    } as unknown as jest.Mocked<OcrWorkerPoolService>;
+    } as unknown as jest.Mocked<PdfMetadataExtractor>;
 
     attachmentsService = {
       getExtractionStatusBreakdown: jest.fn().mockResolvedValue({
@@ -36,13 +24,12 @@ describe('ExtractionTelemetryController', () => {
 
     controller = new ExtractionTelemetryController(
       trustedExtractor,
-      ocrWorkerPool,
       attachmentsService,
     );
   });
 
   describe('GET /telemetry', () => {
-    it('returns runtime telemetry metrics from OcrWorkerPoolService and AttachmentsService', async () => {
+    it('returns runtime telemetry metrics from AttachmentsService', async () => {
       const response = await controller.getTelemetry();
 
       expect(response.status).toBe('UP');
@@ -52,13 +39,6 @@ describe('ExtractionTelemetryController', () => {
       expect(response.flags.enabled).toBe(true);
       expect(response.flags.zeroDocker).toBe(true);
       expect(response.metrics.supportedFormats).toContain('PDF');
-      expect(response.metrics.ocrWorkerPool).toEqual({
-        initialized: true,
-        destroyed: false,
-        activeWorkers: 2,
-        configuredConcurrency: 2,
-        defaultLanguages: ['vie', 'eng'],
-      });
       expect(response.metrics.attachments).toEqual({
         total: 15,
         byStatus: {
@@ -70,7 +50,7 @@ describe('ExtractionTelemetryController', () => {
   });
 
   describe('POST /benchmark', () => {
-    const mockExtractionResult: TrustedExtractionResult = {
+    const mockExtractionResult: PdfMetadataExtractionResult = {
       metadata: {
         title: 'Deep Residual Learning for Image Recognition',
         authors: ['Kaiming He', 'Xiangyu Zhang'],
@@ -90,7 +70,7 @@ describe('ExtractionTelemetryController', () => {
       missingFields: [],
       provenance: {
         extractedAt: '2026-01-01T00:00:00.000Z',
-        engineUsed: 'XMP_BINARY',
+        engineUsed: 'XMP',
         executionTimeMs: 42,
         qualityBreakdown: {
           totalScore: 0.95,
@@ -130,7 +110,7 @@ describe('ExtractionTelemetryController', () => {
       expect(res.success).toBe(true);
       expect(res.benchmark.isSelfSufficient).toBe(true);
       expect(res.benchmark.qualityScore).toBe(0.95);
-      expect(res.benchmark.engineUsed).toBe('XMP_BINARY');
+      expect(res.benchmark.engineUsed).toBe('XMP');
       expect(res.benchmark.executionLatencyMs).toBeGreaterThanOrEqual(0);
       expect(res.extractedMetadata.title).toBe(
         'Deep Residual Learning for Image Recognition',

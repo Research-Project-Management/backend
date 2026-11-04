@@ -1,10 +1,14 @@
 import {
   SCHEMA_V42_DATA, CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, FIELD_ALIASES,
-  getPrimaryCreatorRoleForType, harmonizeZoteroFields, isPlaceholderItemTitle,
-  LibraryItemSource, mergeZoteroExtraTextWithStatus, parseCreatorString,
-  resolveCanonicalCreatorRole, resolveProviderFieldWeight, ItemProvenancePolicy,
-  FieldProvenanceRecord,
+  getPrimaryCreatorRoleForType, harmonizeZoteroFields, isPaperLevelKeywordSource,
+  isPlaceholderItemTitle, isRejectedCitedIdentifier, LibraryItemSource, mergeZoteroExtraTextWithStatus,
+  parseCreatorString, resolveCanonicalCreatorRole, resolveProviderFieldWeight,
+  ItemProvenancePolicy, FieldProvenanceRecord,
 } from '@/modules/library/core';
+
+const REJECTABLE_IDENTIFIER_FIELDS = new Set([
+  'doi', 'DOI', 'arxivId', 'archiveId', 'archiveID', 'pmid', 'PMID', 'isbn', 'ISBN',
+]);
 
 export const SYSTEM_RESERVED_KEYS = new Set([
   'id', 'userId', 'projectId', 'deletedAt', 'createdAt', 'updatedAt', 'version',
@@ -114,6 +118,44 @@ function extractTagStr(entry: unknown): string {
   return '';
 }
 
+function extractPreservedManualTagStrings(
+  existingRec: Record<string, unknown> | null | undefined,
+): string[] {
+  if (!existingRec) return [];
+  const manualTags: string[] = [];
+  const seen = new Set<string>();
+  const candidates = [
+    ...(Array.isArray(existingRec.itemTags) ? existingRec.itemTags : []),
+    ...(Array.isArray(existingRec.zoteroTags) ? existingRec.zoteroTags : []),
+    ...(Array.isArray(existingRec.tags) ? existingRec.tags : []),
+  ];
+  for (const entry of candidates) {
+    if (!entry || typeof entry !== 'object') continue;
+    const obj = entry as {
+      type?: unknown;
+      name?: unknown;
+      tag?: unknown;
+    };
+    const nestedTag =
+      obj.tag && typeof obj.tag === 'object'
+        ? (obj.tag as { name?: unknown; type?: unknown })
+        : undefined;
+    const isManual =
+      obj.type === 'manual' ||
+      obj.type === 0 ||
+      (!obj.type && nestedTag?.type === 'manual');
+    if (!isManual) continue;
+    const rawName = extractTagStr(entry);
+    if (!rawName) continue;
+    const lower = rawName.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      manualTags.push(rawName);
+    }
+  }
+  return manualTags;
+}
+
 function buildPatchProvenanceContext(
   existingRec: Record<string, unknown> | null | undefined,
   incomingExtraObj: Record<string, unknown>,
@@ -123,13 +165,27 @@ function buildPatchProvenanceContext(
   const existingExtraObj = asObj(existingRec?.extraFields);
   const metaState = ItemProvenancePolicy.extractProvenanceState(existingMetaObj);
   const extraState = ItemProvenancePolicy.extractProvenanceState(existingExtraObj);
+  const topState = ItemProvenancePolicy.extractProvenanceState(
+    existingRec && typeof existingRec === 'object' ? existingRec : {},
+  );
   const lockedSet = new Set<string>([
     ...(Array.isArray(extraLockedFields) ? extraLockedFields : []),
     ...(Array.isArray(existingRec?.lockedFields) ? (existingRec.lockedFields as string[]) : []),
+    ...topState.lockedSet,
     ...metaState.lockedSet, ...extraState.lockedSet,
   ]);
-  const existingProvMap: Record<string, FieldProvenanceRecord> = { ...metaState.provenanceMap, ...extraState.provenanceMap };
-  const incomingProvMap = asObj(incomingExtraObj.fieldProvenance) as Record<string, FieldProvenanceRecord>;
+  const existingProvMap: Record<string, FieldProvenanceRecord> = {
+    ...topState.provenanceMap,
+    ...metaState.provenanceMap,
+    ...extraState.provenanceMap,
+    ...(existingRec?.provenance && typeof existingRec.provenance === 'object'
+      ? (existingRec.provenance as Record<string, FieldProvenanceRecord>)
+      : {}),
+  };
+  const incomingProvMap = {
+    ...(asObj(incomingExtraObj.fieldProvenance) as Record<string, FieldProvenanceRecord>),
+    ...(asObj(incomingExtraObj.provenance) as Record<string, FieldProvenanceRecord>),
+  };
   const isFilenameTitle = existingExtraObj.isFilenameTitle === true || existingMetaObj.isFilenameTitle === true;
 
   const findProv = (map: Record<string, FieldProvenanceRecord>, fieldKey: string): FieldProvenanceRecord | undefined => {
@@ -186,8 +242,10 @@ export function buildEnrichmentPatch(
     return existingAuth < 0.95 && getIncomingFieldAuthority(fieldKey) > existingAuth + 0.02;
   };
 
+  const rejectedCitedDoi = pickFirstString(existingExtraObj.rejectedCitedDoi, existingMetaObj.rejectedCitedDoi, existingRec?.rejectedCitedDoi);
   const maybeEnrich = (field: string, val: unknown) => {
     if (val == null || val === '' || isFieldLocked(field)) return;
+    if (REJECTABLE_IDENTIFIER_FIELDS.has(field) && Boolean(rejectedCitedDoi) && isRejectedCitedIdentifier(val, rejectedCitedDoi)) return;
     const current = existingRec?.[field] !== undefined ? existingRec[field] : existingExtraObj[field] !== undefined ? existingExtraObj[field] : existingMetaObj[field];
     const isEmpty = current == null || current === '' || (Array.isArray(current) && current.length === 0);
     if (isEmpty || (current !== val && canUpgradeExistingField(field))) enrichPatch[field] = val;
@@ -243,11 +301,28 @@ export function buildEnrichmentPatch(
     enrichPatch['creators'] = mergePreservedSecondaryContributors(pCreators, existingCreatorList, resolvedType);
   }
   if (pKeywords?.length && !isFieldLocked('tags')) {
-    const existingTagStrings = (existingKeywords ?? []).map(extractTagStr).filter(Boolean);
+    const existingTagProv = findProv(existingProvMap, 'tags') ?? findProv(existingProvMap, 'keywords');
+    const rawProposedProv = asObj(rawProposed.provenance) as Record<string, FieldProvenanceRecord>;
+    const incomingTagProv =
+      findProv(incomingProvMap, 'tags') ??
+      findProv(incomingProvMap, 'keywords') ??
+      findProv(rawProposedProv, 'tags') ??
+      findProv(rawProposedProv, 'keywords');
+    const existingTagSource = existingTagProv?.sourceProvider || existingTagProv?.source;
+    const incomingTagSource =
+      incomingTagProv?.sourceProvider ||
+      incomingTagProv?.source ||
+      pickFirstString(pExtraObj.engineUsed, rawProposed.sourceProvider, pExtraObj.sourceProvider, rawProposed.source);
+    const shouldReplaceJournalSubjectTags =
+      Boolean(existingTagSource && !isPaperLevelKeywordSource(existingTagSource)) &&
+      Boolean(incomingTagSource && isPaperLevelKeywordSource(incomingTagSource));
+    const existingTagStrings = shouldReplaceJournalSubjectTags
+      ? extractPreservedManualTagStrings(existingRec)
+      : (existingKeywords ?? []).map(extractTagStr).filter(Boolean);
     const incomingTagStrings = pKeywords.map(extractTagStr).filter(Boolean);
     const seenLower = new Set(existingTagStrings.map((t) => t.toLowerCase()));
     const mergedKeywords = [...existingTagStrings];
-    let addedNewKeyword = false;
+    let addedNewKeyword = shouldReplaceJournalSubjectTags && incomingTagStrings.length > 0;
     for (const kw of incomingTagStrings) {
       const lower = kw.toLowerCase();
       if (!seenLower.has(lower)) {
@@ -260,10 +335,28 @@ export function buildEnrichmentPatch(
       const cappedKeywords = mergedKeywords.slice(0, 25);
       enrichPatch['keywords'] = cappedKeywords;
       enrichPatch['labels'] = cappedKeywords;
+      enrichPatch['tags'] = cappedKeywords;
     }
   }
   if (typeof rawProposed.isRetracted === 'boolean' && !isFieldLocked('isRetracted')) {
-    if (rawProposed.isRetracted === true || existingRec?.isRetracted == null) enrichPatch['isRetracted'] = rawProposed.isRetracted;
+    if (rawProposed.isRetracted === true || existingRec?.isRetracted == null) {
+      enrichPatch['isRetracted'] = rawProposed.isRetracted;
+      if (rawProposed.retractionCheckedAt !== undefined) {
+        enrichPatch['retractionCheckedAt'] = rawProposed.retractionCheckedAt;
+      }
+      if (rawProposed.retractionNature !== undefined) {
+        enrichPatch['retractionNature'] = rawProposed.retractionNature;
+      }
+      if (rawProposed.retractionDetails !== undefined) {
+        enrichPatch['retractionDetails'] = rawProposed.retractionDetails;
+      }
+    }
+  } else if (
+    rawProposed.retractionCheckedAt !== undefined &&
+    existingRec?.retractionCheckedAt == null &&
+    !isFieldLocked('isRetracted')
+  ) {
+    enrichPatch['retractionCheckedAt'] = rawProposed.retractionCheckedAt;
   }
   if (typeof rawProposed.citationCount === 'number' && !isFieldLocked('citationCount')) {
     if (existingRec?.citationCount == null || rawProposed.citationCount > Number(existingRec.citationCount)) enrichPatch['citationCount'] = rawProposed.citationCount;
@@ -347,10 +440,12 @@ export function buildReResolvePatch(
     return resolveProviderFieldWeight(src, fieldKey) * (prov && typeof prov.confidence === 'number' ? prov.confidence : 0.95);
   };
 
+  const rejectedCitedDoi = pickFirstString(existingExtraObj.rejectedCitedDoi, existingMetaObj.rejectedCitedDoi, existingRec.rejectedCitedDoi);
   const applyField = (fieldName: string, value: unknown) => {
     const coupled = ItemProvenancePolicy.getCoupledFieldAliases(fieldName);
     if (lockedSet.has(fieldName) || coupled.some((alias) => lockedSet.has(alias))) return;
     if (allowedFieldSet && !allowedFieldSet.has(fieldName)) return;
+    if (REJECTABLE_IDENTIFIER_FIELDS.has(fieldName) && Boolean(rejectedCitedDoi) && isRejectedCitedIdentifier(value, rejectedCitedDoi)) return;
     if (!allowedFieldSet) {
       const existingVal = getExistingValue(fieldName);
       if (existingVal !== undefined) {
@@ -411,7 +506,32 @@ export function buildReResolvePatch(
 
   const existingTags = (existingRec.tags || existingRec.keywords || existingRec.labels || existingRec.itemTags) as unknown[] | undefined;
   const resolvedTags = (m.tags || m.keywords || m.labels) as unknown[] | undefined;
-  if (Array.isArray(resolvedTags) && resolvedTags.length > 0 && (!Array.isArray(existingTags) || existingTags.length === 0)) applyField('tags', resolvedTags);
+  const existingTagProv = findProv(existingProvMap, 'tags') ?? findProv(existingProvMap, 'keywords');
+  const existingTagSource = existingTagProv?.sourceProvider || existingTagProv?.source;
+  const incomingTagProv = findProv(incomingProvMap, 'tags') ?? findProv(incomingProvMap, 'keywords');
+  const incomingTagSource = incomingTagProv?.sourceProvider || incomingTagProv?.source || resolvedSource;
+  const canUpgradeSubjectTags =
+    Boolean(existingTagSource && !isPaperLevelKeywordSource(existingTagSource)) &&
+    Boolean(incomingTagSource && isPaperLevelKeywordSource(incomingTagSource));
+  if (
+    Array.isArray(resolvedTags) &&
+    resolvedTags.length > 0 &&
+    (!Array.isArray(existingTags) || existingTags.length === 0 || canUpgradeSubjectTags)
+  ) {
+    const preservedManual = canUpgradeSubjectTags ? extractPreservedManualTagStrings(existingRec) : [];
+    const seenLower = new Set(preservedManual.map((t) => t.toLowerCase()));
+    const mergedResolved: unknown[] = [...preservedManual];
+    for (const rt of resolvedTags) {
+      const str = extractTagStr(rt);
+      const lower = str.toLowerCase();
+      if (str && !seenLower.has(lower)) {
+        seenLower.add(lower);
+        mergedResolved.push(rt);
+      }
+    }
+    applyField('tags', mergedResolved);
+    applyField('keywords', mergedResolved);
+  }
 
   const handledKeys = new Set([
     'title', 'creators', 'authors', 'editors', 'contributors', 'publicationDate', 'date', 'year',

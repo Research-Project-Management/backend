@@ -20,14 +20,19 @@ export class TagsRepository {
   ) {
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(options?.projectId);
-    const activeFilter = options?.includeInactive
+    const activeFilter: Prisma.TagWhereInput = options?.includeInactive
       ? {}
       : {
-          itemTags: {
-            some: {
-              item: { deletedAt: null },
+          OR: [
+            { type: TagType.manual },
+            {
+              itemTags: {
+                some: {
+                  item: { deletedAt: null },
+                },
+              },
             },
-          },
+          ],
         };
     const where: Prisma.TagWhereInput = validProjectId
       ? {
@@ -89,81 +94,32 @@ export class TagsRepository {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
     const resolvedType = type || TagType.manual;
     const defaultColor = color ?? '#3b82f6';
+    const scopeWhere: Prisma.TagWhereInput = effectiveProjectId
+      ? { projectId: effectiveProjectId }
+      : { userId, projectId: null };
 
-    if (effectiveProjectId) {
-      const existingProjectTag = await client.tag.findFirst({
-        where: {
-          projectId: effectiveProjectId,
-          name: { equals: name, mode: 'insensitive' },
-        },
-      });
-      if (existingProjectTag) {
-        if (
-          (color !== undefined && existingProjectTag.color !== color) ||
-          (shortcut !== undefined && existingProjectTag.shortcut !== shortcut)
-        ) {
-          return client.tag.update({
-            where: { id: existingProjectTag.id },
-            data: {
-              ...(color !== undefined ? { color } : {}),
-              ...(shortcut !== undefined ? { shortcut } : {}),
-            },
-          });
-        }
-        return existingProjectTag;
-      }
-
-      try {
-        return await client.tag.create({
-          data: {
-            userId,
-            createdById: userId,
-            name,
-            color: defaultColor,
-            type: resolvedType,
-            projectId: effectiveProjectId,
-            ...(shortcut !== undefined ? { shortcut } : {}),
-          },
-        });
-      } catch (err: unknown) {
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === 'P2002'
-        ) {
-          const raceTag = await client.tag.findFirst({
-            where: {
-              projectId: effectiveProjectId,
-              name: { equals: name, mode: 'insensitive' },
-            },
-          });
-          if (raceTag) return raceTag;
-        }
-        throw err;
-      }
-    }
-
-    const existingPersonalTag = await client.tag.findFirst({
+    const existingTag = await client.tag.findFirst({
       where: {
-        userId,
-        projectId: null,
+        ...scopeWhere,
         name: { equals: name, mode: 'insensitive' },
       },
     });
 
-    if (existingPersonalTag) {
+    if (existingTag) {
       if (
-        (color !== undefined && existingPersonalTag.color !== color) ||
-        (shortcut !== undefined && existingPersonalTag.shortcut !== shortcut)
+        (color !== undefined && existingTag.color !== color) ||
+        (shortcut !== undefined && existingTag.shortcut !== shortcut)
       ) {
         return client.tag.update({
-          where: { id: existingPersonalTag.id },
+          where: { id: existingTag.id },
           data: {
             ...(color !== undefined ? { color } : {}),
             ...(shortcut !== undefined ? { shortcut } : {}),
+            version: { increment: 1 },
           },
         });
       }
-      return existingPersonalTag;
+      return existingTag;
     }
 
     try {
@@ -172,9 +128,10 @@ export class TagsRepository {
           userId,
           createdById: userId,
           name,
+          normalizedName: name.trim().toLowerCase(),
           color: defaultColor,
           type: resolvedType,
-          projectId: null,
+          projectId: effectiveProjectId ?? null,
           ...(shortcut !== undefined ? { shortcut } : {}),
         },
       });
@@ -185,8 +142,7 @@ export class TagsRepository {
       ) {
         const raceTag = await client.tag.findFirst({
           where: {
-            userId,
-            projectId: null,
+            ...scopeWhere,
             name: { equals: name, mode: 'insensitive' },
           },
         });
@@ -294,14 +250,16 @@ export class TagsRepository {
       });
 
       if (conflictingTag) {
-        const sourceLinks = await client.itemTag.findMany({
-          where: { tagId: tag.id },
-          select: { itemId: true, type: true },
-        });
-        const targetLinks = await client.itemTag.findMany({
-          where: { tagId: conflictingTag.id },
-          select: { itemId: true },
-        });
+        const [sourceLinks, targetLinks] = await Promise.all([
+          client.itemTag.findMany({
+            where: { tagId: tag.id },
+            select: { itemId: true, type: true },
+          }),
+          client.itemTag.findMany({
+            where: { tagId: conflictingTag.id },
+            select: { itemId: true },
+          }),
+        ]);
         const targetItemIds = new Set(targetLinks.map((l) => l.itemId));
         const missingLinks = sourceLinks.filter(
           (l) => !targetItemIds.has(l.itemId),
@@ -341,7 +299,12 @@ export class TagsRepository {
     return client.tag.update({
       where: { id: tag.id },
       data: {
-        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.name !== undefined
+          ? {
+              name: data.name,
+              normalizedName: data.name.trim().toLowerCase(),
+            }
+          : {}),
         ...(data.color !== undefined ? { color: data.color } : {}),
         ...(data.type !== undefined ? { type: data.type } : {}),
         ...(data.shortcut !== undefined ? { shortcut: data.shortcut } : {}),
@@ -360,6 +323,7 @@ export class TagsRepository {
     const rows = await client.itemTag.findMany({
       where: {
         tagId: tagIds.length === 1 ? tagIds[0] : { in: tagIds },
+        item: { deletedAt: null },
       },
       select: { itemId: true },
     });
@@ -389,6 +353,29 @@ export class TagsRepository {
     return result.count > 0;
   }
 
+  async findAutomaticTagItemIds(
+    userId: string,
+    tx?: Prisma.TransactionClient,
+    projectId?: string,
+  ): Promise<string[]> {
+    const client = this.getClient(tx);
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeWhere: Prisma.TagWhereInput = validProjectId
+      ? { projectId: validProjectId }
+      : { userId, projectId: null };
+    const links = await client.itemTag.findMany({
+      where: {
+        item: { deletedAt: null },
+        OR: [
+          { type: TagType.automatic, tag: scopeWhere },
+          { tag: { ...scopeWhere, type: TagType.automatic } },
+        ],
+      },
+      select: { itemId: true },
+    });
+    return Array.from(new Set(links.map((l) => l.itemId)));
+  }
+
   async deleteAutomatic(
     userId: string,
     tx?: Prisma.TransactionClient,
@@ -400,6 +387,19 @@ export class TagsRepository {
       ? { projectId: validProjectId }
       : { userId, projectId: null };
 
+    const autoItemTags = client.itemTag?.findMany
+      ? (await client.itemTag.findMany({
+          where: {
+            type: TagType.automatic,
+            tag: scopeWhere,
+          },
+          select: { tagId: true },
+        })) || []
+      : [];
+    const affectedAutoTagIds = Array.from(
+      new Set(autoItemTags.map((it) => it.tagId).filter(Boolean)),
+    );
+
     await client.itemTag.deleteMany({
       where: {
         type: TagType.automatic,
@@ -407,25 +407,37 @@ export class TagsRepository {
       },
     });
 
-    const automaticTags = await client.tag.findMany({
-      where: {
-        ...scopeWhere,
-        type: TagType.automatic,
-      },
-      select: { id: true },
-    });
-    if (automaticTags.length === 0) return [];
-    const tagIds = automaticTags.map((t) => t.id);
+    if (typeof client.tag?.updateMany === 'function') {
+      await client.tag.updateMany({
+        where: {
+          ...scopeWhere,
+          type: TagType.automatic,
+          itemTags: { some: {} },
+        },
+        data: {
+          type: TagType.manual,
+        },
+      });
+    }
 
-    await client.itemTag.deleteMany({
-      where: { tagId: { in: tagIds } },
-    });
+    const automaticTagsToDelete =
+      (await client.tag.findMany({
+        where: {
+          ...scopeWhere,
+          type: TagType.automatic,
+          itemTags: { none: {} },
+        },
+        select: { id: true },
+      })) || [];
+    const deletedTagIds = automaticTagsToDelete.map((t) => t.id);
 
-    await client.tag.deleteMany({
-      where: { id: { in: tagIds } },
-    });
+    if (deletedTagIds.length > 0) {
+      await client.tag.deleteMany({
+        where: { id: { in: deletedTagIds } },
+      });
+    }
 
-    return tagIds;
+    return deletedTagIds.length > 0 ? deletedTagIds : affectedAutoTagIds;
   }
 
   async assignToItem(
@@ -434,19 +446,30 @@ export class TagsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const client = this.getClient(tx);
-    await client.itemTag.upsert({
-      where: {
-        tagId_itemId: {
+    await Promise.all([
+      client.itemTag.upsert({
+        where: {
+          tagId_itemId: {
+            tagId,
+            itemId,
+          },
+        },
+        create: {
           tagId,
           itemId,
+          type: TagType.manual,
         },
-      },
-      create: {
-        tagId,
-        itemId,
-      },
-      update: {},
-    });
+        update: {
+          type: TagType.manual,
+        },
+      }),
+      typeof client.tag?.updateMany === 'function'
+        ? client.tag.updateMany({
+            where: { id: tagId, type: TagType.automatic },
+            data: { type: TagType.manual },
+          })
+        : Promise.resolve(),
+    ]);
   }
 
   async removeFromItem(
@@ -579,34 +602,130 @@ export class TagsRepository {
     const [primaryTags, dupTags] = await Promise.all([
       client.itemTag.findMany({
         where: { itemId: targetItemId },
-        select: { tagId: true },
+        select: { tagId: true, type: true },
       }),
       client.itemTag.findMany({
         where: { itemId: { in: sourceItemIds } },
-        select: { tagId: true },
+        select: { tagId: true, type: true },
       }),
     ]);
-    const primaryTagIds = new Set(primaryTags.map((it) => it.tagId));
-    const newTagIds = Array.from(
-      new Set(
-        dupTags
-          .map((dup) => dup.tagId)
-          .filter((tagId) => !primaryTagIds.has(tagId)),
-      ),
-    );
+    const primaryTagTypeMap = new Map<string, TagType>();
+    for (const pt of primaryTags) {
+      primaryTagTypeMap.set(pt.tagId, pt.type ?? TagType.manual);
+    }
 
-    if (newTagIds.length > 0) {
-      await client.itemTag.createMany({
-        data: newTagIds.map((tagId) => ({
+    const dupTagTypeMap = new Map<string, TagType>();
+    for (const dup of dupTags) {
+      const existingType = dupTagTypeMap.get(dup.tagId);
+      const dupType = dup.type ?? TagType.manual;
+      if (!existingType || dupType === TagType.manual) {
+        dupTagTypeMap.set(dup.tagId, dupType);
+      }
+    }
+
+    const newEntries: Array<{ itemId: string; tagId: string; type: TagType }> = [];
+    const upgradeTagIds: string[] = [];
+
+    for (const [tagId, dupType] of dupTagTypeMap.entries()) {
+      const primaryType = primaryTagTypeMap.get(tagId);
+      if (primaryType === undefined) {
+        newEntries.push({
           itemId: targetItemId,
           tagId,
-        })),
+          type: dupType,
+        });
+      } else if (
+        primaryType === TagType.automatic &&
+        dupType === TagType.manual
+      ) {
+        upgradeTagIds.push(tagId);
+      }
+    }
+
+    if (newEntries.length > 0) {
+      await client.itemTag.createMany({
+        data: newEntries,
         skipDuplicates: true,
+      });
+    }
+
+    if (upgradeTagIds.length > 0 && typeof client.itemTag.updateMany === 'function') {
+      await client.itemTag.updateMany({
+        where: {
+          itemId: targetItemId,
+          tagId: { in: upgradeTagIds },
+          type: TagType.automatic,
+        },
+        data: {
+          type: TagType.manual,
+        },
       });
     }
 
     await client.itemTag.deleteMany({
       where: { itemId: { in: sourceItemIds } },
     });
+  }
+
+  async splitTag(
+    userId: string,
+    tagId: string,
+    parts: string[],
+    tx?: Prisma.TransactionClient,
+    projectId?: string,
+  ) {
+    const client = this.getClient(tx);
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeWhere: Prisma.TagWhereInput = validProjectId
+      ? { id: tagId, projectId: validProjectId }
+      : { id: tagId, userId, projectId: null };
+
+    const sourceTag = await client.tag.findFirst({ where: scopeWhere });
+    if (!sourceTag) return null;
+
+    const sourceLinks = await client.itemTag.findMany({
+      where: { tagId: sourceTag.id, item: { deletedAt: null } },
+      select: { itemId: true, type: true },
+    });
+    const affectedItemIds = Array.from(new Set(sourceLinks.map((l) => l.itemId)));
+
+    const firstTag = await this.update(
+      userId,
+      sourceTag.id,
+      { name: parts[0] },
+      tx,
+      validProjectId,
+    );
+    const resultTags = firstTag ? [firstTag] : [];
+
+    for (const partName of parts.slice(1)) {
+      const targetTag = await this.create(
+        userId,
+        partName,
+        sourceTag.color ?? undefined,
+        sourceTag.type,
+        validProjectId,
+        tx,
+      );
+      if (targetTag) {
+        resultTags.push(targetTag);
+        if (sourceLinks.length > 0 && targetTag.id !== firstTag?.id) {
+          await client.itemTag.createMany({
+            data: sourceLinks.map((l) => ({
+              tagId: targetTag.id,
+              itemId: l.itemId,
+              type: l.type ?? sourceTag.type ?? TagType.manual,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+    }
+
+    return {
+      tags: resultTags,
+      affectedItemIds,
+      mergedFromTagId: (firstTag as { _mergedFromTagId?: string } | null)?._mergedFromTagId,
+    };
   }
 }

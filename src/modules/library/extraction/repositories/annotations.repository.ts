@@ -12,8 +12,12 @@ import {
   UpdateAnnotationData,
   UpsertAnnotationItem,
   BatchAnnotationsResult,
-} from '@/modules/library/extraction/types/extraction.types';
-import { buildAnnotationSortIndex } from '@/modules/library/core';
+} from '@/modules/library/core/types/extraction.types';
+import {
+  buildAnnotationSortIndex,
+  uuidv7,
+  isUuid,
+} from '@/modules/library/core';
 import {
   extractTopLeftAnchor,
   normalizeRectCoordsToBoxes,
@@ -26,6 +30,7 @@ const ANNOTATION_SELECT = {
   attachmentId: true,
   type: true,
   pageIndex: true,
+  pageLabel: true,
   annotationSortIndex: true,
   color: true,
   quoteText: true,
@@ -125,37 +130,50 @@ export class AnnotationsRepository {
       ? data.rectCoords != null
         ? (data.rectCoords as Prisma.InputJsonValue)
         : Prisma.JsonNull
-      : current.rectCoords != null
-        ? (current.rectCoords as Prisma.InputJsonValue)
-        : Prisma.JsonNull;
+      : undefined;
+
+    const targetPageIndex = data.pageIndex ?? current.pageIndex;
 
     let annotationSortIndex =
       data.annotationSortIndex ?? current.annotationSortIndex ?? '';
     if (
       data.annotationSortIndex === undefined &&
-      (coordsUpdated || data.y !== undefined || data.x !== undefined)
+      (coordsUpdated ||
+        data.y !== undefined ||
+        data.x !== undefined ||
+        data.pageIndex !== undefined)
     ) {
       const topLeft = this.deriveTopLeftFromRectCoords(
         coordsUpdated ? data.rectCoords : current.rectCoords,
         data.y,
         data.x,
       );
-      if (topLeft) {
-        annotationSortIndex = buildAnnotationSortIndex(
-          current.pageIndex,
-          topLeft.y,
-          topLeft.x,
-        );
-      }
+      annotationSortIndex = buildAnnotationSortIndex(
+        targetPageIndex,
+        topLeft?.y ?? data.y ?? 0,
+        topLeft?.x ?? data.x ?? 0,
+      );
     }
 
     return {
+      ...(data.type !== undefined ? { type: data.type } : {}),
+      ...(data.pageIndex !== undefined ? { pageIndex: data.pageIndex } : {}),
+      ...(data.pageLabel !== undefined
+        ? { pageLabel: data.pageLabel }
+        : current.pageLabel !== undefined
+          ? { pageLabel: current.pageLabel }
+          : {}),
+      ...(data.imageFileId !== undefined
+        ? { imageFileId: data.imageFileId }
+        : {}),
       color: data.color ?? current.color,
       quoteText:
         data.quoteText !== undefined ? data.quoteText : current.quoteText,
       comment: data.comment !== undefined ? data.comment : current.comment,
       tags: data.tags !== undefined ? data.tags : current.tags,
-      rectCoords: nextRectCoords,
+      ...(coordsUpdated && nextRectCoords !== undefined
+        ? { rectCoords: nextRectCoords }
+        : {}),
       annotationSortIndex,
     };
   }
@@ -176,8 +194,13 @@ export class AnnotationsRepository {
       data: {
         ...(data.id ? { id: data.id } : {}),
         attachmentId: data.attachmentId,
+        ...(data.itemId ? { itemId: data.itemId } : {}),
+        ...(data.imageFileId !== undefined
+          ? { imageFileId: data.imageFileId }
+          : {}),
         type: data.type ?? AnnotationType.highlight,
         pageIndex: data.pageIndex,
+        ...(data.pageLabel !== undefined ? { pageLabel: data.pageLabel } : {}),
         annotationSortIndex:
           data.annotationSortIndex ??
           buildAnnotationSortIndex(
@@ -224,6 +247,7 @@ export class AnnotationsRepository {
     const updatePayload = this.buildUpdateData(data, current);
 
     if (client.annotation?.updateMany) {
+      const now = new Date();
       const affected = await client.annotation.updateMany({
         where: { id, deletedAt: null, version: expectedVersion },
         data: {
@@ -240,11 +264,15 @@ export class AnnotationsRepository {
           providedVersion: expectedVersion,
         });
       }
-      const reloaded = await this.findById(id, tx);
-      if (!reloaded) {
-        throw new NotFoundException(`Annotation ${id} not found`);
-      }
-      return reloaded;
+      const nextRects =
+        data.rectCoords !== undefined ? data.rectCoords : current.rectCoords;
+      return this.mapEntity({
+        ...current,
+        ...updatePayload,
+        rectCoords: (nextRects ?? null) as Prisma.JsonValue,
+        version: current.version + 1,
+        updatedAt: now,
+      });
     }
 
     const row = await client.annotation.update({
@@ -312,6 +340,7 @@ export class AnnotationsRepository {
     upserts: UpsertAnnotationItem[],
     deletes: string[],
     tx: Prisma.TransactionClient,
+    itemId?: string,
   ): Promise<BatchAnnotationsResult> {
     const created: AnnotationEntity[] = [];
     const updated: AnnotationEntity[] = [];
@@ -324,7 +353,7 @@ export class AnnotationsRepository {
     const existingMap = new Map<string, AnnotationEntity>();
     if (idsToLookup.length > 0) {
       const existingRows = await tx.annotation.findMany({
-        where: { id: { in: idsToLookup }, attachmentId },
+        where: { id: { in: idsToLookup } },
         select: ANNOTATION_SELECT,
       });
       for (const row of existingRows) {
@@ -332,8 +361,15 @@ export class AnnotationsRepository {
       }
     }
 
+    const newItemsToCreate: UpsertAnnotationItem[] = [];
+
     for (const item of upserts) {
       const current = item.id ? existingMap.get(item.id) : undefined;
+      if (current && current.attachmentId !== attachmentId) {
+        throw new NotFoundException(
+          `Annotation ${item.id} does not belong to attachment ${attachmentId}`,
+        );
+      }
       if (item.id && !current && item.expectedVersion !== undefined) {
         throw new NotFoundException(`Annotation ${item.id} not found`);
       }
@@ -363,6 +399,10 @@ export class AnnotationsRepository {
         const updatePayload = {
           ...this.buildUpdateData(
             {
+              type: item.type,
+              pageIndex: item.pageIndex,
+              pageLabel: item.pageLabel,
+              annotationSortIndex: item.annotationSortIndex,
               color: item.color,
               quoteText: item.quoteText,
               comment: item.comment,
@@ -381,6 +421,7 @@ export class AnnotationsRepository {
           item.expectedVersion !== undefined &&
           tx.annotation?.updateMany
         ) {
+          const now = new Date();
           const affected = await tx.annotation.updateMany({
             where: {
               id: current.id,
@@ -394,19 +435,26 @@ export class AnnotationsRepository {
             },
           });
           if (affected.count === 0) {
-            const fresh = await this.findById(current.id, tx);
             throw new VersionMismatchException({
               aggregateType: 'Annotation',
               entityId: current.id,
-              currentVersion: fresh?.version ?? current.version,
+              currentVersion: current.version,
               providedVersion: item.expectedVersion,
             });
           }
-          const reloaded = await this.findById(current.id, tx);
-          if (!reloaded) {
-            throw new NotFoundException(`Annotation ${current.id} not found`);
-          }
-          updated.push(reloaded);
+          const nextRects =
+            item.rectCoords !== undefined
+              ? item.rectCoords
+              : current.rectCoords;
+          updated.push(
+            this.mapEntity({
+              ...current,
+              ...updatePayload,
+              rectCoords: (nextRects ?? null) as Prisma.JsonValue,
+              version: current.version + 1,
+              updatedAt: now,
+            }),
+          );
         } else {
           const result = await tx.annotation.update({
             where: { id: current.id },
@@ -423,36 +471,133 @@ export class AnnotationsRepository {
           }
         }
       } else {
-        const topLeft = this.deriveTopLeftFromRectCoords(
-          item.rectCoords,
-          item.y,
-          item.x,
-        );
-        const result = await tx.annotation.create({
-          data: {
-            ...(item.id ? { id: item.id } : {}),
-            attachmentId,
-            type: item.type ?? AnnotationType.highlight,
-            pageIndex: item.pageIndex,
-            annotationSortIndex: buildAnnotationSortIndex(
+        newItemsToCreate.push(item);
+      }
+    }
+
+    if (newItemsToCreate.length > 0) {
+      if (tx.annotation?.createMany && newItemsToCreate.length > 1) {
+        const now = new Date();
+        const createPayloads: Prisma.AnnotationCreateManyInput[] = [];
+        const createdEntities: AnnotationEntity[] = [];
+
+        for (const item of newItemsToCreate) {
+          const id = item.id || uuidv7();
+          const topLeft = this.deriveTopLeftFromRectCoords(
+            item.rectCoords,
+            item.y,
+            item.x,
+          );
+          const type = item.type ?? AnnotationType.highlight;
+          const pageLabel = item.pageLabel ?? '';
+          const annotationSortIndex =
+            item.annotationSortIndex ??
+            buildAnnotationSortIndex(
               item.pageIndex,
               topLeft?.y ?? item.y,
               topLeft?.x ?? item.x,
-            ),
-            color: item.color ?? '#ffd400',
-            quoteText: item.quoteText ?? '',
-            comment: item.comment ?? '',
-            tags: item.tags ?? [],
+            );
+          const color = item.color ?? '#ffd400';
+          const quoteText = item.quoteText ?? '';
+          const comment = item.comment ?? '';
+          const tags = item.tags ?? [];
+
+          const resolvedItemId = item.itemId || itemId;
+          createPayloads.push({
+            id,
+            attachmentId,
+            ...(resolvedItemId ? { itemId: resolvedItemId } : {}),
+            ...(item.imageFileId !== undefined
+              ? { imageFileId: item.imageFileId }
+              : {}),
+            type,
+            pageIndex: item.pageIndex,
+            pageLabel,
+            annotationSortIndex,
+            color,
+            quoteText,
+            comment,
+            tags,
             rectCoords:
               item.rectCoords != null
                 ? (item.rectCoords as Prisma.InputJsonValue)
                 : Prisma.JsonNull,
             authorId,
             version: 1,
-          },
-          select: ANNOTATION_SELECT,
+            createdAt: now,
+            updatedAt: now,
+          });
+
+          createdEntities.push(
+            this.mapEntity({
+              id,
+              attachmentId,
+              type,
+              pageIndex: item.pageIndex,
+              pageLabel,
+              annotationSortIndex,
+              color,
+              quoteText,
+              comment,
+              tags,
+              rectCoords: (item.rectCoords ?? null) as Prisma.JsonValue,
+              authorId,
+              version: 1,
+              deletedAt: null,
+              createdAt: now,
+              updatedAt: now,
+            }),
+          );
+        }
+
+        await tx.annotation.createMany({
+          data: createPayloads,
+          skipDuplicates: true,
         });
-        created.push(this.mapEntity(result));
+        created.push(...createdEntities);
+      } else {
+        for (const item of newItemsToCreate) {
+          const topLeft = this.deriveTopLeftFromRectCoords(
+            item.rectCoords,
+            item.y,
+            item.x,
+          );
+          const resolvedItemId = item.itemId || itemId;
+          const result = await tx.annotation.create({
+            data: {
+              ...(item.id ? { id: item.id } : {}),
+              attachmentId,
+              ...(resolvedItemId ? { itemId: resolvedItemId } : {}),
+              ...(item.imageFileId !== undefined
+                ? { imageFileId: item.imageFileId }
+                : {}),
+              type: item.type ?? AnnotationType.highlight,
+              pageIndex: item.pageIndex,
+              ...(item.pageLabel !== undefined
+                ? { pageLabel: item.pageLabel }
+                : {}),
+              annotationSortIndex:
+                item.annotationSortIndex ??
+                buildAnnotationSortIndex(
+                  item.pageIndex,
+                  topLeft?.y ?? item.y,
+                  topLeft?.x ?? item.x,
+                ),
+              color: item.color ?? '#ffd400',
+              quoteText: item.quoteText ?? '',
+              comment: item.comment ?? '',
+              tags: item.tags ?? [],
+              rectCoords:
+                item.rectCoords != null
+                  ? (item.rectCoords as Prisma.InputJsonValue)
+                  : Prisma.JsonNull,
+              authorId,
+              version: 1,
+            },
+            select: ANNOTATION_SELECT,
+          });
+          created.push(this.mapEntity(result));
+        }
       }
     }
 
@@ -523,5 +668,33 @@ export class AnnotationsRepository {
       data: { deletedAt: null },
     });
     return result.count;
+  }
+
+  async isProjectAdmin(
+    userId: string,
+    projectId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<boolean> {
+    if (!isUuid(userId) || !isUuid(projectId)) return false;
+    const client = this.getClient(tx);
+    try {
+      const member = await client.projectMember.findFirst({
+        where: { projectId, userId, project: { deletedAt: null } },
+        select: { role: true },
+      });
+      if (
+        member?.role &&
+        ['owner', 'coordinator'].includes(String(member.role).toLowerCase())
+      ) {
+        return true;
+      }
+      const project = await client.project.findFirst({
+        where: { id: projectId, deletedAt: null },
+        select: { createdById: true },
+      });
+      return project?.createdById === userId;
+    } catch {
+      return false;
+    }
   }
 }

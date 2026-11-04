@@ -6,6 +6,7 @@ import {
 import {
   VIETNAMESE_SURNAMES_PREFIX_REGEX,
   hasVietnameseDiacritics,
+  isInstitutionName,
 } from '@/modules/library/core';
 import type { EngineCitationResult } from './csl-engine.service';
 
@@ -20,7 +21,7 @@ export function escapeCitationHtml(text: string): string {
 export class TcvnCitationFormatterService {
   private static readonly VN_SURNAMES_REGEX = VIETNAMESE_SURNAMES_PREFIX_REGEX;
   private static readonly ACADEMIC_DEGREES_REGEX =
-    /^(?:(?:p?gs|ts(?:kh)?|ths|cn|ks|bs|dr|prof|ph\.?d)\.?\s*)+/gi;
+    /^(?:(?:p?gs|ts(?:kh)?|ths|dr|prof|ph\.?d)\.?\s+|(?:cn|ks|bs)\.\s*)+/gi;
 
   private static readonly AMBIGUOUS_ASCII_SURNAMES = new Set([
     'le',
@@ -100,6 +101,9 @@ export class TcvnCitationFormatterService {
       const middle = givenParts.slice(0, -1).join(' ');
       return { primary, secondary: `${cleanFamily} ${middle}`.trim() };
     }
+    if (isInstitutionName(cleanFamily)) {
+      return { primary: cleanFamily, secondary: '' };
+    }
     const familyParts = cleanFamily.split(/\s+/).filter(Boolean);
     if (familyParts.length > 1) {
       return {
@@ -167,6 +171,10 @@ export class TcvnCitationFormatterService {
     const cleanFamily = this.stripAcademicDegrees(author.family || '');
     const cleanGiven = this.stripAcademicDegrees(author.given || '');
 
+    if (isInstitutionName(cleanFamily) && !cleanGiven) {
+      return cleanFamily;
+    }
+
     if (TcvnCitationFormatterService.isVietnameseAuthor(author)) {
       return `${cleanFamily} ${cleanGiven}`.trim() || 'Khuyết danh';
     }
@@ -188,6 +196,10 @@ export class TcvnCitationFormatterService {
     const cleanFamily = this.stripAcademicDegrees(author.family || '');
     const cleanGiven = this.stripAcademicDegrees(author.given || '');
 
+    if (isInstitutionName(cleanFamily) && !cleanGiven) {
+      return cleanFamily;
+    }
+
     if (TcvnCitationFormatterService.isVietnameseAuthor(author)) {
       return `${cleanFamily} ${cleanGiven}`.trim() || 'Khuyết danh';
     }
@@ -199,6 +211,19 @@ export class TcvnCitationFormatterService {
     isNumeric: boolean = false,
     index: number = 1,
   ): EngineCitationResult {
+    const isVn = TcvnCitationFormatterService.isVietnameseItem(cslItem);
+    const andWord = 'và';
+    const etAlWord = 'và c.s.';
+    const noDateWord = 'không ngày';
+    const anonWord = isVn ? 'Khuyết danh' : 'Anonymous';
+    const volWord = 'tập';
+    const pageWord = 'tr.';
+    const inWord = 'Trong:';
+    const confPrefix = 'Kỷ yếu ';
+    const thesisDefault = isVn ? 'Luận án tiến sĩ' : 'Ph.D. dissertation';
+    const accessPrefix = ', truy cập ngày ';
+    const atPrefix = ', tại ';
+
     const authors = cslItem.author || [];
     const formattedAuthors = authors.map((a: CslName) =>
       TcvnCitationFormatterService.formatTcvnAuthorName(a),
@@ -206,21 +231,21 @@ export class TcvnCitationFormatterService {
 
     const authorStr =
       formattedAuthors.length === 0
-        ? 'Khuyết danh'
+        ? anonWord
         : formattedAuthors.length === 1
           ? formattedAuthors[0]
           : formattedAuthors.length === 2
-            ? `${formattedAuthors[0]} và ${formattedAuthors[1]}`
+            ? `${formattedAuthors[0]} ${andWord} ${formattedAuthors[1]}`
             : formattedAuthors.length === 3
-              ? `${formattedAuthors[0]}, ${formattedAuthors[1]} và ${formattedAuthors[2]}`
-              : `${formattedAuthors.slice(0, 3).join(', ')} và c.s.`;
+              ? `${formattedAuthors[0]}, ${formattedAuthors[1]} ${andWord} ${formattedAuthors[2]}`
+              : `${formattedAuthors.slice(0, 3).join(', ')} ${etAlWord}`;
 
-    const year = cslItem.issued?.['date-parts']?.[0]?.[0] || 'không ngày';
-    const title = cslItem.title || 'Không có tiêu đề';
+    const year = cslItem.issued?.['date-parts']?.[0]?.[0] || noDateWord;
+    const title = cslItem.title || (isVn ? 'Không có tiêu đề' : 'Untitled');
     const journal = cslItem['container-title'] || '';
-    const volume = cslItem.volume ? `tập ${cslItem.volume}` : '';
+    const volume = cslItem.volume ? `${volWord} ${cslItem.volume}` : '';
     const issue = cslItem.issue ? `(${cslItem.issue})` : '';
-    const page = cslItem.page ? `tr. ${cslItem.page}` : '';
+    const page = cslItem.page ? `${pageWord} ${cslItem.page}` : '';
     const publisher = cslItem.publisher || '';
     const place = cslItem['publisher-place'] || '';
     const url = cslItem.URL || '';
@@ -253,12 +278,12 @@ export class TcvnCitationFormatterService {
       );
       inText =
         inTextAuthors.length === 0
-          ? `(Khuyết danh, ${year})`
+          ? `(${anonWord}, ${year})`
           : inTextAuthors.length === 1
             ? `(${inTextAuthors[0]}, ${year})`
             : inTextAuthors.length === 2
-              ? `(${inTextAuthors[0]} và ${inTextAuthors[1]}, ${year})`
-              : `(${inTextAuthors[0]} và c.s., ${year})`;
+              ? `(${inTextAuthors[0]} ${andWord} ${inTextAuthors[1]}, ${year})`
+              : `(${inTextAuthors[0]} ${etAlWord}, ${year})`;
     }
 
     let details = '';
@@ -280,12 +305,13 @@ export class TcvnCitationFormatterService {
       const tailParts = [publisher, place, page, doi]
         .filter(Boolean)
         .join(', ');
+      const defaultContainer = isVn ? 'Sách chuyên khảo' : 'Monograph';
       const inContainer = journal
-        ? `Trong: ${journal}`
-        : 'Trong: Sách chuyên khảo';
+        ? `${inWord} ${journal}`
+        : `${inWord} ${defaultContainer}`;
       const inContainerHtml = journal
-        ? `Trong: <i>${escapeCitationHtml(journal)}</i>`
-        : 'Trong: <i>Sách chuyên khảo</i>';
+        ? `${inWord} <i>${escapeCitationHtml(journal)}</i>`
+        : `${inWord} <i>${escapeCitationHtml(defaultContainer)}</i>`;
       details = `"${title}", ${inContainer}${tailParts ? `, ${tailParts}` : ''}.`;
       detailsHtml = `"${escapeCitationHtml(title)}", ${inContainerHtml}${tailParts ? `, ${escapeCitationHtml(tailParts)}` : ''}.`;
     } else if (type === 'book') {
@@ -294,25 +320,26 @@ export class TcvnCitationFormatterService {
       detailsHtml = `<i>${escapeCitationHtml(title)}</i>${pubParts ? `, ${escapeCitationHtml(pubParts)}` : ''}.`;
     } else if (type === 'paper-conference') {
       const confTail = [place, publisher, page, doi].filter(Boolean).join(', ');
-      details = `"${title}", Kỷ yếu ${journal || 'Hội nghị Khoa học'}${confTail ? `, ${confTail}` : ''}.`;
-      detailsHtml = `"${escapeCitationHtml(title)}", <i>Kỷ yếu ${escapeCitationHtml(journal || 'Hội nghị Khoa học')}</i>${confTail ? `, ${escapeCitationHtml(confTail)}` : ''}.`;
+      const defaultConf = isVn ? 'Hội nghị Khoa học' : 'Scientific Conference';
+      details = `"${title}", ${confPrefix}${journal || defaultConf}${confTail ? `, ${confTail}` : ''}.`;
+      detailsHtml = `"${escapeCitationHtml(title)}", <i>${escapeCitationHtml(confPrefix)}${escapeCitationHtml(journal || defaultConf)}</i>${confTail ? `, ${escapeCitationHtml(confTail)}` : ''}.`;
     } else if (type === 'thesis') {
-      const genre = cslItem.genre || 'Luận án tiến sĩ';
+      const genre = cslItem.genre || thesisDefault;
       const thesisTail = [publisher, place].filter(Boolean).join(', ');
       details = `${title}, ${genre}${thesisTail ? `, ${thesisTail}` : ''}.`;
       detailsHtml = `<i>${escapeCitationHtml(title)}</i>, ${escapeCitationHtml(genre)}${thesisTail ? `, ${escapeCitationHtml(thesisTail)}` : ''}.`;
     } else {
       const accessClause = accessedDateStr
-        ? `, truy cập ngày ${accessedDateStr}`
+        ? `${accessPrefix}${accessedDateStr}`
         : '';
       const urlClause = url
         ? accessedDateStr
-          ? `, tại <${url}>`
+          ? `${atPrefix}<${url}>`
           : `, <${url}>`
         : '';
       const urlClauseHtml = url
         ? accessedDateStr
-          ? `, tại &lt;${escapeCitationHtml(url)}&gt;`
+          ? `${escapeCitationHtml(atPrefix)}&lt;${escapeCitationHtml(url)}&gt;`
           : `, &lt;${escapeCitationHtml(url)}&gt;`
         : '';
       details = `"${title}"${journal ? `, ${journal}` : ''}${publisher ? `, ${publisher}` : ''}${accessClause}${urlClause}.`;

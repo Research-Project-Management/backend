@@ -3,7 +3,7 @@ import { CitationService } from '@/modules/library/citation/services/citation.se
 import {
   CslStyleRegistry,
   SUPPORTED_CITATION_STYLES,
-} from '@/modules/library/citation/domain/csl-style-registry';
+} from '@/modules/library/citation/domain/citation.domain';
 import { CitationItemInput } from '@/modules/library/citation/types/citation.types';
 
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
@@ -61,32 +61,18 @@ describe('Library Citation Service & CSL Style Registry', () => {
       expect(registry.has('non-existent-style')).toBe(false);
     });
 
-    it('should generate robust emergency fallbacks for different style categories', () => {
-      // author-date fallback
-      const apaFallback = registry.formatFallback(mockItem, 'apa-7th');
-      expect(apaFallback.inText).toContain('Vaswani');
-      expect(apaFallback.inText).toContain('2017');
-      expect(apaFallback.bibliography).toContain('Attention Is All You Need');
+    it('should return style metadata via getStyle', () => {
+      const apaStyle = registry.getStyle('apa-7th');
+      expect(apaStyle.id).toBe('apa-7th');
+      expect(apaStyle.category).toBe('author-date');
 
-      // numeric fallback
-      const ieeeFallback = registry.formatFallback(mockItem, 'ieee', 3);
-      expect(ieeeFallback.inText).toBe('[3]');
-      expect(ieeeFallback.bibliography).toContain('[3]');
+      const ieeeStyle = registry.getStyle('ieee');
+      expect(ieeeStyle.id).toBe('ieee');
+      expect(ieeeStyle.category).toBe('numeric');
 
-      // raw bibtex fallback
-      const bibtexFallback = registry.formatFallback(mockItem, 'bibtex', 1);
-      expect(bibtexFallback.inText).toBe('\\cite{vaswani2017attention}');
-      expect(bibtexFallback.bibliography).toContain(
-        '@article{vaswani2017attention',
-      );
-
-      // raw ris fallback
-      const risFallback = registry.formatFallback(mockItem, 'ris', 1);
-      expect(risFallback.inText).toBe('Attention Is All You Need');
-      expect(risFallback.bibliography).toContain('TY  - JOUR');
-      expect(risFallback.bibliography).toContain(
-        'TI  - Attention Is All You Need',
-      );
+      const bibtexStyle = registry.getStyle('bibtex');
+      expect(bibtexStyle.id).toBe('bibtex');
+      expect(bibtexStyle.category).toBe('raw');
     });
   });
 

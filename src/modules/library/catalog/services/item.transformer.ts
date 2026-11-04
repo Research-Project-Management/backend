@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { TypesService } from '@/modules/library/catalog/services/types.service';
-import { ItemsMapper } from '../domain/items.mapper';
+import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
+import { ItemsMapper } from '@/modules/library/core';
 import {
   TypeConversionPreview,
   FieldMappingChange,

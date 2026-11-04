@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { MirrorBibliographicMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import {
-  AcademicHttpClient,
+  HttpClient,
   cleanAbstractText,
 } from '@/modules/library/core';
 import { CrossRefProvider } from '@/modules/library/ingestion/providers/crossref.provider';
@@ -75,7 +75,7 @@ export class WebMirrorResolverService {
   private readonly logger = new Logger(WebMirrorResolverService.name);
 
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() private readonly httpClient?: HttpClient,
     @Optional() private readonly crossRefProvider?: CrossRefProvider,
     @Optional() private readonly arxivProvider?: ArxivProvider,
     @Optional() private readonly openAlexProvider?: OpenAlexProvider,
@@ -328,6 +328,109 @@ export class WebMirrorResolverService {
   }
 
   /**
+   * Free & Open OpenReview API v2 / v1 resolver for `openreview.net/forum?id=...` or `openreview.net/pdf?id=...` URLs.
+   */
+  async resolveOpenReview(
+    url: string,
+  ): Promise<MirrorBibliographicMetadata | null> {
+    const match = url.match(
+      /openreview\.net\/(?:forum|pdf|document)\?id=([A-Za-z0-9_-]+)/i,
+    );
+    if (!match?.[1]) return null;
+    const forumId = match[1];
+
+    try {
+      const endpoint = `https://api2.openreview.net/notes?id=${encodeURIComponent(forumId)}`;
+      const signal = AbortSignal.timeout(6000);
+      const headers = { Accept: 'application/json' };
+      const res = this.httpClient
+        ? (
+            await this.httpClient.request(endpoint, {
+              headers,
+              signal,
+              timeoutMs: 6000,
+            })
+          ).response
+        : await fetch(endpoint, { headers, signal });
+
+      if (!res.ok) return null;
+      const data = (await res.json()) as {
+        notes?: Array<{
+          id?: string;
+          cdate?: number;
+          pdate?: number;
+          tmdate?: number;
+          content?: Record<string, unknown>;
+        }>;
+      };
+      const note = data?.notes?.[0];
+      const content = note?.content;
+      if (!content || typeof content !== 'object') return null;
+
+      const unwrap = (v: unknown): unknown =>
+        v && typeof v === 'object' && !Array.isArray(v) && 'value' in v
+          ? (v as Record<string, unknown>).value
+          : v;
+
+      const rawTitle = unwrap(content.title);
+      const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+      if (!title) return null;
+
+      const rawAbstract = unwrap(content.abstract);
+      const abstract =
+        typeof rawAbstract === 'string'
+          ? cleanAbstractText(rawAbstract)
+          : undefined;
+
+      const rawAuthors = unwrap(content.authors);
+      const authors = Array.isArray(rawAuthors)
+        ? rawAuthors
+            .filter((a): a is string => typeof a === 'string')
+            .map((a) => a.trim())
+            .filter(Boolean)
+        : undefined;
+
+      const rawKeywords = unwrap(content.keywords);
+      const keywords = Array.isArray(rawKeywords)
+        ? rawKeywords
+            .filter((k): k is string => typeof k === 'string')
+            .map((k) => k.trim())
+            .filter(Boolean)
+        : undefined;
+
+      const rawVenue = unwrap(content.venue ?? content.venueid);
+      const journal =
+        typeof rawVenue === 'string' &&
+        rawVenue.trim() &&
+        !rawVenue.includes('/')
+          ? rawVenue.trim()
+          : 'OpenReview';
+
+      const timestamp = note?.pdate || note?.cdate || note?.tmdate;
+      const year =
+        typeof timestamp === 'number' && timestamp > 0
+          ? new Date(timestamp).getUTCFullYear()
+          : undefined;
+
+      const mirrorResult: EnrichedMirrorBibliographicMetadata = {
+        title,
+        abstract,
+        authors: authors && authors.length > 0 ? authors : undefined,
+        year,
+        journal,
+        keywords: keywords && keywords.length > 0 ? keywords : undefined,
+        itemType: 'conferencePaper',
+        isOpenAccess: true,
+        pdfUrl: `https://openreview.net/pdf?id=${forumId}`,
+        sourceMirror: 'OpenAlex',
+      };
+      return mirrorResult;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Free & Open OpenAlex Works API resolver (0đ, polite pool).
    * Delegates to OpenAlexProvider.
    */
@@ -337,6 +440,10 @@ export class WebMirrorResolverService {
     pmcid?: string;
     url?: string;
   }): Promise<MirrorBibliographicMetadata | null> {
+    if (target.url && /openreview\.net\//i.test(target.url)) {
+      const openReviewHit = await this.resolveOpenReview(target.url);
+      if (openReviewHit) return openReviewHit;
+    }
     if (!this.openAlexProvider) return null;
     try {
       const signal = AbortSignal.timeout(6000);

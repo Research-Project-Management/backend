@@ -3,7 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { ConditionEvaluatorEngine } from '@/modules/library/catalog/domain/condition-evaluator.engine';
 import { SavedSearchesService } from '@/modules/library/catalog/services/saved-searches.service';
 import { SavedSearchesRepository } from '@/modules/library/catalog/repositories/saved-searches.repository';
-import { SavedSearchConditionGroup } from '@/modules/library/catalog/types/saved-search.types';
+import { SavedSearchConditionGroup } from '@/modules/library/catalog/types/catalog.types';
 
 describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
   let engine: ConditionEvaluatorEngine;

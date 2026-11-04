@@ -35,23 +35,6 @@ import {
   ProjectId,
 } from '@/modules/library/core';
 
-interface LegacyTransactionHelpers {
-  appendChange?: (
-    tx: unknown,
-    scope: unknown,
-    change: unknown,
-  ) => Promise<unknown>;
-  appendChangesBatch?: (tx: unknown, changes: unknown[]) => Promise<unknown>;
-  publishOutbox?: (
-    tx: unknown,
-    scope: unknown,
-    aggregateId: string,
-    eventType: string,
-    payload: unknown,
-  ) => Promise<unknown>;
-  publishOutboxBatch?: (tx: unknown, events: unknown[]) => Promise<unknown>;
-}
-
 @Injectable()
 export class AttachmentRenamerService {
   private readonly logger = new Logger(AttachmentRenamerService.name);
@@ -65,7 +48,7 @@ export class AttachmentRenamerService {
     private readonly cache?: RedisCacheService,
     @Optional()
     @Inject(UNIT_OF_WORK)
-    private readonly libraryTx?: IUnitOfWork & LegacyTransactionHelpers,
+    private readonly libraryTx?: IUnitOfWork,
     @Optional()
     @Inject(ITEM_CACHE_INVALIDATOR)
     private readonly cacheCoordinator?: IItemCacheInvalidator,
@@ -167,9 +150,11 @@ export class AttachmentRenamerService {
       undefined;
 
     let updated: Awaited<ReturnType<typeof this.repo.renameAttachment>>;
+    let ranPostCommitHook = false;
     if (typeof this.libraryTx?.executeInTransaction === 'function') {
       updated = await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           const renamed = await this.repo.renameAttachment(
             attachmentId,
             newFilename,
@@ -191,7 +176,7 @@ export class AttachmentRenamerService {
           await helpers.publishOutbox(
             eventScope,
             attachmentId,
-            'library.attachment.updated',
+            LIBRARY_EVENT_TYPES.ATTACHMENT_UPDATED,
             renamed ?? {
               id: attachmentId,
               itemId: attachment.itemId,
@@ -208,6 +193,13 @@ export class AttachmentRenamerService {
               filename: newFilename,
             },
           );
+          helpers?.onAfterCommit?.(() =>
+            this.invalidateAttachmentCache(
+              attachment.itemId,
+              userId,
+              effectiveProjectId,
+            ),
+          );
           return renamed;
         },
       );
@@ -217,51 +209,15 @@ export class AttachmentRenamerService {
         newFilename,
         attachment.fileId ?? undefined,
       );
-      const eventScope = { userId, projectId: effectiveProjectId };
-      if (typeof this.libraryTx?.appendChange === 'function') {
-        await this.libraryTx.appendChange(undefined, eventScope, {
-          entityType: 'Attachment',
-          entityId: attachmentId,
-          action: 'update',
-          version: 1,
-          data: updated ?? {
-            id: attachmentId,
-            itemId: attachment.itemId,
-            filename: newFilename,
-          },
-        });
-      }
-      if (typeof this.libraryTx?.publishOutbox === 'function') {
-        await this.libraryTx.publishOutbox(
-          undefined,
-          eventScope,
-          attachmentId,
-          'library.attachment.updated',
-          updated ?? {
-            id: attachmentId,
-            itemId: attachment.itemId,
-            filename: newFilename,
-          },
-        );
-        await this.libraryTx.publishOutbox(
-          undefined,
-          eventScope,
-          attachment.itemId,
-          LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-          {
-            id: attachment.itemId,
-            attachmentId,
-            filename: newFilename,
-          },
-        );
-      }
     }
 
-    await this.invalidateAttachmentCache(
-      attachment.itemId,
-      userId,
-      effectiveProjectId,
-    );
+    if (!ranPostCommitHook) {
+      await this.invalidateAttachmentCache(
+        attachment.itemId,
+        userId,
+        effectiveProjectId,
+      );
+    }
 
     return { attachment: updated, oldFilename, newFilename };
   }
@@ -378,9 +334,27 @@ export class AttachmentRenamerService {
     }
 
     if (updatesToPersist.length > 0) {
+      const uniqueRenamedItemIds = new Map<string, string | undefined>();
+      for (const u of updatesToPersist) {
+        uniqueRenamedItemIds.set(u.itemId, u.projectId);
+      }
+      const invalidateRenamedItems = async () => {
+        await Promise.all(
+          Array.from(uniqueRenamedItemIds.entries()).map(
+            ([renamedItemId, itemProjectId]) =>
+              this.invalidateAttachmentCache(
+                renamedItemId,
+                userId,
+                itemProjectId,
+              ),
+          ),
+        );
+      };
+      let ranPostCommitHook = false;
       if (typeof this.libraryTx?.executeInTransaction === 'function') {
         await this.libraryTx.executeInTransaction(
           async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+            ranPostCommitHook = Boolean(helpers?.onAfterCommit);
             await this.repo.batchRename(updatesToPersist, tx);
             const eventScope = { userId, projectId: validProjectId };
             const changeEntries = updatesToPersist.map((u) => ({
@@ -427,7 +401,7 @@ export class AttachmentRenamerService {
                 userId,
                 projectId: u.projectId || validProjectId,
                 aggregateId: u.id,
-                eventType: 'library.attachment.updated',
+                eventType: LIBRARY_EVENT_TYPES.ATTACHMENT_UPDATED,
                 payload: {
                   id: u.id,
                   itemId: u.itemId,
@@ -454,7 +428,7 @@ export class AttachmentRenamerService {
                 await helpers.publishOutbox(
                   scope,
                   u.id,
-                  'library.attachment.updated',
+                  LIBRARY_EVENT_TYPES.ATTACHMENT_UPDATED,
                   {
                     id: u.id,
                     itemId: u.itemId,
@@ -471,95 +445,16 @@ export class AttachmentRenamerService {
                 );
               }
             }
+            helpers?.onAfterCommit?.(invalidateRenamedItems);
           },
         );
       } else {
         await this.repo.batchRename(updatesToPersist);
-        const eventScope = { userId, projectId: validProjectId };
-        const uniqueItems = Array.from(
-          new Set(updatesToPersist.map((u) => u.itemId)),
-        );
-        if (typeof this.libraryTx?.appendChangesBatch === 'function') {
-          await this.libraryTx.appendChangesBatch(
-            undefined,
-            updatesToPersist.map((u) => ({
-              userId,
-              projectId: u.projectId || validProjectId,
-              entityType: 'Attachment',
-              entityId: u.id,
-              action: 'update' as const,
-              version: 1,
-              data: { id: u.id, itemId: u.itemId, filename: u.filename },
-            })),
-          );
-        } else if (typeof this.libraryTx?.appendChange === 'function') {
-          for (const u of updatesToPersist) {
-            await this.libraryTx.appendChange(
-              undefined,
-              { userId, projectId: u.projectId || validProjectId },
-              {
-                entityType: 'Attachment',
-                entityId: u.id,
-                action: 'update',
-                version: 1,
-                data: { id: u.id, itemId: u.itemId, filename: u.filename },
-              },
-            );
-          }
-        }
-        if (typeof this.libraryTx?.publishOutboxBatch === 'function') {
-          await this.libraryTx.publishOutboxBatch(undefined, [
-            ...updatesToPersist.map((u) => ({
-              userId,
-              projectId: u.projectId || validProjectId,
-              aggregateId: u.id,
-              eventType: 'library.attachment.updated',
-              payload: { id: u.id, itemId: u.itemId, filename: u.filename },
-            })),
-            ...uniqueItems.map((itemId) => ({
-              userId,
-              projectId: validProjectId,
-              aggregateId: itemId,
-              eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-              payload: { id: itemId },
-            })),
-          ]);
-        } else if (typeof this.libraryTx?.publishOutbox === 'function') {
-          for (const u of updatesToPersist) {
-            await this.libraryTx.publishOutbox(
-              undefined,
-              { userId, projectId: u.projectId || validProjectId },
-              u.id,
-              'library.attachment.updated',
-              { id: u.id, itemId: u.itemId, filename: u.filename },
-            );
-          }
-          for (const itemId of uniqueItems) {
-            await this.libraryTx.publishOutbox(
-              undefined,
-              eventScope,
-              itemId,
-              LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-              { id: itemId },
-            );
-          }
-        }
       }
 
-      const uniqueRenamedItemIds = new Map<string, string | undefined>();
-      for (const u of updatesToPersist) {
-        uniqueRenamedItemIds.set(u.itemId, u.projectId);
+      if (!ranPostCommitHook) {
+        await invalidateRenamedItems();
       }
-      await Promise.all(
-        Array.from(uniqueRenamedItemIds.entries()).map(
-          ([renamedItemId, itemProjectId]) =>
-            this.invalidateAttachmentCache(
-              renamedItemId,
-              userId,
-              itemProjectId,
-            ),
-        ),
-      );
     }
 
     return {

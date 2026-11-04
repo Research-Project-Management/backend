@@ -6,11 +6,14 @@ import {
   normalizePmcid,
   normalizeIsbn,
   normalizeIssn,
+  CANONICAL_IDENTIFIER_URI_BUILDERS,
+  buildCanonicalIdentifierUri,
   cleanBannedString,
   extractExtraKeyValues,
   isPlaceholderItemTitle,
   harmonizeZoteroFields,
   ItemProvenancePolicy,
+  isRejectedCitedIdentifier,
 } from '@/modules/library/core';
 import { ITEM_COLUMN_METADATA_FIELDS } from '@/modules/library/catalog/types/catalog.types';
 import { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
@@ -45,6 +48,15 @@ export function prepareItemAiMetadataPatch(params: {
   delete rawPatch.citeKey;
   delete rawPatch.mergedCitationKeys;
 
+  const rejectedCited = String(currentMeta.rejectedCitedDoi || '').trim();
+  if (rejectedCited) {
+    for (const idKey of ['doi', 'DOI', 'arxivId', 'archiveId', 'archiveID', 'pmid', 'PMID', 'isbn', 'ISBN']) {
+      if (isRejectedCitedIdentifier(rawPatch[idKey], rejectedCited)) {
+        delete rawPatch[idKey];
+      }
+    }
+  }
+
   const hasBibliographicFields = Object.keys(rawPatch).some(
     (k) => ITEM_COLUMN_METADATA_FIELDS.has(k) || ITEM_COLUMN_METADATA_FIELDS.has(k.toLowerCase()),
   );
@@ -74,9 +86,23 @@ export function prepareItemAiMetadataPatch(params: {
         topLevelColumnSync.year = parsedYear;
       }
     }
-    if (typeof filteredPatch.doi === 'string' && filteredPatch.doi.trim()) {
-      topLevelColumnSync.doi = filteredPatch.doi.trim();
-    }
+    const syncIdCol = (
+      key: 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'issn',
+      normFn: (v?: string | null) => string | undefined,
+    ) => {
+      const rawVal = filteredPatch[key];
+      if (typeof rawVal === 'string' && rawVal.trim()) {
+        const normalizedVal = normFn(rawVal) ?? rawVal.trim();
+        filteredPatch[key] = normalizedVal;
+        topLevelColumnSync[key] = normalizedVal;
+      }
+    };
+    syncIdCol('doi', normalizeDoi);
+    syncIdCol('arxivId', normalizeArxivId);
+    syncIdCol('pmid', normalizePmid);
+    syncIdCol('pmcid', normalizePmcid);
+    syncIdCol('isbn', normalizeIsbn);
+    syncIdCol('issn', normalizeIssn);
     const resolvedAbstract =
       typeof filteredPatch.abstract === 'string' && filteredPatch.abstract.trim()
         ? filteredPatch.abstract.trim()
@@ -274,14 +300,16 @@ export function normalizeItemIdentifiers(
       }
       if (typeof v === 'number') return String(v);
     }
-    if (sawTopEmpty || sawTopNull) {
+    if (sawTopNull) return null;
+    if (sawEfNull) return null;
+
+    if (sawTopEmpty) {
       for (const ek of extraKvKeys) {
         const expVal = explicitByType[ek];
         if (expVal && !isStaleExtraEcho(expVal, extraKvKeys)) return expVal;
       }
-      return sawTopNull ? null : '';
+      return '';
     }
-    if (sawEfNull) return null;
     if (sawEfEmpty) return '';
 
     for (const ek of extraKvKeys) {
@@ -305,12 +333,12 @@ export const IDENTIFIER_URI_BUILDERS: ReadonlyArray<{
   key: keyof ReturnType<typeof normalizeItemIdentifiers>;
   buildUri: (val: string) => string;
 }> = [
-  { type: 'doi', key: 'doi', buildUri: (v) => `https://doi.org/${v}` },
-  { type: 'arxiv', key: 'arxivId', buildUri: (v) => `https://arxiv.org/abs/${v}` },
-  { type: 'pmid', key: 'pmid', buildUri: (v) => `https://pubmed.ncbi.nlm.nih.gov/${v}/` },
-  { type: 'pmcid', key: 'pmcid', buildUri: (v) => `https://www.ncbi.nlm.nih.gov/pmc/articles/${v}/` },
-  { type: 'isbn', key: 'isbn', buildUri: (v) => `urn:isbn:${v}` },
-  { type: 'issn', key: 'issn', buildUri: (v) => `urn:issn:${v}` },
+  { type: 'doi', key: 'doi', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.doi },
+  { type: 'arxiv', key: 'arxivId', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.arxiv },
+  { type: 'pmid', key: 'pmid', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmid },
+  { type: 'pmcid', key: 'pmcid', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmcid },
+  { type: 'isbn', key: 'isbn', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.isbn },
+  { type: 'issn', key: 'issn', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.issn },
 ];
 
 export function buildDeduplicatedIdentifiers(
@@ -340,8 +368,7 @@ export function buildDeduplicatedIdentifiers(
       if (seenTypes.has(type) || seenPairs.has(pairKey)) continue;
       seenTypes.add(type);
       seenPairs.add(pairKey);
-      const uriBuilder = IDENTIFIER_URI_BUILDERS.find((b) => b.type === type)?.buildUri;
-      result.push({ type, value, canonicalUri: ident.canonicalUri ?? (uriBuilder ? uriBuilder(value) : null) });
+      result.push({ type, value, canonicalUri: ident.canonicalUri ?? buildCanonicalIdentifierUri(type, value) });
     }
   }
   return result;
@@ -491,6 +518,33 @@ const IDENTIFIER_EXTRA_CLEANUP_RULES: ReadonlyArray<{
   { key: 'arxivId', lineRe: /^\s*(?:arxiv|arxivid|arxiv-id|archiveid)\s*:/i, braceRe: /\{\s*:(?:arxiv|archiveid)\s*:\s*[^}]*\}/gi },
 ];
 
+export function cleanExtraFromClearedIds(
+  extra: string,
+  clearedIds: ReadonlySet<string>,
+  options?: { clearCitationKey?: boolean },
+): string {
+  if (!extra || (clearedIds.size === 0 && !options?.clearCitationKey)) return extra;
+  const clearedLinePatterns: RegExp[] = [];
+  const clearedBracePatterns: RegExp[] = [];
+  for (const rule of IDENTIFIER_EXTRA_CLEANUP_RULES) {
+    if (clearedIds.has(rule.key)) {
+      clearedLinePatterns.push(rule.lineRe);
+      clearedBracePatterns.push(rule.braceRe);
+    }
+  }
+  if (options?.clearCitationKey) {
+    clearedLinePatterns.push(/^\s*(?:citation[\s_-]*key|cite[\s_-]*key|bibtex)\s*:/i);
+  }
+  if (clearedLinePatterns.length === 0 && clearedBracePatterns.length === 0) return extra;
+  let cleanedExtra = extra;
+  for (const braceRe of clearedBracePatterns) cleanedExtra = cleanedExtra.replace(braceRe, '');
+  return cleanedExtra
+    .split(/\r?\n/)
+    .filter((line) => !clearedLinePatterns.some((re) => re.test(line)))
+    .join('\n')
+    .trim();
+}
+
 export function syncMetadataIdentifierAliases(
   result: Record<string, unknown>,
   ids: ReturnType<typeof normalizeItemIdentifiers>,
@@ -529,26 +583,15 @@ export function syncMetadataIdentifierAliases(
   syncKey(ids.arxivId, 'arxivId', ['archiveId', 'archiveID', 'ARXIV', 'arxiv']);
 
   if (!isCreate && typeof result.extra === 'string' && result.extra) {
-    const clearedLinePatterns: RegExp[] = [];
-    const clearedBracePatterns: RegExp[] = [];
+    const touchedOrClearedIds = new Set<string>();
     for (const rule of IDENTIFIER_EXTRA_CLEANUP_RULES) {
       if (ids[rule.key] !== undefined) {
-        clearedLinePatterns.push(rule.lineRe);
-        clearedBracePatterns.push(rule.braceRe);
+        touchedOrClearedIds.add(rule.key);
       }
     }
-    if (options?.suppliedCitationKey !== undefined) {
-      clearedLinePatterns.push(/^\s*(?:citation[\s_-]*key|cite[\s_-]*key|bibtex)\s*:/i);
-    }
-    if (clearedLinePatterns.length > 0 || clearedBracePatterns.length > 0) {
-      let cleanedExtra = result.extra;
-      for (const braceRe of clearedBracePatterns) cleanedExtra = cleanedExtra.replace(braceRe, '');
-      result.extra = cleanedExtra
-        .split(/\r?\n/)
-        .filter((line) => !clearedLinePatterns.some((re) => re.test(line)))
-        .join('\n')
-        .trim();
-    }
+    result.extra = cleanExtraFromClearedIds(result.extra, touchedOrClearedIds, {
+      clearCitationKey: options?.suppliedCitationKey !== undefined,
+    });
   }
   if (!isCreate) {
     const clearMappedField = (baseField: string, rawVal: unknown, extraAliases: string[] = []) => {

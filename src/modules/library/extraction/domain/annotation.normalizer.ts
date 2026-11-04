@@ -4,8 +4,8 @@ import {
   RectCoords,
   CreateAnnotationData,
   UpdateAnnotationData,
-} from '@/modules/library/extraction/types/extraction.types';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+} from '@/modules/library/core/types/extraction.types';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 
 export const DEFAULT_ANNOTATION_COLOR = '#ffd400';
 const HEX_COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
@@ -17,6 +17,8 @@ export interface NormalizedRectBox {
   y2: number;
   width: number;
   height: number;
+  paths?: number[][][];
+  imageDataUrl?: string;
 }
 
 /**
@@ -43,6 +45,14 @@ export function extractTopLeftAnchor(
       const rawY = Number(r.y1 ?? r.y);
       if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
         return { x1: rawX, y1: rawY };
+      }
+      if (Array.isArray(r.points) && r.points.length > 0) {
+        const p0 = r.points[0] as Record<string, unknown> | number[];
+        const px = Array.isArray(p0) ? Number(p0[0]) : Number(p0?.x);
+        const py = Array.isArray(p0) ? Number(p0[1]) : Number(p0?.y);
+        if (Number.isFinite(px) && Number.isFinite(py)) {
+          return { x1: px, y1: py };
+        }
       }
     }
     return null;
@@ -113,6 +123,13 @@ export function normalizeSingleRectBox(
       x2 !== undefined &&
       y2 !== undefined
     ) {
+      const extra: Partial<NormalizedRectBox> = {};
+      if (Array.isArray(r.paths)) {
+        extra.paths = r.paths as number[][][];
+      }
+      if (typeof r.imageDataUrl === 'string' && r.imageDataUrl.length <= 500_000) {
+        extra.imageDataUrl = r.imageDataUrl;
+      }
       return {
         x1,
         y1,
@@ -120,6 +137,7 @@ export function normalizeSingleRectBox(
         y2,
         width: w ?? Math.max(0, x2 - x1),
         height: h ?? Math.max(0, y2 - y1),
+        ...extra,
       };
     }
   }
@@ -247,6 +265,41 @@ export class AnnotationNormalizer {
       const y1 = Math.min(rawY1, rawY2);
       const y2 = Math.max(rawY1, rawY2);
 
+      const extraProps: Record<string, unknown> = {};
+      if (Array.isArray(r.paths)) {
+        const sanitizedPaths: number[][][] = [];
+        const maxPaths = Math.min(r.paths.length, 64);
+        for (let pIdx = 0; pIdx < maxPaths; pIdx++) {
+          const stroke = r.paths[pIdx];
+          if (!Array.isArray(stroke)) continue;
+          const sanitizedStroke: number[][] = [];
+          const maxPts = Math.min(stroke.length, 1024);
+          for (let ptIdx = 0; ptIdx < maxPts; ptIdx++) {
+            const pt = stroke[ptIdx];
+            if (Array.isArray(pt) && pt.length >= 2) {
+              const px = Number(pt[0]);
+              const py = Number(pt[1]);
+              if (Number.isFinite(px) && Number.isFinite(py)) {
+                sanitizedStroke.push([px, py]);
+              }
+            }
+          }
+          if (sanitizedStroke.length > 0) {
+            sanitizedPaths.push(sanitizedStroke);
+          }
+        }
+        if (sanitizedPaths.length > 0) {
+          extraProps.paths = sanitizedPaths;
+        }
+      }
+      if (
+        typeof r.imageDataUrl === 'string' &&
+        r.imageDataUrl.length <= 500_000 &&
+        r.imageDataUrl.startsWith('data:image/')
+      ) {
+        extraProps.imageDataUrl = r.imageDataUrl;
+      }
+
       normalizedRects.push({
         x1,
         y1,
@@ -254,6 +307,7 @@ export class AnnotationNormalizer {
         y2,
         width: x2 - x1,
         height: y2 - y1,
+        ...extraProps,
       });
     }
 
@@ -311,7 +365,6 @@ export class AnnotationNormalizer {
     if (
       normalized === 'box' ||
       normalized === 'area' ||
-      normalized === 'image' ||
       normalized === 'square' ||
       normalized === 'circle' ||
       normalized === 'line' ||
@@ -319,12 +372,21 @@ export class AnnotationNormalizer {
     ) {
       return AnnotationType.rect;
     }
+    if (normalized === 'image') {
+      return AnnotationType.image;
+    }
     if (
       normalized === 'strike' ||
       normalized === 'strikeout' ||
       normalized === 'strikethrough'
     ) {
       return AnnotationType.strike;
+    }
+    if (normalized === 'squiggly') {
+      return AnnotationType.underline;
+    }
+    if (normalized === 'caret' || normalized === 'sticky') {
+      return AnnotationType.note;
     }
     if (normalized === 'text' || normalized === 'freetext') {
       return AnnotationType.text;
@@ -348,9 +410,15 @@ export class AnnotationNormalizer {
    */
   normalizeTags(tags?: unknown): string[] {
     if (!Array.isArray(tags)) return [];
-    return normalizeAcademicTags(
+    return normalizeTags(
       tags.filter((t): t is string => typeof t === 'string'),
+      { allowManualAcademicTerms: true },
     );
+  }
+
+  normalizePageLabel(pageLabel?: string | null): string {
+    if (!pageLabel || typeof pageLabel !== 'string') return '';
+    return pageLabel.replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, 64);
   }
 
   /**
@@ -359,6 +427,7 @@ export class AnnotationNormalizer {
   normalizeCreateData(data: CreateAnnotationData) {
     return {
       ...data,
+      pageLabel: this.normalizePageLabel(data.pageLabel),
       color: this.normalizeColor(data.color),
       quoteText: this.normalizeQuote(data.quoteText),
       comment: this.normalizeComment(data.comment),
@@ -377,6 +446,12 @@ export class AnnotationNormalizer {
   normalizeUpdateData(data: UpdateAnnotationData) {
     const payload: Partial<UpdateAnnotationData> = { ...data };
 
+    if (data.type !== undefined) {
+      payload.type = this.parseType(data.type);
+    }
+    if (data.pageLabel !== undefined) {
+      payload.pageLabel = this.normalizePageLabel(data.pageLabel);
+    }
     if (data.color !== undefined) {
       payload.color = this.normalizeColor(data.color);
     }

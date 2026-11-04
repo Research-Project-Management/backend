@@ -3,7 +3,7 @@ import {
   ClassifiedQuery,
   QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { IngestionValidationException } from '@/modules/library/ingestion/types/ingestion.errors';
+import { IngestionValidationException } from '@/modules/library/ingestion/types/metadata.types';
 import {
   stripSurroundingPunctuation,
   normalizeArxivId,
@@ -42,6 +42,7 @@ require('@citation-js/plugin-bibtex');
  * alters (e.g. stripping math/braces or corporate authors), or fails to map into CSL.
  */
 export const CUSTOM_BIBTEX_ENRICHMENT_KEYS = new Set<string>([
+  'abstract',
   'archiveprefix',
   'eprint',
   'primaryclass',
@@ -50,6 +51,9 @@ export const CUSTOM_BIBTEX_ENRICHMENT_KEYS = new Set<string>([
   'zbl',
   'arxiv',
   'arxivid',
+  'doi',
+  'isbn',
+  'issn',
   'pmid',
   'pmcid',
   'file',
@@ -71,11 +75,15 @@ export const CUSTOM_BIBTEX_ENRICHMENT_KEYS = new Set<string>([
   'place',
   'series',
   'series_title',
+  'pages',
+  'eid',
   'numpages',
   'pagetotal',
+  'volume',
   'volumes',
   'chapter',
   'shorttitle',
+  'subtitle',
   'shortjournal',
   'fjournal',
   'urldate',
@@ -90,14 +98,55 @@ export const CUSTOM_BIBTEX_ENRICHMENT_KEYS = new Set<string>([
   'license',
   'author',
   'editor',
+  'translator',
   'title',
   'date',
   'issue',
+  'journal',
+  'publisher',
+  'month',
 ]);
+
+export const DEFAULT_BIBTEX_STRING_MACROS: Readonly<Record<string, string>> = {
+  jan: 'January',
+  feb: 'February',
+  mar: 'March',
+  apr: 'April',
+  may: 'May',
+  jun: 'June',
+  jul: 'July',
+  aug: 'August',
+  sep: 'September',
+  oct: 'October',
+  nov: 'November',
+  dec: 'December',
+  acmcs: 'ACM Computing Surveys',
+  acta: 'Acta Informatica',
+  cacm: 'Communications of the ACM',
+  ibmjrd: 'IBM Journal of Research and Development',
+  ibmsj: 'IBM Systems Journal',
+  ieeese: 'IEEE Transactions on Software Engineering',
+  ieeetc: 'IEEE Transactions on Computers',
+  ieeetcad:
+    'IEEE Transactions on Computer-Aided Design of Integrated Circuits',
+  ipl: 'Information Processing Letters',
+  jacm: 'Journal of the ACM',
+  jcss: 'Journal of Computer and System Sciences',
+  scp: 'Science of Computer Programming',
+  sicomp: 'SIAM Journal on Computing',
+  tocs: 'ACM Transactions on Computer Systems',
+  tods: 'ACM Transactions on Database Systems',
+  tog: 'ACM Transactions on Graphics',
+  toms: 'ACM Transactions on Mathematical Software',
+  toois: 'ACM Transactions on Office Information Systems',
+  toplas: 'ACM Transactions on Programming Languages and Systems',
+  tcs: 'Theoretical Computer Science',
+};
 
 export function extractBibtexFields(
   body: string,
   allowedKeys?: ReadonlySet<string>,
+  macros?: ReadonlyMap<string, string>,
 ): Record<string, string> {
   const fields: Record<string, string> = {};
   let pos = 0;
@@ -111,13 +160,35 @@ export function extractBibtexFields(
   const commaStickyRe = /\s*,\s*/y;
 
   while (pos < len) {
+    // Skip whitespace and '%' comments before looking for next key
+    while (pos < len) {
+      const ch = body[pos];
+      if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n') {
+        pos++;
+      } else if (ch === '%') {
+        while (pos < len && body[pos] !== '\n' && body[pos] !== '\r') {
+          pos++;
+        }
+      } else {
+        break;
+      }
+    }
+    if (pos >= len) break;
+
     keyStickyRe.lastIndex = pos;
     let keyMatch = keyStickyRe.exec(body);
     if (!keyMatch) {
-      keySearchRe.lastIndex = pos;
-      keyMatch = keySearchRe.exec(body);
-      if (!keyMatch) break;
-      pos = keySearchRe.lastIndex;
+      // Advance to next line or delimiter
+      while (
+        pos < len &&
+        body[pos] !== '\n' &&
+        body[pos] !== '\r' &&
+        body[pos] !== ','
+      ) {
+        pos++;
+      }
+      if (pos < len && body[pos] === ',') pos++;
+      continue;
     } else {
       pos = keyStickyRe.lastIndex;
     }
@@ -154,11 +225,19 @@ export function extractBibtexFields(
         }
       } else if (char === '"') {
         pos++;
+        let braceDepth = 0;
         const start = pos;
-        while (pos < len && body[pos] !== '"') {
+        while (pos < len) {
           if (body[pos] === '\\') {
             pos += 2;
             continue;
+          }
+          if (body[pos] === '{') {
+            braceDepth++;
+          } else if (body[pos] === '}') {
+            if (braceDepth > 0) braceDepth--;
+          } else if (body[pos] === '"' && braceDepth === 0) {
+            break;
           }
           pos++;
         }
@@ -171,7 +250,13 @@ export function extractBibtexFields(
         const bareMatch = bareStickyRe.exec(body);
         if (bareMatch) {
           if (shouldExtract) {
-            segments.push(bareMatch[1]);
+            const rawToken = bareMatch[1];
+            const lowerToken = rawToken.toLowerCase();
+            const expanded =
+              macros?.get(lowerToken) ??
+              DEFAULT_BIBTEX_STRING_MACROS[lowerToken] ??
+              rawToken;
+            segments.push(expanded);
           }
           pos = bareStickyRe.lastIndex;
         } else {
@@ -200,34 +285,170 @@ export function extractBibtexFields(
   return fields;
 }
 
+export function extractBibtexStringMacros(
+  rawBibtex: string,
+): Map<string, string> {
+  const macros = new Map<string, string>(
+    Object.entries(DEFAULT_BIBTEX_STRING_MACROS),
+  );
+  if (!rawBibtex) return macros;
+
+  const headerRe = /@string\s*([{(])/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = headerRe.exec(rawBibtex)) !== null) {
+    const openChar = match[1];
+    const closeChar = openChar === '{' ? '}' : ')';
+    let pos = headerRe.lastIndex;
+    const len = rawBibtex.length;
+    let depth = 1;
+    let inQuotes = false;
+
+    const contentStart = pos;
+    while (pos < len && depth > 0) {
+      const ch = rawBibtex[pos];
+      if (ch === '\\') {
+        pos += 2;
+        continue;
+      }
+      if (ch === '%' && !inQuotes && depth <= 1) {
+        // Skip comment line
+        while (pos < len && rawBibtex[pos] !== '\n' && rawBibtex[pos] !== '\r') {
+          pos++;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        if (depth === 1) {
+          inQuotes = !inQuotes;
+        }
+      } else {
+        if (ch === openChar || ch === '{') {
+          depth++;
+        } else if (ch === closeChar || ch === '}') {
+          if (depth > 1) {
+            depth--;
+          } else if (depth === 1 && !inQuotes) {
+            depth--;
+          }
+        }
+      }
+      pos++;
+    }
+
+    const innerContent = rawBibtex.slice(
+      contentStart,
+      depth === 0 ? pos - 1 : pos,
+    );
+    headerRe.lastIndex = pos;
+
+    const parsed = extractBibtexFields(innerContent, undefined, macros);
+    for (const [k, v] of Object.entries(parsed)) {
+      macros.set(k.toLowerCase(), v);
+    }
+  }
+
+  return macros;
+}
+
+export interface RawBibtexBlock {
+  rawType: string;
+  citationKey: string;
+  body: string;
+}
+
+/**
+ * Splits a raw BibTeX string into balanced `@type{key, body}` or `@type(key, body)` blocks in O(N) time.
+ * Immune to `@` characters inside field values (e.g. emails or abstracts) and supports multiple entries on a single line.
+ */
+export function splitBibtexEntryBlocks(rawBibtex: string): RawBibtexBlock[] {
+  const blocks: RawBibtexBlock[] = [];
+  const headerRe = /@([a-zA-Z]+)\s*([{(])/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = headerRe.exec(rawBibtex)) !== null) {
+    const rawType = match[1].toLowerCase();
+    const openChar = match[2];
+    const closeChar = openChar === '{' ? '}' : ')';
+    let pos = headerRe.lastIndex;
+    const len = rawBibtex.length;
+    let depth = 1;
+    let inQuotes = false;
+
+    const contentStart = pos;
+    while (pos < len && depth > 0) {
+      const ch = rawBibtex[pos];
+      if (ch === '\\') {
+        pos += 2;
+        continue;
+      }
+      if (ch === '%' && !inQuotes && depth <= 1) {
+        // Skip comment line
+        while (pos < len && rawBibtex[pos] !== '\n' && rawBibtex[pos] !== '\r') {
+          pos++;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        if (depth === 1) {
+          inQuotes = !inQuotes;
+        }
+      } else {
+        if (ch === openChar || ch === '{') {
+          depth++;
+        } else if (ch === closeChar || ch === '}') {
+          if (depth > 1) {
+            depth--;
+          } else if (depth === 1 && !inQuotes) {
+            depth--;
+          }
+        }
+      }
+      pos++;
+    }
+
+    const innerContent = rawBibtex.slice(
+      contentStart,
+      depth === 0 ? pos - 1 : pos,
+    );
+    headerRe.lastIndex = pos;
+
+    if (
+      rawType === 'comment' ||
+      rawType === 'preamble' ||
+      rawType === 'string'
+    ) {
+      continue;
+    }
+
+    const commaIdx = innerContent.indexOf(',');
+    if (commaIdx === -1) continue;
+
+    const citationKey = innerContent.slice(0, commaIdx).trim();
+    const body = innerContent.slice(commaIdx + 1);
+    blocks.push({ rawType, citationKey, body });
+  }
+
+  return blocks;
+}
+
 export class BibtexFallbackParser {
   /**
-   * Resilient regex fallback for non-standard BibTeX dialects
+   * Resilient parser for non-standard BibTeX dialects
    */
   static parse(rawBibtex: string): ParsedBibtexEntry[] {
     const entries: ParsedBibtexEntry[] = [];
-    const entryRegex =
-      /@([a-zA-Z]+)\s*\{\s*([^,\s]*)\s*,([\s\S]*?)(?=\n\s*@[a-zA-Z]+\s*\{|\s*$)/g;
-
-    let match: RegExpExecArray | null;
-    while ((match = entryRegex.exec(rawBibtex)) !== null) {
-      const rawType = match[1].toLowerCase();
-      if (
-        rawType === 'comment' ||
-        rawType === 'preamble' ||
-        rawType === 'string'
-      ) {
-        continue;
-      }
-
-      const citationKey = match[2]?.trim() || '';
-      const body = match[3] || '';
-      const fields = extractBibtexFields(body);
+    const macros = extractBibtexStringMacros(rawBibtex);
+    for (const block of splitBibtexEntryBlocks(rawBibtex)) {
+      const fields = extractBibtexFields(block.body, undefined, macros);
       entries.push(
-        buildParsedBibtexEntry(citationKey || undefined, rawType, fields),
+        buildParsedBibtexEntry(
+          block.citationKey || undefined,
+          block.rawType,
+          fields,
+        ),
       );
     }
-
     return entries;
   }
 }
@@ -243,6 +464,8 @@ export class BibtexParser {
     if (!rawBibtex || typeof rawBibtex !== 'string' || !rawBibtex.trim()) {
       return [];
     }
+
+    const macros = extractBibtexStringMacros(rawBibtex);
 
     try {
       const cite = new Cite(rawBibtex);
@@ -262,27 +485,23 @@ export class BibtexParser {
         fields: Record<string, string>;
       }> = [];
 
-      const entryRegex =
-        /@([a-zA-Z]+)\s*\{\s*([^,\s]*)\s*,([\s\S]*?)(?=\n\s*@[a-zA-Z]+\s*\{|\s*$)/g;
-      let rawMatch: RegExpExecArray | null;
-      while ((rawMatch = entryRegex.exec(rawBibtex)) !== null) {
-        const rType = rawMatch[1].toLowerCase();
-        if (rType === 'comment' || rType === 'preamble' || rType === 'string') {
-          continue;
-        }
-        const cKey = rawMatch[2]?.trim() || '';
+      for (const block of splitBibtexEntryBlocks(rawBibtex)) {
         const extractedFields = extractBibtexFields(
-          rawMatch[3] || '',
+          block.body,
           CUSTOM_BIBTEX_ENRICHMENT_KEYS,
+          macros,
         );
         const entryInfo = {
-          rawType: rType,
-          citationKey: cKey,
+          rawType: block.rawType,
+          citationKey: block.citationKey,
           fields: extractedFields,
         };
         rawEntriesByIndex.push(entryInfo);
-        if (cKey && !rawEntriesByKey.has(cKey.toLowerCase())) {
-          rawEntriesByKey.set(cKey.toLowerCase(), entryInfo);
+        if (
+          block.citationKey &&
+          !rawEntriesByKey.has(block.citationKey.toLowerCase())
+        ) {
+          rawEntriesByKey.set(block.citationKey.toLowerCase(), entryInfo);
         }
       }
 

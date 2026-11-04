@@ -2,10 +2,10 @@ import { Injectable, Inject, NotFoundException, Optional } from '@nestjs/common'
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { TypesService } from './types.service';
-import { ItemCacheCoordinator } from './item-cache.coordinator';
+import { TypesService } from './zotero-schema-validator.service';
+import { ItemCacheCoordinator } from './library-bootstrap.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
-import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import { ItemsMapper } from '@/modules/library/core';
 import {
   ItemDetail,
   TypeConversionPreview,
@@ -138,6 +138,7 @@ export class ItemTypeConversionService {
       );
     };
 
+    let ranPostCommitHook = Boolean(helpers?.onAfterCommit);
     const updated =
       !tx && this.libraryTx
         ? await this.libraryTx.executeInTransaction(
@@ -145,6 +146,7 @@ export class ItemTypeConversionService {
               innerTx: Prisma.TransactionClient,
               innerHelpers: TransactionHelpers,
             ) => {
+              ranPostCommitHook = Boolean(innerHelpers?.onAfterCommit);
               const res = await this.command.update(
                 userId,
                 itemId,
@@ -154,6 +156,13 @@ export class ItemTypeConversionService {
                 projectId,
               );
               await recordConversionEvents(res, innerHelpers);
+              innerHelpers?.onAfterCommit?.(() =>
+                this.cacheCoordinator?.invalidateItemCache(
+                  itemId,
+                  userId,
+                  effectiveProjectId,
+                ),
+              );
               return res;
             },
           )
@@ -167,14 +176,23 @@ export class ItemTypeConversionService {
               projectId,
             );
             await recordConversionEvents(res, helpers);
+            helpers?.onAfterCommit?.(() =>
+              this.cacheCoordinator?.invalidateItemCache(
+                itemId,
+                userId,
+                effectiveProjectId,
+              ),
+            );
             return res;
           })();
 
-    await this.cacheCoordinator?.invalidateItemCache(
-      itemId,
-      userId,
-      effectiveProjectId,
-    );
+    if (!ranPostCommitHook) {
+      await this.cacheCoordinator?.invalidateItemCache(
+        itemId,
+        userId,
+        effectiveProjectId,
+      );
+    }
 
     return {
       success: true,

@@ -1,27 +1,10 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
-import { PrismaService } from '@/core';
-import { RedisCacheService } from '@/core';
+import { PrismaService, RedisCacheService } from '@/core';
 import { Prisma } from '@prisma/client';
-
-import {
-  SearchOptions,
-  FacetResult,
-} from '@/modules/library/search/dto/search.dto';
-import {
-  SearchSpecificationBuilder,
-  TextSearchSpecification,
-  sanitizeSearchQuery,
-} from '@/modules/library/search/domain/item-specifications';
-import { isProjectScopeId, LIBRARY_REDIS_KEYS } from '@/modules/library/core';
-import {
-  isValidUuid,
-  sanitizeUuidSearchOptions,
-  buildSearchItemsCacheKey,
-  buildSearchFacetCacheKey,
-  aggregateFacetGroups,
-  buildSearchFtsMatchingIdsSql,
-  buildSearchFtsSqlQuery,
-} from './search-sql.helper';
+import { SearchOptions, FacetResult } from '@/modules/library/search/controllers/search.controller';
+import { SearchSpecificationBuilder, TextSearchSpecification, sanitizeSearchQuery } from '@/modules/library/search/domain/item-specifications';
+import { isProjectScopeId, LIBRARY_REDIS_KEYS, SingleFlightCoalescer, SearchQueryEngine } from '@/modules/library/core';
+import { isValidUuid, sanitizeUuidSearchOptions, resolveSearchCollectionOptions, buildSearchItemsCacheKey, buildSearchFacetCacheKey, aggregateFacetGroups, buildSearchFtsMatchingIdsSql, buildSearchFtsSqlQuery, buildSearchTrgmFallbackSqlQuery, escapeLikePattern } from './search-sql.helper';
 
 export type { SearchOptions, FacetResult };
 
@@ -30,6 +13,12 @@ export class SearchRepository implements OnModuleInit {
   private readonly logger = new Logger(SearchRepository.name);
   private static readonly MAX_SCOPE_VERSIONS = 1000;
   private readonly scopeVersions = new Map<string, string>();
+  private readonly singleFlight = new SingleFlightCoalescer();
+
+  private applyJitter(baseTtlSeconds: number): number {
+    const jitter = Math.floor(baseTtlSeconds * 0.1 * (Math.random() * 2 - 1));
+    return Math.max(1, baseTtlSeconds + jitter);
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -44,14 +33,8 @@ export class SearchRepository implements OnModuleInit {
     return tx || this.prisma;
   }
 
-  private isProjectScope(projectId?: string): projectId is string {
-    return isProjectScopeId(projectId);
-  }
-
   private resolveScopeId(userId: string, options?: SearchOptions): string {
-    return this.isProjectScope(options?.projectId)
-      ? options.projectId.trim()
-      : userId;
+    return isProjectScopeId(options?.projectId) ? options.projectId.trim() : userId;
   }
 
   private setLocalScopeVersion(scopeId: string, version: string): void {
@@ -59,15 +42,9 @@ export class SearchRepository implements OnModuleInit {
       this.scopeVersions.delete(scopeId);
     } else if (this.scopeVersions.size >= SearchRepository.MAX_SCOPE_VERSIONS) {
       const oldestKey = this.scopeVersions.keys().next().value;
-      if (oldestKey !== undefined) {
-        this.scopeVersions.delete(oldestKey);
-      }
+      if (oldestKey !== undefined) this.scopeVersions.delete(oldestKey);
     }
     this.scopeVersions.set(scopeId, version);
-  }
-
-  private getScopeVersion(scopeId: string): string {
-    return this.scopeVersions.get(scopeId) || '1';
   }
 
   async resolveScopeVersion(scopeId: string): Promise<string> {
@@ -78,18 +55,14 @@ export class SearchRepository implements OnModuleInit {
       try {
         const versionKey = LIBRARY_REDIS_KEYS.searchVersion(normalizedScope);
         const redisVer = await this.cache.get<string>(versionKey);
-        if (
-          (typeof redisVer === 'string' || typeof redisVer === 'number') &&
-          String(redisVer).trim().length > 0
-        ) {
+        if ((typeof redisVer === 'string' || typeof redisVer === 'number') && String(redisVer).trim().length > 0) {
           const resolved = String(redisVer).trim();
           this.setLocalScopeVersion(normalizedScope, resolved);
           return resolved;
         }
         if (redisVer === null || redisVer === undefined) {
           const hadLocal = this.scopeVersions.has(normalizedScope);
-          const prevVer =
-            parseInt(this.scopeVersions.get(normalizedScope) || '1', 10) || 1;
+          const prevVer = parseInt(this.scopeVersions.get(normalizedScope) || '1', 10) || 1;
           const nextVer = hadLocal ? String(prevVer + 1) : '1';
           this.setLocalScopeVersion(normalizedScope, nextVer);
           await this.cache.set?.(versionKey, nextVer, 86400);
@@ -106,91 +79,124 @@ export class SearchRepository implements OnModuleInit {
     return fallbackVer;
   }
 
-  private sanitizeUuidOptions(options: SearchOptions): SearchOptions {
-    return sanitizeUuidSearchOptions(options);
+  private buildBaseWhere(userId: string, options: SearchOptions): Prisma.ItemWhereInput {
+    return SearchSpecificationBuilder.baseFromOptions(userId, sanitizeUuidSearchOptions(options)).toPrismaWhere();
+  }
+  private buildTextWhereIlike(queryText: string, searchMode?: string): Prisma.ItemWhereInput {
+    return new TextSearchSpecification(escapeLikePattern(queryText), searchMode).toPrismaWhere();
   }
 
-  private buildSearchCacheKey(
-    userId: string,
+  private static readonly ITEM_SEARCH_INCLUDE = (userId: string) => ({
+    contributors: { orderBy: { orderIndex: 'asc' as const } },
+    attachments: { where: { deletedAt: null }, take: 5 },
+    itemTags: { include: { tag: true } },
+    collectionItems: { include: { collection: true } },
+    states: { where: { userId }, take: 1 },
+    identifiers: true,
+  });
+
+  private hasInvalidUuidFilter(
     options: SearchOptions,
-    queryText: string | undefined,
-    limit: number,
-    version: string = '1',
-  ): string {
-    return buildSearchItemsCacheKey(userId, options, queryText, limit, version);
+    checkCursor: boolean = false,
+  ): boolean {
+    return Boolean(
+      (options.collectionId && !isValidUuid(options.collectionId)) ||
+        (options.tagId && !isValidUuid(options.tagId)) ||
+        (isProjectScopeId(options.projectId) &&
+          !isValidUuid(options.projectId.trim())) ||
+        (checkCursor && options.cursor && !isValidUuid(options.cursor)),
+    );
   }
 
-  /**
-   * Builds the base Prisma WHERE clause for non-text filters using Specification Pattern.
-   * Text search is handled separately via raw FTS or ILIKE fallback.
-   */
-  private buildBaseWhere(
+  private async resolveMatchingSearchWhere(
+    client: Prisma.TransactionClient | PrismaService,
     userId: string,
-    options: SearchOptions,
-  ): Prisma.ItemWhereInput {
-    return SearchSpecificationBuilder.baseFromOptions(
+    rawOptions: SearchOptions,
+  ): Promise<Prisma.ItemWhereInput> {
+    const resolvedOptions = await resolveSearchCollectionOptions(
+      client,
       userId,
-      this.sanitizeUuidOptions(options),
-    ).toPrismaWhere();
+      rawOptions,
+    );
+    const q = resolvedOptions.q?.trim();
+    const ftsSanitized = sanitizeSearchQuery(q);
+    let textWhere: Prisma.ItemWhereInput = {};
+
+    if (q) {
+      if (ftsSanitized && this.hasFtsColumn()) {
+        try {
+          const builtIds = buildSearchFtsMatchingIdsSql({
+            userId,
+            options: resolvedOptions,
+            queryText: ftsSanitized,
+            limit: 5000,
+          });
+          if (!builtIds) {
+            textWhere = this.buildTextWhereIlike(q, resolvedOptions.searchMode);
+          } else {
+            const rawRunner =
+              typeof client.$queryRawUnsafe === 'function'
+                ? client
+                : this.prisma;
+            const ftsRows = await rawRunner.$queryRawUnsafe<
+              Array<{ id: string }>
+            >(builtIds.sql, ...builtIds.params);
+            textWhere = { id: { in: ftsRows.map((r) => r.id) } };
+          }
+        } catch {
+          textWhere = this.buildTextWhereIlike(q, resolvedOptions.searchMode);
+        }
+      } else {
+        textWhere = this.buildTextWhereIlike(q, resolvedOptions.searchMode);
+      }
+    }
+
+    return {
+      ...this.buildBaseWhere(userId, resolvedOptions),
+      ...textWhere,
+    };
   }
 
-  /**
-   * Builds a Prisma text-search OR clause using Specification Pattern.
-   * Used as fallback when tsvector is not available.
-   */
-  private buildTextWhereIlike(queryText: string): Prisma.ItemWhereInput {
-    return new TextSearchSpecification(queryText).toPrismaWhere();
-  }
-
-  async searchItems(
+  async prepareSearchOptions(
     userId: string,
     options: SearchOptions,
     tx?: Prisma.TransactionClient,
-  ) {
-    if (
-      (options.collectionId && !isValidUuid(options.collectionId)) ||
-      (options.tagId && !isValidUuid(options.tagId)) ||
-      (this.isProjectScope(options.projectId) &&
-        !isValidUuid(options.projectId.trim())) ||
-      (options.cursor && !isValidUuid(options.cursor))
-    ) {
+  ): Promise<SearchOptions> {
+    if (this.hasInvalidUuidFilter(options)) return options;
+    return resolveSearchCollectionOptions(this.getClient(tx), userId, options);
+  }
+
+  async searchItems(userId: string, options: SearchOptions, tx?: Prisma.TransactionClient) {
+    if (this.hasInvalidUuidFilter(options, true)) {
       return { items: [], nextCursor: undefined, hasNextPage: false };
     }
 
-    const limit = Math.min(options.limit ?? 20, 100);
+    const limit = Math.min(Math.max(options.limit ?? 20, 1), 500);
     const queryText = options.q?.trim();
 
     if (!tx && this.cache) {
       const scopeId = this.resolveScopeId(userId, options);
       const version = await this.resolveScopeVersion(scopeId);
-      const cacheKey = this.buildSearchCacheKey(
-        userId,
-        options,
-        queryText,
-        limit,
-        version,
-      );
+      const cacheKey = buildSearchItemsCacheKey(userId, options, queryText, limit, version);
 
       if (typeof this.cache.wrap === 'function') {
-        return this.cache.wrap(
-          cacheKey,
-          () => this.executeSearchItems(userId, options, queryText, limit, tx),
-          60, // 60s TTL for fast navigation & debounced typing
+        return this.singleFlight.execute(cacheKey, () =>
+          this.cache!.wrap(
+            cacheKey,
+            () => this.executeSearchItems(userId, options, queryText, limit, tx),
+            this.applyJitter(60),
+          ),
         );
       }
-      const cached = await this.cache.get?.(cacheKey);
-      if (cached && typeof cached === 'object' && 'items' in cached) {
-        return cached as Awaited<ReturnType<typeof this.executeSearchItems>>;
-      }
-      const fresh = await this.executeSearchItems(
-        userId,
-        options,
-        queryText,
-        limit,
-        tx,
-      );
-      await this.cache.set?.(cacheKey, fresh, 60);
-      return fresh;
+      return this.singleFlight.execute(cacheKey, async () => {
+        const cached = await this.cache!.get?.(cacheKey);
+        if (cached && typeof cached === 'object' && 'items' in cached) {
+          return cached as Awaited<ReturnType<typeof this.executeSearchItems>>;
+        }
+        const fresh = await this.executeSearchItems(userId, options, queryText, limit, tx);
+        await this.cache!.set?.(cacheKey, fresh, this.applyJitter(60));
+        return fresh;
+      });
     }
 
     return this.executeSearchItems(userId, options, queryText, limit, tx);
@@ -198,32 +204,21 @@ export class SearchRepository implements OnModuleInit {
 
   private async executeSearchItems(
     userId: string,
-    options: SearchOptions,
+    rawOptions: SearchOptions,
     queryText: string | undefined,
     limit: number,
     tx?: Prisma.TransactionClient,
   ) {
-    // Full-Text Search via PostgreSQL tsvector
-    // Uses generated column `search_vector` (GIN index) added by migration
-    // `add_catalog_item_fts`. Falls back to ILIKE if migration hasn't run yet
-    // or if the query consists only of punctuation/symbols that strip to empty in tsquery.
+    const options = await resolveSearchCollectionOptions(this.getClient(tx), userId, rawOptions);
     const ftsSanitized = sanitizeSearchQuery(queryText);
     if (queryText && ftsSanitized && this.hasFtsColumn()) {
       try {
-        return await this.searchItemsFts(
-          userId,
-          options,
-          ftsSanitized,
-          limit,
-          tx,
-        );
+        return await this.searchItemsFts(userId, options, ftsSanitized, limit, tx);
       } catch (err: unknown) {
-        // Column might not exist yet (pre-migration) — fall through to ILIKE
         const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`FTS query failed, falling back to ILIKE: ${errMsg}`);
       }
     }
-    // ILIKE fallback (pre-migration or no text query)
     return await this.searchItemsIlike(userId, options, limit, tx);
   }
 
@@ -234,23 +229,31 @@ export class SearchRepository implements OnModuleInit {
     limit: number,
     tx?: Prisma.TransactionClient,
   ) {
-    const built = buildSearchFtsSqlQuery({
-      userId,
-      options,
-      queryText,
-      limit,
-    });
-    if (!built) {
-      return { items: [], nextCursor: undefined, hasNextPage: false };
-    }
+    const built = buildSearchFtsSqlQuery({ userId, options, queryText, limit });
+    if (!built) return { items: [], nextCursor: undefined, hasNextPage: false };
 
     const client = this.getClient(tx);
-    const rawRunner =
-      typeof client.$queryRawUnsafe === 'function' ? client : this.prisma;
-    const rows = await rawRunner.$queryRawUnsafe<Array<{ id: string }>>(
-      built.sql,
-      ...built.params,
-    );
+    const rawRunner = typeof client.$queryRawUnsafe === 'function' ? client : this.prisma;
+    let rows = await rawRunner.$queryRawUnsafe<Array<{ id: string }>>(built.sql, ...built.params);
+
+    if (rows.length === 0 && !options.cursor && queryText.trim().length >= 3) {
+      const trgmBuilt = buildSearchTrgmFallbackSqlQuery({
+        userId,
+        options,
+        queryText,
+        limit,
+      });
+      if (trgmBuilt) {
+        try {
+          rows = await rawRunner.$queryRawUnsafe<Array<{ id: string }>>(
+            trgmBuilt.sql,
+            ...trgmBuilt.params,
+          );
+        } catch {
+          // pg_trgm extension may not be installed in all environments; ignore silently
+        }
+      }
+    }
 
     let hasNextPage = false;
     let nextCursor: string | undefined;
@@ -262,28 +265,15 @@ export class SearchRepository implements OnModuleInit {
       nextCursor = ids[ids.length - 1];
     }
 
-    if (ids.length === 0) {
-      return { items: [], nextCursor: undefined, hasNextPage: false };
-    }
+    if (ids.length === 0) return { items: [], nextCursor: undefined, hasNextPage: false };
 
-    // Fetch full records with relations in original ranked order
     const items = await client.item.findMany({
       where: { id: { in: ids } },
-      include: {
-        contributors: { orderBy: { orderIndex: 'asc' } },
-        attachments: { where: { deletedAt: null }, take: 5 },
-        itemTags: { include: { tag: true } },
-        collectionItems: { include: { collection: true } },
-        states: { where: { userId }, take: 1 },
-        identifiers: true,
-      },
+      include: SearchRepository.ITEM_SEARCH_INCLUDE(userId),
     });
 
-    // Restore FTS rank order
     const orderMap = new Map(ids.map((id, idx) => [id, idx]));
-    items.sort(
-      (a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999),
-    );
+    items.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
 
     return { items, nextCursor, hasNextPage };
   }
@@ -297,17 +287,67 @@ export class SearchRepository implements OnModuleInit {
     const client = this.getClient(tx);
     const q = options.q?.trim();
 
-    const where: Prisma.ItemWhereInput = {
-      ...this.buildBaseWhere(userId, options),
-      ...(q ? this.buildTextWhereIlike(q) : {}),
-    };
+    const baseWhere = this.buildBaseWhere(userId, options);
+    const textWhere = q
+      ? this.buildTextWhereIlike(q, options.searchMode)
+      : undefined;
+    const where: Prisma.ItemWhereInput = textWhere
+      ? { AND: [baseWhere, textWhere] }
+      : baseWhere;
+
+    const effectiveSortBy = options.sortBy || options.orderBy;
+    const effectiveSortDir: Prisma.SortOrder =
+      (options.sortOrder || options.orderDirection) === 'asc' ? 'asc' : 'desc';
 
     const orderBy: Prisma.ItemOrderByWithRelationInput[] =
-      options.sortBy === 'year'
-        ? [{ year: options.sortOrder || 'desc' }, { id: 'desc' }]
-        : options.sortBy === 'title'
-          ? [{ title: options.sortOrder || 'asc' }, { id: 'desc' }]
-          : [{ createdAt: options.sortOrder || 'desc' }, { id: 'desc' }];
+      effectiveSortBy === 'year'
+        ? [
+            { year: { sort: effectiveSortDir, nulls: 'last' } },
+            { id: effectiveSortDir },
+          ]
+        : effectiveSortBy === 'title'
+          ? [{ title: effectiveSortDir }, { id: effectiveSortDir }]
+          : effectiveSortBy === 'authors' ||
+              effectiveSortBy === 'creator' ||
+              effectiveSortBy === 'firstAuthor'
+            ? [
+                { firstAuthor: { sort: effectiveSortDir, nulls: 'last' } },
+                { id: effectiveSortDir },
+              ]
+            : effectiveSortBy === 'publication' ||
+                effectiveSortBy === 'publicationTitle'
+              ? [
+                  {
+                    publicationTitle: {
+                      sort: effectiveSortDir,
+                      nulls: 'last',
+                    },
+                  },
+                  { id: effectiveSortDir },
+                ]
+              : effectiveSortBy === 'citationKey'
+                ? [
+                    { citationKey: { sort: effectiveSortDir, nulls: 'last' } },
+                    { id: effectiveSortDir },
+                  ]
+                : effectiveSortBy === 'deletedAt' ||
+                    effectiveSortBy === 'dateDeleted'
+                  ? [
+                      { deletedAt: { sort: effectiveSortDir, nulls: 'last' } },
+                      { id: effectiveSortDir },
+                    ]
+                  : effectiveSortBy === 'updatedAt' ||
+                      effectiveSortBy === 'dateModified'
+                    ? [
+                        { updatedAt: effectiveSortDir },
+                        { id: effectiveSortDir },
+                      ]
+                    : [
+                        { createdAt: effectiveSortDir },
+                        { id: effectiveSortDir },
+                      ];
+
+    const page = options.page && options.page > 0 ? options.page : 1;
 
     return client.item
       .findMany({
@@ -316,26 +356,19 @@ export class SearchRepository implements OnModuleInit {
         take: limit + 1,
         ...(options.cursor && isValidUuid(options.cursor)
           ? { cursor: { id: options.cursor }, skip: 1 }
-          : {}),
-        include: {
-          contributors: { orderBy: { orderIndex: 'asc' } },
-          attachments: { where: { deletedAt: null }, take: 5 },
-          itemTags: { include: { tag: true } },
-          collectionItems: { include: { collection: true } },
-          states: { where: { userId }, take: 1 },
-          identifiers: true,
-        },
+          : page > 1
+            ? { skip: (page - 1) * limit }
+            : {}),
+        include: SearchRepository.ITEM_SEARCH_INCLUDE(userId),
       })
       .then((items) => {
         let hasNextPage = false;
         let nextCursor: string | undefined;
-
         if (items.length > limit) {
           hasNextPage = true;
           items.pop();
           nextCursor = items[items.length - 1]?.id;
         }
-
         return { items, nextCursor, hasNextPage };
       });
   }
@@ -345,172 +378,65 @@ export class SearchRepository implements OnModuleInit {
     options: SearchOptions,
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
-    if (
-      (options.collectionId && !isValidUuid(options.collectionId)) ||
-      (options.tagId && !isValidUuid(options.tagId)) ||
-      (this.isProjectScope(options.projectId) &&
-        !isValidUuid(options.projectId.trim()))
-    ) {
+    if (this.hasInvalidUuidFilter(options)) {
       return 0;
     }
 
     const client = this.getClient(tx);
-    const q = options.q?.trim();
-    const ftsSanitized = sanitizeSearchQuery(q);
-    let textWhere: Prisma.ItemWhereInput = {};
-
-    if (q) {
-      if (ftsSanitized && this.hasFtsColumn()) {
-        try {
-          const builtIds = buildSearchFtsMatchingIdsSql({
-            userId,
-            options,
-            queryText: ftsSanitized,
-            limit: 5000,
-          });
-          if (!builtIds) {
-            textWhere = this.buildTextWhereIlike(q);
-          } else {
-            const rawRunner =
-              typeof client.$queryRawUnsafe === 'function'
-                ? client
-                : this.prisma;
-            const ftsRows = await rawRunner.$queryRawUnsafe<
-              Array<{ id: string }>
-            >(builtIds.sql, ...builtIds.params);
-            textWhere = { id: { in: ftsRows.map((r) => r.id) } };
-          }
-        } catch {
-          textWhere = this.buildTextWhereIlike(q);
-        }
-      } else {
-        textWhere = this.buildTextWhereIlike(q);
-      }
-    }
-
-    const where: Prisma.ItemWhereInput = {
-      ...this.buildBaseWhere(userId, options),
-      ...textWhere,
-    };
-
-    if (!client.item?.count) {
-      return 0;
-    }
+    if (!client.item?.count) return 0;
+    const where = await this.resolveMatchingSearchWhere(client, userId, options);
     return client.item.count({ where });
   }
 
-  async getFacets(
-    userId: string,
-    options: SearchOptions,
-    tx?: Prisma.TransactionClient,
-  ): Promise<FacetResult> {
-    return this.computeFacets(userId, options, tx);
-  }
 
-  async computeFacets(
-    userId: string,
-    options: SearchOptions,
-    tx?: Prisma.TransactionClient,
-  ): Promise<FacetResult> {
+  async computeFacets(userId: string, options: SearchOptions, tx?: Prisma.TransactionClient): Promise<FacetResult> {
     const scopeId = this.resolveScopeId(userId, options);
     const version = await this.resolveScopeVersion(scopeId);
     const cacheKey = buildSearchFacetCacheKey(userId, options, version);
 
-    if (this.cache) {
-      try {
-        const cached = await this.cache.get<FacetResult>(cacheKey);
-        if (cached && typeof cached === 'object' && 'itemTypes' in cached) {
-          return cached;
-        }
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        this.logger.debug(`Facet cache lookup error: ${errMsg}`);
-      }
-    }
-
-    if (
-      (options.collectionId && !isValidUuid(options.collectionId)) ||
-      (options.tagId && !isValidUuid(options.tagId)) ||
-      (this.isProjectScope(options.projectId) &&
-        !isValidUuid(options.projectId.trim()))
-    ) {
-      return { itemTypes: {}, years: {}, tags: {} };
-    }
-
-    const client = this.getClient(tx);
-    const q = options.q?.trim();
-    const ftsSanitized = sanitizeSearchQuery(q);
-    let textWhere: Prisma.ItemWhereInput = {};
-
-    if (q) {
-      if (ftsSanitized && this.hasFtsColumn()) {
+    const computeFreshFacets = async (): Promise<FacetResult> => {
+      if (this.cache) {
         try {
-          const builtIds = buildSearchFtsMatchingIdsSql({
-            userId,
-            options,
-            queryText: ftsSanitized,
-            limit: 5000,
-          });
-          if (!builtIds) {
-            textWhere = this.buildTextWhereIlike(q);
-          } else {
-            const rawRunner =
-              typeof client.$queryRawUnsafe === 'function'
-                ? client
-                : this.prisma;
-            const ftsRows = await rawRunner.$queryRawUnsafe<
-              Array<{ id: string }>
-            >(builtIds.sql, ...builtIds.params);
-            textWhere = { id: { in: ftsRows.map((r) => r.id) } };
-          }
-        } catch {
-          textWhere = this.buildTextWhereIlike(q);
+          const cached = await this.cache.get<FacetResult>(cacheKey);
+          if (cached && typeof cached === 'object' && 'itemTypes' in cached) return cached;
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          this.logger.debug(`Facet cache lookup error: ${errMsg}`);
         }
-      } else {
-        textWhere = this.buildTextWhereIlike(q);
       }
-    }
 
-    const where: Prisma.ItemWhereInput = {
-      ...this.buildBaseWhere(userId, options),
-      ...textWhere,
+      if (this.hasInvalidUuidFilter(options)) {
+        return { itemTypes: {}, years: {}, tags: {} };
+      }
+
+      const client = this.getClient(tx);
+      const where = await this.resolveMatchingSearchWhere(
+        client,
+        userId,
+        options,
+      );
+
+      const [typeGroups, yearGroups, tagItems] = await Promise.all([
+        client.item.groupBy({ by: ['itemType'], where, _count: { _all: true } }),
+        client.item.groupBy({ by: ['year'], where, _count: { _all: true } }),
+        client.itemTag.findMany({ where: { item: where }, take: 1000, select: { tag: { select: { name: true } } } }),
+      ]);
+
+      const facetResult: FacetResult = aggregateFacetGroups({ typeGroups, yearGroups, tagItems });
+
+      if (this.cache) {
+        try {
+          await this.cache.set(cacheKey, facetResult, this.applyJitter(120));
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.debug(`Facet cache set error: ${message}`);
+        }
+      }
+
+      return facetResult;
     };
 
-    const [typeGroups, yearGroups, tagItems] = await Promise.all([
-      client.item.groupBy({
-        by: ['itemType'],
-        where,
-        _count: { _all: true },
-      }),
-      client.item.groupBy({
-        by: ['year'],
-        where,
-        _count: { _all: true },
-      }),
-      client.itemTag.findMany({
-        where: { item: where },
-        take: 1000,
-        select: { tag: { select: { name: true } } },
-      }),
-    ]);
-
-    const facetResult: FacetResult = aggregateFacetGroups({
-      typeGroups,
-      yearGroups,
-      tagItems,
-    });
-
-    // 3. Cache computed facet result (TTL: 120 seconds)
-    if (this.cache) {
-      try {
-        await this.cache.set(cacheKey, facetResult, 120);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.debug(`Facet cache set error: ${message}`);
-      }
-    }
-
-    return facetResult;
+    return tx ? computeFreshFacets() : this.singleFlight.execute(cacheKey, computeFreshFacets);
   }
 
   async invalidateFacets(scopeId: string): Promise<void> {
@@ -519,13 +445,9 @@ export class SearchRepository implements OnModuleInit {
     let baseVer = Number(this.scopeVersions.get(normalizedScope) || '1') || 1;
     if (this.cache?.get) {
       try {
-        const redisVer = await this.cache.get<string>(
-          LIBRARY_REDIS_KEYS.searchVersion(normalizedScope),
-        );
+        const redisVer = await this.cache.get<string>(LIBRARY_REDIS_KEYS.searchVersion(normalizedScope));
         const parsedRedis = Number(redisVer);
-        if (Number.isFinite(parsedRedis) && parsedRedis > baseVer) {
-          baseVer = parsedRedis;
-        }
+        if (Number.isFinite(parsedRedis) && parsedRedis > baseVer) baseVer = parsedRedis;
       } catch {
         // Non-fatal fallback to local version
       }
@@ -536,12 +458,8 @@ export class SearchRepository implements OnModuleInit {
     if (this.cache) {
       const versionKey = LIBRARY_REDIS_KEYS.searchVersion(normalizedScope);
       await Promise.all([
-        this.cache.delPattern?.(
-          LIBRARY_REDIS_KEYS.searchFacetsPattern(normalizedScope),
-        ),
-        this.cache.delPattern?.(
-          LIBRARY_REDIS_KEYS.searchItemsPattern(normalizedScope),
-        ),
+        this.cache.delPattern?.(LIBRARY_REDIS_KEYS.searchFacetsPattern(normalizedScope)),
+        this.cache.delPattern?.(LIBRARY_REDIS_KEYS.searchItemsPattern(normalizedScope)),
         this.cache.set?.(versionKey, nextVer, 86400),
       ]);
     }
@@ -598,6 +516,7 @@ export class SearchRepository implements OnModuleInit {
     return this.prisma.attachment.findFirst({
       where: {
         id: attachmentId,
+        deletedAt: null,
         item: {
           deletedAt: null,
         },
@@ -617,7 +536,17 @@ export class SearchRepository implements OnModuleInit {
     if (itemId && this.prisma?.item?.findUnique) {
       const item = await this.prisma.item.findUnique({
         where: { id: itemId },
-        select: { id: true, userId: true, projectId: true, deletedAt: true },
+        select: {
+          id: true,
+          userId: true,
+          projectId: true,
+          deletedAt: true,
+          title: true,
+          abstract: true,
+          publicationTitle: true,
+          contributors: { select: { fullName: true, lastName: true } },
+          itemTags: { select: { tag: { select: { name: true } } } },
+        },
       });
       if (!item || item.deletedAt !== null) {
         if (resolvedScope) {
@@ -626,6 +555,58 @@ export class SearchRepository implements OnModuleInit {
         return { indexed: false, scopeId: resolvedScope };
       }
       resolvedScope = resolvedScope || item.projectId || item.userId;
+
+      if (this.hasFtsColumn() && typeof this.prisma.$executeRaw === 'function') {
+        try {
+          const itemRec = item as Record<string, unknown>;
+          const rawTitle = typeof itemRec.title === 'string' ? itemRec.title : '';
+          const rawAbstract = typeof itemRec.abstract === 'string' ? itemRec.abstract : '';
+          const rawPub = typeof itemRec.publicationTitle === 'string' ? itemRec.publicationTitle : '';
+          const rawContributors = Array.isArray(itemRec.contributors)
+            ? (itemRec.contributors as Array<{ fullName?: string | null; lastName?: string | null }>)
+                .map((c) => `${c.fullName || ''} ${c.lastName || ''}`)
+                .join(' ')
+            : '';
+          const rawTags = Array.isArray(itemRec.itemTags)
+            ? (itemRec.itemTags as Array<{ tag?: { name?: string | null } }>)
+                .map((it) => it.tag?.name || '')
+                .join(' ')
+            : '';
+
+          const foldedTitle = SearchQueryEngine.stripDiacritics(rawTitle);
+          const foldedAuthorsTags = SearchQueryEngine.stripDiacritics(
+            `${rawContributors} ${rawTags}`,
+          );
+          const foldedAbstractPub = SearchQueryEngine.stripDiacritics(
+            `${rawAbstract} ${rawPub}`,
+          );
+
+          await this.prisma.$executeRaw`
+            UPDATE "items" i
+            SET "search_vector" =
+              setweight(to_tsvector('english', COALESCE(i."title", '') || ' ' || COALESCE(i."citation_key", '') || ' ' || COALESCE(i."doi", '')), 'A') ||
+              setweight(to_tsvector('simple', ${foldedTitle}), 'A') ||
+              setweight(to_tsvector('simple', COALESCE((
+                SELECT string_agg(COALESCE(c."full_name", '') || ' ' || COALESCE(c."last_name", ''), ' ')
+                FROM "contributors" c
+                WHERE c."item_id" = i."id"
+              ), '') || ' ' || COALESCE((
+                SELECT string_agg(t."name", ' ')
+                FROM "item_tags" it
+                JOIN "tags" t ON t."id" = it."tag_id"
+                WHERE it."item_id" = i."id"
+              ), '') || ' ' || ${foldedAuthorsTags}), 'B') ||
+              setweight(to_tsvector('english', COALESCE(i."abstract", '') || ' ' || ${foldedAbstractPub}), 'B') ||
+              setweight(to_tsvector('english', COALESCE(i."publication_title", '')), 'C')
+            WHERE i."id" = ${itemId}::uuid
+          `;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.debug(
+            `Best-effort search_vector update skipped for item ${itemId}: ${msg}`,
+          );
+        }
+      }
     }
 
     if (resolvedScope) {
@@ -636,26 +617,32 @@ export class SearchRepository implements OnModuleInit {
   }
 
   async deleteFullTextIndexByItemId(itemId: string): Promise<void> {
-    await this.prisma.fullTextIndex.deleteMany({
-      where: { attachment: { itemId } },
-    });
+    await this.prisma.fullTextIndex.deleteMany({ where: { attachment: { itemId } } });
   }
 
   async deleteFullTextIndexByAttachmentId(attachmentId: string): Promise<void> {
-    await this.prisma.fullTextIndex.deleteMany({
-      where: { attachmentId },
-    });
+    await this.prisma.fullTextIndex.deleteMany({ where: { attachmentId } });
   }
 
   async replaceAttachmentPageIndex(
     attachmentId: string,
-    pages: Array<{
-      pageIndex: number;
-      textContent: string;
-      charOffset?: number;
-    }>,
+    pages: Array<{ pageIndex: number; textContent: string; charOffset?: number; itemId?: string }>,
+    itemId?: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
+      let resolvedItemId = itemId || pages[0]?.itemId;
+      if (!resolvedItemId && typeof tx.attachment?.findUnique === 'function') {
+        try {
+          const att = await tx.attachment.findUnique({
+            where: { id: attachmentId },
+            select: { itemId: true },
+          });
+          resolvedItemId = att?.itemId;
+        } catch {
+          // Ignore lookup failure in unit test mocks
+        }
+      }
+
       await tx.fullTextIndex.deleteMany({
         where: { attachmentId },
       });
@@ -667,6 +654,7 @@ export class SearchRepository implements OnModuleInit {
           await tx.fullTextIndex.createMany({
             data: chunk.map((page) => ({
               attachmentId,
+              ...(resolvedItemId ? { itemId: resolvedItemId } : {}),
               pageIndex: page.pageIndex,
               textContent: (page.textContent || '').replace(/\0/g, ''),
               charOffset: page.charOffset ?? 0,
@@ -693,25 +681,55 @@ export class SearchRepository implements OnModuleInit {
         ? pageIndexOrSearchTerm
         : searchTerm;
     const trimmedTerm = resolvedSearchTerm?.trim();
+    const escapedTerm = trimmedTerm ? escapeLikePattern(trimmedTerm) : undefined;
 
     const dbPages = await this.prisma.fullTextIndex.findMany({
       where: {
         attachmentId,
+        attachment: {
+          deletedAt: null,
+          item: { deletedAt: null },
+        },
         ...(resolvedPageIndex !== undefined
           ? { pageIndex: resolvedPageIndex }
           : {}),
-        ...(trimmedTerm
+        ...(escapedTerm
           ? {
               textContent: {
-                contains: trimmedTerm,
+                contains: escapedTerm,
                 mode: 'insensitive',
               },
             }
           : {}),
       },
       orderBy: { pageIndex: 'asc' },
-      ...(trimmedTerm ? { take: 50 } : {}),
+      take: trimmedTerm ? 200 : 1000,
     });
+
+    if (dbPages.length === 0 && escapedTerm && trimmedTerm) {
+      const foldedTerm = SearchQueryEngine.stripDiacritics(trimmedTerm).trim();
+      if (foldedTerm.length >= 2) {
+        const allPages = await this.prisma.fullTextIndex.findMany({
+          where: {
+            attachmentId,
+            attachment: {
+              deletedAt: null,
+              item: { deletedAt: null },
+            },
+            ...(resolvedPageIndex !== undefined
+              ? { pageIndex: resolvedPageIndex }
+              : {}),
+          },
+          orderBy: { pageIndex: 'asc' },
+          take: 500,
+        });
+        return allPages.map((dbPage) => ({
+          pageIndex: dbPage.pageIndex,
+          textContent: dbPage.textContent || '',
+          charOffset: dbPage.charOffset ?? 0,
+        }));
+      }
+    }
 
     return dbPages.map((dbPage) => ({
       pageIndex: dbPage.pageIndex,

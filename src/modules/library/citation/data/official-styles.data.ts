@@ -17,8 +17,14 @@ export const IEEE_CSL = `<?xml version="1.0" encoding="utf-8"?>
   </info>
   <citation collapse="citation-number">
     <sort><key variable="citation-number"/></sort>
-    <layout prefix="[" suffix="]" delimiter=", ">
-      <text variable="citation-number"/>
+    <layout delimiter=", ">
+      <group prefix="[" suffix="]" delimiter=", ">
+        <text variable="citation-number"/>
+        <group delimiter=" ">
+          <label variable="locator" form="short"/>
+          <text variable="locator"/>
+        </group>
+      </group>
     </layout>
   </citation>
   <bibliography entry-spacing="0" second-field-align="flush">
@@ -28,7 +34,7 @@ export const IEEE_CSL = `<?xml version="1.0" encoding="utf-8"?>
         <name initialize-with=". " delimiter=", " and="text"/>
       </names>
       <choose>
-        <if type="book thesis report" match="any">
+        <if type="book" match="any">
           <group delimiter=", ">
             <text variable="title" font-style="italic"/>
             <text variable="edition" suffix=" ed."/>
@@ -40,6 +46,71 @@ export const IEEE_CSL = `<?xml version="1.0" encoding="utf-8"?>
             <text variable="DOI" prefix="doi: "/>
           </group>
         </if>
+        <else-if type="thesis" match="any">
+          <group delimiter=", ">
+            <text variable="title" quotes="true"/>
+            <text variable="genre"/>
+            <text variable="publisher"/>
+            <text variable="publisher-place"/>
+            <date variable="issued">
+              <date-part name="year"/>
+            </date>
+            <text variable="DOI" prefix="doi: "/>
+          </group>
+        </else-if>
+        <else-if type="report" match="any">
+          <text variable="title" quotes="true" suffix=", "/>
+          <group delimiter=", ">
+            <text variable="publisher" font-style="italic"/>
+            <text variable="publisher-place"/>
+            <group delimiter=" ">
+              <text variable="genre"/>
+              <text variable="number"/>
+            </group>
+            <date variable="issued">
+              <date-part name="month" form="short" suffix=" "/>
+              <date-part name="year"/>
+            </date>
+            <text variable="DOI" prefix="doi: "/>
+          </group>
+        </else-if>
+        <else-if type="patent" match="any">
+          <text variable="title" quotes="true" suffix=", "/>
+          <group delimiter=", ">
+            <group delimiter=" ">
+              <text variable="authority"/>
+              <text variable="number" prefix="Patent "/>
+            </group>
+            <date variable="issued">
+              <date-part name="month" form="short" suffix=" "/>
+              <date-part name="day" suffix=", "/>
+              <date-part name="year"/>
+            </date>
+          </group>
+        </else-if>
+        <else-if type="webpage post-weblog" match="any">
+          <text variable="title" quotes="true" suffix=", "/>
+          <group delimiter=". ">
+            <group delimiter=", ">
+              <text variable="container-title" font-style="italic"/>
+              <text variable="publisher"/>
+              <date variable="issued">
+                <date-part name="month" form="short" suffix=" "/>
+                <date-part name="day" suffix=", "/>
+                <date-part name="year"/>
+              </date>
+            </group>
+            <group delimiter=" ">
+              <text value="[Online]. Available:"/>
+              <text variable="URL"/>
+            </group>
+            <date variable="accessed" prefix="[Accessed: " suffix="]">
+              <date-part name="month" form="short" suffix=" "/>
+              <date-part name="day" suffix=", "/>
+              <date-part name="year"/>
+            </date>
+          </group>
+        </else-if>
         <else-if type="chapter" match="any">
           <text variable="title" quotes="true" suffix=", "/>
           <group delimiter=", ">
@@ -89,7 +160,14 @@ export const IEEE_CSL = `<?xml version="1.0" encoding="utf-8"?>
               <date-part name="month" form="short" suffix=" "/>
               <date-part name="year"/>
             </date>
-            <text variable="DOI" prefix="doi: "/>
+            <choose>
+              <if variable="DOI">
+                <text variable="DOI" prefix="doi: "/>
+              </if>
+              <else-if variable="URL">
+                <text variable="URL" prefix="[Online]. Available: "/>
+              </else-if>
+            </choose>
           </group>
         </else>
       </choose>
@@ -129,6 +207,29 @@ export const NATURE_CSL = `<?xml version="1.0" encoding="utf-8"?>
             </date>
           </group>
         </if>
+        <else-if type="chapter paper-conference" match="any">
+          <text variable="title" suffix=". "/>
+          <text variable="container-title" font-style="italic" prefix="in " suffix=" "/>
+          <names variable="editor" prefix="(" suffix=") ">
+            <label form="short" suffix=" "/>
+            <name sort-separator=", " initialize-with=". " delimiter=", " and="symbol"/>
+          </names>
+          <text variable="page" suffix=" "/>
+          <group prefix="(" suffix=")" delimiter=", ">
+            <text variable="publisher"/>
+            <date variable="issued">
+              <date-part name="year"/>
+            </date>
+          </group>
+        </else-if>
+        <else-if type="webpage post-weblog" match="any">
+          <text variable="title" suffix=". "/>
+          <text variable="container-title" font-style="italic" suffix=" "/>
+          <text variable="URL" suffix=" "/>
+          <date variable="issued" prefix="(" suffix=")">
+            <date-part name="year"/>
+          </date>
+        </else-if>
         <else>
           <text variable="title" suffix=". " font-weight="bold"/>
           <text variable="container-title" font-style="italic" form="short" suffix=" "/>
@@ -156,15 +257,25 @@ export const CHICAGO_CSL = `<?xml version="1.0" encoding="utf-8"?>
   </info>
   <citation et-al-min="4" et-al-use-first="1" disambiguate-add-year-suffix="true" disambiguate-add-names="true">
     <layout prefix="(" suffix=")" delimiter="; ">
-      <names variable="author">
-        <name form="short" and="text" delimiter=", "/>
-      </names>
-      <date variable="issued" prefix=" ">
-        <date-part name="year"/>
-      </date>
+      <group delimiter=", ">
+        <group delimiter=" ">
+          <names variable="author">
+            <name form="short" and="text" delimiter=", "/>
+          </names>
+          <date variable="issued">
+            <date-part name="year"/>
+          </date>
+        </group>
+        <text variable="locator"/>
+      </group>
     </layout>
   </citation>
   <bibliography hanging-indent="true" et-al-min="11" et-al-use-first="7" entry-spacing="1">
+    <sort>
+      <key variable="author"/>
+      <key variable="issued"/>
+      <key variable="title"/>
+    </sort>
     <layout suffix=".">
       <names variable="author" suffix=". ">
         <name name-as-sort-order="first" and="text" delimiter=", " delimiter-precedes-last="always"/>
@@ -175,6 +286,10 @@ export const CHICAGO_CSL = `<?xml version="1.0" encoding="utf-8"?>
       <choose>
         <if type="book thesis report" match="any">
           <text variable="title" font-style="italic" text-case="title" suffix=". "/>
+          <group delimiter=", " suffix=". ">
+            <text variable="genre"/>
+            <text variable="number"/>
+          </group>
           <group delimiter=": " suffix=".">
             <text variable="publisher-place"/>
             <text variable="publisher"/>
@@ -191,6 +306,19 @@ export const CHICAGO_CSL = `<?xml version="1.0" encoding="utf-8"?>
             <text variable="publisher-place"/>
             <text variable="publisher"/>
           </group>
+        </else-if>
+        <else-if type="webpage post-weblog" match="any">
+          <text variable="title" quotes="true" text-case="title" suffix=". "/>
+          <group delimiter=", ">
+            <text variable="container-title" font-style="italic"/>
+            <text variable="publisher"/>
+            <date variable="accessed" prefix="accessed ">
+              <date-part name="month" form="long" suffix=" "/>
+              <date-part name="day" suffix=", "/>
+              <date-part name="year"/>
+            </date>
+          </group>
+          <text variable="URL" prefix=". "/>
         </else-if>
         <else>
           <text variable="title" quotes="true" text-case="title" suffix=". "/>
@@ -228,6 +356,11 @@ export const MLA_CSL = `<?xml version="1.0" encoding="utf-8"?>
     </layout>
   </citation>
   <bibliography hanging-indent="true" et-al-min="3" et-al-use-first="1" line-spacing="2" entry-spacing="0">
+    <sort>
+      <key variable="author"/>
+      <key variable="title"/>
+      <key variable="issued"/>
+    </sort>
     <layout suffix=".">
       <names variable="author" suffix=". ">
         <name name-as-sort-order="first" and="text" delimiter=", "/>
@@ -236,6 +369,7 @@ export const MLA_CSL = `<?xml version="1.0" encoding="utf-8"?>
         <if type="book thesis report" match="any">
           <text variable="title" font-style="italic" suffix=". "/>
           <group delimiter=", ">
+            <text variable="genre"/>
             <text variable="publisher"/>
             <date variable="issued">
               <date-part name="year"/>
@@ -259,160 +393,18 @@ export const MLA_CSL = `<?xml version="1.0" encoding="utf-8"?>
           </group>
         </else>
       </choose>
-      <text variable="DOI" prefix=". https://doi.org/"/>
-    </layout>
-  </bibliography>
-</style>`;
-
-export const TCVN_CSL = `<?xml version="1.0" encoding="utf-8"?>
-<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0" default-locale="vi-VN">
-  <info>
-    <title>Tiêu chuẩn Việt Nam - Bộ Giáo dục và Đào tạo (Author-Date)</title>
-    <id>http://www.zotero.org/styles/vietnam-ministry-of-education-and-training-author-date</id>
-    <link href="http://www.zotero.org/styles/vietnam-ministry-of-education-and-training-author-date" rel="self"/>
-    <author><name>Bộ Giáo dục và Đào tạo Việt Nam</name></author>
-    <category citation-format="author-date"/>
-    <category field="generic-base"/>
-    <updated>2026-10-08T00:00:00+00:00</updated>
-  </info>
-  <citation et-al-min="3" et-al-use-first="1" disambiguate-add-year-suffix="true" collapse="year">
-    <layout prefix="(" suffix=")" delimiter="; ">
-      <group delimiter=", ">
-        <names variable="author">
-          <name form="short" and="text" delimiter=", "/>
-          <substitute>
-            <text variable="title" form="short"/>
-          </substitute>
-        </names>
-        <date variable="issued">
-          <date-part name="year"/>
-        </date>
-      </group>
-    </layout>
-  </citation>
-  <bibliography hanging-indent="true" et-al-min="4" et-al-use-first="3" entry-spacing="0">
-    <layout suffix=".">
-      <names variable="author" suffix=" ">
-        <name delimiter=", " and="text"/>
-      </names>
-      <date variable="issued" prefix="(" suffix="), ">
-        <date-part name="year"/>
-      </date>
       <choose>
-        <if type="article-journal article-magazine" match="any">
-          <text variable="title" quotes="true" suffix=", "/>
-          <text variable="container-title" font-style="italic" suffix=", "/>
-          <group delimiter=", ">
-            <text variable="volume" prefix="tập "/>
-            <text variable="issue" prefix="số "/>
-            <text variable="page" prefix="tr. "/>
-            <text variable="DOI" prefix="DOI: "/>
-          </group>
+        <if variable="DOI">
+          <text variable="DOI" prefix=". https://doi.org/"/>
         </if>
-        <else-if type="chapter" match="any">
-          <text variable="title" quotes="true" suffix=", "/>
-          <text variable="container-title" font-style="italic" prefix="Trong: " suffix=", "/>
-          <group delimiter=", ">
-            <text variable="publisher"/>
-            <text variable="publisher-place"/>
-            <text variable="page" prefix="tr. "/>
-          </group>
+        <else-if variable="URL">
+          <text variable="URL" prefix=", "/>
+          <date variable="accessed" prefix=". Accessed ">
+            <date-part name="day" suffix=" "/>
+            <date-part name="month" form="short" suffix=" "/>
+            <date-part name="year"/>
+          </date>
         </else-if>
-        <else-if type="book report" match="any">
-          <text variable="title" font-style="italic" suffix=", "/>
-          <group delimiter=", ">
-            <text variable="publisher"/>
-            <text variable="publisher-place"/>
-          </group>
-        </else-if>
-        <else-if type="paper-conference" match="any">
-          <text variable="title" quotes="true" suffix=", "/>
-          <text variable="container-title" font-style="italic" prefix="Kỷ yếu " suffix=", "/>
-          <text variable="page" prefix="tr. "/>
-        </else-if>
-        <else-if type="thesis" match="any">
-          <text variable="title" font-style="italic" suffix=", "/>
-          <text variable="genre" suffix=", "/>
-          <text variable="publisher"/>
-        </else-if>
-        <else>
-          <text variable="title" quotes="true" suffix=", "/>
-          <text variable="container-title" font-style="italic" suffix=", "/>
-          <text variable="URL"/>
-        </else>
-      </choose>
-    </layout>
-  </bibliography>
-</style>`;
-
-export const TCVN_NUMERIC_CSL = `<?xml version="1.0" encoding="utf-8"?>
-<style xmlns="http://purl.org/net/xbiblio/csl" class="numeric" version="1.0" default-locale="vi-VN">
-  <info>
-    <title>Tiêu chuẩn Việt Nam - Bộ Giáo dục và Đào tạo (Numeric)</title>
-    <id>http://www.zotero.org/styles/vietnam-ministry-of-education-and-training-numeric</id>
-    <link href="http://www.zotero.org/styles/vietnam-ministry-of-education-and-training-numeric" rel="self"/>
-    <author><name>Bộ Giáo dục và Đào tạo Việt Nam</name></author>
-    <category citation-format="numeric"/>
-    <category field="generic-base"/>
-    <updated>2026-10-08T00:00:00+00:00</updated>
-  </info>
-  <citation collapse="citation-number">
-    <sort><key variable="citation-number"/></sort>
-    <layout prefix="[" suffix="]" delimiter=", ">
-      <text variable="citation-number"/>
-    </layout>
-  </citation>
-  <bibliography entry-spacing="0" second-field-align="flush">
-    <layout suffix=".">
-      <text variable="citation-number" prefix="[" suffix="] "/>
-      <names variable="author" suffix=" ">
-        <name delimiter=", " and="text"/>
-      </names>
-      <date variable="issued" prefix="(" suffix="), ">
-        <date-part name="year"/>
-      </date>
-      <choose>
-        <if type="article-journal article-magazine" match="any">
-          <text variable="title" quotes="true" suffix=", "/>
-          <text variable="container-title" font-style="italic" suffix=", "/>
-          <group delimiter=", ">
-            <text variable="volume" prefix="tập "/>
-            <text variable="issue" prefix="số "/>
-            <text variable="page" prefix="tr. "/>
-            <text variable="DOI" prefix="DOI: "/>
-          </group>
-        </if>
-        <else-if type="chapter" match="any">
-          <text variable="title" quotes="true" suffix=", "/>
-          <text variable="container-title" font-style="italic" prefix="Trong: " suffix=", "/>
-          <group delimiter=", ">
-            <text variable="publisher"/>
-            <text variable="publisher-place"/>
-            <text variable="page" prefix="tr. "/>
-          </group>
-        </else-if>
-        <else-if type="book report" match="any">
-          <text variable="title" font-style="italic" suffix=", "/>
-          <group delimiter=", ">
-            <text variable="publisher"/>
-            <text variable="publisher-place"/>
-          </group>
-        </else-if>
-        <else-if type="paper-conference" match="any">
-          <text variable="title" quotes="true" suffix=", "/>
-          <text variable="container-title" font-style="italic" prefix="Kỷ yếu " suffix=", "/>
-          <text variable="page" prefix="tr. "/>
-        </else-if>
-        <else-if type="thesis" match="any">
-          <text variable="title" font-style="italic" suffix=", "/>
-          <text variable="genre" suffix=", "/>
-          <text variable="publisher"/>
-        </else-if>
-        <else>
-          <text variable="title" quotes="true" suffix=", "/>
-          <text variable="container-title" font-style="italic" suffix=", "/>
-          <text variable="URL"/>
-        </else>
       </choose>
     </layout>
   </bibliography>

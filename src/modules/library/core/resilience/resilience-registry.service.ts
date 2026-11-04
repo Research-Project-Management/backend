@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CircuitBreaker, CircuitBreakerOptions } from './circuit-breaker';
-import { TokenBucketRateLimiter, RateLimiterOptions } from './rate-limiter';
+import { TokenBucketRateLimiter, RateLimiterOptions } from './circuit-breaker';
 
 export interface ResilienceExecuteOptions<T> {
   fallback?: (err: Error) => Promise<T>;

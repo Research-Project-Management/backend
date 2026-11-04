@@ -1,42 +1,24 @@
 import {
-  Injectable,
-  Inject,
-  Logger,
-  NotFoundException,
-  UnprocessableEntityException,
-  Optional,
+  Injectable, Inject, Logger, NotFoundException, UnprocessableEntityException, Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import {
-  CreateItemData,
-  UpdateItemData,
-  ItemDetail,
-  ItemTransactionContext,
+  CreateItemData, UpdateItemData, ItemDetail, ItemTransactionContext,
 } from '@/modules/library/core/types/bibliographic.types';
 import {
-  sanitizeItemTitle,
-  normalizeProjectScopeId,
-  TransactionHelpers,
-  UNIT_OF_WORK,
-  IUnitOfWork,
-  LIBRARY_EVENT_TYPES,
-  buildItemCreatedOutboxPayload,
-  LibraryItemSource,
+  sanitizeItemTitle, normalizeProjectScopeId, TransactionHelpers, executeWithPostCommit, UNIT_OF_WORK,
+  IUnitOfWork, LIBRARY_EVENT_TYPES, buildItemCreatedOutboxPayload, LibraryItemSource, ItemsMapper,
+  SEARCH_FACADE, ISearchFacade,
 } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
-import { TagsService } from './tags.service';
-import { ItemCacheCoordinator } from './item-cache.coordinator';
+import { ItemCacheCoordinator } from './library-bootstrap.service';
 import { ZoteroSchemaValidatorService } from './zotero-schema-validator.service';
-import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import {
-  executeBulkSoftDeleteInTx,
-  executeBulkRestoreInTx,
-  executeBulkPurgeInTx,
-  executePurgeExpiredTrashInTx,
-} from './item-curation.service';
+  executeBulkSoftDeleteInTx, executeBulkRestoreInTx, executeBulkPurgeInTx,
+  executeBulkHardDeleteInTx, executeEmptyTrashInTx, executePurgeExpiredTrashInTx,
+} from '../repositories/command-bulk.operations';
 export type { ItemTransactionContext };
 @Injectable()
 export class ItemService {
@@ -46,134 +28,123 @@ export class ItemService {
     private readonly query: QueryRepository,
     private readonly command: CommandRepository,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
-    private readonly tagsService: TagsService,
-    @Optional()
-    private readonly validator?: ZoteroSchemaValidatorService,
+    @Optional() _tagsService?: unknown,
+    @Optional() private readonly validator?: ZoteroSchemaValidatorService,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() cacheCoordinator?: ItemCacheCoordinator,
+    @Optional() @Inject(SEARCH_FACADE) private readonly searchGateway?: ISearchFacade,
   ) {
-    this.cacheCoordinator =
-      cacheCoordinator ?? new ItemCacheCoordinator(cache);
+    this.cacheCoordinator = cacheCoordinator ?? new ItemCacheCoordinator(cache);
+  }
+
+  private stripPersonalOverlayForSharedScope<T>(item: T, projectId?: string | null): T {
+    if (!projectId || !item || typeof item !== 'object') return item;
+    const clone = { ...(item as unknown as Record<string, unknown>) };
+    for (const k of [
+      'isStarred', 'starred', 'isRead', 'readStatus', 'rating', 'currentPage',
+      'lastReadPage', 'scrollPosition', 'lastOpenedAt', 'lastReadAt', 'isMyPublication', 'states', 'publications',
+    ]) {
+      delete clone[k];
+    }
+    return clone as unknown as T;
   }
   async invalidateItemCache(
-    id: string,
-    userId?: string,
-    projectId?: string,
-    options?: { skipScopeInvalidation?: boolean },
+    id: string, userId?: string, projectId?: string, options?: { skipScopeInvalidation?: boolean },
   ): Promise<void> {
-    return this.cacheCoordinator.invalidateItemCache(
-      id,
-      userId,
-      projectId,
-      options,
-    );
+    return this.cacheCoordinator.invalidateItemCache(id, userId, projectId, options);
   }
-  async invalidateScopeListCache(
-    userId: string,
-    projectId?: string,
-  ): Promise<void> {
+  async invalidateScopeListCache(userId: string, projectId?: string): Promise<void> {
     return this.cacheCoordinator.invalidateScopeListCache(userId, projectId);
   }
   async getItem(userId: string, id: string, projectId?: string) {
     const item = await this.query.findById(userId, id, projectId);
-    return item
-      ? (ItemsMapper.mapFlattenedState(item, userId) ??
-          ItemsMapper.toDomain(item))
-      : null;
+    return item ? (ItemsMapper.mapFlattenedState(item, userId) ?? ItemsMapper.toDomain(item)) : null;
   }
   async createItem(
     userId: string,
     data: CreateItemData,
     context?: Partial<ItemTransactionContext> & {
-      projectId?: string;
-      source?: LibraryItemSource;
-      idempotencyKey?: string;
-      correlationId?: string;
+      projectId?: string; source?: LibraryItemSource; idempotencyKey?: string; correlationId?: string;
     },
     projectId?: string,
   ): Promise<ItemDetail> {
     const dataRec = data as Record<string, unknown>;
-    const dataEf =
-      data.extraFields && typeof data.extraFields === 'object'
-        ? data.extraFields
-        : {};
+    const dataEf = data.extraFields && typeof data.extraFields === 'object' ? data.extraFields : {};
     const fallbackTitle =
-      data.title ??
-      (dataRec.caseName as string | undefined) ??
-      (dataRec.nameOfAct as string | undefined) ??
-      (dataRec.subject as string | undefined) ??
-      (dataEf.caseName as string | undefined) ??
-      (dataEf.nameOfAct as string | undefined) ??
-      (dataEf.subject as string | undefined);
+      data.title ?? (dataRec.caseName as string | undefined) ?? (dataRec.nameOfAct as string | undefined) ??
+      (dataRec.subject as string | undefined) ?? (dataEf.caseName as string | undefined) ??
+      (dataEf.nameOfAct as string | undefined) ?? (dataEf.subject as string | undefined);
     const cleanTitle = sanitizeItemTitle(fallbackTitle);
-    if (!cleanTitle) {
-      throw new UnprocessableEntityException('Item title cannot be empty');
-    }
+    if (!cleanTitle) throw new UnprocessableEntityException('Item title cannot be empty');
     data.title = cleanTitle;
+    const isPreNormalized = Boolean((data as { isPreNormalized?: boolean }).isPreNormalized);
     const valRes = this.validator?.validateAndSanitizeItem
       ? this.validator.validateAndSanitizeItem(data.itemType, data)
       : { sanitizedItem: data, warnings: [] };
     const itemPayload = valRes.sanitizedItem as CreateItemData;
-    const effectiveProjectId = normalizeProjectScopeId(
-      projectId || context?.projectId || itemPayload.projectId,
-    );
-    const execute = async (
-      tx: Prisma.TransactionClient,
-      helpers: TransactionHelpers,
-    ) => {
-      const item = await this.command.create(
-        userId,
-        itemPayload,
-        tx,
-        effectiveProjectId,
-      );
-      const domainCreated = (ItemsMapper.mapFlattenedState(item, userId) ??
-        ItemsMapper.toDomain(item)) as ItemDetail;
+    if (isPreNormalized && itemPayload && typeof itemPayload === 'object') {
+      Object.defineProperty(itemPayload, 'isPreNormalized', {
+        value: true,
+        enumerable: false,
+        configurable: true,
+      });
+    }
+    const effectiveProjectId = normalizeProjectScopeId(projectId || context?.projectId || itemPayload.projectId);
+    const execute = async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+      const item = await this.command.create(userId, itemPayload, tx, effectiveProjectId);
+      const domainCreated = (ItemsMapper.mapFlattenedState(item, userId) ?? ItemsMapper.toDomain(item)) as ItemDetail;
+      const sharedCreatedData = this.stripPersonalOverlayForSharedScope(domainCreated, effectiveProjectId);
       await helpers.appendChange(
         { userId, projectId: effectiveProjectId },
-        {
-          entityType: 'Item',
-          entityId: item.id,
-          action: 'create',
-          version: item.version,
-          data: domainCreated,
-        },
+        { entityType: 'Item', entityId: item.id, action: 'create', version: item.version, data: sharedCreatedData },
       );
       const payload = buildItemCreatedOutboxPayload({
-        itemId: item.id,
-        userId,
-        projectId: effectiveProjectId,
-        title: item.title,
-        source: context?.source ?? 'manual',
-        doi: item.doi,
+        itemId: item.id, userId, projectId: effectiveProjectId, title: item.title,
+        source: context?.source ?? 'manual', doi: item.doi,
       });
       await helpers.publishOutbox(
-        { userId, projectId: effectiveProjectId },
-        item.id,
-        LIBRARY_EVENT_TYPES.ITEM_CREATED,
-        payload,
+        { userId, projectId: effectiveProjectId }, item.id, LIBRARY_EVENT_TYPES.ITEM_CREATED, payload,
       );
-      helpers.onAfterCommit?.(() =>
-        this.invalidateScopeListCache(userId, effectiveProjectId),
-      );
+      const createdItemAttachments = Array.isArray((item as { attachments?: unknown[] }).attachments)
+        ? ((item as {
+            attachments: Array<{
+              id?: string; fileId?: string | null; url?: string | null; mimeType?: string | null;
+              filename?: string | null; linkMode?: string | null; extractionStatus?: string | null;
+            }>;
+          }).attachments)
+        : [];
+      for (const att of createdItemAttachments) {
+        if (!att?.id) continue;
+        const attRec = att as { size?: number | bigint | null; storageKey?: string | null };
+        const isPdf = att.mimeType === 'application/pdf' || Boolean(att.filename && att.filename.toLowerCase().endsWith('.pdf'));
+        const hasRealSizeOrKey = Number(attRec.size ?? 0) > 0 || Boolean(attRec.storageKey);
+        const hasStoredBinary = att.linkMode !== 'linked_url' && hasRealSizeOrKey && Boolean(att.fileId || (att.url && !att.url.startsWith('http')));
+        if (isPdf && hasStoredBinary && (!att.extractionStatus || att.extractionStatus === 'PENDING')) {
+          await helpers.publishOutbox(
+            { userId, projectId: effectiveProjectId }, att.id, LIBRARY_EVENT_TYPES.ATTACHMENT_EXTRACTION_REQUESTED,
+            { attachmentId: att.id, itemId: item.id, userId, projectId: effectiveProjectId },
+          );
+        }
+      }
       return domainCreated;
     };
-    let result: ItemDetail;
-    let ranPostCommitHook = false;
     if (context?.tx && context?.helpers) {
-      result = await execute(context.tx, context.helpers);
-    } else {
-      result = await this.libraryTx.executeInTransaction(
-        async (tx, helpers) => {
-          ranPostCommitHook = Boolean(helpers.onAfterCommit);
-          return execute(tx, helpers);
-        },
-      );
-    }
-    if (!ranPostCommitHook) {
+      if (context.helpers.onAfterCommit) {
+        context.helpers.onAfterCommit(() => this.invalidateScopeListCache(userId, effectiveProjectId));
+        return execute(context.tx, context.helpers);
+      }
+      const res = await execute(context.tx, context.helpers);
       await this.invalidateScopeListCache(userId, effectiveProjectId);
+      return res;
     }
-    return result;
+    if (context?.tx) {
+      return execute(context.tx, {} as TransactionHelpers);
+    }
+    return executeWithPostCommit(
+      this.libraryTx,
+      (tx, helpers) => execute(tx, helpers),
+      () => this.invalidateScopeListCache(userId, effectiveProjectId),
+    );
   }
   async updateItem(
     userId: string,
@@ -197,7 +168,6 @@ export class ItemService {
       'number'
         ? (data as { expectedVersion: number }).expectedVersion
         : undefined);
-    let ranPostCommitHook = false;
     const executeUpdate = async (
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
@@ -235,13 +205,17 @@ export class ItemService {
       const eventScope = { userId, projectId: effectiveProjectId };
       const domainUpdated = (ItemsMapper.mapFlattenedState(updated, userId) ??
         ItemsMapper.toDomain(updated)) as ItemDetail;
+      const sharedUpdatedData = this.stripPersonalOverlayForSharedScope(
+        domainUpdated,
+        effectiveProjectId,
+      );
       const updatedFields = Object.keys(data);
       await helpers.appendChange(eventScope, {
         entityType: 'Item',
         entityId: id,
         action: 'update',
         version: updated.version,
-        data: domainUpdated,
+        data: sharedUpdatedData,
       });
       await helpers.publishOutbox(
         eventScope,
@@ -252,21 +226,21 @@ export class ItemService {
           updatedFields,
         },
       );
-      helpers.onAfterCommit?.(() =>
-        this.invalidateItemCache(id, userId, resolvedProjectId),
-      );
       return domainUpdated;
     };
-    const res = context
-      ? await executeUpdate(context.tx, context.helpers)
-      : await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-          ranPostCommitHook = Boolean(helpers.onAfterCommit);
-          return executeUpdate(tx, helpers);
-        });
-    if (!ranPostCommitHook) {
-      await this.invalidateItemCache(id, userId, resolvedProjectId);
+    if (context) {
+      if (context.helpers?.onAfterCommit) {
+        context.helpers.onAfterCommit(() =>
+          this.invalidateItemCache(id, userId, resolvedProjectId),
+        );
+      }
+      return executeUpdate(context.tx, context.helpers);
     }
-    return res;
+    return executeWithPostCommit(
+      this.libraryTx,
+      (tx, helpers) => executeUpdate(tx, helpers),
+      () => this.invalidateItemCache(id, userId, resolvedProjectId),
+    );
   }
   async setMyPublication(
     userId: string,
@@ -283,10 +257,9 @@ export class ItemService {
     },
   ): Promise<ItemDetail> {
     let resolvedProjectId: string | undefined;
-    let ranPostCommitHook = false;
-    const res = await this.libraryTx.executeInTransaction(
+    return executeWithPostCommit(
+      this.libraryTx,
       async (tx, helpers) => {
-        ranPostCommitHook = Boolean(helpers.onAfterCommit);
         const updated = await this.command.setMyPublication(
           userId,
           id,
@@ -294,17 +267,31 @@ export class ItemService {
           options,
           tx,
         );
-        const effectiveProjectId = updated.projectId || undefined;
+        const effectiveProjectId =
+          normalizeProjectScopeId(options?.projectId) ||
+          updated.projectId ||
+          undefined;
         resolvedProjectId = effectiveProjectId;
-        const eventScope = { userId, projectId: effectiveProjectId };
+        const isSharedProjectItem = Boolean(effectiveProjectId);
+        // Personal UserPublication in a shared project must emit to the user's personal sync stream
+        const eventScope = isSharedProjectItem
+          ? { userId, projectId: undefined }
+          : { userId, projectId: effectiveProjectId };
         const domainItem = (ItemsMapper.mapFlattenedState(updated, userId) ??
           ItemsMapper.toDomain(updated)) as ItemDetail;
         await helpers.appendChange(eventScope, {
-          entityType: 'Item',
-          entityId: id,
+          entityType: isSharedProjectItem ? 'UserPublication' : 'Item',
+          entityId: isSharedProjectItem ? `${userId}:${id}` : id,
           action: 'update',
           version: updated.version,
-          data: domainItem,
+          data: isSharedProjectItem
+            ? {
+                itemId: id,
+                userId,
+                projectId: effectiveProjectId,
+                isMyPublication,
+              }
+            : domainItem,
         });
         await helpers.publishOutbox(
           eventScope,
@@ -312,16 +299,10 @@ export class ItemService {
           LIBRARY_EVENT_TYPES.ITEM_UPDATED,
           domainItem,
         );
-        helpers.onAfterCommit?.(() =>
-          this.invalidateItemCache(id, userId, resolvedProjectId),
-        );
         return domainItem;
       },
+      () => this.invalidateItemCache(id, userId, resolvedProjectId),
     );
-    if (!ranPostCommitHook) {
-      await this.invalidateItemCache(id, userId, resolvedProjectId);
-    }
-    return res;
   }
   async reindexItem(userId: string, id: string, projectId?: string) {
     const item = await this.query.findById(userId, id, projectId);
@@ -343,6 +324,15 @@ export class ItemService {
         },
       );
     });
+    if (this.searchGateway?.reindexItem) {
+      await this.searchGateway
+        .reindexItem({
+          id,
+          userId,
+          projectId: effectiveProjectId,
+        })
+        .catch(() => {});
+    }
     return {
       success: true,
       message: 'Item re-indexing requested',
@@ -384,32 +374,34 @@ export class ItemService {
           data: { id, deletedAt: deletedAt.toISOString() },
         });
         await helpers.publishOutbox(
-          eventScope,
-          id,
-          LIBRARY_EVENT_TYPES.ITEM_DELETED,
-          { id, deletedAt, projectId: validProjectId },
+          eventScope, id, LIBRARY_EVENT_TYPES.ITEM_DELETED,
+          { id, deletedAt, projectId: validProjectId, cascadedInTx: true },
         );
-        helpers.onAfterCommit?.(() =>
+      }
+      return deleted;
+    };
+    if (context) {
+      const deleted = await executeDelete(context.tx, context.helpers);
+      if (deleted) {
+        context.helpers?.onAfterCommit?.(() =>
           this.invalidateItemCache(id, userId, validProjectId, {
             skipScopeInvalidation,
           }),
         );
       }
       return deleted;
-    };
-    let ranPostCommitHook = false;
-    const deleted = context
-      ? await executeDelete(context.tx, context.helpers)
-      : await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-          ranPostCommitHook = Boolean(helpers.onAfterCommit);
-          return executeDelete(tx, helpers);
-        });
-    if (deleted && !ranPostCommitHook) {
-      await this.invalidateItemCache(id, userId, validProjectId, {
-        skipScopeInvalidation,
-      });
     }
-    return deleted;
+    return executeWithPostCommit(
+      this.libraryTx,
+      (tx, helpers) => executeDelete(tx, helpers),
+      async (deleted) => {
+        if (deleted) {
+          await this.invalidateItemCache(id, userId, validProjectId, {
+            skipScopeInvalidation,
+          });
+        }
+      },
+    );
   }
   async restoreItem(
     userId: string,
@@ -419,10 +411,9 @@ export class ItemService {
     skipScopeInvalidation?: boolean,
   ) {
     const validProjectId = normalizeProjectScopeId(projectId);
-    let ranPostCommitHook = false;
-    const res = await this.libraryTx.executeInTransaction(
+    return executeWithPostCommit(
+      this.libraryTx,
       async (tx, helpers) => {
-        ranPostCommitHook = Boolean(helpers.onAfterCommit);
         const restored = await this.command.restore(
           userId,
           id,
@@ -444,30 +435,16 @@ export class ItemService {
         });
         await helpers.removeTombstone(eventScope, 'Item', id);
         await helpers.publishOutbox(
-          eventScope,
-          id,
-          LIBRARY_EVENT_TYPES.ITEM_RESTORED,
-          {
-            itemId: id,
-            userId,
-            projectId: effectiveProjectId,
-            restoredAt: new Date().toISOString(),
-          },
-        );
-        helpers.onAfterCommit?.(() =>
-          this.invalidateItemCache(id, userId, validProjectId, {
-            skipScopeInvalidation,
-          }),
+          eventScope, id, LIBRARY_EVENT_TYPES.ITEM_RESTORED,
+          { itemId: id, userId, projectId: effectiveProjectId, restoredAt: new Date().toISOString(), cascadedInTx: true },
         );
         return domainItem;
       },
+      () =>
+        this.invalidateItemCache(id, userId, validProjectId, {
+          skipScopeInvalidation,
+        }),
     );
-    if (!ranPostCommitHook) {
-      await this.invalidateItemCache(id, userId, validProjectId, {
-        skipScopeInvalidation,
-      });
-    }
-    return res;
   }
   async purgeItem(
     userId: string,
@@ -477,10 +454,9 @@ export class ItemService {
   ): Promise<boolean> {
     const validProjectId = normalizeProjectScopeId(projectId);
     let storagePathsToDelete: string[] = [];
-    let ranPostCommitHook = false;
-    const purged = await this.libraryTx.executeInTransaction(
+    const purged = await executeWithPostCommit(
+      this.libraryTx,
       async (tx, helpers) => {
-        ranPostCommitHook = Boolean(helpers.onAfterCommit);
         const purgeRes = this.command.purgeWithStoragePaths
           ? await this.command.purgeWithStoragePaths(
               userId,
@@ -507,32 +483,24 @@ export class ItemService {
             version: 0,
           });
           await helpers.publishOutbox(
-            eventScope,
-            id,
-            LIBRARY_EVENT_TYPES.ITEM_PURGED,
+            eventScope, id, LIBRARY_EVENT_TYPES.ITEM_PURGED,
             {
-              itemId: id,
-              itemIds: [id],
-              userId,
-              projectId: validProjectId,
-              filePaths: purgeRes.storagePaths,
-              purgedAt: new Date().toISOString(),
+              itemId: id, itemIds: [id], userId, projectId: validProjectId,
+              filePaths: purgeRes.storagePaths, purgedAt: new Date().toISOString(),
+              cascadedInTx: true, storageDeletedInTx: true,
             },
-          );
-          helpers.onAfterCommit?.(() =>
-            this.invalidateItemCache(id, userId, validProjectId, {
-              skipScopeInvalidation,
-            }),
           );
         }
         return purgeRes.purged;
       },
+      async (wasPurged) => {
+        if (wasPurged) {
+          await this.invalidateItemCache(id, userId, validProjectId, {
+            skipScopeInvalidation,
+          });
+        }
+      },
     );
-    if (purged && !ranPostCommitHook) {
-      await this.invalidateItemCache(id, userId, validProjectId, {
-        skipScopeInvalidation,
-      });
-    }
     if (storagePathsToDelete.length > 0) {
       await this.command.deleteStorageFilesBatch(storagePathsToDelete);
     }
@@ -561,28 +529,27 @@ export class ItemService {
       };
     }
     const validProjectId = normalizeProjectScopeId(projectId);
-    let ranPostCommitHook = false;
-    const { succeededIds, failedIds } =
-      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-        ranPostCommitHook = Boolean(helpers.onAfterCommit);
-        const res = await executeBulkSoftDeleteInTx({
+    const { succeededIds, failedIds } = await executeWithPostCommit(
+      this.libraryTx,
+      (tx, helpers) =>
+        executeBulkSoftDeleteInTx({
           command: this.command,
           userId,
           itemIds,
           tx,
           helpers,
           validProjectId,
-        });
+        }),
+      async (res) => {
         if (res.succeededIds.length > 0) {
-          helpers.onAfterCommit?.(() =>
-            this.invalidateBulkItemsCache(res.succeededIds, userId, validProjectId),
+          await this.invalidateBulkItemsCache(
+            res.succeededIds,
+            userId,
+            validProjectId,
           );
         }
-        return res;
-      });
-    if (succeededIds.length > 0 && !ranPostCommitHook) {
-      await this.invalidateBulkItemsCache(succeededIds, userId, validProjectId);
-    }
+      },
+    );
     return {
       success: true,
       trashedCount: succeededIds.length,
@@ -600,11 +567,10 @@ export class ItemService {
       };
     }
     const validProjectId = normalizeProjectScopeId(projectId);
-    let ranPostCommitHook = false;
-    const { succeededIds, failedIds, restoredItems } =
-      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-        ranPostCommitHook = Boolean(helpers.onAfterCommit);
-        const res = await executeBulkRestoreInTx({
+    const { succeededIds, failedIds } = await executeWithPostCommit(
+      this.libraryTx,
+      (tx, helpers) =>
+        executeBulkRestoreInTx({
           command: this.command,
           query: this.query,
           userId,
@@ -612,27 +578,18 @@ export class ItemService {
           tx,
           helpers,
           validProjectId,
-        });
+        }),
+      async (res) => {
         if (res.succeededIds.length > 0) {
-          helpers.onAfterCommit?.(() =>
-            this.invalidateBulkItemsCache(
-              res.succeededIds,
-              userId,
-              validProjectId,
-              res.restoredItems.map((r) => r.projectId),
-            ),
+          await this.invalidateBulkItemsCache(
+            res.succeededIds,
+            userId,
+            validProjectId,
+            res.restoredItems.map((r) => r.projectId),
           );
         }
-        return res;
-      });
-    if (succeededIds.length > 0 && !ranPostCommitHook) {
-      await this.invalidateBulkItemsCache(
-        succeededIds,
-        userId,
-        validProjectId,
-        restoredItems.map((r) => r.projectId),
-      );
-    }
+      },
+    );
     return {
       success: true,
       restoredCount: succeededIds.length,
@@ -650,28 +607,28 @@ export class ItemService {
       };
     }
     const validProjectId = normalizeProjectScopeId(projectId);
-    let ranPostCommitHook = false;
     const { succeededIds, failedIds, fileIdsToDelete } =
-      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-        ranPostCommitHook = Boolean(helpers.onAfterCommit);
-        const res = await executeBulkPurgeInTx({
-          command: this.command,
-          userId,
-          itemIds,
-          tx,
-          helpers,
-          validProjectId,
-        });
-        if (res.succeededIds.length > 0) {
-          helpers.onAfterCommit?.(() =>
-            this.invalidateBulkItemsCache(res.succeededIds, userId, validProjectId),
-          );
-        }
-        return res;
-      });
-    if (succeededIds.length > 0 && !ranPostCommitHook) {
-      await this.invalidateBulkItemsCache(succeededIds, userId, validProjectId);
-    }
+      await executeWithPostCommit(
+        this.libraryTx,
+        (tx, helpers) =>
+          executeBulkPurgeInTx({
+            command: this.command,
+            userId,
+            itemIds,
+            tx,
+            helpers,
+            validProjectId,
+          }),
+        async (res) => {
+          if (res.succeededIds.length > 0) {
+            await this.invalidateBulkItemsCache(
+              res.succeededIds,
+              userId,
+              validProjectId,
+            );
+          }
+        },
+      );
     if (fileIdsToDelete.length > 0) {
       await this.command.deleteStorageFilesBatch(fileIdsToDelete);
     }
@@ -681,6 +638,18 @@ export class ItemService {
       succeededIds,
       failedIds,
     };
+  }
+  async emptyTrash(userId: string, projectId?: string) {
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const { succeededIds, failedIds, fileIdsToDelete } = await executeWithPostCommit(
+      this.libraryTx,
+      (tx, helpers) => executeEmptyTrashInTx({ command: this.command, userId, tx, helpers, validProjectId }),
+      async (res) => {
+        if (res.succeededIds.length > 0) await this.invalidateBulkItemsCache(res.succeededIds, userId, validProjectId);
+      },
+    );
+    if (fileIdsToDelete.length > 0) await this.command.deleteStorageFilesBatch(fileIdsToDelete);
+    return { success: true, purgedCount: succeededIds.length, succeededIds, failedIds };
   }
   async purgeExpiredTrash(retentionDays: number = 30, limit: number = 200) {
     let storagePathsToDelete: string[] = [];
@@ -711,10 +680,9 @@ export class ItemService {
         ),
       );
     };
-    let ranPostCommitHook = false;
-    const result = await this.libraryTx.executeInTransaction(
+    const result = await executeWithPostCommit(
+      this.libraryTx,
       async (tx, helpers) => {
-        ranPostCommitHook = Boolean(helpers.onAfterCommit);
         const res = await executePurgeExpiredTrashInTx({
           command: this.command,
           retentionDays,
@@ -724,15 +692,10 @@ export class ItemService {
         });
         storagePathsToDelete = res.storagePaths;
         purgedItemsList = res.expiredItems ?? [];
-        if (purgedItemsList.length > 0) {
-          helpers.onAfterCommit?.(invalidatePurgedItems);
-        }
         return res;
       },
+      () => invalidatePurgedItems(),
     );
-    if (!ranPostCommitHook) {
-      await invalidatePurgedItems();
-    }
     if (storagePathsToDelete.length > 0) {
       await this.command.deleteStorageFilesBatch(storagePathsToDelete);
     }

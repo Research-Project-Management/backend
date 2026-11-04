@@ -5,20 +5,20 @@ export * from './library.facade';
 export {
   ExtractionFacade,
   EXTRACTION_FACADE,
-} from './extraction/extraction.facade';
-export type { IExtractionFacade } from './extraction/extraction.facade';
+} from './extraction/services/reference-matcher.service';
+export type { IExtractionFacade } from './extraction/services/reference-matcher.service';
 
-export { CatalogFacade, CATALOG_FACADE } from './catalog/catalog.facade';
-export type { ICatalogFacade } from './catalog/catalog.facade';
+export { CatalogFacade, CATALOG_FACADE } from './catalog/services/library-bootstrap.service';
+export type { ICatalogFacade } from './catalog/services/library-bootstrap.service';
 
-export { CitationFacade, CITATION_FACADE } from './citation/citation.facade';
-export type { ICitationFacade } from './citation/citation.facade';
+export { CitationFacade, CITATION_FACADE } from './citation/services/citation.service';
+export type { ICitationFacade } from './citation/services/citation.service';
 
 export {
   IngestionFacade,
   INGESTION_FACADE,
-} from './ingestion/ingestion.facade';
-export type { IIngestionFacade } from './ingestion/ingestion.facade';
+} from './ingestion/controllers/ingestion.controller';
+export type { IIngestionFacade } from './ingestion/controllers/ingestion.controller';
 
-export { SearchFacade, SEARCH_FACADE } from './search/search.facade';
-export type { ISearchFacade } from './search/search.facade';
+export { SearchFacade, SEARCH_FACADE } from './search/controllers/search.controller';
+export type { ISearchFacade } from './search/controllers/search.controller';

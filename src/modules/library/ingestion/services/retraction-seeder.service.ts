@@ -1,12 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import {
-  normalizeDoi,
-  normalizePmid,
-  ExternalProviderException,
-} from '@/modules/library/core';
+import { normalizeDoi, normalizePmid, ExternalProviderException, EntityNotFoundException, LIBRARY_EVENT_TYPES, ReconcileExtractedCandidatePayload } from '@/modules/library/core';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
+import { OnEvent } from '@nestjs/event-emitter';
+import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
+import { MetadataResolverService } from '@/modules/library/ingestion/services/metadata-resolver.service';
+import { createHash } from 'crypto';
+import { RedisCacheService } from '@/core';
+import { QueryType, ResolvedMetadata } from '@/modules/library/ingestion/types/metadata.types';
+import { METADATA_POLICY_VERSION } from '@/modules/library/ingestion/policies/metadata.policy';
 
 export interface RetractionSeedResult {
   totalRows: number;
@@ -122,7 +127,7 @@ export function parseRetractionNature(natureRaw?: string): {
     norm.includes('erratum') ||
     norm.includes('corrigendum')
   ) {
-    return { nature: 'correction', isRetracted: true };
+    return { nature: 'correction', isRetracted: false };
   }
   return { nature: 'retraction', isRetracted: true };
 }
@@ -216,8 +221,10 @@ export class RetractionSeederService {
         checkedAt: new Date(),
       });
 
-      this.retractionDb.addRetractionToBloom?.(cleanDoi);
-      if (cleanPmid) this.retractionDb.addRetractionToBloom?.(cleanPmid);
+      if (isRetracted) {
+        this.retractionDb.addRetractionToBloom?.(cleanDoi);
+        if (cleanPmid) this.retractionDb.addRetractionToBloom?.(cleanPmid);
+      }
 
       validRecords++;
 
@@ -273,5 +280,362 @@ export class RetractionSeederService {
     }
     const csvContent = await res.text();
     return this.seedFromCsv(csvContent);
+  }
+}
+
+export interface SeedRetractionsCommandOptions {
+  filePath?: string;
+  url?: string;
+  chunkSize?: number;
+}
+
+@Injectable()
+export class SeedRetractionsCommand {
+  private readonly logger = new Logger(SeedRetractionsCommand.name);
+
+  constructor(private readonly seeder: RetractionSeederService) {}
+
+  async execute(
+    options?: SeedRetractionsCommandOptions,
+  ): Promise<RetractionSeedResult> {
+    if (options?.filePath) {
+      const resolvedPath = path.resolve(process.cwd(), options.filePath);
+      this.logger.log(
+        `Executing Retraction Seeder from local file: ${resolvedPath}`,
+      );
+      if (!fs.existsSync(resolvedPath)) {
+        throw new EntityNotFoundException(
+          `Retraction seed CSV file not found at: ${resolvedPath}`,
+        );
+      }
+      const content = fs.readFileSync(resolvedPath, 'utf8');
+      return this.seeder.seedFromCsv(content, { chunkSize: options.chunkSize });
+    }
+
+    if (options?.url) {
+      this.logger.log(
+        `Executing Retraction Seeder from custom URL: ${options.url}`,
+      );
+      return this.seeder.seedFromGitlab(options.url);
+    }
+
+    this.logger.log(
+      'Executing Retraction Seeder from official Crossref GitLab repository',
+    );
+    return this.seeder.seedFromGitlab();
+  }
+}
+
+const IDENTIFIER_FIELD_GROUPS = ['doi', 'pmid', 'fields', 'metadata'];
+
+@Injectable()
+export class RetractionItemEventsSubscriber {
+  private readonly logger = new Logger(RetractionItemEventsSubscriber.name);
+
+  constructor(
+    @Optional() private readonly retraction?: RetractionService,
+    @Optional() private readonly metadataResolver?: MetadataResolverService,
+  ) {}
+
+  @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_METADATA_EXTRACTED, { async: true })
+  async handleAttachmentMetadataExtracted(
+    event: ReconcileExtractedCandidatePayload | Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.metadataResolver) return;
+    const rawPayload = (event as Record<string, unknown>)?.payload ?? event;
+    const effectivePayload = (rawPayload && typeof rawPayload === 'object' ? rawPayload : event) as Record<string, unknown>;
+    const itemId = (effectivePayload.itemId || (event as Record<string, unknown>)?.aggregateId) as string | undefined;
+    const userId = (effectivePayload.userId || (event as Record<string, unknown>)?.userId || (event as { scope?: { userId?: string } })?.scope?.userId) as string | undefined;
+    if (!itemId || !userId) return;
+
+    try {
+      const reconcilePayload: ReconcileExtractedCandidatePayload = {
+        ...(effectivePayload as unknown as ReconcileExtractedCandidatePayload),
+        itemId,
+        userId,
+      };
+      await this.metadataResolver.reconcileExtractedCandidate(reconcilePayload);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Single-authority reconciliation after extraction skipped for item ${itemId}: ${message}`,
+      );
+    }
+  }
+
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_UPDATED, { async: true })
+  async handleItemUpdated(event: {
+    aggregateId?: string;
+    itemId?: string;
+    userId?: string | null;
+    projectId?: string | null;
+    payload?: { updatedFields?: string[]; userId?: string; projectId?: string; itemId?: string; doi?: string; pmid?: string; source?: string; metadata?: { doi?: string; pmid?: string } };
+  }): Promise<void> {
+    if (!this.retraction) return;
+
+    const itemId = event?.aggregateId || event?.itemId || event?.payload?.itemId;
+    const userId = event?.userId ?? event?.payload?.userId ?? undefined;
+    if (!itemId || !userId) return;
+
+    const payload = event.payload as
+      | {
+          updatedFields?: string[];
+          userId?: string;
+          projectId?: string;
+          source?: string;
+          doi?: string | null;
+          pmid?: string | null;
+          metadata?: { doi?: string | null; pmid?: string | null };
+        }
+      | undefined;
+    const updatedFields = payload?.updatedFields;
+    const source = payload?.source;
+    if (
+      source === 'retraction_watch' ||
+      (Array.isArray(updatedFields) &&
+        (updatedFields.includes('retractionCheckedAt') ||
+          updatedFields.includes('isRetracted')))
+    ) {
+      return;
+    }
+    const hasExplicitIdentifierInPayload = Boolean(
+      payload?.doi ||
+        payload?.pmid ||
+        payload?.metadata?.doi ||
+        payload?.metadata?.pmid,
+    );
+    const effectiveFieldGroups =
+      source === 'extraction.metadata_sync'
+        ? ['doi', 'pmid']
+        : IDENTIFIER_FIELD_GROUPS;
+    const mayAffectIdentifier = Array.isArray(updatedFields)
+      ? updatedFields.some((f) => effectiveFieldGroups.includes(f)) ||
+        hasExplicitIdentifierInPayload
+      : hasExplicitIdentifierInPayload;
+    if (!mayAffectIdentifier) return;
+
+    try {
+      await this.retraction.checkItem(
+        userId,
+        itemId,
+        event.projectId ?? event.payload?.projectId ?? undefined,
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Retraction re-check after update skipped for item ${itemId}: ${message}`,
+      );
+    }
+  }
+}
+
+const NEGATIVE_SENTINEL = '__metadata_negative__';
+
+interface L1CacheEntry {
+  value: ResolvedMetadata | false;
+  expiresAt: number;
+}
+
+@Injectable()
+export class MetadataCache {
+  private readonly logger = new Logger(MetadataCache.name);
+
+  // Positive TTLs (seconds)
+  private readonly TTL_MAP: Record<QueryType, number> = {
+    DOI: 7 * 86_400, // 7 days
+    ARXIV: 7 * 86_400, // 7 days
+    PMID: 7 * 86_400, // 7 days
+    ISBN: 14 * 86_400, // 14 days
+    URL: 86_400, // 24 hours
+    TITLE: 86_400, // 24 hours
+  };
+
+  // Negative TTLs (seconds) — short so new preprints/papers are discovered quickly
+  private readonly NEGATIVE_TTL_MAP: Record<QueryType, number> = {
+    DOI: 3_600, // 1 hour
+    ARXIV: 3_600, // 1 hour
+    PMID: 3_600, // 1 hour
+    ISBN: 7_200, // 2 hours
+    URL: 900, // 15 minutes
+    TITLE: 900, // 15 minutes
+  };
+
+  // Tier 1: High-Performance In-Memory LRU Cache (<0.05ms latency)
+  private readonly l1Cache = new Map<string, L1CacheEntry>();
+  private readonly MAX_L1_ENTRIES = 1000;
+
+  constructor(@Optional() private readonly redis?: RedisCacheService) {}
+
+  buildKey(queryType: QueryType, canonicalId: string): string {
+    const hash = createHash('md5')
+      .update(canonicalId.toLowerCase().trim())
+      .digest('hex');
+    return `metadata:v${METADATA_POLICY_VERSION}:${queryType}:${hash}`;
+  }
+
+  private resolveQueryTypeFromKey(
+    key: string,
+    explicitType?: QueryType,
+  ): QueryType | undefined {
+    if (explicitType && explicitType in this.TTL_MAP) {
+      return explicitType;
+    }
+    const parts = key.split(':');
+    const candidate = parts.length >= 3 ? (parts[2] as QueryType) : undefined;
+    return candidate && candidate in this.TTL_MAP ? candidate : undefined;
+  }
+
+  /**
+   * Retrieves metadata from L1 memory or L2 Redis.
+   */
+  async get(
+    key: string,
+    queryType?: QueryType,
+  ): Promise<ResolvedMetadata | null | false> {
+    const now = Date.now();
+    const resolvedQueryType = this.resolveQueryTypeFromKey(key, queryType);
+
+    // 1. Tier 1: Check L1 In-Memory LRU Cache (0ms)
+    const l1Entry = this.l1Cache.get(key);
+    if (l1Entry) {
+      if (l1Entry.expiresAt > now) {
+        // Refresh LRU order
+        this.l1Cache.delete(key);
+        this.l1Cache.set(key, l1Entry);
+
+        if (l1Entry.value === false) {
+          this.logger.debug(`L1 Negative Cache HIT: ${key}`);
+          return false;
+        }
+        this.logger.debug(`L1 Cache HIT (0ms): ${key}`);
+        return l1Entry.value;
+      } else {
+        // Expired entry
+        this.l1Cache.delete(key);
+      }
+    }
+
+    // 2. Tier 2: Check L2 Redis Cache
+    if (!this.redis || !this.redis.isReady()) {
+      return null;
+    }
+
+    try {
+      const raw = await this.redis.get<string | ResolvedMetadata>(key);
+      if (raw === null || raw === undefined) return null;
+
+      if (raw === NEGATIVE_SENTINEL) {
+        this.logger.debug(`L2 Redis Negative Cache HIT: ${key}`);
+        const negativeTtl = resolvedQueryType
+          ? (this.NEGATIVE_TTL_MAP[resolvedQueryType] ?? 900)
+          : 900;
+        this.setL1(key, false, negativeTtl);
+        return false;
+      }
+
+      this.logger.debug(`L2 Redis Cache HIT: ${key}`);
+      const parsed: ResolvedMetadata =
+        typeof raw === 'string' ? (JSON.parse(raw) as ResolvedMetadata) : raw;
+
+      const positiveTtl = resolvedQueryType
+        ? (this.TTL_MAP[resolvedQueryType] ?? 3_600)
+        : 3_600;
+      this.setL1(key, parsed, positiveTtl);
+      return parsed;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Cache GET failed for key "${key}": ${msg}`);
+      return null;
+    }
+  }
+
+  /**
+   * Sets positive resolved metadata in both L1 In-Memory and L2 Redis.
+   */
+  async set(
+    key: string,
+    value: ResolvedMetadata,
+    queryType: QueryType,
+  ): Promise<void> {
+    const ttl = this.TTL_MAP[queryType] ?? 86_400;
+
+    // 1. Set L1 In-Memory
+    this.setL1(key, value, ttl);
+
+    // 2. Set L2 Redis
+    if (!this.redis || !this.redis.isReady()) return;
+
+    try {
+      await this.redis.set(key, value, ttl);
+      this.logger.debug(`L2 Redis SET (TTL=${ttl}s): ${key}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`L2 Cache SET failed for key "${key}": ${msg}`);
+    }
+  }
+
+  /**
+   * Sets negative sentinel in both L1 In-Memory and L2 Redis.
+   */
+  async setNegative(key: string, queryType: QueryType): Promise<void> {
+    const ttl = this.NEGATIVE_TTL_MAP[queryType] ?? 900;
+
+    // 1. Set L1 In-Memory negative
+    this.setL1(key, false, ttl);
+
+    // 2. Set L2 Redis negative
+    if (!this.redis || !this.redis.isReady()) return;
+
+    try {
+      await this.redis.set(key, NEGATIVE_SENTINEL, ttl);
+      this.logger.debug(`L2 Redis Negative SET (TTL=${ttl}s): ${key}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`L2 Negative SET failed for key "${key}": ${msg}`);
+    }
+  }
+
+  /**
+   * Internal helper to insert/update entry in L1 LRU Cache.
+   */
+  private setL1(
+    key: string,
+    value: ResolvedMetadata | false,
+    ttlSeconds: number,
+  ): void {
+    const now = Date.now();
+    if (this.l1Cache.has(key)) {
+      this.l1Cache.delete(key);
+    } else if (this.l1Cache.size >= this.MAX_L1_ENTRIES) {
+      for (const [k, entry] of this.l1Cache.entries()) {
+        if (entry.expiresAt <= now) {
+          this.l1Cache.delete(k);
+        }
+      }
+      if (this.l1Cache.size >= this.MAX_L1_ENTRIES) {
+        const oldestKey = this.l1Cache.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.l1Cache.delete(oldestKey);
+        }
+      }
+    }
+
+    const expiresAt = now + ttlSeconds * 1000;
+    this.l1Cache.set(key, { value, expiresAt });
+  }
+
+  /**
+   * Clears L1 in-memory cache (primarily for unit tests).
+   */
+  clearMemoryCache(): void {
+    this.l1Cache.clear();
+  }
+
+  get available(): boolean {
+    return true;
+  }
+
+  get redisAvailable(): boolean {
+    return Boolean(this.redis && this.redis.isReady());
   }
 }

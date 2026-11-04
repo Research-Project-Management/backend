@@ -11,17 +11,17 @@ import {
   normalizePmid,
   cleanBibliographicText,
   cleanAbstractText,
-  AcademicHttpClient,
+  HttpClient,
   LibraryConfigService,
   libraryConfig,
   normalizePageRange,
   parseCreatorString,
-  normalizeAcademicTags,
-  getAcademicContactEmail,
-  getAcademicUserAgent,
+  normalizeTags,
+  getContactEmail,
+  getUserAgent,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import { AbstractAcademicProvider } from './abstract-academic.provider';
+import { BaseMetadataProvider } from './base-metadata.provider';
 
 export function parseMedlineDate(raw: string): string | undefined {
   const str = raw.trim();
@@ -47,13 +47,13 @@ export async function enrichFromEuropePmc(
   result: ProviderResult,
   cleanPmid: string,
   rawTags: string[],
-  httpClient?: AcademicHttpClient,
+  httpClient?: HttpClient,
   signal?: AbortSignal,
 ): Promise<void> {
   try {
     const epmcUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=EXT_ID:${encodeURIComponent(cleanPmid)}%20AND%20SRC:MED&resultType=core&format=json`;
     const headers = {
-      'User-Agent': getAcademicUserAgent('PubMed'),
+      'User-Agent': getUserAgent('PubMed'),
       Accept: 'application/json',
     };
     const response = httpClient
@@ -110,7 +110,7 @@ export async function enrichFromEuropePmc(
 }
 
 @Injectable()
-export class PubMedProvider extends AbstractAcademicProvider {
+export class PubMedProvider extends BaseMetadataProvider {
   readonly id: ProviderName = 'PubMed';
   readonly capabilities: ProviderCapability = {
     queryTypes: ['PMID'],
@@ -120,7 +120,7 @@ export class PubMedProvider extends AbstractAcademicProvider {
   };
 
   constructor(
-    @Optional() httpClient?: AcademicHttpClient,
+    @Optional() httpClient?: HttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {
     super(httpClient);
@@ -137,7 +137,7 @@ export class PubMedProvider extends AbstractAcademicProvider {
     return (
       this.configService?.providers.ncbiEmail ??
       libraryConfig().providers.ncbiEmail ??
-      getAcademicContactEmail()
+      getContactEmail()
     );
   }
 
@@ -194,7 +194,7 @@ export class PubMedProvider extends AbstractAcademicProvider {
     if (this.apiKey) url += `&api_key=${encodeURIComponent(this.apiKey)}`;
 
     const headers = {
-      'User-Agent': getAcademicUserAgent('PubMed'),
+      'User-Agent': getUserAgent('PubMed'),
       Accept: '*/*',
     };
 
@@ -223,7 +223,7 @@ export class PubMedProvider extends AbstractAcademicProvider {
     if (this.apiKey) url += `&api_key=${encodeURIComponent(this.apiKey)}`;
 
     const headers = {
-      'User-Agent': getAcademicUserAgent('PubMed'),
+      'User-Agent': getUserAgent('PubMed'),
       Accept: 'application/json',
     };
 
@@ -621,7 +621,7 @@ export class PubMedProvider extends AbstractAcademicProvider {
       let url = `${base}/efetch.fcgi?db=pubmed&id=${encodeURIComponent(cleanPmid)}&retmode=xml&tool=FluxAcademic&email=${encodeURIComponent(this.email)}`;
       if (this.apiKey) url += `&api_key=${encodeURIComponent(this.apiKey)}`;
       const headers = {
-        'User-Agent': getAcademicUserAgent('PubMed'),
+        'User-Agent': getUserAgent('PubMed'),
         Accept: 'application/xml, text/xml, */*',
       };
       const response = await this.executeHttpFetch(url, signal, headers);
@@ -689,7 +689,7 @@ export class PubMedProvider extends AbstractAcademicProvider {
       }
 
       if (rawTags.length > 0) {
-        const normalizedTags = normalizeAcademicTags(rawTags);
+        const normalizedTags = normalizeTags(rawTags);
         if (normalizedTags.length > 0) {
           result.metadata.keywords = normalizedTags;
           result.metadata.tags = normalizedTags;

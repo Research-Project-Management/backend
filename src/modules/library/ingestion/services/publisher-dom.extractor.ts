@@ -454,4 +454,270 @@ export class PublisherDomExtractor {
 
     return out;
   }
+
+  /**
+   * Extracts balanced JSON object literal starting at `startBraceIdx` (`{`).
+   */
+  private extractBalancedJsonObject(
+    text: string,
+    startBraceIdx: number,
+  ): string | undefined {
+    if (startBraceIdx < 0 || text[startBraceIdx] !== '{') return undefined;
+    let depth = 0;
+    let inString = false;
+    let pos = startBraceIdx;
+    const len = text.length;
+
+    while (pos < len) {
+      const ch = text[pos];
+      if (inString) {
+        if (ch === '\\') {
+          pos += 2;
+          continue;
+        }
+        if (ch === '"') inString = false;
+      } else {
+        if (ch === '"') inString = true;
+        else if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            return text.slice(startBraceIdx, pos + 1);
+          }
+        }
+      }
+      pos++;
+    }
+    return undefined;
+  }
+
+  /**
+   * Extracts bibliographic metadata from publisher-specific embedded JS / JSON blobs:
+   * - IEEE Xplore: `xplGlobal.document.metadata = {...};`
+   * - OpenReview / Next.js SPA: `<script id="__NEXT_DATA__" type="application/json">`
+   * - ScienceDirect / Elsevier: embedded `SDM.pm.doi` or JSON state
+   */
+  extractEmbeddedScriptMetadata(html: string): FallbackMeta {
+    const out: FallbackMeta = {};
+    if (!html) return out;
+
+    // 1. IEEE Xplore: xplGlobal.document.metadata = { ... }
+    const ieeeMarker = html.search(/xplGlobal\.document\.metadata\s*=\s*\{/);
+    if (ieeeMarker !== -1) {
+      const braceStart = html.indexOf('{', ieeeMarker);
+      const rawJson = this.extractBalancedJsonObject(html, braceStart);
+      if (rawJson) {
+        try {
+          const meta = JSON.parse(rawJson) as Record<string, unknown>;
+          const rawTitle =
+            (typeof meta.formulaStrippedArticleTitle === 'string' &&
+              meta.formulaStrippedArticleTitle) ||
+            (typeof meta.title === 'string' && meta.title) ||
+            (typeof meta.articleTitle === 'string' && meta.articleTitle);
+          if (rawTitle) {
+            out.title = decodeHtmlEntities(rawTitle)
+              .replace(/<[^>]+>/g, '')
+              .trim();
+          }
+          if (typeof meta.doi === 'string') {
+            out.doi = normalizeDoi(meta.doi) || out.doi;
+          }
+          if (typeof meta.abstract === 'string') {
+            out.abstract = decodeHtmlEntities(meta.abstract)
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
+          const pubTitle =
+            (typeof meta.displayPublicationTitle === 'string' &&
+              meta.displayPublicationTitle) ||
+            (typeof meta.publicationTitle === 'string' &&
+              meta.publicationTitle);
+          if (pubTitle) {
+            out.publicationTitle = decodeHtmlEntities(pubTitle).trim();
+          }
+          if (
+            typeof meta.volume === 'string' ||
+            typeof meta.volume === 'number'
+          ) {
+            out.volume = String(meta.volume).trim();
+          }
+          if (
+            typeof meta.issue === 'string' ||
+            typeof meta.issue === 'number'
+          ) {
+            out.issue = String(meta.issue).trim();
+          }
+          const startPage =
+            typeof meta.startPage === 'string' ||
+            typeof meta.startPage === 'number'
+              ? String(meta.startPage).trim()
+              : undefined;
+          const endPage =
+            typeof meta.endPage === 'string' || typeof meta.endPage === 'number'
+              ? String(meta.endPage).trim()
+              : undefined;
+          out.pages = this.joinPages(startPage, endPage) || out.pages;
+          if (
+            typeof meta.publicationDate === 'string' &&
+            meta.publicationDate.trim()
+          ) {
+            out.date = meta.publicationDate.trim();
+          } else if (
+            typeof meta.publicationYear === 'string' ||
+            typeof meta.publicationYear === 'number'
+          ) {
+            out.date = String(meta.publicationYear).trim();
+          }
+          out.publisher =
+            (typeof meta.publisher === 'string' && meta.publisher.trim()) ||
+            'IEEE';
+          if (
+            meta.isConference === true ||
+            String(meta.contentType || '')
+              .toLowerCase()
+              .includes('conference')
+          ) {
+            out.itemType = 'conferencePaper';
+          } else if (
+            meta.isJournal === true ||
+            String(meta.contentType || '')
+              .toLowerCase()
+              .includes('journal')
+          ) {
+            out.itemType = 'journalArticle';
+          }
+
+          if (Array.isArray(meta.authors)) {
+            const authors: string[] = [];
+            const creators: NonNullable<FallbackMeta['creators']> = [];
+            for (const a of meta.authors) {
+              if (a && typeof a === 'object') {
+                const aObj = a as Record<string, unknown>;
+                const name =
+                  (typeof aObj.name === 'string' && aObj.name.trim()) ||
+                  [aObj.firstName, aObj.lastName]
+                    .filter((x): x is string => typeof x === 'string')
+                    .join(' ')
+                    .trim();
+                if (name) {
+                  authors.push(name);
+                  creators.push(this.toCreator(name, creators.length, 'author'));
+                }
+              }
+            }
+            if (authors.length > 0) out.authors = authors;
+            if (creators.length > 0) out.creators = creators;
+          }
+
+          if (Array.isArray(meta.keywords)) {
+            const kwList: string[] = [];
+            for (const kwGroup of meta.keywords) {
+              if (kwGroup && typeof kwGroup === 'object') {
+                const kwd = (kwGroup as Record<string, unknown>).kwd;
+                if (Array.isArray(kwd)) {
+                  for (const k of kwd) {
+                    if (typeof k === 'string' && k.trim()) {
+                      kwList.push(k.trim());
+                    }
+                  }
+                }
+              }
+            }
+            if (kwList.length > 0) out.keywords = kwList;
+          }
+        } catch {
+          // Ignore malformed xplGlobal JSON
+        }
+      }
+    }
+
+    // 2. Next.js __NEXT_DATA__ (OpenReview / modern academic portals)
+    const nextDataMatch = html.match(
+      /<script\b[^>]*id\s*=\s*["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i,
+    );
+    if (nextDataMatch?.[1]) {
+      try {
+        const nextObj = JSON.parse(nextDataMatch[1].trim()) as Record<
+          string,
+          unknown
+        >;
+        const pageProps = (
+          (nextObj.props as Record<string, unknown> | undefined)?.pageProps ??
+          {}
+        ) as Record<string, unknown>;
+        const forumNote = (pageProps.forumNote ??
+          pageProps.note ??
+          pageProps.submission ??
+          pageProps.article) as Record<string, unknown> | undefined;
+        const content = (forumNote?.content ?? forumNote) as
+          | Record<string, unknown>
+          | undefined;
+
+        const unwrapVal = (v: unknown): unknown =>
+          v && typeof v === 'object' && !Array.isArray(v) && 'value' in v
+            ? (v as Record<string, unknown>).value
+            : v;
+
+        if (content && typeof content === 'object') {
+          const titleVal = unwrapVal(content.title);
+          if (!out.title && typeof titleVal === 'string' && titleVal.trim()) {
+            out.title = titleVal.trim();
+          }
+          const abstractVal = unwrapVal(content.abstract);
+          if (
+            !out.abstract &&
+            typeof abstractVal === 'string' &&
+            abstractVal.trim()
+          ) {
+            out.abstract = abstractVal.trim();
+          }
+          const venueVal = unwrapVal(content.venue ?? content.venueid);
+          if (
+            !out.publicationTitle &&
+            typeof venueVal === 'string' &&
+            venueVal.trim() &&
+            !venueVal.includes('/')
+          ) {
+            out.publicationTitle = venueVal.trim();
+          }
+          const authorsVal = unwrapVal(content.authors);
+          if (!out.authors && Array.isArray(authorsVal)) {
+            const parsedAuthors = authorsVal
+              .filter((x): x is string => typeof x === 'string')
+              .map((s) => s.trim())
+              .filter(Boolean);
+            if (parsedAuthors.length > 0) {
+              out.authors = parsedAuthors;
+              out.creators = parsedAuthors.map((a, idx) =>
+                this.toCreator(a, idx, 'author'),
+              );
+            }
+          }
+          const kwVal = unwrapVal(content.keywords);
+          if (!out.keywords && Array.isArray(kwVal)) {
+            const parsedKw = kwVal
+              .filter((x): x is string => typeof x === 'string')
+              .map((s) => s.trim())
+              .filter(Boolean);
+            if (parsedKw.length > 0) out.keywords = parsedKw;
+          }
+        }
+      } catch {
+        // Ignore malformed __NEXT_DATA__
+      }
+    }
+
+    // 3. ScienceDirect / Elsevier embedded DOI variable (`SDM.pm.doi = '...'` or `"doi":"10.1016/..."`)
+    if (!out.doi) {
+      const sdmDoiMatch =
+        html.match(/SDM\.pm\.doi\s*=\s*["'](10\.\d{4,9}\/[^"']+)["']/i) ||
+        html.match(/"doi"\s*:\s*"(10\.\d{4,9}\/[^"]+)"/i);
+      if (sdmDoiMatch?.[1]) {
+        out.doi = normalizeDoi(sdmDoiMatch[1]) || undefined;
+      }
+    }
+
+    return out;
+  }
 }

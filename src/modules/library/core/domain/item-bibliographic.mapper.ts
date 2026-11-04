@@ -1,6 +1,9 @@
-import { cleanAbstractText } from './academic-text.domain';
+import { cleanAbstractText } from './text.domain';
 import { splitAuthorString } from './author.domain';
 import { resolveCanonicalArxivCategory } from './tag.domain';
+import { CANONICAL_IDENTIFIER_URI_BUILDERS } from './identifier.domain';
+import { isRejectedCitedIdentifier } from './metadata-coalesce.policy';
+import { ItemProvenancePolicy } from './item-provenance.domain';
 import {
   getEffectiveBaseFieldMap,
   getPrimaryCreatorRoleForType,
@@ -364,12 +367,16 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
       it,
     );
 
-    if (!existingExtra.toLowerCase().includes('arxiv:')) {
+    const isPreprintOrArxivPrimary =
+      it.itemType === 'preprint' ||
+      !it.doi ||
+      /^10\.48550\/arxiv\./i.test(String(it.doi));
+    if (isPreprintOrArxivPrimary && !existingExtra.toLowerCase().includes('arxiv:')) {
       const arxivLine = catStr
         ? `arXiv: ${canonicalCleanId} [${catStr}]`
         : `arXiv: ${canonicalCleanId}`;
       it.extra = existingExtra ? `${arxivLine}\n${existingExtra}` : arxivLine;
-    } else {
+    } else if (existingExtra.toLowerCase().includes('arxiv:')) {
       it.extra = existingExtra.replace(
         /^arxiv:\s*([^\s[]+)(?:v\d+)?(?:\s*\[([^\]]+)\])?/im,
         (_: string, id: string, cat?: string) => {
@@ -518,24 +525,22 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     it.publicationDate || it.date || (it.year ? String(it.year) : '');
   it.date = it.date || it.publicationDate || (it.year ? String(it.year) : '');
 
+  const rejectedCitedDoi = extraFields.rejectedCitedDoi ?? it.rejectedCitedDoi;
   if (Array.isArray(it.identifiers)) {
     const idTypeToField: Record<string, keyof MutableItemPayload> = {
-      arxiv: 'arxivId',
-      arxivid: 'arxivId',
-      doi: 'doi',
-      pmid: 'pmid',
-      pmcid: 'pmcid',
-      isbn: 'isbn',
-      issn: 'issn',
+      arxiv: 'arxivId', arxivid: 'arxivId', doi: 'doi', pmid: 'pmid', pmcid: 'pmcid', isbn: 'isbn', issn: 'issn',
     };
     for (const ident of it.identifiers) {
-      const type = (ident.type || ident.identifierType || '')
-        .trim()
-        .toLowerCase();
+      const type = (ident.type || ident.identifierType || '').trim().toLowerCase();
       const targetKey = idTypeToField[type];
-      const cleanVal =
-        typeof ident.value === 'string' ? ident.value.trim() : '';
-      if (targetKey && cleanVal) {
+      const cleanVal = typeof ident.value === 'string' ? ident.value.trim() : '';
+      if (targetKey && cleanVal && Boolean(rejectedCitedDoi) && isRejectedCitedIdentifier(cleanVal, rejectedCitedDoi) && !ItemProvenancePolicy.inspectFieldUserLock(extraFields, String(targetKey)).locked) {
+        continue;
+      }
+      const currentVal = targetKey && typeof it[targetKey] === 'string' ? (it[targetKey] as string).trim() : '';
+      const isArxivDoiOverwritingPublishedDoi =
+        targetKey === 'doi' && Boolean(currentVal) && !/^10\.48550\/arxiv\./i.test(currentVal) && /^10\.48550\/arxiv\./i.test(cleanVal);
+      if (targetKey && cleanVal && !isArxivDoiOverwritingPublishedDoi) {
         it[targetKey] = cleanVal;
       }
     }
@@ -628,27 +633,20 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     val: string | null | undefined;
     uri: (v: string) => string;
   }> = [
-    { type: 'doi', val: it.doi, uri: (v) => `https://doi.org/${v}` },
-    {
-      type: 'arxiv',
-      val: it.arxivId,
-      uri: (v) => `https://arxiv.org/abs/${v}`,
-    },
-    {
-      type: 'pmid',
-      val: it.pmid,
-      uri: (v) => `https://pubmed.ncbi.nlm.nih.gov/${v}/`,
-    },
-    {
-      type: 'pmcid',
-      val: it.pmcid,
-      uri: (v) => `https://www.ncbi.nlm.nih.gov/pmc/articles/${v}/`,
-    },
-    { type: 'isbn', val: it.isbn, uri: (v) => `urn:isbn:${v}` },
-    { type: 'issn', val: it.issn, uri: (v) => `urn:issn:${v}` },
+    { type: 'doi', val: it.doi, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.doi },
+    { type: 'arxiv', val: it.arxivId, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.arxiv },
+    { type: 'pmid', val: it.pmid, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmid },
+    { type: 'pmcid', val: it.pmcid, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmcid },
+    { type: 'isbn', val: it.isbn, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.isbn },
+    { type: 'issn', val: it.issn, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.issn },
   ];
   const existingIdents = Array.isArray(it.identifiers)
-    ? [...it.identifiers]
+    ? it.identifiers.filter((ident) => {
+        const val = typeof ident?.value === 'string' ? ident.value.trim() : '';
+        const type = (ident?.type || ident?.identifierType || '').trim().toLowerCase();
+        const lockField = type === 'arxiv' || type === 'arxivid' ? 'arxivId' : type || 'doi';
+        return !(val && Boolean(rejectedCitedDoi) && isRejectedCitedIdentifier(val, rejectedCitedDoi) && !ItemProvenancePolicy.inspectFieldUserLock(extraFields, lockField).locked);
+      })
     : [];
   const existingTypes = new Set(
     existingIdents

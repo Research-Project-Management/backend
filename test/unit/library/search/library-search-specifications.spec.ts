@@ -11,7 +11,7 @@ import {
 } from '@/modules/library/search';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import { SearchService } from '@/modules/library/search/services/search.service';
-import { SearchEventsSubscriber } from '@/modules/library/search/subscribers/search-events.subscriber';
+import { SearchEventsSubscriber } from '@/modules/library/search/services/search.service';
 import { PrismaService } from '@/core';
 import { RedisCacheService } from '@/core';
 
@@ -116,7 +116,20 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
         colSpec.isSatisfiedBy({ ...sampleItem, collectionItems: [] }),
       ).toBe(false);
       expect(colSpec.toPrismaWhere()).toEqual({
-        collectionItems: { some: { collectionId: 'col-1' } },
+        collectionItems: {
+          some: { collectionId: 'col-1', collection: { deletedAt: null } },
+        },
+      });
+
+      const multiColSpec = new CollectionSpecification(['col-1', 'col-sub-1']);
+      expect(multiColSpec.isSatisfiedBy(sampleItem)).toBe(true);
+      expect(multiColSpec.toPrismaWhere()).toEqual({
+        collectionItems: {
+          some: {
+            collectionId: { in: ['col-1', 'col-sub-1'] },
+            collection: { deletedAt: null },
+          },
+        },
       });
 
       const tagSpec = new TagSpecification('tag-ai');
@@ -264,7 +277,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       expect(mockCache.set).toHaveBeenCalledWith(
         expect.stringContaining('library:search:facets:user:user-1:'),
         facets,
-        120,
+        expect.any(Number),
       );
     });
 

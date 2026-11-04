@@ -21,7 +21,6 @@ import {
   BibtexParser,
   ParsedBibtexEntry,
   DoiParser,
-  QueryClassifier,
 } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
@@ -37,13 +36,14 @@ import {
   deriveDoiFromPublisherUrl,
   gunzipAsync,
 } from '@/modules/library/core';
+import { QueryClassifier } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import {
   createCandidate,
   buildEvidenceFields,
   mapBibtexToRawRecord,
   applyUserOverridesToCandidate,
-} from '../domain/candidate-builder.helper';
+} from '../domain/metadata.validator';
 import { IdentifyFileResolver, cleanPdfTitle } from './identify-file.resolver';
 
 export {
@@ -55,7 +55,7 @@ export {
   buildEvidenceFields,
   mapBibtexToRawRecord,
   applyUserOverridesToCandidate,
-} from '../domain/candidate-builder.helper';
+} from '../domain/metadata.validator';
 
 @Injectable()
 export class IdentifyUrlResolver {
@@ -133,6 +133,14 @@ export class IdentifyUrlResolver {
     const hasTitle = Boolean(
       normalized.title && normalized.title !== 'Untitled Document',
     );
+
+    if (extractedRaw.ladderStepReached === 2 && hasTitle) {
+      normalized.extraFields = {
+        ...(normalized.extraFields || {}),
+        alreadyResolvedByMirror: true,
+        ladderStepReached: 2,
+      };
+    }
 
     if (extractedRaw.isBlocked && !hasIdentifier) {
       normalized.extraFields = {

@@ -1,10 +1,10 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { Prisma, ReadStatus } from '@prisma/client';
 import { isUUID } from 'class-validator';
-import { AcademicSearchQueryEngine } from '@/modules/library/core';
+import { SearchQueryEngine, normalizeCanonicalItemType } from '@/modules/library/core';
 import {
   SavedSearchCondition, SavedSearchConditionGroup, isConditionGroup, SavedSearchOperator, SavedSearchScopeOptions,
-} from '@/modules/library/catalog/types/saved-search.types';
+} from '@/modules/library/catalog/types/catalog.types';
 import { FIELD_ALIASES } from '@/modules/library/catalog/types/catalog.types';
 
 const MAX_CONDITION_DEPTH = 5;
@@ -15,8 +15,6 @@ export const DIRECT_STRING_FIELDS = new Set([
   'abstract', 'url', 'firstAuthor', 'createdAt', 'updatedAt',
 ]);
 const UUID_ITEM_COLUMNS = new Set(['userId', 'projectId']);
-export const BOOLEAN_FLAG_FIELDS = new Set(['hasAttachment', 'hasPdf', 'isStarred']);
-export const DATE_FIELDS = new Set(['dateAdded', 'dateModified', 'publicationDate', 'date', 'accessedAt', 'accessDate']);
 export const IDENTIFIER_FIELDS = new Set(['doi', 'isbn', 'issn', 'pmid', 'pmcid', 'arxivId']);
 
 const IDENTIFIER_FIELD_TO_TYPE: Record<string, string> = {
@@ -37,14 +35,21 @@ const OPERATOR_ALIASES: Record<string, SavedSearchOperator> = {
 };
 const SEARCH_FIELD_ALIASES: Record<string, string> = {
   author: 'creator', authors: 'creator', contributor: 'creator', contributors: 'creator',
+  venue: 'publicationTitle', publication: 'publicationTitle', publication_title: 'publicationTitle',
   hasPdf: 'hasAttachment', has_pdf: 'hasAttachment', has_attachment: 'hasAttachment',
-  read_status: 'readStatus', is_starred: 'isStarred', starred: 'isStarred',
-  item_type: 'itemType', publication_title: 'publicationTitle', citation_key: 'citationKey', citekey: 'citationKey',
+  hasFile: 'hasAttachment', attachmentCount: 'hasAttachment',
+  has_notes: 'hasNotes', noteCount: 'hasNotes',
+  notes: 'noteContent',
+  annotationText: 'annotation',
+  read_status: 'readStatus', readingStatus: 'readStatus',
+  is_starred: 'isStarred', starred: 'isStarred',
+  is_retracted: 'isRetracted', retracted: 'isRetracted',
+  item_type: 'itemType', citation_key: 'citationKey', citekey: 'citationKey',
   arxiv: 'arxivId', arxiv_id: 'arxivId', archiveId: 'arxivId', archiveID: 'arxivId',
 };
 
 function normalizeSavedSearchJsonValue(jsonKey: string, val: string): string {
-  return AcademicSearchQueryEngine.normalizeFieldTargetValue(jsonKey, val);
+  return SearchQueryEngine.normalizeFieldTargetValue(jsonKey, val);
 }
 
 function buildCaseInsensitiveStringFilter(operator: string, val: string, treatIsAsContains = false): Prisma.StringFilter | null {
@@ -63,19 +68,24 @@ export function evalIdentifierField(fieldKey: string, operator: string, val: str
   const canonicalType = IDENTIFIER_FIELD_TO_TYPE[fieldKey];
   if (!canonicalType) return null;
   const effectiveVal = normalizeSavedSearchJsonValue(fieldKey, val);
-  const baseClause =
-    fieldKey === 'doi' ? evalStringField('doi', operator, effectiveVal) : evalJsonField(fieldKey, operator, val);
+  const topColClause = evalStringField(fieldKey, operator, effectiveVal);
+  const jsonClause = fieldKey === 'doi' ? null : evalJsonField(fieldKey, operator, val);
+  const baseClause = jsonClause || topColClause;
   if (!baseClause) return null;
+  const colAndJsonPositive = topColClause && jsonClause ? [topColClause, jsonClause] : [baseClause];
+  const colAndJsonNegative = topColClause && jsonClause ? [topColClause, jsonClause] : [baseClause];
   if (operator === 'isPresent') {
-    return { OR: [baseClause, { identifiers: { some: { type: canonicalType, value: { not: '' } } } }] };
+    return { OR: [...colAndJsonPositive, { identifiers: { some: { type: canonicalType, value: { not: '' } } } }] };
   }
   if (operator === 'isAbsent') {
-    return { AND: [baseClause, { identifiers: { none: { type: canonicalType, value: { not: '' } } } }] };
+    return { AND: [...colAndJsonNegative, { identifiers: { none: { type: canonicalType, value: { not: '' } } } }] };
   }
   const strFilter = buildCaseInsensitiveStringFilter(operator, effectiveVal, false);
   if (!strFilter) return baseClause;
   const someIdent: Prisma.ItemWhereInput = { identifiers: { some: { type: canonicalType, value: strFilter } } };
-  return isNegatedStringOp(operator) ? { AND: [baseClause, { NOT: someIdent }] } : { OR: [baseClause, someIdent] };
+  return isNegatedStringOp(operator)
+    ? { AND: [...colAndJsonNegative, { NOT: someIdent }] }
+    : { OR: [...colAndJsonPositive, someIdent] };
 }
 
 export function evalJsonField(jsonKey: string, operator: string, val: string): Prisma.ItemWhereInput | null {
@@ -185,63 +195,51 @@ export function evalAnyFieldCondition(operator: SavedSearchOperator, strVal: str
       AND: [{ title: '' }, { abstract: '' }, { publicationTitle: '' }, { contributors: { none: {} } }],
     };
   }
-  const ids = AcademicSearchQueryEngine.extractIdentifiers(strVal);
-  const identTerms = Array.from(
-    new Set(
-      [
-        strVal, ids.cleanDoi, ids.cleanIsbn, ids.cleanIssn,
-        ids.cleanArxivBase || ids.cleanArxiv, ids.cleanPmid, ids.cleanPmcid,
-      ].filter((v): v is string => Boolean(v && v.trim())),
-    ),
-  );
-  const ci = (v: string) => ({ contains: v, mode: 'insensitive' as const });
-  const anyFieldClauses: Prisma.ItemWhereInput[] = [
-    { title: ci(strVal) },
-    { abstract: ci(strVal) },
-    { publicationTitle: ci(strVal) },
-    { doi: ci(ids.cleanDoi || strVal) },
-    { citationKey: ci(strVal) },
-    ...identTerms.map((term) => ({ identifiers: { some: { value: ci(term) } } })),
-    { metadata: { path: ['publisher'], string_contains: strVal } },
-    { metadata: { path: ['isbn'], string_contains: ids.cleanIsbn || strVal } },
-    { metadata: { path: ['issn'], string_contains: ids.cleanIssn || strVal } },
-    ...(ids.cleanArxivBase || ids.cleanArxiv
-      ? [{ metadata: { path: ['arxivId'], string_contains: ids.cleanArxivBase || ids.cleanArxiv! } }]
-      : []),
-    ...(ids.cleanPmid ? [{ metadata: { path: ['pmid'], string_contains: ids.cleanPmid } }] : []),
-    ...(ids.cleanPmcid ? [{ metadata: { path: ['pmcid'], string_contains: ids.cleanPmcid } }] : []),
-    { metadata: { path: ['extra'], string_contains: strVal } },
-    {
-      contributors: {
-        some: { OR: [{ fullName: ci(strVal) }, { lastName: ci(strVal) }, { firstName: ci(strVal) }] },
-      },
-    },
-    { itemTags: { some: { tag: { name: ci(strVal) } } } },
-    { notesList: { some: { deletedAt: null, OR: [{ title: ci(strVal) }, { contentMd: ci(strVal) }] } } },
-    {
-      attachments: {
-        some: {
-          deletedAt: null,
-          OR: [
-            { filename: ci(strVal) },
-            { annotations: { some: { deletedAt: null, OR: [{ quoteText: ci(strVal) }, { comment: ci(strVal) }] } } },
-            { fullTextIndexes: { some: { textContent: ci(strVal) } } },
-          ],
-        },
-      },
-    },
-  ];
+  const anyFieldClauses = SearchQueryEngine.buildComprehensiveItemSearchClauses(
+    strVal,
+    'everything',
+    { includeExtraMetadata: true },
+  ) as Prisma.ItemWhereInput[];
   return operator === 'doesNotContain' || operator === 'isNot'
     ? { NOT: { OR: anyFieldClauses } }
     : { OR: anyFieldClauses };
 }
 
 export function evalCreatorCondition(operator: SavedSearchOperator, strVal: string): Prisma.ItemWhereInput | null {
-  if (operator === 'isPresent') return { contributors: { some: {} } };
-  if (operator === 'isAbsent') return { contributors: { none: {} } };
+  if (operator === 'isPresent') {
+    return {
+      OR: [
+        { contributors: { some: {} } },
+        { AND: [{ firstAuthor: { not: null } }, { firstAuthor: { not: '' } }] },
+      ],
+    };
+  }
+  if (operator === 'isAbsent') {
+    return {
+      AND: [
+        { contributors: { none: {} } },
+        { OR: [{ firstAuthor: null }, { firstAuthor: '' }] },
+      ],
+    };
+  }
   const filter = buildCaseInsensitiveStringFilter(operator, strVal, true);
   if (!filter) return null;
-  const someClause: Prisma.ItemWhereInput = { contributors: { some: { fullName: filter } } };
+  const someClause: Prisma.ItemWhereInput = {
+    OR: [
+      {
+        contributors: {
+          some: {
+            OR: [
+              { fullName: filter },
+              { lastName: filter },
+              { firstName: filter },
+            ],
+          },
+        },
+      },
+      { firstAuthor: filter },
+    ],
+  };
   return isNegatedStringOp(operator) ? { NOT: someClause } : someClause;
 }
 
@@ -264,8 +262,9 @@ export function evalYearCondition(operator: SavedSearchOperator, value: unknown)
 export function evalItemTypeCondition(operator: SavedSearchOperator, strVal: string): Prisma.ItemWhereInput | null {
   if (operator === 'isPresent') return { itemType: { not: '' } };
   if (operator === 'isAbsent') return { itemType: '' };
-  if (operator === 'is' || operator === 'equals') return { itemType: strVal };
-  if (operator === 'isNot' || operator === 'not_equals') return { NOT: { itemType: strVal } };
+  const canonicalType = normalizeCanonicalItemType(strVal);
+  if (operator === 'is' || operator === 'equals') return { itemType: canonicalType };
+  if (operator === 'isNot' || operator === 'not_equals') return { NOT: { itemType: canonicalType } };
   if (operator === 'contains') return { itemType: { contains: strVal, mode: 'insensitive' } };
   if (operator === 'doesNotContain') return { NOT: { itemType: { contains: strVal, mode: 'insensitive' } } };
   return null;
@@ -281,12 +280,79 @@ export function evalTagCondition(operator: SavedSearchOperator, strVal: string):
 }
 
 export function evalCollectionCondition(operator: SavedSearchOperator, strVal: string, descendantMap?: Map<string, string[]>): Prisma.ItemWhereInput | null {
-  if (operator === 'isPresent') return { collectionItems: { some: {} } };
-  if (operator === 'isAbsent') return { collectionItems: { none: {} } };
-  const targetIds = descendantMap?.get(strVal) || [strVal];
-  const collectionCondition = targetIds.length === 1 ? { collectionId: targetIds[0] } : { collectionId: { in: targetIds } };
+  if (operator === 'isPresent') return { collectionItems: { some: { collection: { deletedAt: null } } } };
+  if (operator === 'isAbsent') return { collectionItems: { none: { collection: { deletedAt: null } } } };
+  if (!strVal) return null;
+  if (descendantMap?.has(strVal)) {
+    const targetIds = descendantMap.get(strVal)!;
+    const collectionCondition =
+      targetIds.length === 1
+        ? { collectionId: targetIds[0], collection: { deletedAt: null } }
+        : { collectionId: { in: targetIds }, collection: { deletedAt: null } };
+    if (operator === 'is' || operator === 'equals' || operator === 'contains') return { collectionItems: { some: collectionCondition } };
+    return isNegatedStringOp(operator) ? { NOT: { collectionItems: { some: collectionCondition } } } : null;
+  }
+  if (!isUUID(strVal)) {
+    const nameFilter =
+      operator === 'contains' || operator === 'doesNotContain'
+        ? { contains: strVal, mode: 'insensitive' as const }
+        : { equals: strVal, mode: 'insensitive' as const };
+    const nameCondition: Prisma.CollectionItemWhereInput = {
+      collection: { name: nameFilter, deletedAt: null },
+    };
+    if (operator === 'is' || operator === 'equals' || operator === 'contains') {
+      return { collectionItems: { some: nameCondition } };
+    }
+    return isNegatedStringOp(operator) ? { NOT: { collectionItems: { some: nameCondition } } } : null;
+  }
+  const targetIds = [strVal];
+  const collectionCondition = { collectionId: targetIds[0], collection: { deletedAt: null } };
   if (operator === 'is' || operator === 'equals' || operator === 'contains') return { collectionItems: { some: collectionCondition } };
   return isNegatedStringOp(operator) ? { NOT: { collectionItems: { some: collectionCondition } } } : null;
+}
+
+export function evalHasNotesCondition(
+  operator: SavedSearchOperator,
+  value: unknown,
+  strVal: string,
+): Prisma.ItemWhereInput | null {
+  const isNegativeOp =
+    operator === 'isAbsent' ||
+    operator === 'isNot' ||
+    value === false ||
+    strVal === 'false' ||
+    value === 0 ||
+    strVal === '0';
+  return !isNegativeOp ? { noteCount: { gt: 0 } } : { noteCount: 0 };
+}
+
+export function evalIsRetractedCondition(
+  operator: SavedSearchOperator,
+  value: unknown,
+  strVal: string,
+): Prisma.ItemWhereInput | null {
+  const isNegativeOp =
+    operator === 'isAbsent' ||
+    operator === 'isNot' ||
+    value === false ||
+    strVal === 'false' ||
+    value === 0 ||
+    strVal === '0';
+  return !isNegativeOp
+    ? {
+        OR: [
+          { isRetracted: true },
+          { metadata: { path: ['isRetracted'], equals: true } },
+        ],
+      }
+    : {
+        NOT: {
+          OR: [
+            { isRetracted: true },
+            { metadata: { path: ['isRetracted'], equals: true } },
+          ],
+        },
+      };
 }
 
 export function evalUserStarredCondition(operator: SavedSearchOperator, value: unknown, strVal: string, userId?: string): Prisma.ItemWhereInput | null {
@@ -336,8 +402,14 @@ export function evalAttachmentCondition(
   strVal: string,
 ): Prisma.ItemWhereInput | null {
   if (field === 'hasAttachment') {
-    const isNegativeOp = operator === 'isAbsent' || operator === 'isNot' || value === false || strVal === 'false';
-    return !isNegativeOp ? { attachments: { some: { deletedAt: null } } } : { attachments: { none: { deletedAt: null } } };
+    const isNegativeOp =
+      operator === 'isAbsent' ||
+      operator === 'isNot' ||
+      value === false ||
+      strVal === 'false' ||
+      value === 0 ||
+      strVal === '0';
+    return !isNegativeOp ? { hasFile: true } : { hasFile: false };
   }
   if (field === 'attachmentFilename') {
     if (operator === 'isPresent') return { attachments: { some: { deletedAt: null } } };
@@ -358,7 +430,7 @@ export function evalAttachmentCondition(
 export function evalNoteCondition(operator: SavedSearchOperator, strVal: string): Prisma.ItemWhereInput | null {
   if (operator === 'isPresent') return { notesList: { some: { deletedAt: null } } };
   if (operator === 'isAbsent') return { notesList: { none: { deletedAt: null } } };
-  const noteOr = [
+  const noteOr: Prisma.NoteWhereInput[] = [
     { title: { contains: strVal, mode: 'insensitive' as const } },
     { contentMd: { contains: strVal, mode: 'insensitive' as const } },
   ];
@@ -366,6 +438,25 @@ export function evalNoteCondition(operator: SavedSearchOperator, strVal: string)
   return operator === 'doesNotContain' || operator === 'isNot'
     ? { NOT: { notesList: { some: { deletedAt: null, OR: noteOr } } } }
     : null;
+}
+
+export function evalAnnotationCondition(operator: SavedSearchOperator, strVal: string): Prisma.ItemWhereInput | null {
+  if (operator === 'isPresent') {
+    return { attachments: { some: { deletedAt: null, annotations: { some: { deletedAt: null } } } } };
+  }
+  if (operator === 'isAbsent') {
+    return { attachments: { none: { deletedAt: null, annotations: { some: { deletedAt: null } } } } };
+  }
+  const annOr: Prisma.AnnotationWhereInput[] = [
+    { quoteText: { contains: strVal, mode: 'insensitive' as const } },
+    { comment: { contains: strVal, mode: 'insensitive' as const } },
+    ...(strVal ? [{ tags: { has: strVal } }] : []),
+  ];
+  const matchClause: Prisma.ItemWhereInput = {
+    attachments: { some: { deletedAt: null, annotations: { some: { deletedAt: null, OR: annOr } } } },
+  };
+  if (operator === 'contains' || operator === 'is') return matchClause;
+  return operator === 'doesNotContain' || operator === 'isNot' ? { NOT: matchClause } : null;
 }
 
 function extractYearNumber(raw: unknown): number {
@@ -402,9 +493,26 @@ function evalPublicationDateStrategy(ctx: FieldEvaluatorContext): Prisma.ItemWhe
 
 function evalAccessedAtStrategy(ctx: FieldEvaluatorContext): Prisma.ItemWhereInput | null {
   const { operator, value, strVal } = ctx;
-  return DATE_RANGE_OPERATORS.has(operator)
-    ? (evalDateField('accessedAt', operator, value) ?? evalJsonField('accessedAt', operator, strVal))
-    : (evalJsonField('accessedAt', operator, strVal) ?? evalDateField('accessedAt', operator, value));
+  const directJson = evalJsonField('accessedAt', operator, strVal);
+  if (directJson) return directJson;
+  if (DATE_RANGE_OPERATORS.has(operator)) {
+    if (operator === 'isInTheLast') {
+      const cutoff = parseRelativeDuration(value);
+      if (!cutoff) return null;
+      const yearPrefix = String(cutoff.getUTCFullYear());
+      return {
+        AND: [
+          { metadata: { path: ['accessedAt'], not: Prisma.JsonNull } },
+          { metadata: { path: ['accessedAt'], string_contains: yearPrefix } },
+        ],
+      };
+    }
+    const isoPrefix = strVal.slice(0, 10);
+    if (isoPrefix) {
+      return { metadata: { path: ['accessedAt'], string_starts_with: isoPrefix } };
+    }
+  }
+  return null;
 }
 
 export const FIELD_EVALUATOR_STRATEGIES: Readonly<Record<string, FieldEvaluatorStrategy>> = {
@@ -416,6 +524,8 @@ export const FIELD_EVALUATOR_STRATEGIES: Readonly<Record<string, FieldEvaluatorS
   collection: ({ operator, strVal, descendantMap }) => evalCollectionCondition(operator, strVal, descendantMap),
   hasAttachment: ({ operator, value, strVal }) => evalAttachmentCondition('hasAttachment', operator, value, strVal),
   hasPdf: ({ operator, value, strVal }) => evalAttachmentCondition('hasAttachment', operator, value, strVal),
+  hasNotes: ({ operator, value, strVal }) => evalHasNotesCondition(operator, value, strVal),
+  isRetracted: ({ operator, value, strVal }) => evalIsRetractedCondition(operator, value, strVal),
   isStarred: ({ operator, value, strVal, userId }) => evalUserStarredCondition(operator, value, strVal, userId),
   readStatus: ({ operator, strVal, userId }) => evalReadStatusCondition(operator, strVal, userId),
   rating: ({ operator, value, userId }) => evalRatingCondition(operator, value, userId),
@@ -430,6 +540,8 @@ export const FIELD_EVALUATOR_STRATEGIES: Readonly<Record<string, FieldEvaluatorS
   filename: ({ operator, value, strVal }) => evalAttachmentCondition('attachmentFilename', operator, value, strVal),
   noteContent: ({ operator, strVal }) => evalNoteCondition(operator, strVal),
   note: ({ operator, strVal }) => evalNoteCondition(operator, strVal),
+  annotation: ({ operator, strVal }) => evalAnnotationCondition(operator, strVal),
+  annotations: ({ operator, strVal }) => evalAnnotationCondition(operator, strVal),
 };
 
 function evaluateDefaultFieldStrategy(ctx: FieldEvaluatorContext): Prisma.ItemWhereInput | null {
@@ -496,7 +608,7 @@ export class ConditionEvaluatorEngine {
         if (!item.field || typeof item.field !== 'string' || !item.operator || typeof item.operator !== 'string') {
           throw new BadRequestException('Condition must have valid field and operator');
         }
-        if (item.field === 'collection' && item.value && typeof item.value === 'string') {
+        if (item.field === 'collection' && item.value && typeof item.value === 'string' && item.value.trim()) {
           counter.collectionIds.push(item.value.trim());
         }
       }

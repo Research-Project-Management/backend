@@ -5,8 +5,8 @@ import { asMetaObject, getEffectiveItemField } from './duplicate-clustering.help
 import {
   normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn,
   PRISMA_ITEM_SCALAR_COLUMNS, ItemProvenancePolicy, FieldProvenanceRecord, isPlaceholderItemTitle,
-  deriveFirstAuthor, PREPRINT_SERVER_VENUE_REGEX, parseCreatorString, countFullGivenNames,
-  isBetterAuthorListCandidate,
+  isRejectedCitedIdentifier, deriveFirstAuthor, PREPRINT_SERVER_VENUE_REGEX, parseCreatorString, countFullGivenNames,
+  isBetterAuthorListCandidate, normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { ALLOWED_MERGE_METADATA_FIELDS, PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/ingestion.types';
 
@@ -34,21 +34,19 @@ export interface CreateIngestionReviewCaseData {
   status?: string; resolution?: string; assignedToUserId?: string; assignedToId?: string;
 }
 
-export function parseRunScope(
-  scope?: IngestionScope,
-  fallbackUserId?: string,
-): { userId: string; projectId: string | null } {
+export function parseRunScope(scope?: IngestionScope, fallbackUserId?: string): { userId: string; projectId: string | null } {
   if (typeof scope === 'object' && scope !== null) {
-    const rawProject = scope.projectId;
+    const rawProject = normalizeProjectScopeId(scope.projectId);
     const resolvedUserId = scope.userId || fallbackUserId;
     if (!resolvedUserId) throw new BadRequestException('User context (userId) is required for ingestion run operations');
     return { userId: resolvedUserId, projectId: rawProject && isUUID(rawProject) ? rawProject : null };
   }
   const str = typeof scope === 'string' ? scope : '';
-  const isProject = str && str !== 'user' && str !== 'me' && str !== fallbackUserId && isUUID(str);
+  const normalizedProj = normalizeProjectScopeId(str);
+  const isProject = Boolean(normalizedProj && normalizedProj !== fallbackUserId && isUUID(normalizedProj));
   const resolvedUserId = fallbackUserId || (!isProject && str ? str : '');
   if (!resolvedUserId) throw new BadRequestException('User context (userId) is required for ingestion run operations');
-  return { userId: resolvedUserId, projectId: isProject ? str : null };
+  return { userId: resolvedUserId, projectId: isProject && normalizedProj ? normalizedProj : null };
 }
 
 export function buildMergeAuditTrail(params: {
@@ -78,16 +76,12 @@ export function buildMergeAuditTrail(params: {
 }
 
 const INVERSE_RELATION_TYPE_MAP: Readonly<Record<string, string>> = {
-  cites: 'cited_by', cited_by: 'cites',
-  is_preprint_of: 'is_published_version_of', is_published_version_of: 'is_preprint_of',
-  is_supplement_to: 'has_supplement', has_supplement: 'is_supplement_to',
-  is_part_of: 'has_part', has_part: 'is_part_of',
+  cites: 'cited_by', cited_by: 'cites', is_preprint_of: 'is_published_version_of', is_published_version_of: 'is_preprint_of',
+  is_supplement_to: 'has_supplement', has_supplement: 'is_supplement_to', is_part_of: 'has_part', has_part: 'is_part_of',
   related_to: 'related_to', related: 'related',
 };
 
-export function registerRelationPairWithReciprocal(
-  pairSet: Set<string>, sourceId: string, targetId: string, relationType: string,
-): void {
+export function registerRelationPairWithReciprocal(pairSet: Set<string>, sourceId: string, targetId: string, relationType: string): void {
   pairSet.add(`${sourceId}::${targetId}::${relationType}`);
   const inverseType = INVERSE_RELATION_TYPE_MAP[relationType];
   if (inverseType) pairSet.add(`${targetId}::${sourceId}::${inverseType}`);
@@ -262,7 +256,9 @@ export function computeClearedCanonicalIdentifierTypes(
   }
   for (const key of IDENTIFIER_META_KEYS) {
     const cType = key === 'arxivId' ? 'arxiv' : key;
+    if (topLevelData[key] === null) clearedCanonicalTypes.add(cType);
     if (clearedCanonicalTypes.has(cType)) {
+      topLevelData[key] = null;
       delete primaryMeta[key];
       for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(key)) delete primaryMeta[alias];
     }
@@ -279,9 +275,11 @@ export function computeDesiredMergedIdentifierRecords(params: {
   primaryDoi?: string | null;
 }): Map<string, { type: string; value: string; canonicalUri: string }> {
   const { primaryId, existingIdRecords, clearedCanonicalTypes, topLevelData, primaryMeta, primaryDoi } = params;
+  const rejectedCitedDoi = primaryMeta.rejectedCitedDoi;
+  const isBlockedId = (val: unknown) => Boolean(rejectedCitedDoi) && isRejectedCitedIdentifier(val, rejectedCitedDoi);
   const desiredByType = new Map<string, { type: string; value: string; canonicalUri: string }>();
   for (const rec of existingIdRecords) {
-    if (rec.itemId === primaryId && rec.type && rec.value) {
+    if (rec.itemId === primaryId && rec.type && rec.value && !isBlockedId(rec.value)) {
       const cType = canonicalIdType(rec.type);
       if (!clearedCanonicalTypes.has(cType)) {
         desiredByType.set(cType, { type: cType, value: rec.value, canonicalUri: rec.canonicalUri || rec.value });
@@ -289,7 +287,7 @@ export function computeDesiredMergedIdentifierRecords(params: {
     }
   }
   for (const rec of existingIdRecords) {
-    if (rec.itemId !== primaryId && rec.type && rec.value) {
+    if (rec.itemId !== primaryId && rec.type && rec.value && !isBlockedId(rec.value)) {
       const cType = canonicalIdType(rec.type);
       if (!clearedCanonicalTypes.has(cType) && !desiredByType.has(cType)) {
         desiredByType.set(cType, { type: cType, value: rec.value, canonicalUri: rec.canonicalUri || rec.value });
@@ -298,12 +296,12 @@ export function computeDesiredMergedIdentifierRecords(params: {
   }
   if (!clearedCanonicalTypes.has('doi')) {
     const effectiveDoiRaw = topLevelData.doi ?? primaryMeta.doi ?? primaryDoi;
-    if (typeof effectiveDoiRaw === 'string' && effectiveDoiRaw.trim()) {
+    if (typeof effectiveDoiRaw === 'string' && effectiveDoiRaw.trim() && !isBlockedId(effectiveDoiRaw)) {
       const cleanDoi = normalizeDoi(effectiveDoiRaw) || effectiveDoiRaw.trim();
       desiredByType.set('doi', { type: 'doi', value: cleanDoi, canonicalUri: `https://doi.org/${cleanDoi}` });
     } else {
       const discoveredDoi = desiredByType.get('doi')?.value;
-      if (discoveredDoi && discoveredDoi.trim()) {
+      if (discoveredDoi && discoveredDoi.trim() && !isBlockedId(discoveredDoi)) {
         const cleanDoi = normalizeDoi(discoveredDoi) || discoveredDoi.trim();
         topLevelData.doi = cleanDoi;
         primaryMeta.doi = cleanDoi;
@@ -322,17 +320,21 @@ export function computeDesiredMergedIdentifierRecords(params: {
     const canonicalType = key === 'arxivId' ? 'arxiv' : key;
     if (clearedCanonicalTypes.has(canonicalType)) {
       desiredByType.delete(canonicalType);
+      topLevelData[key] = null;
       delete primaryMeta[key];
       continue;
     }
-    const rawVal = primaryMeta[key];
-    if (typeof rawVal === 'string' && rawVal.trim()) {
+    const rawVal = topLevelData[key] ?? primaryMeta[key];
+    if (typeof rawVal === 'string' && rawVal.trim() && !isBlockedId(rawVal)) {
       const cleanVal = idNormMap[key].norm(rawVal) || rawVal.trim();
+      if (topLevelData[key] === undefined) topLevelData[key] = cleanVal;
+      primaryMeta[key] = cleanVal;
       desiredByType.set(canonicalType, { type: canonicalType, value: cleanVal, canonicalUri: idNormMap[key].uri(cleanVal) });
     } else {
       const discovered = desiredByType.get(canonicalType)?.value;
-      if (discovered && discovered.trim()) {
+      if (discovered && discovered.trim() && !isBlockedId(discovered)) {
         const cleanVal = idNormMap[key].norm(discovered) || discovered.trim();
+        topLevelData[key] = cleanVal;
         primaryMeta[key] = cleanVal;
         desiredByType.set(canonicalType, { type: canonicalType, value: cleanVal, canonicalUri: idNormMap[key].uri(cleanVal) });
       }
@@ -470,7 +472,7 @@ export function applyMetadataAndProvenanceBackfill(params: {
         for (const dup of sortedDupsForId) {
           const dupMeta = asMetaObject(dup.metadata);
           const candidateVal = getEffectiveItemField(dup, idKey, dupMeta);
-          if (candidateVal !== undefined) {
+          if (candidateVal !== undefined && !(Boolean(primaryMeta.rejectedCitedDoi) && isRejectedCitedIdentifier(candidateVal, primaryMeta.rejectedCitedDoi))) {
             primaryMeta[idKey] = candidateVal;
             backfillFields[idKey] = candidateVal;
             const lockCheck = ItemProvenancePolicy.inspectFieldUserLock(dupMeta, idKey);
@@ -549,6 +551,21 @@ export function computeMergedTopLevelAndPrimaryMeta(params: {
     ...(attachmentCount !== undefined ? { attachmentCount, hasFile: attachmentCount > 0 } : {}),
   };
 
+  if (primaryMeta.isRetracted === true || (primary as { isRetracted?: boolean }).isRetracted === true) {
+    topLevelData.isRetracted = true;
+    primaryMeta.isRetracted = true;
+  }
+
+  const rawCheckedAt =
+    primaryMeta.retractionCheckedAt ?? (primary as { retractionCheckedAt?: Date | string | null }).retractionCheckedAt;
+  if (rawCheckedAt) {
+    const parsedDate = rawCheckedAt instanceof Date ? rawCheckedAt : new Date(String(rawCheckedAt));
+    if (!Number.isNaN(parsedDate.getTime())) {
+      topLevelData.retractionCheckedAt = parsedDate;
+      if (!primaryMeta.retractionCheckedAt) primaryMeta.retractionCheckedAt = parsedDate.toISOString();
+    }
+  }
+
   for (const [key, val] of Object.entries(combinedUpdates)) {
     if (key === 'extraFields' || key === 'metadata' || SYSTEM_RESERVED_MERGE_KEYS.has(key)) continue;
     if (TOP_LEVEL_ITEM_COLUMNS.has(key)) {
@@ -570,8 +587,7 @@ export function computeMergedTopLevelAndPrimaryMeta(params: {
 
   const primaryHasAbstract = hasNonEmpty(primary.abstract) || hasNonEmpty(origPrimaryMeta.abstractNote);
   const abstractAliasAuthorized =
-    scalarSelections.abstract !== undefined ||
-    scalarSelections.abstractNote !== undefined ||
+    scalarSelections.abstract !== undefined || scalarSelections.abstractNote !== undefined ||
     (backfillFields.abstractNote !== undefined &&
       ItemProvenancePolicy.isFieldLocked(primaryMeta, 'abstractNote') &&
       !ItemProvenancePolicy.isFieldLocked(origPrimaryMeta, 'abstract'));
@@ -709,23 +725,19 @@ export function computeMergedTopLevelAndPrimaryMeta(params: {
       delete primaryMeta.DOI;
     }
   }
-
   if (topLevelData.url !== undefined) {
     if (isEmptyClear(topLevelData.url)) {
       topLevelData.url = null;
       delete primaryMeta.url;
-      delete primaryMeta.URL;
     } else {
       primaryMeta.url = topLevelData.url;
-      delete primaryMeta.URL;
     }
+    delete primaryMeta.URL;
   }
-
   if (topLevelData.citationKey !== undefined && isEmptyClear(topLevelData.citationKey)) {
     topLevelData.citationKey = null;
     delete primaryMeta.citationKey;
     delete primaryMeta.citeKey;
   }
-
   return topLevelData;
 }

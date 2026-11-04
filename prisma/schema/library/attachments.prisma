@@ -46,7 +46,7 @@ enum AnnotationType {
 model Attachment {
   id                    String                     @id @default(uuid(7)) @db.Uuid
   itemId                String                     @map("item_id") @db.Uuid
-  item                  Item                       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item                  Item                       @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_attachments_item_id")
   linkMode              LinkMode                   @default(imported_file) @map("link_mode")
   attachmentType        AttachmentType             @default(primary_pdf) @map("attachment_type")
   filename              String                     @default("document.pdf")
@@ -62,7 +62,10 @@ model Attachment {
   extractionStartedAt   DateTime?                  @map("extraction_started_at") @db.Timestamptz(6)
   extractionCompletedAt DateTime?                  @map("extraction_completed_at") @db.Timestamptz(6)
   extractionLastError   String?                    @map("extraction_last_error")
+  isPrimary             Boolean                    @default(false) @map("is_primary")
   metadata              Json?                      @default("{}") @db.JsonB
+  createdById           String?                    @map("created_by_id") @db.Uuid
+  deletedById           String?                    @map("deleted_by_id") @db.Uuid
   version               Int                        @default(1)
   createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -71,12 +74,13 @@ model Attachment {
   revisions             AttachmentRevision[]
   annotations           Annotation[]
   fullTextIndexes       FullTextIndex[]
+  structure             AttachmentStructure?
+  readingStates         AttachmentReadingState[]
 
-  @@index([itemId, linkMode])
-  @@index([itemId, attachmentType])
+  @@index([itemId, deletedAt, attachmentType])
+  @@index([itemId, deletedAt, fileId])
   @@index([itemId, deletedAt, createdAt])
-  @@index([deletedAt])
-  @@index([fileId])
+  @@index([fileId, deletedAt])
   @@index([fileHash])
   @@index([extractionStatus, extractionStartedAt])
   @@map("attachments")
@@ -85,13 +89,14 @@ model Attachment {
 model AttachmentRevision {
   id             String     @id @default(uuid(7)) @db.Uuid
   attachmentId   String     @map("attachment_id") @db.Uuid
-  attachment     Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  attachment     Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_attachment_revisions_attachment_id")
   revisionNumber Int        @default(1) @map("revision_number")
   fileId         String?    @map("file_id") @db.Uuid
   fileHash       String?    @map("file_hash")
   sizeBytes      BigInt     @default(0) @map("size_bytes")
   url            String     @default("")
   comment        String?    @default("")
+  createdById    String?    @map("created_by_id") @db.Uuid
   createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([attachmentId, revisionNumber])
@@ -102,7 +107,9 @@ model AttachmentRevision {
 model Annotation {
   id                  String         @id @default(uuid(7)) @db.Uuid
   attachmentId        String         @map("attachment_id") @db.Uuid
-  attachment          Attachment     @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  attachment          Attachment     @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_annotations_attachment_id")
+  itemId              String?        @map("item_id") @db.Uuid
+  imageFileId         String?        @map("image_file_id") @db.Uuid
   type                AnnotationType @default(highlight)
   color               String         @default("#ffeb3b")
   pageIndex           Int            @default(0) @map("page_index")
@@ -118,21 +125,50 @@ model Annotation {
   updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt           DateTime?      @map("deleted_at") @db.Timestamptz(6)
 
-  @@index([attachmentId, deletedAt, annotationSortIndex])
-  @@index([attachmentId, deletedAt, pageIndex])
+  @@index([attachmentId, deletedAt, pageIndex, annotationSortIndex, createdAt])
+  @@index([attachmentId, deletedAt, type, pageIndex, annotationSortIndex])
+  @@index([itemId, deletedAt, pageIndex, annotationSortIndex])
   @@index([authorId, deletedAt])
   @@index([tags], type: Gin)
   @@map("annotations")
 }
 
 model FullTextIndex {
-  attachmentId String     @map("attachment_id") @db.Uuid
-  attachment   Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
-  pageIndex    Int        @map("page_index")
-  textContent  String     @map("text_content")
-  charOffset   Int        @default(0) @map("char_offset")
-  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  attachmentId String                   @map("attachment_id") @db.Uuid
+  attachment   Attachment               @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_full_text_indexes_attachment_id")
+  itemId       String?                  @map("item_id") @db.Uuid
+  pageIndex    Int                      @map("page_index")
+  textContent  String                   @map("text_content")
+  charOffset   Int                      @default(0) @map("char_offset")
+  searchVector Unsupported("tsvector")? @map("search_vector")
+  createdAt    DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@id([attachmentId, pageIndex])
+  @@index([itemId, attachmentId])
+  @@index([searchVector], type: Gin)
   @@map("full_text_indexes")
+}
+
+model AttachmentStructure {
+  attachmentId      String     @id @map("attachment_id") @db.Uuid
+  attachment        Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_attachment_structures_attachment_id")
+  itemId            String     @map("item_id") @db.Uuid
+  item              Item       @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_attachment_structures_item_id")
+  isScanned         Boolean    @default(false) @map("is_scanned")
+  ocrStatus         String?    @map("ocr_status") @db.VarChar(32)
+  qualityScore      Float?     @map("quality_score") @db.Real
+  engineUsed        String?    @map("engine_used") @db.VarChar(64)
+  pageCount         Int        @default(0) @map("page_count")
+  sections          Json       @default("[]") @db.JsonB
+  figures           Json       @default("[]") @db.JsonB
+  tables            Json       @default("[]") @db.JsonB
+  formulas          Json       @default("[]") @db.JsonB
+  references        Json       @default("[]") @db.JsonB
+  fulltextFileId    String?    @map("fulltext_file_id") @db.Uuid
+  fulltextByteSize  Int?       @map("fulltext_byte_size")
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([itemId])
+  @@map("attachment_structures")
 }

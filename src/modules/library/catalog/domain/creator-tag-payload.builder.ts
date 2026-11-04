@@ -1,16 +1,17 @@
 import { Prisma, LinkMode, AttachmentType, AnnotationType, TagType } from '@prisma/client';
 import { isUuid } from '@/core';
 import {
-  normalizeAcademicTags,
+  normalizeTags,
   cleanSingleTag,
   buildTipTapDocFromText,
   getPrimaryCreatorRoleForType,
   mergeCanonicalCreators,
   deriveFirstAuthor,
   INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
-  convertAcademicHtmlToMarkdown,
+  convertHtmlToMarkdown,
   ItemProvenancePolicy,
   ManualLockMutationInput,
+  ItemsMapper,
 } from '@/modules/library/core';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
@@ -22,7 +23,6 @@ import {
   CreatorCreditInput,
 } from '@/modules/library/core/types/bibliographic.types';
 import { getFileContentPath } from '@/modules/storage/storage.port';
-import { ItemsMapper } from './items.mapper';
 
 export { buildTipTapDocFromText, isUuid, deriveFirstAuthor, ITEM_COLUMN_METADATA_FIELDS };
 export {
@@ -45,9 +45,24 @@ export function buildTagTypeMap(
   if (!Array.isArray(rawTagList)) return tagTypeMap;
   for (const rt of rawTagList) {
     if (typeof rt === 'object' && rt !== null) {
-      const tagName = (rt.name || rt.tag || '').trim();
+      const innerTag =
+        'tag' in rt && typeof rt.tag === 'object' && rt.tag !== null
+          ? (rt.tag as { name?: unknown; type?: unknown })
+          : null;
+      const rawName =
+        typeof rt.name === 'string'
+          ? rt.name
+          : typeof rt.tag === 'string'
+            ? rt.tag
+            : typeof innerTag?.name === 'string'
+              ? innerTag.name
+              : '';
+      const tagName = rawName.trim();
       if (!tagName) continue;
-      const typeVal = 'type' in rt ? (rt as { type?: unknown }).type : undefined;
+      const typeVal =
+        'type' in rt && (rt as { type?: unknown }).type !== undefined
+          ? (rt as { type?: unknown }).type
+          : innerTag?.type;
       const resolvedType =
         typeVal === 1 || typeVal === 'automatic' || typeVal === TagType.automatic
           ? TagType.automatic
@@ -56,7 +71,9 @@ export function buildTagTypeMap(
             : undefined;
       if (resolvedType) {
         tagTypeMap.set(tagName.toLowerCase(), resolvedType);
-        const normalized = cleanSingleTag(tagName);
+        const normalized = cleanSingleTag(tagName, {
+          allowManualAcademicTerms: resolvedType !== TagType.automatic,
+        });
         if (normalized) tagTypeMap.set(normalized.toLowerCase(), resolvedType);
       }
     }
@@ -141,7 +158,7 @@ export function resolveExtraPlainText(
   return updatedLines.join('\n').trim() || undefined;
 }
 
-const IGNORED_SYSTEM_KEYS = new Set([
+export const IGNORED_SYSTEM_KEYS = new Set([
   ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
   'id', 'userId', 'projectId', 'createdById', 'uploadedById',
   'createdAt', 'updatedAt', 'deletedAt', 'version', '_version',
@@ -236,9 +253,7 @@ export function extractNonColumnExtraFields(
   return result;
 }
 
-export function convertHtmlToMarkdown(html: string): string {
-  return convertAcademicHtmlToMarkdown(html);
-}
+export { convertHtmlToMarkdown };
 
 export function prepareNotesToCreate(
   notes: unknown,
@@ -285,14 +300,22 @@ export function prepareNotesToCreate(
           ? (noteObj.contentJson as Record<string, unknown>)
           : buildTipTapDocFromText(contentMd);
       const customTags = Array.isArray(noteObj?.tags)
-        ? (noteObj.tags as unknown[]).filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+        ? normalizeTags(
+            (noteObj.tags as unknown[]).filter(
+              (t): t is string => typeof t === 'string' && t.trim().length > 0,
+            ),
+            { allowManualAcademicTerms: true },
+          )
         : [];
-      const baseTags = normalizeAcademicTags([
-        'imported',
-        ...(sourceName ? [sourceName] : []),
-        ...(isComment ? ['comment'] : []),
-      ]);
-      const mergedTags = Array.from(new Set([...baseTags, ...customTags.map((t) => t.trim())]));
+      const baseTags = normalizeTags(
+        [
+          'imported',
+          ...(sourceName ? [sourceName] : []),
+          ...(isComment ? ['comment'] : []),
+        ],
+        { allowManualAcademicTerms: true },
+      );
+      const mergedTags = Array.from(new Set([...baseTags, ...customTags]));
       return {
         userId,
         createdById: createdById || userId,
@@ -313,6 +336,8 @@ export function prepareAttachmentsToCreate(
   fallbackData?: { filename?: string; fileUrl?: string; size?: number; mimeType?: string },
   userId?: string,
 ): Prisma.AttachmentCreateWithoutItemInput[] {
+  const resolvedCreatorId =
+    userId && userId !== 'system' && isUuid(userId) ? userId : undefined;
   const result: Prisma.AttachmentCreateWithoutItemInput[] = [];
   if (Array.isArray(attachments) && attachments.length > 0) {
     let hasPrimaryPdf = false;
@@ -389,7 +414,12 @@ export function prepareAttachmentsToCreate(
                 };
               })
           : [];
+      const isExtractablePdf =
+        isPdf &&
+        linkMode !== LinkMode.linked_url &&
+        Boolean(resolvedFileId || (fileUrl && !fileUrl.startsWith('http')));
       result.push({
+        ...(resolvedCreatorId ? { createdById: resolvedCreatorId } : {}),
         filename,
         url: fileUrl,
         fileId: resolvedFileId,
@@ -397,12 +427,26 @@ export function prepareAttachmentsToCreate(
         mimeType,
         linkMode,
         attachmentType,
+        ...(!isExtractablePdf
+          ? {
+              extractionStatus: 'READY',
+              extractionCompletedAt: new Date(),
+            }
+          : {}),
         metadata: Object.keys(metadata).length > 0 ? (metadata as Prisma.InputJsonValue) : undefined,
         ...(annotationsToCreate.length > 0 ? { annotations: { create: annotationsToCreate } } : {}),
         ...(fileUrl || resolvedFileId
           ? {
               revisions: {
-                create: [{ revisionNumber: 1, url: fileUrl, sizeBytes: size, fileHash: (att.fileHash as string) || null }],
+                create: [
+                  {
+                    ...(resolvedCreatorId ? { createdById: resolvedCreatorId } : {}),
+                    revisionNumber: 1,
+                    url: fileUrl,
+                    sizeBytes: size,
+                    fileHash: (att.fileHash as string) || null,
+                  },
+                ],
               },
             }
           : {}),
@@ -417,7 +461,11 @@ export function prepareAttachmentsToCreate(
     const filename = fallbackData?.filename || 'document.pdf';
     const mimeType = fallbackData?.mimeType || 'application/pdf';
     const size = fallbackData?.size || 0;
+    const isExtractableFallbackPdf =
+      (mimeType === 'application/pdf' || filename.toLowerCase().endsWith('.pdf')) &&
+      Boolean(fallbackFileId || (fileUrl && !fileUrl.startsWith('http')));
     result.push({
+      ...(resolvedCreatorId ? { createdById: resolvedCreatorId } : {}),
       filename,
       url: fileUrl,
       fileId: fallbackFileId || null,
@@ -425,7 +473,23 @@ export function prepareAttachmentsToCreate(
       mimeType,
       linkMode: 'imported_file',
       attachmentType: 'primary_pdf',
-      revisions: { create: [{ revisionNumber: 1, url: fileUrl, sizeBytes: size, fileHash: null }] },
+      ...(!isExtractableFallbackPdf
+        ? {
+            extractionStatus: 'READY',
+            extractionCompletedAt: new Date(),
+          }
+        : {}),
+      revisions: {
+        create: [
+          {
+            ...(resolvedCreatorId ? { createdById: resolvedCreatorId } : {}),
+            revisionNumber: 1,
+            url: fileUrl,
+            sizeBytes: size,
+            fileHash: null,
+          },
+        ],
+      },
     });
   }
   return result;

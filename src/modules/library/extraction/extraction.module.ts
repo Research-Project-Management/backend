@@ -10,17 +10,16 @@ import {
 import { AttachmentController } from './controllers/attachments.controller';
 import { AttachmentStorageController } from './controllers/attachment-storage.controller';
 import { AnnotationsController } from './controllers/annotations.controller';
-import { ExtractionTelemetryController } from './controllers/extraction-telemetry.controller';
+import { ExtractionTelemetryController } from './controllers/attachments.controller';
 
 // Facades
-import { ExtractionFacade, EXTRACTION_FACADE } from './extraction.facade';
+import { ExtractionFacade, EXTRACTION_FACADE } from './services/reference-matcher.service';
 
 // Services
 import { AttachmentsService } from './services/attachments.service';
 import { AttachmentRenamerService } from './services/attachment-renamer.service';
 import { WebSnapshotService } from './services/web-snapshot.service';
-import { OcrWorkerPoolService } from './services/ocr-worker-pool.service';
-import { TrustedExtractionService } from './services/trusted-extraction.service';
+import { PdfMetadataExtractor } from './services/pdf-metadata.extractor';
 import { AnnotationsService } from './services/annotations.service';
 import { PdfAnnotationImporterService } from './services/pdf-annotation-importer.service';
 import { ReferenceMatcherService } from './services/reference-matcher.service';
@@ -35,15 +34,10 @@ import { AnnotationsRepository } from './repositories/annotations.repository';
 import { PdfProvider } from './providers/pdf.provider';
 import { PdfTextMetadataExtractor } from './providers/pdf-text-metadata.extractor';
 import {
-  OcrProvider,
-  OcrPreprocessorService,
-  OcrSandwichPdfService,
-} from './providers/ocr.provider';
-import {
   ExtractionHandler,
   EXTRACTION_EVENT_TYPES,
 } from './services/extraction.handler';
-import { ItemLifecycleSubscriber } from './subscribers/item-lifecycle.subscriber';
+import { ItemLifecycleSubscriber } from './services/reference-matcher.service';
 import { AnnotationNormalizer } from './domain/annotation.normalizer';
 
 @Global()
@@ -72,17 +66,13 @@ import { AnnotationNormalizer } from './domain/annotation.normalizer';
     AttachmentsService,
     AttachmentRenamerService,
     WebSnapshotService,
-    OcrPreprocessorService,
-    OcrWorkerPoolService,
-    OcrSandwichPdfService,
-    TrustedExtractionService,
+    PdfMetadataExtractor,
     AnnotationsService,
     PdfAnnotationImporterService,
     ReferenceMatcherService,
     ExtractionMetadataSynchronizer,
 
     // Utilities & Providers
-    OcrProvider,
     PdfProvider,
     PdfTextMetadataExtractor,
     ExtractionHandler,

@@ -1,13 +1,6 @@
-import {
-  IsString,
-  IsOptional,
-  IsArray,
-  IsNumber,
-  IsBoolean,
-  Min,
-  Max,
-} from 'class-validator';
+import { IsString, IsOptional, IsArray, IsNumber, IsBoolean, Min, Max, IsUUID, ArrayMaxSize, ArrayNotEmpty, MaxLength, IsObject } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 function transformOptionalBoolean(value: unknown): boolean | undefined {
   if (value === 'true' || value === true || value === '1' || value === 1)
@@ -56,6 +49,21 @@ export class CursorPaginationQueryDto {
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (Array.isArray(value))
+      return value.map((s) => String(s).trim()).filter(Boolean);
+    if (typeof value === 'string')
+      return value
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    return undefined;
+  })
+  @IsArray()
+  @IsString({ each: true })
+  ids?: string[];
 
   @IsOptional()
   @IsString()
@@ -218,6 +226,10 @@ export class CursorPaginationQueryDto {
   @Transform(({ value }) => transformOptionalBoolean(value))
   @IsBoolean()
   recursive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  checkInProjectId?: string;
 }
 
 export interface CursorPaginatedResult<T> {
@@ -319,4 +331,217 @@ export interface DocumentFulltextResponse {
   tableCount?: number;
   formulaCount?: number;
   referenceCount?: number;
+}
+
+export class TypeConversionPreviewDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  targetType?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  targetItemType?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  retainUnmappedInExtra?: boolean;
+}
+
+export class TypeConversionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  targetType?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  targetItemType?: string;
+
+  @IsOptional()
+  @IsNumber()
+  expectedVersion?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  retainUnmappedInExtra?: boolean;
+
+  @IsOptional()
+  @IsObject()
+  customFieldOverrides?: Record<string, unknown>;
+}
+
+export class ParseCitationsDto {
+  @ApiPropertyOptional({
+    description:
+      'Raw unformatted citation text or multi-line bibliography string to parse via citation parser',
+    example:
+      'Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017). Attention is all you need. Advances in neural information processing systems, 30.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100000)
+  citations?: string;
+
+  @ApiPropertyOptional({
+    description: 'Alias for citations',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100000)
+  rawCitations?: string;
+}
+
+export class BulkPurgeItemsDto {
+  @ApiProperty({
+    description: 'Array of item IDs to permanently delete from library/trash',
+    example: ['uuid-1', 'uuid-2'],
+  })
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsString({ each: true })
+  @MaxLength(100, { each: true })
+  itemIds!: string[];
+}
+
+export class BulkTrashItemsDto {
+  @ApiProperty({
+    description: 'Array of item IDs to move to trash',
+    example: ['uuid-1', 'uuid-2'],
+  })
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsString({ each: true })
+  @MaxLength(100, { each: true })
+  itemIds!: string[];
+}
+
+export class BulkRestoreItemsDto {
+  @ApiProperty({
+    description: 'Array of item IDs to restore from trash',
+    example: ['uuid-1', 'uuid-2'],
+  })
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsString({ each: true })
+  @MaxLength(100, { each: true })
+  itemIds!: string[];
+}
+
+export class ImportItemIdsDto {
+  @ApiProperty({
+    description: 'Array of item UUIDs to import into project',
+    example: ['uuid-1', 'uuid-2'],
+  })
+  @IsArray()
+  @ArrayNotEmpty({ message: 'itemIds must be a non-empty array' })
+  @ArrayMaxSize(100, { message: 'itemIds must contain at most 100 IDs' })
+  @IsUUID(undefined, { each: true, message: 'Each item ID must be a valid UUID' })
+  itemIds!: string[];
+}
+
+export class ReResolveMetadataDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  doi?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  arxivId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  pmid?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  isbn?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  title?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  forceRefresh?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  aggressive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  attachOaPdf?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  fields?: string[];
+
+  @IsOptional()
+  @IsNumber()
+  expectedVersion?: number;
+
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
+}
+
+export class LinkItemsDto {
+  @IsOptional()
+  @IsUUID()
+  targetItemId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  targetItemIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  relationType?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
+}
+
+export class MarkMyPublicationDto {
+  @IsOptional()
+  @IsString()
+  contributorId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  isPublic?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  openAccessLicense?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  includeAttachments?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  includeNotes?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  authorshipConfirmed?: boolean;
+
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
 }

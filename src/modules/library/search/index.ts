@@ -1,20 +1,18 @@
 export * from './search.module';
-export * from './search.facade';
+export * from './controllers/search.controller';
 
 // Controllers
-export * from './controllers/search.controller';
 
 // Domain
 export * from './domain/item-specifications';
 
 // DTOs & Types
-export * from './dto/search.dto';
 
 // Services
 export * from './services/search.service';
 
-// Repositories
+// Repositories & SQL Builders
 export * from './repositories/search.repository';
+export * from './repositories/search-sql.helper';
 
 // Subscribers
-export * from './subscribers/search-events.subscriber';

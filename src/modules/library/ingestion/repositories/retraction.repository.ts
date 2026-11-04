@@ -43,6 +43,9 @@ const RETRACTION_IDENTIFIER_FILTER: Prisma.ItemWhereInput = {
       NOT: { doi: '' },
     },
     {
+      pmid: { not: null },
+    },
+    {
       metadata: {
         path: ['pmid'],
         not: Prisma.AnyNull,
@@ -237,103 +240,80 @@ export class RetractionRepository {
       const updated = await client.item.update({
         where: { id: itemId },
         data: {
+          isRetracted: Boolean(isRetracted),
           metadata: metadataObj as unknown as Prisma.InputJsonValue,
           retractionCheckedAt: checkedAt,
           ...(statusChanged ? { version: { increment: 1 } } : {}),
         },
-        include: {
-          contributors: { orderBy: { orderIndex: 'asc' } },
-          itemTags: { include: { tag: true } },
-          collectionItems: { include: { collection: true } },
-          attachments: { where: { deletedAt: null } },
-          notesList: { where: { deletedAt: null } },
-          identifiers: true,
-        },
+        ...(statusChanged
+          ? {
+              include: {
+                contributors: { orderBy: { orderIndex: 'asc' } },
+                itemTags: { include: { tag: true } },
+                collectionItems: { include: { collection: true } },
+                attachments: { where: { deletedAt: null } },
+                notesList: { where: { deletedAt: null } },
+                identifiers: true,
+              },
+            }
+          : {}),
       });
       const effectiveUserId = existing?.userId || updated?.userId;
-      const domainUpdated = updated
-        ? ItemsMapper.mapFlattenedState(updated, effectiveUserId)
-        : updated;
+      const effectiveProjectId = normalizeProjectScopeId(
+        existing?.projectId ?? updated?.projectId,
+      );
+      const rawDomainUpdated =
+        statusChanged && updated
+          ? ItemsMapper.mapFlattenedState(updated, effectiveUserId)
+          : updated;
+      const domainUpdated =
+        effectiveProjectId &&
+        rawDomainUpdated &&
+        typeof rawDomainUpdated === 'object'
+          ? (() => {
+              const clone = {
+                ...(rawDomainUpdated as unknown as Record<string, unknown>),
+              };
+              delete clone.isStarred;
+              delete clone.starred;
+              delete clone.isRead;
+              delete clone.readStatus;
+              delete clone.rating;
+              delete clone.currentPage;
+              delete clone.lastReadPage;
+              delete clone.scrollPosition;
+              delete clone.lastOpenedAt;
+              delete clone.lastReadAt;
+              delete clone.isMyPublication;
+              delete clone.states;
+              delete clone.publications;
+              return clone as unknown as typeof rawDomainUpdated;
+            })()
+          : rawDomainUpdated;
 
-      if (statusChanged && updated && effectiveUserId) {
-        const effectiveProjectId = normalizeProjectScopeId(
-          existing?.projectId ?? updated.projectId,
-        );
+      if (statusChanged && updated && effectiveUserId && helpers) {
         const eventScope = {
           userId: effectiveUserId,
           projectId: effectiveProjectId ?? null,
         };
-        if (helpers) {
-          await helpers.appendChange(eventScope, {
-            entityType: 'Item',
-            entityId: itemId,
-            action: 'update',
-            version: updated.version,
-            data: domainUpdated,
-          });
-          await helpers.publishOutbox(
-            eventScope,
-            itemId,
-            LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-            {
-              ...(domainUpdated as unknown as Record<string, unknown>),
-              updatedFields: ['isRetracted', 'retractionCheckedAt'],
-              source: 'retraction_watch',
-            },
-          );
-          return domainUpdated as unknown as Item;
-        }
-        try {
-          const seqRecord = effectiveProjectId
-            ? await client.syncSequence?.upsert({
-                where: { projectId: effectiveProjectId },
-                create: {
-                  projectId: effectiveProjectId,
-                  currentSequence: BigInt(1),
-                },
-                update: { currentSequence: { increment: BigInt(1) } },
-                select: { currentSequence: true },
-              })
-            : await client.syncSequence?.upsert({
-                where: { userId: effectiveUserId },
-                create: {
-                  userId: effectiveUserId,
-                  currentSequence: BigInt(1),
-                },
-                update: { currentSequence: { increment: BigInt(1) } },
-                select: { currentSequence: true },
-              });
-          const seq = seqRecord?.currentSequence ?? BigInt(1);
-          await client.libraryChange?.create({
-            data: {
-              seq,
-              userId: effectiveUserId,
-              projectId: effectiveProjectId ?? null,
-              entityType: 'Item',
-              entityId: itemId,
-              action: 'update',
-              version: updated.version,
-              data: domainUpdated as unknown as Prisma.InputJsonValue,
-            },
-          });
-          await client.outboxEvent?.create({
-            data: {
-              userId: effectiveUserId,
-              projectId: effectiveProjectId ?? null,
-              aggregateId: itemId,
-              eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-              payload: {
-                ...(domainUpdated as unknown as Record<string, unknown>),
-                updatedFields: ['isRetracted', 'retractionCheckedAt'],
-                source: 'retraction_watch',
-              },
-              status: 'PENDING',
-              retryCount: 0,
-            },
-          });
-        } catch {
-          // Non-critical changelog write in standalone repository context
-        }
+        await helpers.appendChange(eventScope, {
+          entityType: 'Item',
+          entityId: itemId,
+          action: 'update',
+          version: updated.version,
+          data: domainUpdated,
+        });
+        await helpers.publishOutbox(
+          eventScope,
+          itemId,
+          LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+          {
+            ...(domainUpdated as unknown as Record<string, unknown>),
+            updatedFields: ['isRetracted', 'retractionCheckedAt'],
+            source: 'retraction_watch',
+          },
+        );
+        return domainUpdated as unknown as Item;
       }
 
       return (domainUpdated ?? updated) as unknown as Item;
@@ -355,10 +335,7 @@ export class RetractionRepository {
     const items = await this.prisma.item.findMany({
       where: {
         ...scopeWhere,
-        metadata: {
-          path: ['isRetracted'],
-          equals: true,
-        },
+        isRetracted: true,
       },
       take: 500,
       orderBy: [{ updatedAt: 'desc' }],
@@ -372,10 +349,13 @@ export class RetractionRepository {
       .filter((item) => {
         const meta = parseItemMetadata(item.metadata);
         const rec = item as unknown as {
+          isRetracted?: boolean;
           retraction?: { isRetracted?: boolean };
         };
         return (
-          meta.isRetracted === true || rec.retraction?.isRetracted === true
+          rec.isRetracted === true ||
+          meta.isRetracted === true ||
+          rec.retraction?.isRetracted === true
         );
       })
       .map(
@@ -391,10 +371,7 @@ export class RetractionRepository {
     const baseWhere = this.getScopeWhere(userId, projectId);
     const retractedBaseWhere: Prisma.ItemWhereInput = {
       ...baseWhere,
-      metadata: {
-        path: ['isRetracted'],
-        equals: true,
-      },
+      isRetracted: true,
     };
 
     const [totalItems, retractedCount, expressionsOfConcernCount, manualCount] =
@@ -573,7 +550,10 @@ export class RetractionRepository {
     );
     const items = await this.prisma.item.findMany({
       where: {
-        doi: { in: normalized },
+        OR: [
+          { doi: { in: normalized } },
+          { identifiers: { some: { type: 'doi', value: { in: normalized } } } },
+        ],
         deletedAt: null,
       },
       select: {
@@ -582,6 +562,7 @@ export class RetractionRepository {
         projectId: true,
         doi: true,
         metadata: true,
+        identifiers: { select: { type: true, value: true } },
       },
     });
     return items.map((it) => {
@@ -590,7 +571,7 @@ export class RetractionRepository {
         id: it.id,
         userId: it.userId,
         projectId: it.projectId,
-        doi: it.doi,
+        doi: it.doi ?? findIdentVal(it.identifiers, 'doi'),
         isRetracted: Boolean(meta.isRetracted),
         retractionNature: meta.retractionNature ?? null,
       };

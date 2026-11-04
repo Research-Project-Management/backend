@@ -1,14 +1,345 @@
+import { Prisma, ReadStatus, Annotation } from '@prisma/client';
+import { isUuid, PrismaService } from '@/core';
+import { normalizeProjectScopeId, SearchQueryEngine, ScopeSpecification, ActiveItemsSpecification, TrashItemsSpecification, ItemTypeSpecification, YearRangeSpecification, CollectionSpecification, TagSpecification, TagNamesSpecification, CompositeSpecification, AndSpecification, OrSpecification, NotSpecification, syncItemDenormalizedCountsInClient } from '@/modules/library/core';
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService, isUuid } from '@/core';
-import { Prisma, Annotation } from '@prisma/client';
-import { normalizeProjectScopeId } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
-import {
-  CreateNoteData,
-  UpdateNoteData,
-} from '@/modules/library/catalog/types/catalog.types';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
+import { buildTipTapDocFromText, extractPlainTextFromTipTap } from '@/modules/library/core/domain/renamer.domain';
+import { CreateNoteData, UpdateNoteData } from '@/modules/library/catalog/types/catalog.types';
+
+export {
+  ScopeSpecification,
+  ActiveItemsSpecification,
+  TrashItemsSpecification,
+  ItemTypeSpecification,
+  YearRangeSpecification,
+  CollectionSpecification,
+  TagSpecification,
+  TagNamesSpecification,
+  CompositeSpecification,
+  AndSpecification,
+  OrSpecification,
+  NotSpecification,
+  isUuid,
+};
+
+export interface ItemFilterOptions {
+  view?:
+    | 'all'
+    | 'recent'
+    | 'unfiled'
+    | 'trash'
+    | 'my-publications'
+    | 'publications'
+    | 'starred'
+    | 'retracted';
+  collectionId?: string;
+  collectionIds?: string[];
+  targetCollectionIds?: string[];
+  tagId?: string;
+  tag?: string;
+  search?: string;
+  hasFile?: boolean;
+  hasNotes?: boolean;
+  isRetracted?: boolean;
+  onlyFlagged?: boolean;
+  projectId?: string;
+  itemType?: string;
+  type?: string;
+  fromYear?: number;
+  toYear?: number;
+  readStatus?: string;
+  searchMode?: 'title_creator_year' | 'fields_tags' | 'everything' | string;
+  userId?: string;
+  ids?: string[];
+}
+
+/**
+ * Constructs comprehensive search filters covering Zotero fields:
+ * - 'title_creator_year': title, year, and contributor names
+ * - 'fields_tags': all bibliographic fields + tags
+ * - 'everything' (default): all bibliographic fields + tags + notes + attachments + fulltext
+ */
+export function buildItemSearchCondition(
+  search: string,
+  searchMode?: string,
+): Prisma.ItemWhereInput[] {
+  const effectiveMode =
+    searchMode === 'title_creator_year'
+      ? 'title_creator_year'
+      : searchMode === 'everything'
+        ? 'everything'
+        : 'fields_tags';
+  return SearchQueryEngine.buildComprehensiveItemSearchClauses(
+    search,
+    effectiveMode,
+  ) as Prisma.ItemWhereInput[];
+}
+
+export class ItemWhereSpecification extends CompositeSpecification<
+  Record<string, unknown>,
+  Prisma.ItemWhereInput
+> {
+  constructor(
+    private readonly clause: Prisma.ItemWhereInput,
+    private readonly predicate?: (item: Record<string, unknown>) => boolean,
+  ) {
+    super();
+  }
+
+  toPrismaWhere(): Prisma.ItemWhereInput {
+    return this.clause;
+  }
+
+  isSatisfiedBy(item: Record<string, unknown>): boolean {
+    return this.predicate ? this.predicate(item) : true;
+  }
+}
+
+function composeAndSpecifications(
+  specs: ItemWhereSpecification[],
+): Prisma.ItemWhereInput[] {
+  if (specs.length === 0) return [];
+  if (specs.length === 1) return [specs[0].toPrismaWhere()];
+  const combined = specs
+    .slice(1)
+    .reduce<
+      CompositeSpecification<Record<string, unknown>, Prisma.ItemWhereInput>
+    >((acc, spec) => acc.and(spec), specs[0])
+    .toPrismaWhere();
+  if (combined && Array.isArray(combined.AND)) {
+    return combined.AND;
+  }
+  return [combined];
+}
+
+/**
+ * Builds a shared CatalogItem WHERE clause from the common filter options.
+ * Uses CompositeSpecification / AndSpecification so multiple tag or state predicates
+ * compose into `{ AND: [...] }` without overwriting each other.
+ */
+export function buildItemWhereClause(
+  userId: string,
+  options: ItemFilterOptions,
+): Prisma.ItemWhereInput {
+  const view = options.view ?? 'all';
+  const validProjectId = normalizeProjectScopeId(options.projectId);
+  const scopeSpec = new ScopeSpecification(
+    userId,
+    validProjectId && isUuid(validProjectId) ? validProjectId : null,
+  );
+  const where: Prisma.ItemWhereInput = {
+    ...(scopeSpec.toPrismaWhere() as Prisma.ItemWhereInput),
+  };
+
+  const andSpecs: ItemWhereSpecification[] = [];
+  const stateSpecs: ItemWhereSpecification[] = [];
+  const tagSpecs: ItemWhereSpecification[] = [];
+
+  if (options.ids && options.ids.length > 0) {
+    const validIds = options.ids.filter(isUuid);
+    if (validIds.length > 0) {
+      andSpecs.push(
+        new ItemWhereSpecification({
+          id: { in: validIds },
+        }),
+      );
+    }
+  }
+
+  if (view === 'trash') {
+    where.deletedAt = { not: null };
+  } else {
+    where.deletedAt = null;
+    if (view === 'unfiled') {
+      where.collectionItems = { none: { collection: { deletedAt: null } } };
+    } else if (view === 'my-publications' || view === 'publications') {
+      andSpecs.push(
+        new ItemWhereSpecification({
+          OR: [
+            { metadata: { path: ['isMyPublication'], equals: true } },
+            { publications: { some: { userId } } },
+          ],
+        }),
+      );
+    } else if (view === 'starred') {
+      stateSpecs.push(
+        new ItemWhereSpecification({
+          states: { some: { userId, isStarred: true } },
+        }),
+      );
+    } else if (view === 'retracted') {
+      andSpecs.push(
+        new ItemWhereSpecification({
+          OR: [
+            { isRetracted: true },
+            { metadata: { path: ['isRetracted'], equals: true } },
+          ],
+        }),
+      );
+    }
+  }
+
+  if (options.isRetracted !== undefined && view !== 'retracted') {
+    if (options.isRetracted) {
+      andSpecs.push(
+        new ItemWhereSpecification({
+          OR: [
+            { isRetracted: true },
+            { metadata: { path: ['isRetracted'], equals: true } },
+          ],
+        }),
+      );
+    } else {
+      andSpecs.push(
+        new ItemWhereSpecification({
+          NOT: {
+            OR: [
+              { isRetracted: true },
+              { metadata: { path: ['isRetracted'], equals: true } },
+            ],
+          },
+        }),
+      );
+    }
+  }
+
+  if (options.onlyFlagged) {
+    stateSpecs.push(
+      new ItemWhereSpecification({
+        states: {
+          some: {
+            userId,
+            isStarred: true,
+          },
+        },
+      }),
+    );
+  }
+
+  if (options.hasFile !== undefined) {
+    where.hasFile = options.hasFile;
+  }
+
+  if (options.hasNotes !== undefined) {
+    if (options.hasNotes) {
+      where.noteCount = { gt: 0 };
+    } else {
+      where.noteCount = 0;
+    }
+  }
+
+  const targetCollectionIds =
+    options.targetCollectionIds || options.collectionIds;
+  if (targetCollectionIds && targetCollectionIds.length > 0) {
+    where.collectionItems = new CollectionSpecification(
+      targetCollectionIds,
+    ).toPrismaWhere().collectionItems as Prisma.CollectionItemListRelationFilter;
+  } else if (options.collectionId) {
+    where.collectionItems = new CollectionSpecification(
+      options.collectionId,
+    ).toPrismaWhere().collectionItems as Prisma.CollectionItemListRelationFilter;
+  }
+
+  if (options.tagId) {
+    tagSpecs.push(
+      new ItemWhereSpecification(
+        new TagSpecification(options.tagId).toPrismaWhere() as Prisma.ItemWhereInput,
+      ),
+    );
+  }
+
+  if (options.tag) {
+    const tagNamesWhere = new TagNamesSpecification(options.tag).toPrismaWhere();
+    if (tagNamesWhere.itemTags) {
+      tagSpecs.push(
+        new ItemWhereSpecification(tagNamesWhere as Prisma.ItemWhereInput),
+      );
+    }
+  }
+
+  if (tagSpecs.length === 1) {
+    where.itemTags = tagSpecs[0].toPrismaWhere().itemTags;
+  } else if (tagSpecs.length > 1) {
+    andSpecs.push(...tagSpecs);
+  }
+
+  const itemType = options.itemType || options.type;
+  if (itemType) {
+    const itemTypeWhere = new ItemTypeSpecification(itemType).toPrismaWhere();
+    if (itemTypeWhere.itemType !== undefined) {
+      where.itemType = itemTypeWhere.itemType as Prisma.StringFilter | string;
+    }
+  }
+
+  if (options.fromYear !== undefined || options.toYear !== undefined) {
+    where.year = new YearRangeSpecification(
+      options.fromYear,
+      options.toYear,
+    ).toPrismaWhere().year as Prisma.IntNullableFilter;
+  }
+
+  if (options.readStatus && options.readStatus !== 'all') {
+    const validStatuses: ReadStatus[] = ['unread', 'reading', 'completed'];
+    const statuses = options.readStatus
+      .split(',')
+      .map((s) => (s.trim() === 'read' ? 'completed' : s.trim()))
+      .filter((s): s is ReadStatus => validStatuses.includes(s as ReadStatus));
+    if (statuses.length > 0) {
+      if (statuses.includes('unread')) {
+        andSpecs.push(
+          new ItemWhereSpecification({
+            OR: [
+              { states: { none: { userId } } },
+              {
+                states: {
+                  some: {
+                    userId,
+                    readStatus:
+                      statuses.length > 1 ? { in: statuses } : 'unread',
+                  },
+                },
+              },
+            ],
+          }),
+        );
+      } else {
+        stateSpecs.push(
+          new ItemWhereSpecification({
+            states: {
+              some: {
+                userId,
+                readStatus:
+                  statuses.length > 1 ? { in: statuses } : statuses[0],
+              },
+            },
+          }),
+        );
+      }
+    }
+  }
+
+  if (stateSpecs.length === 1) {
+    where.states = stateSpecs[0].toPrismaWhere().states;
+  } else if (stateSpecs.length > 1) {
+    andSpecs.push(...stateSpecs);
+  }
+
+  if (options.search) {
+    andSpecs.push(
+      new ItemWhereSpecification({
+        OR: buildItemSearchCondition(options.search, options.searchMode),
+      }),
+    );
+  }
+
+  const andConditions = composeAndSpecifications(andSpecs);
+  if (andConditions.length > 0) {
+    where.AND = andConditions;
+  }
+
+  return where;
+}
 
 export type { CreateNoteData, UpdateNoteData };
 
@@ -66,13 +397,8 @@ export class NotesRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     if (!itemId || !isUuid(itemId)) return;
-    const client = this.getClient(tx);
-    const activeCount = await client.note.count({
-      where: { itemId, deletedAt: null },
-    });
-    await client.item.updateMany({
-      where: { id: itemId },
-      data: { noteCount: activeCount },
+    await syncItemDenormalizedCountsInClient(this.getClient(tx), itemId, {
+      notes: true,
     });
   }
 
@@ -100,7 +426,12 @@ export class NotesRepository {
         effectiveProjectId = parentItem.projectId;
       }
     }
-    const contentMd = data.contentMd ?? '';
+    const effectiveContentMd =
+      data.contentMd !== undefined && data.contentMd !== ''
+        ? data.contentMd
+        : data.contentJson !== undefined && data.contentJson !== null
+          ? extractPlainTextFromTipTap(data.contentJson)
+          : (data.contentMd ?? '');
     const created = await client.note.create({
       data: {
         userId,
@@ -110,9 +441,11 @@ export class NotesRepository {
         contentJson:
           data.contentJson !== undefined && data.contentJson !== null
             ? (data.contentJson as Prisma.InputJsonValue)
-            : (buildTipTapDocFromText(contentMd) as Prisma.InputJsonValue),
-        contentMd,
-        tags: data.tags ? normalizeAcademicTags(data.tags) : [],
+            : (buildTipTapDocFromText(effectiveContentMd) as Prisma.InputJsonValue),
+        contentMd: effectiveContentMd,
+        tags: data.tags
+          ? normalizeTags(data.tags, { allowManualAcademicTerms: true })
+          : [],
         createdById: data.createdById || userId,
         version: 1,
       },
@@ -140,7 +473,17 @@ export class NotesRepository {
     }
 
     const effectiveExpectedVersion = expectedVersion ?? data?.expectedVersion;
+    const validUpdatedById = isUuid(userId) ? userId : undefined;
+    const resolvedContentMd =
+      data.contentMd !== undefined
+        ? data.contentMd
+        : data.contentJson !== undefined
+          ? data.contentJson !== null
+            ? extractPlainTextFromTipTap(data.contentJson)
+            : ''
+          : existing.contentMd;
     const updatePayload = {
+      ...(validUpdatedById ? { updatedById: validUpdatedById } : {}),
       title: data.title ?? existing.title,
       contentJson:
         data.contentJson !== undefined
@@ -150,11 +493,10 @@ export class NotesRepository {
           : data.contentMd !== undefined
             ? (buildTipTapDocFromText(data.contentMd) as Prisma.InputJsonValue)
             : undefined,
-      contentMd:
-        data.contentMd !== undefined ? data.contentMd : existing.contentMd,
+      contentMd: resolvedContentMd,
       tags:
         data.tags !== undefined
-          ? normalizeAcademicTags(data.tags)
+          ? normalizeTags(data.tags, { allowManualAcademicTerms: true })
           : existing.tags,
     };
 
@@ -185,37 +527,22 @@ export class NotesRepository {
         });
       }
 
-      return (
-        (await client.note.findFirst?.({
-          where: { id, ...scopeWhere, deletedAt: null },
-        })) ?? {
-          ...existing,
-          ...updatePayload,
-          version: (existing.version ?? 1) + 1,
-        }
-      );
+      return {
+        ...existing,
+        ...updatePayload,
+        contentJson:
+          updatePayload.contentJson === Prisma.DbNull
+            ? null
+            : (updatePayload.contentJson ?? existing.contentJson),
+        version: (existing.version ?? 1) + 1,
+        updatedAt: new Date(),
+      };
     }
 
     return client.note.update({
       where: { id },
       data: {
-        title: data.title ?? existing.title,
-        contentJson:
-          data.contentJson !== undefined
-            ? data.contentJson !== null
-              ? (data.contentJson as Prisma.InputJsonValue)
-              : Prisma.DbNull
-            : data.contentMd !== undefined
-              ? (buildTipTapDocFromText(
-                  data.contentMd,
-                ) as Prisma.InputJsonValue)
-              : undefined,
-        contentMd:
-          data.contentMd !== undefined ? data.contentMd : existing.contentMd,
-        tags:
-          data.tags !== undefined
-            ? normalizeAcademicTags(data.tags)
-            : existing.tags,
+        ...updatePayload,
         version: { increment: 1 },
       },
     });
@@ -243,6 +570,7 @@ export class NotesRepository {
       },
       data: {
         deletedAt: new Date(),
+        ...(isUuid(userId) ? { deletedById: userId } : {}),
         version: { increment: 1 },
       },
     });
@@ -330,7 +658,7 @@ export class NotesRepository {
         contentMd: trimmed,
         contentJson: buildTipTapDocFromText(trimmed) as Prisma.InputJsonValue,
         createdById: userId,
-        tags: normalizeAcademicTags(['imported', ...(source ? [source] : [])]),
+        tags: normalizeTags(['imported', ...(source ? [source] : [])]),
         version: 1,
       },
     });
@@ -339,12 +667,22 @@ export class NotesRepository {
 
   async findItemAnnotations(
     itemId: string,
-    opts?: { attachmentId?: string; annotationIds?: string[] },
+    opts?: {
+      attachmentId?: string;
+      annotationIds?: string[];
+      userId?: string;
+      projectId?: string;
+    },
+    tx?: Prisma.TransactionClient,
   ): Promise<Annotation[]> {
+    const client = this.getClient(tx);
     const cleanAnnotationIds = Array.isArray(opts?.annotationIds)
       ? opts.annotationIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
       : [];
-    return this.prisma.annotation.findMany({
+    const itemScopeWhere = opts?.userId
+      ? this.buildScopeWhere(opts.userId, opts.projectId)
+      : {};
+    return client.annotation.findMany({
       where: {
         ...(opts?.attachmentId ? { attachmentId: opts.attachmentId } : {}),
         ...(cleanAnnotationIds.length > 0
@@ -353,10 +691,22 @@ export class NotesRepository {
         attachment: {
           itemId,
           deletedAt: null,
+          ...(Object.keys(itemScopeWhere).length > 0
+            ? {
+                item: {
+                  ...itemScopeWhere,
+                  deletedAt: null,
+                },
+              }
+            : {}),
         },
         deletedAt: null,
       },
-      orderBy: [{ pageIndex: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [
+        { pageIndex: 'asc' },
+        { annotationSortIndex: 'asc' },
+        { createdAt: 'asc' },
+      ],
     });
   }
 }

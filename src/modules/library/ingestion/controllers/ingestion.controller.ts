@@ -1,36 +1,18 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Param,
-  Query,
-  Body,
-  Headers,
-  UseGuards,
-  HttpCode,
-  HttpStatus,
-  BadRequestException,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiBearerAuth,
-  ApiOperation,
-  ApiParam,
-} from '@nestjs/swagger';
+import { Controller, Get, Post, Param, Query, Body, Headers, UseGuards, HttpCode, HttpStatus, BadRequestException, Optional, Injectable } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { IngestionSubmissionDto } from '@/modules/library/ingestion/dto/submission.dto';
-import { UnifiedIngestionDto } from '@/modules/library/ingestion/dto/ingestion.dto';
-import {
-  CaptureUrlDto,
-  ConfirmCapturedUrlDto,
-} from '@/modules/library/ingestion/dto/capture-url.dto';
+import { IngestionSubmissionDto, UnifiedIngestionDto, CaptureUrlDto, ConfirmCapturedUrlDto, FetchAcademicFeedDto } from '@/modules/library/ingestion/dto/ingestion.dto';
 import { isUUID } from 'class-validator';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
-import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
-import { IngestionCommand } from '@/modules/library/ingestion/types/ingestion.types';
+import { FeedRetrievalService } from '@/modules/library/ingestion/services/feed-retrieval.service';
+import { IngestionSubmissionEnvelope, IngestionCommand, IngestionAcceptedResult, DuplicateClusterResult, RetractionCheckResult } from '@/modules/library/ingestion/types/ingestion.types';
 import { SubmissionEnvelopeFactory } from '@/modules/library/ingestion/domain/submission-envelope.factory';
+import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
+import { QualityService, QualityAuditReport } from '@/modules/library/ingestion/services/ingestion-verifier.service';
+import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
+import { IngestionRunSnapshot, INGESTION_FACADE, IIngestionFacade, ReconcileExtractedCandidatePayload } from '@/modules/library/core';
 
 /**
  * Unified Library Ingestion Controller.
@@ -48,6 +30,7 @@ export class IngestionController {
   constructor(
     protected readonly ingestionService: IngestionService,
     protected readonly urlCaptureService: UrlCaptureService,
+    @Optional() protected readonly feedRetrievalService?: FeedRetrievalService,
   ) {}
 
   private validateProjectId(projectId?: string): string | undefined {
@@ -81,28 +64,14 @@ export class IngestionController {
       this.validateProjectId(queryProjectId) ||
       this.validateProjectId(dto.projectId);
 
-    const envelope = this.buildEnvelope(
+    const envelope = SubmissionEnvelopeFactory.fromSubmissionDto({
       dto,
       userId,
-      effectiveProjectId,
-      effectiveIdempotencyKey,
-    );
+      projectId: effectiveProjectId,
+      idempotencyKey: effectiveIdempotencyKey,
+    });
 
     return this.ingestionService.submit(envelope);
-  }
-
-  private buildEnvelope(
-    dto: IngestionSubmissionDto,
-    userId: string,
-    projectId?: string,
-    idempotencyKey?: string,
-  ): IngestionSubmissionEnvelope {
-    return SubmissionEnvelopeFactory.fromSubmissionDto({
-      dto,
-      userId,
-      projectId,
-      idempotencyKey,
-    });
   }
 
   @Get(['status/:runId', 'runs/:runId'])
@@ -111,7 +80,8 @@ export class IngestionController {
   async getStatus(
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!isUUID(runId)) {
       throw new BadRequestException('Invalid run ID');
@@ -119,7 +89,7 @@ export class IngestionController {
     return this.ingestionService.getRunStatus(
       userId,
       runId,
-      this.validateProjectId(projectId),
+      this.validateProjectId(paramProjectId || queryProjectId),
     );
   }
 
@@ -129,7 +99,8 @@ export class IngestionController {
   async getProgress(
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!isUUID(runId)) {
       throw new BadRequestException('Invalid run ID');
@@ -137,7 +108,7 @@ export class IngestionController {
     return this.ingestionService.getRunProgress(
       userId,
       runId,
-      this.validateProjectId(projectId),
+      this.validateProjectId(paramProjectId || queryProjectId),
     );
   }
 
@@ -148,7 +119,8 @@ export class IngestionController {
   async retry(
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!isUUID(runId)) {
       throw new BadRequestException('Invalid run ID');
@@ -156,7 +128,7 @@ export class IngestionController {
     return this.ingestionService.retryRun(
       userId,
       runId,
-      this.validateProjectId(projectId),
+      this.validateProjectId(paramProjectId || queryProjectId),
     );
   }
 
@@ -179,28 +151,14 @@ export class IngestionController {
       this.validateProjectId(queryProjectId) ||
       this.validateProjectId(dto.projectId);
 
-    const command = this.mapUnifiedDtoToCommand(
+    const command = SubmissionEnvelopeFactory.mapUnifiedDtoToCommand({
       dto,
       userId,
-      effectiveProjectId,
-      effectiveIdempotencyKey,
-    );
+      projectId: effectiveProjectId,
+      idempotencyKey: effectiveIdempotencyKey,
+    });
 
     return this.ingestionService.ingest(command);
-  }
-
-  private mapUnifiedDtoToCommand(
-    dto: UnifiedIngestionDto,
-    userId: string,
-    projectId?: string,
-    idempotencyKey?: string,
-  ): IngestionCommand {
-    return SubmissionEnvelopeFactory.mapUnifiedDtoToCommand({
-      dto,
-      userId,
-      projectId,
-      idempotencyKey,
-    });
   }
 
   @Post('capture-url')
@@ -250,7 +208,8 @@ export class IngestionController {
   async getExplain(
     @CurrentUser('id') userId: string,
     @Param('id') runId: string,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!isUUID(runId)) {
       throw new BadRequestException('Invalid run ID');
@@ -258,7 +217,7 @@ export class IngestionController {
     return this.ingestionService.getRunStatus(
       userId,
       runId,
-      this.validateProjectId(projectId),
+      this.validateProjectId(paramProjectId || queryProjectId),
     );
   }
 
@@ -269,14 +228,106 @@ export class IngestionController {
       'Fetch and parse an external RSS/Atom journal or arXiv feed with DB caching & ETag support',
   })
   async fetchFeed(
-    @Body() body: { url: string; forceRefresh?: boolean },
+    @Body() dto: FetchAcademicFeedDto,
     @CurrentUser() user?: { id?: string; userId?: string },
   ) {
     const userId = user?.id || user?.userId;
+    if (this.feedRetrievalService) {
+      return this.feedRetrievalService.fetchAcademicFeed(
+        dto.url,
+        dto.forceRefresh,
+        userId,
+      );
+    }
     return this.urlCaptureService.fetchAcademicFeed(
-      body?.url,
-      body?.forceRefresh,
+      dto.url,
+      dto.forceRefresh,
       userId,
     );
+  }
+}
+
+export { INGESTION_FACADE };
+export type { IIngestionFacade };
+
+/**
+ * Public Facade for Ingestion Bounded Context (Supporting Domain).
+ * Shields ingestion pipelines, curation/dedup algorithms, and retraction checks.
+ */
+@Injectable()
+export class IngestionFacade implements IIngestionFacade {
+  constructor(
+    private readonly ingestionService: IngestionService,
+    private readonly duplicateDetector: DuplicateDetectorService,
+    private readonly qualityService: QualityService,
+    private readonly retractionService: RetractionService,
+  ) {}
+
+  async submitIngestion(
+    envelope: IngestionSubmissionEnvelope,
+    options?: { enqueue?: boolean },
+  ): Promise<IngestionAcceptedResult> {
+    return this.ingestionService.submit(envelope, options);
+  }
+
+  async getIngestionStatus(
+    userId: string,
+    runId: string,
+  ): Promise<IngestionRunSnapshot> {
+    return this.ingestionService.getRunStatus(userId, runId);
+  }
+
+  async findDuplicates(
+    userId: string,
+    projectId?: string,
+  ): Promise<DuplicateClusterResult[]> {
+    return this.duplicateDetector.detectDuplicates(userId, projectId);
+  }
+
+  async getQualityAudit(
+    userId: string,
+    projectId?: string,
+  ): Promise<QualityAuditReport> {
+    return this.qualityService.getQualityAudit(userId, projectId);
+  }
+
+  async checkRetraction(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<RetractionCheckResult> {
+    return this.retractionService.checkItem(userId, itemId, projectId);
+  }
+
+  async reResolveMetadata(
+    userId: string,
+    itemId: string,
+    options?: {
+      doi?: string;
+      arxivId?: string;
+      pmid?: string;
+      isbn?: string;
+      title?: string;
+      forceRefresh?: boolean;
+      expectedVersion?: number;
+    },
+    projectId?: string,
+  ): Promise<Awaited<ReturnType<IngestionService['reResolveMetadata']>>> {
+    return this.ingestionService.reResolveMetadata(
+      userId,
+      itemId,
+      options,
+      projectId,
+    );
+  }
+
+  async reconcileExtractedCandidate(
+    payload: ReconcileExtractedCandidatePayload,
+  ): Promise<{
+    updated: boolean;
+    updatedFields: string[];
+    rejectedCitedDoi?: string;
+  }> {
+    return this.ingestionService.reconcileExtractedCandidate(payload);
   }
 }

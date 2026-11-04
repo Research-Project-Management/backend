@@ -1,29 +1,19 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
-import {
-  SearchOptions,
-  FacetResult,
-  SearchItemsQueryDto,
-} from '@/modules/library/search/dto/search.dto';
-import {
-  isProjectScopeId,
-  SubsystemUnavailableException,
+import { SearchOptions, FacetResult, SearchItemsQueryDto } from '@/modules/library/search/controllers/search.controller';
+import { isProjectScopeId, isSafeSearchRegex, parseSafeSearchRegex, SearchQueryEngine, ItemsMapper, SubsystemUnavailableException, LIBRARY_EVENT_TYPES, DomainEventEnvelope } from '@/modules/library/core';
+import { OnEvent } from '@nestjs/event-emitter';
+
+export {
   isSafeSearchRegex,
   parseSafeSearchRegex,
-  ItemsMapper,
-} from '@/modules/library/core';
-
-export { isSafeSearchRegex, parseSafeSearchRegex };
+};
 
 export interface PageTextExtraction {
   pageIndex: number;
   textContent: string;
   charOffset?: number;
+  itemId?: string;
 }
 
 export interface PageAnchorMatch {
@@ -32,6 +22,12 @@ export interface PageAnchorMatch {
   snippet: string;
   charOffsetStart: number;
   charOffsetEnd: number;
+  /** Alias for frontend SDK compatibility */
+  text: string;
+  /** Alias for frontend SDK compatibility */
+  startOffset: number;
+  /** Alias for frontend SDK compatibility */
+  endOffset: number;
 }
 
 function buildContextualSnippet(
@@ -47,8 +43,31 @@ function buildContextualSnippet(
     .trim();
 }
 
+function createPageAnchorMatch(
+  attachmentId: string,
+  page: { pageIndex: number; textContent: string; charOffset?: number },
+  matchPos: number,
+  matchLen: number,
+): PageAnchorMatch {
+  const charOffsetStart = (page.charOffset ?? 0) + matchPos;
+  const charOffsetEnd = charOffsetStart + matchLen;
+  const snippet = buildContextualSnippet(page.textContent, matchPos, matchLen);
+  return {
+    attachmentId,
+    pageIndex: page.pageIndex,
+    snippet,
+    charOffsetStart,
+    charOffsetEnd,
+    text: snippet,
+    startOffset: charOffsetStart,
+    endOffset: charOffsetEnd,
+  };
+}
+
 @Injectable()
 export class FullTextProvider {
+  private static readonly MAX_MATCHES_PER_ATTACHMENT = 200;
+  private static readonly MAX_MATCHES_PER_PAGE = 50;
   private readonly repo: SearchRepository;
 
   constructor(@Optional() private readonly searchRepo?: SearchRepository) {
@@ -76,10 +95,8 @@ export class FullTextProvider {
     const trimmedTerm = (term ?? '').trim();
     const safeRegex = parseSafeSearchRegex(trimmedTerm);
     const normalizedTerm = trimmedTerm.toLowerCase();
+    const foldedTerm = SearchQueryEngine.stripDiacritics(normalizedTerm);
     if (!safeRegex && normalizedTerm.length < 2) return [];
-
-    const MAX_MATCHES_PER_ATTACHMENT = 200;
-    const MAX_MATCHES_PER_PAGE = 50;
 
     const pages = await this.repo.findAttachmentPages(
       attachmentId,
@@ -97,8 +114,8 @@ export class FullTextProvider {
         let match: RegExpExecArray | null;
         while (
           (match = safeRegex.exec(textContent)) !== null &&
-          matches.length < MAX_MATCHES_PER_ATTACHMENT &&
-          pageMatches < MAX_MATCHES_PER_PAGE
+          matches.length < FullTextProvider.MAX_MATCHES_PER_ATTACHMENT &&
+          pageMatches < FullTextProvider.MAX_MATCHES_PER_PAGE
         ) {
           const matchedText = match[0] || '';
           if (matchedText.length === 0) {
@@ -106,46 +123,59 @@ export class FullTextProvider {
             continue;
           }
           pageMatches++;
-          const pos = match.index;
-          const charOffsetStart = (page.charOffset ?? 0) + pos;
-          matches.push({
-            attachmentId,
-            pageIndex: page.pageIndex,
-            snippet: buildContextualSnippet(
-              textContent,
-              pos,
+          matches.push(
+            createPageAnchorMatch(
+              attachmentId,
+              page,
+              match.index,
               matchedText.length,
             ),
-            charOffsetStart,
-            charOffsetEnd: charOffsetStart + matchedText.length,
-          });
+          );
         }
       } else {
         const lower = textContent.toLowerCase();
         let pos = 0;
         while (
           (pos = lower.indexOf(normalizedTerm, pos)) !== -1 &&
-          matches.length < MAX_MATCHES_PER_ATTACHMENT &&
-          pageMatches < MAX_MATCHES_PER_PAGE
+          matches.length < FullTextProvider.MAX_MATCHES_PER_ATTACHMENT &&
+          pageMatches < FullTextProvider.MAX_MATCHES_PER_PAGE
         ) {
           pageMatches++;
-          const charOffsetStart = (page.charOffset ?? 0) + pos;
-          matches.push({
-            attachmentId,
-            pageIndex: page.pageIndex,
-            snippet: buildContextualSnippet(
-              textContent,
+          matches.push(
+            createPageAnchorMatch(
+              attachmentId,
+              page,
               pos,
               normalizedTerm.length,
             ),
-            charOffsetStart,
-            charOffsetEnd: charOffsetStart + normalizedTerm.length,
-          });
+          );
           pos += normalizedTerm.length;
+        }
+
+        // Diacritic-insensitive fallback on the page if exact lowercase had no hits
+        if (pageMatches === 0 && foldedTerm.length >= 2) {
+          const foldedText = SearchQueryEngine.stripDiacritics(lower);
+          let fPos = 0;
+          while (
+            (fPos = foldedText.indexOf(foldedTerm, fPos)) !== -1 &&
+            matches.length < FullTextProvider.MAX_MATCHES_PER_ATTACHMENT &&
+            pageMatches < FullTextProvider.MAX_MATCHES_PER_PAGE
+          ) {
+            pageMatches++;
+            matches.push(
+              createPageAnchorMatch(
+                attachmentId,
+                page,
+                fPos,
+                foldedTerm.length,
+              ),
+            );
+            fPos += foldedTerm.length;
+          }
         }
       }
 
-      if (matches.length >= MAX_MATCHES_PER_ATTACHMENT) break;
+      if (matches.length >= FullTextProvider.MAX_MATCHES_PER_ATTACHMENT) break;
     }
 
     return matches;
@@ -168,20 +198,49 @@ export class SearchService {
    * Faceted search returning items, facets, and cursor pagination metadata.
    */
   async search(userId: string, dto: SearchItemsQueryDto) {
-    const effectiveQuery = dto.query ?? '';
-    const searchOptions: SearchOptions = {
+    const effectiveQuery = dto.query ?? dto.q ?? '';
+    const effectiveItemType = dto.itemType ?? dto.type;
+    const effectiveYearFrom = dto.yearFrom ?? dto.fromYear;
+    const effectiveYearTo = dto.yearTo ?? dto.toYear;
+    const effectiveSortBy = dto.sortBy ?? dto.orderBy;
+    const effectiveSortOrder = dto.sortOrder ?? dto.orderDirection;
+
+    let searchOptions: SearchOptions = {
       q: effectiveQuery,
       collectionId: dto.collectionId,
       tagId: dto.tagId,
       limit: dto.limit,
       cursor: dto.cursor,
       projectId: dto.projectId,
-      ...(dto.itemType !== undefined ? { itemType: dto.itemType } : {}),
-      ...(dto.yearFrom !== undefined ? { yearFrom: dto.yearFrom } : {}),
-      ...(dto.yearTo !== undefined ? { yearTo: dto.yearTo } : {}),
-      ...(dto.sortBy !== undefined ? { sortBy: dto.sortBy } : {}),
-      ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+      ...(dto.searchMode !== undefined ? { searchMode: dto.searchMode } : {}),
+      ...(dto.view !== undefined ? { view: dto.view } : {}),
+      ...(dto.includeSubcollections !== undefined
+        ? { includeSubcollections: dto.includeSubcollections }
+        : {}),
+      ...(dto.tag !== undefined ? { tag: dto.tag } : {}),
+      ...(dto.hasFile !== undefined ? { hasFile: dto.hasFile } : {}),
+      ...(dto.hasNotes !== undefined ? { hasNotes: dto.hasNotes } : {}),
+      ...(dto.readStatus !== undefined ? { readStatus: dto.readStatus } : {}),
+      ...(dto.page !== undefined ? { page: dto.page } : {}),
+      ...(effectiveItemType !== undefined
+        ? { itemType: effectiveItemType }
+        : {}),
+      ...(effectiveYearFrom !== undefined
+        ? { yearFrom: effectiveYearFrom }
+        : {}),
+      ...(effectiveYearTo !== undefined ? { yearTo: effectiveYearTo } : {}),
+      ...(effectiveSortBy !== undefined ? { sortBy: effectiveSortBy } : {}),
+      ...(effectiveSortOrder !== undefined
+        ? { sortOrder: effectiveSortOrder }
+        : {}),
     };
+
+    if (typeof this.repo.prepareSearchOptions === 'function') {
+      searchOptions = await this.repo.prepareSearchOptions(
+        userId,
+        searchOptions,
+      );
+    }
 
     const [searchResult, facets, directCount] = await Promise.all([
       this.repo.searchItems(userId, searchOptions),
@@ -241,16 +300,14 @@ export class SearchService {
     }
 
     const attachment = await this.repo.findAttachmentWithItem(attachmentId);
-
-    if (!attachment) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
-    }
-
-    if (isProjectScopeId(projectId)) {
-      if (attachment.item.projectId !== projectId) {
-        throw new NotFoundException(`Attachment ${attachmentId} not found`);
-      }
-    } else if (attachment.item.userId !== userId || attachment.item.projectId) {
+    const ownerItem = attachment?.item;
+    const isAuthorized = Boolean(
+      ownerItem &&
+        (isProjectScopeId(projectId)
+          ? ownerItem.projectId === projectId.trim()
+          : ownerItem.userId === userId && !ownerItem.projectId),
+    );
+    if (!isAuthorized) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
@@ -261,10 +318,22 @@ export class SearchService {
     attachmentId: string,
     pages: PageTextExtraction[],
   ): Promise<void> {
-    await this.fullText.indexAttachmentPages(attachmentId, pages);
+    if (!attachmentId || !Array.isArray(pages) || pages.length === 0) return;
+    await this.repo.replaceAttachmentPageIndex(attachmentId, pages);
+  }
+
+  async deleteItemSearchIndex(itemId: string): Promise<void> {
+    if (!itemId) return;
+    await this.repo.deleteFullTextIndexByItemId(itemId);
+  }
+
+  async deleteAttachmentSearchIndex(attachmentId: string): Promise<void> {
+    if (!attachmentId) return;
+    await this.repo.deleteFullTextIndexByAttachmentId(attachmentId);
   }
 
   async invalidateFacetsCache(scopeId: string): Promise<void> {
+    if (!scopeId) return;
     await this.repo.invalidateFacets(scopeId);
   }
 
@@ -281,5 +350,238 @@ export class SearchService {
       await this.invalidateFacetsCache(scopeId);
     }
     return { indexed: Boolean(item.id) };
+  }
+}
+
+/**
+ * Unified SearchEventsSubscriber for Search Bounded Context.
+ * Coordinates full-text index cleanup and Redis search/facet cache invalidations
+ * across domain events.
+ */
+@Injectable()
+export class SearchEventsSubscriber {
+  private readonly logger = new Logger(SearchEventsSubscriber.name);
+
+  constructor(
+    private readonly searchService: SearchService,
+    @Optional()
+    private readonly searchRepo?: SearchRepository,
+  ) {}
+
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_CREATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_UPDATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_RESTORED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_REINDEXED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_MERGED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_TAGGED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_UNTAGGED, { async: true })
+  async handleItemChanged(event: DomainEventEnvelope): Promise<void> {
+    const payload = event?.payload as
+      | {
+          id?: string;
+          attachmentId?: string;
+          itemId?: string;
+          pages?: PageTextExtraction[];
+        }
+      | undefined;
+
+    if (payload?.attachmentId && Array.isArray(payload.pages)) {
+      try {
+        await this.searchService.indexAttachmentPages(
+          payload.attachmentId,
+          payload.pages,
+        );
+      } catch (err: unknown) {
+        this.logger.error(
+          `[SearchEvents] Failed to index attachment pages on ${event.eventType} for ${payload.attachmentId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    const resolvedItemId =
+      payload?.itemId || payload?.id || event?.aggregateId;
+    const scopeId = this.resolveScopeId(event);
+    let cacheAlreadyInvalidated = false;
+
+    if (resolvedItemId && typeof this.searchService?.indexItem === 'function') {
+      try {
+        await this.searchService.indexItem({
+          id: resolvedItemId,
+          projectId: scopeId,
+        });
+        cacheAlreadyInvalidated = true;
+      } catch (err: unknown) {
+        this.logger.warn(
+          `[SearchEvents] Failed to refresh search_vector on ${event.eventType} for ${resolvedItemId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    if (!scopeId || cacheAlreadyInvalidated) return;
+
+    try {
+      await this.searchService?.invalidateFacetsCache?.(scopeId);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[SearchEvents] Failed to invalidate facet cache on ${event.eventType}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_PAGES_EXTRACTED, { async: true })
+  async handleAttachmentPagesExtracted(
+    event:
+      | DomainEventEnvelope<{
+          attachmentId?: string;
+          itemId?: string;
+          pages?: PageTextExtraction[];
+        }>
+      | {
+          attachmentId?: string;
+          itemId?: string;
+          pages?: PageTextExtraction[];
+        },
+  ): Promise<void> {
+    const rawPayload =
+      event &&
+      'payload' in event &&
+      event.payload &&
+      typeof event.payload === 'object'
+        ? event.payload
+        : (event as {
+            attachmentId?: string;
+            itemId?: string;
+            pages?: PageTextExtraction[];
+          });
+    const attachmentId =
+      rawPayload?.attachmentId ||
+      (event && 'aggregateId' in event ? event.aggregateId : undefined);
+    const pages = Array.isArray(rawPayload?.pages) ? rawPayload.pages : [];
+    if (pages.length === 0) return;
+
+    if (!attachmentId) return;
+
+    try {
+      await this.searchService.indexAttachmentPages(
+        attachmentId,
+        rawPayload?.itemId
+          ? pages.map((p) => ({ ...p, itemId: p.itemId ?? rawPayload.itemId }))
+          : pages,
+      );
+    } catch (err: unknown) {
+      this.logger.error(
+        `[SearchEvents] Failed to index extracted pages for attachment ${attachmentId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_DELETED, { async: true })
+  async handleItemDeleted(event: DomainEventEnvelope): Promise<void> {
+    const scopeId = this.resolveScopeId(event);
+    if (!scopeId || !this.searchService?.invalidateFacetsCache) return;
+
+    try {
+      await this.searchService.invalidateFacetsCache(scopeId);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[SearchEvents] Facet cache invalidation error on ITEM_DELETED: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_PURGED, { async: true })
+  async handleItemPurged(event: DomainEventEnvelope): Promise<void> {
+    const payload = event?.payload as
+      | {
+          id?: string;
+          itemId?: string;
+          reason?: string;
+          mergedIntoId?: string;
+          primaryId?: string;
+        }
+      | undefined;
+    const itemId = event?.aggregateId || payload?.id || payload?.itemId;
+    if (!itemId) return;
+
+    const isMergedDuplicate = Boolean(
+      payload?.reason === 'merged_into' ||
+      payload?.mergedIntoId ||
+      payload?.primaryId,
+    );
+
+    const cleanupTasks: Promise<unknown>[] = [];
+    if (!isMergedDuplicate) {
+      if (typeof this.searchService?.deleteItemSearchIndex === 'function') {
+        cleanupTasks.push(
+          this.searchService
+            .deleteItemSearchIndex(itemId)
+            .catch((err: unknown) =>
+              this.logger.error(
+                `[SearchEvents] FTS cleanup error for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
+              ),
+            ),
+        );
+      } else if (this.searchRepo?.deleteFullTextIndexByItemId) {
+        cleanupTasks.push(
+          this.searchRepo
+            .deleteFullTextIndexByItemId(itemId)
+            .catch((err: unknown) =>
+              this.logger.error(
+                `[SearchEvents] FTS cleanup error for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
+              ),
+            ),
+        );
+      }
+    }
+
+    const scopeId = this.resolveScopeId(event);
+    if (scopeId && this.searchService?.invalidateFacetsCache) {
+      cleanupTasks.push(
+        this.searchService
+          .invalidateFacetsCache(scopeId)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `[SearchEvents] Facet cache invalidation error: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          ),
+      );
+    }
+
+    await Promise.allSettled(cleanupTasks);
+  }
+
+  @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_DELETED, { async: true })
+  async handleDomainAttachmentDeleted(
+    event: DomainEventEnvelope,
+  ): Promise<void> {
+    const attachmentId = event.aggregateId;
+    if (!attachmentId) return;
+
+    this.logger.debug(
+      `[SearchEvents] Cleaning up FTS index for deleted attachment ${attachmentId}`,
+    );
+    try {
+      if (typeof this.searchService?.deleteAttachmentSearchIndex === 'function') {
+        await this.searchService.deleteAttachmentSearchIndex(attachmentId);
+      } else if (this.searchRepo?.deleteFullTextIndexByAttachmentId) {
+        await this.searchRepo.deleteFullTextIndexByAttachmentId(attachmentId);
+      }
+    } catch (err: unknown) {
+      this.logger.error(
+        `[SearchEvents] Attachment FTS cleanup failed for ${attachmentId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private resolveScopeId(event: DomainEventEnvelope): string | undefined {
+    const payload = event?.payload as
+      { projectId?: string | null; userId?: string } | undefined;
+    return (
+      event?.scopeId ||
+      event?.projectId ||
+      payload?.projectId ||
+      event?.userId ||
+      payload?.userId
+    );
   }
 }

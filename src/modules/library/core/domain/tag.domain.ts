@@ -1,10 +1,11 @@
 import { TagInput } from '@/modules/library/core/types/bibliographic.types';
-import { stripLatexBraces } from './academic-text.domain';
+import { stripLatexBraces } from './text.domain';
 import {
   MAX_TAG_LENGTH,
   ARXIV_CATEGORY_MAP,
   CANONICAL_ARXIV_CATEGORIES,
   NOISE_TAG_WORDS,
+  HARD_INVALID_TAG_WORDS,
 } from './tag-taxonomy.lexicon';
 
 /**
@@ -152,7 +153,14 @@ export function toCanonicalTagKey(tag: string): string {
  * - Expands raw arXiv taxonomy codes into full academic descriptors
  * - Rejects non-keyword structural noise (DOIs, URLs, PMIDs, pagination, dates, placeholders)
  */
-export function cleanSingleTag(rawTag: string): string | null {
+export interface CleanTagOptions {
+  allowManualAcademicTerms?: boolean;
+}
+
+export function cleanSingleTag(
+  rawTag: string,
+  options?: CleanTagOptions,
+): string | null {
   if (!rawTag || typeof rawTag !== 'string') return null;
 
   // 1. Mojibake, LaTeX, and HTML cleanup
@@ -210,7 +218,11 @@ export function cleanSingleTag(rawTag: string): string | null {
   const lower = tag.toLowerCase();
 
   // 6. Reject structural document noise
-  if (NOISE_TAG_WORDS.has(lower)) {
+  if (options?.allowManualAcademicTerms) {
+    if (HARD_INVALID_TAG_WORDS.has(lower)) {
+      return null;
+    }
+  } else if (NOISE_TAG_WORDS.has(lower)) {
     return null;
   }
 
@@ -270,8 +282,9 @@ export function cleanSingleTag(rawTag: string): string | null {
  * - Deduplicates via `toCanonicalTagKey` while preferring explicit mixed/uppercase orthography
  *   (e.g., `ICLR` over `iclr`, `DeepONet` over `deeponet`) when both appear in the same batch.
  */
-export function normalizeAcademicTags(
+export function normalizeTags(
   rawTags?: (TagInput | null | undefined)[] | null,
+  options?: CleanTagOptions,
 ): string[] {
   if (!Array.isArray(rawTags) || rawTags.length === 0) return [];
 
@@ -283,10 +296,21 @@ export function normalizeAcademicTags(
     const rawStr = typeof item === 'string' ? item : item.tag || item.name;
     if (!rawStr || typeof rawStr !== 'string') continue;
 
+    const isExplicitManualItem =
+      typeof item === 'object' &&
+      item !== null &&
+      ('type' in item &&
+        ((item as { type?: unknown }).type === 0 ||
+          (item as { type?: unknown }).type === 'manual'));
+    const effectiveOptions =
+      options?.allowManualAcademicTerms || isExplicitManualItem
+        ? { ...options, allowManualAcademicTerms: true }
+        : options;
+
     const parts = splitPreservingTaxonomyDescriptors(rawStr);
 
     for (const part of parts) {
-      const cleaned = cleanSingleTag(part);
+      const cleaned = cleanSingleTag(part, effectiveOptions);
       if (!cleaned) continue;
 
       const key = toCanonicalTagKey(cleaned);

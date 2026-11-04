@@ -4,16 +4,16 @@ import { BullModule } from '@nestjs/bullmq';
 import { CoreModule as AppCoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
 
-import { LIBRARY_OUTBOX_QUEUE } from './domain/outbox.domain';
+import { LIBRARY_OUTBOX_QUEUE } from './services/transaction.service';
 import { TransactionService } from './services/transaction.service';
 import { ChangeLogRepository } from './repositories/changelog.repository';
 import { OutboxRepository } from './repositories/outbox.repository';
+import { OutboxWorker } from './services/outbox.worker';
 import {
-  OutboxWorker,
   OutboxDispatcher,
   OutboxMetrics,
   OutboxQueueConsumer,
-} from './services/outbox.worker';
+} from './services/idempotent-consumer.service';
 import {
   OUTBOX_REGISTRY_PORT,
   LIBRARY_EVENT_TYPES,

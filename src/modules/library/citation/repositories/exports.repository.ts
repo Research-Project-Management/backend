@@ -69,17 +69,19 @@ export class ExportsRepository {
   }
 
   async findProjectMember(projectId: string, userId: string) {
-    const member = await this.prisma.projectMember.findUnique({
-      where: {
-        projectId_userId: { projectId, userId },
-      },
-      select: { role: true },
-    });
+    const [member, ownedProject] = await Promise.all([
+      this.prisma.projectMember.findUnique({
+        where: {
+          projectId_userId: { projectId, userId },
+        },
+        select: { role: true },
+      }),
+      this.prisma.project.findFirst({
+        where: { id: projectId, createdById: userId, deletedAt: null },
+        select: { id: true },
+      }),
+    ]);
     if (member) return member;
-    const ownedProject = await this.prisma.project.findFirst({
-      where: { id: projectId, createdById: userId, deletedAt: null },
-      select: { id: true },
-    });
     if (ownedProject) {
       return { role: 'OWNER' as const };
     }
@@ -108,31 +110,6 @@ export class ExportsRepository {
     });
   }
 
-  async findItemsByIds(
-    scopeWhere: Prisma.ItemWhereInput,
-    itemIds: string[],
-    collectionId?: string,
-    take: number = EXPORT_MAX_ITEMS,
-  ) {
-    return this.prisma.item.findMany({
-      where: {
-        ...scopeWhere,
-        id: { in: itemIds },
-        ...(collectionId
-          ? { collectionItems: { some: { collectionId } } }
-          : {}),
-      },
-      include: {
-        contributors: { orderBy: { orderIndex: 'asc' } },
-        attachments: { where: { deletedAt: null } },
-        itemTags: { include: { tag: true } },
-        notesList: { where: { deletedAt: null } },
-        identifiers: true,
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take,
-    });
-  }
 
   async findItemById(userId: string, itemId: string, projectId?: string) {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
@@ -151,6 +128,7 @@ export class ExportsRepository {
         notesList: { where: { deletedAt: null } },
         identifiers: true,
         attachments: {
+          where: { deletedAt: null },
           include: {
             annotations: {
               where: { deletedAt: null },

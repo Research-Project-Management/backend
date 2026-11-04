@@ -7,7 +7,7 @@ import {
   OutboxDiagnosticSummary,
   evaluateOutboxFailureDecision,
   computeOutboxDiagnostics,
-} from '../domain/outbox.domain';
+} from '../services/transaction.service';
 import type { ChangeLogRepository } from './changelog.repository';
 
 export interface OutboxPublishInput extends CorePublishOutboxInput {
@@ -43,6 +43,22 @@ export class OutboxRepository {
     return '00000000-0000-0000-0000-000000000000';
   }
 
+  private resolveActorId(
+    userId?: string | null,
+    explicitActorId?: string | null,
+  ): string | null {
+    const candidate = (explicitActorId ?? userId ?? '').trim();
+    if (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        candidate,
+      ) &&
+      candidate !== '00000000-0000-0000-0000-000000000000'
+    ) {
+      return candidate;
+    }
+    return null;
+  }
+
   async publishOutboxBatch(
     events: PublishOutboxInput[],
     tx?: Prisma.TransactionClient,
@@ -53,6 +69,7 @@ export class OutboxRepository {
     const data: Prisma.OutboxEventCreateManyInput[] = events.map((ev) => ({
       id: uuidv7(),
       userId: this.normalizeUserId(ev.userId),
+      actorId: this.resolveActorId(ev.userId, ev.actorId),
       projectId: ev.projectId || null,
       aggregateId: ev.aggregateId,
       eventType: ev.eventType,
@@ -120,6 +137,12 @@ export class OutboxRepository {
           })
         : Promise.resolve({ count: 0 }),
     ]);
+
+    if (this.prisma?.idempotencyRecord?.deleteMany) {
+      await this.prisma.idempotencyRecord.deleteMany({
+        where: { expiresAt: { lt: new Date() } },
+      });
+    }
 
     return {
       purgedPublished: publishedDeleteRes.count,
@@ -247,6 +270,7 @@ export class OutboxRepository {
       Array<{
         id: string;
         userId: string;
+        actorId: string | null;
         projectId: string | null;
         aggregateId: string;
         eventType: string;
@@ -283,12 +307,14 @@ export class OutboxRepository {
           claimed_at = ${now},
           lease_expires_at = ${newLeaseExpiresAt},
           claimed_by = ${workerId},
+          retry_count = e.retry_count + CASE WHEN c.status = 'PROCESSING'::"OutboxStatus" THEN 1 ELSE 0 END,
           updated_at = ${now}
       FROM candidates c
       WHERE e.id = c.id
       RETURNING 
         e.id,
         e.user_id AS "userId",
+        e.actor_id AS "actorId",
         e.project_id AS "projectId",
         e.aggregate_id AS "aggregateId",
         e.event_type AS "eventType",
@@ -316,6 +342,7 @@ export class OutboxRepository {
       event: {
         id: r.id,
         userId: r.userId,
+        actorId: r.actorId ?? null,
         projectId: r.projectId,
         aggregateId: r.aggregateId,
         eventType: r.eventType,
@@ -389,17 +416,37 @@ export class OutboxRepository {
     };
   }
 
-  async findIdempotencyRecord(idempotencyKey: string, userId = 'system') {
-    if (!this.prisma?.idempotencyRecord?.findUnique) return null;
+  async findIdempotencyRecord(
+    idempotencyKey: string,
+    userId = 'system',
+    projectId: string | null = null,
+  ) {
+    if (!this.prisma?.idempotencyRecord) return null;
     const normalizedUserId = this.normalizeUserId(userId);
-    return this.prisma.idempotencyRecord.findUnique({
-      where: {
-        userId_idempotencyKey: {
-          userId: normalizedUserId,
-          idempotencyKey,
+    const scopeWhere = projectId
+      ? { projectId, idempotencyKey }
+      : { userId: normalizedUserId, projectId: null, idempotencyKey };
+
+    if (typeof this.prisma.idempotencyRecord.findFirst === 'function') {
+      return this.prisma.idempotencyRecord.findFirst({
+        where: scopeWhere,
+      });
+    }
+    if (
+      projectId &&
+      typeof this.prisma.idempotencyRecord.findUnique === 'function'
+    ) {
+      return this.prisma.idempotencyRecord.findUnique({
+        where: {
+          userId_projectId_idempotencyKey: {
+            userId: normalizedUserId,
+            projectId,
+            idempotencyKey,
+          },
         },
-      },
-    });
+      });
+    }
+    return null;
   }
 
   async upsertIdempotencyRecord(
@@ -407,45 +454,123 @@ export class OutboxRepository {
     status: string,
     expiresAt: Date,
     userId = 'system',
+    projectId: string | null = null,
   ) {
-    if (!this.prisma?.idempotencyRecord?.upsert) return null;
+    if (!this.prisma?.idempotencyRecord) return null;
     const normalizedUserId = this.normalizeUserId(userId);
-    return this.prisma.idempotencyRecord.upsert({
-      where: {
-        userId_idempotencyKey: {
-          userId: normalizedUserId,
+    const scopeWhere = projectId
+      ? { projectId, idempotencyKey }
+      : { userId: normalizedUserId, projectId: null, idempotencyKey };
+
+    const existing = await this.findIdempotencyRecord(
+      idempotencyKey,
+      userId,
+      projectId,
+    );
+    if (
+      status === 'processing' &&
+      existing &&
+      (existing.status === 'completed' || existing.status === 'succeeded') &&
+      existing.expiresAt > new Date()
+    ) {
+      return existing;
+    }
+
+    if (
+      existing &&
+      typeof this.prisma.idempotencyRecord.update === 'function'
+    ) {
+      return this.prisma.idempotencyRecord.update({
+        where: { id: existing.id },
+        data: { status, expiresAt },
+      });
+    }
+
+    if (typeof this.prisma.idempotencyRecord.create === 'function') {
+      try {
+        return await this.prisma.idempotencyRecord.create({
+          data: {
+            userId: normalizedUserId,
+            projectId: projectId || null,
+            idempotencyKey,
+            status,
+            expiresAt,
+          },
+        });
+      } catch {
+        const retry = await this.findIdempotencyRecord(
           idempotencyKey,
+          userId,
+          projectId,
+        );
+        if (
+          retry &&
+          typeof this.prisma.idempotencyRecord.update === 'function'
+        ) {
+          return this.prisma.idempotencyRecord.update({
+            where: { id: retry.id },
+            data: { status, expiresAt },
+          });
+        }
+      }
+    }
+
+    if (
+      projectId &&
+      typeof this.prisma.idempotencyRecord.upsert === 'function'
+    ) {
+      return this.prisma.idempotencyRecord.upsert({
+        where: {
+          userId_projectId_idempotencyKey: {
+            userId: normalizedUserId,
+            projectId,
+            idempotencyKey,
+          },
         },
-      },
-      create: {
-        userId: normalizedUserId,
-        idempotencyKey,
-        status,
-        expiresAt,
-      },
-      update: {
-        status,
-        expiresAt,
-      },
-    });
+        create: {
+          userId: normalizedUserId,
+          projectId,
+          idempotencyKey,
+          status,
+          expiresAt,
+        },
+        update: {
+          status,
+          expiresAt,
+        },
+      });
+    }
+
+    return existing ?? null;
   }
 
   async deleteIdempotencyRecords(
     idempotencyKey: string,
     statuses?: string[],
     userId = 'system',
+    projectId: string | null = null,
   ) {
     if (!this.prisma?.idempotencyRecord?.deleteMany) return;
     const normalizedUserId = this.normalizeUserId(userId);
+    const scopeWhere = projectId
+      ? { projectId, idempotencyKey }
+      : { userId: normalizedUserId, projectId: null, idempotencyKey };
     await this.prisma.idempotencyRecord.deleteMany({
       where: {
-        userId: normalizedUserId,
-        idempotencyKey,
+        ...scopeWhere,
         ...(statuses && statuses.length > 0
           ? { status: { in: statuses } }
           : {}),
       },
     });
+  }
+
+  async purgeExpiredIdempotencyRecords(now: Date = new Date()): Promise<number> {
+    if (!this.prisma?.idempotencyRecord?.deleteMany) return 0;
+    const res = await this.prisma.idempotencyRecord.deleteMany({
+      where: { expiresAt: { lt: now } },
+    });
+    return res.count;
   }
 }
 
@@ -557,9 +682,14 @@ export async function executeOutboxGarbageCollection(params: {
   let purgedTombstones = 0;
 
   try {
+    const now = new Date();
     const outboxRes = await repo.purgeProcessedOutboxEvents(3, 30, 1000);
     purgedPublished = outboxRes.purgedPublished;
     purgedFailed = outboxRes.purgedFailed;
+
+    if (typeof repo.purgeExpiredIdempotencyRecords === 'function') {
+      await repo.purgeExpiredIdempotencyRecords(now);
+    }
 
     if (changeLogRepo) {
       const changeLogRes = await changeLogRepo.compactAndPurgeChangeLog(30, 1000);
@@ -605,10 +735,3 @@ export async function buildOutboxDiagnosticSummary(params: {
 
   return summary;
 }
-
-export const OutboxEventHandlers = {
-  handleMissingOutboxHandler,
-  handleOutboxDispatchFailure,
-  executeOutboxGarbageCollection,
-  buildOutboxDiagnosticSummary,
-};

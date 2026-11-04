@@ -6,14 +6,6 @@ import type { Prisma } from '@prisma/client';
 import type { TransactionHelpers } from '../ports';
 import { SCHEMA_V42_DATA } from './schema.constants';
 
-export enum IngestionSource {
-  Manual = 'Manual',
-  DOI = 'DOI',
-  FileImport = 'FileImport',
-  BrowserExtension = 'BrowserExtension',
-  PDF = 'PDF',
-}
-
 // Creator & Contributor Roles
 export type CreatorType =
   | 'author'
@@ -96,51 +88,17 @@ export type TagObjectInput = {
 };
 export type TagInput = string | TagObjectInput;
 
-/**
- * Maps itemType → its primary venue/container field name for display.
- * e.g. journalArticle → 'publicationTitle', bookSection → 'bookTitle'.
- *
- * Distinct from schema.constants.ts BASE_FIELD_MAPPINGS which is the
- * nested Zotero base-field → type-specific-field crosswalk (different shape).
- */
-export const VENUE_FIELD_MAP: Record<string, string> = {
-  publicationTitle: 'publicationTitle',
-  journalArticle: 'publicationTitle',
-  proceedingsTitle: 'proceedingsTitle',
-  conferencePaper: 'proceedingsTitle',
-  bookTitle: 'bookTitle',
-  bookSection: 'bookTitle',
-  dictionaryTitle: 'dictionaryTitle',
-  encyclopediaTitle: 'encyclopediaTitle',
-  seriesTitle: 'seriesTitle',
-  seriesText: 'seriesText',
-  websiteTitle: 'websiteTitle',
-  blogTitle: 'blogTitle',
-  forumTitle: 'forumTitle',
-  programTitle: 'programTitle',
-  episodeNumber: 'episodeNumber',
-  audioRecordingFormat: 'audioRecordingFormat',
-  videoRecordingFormat: 'videoRecordingFormat',
-};
-
-export const VENUE_TYPE_SPECIFIC_FIELDS = [
-  'proceedingsTitle',
-  'bookTitle',
-  'dictionaryTitle',
-  'encyclopediaTitle',
-  'websiteTitle',
-  'blogTitle',
-  'forumTitle',
-  'programTitle',
-  'seriesTitle',
-] as const;
-
 export const PRISMA_ITEM_SCALAR_COLUMNS = [
   'title',
   'itemType',
   'year',
   'citationKey',
   'doi',
+  'isbn',
+  'issn',
+  'pmid',
+  'pmcid',
+  'arxivId',
   'publicationTitle',
   'abstract',
   'url',
@@ -474,7 +432,7 @@ export interface ItemMetadata {
 }
 
 // Canonical Document Structure Types (Standardized In-Process Types)
-export interface AcademicCreator {
+export interface ItemCreator {
   fullName: string;
   firstName?: string;
   middleName?: string;
@@ -551,29 +509,6 @@ export interface DocumentFormula {
   coords?: BoundingBoxCoordinates;
 }
 
-export interface DocumentHeaderResult {
-  title?: string;
-  authors?: string[];
-  creators?: AcademicCreator[];
-  abstract?: string;
-  doi?: string;
-  arxivId?: string;
-  year?: number;
-  publicationDate?: string;
-  journal?: string;
-  bookTitle?: string;
-  conferenceName?: string;
-  volume?: string;
-  issue?: string;
-  pages?: string;
-  publisher?: string;
-  place?: string;
-  issn?: string;
-  isbn?: string;
-  keywords?: string[];
-  notes?: Array<{ content: string; type?: string }>;
-}
-
 export interface UpdateItemData extends Partial<CreateItemData> {
   expectedVersion?: number;
 }
@@ -583,6 +518,7 @@ export interface ItemSummary {
   projectId?: string;
   userId?: string;
   title: string;
+  abstract?: string | null;
   itemType?: string;
   year?: number | null;
   doi?: string | null;

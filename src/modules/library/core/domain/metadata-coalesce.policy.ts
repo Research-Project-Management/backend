@@ -1,13 +1,12 @@
-import { TITLE_SIMILARITY_STOPWORDS } from './academic-text.lexicon';
-import { isPlaceholderItemTitle, titleSimilarity, hasAuthorAndYearCorroboration } from './academic-title.domain';
-import { normalizeAcademicTags } from './tag.domain';
+import { isPlaceholderItemTitle, titleSimilarity, hasAuthorAndYearCorroboration, extractNormalizedAuthorSurnames } from './title.domain';
+import { normalizeTags } from './tag.domain';
 import { mergeZoteroExtraTextLines, resolveFieldAliases, resolveBidirectionalBaseFields } from './zotero-field-harmonizer.domain';
 import { parseCreatorString } from './author.domain';
-import { normalizeArxivId } from './identifier.domain';
+import { normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn } from './identifier.domain';
 import { ItemMetadata } from '../types/bibliographic.types';
 
-export const BIBLIOGRAPHIC_STOPWORDS = TITLE_SIMILARITY_STOPWORDS;
-export const TITLE_MATCH_SIMILARITY_THRESHOLD = 0.5;
+export { extractNormalizedAuthorSurnames };
+
 export enum OriginTier { FILENAME_FALLBACK = 0, LOCAL_EXTRACTED = 1, SUPPLEMENTAL_GRAPH = 2, AUTHORITATIVE_REGISTRY = 3, USER_OVERRIDE = 4 }
 
 const USER_OVERRIDE_PROVIDERS = new Set(['useroverride', 'user', 'manual', 'useridentifier']);
@@ -18,7 +17,7 @@ const TIER_BASE_WEIGHT: Readonly<Record<OriginTier, number>> = { [OriginTier.USE
 
 export function resolveProviderTier(provider: string | undefined, _field?: string): OriginTier {
   if (!provider || !provider.trim()) return OriginTier.FILENAME_FALLBACK;
-  const lower = provider.trim().toLowerCase();
+  const lower = provider.trim().toLowerCase().replace(/[\s_-]+/g, '');
   if (USER_OVERRIDE_PROVIDERS.has(lower)) return OriginTier.USER_OVERRIDE;
   if (AUTHORITATIVE_REGISTRY_PROVIDERS.has(lower)) return OriginTier.AUTHORITATIVE_REGISTRY;
   if (SUPPLEMENTAL_GRAPH_PROVIDERS.has(lower)) return OriginTier.SUPPLEMENTAL_GRAPH;
@@ -28,13 +27,20 @@ export function resolveProviderTier(provider: string | undefined, _field?: strin
 
 export function resolveProviderFieldWeight(provider: string | undefined, field?: string): number {
   if (!provider || !provider.trim()) return 0.5;
-  const lower = provider.trim().toLowerCase(), fieldLower = (field ?? '').trim().toLowerCase();
+  const lower = provider.trim().toLowerCase().replace(/[\s_-]+/g, ''), fieldLower = (field ?? '').trim().toLowerCase();
   const tier = resolveProviderTier(lower, fieldLower);
   if (tier === OriginTier.USER_OVERRIDE) return TIER_BASE_WEIGHT[OriginTier.USER_OVERRIDE];
   if (fieldLower === 'doi' && lower === 'crossref') return 1.05;
   if ((fieldLower === 'pmid' || fieldLower === 'pmcid') && lower === 'pubmed') return 1.05;
   if ((fieldLower === 'arxivid' || fieldLower === 'archiveid') && lower === 'arxiv') return 1.05;
+  // CrossRef only exposes journal-level ASJC subject categories (`message.subject`), not paper-level author keywords.
+  // Any paper-level keyword source (OpenAlex, PubMed, arXiv, SemanticScholar, or LocalPDF/XMP) outranks it.
+  if ((fieldLower === 'tags' || fieldLower === 'keywords' || fieldLower === 'labels') && lower === 'crossref') return 0.35;
   return TIER_BASE_WEIGHT[tier];
+}
+
+export function isPaperLevelKeywordSource(provider: string | undefined): boolean {
+  return resolveProviderFieldWeight(provider, 'keywords') >= TIER_BASE_WEIGHT[OriginTier.LOCAL_EXTRACTED];
 }
 
 export const PREPRINT_SERVER_VENUE_REGEX = /^(?:arxiv(?:\.org)?|corr|biorxiv|medrxiv|chemrxiv|techrxiv|ssrn|research\s+square|osf\s+preprints|hal|zenodo)(?:\s+preprints?|\s+e-?prints?)?$/i;
@@ -113,7 +119,7 @@ export function selectAuthoritativeCreatorVariant<T extends { sourceProvider?: s
 export function mergeReconciledTagArrays(arrays: unknown[]): string[] {
   const candidateTags: string[] = [];
   for (const arr of arrays) if (Array.isArray(arr)) for (const t of arr) if (typeof t === 'string' && t.trim()) candidateTags.push(t.trim());
-  return normalizeAcademicTags(candidateTags);
+  return normalizeTags(candidateTags);
 }
 
 export function mergeReconciledNotesArrays(arrays: unknown[], normalizeToObject = false): unknown[] {
@@ -175,19 +181,59 @@ export function finalizeReconciledBibliographicMetadata(resolved: Record<string,
   ) || '';
   const isValidArxivId = /^\d{4}\.\d{4,5}$/.test(rawArxivCandidate) || /^[a-z-]+(?:\.[a-z]{2})?\/\d{7}$/i.test(rawArxivCandidate);
   const isNonArxivDoi = Boolean(typeof resolved.doi === 'string' && resolved.doi.trim() && !/^10\.(?:48550\/arxiv\.|1101\/|21203\/|26434\/|20944\/)/i.test(resolved.doi.trim()));
-  const rawVenue = String(resolved.publicationTitle || resolved.journal || '').trim();
+  const rawVenue = String(resolved.publicationTitle || resolved.journal || resolved.proceedingsTitle || '').trim();
   if (itemType === 'preprint' && isNonArxivDoi && rawVenue && !PREPRINT_SERVER_VENUE_REGEX.test(rawVenue)) {
-    itemType = 'journalArticle';
-    resolved.itemType = 'journalArticle';
+    const targetPublishedType =
+      resolved.proceedingsTitle || resolved.conferenceName
+        ? 'conferencePaper'
+        : 'journalArticle';
+    itemType = targetPublishedType;
+    resolved.itemType = targetPublishedType;
     if (isValidArxivId) {
       resolved.arxivId = rawArxivCandidate;
       resolved.extra = mergeReconciledExtraText([resolved.extra, `arXiv: ${rawArxivCandidate}`]);
     }
   }
+  const deleteForeignKeys = (keys: readonly string[]) => {
+    for (const k of keys) {
+      delete resolved[k];
+      if (resolved.extraFields && typeof resolved.extraFields === 'object') {
+        delete (resolved.extraFields as Record<string, unknown>)[k];
+      }
+    }
+  };
   if (itemType === 'journalArticle') {
     if (resolved.publicationTitle && !resolved.journal) resolved.journal = resolved.publicationTitle;
     else if (resolved.journal && !resolved.publicationTitle) resolved.publicationTitle = resolved.journal;
+    deleteForeignKeys(['proceedingsTitle', 'conferenceName', 'bookTitle', 'university', 'thesisType', 'reportNumber', 'reportType']);
+  } else if (itemType === 'conferencePaper') {
+    if (!resolved.proceedingsTitle && (resolved.publicationTitle || resolved.journal)) {
+      resolved.proceedingsTitle = resolved.publicationTitle || resolved.journal;
+    }
+    if (resolved.proceedingsTitle && !resolved.publicationTitle) {
+      resolved.publicationTitle = resolved.proceedingsTitle;
+    }
+    deleteForeignKeys(['journal', 'bookTitle', 'university', 'thesisType', 'reportNumber', 'reportType']);
+  } else if (itemType === 'bookSection') {
+    if (!resolved.bookTitle && (resolved.publicationTitle || resolved.journal)) {
+      resolved.bookTitle = resolved.publicationTitle || resolved.journal;
+    }
+    if (resolved.bookTitle && !resolved.publicationTitle) {
+      resolved.publicationTitle = resolved.bookTitle;
+    }
+    deleteForeignKeys(['journal', 'proceedingsTitle', 'conferenceName', 'university', 'thesisType', 'reportNumber', 'reportType']);
+  } else if (itemType === 'book') {
+    deleteForeignKeys(['journal', 'proceedingsTitle', 'conferenceName', 'bookTitle', 'university', 'thesisType', 'reportNumber', 'reportType']);
   } else if (itemType === 'preprint') {
+    if (rawVenue && !PREPRINT_SERVER_VENUE_REGEX.test(rawVenue)) {
+      const extraObj =
+        resolved.extraFields && typeof resolved.extraFields === 'object'
+          ? (resolved.extraFields as Record<string, unknown>)
+          : {};
+      if (!extraObj.journalRef) {
+        resolved.extraFields = { ...extraObj, journalRef: rawVenue };
+      }
+    }
     if (isValidArxivId && !isNonArxivDoi) {
       resolved.repository = resolved.repository || 'arXiv';
       resolved.archive = resolved.archive || 'arXiv';
@@ -197,57 +243,56 @@ export function finalizeReconciledBibliographicMetadata(resolved: Record<string,
     } else {
       resolved.repository = resolved.repository || resolved.institution || resolved.publicationTitle || resolved.journal || resolved.publisher;
     }
-    for (const k of ['publicationTitle', 'journal', 'proceedingsTitle', 'conferenceName', 'bookTitle', 'series', 'volume', 'issue', 'pages', 'journalAbbr', 'journalAbbreviation', 'issn', 'isbn'] as const) {
-      delete resolved[k];
-      if (resolved.extraFields && typeof resolved.extraFields === 'object') delete (resolved.extraFields as Record<string, unknown>)[k];
-    }
+    deleteForeignKeys(['publicationTitle', 'journal', 'proceedingsTitle', 'conferenceName', 'bookTitle', 'series', 'volume', 'issue', 'pages', 'journalAbbr', 'journalAbbreviation', 'issn', 'isbn']);
   }
   if (Array.isArray(resolved.creators) && resolved.creators.length > 0) {
-    const creatorsList = resolved.creators as Array<{ creatorType?: string; fullName?: string; name?: string; firstName?: string; lastName?: string }>;
+    const creatorsList = resolved.creators as Array<{ creatorType?: string; fullName?: string; name?: string; firstName?: string; lastName?: string; orderIndex?: number }>;
     const authorsList = resolved.authors as unknown[] | undefined;
     const authorCreators = creatorsList.filter((c) => c.creatorType === 'author' || !c.creatorType);
+    const nonAuthorCreators = creatorsList.filter((c) => Boolean(c.creatorType && c.creatorType !== 'author'));
     const effectiveList = authorCreators.length > 0 ? authorCreators : creatorsList;
     if (!authorsList || authorsList.length === 0 || effectiveList.length > authorsList.length || (effectiveList.length === authorsList.length && countFullGivenNames(effectiveList) >= countFullGivenNames(authorsList))) {
       resolved.authors = effectiveList.map((c) => c.fullName || c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim()).filter(Boolean);
     } else if (Array.isArray(authorsList) && (authorsList.length > effectiveList.length || countFullGivenNames(authorsList) > countFullGivenNames(effectiveList))) {
-      resolved.creators = (authorsList as string[]).map((a, idx) => parseCreatorString(String(a), idx, 'author')).filter((c): c is NonNullable<typeof c> => c !== null);
+      const upgradedAuthors = (authorsList as string[]).map((a, idx) => parseCreatorString(String(a), idx, 'author')).filter((c): c is NonNullable<typeof c> => c !== null);
+      resolved.creators = [
+        ...upgradedAuthors,
+        ...nonAuthorCreators.map((c, idx) => ({ ...c, orderIndex: upgradedAuthors.length + idx })),
+      ];
     }
   } else if (Array.isArray(resolved.authors) && resolved.authors.length > 0 && (!Array.isArray(resolved.creators) || resolved.creators.length === 0)) {
     resolved.creators = (resolved.authors as string[]).map((a, idx) => parseCreatorString(a, idx, 'author')).filter((c): c is NonNullable<typeof c> => c !== null);
   }
 }
 
-export const finalizeBibliographicMetadata = finalizeReconciledBibliographicMetadata;
-
-export function extractNormalizedAuthorSurnames(authorsOrCreators: unknown): Set<string> {
-  const out = new Set<string>();
-  const addRaw = (rawName: string) => {
-    const trimmed = rawName.trim();
-    if (!trimmed) return;
-    const token = trimmed.includes(',') ? trimmed.split(',')[0].trim().split(/\s+/).pop() || '' : trimmed.split(/\s+/).pop() || '';
-    const norm = token.replace(/[đĐ]/g, 'd').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-    if (norm.length >= 2) out.add(norm);
-  };
-  const processArray = (arr: unknown[]) => {
-    for (const entry of arr) {
-      if (typeof entry === 'string') addRaw(entry);
-      else if (entry && typeof entry === 'object') {
-        const obj = entry as { lastName?: string; family?: string; fullName?: string; name?: string };
-        addRaw(String((typeof obj.lastName === 'string' && obj.lastName.trim() ? obj.lastName : typeof obj.family === 'string' && obj.family.trim() ? obj.family : obj.fullName || obj.name) || ''));
-      }
-    }
-  };
-  if (Array.isArray(authorsOrCreators)) processArray(authorsOrCreators);
-  else if (authorsOrCreators && typeof authorsOrCreators === 'object') {
-    const rec = authorsOrCreators as Record<string, unknown>;
-    for (const k of ['creators', 'contributors', 'authors'] as const) {
-      if (Array.isArray(rec[k]) && (rec[k] as unknown[]).length > 0) { processArray(rec[k] as unknown[]); if (out.size > 0) break; }
-    }
-  }
-  return out;
+export function normalizeComparableIdentifier(rawValue: unknown): string {
+  const raw = String(rawValue ?? '').trim();
+  if (!raw) return '';
+  const norm =
+    normalizeDoi(raw) ||
+    normalizeArxivId(raw, { stripVersion: true }) ||
+    normalizeIsbn(raw) ||
+    normalizePmid(raw) ||
+    normalizePmcid(raw) ||
+    normalizeIssn(raw) ||
+    raw;
+  return norm
+    .toLowerCase()
+    .replace(/^10\.48550\/arxiv\./i, '')
+    .replace(/v\d+$/i, '');
 }
 
-export function evaluateCitationTrap(localMeta: Record<string, unknown>, resolvedMeta: Record<string, unknown>, isFilenameFallback?: boolean): { isTrap: boolean; similarity: number; rejectedDoi?: string } {
+export function isSameCanonicalIdentifier(idA: unknown, idB: unknown): boolean {
+  const normA = normalizeComparableIdentifier(idA);
+  const normB = normalizeComparableIdentifier(idB);
+  return Boolean(normA && normB && normA === normB);
+}
+
+export function isRejectedCitedIdentifier(rawValue: unknown, rejectedCitedId: unknown): boolean {
+  return isSameCanonicalIdentifier(rawValue, rejectedCitedId);
+}
+
+export function evaluateCitationTrap(localMeta: Record<string, unknown>, resolvedMeta: Record<string, unknown>, isFilenameFallback?: boolean): { isTrap: boolean; similarity: number; rejectedDoi?: string; rejectedIdentifier?: string } {
   const localExtra = localMeta.extraFields && typeof localMeta.extraFields === 'object' ? (localMeta.extraFields as Record<string, unknown>) : {};
   const effectiveFilenameFallback = isFilenameFallback ?? Boolean(localExtra.isFilenameTitle || localMeta.isFilenameTitle);
   const pdfTitle = typeof localMeta.title === 'string' ? localMeta.title.trim() : '';
@@ -256,8 +301,10 @@ export function evaluateCitationTrap(localMeta: Record<string, unknown>, resolve
   if (!isCrediblePdfTitle || !resolvedTitle) return { isTrap: false, similarity: 1 };
   const similarity = titleSimilarity(resolvedTitle, pdfTitle);
   if (similarity < 0.4 && !hasAuthorAndYearCorroboration(localMeta, resolvedMeta)) {
-    const rejectedDoi = (typeof resolvedMeta.doi === 'string' && resolvedMeta.doi.trim()) || (typeof localMeta.doi === 'string' && localMeta.doi.trim()) || undefined;
-    return { isTrap: true, similarity, rejectedDoi };
+    const pickId = (meta: Record<string, unknown>, key: string) => (typeof meta[key] === 'string' && meta[key].trim() ? meta[key].trim() : undefined);
+    const rejectedDoi = pickId(resolvedMeta, 'doi') || pickId(localMeta, 'doi');
+    const rejectedIdentifier = rejectedDoi || pickId(resolvedMeta, 'arxivId') || pickId(localMeta, 'arxivId') || pickId(resolvedMeta, 'pmid') || pickId(localMeta, 'pmid') || pickId(resolvedMeta, 'isbn') || pickId(localMeta, 'isbn');
+    return { isTrap: true, similarity, rejectedDoi: rejectedDoi || rejectedIdentifier, rejectedIdentifier };
   }
   return { isTrap: false, similarity };
 }
@@ -308,8 +355,8 @@ export function verifyCandidateMatch(recordCand: CoalesceMetadataCandidate, prov
   if (providerCand.rawEvidenceRef && recordCand.candidateId && providerCand.rawEvidenceRef === recordCand.candidateId) return true;
   const rMeta = recordCand.normalizedMetadata || {}, pMeta = providerCand.normalizedMetadata || {};
   for (const idKey of ['doi', 'arxivId', 'pmid', 'isbn'] as const) {
-    const rVal = rMeta[idKey]?.trim().toLowerCase(), pVal = pMeta[idKey]?.trim().toLowerCase();
-    if (rVal && pVal && rVal !== pVal) return false;
+    const rVal = rMeta[idKey]?.trim(), pVal = pMeta[idKey]?.trim();
+    if (rVal && pVal && !isSameCanonicalIdentifier(rVal, pVal)) return false;
   }
   const rYear = Number(rMeta.year), pYear = Number(pMeta.year);
   if (Number.isFinite(rYear) && rYear > 0 && Number.isFinite(pYear) && pYear > 0 && Math.abs(rYear - pYear) > 1) return false;
@@ -318,8 +365,8 @@ export function verifyCandidateMatch(recordCand: CoalesceMetadataCandidate, prov
   if (rAuthors.size > 0 && pAuthors.size > 0 && ![...rAuthors].some((name) => pAuthors.has(name))) return false;
   if (providerCand.rawEvidenceRef && recordCand.candidateId && providerCand.rawEvidenceRef !== recordCand.candidateId) {
     for (const idKey of ['doi', 'arxivId', 'pmid', 'isbn'] as const) {
-      const rVal = rMeta[idKey]?.trim().toLowerCase(), pVal = pMeta[idKey]?.trim().toLowerCase();
-      if ((rVal || pVal) && rVal !== pVal) return false;
+      const rVal = rMeta[idKey]?.trim(), pVal = pMeta[idKey]?.trim();
+      if ((rVal || pVal) && !isSameCanonicalIdentifier(rVal, pVal)) return false;
     }
     if ((rAuthors.size === 0) !== (pAuthors.size === 0)) return false;
   }
@@ -331,6 +378,8 @@ export class MetadataCoalescePolicy {
   static evaluateCitationTrap = evaluateCitationTrap;
   static verifyTitleLookupCorroboration = verifyTitleLookupCorroboration;
   static extractNormalizedAuthorSurnames = extractNormalizedAuthorSurnames;
+  static isSameCanonicalIdentifier = isSameCanonicalIdentifier;
+  static isRejectedCitedIdentifier = isRejectedCitedIdentifier;
 
   private static isUserSource(provider?: string, isUserOverride?: boolean): boolean {
     return Boolean(isUserOverride || resolveProviderTier(provider) === OriginTier.USER_OVERRIDE);
@@ -415,9 +464,25 @@ export class MetadataCoalescePolicy {
         continue;
       }
       if (field === 'tags' || field === 'labels' || field === 'keywords' || field === 'notes') {
-        const pool = isBestUser ? [best] : sorted;
+        if (
+          (field === 'tags' || field === 'labels' || field === 'keywords') &&
+          (proposedItem.tags !== undefined || proposedItem.keywords !== undefined || proposedItem.labels !== undefined)
+        ) {
+          const cachedTags = (proposedItem.tags ?? proposedItem.keywords ?? proposedItem.labels) as string[];
+          const cachedEv = selectedFields.tags ?? selectedFields.keywords ?? selectedFields.labels ?? best;
+          selectedFields[field] = { ...stripAnnotation(cachedEv), path: field, normalizedValue: cachedTags, ...(isBestUser ? { isUserOverride: true } : {}) };
+          proposedItem[field] = cachedTags;
+          rejectedFields[field] = [];
+          continue;
+        }
+        let pool = isBestUser ? [best] : sorted;
+        if (field !== 'notes' && !isBestUser && pool.length > 1) {
+          const paperLevelPool = pool.filter((ev) => isPaperLevelKeywordSource(ev.sourceProvider));
+          if (paperLevelPool.length > 0) pool = paperLevelPool;
+        }
         const resolvedVal = field === 'notes' ? mergeReconciledNotesArrays(pool.map((ev) => ev.normalizedValue), true) : mergeReconciledTagArrays(pool.map((ev) => ev.normalizedValue));
-        selectedFields[field] = { ...stripAnnotation(best), normalizedValue: resolvedVal, ...(isBestUser ? { isUserOverride: true } : {}) };
+        const winnerEv = pool[0] || best;
+        selectedFields[field] = { ...stripAnnotation(winnerEv), normalizedValue: resolvedVal, ...(isBestUser ? { isUserOverride: true } : {}) };
         proposedItem[field] = resolvedVal;
         rejectedFields[field] = [];
         continue;
@@ -450,7 +515,12 @@ export class MetadataCoalescePolicy {
       }
     }
     finalizeReconciledBibliographicMetadata(proposedItem, candidates.map((c) => ({ sourceProvider: (c as { sourceProvider?: string }).sourceProvider || c.sourceName, metadata: (c.normalizedMetadata as unknown as Record<string, unknown>) ?? (c as { metadata?: Record<string, unknown> }).metadata ?? (c.fields as unknown as Record<string, unknown>) })));
-    for (const syncKey of ['publicationDate', 'date', 'authors', 'creators', 'itemType', 'publicationTitle', 'journal', 'extra'] as const) {
+    for (const sKey of Object.keys(selectedFields)) {
+      if (proposedItem[sKey] === undefined) {
+        delete selectedFields[sKey];
+      }
+    }
+    for (const syncKey of ['publicationDate', 'date', 'authors', 'creators', 'itemType', 'publicationTitle', 'journal', 'proceedingsTitle', 'bookTitle', 'extra'] as const) {
       if (selectedFields[syncKey] && proposedItem[syncKey] !== undefined && selectedFields[syncKey].normalizedValue !== proposedItem[syncKey]) selectedFields[syncKey] = { ...selectedFields[syncKey], normalizedValue: proposedItem[syncKey] };
     }
     const fieldProvenance: Record<string, { source: string; sourceProvider: string; confidence: number; verified: boolean; isUserOverride?: boolean; lockedByUser?: boolean }> = {};
@@ -472,6 +542,5 @@ export class MetadataCoalescePolicy {
   reconcile(candidates: CoalesceMetadataCandidate[]): CoalesceDecision { return MetadataCoalescePolicy.coalesceCandidates(candidates); }
 }
 export type ReconciliationDecision = CoalesceDecision;
-export type ConflictDetail = CoalesceConflictDetail;
 export type FieldEvidence = CoalesceFieldEvidence;
 export type MetadataCandidate = CoalesceMetadataCandidate;

@@ -348,8 +348,6 @@ export const REVERSE_BASE_FIELD_MAPPINGS =
 export const CSL_TYPE_MAP: Record<string, string> = SCHEMA_V42_DATA.cslTypeMap;
 export const CSL_CREATOR_MAP: Record<string, string> =
   SCHEMA_V42_DATA.cslCreatorMap;
-export const CSL_FIELD_MAP: Record<string, string> =
-  SCHEMA_V42_DATA.cslFieldMap;
 
 export const FIELD_ALIASES: Record<string, string> = {
   DOI: 'doi',

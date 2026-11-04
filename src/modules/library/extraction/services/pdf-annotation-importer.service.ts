@@ -10,7 +10,7 @@ import { AnnotationsRepository } from '@/modules/library/extraction/repositories
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { AnnotationsService } from './annotations.service';
-import { AnnotationType } from '@/modules/library/extraction/types/extraction.types';
+import { AnnotationType } from '@/modules/library/core/types/extraction.types';
 import {
   AnnotationNormalizer,
   extractTopLeftAnchor,
@@ -119,6 +119,21 @@ export class PdfAnnotationImporterService {
 
       const existingAnnotations =
         await this.annotationsRepo.findExistingForImport(attachmentId);
+      const existingAnchorsByPageAndType = new Map<
+        string,
+        Array<{ x1: number; y1: number }>
+      >();
+      for (const ea of existingAnnotations) {
+        const anchor = extractTopLeftAnchor(ea.rectCoords);
+        if (!anchor) continue;
+        const key = `${ea.pageIndex}:${ea.type}`;
+        const bucket = existingAnchorsByPageAndType.get(key);
+        if (bucket) {
+          bucket.push(anchor);
+        } else {
+          existingAnchorsByPageAndType.set(key, [anchor]);
+        }
+      }
 
       let totalFound = 0;
       let imported = 0;
@@ -188,9 +203,20 @@ export class PdfAnnotationImporterService {
             typeof page.getViewport === 'function'
               ? page.getViewport({ scale: 1.0 })
               : null;
-          const [vx1 = 0, vy1 = 0, vx2 = 612, vy2 = 792] = page.view || [];
-          const pageWidth = viewport?.width || Math.abs(vx2 - vx1) || 612;
-          const pageHeight = viewport?.height || Math.abs(vy2 - vy1) || 792;
+          const pageWidth =
+            viewport?.width ||
+            (Array.isArray(page.view) && page.view.length >= 4
+              ? Math.abs(page.view[2] - page.view[0])
+              : 612);
+          const pageHeight =
+            viewport?.height ||
+            (Array.isArray(page.view) && page.view.length >= 4
+              ? Math.abs(page.view[3] - page.view[1])
+              : 792);
+          const [vx1 = 0, vy1 = 0, vx2 = pageWidth, vy2 = pageHeight] =
+            Array.isArray(page.view) && page.view.length >= 4
+              ? page.view
+              : [0, 0, pageWidth, pageHeight];
           const pageIndex = p - 1;
 
           for (const annot of annots) {
@@ -204,6 +230,8 @@ export class PdfAnnotationImporterService {
               annot.rect,
               pageWidth,
               pageHeight,
+              vx1,
+              vy2,
             );
             if (normalizedRects.length === 0) continue;
 
@@ -211,26 +239,15 @@ export class PdfAnnotationImporterService {
             const normX1 = primaryRect.x1;
             const normY1 = primaryRect.y1;
 
-            interface ExistingAnnotationLike {
-              pageIndex?: number;
-              type?: string;
-              rectCoords?: unknown;
-            }
-
-            const isDuplicate = existingAnnotations.some(
-              (ea: ExistingAnnotationLike) => {
-                if (ea.pageIndex !== pageIndex || ea.type !== mappedType)
-                  return false;
-                const anchor = extractTopLeftAnchor(ea.rectCoords);
-                if (!anchor) return false;
-                // Chebyshev (L_infinity) distance: max(|x1 - x1'|, |y1 - y1'|) < 0.005
-                return (
-                  Math.max(
-                    Math.abs(anchor.x1 - normX1),
-                    Math.abs(anchor.y1 - normY1),
-                  ) < 0.005
-                );
-              },
+            const dedupKey = `${pageIndex}:${mappedType}`;
+            const candidateAnchors =
+              existingAnchorsByPageAndType.get(dedupKey) ?? [];
+            const isDuplicate = candidateAnchors.some(
+              (anchor) =>
+                Math.max(
+                  Math.abs(anchor.x1 - normX1),
+                  Math.abs(anchor.y1 - normY1),
+                ) < 0.005,
             );
 
             if (isDuplicate) continue;
@@ -281,11 +298,15 @@ export class PdfAnnotationImporterService {
               authorId: userId,
             });
 
-            existingAnnotations.push({
-              pageIndex,
-              type: mappedType,
-              rectCoords: normalizedRects,
-            });
+            const updatedAnchors =
+              existingAnchorsByPageAndType.get(dedupKey);
+            if (updatedAnchors) {
+              updatedAnchors.push({ x1: normX1, y1: normY1 });
+            } else {
+              existingAnchorsByPageAndType.set(dedupKey, [
+                { x1: normX1, y1: normY1 },
+              ]);
+            }
 
             imported++;
           }
@@ -305,15 +326,26 @@ export class PdfAnnotationImporterService {
       }
 
       if (annotationsToCreate.length > 0) {
-        await this.annotationsService.batchUpsertAnnotations(
-          userId,
-          attachmentId,
-          {
-            upserts: annotationsToCreate,
-            deletes: [],
-          },
-          projectId,
-        );
+        const BATCH_CHUNK_SIZE = 200;
+        for (
+          let offset = 0;
+          offset < annotationsToCreate.length;
+          offset += BATCH_CHUNK_SIZE
+        ) {
+          const chunk = annotationsToCreate.slice(
+            offset,
+            offset + BATCH_CHUNK_SIZE,
+          );
+          await this.annotationsService.batchUpsertAnnotations(
+            userId,
+            attachmentId,
+            {
+              upserts: chunk,
+              deletes: [],
+            },
+            projectId,
+          );
+        }
       }
 
       this.logger.log(
@@ -348,6 +380,8 @@ export class PdfAnnotationImporterService {
     rect: number[] | undefined,
     pageWidth: number,
     pageHeight: number,
+    originX = 0,
+    originY = pageHeight,
   ): Array<{
     x1: number;
     y1: number;
@@ -367,8 +401,8 @@ export class PdfAnnotationImporterService {
       const minY = Math.min(ry1, ry2);
       const maxY = Math.max(ry1, ry2);
 
-      const normX1 = Math.max(0, Math.min(1, minX / pageWidth));
-      const normY1 = Math.max(0, Math.min(1, (pageHeight - maxY) / pageHeight));
+      const normX1 = Math.max(0, Math.min(1, (minX - originX) / pageWidth));
+      const normY1 = Math.max(0, Math.min(1, (originY - maxY) / pageHeight));
       const normW = Math.min(1 - normX1, Math.max(0, (maxX - minX) / pageWidth));
       const normH = Math.min(
         1 - normY1,
@@ -498,6 +532,9 @@ export class PdfAnnotationImporterService {
   }
 
   private mapSubtype(subtype?: string): AnnotationType | null {
+    if (subtype && subtype.trim().toLowerCase() === 'text') {
+      return AnnotationType.note;
+    }
     return this.normalizer.parseType(subtype, null);
   }
 

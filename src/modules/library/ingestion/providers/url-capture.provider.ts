@@ -28,7 +28,7 @@ import {
   normalizeArxivId,
   normalizePmid,
   normalizePmcid,
-  normalizeAcademicTags,
+  normalizeTags,
 } from '@/modules/library/core';
 
 // Public Interfaces
@@ -253,14 +253,15 @@ export class UrlCaptureProvider {
       normalizePmcid(canonicalUrl);
 
     const lookupQuery = candidateArxiv || candidateDoi || candidatePmid;
-    if (this.metadataPort && lookupQuery) {
+    const alreadyResolvedByMirror = scrapedResult?.ladderStepReached === 2;
+    if (this.metadataPort && lookupQuery && !alreadyResolvedByMirror) {
       try {
         const resolved = await this.metadataPort.resolve({
           query: lookupQuery,
         });
         if (resolved?.metadata && resolved.metadata.title) {
           const rm = resolved.metadata;
-          const regTags = normalizeAcademicTags(
+          const regTags = normalizeTags(
             rm.tags || rm.keywords || captured.keywords || [],
           );
           const isArxivPreprint =
@@ -272,31 +273,40 @@ export class UrlCaptureProvider {
           const cleanArxiv = candidateArxiv
             ? candidateArxiv.replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '')
             : rm.arxivId;
+          const nonPreprintFields = isArxivPreprint
+            ? {}
+            : {
+                isbn: rm.isbn || captured.isbn,
+                issn: rm.issn || captured.issn,
+                journal: rm.journal || captured.journal,
+                journalAbbr: rm.journalAbbr || captured.journalAbbr,
+                volume: rm.volume != null ? String(rm.volume) : captured.volume,
+                issue: rm.issue != null ? String(rm.issue) : captured.issue,
+                pages: rm.pages || captured.pages,
+                conferenceName: rm.conferenceName || captured.conferenceName,
+                proceedingsTitle: rm.proceedingsTitle || captured.proceedingsTitle,
+                bookTitle: rm.bookTitle || captured.bookTitle,
+                series: rm.series || captured.series,
+              };
           captured = {
             ...captured,
+            ...nonPreprintFields,
             title: rm.title || captured.title,
             shortTitle: rm.shortTitle || captured.shortTitle,
             abstract: rm.abstract || captured.abstract,
-            itemType: isArxivPreprint
-              ? 'preprint'
-              : rm.itemType || captured.itemType,
-            authors:
-              rm.authors && rm.authors.length > 0
-                ? rm.authors
-                : captured.authors,
-            creators:
-              rm.creators && rm.creators.length > 0
-                ? rm.creators.map((c) => ({
-                    firstName: c.firstName || undefined,
-                    lastName: c.lastName || c.fullName || 'Unknown',
-                    fullName: c.fullName || undefined,
-                    creatorType: c.creatorType || 'author',
-                    fieldMode: c.fieldMode ?? (c.firstName ? 0 : 1),
-                  }))
-                : captured.creators,
+            itemType: isArxivPreprint ? 'preprint' : rm.itemType || captured.itemType,
+            authors: rm.authors?.length ? rm.authors : captured.authors,
+            creators: rm.creators?.length
+              ? rm.creators.map((c) => ({
+                  firstName: c.firstName || undefined,
+                  lastName: c.lastName || c.fullName || 'Unknown',
+                  fullName: c.fullName || undefined,
+                  creatorType: c.creatorType || 'author',
+                  fieldMode: c.fieldMode ?? (c.firstName ? 0 : 1),
+                }))
+              : captured.creators,
             year: rm.year ?? captured.year,
-            publicationDate:
-              rm.publicationDate || rm.date || captured.publicationDate,
+            publicationDate: rm.publicationDate || rm.date || captured.publicationDate,
             doi:
               isArxivPreprint && cleanArxiv
                 ? `10.48550/arXiv.${cleanArxiv}`
@@ -304,41 +314,10 @@ export class UrlCaptureProvider {
             arxivId: cleanArxiv || captured.arxivId,
             pmid: rm.pmid || candidatePmid || captured.pmid,
             pmcid: rm.pmcid || captured.pmcid,
-            isbn: isArxivPreprint ? undefined : rm.isbn || captured.isbn,
-            issn: isArxivPreprint ? undefined : rm.issn || captured.issn,
             publicationTitle: isArxivPreprint
               ? 'arXiv'
               : rm.publicationTitle || rm.journal || captured.publicationTitle,
-            journal: isArxivPreprint
-              ? undefined
-              : rm.journal || captured.journal,
-            journalAbbr: isArxivPreprint
-              ? undefined
-              : rm.journalAbbr || captured.journalAbbr,
-            publisher: isArxivPreprint
-              ? 'arXiv'
-              : rm.publisher || captured.publisher,
-            volume: isArxivPreprint
-              ? undefined
-              : rm.volume != null
-                ? String(rm.volume)
-                : captured.volume,
-            issue: isArxivPreprint
-              ? undefined
-              : rm.issue != null
-                ? String(rm.issue)
-                : captured.issue,
-            pages: isArxivPreprint ? undefined : rm.pages || captured.pages,
-            conferenceName: isArxivPreprint
-              ? undefined
-              : rm.conferenceName || captured.conferenceName,
-            proceedingsTitle: isArxivPreprint
-              ? undefined
-              : rm.proceedingsTitle || captured.proceedingsTitle,
-            bookTitle: isArxivPreprint
-              ? undefined
-              : rm.bookTitle || captured.bookTitle,
-            series: isArxivPreprint ? undefined : rm.series || captured.series,
+            publisher: isArxivPreprint ? 'arXiv' : rm.publisher || captured.publisher,
             language: rm.language || captured.language,
             rights: rm.rights || captured.rights,
             license: rm.license || captured.license,
@@ -347,9 +326,7 @@ export class UrlCaptureProvider {
             extra: rm.extra || captured.extra,
             keywords: regTags.length > 0 ? regTags : captured.keywords,
             openAccessPdfUrl:
-              rm.openAccessPdfUrl ||
-              captured.openAccessPdfUrl ||
-              captured.pdfUrl,
+              rm.openAccessPdfUrl || captured.openAccessPdfUrl || captured.pdfUrl,
             extraFields: {
               ...(captured.extraFields || {}),
               ...(rm.extraFields || {}),

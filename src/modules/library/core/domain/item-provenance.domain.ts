@@ -1,5 +1,5 @@
 import { resolveProviderFieldWeight } from './metadata-coalesce.policy';
-import { isPlaceholderItemTitle } from './academic-title.domain';
+import { isPlaceholderItemTitle } from './title.domain';
 import { TypeConversionPreview } from '@/modules/library/core/types/bibliographic.types';
 
 export interface FieldProvenanceRecord {

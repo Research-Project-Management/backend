@@ -9,25 +9,33 @@ import { Prisma, TagType } from '@prisma/client';
 import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repository';
 import {
   normalizeProjectScopeId,
+  libraryConfig,
   LIBRARY_EVENT_TYPES,
   UNIT_OF_WORK,
   IUnitOfWork,
   executeStandardLibraryCacheInvalidation,
-} from '@/modules/library/core';
-import { cleanSingleTag } from '@/modules/library/core/domain/tag.domain';
-import { resolveOrCreateTags } from '@/modules/library/catalog/repositories/command-relations.helper';
-import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
-import {
+  SingleFlightCoalescer,
   UserId,
   TagId,
   ItemId,
   ProjectId,
 } from '@/modules/library/core';
-import { ItemCacheCoordinator } from './item-cache.coordinator';
+import { cleanSingleTag } from '@/modules/library/core/domain/tag.domain';
+import { resolveOrCreateTags } from '@/modules/library/catalog/repositories/command-relations.helper';
+import { RedisCacheService } from '@/core';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
+import { ItemCacheCoordinator } from './library-bootstrap.service';
 
 @Injectable()
 export class TagsService {
+  private readonly singleFlight = new SingleFlightCoalescer();
+
+  private applyJitter(ttl: number): number {
+    return libraryConfig().app.isTest
+      ? ttl
+      : Math.max(1, Math.floor(ttl * (0.9 + Math.random() * 0.2)));
+  }
+
   constructor(
     private readonly repo: TagsRepository,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
@@ -60,19 +68,20 @@ export class TagsService {
     userId: UserId | string,
     options?: { includeInactive?: boolean; projectId?: ProjectId | string },
   ) {
-    if (this.cache) {
-      const validProjectId = normalizeProjectScopeId(options?.projectId);
-      const scopeKey = validProjectId ? `proj:${validProjectId}` : userId;
-      const cacheKey = options?.includeInactive
-        ? `${LIBRARY_REDIS_KEYS.tags(scopeKey)}:all`
-        : LIBRARY_REDIS_KEYS.tags(scopeKey);
-      return this.cache.wrap(
-        cacheKey,
-        () => this.repo.findMany(userId, options),
-        300,
-      );
-    }
-    return this.repo.findMany(userId, options);
+    const validProjectId = normalizeProjectScopeId(options?.projectId);
+    const scopeKey = validProjectId ? `proj:${validProjectId}` : userId;
+    const cacheKey = options?.includeInactive
+      ? `${LIBRARY_REDIS_KEYS.tags(scopeKey)}:all`
+      : LIBRARY_REDIS_KEYS.tags(scopeKey);
+    return this.singleFlight.execute(cacheKey, () =>
+      this.cache
+        ? this.cache.wrap(
+            cacheKey,
+            () => this.repo.findMany(userId, options),
+            this.applyJitter(300),
+          )
+        : this.repo.findMany(userId, options),
+    );
   }
 
   async createOrGetTag(
@@ -83,7 +92,9 @@ export class TagsService {
     projectId?: ProjectId | string | null,
     shortcut?: number | null,
   ) {
-    const cleanName = cleanSingleTag(name);
+    const cleanName = cleanSingleTag(name, {
+      allowManualAcademicTerms: type !== TagType.automatic,
+    });
     if (!cleanName) {
       throw new BadRequestException(
         `Invalid or disallowed tag name: "${name}"`,
@@ -105,19 +116,22 @@ export class TagsService {
         );
 
         const eventScope = { userId, projectId: effectiveProjectId };
+        const isExistingUpdate = typeof tag.version === 'number' && tag.version > 1;
 
         await helpers.appendChange(eventScope, {
           entityType: 'Tag',
           entityId: tag.id,
-          action: 'create',
-          version: 1,
+          action: isExistingUpdate ? 'update' : 'create',
+          version: tag.version ?? 1,
           data: tag,
         });
 
         await helpers.publishOutbox(
           eventScope,
           tag.id,
-          LIBRARY_EVENT_TYPES.TAG_CREATED,
+          isExistingUpdate
+            ? LIBRARY_EVENT_TYPES.TAG_UPDATED
+            : LIBRARY_EVENT_TYPES.TAG_CREATED,
           tag,
         );
 
@@ -148,7 +162,9 @@ export class TagsService {
     projectId?: ProjectId | string,
   ) {
     if (data.name !== undefined) {
-      const cleanName = cleanSingleTag(data.name);
+      const cleanName = cleanSingleTag(data.name, {
+        allowManualAcademicTerms: data.type !== TagType.automatic,
+      });
       if (!cleanName) {
         throw new BadRequestException(
           `Invalid or disallowed tag name: "${data.name}"`,
@@ -258,16 +274,18 @@ export class TagsService {
             entityType: 'Tag',
             entityId: tagId,
           });
-
+          await helpers.appendChange(eventScope, {
+            entityType: 'Tag',
+            entityId: tagId,
+            action: 'delete',
+            version: 0,
+            data: { id: tagId, deleted: true },
+          });
           await helpers.publishOutbox(
             eventScope,
             tagId,
             LIBRARY_EVENT_TYPES.TAG_DELETED,
-            {
-              id: tagId,
-              deletedAt: new Date(),
-              projectId: effectiveProjectId,
-            },
+            { id: tagId, deletedAt: new Date(), projectId: effectiveProjectId },
           );
         }
         helpers?.onAfterCommit?.(() =>
@@ -291,15 +309,26 @@ export class TagsService {
     const eventScope = { userId, projectId: effectiveProjectId };
 
     let ranPostCommitHook = false;
+    let affectedItemIds: string[] = [];
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
         ranPostCommitHook = Boolean(helpers?.onAfterCommit);
+        if (this.repo.findAutomaticTagItemIds) {
+          affectedItemIds = await this.repo.findAutomaticTagItemIds(
+            userId,
+            tx,
+            effectiveProjectId,
+          );
+        }
         const deletedTagIds = await this.repo.deleteAutomatic(
           userId,
           tx,
           effectiveProjectId,
         );
         if (deletedTagIds.length > 0) {
+          if (affectedItemIds.length === 0) {
+            affectedItemIds = await this.repo.findItemIdsByTagIds(deletedTagIds, tx);
+          }
           const deletedAt = new Date();
           const deletedIso = deletedAt.toISOString();
           await helpers.recordTombstonesBatch(
@@ -335,14 +364,14 @@ export class TagsService {
           );
         }
         helpers?.onAfterCommit?.(() =>
-          this.invalidateTagsCache(userId, effectiveProjectId),
+          this.invalidateTagsCache(userId, effectiveProjectId, affectedItemIds),
         );
         return { count: deletedTagIds.length };
       },
     );
 
     if (!ranPostCommitHook) {
-      await this.invalidateTagsCache(userId, effectiveProjectId);
+      await this.invalidateTagsCache(userId, effectiveProjectId, affectedItemIds);
     }
     return result;
   }
@@ -472,21 +501,22 @@ export class TagsService {
       }
 
       const eventScope = { userId, projectId: effectiveProjectId };
-
       await helpers.recordTombstone(eventScope, {
         entityType: 'ItemTag',
         entityId: `${tagId}:${itemId}`,
       });
-
+      await helpers.appendChange(eventScope, {
+        entityType: 'ItemTag',
+        entityId: `${tagId}:${itemId}`,
+        action: 'delete',
+        version: 0,
+        data: { tagId, itemId, deleted: true },
+      });
       await helpers.publishOutbox(
         eventScope,
         itemId,
         LIBRARY_EVENT_TYPES.ITEM_UNTAGGED,
-        {
-          tagId,
-          itemId,
-          projectId: effectiveProjectId,
-        },
+        { tagId, itemId, projectId: effectiveProjectId },
       );
       helpers?.onAfterCommit?.(() =>
         this.invalidateTagsCache(userId, effectiveProjectId, itemId),
@@ -541,20 +571,41 @@ export class TagsService {
 
     if (this.libraryTx && !tx) {
       let ranPostCommitHook = false;
+      const effectiveProjectId = normalizeProjectScopeId(projectId);
       const synced = await this.libraryTx.executeInTransaction(
         async (innerTx, helpers) => {
           ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           const didSync = await executeSync(innerTx);
           if (didSync) {
+            const eventScope = { userId, projectId: effectiveProjectId };
+            await helpers?.appendChange?.(eventScope, {
+              entityType: 'Item',
+              entityId: itemId,
+              action: 'update',
+              version: 1,
+              data: { id: itemId, tagNames },
+            });
+            await helpers?.publishOutbox?.(
+              eventScope,
+              itemId,
+              LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+              {
+                id: itemId,
+                itemId,
+                userId,
+                projectId: effectiveProjectId,
+                updatedFields: ['tags'],
+              },
+            );
             helpers?.onAfterCommit?.(() =>
-              this.invalidateTagsCache(userId, projectId, itemId),
+              this.invalidateTagsCache(userId, effectiveProjectId, itemId),
             );
           }
           return didSync;
         },
       );
       if (synced && !ranPostCommitHook) {
-        await this.invalidateTagsCache(userId, projectId, itemId);
+        await this.invalidateTagsCache(userId, effectiveProjectId, itemId);
       }
       return;
     }
@@ -576,37 +627,96 @@ export class TagsService {
     }
 
     const [primaryTags, dupTags] = await Promise.all([
-      tx.itemTag.findMany({
-        where: { itemId: targetItemId },
-        select: { tagId: true },
-      }),
-      tx.itemTag.findMany({
-        where: { itemId: { in: sourceItemIds } },
-        select: { tagId: true },
-      }),
+      tx.itemTag.findMany({ where: { itemId: targetItemId }, select: { tagId: true } }),
+      tx.itemTag.findMany({ where: { itemId: { in: sourceItemIds } }, select: { tagId: true } }),
     ]);
     const primaryTagIds = new Set(primaryTags.map((it) => it.tagId));
-
     const newTagIds = Array.from(
-      new Set(
-        dupTags
-          .map((dup) => dup.tagId)
-          .filter((tagId) => !primaryTagIds.has(tagId)),
-      ),
+      new Set(dupTags.map((dup) => dup.tagId).filter((tagId) => !primaryTagIds.has(tagId))),
     );
-
     if (newTagIds.length > 0) {
       await tx.itemTag.createMany({
-        data: newTagIds.map((tagId) => ({
-          itemId: targetItemId,
-          tagId,
-        })),
+        data: newTagIds.map((tagId) => ({ itemId: targetItemId, tagId })),
         skipDuplicates: true,
       });
     }
+    await tx.itemTag.deleteMany({ where: { itemId: { in: sourceItemIds } } });
+  }
 
-    await tx.itemTag.deleteMany({
-      where: { itemId: { in: sourceItemIds } },
+  async splitTag(
+    userId: UserId | string,
+    tagId: TagId | string,
+    rawParts: string[],
+    projectId?: ProjectId | string,
+  ) {
+    const cleanParts = Array.from(
+      new Set(
+        (rawParts || [])
+          .map((p) =>
+            cleanSingleTag(String(p || ''), { allowManualAcademicTerms: true }),
+          )
+          .filter((p): p is string => Boolean(p)),
+      ),
+    );
+    if (cleanParts.length < 2) {
+      throw new BadRequestException(
+        'At least 2 distinct valid tag names are required to split a tag',
+      );
+    }
+
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const eventScope = { userId, projectId: effectiveProjectId };
+    let affectedItemIds: string[] = [];
+    let ranPostCommitHook = false;
+
+    const tags = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      ranPostCommitHook = Boolean(helpers?.onAfterCommit);
+      const splitRes = await this.repo.splitTag(
+        String(userId),
+        String(tagId),
+        cleanParts,
+        tx,
+        effectiveProjectId,
+      );
+      if (!splitRes) {
+        throw new NotFoundException(`Tag ${tagId} not found`);
+      }
+      affectedItemIds = splitRes.affectedItemIds;
+
+      if (splitRes.mergedFromTagId) {
+        await helpers.recordTombstone(eventScope, {
+          entityType: 'Tag',
+          entityId: splitRes.mergedFromTagId,
+        });
+      }
+
+      for (const [idx, tag] of splitRes.tags.entries()) {
+        await helpers.appendChange(eventScope, {
+          entityType: 'Tag',
+          entityId: tag.id,
+          action: idx === 0 ? 'update' : 'create',
+          version: (tag as { version?: number }).version ?? 1,
+          data: tag,
+        });
+        await helpers.publishOutbox(
+          eventScope,
+          tag.id,
+          idx === 0
+            ? LIBRARY_EVENT_TYPES.TAG_UPDATED
+            : LIBRARY_EVENT_TYPES.TAG_CREATED,
+          tag,
+        );
+      }
+
+      helpers?.onAfterCommit?.(() =>
+        this.invalidateTagsCache(userId, effectiveProjectId, affectedItemIds),
+      );
+      return splitRes.tags;
     });
+
+    if (!ranPostCommitHook) {
+      await this.invalidateTagsCache(userId, effectiveProjectId, affectedItemIds);
+    }
+    return { tags, count: tags.length };
   }
 }

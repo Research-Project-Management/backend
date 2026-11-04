@@ -5,7 +5,7 @@ import { ConfigurationException } from '@/modules/library/core/errors/domain.exc
 import {
   normalizeExactMatchCandidateInput,
   buildExactMatchOrClauses,
-  evaluateExactMatchSpecifications,
+  evaluateExactMatchCandidates,
 } from '@/modules/library/catalog/domain/match-specifications.domain';
 
 export type PrismaClientOrTx = Prisma.TransactionClient | PrismaService;
@@ -206,7 +206,7 @@ export class ItemMatchQueryRepository {
         contributors: { orderBy: { orderIndex: 'asc' } },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
-        attachments: { include: { revisions: true } },
+        attachments: { where: { deletedAt: null }, include: { revisions: true } },
         notesList: { where: { deletedAt: null } },
         identifiers: {
           select: { type: true, value: true, canonicalUri: true },
@@ -240,7 +240,7 @@ export class ItemMatchQueryRepository {
         contributors: { orderBy: { orderIndex: 'asc' } },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
-        attachments: { include: { revisions: true } },
+        attachments: { where: { deletedAt: null }, include: { revisions: true } },
         notesList: { where: { deletedAt: null } },
         identifiers: {
           select: { type: true, value: true, canonicalUri: true },
@@ -280,21 +280,7 @@ export class ItemMatchQueryRepository {
     const exactOrConditions = buildExactMatchOrClauses(matchInput);
 
     if (exactOrConditions.length > 0) {
-      const match = (await activeClient.item.findFirst({
-        where: {
-          ...scopeWhere,
-          OR: exactOrConditions,
-        },
-        select: {
-          id: true,
-          title: true,
-          doi: true,
-          metadata: true,
-          identifiers: {
-            select: { type: true, value: true, canonicalUri: true },
-          },
-        },
-      })) as {
+      type CandidateRow = {
         id: string;
         title: string;
         doi?: string | null;
@@ -304,9 +290,53 @@ export class ItemMatchQueryRepository {
           value?: string;
           canonicalUri?: string | null;
         }>;
-      } | null;
-      if (match) {
-        const evaluated = evaluateExactMatchSpecifications(matchInput, match);
+      };
+      const selectSpec = {
+        id: true,
+        title: true,
+        doi: true,
+        metadata: true,
+        identifiers: {
+          select: { type: true, value: true, canonicalUri: true },
+        },
+      } as const;
+      const whereSpec = {
+        ...scopeWhere,
+        OR: exactOrConditions,
+      };
+      const firstMatch = (await activeClient.item.findFirst({
+        where: whereSpec,
+        select: selectSpec,
+      })) as CandidateRow | null;
+      const matches: CandidateRow[] = firstMatch ? [firstMatch] : [];
+      const appliedSpecCount = [
+        matchInput.cleanDoi,
+        matchInput.cleanArxiv,
+        matchInput.cleanPmid,
+        matchInput.cleanIsbn,
+      ].filter(Boolean).length;
+      if (
+        firstMatch &&
+        (appliedSpecCount > 1 || Boolean(matchInput.cleanIsbn)) &&
+        typeof activeClient.item.findMany === 'function'
+      ) {
+        const extraRows = (await activeClient.item
+          .findMany({
+            where: whereSpec,
+            select: selectSpec,
+            take: 10,
+          })
+          .catch(() => null)) as CandidateRow[] | null;
+        if (Array.isArray(extraRows) && extraRows.length > 0) {
+          for (const row of extraRows) {
+            if (!matches.some((m) => m.id === row.id)) {
+              matches.push(row);
+            }
+          }
+        }
+      }
+      if (matches.length > 0) {
+        const evaluated = evaluateExactMatchCandidates(matchInput, matches);
         if (evaluated) {
           return {
             exactMatch: evaluated,
@@ -437,18 +467,20 @@ export class ItemMatchQueryRepository {
 
     if (!relations?.length) return [];
 
-    const seenPeerIds = new Set<string>();
+    const seenRelationKeys = new Set<string>();
     const result: Record<string, unknown>[] = [];
 
     for (const r of relations) {
       const isOutgoing = r.sourceItemId === itemId;
       const peerItem = isOutgoing ? r.targetItem : r.sourceItem;
-      if (!peerItem || peerItem.id === itemId || seenPeerIds.has(peerItem.id)) {
+      const direction = isOutgoing ? 'outgoing' : 'incoming';
+      const rawType = r.relationType as string;
+      const dedupKey = `${peerItem?.id ?? ''}:${rawType}:${direction}`;
+      if (!peerItem || peerItem.id === itemId || seenRelationKeys.has(dedupKey)) {
         continue;
       }
-      seenPeerIds.add(peerItem.id);
+      seenRelationKeys.add(dedupKey);
 
-      const rawType = r.relationType as string;
       const effectiveRelationType = isOutgoing
         ? rawType
         : (ItemMatchQueryRepository.RECIPROCAL_RELATION_TYPE_MAP[rawType] ??

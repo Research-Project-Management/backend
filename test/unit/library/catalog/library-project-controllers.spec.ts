@@ -3,7 +3,7 @@ import { CollectionsController } from '@/modules/library/catalog/controllers/col
 import {
   StateController,
   StateBatchController,
-} from '@/modules/library/catalog/controllers/state.controller';
+} from '@/modules/library/catalog/controllers/library-workspace.controller';
 import { AttachmentController } from '@/modules/library/extraction/controllers/attachments.controller';
 import { IngestionController } from '@/modules/library/ingestion/controllers/ingestion.controller';
 

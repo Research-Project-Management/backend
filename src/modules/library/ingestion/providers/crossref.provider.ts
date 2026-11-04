@@ -1,30 +1,18 @@
 import { Injectable, Optional } from '@nestjs/common';
 import {
-  MetadataRequest,
-  ProviderCapability,
-  ProviderName,
-  ProviderResult,
+  MetadataRequest, ProviderCapability, ProviderName, ProviderResult,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
-  normalizeDoi,
-  normalizeIsbn,
-  normalizeIssn,
-  cleanBibliographicText,
-  cleanAbstractText,
-  TITLE_MATCH_THRESHOLD,
-  AcademicHttpClient,
-  LibraryConfigService,
-  libraryConfig,
-  CSL_TYPE_TO_ITEM_TYPE,
-  normalizePageRange,
-  getAcademicContactEmail,
+  normalizeDoi, normalizeIsbn, normalizeIssn, cleanBibliographicText,
+  cleanAbstractText, TITLE_MATCH_THRESHOLD, HttpClient, LibraryConfigService,
+  libraryConfig, CSL_TYPE_TO_ITEM_TYPE, normalizePageRange, getContactEmail,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { AbstractAcademicProvider } from './abstract-academic.provider';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
+import { BaseMetadataProvider } from './base-metadata.provider';
 
 @Injectable()
-export class CrossRefProvider extends AbstractAcademicProvider {
+export class CrossRefProvider extends BaseMetadataProvider {
   readonly id: ProviderName = 'CrossRef';
   readonly capabilities: ProviderCapability = {
     queryTypes: ['DOI', 'TITLE'],
@@ -34,7 +22,7 @@ export class CrossRefProvider extends AbstractAcademicProvider {
   };
 
   constructor(
-    @Optional() httpClient?: AcademicHttpClient,
+    @Optional() httpClient?: HttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {
     super(httpClient);
@@ -44,14 +32,11 @@ export class CrossRefProvider extends AbstractAcademicProvider {
     return (
       this.configService?.providers.crossrefEmail ??
       libraryConfig().providers.crossrefEmail ??
-      getAcademicContactEmail()
+      getContactEmail()
     );
   }
 
-  private async executeFetch(
-    url: string,
-    signal?: AbortSignal,
-  ): Promise<Response> {
+  private async executeFetch(url: string, signal?: AbortSignal): Promise<Response> {
     const headers = {
       'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
       Accept: 'application/json',
@@ -59,27 +44,15 @@ export class CrossRefProvider extends AbstractAcademicProvider {
     return this.executeHttpFetch(url, signal, headers);
   }
 
-  async resolve(
-    request: MetadataRequest,
-    signal?: AbortSignal,
-  ): Promise<ProviderResult | null> {
+  async resolve(request: MetadataRequest, signal?: AbortSignal): Promise<ProviderResult | null> {
     const { query } = request;
-    if (
-      /^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.48550\/arxiv\./i.test(
-        query.trim(),
-      )
-    ) {
+    if (/^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.48550\/arxiv\./i.test(query.trim())) {
       return null;
     }
     const cleanDoi = normalizeDoi(query);
-
-    if (cleanDoi) {
-      return this.resolveByDoi(cleanDoi, signal);
-    }
-    if (request.queryType && request.queryType !== 'TITLE') {
-      return null;
-    }
-    return this.searchByTitle(query, signal);
+    if (cleanDoi) return this.resolveByDoi(cleanDoi, signal);
+    if (request.queryType && request.queryType !== 'TITLE') return null;
+    return this.searchByTitle(query, signal, request);
   }
 
   async searchRecentWorks(
@@ -150,6 +123,7 @@ export class CrossRefProvider extends AbstractAcademicProvider {
   private async searchByTitle(
     title: string,
     signal?: AbortSignal,
+    request?: MetadataRequest,
   ): Promise<ProviderResult | null> {
     const cleanTitle = title.trim();
     if (!cleanTitle) return null;
@@ -197,6 +171,33 @@ export class CrossRefProvider extends AbstractAcademicProvider {
             ? candidate.title
             : '',
       TITLE_MATCH_THRESHOLD,
+      {
+        authorHint: request?.authorHint,
+        yearHint: request?.yearHint,
+        getAuthors: (candidate) => candidate.author,
+        getYear: (candidate) => {
+          const dp =
+            (
+              candidate['published-print'] as
+                | { 'date-parts'?: number[][] }
+                | undefined
+            )?.['date-parts']?.[0] ??
+            (
+              candidate.published as
+                | { 'date-parts'?: number[][] }
+                | undefined
+            )?.['date-parts']?.[0] ??
+            (
+              candidate['published-online'] as
+                | { 'date-parts'?: number[][] }
+                | undefined
+            )?.['date-parts']?.[0] ??
+            (
+              candidate.issued as { 'date-parts'?: number[][] } | undefined
+            )?.['date-parts']?.[0];
+          return dp?.[0];
+        },
+      },
     );
     if (!best) {
       this.logger.debug(
@@ -313,23 +314,34 @@ export class CrossRefProvider extends AbstractAcademicProvider {
     let year: number | null = null;
     let publicationDate: string | undefined = undefined;
     const pubPrint = message['published-print'] as
-      { 'date-parts'?: number[][] } | undefined;
+      | { 'date-parts'?: number[][] }
+      | undefined;
+    const published = message.published as
+      | { 'date-parts'?: number[][] }
+      | undefined;
     const pubOnline = message['published-online'] as
-      { 'date-parts'?: number[][] } | undefined;
+      | { 'date-parts'?: number[][] }
+      | undefined;
     const issued = message.issued as { 'date-parts'?: number[][] } | undefined;
+    const created = message.created as
+      | { 'date-parts'?: number[][] }
+      | undefined;
 
-    const candidateDateParts = [pubPrint, pubOnline, issued]
+    // Zotero academic priority: published-print -> published -> published-online -> issued -> created.
+    // Once the canonical publication year is anchored by the highest-priority date source,
+    // allow a fuller date (with month/day) ONLY if it shares the exact same year.
+    const candidateDateParts = [pubPrint, published, pubOnline, issued, created]
       .map((d) => d?.['date-parts']?.[0])
       .filter((parts): parts is number[] => Array.isArray(parts) && !!parts[0]);
-    const dateParts = candidateDateParts.reduce<number[] | undefined>(
-      (best, curr) => {
-        if (!best) return curr;
-        const bestLen = best.filter((p) => p != null).length;
-        const currLen = curr.filter((p) => p != null).length;
-        return currLen > bestLen ? curr : best;
-      },
-      undefined,
-    );
+    const primaryParts = candidateDateParts[0];
+    const dateParts = primaryParts
+      ? candidateDateParts.reduce<number[]>((best, curr) => {
+          if (curr[0] !== primaryParts[0]) return best;
+          const bestLen = best.filter((p) => p != null).length;
+          const currLen = curr.filter((p) => p != null).length;
+          return currLen > bestLen ? curr : best;
+        }, primaryParts)
+      : undefined;
     if (dateParts && dateParts[0]) {
       year = Number(dateParts[0]);
       const y = String(dateParts[0]).padStart(4, '0');
@@ -399,7 +411,7 @@ export class CrossRefProvider extends AbstractAcademicProvider {
         }
       }
     }
-    const keywords = normalizeAcademicTags(rawKeywords);
+    const keywords = normalizeTags(rawKeywords);
 
     const shortContainer = message['short-container-title'];
     const rawJournalAbbr = Array.isArray(shortContainer)
@@ -695,7 +707,7 @@ export class CrossRefProvider extends AbstractAcademicProvider {
         thesisType,
         reportType,
         reportNumber,
-        number: reportNumberStr,
+        number: reportNumber,
         edition,
         volume,
         issue,

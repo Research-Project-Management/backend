@@ -25,12 +25,20 @@ model Item {
   year                Int?
   citationKey         String?     @map("citation_key")
   doi                 String?
+  isbn                String?
+  issn                String?
+  pmid                String?
+  pmcid               String?
+  arxivId             String?     @map("arxiv_id")
   publicationTitle    String?     @map("publication_title")
   abstract            String?
   url                 String?
   metadata            Json        @default("{}") @db.JsonB
   userId              String      @map("user_id") @db.Uuid
   projectId           String?     @map("project_id") @db.Uuid
+  createdById         String?     @map("created_by_id") @db.Uuid
+  updatedById         String?     @map("updated_by_id") @db.Uuid
+  deletedById         String?     @map("deleted_by_id") @db.Uuid
   version             Int         @default(1)
   deletedAt           DateTime?   @map("deleted_at") @db.Timestamptz(6)
   createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -41,6 +49,7 @@ model Item {
   attachmentCount     Int                      @default(0) @map("attachment_count")
   noteCount           Int                      @default(0) @map("note_count")
   firstAuthor         String?                  @map("first_author") @db.VarChar(255)
+  isRetracted         Boolean                  @default(false) @map("is_retracted")
   retractionCheckedAt DateTime?                @map("retraction_checked_at") @db.Timestamptz(6)
   searchVector        Unsupported("tsvector")? @map("search_vector")
 
@@ -54,37 +63,38 @@ model Item {
   outgoingRel         ItemRelation[]         @relation("SourceItem")
   incomingRel         ItemRelation[]         @relation("TargetItem")
   states              State[]
+  attachmentReadingStates AttachmentReadingState[]
+  attachmentStructures    AttachmentStructure[]
   ingestionRuns       IngestionRun[]
   itemMetadata        ItemMetadata[]
   publications        UserPublication[]
 
   @@index([projectId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
-  @@index([projectId, deletedAt, updatedAt(sort: Desc)])
+  @@index([projectId, deletedAt, updatedAt(sort: Desc), id(sort: Desc)])
   @@index([projectId, deletedAt, year(sort: Desc), id(sort: Desc)])
   @@index([projectId, deletedAt, firstAuthor, id])
-  @@index([projectId, deletedAt, title, id(sort: Desc)])
+  @@index([projectId, deletedAt, title, id])
   @@index([projectId, deletedAt, publicationTitle, id])
+  @@index([projectId, deletedAt, citationKey, id])
   @@index([projectId, deletedAt, itemType])
-  @@index([projectId, deletedAt, doi])
-  @@index([projectId, deletedAt, citationKey])
-  @@index([projectId, hasFile, deletedAt])
-  @@index([projectId, noteCount, deletedAt])
-  @@index([retractionCheckedAt])
+  @@index([projectId, deletedAt, hasFile, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([projectId, deletedAt, isRetracted, createdAt(sort: Desc), id(sort: Desc)])
   @@index([userId, projectId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@index([userId, projectId, deletedAt, updatedAt(sort: Desc), id(sort: Desc)])
   @@index([userId, projectId, deletedAt, year(sort: Desc), id(sort: Desc)])
   @@index([userId, projectId, deletedAt, firstAuthor, id])
   @@index([userId, projectId, deletedAt, title, id])
   @@index([userId, projectId, deletedAt, publicationTitle, id])
+  @@index([userId, projectId, deletedAt, citationKey, id])
   @@index([userId, projectId, deletedAt, itemType])
-  @@index([userId, projectId, deletedAt, doi])
-  @@index([userId, projectId, deletedAt, citationKey])
-  @@index([userId, projectId, hasFile, deletedAt])
-  @@index([userId, projectId, noteCount, deletedAt])
-  @@index([deletedAt])
+  @@index([userId, projectId, deletedAt, hasFile, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([userId, projectId, deletedAt, isRetracted, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([userId, projectId, deletedAt, arxivId])
+  @@index([userId, projectId, deletedAt, pmid])
+  @@index([createdById])
   @@index([doi, deletedAt])
   @@index([citationKey, deletedAt])
-  @@index([publicationTitle, deletedAt])
+  @@index([deletedAt, retractionCheckedAt])
   @@index([metadata], type: Gin)
   @@index([searchVector], type: Gin)
   @@map("items")
@@ -93,7 +103,7 @@ model Item {
 model Contributor {
   id           String            @id @default(uuid(7)) @db.Uuid
   itemId       String            @map("item_id") @db.Uuid
-  item         Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item         Item              @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_contributors_item_id")
   creatorType  String            @default("author") @map("creator_type")
   fieldMode    Int               @default(0) @map("field_mode") // 0 = personal (two-field), 1 = single-field institution
   firstName    String?           @default("") @map("first_name")
@@ -113,9 +123,9 @@ model Contributor {
 model ItemRelation {
   id           String       @id @default(uuid(7)) @db.Uuid
   sourceItemId String       @map("source_item_id") @db.Uuid
-  sourceItem   Item         @relation("SourceItem", fields: [sourceItemId], references: [id], onDelete: Cascade)
+  sourceItem   Item         @relation("SourceItem", fields: [sourceItemId], references: [id], onDelete: Cascade, map: "fk_item_relations_source_item_id")
   targetItemId String       @map("target_item_id") @db.Uuid
-  targetItem   Item         @relation("TargetItem", fields: [targetItemId], references: [id], onDelete: Cascade)
+  targetItem   Item         @relation("TargetItem", fields: [targetItemId], references: [id], onDelete: Cascade, map: "fk_item_relations_target_item_id")
   relationType RelationType @default(related) @map("relation_type")
   description  String?      @default("")
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -128,7 +138,7 @@ model ItemRelation {
 model ItemMetadata {
   id             String   @id @default(uuid(7)) @db.Uuid
   itemId         String   @map("item_id") @db.Uuid
-  item           Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item           Item     @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_item_metadata_item_id")
   sourceUri      String?  @default("") @map("source_uri")
   sourceProvider String   @default("arxiv") @map("source_provider") @db.VarChar(64)
   rawPayload     Json     @map("raw_payload") @db.JsonB
@@ -139,7 +149,6 @@ model ItemMetadata {
 
   @@index([itemId, sourceProvider, createdAt(sort: Desc)])
   @@index([itemId, createdAt(sort: Desc)])
-  @@index([sourceProvider])
   @@map("item_metadata")
 }
 
@@ -170,9 +179,9 @@ model Retraction {
 model UserPublication {
   userId            String       @map("user_id") @db.Uuid
   itemId            String       @map("item_id") @db.Uuid
-  item              Item         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item              Item         @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_user_publications_item_id")
   contributorId     String?      @map("contributor_id") @db.Uuid
-  contributor       Contributor? @relation(fields: [contributorId], references: [id], onDelete: SetNull)
+  contributor       Contributor? @relation(fields: [contributorId], references: [id], onDelete: SetNull, map: "fk_user_publications_contributor_id")
   isPublic          Boolean      @default(false) @map("is_public")
   openAccessLicense String?      @map("open_access_license")
   addedAt           DateTime     @default(now()) @map("added_at") @db.Timestamptz(6)
@@ -187,7 +196,7 @@ model UserPublication {
 model ItemIdentifier {
   id           String   @id @default(uuid(7)) @db.Uuid
   itemId       String   @map("item_id") @db.Uuid
-  item         Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item         Item     @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_item_identifiers_item_id")
   type         String   @db.VarChar(64)
   value        String   @db.Text
   canonicalUri String?  @map("canonical_uri") @db.Text

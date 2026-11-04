@@ -6,9 +6,9 @@ import {
 } from '../types/bibliographic.types';
 import {
   cleanCommentText,
-  convertAcademicHtmlToMarkdown,
-} from './academic-text.domain';
-import { normalizeAcademicTags, cleanSingleTag } from './tag.domain';
+  convertHtmlToMarkdown,
+} from './text.domain';
+import { normalizeTags, cleanSingleTag } from './tag.domain';
 import {
   MutableItemPayload,
   AttachmentLike,
@@ -36,7 +36,7 @@ const NON_COLUMN_LOWER_SET = new Set(
 const IGNORED_EXTRA_FIELD_PROMOTION_KEYS = new Set([
   'comment', 'comments', 'notes', 'provenance', '_rawExtra', 'DOI', 'ISBN',
   'ISSN', 'PMID', 'PMCID', 'archiveID', 'journalAbbr', 'accessedAt',
-  'citeKey', 'labels', 'keywordsList',
+  'citeKey', 'labels', 'keywordsList', 'tags', 'keywords', 'zoteroTags',
 ]);
 
 function escapeHtmlText(str: string): string {
@@ -53,36 +53,20 @@ export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
   const hasRelationalItemTags = Array.isArray(it.itemTags);
   const hasRelationalPublications = Array.isArray(it.publications);
   const rawMetaExtraFields =
-    metaObj &&
-    metaObj.extraFields &&
-    typeof metaObj.extraFields === 'object' &&
-    !Array.isArray(metaObj.extraFields)
+    metaObj && metaObj.extraFields && typeof metaObj.extraFields === 'object' && !Array.isArray(metaObj.extraFields)
       ? (metaObj.extraFields as Record<string, unknown>)
       : null;
   if (metaObj) {
     for (const [key, value] of Object.entries(metaObj)) {
-      if (key === 'extraFields' || key === 'metadata') {
-        continue;
-      }
-      if (hasRelationalPublications && key === 'isMyPublication') {
-        continue;
-      }
+      if (key === 'extraFields' || key === 'metadata') continue;
+      if (hasRelationalPublications && key === 'isMyPublication') continue;
       if (
         hasRelationalItemTags &&
-        (key === 'tags' ||
-          key === 'keywords' ||
-          key === 'zoteroTags' ||
-          key === 'labels' ||
-          key === 'keywordsList')
+        (key === 'tags' || key === 'keywords' || key === 'zoteroTags' || key === 'labels' || key === 'keywordsList')
       ) {
         continue;
       }
-      if (
-        value !== undefined &&
-        value !== null &&
-        value !== '' &&
-        (it[key] === undefined || it[key] === null || it[key] === '')
-      ) {
+      if (value !== undefined && value !== null && value !== '' && (it[key] === undefined || it[key] === null || it[key] === '')) {
         it[key] = value;
       }
     }
@@ -205,25 +189,13 @@ export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
 }
 
 export function inferViewerFormat(
-  att?: {
-    attachmentType?: string | null;
-    mimeType?: string | null;
-    filename?: string | null;
-  } | null,
+  att?: { attachmentType?: string | null; mimeType?: string | null; filename?: string | null } | null,
 ): 'pdf' | 'epub' | 'snapshot' {
   const mime = (att?.mimeType || '').toLowerCase();
   const filename = (att?.filename || '').toLowerCase();
   const attType = (att?.attachmentType || '').toLowerCase();
-
-  if (mime.includes('epub') || filename.endsWith('.epub')) {
-    return 'epub';
-  }
-  if (
-    attType === 'snapshot' ||
-    mime.includes('html') ||
-    filename.endsWith('.html') ||
-    filename.endsWith('.htm')
-  ) {
+  if (mime.includes('epub') || filename.endsWith('.epub')) return 'epub';
+  if (attType === 'snapshot' || mime.includes('html') || filename.endsWith('.html') || filename.endsWith('.htm')) {
     return 'snapshot';
   }
   return 'pdf';
@@ -507,7 +479,9 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
     return items
       .map((entry) => {
         const { rawName, isAuto } = extractEntry(entry);
-        const cleanedName = cleanSingleTag(rawName);
+        const cleanedName = cleanSingleTag(rawName, {
+          allowManualAcademicTerms: !isAuto,
+        });
         if (!cleanedName) return null;
         const lower = cleanedName.toLowerCase();
         if (seen.has(lower)) return null;
@@ -520,14 +494,31 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
   if (Array.isArray(it.itemTags)) {
     const itemTagArr = it.itemTags;
     if (itemTagArr.length > 0) {
-      const rawTagNames = itemTagArr
-        .map(
-          (t) =>
-            (t.tag as { name?: string } | undefined)?.name ||
-            (t.name as string | undefined),
-        )
-        .filter(Boolean) as string[];
-      const tagNames = normalizeAcademicTags(rawTagNames);
+      const tagEntries = itemTagArr
+        .map((t) => {
+          const tagObj = t.tag as
+            | {
+                id?: string;
+                name?: string;
+                color?: string;
+                shortcut?: number | null;
+                type?: unknown;
+              }
+            | undefined;
+          const rawName = tagObj?.name || (t.name as string | undefined) || '';
+          const isAuto =
+            t.type === 'automatic' ||
+            t.type === 1 ||
+            (!t.type && tagObj?.type === 'automatic');
+          return {
+            name: rawName,
+            type: isAuto ? 'automatic' : 'manual',
+          };
+        })
+        .filter((e) => Boolean(e.name));
+      const tagNames = normalizeTags(tagEntries, {
+        allowManualAcademicTerms: true,
+      });
       it.tags = tagNames;
       it.keywords = tagNames;
       it.zoteroTags = buildZoteroTags(itemTagArr, (entry) => {
@@ -543,7 +534,7 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
       });
     } else if (Array.isArray(it.tags) && it.tags.length > 0) {
       const rawTags = it.tags;
-      const tagNames = normalizeAcademicTags(rawTags as string[]);
+      const tagNames = normalizeTags(rawTags as string[]);
       it.tags = tagNames;
       it.keywords = tagNames;
       it.zoteroTags = buildZoteroTags(rawTags, (t) => {
@@ -563,6 +554,22 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
       it.keywords = [];
       it.zoteroTags = [];
     }
+    if (it.metadata && typeof it.metadata === 'object' && !Array.isArray(it.metadata)) {
+      const syncedMeta = { ...(it.metadata as Record<string, unknown>) };
+      syncedMeta.tags = it.tags;
+      syncedMeta.keywords = it.keywords;
+      delete syncedMeta.labels;
+      delete syncedMeta.keywordsList;
+      delete syncedMeta.zoteroTags;
+      it.metadata = syncedMeta;
+    }
+    if (it.extraFields && typeof it.extraFields === 'object') {
+      delete it.extraFields.tags;
+      delete it.extraFields.keywords;
+      delete it.extraFields.labels;
+      delete it.extraFields.keywordsList;
+      delete it.extraFields.zoteroTags;
+    }
   } else {
     const metaObj = parseJsonObject(it.metadata) || {};
     const firstNonEmptyArray = (candidates: unknown[]): unknown[] => {
@@ -581,7 +588,7 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
       metaObj.labels,
       metaObj.keywordsList,
     ]);
-    const tagNames = normalizeAcademicTags(rawTags as string[]);
+    const tagNames = normalizeTags(rawTags as string[]);
     it.tags = tagNames;
     it.keywords = tagNames;
     it.zoteroTags = buildZoteroTags(rawTags, (t) => {
@@ -622,7 +629,7 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
     it.collections = it.collections || [];
   }
 
-  const cleanNoteBody = convertAcademicHtmlToMarkdown;
+  const cleanNoteBody = convertHtmlToMarkdown;
 
   const normalizeNoteList = (list: Array<Record<string, unknown>>) => {
     const seen = new Set<string>();
@@ -661,21 +668,13 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
   } else if (it.extraFields && typeof it.extraFields.comment === 'string') {
     const commentVal = cleanCommentText(it.extraFields.comment);
     if (commentVal) {
-      const formatted = commentVal.toLowerCase().startsWith('comment:')
-        ? commentVal
-        : `Comment: ${commentVal}`;
-      it.notes = [
-        {
-          id: `comment-${it.id}`,
-          content: formatted,
-          contentMd: formatted,
-          note: `<p>${escapeHtmlText(formatted)}</p>`,
-          itemType: 'note',
-          source: 'arXiv',
-          createdAt: it.createdAt || new Date().toISOString(),
-          updatedAt: it.updatedAt || new Date().toISOString(),
-        },
-      ];
+      const formatted = commentVal.toLowerCase().startsWith('comment:') ? commentVal : `Comment: ${commentVal}`;
+      const ts = it.createdAt || new Date().toISOString();
+      it.notes = [{
+        id: `comment-${it.id}`, content: formatted, contentMd: formatted,
+        note: `<p>${escapeHtmlText(formatted)}</p>`, itemType: 'note', source: 'arXiv',
+        createdAt: ts, updatedAt: it.updatedAt || ts,
+      }];
     } else {
       it.notes = [];
     }
@@ -684,9 +683,7 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
   }
 
   delete it.notesList;
-  if (it.extraFields && 'comment' in it.extraFields) {
-    delete it.extraFields.comment;
-  }
+  if (it.extraFields && 'comment' in it.extraFields) delete it.extraFields.comment;
 }
 
 export class ItemsMapper {
@@ -695,24 +692,16 @@ export class ItemsMapper {
     visitedOrUserId: WeakSet<object> | string = new WeakSet(),
   ): T & Partial<ItemDetail> {
     if (!raw || typeof raw !== 'object') return raw as T & Partial<ItemDetail>;
-    const visited =
-      visitedOrUserId instanceof WeakSet ? visitedOrUserId : new WeakSet<object>();
-    const userId =
-      typeof visitedOrUserId === 'string' && visitedOrUserId
-        ? visitedOrUserId
-        : undefined;
+    const visited = visitedOrUserId instanceof WeakSet ? visitedOrUserId : new WeakSet<object>();
+    const userId = typeof visitedOrUserId === 'string' && visitedOrUserId ? visitedOrUserId : undefined;
     if (visited.has(raw as object)) {
       return { ...(raw as Record<string, unknown>) } as unknown as T & Partial<ItemDetail>;
     }
     visited.add(raw as object);
     const it = { ...(raw as Record<string, unknown>) } as MutableItemPayload;
     if (userId && Array.isArray(it.states) && it.states.length > 1) {
-      const matchedState = it.states.find(
-        (s) => !s?.userId || s.userId === userId,
-      );
-      if (matchedState) {
-        it.states = [matchedState];
-      }
+      const matchedState = it.states.find((s) => !s?.userId || s.userId === userId);
+      if (matchedState) it.states = [matchedState];
     }
     unpackMetadataAndExtraPartial(it);
     const primaryPdf = mapAttachmentsAndPrimaryFilePartial(it);
@@ -724,15 +713,14 @@ export class ItemsMapper {
     return it as unknown as T & Partial<ItemDetail>;
   }
 
-  static toDomainList<T = Record<string, unknown>>(items: T[]): Array<T & Partial<ItemDetail>> {
-    if (!Array.isArray(items)) return [];
-    return items.map((item) => this.toDomain(item));
+  static toDomainList<T = Record<string, unknown>>(items: T[], userId?: string): Array<T & Partial<ItemDetail>> {
+    return Array.isArray(items) ? items.map((item) => this.toDomain(item, userId)) : [];
   }
 
   static mapFlattenedState<T extends Record<string, unknown>>(
     item: T | null | undefined,
     userId?: string,
   ): (T & { readStatus: string; rating: number; lastReadAt: string | null }) | null {
-    return mapFlattenedStateHelper(item, (it) => ItemsMapper.toDomain(it), userId);
+    return mapFlattenedStateHelper(item, (it) => ItemsMapper.toDomain(it, userId), userId);
   }
 }

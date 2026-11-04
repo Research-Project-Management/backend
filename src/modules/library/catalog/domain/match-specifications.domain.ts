@@ -357,6 +357,18 @@ export class IsbnExactMatchSpecification implements IExactMatchSpecification {
     );
 
     if (isIsbnMatch) {
+      if (input.cleanDoi) {
+        const rowDoi = (
+          (typeof match.doi === 'string' && match.doi.trim()) ||
+          (typeof meta.doi === 'string' && meta.doi.trim()) ||
+          getIdentifierValue(match, 'doi')
+        )
+          .trim()
+          .toLowerCase();
+        if (rowDoi && rowDoi !== input.cleanDoi.trim().toLowerCase()) {
+          return null;
+        }
+      }
       return { isbn: cleanIsbn };
     }
     return null;
@@ -449,5 +461,36 @@ export function evaluateExactMatchSpecifications(
     }
   }
 
+  return null;
+}
+
+export function evaluateExactMatchCandidates(
+  input: ExactMatchCandidateInput,
+  matches: MatchedCandidateRow[],
+): {
+  id: string;
+  title: string;
+  matchReason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
+  evidence: Record<string, string>;
+} | null {
+  if (!matches || matches.length === 0) return null;
+  for (const spec of EXACT_MATCH_SPECIFICATIONS) {
+    if (!spec.isApplicable(input)) continue;
+    for (const match of matches) {
+      const evidence = spec.isSatisfiedByRow(match, input);
+      if (evidence) {
+        return {
+          id: match.id,
+          title: match.title,
+          matchReason: spec.reason,
+          evidence,
+        };
+      }
+    }
+  }
+  for (const match of matches) {
+    const fallback = evaluateExactMatchSpecifications(input, match);
+    if (fallback) return fallback;
+  }
   return null;
 }

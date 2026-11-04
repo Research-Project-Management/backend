@@ -1,4 +1,4 @@
-import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/base-metadata.provider';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
 
 describe('RetractionScannerProvider', () => {
@@ -147,6 +147,45 @@ describe('RetractionScannerProvider', () => {
     fetchSpy.mockRestore();
   });
 
+  it('should not flag paper as retracted when CrossRef only reports a correction/erratum (Zotero parity)', async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (url: any) => {
+        const urlStr = String(url);
+        if (urlStr.includes('openalex.org')) {
+          return {
+            ok: true,
+            json: async () => ({ is_retracted: false }),
+          } as any;
+        }
+        if (urlStr.includes('crossref.org')) {
+          return {
+            ok: true,
+            json: async () => ({
+              message: {
+                'update-to': [
+                  {
+                    type: 'correction',
+                    label: 'Author typo correction in Figure 2',
+                  },
+                ],
+              },
+            }),
+          } as any;
+        }
+        return { ok: false } as any;
+      });
+
+    const result = await provider.lookup('10.1000/erratum-paper');
+
+    expect(result.status).toBe('clean');
+    expect(mockDbService.saveClean).toHaveBeenCalledWith(
+      '10.1000/erratum-paper',
+      undefined,
+    );
+    fetchSpy.mockRestore();
+  });
+
   it('should mark paper as clean and cache clean status when both APIs report clean', async () => {
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
@@ -191,7 +230,7 @@ describe('RetractionScannerProvider', () => {
     fetchSpy.mockRestore();
   });
 
-  it('should delegate to AcademicHttpClient without infinite recursion when injected via NestJS DI', async () => {
+  it('should delegate to HttpClient without infinite recursion when injected via NestJS DI', async () => {
     const mockHttpClient = {
       request: jest.fn().mockResolvedValue({
         response: {

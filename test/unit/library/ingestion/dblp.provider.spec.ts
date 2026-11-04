@@ -1,4 +1,4 @@
-import { DblpProvider } from '@/modules/library/ingestion/providers/dblp.provider';
+import { DblpProvider } from '@/modules/library/ingestion/providers/arxiv.provider';
 
 describe('DblpProvider', () => {
   let provider: DblpProvider;

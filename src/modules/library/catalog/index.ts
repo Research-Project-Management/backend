@@ -1,43 +1,35 @@
 export * from './catalog.module';
-export * from './catalog.facade';
+export * from './services/library-bootstrap.service';
 
 // Controllers
 export * from './controllers/items.controller';
 export * from './controllers/library-workspace.controller';
-export * from './controllers/item-curation.controller';
 export * from './controllers/collections.controller';
-export * from './controllers/tags.controller';
-export * from './controllers/types.controller';
 export * from './controllers/notes.controller';
-export * from './controllers/saved-searches.controller';
-export * from './controllers/state.controller';
 
 // DTOs
 export * from './dto/items.dto';
 export * from './dto/collections.dto';
-export * from './dto/tags.dto';
-export * from './dto/notes.dto';
-export * from './dto/saved-search.dto';
+export * from './types/catalog.types';
 
 // Services
 export * from './services/items.service';
 export * from './services/item-query.service';
-export * from './services/item-fulltext.service';
+export * from './services/item-relations.service';
 export * from './services/item-type-conversion.service';
 export * from './services/item-curation.service';
-export * from './services/item-relations.service';
-export * from './services/item-cache.coordinator';
 export * from './services/item.transformer';
 export * from './services/collections.service';
 export * from './services/tags.service';
-export * from './services/types.service';
+export * from './services/zotero-schema-validator.service';
 export * from './services/notes.service';
 export * from './services/saved-searches.service';
 export * from './services/state.service';
-export * from './services/zotero-schema-validator.service';
 
 // Repositories
 export { CommandRepository } from './repositories/command.repository';
+export * from './repositories/command-bulk.operations';
+export * from './repositories/collection-membership.operations';
 export {
   resolveOrCreateTags,
   syncTagsForCatalogItem,
@@ -50,20 +42,14 @@ export * from './repositories/collections.repository';
 export * from './repositories/tags.repository';
 export * from './repositories/notes.repository';
 export * from './repositories/saved-searches.repository';
-export * from './repositories/state.repository';
 
 // Types
-export * from './types/catalog.types';
-export * from './types/saved-search.types';
 
 // Domain
-export * from './domain/tree.engine';
-export * from './domain/condition-evaluator.engine';
-export * from './domain/items.mapper';
-export * from './domain/notes.domain';
 export * from './domain/state.domain';
+export * from './domain/condition-evaluator.engine';
+export * from './domain/notes.domain';
 export * from './domain/command-payload.builder';
 export * from './domain/creator-tag-payload.builder';
-export * from './domain/item-bibliographic.mapper';
 export * from './domain/match-specifications.domain';
 export * from './domain/type-conversion-rules.domain';

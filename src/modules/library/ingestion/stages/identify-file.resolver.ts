@@ -3,13 +3,15 @@ import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   EXTRACTION_FACADE,
   IExtractionFacade,
-  normalizeAcademicTitleCase,
+  cleanPdfTitle,
   inferItemTypeFromPdfSignals,
 } from '@/modules/library/core';
 import { SubmissionPayload } from '@/modules/library/ingestion/types/ingestion.types';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { createCandidate } from '../domain/candidate-builder.helper';
+import { createCandidate } from '../domain/metadata.validator';
+
+export { cleanPdfTitle };
 
 export interface ExtractedPdfMetadata {
   title?: string;
@@ -58,78 +60,41 @@ export interface ExtractedPdfMetadata {
   [key: string]: unknown;
 }
 
-export function cleanPdfTitle(
-  rawTitle?: unknown,
-  filename?: string,
-  authors?: unknown[],
-  creators?: unknown[],
-): string {
-  if (typeof rawTitle === 'string') {
-    let t = rawTitle.trim();
-    const isBannerOrGarbage =
-      /noname\s+manuscript/i.test(t) ||
-      /\(will\s+be\s+inserted\s+by\s+the\s+editor\)/i.test(t) ||
-      /proceedings\s+of\s+the/i.test(t) ||
-      /submitted\s+(to|\d)/i.test(t) ||
-      /published\s+\d/i.test(t) ||
-      /^journal\s+of\s+/i.test(t) ||
-      /\.(eps|pdf|png|jpe?g|svg)$/i.test(t) ||
-      /^(untitled|document|microsoft word)/i.test(t) ||
-      /^[A-Z]\s+[A-Z]\s+[A-Z]\s+[A-Z]/i.test(t);
+function mergeExtractedPdfMetadata(
+  primary: ExtractedPdfMetadata,
+  fallback?: ExtractedPdfMetadata,
+): ExtractedPdfMetadata {
+  if (!fallback || Object.keys(fallback).length === 0) return primary;
+  if (Object.keys(primary).length === 0) return fallback;
 
-    if (t.length > 3 && !isBannerOrGarbage) {
-      t = t.replace(/[\s∗*†‡§#]+$/, '').trim();
-      const firstLine = t.split(/\r?\n/)[0]?.trim();
-      if (firstLine && firstLine.length > 5 && firstLine.length < t.length) {
-        t = firstLine;
-      }
+  const merged: Record<string, unknown> = { ...primary };
+  const primaryRec = primary as Record<string, unknown>;
+  const fallbackProv = (fallback.fieldProvenance || {}) as Record<string, unknown>;
+  const mergedProv: Record<string, unknown> = {
+    ...((primaryRec.fieldProvenance as Record<string, unknown>) || {}),
+  };
 
-      const candidateAuthors = [
-        ...(Array.isArray(authors) ? authors : []),
-        ...(Array.isArray(creators) ? creators : []),
-      ];
-      for (const author of candidateAuthors) {
-        const authorObj =
-          typeof author === 'object' && author !== null
-            ? (author as {
-                fullName?: string;
-                name?: string;
-                firstName?: string;
-                lastName?: string;
-              })
-            : null;
-        const authorStr =
-          typeof author === 'string'
-            ? author
-            : (
-                authorObj?.fullName ||
-                authorObj?.name ||
-                `${authorObj?.firstName || ''} ${authorObj?.lastName || ''}`
-              ).trim();
-        if (authorStr && authorStr.length > 3) {
-          const escaped = authorStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          t = t
-            .replace(new RegExp(`\\s+${escaped}[\\s∗*†‡§#]*$`, 'i'), '')
-            .trim();
-        }
+  for (const [k, v] of Object.entries(fallback)) {
+    if (k === 'fieldProvenance' || v === undefined || v === null || v === '') continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    const cur = primaryRec[k];
+    const isCurEmpty =
+      cur === undefined ||
+      cur === null ||
+      cur === '' ||
+      (Array.isArray(cur) && cur.length === 0) ||
+      (k === 'title' && cur === 'Uploaded Document');
+    if (isCurEmpty) {
+      merged[k] = v;
+      if (fallbackProv[k] && !mergedProv[k]) {
+        mergedProv[k] = fallbackProv[k];
       }
-      return normalizeAcademicTitleCase(t);
     }
   }
-
-  if (filename) {
-    const cleanBase = filename
-      .replace(/\.[a-zA-Z0-9]+$/, '')
-      .replace(/[-_]+/g, ' ')
-      .trim();
-    const isArxivPattern =
-      /^\d{4}\s*\d{4,5}(v\d+)?$/i.test(cleanBase) || /^arxiv/i.test(cleanBase);
-    if (cleanBase.length > 2 && !isArxivPattern) {
-      return normalizeAcademicTitleCase(cleanBase);
-    }
+  if (Object.keys(mergedProv).length > 0) {
+    merged.fieldProvenance = mergedProv;
   }
-
-  return 'Uploaded Document';
+  return merged as unknown as ExtractedPdfMetadata;
 }
 
 @Injectable()
@@ -250,15 +215,13 @@ export class IdentifyFileResolver {
         if (fileRecord?.buffer) {
           fileBuffer = fileRecord.buffer;
 
-          let ranTrustedExtraction = false;
-          if (this.extractionGateway?.extractTrustedMetadata) {
+          if (this.extractionGateway.extractTrustedMetadata) {
             try {
               const trusted =
                 await this.extractionGateway.extractTrustedMetadata(
-                  fileRecord.buffer,
+                  fileBuffer,
                   payload.filename,
                 );
-              ranTrustedExtraction = true;
               if (trusted?.metadata) {
                 extractedMetadata = {
                   ...(trusted.metadata as unknown as ExtractedPdfMetadata),
@@ -268,72 +231,53 @@ export class IdentifyFileResolver {
                 };
               }
             } catch {
-              // Fall through to extractDocumentFromBuffer
+              // Fall through to header document extraction
             }
           }
 
           const needsDocumentFallback =
             Object.keys(extractedMetadata).length === 0 ||
-            (!extractedMetadata.isSelfSufficient &&
-              !extractedMetadata.doi &&
+            (!extractedMetadata.doi &&
               !extractedMetadata.arxivId &&
               !extractedMetadata.isbn &&
               (!extractedMetadata.title ||
                 extractedMetadata.title === 'Uploaded Document'));
 
-          if (
-            needsDocumentFallback &&
-            this.extractionGateway?.extractDocumentFromBuffer
-          ) {
+          if (needsDocumentFallback) {
             const extractedDoc =
               await this.extractionGateway.extractDocumentFromBuffer(
-                fileRecord.buffer,
+                fileBuffer,
                 {
-                  headerOnly: true,
                   maxPages: 3,
-                  ...(ranTrustedExtraction
-                    ? { skipTrustedExtraction: true }
-                    : {}),
+                  headerOnly: true,
+                  skipTrustedExtraction: true,
                 },
               );
             const docMeta =
               ((extractedDoc?.metadata ||
                 extractedDoc) as unknown as ExtractedPdfMetadata) || {};
-            if (Object.keys(extractedMetadata).length === 0) {
-              extractedMetadata = docMeta;
-            } else {
-              extractedMetadata = {
-                ...extractedMetadata,
-                ...Object.fromEntries(
-                  Object.entries(docMeta).filter(
-                    ([, v]) => v !== undefined && v !== null && v !== '',
-                  ),
-                ),
-              };
-            }
-          }
-
-          if (
-            Object.keys(extractedMetadata).length === 0 &&
-            this.extractionGateway.extractMetadataFromBuffer
-          ) {
-            extractedMetadata =
-              (this.extractionGateway.extractMetadataFromBuffer(
-                fileRecord.buffer,
-              ) as unknown as ExtractedPdfMetadata) || {};
+            extractedMetadata = mergeExtractedPdfMetadata(
+              extractedMetadata,
+              docMeta,
+            );
           }
         }
       } catch (caughtError: unknown) {
         this.logger.warn(
           `PDF metadata extraction failed for file ${payload.fileId}: ${caughtError instanceof Error ? caughtError.message : String(caughtError)}`,
         );
+      }
+
+      if (
+        fileBuffer &&
+        Object.keys(extractedMetadata).length === 0 &&
+        this.extractionGateway.extractMetadataFromBuffer
+      ) {
         try {
           extractedMetadata =
-            fileBuffer && this.extractionGateway?.extractMetadataFromBuffer
-              ? (this.extractionGateway.extractMetadataFromBuffer(
-                  fileBuffer,
-                ) as unknown as ExtractedPdfMetadata) || {}
-              : {};
+            (this.extractionGateway.extractMetadataFromBuffer(
+              fileBuffer,
+            ) as unknown as ExtractedPdfMetadata) || {};
         } catch {
           extractedMetadata = {};
         }
@@ -378,7 +322,7 @@ export class IdentifyFileResolver {
     let inferredItemType: string | undefined;
     let inferredConfidence = 0.75;
 
-    if (!hasAuthoritativeId) {
+    if (!extractedMetadata.itemType) {
       const inferred = inferItemTypeFromPdfSignals({
         title: resolvedTitle,
         notes: extractedMetadata.notes,
@@ -392,18 +336,29 @@ export class IdentifyFileResolver {
 
       if (inferred) {
         inferredItemType = inferred.itemType;
-        inferredConfidence = 0.75 * inferred.confidence;
+        if (!hasAuthoritativeId) {
+          inferredConfidence = 0.75 * inferred.confidence;
+        }
       }
     }
 
     // Zero-guesswork abstract policy (Zotero-style):
-    // Abstracts must come from authoritative registries or structured authoring XMP metadata.
-    // Unindexed PDFs without authoritative IDs must not have abstracts populated from arbitrary layout text regex slicing.
+    // Abstracts must come from authoritative registries, structured authoring XMP metadata,
+    // or credible local extraction (matching ExtractionMetadataSynchronizer's high-confidence policy).
     const isUnindexed = !hasAuthoritativeId && !isClientResolved;
+    const rawAbstract =
+      typeof extractedMetadata.abstract === 'string'
+        ? extractedMetadata.abstract.trim()
+        : '';
+    const hasCredibleLocalAbstract =
+      rawAbstract.length >= 80 &&
+      (typeof extractedMetadata.qualityScore === 'number'
+        ? extractedMetadata.qualityScore >= 0.6
+        : true);
     const resolvedAbstract =
-      isUnindexed && !extractedMetadata.xmpFound
+      isUnindexed && !extractedMetadata.xmpFound && !hasCredibleLocalAbstract
         ? undefined
-        : extractedMetadata.abstract || undefined;
+        : rawAbstract || undefined;
 
     const rawFileMetadata = {
       ...extractedItemMeta,

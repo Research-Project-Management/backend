@@ -14,7 +14,7 @@ import {
   ExportItemRecord,
 } from '@/modules/library/citation/repositories/exports.repository';
 import { CitationService } from './citation.service';
-import { ExportLibraryDto } from '@/modules/library/citation/dto/citation.dto';
+import { ExportLibraryDto } from '@/modules/library/citation/types/citation.types';
 import { PdfBakerService } from './pdf-baker.service';
 import {
   ExportResult,
@@ -224,8 +224,36 @@ export class ExportsService {
   async burnAnnotationsToPdf(
     rawPdfBuffer: Buffer | Uint8Array,
     annotations: BurnableAnnotation[],
+    options?: { mode?: 'interactive' | 'flattened' | 'hybrid' },
   ): Promise<Uint8Array> {
-    return this.pdfBakerService.burnAnnotationsToPdf(rawPdfBuffer, annotations);
+    return this.pdfBakerService.burnAnnotationsToPdf(
+      rawPdfBuffer,
+      annotations,
+      options,
+    );
+  }
+
+  /**
+   * Alias for exportAnnotatedItemPdf allowing direct (userId, itemId, projectId, attachmentId) invocation.
+   */
+  async exportAnnotatedPdf(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+    attachmentId?: string,
+  ): Promise<{
+    filename: string;
+    mimeType: string;
+    buffer: Buffer;
+    base64: string;
+  }> {
+    return this.exportAnnotatedItemPdf(
+      userId,
+      itemId,
+      undefined,
+      projectId,
+      attachmentId,
+    );
   }
 
   /**
@@ -319,12 +347,23 @@ export class ExportsService {
 
     const burnedBuffer = Buffer.isBuffer(burned) ? burned : Buffer.from(burned);
 
-    return {
+    const result = {
       filename: safeFilename,
       mimeType: 'application/pdf',
-      buffer: burnedBuffer,
       base64: burnedBuffer.toString('base64'),
+    } as {
+      filename: string;
+      mimeType: string;
+      buffer: Buffer;
+      base64: string;
     };
+    Object.defineProperty(result, 'buffer', {
+      value: burnedBuffer,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+    return result;
   }
 
   /**
@@ -348,7 +387,8 @@ export class ExportsService {
     const filename =
       'references.' +
       (format === 'ris' ? 'ris' : format === 'csl-json' ? 'json' : 'bib');
-    if (!keys || keys.length === 0) {
+    const safeKeys = Array.isArray(keys) ? keys : [];
+    if (safeKeys.length === 0) {
       const emptyResult = {
         content: '',
         count: 0,
@@ -369,7 +409,9 @@ export class ExportsService {
       };
     }
 
-    const trimmedKeys = keys.map((k) => k.trim()).filter(Boolean);
+    const trimmedKeys = safeKeys
+      .map((k) => (typeof k === 'string' ? k.trim() : ''))
+      .filter(Boolean);
     const normalizedKeys = trimmedKeys.map((k) => k.toLowerCase());
 
     const effectiveProjectId = normalizeProjectScopeId(projectId);

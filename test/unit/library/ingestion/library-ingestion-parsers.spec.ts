@@ -3,11 +3,11 @@ import { DoiParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
-import { parseAcademicFeedXml } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
+import { parseFeedXml } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 import { XmlLegacyFormatsParser } from '@/modules/library/ingestion/parsers/xml-legacy-formats.parser';
 import { HtmlMetaTagExtractor } from '@/modules/library/ingestion/services/html-meta-tag.extractor';
 import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
-import { IngestionValidationException } from '@/modules/library/ingestion/types/ingestion.errors';
+import { IngestionValidationException } from '@/modules/library/ingestion/types/metadata.types';
 
 describe('Library Ingestion Parsers (DoiParser, BibtexParser & XmlLegacyFormatsParser)', () => {
   let doiParser: DoiParser;
@@ -161,7 +161,7 @@ describe('Library Ingestion Parsers (DoiParser, BibtexParser & XmlLegacyFormatsP
       expect(entries[0].authors?.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('should extract object-based keywords in CslParser and handle self-closing <link/> in parseAcademicFeedXml', () => {
+    it('should extract object-based keywords in CslParser and handle self-closing <link/> in parseFeedXml', () => {
       const cslParser = new CslParser();
       const cslEntries = cslParser.parse([
         {
@@ -187,7 +187,7 @@ describe('Library Ingestion Parsers (DoiParser, BibtexParser & XmlLegacyFormatsP
           </entry>
         </feed>
       `;
-      const feed = parseAcademicFeedXml(atomXml);
+      const feed = parseFeedXml(atomXml);
       expect(feed.entries).toHaveLength(1);
       expect(feed.entries[0].url).toBe('https://arxiv.org/abs/2401.12345');
     });
