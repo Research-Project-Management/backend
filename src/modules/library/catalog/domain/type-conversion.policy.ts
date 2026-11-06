@@ -7,7 +7,7 @@ import {
   REVERSE_FIELD_ALIASES,
 } from '@/modules/library/catalog/types/catalog.types';
 
-export interface TypeConversionRuleContext {
+interface TypeConversionRuleContext {
   sourceType: string;
   targetType: string;
   sourceValues: Record<string, unknown>;
@@ -19,7 +19,7 @@ export interface TypeConversionRuleContext {
   retainUnmappedInExtra: boolean;
 }
 
-export interface ITypeConversionRule {
+interface ITypeConversionRule {
   readonly id: string;
   readonly description: string;
   matches(sourceType: string, targetType: string): boolean;
@@ -65,7 +65,7 @@ function remapFieldInContext(
  * Rule 1: `book` -> `bookSection`
  * Container book `title` shifts into `bookTitle`, clearing the section's `title` and `shortTitle`.
  */
-export class BookToBookSectionConversionRule implements ITypeConversionRule {
+class BookToBookSectionConversionRule implements ITypeConversionRule {
   readonly id = 'BOOK_TO_BOOK_SECTION';
   readonly description =
     'Moves book title into bookTitle when converting book -> bookSection';
@@ -96,7 +96,7 @@ export class BookToBookSectionConversionRule implements ITypeConversionRule {
  * Container `bookTitle` becomes the top-level `title`; any existing chapter `title`
  * is recorded in `droppedFields` / `unmappedRetained` as `sectionTitle`.
  */
-export class BookSectionToBookConversionRule implements ITypeConversionRule {
+class BookSectionToBookConversionRule implements ITypeConversionRule {
   readonly id = 'BOOK_SECTION_TO_BOOK';
   readonly description =
     'Promotes bookTitle to title and retains chapter title as sectionTitle when converting bookSection -> book';
@@ -141,7 +141,7 @@ export class BookSectionToBookConversionRule implements ITypeConversionRule {
  * Transfers container title (`publicationTitle` / `journal` / `bookTitle`) into `proceedingsTitle`
  * if `proceedingsTitle` is not already populated.
  */
-export class ToConferencePaperConversionRule implements ITypeConversionRule {
+class ToConferencePaperConversionRule implements ITypeConversionRule {
   readonly id = 'TO_CONFERENCE_PAPER_CONTAINER';
   readonly description =
     'Maps container venue (publicationTitle / bookTitle) to proceedingsTitle when converting to conferencePaper';
@@ -167,7 +167,7 @@ export class ToConferencePaperConversionRule implements ITypeConversionRule {
  * Transfers container title (`proceedingsTitle` / `bookTitle` / `repository`) into `publicationTitle`
  * if `publicationTitle` is not already populated.
  */
-export class ToJournalArticleConversionRule implements ITypeConversionRule {
+class ToJournalArticleConversionRule implements ITypeConversionRule {
   readonly id = 'TO_JOURNAL_ARTICLE_CONTAINER';
   readonly description =
     'Maps proceedingsTitle, bookTitle, or repository to publicationTitle when converting to journalArticle';
@@ -202,7 +202,7 @@ export class ToJournalArticleConversionRule implements ITypeConversionRule {
  * Transfers publisher/venue (`publisher`, `institution`, `publicationTitle`) into `repository`
  * when `repository` is not already populated.
  */
-export class ToPreprintConversionRule implements ITypeConversionRule {
+class ToPreprintConversionRule implements ITypeConversionRule {
   readonly id = 'TO_PREPRINT_REPOSITORY';
   readonly description =
     'Maps institution, publisher, or publicationTitle to repository when converting to preprint';
@@ -225,7 +225,7 @@ export class ToPreprintConversionRule implements ITypeConversionRule {
  * Rule 6: `*` -> `thesis`
  * Transfers `publisher` or `institution` into `university` when `university` is not already populated.
  */
-export class ToThesisConversionRule implements ITypeConversionRule {
+class ToThesisConversionRule implements ITypeConversionRule {
   readonly id = 'TO_THESIS_UNIVERSITY';
   readonly description =
     'Maps publisher or institution to university when converting to thesis';
@@ -248,7 +248,7 @@ export class ToThesisConversionRule implements ITypeConversionRule {
  * Rule 7: `*` -> `report`
  * Transfers `publisher` or `university` into `institution` when `institution` is not already populated.
  */
-export class ToReportConversionRule implements ITypeConversionRule {
+class ToReportConversionRule implements ITypeConversionRule {
   readonly id = 'TO_REPORT_INSTITUTION';
   readonly description =
     'Maps publisher or university to institution when converting to report';
@@ -271,7 +271,7 @@ export class ToReportConversionRule implements ITypeConversionRule {
  * Rule 8: `*` -> `patent`
  * Transfers `place` -> `country` and `publisher` / `authority` -> `issuingAuthority`.
  */
-export class ToPatentConversionRule implements ITypeConversionRule {
+class ToPatentConversionRule implements ITypeConversionRule {
   readonly id = 'TO_PATENT_AUTHORITY';
   readonly description =
     'Maps place to country and authority/publisher to issuingAuthority when converting to patent';
@@ -305,7 +305,7 @@ export class ToPatentConversionRule implements ITypeConversionRule {
  * Rule 9: `*` -> `case`
  * Transfers `publicationTitle` -> `reporter` and `publisher` / `authority` -> `court`.
  */
-export class ToCaseConversionRule implements ITypeConversionRule {
+class ToCaseConversionRule implements ITypeConversionRule {
   readonly id = 'TO_CASE_REPORTER_COURT';
   readonly description =
     'Maps publicationTitle to reporter and authority/publisher to court when converting to legal case';
@@ -332,7 +332,7 @@ export class ToCaseConversionRule implements ITypeConversionRule {
  * Rule 10: `*` -> `statute`
  * Transfers `publicationTitle` -> `code` and `volume` -> `codeNumber`.
  */
-export class ToStatuteConversionRule implements ITypeConversionRule {
+class ToStatuteConversionRule implements ITypeConversionRule {
   readonly id = 'TO_STATUTE_CODE';
   readonly description =
     'Maps publicationTitle to code and volume to codeNumber when converting to statute';
@@ -351,7 +351,7 @@ export class ToStatuteConversionRule implements ITypeConversionRule {
   }
 }
 
-export const TYPE_CONVERSION_RULES: readonly ITypeConversionRule[] = [
+const TYPE_CONVERSION_RULES: readonly ITypeConversionRule[] = [
   new BookToBookSectionConversionRule(),
   new BookSectionToBookConversionRule(),
   new ToConferencePaperConversionRule(),

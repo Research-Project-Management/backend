@@ -17,10 +17,15 @@ import {
   NATURE_CSL,
   CHICAGO_CSL,
   MLA_CSL,
-} from '@/modules/library/citation/data/official-styles.data';
-import { normalizeEngineStyleId } from '@/modules/library/citation/domain/citation.domain';
+  VI_VN_LOCALE,
+} from '@/modules/library/citation/domain/official-styles.lexicon';
+import {
+  BUILTIN_SPECIAL_STYLES,
+  MAX_DYNAMIC_CSL_STYLES,
+  normalizeEngineStyleId,
+} from '@/modules/library/citation/domain/citation.domain';
 
-export interface CslStyleMetadata {
+interface CslStyleMetadata {
   id: string;
   name: string;
   title: string;
@@ -72,84 +77,19 @@ const POPULAR_STYLES: ReadonlyArray<CslStyleMetadata> = [
   { id: 'american-institute-of-physics', name: 'american-institute-of-physics', title: 'American Institute of Physics (AIP)', category: 'numeric' },
   { id: 'biomed-central', name: 'biomed-central', title: 'BioMed Central (BMC)', category: 'numeric' },
   { id: 'british-medical-journal', name: 'bmj', title: 'British Medical Journal (BMJ)', category: 'numeric' },
-  {
-    id: 'cambridge-university-press-author-date',
-    name: 'cambridge-university-press-author-date',
-    title: 'Cambridge University Press (Author-Date)',
-    category: 'author-date',
-  },
-  {
-    id: 'oxford-university-press-note',
-    name: 'oxford-university-press-note',
-    title: 'Oxford University Press',
-    category: 'note',
-  },
-  {
-    id: 'elsevier-harvard',
-    name: 'elsevier-harvard',
-    title: 'Elsevier - Harvard (with titles)',
-    category: 'author-date',
-  },
-  {
-    id: 'elsevier-vancouver',
-    name: 'elsevier-vancouver',
-    title: 'Elsevier - Vancouver',
-    category: 'numeric',
-  },
-  {
-    id: 'elsevier-with-titles',
-    name: 'elsevier-with-titles',
-    title: 'Elsevier Numeric (with titles)',
-    category: 'numeric',
-  },
-  {
-    id: 'springer-basic-author-date',
-    name: 'springer-basic-author-date',
-    title: 'Springer Basic (Author-Date)',
-    category: 'author-date',
-  },
-  {
-    id: 'springer-vancouver',
-    name: 'springer-vancouver',
-    title: 'Springer - Vancouver',
-    category: 'numeric',
-  },
-  {
-    id: 'royal-society-of-chemistry',
-    name: 'royal-society-of-chemistry',
-    title: 'Royal Society of Chemistry (RSC)',
-    category: 'numeric',
-  },
-  {
-    id: 'frontiers',
-    name: 'frontiers',
-    title: 'Frontiers Journals',
-    category: 'author-date',
-  },
-  {
-    id: 'mdpi',
-    name: 'multidisciplinary-digital-publishing-institute',
-    title: 'MDPI Journals',
-    category: 'numeric',
-  },
-  {
-    id: 'springer-lecture-notes-in-computer-science',
-    name: 'springer-lecture-notes-in-computer-science',
-    title: 'Springer LNCS (Lecture Notes in Computer Science)',
-    category: 'numeric',
-  },
-  {
-    id: 'bibtex',
-    name: 'bibtex',
-    title: 'BibTeX (LaTeX Standard)',
-    category: 'raw',
-  },
-  {
-    id: 'ris',
-    name: 'ris',
-    title: 'Research Information Systems (RIS)',
-    category: 'raw',
-  },
+  { id: 'cambridge-university-press-author-date', name: 'cambridge-university-press-author-date', title: 'Cambridge University Press (Author-Date)', category: 'author-date' },
+  { id: 'oxford-university-press-note', name: 'oxford-university-press-note', title: 'Oxford University Press', category: 'note' },
+  { id: 'elsevier-harvard', name: 'elsevier-harvard', title: 'Elsevier - Harvard (with titles)', category: 'author-date' },
+  { id: 'elsevier-vancouver', name: 'elsevier-vancouver', title: 'Elsevier - Vancouver', category: 'numeric' },
+  { id: 'elsevier-with-titles', name: 'elsevier-with-titles', title: 'Elsevier Numeric (with titles)', category: 'numeric' },
+  { id: 'springer-basic-author-date', name: 'springer-basic-author-date', title: 'Springer Basic (Author-Date)', category: 'author-date' },
+  { id: 'springer-vancouver', name: 'springer-vancouver', title: 'Springer - Vancouver', category: 'numeric' },
+  { id: 'royal-society-of-chemistry', name: 'royal-society-of-chemistry', title: 'Royal Society of Chemistry (RSC)', category: 'numeric' },
+  { id: 'frontiers', name: 'frontiers', title: 'Frontiers Journals', category: 'author-date' },
+  { id: 'mdpi', name: 'multidisciplinary-digital-publishing-institute', title: 'MDPI Journals', category: 'numeric' },
+  { id: 'springer-lecture-notes-in-computer-science', name: 'springer-lecture-notes-in-computer-science', title: 'Springer LNCS (Lecture Notes in Computer Science)', category: 'numeric' },
+  { id: 'bibtex', name: 'bibtex', title: 'BibTeX (LaTeX Standard)', category: 'raw' },
+  { id: 'ris', name: 'ris', title: 'Research Information Systems (RIS)', category: 'raw' },
 ];
 
 @Injectable()
@@ -423,36 +363,11 @@ export class CslRepositoryService implements OnModuleInit {
       .toLowerCase();
 
     const RESERVED_OFFICIAL_STYLES = new Set([
-      'ieee',
-      'nature',
-      'science',
-      'chicago',
-      'chicago-author-date',
-      'mla',
-      'mla-9th',
-      'apa',
-      'apa-7th',
-      'vancouver',
-      'harvard',
-      'harvard1',
-      'harvard-cite-them-right',
-      'bibtex',
-      'ris',
-      'cell',
-      'the-lancet',
-      'plos',
-      'plos-one',
-      'pnas',
-      'frontiers',
-      'springer',
-      'elsevier',
-      'tcvn',
-      'tcvn-author-date',
-      'tcvn-numeric',
-      'bo-giao-duc',
-      'vietnam',
-      'auto',
-      'auto-numeric',
+      'ieee', 'nature', 'science', 'chicago', 'chicago-author-date', 'mla', 'mla-9th',
+      'apa', 'apa-7th', 'vancouver', 'harvard', 'harvard1', 'harvard-cite-them-right',
+      'bibtex', 'ris', 'cell', 'the-lancet', 'plos', 'plos-one', 'pnas', 'frontiers',
+      'springer', 'elsevier', 'tcvn', 'tcvn-author-date', 'tcvn-numeric',
+      'bo-giao-duc', 'vietnam', 'auto', 'auto-numeric',
     ]);
     const normalizedEngineId = normalizeEngineStyleId(slug);
     if (RESERVED_OFFICIAL_STYLES.has(slug) || RESERVED_OFFICIAL_STYLES.has(normalizedEngineId)) {
@@ -478,9 +393,11 @@ export class CslRepositoryService implements OnModuleInit {
     // Cache XML and metadata with user/project scope isolation
     if (this.redisCache) {
       const xmlKey = LIBRARY_REDIS_KEYS.cslStyleXml(slug, scopeKey);
-      await this.redisCache.set(xmlKey, cslXml, 86400 * 365);
       const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey);
-      const existing = await this.getCustomStyles(scopeKey);
+      const [, existing] = await Promise.all([
+        this.redisCache.set(xmlKey, cslXml, 86400 * 365),
+        this.getCustomStyles(scopeKey),
+      ]);
       const updated = [meta, ...existing.filter((s) => s.id !== slug)].slice(
         0,
         CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE,
@@ -664,5 +581,168 @@ export class CslRepositoryService implements OnModuleInit {
       ((lower.includes('<citation') && lower.includes('</citation>')) ||
         (lower.includes('<bibliography') && lower.includes('</bibliography>')))
     );
+  }
+}
+
+interface CitationJsTemplateStore {
+  has(id: string): boolean;
+  add(id: string, xml: string): void;
+  get?(id: string): string | undefined;
+  remove?(id: string): void;
+  delete?(id: string): boolean;
+  data?: Record<string, string>;
+}
+
+interface CitationJsPluginConfig {
+  format?: { useIdAsLabel?: boolean };
+  templates?: CitationJsTemplateStore;
+  locales?: CitationJsTemplateStore;
+}
+
+interface CitationJsPlugins {
+  config: { get(name: string): CitationJsPluginConfig | undefined };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { plugins } = require('@citation-js/core') as { plugins: CitationJsPlugins };
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+require('@citation-js/plugin-csl');
+
+@Injectable()
+export class CslLocaleLoaderService {
+  private readonly logger = new Logger(CslLocaleLoaderService.name);
+  private templatesInitialized = false;
+  private readonly staticTemplateIds = new Set<string>([
+    'apa', 'vancouver', 'harvard1', 'ieee', 'nature', 'chicago',
+    'chicago-author-date', 'mla', 'mla-9th', 'tcvn', 'tcvn-author-date', 'tcvn-numeric',
+  ]);
+  private readonly dynamicTemplateIds = new Set<string>();
+
+  constructor(
+    @Optional()
+    @Inject(CslRepositoryService)
+    private readonly cslRepo?: CslRepositoryService,
+  ) {}
+
+  private evictTemplateFromStore(templates: CitationJsTemplateStore, id: string): void {
+    if (typeof templates.remove === 'function') {
+      templates.remove(id);
+    } else if (typeof templates.delete === 'function') {
+      templates.delete(id);
+    } else if (templates.data && typeof templates.data === 'object') {
+      delete templates.data[id];
+    }
+  }
+
+  public initTemplates(): void {
+    if (this.templatesInitialized) return;
+    try {
+      const bibtexConfig = plugins.config.get('@bibtex');
+      if (bibtexConfig?.format) bibtexConfig.format.useIdAsLabel = true;
+      const csl = plugins.config.get('@csl');
+      if (csl?.templates) {
+        const templateBindings: ReadonlyArray<[string, string]> = [
+          ['ieee', IEEE_CSL],
+          ['nature', NATURE_CSL],
+          ['chicago', CHICAGO_CSL],
+          ['chicago-author-date', CHICAGO_CSL],
+          ['mla', MLA_CSL],
+          ['mla-9th', MLA_CSL],
+        ];
+        for (const [id, xml] of templateBindings) {
+          this.staticTemplateIds.add(id);
+          if (!csl.templates.has(id)) csl.templates.add(id, xml);
+        }
+      }
+      if (csl?.locales) {
+        for (const loc of ['vi-VN', 'vi']) {
+          if (!csl.locales.has(loc)) csl.locales.add(loc, VI_VN_LOCALE);
+        }
+      }
+      this.templatesInitialized = true;
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to register CSL templates: ${errMsg}`);
+    }
+  }
+
+  public getScopedStyleId(styleId: string, scopeId?: string): string {
+    const normalized = this.normalizeStyle(styleId);
+    if (this.staticTemplateIds.has(normalized) || BUILTIN_SPECIAL_STYLES.has(normalized)) {
+      return normalized;
+    }
+    const scopeKey = scopeId?.trim() || 'global';
+    return `${scopeKey}::${normalized}`;
+  }
+
+  public isStyleSupported(styleId: string, scopeId?: string): boolean {
+    if (!styleId) return false;
+    this.initTemplates();
+    const normalized = this.normalizeStyle(styleId);
+    if (BUILTIN_SPECIAL_STYLES.has(normalized)) return true;
+    const scopedId = this.getScopedStyleId(normalized, scopeId);
+    try {
+      const csl = plugins.config.get('@csl');
+      return Boolean(csl?.templates?.has(scopedId));
+    } catch {
+      return false;
+    }
+  }
+
+  public async ensureTemplate(styleId: string, scopeId?: string, rawXml?: string): Promise<boolean> {
+    this.initTemplates();
+    const normalized = this.normalizeStyle(styleId);
+    if (BUILTIN_SPECIAL_STYLES.has(normalized) || this.staticTemplateIds.has(normalized)) return true;
+    const scopedId = this.getScopedStyleId(normalized, scopeId);
+    try {
+      const csl = plugins.config.get('@csl');
+      if (csl?.templates?.has(scopedId) && !rawXml) {
+        this.dynamicTemplateIds.delete(scopedId);
+        this.dynamicTemplateIds.add(scopedId);
+        return true;
+      }
+      const xml = rawXml || (this.cslRepo ? await this.cslRepo.fetchCslXml(normalized, scopeId) : null);
+      if (!xml) return false;
+      if (csl?.templates) {
+        if (this.dynamicTemplateIds.size >= MAX_DYNAMIC_CSL_STYLES) {
+          const oldestId = this.dynamicTemplateIds.values().next().value;
+          if (oldestId) {
+            this.dynamicTemplateIds.delete(oldestId);
+            this.evictTemplateFromStore(csl.templates, oldestId);
+          }
+        }
+        csl.templates.add(scopedId, xml);
+        this.dynamicTemplateIds.add(scopedId);
+        this.logger.log(`Dynamically registered on-demand scoped CSL template: "${scopedId}"`);
+        return true;
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Could not dynamically load CSL template for "${scopedId}": ${errMsg}`);
+    }
+    return false;
+  }
+
+  public normalizeStyle(styleId: string): string {
+    return normalizeEngineStyleId(styleId);
+  }
+
+  public getStyleDefaultLocale(styleId: string, scopeId?: string): string {
+    this.initTemplates();
+    const scopedId = this.getScopedStyleId(styleId, scopeId);
+    try {
+      const csl = plugins.config.get('@csl');
+      const xml =
+        typeof csl?.templates?.get === 'function'
+          ? csl.templates.get(scopedId)
+          : csl?.templates?.data?.[scopedId];
+      if (typeof xml === 'string') {
+        const match = xml.match(/\bdefault-locale\s*=\s*["']([^"']+)["']/i);
+        if (match?.[1]?.trim()) return match[1].trim();
+      }
+    } catch {
+      // Fallback to en-US
+    }
+    return 'en-US';
   }
 }

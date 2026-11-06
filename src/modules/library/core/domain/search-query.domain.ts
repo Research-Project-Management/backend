@@ -31,7 +31,15 @@ export class SearchQueryEngine {
   static extractIdentifiers(rawQuery?: string): NormalizedSearchIdentifiers {
     const q = (rawQuery ?? '').trim();
     if (!q) return {};
-    const cleanDoi = normalizeDoi(q);
+    let cleanDoi = normalizeDoi(q);
+    if (!cleanDoi) {
+      const doiMatch = q.match(
+        /(?:doi:\s*|https?:\/\/(?:dx\.)?doi\.org\/)?\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i,
+      );
+      if (doiMatch?.[1]) {
+        cleanDoi = normalizeDoi(doiMatch[1]);
+      }
+    }
     let cleanIsbn = normalizeIsbn(q);
     if (!cleanIsbn) {
       const isbnMatch = q.match(

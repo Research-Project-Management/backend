@@ -1,15 +1,10 @@
 export * from './citation.module';
-export * from './services/citation.service';
 
 // Controllers
 export * from './controllers/citation.controller';
 
-// Domain
-export * from './domain/csl-json.mapper';
-export * from './domain/citation.domain';
-export * from './domain/export-format.strategies';
-
-// Services
+// Services & Facade
+export * from './services/citation.service';
 export * from './services/csl-repository.service';
 export * from './services/csl-engine.service';
 export * from './services/csl-style-formatter.service';
@@ -20,10 +15,13 @@ export * from './services/exports.service';
 // Repositories
 export * from './repositories/exports.repository';
 
-// DTOs
+// Domain & Data
+export * from './domain/csl-json.mapper';
+export * from './domain/citation.domain';
+export * from './domain/export-format.mapper';
+export * from './domain/official-styles.lexicon';
+
+// DTOs & Types
+export * from './dto/citation.dto';
 export * from './types/citation.types';
 
-// Types
-
-// Data
-export * from './data/official-styles.data';

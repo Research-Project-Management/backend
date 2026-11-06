@@ -1,5 +1,5 @@
 import { cleanAbstractText } from './text.domain';
-import { splitAuthorString } from './author.domain';
+import { isInstitutionName, splitAuthorString } from './author.domain';
 import { resolveCanonicalArxivCategory } from './tag.domain';
 import { CANONICAL_IDENTIFIER_URI_BUILDERS } from './identifier.domain';
 import { isRejectedCitedIdentifier } from './metadata-coalesce.policy';
@@ -10,140 +10,17 @@ import {
   resolveBidirectionalBaseFields,
   resolveCanonicalCreatorRole,
   resolveFieldAliases,
-} from './zotero-field-harmonizer.domain';
+} from './field-harmonizer.domain';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
+  type AttachmentLike,
   type CreatorCreditInput,
+  type ItemIdentifierLike,
+  type MutableItemPayload,
 } from '../types/bibliographic.types';
 
-export interface AttachmentLike {
-  attachmentType?: string;
-  mimeType?: string;
-  filename?: string;
-  fileId?: string | null;
-  title?: string;
-  metadata?: { title?: string; [key: string]: unknown } | null;
-  url?: string;
-  revisions?: Array<{ url?: string; [key: string]: unknown }>;
-  size?: number;
-  [key: string]: unknown;
-}
-
-export interface ItemIdentifierLike {
-  type?: string;
-  identifierType?: string;
-  value?: string;
-  canonicalUri?: string | null;
-  [key: string]: unknown;
-}
-
-export type MutableItemPayload = Record<string, unknown> & {
-  id?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  attachments?: AttachmentLike[];
-  states?: Array<Record<string, unknown>>;
-  metadata?: Record<string, unknown> | string | null;
-  contributors?: CreatorCreditInput[];
-  creators?: CreatorCreditInput[];
-  authors?: unknown;
-  editors?: unknown;
-  itemTags?: Array<Record<string, unknown>>;
-  tags?: unknown;
-  keywords?: unknown;
-  zoteroTags?: unknown;
-  collectionItems?: Array<Record<string, unknown>>;
-  collectionId?: string | null;
-  collectionIds?: string[];
-  collections?: unknown[];
-  notesList?: Array<Record<string, unknown>>;
-  notes?: Array<Record<string, unknown>>;
-  extraFields?: Record<string, unknown>;
-  extra?: unknown;
-  citationCount?: number | string | null;
-  referenceCount?: number | string | null;
-  openAccessPdfUrl?: string | null;
-  doi?: string | null;
-  DOI?: string | null;
-  arxivId?: string | null;
-  archiveId?: string | null;
-  archiveID?: string | null;
-  isbn?: string | null;
-  ISBN?: string | null;
-  issn?: string | null;
-  ISSN?: string | null;
-  pmid?: string | null;
-  PMID?: string | null;
-  pmcid?: string | null;
-  PMCID?: string | null;
-  identifiers?: ItemIdentifierLike[];
-  seriesNumber?: string | null;
-  edition?: string | null;
-  numPages?: number | string | null;
-  numberOfPages?: number | string | null;
-  proceedingsTitle?: string | null;
-  conferenceName?: string | null;
-  institution?: string | null;
-  university?: string | null;
-  reportNumber?: string | null;
-  reportType?: string | null;
-  thesisType?: string | null;
-  repository?: string | null;
-  country?: string | null;
-  websiteTitle?: string | null;
-  websiteType?: string | null;
-  blogTitle?: string | null;
-  issuingAuthority?: string | null;
-  authority?: string | null;
-  patentNumber?: string | null;
-  issueDate?: string | null;
-  priorityDate?: string | null;
-  originalDate?: string | null;
-  assignee?: string | null;
-  rights?: string | null;
-  license?: string | null;
-  abstract?: string | null;
-  abstractNote?: string | null;
-  year?: number | string | null;
-  date?: string | null;
-  publicationDate?: string | null;
-  publicationTitle?: string | null;
-  journal?: string | null;
-  journalAbbreviation?: string | null;
-  journalAbbr?: string | null;
-  place?: string | null;
-  eventPlace?: string | null;
-  bookTitle?: string | null;
-  volume?: string | null;
-  issue?: string | null;
-  pages?: string | null;
-  callNumber?: string | null;
-  accessDate?: string | null;
-  accessedAt?: string | Date | null;
-  citationKey?: string | null;
-  citeKey?: string | null;
-  genre?: string | null;
-  number?: string | null;
-  isStarred?: boolean;
-  readStatus?: string;
-  rating?: number;
-  lastReadAt?: string | Date | null;
-  itemType?: string;
-  type?: string;
-  fileUrl?: string | null;
-  filename?: string;
-  mimeType?: string;
-  size?: number;
-  primaryFile?: Record<string, unknown> | null;
-  isMyPublication?: boolean;
-  publications?: unknown[];
-  outgoingRel?: Array<Record<string, unknown>>;
-  incomingRel?: Array<Record<string, unknown>>;
-  relations?: unknown[];
-  seeAlso?: unknown;
-  [key: string]: unknown;
-};
+export type { AttachmentLike, ItemIdentifierLike, MutableItemPayload };
 
 export function parseJsonObject(val: unknown): Record<string, unknown> | null {
   if (val && typeof val === 'object' && !Array.isArray(val)) {
@@ -181,13 +58,22 @@ export function mapCreatorsPartial(it: MutableItemPayload): void {
         [c.firstName, c.lastName].filter(Boolean).join(' ') ||
         c.name ||
         '';
+      const rawFieldMode = (c as { fieldMode?: number }).fieldMode;
+      const inferredFieldMode =
+        rawFieldMode === 1
+          ? 1
+          : rawFieldMode === 0 && (c.firstName || !isInstitutionName(full))
+            ? 0
+            : !c.firstName && isInstitutionName(full)
+              ? 1
+              : 0;
       return {
         id: (c as { id?: string }).id,
         orderIndex: c.orderIndex ?? idx,
         creatorType: resolveCanonicalCreatorRole(c.creatorType, {
           itemType: it.itemType,
         }),
-        fieldMode: (c as { fieldMode?: number }).fieldMode ?? 0,
+        fieldMode: inferredFieldMode,
         firstName: c.firstName || undefined,
         lastName: c.lastName || undefined,
         shortName: (c as { shortName?: string }).shortName || undefined,

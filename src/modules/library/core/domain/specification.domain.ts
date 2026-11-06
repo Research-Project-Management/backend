@@ -1,15 +1,10 @@
-import { isUuid } from '@/core';
+import { Prisma } from '@prisma/client';
+import { IUnitOfWork, TransactionHelpers } from '../ports/catalog.port';
 
 export type QueryCriteria = Record<string, unknown>;
 
 /**
  * GoF / DDD Specification Pattern Interface.
- *
- * Encapsulates domain query and filtering criteria into reusable, composable objects.
- * Supports:
- * - In-memory predicate evaluation via `isSatisfiedBy(item)`
- * - Database query compilation via `toPrismaWhere()`
- * - Logical composition via `.and()`, `.or()`, and `.not()`
  */
 export interface ISpecification<T = unknown, TWhere = QueryCriteria> {
   toPrismaWhere(): TWhere;
@@ -19,10 +14,7 @@ export interface ISpecification<T = unknown, TWhere = QueryCriteria> {
   not(): ISpecification<T, TWhere>;
 }
 
-export abstract class CompositeSpecification<
-  T = unknown,
-  TWhere = QueryCriteria,
-> implements ISpecification<T, TWhere> {
+export abstract class CompositeSpecification<T = unknown, TWhere = QueryCriteria> implements ISpecification<T, TWhere> {
   abstract toPrismaWhere(): TWhere;
   abstract isSatisfiedBy(item: T): boolean;
 
@@ -290,7 +282,6 @@ export class ScopeSpecification extends CompositeSpecification<
   ) {
     super();
   }
-
 
   toPrismaWhere(): QueryCriteria {
     if (isProjectScopeId(this.projectId)) {
@@ -616,4 +607,141 @@ export class CustomCriteriaSpecification extends CompositeSpecification {
     if (!item || typeof item !== 'object') return false;
     return this.predicate(item as Record<string, unknown>);
   }
+}
+
+interface ItemDenormalizedCountClient {
+  attachment?: {
+    count?: (args: { where: { itemId: string; deletedAt: null } }) => Promise<number>;
+  };
+  note?: {
+    count?: (args: { where: { itemId: string; deletedAt: null } }) => Promise<number>;
+  };
+  item?: {
+    updateMany?: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+    update?: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+  };
+}
+
+const SPEC_UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Shared repository helper to recount and synchronize denormalized `attachmentCount`,
+ * `hasFile`, and `noteCount` columns on `Item` within a Prisma client or transaction.
+ */
+export async function syncItemDenormalizedCountsInClient(
+  db: ItemDenormalizedCountClient | null | undefined,
+  itemId: string | null | undefined,
+  options?: { attachments?: boolean; notes?: boolean; requireUuid?: boolean },
+): Promise<void> {
+  if (!itemId || !db?.item) return;
+  if (options?.requireUuid && !SPEC_UUID_REGEX.test(itemId)) return;
+
+  const syncAttachments = options?.attachments ?? false;
+  const syncNotes = options?.notes ?? false;
+  if (!syncAttachments && !syncNotes) return;
+
+  const data: Record<string, unknown> = {};
+
+  const [rawAttachmentCount, activeNoteCount] = await Promise.all([
+    syncAttachments && db.attachment
+      ? db.attachment.count
+        ? db.attachment.count({ where: { itemId, deletedAt: null } })
+        : 1
+      : undefined,
+    syncNotes && db.note?.count
+      ? db.note.count({ where: { itemId, deletedAt: null } })
+      : undefined,
+  ]);
+
+  if (rawAttachmentCount !== undefined) {
+    const activeCount = Math.max(0, rawAttachmentCount);
+    data.hasFile = activeCount > 0;
+    data.attachmentCount = activeCount;
+  }
+  if (activeNoteCount !== undefined) {
+    data.noteCount = Math.max(0, activeNoteCount);
+  }
+
+  if (Object.keys(data).length === 0) return;
+
+  if (db.item.updateMany) {
+    await db.item.updateMany({ where: { id: itemId }, data });
+  } else if (db.item.update) {
+    await db.item.update({ where: { id: itemId }, data });
+  }
+}
+
+/**
+ * Executes a Unit of Work transaction and guarantees that `afterCommit` runs once:
+ * via `helpers.onAfterCommit` if supported by the transaction runner, or immediately
+ * after `executeInTransaction` resolves when `onAfterCommit` is absent (e.g., in test mocks).
+ */
+export async function executeWithPostCommit<T>(
+  uow: IUnitOfWork,
+  work: (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => Promise<T>,
+  afterCommit: (result: T) => Promise<void> | void,
+): Promise<T> {
+  let registered = false;
+  let capturedResult!: T;
+  const result = await uow.executeInTransaction(async (tx, helpers) => {
+    const res = await work(tx, helpers);
+    capturedResult = res;
+    if (helpers?.onAfterCommit) {
+      registered = true;
+      helpers.onAfterCommit(() => afterCommit(res));
+    }
+    return res;
+  });
+  if (!registered) {
+    await afterCommit(result ?? capturedResult);
+  }
+  return result;
+}
+
+/**
+ * Automatically disambiguates citation keys against existing items in the project or user scope.
+ * Follows BibTeX / BetterBibTeX convention: vaswani2017attention -> vaswani2017attentiona -> vaswani2017attentionb.
+ */
+export async function disambiguateCitationKey(
+  db:
+    | Prisma.TransactionClient
+    | { item?: { findMany?: Prisma.TransactionClient['item']['findMany'] } }
+    | null
+    | undefined,
+  baseKey: string | null | undefined,
+  scope: { userId: string; projectId?: string | null },
+  excludeItemId?: string,
+): Promise<string | null> {
+  if (!baseKey || !baseKey.trim()) return null;
+  const cleanKey = baseKey.trim();
+  if (typeof db?.item?.findMany !== 'function') return cleanKey;
+  const scopeWhere: Prisma.ItemWhereInput =
+    scope.projectId && SPEC_UUID_REGEX.test(scope.projectId)
+      ? { projectId: scope.projectId }
+      : { userId: scope.userId, projectId: null };
+  const rows = await db.item.findMany({
+    where: {
+      ...scopeWhere,
+      deletedAt: null,
+      ...(excludeItemId ? { id: { not: excludeItemId } } : {}),
+      citationKey: { startsWith: cleanKey, mode: 'insensitive' },
+    },
+    select: { citationKey: true },
+    take: 500,
+  });
+  const existingKeys = new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((item: { citationKey?: string | null }) => item.citationKey?.toLowerCase())
+      .filter((k: string | undefined): k is string => Boolean(k)),
+  );
+  if (!existingKeys.has(cleanKey.toLowerCase())) return cleanKey;
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+  for (let i = 0; i < alphabet.length; i++) {
+    const candidate = `${cleanKey}${alphabet[i]}`;
+    if (!existingKeys.has(candidate.toLowerCase())) return candidate;
+  }
+  let counter = 1;
+  while (existingKeys.has(`${cleanKey}-${counter}`.toLowerCase())) counter++;
+  return `${cleanKey}-${counter}`;
 }

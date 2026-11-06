@@ -9,13 +9,13 @@ import {
 import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
 import { SavedSearchesRepository } from '@/modules/library/catalog/repositories/saved-searches.repository';
-import { ConditionEvaluatorEngine } from '@/modules/library/catalog/domain/condition-evaluator.engine';
+import { ConditionEvaluatorEngine } from '@/modules/library/catalog/domain/condition-evaluator.policy';
 import {
   CreateSavedSearchDto,
   UpdateSavedSearchDto,
   PreviewSavedSearchDto,
   ExecuteSavedSearchQueryDto,
-} from '@/modules/library/catalog/types/catalog.types';
+} from '@/modules/library/catalog/dto/collections.dto';
 import { ItemsMapper } from '@/modules/library/core';
 import {
   SavedSearchConditionGroup,
@@ -72,14 +72,6 @@ export class SavedSearchesService {
         ? await this.repo.findCollectionDescendantsMap(userId, projectId, referencedColIds)
         : new Map<string, string[]>());
     return this.evaluator.compile(userId, group, projectId, descendantMap);
-  }
-
-  async createSavedSearch(
-    userId: string,
-    dto: CreateSavedSearchDto,
-    projectId?: string,
-  ) {
-    return this.create(userId, dto, projectId);
   }
 
   async create(userId: string, dto: CreateSavedSearchDto, projectId?: string) {
@@ -340,19 +332,21 @@ export class SavedSearchesService {
             throw new NotFoundException(`Saved search ${id} not found`);
           }
           const eventScope = { userId, projectId: effectiveProjectId };
-          await helpers.appendChange(eventScope, {
-            entityType: 'SavedSearch',
-            entityId: id,
-            action: 'update',
-            version: updatedRecord.version ?? 1,
-            data: updatedRecord,
-          });
-          await helpers.publishOutbox(
-            eventScope,
-            id,
-            LIBRARY_EVENT_TYPES.SAVED_SEARCH_UPDATED,
-            updatedRecord,
-          );
+          await Promise.all([
+            helpers.appendChange(eventScope, {
+              entityType: 'SavedSearch',
+              entityId: id,
+              action: 'update',
+              version: updatedRecord.version ?? 1,
+              data: updatedRecord,
+            }),
+            helpers.publishOutbox(
+              eventScope,
+              id,
+              LIBRARY_EVENT_TYPES.SAVED_SEARCH_UPDATED,
+              updatedRecord,
+            ),
+          ]);
           helpers?.onAfterCommit?.(() =>
             this.invalidateCache(userId, effectiveProjectId),
           );
@@ -365,10 +359,12 @@ export class SavedSearchesService {
       return updated;
     }
 
-    await this.repo.update(userId, id, dto, projectId);
-    if (recalculatedCount !== undefined) {
-      await this.repo.updateCachedCount(id, recalculatedCount);
-    }
+    await Promise.all([
+      this.repo.update(userId, id, dto, projectId),
+      ...(recalculatedCount !== undefined
+        ? [this.repo.updateCachedCount(id, recalculatedCount)]
+        : []),
+    ]);
 
     await this.invalidateCache(userId, effectiveProjectId);
     return this.findById(userId, id, projectId);

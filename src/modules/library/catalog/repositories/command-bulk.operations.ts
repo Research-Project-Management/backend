@@ -7,9 +7,19 @@ import {
   TransactionHelpers,
   ItemsMapper,
 } from '@/modules/library/core';
-import { isUuid } from '@/modules/library/catalog/domain/command-payload.builder';
-import type { CommandRepository } from './command.repository';
-import type { QueryRepository } from './query.repository';
+import { isUuid } from '@/modules/library/catalog/domain/item-command.mapper';
+
+export interface ICommandBulkRepositoryPort {
+  softDeleteMany(userId: string, itemIds: string[], tx?: Prisma.TransactionClient, projectId?: string): Promise<{ succeededIds: string[]; failedIds: string[] }>;
+  restoreMany(userId: string, itemIds: string[], tx?: Prisma.TransactionClient, projectId?: string): Promise<{ restoredItems: Array<{ id: string; version: number; projectId: string | null }>; succeededIds: string[]; failedIds: string[] }>;
+  purgeMany(userId: string, itemIds: string[], tx?: Prisma.TransactionClient, projectId?: string): Promise<{ succeededIds: string[]; failedIds: string[]; fileIdsToDelete: string[]; storagePaths: string[] }>;
+  emptyTrash(userId: string, tx?: Prisma.TransactionClient, projectId?: string): Promise<{ succeededIds: string[]; failedIds: string[]; fileIdsToDelete: string[]; storagePaths: string[] }>;
+  purgeExpiredTrash(retentionDays?: number, limit?: number, tx?: Prisma.TransactionClient): Promise<{ purgedItems: number; purgedNotes: number; purgedCollections: number; storagePaths: string[]; expiredItems: Array<{ id: string; userId: string; projectId: string | null }>; expiredNotes: Array<{ id: string; userId: string; projectId: string | null }>; expiredCollections: Array<{ id: string; userId: string; projectId: string | null }> }>;
+}
+
+export interface IQueryBulkRepositoryPort {
+  findByIds(userId: string, ids: string[], projectId?: string, tx?: Prisma.TransactionClient, includeContent?: boolean): Promise<Array<{ id: string; [key: string]: unknown }>>;
+}
 
 export class CommandBulkOperations {
   public static async collectStoragePathsForItems(
@@ -150,15 +160,33 @@ export class CommandBulkOperations {
       select: { id: true, version: true, projectId: true, metadata: true, deletedAt: true },
     });
 
-    const restorableMap = new Map<string, { id: string; version: number; projectId: string | null; deletedAt: Date | null }>();
+    const restorableMap = new Map<
+      string,
+      {
+        id: string;
+        version: number;
+        projectId: string | null;
+        deletedAt: Date | null;
+        cleanedMetadata?: Prisma.InputJsonValue;
+      }
+    >();
     for (const item of existingItems) {
       const metadataObj =
         item.metadata && typeof item.metadata === 'object' && !Array.isArray(item.metadata)
-          ? (item.metadata as Record<string, unknown>)
+          ? { ...(item.metadata as Record<string, unknown>) }
           : {};
-      if (typeof metadataObj.mergedIntoId === 'string' && metadataObj.mergedIntoId) continue;
+      let cleanedMetadata: Prisma.InputJsonValue | undefined;
+      if (typeof metadataObj.mergedIntoId === 'string' && metadataObj.mergedIntoId) {
+        delete metadataObj.mergedIntoId;
+        delete metadataObj.mergedAt;
+        cleanedMetadata = metadataObj as Prisma.InputJsonValue;
+      }
       restorableMap.set(item.id, {
-        id: item.id, version: item.version + 1, projectId: item.projectId, deletedAt: item.deletedAt,
+        id: item.id,
+        version: item.version + 1,
+        projectId: item.projectId,
+        deletedAt: item.deletedAt,
+        cleanedMetadata,
       });
     }
 
@@ -170,6 +198,23 @@ export class CommandBulkOperations {
         where: { id: { in: succeededIds }, deletedAt: { not: null }, ...scopeFilter },
         data: { deletedAt: null, deletedById: null, updatedById: userId, version: { increment: 1 } },
       });
+
+      const mergedRestoredEntries = succeededIds
+        .map((id) => restorableMap.get(id))
+        .filter(
+          (entry): entry is NonNullable<typeof entry> & { cleanedMetadata: Prisma.InputJsonValue } =>
+            Boolean(entry && entry.cleanedMetadata !== undefined),
+        );
+      if (mergedRestoredEntries.length > 0 && typeof client.item?.update === 'function') {
+        await Promise.all(
+          mergedRestoredEntries.map((entry) =>
+            client.item.update({
+              where: { id: entry.id },
+              data: { metadata: entry.cleanedMetadata },
+            }),
+          ),
+        );
+      }
 
       await Promise.all(
         succeededIds.flatMap((id) => {
@@ -437,7 +482,7 @@ export class CommandBulkOperations {
 }
 
 export async function executeBulkSoftDeleteInTx(params: {
-  command: CommandRepository;
+  command: ICommandBulkRepositoryPort;
   userId: string;
   itemIds: string[];
   tx: Prisma.TransactionClient;
@@ -477,8 +522,8 @@ export async function executeBulkSoftDeleteInTx(params: {
 }
 
 export async function executeBulkRestoreInTx(params: {
-  command: CommandRepository;
-  query: QueryRepository;
+  command: ICommandBulkRepositoryPort;
+  query: IQueryBulkRepositoryPort;
   userId: string;
   itemIds: string[];
   tx: Prisma.TransactionClient;
@@ -530,7 +575,7 @@ export async function executeBulkRestoreInTx(params: {
 }
 
 export async function executeBulkPurgeInTx(params: {
-  command: CommandRepository;
+  command: ICommandBulkRepositoryPort;
   userId: string;
   itemIds: string[];
   tx: Prisma.TransactionClient;
@@ -577,7 +622,7 @@ export async function executeBulkPurgeInTx(params: {
 }
 
 export async function executeEmptyTrashInTx(params: {
-  command: CommandRepository;
+  command: ICommandBulkRepositoryPort;
   userId: string;
   tx: Prisma.TransactionClient;
   helpers: TransactionHelpers;
@@ -622,10 +667,10 @@ export async function executeEmptyTrashInTx(params: {
   return res;
 }
 
-export const executeBulkHardDeleteInTx = executeBulkPurgeInTx;
+const executeBulkHardDeleteInTx = executeBulkPurgeInTx;
 
 export async function executePurgeExpiredTrashInTx(params: {
-  command: CommandRepository;
+  command: ICommandBulkRepositoryPort;
   retentionDays: number;
   limit: number;
   tx: Prisma.TransactionClient;

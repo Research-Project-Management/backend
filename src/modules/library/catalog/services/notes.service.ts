@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
-import { ItemCacheCoordinator } from './library-bootstrap.service';
+import { ItemCacheCoordinator } from './schema-validator.service';
 import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import {
   CreateNoteData,
@@ -23,7 +23,7 @@ import {
   sanitizeNoteTitle,
   sanitizeNoteContent,
 } from '@/modules/library/catalog/domain/notes.domain';
-import { buildTipTapDocFromText } from '@/modules/library/core/domain/renamer.domain';
+
 import {
   TransactionHelpers,
   UNIT_OF_WORK,

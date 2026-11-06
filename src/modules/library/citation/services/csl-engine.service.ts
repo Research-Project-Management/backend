@@ -9,13 +9,16 @@ import {
   CslItemData,
   CslName,
   CitationContextOptions,
+  EngineCitationResult,
 } from '@/modules/library/citation/types/citation.types';
-import { CslRepositoryService } from './csl-repository.service';
 import {
+  CslRepositoryService,
   CslLocaleLoaderService,
+} from './csl-repository.service';
+import {
   BUILTIN_SPECIAL_STYLES,
   NUMERIC_STYLE_TOKENS,
-} from './citation.service';
+} from '@/modules/library/citation/domain/citation.domain';
 import {
   CslStyleFormatterService,
   BIBTEX_ITEM_TYPE_MAP,
@@ -23,7 +26,7 @@ import {
   RIS_ITEM_TYPE_MAP,
   RIS_CSL_TYPE_MAP,
 } from './csl-style-formatter.service';
-import { TcvnCitationFormatterService } from './tcvn-citation-formatter.service';
+import { TcvnCitationFormatterService } from '@/modules/library/citation/domain/tcvn-citation.domain';
 
 interface CiteEntryOption {
   id: string;
@@ -53,13 +56,7 @@ interface CiteConstructor {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Cite } = require('@citation-js/core') as { Cite: CiteConstructor };
 
-export interface EngineCitationResult {
-  styleId: string;
-  inText: string;
-  bibliography: string;
-  bibliographyHtml?: string;
-  source: 'csl-engine';
-}
+export type { EngineCitationResult };
 
 export {
   CslLocaleLoaderService,
@@ -583,8 +580,9 @@ export class CslEngineService implements OnModuleInit {
       .trim();
 
     const batchCitations = applyBatchYearDisambiguation(
-      cslItems.map((item) => {
-        const cacheKey = this.buildCacheKey(item, activeTemplate);
+      cslItems.map((item, idx) => {
+        const cacheIndex = isNumericStyle ? idx + 1 : undefined;
+        const cacheKey = this.buildCacheKey(item, activeTemplate, cacheIndex);
         const cached = this.getCached(cacheKey);
         if (cached) {
           return {
@@ -595,7 +593,7 @@ export class CslEngineService implements OnModuleInit {
           };
         }
 
-        const cit = cite
+        const rawCit = cite
           .format('citation', {
             template: activeTemplate,
             lang: effectiveLang,
@@ -617,8 +615,20 @@ export class CslEngineService implements OnModuleInit {
             entry: item.id,
           })
           .trim();
-        const itemBib =
+        let itemBib =
           baseStyle === 'ieee' ? rawBib.replace(/[\u201C\u201D]/g, '"') : rawBib;
+        let cit = rawCit;
+        if (isNumericStyle && idx > 0) {
+          const numStr = String(idx + 1);
+          if (cit === '[1]') cit = `[${numStr}]`;
+          else if (cit === '(1)') cit = `(${numStr})`;
+          else if (cit === '1') cit = numStr;
+          if (/^\[1\]\s/.test(itemBib)) {
+            itemBib = itemBib.replace(/^\[1\](\s)/, `[${numStr}]$1`);
+          } else if (/^1\.\s/.test(itemBib)) {
+            itemBib = itemBib.replace(/^1\.(\s)/, `${numStr}.$1`);
+          }
+        }
         const entryResult = {
           id: item.id,
           inText: cit,

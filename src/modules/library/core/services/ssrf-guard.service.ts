@@ -5,7 +5,7 @@ import { ResilienceRegistryService } from '@/modules/library/core/resilience/res
 import { LibraryConfigService, libraryConfig } from '@/modules/library/core/config/library.config';
 import { ExternalProviderException } from '@/modules/library/core/errors/domain.exception';
 
-export interface SsrfGuardOptions {
+interface SsrfGuardOptions {
   requireHttps?: boolean;
   allowedSchemes?: string[];
   maxRedirects?: number;
@@ -24,7 +24,7 @@ export const DEFAULT_BROWSER_FETCH_HEADERS: Record<string, string> = {
 /** Thrown when a redirect hop targets an unsafe destination. */
 export class UnsafeRedirectError extends Error {}
 
-export type SafeUrlResult = URL & { resolvedIps?: string[] };
+type SafeUrlResult = URL & { resolvedIps?: string[] };
 
 @Injectable()
 export class SsrfGuardService {
@@ -570,7 +570,7 @@ export function getUserAgent(subsystem = 'Platform'): string {
   return `FluxResearch${subsystem}/1.0 (mailto:${email}; https://flux.study)`;
 }
 
-export interface HttpRequestOptions {
+interface HttpRequestOptions {
   method?: 'GET' | 'POST' | 'HEAD';
   headers?: Record<string, string>;
   timeoutMs?: number;

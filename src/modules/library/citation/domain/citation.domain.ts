@@ -33,7 +33,7 @@ export interface RawCslWorkInput {
  * Validates whether a given citation style identifier is a valid slug or recognized style.
  * Accepts standard names as well as 10,000+ CSL repository journal slugs.
  */
-export function isSupportedCitationStyle(
+function isSupportedCitationStyle(
   styleId: string,
 ): styleId is CitationStyleId {
   if (!styleId || typeof styleId !== 'string') return false;
@@ -210,12 +210,12 @@ export function extractItemCitationAliases(it: ExportItemRecord): string[] {
   return Array.from(aliases);
 }
 
-export interface EmittedCitationEntry {
+interface EmittedCitationEntry {
   item: ExportItemRecord;
   emitCiteKey: string;
 }
 
-export interface ResolvedCitationKeysResult {
+interface ResolvedCitationKeysResult {
   foundKeys: string[];
   missingKeys: string[];
   emittedEntries: EmittedCitationEntry[];
@@ -302,7 +302,7 @@ export function resolveEmittedCitationEntries(
   };
 }
 
-export interface StyleSummary {
+interface StyleSummary {
   id: CitationStyleId;
   name: string;
   shortTitle?: string;
@@ -342,13 +342,14 @@ export function normalizeEngineStyleId(styleId: string): string {
   if (s === 'harvard' || s === 'harvard1') return 'harvard1';
   if (
     s === 'tcvn' ||
+    s === 'tcvn-7539' ||
     s === 'tcvn-author-date' ||
     s === 'bo-giao-duc' ||
     s === 'vietnam'
   ) {
     return 'tcvn';
   }
-  if (s === 'tcvn-numeric') return 'tcvn-numeric';
+  if (s === 'tcvn-numeric' || s === 'tcvn-7539-numeric') return 'tcvn-numeric';
   return s;
 }
 
@@ -475,6 +476,13 @@ export class CslStyleRegistry {
         id: 'chicago-author-date',
         name: 'Chicago (Author-Date)',
         shortTitle: 'Chicago',
+        category: 'author-date',
+        isPrimary: false,
+      },
+      {
+        id: 'tcvn-7539',
+        name: 'Tiêu chuẩn Việt Nam (TCVN 7539 / Bộ Giáo dục & Đào tạo)',
+        shortTitle: 'TCVN',
         category: 'author-date',
         isPrimary: false,
       },

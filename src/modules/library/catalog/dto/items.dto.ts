@@ -1,16 +1,6 @@
-import {
-  IsString,
-  IsOptional,
-  IsArray,
-  ArrayMaxSize,
-  IsNumber,
-  IsBoolean,
-  IsObject,
-  MaxLength,
-  ValidateNested,
-} from 'class-validator';
+import { IsString, IsOptional, IsArray, ArrayMaxSize, IsNumber, IsBoolean, MaxLength, ValidateNested } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { PartialType, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PartialType } from '@nestjs/swagger';
 
 export class CreatorDto {
   @IsOptional()

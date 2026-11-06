@@ -1,16 +1,16 @@
-import { Controller, Get, Param, Query, Req, UseGuards, Post, Body, NotFoundException, Header, Put, Patch, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Param, Query, Req, UseGuards, Post, Body, NotFoundException, Header, Put, Patch, HttpCode, HttpStatus, Optional } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser, Public } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles, ProjectAccessGuard } from '@/modules/project/access';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectScopeId, isUuid } from '@/modules/library/core';
 import { CursorPaginationQueryDto } from '@/modules/library/catalog/dto/items.dto';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { LibraryBootstrapService } from '@/modules/library/catalog/services/library-bootstrap.service';
-import { IsString, IsObject, MaxLength } from 'class-validator';
-import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
-import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
+import { ReaderBootstrapService } from '@/modules/library/catalog/services/reader-bootstrap.service';
+import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
+import { SchemaValidatorService } from '@/modules/library/catalog/services/schema-validator.service';
 import { StateService } from '@/modules/library/catalog/services/state.service';
-import { UpdateStateDto, GetBatchStatesDto } from '@/modules/library/catalog/dto/collections.dto';
+import { UpdateStateDto, GetBatchStatesDto, ValidateItemPayloadDto } from '@/modules/library/catalog/dto/collections.dto';
 
 export interface RequestWithAccessHint {
   role?: string;
@@ -120,7 +120,8 @@ export function buildGetItemsOptions(
 export class LibraryWorkspaceController {
   constructor(
     private readonly queryService: ItemQueryService,
-    private readonly bootstrapService?: LibraryBootstrapService,
+    @Optional() private readonly bootstrapService?: LibraryBootstrapService,
+    @Optional() private readonly readerBootstrapService?: ReaderBootstrapService,
   ) {}
 
   private extractAccessHint(req?: RequestWithAccessHint) {
@@ -157,6 +158,36 @@ export class LibraryWorkspaceController {
     );
   }
 
+  @Get('items/:id/reader-bootstrap')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary:
+      'Consolidated single-request document reader bootstrap for personal or project library item',
+  })
+  async getReaderBootstrap(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Query('attachmentId') attachmentId?: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Req() req?: RequestWithAccessHint,
+  ) {
+    if (!isUuid(id)) {
+      throw new NotFoundException(`Item ${id} not found in library`);
+    }
+    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const result = await this.readerBootstrapService?.getReaderBootstrap(
+      userId,
+      id,
+      { projectId, attachmentId },
+      this.extractAccessHint(req),
+    );
+    if (!result) {
+      throw new NotFoundException(`Item ${id} not found in library`);
+    }
+    return result;
+  }
+
   @Get('permissions')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
@@ -180,15 +211,6 @@ export class LibraryWorkspaceController {
 
 export { LibraryWorkspaceController as LibraryPermissionsController };
 
-export class ValidateItemPayloadDto {
-  @IsString()
-  @MaxLength(100)
-  itemType!: string;
-
-  @IsObject()
-  data!: Record<string, unknown>;
-}
-
 @ApiTags('Library Item Types & Academic Schema')
 @ApiBearerAuth()
 @Controller(['api/v1/library/types', 'api/v1/library/item-types'])
@@ -196,7 +218,7 @@ export class ValidateItemPayloadDto {
 export class TypeController {
   constructor(
     private readonly typesService: TypesService,
-    private readonly schemaValidator: ZoteroSchemaValidatorService,
+    private readonly schemaValidator: SchemaValidatorService,
   ) {}
 
   @Public()

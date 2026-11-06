@@ -14,26 +14,39 @@ import {
   ExportItemRecord,
 } from '@/modules/library/citation/repositories/exports.repository';
 import { CitationService } from './citation.service';
-import { ExportLibraryDto } from '@/modules/library/citation/types/citation.types';
 import { PdfBakerService } from './pdf-baker.service';
 import {
   ExportResult,
   BurnableAnnotation,
   ExportFormatType,
+  CitationStyleId,
+  FormattedCitationResult,
+  ExportLibraryDto,
 } from '@/modules/library/citation/types/citation.types';
 import {
   resolveExportFormatStrategy,
   formatItemsAsBibtex,
-} from '@/modules/library/citation/domain/export-format.strategies';
+} from '@/modules/library/citation/domain/export-format.mapper';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import {
   extractItemCitationAliases,
   resolveEmittedCitationEntries,
 } from '@/modules/library/citation/domain/citation.domain';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  CITATION_FACADE,
+  ICitationFacade as ICoreCitationFacade,
+} from '@/modules/library/core';
 
 export type { BurnableAnnotation, ExportResult };
-export { extractItemCitationAliases };
+export { extractItemCitationAliases, CITATION_FACADE };
+
+export type ICitationFacade = ICoreCitationFacade<
+  CitationStyleId,
+  FormattedCitationResult,
+  ExportLibraryDto,
+  ExportResult
+>;
 
 @Injectable()
 export class ExportsService {
@@ -272,22 +285,20 @@ export class ExportsService {
     base64: string;
   }> {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
-    if (effectiveProjectId && userId && this.exportsRepo.findProjectMember) {
-      const member = await this.exportsRepo.findProjectMember(
-        effectiveProjectId,
-        userId,
-      );
-      if (!member) {
-        throw new NotFoundException(
-          `Project ${effectiveProjectId} not found or access denied`,
-        );
-      }
-    }
-    const item = await this.exportsRepo.findItemById(
-      userId,
-      itemId,
-      effectiveProjectId,
+    const needMemberCheck = Boolean(
+      effectiveProjectId && userId && this.exportsRepo.findProjectMember,
     );
+    const [member, item] = await Promise.all([
+      needMemberCheck
+        ? this.exportsRepo.findProjectMember(effectiveProjectId!, userId)
+        : Promise.resolve(true),
+      this.exportsRepo.findItemById(userId, itemId, effectiveProjectId),
+    ]);
+    if (needMemberCheck && !member) {
+      throw new NotFoundException(
+        `Project ${effectiveProjectId} not found or access denied`,
+      );
+    }
 
     if (!item) {
       throw new NotFoundException('Item not found');
@@ -416,18 +427,6 @@ export class ExportsService {
 
     const effectiveProjectId = normalizeProjectScopeId(projectId);
 
-    if (effectiveProjectId && userId) {
-      const member = await this.exportsRepo.findProjectMember(
-        effectiveProjectId,
-        userId,
-      );
-      if (!member) {
-        throw new NotFoundException(
-          `Project ${effectiveProjectId} not found or access denied`,
-        );
-      }
-    }
-
     const scopeWhere: Prisma.ItemWhereInput = effectiveProjectId
       ? { projectId: effectiveProjectId, deletedAt: null }
       : { userId, projectId: null, deletedAt: null };
@@ -447,8 +446,18 @@ export class ExportsService {
       ],
     };
 
-    const initialItems =
-      await this.exportsRepo.findItemsByScope(targetedScopeWhere);
+    const needMemberCheck = Boolean(effectiveProjectId && userId);
+    const [member, initialItems] = await Promise.all([
+      needMemberCheck
+        ? this.exportsRepo.findProjectMember(effectiveProjectId!, userId)
+        : Promise.resolve(true),
+      this.exportsRepo.findItemsByScope(targetedScopeWhere),
+    ]);
+    if (needMemberCheck && !member) {
+      throw new NotFoundException(
+        `Project ${effectiveProjectId} not found or access denied`,
+      );
+    }
     const itemById = new Map<string, ExportItemRecord>();
     for (const it of initialItems) {
       if (it?.id) itemById.set(it.id, it);
@@ -519,5 +528,53 @@ export class ExportsService {
       foundKeys,
       missingKeys,
     };
+  }
+}
+
+@Injectable()
+export class CitationFacade implements ICitationFacade {
+  constructor(
+    private readonly citationService: CitationService,
+    private readonly exportsService: ExportsService,
+  ) {}
+
+  async formatCitation(
+    userId: string,
+    itemId: string,
+    styleId: CitationStyleId = 'apa-7th',
+    index: number = 1,
+    projectId?: string,
+  ): Promise<FormattedCitationResult> {
+    return this.citationService.formatItemById(
+      userId,
+      itemId,
+      styleId,
+      index,
+      projectId,
+    );
+  }
+
+  async exportByCitationKeys(
+    userId: string,
+    citeKeys: string[],
+    projectId?: string,
+  ): Promise<{
+    content: string;
+    count: number;
+    foundKeys: string[];
+    missingKeys: string[];
+  }> {
+    return this.exportsService.exportByCitationKeys(
+      userId,
+      citeKeys,
+      projectId,
+    );
+  }
+
+  async exportLibrary(
+    userId: string,
+    options: ExportLibraryDto = { format: 'bibtex' },
+  ): Promise<ExportResult> {
+    return this.exportsService.exportLibrary(userId, options);
   }
 }

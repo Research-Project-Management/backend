@@ -1,10 +1,5 @@
-import {
-  CreatorType,
-  CreatorInput,
-  CreatorCreditInput,
-  ParsedCreator,
-} from '@/modules/library/core/types/bibliographic.types';
-import { resolveCanonicalCreatorRole } from './zotero-field-harmonizer.domain';
+import { CreatorType, CreatorInput, ParsedCreator } from '@/modules/library/core/types/bibliographic.types';
+
 import {
   stripXmlAndHtmlTags,
   decodeHtmlEntities,
@@ -44,7 +39,7 @@ export function isInstitutionName(name?: string | null): boolean {
  * and every surname token must be a lowercase particle or a capitalized word
  * containing at least one lowercase letter.
  */
-export function isVancouverName(raw?: string | null): boolean {
+function isVancouverName(raw?: string | null): boolean {
   if (!raw || typeof raw !== 'string') return false;
   const tokens = raw.trim().split(/\s+/);
   if (tokens.length < 2) return false;
@@ -455,7 +450,7 @@ export function splitAuthorString(input: string): string[] {
  * - Generational suffixes (Jr., Sr., III)
  * - Mononyms ("Aristotle", "Plato")
  */
-export interface ParseCreatorOptions {
+interface ParseCreatorOptions {
   preferSingleFieldForVietnamese?: boolean;
 }
 

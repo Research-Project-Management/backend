@@ -1,10 +1,5 @@
-import { CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS } from '../types/bibliographic.types';
-import {
-  ALL_CREATOR_ROLES,
-  BASE_FIELD_MAPPINGS,
-  FIELD_ALIASES,
-  SCHEMA_V42_DATA,
-} from '../types/schema.constants';
+
+import { ALL_CREATOR_ROLES, BASE_FIELD_MAPPINGS, SCHEMA_V42_DATA } from '../types/schema.constants';
 
 const VALID_CREATOR_MAP_CACHE = new Map<string, Map<string, string>>();
 let GLOBAL_CREATOR_MAP_CACHE: Map<string, string> | null = null;
@@ -26,7 +21,7 @@ const CREATOR_ROLE_SYNONYMS: Readonly<Record<string, string>> = {
  * Returns a case-insensitive lookup map (lowercase -> canonical Zotero v42 camelCase)
  * of all 31 global Zotero creator types plus common academic role synonyms.
  */
-export function getAllCanonicalCreatorMap(): Map<string, string> {
+function getAllCanonicalCreatorMap(): Map<string, string> {
   if (GLOBAL_CREATOR_MAP_CACHE) {
     return GLOBAL_CREATOR_MAP_CACHE;
   }
@@ -445,7 +440,7 @@ export function extractExtraKeyValues(
   return result;
 }
 
-export interface HarmonizeZoteroFieldsOptions {
+interface HarmonizeFieldsOptions {
   itemType?: string;
   syncExtraFields?: boolean;
   syncLegacyAliases?: boolean;
@@ -456,14 +451,14 @@ export interface HarmonizeZoteroFieldsOptions {
  * Pure, idempotent Single-Source-of-Truth harmonizer for Zotero v42 fields and aliases.
  *
  * Guarantees:
- * 1. Idempotency: `harmonizeZoteroFields(harmonizeZoteroFields(x))` is deep-equal to `harmonizeZoteroFields(x)`.
+ * 1. Idempotency: `harmonizeBibliographicFields(harmonizeBibliographicFields(x))` is deep-equal to `harmonizeBibliographicFields(x)`.
  * 2. Bidirectional `BASE_FIELD_MAPPINGS` across all 37 Zotero item types.
  * 3. Lossless input alias resolution (`DOI` -> `doi`, `ISBN` -> `isbn`, `abstract` <-> `abstractNote`, etc.).
  * 4. Optional synchronization of type-specific mapped fields into `extraFields` when present.
  */
-export function harmonizeZoteroFields<T extends Record<string, unknown>>(
+export function harmonizeBibliographicFields<T extends Record<string, unknown>>(
   input: T,
-  options?: HarmonizeZoteroFieldsOptions,
+  options?: HarmonizeFieldsOptions,
 ): T {
   if (!input || typeof input !== 'object') return input;
 
@@ -558,90 +553,10 @@ export function harmonizeZoteroFields<T extends Record<string, unknown>>(
 }
 
 /**
- * Comprehensive, schema-derived set of all metadata field keys that can participate
- * in multi-source metadata reconciliation (`ReconciliationService`).
- * Derived dynamically from `SCHEMA_V42_DATA.distinctFieldKeys`, `ITEM_COLUMN_METADATA_FIELDS`,
- * and `FIELD_ALIASES` so no Zotero v42 field is ever dropped.
- */
-export const ALL_RECONCILABLE_METADATA_FIELDS: ReadonlyArray<string> = (() => {
-  const excludedTopLevel = new Set([
-    'title',
-    'creators',
-    'authors',
-    'editors',
-    'contributors',
-    'itemType',
-    'type',
-    'extra',
-    'extraFields',
-    'metadata',
-    'attachments',
-    'notes',
-    'notesList',
-    'collections',
-    'collectionIds',
-    'collectionId',
-  ]);
-  const fieldSet = new Set<string>([
-    'abstract',
-    'abstractNote',
-    'publicationDate',
-    'date',
-    'year',
-    'publicationTitle',
-    'journal',
-    'venue',
-    'publisher',
-    'volume',
-    'issue',
-    'number',
-    'pages',
-    'doi',
-    'DOI',
-    'isbn',
-    'ISBN',
-    'issn',
-    'ISSN',
-    'pmid',
-    'PMID',
-    'pmcid',
-    'PMCID',
-    'arxivId',
-    'archiveId',
-    'archiveID',
-    'url',
-    'URL',
-    'openAccessPdfUrl',
-    'language',
-    'rights',
-    'license',
-    'tags',
-    'citationCount',
-    'referenceCount',
-  ]);
-
-  for (const key of CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS) {
-    if (!excludedTopLevel.has(key)) {
-      fieldSet.add(key);
-    }
-  }
-  for (const key of SCHEMA_V42_DATA.distinctFieldKeys) {
-    if (!excludedTopLevel.has(key)) {
-      fieldSet.add(key);
-    }
-  }
-  for (const [alias, target] of Object.entries(FIELD_ALIASES)) {
-    if (!excludedTopLevel.has(alias)) fieldSet.add(alias);
-    if (!excludedTopLevel.has(target)) fieldSet.add(target);
-  }
-  return Array.from(fieldSet);
-})();
-
-/**
  * Merges plain-text Zotero `Extra` blocks in priority order, preserving unique `Key: Value`
  * entries and free-form lines without duplicating keys already provided by a higher-trust source.
  */
-export function mergeZoteroExtraTextWithStatus(
+export function mergeExtraTextWithStatus(
   existingText: string,
   ...incomingVariants: unknown[]
 ): { merged: string; addedNewLine: boolean } {
@@ -684,9 +599,9 @@ export function mergeZoteroExtraTextWithStatus(
   return { merged: lines.join('\n'), addedNewLine };
 }
 
-export function mergeZoteroExtraTextLines(variants: unknown[]): string {
+export function mergeExtraTextLines(variants: unknown[]): string {
   const [first, ...rest] = variants;
-  return mergeZoteroExtraTextWithStatus(
+  return mergeExtraTextWithStatus(
     typeof first === 'string' ? first : '',
     ...(typeof first === 'string' ? rest : variants),
   ).merged;

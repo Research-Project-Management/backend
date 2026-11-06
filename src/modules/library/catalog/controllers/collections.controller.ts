@@ -5,7 +5,7 @@ import { CreateCollectionDto, UpdateCollectionDto, MoveItemsDto, ReorderCollecti
 import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/catalog.types';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
-import { normalizeProjectScopeId, INGESTION_FACADE, IIngestionFacade, ReResolveMetadataOptions } from '@/modules/library/core';
+import { normalizeProjectScopeId, INGESTION_FACADE, IIngestionFacade } from '@/modules/library/core';
 import { ParseCitationsDto, ReResolveMetadataDto, TypeConversionPreviewDto, TypeConversionDto, LinkItemsDto, MarkMyPublicationDto } from '@/modules/library/catalog/dto/items.dto';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';

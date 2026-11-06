@@ -4,20 +4,7 @@ import {
   CslDate,
 } from '@/modules/library/citation/types/citation.types';
 import { isUuid } from '@/core';
-import {
-  CSL_TYPE_MAP,
-  CSL_CREATOR_MAP,
-  SCHEMA_V42_DATA,
-  harmonizeZoteroFields,
-  normalizeTags,
-  VIETNAMESE_FAMILY_NAMES,
-  VIETNAMESE_COMPOUND_SURNAMES,
-  VIETNAMESE_MIDDLE_NAMES,
-  isVietnameseName,
-  parseCreatorString,
-  isInstitutionName,
-  generateCitationKey,
-} from '@/modules/library/core';
+import { CSL_TYPE_MAP, CSL_CREATOR_MAP, SCHEMA_V42_DATA, harmonizeBibliographicFields, normalizeTags, generateCitationKey } from '@/modules/library/core';
 import {
   ContributorLike,
   EXTRA_DIRECT_CSL_STRING_KEYS,
@@ -34,7 +21,7 @@ export {
   CslExtraMapper,
 };
 
-export const ITEM_TYPE_TO_CSL_TYPE: Record<string, string> = CSL_TYPE_MAP;
+const ITEM_TYPE_TO_CSL_TYPE: Record<string, string> = CSL_TYPE_MAP;
 
 export interface CslSourceItem {
   id?: string | null;
@@ -188,7 +175,7 @@ export class CslJsonMapper {
         : undefined;
     const rawExtraObj = { ...(metaObj || {}), ...(item.extraFields || {}) };
 
-    const harmonized = harmonizeZoteroFields(
+    const harmonized = harmonizeBibliographicFields(
       {
         ...rawExtraObj,
         ...(item as Record<string, unknown>),

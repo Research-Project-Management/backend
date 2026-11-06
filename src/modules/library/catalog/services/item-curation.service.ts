@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
-import { ItemCacheCoordinator } from './library-bootstrap.service';
+import { ItemCacheCoordinator } from './schema-validator.service';
 import { ItemQueryService } from './item-query.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
@@ -15,21 +15,11 @@ import {
   BibliographicReference,
 } from '@/modules/library/core/types/bibliographic.types';
 import { Prisma } from '@prisma/client';
-import {
-  LIBRARY_EVENT_TYPES,
-  LIBRARY_REDIS_KEYS,
-  TransactionHelpers,
-  UNIT_OF_WORK,
-  IUnitOfWork,
-  buildItemCreatedOutboxPayload,
-  normalizeProjectScopeId,
-  ItemsMapper,
-} from '@/modules/library/core';
+import { LIBRARY_EVENT_TYPES, LIBRARY_REDIS_KEYS, UNIT_OF_WORK, IUnitOfWork, buildItemCreatedOutboxPayload, normalizeProjectScopeId, ItemsMapper } from '@/modules/library/core';
 import {
   ImportSourceItem,
   buildImportItemPayload,
-  prepareItemAiMetadataPatch,
-} from '@/modules/library/catalog/domain/command-payload.builder';
+} from '@/modules/library/catalog/domain/item-command.mapper';
 import { executeEmptyTrashInTx } from '../repositories/command-bulk.operations';
 
 export type { ImportSourceItem };
@@ -166,7 +156,12 @@ export class ItemCurationService {
       return { success: true, importedCount: 0 };
     }
 
-    const project = await this.query.findProjectWithMembers(projectId);
+    const [project, perms] = await Promise.all([
+      this.query.findProjectWithMembers(projectId),
+      this.itemQueryService
+        ? this.itemQueryService.getPermissions(userId, projectId)
+        : Promise.resolve(null),
+    ]);
 
     if (!project) {
       throw new NotFoundException(`Project ${projectId} not found`);
@@ -184,16 +179,10 @@ export class ItemCurationService {
       );
     }
 
-    if (this.itemQueryService) {
-      const perms = await this.itemQueryService.getPermissions(
-        userId,
-        projectId,
+    if (perms && !perms.permissions.canImport) {
+      throw new ForbiddenException(
+        'You do not have permission to import items to this project',
       );
-      if (!perms.permissions.canImport) {
-        throw new ForbiddenException(
-          'You do not have permission to import items to this project',
-        );
-      }
     }
 
     const sourceItems = await this.query.findManyByIdsWithFullDetails(
@@ -359,11 +348,13 @@ export class ItemCurationService {
    * Retrieves raw provenance metadata records for an item across all providers (arXiv, pdf_metadata, CrossRef).
    */
   async getMetadataSources(userId: string, itemId: string, projectId?: string) {
-    const item = await this.query.findById(userId, itemId, projectId);
+    const [item, sources] = await Promise.all([
+      this.query.findById(userId, itemId, projectId),
+      this.query.findMetadataSources(itemId),
+    ]);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found in library`);
     }
-    const sources = await this.query.findMetadataSources(itemId);
     return {
       itemId,
       count: sources.length,
@@ -462,15 +453,10 @@ export class ItemCurationService {
         : {};
 
     const validProjectId = normalizeProjectScopeId(existing.projectId);
-    const effectiveItemType = String(existing.itemType || 'journalArticle');
-
-    const { filteredPatch, topLevelColumnSync, mergedMetadata } =
-      prepareItemAiMetadataPatch({
-        existingTitle: existing.title,
-        effectiveItemType,
-        currentMeta,
-        aiMetadataPatch,
-      });
+    const mergedMetadata = {
+      ...currentMeta,
+      ...aiMetadataPatch,
+    } as Prisma.InputJsonValue;
 
     const invalidateUpdatedItemCache = async () => {
       if (this.cacheCoordinator && existing.userId) {
@@ -496,9 +482,6 @@ export class ItemCurationService {
         ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         const updated = await this.command.applyItemAiMetadataUpdate({
           itemId,
-          existing: existing,
-          filteredPatch,
-          topLevelColumnSync,
           mergedMetadata,
           tx,
         });
@@ -530,9 +513,6 @@ export class ItemCurationService {
     } else {
       await this.command.applyItemAiMetadataUpdate({
         itemId,
-        existing: existing,
-        filteredPatch,
-        topLevelColumnSync,
         mergedMetadata,
       });
     }

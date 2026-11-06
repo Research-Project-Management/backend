@@ -1,7 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
-import { CitationFacade, CITATION_FACADE } from './services/citation.service';
+import { CitationFacade, CITATION_FACADE } from './services/exports.service';
 
 // Presentation
 import { CitationController } from './controllers/citation.controller';
@@ -18,7 +18,7 @@ import {
   CslLocaleLoaderService,
   CslStyleFormatterService,
 } from './services/csl-engine.service';
-import { TcvnCitationFormatterService } from './services/tcvn-citation-formatter.service';
+import { TcvnCitationFormatterService } from './domain/tcvn-citation.domain';
 import { CslRepositoryService } from './services/csl-repository.service';
 import { ExportsService } from './services/exports.service';
 import { PdfBakerService } from './services/pdf-baker.service';

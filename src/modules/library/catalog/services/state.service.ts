@@ -33,7 +33,7 @@ import {
 } from '@/modules/library/catalog/domain/state.domain';
 import { RedisCacheService } from '@/core';
 import { AccessService, Permission } from '@/modules/project/access';
-import { ItemCacheCoordinator } from './library-bootstrap.service';
+import { ItemCacheCoordinator } from './schema-validator.service';
 
 export { pickPreferredMergedState };
 

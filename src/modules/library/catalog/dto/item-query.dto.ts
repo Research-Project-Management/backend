@@ -314,8 +314,6 @@ export interface DocumentFulltextResponse {
   markdown?: string;
   plainText?: string;
   pageCount?: number;
-  isScanned?: boolean;
-  ocrStatus?: string;
   pages?: Array<{
     pageNumber: number;
     pageIndex?: number;

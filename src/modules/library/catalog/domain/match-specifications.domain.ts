@@ -15,19 +15,19 @@ export {
   NotSpecification,
 };
 
-export interface ExactMatchCandidateInput {
+interface ExactMatchCandidateInput {
   cleanDoi: string | null;
   cleanArxiv: string | null;
   cleanPmid: string | null;
   cleanIsbn: string | null;
 }
 
-export interface MatchedCandidateIdentifierRow {
+interface MatchedCandidateIdentifierRow {
   type?: string;
   value?: string;
 }
 
-export interface MatchedCandidateRow {
+interface MatchedCandidateRow {
   id: string;
   title: string;
   doi?: string | null;
@@ -35,7 +35,7 @@ export interface MatchedCandidateRow {
   identifiers?: MatchedCandidateIdentifierRow[];
 }
 
-export interface IExactMatchSpecification {
+interface IExactMatchSpecification {
   readonly reason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
   isApplicable(input: ExactMatchCandidateInput): boolean;
   toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.ItemWhereInput[];
@@ -102,7 +102,7 @@ function getIdentifierValue(
   return '';
 }
 
-export function hasAnyPopulatedIdentifier(match: MatchedCandidateRow): boolean {
+function hasAnyPopulatedIdentifier(match: MatchedCandidateRow): boolean {
   const meta = asMetaRecord(match.metadata);
   const idents = Array.isArray(match.identifiers) ? match.identifiers : [];
   const metaIdents = Array.isArray(meta.identifiers) ? meta.identifiers : [];
@@ -120,7 +120,7 @@ export function hasAnyPopulatedIdentifier(match: MatchedCandidateRow): boolean {
   );
 }
 
-export class DoiExactMatchSpecification implements IExactMatchSpecification {
+class DoiExactMatchSpecification implements IExactMatchSpecification {
   readonly reason = 'DOI_EXACT' as const;
 
   isApplicable(input: ExactMatchCandidateInput): boolean {
@@ -181,7 +181,7 @@ export class DoiExactMatchSpecification implements IExactMatchSpecification {
   }
 }
 
-export class ArxivExactMatchSpecification implements IExactMatchSpecification {
+class ArxivExactMatchSpecification implements IExactMatchSpecification {
   readonly reason = 'ARXIV_EXACT' as const;
 
   isApplicable(input: ExactMatchCandidateInput): boolean {
@@ -263,7 +263,7 @@ export class ArxivExactMatchSpecification implements IExactMatchSpecification {
   }
 }
 
-export class PmidExactMatchSpecification implements IExactMatchSpecification {
+class PmidExactMatchSpecification implements IExactMatchSpecification {
   readonly reason = 'PMID_EXACT' as const;
 
   isApplicable(input: ExactMatchCandidateInput): boolean {
@@ -319,7 +319,7 @@ export class PmidExactMatchSpecification implements IExactMatchSpecification {
   }
 }
 
-export class IsbnExactMatchSpecification implements IExactMatchSpecification {
+class IsbnExactMatchSpecification implements IExactMatchSpecification {
   readonly reason = 'ISBN_EXACT' as const;
 
   isApplicable(input: ExactMatchCandidateInput): boolean {
@@ -389,7 +389,7 @@ export class IsbnExactMatchSpecification implements IExactMatchSpecification {
   }
 }
 
-export const EXACT_MATCH_SPECIFICATIONS: readonly IExactMatchSpecification[] = [
+const EXACT_MATCH_SPECIFICATIONS: readonly IExactMatchSpecification[] = [
   new DoiExactMatchSpecification(),
   new ArxivExactMatchSpecification(),
   new PmidExactMatchSpecification(),
@@ -424,7 +424,7 @@ export function buildExactMatchOrClauses(
   return clauses;
 }
 
-export function evaluateExactMatchSpecifications(
+function evaluateExactMatchSpecifications(
   input: ExactMatchCandidateInput,
   match: MatchedCandidateRow,
 ): {

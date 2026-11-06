@@ -10,7 +10,7 @@ import { CslJsonMapper, CslSourceItem } from './csl-json.mapper';
 /**
  * Escapes and sanitizes a value for CSV output (RFC 4180 + formula injection defense).
  */
-export function escapeCsvField(val: unknown): string {
+function escapeCsvField(val: unknown): string {
   if (val === null || val === undefined) return '""';
   const str =
     typeof val === 'string'
@@ -27,7 +27,7 @@ export function escapeCsvField(val: unknown): string {
 /**
  * Serializes a list of items into standard RFC 4180 CSV string (18-column schema with CRLF).
  */
-export function formatCsvExport(
+function formatCsvExport(
   items: ReadonlyArray<CsvExportItem | CslSourceItem>,
 ): string {
   const headers = [
@@ -122,14 +122,14 @@ export function formatCsvExport(
   return [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
 }
 
-export interface ICitationFormatterPort {
+interface ICitationFormatterPort {
   formatItem(
     item: CitationItemInput,
     styleId: string,
   ): { bibliography: string };
 }
 
-export interface ExportStrategyOptions {
+interface ExportStrategyOptions {
   timestamp?: string;
   truncated?: boolean;
   citationFormatter?: ICitationFormatterPort;
@@ -154,7 +154,7 @@ export interface IExportFormatStrategy {
   }): ExportResult;
 }
 
-export function toCitationItemInput(
+function toCitationItemInput(
   it: ExportItemRecord,
   overrideKey?: string,
 ): CitationItemInput {
@@ -198,7 +198,7 @@ export function formatItemsAsBibtex(
   return entries.join('\n\n');
 }
 
-export class BibtexExportStrategy implements IExportFormatStrategy {
+class BibtexExportStrategy implements IExportFormatStrategy {
   readonly format: ExportFormatType = 'bibtex';
   readonly extension = 'bib';
   readonly mimeType = 'application/x-bibtex';
@@ -239,7 +239,7 @@ export class BibtexExportStrategy implements IExportFormatStrategy {
   }
 }
 
-export class RisExportStrategy implements IExportFormatStrategy {
+class RisExportStrategy implements IExportFormatStrategy {
   readonly format: ExportFormatType = 'ris';
   readonly extension = 'ris';
   readonly mimeType = 'application/x-research-info-systems';
@@ -290,7 +290,7 @@ export class RisExportStrategy implements IExportFormatStrategy {
   }
 }
 
-export class CslJsonExportStrategy implements IExportFormatStrategy {
+class CslJsonExportStrategy implements IExportFormatStrategy {
   readonly format: ExportFormatType = 'csl-json';
   readonly aliases = ['csl_json'] as const;
   readonly extension = 'json';
@@ -350,7 +350,7 @@ export class CslJsonExportStrategy implements IExportFormatStrategy {
   }
 }
 
-export class CsvExportStrategy implements IExportFormatStrategy {
+class CsvExportStrategy implements IExportFormatStrategy {
   readonly format: ExportFormatType = 'csv';
   readonly extension = 'csv';
   readonly mimeType = 'text/csv; charset=utf-8';
@@ -449,7 +449,7 @@ export class MarkdownExportStrategy implements IExportFormatStrategy {
   }
 }
 
-export const EXPORT_FORMAT_STRATEGIES: readonly IExportFormatStrategy[] = [
+const EXPORT_FORMAT_STRATEGIES: readonly IExportFormatStrategy[] = [
   new BibtexExportStrategy(),
   new RisExportStrategy(),
   new CslJsonExportStrategy(),

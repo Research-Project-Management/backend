@@ -19,15 +19,7 @@ import { isUUID } from 'class-validator';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { normalizeProjectScopeId } from '@/modules/library/core';
-import {
-  CursorPaginationQueryDto,
-  CreateItemDto,
-  UpdateItemDto,
-  BulkPurgeItemsDto,
-  BulkTrashItemsDto,
-  BulkRestoreItemsDto,
-  ImportItemIdsDto,
-} from '@/modules/library/catalog/dto/items.dto';
+import { CreateItemDto, UpdateItemDto, BulkPurgeItemsDto, BulkTrashItemsDto, BulkRestoreItemsDto, ImportItemIdsDto } from '@/modules/library/catalog/dto/items.dto';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';

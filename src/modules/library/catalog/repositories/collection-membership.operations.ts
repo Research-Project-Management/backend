@@ -1,15 +1,17 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';
-import { AssignItemsToCollectionDto } from '@/modules/library/catalog/dto/collections.dto';
-import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/catalog.types';
+import {
+  CollectionDeleteStrategy,
+  type AssignItemsToCollectionInput,
+} from '@/modules/library/catalog/types/catalog.types';
 import { normalizeParentId } from '@/modules/library/catalog/domain/state.domain';
 import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
-  TransactionService,
+  IUnitOfWork,
 } from '@/modules/library/core';
 
 export async function validateCollectionReorderNoCycle(
@@ -69,10 +71,10 @@ export async function validateCollectionReorderNoCycle(
 
 export async function executeAssignItemsToCollection(
   repo: CollectionsRepository,
-  libraryTx: TransactionService | undefined,
+  libraryTx: IUnitOfWork | undefined,
   userId: string,
   collectionId: string,
-  dto: AssignItemsToCollectionDto,
+  dto: AssignItemsToCollectionInput,
   projectId?: string,
   onAfterCommit?: (ids: string[]) => Promise<void> | void,
 ): Promise<{ ids: string[]; count: number; ranPostCommitHook?: boolean }> {
@@ -83,12 +85,14 @@ export async function executeAssignItemsToCollection(
     : { userId, projectId: null };
 
   const validateInClient = async (tx?: Prisma.TransactionClient) => {
-    const collection = await repo.findById(userId, collectionId, tx, projectId);
+    const [collection, validItemIds] = await Promise.all([
+      repo.findById(userId, collectionId, tx, projectId),
+      ids.length > 0 ? repo.findValidItemIds(ids, scopeWhere, tx) : Promise.resolve([]),
+    ]);
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
     if (ids.length === 0) return false;
-    const validItemIds = await repo.findValidItemIds(ids, scopeWhere, tx);
     const validIdSet = new Set(validItemIds);
     const invalidIds = ids.filter((id) => !validIdSet.has(id));
     if (invalidIds.length > 0) {
@@ -197,7 +201,7 @@ export async function transferCollectionItemMembershipsInTx(
 export async function executeDeleteCollectionWithCascade(
   repo: CollectionsRepository,
   tree: TreeEngine,
-  libraryTx: TransactionService | undefined,
+  libraryTx: IUnitOfWork | undefined,
   userId: string,
   collectionId: string,
   strategy: CollectionDeleteStrategy = 'orphan',
@@ -218,18 +222,23 @@ export async function executeDeleteCollectionWithCascade(
     }
     const effectiveProjectId =
       normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
-    let affectedItemIds = await repo.findItemIdsByCollection(
-      userId,
-      collectionId,
-      tx,
-      undefined,
-      effectiveProjectId,
-    );
+    const [initialAffectedItemIds, allCollections] = await Promise.all([
+      repo.findItemIdsByCollection(
+        userId,
+        collectionId,
+        tx,
+        undefined,
+        effectiveProjectId,
+      ),
+      strategy === 'cascade'
+        ? repo.findAllHierarchyNodes
+          ? repo.findAllHierarchyNodes(userId, effectiveProjectId, tx)
+          : repo.findAll?.(userId, effectiveProjectId, tx)
+        : Promise.resolve(undefined),
+    ]);
+    let affectedItemIds = initialAffectedItemIds;
     let descendantIds: string[] = [];
     if (strategy === 'cascade') {
-      const allCollections = await (repo.findAllHierarchyNodes
-        ? repo.findAllHierarchyNodes(userId, effectiveProjectId, tx)
-        : repo.findAll?.(userId, effectiveProjectId, tx));
       descendantIds = tree.getDescendantIds(allCollections || [], collectionId);
       if (descendantIds.length > 0) {
         const effectiveTx = tx && Object.keys(tx).length > 0 ? tx : undefined;
@@ -502,7 +511,7 @@ export async function executeDeleteCollectionWithCascade(
 export async function executeCopyCollectionSubtree(
   repo: CollectionsRepository,
   tree: TreeEngine,
-  libraryTx: TransactionService | undefined,
+  libraryTx: IUnitOfWork | undefined,
   userId: string,
   collectionId: string,
   targetParentId?: string | null,
@@ -676,8 +685,8 @@ export async function executeCopyCollectionSubtree(
       }
 
       const children = childrenByParent.get(source.id) ?? [];
-      for (const child of children) {
-        await cloneNode(child, created.id, false);
+      if (children.length > 0) {
+        await Promise.all(children.map((child) => cloneNode(child, created.id, false)));
       }
 
       return created;

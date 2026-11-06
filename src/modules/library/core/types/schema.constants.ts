@@ -10,10 +10,9 @@ import {
   CreatorTypeDefinition,
   CanonicalItemType,
 } from './schema.types';
-import rawZoteroSchema from '@/modules/library/core/data/zotero-schema.json';
+import rawBibliographicSchema from '@/modules/library/core/types/bibliographic-schema.json';
 
-export const LIBRARY_SCHEMA_VERSION = rawZoteroSchema.version || 42;
-export const SCHEMA_SOURCE = `zotero-schema-v${LIBRARY_SCHEMA_VERSION}`;
+const LIBRARY_SCHEMA_VERSION = rawBibliographicSchema.version || 42;
 
 const CATEGORY_MAP: Record<string, ItemTypeDefinition['category']> = {
   journalArticle: 'academic',
@@ -181,7 +180,7 @@ const MONO_FIELDS = new Set([
   'pmcid',
 ]);
 
-interface ZoteroRawSchema {
+interface RawBibliographicSchema {
   version?: number;
   locales?: Record<
     string,
@@ -213,7 +212,7 @@ interface ZoteroRawSchema {
 }
 
 function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
-  const schema: ZoteroRawSchema = rawZoteroSchema;
+  const schema: RawBibliographicSchema = rawBibliographicSchema;
   const en = schema.locales?.['en-US'] || {
     fields: {},
     itemTypes: {},
@@ -279,7 +278,7 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
       primaryCreatorType: primaryCreator,
       isBibliographic: !isSpecial,
       isSpecial,
-      source: `zotero-schema-v${LIBRARY_SCHEMA_VERSION}`,
+      source: `bibliographic-schema-v${LIBRARY_SCHEMA_VERSION}`,
       schemaVersion: LIBRARY_SCHEMA_VERSION,
     };
   }
@@ -327,7 +326,7 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
 
   return {
     version: LIBRARY_SCHEMA_VERSION,
-    source: `zotero-schema-v${LIBRARY_SCHEMA_VERSION}`,
+    source: `bibliographic-schema-v${LIBRARY_SCHEMA_VERSION}`,
     distinctFieldKeys: Array.from(distinctKeys),
     creatorRoles: en.creatorTypes || {},
     baseFieldMappings,

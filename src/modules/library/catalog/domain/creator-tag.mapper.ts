@@ -29,18 +29,14 @@ export {
   cleanSingleIdentifier,
   extractExtraKeyValues,
   normalizeItemIdentifiers,
-  prepareItemAiMetadataPatch,
-} from './identifier-change.helper';
-export type { AiMetadataPatchPreparation } from './identifier-change.helper';
+} from './identifier-change.domain';
 
 export interface ResolvedTag {
   id: string;
   type: TagType;
 }
 
-export function buildTagTypeMap(
-  rawTagList: (TagInput | null | undefined)[],
-): Map<string, TagType> {
+export function buildTagTypeMap(rawTagList: (TagInput | null | undefined)[]): Map<string, TagType> {
   const tagTypeMap = new Map<string, TagType>();
   if (!Array.isArray(rawTagList)) return tagTypeMap;
   for (const rt of rawTagList) {
@@ -50,13 +46,7 @@ export function buildTagTypeMap(
           ? (rt.tag as { name?: unknown; type?: unknown })
           : null;
       const rawName =
-        typeof rt.name === 'string'
-          ? rt.name
-          : typeof rt.tag === 'string'
-            ? rt.tag
-            : typeof innerTag?.name === 'string'
-              ? innerTag.name
-              : '';
+        typeof rt.name === 'string' ? rt.name : typeof rt.tag === 'string' ? rt.tag : typeof innerTag?.name === 'string' ? innerTag.name : '';
       const tagName = rawName.trim();
       if (!tagName) continue;
       const typeVal =
@@ -71,9 +61,7 @@ export function buildTagTypeMap(
             : undefined;
       if (resolvedType) {
         tagTypeMap.set(tagName.toLowerCase(), resolvedType);
-        const normalized = cleanSingleTag(tagName, {
-          allowManualAcademicTerms: resolvedType !== TagType.automatic,
-        });
+        const normalized = cleanSingleTag(tagName, { allowManualAcademicTerms: resolvedType !== TagType.automatic });
         if (normalized) tagTypeMap.set(normalized.toLowerCase(), resolvedType);
       }
     }
@@ -101,10 +89,19 @@ export function resolveExtraPlainText(
   const cleanRaw = typeof rawCandidate === 'string' ? rawCandidate.trim() : '';
 
   const normalizeExtraKey = (k: string) => k.trim().toLowerCase().replace(/[\s_-]+/g, '');
+  const retainedUnmappedNorms = new Set<string>();
+  for (const [pKey, pVal] of Object.entries(patches || {})) {
+    const m = pKey.match(/^__unmapped_[^_]+_(.+)$/i);
+    if (m?.[1] && pVal !== null && pVal !== undefined && pVal !== '') {
+      retainedUnmappedNorms.add(normalizeExtraKey(m[1]));
+    }
+  }
   const patchLookup = new Map<string, { originalKey: string; val: unknown }>();
   for (const [pKey, pVal] of Object.entries(patches || {})) {
     if (!pKey.startsWith('__') && pVal !== undefined) {
-      patchLookup.set(normalizeExtraKey(pKey), { originalKey: pKey, val: pVal });
+      const normK = normalizeExtraKey(pKey);
+      if (pVal === null && retainedUnmappedNorms.has(normK)) continue;
+      patchLookup.set(normK, { originalKey: pKey, val: pVal });
     }
   }
   if (hasDemotedLines) {
@@ -177,7 +174,7 @@ export const IGNORED_SYSTEM_KEYS = new Set([
   'promptUploadPdf', 'lockedFields', '__isSystemUpdate', '__updateSource',
 ]);
 
-export type RecordManualLockInput = ManualLockMutationInput;
+type RecordManualLockInput = ManualLockMutationInput;
 
 export function applyManualEditProvenanceLocks(input: RecordManualLockInput): void {
   const hasExplicitLocks =
@@ -611,7 +608,10 @@ export interface ImportSourceItem {
   itemTags?: Array<{ tag?: { name?: string } }>;
   notesList?: Array<{ title?: string; contentMd?: string; tags?: string[] }>;
   contributors?: Array<{
-    creatorType?: string; firstName?: string | null; lastName?: string | null; fullName?: string; orderIndex?: number;
+    creatorType?: string; fieldMode?: number; firstName?: string | null; lastName?: string | null; fullName?: string; shortName?: string | null; orderIndex?: number;
+  }>;
+  creators?: Array<{
+    creatorType?: string; fieldMode?: number; firstName?: string | null; lastName?: string | null; fullName?: string; name?: string; shortName?: string | null; orderIndex?: number;
   }>;
   identifiers?: Array<{ type: string; value: string; canonicalUri?: string | null }>;
   [key: string]: unknown;
@@ -724,6 +724,7 @@ export function buildImportItemPayload(rawSource: ImportSourceItem, userId: stri
       })) || [],
     creators: mergeCanonicalCreators({
       contributors: source.contributors,
+      creators: source.creators,
       itemType: source.itemType || 'journalArticle',
     }),
     identifiers: source.identifiers?.map((identifier) => ({

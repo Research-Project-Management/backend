@@ -9,48 +9,21 @@ import { ItemQueryService } from '@/modules/library/catalog/services/item-query.
 import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
 import { CollectionsService } from '@/modules/library/catalog/services/collections.service';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
-import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
+import { TypesService, ItemCacheCoordinator } from '@/modules/library/catalog/services/schema-validator.service';
 import { StateService } from '@/modules/library/catalog/services/state.service';
 import { NotesService } from '@/modules/library/catalog/services/notes.service';
 import { ItemDetail, DuplicateCandidateItem, QualityAuditCandidateItem, CreateItemData, UpdateItemData } from '@/modules/library/core/types/bibliographic.types';
 import { NoteEntity, CreateNoteData } from '@/modules/library/catalog/types/catalog.types';
 import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';
 
-export interface LibraryBootstrapOptions {
-  projectId?: string;
-  includeItems?: boolean;
-  view?:
-    | 'all'
-    | 'recent'
-    | 'unfiled'
-    | 'trash'
-    | 'my-publications'
-    | 'publications'
-    | 'starred'
-    | 'retracted';
-  collectionId?: string;
-  collectionIds?: string[];
-  includeSubcollections?: boolean;
-  recursive?: boolean;
-  tagId?: string;
-  tag?: string;
-  search?: string;
-  searchMode?: 'title_creator_year' | 'fields_tags' | 'everything' | string;
-  limit?: number;
-  cursor?: string;
-  page?: number;
-  orderBy?: string;
-  orderDirection?: 'asc' | 'desc';
-  itemType?: string;
-  type?: string;
-  fromYear?: number;
-  toYear?: number;
-  readStatus?: string;
-  hasFile?: boolean;
-  hasNotes?: boolean;
-  fields?: string;
-  onlyFlagged?: boolean;
-  isRetracted?: boolean;
+interface LibraryBootstrapOptions {
+  projectId?: string; includeItems?: boolean;
+  view?: 'all' | 'recent' | 'unfiled' | 'trash' | 'my-publications' | 'publications' | 'starred' | 'retracted';
+  collectionId?: string; collectionIds?: string[]; includeSubcollections?: boolean; recursive?: boolean;
+  tagId?: string; tag?: string; search?: string; searchMode?: 'title_creator_year' | 'fields_tags' | 'everything' | string;
+  limit?: number; cursor?: string; page?: number; orderBy?: string; orderDirection?: 'asc' | 'desc';
+  itemType?: string; type?: string; fromYear?: number; toYear?: number; readStatus?: string;
+  hasFile?: boolean; hasNotes?: boolean; fields?: string; onlyFlagged?: boolean; isRetracted?: boolean;
 }
 
 /**
@@ -236,134 +209,6 @@ export class LibraryBootstrapService {
           : {}),
       };
     });
-  }
-}
-
-/**
- * ItemCacheCoordinator
- * Encapsulates Redis caching and invalidation logic across Item scopes, details, and fulltext entries.
- */
-@Injectable()
-export class ItemCacheCoordinator {
-  private readonly logger = new Logger(ItemCacheCoordinator.name);
-  private readonly isTestEnv = libraryConfig().app.isTest;
-
-  constructor(@Optional() private readonly cache?: RedisCacheService) {}
-
-  /**
-   * Invalidates Redis cache entries for an item and affected library lists.
-   */
-  async invalidateItemCache(
-    id: string,
-    userId?: string,
-    projectId?: string,
-    options?: {
-      skipScopeInvalidation?: boolean;
-      onlyUserStateOverlay?: boolean;
-      preserveContentCaches?: boolean;
-    },
-  ): Promise<void> {
-    if (!this.cache) return;
-    try {
-      await invalidateLibraryScopeCaches(this.cache, {
-        userId,
-        projectId,
-        itemIds: [id],
-        skipScopeInvalidation:
-          options?.skipScopeInvalidation === true || !userId,
-        onlyUserStateOverlay: options?.onlyUserStateOverlay,
-        preserveContentCaches: options?.preserveContentCaches,
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to invalidate cache for item ${id}: ${message}`);
-    }
-  }
-
-  /**
-   * Performs a single scope-level cache invalidation for list/count/tag caches.
-   */
-  async invalidateScopeListCache(
-    userId: string,
-    projectId?: string,
-  ): Promise<void> {
-    if (!this.cache) return;
-    try {
-      await invalidateLibraryScopeCaches(this.cache, {
-        userId,
-        projectId,
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to invalidate scope caches: ${message}`);
-    }
-  }
-
-  /**
-   * Batch invalidates Redis cache entries across multiple items and scopes.
-   */
-  async invalidateBulkItemsCache(
-    itemIds: string[],
-    userId: string,
-    projectId?: string,
-    additionalProjectIds?: Array<string | null | undefined>,
-    options?: {
-      skipScopeInvalidation?: boolean;
-      onlyUserStateOverlay?: boolean;
-      preserveContentCaches?: boolean;
-    },
-  ): Promise<void> {
-    if (itemIds.length === 0 || !this.cache) return;
-    try {
-      await invalidateLibraryScopeCaches(this.cache, {
-        userId,
-        projectId,
-        itemIds,
-        additionalProjectIds,
-        skipScopeInvalidation: options?.skipScopeInvalidation,
-        onlyUserStateOverlay: options?.onlyUserStateOverlay,
-        preserveContentCaches: options?.preserveContentCaches,
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Failed to invalidate bulk item caches (${itemIds.length} items): ${message}`,
-      );
-    }
-  }
-
-  /**
-   * Unified write-path invalidation helper for item mutations across services.
-   */
-  async invalidateForWrite(params: {
-    userId: string;
-    projectId?: string | null;
-    itemIds?: string[];
-    additionalProjectIds?: Array<string | null | undefined>;
-    skipScopeInvalidation?: boolean;
-    onlyUserStateOverlay?: boolean;
-    preserveContentCaches?: boolean;
-  }): Promise<void> {
-    const validProjectId = normalizeProjectScopeId(
-      params.projectId ?? undefined,
-    );
-    if (params.itemIds && params.itemIds.length > 0) {
-      await this.invalidateBulkItemsCache(
-        params.itemIds,
-        params.userId,
-        validProjectId,
-        params.additionalProjectIds,
-        {
-          skipScopeInvalidation: params.skipScopeInvalidation,
-          onlyUserStateOverlay: params.onlyUserStateOverlay,
-          preserveContentCaches: params.preserveContentCaches,
-        },
-      );
-      return;
-    }
-    if (!params.skipScopeInvalidation) {
-      await this.invalidateScopeListCache(params.userId, validProjectId);
-    }
   }
 }
 
@@ -563,24 +408,22 @@ export class CatalogFacade implements ICatalogFacade {
     duplicateItemIds: string[],
     primaryItemId: string,
   ): Promise<void> {
-    await this.tagsService.mergeTagsToItem(tx, duplicateItemIds, primaryItemId);
-    await this.collectionsService.transferItemMemberships(
-      duplicateItemIds,
-      primaryItemId,
-      tx,
-    );
-    await this.stateService.transferUserItemStates(
-      tx,
-      duplicateItemIds,
-      primaryItemId,
-    );
-    if (this.notesService) {
-      await this.notesService.reassignToItem(
+    await Promise.all([
+      this.tagsService.mergeTagsToItem(tx, duplicateItemIds, primaryItemId),
+      this.collectionsService.transferItemMemberships(
         duplicateItemIds,
         primaryItemId,
         tx,
-      );
-    }
+      ),
+      this.stateService.transferUserItemStates(
+        tx,
+        duplicateItemIds,
+        primaryItemId,
+      ),
+      this.notesService
+        ? this.notesService.reassignToItem(duplicateItemIds, primaryItemId, tx)
+        : Promise.resolve(),
+    ]);
   }
 
   async listNotes(

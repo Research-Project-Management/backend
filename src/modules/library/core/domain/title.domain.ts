@@ -1,3 +1,7 @@
+import * as zlib from 'zlib';
+import { promisify } from 'util';
+import { randomBytes } from 'crypto';
+import { BaseDomainException } from '../errors/domain.exception';
 import {
   SPECIAL_CASE_WORDS,
   COMMON_ACRONYMS,
@@ -122,7 +126,7 @@ export function normalizeTitleCase(title?: string | null): string {
  * Only activates when the title contains at least 3 isolated single-capital + word pairs,
  * preventing any false positives on normal titles like "A Survey of X" or "X-Ray Analysis".
  */
-export function collapseFragmentedSmallCapsTokens(title: string): string {
+function collapseFragmentedSmallCapsTokens(title: string): string {
   if (!title || typeof title !== 'string') return '';
   const pairMatches = title.match(/(?:^|[\s\-–—:(])\p{Lu}\s+\p{Lu}\p{Ll}+/gu);
   if (!pairMatches || pairMatches.length < 3) {
@@ -505,4 +509,134 @@ export function hasAuthorAndYearCorroboration(
     if (surnamesB.has(s)) return true;
   }
   return false;
+}
+
+export const gzipAsync = promisify(zlib.gzip);
+export const gunzipAsync = promisify(zlib.gunzip);
+
+export const MAX_SAFE_HTTP_PAYLOAD_BYTES = 100 * 1024 * 1024; // 100 MB upper limit
+const MAX_SAFE_TEXT_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB default for HTML/XML/JSON
+
+export class PayloadTooLargeException extends BaseDomainException {
+  override readonly code = 'LIBRARY_PAYLOAD_TOO_LARGE';
+
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, details);
+    this.name = 'PayloadTooLargeException';
+  }
+}
+
+export async function readSafeResponseBuffer(
+  response: Response,
+  maxBytes = MAX_SAFE_HTTP_PAYLOAD_BYTES,
+): Promise<Buffer> {
+  const contentLengthHeader = response.headers?.get?.('content-length');
+  if (contentLengthHeader) {
+    const declaredLength = parseInt(contentLengthHeader, 10);
+    if (!isNaN(declaredLength) && declaredLength > maxBytes) {
+      throw new PayloadTooLargeException(
+        `Payload size (${(declaredLength / (1024 * 1024)).toFixed(1)} MB) exceeds safe OS limit of ${(maxBytes / (1024 * 1024)).toFixed(0)} MB`,
+      );
+    }
+  }
+
+  const streamBody = response.body as ReadableStream<Uint8Array> | null;
+  if (streamBody && typeof streamBody.getReader === 'function') {
+    const reader = streamBody.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          totalBytes += value.length;
+          if (totalBytes > maxBytes) {
+            await reader.cancel();
+            throw new PayloadTooLargeException(
+              `Stream exceeded safe OS payload limit of ${(maxBytes / (1024 * 1024)).toFixed(0)} MB`,
+            );
+          }
+          chunks.push(value);
+        }
+      }
+    } finally {
+      if (typeof reader.releaseLock === 'function') {
+        reader.releaseLock();
+      }
+    }
+
+    return Buffer.concat(chunks, totalBytes);
+  }
+
+  const arrayBuf = await response.arrayBuffer();
+  if (arrayBuf.byteLength > maxBytes) {
+    throw new PayloadTooLargeException(
+      `Response buffer (${(arrayBuf.byteLength / (1024 * 1024)).toFixed(1)} MB) exceeds safe OS limit of ${(maxBytes / (1024 * 1024)).toFixed(0)} MB`,
+    );
+  }
+  return Buffer.from(arrayBuf);
+}
+
+export async function readSafeResponseText(
+  response: Response,
+  maxBytes = MAX_SAFE_TEXT_PAYLOAD_BYTES,
+): Promise<string> {
+  const streamBody = response.body as ReadableStream<Uint8Array> | null;
+  if (
+    (streamBody && typeof streamBody.getReader === 'function') ||
+    typeof response.arrayBuffer === 'function'
+  ) {
+    const buf = await readSafeResponseBuffer(response, maxBytes);
+    return buf.toString('utf-8');
+  }
+  const text = await response.text();
+  if (Buffer.byteLength(text, 'utf-8') > maxBytes) {
+    throw new PayloadTooLargeException(
+      `Text payload exceeds safe limit of ${(maxBytes / (1024 * 1024)).toFixed(0)} MB`,
+    );
+  }
+  return text;
+}
+
+let lastTime = 0;
+let seq = 0;
+
+/**
+ * Generates an RFC 9562 compliant UUID v7 string using Node's native `crypto`.
+ * Time-ordered 128-bit identifier with 48-bit millisecond precision and monotonic sequence.
+ */
+export function uuidv7(): string {
+  const bytes = randomBytes(16);
+
+  const now = Date.now();
+  if (now > lastTime) {
+    lastTime = now;
+    seq = ((bytes[6] & 0x0f) << 8) | bytes[7];
+  } else {
+    seq = (seq + 1) & 0x0fff;
+  }
+
+  bytes[0] = Math.floor(now / 0x10000000000) & 0xff;
+  bytes[1] = Math.floor(now / 0x100000000) & 0xff;
+  bytes[2] = Math.floor(now / 0x1000000) & 0xff;
+  bytes[3] = Math.floor(now / 0x10000) & 0xff;
+  bytes[4] = Math.floor(now / 0x100) & 0xff;
+  bytes[5] = now & 0xff;
+
+  bytes[6] = 0x70 | ((seq >> 8) & 0x0f);
+  bytes[7] = seq & 0xff;
+
+  bytes[8] = 0x80 | (bytes[8] & 0x3f);
+
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(val?: string | null): boolean {
+  return typeof val === 'string' && UUID_REGEX.test(val);
 }

@@ -1,8 +1,8 @@
 import { Controller, Get, Post, Body, Param, Query, UseGuards, NotFoundException, BadRequestException, Header } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { CitationService } from '@/modules/library/citation/services/citation.service';
-import { FormatCitationDto, FormatBatchCitationDto, ExportLibraryDto, ExportByKeysDto, ExportFormatType } from '@/modules/library/citation/types/citation.types';
-import { normalizeCitationStyleId } from '@/modules/library/citation/domain/citation.domain';
+import { FormatCitationDto, FormatBatchCitationDto, ExportLibraryDto, ExportByKeysDto } from '@/modules/library/citation/dto/citation.dto';
+import { ExportFormatType } from '@/modules/library/citation/types/citation.types';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ProjectAccessGuard, ProjectRoles, ProjectRole } from '@/modules/project/access';
@@ -245,7 +245,6 @@ export class CitationController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') routeProjectId?: string,
   ) {
-    const styleId = normalizeCitationStyleId(style);
     const parsedIndex = index ? parseInt(index, 10) : 1;
     const numIndex =
       Number.isFinite(parsedIndex) && parsedIndex > 0 ? parsedIndex : 1;
@@ -260,7 +259,7 @@ export class CitationController {
     const res = await this.citationService.formatItemById(
       userId,
       itemId,
-      styleId,
+      style,
       numIndex,
       projectId,
       hasContext
@@ -299,7 +298,6 @@ export class CitationController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') routeProjectId?: string,
   ) {
-    const styleId = normalizeCitationStyleId(style);
     const rawIds = Array.isArray(itemIds) ? itemIds : [];
     // Safety guard: Deduplicate and cap batch at 100 items to protect Node.js event loop
     const ids = Array.from(new Set(rawIds)).slice(0, 100);
@@ -310,7 +308,7 @@ export class CitationController {
     return this.citationService.formatItemBatch(
       userId,
       ids,
-      styleId,
+      style,
       projectId,
     );
   }

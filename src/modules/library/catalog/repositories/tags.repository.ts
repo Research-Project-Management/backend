@@ -3,7 +3,7 @@ import { PrismaService } from '@/core';
 import { Prisma, TagType } from '@prisma/client';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
-import { resolveOrCreateTags } from '@/modules/library/catalog/repositories/command-relations.helper';
+import { resolveOrCreateTags } from '@/modules/library/catalog/repositories/command-relations.operations';
 
 @Injectable()
 export class TagsRepository {
@@ -58,25 +58,6 @@ export class TagsRepository {
             },
           },
         },
-      },
-    });
-  }
-
-  async findByName(
-    userId: string,
-    name: string,
-    tx?: Prisma.TransactionClient,
-    projectId?: string,
-  ) {
-    const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere = validProjectId
-      ? { projectId: validProjectId }
-      : { userId, projectId: null };
-    return client.tag.findFirst({
-      where: {
-        name: { equals: name, mode: 'insensitive' },
-        ...scopeWhere,
       },
     });
   }
@@ -265,31 +246,35 @@ export class TagsRepository {
           (l) => !targetItemIds.has(l.itemId),
         );
 
-        if (missingLinks.length > 0) {
-          await client.itemTag.createMany({
-            data: missingLinks.map((l) => ({
-              tagId: conflictingTag.id,
-              itemId: l.itemId,
-              type: l.type ?? tag.type ?? TagType.manual,
-            })),
-            skipDuplicates: true,
-          });
-        }
-        await client.itemTag.deleteMany({
-          where: { tagId: tag.id },
-        });
-        await client.tag.delete({
-          where: { id: tag.id },
-        });
-        const updatedConflicting = await client.tag.update({
-          where: { id: conflictingTag.id },
-          data: {
-            ...(data.color !== undefined ? { color: data.color } : {}),
-            ...(data.type !== undefined ? { type: data.type } : {}),
-            ...(data.shortcut !== undefined ? { shortcut: data.shortcut } : {}),
-            version: { increment: 1 },
-          },
-        });
+        await Promise.all([
+          missingLinks.length > 0
+            ? client.itemTag.createMany({
+                data: missingLinks.map((l) => ({
+                  tagId: conflictingTag.id,
+                  itemId: l.itemId,
+                  type: l.type ?? tag.type ?? TagType.manual,
+                })),
+                skipDuplicates: true,
+              })
+            : Promise.resolve(),
+          client.itemTag.deleteMany({
+            where: { tagId: tag.id },
+          }),
+        ]);
+        const [, updatedConflicting] = await Promise.all([
+          client.tag.delete({
+            where: { id: tag.id },
+          }),
+          client.tag.update({
+            where: { id: conflictingTag.id },
+            data: {
+              ...(data.color !== undefined ? { color: data.color } : {}),
+              ...(data.type !== undefined ? { type: data.type } : {}),
+              ...(data.shortcut !== undefined ? { shortcut: data.shortcut } : {}),
+              version: { increment: 1 },
+            },
+          }),
+        ]);
         return Object.assign(updatedConflicting, {
           _mergedFromTagId: tag.id,
         });
@@ -642,29 +627,24 @@ export class TagsRepository {
       }
     }
 
-    if (newEntries.length > 0) {
-      await client.itemTag.createMany({
-        data: newEntries,
-        skipDuplicates: true,
-      });
-    }
-
-    if (upgradeTagIds.length > 0 && typeof client.itemTag.updateMany === 'function') {
-      await client.itemTag.updateMany({
-        where: {
-          itemId: targetItemId,
-          tagId: { in: upgradeTagIds },
-          type: TagType.automatic,
-        },
-        data: {
-          type: TagType.manual,
-        },
-      });
-    }
-
-    await client.itemTag.deleteMany({
-      where: { itemId: { in: sourceItemIds } },
-    });
+    await Promise.all([
+      newEntries.length > 0
+        ? client.itemTag.createMany({ data: newEntries, skipDuplicates: true })
+        : Promise.resolve(),
+      upgradeTagIds.length > 0 && typeof client.itemTag.updateMany === 'function'
+        ? client.itemTag.updateMany({
+            where: {
+              itemId: targetItemId,
+              tagId: { in: upgradeTagIds },
+              type: TagType.automatic,
+            },
+            data: { type: TagType.manual },
+          })
+        : Promise.resolve(),
+      client.itemTag.deleteMany({
+        where: { itemId: { in: sourceItemIds } },
+      }),
+    ]);
   }
 
   async splitTag(

@@ -1,10 +1,10 @@
 import { CreatorCreditInput } from '@/modules/library/core/types/bibliographic.types';
-import { resolveCanonicalCreatorRole, getPrimaryCreatorRoleForType } from './zotero-field-harmonizer.domain';
+import { resolveCanonicalCreatorRole, getPrimaryCreatorRoleForType } from './field-harmonizer.domain';
 import { cleanAuthorName, isNoiseAuthorName, isInstitutionName, splitAuthorString, parseCreatorString } from './author.domain';
 import { SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
 import { ITEM_TYPE_ALIASES, CSL_TYPE_TO_ITEM_TYPE } from '@/modules/library/core/domain/text.lexicon';
 
-export function extractCreatorString(input: unknown): string {
+function extractCreatorString(input: unknown): string {
   if (!input) return '';
   if (typeof input === 'string') return input;
   if (typeof input === 'object' && input !== null) {
@@ -339,7 +339,7 @@ export function mapCslTypeToZoteroItemType(cslType?: string | null): string {
   return 'journalArticle';
 }
 
-export interface PdfItemTypeSignals {
+interface PdfItemTypeSignals {
   title?: string;
   notes?: Array<string | { content?: string }>;
   journal?: string;
@@ -352,7 +352,7 @@ export interface PdfItemTypeSignals {
   rawText?: string;
 }
 
-export interface InferredItemType {
+interface InferredItemType {
   itemType: string;
   /** 0–1 confidence: how certain the heuristic is */
   confidence: number;

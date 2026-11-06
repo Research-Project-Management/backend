@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
+import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
 import { ItemsMapper } from '@/modules/library/core';
 import {
   TypeConversionPreview,
@@ -16,9 +16,9 @@ import {
   ItemFieldDefinition,
   CreatorTypeDefinition,
 } from '@/modules/library/core/types/schema.types';
-import { applyStructuralTypeConversionRules } from '../domain/type-conversion-rules.domain';
+import { applyStructuralTypeConversionRules } from '../domain/type-conversion.policy';
 
-export interface IItemTransformerPort {
+interface IItemTransformerPort {
   getItemFieldValue(item: Record<string, unknown>, key: string): unknown;
   findMatchingTargetField(
     sourceKey: string,

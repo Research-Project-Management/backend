@@ -18,7 +18,7 @@ import { NoteController } from './controllers/notes.controller';
 
 // Services
 import { ItemService } from './services/items.service';
-import { ItemCacheCoordinator } from './services/library-bootstrap.service';
+import { ItemCacheCoordinator } from './services/schema-validator.service';
 import { ItemQueryService } from './services/item-query.service';
 import { ItemFulltextService } from './services/item-relations.service';
 import { ItemTypeConversionService } from './services/item-type-conversion.service';
@@ -26,16 +26,17 @@ import { ItemCurationService } from './services/item-curation.service';
 import { ItemRelationsService } from './services/item-relations.service';
 import { CollectionsService } from './services/collections.service';
 import { TagsService } from './services/tags.service';
-import { TypesService } from './services/zotero-schema-validator.service';
+import { TypesService } from './services/schema-validator.service';
 import { LibraryBootstrapService } from './services/library-bootstrap.service';
+import { ReaderBootstrapService } from './services/reader-bootstrap.service';
 import { StateService } from './services/state.service';
 import { SavedSearchesService } from './services/saved-searches.service';
-import { ZoteroSchemaValidatorService } from './services/zotero-schema-validator.service';
+import { SchemaValidatorService } from './services/schema-validator.service';
 import { NotesService } from './services/notes.service';
 
 // Engines & Mappers
 import { TreeEngine } from './domain/state.domain';
-import { ConditionEvaluatorEngine } from './domain/condition-evaluator.engine';
+import { ConditionEvaluatorEngine } from './domain/condition-evaluator.policy';
 import { ItemsMapper } from '@/modules/library/core';
 import { ItemTransformer } from './services/item.transformer';
 
@@ -96,9 +97,10 @@ import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core';
     TypesService,
     StateService,
     SavedSearchesService,
-    ZoteroSchemaValidatorService,
+    SchemaValidatorService,
     NotesService,
     LibraryBootstrapService,
+    ReaderBootstrapService,
 
     // Engines & Mappers
     TreeEngine,

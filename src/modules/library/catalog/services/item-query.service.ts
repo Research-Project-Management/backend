@@ -16,13 +16,13 @@ import {
 } from '@/modules/library/core/types/bibliographic.types';
 import { AccessService, Permission } from '@/modules/project/access';
 
-export interface LibraryPermissionsContract {
+interface LibraryPermissionsContract {
   canRead: boolean; canCreateItem: boolean; canEditItem: boolean; canDeleteItem: boolean;
   canPurgeItem: boolean; canManageCollections: boolean; canImport: boolean;
   canExport: boolean; canAnnotate: boolean;
 }
 
-export interface LibraryScopeAccessContract {
+interface LibraryScopeAccessContract {
   scope: 'personal' | 'project';
   role: 'owner' | 'coordinator' | 'contributor' | 'reviewer';
   permissions: LibraryPermissionsContract;

@@ -5,12 +5,20 @@ import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { NotesService } from '@/modules/library/catalog/services/notes.service';
-import { CreateNoteDto, UpdateNoteDto, ExtractNotesFromAnnotationsDto } from '@/modules/library/catalog/dto/collections.dto';
-import { TagType } from '@prisma/client';
+import {
+  CreateNoteDto,
+  UpdateNoteDto,
+  ExtractNotesFromAnnotationsDto,
+  CreateTagDto,
+  UpdateTagDto,
+  SplitTagDto,
+  CreateSavedSearchDto,
+  UpdateSavedSearchDto,
+  PreviewSavedSearchDto,
+  ExecuteSavedSearchQueryDto,
+} from '@/modules/library/catalog/dto/collections.dto';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
-import { CreateTagDto, UpdateTagDto, SplitTagDto } from '@/modules/library/catalog/dto/collections.dto';
 import { SavedSearchesService } from '@/modules/library/catalog/services/saved-searches.service';
-import { CreateSavedSearchDto, UpdateSavedSearchDto, PreviewSavedSearchDto, ExecuteSavedSearchQueryDto } from '@/modules/library/catalog/types/catalog.types';
 
 @ApiTags('Library Notes')
 @ApiBearerAuth('JWT-auth')

@@ -2,8 +2,13 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, ReadStatus } from '@prisma/client';
 import { normalizeProjectScopeId, VersionMismatchException, collectDescendantCollectionIds } from '@/modules/library/core';
-import { CreateSavedSearchDto, UpdateSavedSearchDto } from '@/modules/library/catalog/types/catalog.types';
-import { ExecuteSavedSearchOptions, StateEntity, UpsertStateData } from '@/modules/library/catalog/types/catalog.types';
+import {
+  ExecuteSavedSearchOptions,
+  StateEntity,
+  UpsertStateData,
+  type CreateSavedSearchInput,
+  type UpdateSavedSearchInput,
+} from '@/modules/library/catalog/types/catalog.types';
 import { pickPreferredMergedState } from '@/modules/library/catalog/domain/state.domain';
 
 @Injectable()
@@ -46,7 +51,7 @@ export class SavedSearchesRepository {
 
   async create(
     userId: string,
-    dto: CreateSavedSearchDto,
+    dto: CreateSavedSearchInput,
     projectId?: string,
     tx?: Prisma.TransactionClient,
     initialCount?: number,
@@ -114,7 +119,7 @@ export class SavedSearchesRepository {
   async update(
     userId: string,
     id: string,
-    dto: UpdateSavedSearchDto,
+    dto: UpdateSavedSearchInput,
     projectId?: string,
     tx?: Prisma.TransactionClient,
   ) {
@@ -508,36 +513,74 @@ export class StateRepository {
         ? (scrollObj.bookmarks as Prisma.InputJsonValue)
         : undefined;
 
-      await client.attachmentReadingState.upsert({
-        where: {
-          userId_attachmentId: {
+      const [upsertedState] = await Promise.all([
+        client.state.upsert({
+          where: {
+            userId_itemId: {
+              userId,
+              itemId,
+            },
+          },
+          create: {
+            userId,
+            itemId,
+            isStarred: data.isStarred ?? false,
+            readStatus: dbReadStatus,
+            rating: data.rating,
+            currentPage: data.currentPage ?? 1,
+            scrollPosition: scrollJson ?? Prisma.JsonNull,
+            ...(resolvedAttachmentId
+              ? { lastActiveAttachmentId: resolvedAttachmentId }
+              : {}),
+            lastOpenedAt: data.lastOpenedAt ?? new Date(),
+            lastReadAt: data.lastReadAt,
+          },
+          update: {
+            isStarred: data.isStarred,
+            readStatus: dbReadStatus,
+            rating: data.rating,
+            currentPage: data.currentPage,
+            scrollPosition: scrollJson,
+            ...(resolvedAttachmentId
+              ? { lastActiveAttachmentId: resolvedAttachmentId }
+              : {}),
+            lastOpenedAt: data.lastOpenedAt,
+            lastReadAt: data.lastReadAt,
+          },
+          select: STATE_SELECT,
+        }),
+        client.attachmentReadingState.upsert({
+          where: {
+            userId_attachmentId: {
+              userId,
+              attachmentId: resolvedAttachmentId,
+            },
+          },
+          create: {
             userId,
             attachmentId: resolvedAttachmentId,
+            itemId,
+            ...(currentPage !== undefined ? { currentPage } : {}),
+            ...(scrollOffsetX !== undefined ? { scrollOffsetX } : {}),
+            ...(scrollOffsetY !== undefined ? { scrollOffsetY } : {}),
+            ...(zoomScale !== undefined ? { zoomScale } : {}),
+            ...(rotation !== undefined ? { rotation } : {}),
+            ...(viewMode !== undefined ? { viewMode } : {}),
+            ...(bookmarks !== undefined ? { bookmarks } : {}),
           },
-        },
-        create: {
-          userId,
-          attachmentId: resolvedAttachmentId,
-          itemId,
-          ...(currentPage !== undefined ? { currentPage } : {}),
-          ...(scrollOffsetX !== undefined ? { scrollOffsetX } : {}),
-          ...(scrollOffsetY !== undefined ? { scrollOffsetY } : {}),
-          ...(zoomScale !== undefined ? { zoomScale } : {}),
-          ...(rotation !== undefined ? { rotation } : {}),
-          ...(viewMode !== undefined ? { viewMode } : {}),
-          ...(bookmarks !== undefined ? { bookmarks } : {}),
-        },
-        update: {
-          ...(currentPage !== undefined ? { currentPage } : {}),
-          ...(scrollOffsetX !== undefined ? { scrollOffsetX } : {}),
-          ...(scrollOffsetY !== undefined ? { scrollOffsetY } : {}),
-          ...(zoomScale !== undefined ? { zoomScale } : {}),
-          ...(rotation !== undefined ? { rotation } : {}),
-          ...(viewMode !== undefined ? { viewMode } : {}),
-          ...(bookmarks !== undefined ? { bookmarks } : {}),
-          version: { increment: 1 },
-        },
-      });
+          update: {
+            ...(currentPage !== undefined ? { currentPage } : {}),
+            ...(scrollOffsetX !== undefined ? { scrollOffsetX } : {}),
+            ...(scrollOffsetY !== undefined ? { scrollOffsetY } : {}),
+            ...(zoomScale !== undefined ? { zoomScale } : {}),
+            ...(rotation !== undefined ? { rotation } : {}),
+            ...(viewMode !== undefined ? { viewMode } : {}),
+            ...(bookmarks !== undefined ? { bookmarks } : {}),
+            version: { increment: 1 },
+          },
+        }),
+      ]);
+      return upsertedState;
     }
 
     return client.state.upsert({
@@ -612,8 +655,8 @@ export class StateRepository {
       userStateByUser.set(us.userId, list);
     }
 
-    await Promise.all(
-      Array.from(userStateByUser.entries()).map(([userId, states]) => {
+    await Promise.all([
+      ...Array.from(userStateByUser.entries()).map(([userId, states]) => {
         const merged = pickPreferredMergedState(states);
         const targetState = states.find((s) => s.itemId === targetItemId) as
           | { lastActiveAttachmentId?: string | null }
@@ -667,17 +710,15 @@ export class StateRepository {
           },
         });
       }),
-    );
-
-    if (typeof client.attachmentReadingState?.updateMany === 'function') {
-      await client.attachmentReadingState.updateMany({
+      typeof client.attachmentReadingState?.updateMany === 'function'
+        ? client.attachmentReadingState.updateMany({
+            where: { itemId: { in: cleanSourceIds } },
+            data: { itemId: targetItemId },
+          })
+        : undefined,
+      client.state.deleteMany({
         where: { itemId: { in: cleanSourceIds } },
-        data: { itemId: targetItemId },
-      });
-    }
-
-    await client.state.deleteMany({
-      where: { itemId: { in: cleanSourceIds } },
-    });
+      }),
+    ]);
   }
 }

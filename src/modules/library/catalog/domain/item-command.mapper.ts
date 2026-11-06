@@ -2,33 +2,27 @@ import { Prisma, TagType } from '@prisma/client';
 import { generateCitationKey } from '@/modules/library/core/domain/identifier.domain';
 import {
   cleanAbstractText, getEffectiveBaseFieldMap, getEffectiveReverseBaseFieldMap,
-  getPrimaryCreatorRoleForType, getValidCreatorMapForType, harmonizeZoteroFields, normalizeTags, sanitizeItemTitle,
+  getPrimaryCreatorRoleForType, getValidCreatorMapForType, harmonizeBibliographicFields, normalizeTags, sanitizeItemTitle,
 } from '@/modules/library/core';
 import {
   ITEM_COLUMN_METADATA_FIELDS, FIELD_ALIASES, BASE_FIELD_MAPPINGS, parseAccessDate, TagInput,
 } from '@/modules/library/catalog/types/catalog.types';
 import { CreateItemData, UpdateItemData, ItemDetail } from '@/modules/library/core/types/bibliographic.types';
-import {
-  isUuid, cleanSingleIdentifier, extractExtraKeyValues, normalizeItemIdentifiers, resolveExtraPlainText,
-  extractNonColumnExtraFields, convertHtmlToMarkdown, buildTipTapDocFromText, prepareNotesToCreate,
-  prepareAttachmentsToCreate, deriveFirstAuthor, prepareContributorsToCreate, applyManualEditProvenanceLocks,
-  prepareItemAiMetadataPatch, buildImportItemPayload, buildTagTypeMap, ResolvedTag,
-  ImportSourceItem, AiMetadataPatchPreparation, IGNORED_SYSTEM_KEYS,
-} from './creator-tag-payload.builder';
+import { isUuid, extractExtraKeyValues, normalizeItemIdentifiers, resolveExtraPlainText, extractNonColumnExtraFields, prepareNotesToCreate, prepareAttachmentsToCreate, deriveFirstAuthor, prepareContributorsToCreate, applyManualEditProvenanceLocks, ResolvedTag, ImportSourceItem, IGNORED_SYSTEM_KEYS } from './creator-tag.mapper';
 import {
   buildDeduplicatedIdentifiers, buildCollectionItemsUpdatePatch, syncMetadataIdentifierAliases,
   IDENTIFIER_URI_BUILDERS, calculateIdentifierChanges, buildMyPublicationMetadata, applyMetadataProvenanceAndTelemetry,
   cleanExtraFromClearedIds,
-} from './identifier-change.helper';
+} from './identifier-change.domain';
 
-export * from './creator-tag-payload.builder';
-export type { ResolvedTag, ImportSourceItem, AiMetadataPatchPreparation };
+export * from './creator-tag.mapper';
+export type { ResolvedTag, ImportSourceItem };
 export {
   ITEM_COLUMN_METADATA_FIELDS, IDENTIFIER_URI_BUILDERS, buildDeduplicatedIdentifiers, calculateIdentifierChanges,
   buildMyPublicationMetadata, buildCollectionItemsUpdatePatch, syncMetadataIdentifierAliases, cleanExtraFromClearedIds,
 };
 
-export interface CanonicalCommandFields {
+interface CanonicalCommandFields {
   itemType: string; baseMap: Record<string, string>; effectiveExtraFields: Record<string, unknown>;
   rawTitle: string | undefined; rawPubTitle: string | null | undefined; rawPublisher: string | null | undefined;
   rawPubDate: string | null | undefined; extractedYear: number | null; rawPlace: string | null | undefined;
@@ -41,13 +35,13 @@ export interface CanonicalCommandFields {
   rawTypeField: string | null | undefined;
 }
 
-export const VENUE_BASE_FIELDS: ReadonlyArray<string> = Array.from(
+const VENUE_BASE_FIELDS: ReadonlyArray<string> = Array.from(
   new Set([...Object.values(BASE_FIELD_MAPPINGS).map((m) => m.publicationTitle).filter(Boolean), 'reporter', 'code']),
 );
-export const ALL_MAPPED_PUBLISHER_KEYS: ReadonlyArray<string> = Array.from(
+const ALL_MAPPED_PUBLISHER_KEYS: ReadonlyArray<string> = Array.from(
   new Set(Object.values(BASE_FIELD_MAPPINGS).map((m) => m.publisher).filter(Boolean)),
 );
-export const COUPLED_TYPE_SPECIFIC_TO_BASE: Readonly<Record<string, ReadonlyArray<string>>> = {
+const COUPLED_TYPE_SPECIFIC_TO_BASE: Readonly<Record<string, ReadonlyArray<string>>> = {
   reporter: ['publicationTitle'], code: ['publicationTitle'], caseName: ['title'],
   nameOfAct: ['title'], subject: ['title'], eventPlace: ['place'], country: ['place'],
   dateDecided: ['date', 'publicationDate'], dateEnacted: ['date', 'publicationDate'],
@@ -56,7 +50,7 @@ export const COUPLED_TYPE_SPECIFIC_TO_BASE: Readonly<Record<string, ReadonlyArra
   docketNumber: ['issue', 'number'], publicLawNumber: ['issue', 'number'],
   patentNumber: ['issue', 'number'], reportNumber: ['issue', 'number'],
 };
-export const DIRECT_STRING_METADATA_KEYS = [
+const DIRECT_STRING_METADATA_KEYS = [
   'section', 'partNumber', 'partTitle', 'series', 'seriesTitle', 'seriesText',
   'language', 'shortTitle', 'libraryCatalog', 'archive', 'archiveLocation',
   'callNumber', 'openAccessPdfUrl',
@@ -157,7 +151,7 @@ export function resolveCanonicalCommandFields(
       : candidateType && candidateType.toLowerCase() !== targetItemType.toLowerCase() ? candidateType : undefined;
 
   if (!(dataRecord as { isPreNormalized?: boolean }).isPreNormalized) {
-    const harmonizedProbe = harmonizeZoteroFields(
+    const harmonizedProbe = harmonizeBibliographicFields(
       { ...dataRecord, itemType: targetItemType, extraFields: { ...effectiveExtraFields, ...dataExtra } },
       { itemType: targetItemType, syncExtraFields: true },
     );
@@ -424,7 +418,7 @@ export function buildMetadataPartial(params: {
   return result;
 }
 
-export interface PreResolvedCreateRelations {
+interface PreResolvedCreateRelations {
   resolvedTags?: ReadonlyArray<ResolvedTag>;
   validCollectionIds?: ReadonlySet<string>;
   disambiguatedCitationKey?: string | null;

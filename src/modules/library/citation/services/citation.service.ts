@@ -1,15 +1,12 @@
 import { Injectable, Logger, BadRequestException, NotFoundException, Optional, Inject } from '@nestjs/common';
-import { CslStyleRegistry, BUILTIN_SPECIAL_STYLES, NUMERIC_STYLE_TOKENS, MAX_DYNAMIC_CSL_STYLES, normalizeEngineStyleId } from '@/modules/library/citation/domain/citation.domain';
-import { CitationStyleId, CitationItemInput, CitationContextOptions, FormattedCitationResult, ReferenceData, CatalogItemRecord, ExportResult } from '@/modules/library/citation/types/citation.types';
-import { CATALOG_FACADE, METADATA_PORT, ICatalogFacade, HttpClient, normalizeProjectScopeId, CITATION_FACADE, ICitationFacade as ICoreCitationFacade } from '@/modules/library/core';
+import { CslStyleRegistry, BUILTIN_SPECIAL_STYLES, NUMERIC_STYLE_TOKENS, MAX_DYNAMIC_CSL_STYLES, normalizeCitationStyleId } from '@/modules/library/citation/domain/citation.domain';
+import { CitationStyleId, CitationItemInput, CitationContextOptions, FormattedCitationResult, ReferenceData, CatalogItemRecord } from '@/modules/library/citation/types/citation.types';
+import { CATALOG_FACADE, METADATA_PORT, ICatalogFacade, HttpClient, normalizeProjectScopeId } from '@/modules/library/core';
 import { DoiContentNegotiationService } from './doi-content-negotiation.service';
 import { CslEngineService } from './csl-engine.service';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslRepositoryService } from './csl-repository.service';
 import { QueryResolverService, MetadataPortResolveResult } from './query-resolver.service';
-import { IEEE_CSL, NATURE_CSL, CHICAGO_CSL, MLA_CSL, VI_VN_LOCALE } from '@/modules/library/citation/data/official-styles.data';
-import { ExportsService } from '@/modules/library/citation/services/exports.service';
-import { ExportLibraryDto } from '@/modules/library/citation/types/citation.types';
 
 export type { ReferenceData };
 export { QueryResolverService };
@@ -247,36 +244,39 @@ export class CitationService {
   async formatItemById(
     userId: string,
     itemId: string,
-    styleId: CitationStyleId = 'apa-7th',
+    styleId: CitationStyleId | string = 'apa-7th',
     index: number = 1,
     projectId?: string,
     context?: CitationContextOptions,
   ): Promise<FormattedCitationResult> {
+    const normalizedStyleId = normalizeCitationStyleId(styleId);
     const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const item = this.catalogGateway
-      ? await this.catalogGateway.getItem<CatalogItemRecord>(
-          userId,
-          itemId,
-          effectiveProjectId,
-        )
-      : null;
+    const scopeId = effectiveProjectId || userId;
+    const [item] = await Promise.all([
+      this.catalogGateway
+        ? this.catalogGateway.getItem<CatalogItemRecord>(
+            userId,
+            itemId,
+            effectiveProjectId,
+          )
+        : Promise.resolve(null),
+      this.cslEngine.ensureTemplate(normalizedStyleId, scopeId),
+    ]);
 
     if (!item) {
       throw new NotFoundException('Item not found in library');
     }
 
-    const scopeId = effectiveProjectId || userId;
-    await this.cslEngine.ensureTemplate(styleId, scopeId);
     const cslItem = CslJsonMapper.toCsl(item);
     const engineRes = this.cslEngine.format(
       cslItem,
-      styleId,
+      normalizedStyleId,
       index,
       scopeId,
       context,
     );
     return {
-      styleId,
+      styleId: normalizedStyleId,
       inText: engineRes.inText,
       bibliography: engineRes.bibliography,
       bibliographyHtml: engineRes.bibliographyHtml,
@@ -290,17 +290,24 @@ export class CitationService {
   async formatItemBatch(
     userId: string,
     itemIds: string[],
-    styleId: CitationStyleId = 'apa-7th',
+    styleId: CitationStyleId | string = 'apa-7th',
     projectId?: string,
   ) {
+    const normalizedStyleId = normalizeCitationStyleId(styleId);
     const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const rawItems = this.catalogGateway
-      ? await this.catalogGateway.findByIds<CatalogItemRecord>(
-          userId,
-          itemIds,
-          effectiveProjectId,
-        )
-      : [];
+    const scopeId = effectiveProjectId || userId;
+    const [rawItems] = await Promise.all([
+      this.catalogGateway
+        ? this.catalogGateway.findByIds<CatalogItemRecord>(
+            userId,
+            itemIds,
+            effectiveProjectId,
+          )
+        : Promise.resolve([]),
+      itemIds.length > 0
+        ? this.cslEngine.ensureTemplate(normalizedStyleId, scopeId)
+        : Promise.resolve(false),
+    ]);
     const itemMap = new Map<string, CatalogItemRecord>();
     for (const it of rawItems) {
       if (it?.id) itemMap.set(it.id, it);
@@ -311,24 +318,22 @@ export class CitationService {
 
     if (items.length === 0) {
       return {
-        style: styleId,
+        style: normalizedStyleId,
         total: 0,
         combinedInText: '',
         bibliographyText: '',
         bibliographyHtml: '',
         citations: itemIds.map((id) => ({
           itemId: id,
-          citation: { styleId, inText: '', bibliography: '' },
+          citation: { styleId: normalizedStyleId, inText: '', bibliography: '' },
         })),
       };
     }
 
-    const scopeId = effectiveProjectId || userId;
-    await this.cslEngine.ensureTemplate(styleId, scopeId);
     const cslItems = items.map((it) => CslJsonMapper.toCsl(it));
     const batchRes = await this.cslEngine.formatBatchAsync(
       cslItems,
-      styleId,
+      normalizedStyleId,
       scopeId,
     );
 
@@ -336,7 +341,7 @@ export class CitationService {
     for (let idx = 0; idx < batchRes.citations.length; idx++) {
       const single = batchRes.citations[idx];
       const formattedSingle: FormattedCitationResult = {
-        styleId: batchRes.styleId || styleId,
+        styleId: batchRes.styleId || normalizedStyleId,
         inText: single.inText,
         bibliography: single.bibliography,
         bibliographyHtml: single.bibliographyHtml,
@@ -371,14 +376,14 @@ export class CitationService {
     const citations = itemIds.map((id) => ({
       itemId: id,
       citation: citationMap.get(id) || {
-        styleId,
+        styleId: normalizedStyleId,
         inText: '',
         bibliography: '',
       },
     }));
 
     return {
-      style: styleId,
+      style: normalizedStyleId,
       total: citations.length,
       combinedInText: batchRes.combinedInText,
       bibliographyText: batchRes.bibliographyText,
@@ -389,270 +394,3 @@ export class CitationService {
 }
 
 export { BUILTIN_SPECIAL_STYLES, NUMERIC_STYLE_TOKENS, MAX_DYNAMIC_CSL_STYLES };
-
-interface CitationJsTemplateStore {
-  has(id: string): boolean;
-  add(id: string, xml: string): void;
-  get?(id: string): string | undefined;
-  remove?(id: string): void;
-  delete?(id: string): boolean;
-  data?: Record<string, string>;
-}
-
-interface CitationJsPluginConfig {
-  format?: { useIdAsLabel?: boolean };
-  templates?: CitationJsTemplateStore;
-  locales?: CitationJsTemplateStore;
-}
-
-interface CitationJsPlugins {
-  config: {
-    get(name: string): CitationJsPluginConfig | undefined;
-  };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { plugins } = require('@citation-js/core') as {
-  plugins: CitationJsPlugins;
-};
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-require('@citation-js/plugin-csl');
-
-@Injectable()
-export class CslLocaleLoaderService {
-  private readonly logger = new Logger(CslLocaleLoaderService.name);
-  private templatesInitialized = false;
-  private readonly staticTemplateIds = new Set<string>([
-    'apa',
-    'vancouver',
-    'harvard1',
-    'ieee',
-    'nature',
-    'chicago',
-    'chicago-author-date',
-    'mla',
-    'mla-9th',
-    'tcvn',
-    'tcvn-author-date',
-    'tcvn-numeric',
-  ]);
-  private readonly dynamicTemplateIds = new Set<string>();
-
-  constructor(
-    @Optional()
-    @Inject(CslRepositoryService)
-    private readonly cslRepo?: CslRepositoryService,
-  ) {}
-
-  private evictTemplateFromStore(
-    templates: CitationJsTemplateStore,
-    id: string,
-  ): void {
-    if (typeof templates.remove === 'function') {
-      templates.remove(id);
-    } else if (typeof templates.delete === 'function') {
-      templates.delete(id);
-    } else if (templates.data && typeof templates.data === 'object') {
-      delete templates.data[id];
-    }
-  }
-
-  public initTemplates(): void {
-    if (this.templatesInitialized) return;
-
-    try {
-      const bibtexConfig = plugins.config.get('@bibtex');
-      if (bibtexConfig?.format) {
-        bibtexConfig.format.useIdAsLabel = true;
-      }
-
-      const csl = plugins.config.get('@csl');
-      if (csl?.templates) {
-        const templateBindings: ReadonlyArray<[string, string]> = [
-          ['ieee', IEEE_CSL],
-          ['nature', NATURE_CSL],
-          ['chicago', CHICAGO_CSL],
-          ['chicago-author-date', CHICAGO_CSL],
-          ['mla', MLA_CSL],
-          ['mla-9th', MLA_CSL],
-        ];
-        for (const [id, xml] of templateBindings) {
-          this.staticTemplateIds.add(id);
-          if (!csl.templates.has(id)) csl.templates.add(id, xml);
-        }
-      }
-      if (csl?.locales) {
-        for (const loc of ['vi-VN', 'vi']) {
-          if (!csl.locales.has(loc)) csl.locales.add(loc, VI_VN_LOCALE);
-        }
-      }
-      this.templatesInitialized = true;
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Failed to register CSL templates: ${errMsg}`);
-    }
-  }
-
-  public getScopedStyleId(styleId: string, scopeId?: string): string {
-    const normalized = this.normalizeStyle(styleId);
-    if (this.staticTemplateIds.has(normalized) || BUILTIN_SPECIAL_STYLES.has(normalized)) {
-      return normalized;
-    }
-    const scopeKey = scopeId?.trim() || 'global';
-    return `${scopeKey}::${normalized}`;
-  }
-
-  public isStyleSupported(styleId: string, scopeId?: string): boolean {
-    if (!styleId) return false;
-    this.initTemplates();
-    const normalized = this.normalizeStyle(styleId);
-    if (BUILTIN_SPECIAL_STYLES.has(normalized)) return true;
-    const scopedId = this.getScopedStyleId(normalized, scopeId);
-    try {
-      const csl = plugins.config.get('@csl');
-      return Boolean(csl?.templates?.has(scopedId));
-    } catch {
-      return false;
-    }
-  }
-
-  public async ensureTemplate(
-    styleId: string,
-    scopeId?: string,
-    rawXml?: string,
-  ): Promise<boolean> {
-    this.initTemplates();
-    const normalized = this.normalizeStyle(styleId);
-    if (BUILTIN_SPECIAL_STYLES.has(normalized)) return true;
-
-    // Protection: Never overwrite official static built-in templates with custom XML
-    if (this.staticTemplateIds.has(normalized)) {
-      return true;
-    }
-
-    const scopedId = this.getScopedStyleId(normalized, scopeId);
-
-    try {
-      const csl = plugins.config.get('@csl');
-      if (csl?.templates?.has(scopedId) && !rawXml) {
-        this.dynamicTemplateIds.delete(scopedId);
-        this.dynamicTemplateIds.add(scopedId);
-        return true;
-      }
-
-      const xml =
-        rawXml ||
-        (this.cslRepo
-          ? await this.cslRepo.fetchCslXml(normalized, scopeId)
-          : null);
-
-      if (!xml) {
-        return false;
-      }
-
-      if (csl?.templates) {
-        if (this.dynamicTemplateIds.size >= MAX_DYNAMIC_CSL_STYLES) {
-          const oldestId = this.dynamicTemplateIds.values().next().value;
-          if (oldestId) {
-            this.dynamicTemplateIds.delete(oldestId);
-            this.evictTemplateFromStore(csl.templates, oldestId);
-          }
-        }
-        csl.templates.add(scopedId, xml);
-        this.dynamicTemplateIds.add(scopedId);
-        this.logger.log(
-          `Dynamically registered on-demand scoped CSL template: "${scopedId}"`,
-        );
-        return true;
-      }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Could not dynamically load CSL template for "${scopedId}": ${errMsg}`,
-      );
-    }
-    return false;
-  }
-
-  public normalizeStyle(styleId: string): string {
-    return normalizeEngineStyleId(styleId);
-  }
-
-  public getStyleDefaultLocale(styleId: string, scopeId?: string): string {
-    this.initTemplates();
-    const scopedId = this.getScopedStyleId(styleId, scopeId);
-    try {
-      const csl = plugins.config.get('@csl');
-      const xml =
-        typeof csl?.templates?.get === 'function'
-          ? csl.templates.get(scopedId)
-          : csl?.templates?.data?.[scopedId];
-      if (typeof xml === 'string') {
-        const match = xml.match(/\bdefault-locale\s*=\s*["']([^"']+)["']/i);
-        if (match?.[1]?.trim()) {
-          return match[1].trim();
-        }
-      }
-    } catch {
-      // Fallback to en-US
-    }
-    return 'en-US';
-  }
-}
-
-export { CITATION_FACADE };
-
-export type ICitationFacade = ICoreCitationFacade<
-  CitationStyleId,
-  FormattedCitationResult,
-  ExportLibraryDto,
-  ExportResult
->;
-
-@Injectable()
-export class CitationFacade implements ICitationFacade {
-  constructor(
-    private readonly citationService: CitationService,
-    private readonly exportsService: ExportsService,
-  ) {}
-
-  async formatCitation(
-    userId: string,
-    itemId: string,
-    styleId: CitationStyleId = 'apa-7th',
-    index: number = 1,
-    projectId?: string,
-  ): Promise<FormattedCitationResult> {
-    return this.citationService.formatItemById(
-      userId,
-      itemId,
-      styleId,
-      index,
-      projectId,
-    );
-  }
-
-  async exportByCitationKeys(
-    userId: string,
-    citeKeys: string[],
-    projectId?: string,
-  ): Promise<{
-    content: string;
-    count: number;
-    foundKeys: string[];
-    missingKeys: string[];
-  }> {
-    return this.exportsService.exportByCitationKeys(
-      userId,
-      citeKeys,
-      projectId,
-    );
-  }
-
-  async exportLibrary(
-    userId: string,
-    options: ExportLibraryDto = { format: 'bibtex' },
-  ): Promise<ExportResult> {
-    return this.exportsService.exportLibrary(userId, options);
-  }
-}

@@ -1,7 +1,5 @@
 import { CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, PRISMA_ITEM_SCALAR_COLUMNS, INTERNAL_SYSTEM_AND_TELEMETRY_KEYS, ITEM_COLUMN_METADATA_FIELDS, TYPE_SPECIFIC_EXTRA_FIELDS, CreateItemData, UpdateItemData, NoteEntity, CreateNoteData } from '@/modules/library/core/types/bibliographic.types';
 import type { UserId, ItemId, TagObjectInput, TagInput } from '@/modules/library/core';
-import { IsString, IsOptional, IsBoolean, IsIn, IsObject, IsInt, Min, Max, MaxLength } from 'class-validator';
-import { Type } from 'class-transformer';
 
 export {
   CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
@@ -64,25 +62,7 @@ export interface CollectionTreeNode {
 }
 
 // ============================================================================
-// 2. TAGS TYPES
-// ============================================================================
-
-export interface TagDetail {
-  id: string;
-  projectId?: string | null;
-  name: string;
-  color?: string | null;
-  type?: string | null;
-  shortcut?: number | null;
-  userId?: string;
-  createdById?: string | null;
-  _count?: { itemTags: number };
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-// ============================================================================
-// 3. NOTES TYPES
+// 2. NOTES TYPES
 // ============================================================================
 
 export interface UpdateNoteData {
@@ -102,7 +82,7 @@ export interface ExtractLiteratureNoteResult {
 }
 
 // ============================================================================
-// 4. READING STATE TYPES
+// 3. READING STATE TYPES
 // ============================================================================
 
 export enum ReadingStatus {
@@ -156,47 +136,6 @@ export const VALID_READING_TRANSITIONS: Record<
   [ReadingStatus.READING]: [ReadingStatus.COMPLETED, ReadingStatus.UNREAD],
   [ReadingStatus.COMPLETED]: [ReadingStatus.READING, ReadingStatus.UNREAD],
 };
-
-export interface SavedSearchContributor {
-  id?: string;
-  name?: string;
-  firstName?: string | null;
-  lastName?: string | null;
-  fullName?: string | null;
-  creatorType?: string;
-  orderIndex?: number;
-}
-
-export interface SavedSearchIdentifier {
-  id?: string;
-  type: string;
-  value: string;
-  canonicalUri?: string | null;
-}
-
-export interface SavedSearchAttachment {
-  id?: string;
-  filename?: string;
-  mimeType?: string;
-  size?: number | bigint;
-  url?: string;
-}
-
-export interface SavedSearchTag {
-  tag: {
-    id: string;
-    name: string;
-    color?: string | null;
-  };
-}
-
-export interface SavedSearchCollection {
-  collection: {
-    id: string;
-    name: string;
-    color?: string | null;
-  };
-}
 
 export type SavedSearchField =
   | 'anyField'
@@ -318,7 +257,7 @@ export interface ExecuteSavedSearchOptions {
   sortOrder?: 'asc' | 'desc';
 }
 
-const SAVED_SEARCH_SORT_BY_VALUES = [
+export const SAVED_SEARCH_SORT_BY_VALUES = [
   'dateAdded',
   'createdAt',
   'year',
@@ -335,195 +274,79 @@ const SAVED_SEARCH_SORT_BY_VALUES = [
 
 export type SavedSearchSortBy = (typeof SAVED_SEARCH_SORT_BY_VALUES)[number];
 
-export class CreateSavedSearchDto {
-  @IsString()
-  @MaxLength(255)
-  name!: string;
+export interface AssignItemsToCollectionInput {
+  itemIds?: string[];
+}
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(1000)
+export interface CreateSavedSearchInput {
+  name: string;
   description?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
   icon?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
   color?: string;
-
-  @IsObject()
-  conditions!: SavedSearchConditionGroup;
-
-  @IsOptional()
-  @IsObject()
+  conditions: SavedSearchConditionGroup;
   scopeOptions?: SavedSearchScopeOptions;
-
-  @IsOptional()
-  @IsIn(['AND', 'OR'])
   conjunction?: 'AND' | 'OR';
-
-  @IsOptional()
-  @IsIn(SAVED_SEARCH_SORT_BY_VALUES)
   sortBy?: SavedSearchSortBy;
-
-  @IsOptional()
-  @IsIn(['asc', 'desc'])
   sortOrder?: 'asc' | 'desc';
-
-  @IsOptional()
-  @IsBoolean()
   isPinned?: boolean;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
   projectId?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
   targetScope?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
   scope?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
   expectedVersion?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
   version?: number;
 }
 
-export class UpdateSavedSearchDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
+import {
+  FIELD_ALIASES,
+} from '@/modules/library/core/types/schema.constants';
+
+export const SYSTEM_AND_TELEMETRY_KEYS = new Set([
+  ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
+  'id', 'projectId', 'userId', 'createdById', 'uploadedById', 'createdAt',
+  'updatedAt', 'deletedAt', 'version', 'expectedVersion', 'isDeleted',
+  'silent', 'provenance', 'fieldProvenance', 'lockedFields', 'ingestionStatus',
+  'verificationScore', 'isVerified', 'matchedSignals', 'missingFields',
+  'isSelfSufficient', 'qualityScore', 'engineUsed', 'disambiguationWarning',
+  'rejectedCitedDoi', 'promptUploadPdf', 'sourceProvider', 'source', 'sources',
+  'originProvider', 'canonicalId', 'canonicalUrl', 'resolvedAt', 'warnings',
+  'dismissedDuplicateIds', 'mergedFromIds', 'crossrefEnriched', 'isRetracted',
+  'retractionNature', 'retractionDetails', 'retractionCheckedAt', 'isMyPublication',
+  'publicationConfirmedAt', 'userStates', 'states', 'readStatus', 'rating',
+  'lastReadAt', 'isStarred', 'demotedToExtra', 'demotedExtraLines', '__demotedExtraLines',
+]);
+
+export const PRIVILEGED_INTERNAL_KEYS = new Set([
+  '__isSystemUpdate',
+  '__updateSource',
+]);
+
+export const UNIVERSAL_FIELDS = new Set([
+  ...SYSTEM_AND_TELEMETRY_KEYS,
+  ...CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
+  ...Object.keys(FIELD_ALIASES),
+  ...Object.values(FIELD_ALIASES),
+  'creators', 'authors', 'author', 'editors', 'contributors', 'metadata',
+  'relations', 'seeAlso', 'tags', 'labels', 'itemTags', 'keywords',
+  'keywordsList', 'collectionId', 'collectionIds', 'collections',
+  'collectionItems', 'notes', 'notesList', 'fileUrl', 'fileId', 'filename',
+  'mimeType', 'size', 'primaryFile', 'attachments', 'identifiers',
+  'extraFields', 'URL', 'numberOfPages', 'numPages', 'journalRef',
+  'primaryCategory', 'categories',
+]);
+
+export interface UpdateSavedSearchInput {
   name?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(1000)
   description?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
   icon?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
   color?: string;
-
-  @IsOptional()
-  @IsObject()
   conditions?: SavedSearchConditionGroup;
-
-  @IsOptional()
-  @IsObject()
   scopeOptions?: SavedSearchScopeOptions;
-
-  @IsOptional()
-  @IsIn(['AND', 'OR'])
   conjunction?: 'AND' | 'OR';
-
-  @IsOptional()
-  @IsIn(SAVED_SEARCH_SORT_BY_VALUES)
   sortBy?: SavedSearchSortBy;
-
-  @IsOptional()
-  @IsIn(['asc', 'desc'])
   sortOrder?: 'asc' | 'desc';
-
-  @IsOptional()
-  @IsBoolean()
   isPinned?: boolean;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
   targetScope?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
   scope?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
   expectedVersion?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
   version?: number;
-}
-
-export class PreviewSavedSearchDto {
-  @IsObject()
-  conditions!: SavedSearchConditionGroup;
-
-  @IsOptional()
-  @IsObject()
-  scopeOptions?: SavedSearchScopeOptions;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  sortBy?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(10)
-  sortOrder?: 'asc' | 'desc';
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  projectId?: string;
-}
-
-export class ExecuteSavedSearchQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(1000)
-  limit?: number = 50;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(1000)
-  page?: number;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  cursor?: string;
-
-  @IsOptional()
-  @IsIn(SAVED_SEARCH_SORT_BY_VALUES)
-  sortBy?: SavedSearchSortBy;
-
-  @IsOptional()
-  @IsIn(['asc', 'desc'])
-  sortOrder?: 'asc' | 'desc';
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  projectId?: string;
 }

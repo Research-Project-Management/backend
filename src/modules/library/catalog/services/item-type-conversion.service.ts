@@ -2,8 +2,7 @@ import { Injectable, Inject, NotFoundException, Optional } from '@nestjs/common'
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { TypesService } from './zotero-schema-validator.service';
-import { ItemCacheCoordinator } from './library-bootstrap.service';
+import { TypesService, ItemCacheCoordinator } from './schema-validator.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { ItemsMapper } from '@/modules/library/core';
 import {
@@ -202,7 +201,7 @@ export class ItemTypeConversionService {
   }
 }
 
-export function buildTypeConversionUpdatePayload(
+function buildTypeConversionUpdatePayload(
   targetType: string,
   existing: ItemDetail,
   preview: TypeConversionPreview,

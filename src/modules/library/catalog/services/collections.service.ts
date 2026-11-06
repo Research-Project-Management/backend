@@ -9,7 +9,7 @@ import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 import { RedisCacheService } from '@/core';
 import { normalizeProjectScopeId, isProjectScopeId, libraryConfig, LIBRARY_EVENT_TYPES, TransactionHelpers, UNIT_OF_WORK, IUnitOfWork, executeStandardLibraryCacheInvalidation, SingleFlightCoalescer } from '@/modules/library/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
-import { ItemCacheCoordinator } from './library-bootstrap.service';
+import { ItemCacheCoordinator } from './schema-validator.service';
 import {
   validateCollectionReorderNoCycle,
   executeAssignItemsToCollection,
@@ -420,11 +420,14 @@ export class CollectionsService {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
           ranPostCommitHook = Boolean(helpers?.onAfterCommit);
-          if (collectionId !== 'unfiled') {
-            const collection = await this.repo.findById(userId, collectionId, tx, projectId);
-            if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
-          }
-          ownedItemIds = await this.repo.findOwnedItemIds(itemIds, scopeWhere, tx);
+          const [collection, resolvedOwnedIds] = await Promise.all([
+            collectionId !== 'unfiled'
+              ? this.repo.findById(userId, collectionId, tx, projectId)
+              : Promise.resolve(true),
+            this.repo.findOwnedItemIds(itemIds, scopeWhere, tx),
+          ]);
+          if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
+          ownedItemIds = resolvedOwnedIds;
           if (ownedItemIds.length === 0) return;
           await this.repo.moveItems(
             userId,
@@ -491,11 +494,14 @@ export class CollectionsService {
         },
       );
     } else {
-      if (collectionId !== 'unfiled') {
-        const collection = await this.repo.findById(userId, collectionId, undefined, projectId);
-        if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
-      }
-      ownedItemIds = await this.repo.findOwnedItemIds(itemIds, scopeWhere);
+      const [collection, resolvedOwnedIds] = await Promise.all([
+        collectionId !== 'unfiled'
+          ? this.repo.findById(userId, collectionId, undefined, projectId)
+          : Promise.resolve(true),
+        this.repo.findOwnedItemIds(itemIds, scopeWhere),
+      ]);
+      if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
+      ownedItemIds = resolvedOwnedIds;
       if (ownedItemIds.length === 0) {
         return { message: 'No owned items to move', count: 0, targetCollectionId: destinationCollectionId };
       }
@@ -585,12 +591,6 @@ export class CollectionsService {
     if (count > 0 && !ranPostCommitHook) await this.invalidateCollectionsCache(userId, projectId, ids);
     return { success: true, count };
   }
-  async assignItems(userId: string, collectionId: string, dto: AssignItemsToCollectionDto | string[], projectId?: string) {
-    return this.assignItemsToCollection(userId, collectionId, Array.isArray(dto) ? { itemIds: dto } : dto, projectId);
-  }
-  async removeItems(userId: string, collectionId: string, itemIds: string[], projectId?: string) {
-    return this.detachItemsFromCollection(userId, collectionId, itemIds, projectId);
-  }
   async detachItemFromCollection(userId: string, collectionId: string, itemId: string, projectId?: string) {
     const validProjectId = normalizeProjectScopeId(projectId);
     const scopeWhere = validProjectId ? { projectId: validProjectId } : { userId, projectId: null };
@@ -599,9 +599,11 @@ export class CollectionsService {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
           ranPostCommitHook = Boolean(helpers?.onAfterCommit);
-          const collection = await this.repo.findById(userId, collectionId, tx, projectId);
+          const [collection, itemExists] = await Promise.all([
+            this.repo.findById(userId, collectionId, tx, projectId),
+            this.repo.verifyItemInScope(itemId, scopeWhere, tx),
+          ]);
           if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
-          const itemExists = await this.repo.verifyItemInScope(itemId, scopeWhere, tx);
           if (!itemExists) throw new NotFoundException(`Item not found in library: ${itemId}`);
           await this.repo.removeItemFromCollection(userId, collectionId, itemId, tx);
           const eventScope = { userId, projectId: validProjectId };
@@ -612,9 +614,11 @@ export class CollectionsService {
         },
       );
     } else {
-      const collection = await this.repo.findById(userId, collectionId, undefined, projectId);
+      const [collection, itemExists] = await Promise.all([
+        this.repo.findById(userId, collectionId, undefined, projectId),
+        this.repo.verifyItemInScope(itemId, scopeWhere),
+      ]);
       if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
-      const itemExists = await this.repo.verifyItemInScope(itemId, scopeWhere);
       if (!itemExists) throw new NotFoundException(`Item not found in library: ${itemId}`);
       await this.repo.removeItemFromCollection(userId, collectionId, itemId);
     }

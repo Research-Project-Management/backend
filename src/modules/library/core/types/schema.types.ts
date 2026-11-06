@@ -1,5 +1,4 @@
-import type { Prisma } from '@prisma/client';
-import type { TransactionHelpers } from '../ports';
+import type { Prisma, LibraryChange, Tombstone, OutboxEvent } from '@prisma/client';
 
 /**
  * Canonical Branded ID & Nominal Types for Flux Library.
@@ -234,6 +233,96 @@ export interface TypeConversionPreview {
 export interface ConvertTypeOptions {
   expectedVersion?: number;
   retainUnmappedInExtra?: boolean;
+}
+
+export interface AppendChangeEntry {
+  entityType: string;
+  entityId: string;
+  action: 'create' | 'update' | 'delete' | (string & {});
+  version: number;
+  data?: unknown;
+  actorId?: string | null;
+}
+
+export interface AppendChangeInput extends AppendChangeEntry {
+  userId?: string;
+  projectId?: string | null;
+}
+
+export interface RecordTombstoneEntry {
+  entityType: string;
+  entityId: string;
+  deletedById?: string;
+  actorId?: string | null;
+}
+
+export interface RecordTombstoneInput extends RecordTombstoneEntry {
+  userId?: string;
+  projectId?: string | null;
+}
+
+export interface PublishOutboxInput {
+  userId: string;
+  actorId?: string | null;
+  projectId?: string | null;
+  aggregateId: string;
+  eventType: string;
+  payload: unknown;
+  dedupeKey?: string | null;
+}
+
+export interface TransactionHelpers {
+  appendChange(
+    scope: { userId?: string; projectId?: string | null },
+    entry: AppendChangeEntry,
+  ): Promise<LibraryChange>;
+  appendChangesBatch(
+    scopeOrEntries:
+      { userId?: string; projectId?: string | null } | AppendChangeInput[],
+    entries?: AppendChangeEntry[],
+  ): Promise<number>;
+  recordTombstone(
+    scope: { userId?: string; projectId?: string | null },
+    entry: RecordTombstoneEntry,
+  ): Promise<Tombstone>;
+  recordTombstonesBatch(
+    scopeOrEntries:
+      { userId?: string; projectId?: string | null } | RecordTombstoneInput[],
+    entries?: RecordTombstoneEntry[],
+  ): Promise<number>;
+  removeTombstone(
+    scope: { userId?: string; projectId?: string | null },
+    entityType: string,
+    entityId: string,
+  ): Promise<number>;
+  removeTombstonesBatch(
+    scope: { userId?: string; projectId?: string | null },
+    entityType: string,
+    entityIds: string[],
+  ): Promise<number>;
+  publishOutbox(
+    scope: {
+      userId: string;
+      projectId?: string | null;
+      dedupeKey?: string | null;
+    },
+    aggregateId: string,
+    eventType: string,
+    payload: unknown,
+    options?: { dedupeKey?: string | null },
+  ): Promise<OutboxEvent>;
+  publishOutboxBatch(
+    scopeOrEvents:
+      { userId: string; projectId?: string | null } | PublishOutboxInput[],
+    events?: Array<{
+      aggregateId: string;
+      eventType: string;
+      payload: unknown;
+      projectId?: string | null;
+      dedupeKey?: string | null;
+    }>,
+  ): Promise<string[]>;
+  onAfterCommit?(callback: () => Promise<void> | void): void;
 }
 
 /** Transaction context passed to write methods for composing operations within a parent transaction. */

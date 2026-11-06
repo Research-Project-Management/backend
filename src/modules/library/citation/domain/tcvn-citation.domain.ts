@@ -1,14 +1,13 @@
-import { Injectable } from '@nestjs/common';
 import {
   CslItemData,
   CslName,
+  EngineCitationResult,
 } from '@/modules/library/citation/types/citation.types';
 import {
   VIETNAMESE_SURNAMES_PREFIX_REGEX,
   hasVietnameseDiacritics,
   isInstitutionName,
 } from '@/modules/library/core';
-import type { EngineCitationResult } from './csl-engine.service';
 
 export function escapeCitationHtml(text: string): string {
   return text
@@ -17,7 +16,6 @@ export function escapeCitationHtml(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
-@Injectable()
 export class TcvnCitationFormatterService {
   private static readonly VN_SURNAMES_REGEX = VIETNAMESE_SURNAMES_PREFIX_REGEX;
   private static readonly ACADEMIC_DEGREES_REGEX =

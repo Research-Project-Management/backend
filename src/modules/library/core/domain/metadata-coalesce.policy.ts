@@ -1,21 +1,22 @@
-import { isPlaceholderItemTitle, titleSimilarity, hasAuthorAndYearCorroboration, extractNormalizedAuthorSurnames } from './title.domain';
+import { Prisma, TagType } from '@prisma/client';
+import { isPlaceholderItemTitle, titleSimilarity, hasAuthorAndYearCorroboration, extractNormalizedAuthorSurnames, isUuid } from './title.domain';
 import { normalizeTags } from './tag.domain';
-import { mergeZoteroExtraTextLines, resolveFieldAliases, resolveBidirectionalBaseFields } from './zotero-field-harmonizer.domain';
+import { mergeExtraTextLines, resolveFieldAliases, resolveBidirectionalBaseFields } from './field-harmonizer.domain';
 import { parseCreatorString } from './author.domain';
 import { normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn } from './identifier.domain';
 import { ItemMetadata } from '../types/bibliographic.types';
 
 export { extractNormalizedAuthorSurnames };
 
-export enum OriginTier { FILENAME_FALLBACK = 0, LOCAL_EXTRACTED = 1, SUPPLEMENTAL_GRAPH = 2, AUTHORITATIVE_REGISTRY = 3, USER_OVERRIDE = 4 }
+enum OriginTier { FILENAME_FALLBACK = 0, LOCAL_EXTRACTED = 1, SUPPLEMENTAL_GRAPH = 2, AUTHORITATIVE_REGISTRY = 3, USER_OVERRIDE = 4 }
 
 const USER_OVERRIDE_PROVIDERS = new Set(['useroverride', 'user', 'manual', 'useridentifier']);
-const AUTHORITATIVE_REGISTRY_PROVIDERS = new Set(['crossref', 'pubmed', 'arxiv', 'openlibrary', 'zoteroconnector', 'zoterosync', 'zotero', 'bibliographyrecord', 'enrichedprovider', 'metadataresolution', 'clientresolved', 'directidentifier']);
-const SUPPLEMENTAL_GRAPH_PROVIDERS = new Set(['openalex', 'semanticscholar', 'dblp', 'europepmc', 'datacite', 'googlebooks', 'hal', 'doaj', 'core', 'unpaywall', 'bibtex', 'ris', 'csl_json']);
-const LOCAL_EXTRACTED_PROVIDERS = new Set(['trustedpaper', 'stagedpdf', 'pdfmetadata', 'localpdfextraction', 'local_in_process', 'local_pdf', 'webtranslator', 'urlscraper', 'urlcapture', 'file', 'aimetadata']);
+const AUTHORITATIVE_REGISTRY_PROVIDERS = new Set(['crossref', 'pubmed', 'arxiv', 'openlibrary', 'zoteroconnector', 'zotero', 'bibliographyrecord', 'enrichedprovider', 'metadataresolution', 'directidentifier']);
+const SUPPLEMENTAL_GRAPH_PROVIDERS = new Set(['openalex', 'semanticscholar', 'dblp', 'europepmc', 'datacite', 'unpaywall', 'bibtex', 'ris', 'csl_json']);
+const LOCAL_EXTRACTED_PROVIDERS = new Set(['trustedpaper', 'stagedpdf', 'pdfmetadata', 'localpdfextraction', 'local_in_process', 'local_pdf', 'urlscraper', 'urlcapture', 'file']);
 const TIER_BASE_WEIGHT: Readonly<Record<OriginTier, number>> = { [OriginTier.USER_OVERRIDE]: 10.0, [OriginTier.AUTHORITATIVE_REGISTRY]: 1.0, [OriginTier.SUPPLEMENTAL_GRAPH]: 0.85, [OriginTier.LOCAL_EXTRACTED]: 0.6, [OriginTier.FILENAME_FALLBACK]: 0.45 };
 
-export function resolveProviderTier(provider: string | undefined, _field?: string): OriginTier {
+function resolveProviderTier(provider: string | undefined, _field?: string): OriginTier {
   if (!provider || !provider.trim()) return OriginTier.FILENAME_FALLBACK;
   const lower = provider.trim().toLowerCase().replace(/[\s_-]+/g, '');
   if (USER_OVERRIDE_PROVIDERS.has(lower)) return OriginTier.USER_OVERRIDE;
@@ -43,8 +44,8 @@ export function isPaperLevelKeywordSource(provider: string | undefined): boolean
   return resolveProviderFieldWeight(provider, 'keywords') >= TIER_BASE_WEIGHT[OriginTier.LOCAL_EXTRACTED];
 }
 
-export const PREPRINT_SERVER_VENUE_REGEX = /^(?:arxiv(?:\.org)?|corr|biorxiv|medrxiv|chemrxiv|techrxiv|ssrn|research\s+square|osf\s+preprints|hal|zenodo)(?:\s+preprints?|\s+e-?prints?)?$/i;
-const AUTHORITATIVE_CREATOR_PROVIDERS = new Set(['crossref', 'pubmed', 'arxiv', 'enrichedprovider', 'openalex', 'semanticscholar', 'dblp', 'zoterosync', 'zotero', 'bibtex', 'ris']);
+export const PREPRINT_SERVER_VENUE_REGEX = /^(?:arxiv(?:\.org)?|corr|biorxiv|medrxiv|chemrxiv|techrxiv|ssrn|research\s+square|osf\s+preprints|hal|zenodo)(?:\s*\([^)]+\))?(?:\s+preprints?|\s+e-?prints?)?$/i;
+const AUTHORITATIVE_CREATOR_PROVIDERS = new Set(['crossref', 'pubmed', 'arxiv', 'enrichedprovider', 'openalex', 'semanticscholar', 'dblp', 'zotero', 'bibtex', 'ris']);
 const ABSTRACT_BOILERPLATE_REGEX = /^(?:n\/?a|none|null|undefined|abstract\s+not\s+available\.?|no\s+abstract\s+available\.?|abstract\s+unavailable\.?|not\s+available\.?|-+|\.+)$/i;
 
 export const ALIAS_EVIDENCE_FALLBACK_KEYS: Readonly<Record<string, readonly string[]>> = {
@@ -150,7 +151,7 @@ export function mergeReconciledNotesArrays(arrays: unknown[], normalizeToObject 
 }
 
 export function mergeReconciledExtraText(variants: unknown[]): string {
-  return mergeZoteroExtraTextLines(variants);
+  return mergeExtraTextLines(variants);
 }
 
 export function finalizeReconciledBibliographicMetadata(resolved: Record<string, unknown>, _candidates?: Array<{ sourceProvider?: string; metadata?: Record<string, unknown> }>): void {
@@ -189,10 +190,18 @@ export function finalizeReconciledBibliographicMetadata(resolved: Record<string,
         : 'journalArticle';
     itemType = targetPublishedType;
     resolved.itemType = targetPublishedType;
-    if (isValidArxivId) {
-      resolved.arxivId = rawArxivCandidate;
-      resolved.extra = mergeReconciledExtraText([resolved.extra, `arXiv: ${rawArxivCandidate}`]);
-    }
+  } else if (
+    (itemType === 'journalArticle' || itemType === 'report' || itemType === 'document') &&
+    isValidArxivId &&
+    !isNonArxivDoi &&
+    (!rawVenue || PREPRINT_SERVER_VENUE_REGEX.test(rawVenue))
+  ) {
+    itemType = 'preprint';
+    resolved.itemType = 'preprint';
+  }
+  if ((itemType === 'journalArticle' || itemType === 'conferencePaper') && isNonArxivDoi && isValidArxivId) {
+    resolved.arxivId = rawArxivCandidate;
+    resolved.extra = mergeReconciledExtraText([resolved.extra, `arXiv: ${rawArxivCandidate}`]);
   }
   const deleteForeignKeys = (keys: readonly string[]) => {
     for (const k of keys) {
@@ -205,7 +214,10 @@ export function finalizeReconciledBibliographicMetadata(resolved: Record<string,
   if (itemType === 'journalArticle') {
     if (resolved.publicationTitle && !resolved.journal) resolved.journal = resolved.publicationTitle;
     else if (resolved.journal && !resolved.publicationTitle) resolved.publicationTitle = resolved.journal;
-    deleteForeignKeys(['proceedingsTitle', 'conferenceName', 'bookTitle', 'university', 'thesisType', 'reportNumber', 'reportType']);
+    if (typeof resolved.publisher === 'string' && PREPRINT_SERVER_VENUE_REGEX.test(resolved.publisher.trim())) {
+      delete resolved.publisher;
+    }
+    deleteForeignKeys(['proceedingsTitle', 'conferenceName', 'bookTitle', 'university', 'thesisType', 'reportNumber', 'reportType', 'repository', 'archiveLocation']);
   } else if (itemType === 'conferencePaper') {
     if (!resolved.proceedingsTitle && (resolved.publicationTitle || resolved.journal)) {
       resolved.proceedingsTitle = resolved.publicationTitle || resolved.journal;
@@ -213,7 +225,10 @@ export function finalizeReconciledBibliographicMetadata(resolved: Record<string,
     if (resolved.proceedingsTitle && !resolved.publicationTitle) {
       resolved.publicationTitle = resolved.proceedingsTitle;
     }
-    deleteForeignKeys(['journal', 'bookTitle', 'university', 'thesisType', 'reportNumber', 'reportType']);
+    if (typeof resolved.publisher === 'string' && PREPRINT_SERVER_VENUE_REGEX.test(resolved.publisher.trim())) {
+      delete resolved.publisher;
+    }
+    deleteForeignKeys(['journal', 'bookTitle', 'university', 'thesisType', 'reportNumber', 'reportType', 'repository', 'archiveLocation']);
   } else if (itemType === 'bookSection') {
     if (!resolved.bookTitle && (resolved.publicationTitle || resolved.journal)) {
       resolved.bookTitle = resolved.publicationTitle || resolved.journal;
@@ -263,9 +278,18 @@ export function finalizeReconciledBibliographicMetadata(resolved: Record<string,
   } else if (Array.isArray(resolved.authors) && resolved.authors.length > 0 && (!Array.isArray(resolved.creators) || resolved.creators.length === 0)) {
     resolved.creators = (resolved.authors as string[]).map((a, idx) => parseCreatorString(a, idx, 'author')).filter((c): c is NonNullable<typeof c> => c !== null);
   }
+  const currentCreators = Array.isArray(resolved.creators) ? (resolved.creators as Array<{ creatorType?: string; fullName?: string; name?: string; firstName?: string; lastName?: string; orderIndex?: number }>) : [];
+  const editorCreators = currentCreators.filter((c) => c.creatorType === 'editor');
+  const editorsList = Array.isArray(resolved.editors) ? (resolved.editors as string[]).map((e) => String(e).trim()).filter(Boolean) : [];
+  if (editorsList.length > 0 && editorCreators.length === 0) {
+    const parsedEditors = editorsList.map((e, idx) => parseCreatorString(e, currentCreators.length + idx, 'editor')).filter((c): c is NonNullable<typeof c> => c !== null);
+    resolved.creators = [...currentCreators, ...parsedEditors];
+  } else if (editorCreators.length > 0 && editorsList.length === 0) {
+    resolved.editors = editorCreators.map((c) => c.fullName || c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim()).filter(Boolean);
+  }
 }
 
-export function normalizeComparableIdentifier(rawValue: unknown): string {
+function normalizeComparableIdentifier(rawValue: unknown): string {
   const raw = String(rawValue ?? '').trim();
   if (!raw) return '';
   const norm =
@@ -330,23 +354,23 @@ export function verifyTitleLookupCorroboration(query: string, localMeta: Record<
   return { accepted: true, similarity: sim };
 }
 
-export interface CoalesceFieldEvidence {
+interface CoalesceFieldEvidence {
   path?: string; value?: unknown; rawValue?: unknown; normalizedValue: unknown;
   confidence: number; sourceProvider: string; retrievedAt?: string; warnings?: string[];
   isUserOverride?: boolean; readonly __isAlreadyWeighted?: boolean;
 }
-export interface CoalesceMetadataCandidate {
+interface CoalesceMetadataCandidate {
   candidateId: string; sourceKind: 'IDENTIFIER' | 'RECORD' | 'URL' | 'FILE' | 'PROVIDER' | 'CONNECTOR';
   sourceName: string; sourceProvider?: string; sourceRecordId?: string;
   retrievedAt: string; schemaVersion?: string; rawEvidenceRef?: string;
   rawMetadata?: Record<string, unknown>; fields: Record<string, CoalesceFieldEvidence>;
   normalizedMetadata: ItemMetadata; confidenceScore?: number; overallConfidence?: number;
 }
-export interface CoalesceConflictDetail {
+interface CoalesceConflictDetail {
   field: string; description: string; severity: 'low' | 'medium' | 'high';
   variants: { sourceProvider: string; value: unknown; confidenceScore: number }[];
 }
-export interface CoalesceDecision {
+interface CoalesceDecision {
   selectedFields: Record<string, CoalesceFieldEvidence>; rejectedFields: Record<string, CoalesceFieldEvidence[]>;
   conflicts: CoalesceConflictDetail[]; proposedItem: ItemMetadata; decidedAt: string; policyVersion: string;
 }
@@ -544,3 +568,160 @@ export class MetadataCoalescePolicy {
 export type ReconciliationDecision = CoalesceDecision;
 export type FieldEvidence = CoalesceFieldEvidence;
 export type MetadataCandidate = CoalesceMetadataCandidate;
+
+export async function resolveOrCreateAutomaticTagsInClient(
+  db: Prisma.TransactionClient,
+  userId: string,
+  rawTagList: ReadonlyArray<string | { tag?: string; name?: string; type?: number | string } | null | undefined>,
+  defaultTagType: TagType = TagType.automatic,
+  projectId?: string | null,
+  options?: {
+    allowManualAcademicTerms?: boolean;
+    tagTypeMap?: Map<string, TagType>;
+    existingItemTags?: ReadonlyArray<{
+      tagId?: string;
+      type?: TagType | string | number;
+      name?: string;
+      tag?: { id?: string; name?: string; type?: TagType | string | number };
+    }>;
+  },
+): Promise<Array<{ id: string; type: TagType }>> {
+  const normalizedTagNames = normalizeTags(rawTagList as never, {
+    allowManualAcademicTerms: options?.allowManualAcademicTerms ?? false,
+  }).slice(0, 500);
+  if (normalizedTagNames.length === 0) return [];
+  const effectiveProjectId =
+    projectId && projectId !== 'user' && projectId !== 'me' && projectId !== 'personal' && isUuid(projectId)
+      ? projectId
+      : null;
+  const scopeWhere: Prisma.TagWhereInput = effectiveProjectId
+    ? { projectId: effectiveProjectId }
+    : { userId, projectId: null };
+  const tagTypeMap = options?.tagTypeMap ?? new Map<string, TagType>();
+  const existingItemTagTypeMap = new Map<string, TagType>();
+  const preloadedTagMap = new Map<string, { id: string; name: string; type?: TagType }>();
+  if (Array.isArray(options?.existingItemTags)) {
+    for (const eit of options.existingItemTags) {
+      if (!eit) continue;
+      const rawName = (eit.tag?.name || eit.name || '').trim();
+      const lowerName = rawName.toLowerCase();
+      if (!lowerName) continue;
+      const rawType = eit.type ?? eit.tag?.type;
+      const resolvedExistingType =
+        rawType === TagType.automatic || rawType === 'automatic' || rawType === 1
+          ? TagType.automatic
+          : rawType === TagType.manual || rawType === 'manual' || rawType === 0
+            ? TagType.manual
+            : undefined;
+      if (resolvedExistingType) existingItemTagTypeMap.set(lowerName, resolvedExistingType);
+      const existingTagId = eit.tag?.id || eit.tagId;
+      if (existingTagId && !preloadedTagMap.has(lowerName)) {
+        preloadedTagMap.set(lowerName, { id: existingTagId, name: rawName, type: resolvedExistingType });
+      }
+    }
+  }
+  const unresolvedTagNames = normalizedTagNames.filter((name) => !preloadedTagMap.has(name.trim().toLowerCase()));
+  const tagOrFilter = unresolvedTagNames.map((name) => ({
+    name: { equals: name, mode: 'insensitive' as const },
+  }));
+  const preExistingTags =
+    unresolvedTagNames.length === 0
+      ? Array.from(preloadedTagMap.values())
+      : (await db.tag.findMany({
+          where: { ...scopeWhere, OR: tagOrFilter },
+          select: { id: true, name: true, normalizedName: true, type: true },
+        })) || [];
+  const existingLowerNames = new Set(
+    preExistingTags
+      .map((t: { id: string; name?: string; normalizedName?: string }) =>
+        typeof t.normalizedName === 'string' && t.normalizedName
+          ? t.normalizedName.trim().toLowerCase()
+          : typeof t.name === 'string'
+            ? t.name.trim().toLowerCase()
+            : '',
+      )
+      .filter(Boolean),
+  );
+  const seenMissingLower = new Set<string>();
+  const missingTagNames = normalizedTagNames.filter((name) => {
+    const lower = name.trim().toLowerCase();
+    if (existingLowerNames.has(lower) || seenMissingLower.has(lower)) return false;
+    seenMissingLower.add(lower);
+    return true;
+  });
+  if (missingTagNames.length > 0) {
+    if (typeof db.tag.createMany === 'function') {
+      await db.tag.createMany({
+        data: missingTagNames.map((name) => {
+          const lower = name.trim().toLowerCase();
+          return {
+            userId,
+            createdById: userId,
+            name,
+            normalizedName: lower,
+            type: tagTypeMap.get(lower) || existingItemTagTypeMap.get(lower) || defaultTagType,
+            projectId: effectiveProjectId,
+          };
+        }),
+        skipDuplicates: true,
+      });
+    } else {
+      for (const name of missingTagNames) {
+        try {
+          const lower = name.trim().toLowerCase();
+          await db.tag.create({
+            data: {
+              userId,
+              createdById: userId,
+              name,
+              normalizedName: lower,
+              type: tagTypeMap.get(lower) || existingItemTagTypeMap.get(lower) || defaultTagType,
+              projectId: effectiveProjectId,
+            },
+          });
+        } catch {
+          // Concurrent creation
+        }
+      }
+    }
+  }
+  const allTagOrFilter = normalizedTagNames.map((name) => ({
+    name: { equals: name, mode: 'insensitive' as const },
+  }));
+  const allMatchingTags =
+    missingTagNames.length > 0
+      ? (await db.tag.findMany({
+          where: { ...scopeWhere, OR: allTagOrFilter },
+          select: { id: true, name: true, normalizedName: true, type: true },
+        })) || preExistingTags
+      : preExistingTags;
+  const dedupedByLower = new Map<string, { id: string; type: TagType }>();
+  for (const t of allMatchingTags as Array<{
+    id: string;
+    name?: string;
+    normalizedName?: string;
+    type?: TagType;
+  }>) {
+    const key =
+      typeof t.normalizedName === 'string' && t.normalizedName
+        ? t.normalizedName.trim().toLowerCase()
+        : typeof t.name === 'string'
+          ? t.name.trim().toLowerCase()
+          : t.id;
+    if (!dedupedByLower.has(key)) {
+      dedupedByLower.set(key, {
+        id: t.id,
+        type: tagTypeMap.get(key) || existingItemTagTypeMap.get(key) || t.type || defaultTagType || TagType.manual,
+      });
+    }
+  }
+  const resolvedList = Array.from(dedupedByLower.values());
+  const manualTagIds = resolvedList.filter((rt) => rt.type === TagType.manual).map((rt) => rt.id);
+  if (manualTagIds.length > 0 && typeof db.tag?.updateMany === 'function') {
+    await db.tag.updateMany({
+      where: { id: { in: manualTagIds }, type: TagType.automatic },
+      data: { type: TagType.manual },
+    });
+  }
+  return resolvedList;
+}

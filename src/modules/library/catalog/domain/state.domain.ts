@@ -32,7 +32,7 @@ export function shouldAutoAdvanceToReading(
   return advancedPage || hasScroll;
 }
 
-export const MAX_SCROLL_POSITION_BYTES = 16384; // 16 KB
+const MAX_SCROLL_POSITION_BYTES = 16384; // 16 KB
 
 export function formatStateDate(val?: unknown): string | null {
   if (!val) return null;
@@ -145,7 +145,7 @@ export function toStateResponse(
   };
 }
 
-export interface MergeableUserItemState {
+interface MergeableUserItemState {
   userId: string;
   itemId: string;
   isStarred?: boolean | null;
@@ -157,7 +157,7 @@ export interface MergeableUserItemState {
   lastReadAt?: Date | null;
 }
 
-export interface PreferredMergedState {
+interface PreferredMergedState {
   isStarred: boolean;
   maxRating: number | null;
   readStatus: 'completed' | 'reading' | 'unread';
@@ -326,7 +326,7 @@ export function pickPreferredMergedState(
   };
 }
 
-export interface RawCollectionItem {
+interface RawCollectionItem {
   id: string;
   name: string;
   description?: string | null;

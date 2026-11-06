@@ -6,7 +6,7 @@ import { QueryRepository, hydrateOffloadedMetadataPayload } from '@/modules/libr
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 import { LIBRARY_EVENT_TYPES, TransactionHelpers, UNIT_OF_WORK, IUnitOfWork, normalizeProjectScopeId, executeStandardLibraryCacheInvalidation, libraryConfig, SingleFlightCoalescer } from '@/modules/library/core';
-import { ItemCacheCoordinator } from './library-bootstrap.service';
+import { ItemCacheCoordinator } from './schema-validator.service';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
@@ -38,12 +38,14 @@ export class ItemRelationsService {
   }
 
   async getRelatedItems(userId: string, itemId: string, projectId?: string) {
-    const item = await this.query.findById(userId, itemId, projectId);
+    const [item, relations] = await Promise.all([
+      this.query.findById(userId, itemId, projectId),
+      this.query.getRelations(itemId),
+    ]);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
-    const relations = await this.query.getRelations(itemId);
     return {
       relatedItems: relations,
       total: relations.length,
@@ -463,12 +465,6 @@ export class ItemFulltextService {
               : undefined) ||
             item.abstract ||
             undefined,
-          ...(typeof payload.isScanned === 'boolean'
-            ? { isScanned: payload.isScanned }
-            : {}),
-          ...(typeof payload.ocrStatus === 'string'
-            ? { ocrStatus: payload.ocrStatus }
-            : {}),
           sections: (Array.isArray(payload.sections)
             ? payload.sections
             : []) as DocumentFulltextResponse['sections'],

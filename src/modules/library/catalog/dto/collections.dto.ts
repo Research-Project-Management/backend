@@ -1,7 +1,13 @@
-import { ArrayMaxSize, IsArray, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateIf, ValidateNested, IsBoolean, IsIn, MinLength, IsEnum, Max } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateIf, ValidateNested, IsBoolean, IsIn, MinLength, IsEnum, Max } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { TagType } from '@prisma/client';
-import { ReadingStatus } from '@/modules/library/catalog/types/catalog.types';
+import {
+  ReadingStatus,
+  SAVED_SEARCH_SORT_BY_VALUES,
+  type SavedSearchSortBy,
+  type SavedSearchConditionGroup,
+  type SavedSearchScopeOptions,
+} from '@/modules/library/catalog/types/catalog.types';
 
 export class CreateCollectionDto {
   @IsString()
@@ -109,7 +115,7 @@ export class MoveItemsDto {
   sourceCollectionId?: string | null;
 }
 
-export class ReorderCollectionItemDto {
+class ReorderCollectionItemDto {
   @IsUUID()
   id!: string;
 
@@ -347,7 +353,7 @@ export class SplitTagDto {
   projectId?: string;
 }
 
-export class ReaderBookmarkItemDto {
+class ReaderBookmarkItemDto {
   @IsInt()
   @Min(1)
   page!: number;
@@ -361,7 +367,7 @@ export class ReaderBookmarkItemDto {
   createdAt?: string;
 }
 
-export interface ReaderScrollPositionDto {
+interface ReaderScrollPositionDto {
   attachmentId?: string;
   page?: number;
   zoom?: number;
@@ -413,4 +419,206 @@ export class GetBatchStatesDto {
   @IsUUID('all', { each: true })
   @IsOptional()
   itemIds?: string[];
+}
+
+export class ValidateItemPayloadDto {
+  @IsString()
+  @MaxLength(100)
+  itemType!: string;
+
+  @IsObject()
+  data!: Record<string, unknown>;
+}
+
+export class CreateSavedSearchDto {
+  @IsString()
+  @MaxLength(255)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  icon?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  color?: string;
+
+  @IsObject()
+  conditions!: SavedSearchConditionGroup;
+
+  @IsOptional()
+  @IsObject()
+  scopeOptions?: SavedSearchScopeOptions;
+
+  @IsOptional()
+  @IsIn(['AND', 'OR'])
+  conjunction?: 'AND' | 'OR';
+
+  @IsOptional()
+  @IsIn(SAVED_SEARCH_SORT_BY_VALUES)
+  sortBy?: SavedSearchSortBy;
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsBoolean()
+  isPinned?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  projectId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  targetScope?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  scope?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  expectedVersion?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  version?: number;
+}
+
+export class UpdateSavedSearchDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  icon?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  color?: string;
+
+  @IsOptional()
+  @IsObject()
+  conditions?: SavedSearchConditionGroup;
+
+  @IsOptional()
+  @IsObject()
+  scopeOptions?: SavedSearchScopeOptions;
+
+  @IsOptional()
+  @IsIn(['AND', 'OR'])
+  conjunction?: 'AND' | 'OR';
+
+  @IsOptional()
+  @IsIn(SAVED_SEARCH_SORT_BY_VALUES)
+  sortBy?: SavedSearchSortBy;
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsBoolean()
+  isPinned?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  targetScope?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  scope?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  expectedVersion?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  version?: number;
+}
+
+export class PreviewSavedSearchDto {
+  @IsObject()
+  conditions!: SavedSearchConditionGroup;
+
+  @IsOptional()
+  @IsObject()
+  scopeOptions?: SavedSearchScopeOptions;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  sortBy?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  projectId?: string;
+}
+
+export class ExecuteSavedSearchQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  limit?: number = 50;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  page?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  cursor?: string;
+
+  @IsOptional()
+  @IsIn(SAVED_SEARCH_SORT_BY_VALUES)
+  sortBy?: SavedSearchSortBy;
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  projectId?: string;
 }

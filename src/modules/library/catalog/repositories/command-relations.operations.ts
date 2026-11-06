@@ -6,11 +6,11 @@ import { CreateItemData, UpdateItemData, ItemDetail } from '@/modules/library/co
 import { TagInput } from '@/modules/library/catalog/types/catalog.types';
 import {
   buildMyPublicationMetadata, calculateIdentifierChanges, normalizeItemIdentifiers,
-} from '@/modules/library/catalog/domain/identifier-change.helper';
-import { ResolvedTag, buildTagTypeMap } from '@/modules/library/catalog/domain/creator-tag-payload.builder';
+} from '@/modules/library/catalog/domain/identifier-change.domain';
+import { ResolvedTag, buildTagTypeMap } from '@/modules/library/catalog/domain/creator-tag.mapper';
 import {
   buildCommandCreateInput, extractUniqueCreateCollectionIds, resolveCreateDefaultTagType,
-} from '@/modules/library/catalog/domain/command-payload.builder';
+} from '@/modules/library/catalog/domain/item-command.mapper';
 
 export { buildTagTypeMap };
 export type { ResolvedTag };

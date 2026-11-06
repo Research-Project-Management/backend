@@ -21,10 +21,10 @@ import {
   ProjectId,
 } from '@/modules/library/core';
 import { cleanSingleTag } from '@/modules/library/core/domain/tag.domain';
-import { resolveOrCreateTags } from '@/modules/library/catalog/repositories/command-relations.helper';
+
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
-import { ItemCacheCoordinator } from './library-bootstrap.service';
+import { ItemCacheCoordinator } from './schema-validator.service';
 
 @Injectable()
 export class TagsService {
@@ -528,93 +528,6 @@ export class TagsService {
     }
   }
 
-  async syncTagsToItem(
-    tx: Prisma.TransactionClient,
-    userId: UserId | string,
-    itemId: ItemId | string,
-    tagNames: string[],
-    defaultTagType: TagType = TagType.automatic,
-    projectId?: ProjectId | string,
-  ): Promise<void> {
-    if (tagNames.length === 0) return;
-
-    const executeSync = async (client: Prisma.TransactionClient) => {
-      if (this.repo?.syncItemTags) {
-        return this.repo.syncItemTags(
-          userId,
-          itemId,
-          tagNames,
-          defaultTagType,
-          normalizeProjectScopeId(projectId),
-          client,
-        );
-      }
-      const resolvedTags = await resolveOrCreateTags(
-        client,
-        userId,
-        tagNames,
-        defaultTagType,
-        normalizeProjectScopeId(projectId),
-      );
-      if (resolvedTags.length === 0) return false;
-
-      await client.itemTag.createMany({
-        data: resolvedTags.map((tag) => ({
-          tagId: tag.id,
-          itemId,
-          type: tag.type,
-        })),
-        skipDuplicates: true,
-      });
-      return true;
-    };
-
-    if (this.libraryTx && !tx) {
-      let ranPostCommitHook = false;
-      const effectiveProjectId = normalizeProjectScopeId(projectId);
-      const synced = await this.libraryTx.executeInTransaction(
-        async (innerTx, helpers) => {
-          ranPostCommitHook = Boolean(helpers?.onAfterCommit);
-          const didSync = await executeSync(innerTx);
-          if (didSync) {
-            const eventScope = { userId, projectId: effectiveProjectId };
-            await helpers?.appendChange?.(eventScope, {
-              entityType: 'Item',
-              entityId: itemId,
-              action: 'update',
-              version: 1,
-              data: { id: itemId, tagNames },
-            });
-            await helpers?.publishOutbox?.(
-              eventScope,
-              itemId,
-              LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-              {
-                id: itemId,
-                itemId,
-                userId,
-                projectId: effectiveProjectId,
-                updatedFields: ['tags'],
-              },
-            );
-            helpers?.onAfterCommit?.(() =>
-              this.invalidateTagsCache(userId, effectiveProjectId, itemId),
-            );
-          }
-          return didSync;
-        },
-      );
-      if (synced && !ranPostCommitHook) {
-        await this.invalidateTagsCache(userId, effectiveProjectId, itemId);
-      }
-      return;
-    }
-
-    // When `tx` is passed from an outer transaction, cache invalidation is handled
-    // by the outer caller after the transaction commits.
-    await executeSync(tx);
-  }
-
   async mergeTagsToItem(
     tx: Prisma.TransactionClient,
     sourceItemIds: (ItemId | string)[],
@@ -690,22 +603,41 @@ export class TagsService {
         });
       }
 
-      for (const [idx, tag] of splitRes.tags.entries()) {
-        await helpers.appendChange(eventScope, {
-          entityType: 'Tag',
-          entityId: tag.id,
-          action: idx === 0 ? 'update' : 'create',
-          version: (tag as { version?: number }).version ?? 1,
-          data: tag,
-        });
-        await helpers.publishOutbox(
-          eventScope,
-          tag.id,
+      const changeEntries = splitRes.tags.map((tag, idx) => ({
+        entityType: 'Tag' as const,
+        entityId: tag.id,
+        action: (idx === 0 ? 'update' : 'create') as 'update' | 'create',
+        version: (tag as { version?: number }).version ?? 1,
+        data: tag,
+      }));
+      const outboxEvents = splitRes.tags.map((tag, idx) => ({
+        aggregateId: tag.id,
+        eventType:
           idx === 0
             ? LIBRARY_EVENT_TYPES.TAG_UPDATED
             : LIBRARY_EVENT_TYPES.TAG_CREATED,
-          tag,
-        );
+        payload: tag,
+      }));
+
+      if (helpers.appendChangesBatch) {
+        await helpers.appendChangesBatch(eventScope, changeEntries);
+      } else {
+        for (const entry of changeEntries) {
+          await helpers.appendChange(eventScope, entry);
+        }
+      }
+
+      if (helpers.publishOutboxBatch) {
+        await helpers.publishOutboxBatch(eventScope, outboxEvents);
+      } else {
+        for (const ev of outboxEvents) {
+          await helpers.publishOutbox(
+            eventScope,
+            ev.aggregateId,
+            ev.eventType,
+            ev.payload,
+          );
+        }
       }
 
       helpers?.onAfterCommit?.(() =>

@@ -6,12 +6,12 @@ import { VersionMismatchException } from '@/modules/library/core/errors/domain.e
 import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/catalog.types';
 import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 
-export interface CreateCollectionInput {
+interface CreateCollectionInput {
   name: string; description?: string; color?: string; icon?: string;
   parentId?: string | null; createdById?: string; projectId?: string | null;
 }
 
-export interface UpdateCollectionInput {
+interface UpdateCollectionInput {
   name?: string; description?: string; color?: string; icon?: string;
   parentId?: string | null; version?: number;
 }

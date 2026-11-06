@@ -4,7 +4,7 @@ import { normalizeTitleCase } from './title.domain';
 import { normalizeTags } from './tag.domain';
 import { isValidIsbnChecksum, isValidIssnChecksum } from './identifier.domain';
 
-export interface ExtractedRegexFields {
+interface ExtractedRegexFields {
   doi?: string;
   candidateDois?: Array<{ doi: string; score: number }>;
   arxivId?: string;

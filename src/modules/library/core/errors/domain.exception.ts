@@ -19,7 +19,7 @@ export abstract class BaseDomainException extends Error {
   }
 }
 
-export interface VersionMismatchOptions {
+interface VersionMismatchOptions {
   aggregateType?: string;
   entityId?: string;
   currentVersion?: number;
@@ -225,7 +225,7 @@ export const LIBRARY_EVENT_TYPES = {
 export type LibraryItemSource =
   'doi' | 'url' | 'bibtex' | 'ris' | 'pdf' | 'manual' | 'external_sync';
 
-export interface ItemCreatedOutboxPayload {
+interface ItemCreatedOutboxPayload {
   itemId: string;
   userId?: string;
   projectId?: string;
@@ -265,3 +265,17 @@ export interface DomainEventEnvelope<T = unknown> {
   createdAt: Date;
   schemaVersion: number;
 }
+
+export class AttachmentInvariantError extends BaseDomainException {
+  public override name = 'AttachmentInvariantError';
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+export class AttachmentStorageException extends BaseDomainException {
+  constructor(message: string) {
+    super(message);
+  }
+}
+

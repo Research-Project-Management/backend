@@ -251,7 +251,7 @@ export function isValidIsbnChecksum(digits: string): boolean {
 /**
  * Converts a 10-digit ISBN into its canonical 13-digit `978...` representation.
  */
-export function convertIsbn10To13(isbn10: string): string | undefined {
+function convertIsbn10To13(isbn10: string): string | undefined {
   const clean = isbn10.replace(/[-\s]/g, '').toUpperCase();
   if (!/^\d{9}[\dX]$/.test(clean)) return undefined;
   const stem = `978${clean.slice(0, 9)}`;
@@ -574,13 +574,6 @@ export function deriveDirectPdfUrl(rawUrl: string): string | undefined {
  */
 export function cleanDoi(doi?: string | null): string {
   return normalizeDoi(doi) ?? '';
-}
-
-/**
- * Checks whether a given string is a valid DOI format.
- */
-export function isValidDoi(doi?: string | null): boolean {
-  return !!normalizeDoi(doi);
 }
 
 /**

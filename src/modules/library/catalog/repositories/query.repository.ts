@@ -54,7 +54,7 @@ export async function hydrateOffloadedMetadataPayload(
   return raw;
 }
 
-export interface AttachmentWithOwner {
+interface AttachmentWithOwner {
   id: string;
   itemId: string;
   metadata?: unknown;
@@ -503,20 +503,21 @@ export class QueryRepository {
     if (!isUuid(userId) || !isUuid(projectId)) return null;
     const client = this.getClient(tx);
     try {
-      const member = await client.projectMember.findFirst({
-        where: {
-          projectId,
-          userId,
-          project: { deletedAt: null },
-        },
-        select: { role: true },
-      });
+      const [member, project] = await Promise.all([
+        client.projectMember.findFirst({
+          where: {
+            projectId,
+            userId,
+            project: { deletedAt: null },
+          },
+          select: { role: true },
+        }),
+        client.project.findFirst({
+          where: { id: projectId, deletedAt: null },
+          select: { createdById: true },
+        }),
+      ]);
       if (member?.role) return String(member.role).toLowerCase();
-
-      const project = await client.project.findFirst({
-        where: { id: projectId, deletedAt: null },
-        select: { createdById: true },
-      });
       if (project?.createdById === userId) return 'owner';
     } catch {
       return null;

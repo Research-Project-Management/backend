@@ -48,7 +48,7 @@ function escapeHtmlText(str: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
+function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
   const metaObj = parseJsonObject(it.metadata);
   const hasRelationalItemTags = Array.isArray(it.itemTags);
   const hasRelationalPublications = Array.isArray(it.publications);
@@ -188,7 +188,7 @@ export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
   }
 }
 
-export function inferViewerFormat(
+function inferViewerFormat(
   att?: { attachmentType?: string | null; mimeType?: string | null; filename?: string | null } | null,
 ): 'pdf' | 'epub' | 'snapshot' {
   const mime = (att?.mimeType || '').toLowerCase();
@@ -201,7 +201,7 @@ export function inferViewerFormat(
   return 'pdf';
 }
 
-export function mapAttachmentsAndPrimaryFilePartial(
+function mapAttachmentsAndPrimaryFilePartial(
   it: MutableItemPayload,
 ): AttachmentLike | null {
   if (Array.isArray(it.attachments)) {
@@ -298,7 +298,7 @@ export function mapAttachmentsAndPrimaryFilePartial(
   return primaryPdf;
 }
 
-export function finalizePrimaryFilePartial(
+function finalizePrimaryFilePartial(
   it: MutableItemPayload,
   primaryPdf: AttachmentLike | null,
 ): void {
@@ -349,7 +349,7 @@ const PRISMA_TO_DTO_RELATION: Record<string, string> = {
   CONTINUED_BY: 'isContinuedBy', PART_OF: 'partOf',
 };
 
-export function mapPublicationsAndRelationsPartial(
+function mapPublicationsAndRelationsPartial(
   it: MutableItemPayload,
   toDomainFn: <T>(item: T) => T,
 ): void {
@@ -438,7 +438,7 @@ export function mapPublicationsAndRelationsPartial(
   }
 }
 
-export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
+function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
   if (Array.isArray(it.states) && it.states.length > 0) {
     const active = it.states[0];
     if (it.isStarred === undefined && active?.isStarred !== undefined) {

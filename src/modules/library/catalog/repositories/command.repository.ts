@@ -8,13 +8,13 @@ import { CreateItemData, UpdateItemData } from '@/modules/library/core/types/bib
 import {
   isUuid, cleanSingleIdentifier, normalizeItemIdentifiers, resolveExtraPlainText,
   extractNonColumnExtraFields, prepareNotesToCreate, buildCommandCreateInput, buildCommandUpdateInput,
-} from '@/modules/library/catalog/domain/command-payload.builder';
+} from '@/modules/library/catalog/domain/item-command.mapper';
 import { CommandBulkOperations } from './command-bulk.operations';
 import {
   resolveOrCreateTags, syncTagsForCatalogItem, disambiguateCitationKey, syncCreatedIdentifiers,
   syncUpdatedIdentifiers, resolveCreateItemRelations, sanitizeUpdateCollectionIds,
   putItemRelationInClient, removeItemRelationInClient, setMyPublicationInClient, buildCommandMutationInclude,
-} from './command-relations.helper';
+} from './command-relations.operations';
 export {
   isUuid, cleanSingleIdentifier, normalizeItemIdentifiers, resolveExtraPlainText,
   extractNonColumnExtraFields, prepareNotesToCreate, resolveOrCreateTags,
@@ -571,11 +571,11 @@ export class CommandRepository {
     });
   }
   async applyItemAiMetadataUpdate(params: {
-    itemId: string; existing: Record<string, unknown>; filteredPatch: Record<string, unknown>;
-    topLevelColumnSync: Record<string, unknown>; mergedMetadata: Prisma.InputJsonValue; tx?: Prisma.TransactionClient;
+    itemId: string;
+    mergedMetadata: Prisma.InputJsonValue;
+    tx?: Prisma.TransactionClient;
   }) {
-    const { itemId, existing, filteredPatch, topLevelColumnSync, mergedMetadata, tx } = params;
-    const cleanAiIds = normalizeItemIdentifiers(filteredPatch, { preserveOnInvalid: true });
+    const { itemId, mergedMetadata, tx } = params;
     const itemRelationsInclude = {
       contributors: { orderBy: { orderIndex: 'asc' as const } },
       itemTags: { include: { tag: true } },
@@ -587,14 +587,10 @@ export class CommandRepository {
 
     const client = this.getClient(tx);
     const itemDelegate = client?.item ?? this.prisma?.item;
-    const identClient = client?.itemIdentifier ? client : this.prisma;
-
-    await syncUpdatedIdentifiers(identClient, itemId, cleanAiIds, existing);
-
     if (!itemDelegate?.update) return null;
     return itemDelegate.update({
       where: { id: itemId },
-      data: { ...topLevelColumnSync, metadata: mergedMetadata, version: { increment: 1 } },
+      data: { metadata: mergedMetadata, version: { increment: 1 } },
       include: itemRelationsInclude,
     });
   }

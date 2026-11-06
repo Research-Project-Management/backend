@@ -11,7 +11,7 @@ import {
 } from '@/modules/library/core';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
 
-export interface DoiCitationResult {
+interface DoiCitationResult {
   styleId: string;
   bibliography: string;
   bibliographyHtml?: string;

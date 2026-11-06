@@ -6,7 +6,7 @@ import { stripNoteHtml } from '@/modules/library/core/domain/renamer.domain';
 
 export { stripNoteHtml };
 
-export interface NoteAnnotationSource {
+interface NoteAnnotationSource {
   id?: string;
   attachmentId?: string;
   type?: string | null;
@@ -23,7 +23,7 @@ export interface NoteAnnotationSource {
   createdAt?: Date | null;
 }
 
-export interface NoteItemSource {
+interface NoteItemSource {
   id?: string | null;
   title?: string | null;
   citekey?: string | null;
@@ -311,7 +311,7 @@ function resolveItemCitationAuthorInfo(item: NoteItemSource): {
   return { authorList, authorCitationBase };
 }
 
-export function formatAnnotationBlocksMarkdown(
+function formatAnnotationBlocksMarkdown(
   item: NoteItemSource,
   annotations: NoteAnnotationSource[],
   options?: FormatNoteOptions,

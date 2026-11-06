@@ -13,12 +13,8 @@ import {
   SEARCH_FACADE, ISearchFacade,
 } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
-import { ItemCacheCoordinator } from './library-bootstrap.service';
-import { ZoteroSchemaValidatorService } from './zotero-schema-validator.service';
-import {
-  executeBulkSoftDeleteInTx, executeBulkRestoreInTx, executeBulkPurgeInTx,
-  executeBulkHardDeleteInTx, executeEmptyTrashInTx, executePurgeExpiredTrashInTx,
-} from '../repositories/command-bulk.operations';
+import { SchemaValidatorService, ItemCacheCoordinator } from './schema-validator.service';
+import { executeBulkSoftDeleteInTx, executeBulkRestoreInTx, executeBulkPurgeInTx, executeEmptyTrashInTx, executePurgeExpiredTrashInTx } from '../repositories/command-bulk.operations';
 export type { ItemTransactionContext };
 @Injectable()
 export class ItemService {
@@ -29,7 +25,7 @@ export class ItemService {
     private readonly command: CommandRepository,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional() _tagsService?: unknown,
-    @Optional() private readonly validator?: ZoteroSchemaValidatorService,
+    @Optional() private readonly validator?: SchemaValidatorService,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() cacheCoordinator?: ItemCacheCoordinator,
     @Optional() @Inject(SEARCH_FACADE) private readonly searchGateway?: ISearchFacade,

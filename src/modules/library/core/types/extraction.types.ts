@@ -1,8 +1,5 @@
 import type { AttachmentExtractionStatus as PrismaExtractionStatus } from '@prisma/client';
 import type { BibliographicReference, DocumentSection, DocumentFigure, DocumentTable, DocumentFormula, ItemCreator, ItemMetadata } from './bibliographic.types';
-import { BaseDomainException } from '@/modules/library/core/errors/domain.exception';
-
-export type AttachmentKind = 'stored_file' | 'linked_resource' | 'snapshot';
 
 export type LinkMode =
   'imported_file' | 'imported_url' | 'linked_url' | 'linked_file';
@@ -208,7 +205,6 @@ export interface ExtractedPdfMetadata {
   issn?: string;
   creationDate?: string;
   rawText?: string;
-  rawTei?: string;
   referenceCount?: number;
   citationCount?: number;
   isSelfSufficient?: boolean;
@@ -319,15 +315,91 @@ export interface IPdfMetadataExtractorPort {
 
 export type RectCoords = [number, number, number, number];
 
-export class AttachmentInvariantError extends BaseDomainException {
-  public override name = 'AttachmentInvariantError';
-  constructor(message: string) {
-    super(message);
-  }
+export interface ClaimedAttachmentRecord {
+  id: string;
+  itemId: string;
+  fileId?: string | null;
+  url?: string;
+  filename?: string;
+  metadata?: unknown;
+  item?: {
+    id?: string;
+    userId?: string;
+    projectId?: string | null;
+    title?: string;
+    doi?: string | null;
+    arxivId?: string | null;
+    abstract?: string | null;
+    year?: number | null;
+    metadata?: unknown;
+    contributors?: unknown[];
+    itemTags?: unknown[];
+    notesList?: unknown[];
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
 }
 
-export class AttachmentStorageException extends BaseDomainException {
-  constructor(message: string) {
-    super(message);
-  }
+export interface FullTextOffloadDocument {
+  references?: unknown[];
+  sections?: unknown[];
+  figures?: unknown[];
+  tables?: unknown[];
+  formulas?: unknown[];
+  fullText?: string;
+  pages?: Array<{
+    pageIndex?: number;
+    pageNumber?: number;
+    textContent?: string;
+    text?: string;
+  }>;
+  metadata?: {
+    rawText?: string;
+    keywords?: string[];
+    notes?: Array<{ content: string; type?: string }>;
+    title?: string;
+    doi?: string;
+    arxivId?: string;
+    abstract?: string;
+    year?: number;
+    numberOfPages?: number;
+    publicationTitle?: string;
+    journal?: string;
+    proceedingsTitle?: string;
+    conferenceName?: string;
+    bookTitle?: string;
+    isbn?: string;
+    issn?: string;
+    pmid?: string;
+    volume?: string;
+    issue?: string;
+    pages?: string;
+    publisher?: string;
+    place?: string;
+    publicationDate?: string;
+    primaryCategory?: string;
+    authors?: string[];
+    creators?: Array<{
+      creatorType?: string;
+      fullName?: string;
+      name?: string;
+      firstName?: string;
+      lastName?: string;
+      fieldMode?: number;
+    }>;
+  };
 }
+
+export interface FullTextOffloadResult {
+  text?: string;
+  sections?: unknown[];
+  figures?: unknown[];
+  tables?: unknown[];
+  formulas?: unknown[];
+  references?: unknown[];
+  markdown?: string;
+  pageCount?: number;
+  qualityScore?: number;
+  engineUsed?: string;
+}
+

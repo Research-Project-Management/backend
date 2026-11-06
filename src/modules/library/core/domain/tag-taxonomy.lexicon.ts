@@ -1,6 +1,6 @@
 export const MAX_TAG_LENGTH = 255;
 
-export const ARXIV_ARCHIVE_DOMAINS: Record<string, string> = {
+const ARXIV_ARCHIVE_DOMAINS: Record<string, string> = {
   cs: 'Computer Science',
   econ: 'Economics',
   eess: 'Electrical Engineering and Systems Science',
@@ -14,7 +14,7 @@ export const ARXIV_ARCHIVE_DOMAINS: Record<string, string> = {
   'cond-mat': 'Condensed Matter',
 };
 
-export const ARXIV_SUBDISCIPLINE_TAXONOMY: Record<string, string> = {
+const ARXIV_SUBDISCIPLINE_TAXONOMY: Record<string, string> = {
   // Computer Science
   'cs.AI': 'Artificial Intelligence',
   'cs.AR': 'Hardware Architecture',

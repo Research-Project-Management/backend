@@ -1,6 +1,4 @@
 import { Prisma } from '@prisma/client';
-import { IsNotEmpty, IsOptional, IsString, IsNumber, IsArray, IsObject, IsBoolean, ArrayMaxSize, Min, Max, IsUUID } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export type CitationStyleId =
   | 'apa'
@@ -80,6 +78,14 @@ export interface CitationContextOptions {
   suffix?: string;
   suppressAuthor?: boolean;
   locale?: string;
+}
+
+export interface EngineCitationResult {
+  styleId: string;
+  inText: string;
+  bibliography: string;
+  bibliographyHtml?: string;
+  source: 'csl-engine';
 }
 
 export interface FormattedCitationResult {
@@ -314,114 +320,42 @@ export interface CslItemData {
   [key: string]: unknown;
 }
 
-export class FormatCitationDto {
-  @ApiProperty({ description: 'Item metadata to format citation from' })
-  @IsNotEmpty()
-  @IsObject()
-  item!: CitationItemInput;
+export const BIBTEX_ITEM_TYPE_MAP: Record<string, string> = {
+  journalArticle: 'article', magazineArticle: 'article', newspaperArticle: 'article',
+  book: 'book', bookSection: 'incollection', dictionaryEntry: 'incollection',
+  encyclopediaArticle: 'incollection', conferencePaper: 'inproceedings',
+  report: 'techreport', patent: 'patent', dataset: 'dataset',
+  computerProgram: 'software', standard: 'standard', webpage: 'online',
+  blogPost: 'online', forumPost: 'online', preprint: 'unpublished',
+  manuscript: 'unpublished', case: 'jurisdiction', statute: 'legislation', bill: 'legislation',
+};
 
-  @ApiPropertyOptional({
-    description: 'Citation style ID (e.g. apa, ieee, nature, harvard)',
-    example: 'apa-7th',
-  })
-  @IsOptional()
-  @IsString()
-  styleId?: CitationStyleId;
+export const BIBTEX_CSL_TYPE_MAP: Record<string, string> = {
+  'article-journal': 'article', 'article-magazine': 'article', 'article-newspaper': 'article',
+  'paper-conference': 'inproceedings', book: 'book', chapter: 'incollection',
+  'entry-dictionary': 'incollection', 'entry-encyclopedia': 'incollection',
+  report: 'techreport', thesis: 'phdthesis', patent: 'patent', dataset: 'dataset',
+  software: 'software', standard: 'standard', webpage: 'online', 'post-weblog': 'online',
+  post: 'online', manuscript: 'unpublished', article: 'unpublished',
+  legal_case: 'jurisdiction', legislation: 'legislation', bill: 'legislation',
+};
 
-  @ApiPropertyOptional({ description: 'Citation position index', example: 1 })
-  @IsOptional()
-  @IsNumber()
-  index?: number;
+export const RIS_ITEM_TYPE_MAP: Record<string, string> = {
+  journalArticle: 'JOUR', magazineArticle: 'MGZN', newspaperArticle: 'NEWS',
+  book: 'BOOK', bookSection: 'CHAP', dictionaryEntry: 'DICT',
+  encyclopediaArticle: 'ENCYC', conferencePaper: 'CONF', thesis: 'THES',
+  report: 'RPRT', patent: 'PAT', dataset: 'DATA', computerProgram: 'COMP',
+  standard: 'STAND', webpage: 'ELEC', blogPost: 'BLOG', forumPost: 'ELEC',
+  preprint: 'UNPB', manuscript: 'UNPB', case: 'CASE', statute: 'STAT',
+  bill: 'BILL', hearing: 'HEAR', letter: 'PCOMM', interview: 'INTV',
+  film: 'MPCT', videoRecording: 'VIDEO', audioRecording: 'SOUND',
+  artwork: 'ART', map: 'MAP', presentation: 'SLIDE',
+};
 
-  @ApiPropertyOptional({ description: 'Pinpoint locator (e.g. page number "42")' })
-  @IsOptional()
-  @IsString()
-  locator?: string;
-
-  @ApiPropertyOptional({ description: 'Locator label (e.g. "page", "chapter", "section")' })
-  @IsOptional()
-  @IsString()
-  label?: string;
-
-  @ApiPropertyOptional({ description: 'In-text citation prefix (e.g. "see ")' })
-  @IsOptional()
-  @IsString()
-  prefix?: string;
-
-  @ApiPropertyOptional({ description: 'In-text citation suffix' })
-  @IsOptional()
-  @IsString()
-  suffix?: string;
-
-  @ApiPropertyOptional({ description: 'Suppress author in in-text citation' })
-  @IsOptional()
-  @IsBoolean()
-  suppressAuthor?: boolean;
-}
-
-export class FormatBatchCitationDto {
-  @ApiProperty({ description: 'Array of item metadata' })
-  @IsArray()
-  @IsNotEmpty()
-  @ArrayMaxSize(500)
-  items!: CitationItemInput[];
-
-  @ApiPropertyOptional({
-    description: 'Citation style ID',
-    example: 'apa-7th',
-  })
-  @IsOptional()
-  @IsString()
-  styleId?: CitationStyleId;
-}
-
-export class ExportLibraryDto {
-  @IsString()
-  format!: ExportFormatType;
-
-  @IsOptional()
-  @IsBoolean()
-  includeNotes?: boolean;
-
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(500)
-  @IsUUID('all', { each: true })
-  itemIds?: string[];
-
-  @IsOptional()
-  @IsString()
-  collectionId?: string;
-
-  @IsOptional()
-  @IsString()
-  tagId?: string;
-
-  @IsOptional()
-  @IsString()
-  projectId?: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(1)
-  @Max(5000)
-  limit?: number;
-}
-
-export class ExportByKeysDto {
-  @ApiProperty({ description: 'List of citation keys to export' })
-  @IsArray()
-  @ArrayMaxSize(1000)
-  @IsString({ each: true })
-  keys!: string[];
-
-  @ApiPropertyOptional({ description: 'Project scope ID if exporting from a project' })
-  @IsOptional()
-  @IsString()
-  projectId?: string;
-
-  @ApiPropertyOptional({ description: 'Export format', example: 'bibtex' })
-  @IsOptional()
-  @IsString()
-  format?: ExportFormatType;
-}
+export const RIS_CSL_TYPE_MAP: Record<string, string> = {
+  'article-journal': 'JOUR', 'article-magazine': 'MGZN', 'article-newspaper': 'NEWS',
+  'paper-conference': 'CONF', book: 'BOOK', chapter: 'CHAP', report: 'RPRT',
+  thesis: 'THES', patent: 'PAT', dataset: 'DATA', software: 'COMP',
+  standard: 'STAND', webpage: 'ELEC', 'post-weblog': 'BLOG', post: 'ELEC',
+  manuscript: 'UNPB', legal_case: 'CASE', legislation: 'STAT', bill: 'BILL',
+};

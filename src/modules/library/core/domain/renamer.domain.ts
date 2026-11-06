@@ -13,7 +13,7 @@ import { decodeHtmlEntities } from '@/modules/library/core/domain/text.domain';
  * Default template: {{ firstCreator suffix=" - " }}{{ year suffix=" - " }}{{ title truncate="100" }}
  */
 
-export interface RenamerContributor {
+interface RenamerContributor {
   creatorType?: string | null;
   fieldMode?: number | string | null;
   firstName?: string | null;
@@ -127,7 +127,7 @@ export function extractAuthorTokens(
 /**
  * Extracts 4-digit publication year.
  */
-export function extractYearToken(item: RenamerItemMetadata): string {
+function extractYearToken(item: RenamerItemMetadata): string {
   if (item.year && item.year > 0) {
     return String(item.year);
   }
@@ -353,13 +353,13 @@ export function formatAttachmentFilename(
  * Framework-agnostic document format transformers used across Library contexts.
  */
 
-export const COORD_SCALE = 10_000;
-export const PAGE_PAD = 4;
-export const COORD_PAD = 5;
-export const MAX_SORT_PAGE = 9_999;
-export const MAX_SORT_COORD = 99_999;
+const COORD_SCALE = 10_000;
+const PAGE_PAD = 4;
+const COORD_PAD = 5;
+const MAX_SORT_PAGE = 9_999;
+const MAX_SORT_COORD = 99_999;
 
-export interface ParsedSortIndex {
+interface ParsedSortIndex {
   page: number;
   y: number;
   x: number;
@@ -436,7 +436,7 @@ export function parseAnnotationSortIndex(
   };
 }
 
-export interface TipTapInlineNode {
+interface TipTapInlineNode {
   type: 'text';
   text: string;
   marks?: Array<

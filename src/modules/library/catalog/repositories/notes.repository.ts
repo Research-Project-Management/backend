@@ -76,7 +76,7 @@ export function buildItemSearchCondition(
   ) as Prisma.ItemWhereInput[];
 }
 
-export class ItemWhereSpecification extends CompositeSpecification<
+class ItemWhereSpecification extends CompositeSpecification<
   Record<string, unknown>,
   Prisma.ItemWhereInput
 > {

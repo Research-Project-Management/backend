@@ -1,5 +1,5 @@
 import { resolveProviderFieldWeight } from './metadata-coalesce.policy';
-import { isPlaceholderItemTitle } from './title.domain';
+
 import { TypeConversionPreview } from '@/modules/library/core/types/bibliographic.types';
 
 export interface FieldProvenanceRecord {
@@ -13,7 +13,7 @@ export interface FieldProvenanceRecord {
   [key: string]: unknown;
 }
 
-export interface NormalizedProvenanceState {
+interface NormalizedProvenanceState {
   lockedSet: Set<string>;
   provenanceMap: Record<string, FieldProvenanceRecord>;
   isFilenameTitle: boolean;
@@ -86,7 +86,7 @@ const TRACKED_MANUAL_LOCK_KEYS = [
   'labels',
 ] as const;
 
-export const COUPLED_METADATA_ALIASES: Readonly<
+const COUPLED_METADATA_ALIASES: Readonly<
   Record<string, readonly string[]>
 > = {
   publicationTitle: ['journal', 'venue'],
@@ -662,63 +662,6 @@ export class ItemProvenancePolicy {
     return {
       fieldProvenance: provenanceMap,
       lockedFields: Array.from(lockedSet),
-    };
-  }
-
-  /**
-   * Filters an AI metadata patch against existing user locks (including coupled aliases)
-   * and authoritative provenance (`authority >= 0.70`), stamping accepted bibliographic
-   * fields with `AIMetadata` (`confidence: 0.7`).
-   */
-  static filterAiMetadataPatch(
-    currentMeta: Record<string, unknown>,
-    sanitizedPatch: Record<string, unknown>,
-  ): {
-    filteredPatch: Record<string, unknown>;
-    updatedFieldProvenance?: Record<string, FieldProvenanceRecord>;
-  } {
-    const { provenanceMap } = this.extractProvenanceState(currentMeta);
-
-    const filteredPatch: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(sanitizedPatch)) {
-      if (k === 'lockedFields' || k === 'fieldProvenance') continue;
-      if (!isMeaningfullyNonEmpty(v)) continue;
-      if (k === 'title' && isPlaceholderItemTitle(String(v))) continue;
-      if (this.isFieldLocked(currentMeta, k)) continue;
-
-      const isAiSpecificKey = k.startsWith('ai') || k.startsWith('llm');
-      if (!isAiSpecificKey) {
-        const coupled = this.getCoupledFieldAliases(k);
-        const existingVal =
-          currentMeta[k] !== undefined
-            ? currentMeta[k]
-            : coupled
-                .map((alias) => currentMeta[alias])
-                .find((val) => val !== undefined);
-        const hasNonEmptyExisting = isMeaningfullyNonEmpty(existingVal);
-        if (hasNonEmptyExisting) {
-          const existingAuth = this.getFieldAuthority(currentMeta, k, true);
-          if (existingAuth >= 0.7) {
-            continue;
-          }
-        }
-      }
-
-      filteredPatch[k] = v;
-      if (!isAiSpecificKey) {
-        provenanceMap[k] = {
-          source: 'AIMetadata',
-          sourceProvider: 'AIMetadata',
-          confidence: 0.7,
-          verified: false,
-        };
-      }
-    }
-
-    return {
-      filteredPatch,
-      updatedFieldProvenance:
-        Object.keys(provenanceMap).length > 0 ? provenanceMap : undefined,
     };
   }
 }

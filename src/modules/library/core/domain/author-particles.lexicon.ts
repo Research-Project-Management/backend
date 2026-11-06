@@ -3,7 +3,7 @@
  * (Zotero single-field creator, fieldMode = 1). Deliberately excludes short
  * tokens that collide with person names (e.g. "who", "mit", "meta").
  */
-export const INSTITUTION_KEYWORDS = [
+const INSTITUTION_KEYWORDS = [
   'university',
   'universities',
   'universität',

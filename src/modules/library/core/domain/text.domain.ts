@@ -63,7 +63,7 @@ export function decodeHtmlEntities(text: string): string {
  * (the tag is dropped without inserting spaces, e.g. "CO<sub>2max</sub>" →
  * "CO2max").
  */
-export function convertSubSupTagsToUnicode(text: string): string {
+function convertSubSupTagsToUnicode(text: string): string {
   if (!text || typeof text !== 'string') return '';
   if (!/<(?:jats:|mml:)?su[bp]\b/i.test(text)) return text;
   const mapAll = (content: string, map: Record<string, string>) => {

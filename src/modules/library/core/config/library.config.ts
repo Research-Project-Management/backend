@@ -1,7 +1,7 @@
 import { registerAs, ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
 
-export interface LibraryConfig {
+interface LibraryConfig {
   app: {
     nodeEnv: string;
     isTest: boolean;
@@ -268,3 +268,6 @@ export const LIBRARY_REDIS_KEYS = {
     scopeId ? `csl:${scopeId}:custom-styles-list` : 'csl:custom-styles-list',
   cslStylesCatalogIndex: () => 'csl:catalog:styles-index',
 };
+
+export const LIBRARY_OUTBOX_QUEUE = libraryConfig().outbox.queue;
+export const LIBRARY_OUTBOX_JOB = 'dispatch_outbox_event';

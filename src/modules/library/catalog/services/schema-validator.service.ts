@@ -1,118 +1,17 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
+import { RedisCacheService } from '@/core';
 import { SchemaValidationResult, CreatorHarmonizationChange, CreatorTypeDefinition, ItemFieldDefinition, ItemTypeDefinition, SchemaRegistrySnapshot } from '@/modules/library/core/types/schema.types';
 import { FIELD_ALIASES, REVERSE_FIELD_ALIASES, SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
-import { CreatorCreditInput, CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, INTERNAL_SYSTEM_AND_TELEMETRY_KEYS, getEffectiveBaseFieldMap, getEffectiveReverseBaseFieldMap, getValidCreatorMapForType, normalizeCanonicalItemType } from '@/modules/library/core';
-
-const SYSTEM_AND_TELEMETRY_KEYS = new Set([
-  ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
-  'id',
-  'projectId',
-  'userId',
-  'createdById',
-  'uploadedById',
-  'createdAt',
-  'updatedAt',
-  'deletedAt',
-  'version',
-  'expectedVersion',
-  'isDeleted',
-  'silent',
-  'provenance',
-  'fieldProvenance',
-  'lockedFields',
-  'ingestionStatus',
-  'verificationScore',
-  'isVerified',
-  'matchedSignals',
-  'missingFields',
-  'isSelfSufficient',
-  'qualityScore',
-  'engineUsed',
-  'disambiguationWarning',
-  'rejectedCitedDoi',
-  'promptUploadPdf',
-  'sourceProvider',
-  'source',
-  'sources',
-  'originProvider',
-  'canonicalId',
-  'canonicalUrl',
-  'resolvedAt',
-  'warnings',
-  'dismissedDuplicateIds',
-  'mergedFromIds',
-  'crossrefEnriched',
-  'isRetracted',
-  'retractionNature',
-  'retractionDetails',
-  'retractionCheckedAt',
-  'isMyPublication',
-  'publicationConfirmedAt',
-  'userStates',
-  'states',
-  'readStatus',
-  'rating',
-  'lastReadAt',
-  'isStarred',
-  'demotedToExtra',
-  'demotedExtraLines',
-  '__demotedExtraLines',
-]);
-
-const PRIVILEGED_INTERNAL_KEYS = new Set([
-  '__isSystemUpdate',
-  '__updateSource',
-]);
-
-const UNIVERSAL_FIELDS = new Set([
-  ...SYSTEM_AND_TELEMETRY_KEYS,
-  ...CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
-  ...Object.keys(FIELD_ALIASES),
-  ...Object.values(FIELD_ALIASES),
-  'creators',
-  'authors',
-  'author',
-  'editors',
-  'contributors',
-  'metadata',
-  'relations',
-  'seeAlso',
-  'tags',
-  'labels',
-  'itemTags',
-  'keywords',
-  'keywordsList',
-  'collectionId',
-  'collectionIds',
-  'collections',
-  'collectionItems',
-  'notes',
-  'notesList',
-  'fileUrl',
-  'fileId',
-  'filename',
-  'mimeType',
-  'size',
-  'primaryFile',
-  'attachments',
-  'identifiers',
-  'extraFields',
-  'URL',
-  'numberOfPages',
-  'numPages',
-  'journalRef',
-  'primaryCategory',
-  'categories',
-]);
+import { CreatorCreditInput, getEffectiveBaseFieldMap, getEffectiveReverseBaseFieldMap, getValidCreatorMapForType, normalizeCanonicalItemType, normalizeProjectScopeId, libraryConfig, invalidateLibraryScopeCaches } from '@/modules/library/core';
+import {
+  PRIVILEGED_INTERNAL_KEYS,
+  SYSTEM_AND_TELEMETRY_KEYS,
+  UNIVERSAL_FIELDS,
+} from '@/modules/library/catalog/types/catalog.types';
 
 @Injectable()
 export class TypesService {
   private readonly snapshot: SchemaRegistrySnapshot = SCHEMA_V42_DATA;
-
-  getVersion(): number {
-    return this.snapshot.version;
-  }
-
 
   getSnapshot(): SchemaRegistrySnapshot {
     return this.snapshot;
@@ -170,11 +69,6 @@ export class TypesService {
   getPrimaryCreatorType(itemType: string): string {
     const def = this.getItemType(itemType);
     return def?.primaryCreatorType ?? 'author';
-  }
-
-  isValidCreatorType(itemType: string, creatorType: string): boolean {
-    const valid = this.getValidCreatorTypes(itemType);
-    return valid.some((c) => c.creatorType === creatorType);
   }
 
   getBaseFieldMapping(itemType: string): Record<string, string> {
@@ -245,8 +139,8 @@ export class TypesService {
 }
 
 @Injectable()
-export class ZoteroSchemaValidatorService {
-  private readonly logger = new Logger(ZoteroSchemaValidatorService.name);
+export class SchemaValidatorService {
+  private readonly logger = new Logger(SchemaValidatorService.name);
 
   constructor(private readonly typesService: TypesService) {}
 
@@ -587,5 +481,133 @@ export class ZoteroSchemaValidatorService {
       demotedToExtra,
       creatorChanges: changes,
     };
+  }
+}
+
+/**
+ * ItemCacheCoordinator
+ * Encapsulates Redis caching and invalidation logic across Item scopes, details, and fulltext entries.
+ */
+@Injectable()
+export class ItemCacheCoordinator {
+  private readonly logger = new Logger(ItemCacheCoordinator.name);
+  private readonly isTestEnv = libraryConfig().app.isTest;
+
+  constructor(@Optional() private readonly cache?: RedisCacheService) {}
+
+  /**
+   * Invalidates Redis cache entries for an item and affected library lists.
+   */
+  async invalidateItemCache(
+    id: string,
+    userId?: string,
+    projectId?: string,
+    options?: {
+      skipScopeInvalidation?: boolean;
+      onlyUserStateOverlay?: boolean;
+      preserveContentCaches?: boolean;
+    },
+  ): Promise<void> {
+    if (!this.cache) return;
+    try {
+      await invalidateLibraryScopeCaches(this.cache, {
+        userId,
+        projectId,
+        itemIds: [id],
+        skipScopeInvalidation:
+          options?.skipScopeInvalidation === true || !userId,
+        onlyUserStateOverlay: options?.onlyUserStateOverlay,
+        preserveContentCaches: options?.preserveContentCaches,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to invalidate cache for item ${id}: ${message}`);
+    }
+  }
+
+  /**
+   * Performs a single scope-level cache invalidation for list/count/tag caches.
+   */
+  async invalidateScopeListCache(
+    userId: string,
+    projectId?: string,
+  ): Promise<void> {
+    if (!this.cache) return;
+    try {
+      await invalidateLibraryScopeCaches(this.cache, {
+        userId,
+        projectId,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to invalidate scope caches: ${message}`);
+    }
+  }
+
+  /**
+   * Batch invalidates Redis cache entries across multiple items and scopes.
+   */
+  async invalidateBulkItemsCache(
+    itemIds: string[],
+    userId: string,
+    projectId?: string,
+    additionalProjectIds?: Array<string | null | undefined>,
+    options?: {
+      skipScopeInvalidation?: boolean;
+      onlyUserStateOverlay?: boolean;
+      preserveContentCaches?: boolean;
+    },
+  ): Promise<void> {
+    if (itemIds.length === 0 || !this.cache) return;
+    try {
+      await invalidateLibraryScopeCaches(this.cache, {
+        userId,
+        projectId,
+        itemIds,
+        additionalProjectIds,
+        skipScopeInvalidation: options?.skipScopeInvalidation,
+        onlyUserStateOverlay: options?.onlyUserStateOverlay,
+        preserveContentCaches: options?.preserveContentCaches,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to invalidate bulk item caches (${itemIds.length} items): ${message}`,
+      );
+    }
+  }
+
+  /**
+   * Unified write-path invalidation helper for item mutations across services.
+   */
+  async invalidateForWrite(params: {
+    userId: string;
+    projectId?: string | null;
+    itemIds?: string[];
+    additionalProjectIds?: Array<string | null | undefined>;
+    skipScopeInvalidation?: boolean;
+    onlyUserStateOverlay?: boolean;
+    preserveContentCaches?: boolean;
+  }): Promise<void> {
+    const validProjectId = normalizeProjectScopeId(
+      params.projectId ?? undefined,
+    );
+    if (params.itemIds && params.itemIds.length > 0) {
+      await this.invalidateBulkItemsCache(
+        params.itemIds,
+        params.userId,
+        validProjectId,
+        params.additionalProjectIds,
+        {
+          skipScopeInvalidation: params.skipScopeInvalidation,
+          onlyUserStateOverlay: params.onlyUserStateOverlay,
+          preserveContentCaches: params.preserveContentCaches,
+        },
+      );
+      return;
+    }
+    if (!params.skipScopeInvalidation) {
+      await this.invalidateScopeListCache(params.userId, validProjectId);
+    }
   }
 }
