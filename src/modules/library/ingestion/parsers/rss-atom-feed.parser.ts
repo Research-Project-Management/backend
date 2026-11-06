@@ -11,94 +11,13 @@ import {
 import { parseCreatorString } from '@/modules/library/core';
 import { ItemCreator } from '@/modules/library/core/types/bibliographic.types';
 
-type FeedFormat = 'rss2' | 'rss1-rdf' | 'atom';
+import type {
+  FeedFormat,
+  ParsedFeedEntry,
+  ParsedFeed,
+} from '@/modules/library/ingestion/types/ingestion.types';
 
-export interface ParsedFeedEntry {
-  id: string;
-  title: string;
-  url?: string;
-  pdfUrl?: string;
-  doi?: string;
-  arxivId?: string;
-  pmid?: string;
-  pmcid?: string;
-  primaryCategory?: string;
-  authors: string[];
-  creators: ItemCreator[];
-  abstract?: string;
-  publicationTitle?: string;
-  volume?: string;
-  issue?: string;
-  pages?: string;
-  publicationDate?: string;
-  year?: number | null;
-  keywords: string[];
-  rights?: string;
-  itemType: 'journalArticle' | 'preprint' | 'webpage';
-  isRead?: boolean;
-}
-
-export interface ParsedFeed {
-  format: FeedFormat;
-  feedTitle?: string;
-  feedUrl?: string;
-  siteUrl?: string;
-  description?: string;
-  updatedAt?: string;
-  entries: ParsedFeedEntry[];
-}
-
-export interface PromoteFeedEntryOptions {
-  projectId?: string;
-  collectionId?: string;
-  tags?: string[];
-  attachPdfUrl?: boolean;
-}
-
-export interface FeedPromotionCatalogPort {
-  findExistingByIdentifier?(
-    userId: string,
-    params: {
-      doi?: string;
-      arxivId?: string;
-      url?: string;
-      projectId?: string;
-    },
-  ): Promise<{ id: string; title: string; isDuplicate?: boolean } | null>;
-  createItem(
-    userId: string,
-    data: {
-      title: string;
-      itemType: string;
-      authors: string[];
-      creators?: ItemCreator[];
-      year?: number;
-      doi?: string;
-      arxivId?: string;
-      pmid?: string;
-      pmcid?: string;
-      url?: string;
-      abstract?: string;
-      publicationTitle?: string;
-      volume?: string;
-      issue?: string;
-      pages?: string;
-      publicationDate?: string;
-      rights?: string;
-      metadataSource?: string;
-      projectId?: string;
-      collectionIds?: string[];
-      tags?: string[];
-      metadata?: Record<string, unknown>;
-    },
-  ): Promise<{ id: string; title: string; projectId?: string | null }>;
-}
-
-export interface PromoteFeedEntryResult {
-  item: { id: string; title: string; projectId?: string | null };
-  deduplicated: boolean;
-  feedEntryId: string;
-}
+export type { FeedFormat, ParsedFeedEntry, ParsedFeed };
 
 /**
  * Strips XML CDATA wrappers (`<![CDATA[...]]>`) and HTML tags while preserving readable text.
@@ -305,7 +224,7 @@ function resolveIdentifiers(params: {
 
   if (!doi && arxivId) {
     const canonicalArxiv = arxivId.replace(/v\d+$/i, '');
-    doi = `10.48550/arXiv.${canonicalArxiv}`;
+    doi = normalizeDoi(`10.48550/arXiv.${canonicalArxiv}`);
   }
 
   return { doi, arxivId, pmid, pmcid };
@@ -327,15 +246,21 @@ function parseFeedAuthors(rawAuthors: string[]): {
     if (!cleaned) continue;
 
     // If a single tag contains multiple comma-separated names like "Alice Smith, Bob Jones"
-    // (as opposed to "Smith, Alice" which has 1 comma and no 'and')
+    // (as opposed to "Smith, Alice" which has 1 comma and a single token after the comma)
     const commaParts = cleaned
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
+    const isTwoAuthorCommaSeparated =
+      commaParts.length === 2 &&
+      /\s/.test(commaParts[0]) &&
+      /\s/.test(commaParts[1]);
     const pieces =
-      commaParts.length > 2 || /\band\b/i.test(cleaned)
+      commaParts.length > 2 ||
+      isTwoAuthorCommaSeparated ||
+      /\band\b|;/i.test(cleaned)
         ? cleaned
-            .split(/\s+and\s+|;\s*|\s*,\s*(?=\p{Lu}\p{Ll}+\s+\p{Lu})/gu)
+            .split(/\s+and\s+|;\s*|\s*,\s*(?=\p{Lu}\p{Ll}*\s+\p{Lu})/gu)
             .map((s) => s.trim())
             .filter(Boolean)
         : [cleaned];
@@ -639,111 +564,3 @@ export function parseFeedXml(xml: string): ParsedFeed {
   };
 }
 
-/**
- * Promotes a parsed RSS/Atom feed entry into a user's Personal Library (`projectId: undefined`)
- * or Project Library (`projectId`), with optional duplicate guard by DOI / arXiv ID.
- */
-export async function promoteFeedEntryToLibrary(
-  entry: ParsedFeedEntry,
-  userId: string,
-  catalogPort: FeedPromotionCatalogPort,
-  options: PromoteFeedEntryOptions = {},
-): Promise<PromoteFeedEntryResult> {
-  const effectiveProjectId =
-    options.projectId &&
-    options.projectId !== 'personal' &&
-    options.projectId !== 'user' &&
-    options.projectId !== 'me'
-      ? options.projectId
-      : undefined;
-
-  if (catalogPort.findExistingByIdentifier) {
-    const existing = await catalogPort.findExistingByIdentifier(userId, {
-      doi: entry.doi,
-      arxivId: entry.arxivId,
-      url: entry.url,
-      projectId: effectiveProjectId,
-    });
-    if (existing) {
-      return {
-        item: {
-          id: existing.id,
-          title: existing.title,
-          projectId: effectiveProjectId ?? null,
-        },
-        deduplicated: true,
-        feedEntryId: entry.id,
-      };
-    }
-  }
-
-  const combinedTags = normalizeTags([
-    ...(entry.keywords || []),
-    ...(options.tags || []),
-  ]);
-
-  const normalizedCreators: ItemCreator[] =
-    Array.isArray(entry.creators) && entry.creators.length > 0
-      ? entry.creators.map((c, idx) => {
-          if (
-            !c.firstName &&
-            c.lastName &&
-            c.lastName.includes(' ') &&
-            c.fieldMode !== 1
-          ) {
-            return parseCreatorString(
-              c.lastName,
-              idx,
-              c.creatorType || 'author',
-            );
-          }
-          return c;
-        })
-      : (entry.authors || []).map((name, idx) =>
-          parseCreatorString(name, idx, 'author'),
-        );
-
-  const created = await catalogPort.createItem(userId, {
-    title: entry.title,
-    itemType: entry.itemType,
-    authors: entry.authors,
-    creators: normalizedCreators,
-    year: entry.year ?? undefined,
-    doi: entry.doi,
-    arxivId: entry.arxivId,
-    pmid: entry.pmid,
-    pmcid: entry.pmcid,
-    url: entry.url,
-    abstract: entry.abstract,
-    publicationTitle: entry.publicationTitle,
-    volume: entry.volume,
-    issue: entry.issue,
-    pages: entry.pages,
-    publicationDate: entry.publicationDate,
-    rights: entry.rights,
-    metadataSource: 'rss_atom_feed',
-    projectId: effectiveProjectId,
-    collectionIds: options.collectionId ? [options.collectionId] : undefined,
-    tags: combinedTags,
-    metadata: {
-      source: 'rss_atom_feed',
-      feedEntryId: entry.id,
-      arxivId: entry.arxivId,
-      pmid: entry.pmid,
-      pmcid: entry.pmcid,
-      primaryCategory: entry.primaryCategory,
-      pdfUrl: entry.pdfUrl,
-      volume: entry.volume,
-      issue: entry.issue,
-      pages: entry.pages,
-      publicationDate: entry.publicationDate,
-      rights: entry.rights,
-    },
-  });
-
-  return {
-    item: created,
-    deduplicated: false,
-    feedEntryId: entry.id,
-  };
-}

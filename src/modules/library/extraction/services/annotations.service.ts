@@ -17,7 +17,7 @@ import {
   UpsertAnnotationItem,
   AnnotationEntity,
 } from '@/modules/library/core/types/extraction.types';
-import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
+import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotations.domain';
 import {
   TransactionHelpers,
   ITEM_CACHE_INVALIDATOR,
@@ -484,12 +484,23 @@ export class AnnotationsService {
           },
         );
 
+        const isAdmin =
+          effectiveProjectId && data.deletes.length > 0
+            ? await this.annotationsRepo.isProjectAdmin(
+                userId,
+                effectiveProjectId,
+                tx,
+              )
+            : false;
+
         const result = await this.annotationsRepo.batchUpsert(
           attachmentId,
           userId,
           normalizedUpserts,
           data.deletes,
           tx,
+          resolvedItemId,
+          isAdmin,
         );
 
         const changes: Array<{

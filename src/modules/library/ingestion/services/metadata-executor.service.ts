@@ -8,9 +8,12 @@ import {
   MetadataRequest,
   ProviderExecutionResult,
   ProviderExecutionStatus,
+  ProviderFetchError,
   ProviderName,
 } from '@/modules/library/ingestion/types/metadata.types';
 import { DomainRateLimiterService } from './feed-retrieval.service';
+
+export { ProviderFetchError };
 
 function toAbortError(reason: unknown, fallbackMessage: string): Error {
   if (reason instanceof Error) return reason;
@@ -129,22 +132,6 @@ export class Semaphore {
 
   get waitingCount(): number {
     return this.queue.length;
-  }
-}
-
-/**
- * Error with structured metadata details from HTTP fetch.
- */
-export class ProviderFetchError extends Error {
-  constructor(
-    message: string,
-    public readonly statusCode?: number,
-    public readonly retryAfterMs?: number,
-    public readonly isTimeout?: boolean,
-    public readonly isParseError?: boolean,
-  ) {
-    super(message);
-    this.name = ProviderFetchError.name;
   }
 }
 

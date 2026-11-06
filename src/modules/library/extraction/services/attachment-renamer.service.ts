@@ -282,6 +282,24 @@ export class AttachmentRenamerService {
 
     const verifiedItemIds = new Set<string>();
     const invalidItemIds = new Set<string>();
+    const uniqueAttachmentItemIds = Array.from(
+      new Set(attachments.map((att) => att.itemId).filter(Boolean)),
+    );
+    await Promise.all(
+      uniqueAttachmentItemIds.map(async (candidateItemId) => {
+        try {
+          await this.assertItemExists(userId, candidateItemId, projectId);
+          verifiedItemIds.add(candidateItemId);
+        } catch (err: unknown) {
+          invalidItemIds.add(candidateItemId);
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Failed to verify item ${candidateItemId} for batch attachment rename: ${message}`,
+          );
+        }
+      }),
+    );
+
     const updatesToPersist: Array<{
       id: string;
       itemId: string;
@@ -294,15 +312,6 @@ export class AttachmentRenamerService {
       try {
         if (invalidItemIds.has(att.itemId)) {
           continue;
-        }
-        if (!verifiedItemIds.has(att.itemId)) {
-          try {
-            await this.assertItemExists(userId, att.itemId, projectId);
-            verifiedItemIds.add(att.itemId);
-          } catch (err: unknown) {
-            invalidItemIds.add(att.itemId);
-            throw err;
-          }
         }
         const oldFilename = att.filename || 'document.pdf';
         const newFilename = formatAttachmentFilename(

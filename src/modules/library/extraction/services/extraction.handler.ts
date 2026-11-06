@@ -20,13 +20,14 @@ import {
   normalizeProjectScopeId,
   extractFileIdFromUrl,
   ExtractionProcessException,
+  AttachmentStorageException,
   executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
-import { AttachmentStorageException } from '@/modules/library/core/types/extraction.types';
 import { RedisCacheService } from '@/core';
 import { ReferenceMatcherService } from './reference-matcher.service';
 import { ExtractionMetadataSynchronizer } from './extraction-metadata.synchronizer';
 import { isRejectedCitedIdentifier } from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
+import type { ClaimedAttachmentRecord } from '@/modules/library/core/types/extraction.types';
 
 export const EXTRACTION_EVENT_TYPES = {
   EXTRACTION_REQUESTED: 'library.attachment.extraction_requested',
@@ -40,23 +41,6 @@ type ExtractionResultWithPages = Omit<ExtractedPdfDocument, 'pages'> & {
   pageCount?: number;
   pages?: Array<{ pageIndex?: number; pageNumber?: number; textContent?: string; text?: string; charOffset?: number }>;
 };
-interface ClaimedAttachmentRecord {
-  id: string;
-  itemId: string;
-  fileId?: string | null;
-  url?: string;
-  filename?: string;
-  metadata?: unknown;
-  item?: {
-    id?: string;
-    userId?: string;
-    projectId?: string | null;
-    title?: string;
-    doi?: string | null;
-    metadata?: unknown;
-  } | null;
-  [key: string]: unknown;
-}
 interface PostExtractionPipelineContext {
   event: OutboxEvent;
   attachmentId: string;
@@ -265,22 +249,23 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         );
       }
 
-      if (!attachment.fileId) {
-        await this.extractionRepo
-          .updateAttachmentFileId(attachment.id, fileId)
-          .catch((err: unknown) => {
-            this.logger.warn(
-              `Failed to backfill attachment fileId for ${attachment.id}: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          });
-      }
-
-      // 2. Storage-first reading via Storage Port
-      const storageFile = await this.storagePort.readOwnedFile({
-        fileId,
-        userId: attachment.item?.userId,
-        projectId: attachment.item?.projectId ?? undefined,
-      });
+      // 2. Backfill fileId (if missing) & storage-first reading in parallel
+      const [, storageFile] = await Promise.all([
+        !attachment.fileId
+          ? this.extractionRepo
+              .updateAttachmentFileId(attachment.id, fileId)
+              .catch((err: unknown) => {
+                this.logger.warn(
+                  `Failed to backfill attachment fileId for ${attachment.id}: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              })
+          : Promise.resolve(),
+        this.storagePort.readOwnedFile({
+          fileId,
+          userId: attachment.item?.userId,
+          projectId: attachment.item?.projectId ?? undefined,
+        }),
+      ]);
       const rawBuffer =
         storageFile?.buffer ||
         (Buffer.isBuffer(storageFile) ? storageFile : null);
@@ -396,20 +381,25 @@ export class ExtractionHandler implements OutboxDispatchHandler {
             };
       try {
         await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
-          for (const m of res.matches) {
-            await helpers.appendChange(eventScope, {
-              entityType: 'Relation',
-              entityId: `${sourceItemId}:${m.targetItemId}`,
-              action: 'create',
-              version: 1,
-              data: {
-                itemId: sourceItemId,
-                fromItemId: sourceItemId,
-                toItemId: m.targetItemId,
-                targetItemId: m.targetItemId,
-                relationType: 'cites',
-              },
-            });
+          const entries = res.matches.map((m) => ({
+            entityType: 'Relation',
+            entityId: `${sourceItemId}:${m.targetItemId}`,
+            action: 'create' as const,
+            version: 1,
+            data: {
+              itemId: sourceItemId,
+              fromItemId: sourceItemId,
+              toItemId: m.targetItemId,
+              targetItemId: m.targetItemId,
+              relationType: 'cites',
+            },
+          }));
+          if (helpers.appendChangesBatch) {
+            await helpers.appendChangesBatch(eventScope, entries);
+          } else {
+            await Promise.all(
+              entries.map((entry) => helpers.appendChange(eventScope, entry)),
+            );
           }
         });
       } catch {

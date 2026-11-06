@@ -29,7 +29,7 @@ import {
   resolveBidirectionalBaseFields,
   getEffectiveBaseFieldMap,
   extractExtraKeyValues,
-} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
+} from '@/modules/library/core/domain/field-harmonizer.domain';
 import { normalizeCreators } from './metadata.policy';
 
 export { normalizeCreators };

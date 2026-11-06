@@ -8,9 +8,9 @@ import {
   RetractionSource,
 } from '@/modules/library/ingestion/types/ingestion.types';
 import { normalizeDoi, normalizePmid } from '@/modules/library/core';
-import { RetractionBloomFilter } from '../domain/metadata.validator';
+import { RetractionBloomFilter } from '../domain/metadata-validation.policy';
 
-export interface RetractionSeedItem {
+interface RetractionSeedItem {
   doi: string;
   pmid?: string;
   title?: string;
@@ -157,9 +157,14 @@ export class RetractionDatabaseService implements OnModuleInit {
    */
   async warmMemoryIndex(): Promise<void> {
     try {
-      const records = await this.repo.findRetractionRecordsForMemoryIndex(
-        RetractionDatabaseService.MAX_MEMORY_INDEX_ENTRIES,
-      );
+      const [records, identifiers] = await Promise.all([
+        this.repo.findRetractionRecordsForMemoryIndex(
+          RetractionDatabaseService.MAX_MEMORY_INDEX_ENTRIES,
+        ),
+        this.repo.findAllRetractionIdentifiersForBloom
+          ? this.repo.findAllRetractionIdentifiersForBloom()
+          : Promise.resolve(null),
+      ]);
 
       for (const r of records) {
         const details: RetractionDetails = {
@@ -177,9 +182,7 @@ export class RetractionDatabaseService implements OnModuleInit {
         if (r.pmid) this.setMemoryPmid(r.pmid.toLowerCase().trim(), details);
       }
 
-      if (this.repo.findAllRetractionIdentifiersForBloom) {
-        const identifiers =
-          await this.repo.findAllRetractionIdentifiersForBloom();
+      if (identifiers) {
         this.bloomFilter.clear();
         for (const item of identifiers) {
           if (item.doi) this.bloomFilter.add(item.doi);
@@ -273,12 +276,26 @@ export class RetractionDatabaseService implements OnModuleInit {
 
     // 3. PostgreSQL RetractionRecord Lookup (indexed lookup by DOI / PMID on cache miss)
     if (cleanDoi || cleanPmid) {
-      let record =
-        cleanDoi && this.repo.findRetractionRecordByDoi
-          ? await this.repo.findRetractionRecordByDoi(cleanDoi)
-          : null;
-      if (!record && cleanPmid && this.repo.findRetractionRecordByPmid) {
-        record = await this.repo.findRetractionRecordByPmid(cleanPmid);
+      let record = null;
+      if (
+        cleanDoi &&
+        cleanPmid &&
+        this.repo.findRetractionRecordByDoi &&
+        this.repo.findRetractionRecordByPmid
+      ) {
+        const [doiRecord, pmidRecord] = await Promise.all([
+          this.repo.findRetractionRecordByDoi(cleanDoi),
+          this.repo.findRetractionRecordByPmid(cleanPmid),
+        ]);
+        record = doiRecord ?? pmidRecord;
+      } else {
+        record =
+          cleanDoi && this.repo.findRetractionRecordByDoi
+            ? await this.repo.findRetractionRecordByDoi(cleanDoi)
+            : null;
+        if (!record && cleanPmid && this.repo.findRetractionRecordByPmid) {
+          record = await this.repo.findRetractionRecordByPmid(cleanPmid);
+        }
       }
       if (!record && this.repo.findRetractionRecord) {
         record = await this.repo.findRetractionRecord({

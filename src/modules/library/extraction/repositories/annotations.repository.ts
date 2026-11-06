@@ -21,13 +21,14 @@ import {
 import {
   extractTopLeftAnchor,
   normalizeRectCoordsToBoxes,
-} from '@/modules/library/extraction/domain/annotation.normalizer';
+} from '@/modules/library/extraction/domain/annotations.domain';
 
 export type { AnnotationEntity, CreateAnnotationData, UpdateAnnotationData };
 
 const ANNOTATION_SELECT = {
   id: true,
   attachmentId: true,
+  itemId: true,
   type: true,
   pageIndex: true,
   pageLabel: true,
@@ -341,6 +342,7 @@ export class AnnotationsRepository {
     deletes: string[],
     tx: Prisma.TransactionClient,
     itemId?: string,
+    allowAdminDelete?: boolean,
   ): Promise<BatchAnnotationsResult> {
     const created: AnnotationEntity[] = [];
     const updated: AnnotationEntity[] = [];
@@ -396,6 +398,7 @@ export class AnnotationsRepository {
           });
         }
 
+        const resolvedCurrentItemId = current.itemId || item.itemId || itemId;
         const updatePayload = {
           ...this.buildUpdateData(
             {
@@ -413,6 +416,9 @@ export class AnnotationsRepository {
             },
             current,
           ),
+          ...(!current.itemId && resolvedCurrentItemId
+            ? { itemId: resolvedCurrentItemId }
+            : {}),
           ...(isResurrecting ? { deletedAt: null } : {}),
         };
 
@@ -532,6 +538,7 @@ export class AnnotationsRepository {
             this.mapEntity({
               id,
               attachmentId,
+              itemId: resolvedItemId ?? null,
               type,
               pageIndex: item.pageIndex,
               pageLabel,
@@ -606,7 +613,7 @@ export class AnnotationsRepository {
         where: {
           id: { in: deletes },
           attachmentId,
-          authorId,
+          ...(allowAdminDelete ? {} : { authorId }),
           deletedAt: null,
         },
         select: { id: true },
@@ -678,20 +685,22 @@ export class AnnotationsRepository {
     if (!isUuid(userId) || !isUuid(projectId)) return false;
     const client = this.getClient(tx);
     try {
-      const member = await client.projectMember.findFirst({
-        where: { projectId, userId, project: { deletedAt: null } },
-        select: { role: true },
-      });
+      const [member, project] = await Promise.all([
+        client.projectMember.findFirst({
+          where: { projectId, userId, project: { deletedAt: null } },
+          select: { role: true },
+        }),
+        client.project.findFirst({
+          where: { id: projectId, deletedAt: null },
+          select: { createdById: true },
+        }),
+      ]);
       if (
         member?.role &&
         ['owner', 'coordinator'].includes(String(member.role).toLowerCase())
       ) {
         return true;
       }
-      const project = await client.project.findFirst({
-        where: { id: projectId, deletedAt: null },
-        select: { createdById: true },
-      });
       return project?.createdById === userId;
     } catch {
       return false;

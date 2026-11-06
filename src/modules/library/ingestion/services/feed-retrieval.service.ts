@@ -112,16 +112,36 @@ export class FeedRetrievalService {
   ): Promise<ParsedFeed> {
     if (
       !userId ||
-      !this.feedsRepo?.findReadItemIdsForUser ||
+      (!this.feedsRepo?.findUserItemStates &&
+        !this.feedsRepo?.findReadItemIdsForUser) ||
       !Array.isArray(feed.entries) ||
       feed.entries.length === 0
     ) {
       return feed;
     }
     try {
+      const entryIds = feed.entries.map((e) => e.id).filter(Boolean);
+      if (this.feedsRepo.findUserItemStates) {
+        const { readIds, savedMap } = await this.feedsRepo.findUserItemStates(
+          userId,
+          entryIds,
+        );
+        return {
+          ...feed,
+          entries: feed.entries.map((e) => {
+            const savedItemId = savedMap.get(e.id) ?? e.savedItemId ?? null;
+            return {
+              ...e,
+              isRead: readIds.has(e.id),
+              isSaved: Boolean(savedItemId) || Boolean(e.isSaved),
+              ...(savedItemId ? { savedItemId } : {}),
+            };
+          }),
+        };
+      }
       const readSet = await this.feedsRepo.findReadItemIdsForUser(
         userId,
-        feed.entries.map((e) => e.id).filter(Boolean),
+        entryIds,
       );
       return {
         ...feed,
@@ -401,7 +421,7 @@ export class FeedRetrievalService {
   }
 }
 
-export interface DomainRateLimitConfig {
+interface DomainRateLimitConfig {
   minIntervalMs: number;
 }
 

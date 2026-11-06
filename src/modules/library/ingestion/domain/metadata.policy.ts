@@ -3,13 +3,10 @@ import { BaseDomainException } from '@/modules/library/core/errors/domain.except
 import {
   ProviderName,
   QueryType,
-  ItemMetadata,
-  DuplicateMatchResult,
   CreatorInput,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 import {
-  normalizeDoi,
+  SsrfGuardService,
   isInstitutionName,
   splitAuthorString,
   parseCreatorString,
@@ -18,11 +15,7 @@ import {
 import {
   resolveCanonicalCreatorRole,
   getPrimaryCreatorRoleForType,
-} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
-import {
-  calculateTitleSimilarity,
-  firstAuthorMatches,
-} from '@/modules/library/ingestion/domain/deduplication.domain';
+} from '@/modules/library/core/domain/field-harmonizer.domain';
 
 export class SsrfBlockedDomainException extends BaseDomainException {
   constructor(message: string) {
@@ -33,13 +26,13 @@ export class SsrfBlockedDomainException extends BaseDomainException {
 
 export const METADATA_POLICY_VERSION = 3;
 
-export interface RoutingOptions {
+interface RoutingOptions {
   includeCitations?: boolean;
   includeReferences?: boolean;
   aggressive?: boolean;
 }
 
-export interface RoutingTiers {
+interface RoutingTiers {
   authoritative: ProviderName[];
   enrichment: ProviderName[];
   fallback: ProviderName[];
@@ -173,96 +166,6 @@ export class MetadataRoutingPolicy {
         `SSRF Protection: Blocked request to restricted IP "${hostname}"`,
       );
     }
-  }
-}
-
-// ============================================================================
-// Duplicate Policy
-// ============================================================================
-
-export interface ExistingItemSummary {
-  id: string;
-  title: string;
-  doi?: string | null;
-  year?: number | null;
-  authors?: string[];
-  citationKey?: string | null;
-}
-
-export class DuplicatePolicy {
-  evaluate(
-    proposed: ItemMetadata,
-    existingItems: ExistingItemSummary[],
-  ): DuplicateMatchResult {
-    const cleanProposedDoi =
-      normalizeDoi(proposed.doi) || proposed.doi?.toLowerCase().trim();
-
-    if (cleanProposedDoi) {
-      const exactDoiMatch = existingItems.find((it) => {
-        if (!it.doi) return false;
-        const cleanExistingDoi =
-          normalizeDoi(it.doi) || it.doi.toLowerCase().trim();
-        return cleanExistingDoi === cleanProposedDoi;
-      });
-      if (exactDoiMatch) {
-        return {
-          matchType: 'EXACT',
-          confidence: 1.0,
-          targetItemId: exactDoiMatch.id,
-          targetItemTitle: exactDoiMatch.title,
-          matchReason: 'DOI_EXACT',
-          evidence: { doi: cleanProposedDoi },
-        };
-      }
-    }
-
-    if (proposed.title && proposed.title.trim().length > 5) {
-      for (const item of existingItems) {
-        if (!item.title) continue;
-        const similarity = calculateTitleSimilarity(proposed.title, item.title);
-        if (similarity >= 0.88) {
-          const hasBothYears =
-            proposed.year !== undefined &&
-            proposed.year !== null &&
-            item.year !== undefined &&
-            item.year !== null;
-          const yearMatch =
-            hasBothYears &&
-            Math.abs(Number(proposed.year) - Number(item.year)) <= 1;
-          const yearConflict =
-            hasBothYears &&
-            Math.abs(Number(proposed.year) - Number(item.year)) > 1;
-          const authorMatch =
-            proposed.authors &&
-            proposed.authors.length > 0 &&
-            item.authors &&
-            item.authors.length > 0 &&
-            firstAuthorMatches(proposed.authors[0], item.authors[0]);
-
-          if (!yearConflict && (yearMatch || authorMatch)) {
-            return {
-              matchType: 'PROBABLE',
-              confidence: 0.85,
-              targetItemId: item.id,
-              targetItemTitle: item.title,
-              matchReason: 'TITLE_FUZZY',
-              evidence: {
-                proposedTitle: proposed.title,
-                existingTitle: item.title,
-                yearMatch: Boolean(yearMatch),
-                authorMatch: Boolean(authorMatch),
-              },
-            };
-          }
-        }
-      }
-    }
-
-    return {
-      matchType: 'NO_MATCH',
-      confidence: 0.0,
-      matchReason: 'NONE',
-    };
   }
 }
 

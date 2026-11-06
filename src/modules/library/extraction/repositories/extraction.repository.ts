@@ -3,12 +3,7 @@ import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/renamer.domain';
-import {
-  EntityNotFoundException,
-  normalizeProjectScopeId,
-  ItemProvenancePolicy,
-  deriveFirstAuthor,
-} from '@/modules/library/core';
+import { normalizeProjectScopeId, ItemProvenancePolicy, deriveFirstAuthor, syncItemDenormalizedCountsInClient } from '@/modules/library/core';
 import {
   sanitizeExtractedItemUpdateAgainstFreshState,
   isRejectedCitedIdentifier,
@@ -184,8 +179,6 @@ export class ExtractionRepository {
     data: {
       attachmentId: string;
       itemId: string;
-      isScanned?: boolean;
-      ocrStatus?: string | null;
       qualityScore?: number | null;
       engineUsed?: string | null;
       pageCount?: number;
@@ -205,8 +198,6 @@ export class ExtractionRepository {
     }
     const payload = {
       itemId: data.itemId,
-      ...(data.isScanned !== undefined ? { isScanned: data.isScanned } : {}),
-      ...(data.ocrStatus !== undefined ? { ocrStatus: data.ocrStatus } : {}),
       ...(data.qualityScore !== undefined
         ? { qualityScore: data.qualityScore }
         : {}),
@@ -231,18 +222,6 @@ export class ExtractionRepository {
         ...payload,
       },
       update: payload,
-    });
-  }
-
-  async updateAttachmentMetadata(
-    attachmentId: string,
-    metadata: Prisma.InputJsonValue,
-    tx?: Prisma.TransactionClient,
-  ) {
-    const client = this.getClient(tx);
-    return client.attachment.update({
-      where: { id: attachmentId },
-      data: { metadata },
     });
   }
 
@@ -653,20 +632,32 @@ export class ExtractionRepository {
 
     const createdCount = toCreate.length;
     if (createdCount > 0) {
-      if (client.note?.createMany) {
+      if (typeof client.note?.createMany === 'function') {
         await client.note.createMany({ data: toCreate });
       } else {
         for (const row of toCreate) {
           await client.note.create({ data: row });
         }
       }
-      await client.item.update({
-        where: { id: params.itemId },
-        data: {
-          noteCount: { increment: createdCount },
-          ...(params.skipVersionIncrement ? {} : { version: { increment: 1 } }),
-        },
-      });
+      if (typeof client.note?.count === 'function') {
+        await syncItemDenormalizedCountsInClient(client, params.itemId, {
+          notes: true,
+        });
+        if (!params.skipVersionIncrement && typeof client.item?.update === 'function') {
+          await client.item.update({
+            where: { id: params.itemId },
+            data: { version: { increment: 1 } },
+          });
+        }
+      } else {
+        await client.item.update({
+          where: { id: params.itemId },
+          data: {
+            noteCount: { increment: createdCount },
+            ...(params.skipVersionIncrement ? {} : { version: { increment: 1 } }),
+          },
+        });
+      }
     }
 
     return createdCount;

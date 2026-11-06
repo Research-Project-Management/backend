@@ -4,10 +4,9 @@ import {
   parseCreatorString,
 } from '@/modules/library/core';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
-import { CreatorInput } from '@/modules/library/ingestion/types/metadata.types';
-import { RisItem } from './ris.parser';
+import { CreatorInput, RisItem } from '@/modules/library/ingestion/types/metadata.types';
 
-export const RIS_TYPE_MAP: Record<string, string> = {
+const RIS_TYPE_MAP: Record<string, string> = {
   JOUR: 'journalArticle',
   JFULL: 'journalArticle',
   ABST: 'journalArticle',
@@ -133,7 +132,7 @@ export function buildTypeSpecificFields(params: {
   };
 }
 
-export function parseRisDateString(value: string): {
+function parseRisDateString(value: string): {
   year?: number;
   publicationDate?: string;
 } {
@@ -174,7 +173,7 @@ export function parseRisDateString(value: string): {
   return {};
 }
 
-export interface FallbackRisRecord {
+interface FallbackRisRecord {
   itemType: string;
   citationKey?: string;
   rawAuthors: string[];
@@ -275,7 +274,7 @@ const REFER_SIMPLE_TAG_MAP: Record<string, string> = {
 /**
  * Converts EndNote Refer / UNIX Refer (%0, %T, %A, %D, etc.) into standard RIS lines.
  */
-export function convertReferToRis(content: string): string {
+function convertReferToRis(content: string): string {
   const lines = content.split(/\r?\n/);
   const risLines: string[] = [];
   let inRecord = false;
@@ -349,7 +348,7 @@ export function convertReferToRis(content: string): string {
   return risLines.join('\n');
 }
 
-export type RisDirectFieldKey =
+type RisDirectFieldKey =
   | 'journalAbbr'
   | 'volume'
   | 'issue'
@@ -366,7 +365,7 @@ export type RisDirectFieldKey =
   | 'callNumber'
   | 'archive';
 
-export const RIS_DIRECT_FIELD_MAP: Readonly<Record<string, RisDirectFieldKey>> =
+const RIS_DIRECT_FIELD_MAP: Readonly<Record<string, RisDirectFieldKey>> =
   {
     J2: 'journalAbbr',
     JA: 'journalAbbr',
@@ -390,7 +389,7 @@ export const RIS_DIRECT_FIELD_MAP: Readonly<Record<string, RisDirectFieldKey>> =
     L4: 'archive',
   };
 
-export type RisTagHandler = (
+type RisTagHandler = (
   record: FallbackRisRecord,
   value: string,
   tag: string,
@@ -451,7 +450,7 @@ const handleRisAbstractTag: RisTagHandler = (record, value) => {
   record.abstract = (record.abstract ? record.abstract + ' ' : '') + value;
 };
 
-export const RIS_TAG_HANDLERS: Record<string, RisTagHandler> = {
+const RIS_TAG_HANDLERS: Record<string, RisTagHandler> = {
   ID: (record, value) => {
     if (value) record.citationKey = value;
   },

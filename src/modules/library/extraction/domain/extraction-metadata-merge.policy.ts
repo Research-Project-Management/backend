@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import {
   normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn,
   generateCitationKey, getPrimaryCreatorRoleForType, isPlaceholderItemTitle, sanitizeItemTitle,
-  cleanAbstractText, harmonizeZoteroFields, ItemProvenancePolicy, inferItemTypeFromPdfSignals,
+  cleanAbstractText, harmonizeBibliographicFields, ItemProvenancePolicy, inferItemTypeFromPdfSignals,
   resolveProviderFieldWeight, buildCanonicalIdentifierUri, disambiguateCitationKey,
   resolveOrCreateAutomaticTagsInClient as resolveOrCreateTags,
   isRejectedCitedIdentifier,
@@ -37,7 +37,7 @@ export interface ExtractionSyncDocumentInput {
   };
 }
 
-export interface FreshItemExtractionTarget {
+interface FreshItemExtractionTarget {
   userId: string; projectId?: string | null; citationKey?: string | null; title?: string | null;
   doi?: string | null; arxivId?: string | null; pmid?: string | null; pmcid?: string | null;
   isbn?: string | null; issn?: string | null; abstract?: string | null; year?: number | null;
@@ -50,7 +50,7 @@ function asMetaRecord(raw: unknown): Record<string, unknown> {
     : {};
 }
 
-export function canExtractionOverwriteItemType(
+function canExtractionOverwriteItemType(
   item: { itemType?: string | null; publicationTitle?: string | null } | null | undefined,
   meta: Record<string, unknown>,
   lockedSet: ReadonlySet<string>,
@@ -363,7 +363,7 @@ export function buildExtractedMetadataSyncPlan(
 
   if (hasBackfilledFields || creatorsToSync.length > 0 || tagsToSync.length > 0) {
     if (hasBackfilledFields) {
-      const harmonizedDelta = harmonizeZoteroFields(
+      const harmonizedDelta = harmonizeBibliographicFields(
         { ...metaPatch, itemType: effectiveItemType },
         { itemType: effectiveItemType, syncExtraFields: false, syncLegacyAliases: false },
       );

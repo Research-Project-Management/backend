@@ -1,7 +1,6 @@
 import { CreatorCreditInput, CreatorInput, CreatorType, ItemMetadata as CanonicalItemMetadata } from '@/modules/library/core';
 import { BadRequestException } from '@nestjs/common';
 import { BaseDomainException } from '@/modules/library/core/errors/domain.exception';
-import { IngestionSubmissionEnvelope } from './ingestion.types';
 
 /**
  * Canonical public contracts for the metadata ingestion pipeline.
@@ -97,8 +96,6 @@ export interface MetadataConflictDetail {
   }[];
 }
 
-export type MetadataConflict = MetadataConflictDetail;
-
 export interface ReconciliationDecision {
   selectedFields: Record<string, FieldEvidence>;
   rejectedFields: Record<string, FieldEvidence[]>;
@@ -122,20 +119,6 @@ export interface DuplicateMatchResult {
     | 'FILE_HASH'
     | 'NONE';
   evidence?: Record<string, unknown>;
-}
-
-export interface FieldAssertion {
-  field: string;
-  value: unknown;
-  sourceProvider: string;
-  confidenceScore: number;
-  isUserOverride: boolean;
-  timestamp: string;
-}
-
-export interface ConflictReport {
-  hasConflicts: boolean;
-  conflicts: MetadataConflict[];
 }
 
 // Provider Identity & Capabilities
@@ -314,7 +297,7 @@ export type IngestionErrorCategory =
   | 'unauthorized'
   | 'forbidden';
 
-export class IngestionException extends BaseDomainException {
+class IngestionException extends BaseDomainException {
   public readonly category: IngestionErrorCategory;
 
   constructor(
@@ -331,55 +314,6 @@ export class IngestionValidationException extends IngestionException {
   constructor(message: string) {
     super(message, 'validation_failed');
     this.name = 'IngestionValidationException';
-  }
-}
-
-export class IngestionUnsupportedSourceException extends IngestionException {
-  constructor(source: string) {
-    super(`Unsupported ingestion source: ${source}`, 'unsupported_source');
-    this.name = 'IngestionUnsupportedSourceException';
-  }
-}
-
-export class IngestionMetadataNotFoundException extends IngestionException {
-  constructor(query: string) {
-    super(`Metadata not found for query: ${query}`, 'metadata_not_found');
-    this.name = 'IngestionMetadataNotFoundException';
-  }
-}
-
-export class IngestionIdempotencyConflictException extends IngestionException {
-  constructor(
-    message = 'Idempotency key reused with mismatched payload or request already in progress',
-  ) {
-    super(message, 'idempotency_conflict');
-    this.name = 'IngestionIdempotencyConflictException';
-  }
-}
-
-export class IngestionDuplicateConflictException extends IngestionException {
-  constructor(message: string) {
-    super(message, 'duplicate_conflict');
-    this.name = 'IngestionDuplicateConflictException';
-  }
-}
-
-export class IngestionStorageException extends IngestionException {
-  public readonly cause?: unknown;
-
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, 'storage_failed');
-    this.cause = options?.cause;
-    this.name = 'IngestionStorageException';
-  }
-}
-
-export class IngestionRateLimitException extends IngestionException {
-  constructor(
-    message = 'Upstream provider rate limit exceeded, please retry later',
-  ) {
-    super(message, 'provider_unavailable');
-    this.name = 'IngestionRateLimitException';
   }
 }
 
@@ -423,7 +357,7 @@ export function isNonRetryableIngestionError(err: unknown): boolean {
  */
 export function isRetryableIngestionError(
   err: unknown,
-  envelope?: Pick<IngestionSubmissionEnvelope, 'isFinalAttempt'>,
+  envelope?: { isFinalAttempt?: boolean },
   delegate?: PipelineErrorClassificationDelegate,
 ): boolean {
   const explicitFinal = envelope?.isFinalAttempt;
@@ -455,3 +389,251 @@ export function isRetryableIngestionError(
   const combined = `${String(errObj.code || '')} ${String(errObj.message || '')}`;
   return RETRYABLE_ERROR_PATTERN.test(combined);
 }
+
+/**
+ * Error with structured metadata details from HTTP fetch.
+ */
+export class ProviderFetchError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode?: number,
+    public readonly retryAfterMs?: number,
+    public readonly isTimeout?: boolean,
+    public readonly isParseError?: boolean,
+  ) {
+    super(message);
+    this.name = ProviderFetchError.name;
+  }
+}
+
+export interface ParsedBibtexEntry {
+  citationKey?: string;
+  itemType: string;
+  title: string;
+  shortTitle?: string;
+  authors: string[];
+  editors?: string[];
+  creators?: Array<{
+    name?: string;
+    fullName?: string;
+    firstName?: string;
+    lastName?: string;
+    creatorType: string;
+    fieldMode?: number;
+  }>;
+  year: number | null;
+  publicationDate?: string;
+  journal?: string;
+  journalAbbr?: string;
+  publisher?: string;
+  university?: string;
+  institution?: string;
+  thesisType?: string;
+  reportNumber?: string;
+  reportType?: string;
+  bookTitle?: string;
+  proceedingsTitle?: string;
+  conferenceName?: string;
+  eventPlace?: string;
+  place?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  numPages?: string;
+  numberOfVolumes?: string;
+  seriesNumber?: string;
+  chapter?: string;
+  doi?: string;
+  pmid?: string;
+  pmcid?: string;
+  isbn?: string;
+  issn?: string;
+  url?: string;
+  accessedAt?: string;
+  abstract?: string;
+  series?: string;
+  edition?: string;
+  keywords?: string[];
+  tags?: string[];
+  notes?: string[];
+  language?: string;
+  rights?: string;
+  fileUrl?: string;
+  extra?: string;
+  arxivId?: string;
+  seeAlso?: string[];
+  relations?: Record<string, string | string[]>;
+  [key: string]: unknown;
+}
+
+export type BibtexItem = ParsedBibtexEntry;
+
+export interface RisItem extends ItemMetadata {
+  pmid?: string;
+  pmcid?: string;
+  shortTitle?: string;
+  journalAbbr?: string;
+  accessedAt?: string | Date | null;
+  university?: string;
+  institution?: string;
+  bookTitle?: string;
+  proceedingsTitle?: string;
+  conferenceName?: string;
+  reportNumber?: string;
+  patentNumber?: string;
+  thesisType?: string;
+}
+
+export interface ScrapedCreator {
+  firstName?: string;
+  lastName: string;
+  fullName?: string;
+  creatorType?: string;
+  fieldMode?: number;
+}
+
+export interface ScrapedUrlResult {
+  url: string;
+  isPdf: boolean;
+  fileBuffer?: Buffer;
+  filename?: string;
+  fileId?: string;
+  title?: string;
+  shortTitle?: string;
+  authors?: string[];
+  creators?: ScrapedCreator[];
+  doi?: string;
+  arxivId?: string;
+  pmid?: string;
+  pmcid?: string;
+  isbn?: string;
+  issn?: string;
+  year?: number;
+  publicationDate?: string;
+  publicationTitle?: string;
+  journal?: string;
+  journalAbbr?: string;
+  publisher?: string;
+  abstract?: string;
+  keywords?: string[];
+  pdfUrl?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  language?: string;
+  publisherPlace?: string;
+  place?: string;
+  conferenceName?: string;
+  proceedingsTitle?: string;
+  bookTitle?: string;
+  series?: string;
+  edition?: string;
+  rights?: string;
+  institution?: string;
+  university?: string;
+  thesisType?: string;
+  reportNumber?: string;
+  itemType?: string;
+  confidence: number;
+  isBlocked?: boolean;
+  wafKind?: string;
+  promptUploadPdf?: boolean;
+  ladderStepReached?: number;
+}
+
+export interface MetaEntry {
+  key: string;
+  value: string;
+  alias: boolean;
+}
+
+export type FallbackMeta = {
+  title?: string;
+  authors?: string[];
+  creators?: Array<{
+    firstName?: string;
+    lastName: string;
+    fullName?: string;
+    creatorType?: string;
+    fieldMode?: number;
+  }>;
+  date?: string;
+  publicationTitle?: string;
+  publisher?: string;
+  doi?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  issn?: string;
+  isbn?: string;
+  abstract?: string;
+  keywords?: string[];
+  language?: string;
+  itemType?: string;
+};
+
+export const URL_METADATA_SCRAPER_PORT = Symbol('URL_METADATA_SCRAPER_PORT');
+
+export interface IUrlMetadataScraperPort {
+  scrape(
+    rawUrl: string,
+    options?: {
+      scopeId?: string;
+      userId?: string;
+      preferredFilename?: string;
+    },
+  ): Promise<ScrapedUrlResult>;
+  extractSlugMetadata(rawUrl: string): { title?: string; filename: string };
+}
+
+export interface PdfFingerprint {
+  doi?: string;
+  arxivId?: string;
+  pmid?: string;
+  title?: string;
+  firstAuthorSurname?: string;
+  year?: number;
+  firstPageText?: string;
+}
+
+export type IngestionVerificationStatus =
+  | 'COMPLETE'
+  | 'PARTIAL'
+  | 'NEEDS_REVIEW'
+  | 'BLOCKED'
+  | 'FAILED';
+
+export interface VerificationFieldProvenance {
+  source: string;
+  confidence: number;
+  verified: boolean;
+}
+
+export interface VerificationResult {
+  verificationScore: number;
+  isVerified: boolean;
+  status: IngestionVerificationStatus;
+  matchedSignals: string[];
+  missingFields: string[];
+  fieldProvenance: Record<string, VerificationFieldProvenance>;
+  warnings: string[];
+  isDisambiguationMismatch?: boolean;
+}
+
+export const INGESTION_VERIFIER_PORT = Symbol('INGESTION_VERIFIER_PORT');
+
+export interface IIngestionVerifierPort {
+  extractFingerprint(metadata: ItemMetadata, firstPageText?: string): PdfFingerprint;
+  verifyWebCandidate(
+    fingerprint: PdfFingerprint,
+    candidate: ItemMetadata,
+    sourceName?: string,
+  ): VerificationResult;
+  evaluateLocalResult(
+    metadata: ItemMetadata,
+    engineUsed?: string,
+    qualityScore?: number,
+  ): VerificationResult;
+}
+
+

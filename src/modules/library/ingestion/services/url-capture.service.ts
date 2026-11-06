@@ -25,7 +25,7 @@ import {
   IExtractionFacade,
   ItemDetail,
   CreateItemData,
-  harmonizeZoteroFields,
+  harmonizeBibliographicFields,
   mergeCanonicalCreators,
   SsrfGuardService,
   ItemProvenancePolicy,
@@ -34,7 +34,7 @@ import {
   IUnitOfWork,
 } from '@/modules/library/core';
 import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/deduplication.domain';
-import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.mapper';
 import { toItemData } from '@/modules/library/ingestion/stages/commit.stage';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import { ParsedFeed } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
@@ -326,7 +326,7 @@ export class UrlCaptureService {
         }
       }
 
-      const baselineHarmonized = harmonizeZoteroFields<Record<string, unknown>>(
+      const baselineHarmonized = harmonizeBibliographicFields<Record<string, unknown>>(
         { ...canonicalExtraFields, ...passthroughFields, itemType, extraFields: canonicalExtraFields },
         { itemType, syncExtraFields: false },
       );
@@ -628,15 +628,20 @@ export class UrlCaptureService {
           );
 
         if (this.storagePort?.deleteFile) {
-          for (const p of expiredList) {
-            if (p.claimedAt) continue;
-            const pdfFileId = this.extractPreviewPdfFileId(p.canonicalMetadata);
-            if (pdfFileId) {
-              await this.storagePort
-                .deleteFile(pdfFileId)
-                .catch(() => undefined);
-            }
-          }
+          const deleteFileFn = this.storagePort.deleteFile.bind(
+            this.storagePort,
+          );
+          await Promise.all(
+            expiredList.map((p) => {
+              if (p.claimedAt) return Promise.resolve();
+              const pdfFileId = this.extractPreviewPdfFileId(
+                p.canonicalMetadata,
+              );
+              return pdfFileId
+                ? deleteFileFn(pdfFileId).catch(() => undefined)
+                : Promise.resolve();
+            }),
+          );
         }
       } catch {
         // Ignore blob cleanup errors during preview sweep

@@ -5,8 +5,8 @@ import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
 import { parseFeedXml } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 import { XmlLegacyFormatsParser } from '@/modules/library/ingestion/parsers/xml-legacy-formats.parser';
-import { HtmlMetaTagExtractor } from '@/modules/library/ingestion/services/html-meta-tag.extractor';
-import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
+import { HtmlMetaTagExtractor } from '@/modules/library/ingestion/parsers/html-meta-tag.extractor';
+import { MetadataRoutingPolicy } from '@/modules/library/ingestion/domain/metadata.policy';
 import { IngestionValidationException } from '@/modules/library/ingestion/types/metadata.types';
 
 describe('Library Ingestion Parsers (DoiParser, BibtexParser & XmlLegacyFormatsParser)', () => {

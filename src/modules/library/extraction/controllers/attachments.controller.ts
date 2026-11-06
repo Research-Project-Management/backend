@@ -1,14 +1,13 @@
 import { Controller, Get, Post, Patch, Delete, Param, Query, Body, UseGuards, NotFoundException, HttpStatus, HttpCode, Res, Optional, ParseUUIDPipe, Req, BadRequestException, PayloadTooLargeException } from '@nestjs/common';
 import { type FastifyReply, FastifyRequest } from 'fastify';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiBody } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles, ProjectRole } from '@/modules/project/access';
-import { CreateAttachmentDto, RenameAttachmentDto, BatchRenameAttachmentsDto, CaptureSnapshotDto } from '@/modules/library/extraction/dto/annotations.dto';
+import { CreateAttachmentDto, RenameAttachmentDto, BatchRenameAttachmentsDto, CaptureSnapshotDto, BenchmarkPayloadDto } from '@/modules/library/extraction/dto/annotations.dto';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { WebSnapshotService } from '@/modules/library/extraction/services/web-snapshot.service';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
-import { normalizeProjectScopeId } from '@/modules/library/core';
-import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
+import { normalizeProjectScopeId, EXTRACTION_FACADE, IExtractionFacade } from '@/modules/library/core';
+import { Inject } from '@nestjs/common';
 
 // Services
 
@@ -266,17 +265,6 @@ export class AttachmentController {
 
 const MAX_BENCHMARK_PDF_BYTES = 50 * 1024 * 1024; // 50 MB
 
-export class BenchmarkPayloadDto {
-  @IsOptional()
-  @IsString()
-  base64Pdf?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  filename?: string;
-}
-
 @ApiTags('Library Extraction Telemetry')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
@@ -286,7 +274,8 @@ export class BenchmarkPayloadDto {
 ])
 export class ExtractionTelemetryController {
   constructor(
-    private readonly trustedExtractor: PdfMetadataExtractor,
+    @Inject(EXTRACTION_FACADE)
+    private readonly extractionFacade: IExtractionFacade,
     @Optional() private readonly attachmentsService?: AttachmentsService,
   ) {}
 
@@ -419,7 +408,7 @@ export class ExtractionTelemetryController {
     }
 
     const start = performance.now();
-    const result = await this.trustedExtractor.extract(buffer, filename);
+    const result = await this.extractionFacade.extractTrustedMetadata(buffer, filename);
     const latencyMs = performance.now() - start;
 
     return {

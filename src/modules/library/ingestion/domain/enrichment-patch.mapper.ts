@@ -1,16 +1,17 @@
+import { Logger } from '@nestjs/common';
 import {
   SCHEMA_V42_DATA, CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, FIELD_ALIASES,
-  getPrimaryCreatorRoleForType, harmonizeZoteroFields, isPaperLevelKeywordSource,
-  isPlaceholderItemTitle, isRejectedCitedIdentifier, LibraryItemSource, mergeZoteroExtraTextWithStatus,
+  getPrimaryCreatorRoleForType, harmonizeBibliographicFields, isPaperLevelKeywordSource,
+  isPlaceholderItemTitle, isRejectedCitedIdentifier, LibraryItemSource, mergeExtraTextWithStatus,
   parseCreatorString, resolveCanonicalCreatorRole, resolveProviderFieldWeight,
-  ItemProvenancePolicy, FieldProvenanceRecord,
+  ItemProvenancePolicy, FieldProvenanceRecord, ICatalogFacade,
 } from '@/modules/library/core';
 
 const REJECTABLE_IDENTIFIER_FIELDS = new Set([
   'doi', 'DOI', 'arxivId', 'archiveId', 'archiveID', 'pmid', 'PMID', 'isbn', 'ISBN',
 ]);
 
-export const SYSTEM_RESERVED_KEYS = new Set([
+const SYSTEM_RESERVED_KEYS = new Set([
   'id', 'userId', 'projectId', 'deletedAt', 'createdAt', 'updatedAt', 'version',
   'citationCount', 'referenceCount', 'crossrefEnriched', 'retractionStatus', 'isRetracted',
 ]);
@@ -23,12 +24,12 @@ const TELEMETRY_ONLY_EXTRA_KEYS = new Set([
   'resolvedAt', 'warnings', 'sourceUrl', 'pdfFileId', 'dismissedDuplicateIds', 'mergedFromIds',
 ]);
 
-export const NON_SCALAR_ENRICH_KEYS = new Set([
+const NON_SCALAR_ENRICH_KEYS = new Set([
   ...SYSTEM_RESERVED_KEYS, 'title', 'authors', 'editors', 'creators', 'contributors',
   'keywords', 'labels', 'tags', 'notes', 'extraFields',
 ]);
 
-export const SCALAR_METADATA_FIELDS: string[] = Array.from(
+const SCALAR_METADATA_FIELDS: string[] = Array.from(
   new Set([
     ...SCHEMA_V42_DATA.distinctFieldKeys, ...CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
     ...Object.keys(FIELD_ALIASES), ...Object.values(FIELD_ALIASES),
@@ -208,7 +209,7 @@ export function buildEnrichmentPatch(
   rawProposed: Record<string, unknown>,
 ): Record<string, unknown> {
   const resolvedType = pickFirstString(rawProposed.itemType, existingRec?.itemType) || 'journalArticle';
-  const p = harmonizeZoteroFields(rawProposed, { itemType: resolvedType, syncExtraFields: true });
+  const p = harmonizeBibliographicFields(rawProposed, { itemType: resolvedType, syncExtraFields: true });
   const enrichPatch: Record<string, unknown> = {};
   const pExtraObj = asObj(p.extraFields);
   const { existingMetaObj, existingExtraObj, existingProvMap, incomingProvMap, isFilenameTitle, findProv, isFieldLocked } =
@@ -263,7 +264,7 @@ export function buildEnrichmentPatch(
     if (field === 'extra') {
       const existingExtraText = resolveExistingExtraText(existingRec, existingExtraObj, existingMetaObj);
       if (existingExtraText.length > 0 && typeof p.extra === 'string' && p.extra.trim().length > 0) {
-        const { merged, addedNewLine } = mergeZoteroExtraTextWithStatus(existingExtraText, p.extra);
+        const { merged, addedNewLine } = mergeExtraTextWithStatus(existingExtraText, p.extra);
         if (addedNewLine) enrichPatch['extra'] = merged;
         continue;
       }
@@ -294,9 +295,28 @@ export function buildEnrichmentPatch(
   const pCreators = p.creators as unknown[] | undefined;
   const pKeywords = (p.keywords || p.tags) as unknown[] | undefined;
 
-  if (pAuthors?.length && !isFieldLocked('authors') && (!existingAuthors?.length || canUpgradeExistingField('authors'))) enrichPatch['authors'] = pAuthors;
-  if (pEditors?.length && !isFieldLocked('editors') && (!existingEditors?.length || canUpgradeExistingField('editors'))) enrichPatch['editors'] = pEditors;
-  if (pCreators?.length && !isFieldLocked('creators') && (!existingCreators?.length || canUpgradeExistingField('creators'))) {
+  if (
+    pAuthors?.length &&
+    !isFieldLocked('authors') &&
+    (!existingAuthors?.length ||
+      (canUpgradeExistingField('authors') && pAuthors.length >= existingAuthors.length))
+  ) {
+    enrichPatch['authors'] = pAuthors;
+  }
+  if (
+    pEditors?.length &&
+    !isFieldLocked('editors') &&
+    (!existingEditors?.length ||
+      (canUpgradeExistingField('editors') && pEditors.length >= existingEditors.length))
+  ) {
+    enrichPatch['editors'] = pEditors;
+  }
+  if (
+    pCreators?.length &&
+    !isFieldLocked('creators') &&
+    (!existingCreators?.length ||
+      (canUpgradeExistingField('creators') && pCreators.length >= existingCreators.length))
+  ) {
     const existingCreatorList = [...(Array.isArray(existingRec?.creators) ? existingRec.creators : []), ...(Array.isArray(existingRec?.contributors) ? existingRec.contributors : [])];
     enrichPatch['creators'] = mergePreservedSecondaryContributors(pCreators, existingCreatorList, resolvedType);
   }
@@ -404,7 +424,7 @@ export function buildReResolvePatch(
   options?: { fields?: string[]; lockedFields?: string[] },
 ): { updateData: Record<string, unknown>; updatedFields: string[] } {
   const effectiveItemType = pickFirstString(resolvedMetadata.itemType, existingRec.itemType, existingRec.type) || 'journalArticle';
-  const m: Record<string, unknown> = harmonizeZoteroFields(
+  const m: Record<string, unknown> = harmonizeBibliographicFields(
     { ...resolvedMetadata, extraFields: { ...asObj(resolvedMetadata.extraFields) } },
     { itemType: effectiveItemType, syncExtraFields: true },
   );
@@ -545,7 +565,7 @@ export function buildReResolvePatch(
     if (key === 'extra' && typeof val === 'string') {
       const existingExtraText = resolveExistingExtraText(existingRec, existingExtraObj, existingMetaObj);
       if (existingExtraText.length > 0) {
-        applyField('extra', mergeZoteroExtraTextWithStatus(existingExtraText, val).merged);
+        applyField('extra', mergeExtraTextWithStatus(existingExtraText, val).merged);
         continue;
       }
     }
@@ -591,4 +611,90 @@ export function buildReResolvePatch(
 
 export function mapPayloadToSource(kind: string): LibraryItemSource {
   return ({ IDENTIFIER: 'doi', RECORD: 'bibtex', URL: 'url', FILE: 'pdf' } as const)[kind] ?? 'manual';
+}
+
+export async function materializeDeduplicatedNotes(params: {
+  catalogGateway?: ICatalogFacade;
+  userId: string;
+  projectId?: string;
+  itemId: string;
+  notes?: unknown[];
+  createdItem?: Record<string, unknown> | null;
+  logger?: Logger;
+}): Promise<void> {
+  const { catalogGateway, userId, projectId, itemId, notes, createdItem, logger } = params;
+  if (!Array.isArray(notes) || notes.length === 0 || !catalogGateway?.createNote) {
+    return;
+  }
+
+  const existingNotes = Array.isArray(createdItem?.notes)
+    ? createdItem.notes
+    : Array.isArray(createdItem?.notesList)
+      ? createdItem.notesList
+      : [];
+  if (
+    (existingNotes.length === 0 &&
+      typeof createdItem?.noteCount === 'number' &&
+      createdItem.noteCount > 0) ||
+    (existingNotes.length >= notes.length &&
+      typeof createdItem?.noteCount === 'number' &&
+      createdItem.noteCount >= notes.length)
+  ) {
+    return;
+  }
+
+  const seenContents = new Set<string>();
+  for (const existingNote of existingNotes) {
+    if (typeof existingNote === 'string' && existingNote.trim()) {
+      seenContents.add(existingNote.trim().toLowerCase());
+    } else if (existingNote && typeof existingNote === 'object') {
+      const rec = existingNote as Record<string, unknown>;
+      const txt = rec.contentMd ?? rec.content ?? rec.note;
+      if (typeof txt === 'string' && txt.trim()) {
+        seenContents.add(txt.trim().toLowerCase());
+      }
+    }
+  }
+
+  for (const noteItem of notes) {
+    const rawContent =
+      typeof noteItem === 'object' && noteItem !== null
+        ? (noteItem as Record<string, unknown>).content
+        : undefined;
+    const rawNoteSource =
+      typeof noteItem === 'object' && noteItem !== null
+        ? (noteItem as Record<string, unknown>).source
+        : undefined;
+    const noteSource =
+      typeof rawNoteSource === 'string' || typeof rawNoteSource === 'number'
+        ? String(rawNoteSource)
+        : '';
+    const noteContent =
+      typeof noteItem === 'string'
+        ? noteItem
+        : typeof rawContent === 'string'
+          ? rawContent
+          : '';
+
+    const trimmed = noteContent.trim();
+    if (!trimmed || seenContents.has(trimmed.toLowerCase())) continue;
+    seenContents.add(trimmed.toLowerCase());
+
+    try {
+      await catalogGateway.createNote(userId, {
+        itemId,
+        contentMd: trimmed,
+        title: noteSource || 'Imported Note',
+        projectId,
+        createdById: userId,
+      });
+      logger?.log(
+        `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
+      );
+    } catch (err: unknown) {
+      logger?.warn(
+        `[NOTE] Failed to create note for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 }

@@ -1,12 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  Optional,
-  Inject,
-  ConflictException,
-  BadRequestException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import {
   IngestionSubmissionEnvelope,
   IngestionAcceptedResult,
@@ -16,13 +8,17 @@ import {
   IngestionResult,
   IngestionRunSnapshot,
 } from '@/modules/library/ingestion/types/ingestion.types';
-import { SubmissionEnvelopeFactory } from '@/modules/library/ingestion/domain/submission-envelope.factory';
+import { SubmissionEnvelopeFactory } from '@/modules/library/ingestion/domain/submission-envelope.mapper';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { IngestionStatus, IngestionRun, Prisma } from '@prisma/client';
 import { PipelineService } from './pipeline.service';
 import { QueueService } from './queue.service';
 import { UrlCaptureService } from './url-capture.service';
-import { ConfirmCapturedUrlDto } from '@/modules/library/ingestion/dto/ingestion.dto';
+import {
+  ConfirmCapturedUrlDto,
+  IngestionSubmissionDto,
+  UnifiedIngestionDto,
+} from '@/modules/library/ingestion/dto/ingestion.dto';
 import {
   CATALOG_FACADE,
   ICatalogFacade,
@@ -131,6 +127,26 @@ export class IngestionService {
   }
 
   private readonly inFlightIdempotencyLocks = new Map<string, Promise<IngestionAcceptedResult>>();
+
+  async submitFromDto(params: {
+    dto: IngestionSubmissionDto;
+    userId: string;
+    projectId?: string;
+    idempotencyKey?: string;
+  }): Promise<IngestionAcceptedResult> {
+    const envelope = SubmissionEnvelopeFactory.fromSubmissionDto(params);
+    return this.submit(envelope);
+  }
+
+  async ingestUnifiedDto(params: {
+    dto: UnifiedIngestionDto;
+    userId: string;
+    projectId?: string;
+    idempotencyKey?: string;
+  }): Promise<IngestionResult> {
+    const command = SubmissionEnvelopeFactory.mapUnifiedDtoToCommand(params);
+    return this.ingest(command);
+  }
 
   /**
    * Primary Fast-Path Submission Entry Point (Async 202 Contract)

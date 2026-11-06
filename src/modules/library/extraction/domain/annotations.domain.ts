@@ -7,10 +7,10 @@ import {
 } from '@/modules/library/core/types/extraction.types';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 
-export const DEFAULT_ANNOTATION_COLOR = '#ffd400';
+const DEFAULT_ANNOTATION_COLOR = '#ffd400';
 const HEX_COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
 
-export interface NormalizedRectBox {
+interface NormalizedRectBox {
   x1: number;
   y1: number;
   x2: number;
@@ -71,7 +71,7 @@ export function extractTopLeftAnchor(
 /**
  * Normalizes a single rect item (4-number tuple or object) into a canonical NormalizedRectBox.
  */
-export function normalizeSingleRectBox(
+function normalizeSingleRectBox(
   item: unknown,
 ): NormalizedRectBox | null {
   if (

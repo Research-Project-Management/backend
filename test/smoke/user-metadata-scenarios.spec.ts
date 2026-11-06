@@ -1,5 +1,5 @@
-import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
-import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
+import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
+import { SchemaValidatorService } from '@/modules/library/catalog/services/schema-validator.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
@@ -13,21 +13,21 @@ import {
   normalizeIsbn,
   normalizePmid,
 } from '@/modules/library/core';
-import { RegexExtractor } from '@/modules/library/core/domain/regex.extractor';
+import { RegexExtractor } from '@/modules/library/core/domain/regex.domain';
 import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { buildMockLibraryItem } from '@test/factories';
 
 describe('🧪 Researcher Persona: Comprehensive Metadata Testing Suite', () => {
   let typesService: TypesService;
-  let schemaValidator: ZoteroSchemaValidatorService;
+  let schemaValidator: SchemaValidatorService;
   let itemTransformer: ItemTransformer;
   let cslEngine: CslEngineService;
   let reconciliationPolicy: ReconciliationPolicy;
 
   beforeAll(() => {
     typesService = new TypesService();
-    schemaValidator = new ZoteroSchemaValidatorService(typesService);
+    schemaValidator = new SchemaValidatorService(typesService);
     itemTransformer = new ItemTransformer(typesService);
     cslEngine = new CslEngineService();
     cslEngine.initTemplates();

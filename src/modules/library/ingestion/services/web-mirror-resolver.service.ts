@@ -45,7 +45,7 @@ interface EuropePmcRecord {
   fullTextUrlList?: { fullTextUrl?: EuropePmcFullTextUrl[] };
 }
 
-export type EnrichedMirrorBibliographicMetadata =
+type EnrichedMirrorBibliographicMetadata =
   MirrorBibliographicMetadata & {
     volume?: string;
     issue?: string;

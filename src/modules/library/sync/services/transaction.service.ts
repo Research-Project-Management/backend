@@ -3,14 +3,12 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService, RedisCacheService } from '@/core';
 import { Prisma, LibraryChange, Tombstone, OutboxStatus } from '@prisma/client';
-import { uuidv7, IUnitOfWork, TransactionHelpers, AppendChangeEntry, AppendChangeInput, RecordTombstoneEntry, RecordTombstoneInput, normalizeProjectScopeId, LIBRARY_REDIS_KEYS, SingleFlightCoalescer } from '@/modules/library/core';
+import { uuidv7, IUnitOfWork, TransactionHelpers, AppendChangeEntry, AppendChangeInput, RecordTombstoneEntry, RecordTombstoneInput, normalizeProjectScopeId, LIBRARY_REDIS_KEYS, SingleFlightCoalescer, LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB } from '@/modules/library/core';
 import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
 import { OutboxRepository, PublishOutboxInput, OutboxPublishInput } from '@/modules/library/sync/repositories/outbox.repository';
 import { OutboxWorker } from './outbox.worker';
-import { libraryConfig } from '@/modules/library/core/config/library.config';
 
-export const LIBRARY_OUTBOX_QUEUE = libraryConfig().outbox.queue;
-export const LIBRARY_OUTBOX_JOB = 'dispatch_outbox_event';
+export { LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB };
 
 export type {
   TransactionHelpers,
@@ -315,20 +313,21 @@ export class TransactionService implements IUnitOfWork {
       },
     );
 
-    if (touchedSyncScopes.size > 0) {
-      await this.invalidateSyncScopeSequenceCache(touchedSyncScopes);
-    }
-
-    if (postCommitCallbacks.length > 0) {
-      for (const cb of postCommitCallbacks) {
-        try {
-          await cb();
-        } catch (cbErr: unknown) {
-          this.logger.warn(
-            `Post-commit hook failed: ${cbErr instanceof Error ? cbErr.message : String(cbErr)}`,
-          );
-        }
-      }
+    if (touchedSyncScopes.size > 0 || postCommitCallbacks.length > 0) {
+      await Promise.all([
+        touchedSyncScopes.size > 0
+          ? this.invalidateSyncScopeSequenceCache(touchedSyncScopes)
+          : undefined,
+        ...postCommitCallbacks.map(async (cb) => {
+          try {
+            await cb();
+          } catch (cbErr: unknown) {
+            this.logger.warn(
+              `Post-commit hook failed: ${cbErr instanceof Error ? cbErr.message : String(cbErr)}`,
+            );
+          }
+        }),
+      ]);
     }
 
     if (pendingOutboxEvents.length > 0) {
@@ -460,7 +459,7 @@ export class TransactionService implements IUnitOfWork {
   }
 }
 
-export interface CompactableChange {
+interface CompactableChange {
   id?: string;
   seq: bigint | number | string;
   userId?: string | null;
@@ -559,110 +558,9 @@ function mergePayloadData(prev: unknown, next: unknown): unknown {
   };
 }
 
-export interface OutboxMetricsRecorder {
-  incrementCounter(name: string, value?: number): number;
-  setGauge(name: string, value: number): void;
-  recordOutboxDispatch(durationMs: number, success: boolean): void;
-}
-
-/**
- * Clamped Exponential Backoff with Jitter:
- *   Δt(n) = min(Δt_max, Δt_0 * 2^n) * (1 + α(2U - 1))
- */
-export function computeClampedBackoffSec(
-  attempt: number,
-  baseSec = 1,
-  maxSec = 300,
-  jitterAlpha = 0.1,
-): number {
-  const clamped = Math.min(maxSec, baseSec * Math.pow(2, attempt));
-  const jitter = 1 + jitterAlpha * (2 * Math.random() - 1);
-  return Math.max(1, Math.round(clamped * jitter));
-}
-
-export interface OutboxFailureDecision {
-  isDeadLetter: boolean;
-  nextRetryCount: number;
-  delaySec?: number;
-  nextRetryAt?: Date;
-}
-
-export function evaluateOutboxFailureDecision(
-  retryCount: number,
-  maxRetries: number,
-  baseSec = 1,
-  maxSec = 300,
-): OutboxFailureDecision {
-  const nextRetryCount = retryCount + 1;
-  if (nextRetryCount >= maxRetries) {
-    return { isDeadLetter: true, nextRetryCount };
-  }
-  const delaySec = computeClampedBackoffSec(nextRetryCount, baseSec, maxSec);
-  return {
-    isDeadLetter: false,
-    nextRetryCount,
-    delaySec,
-    nextRetryAt: new Date(Date.now() + delaySec * 1000),
-  };
-}
-
-export interface OutboxDiagnosticSummary {
-  workerId: string;
-  registeredHandlers: string[];
-  pendingCountsByType: Record<string, number>;
-  totalPending: number;
-  totalProcessing: number;
-  oldestPendingAgeSeconds: number;
-  unhandledEventTypes: string[];
-}
-
-export function computeOutboxDiagnostics(params: {
-  workerId: string;
-  registeredHandlers: string[];
-  hasHandler: (eventType: string) => boolean;
-  hasDefaultHandler: boolean;
-  groupedPending: Array<{ eventType: string; count: number }>;
-  oldestPendingCreatedAt: Date | null;
-  processingCount: number;
-  now?: Date;
-}): OutboxDiagnosticSummary {
-  const {
-    workerId,
-    registeredHandlers,
-    hasHandler,
-    hasDefaultHandler,
-    groupedPending,
-    oldestPendingCreatedAt,
-    processingCount,
-    now = new Date(),
-  } = params;
-  const pendingCountsByType: Record<string, number> = {};
-  let totalPending = 0;
-  let oldestPendingAgeSeconds = 0;
-  const unhandledSet = new Set<string>();
-
-  if (oldestPendingCreatedAt) {
-    oldestPendingAgeSeconds = Math.max(
-      0,
-      Math.floor((now.getTime() - oldestPendingCreatedAt.getTime()) / 1000),
-    );
-  }
-
-  for (const group of groupedPending) {
-    pendingCountsByType[group.eventType] = group.count;
-    totalPending += group.count;
-    if (!hasHandler(group.eventType) && !hasDefaultHandler) {
-      unhandledSet.add(group.eventType);
-    }
-  }
-
-  return {
-    workerId,
-    registeredHandlers,
-    pendingCountsByType,
-    totalPending,
-    totalProcessing: processingCount,
-    oldestPendingAgeSeconds,
-    unhandledEventTypes: Array.from(unhandledSet),
-  };
-}
+export {
+  evaluateOutboxFailureDecision,
+  computeOutboxDiagnostics,
+  type OutboxMetricsRecorder,
+  type OutboxDiagnosticSummary,
+} from '../repositories/changelog.repository';

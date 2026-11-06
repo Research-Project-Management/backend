@@ -1,7 +1,7 @@
 import { SingleFlightCoalescer } from '@/modules/library/core/resilience/circuit-breaker';
 import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 import { LibraryBootstrapService } from '@/modules/library/catalog/services/library-bootstrap.service';
-import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
+import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { CollectionsService } from '@/modules/library/catalog/services/collections.service';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';

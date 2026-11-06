@@ -1,7 +1,11 @@
 /**
  * Pure domain utility functions for curation, deduplication, and similarity matching.
  */
-import { isVietnameseName } from '@/modules/library/core';
+import { isVietnameseName, normalizeDoi } from '@/modules/library/core';
+import type {
+  ItemMetadata,
+  DuplicateMatchResult,
+} from '@/modules/library/ingestion/types/metadata.types';
 
 const GREEK_UNICODE_TO_LATIN: Record<string, string> = {
   α: ' alpha ',
@@ -218,7 +222,7 @@ export function tokenizeTitleWords(str?: string | null): string[] {
 /**
  * 1D Rolling-Row Levenshtein Distance ($O(N)$ space, zero 2D matrix heap allocations).
  */
-export function levenshteinDistance(a: string, b: string): number {
+function levenshteinDistance(a: string, b: string): number {
   if (a === b) return 0;
   const m = a.length;
   const n = b.length;
@@ -260,21 +264,6 @@ function computeTokenSortRatioFromTokens(
   return Math.max(0, 1 - dist / maxLen);
 }
 
-/**
- * Calculates Token Sort Ratio similarity between two titles.
- * Sorts unique normalized word tokens alphabetically to eliminate word-order sensitivity.
- */
-export function calculateTokenSortRatio(
-  a?: string | null,
-  b?: string | null,
-): number {
-  if (!a || !b) return 0.0;
-  return computeTokenSortRatioFromTokens(
-    tokenizeTitleWords(a),
-    tokenizeTitleWords(b),
-  );
-}
-
 const ROMAN_NUMERAL_TO_ARABIC: Readonly<Record<string, string>> = {
   i: '1',
   ii: '2',
@@ -301,7 +290,7 @@ function normalizePartDesignatorToken(raw: string): string {
   return lower;
 }
 
-export function extractPartAndVolumeMarkers(title: string): string[] {
+function extractPartAndVolumeMarkers(title: string): string[] {
   if (!title) return [];
   const collected: Array<{ index: number; token: string }> = [];
 
@@ -522,7 +511,7 @@ export function calculateTitleSimilarity(
 /**
  * Jaro-Winkler string similarity for author surnames.
  */
-export function jaroWinkler(s1: string, s2: string): number {
+function jaroWinkler(s1: string, s2: string): number {
   if (s1 === s2) return 1.0;
   const a = s1.toLowerCase().trim();
   const b = s2.toLowerCase().trim();
@@ -614,3 +603,90 @@ export function firstAuthorMatches(authorA: string, authorB: string): boolean {
   }
   return jaroWinkler(normA, normB) >= 0.85;
 }
+
+export interface ExistingItemSummary {
+  id: string;
+  title: string;
+  doi?: string | null;
+  year?: number | null;
+  authors?: string[];
+  citationKey?: string | null;
+}
+
+export class DuplicatePolicy {
+  evaluate(
+    proposed: ItemMetadata,
+    existingItems: ExistingItemSummary[],
+  ): DuplicateMatchResult {
+    const cleanProposedDoi =
+      normalizeDoi(proposed.doi) || proposed.doi?.toLowerCase().trim();
+
+    if (cleanProposedDoi) {
+      const exactDoiMatch = existingItems.find((it) => {
+        if (!it.doi) return false;
+        const cleanExistingDoi =
+          normalizeDoi(it.doi) || it.doi.toLowerCase().trim();
+        return cleanExistingDoi === cleanProposedDoi;
+      });
+      if (exactDoiMatch) {
+        return {
+          matchType: 'EXACT',
+          confidence: 1.0,
+          targetItemId: exactDoiMatch.id,
+          targetItemTitle: exactDoiMatch.title,
+          matchReason: 'DOI_EXACT',
+          evidence: { doi: cleanProposedDoi },
+        };
+      }
+    }
+
+    if (proposed.title && proposed.title.trim().length > 5) {
+      for (const item of existingItems) {
+        if (!item.title) continue;
+        const similarity = calculateTitleSimilarity(proposed.title, item.title);
+        if (similarity >= 0.88) {
+          const hasBothYears =
+            proposed.year !== undefined &&
+            proposed.year !== null &&
+            item.year !== undefined &&
+            item.year !== null;
+          const yearMatch =
+            hasBothYears &&
+            Math.abs(Number(proposed.year) - Number(item.year)) <= 1;
+          const yearConflict =
+            hasBothYears &&
+            Math.abs(Number(proposed.year) - Number(item.year)) > 1;
+          const authorMatch =
+            proposed.authors &&
+            proposed.authors.length > 0 &&
+            item.authors &&
+            item.authors.length > 0 &&
+            firstAuthorMatches(proposed.authors[0], item.authors[0]);
+
+          if (!yearConflict && (yearMatch || authorMatch)) {
+            return {
+              matchType: 'PROBABLE',
+              confidence: 0.85,
+              targetItemId: item.id,
+              targetItemTitle: item.title,
+              matchReason: 'TITLE_FUZZY',
+              evidence: {
+                proposedTitle: proposed.title,
+                existingTitle: item.title,
+                yearMatch: Boolean(yearMatch),
+                authorMatch: Boolean(authorMatch),
+              },
+            };
+          }
+        }
+      }
+    }
+
+    return {
+      matchType: 'NO_MATCH',
+      confidence: 0.0,
+      matchReason: 'NONE',
+    };
+  }
+}
+

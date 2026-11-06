@@ -2,18 +2,21 @@ import { Global, Module } from '@nestjs/common';
 import { CoreModule, shouldRunWorkerConsumers } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
 import { BullModule } from '@nestjs/bullmq';
-import { LIBRARY_INGESTION_QUEUE_STANDARD } from './types/ingestion.types';
-
-// Facade
-import { IngestionFacade, INGESTION_FACADE } from './controllers/ingestion.controller';
+import {
+  LIBRARY_INGESTION_QUEUE_STANDARD,
+  INGESTION_QUEUE_PORT,
+  RETRACTION_DATABASE_PORT,
+  RETRACTION_SERVICE_PORT,
+} from './types/ingestion.types';
 
 // Controllers
-import { IngestionController } from './controllers/ingestion.controller';
-import { CurationController } from './controllers/curation.controller';
-import { RetractionController } from './controllers/curation.controller';
-import { FeedsController } from './controllers/curation.controller';
-import { FeedsService } from './services/feeds.service';
-import { FeedsEngine } from './services/feeds.service';
+import {
+  IngestionController,
+  CurationController,
+  RetractionController,
+  FeedsController,
+} from './controllers/ingestion.controller';
+import { FeedsService, FeedsEngine } from './services/feeds.service';
 
 import { IngestionService } from './services/ingestion.service';
 import { PipelineService } from './services/pipeline.service';
@@ -26,19 +29,23 @@ import { QueueService, IngestionQueueConsumer } from './services/queue.service';
 import { UrlCaptureService } from './services/url-capture.service';
 import { FeedRetrievalService } from './services/feed-retrieval.service';
 import { UrlMetadataScraperService } from './services/url-metadata-scraper.service';
-import { PublisherDomExtractor } from './services/publisher-dom.extractor';
-import { HtmlMetaTagExtractor } from './services/html-meta-tag.extractor';
+import { PublisherDomExtractor } from './parsers/publisher-dom.extractor';
+import { HtmlMetaTagExtractor } from './parsers/html-meta-tag.extractor';
 import { MetadataExecutorService } from './services/metadata-executor.service';
 import { MetadataService } from './services/metadata.service';
 import { DuplicateDetectorService } from './services/duplicate-detector.service';
 import { DuplicateMergerService } from './services/duplicate-merger.service';
 import { RetractionService } from './services/retraction.service';
-import { QualityService } from './services/ingestion-verifier.service';
+import {
+  QualityService,
+  IngestionVerifierService,
+  IngestionFacade,
+  INGESTION_FACADE,
+} from './services/ingestion-verifier.service';
 import { RetractionDatabaseService } from './services/retraction-database.service';
 import { RetractionSyncService } from './services/retraction.service';
 import { RetractionSeederService } from './services/retraction-seeder.service';
 import { SeedRetractionsCommand } from './services/retraction-seeder.service';
-import { IngestionVerifierService } from './services/ingestion-verifier.service';
 import {
   WebFetchLadderService,
   WebMirrorResolverService,
@@ -57,6 +64,8 @@ import {
   METADATA_PROVIDERS,
   METADATA_PORT,
   WEB_FETCH_PORT,
+  URL_METADATA_SCRAPER_PORT,
+  INGESTION_VERIFIER_PORT,
   MetadataProvider,
 } from './types/metadata.types';
 
@@ -66,8 +75,8 @@ import { RisParser } from './parsers/ris.parser';
 import { CslParser } from './parsers/csl.parser';
 import { XmlLegacyFormatsParser } from './parsers/xml-legacy-formats.parser';
 import { BibliographyFormatRegistry } from './parsers/bibliography-format.registry';
-import { NormalizationPolicy } from './policies/normalization.policy';
-import { DuplicatePolicy } from './policies/metadata.policy';
+import { NormalizationPolicy } from './domain/normalization.policy';
+import { DuplicatePolicy } from './domain/deduplication.domain';
 import { IdentifyStage, IdentifyUrlResolver } from './stages/identify.stage';
 import { IdentifyFileResolver } from './stages/identify-file.resolver';
 import { ResolveStage } from './stages/resolve.stage';
@@ -126,13 +135,25 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     IngestionRunReporterService,
     IngestionSagaOrchestrator,
     QueueService,
+    {
+      provide: INGESTION_QUEUE_PORT,
+      useExisting: QueueService,
+    },
     UrlCaptureService,
     FeedRetrievalService,
     FeedsEngine,
     UrlMetadataScraperService,
+    {
+      provide: URL_METADATA_SCRAPER_PORT,
+      useExisting: UrlMetadataScraperService,
+    },
     PublisherDomExtractor,
     HtmlMetaTagExtractor,
     IngestionVerifierService,
+    {
+      provide: INGESTION_VERIFIER_PORT,
+      useExisting: IngestionVerifierService,
+    },
     WebMirrorResolverService,
     WebFetchLadderService,
     {
@@ -213,7 +234,15 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
 
     // Retraction Watch
     RetractionService,
+    {
+      provide: RETRACTION_SERVICE_PORT,
+      useExisting: RetractionService,
+    },
     RetractionDatabaseService,
+    {
+      provide: RETRACTION_DATABASE_PORT,
+      useExisting: RetractionDatabaseService,
+    },
     RetractionScannerProvider,
     RetractionSyncService,
     RetractionSeederService,

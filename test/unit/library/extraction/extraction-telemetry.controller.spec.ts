@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { ExtractionTelemetryController } from '@/modules/library/extraction/controllers/attachments.controller';
-import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
+import { PdfMetadataExtractor } from '@/modules/library/extraction/providers/pdf-metadata.extractor';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { PdfMetadataExtractionResult } from '@/modules/library/core/types/extraction.types';
 

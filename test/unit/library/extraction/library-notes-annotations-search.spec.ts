@@ -5,10 +5,10 @@ import {
   extractPlainTextFromTipTap,
   stripNoteHtml,
 } from '@/modules/library/core/domain/renamer.domain';
-import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
 import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
-import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
+import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotations.domain';
 import { PrismaService } from '@/core';
 import { ItemsMapper } from '@/modules/library/core';
 

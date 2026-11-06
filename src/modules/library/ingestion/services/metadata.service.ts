@@ -32,10 +32,10 @@ import {
 import {
   MetadataRoutingPolicy,
   METADATA_POLICY_VERSION,
-} from '@/modules/library/ingestion/policies/metadata.policy';
+} from '@/modules/library/ingestion/domain/metadata.policy';
 import { MetadataCache } from '@/modules/library/ingestion/services/retraction-seeder.service';
 import { MetadataExecutorService } from './metadata-executor.service';
-import { validateMetadata } from '@/modules/library/ingestion/domain/metadata.validator';
+import { validateMetadata } from '@/modules/library/ingestion/domain/metadata-validation.policy';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 
 @Injectable()

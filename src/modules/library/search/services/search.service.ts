@@ -1,15 +1,19 @@
 import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
-import { SearchOptions, FacetResult, SearchItemsQueryDto } from '@/modules/library/search/controllers/search.controller';
-import { isProjectScopeId, isSafeSearchRegex, parseSafeSearchRegex, SearchQueryEngine, ItemsMapper, SubsystemUnavailableException, LIBRARY_EVENT_TYPES, DomainEventEnvelope } from '@/modules/library/core';
+import { SearchOptions, FacetResult, SearchItemsQueryDto, SearchPageAnchorsQueryDto } from '@/modules/library/search/domain/item-search.policy';
+import { isProjectScopeId, isSafeSearchRegex, parseSafeSearchRegex, SearchQueryEngine, ItemsMapper, SubsystemUnavailableException, LIBRARY_EVENT_TYPES, DomainEventEnvelope, CatalogItemSummary, SEARCH_FACADE, ISearchFacade, type SearchPageTextInput } from '@/modules/library/core';
 import { OnEvent } from '@nestjs/event-emitter';
 
 export {
   isSafeSearchRegex,
   parseSafeSearchRegex,
+  SEARCH_FACADE,
+  SearchItemsQueryDto,
+  SearchPageAnchorsQueryDto,
 };
+export type { ISearchFacade, SearchOptions, FacetResult };
 
-export interface PageTextExtraction {
+interface PageTextExtraction {
   pageIndex: number;
   textContent: string;
   charOffset?: number;
@@ -583,5 +587,91 @@ export class SearchEventsSubscriber {
       event?.userId ||
       payload?.userId
     );
+  }
+}
+
+@Injectable()
+export class SearchFacade implements ISearchFacade {
+  constructor(private readonly searchService: SearchService) {}
+
+  async search(
+    userId: string,
+    queryDto: SearchItemsQueryDto,
+  ): Promise<{
+    items: CatalogItemSummary[];
+    facets?: unknown;
+    meta?: {
+      cursor?: string;
+      hasNextPage: boolean;
+      pageCount: number;
+      totalCount?: number;
+    };
+  }> {
+    const result = await this.searchService.search(userId, queryDto);
+    return {
+      items: result.items as unknown as CatalogItemSummary[],
+      facets: result.facets,
+      meta: result.meta,
+    };
+  }
+
+  async searchPageAnchors(
+    userId: string,
+    attachmentId: string,
+    term: string,
+    pageIndex?: number,
+    projectId?: string,
+  ): Promise<PageAnchorMatch[]> {
+    return this.searchService.searchPageAnchors(
+      userId,
+      attachmentId,
+      term,
+      pageIndex,
+      projectId,
+    );
+  }
+
+  async indexItem(item: {
+    id: string;
+    userId?: string;
+    projectId?: string;
+  }): Promise<void> {
+    await this.searchService.indexItem(item);
+  }
+
+  async reindexItem(item: {
+    id: string;
+    userId?: string;
+    projectId?: string;
+  }): Promise<{
+    localIndexed: boolean;
+    error?: string;
+  }> {
+    try {
+      const res = await this.searchService.indexItem(item);
+      return { localIndexed: res.indexed };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      return { localIndexed: false, error: errMsg };
+    }
+  }
+
+  async indexAttachmentPages(
+    attachmentId: string,
+    pages: SearchPageTextInput[],
+  ): Promise<void> {
+    await this.searchService.indexAttachmentPages(attachmentId, pages);
+  }
+
+  async removeItemIndex(itemId: string): Promise<void> {
+    await this.searchService.deleteItemSearchIndex(itemId);
+  }
+
+  async removeAttachmentIndex(attachmentId: string): Promise<void> {
+    await this.searchService.deleteAttachmentSearchIndex(attachmentId);
+  }
+
+  async invalidateScopeCache(scopeId: string): Promise<void> {
+    await this.searchService.invalidateFacetsCache(scopeId);
   }
 }

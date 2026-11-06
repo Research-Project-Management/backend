@@ -22,6 +22,11 @@ import {
   ExtractionSyncAttachmentInput,
   ExtractionSyncDocumentInput,
 } from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
+import type {
+  ClaimedAttachmentRecord,
+  FullTextOffloadDocument,
+  FullTextOffloadResult,
+} from '@/modules/library/core/types/extraction.types';
 
 @Injectable()
 export class ExtractionMetadataSynchronizer {
@@ -48,89 +53,9 @@ export class ExtractionMetadataSynchronizer {
    * and synchronizes extracted metadata (DOI, arXiv, title, year, contributors, keywords, notes) onto Item model.
    */
   async offloadFullTextAndSyncMetadata(
-    attachment: Record<string, unknown> & {
-      id: string;
-      itemId: string;
-      fileId?: string | null;
-      metadata?: unknown;
-      item?:
-        | (Record<string, unknown> & {
-            id?: string;
-            userId?: string;
-            projectId?: string | null;
-            title?: string;
-            doi?: string | null;
-            arxivId?: string | null;
-            abstract?: string | null;
-            year?: number | null;
-            metadata?: unknown;
-            contributors?: unknown[];
-            itemTags?: unknown[];
-            notesList?: unknown[];
-          })
-        | null;
-    },
-    doc: {
-      references?: unknown[];
-      sections?: unknown[];
-      figures?: unknown[];
-      tables?: unknown[];
-      formulas?: unknown[];
-      fullText?: string;
-      pages?: Array<{
-        pageIndex?: number;
-        pageNumber?: number;
-        textContent?: string;
-        text?: string;
-      }>;
-      metadata?: {
-        rawText?: string;
-        keywords?: string[];
-        notes?: Array<{ content: string; type?: string }>;
-        title?: string;
-        doi?: string;
-        arxivId?: string;
-        abstract?: string;
-        year?: number;
-        numberOfPages?: number;
-        publicationTitle?: string;
-        journal?: string;
-        proceedingsTitle?: string;
-        conferenceName?: string;
-        bookTitle?: string;
-        isbn?: string;
-        issn?: string;
-        pmid?: string;
-        volume?: string;
-        issue?: string;
-        pages?: string;
-        publisher?: string;
-        place?: string;
-        publicationDate?: string;
-        primaryCategory?: string;
-        authors?: string[];
-        creators?: Array<{
-          creatorType?: string;
-          fullName?: string;
-          name?: string;
-          firstName?: string;
-          lastName?: string;
-          fieldMode?: number;
-        }>;
-      };
-    },
-    extractionResult: {
-      text?: string;
-      sections?: unknown[];
-      figures?: unknown[];
-      tables?: unknown[];
-      formulas?: unknown[];
-      references?: unknown[];
-      markdown?: string;
-      pageCount?: number;
-      qualityScore?: number;
-      engineUsed?: string;
-    },
+    attachment: ClaimedAttachmentRecord,
+    doc: FullTextOffloadDocument,
+    extractionResult: FullTextOffloadResult,
     options?: { skipOutboxPublish?: boolean; skipCacheInvalidation?: boolean },
   ): Promise<{
     outboxPublished: boolean;
@@ -283,33 +208,50 @@ export class ExtractionMetadataSynchronizer {
           }
         }
 
-        // Store full-text structured tree (Claim Check reference or inline)
-        const savedFulltextRecord =
-          await this.extractionRepo.saveMetadataSourceRecord(
+        // Store full-text structured tree, attachment structure, and native metadata provenance concurrently
+        const [savedFulltextRecord] = await Promise.all([
+          this.extractionRepo.saveMetadataSourceRecord(
             attachment.itemId,
             'pdf_fulltext',
             payloadToSave as unknown as Prisma.InputJsonValue,
-          );
-
-        if (this.extractionRepo.upsertAttachmentStructure) {
-          await this.extractionRepo.upsertAttachmentStructure({
-            attachmentId: attachment.id,
-            itemId: attachment.itemId,
-            pageCount:
-              typeof fulltextTree.pageCount === 'number'
-                ? fulltextTree.pageCount
-                : 0,
-            qualityScore: extractionResult?.qualityScore,
-            engineUsed: extractionResult?.engineUsed,
-            sections: fulltextTree.sections as Prisma.InputJsonValue,
-            figures: fulltextTree.figures as Prisma.InputJsonValue,
-            tables: fulltextTree.tables as Prisma.InputJsonValue,
-            formulas: fulltextTree.formulas as Prisma.InputJsonValue,
-            references: fulltextTree.references as Prisma.InputJsonValue,
-            fulltextFileId: uploadedFileId ?? null,
-            fulltextByteSize: uploadedByteSize ?? null,
-          });
-        }
+          ),
+          this.extractionRepo.upsertAttachmentStructure
+            ? this.extractionRepo.upsertAttachmentStructure({
+                attachmentId: attachment.id,
+                itemId: attachment.itemId,
+                pageCount:
+                  typeof fulltextTree.pageCount === 'number'
+                    ? fulltextTree.pageCount
+                    : 0,
+                qualityScore: extractionResult?.qualityScore,
+                engineUsed: extractionResult?.engineUsed,
+                sections: fulltextTree.sections as Prisma.InputJsonValue,
+                figures: fulltextTree.figures as Prisma.InputJsonValue,
+                tables: fulltextTree.tables as Prisma.InputJsonValue,
+                formulas: fulltextTree.formulas as Prisma.InputJsonValue,
+                references: fulltextTree.references as Prisma.InputJsonValue,
+                fulltextFileId: uploadedFileId ?? null,
+                fulltextByteSize: uploadedByteSize ?? null,
+              })
+            : Promise.resolve(),
+          this.extractionRepo.saveMetadataSourceRecord(
+            attachment.itemId,
+            'pdf_metadata',
+            {
+              attachmentId: attachment.id,
+              title: doc.metadata?.title,
+              abstract: doc.metadata?.abstract,
+              creators: doc.metadata?.creators,
+              doi: doc.metadata?.doi,
+              arxivId: doc.metadata?.arxivId,
+              year: doc.metadata?.year,
+              keywords: doc.metadata?.keywords,
+              notes: doc.metadata?.notes,
+              referenceCount: doc.references?.length ?? 0,
+              references: doc.references ?? [],
+            } as unknown as Prisma.InputJsonValue,
+          ),
+        ]);
 
         if (
           savedFulltextRecord &&
@@ -317,37 +259,21 @@ export class ExtractionMetadataSynchronizer {
           Array.isArray(savedFulltextRecord.supersededFileIds) &&
           this.storagePort?.deleteFile
         ) {
-          for (const oldFileId of savedFulltextRecord.supersededFileIds) {
-            try {
-              await this.storagePort.deleteFile(oldFileId);
-            } catch (delErr: unknown) {
-              const msg =
-                delErr instanceof Error ? delErr.message : String(delErr);
-              this.logger.warn(
-                `Failed to delete superseded pdf_fulltext blob ${oldFileId}: ${msg}`,
-              );
-            }
-          }
+          const deleteFileFn = this.storagePort.deleteFile.bind(this.storagePort);
+          await Promise.all(
+            savedFulltextRecord.supersededFileIds.map(async (oldFileId: string) => {
+              try {
+                await deleteFileFn(oldFileId);
+              } catch (delErr: unknown) {
+                const msg =
+                  delErr instanceof Error ? delErr.message : String(delErr);
+                this.logger.warn(
+                  `Failed to delete superseded pdf_fulltext blob ${oldFileId}: ${msg}`,
+                );
+              }
+            }),
+          );
         }
-
-        // Save native metadata extraction provenance record
-        await this.extractionRepo.saveMetadataSourceRecord(
-          attachment.itemId,
-          'pdf_metadata',
-          {
-            attachmentId: attachment.id,
-            title: doc.metadata?.title,
-            abstract: doc.metadata?.abstract,
-            creators: doc.metadata?.creators,
-            doi: doc.metadata?.doi,
-            arxivId: doc.metadata?.arxivId,
-            year: doc.metadata?.year,
-            keywords: doc.metadata?.keywords,
-            notes: doc.metadata?.notes,
-            referenceCount: doc.references?.length ?? 0,
-            references: doc.references ?? [],
-          } as unknown as Prisma.InputJsonValue,
-        );
 
         const {
           itemPatch,

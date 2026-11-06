@@ -1,17 +1,16 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Inject, Optional, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { IngestionStage, IngestionStatus, Prisma } from '@prisma/client';
-import { IngestionRunAggregate, IngestionStageName } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import { IngestionRunAggregate, IngestionStageName } from '@/modules/library/ingestion/domain/ingestion-run.domain';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { QueueService } from './queue.service';
-import { IngestionSubmissionEnvelope, IngestionRunSnapshot } from '@/modules/library/ingestion/types/ingestion.types';
+import { IngestionSubmissionEnvelope, IngestionRunSnapshot, INGESTION_QUEUE_PORT, IIngestionQueuePort } from '@/modules/library/ingestion/types/ingestion.types';
 import { isUUID } from 'class-validator';
 
-export interface ExecuteStepOptions<T> {
+interface ExecuteStepOptions<T> {
   compensate?: (result: T) => Promise<void>;
   outputSnapshot?: (result: T) => Prisma.InputJsonValue;
 }
 
-export interface RegisteredCompensation {
+interface RegisteredCompensation {
   stageName: IngestionStageName;
   compensate: () => Promise<void>;
 }
@@ -255,7 +254,7 @@ export function markRunStatusTransitioned(runId: string): void {
   transitionedRunIds.add(runId);
 }
 
-export function consumeRunStatusTransition(runId: string): boolean {
+function consumeRunStatusTransition(runId: string): boolean {
   if (!runId || !transitionedRunIds.has(runId)) return false;
   transitionedRunIds.delete(runId);
   return true;
@@ -318,9 +317,18 @@ export function createSingleItemExecutionLog(params: {
   };
 }
 
-export interface IngestionExecutionLog {
+interface IngestionExecutionLog {
   item?: { id?: string; title?: string };
-  items?: Array<{ itemId?: string; title?: string; status?: string }>;
+  items?: Array<{
+    itemId?: string;
+    title?: string;
+    itemName?: string;
+    status?: string;
+    error?: string;
+  }>;
+  status?: string;
+  ingestionStatus?: string;
+  message?: string;
   currentTitle?: string;
   total?: number;
   processed?: number;
@@ -345,7 +353,8 @@ export interface IngestionRunProgressResult {
   currentTitle?: string;
   items: Array<{
     title: string;
-    status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
+    itemName?: string;
+    status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED' | 'BLOCKED';
     itemId?: string;
     error?: string;
   }>;
@@ -359,7 +368,9 @@ export class IngestionRunReporterService {
 
   constructor(
     private readonly repo: IngestionRepository,
-    private readonly queue: QueueService,
+    @Optional()
+    @Inject(INGESTION_QUEUE_PORT)
+    private readonly queue?: IIngestionQueuePort,
   ) {}
 
   parseExecutionLog(executionLog: unknown): IngestionExecutionLog {
@@ -405,28 +416,54 @@ export class IngestionRunReporterService {
     }
 
     const log = this.parseExecutionLog(run.executionLog);
+    const firstLogItem = Array.isArray(log.items) && log.items.length > 0 ? log.items[0] : null;
     const logItem =
       log.item ||
-      (Array.isArray(log.items) && log.items.length > 0
-        ? { id: log.items[0].itemId || run.itemId, title: log.items[0].title }
+      (firstLogItem
+        ? {
+            id: firstLogItem.itemId || run.itemId,
+            title: firstLogItem.itemName || firstLogItem.title,
+          }
         : null);
     const runItem = run.item as
       { id?: string; title?: string } | null | undefined;
     const resolvedItem = runItem || logItem || null;
     const title =
       runItem?.title ||
+      firstLogItem?.itemName ||
       log.currentTitle ||
-      (Array.isArray(log.items) && log.items[0]?.title) ||
+      firstLogItem?.title ||
       log.item?.title ||
       null;
     const itemId =
       run.itemId ||
       resolvedItem?.id ||
-      (Array.isArray(log.items) && log.items[0]?.itemId) ||
+      firstLogItem?.itemId ||
+      null;
+
+    const isBlocked =
+      log.status === 'BLOCKED' ||
+      log.ingestionStatus === 'BLOCKED';
+    const effectiveLastError =
+      run.lastError ||
+      (typeof log.message === 'string' && isBlocked ? log.message : null) ||
+      firstLogItem?.error ||
       null;
 
     return {
       ...run,
+      ...(isBlocked
+        ? {
+            ingestionStatus: 'BLOCKED',
+            resolutionStatus: 'BLOCKED',
+          }
+        : {}),
+      ...(effectiveLastError
+        ? {
+            lastError: effectiveLastError,
+            errorMessage: effectiveLastError,
+          }
+        : {}),
       itemId,
       item: resolvedItem
         ? { ...resolvedItem, title: resolvedItem.title || title }
@@ -451,15 +488,20 @@ export class IngestionRunReporterService {
 
     const log = this.parseExecutionLog(run.executionLog);
     const total = Number(log.total) || 1;
+    const isBlocked =
+      log.status === 'BLOCKED' ||
+      log.ingestionStatus === 'BLOCKED';
     const isCompleted = run.status === IngestionStatus.COMPLETED;
     const processed = Number(log.processed) || (isCompleted ? total : 0);
     const succeeded =
-      Number(log.succeeded) || (isCompleted && !log.duplicates ? 1 : 0);
+      Number(log.succeeded) ||
+      (isCompleted && !log.duplicates && !isBlocked ? 1 : 0);
     const duplicates = Number(log.duplicates) || 0;
     const failed =
       Number(log.failed) ||
       (run.status === IngestionStatus.FAILED_FINAL ||
-      run.status === IngestionStatus.FAILED_RETRYABLE
+      run.status === IngestionStatus.FAILED_RETRYABLE ||
+      isBlocked
         ? 1
         : 0);
     const percentage =
@@ -471,34 +513,50 @@ export class IngestionRunReporterService {
 
     const runItem = run.item as
       { id?: string; title?: string } | null | undefined;
+    const firstLogItem = Array.isArray(log.items) && log.items.length > 0 ? log.items[0] : null;
     const title =
       runItem?.title ||
+      firstLogItem?.itemName ||
       log.currentTitle ||
-      (Array.isArray(log.items) && log.items[0]?.title) ||
+      firstLogItem?.title ||
       log.item?.title ||
       undefined;
 
     const items: Array<{
       title: string;
-      status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
+      itemName?: string;
+      status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED' | 'BLOCKED';
       itemId?: string;
       error?: string;
     }> =
       Array.isArray(log.items) && log.items.length > 0
         ? log.items.map((it) => ({
-            title: it.title || 'Untitled Document',
+            title: it.title || it.itemName || 'Untitled Document',
+            ...(it.itemName ? { itemName: it.itemName } : {}),
             status:
-              it.status === 'DUPLICATE' || it.status === 'FAILED'
+              it.status === 'DUPLICATE' ||
+              it.status === 'FAILED' ||
+              it.status === 'BLOCKED'
                 ? it.status
-                : 'SUCCEEDED',
+                : isBlocked
+                  ? 'BLOCKED'
+                  : 'SUCCEEDED',
             itemId: it.itemId,
+            ...(it.error ? { error: it.error } : {}),
           }))
         : title
           ? [
               {
                 title,
-                status: isCompleted ? 'SUCCEEDED' : 'FAILED',
+                status: isBlocked
+                  ? 'BLOCKED'
+                  : isCompleted
+                    ? 'SUCCEEDED'
+                    : 'FAILED',
                 itemId: run.itemId || undefined,
+                ...(run.lastError || (typeof log.message === 'string' ? log.message : undefined)
+                  ? { error: run.lastError || (log.message as string) }
+                  : {}),
               },
             ]
           : [];
@@ -506,7 +564,7 @@ export class IngestionRunReporterService {
     return {
       runId: run.id,
       projectId: effectiveScopeId,
-      status: String(run.status),
+      status: isBlocked ? 'BLOCKED' : String(run.status),
       currentStage: run.currentStage || undefined,
       total,
       processed,
@@ -578,7 +636,7 @@ export class IngestionRunReporterService {
       resolvedProjectId || resolvedUserId || effectiveScopeId;
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
-    if (envelope && typeof envelope === 'object') {
+    if (envelope && typeof envelope === 'object' && this.queue) {
       void this.queue
         .enqueue(runId, queueTargetScope, {
           ...envelope,

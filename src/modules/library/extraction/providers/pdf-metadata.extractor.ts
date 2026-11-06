@@ -5,8 +5,8 @@ import {
 } from '@/modules/library/core/types/extraction.types';
 import { ItemMetadata } from '@/modules/library/core';
 import { XmpParser } from '@/modules/library/extraction/providers/pdf-outline.extractor';
-import { RegexExtractor } from '@/modules/library/core/domain/regex.extractor';
-import { LayoutExtractor } from '@/modules/library/extraction/extractors/layout.extractor';
+import { RegexExtractor } from '@/modules/library/core/domain/regex.domain';
+import { LayoutExtractor } from '@/modules/library/extraction/providers/layout.extractor';
 import { PdfTextMetadataExtractor } from '@/modules/library/extraction/providers/pdf-text-metadata.extractor';
 import {
   FieldExtractionProvenance,
@@ -14,6 +14,7 @@ import {
   MetadataQualityGate,
   PdfExtractionTierContext,
   runPdfExtractionTierChain,
+  isBogusTitle,
 } from '@/modules/library/extraction/domain/attachments.domain';
 import { extractText, getDocumentProxy } from 'unpdf';
 import {
@@ -28,7 +29,7 @@ import {
 export { PdfExtractionTierContext, runPdfExtractionTierChain };
 export type { IPdfExtractionTier };
 
-export class XmpExtractionTier implements IPdfExtractionTier {
+class XmpExtractionTier implements IPdfExtractionTier {
   readonly tierName = 'XMP';
   constructor(
     private readonly run: (
@@ -40,7 +41,7 @@ export class XmpExtractionTier implements IPdfExtractionTier {
   }
 }
 
-export class RegexExtractionTier implements IPdfExtractionTier {
+class RegexExtractionTier implements IPdfExtractionTier {
   readonly tierName = 'REGEX';
   constructor(
     private readonly run: (
@@ -52,7 +53,7 @@ export class RegexExtractionTier implements IPdfExtractionTier {
   }
 }
 
-export class LayoutExtractionTier implements IPdfExtractionTier {
+class LayoutExtractionTier implements IPdfExtractionTier {
   readonly tierName = 'LAYOUT';
   constructor(
     private readonly run: (
@@ -79,19 +80,7 @@ export class PdfMetadataExtractor implements IPdfMetadataExtractorPort {
   private readonly infoDictExtractor = new PdfTextMetadataExtractor();
 
   public static isBogusTitle(t?: string): boolean {
-    if (!t) return true;
-    const lower = t.toLowerCase().trim();
-    return (
-      lower.startsWith('microsoft') ||
-      lower.startsWith('untitled') ||
-      lower.startsWith('document') ||
-      lower.startsWith('arxiv:') ||
-      lower === 'technical report' ||
-      /^arxiv\s*:\s*[a-z0-9\-./]+/i.test(lower) ||
-      /\.(docx?|pdf|tex|txt|ps|eps|dvi|ppt|pptx|rtf|html?)$/i.test(lower) ||
-      /^[a-z0-9_.-]+\s+\d+\.\.\d+$/i.test(lower) ||
-      lower.length < 5
-    );
+    return isBogusTitle(t);
   }
 
   public buildExtractionTiers(
@@ -336,8 +325,12 @@ export class PdfMetadataExtractor implements IPdfMetadataExtractorPort {
             }
           };
 
-          for (let i = 1; i <= pagesToRead; i++) {
-            const pText = await readPageText(i);
+          const rawPageTexts = await Promise.all(
+            Array.from({ length: pagesToRead }, (_, idx) =>
+              readPageText(idx + 1),
+            ),
+          );
+          for (const pText of rawPageTexts) {
             if (pText.length > 0) {
               pageChunks.push(pText);
             }

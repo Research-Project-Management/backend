@@ -6,7 +6,7 @@ import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capt
 import { FeedsRepository, type FeedSubscriptionRecord } from '@/modules/library/ingestion/repositories/feeds.repository';
 import { libraryConfig } from '@/modules/library/core/config/library.config';
 
-export type FeedSubscriptionDto = FeedSubscriptionRecord;
+type FeedSubscriptionDto = FeedSubscriptionRecord;
 
 @Injectable()
 export class FeedsService {
@@ -198,7 +198,34 @@ export class FeedsService {
           const abstractMatch = (it.abstract || '').toLowerCase().includes(queryLower);
           const doiMatch = (it.doi || '').toLowerCase().includes(queryLower);
           const arxivMatch = (it.arxivId || '').toLowerCase().includes(queryLower);
-          return titleMatch || abstractMatch || doiMatch || arxivMatch;
+          const categoryMatch = (it.primaryCategory || '').toLowerCase().includes(queryLower);
+          const authorsMatch = Array.isArray(it.authors)
+            ? (
+                it.authors as Array<
+                  | string
+                  | {
+                      name?: string;
+                      fullName?: string;
+                      firstName?: string;
+                      lastName?: string;
+                    }
+                >
+              ).some((a) =>
+                typeof a === 'string'
+                  ? a.toLowerCase().includes(queryLower)
+                  : [a.name, a.fullName, a.firstName, a.lastName].some((part) =>
+                      (part || '').toLowerCase().includes(queryLower),
+                    ),
+              )
+            : false;
+          return (
+            titleMatch ||
+            abstractMatch ||
+            doiMatch ||
+            arxivMatch ||
+            categoryMatch ||
+            authorsMatch
+          );
         })
       : items;
 
@@ -672,22 +699,22 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
         const unreadCutoffDate = new Date(
           now - unreadRetentionDays * 24 * 60 * 60 * 1000,
         );
-        totalPurged += await this.feedsRepo.deleteFeedItemsOlderThan(
-          readCutoffDate,
-          feed.id,
-          'read',
-          subscriberUserIds,
-        );
-        totalPurged += await this.feedsRepo.deleteFeedItemsOlderThan(
-          unreadCutoffDate,
-          feed.id,
-          'unread',
-          subscriberUserIds,
-        );
-        totalPurged += await this.feedsRepo.deleteFeedItemsOlderThan(
-          hardCapDate,
-          feed.id,
-        );
+        const [purgedRead, purgedUnread, purgedHardCap] = await Promise.all([
+          this.feedsRepo.deleteFeedItemsOlderThan(
+            readCutoffDate,
+            feed.id,
+            'read',
+            subscriberUserIds,
+          ),
+          this.feedsRepo.deleteFeedItemsOlderThan(
+            unreadCutoffDate,
+            feed.id,
+            'unread',
+            subscriberUserIds,
+          ),
+          this.feedsRepo.deleteFeedItemsOlderThan(hardCapDate, feed.id),
+        ]);
+        totalPurged += purgedRead + purgedUnread + purgedHardCap;
       }
 
       if (totalPurged > 0) {

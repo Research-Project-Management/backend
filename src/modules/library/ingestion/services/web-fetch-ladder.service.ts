@@ -20,7 +20,7 @@ import {
 import {
   MetadataRoutingPolicy,
   SsrfBlockedDomainException,
-} from '@/modules/library/ingestion/policies/metadata.policy';
+} from '@/modules/library/ingestion/domain/metadata.policy';
 import { DomainRateLimiterService } from './feed-retrieval.service';
 import {
   deriveDoiFromPublisherUrl,

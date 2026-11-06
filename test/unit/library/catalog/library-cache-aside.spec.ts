@@ -5,13 +5,13 @@ import { ItemFulltextService } from '@/modules/library/catalog/services/item-rel
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
-import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
+import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { CatalogFacade } from '@/modules/library/catalog/services/library-bootstrap.service';
 import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
-import { LibraryFacade } from '@/modules/library/library.facade';
+import { LibraryFacade } from '@/modules/library/library.module';
 import { LIBRARY_EVENT_TYPES } from '@/modules/library/core';
 
 describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {

@@ -20,95 +20,14 @@ import {
   DuplicateMatchResult,
   ReconciliationDecision,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
-import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.domain';
+import {
+  buildEnrichmentPatch,
+  materializeDeduplicatedNotes,
+} from '@/modules/library/ingestion/domain/enrichment-patch.mapper';
 import { UrlMetadataScraperService } from './url-metadata-scraper.service';
 
-export async function materializeDeduplicatedNotes(params: {
-  catalogGateway?: ICatalogFacade;
-  userId: string;
-  projectId?: string;
-  itemId: string;
-  notes?: unknown[];
-  createdItem?: Record<string, unknown> | null;
-  logger?: Logger;
-}): Promise<void> {
-  const { catalogGateway, userId, projectId, itemId, notes, createdItem, logger } = params;
-  if (!Array.isArray(notes) || notes.length === 0 || !catalogGateway?.createNote) {
-    return;
-  }
-
-  const existingNotes = Array.isArray(createdItem?.notes)
-    ? createdItem.notes
-    : Array.isArray(createdItem?.notesList)
-      ? createdItem.notesList
-      : [];
-  if (
-    (existingNotes.length === 0 &&
-      typeof createdItem?.noteCount === 'number' &&
-      createdItem.noteCount > 0) ||
-    (existingNotes.length >= notes.length &&
-      typeof createdItem?.noteCount === 'number' &&
-      createdItem.noteCount >= notes.length)
-  ) {
-    return;
-  }
-
-  const seenContents = new Set<string>();
-  for (const existingNote of existingNotes) {
-    if (typeof existingNote === 'string' && existingNote.trim()) {
-      seenContents.add(existingNote.trim().toLowerCase());
-    } else if (existingNote && typeof existingNote === 'object') {
-      const rec = existingNote as Record<string, unknown>;
-      const txt = rec.contentMd ?? rec.content ?? rec.note;
-      if (typeof txt === 'string' && txt.trim()) {
-        seenContents.add(txt.trim().toLowerCase());
-      }
-    }
-  }
-
-  for (const noteItem of notes) {
-    const rawContent =
-      typeof noteItem === 'object' && noteItem !== null
-        ? (noteItem as Record<string, unknown>).content
-        : undefined;
-    const rawNoteSource =
-      typeof noteItem === 'object' && noteItem !== null
-        ? (noteItem as Record<string, unknown>).source
-        : undefined;
-    const noteSource =
-      typeof rawNoteSource === 'string' || typeof rawNoteSource === 'number'
-        ? String(rawNoteSource)
-        : '';
-    const noteContent =
-      typeof noteItem === 'string'
-        ? noteItem
-        : typeof rawContent === 'string'
-          ? rawContent
-          : '';
-
-    const trimmed = noteContent.trim();
-    if (!trimmed || seenContents.has(trimmed.toLowerCase())) continue;
-    seenContents.add(trimmed.toLowerCase());
-
-    try {
-      await catalogGateway.createNote(userId, {
-        itemId,
-        contentMd: trimmed,
-        title: noteSource || 'Imported Note',
-        projectId,
-        createdById: userId,
-      });
-      logger?.log(
-        `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
-      );
-    } catch (err: unknown) {
-      logger?.warn(
-        `[NOTE] Failed to create note for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-}
+export { materializeDeduplicatedNotes };
 
 @Injectable()
 export class PipelineSideEffectsService {
@@ -590,9 +509,11 @@ export class PipelineSideEffectsService {
       const uniqueColIds = Array.from(
         new Set(envelope.collectionIds.filter(Boolean)),
       );
-      for (const colId of uniqueColIds) {
-        await this.assignItemToCollection(userId, colId, itemId, projectId);
-      }
+      await Promise.all(
+        uniqueColIds.map((colId) =>
+          this.assignItemToCollection(userId, colId, itemId, projectId),
+        ),
+      );
     }
   }
 

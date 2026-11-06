@@ -2,8 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   ItemMetadata,
   CreatorInput,
+  RisItem,
+  IngestionValidationException,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { IngestionValidationException } from '@/modules/library/ingestion/types/metadata.types';
 import {
   cleanAbstractText,
   mapCslTypeToZoteroItemType,
@@ -32,21 +33,7 @@ const { Cite } = require('@citation-js/core') as {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 require('@citation-js/plugin-ris');
 
-export interface RisItem extends ItemMetadata {
-  pmid?: string;
-  pmcid?: string;
-  shortTitle?: string;
-  journalAbbr?: string;
-  accessedAt?: string | Date | null;
-  university?: string;
-  institution?: string;
-  bookTitle?: string;
-  proceedingsTitle?: string;
-  conferenceName?: string;
-  reportNumber?: string;
-  patentNumber?: string;
-  thesisType?: string;
-}
+export type { RisItem };
 
 interface CslRisPerson {
   family?: string;
@@ -165,6 +152,50 @@ export class RisParser {
     const rawAuthors: string[] = [];
     const creators: CreatorInput[] = [];
 
+    const seenAuthorKeys = new Set<string>();
+    const registerAuthor = (
+      firstName?: string,
+      lastName?: string,
+      fullName?: string,
+      displayStr?: string,
+      fieldMode?: number,
+    ) => {
+      const cleanLast = (lastName || '').trim();
+      const cleanFirst = (firstName || '').trim();
+      const cleanFull = (
+        fullName ||
+        (cleanFirst && cleanLast
+          ? `${cleanFirst} ${cleanLast}`
+          : cleanLast || cleanFirst)
+      ).trim();
+      if (!cleanLast && !cleanFirst && !cleanFull) return;
+
+      const normKey = `${cleanLast.toLowerCase()}|${cleanFirst.toLowerCase()}|${cleanFull.toLowerCase()}`;
+      const altFull =
+        cleanLast && cleanFirst
+          ? `${cleanLast}, ${cleanFirst}`.toLowerCase()
+          : cleanFull.toLowerCase();
+      if (
+        seenAuthorKeys.has(normKey) ||
+        seenAuthorKeys.has(altFull) ||
+        seenAuthorKeys.has(cleanFull.toLowerCase())
+      ) {
+        return;
+      }
+      seenAuthorKeys.add(normKey);
+      seenAuthorKeys.add(altFull);
+      seenAuthorKeys.add(cleanFull.toLowerCase());
+
+      rawAuthors.push((displayStr || cleanFull).trim());
+      creators.push({
+        firstName: cleanFirst || undefined,
+        lastName: cleanLast || undefined,
+        fullName: cleanFull,
+        creatorType: 'author',
+        ...(fieldMode === 1 ? { fieldMode: 1 } : {}),
+      });
+    };
+
     (csl.author || []).forEach((a: CslRisPerson) => {
       const family = a.family?.trim() || '';
       const given = a.given?.trim() || '';
@@ -173,16 +204,32 @@ export class RisParser {
         (family && given ? `${given} ${family}` : family || given);
 
       if (fullName) {
-        rawAuthors.push(fullName);
-        creators.push({
-          firstName: given || undefined,
-          lastName: family || undefined,
+        registerAuthor(
+          given || undefined,
+          family || undefined,
           fullName,
-          creatorType: 'author',
-          ...(a.literal && !family && !given ? { fieldMode: 1 } : {}),
-        });
+          fullName,
+          a.literal && !family && !given ? 1 : undefined,
+        );
       }
     });
+
+    for (const authStr of rawRec?.rawAuthors || []) {
+      const cleanAuthStr = authStr?.trim();
+      if (!cleanAuthStr) continue;
+      const parsed = parseCreatorString(
+        cleanAuthStr,
+        creators.length,
+        'author',
+      );
+      registerAuthor(
+        parsed.firstName || undefined,
+        parsed.lastName || undefined,
+        parsed.fullName || cleanAuthStr,
+        parsed.fullName || cleanAuthStr,
+        parsed.fieldMode === 1 ? 1 : undefined,
+      );
+    }
 
     const rawEditors: string[] = [];
     const seenEditorKeys = new Set<string>();
@@ -455,7 +502,7 @@ export class RisParser {
       return true;
     }
     // Check if the block contains non-standard/type-specific RIS tags, dates with month/day, or multiline continuations
-    return /^(?:ST|ED|A2|PY|Y1|DA|Y2|J2|JA|T2|BT|INST|CY|AD|LA|M1|M3|U1|C3|AN|C2|UR|L1|ET|CN|CA|C1|L4|T3|SE|KW|RN|N1|AB|N2)\s*-/m.test(
+    return /^(?:A1|A3|A4|AU|ST|ED|A2|PY|Y1|DA|Y2|J2|JA|T2|BT|INST|CY|AD|LA|M1|M3|U1|C3|AN|C2|UR|L1|ET|CN|CA|C1|L4|T3|SE|KW|RN|N1|AB|N2)\s*-/m.test(
       block,
     );
   }

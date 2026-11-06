@@ -1,38 +1,43 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
-import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
-import { calculateMetadataQualityScore, diagnoseBibliographicQualityIssues, QUALITY_RULE_BIT } from '@/modules/library/ingestion/domain/metadata.validator';
-import { titleSimilarity, TITLE_MATCH_THRESHOLD, parseCreatorString, CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
+import {
+  ItemMetadata,
+  PdfFingerprint,
+  IngestionVerificationStatus,
+  VerificationFieldProvenance,
+  VerificationResult,
+} from '@/modules/library/ingestion/types/metadata.types';
+import {
+  IngestionSubmissionEnvelope,
+  IngestionAcceptedResult,
+  DuplicateClusterResult,
+  RetractionCheckResult,
+} from '@/modules/library/ingestion/types/ingestion.types';
+import { calculateMetadataQualityScore, diagnoseBibliographicQualityIssues, QUALITY_RULE_BIT } from '@/modules/library/ingestion/domain/metadata-validation.policy';
+import {
+  titleSimilarity,
+  TITLE_MATCH_THRESHOLD,
+  parseCreatorString,
+  CATALOG_FACADE,
+  ICatalogFacade,
+  IngestionRunSnapshot,
+  INGESTION_FACADE,
+  IIngestionFacade,
+  ReconcileExtractedCandidatePayload,
+} from '@/modules/library/core';
 import { BOT_CHALLENGE_TITLE_RE, BOT_CHALLENGE_HTML_RE } from '@/modules/library/core/domain/text.lexicon';
+import { IngestionService } from './ingestion.service';
+import { DuplicateDetectorService } from './duplicate-detector.service';
+import { RetractionService } from './retraction.service';
 
-export interface PdfFingerprint {
-  doi?: string;
-  arxivId?: string;
-  pmid?: string;
-  title?: string;
-  firstAuthorSurname?: string;
-  year?: number;
-  firstPageText?: string;
-}
+export { INGESTION_FACADE };
+export type { IIngestionFacade };
 
-export type IngestionVerificationStatus =
-  'COMPLETE' | 'PARTIAL' | 'NEEDS_REVIEW' | 'BLOCKED' | 'FAILED';
-
-export interface VerificationFieldProvenance {
-  source: string;
-  confidence: number;
-  verified: boolean;
-}
-
-export interface VerificationResult {
-  verificationScore: number; // 0.0 - 1.0
-  isVerified: boolean; // score >= 0.80
-  status: IngestionVerificationStatus;
-  matchedSignals: string[];
-  missingFields: string[];
-  fieldProvenance: Record<string, VerificationFieldProvenance>;
-  warnings: string[];
-  isDisambiguationMismatch?: boolean;
-}
+export type {
+  PdfFingerprint,
+  IngestionVerificationStatus,
+  VerificationFieldProvenance,
+  VerificationResult,
+};
 
 /**
  * Enterprise Verification and Evidence Gate implementing the Ingestion Verification Scoring Table.
@@ -437,14 +442,6 @@ export class IngestionVerifierService {
   }
 }
 
-export interface CompletenessAnalysis {
-  score: number; // 0 - 100
-  level: 'complete' | 'adequate' | 'minimal';
-  missingKeyFields: string[];
-  presentFieldsCount: number;
-  totalFieldsCount: number;
-}
-
 export interface QualityAuditReport {
   totalItems: number;
   averageQualityScore: number;
@@ -526,5 +523,82 @@ export class QualityService {
         missingYear,
       },
     };
+  }
+}
+
+/**
+ * Public Facade for Ingestion Bounded Context (Supporting Domain).
+ * Shields ingestion pipelines, curation/dedup algorithms, and retraction checks.
+ */
+@Injectable()
+export class IngestionFacade implements IIngestionFacade {
+  constructor(
+    private readonly ingestionService: IngestionService,
+    private readonly duplicateDetector: DuplicateDetectorService,
+    private readonly qualityService: QualityService,
+    private readonly retractionService: RetractionService,
+  ) {}
+
+  async submitIngestion(
+    envelope: IngestionSubmissionEnvelope,
+    options?: { enqueue?: boolean },
+  ): Promise<IngestionAcceptedResult> {
+    return this.ingestionService.submit(envelope, options);
+  }
+
+  async getIngestionStatus(
+    userId: string,
+    runId: string,
+  ): Promise<IngestionRunSnapshot> {
+    return this.ingestionService.getRunStatus(userId, runId);
+  }
+
+  async findDuplicates(
+    userId: string,
+    projectId?: string,
+  ): Promise<DuplicateClusterResult[]> {
+    return this.duplicateDetector.detectDuplicates(userId, projectId);
+  }
+
+  async getQualityAudit(
+    userId: string,
+    projectId?: string,
+  ): Promise<QualityAuditReport> {
+    return this.qualityService.getQualityAudit(userId, projectId);
+  }
+
+  async checkRetraction(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<RetractionCheckResult> {
+    return this.retractionService.checkItem(userId, itemId, projectId);
+  }
+
+  async reResolveMetadata(
+    userId: string,
+    itemId: string,
+    options?: {
+      doi?: string;
+      arxivId?: string;
+      pmid?: string;
+      isbn?: string;
+      title?: string;
+      forceRefresh?: boolean;
+      expectedVersion?: number;
+    },
+    projectId?: string,
+  ): Promise<Awaited<ReturnType<IngestionService['reResolveMetadata']>>> {
+    return this.ingestionService.reResolveMetadata(userId, itemId, options, projectId);
+  }
+
+  async reconcileExtractedCandidate(
+    payload: ReconcileExtractedCandidatePayload,
+  ): Promise<{
+    updated: boolean;
+    updatedFields: string[];
+    rejectedCitedDoi?: string;
+  }> {
+    return this.ingestionService.reconcileExtractedCandidate(payload);
   }
 }

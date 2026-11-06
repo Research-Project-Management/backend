@@ -3,7 +3,8 @@ import { isUuid as isValidUuid } from '@/core';
 import {
   SearchOptions,
   FacetResult,
-} from '@/modules/library/search/controllers/search.controller';
+  extractSearchQueryIdentifiers,
+} from '@/modules/library/search/domain/item-search.policy';
 import {
   isProjectScopeId,
   LIBRARY_REDIS_KEYS,
@@ -11,7 +12,6 @@ import {
   collectDescendantCollectionIds,
   normalizeCanonicalItemType,
 } from '@/modules/library/core';
-import { extractSearchQueryIdentifiers } from '@/modules/library/search/domain/item-specifications';
 
 export { isValidUuid };
 
@@ -245,7 +245,7 @@ export function escapeLikePattern(val: string): string {
 
 const ITEM_FTS_VECTOR_SQL = `COALESCE(search_vector, setweight(to_tsvector('english', COALESCE(title, '')), 'A') || setweight(to_tsvector('english', COALESCE(abstract, '')), 'B') || setweight(to_tsvector('english', COALESCE(publication_title, '')), 'C'))`;
 
-export function buildFtsWhereClause(params: {
+function buildFtsWhereClause(params: {
   hasProject: boolean;
   userId?: string;
   options: SearchOptions;

@@ -1,13 +1,12 @@
 import { Injectable, Optional } from '@nestjs/common';
 import {
-  MetadataRequest, ProviderCapability, ProviderName, ProviderResult,
+  MetadataRequest, ProviderCapability, ProviderName, ProviderResult, ProviderFetchError,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeDoi, normalizeIsbn, normalizeIssn, cleanBibliographicText,
   cleanAbstractText, TITLE_MATCH_THRESHOLD, HttpClient, LibraryConfigService,
   libraryConfig, CSL_TYPE_TO_ITEM_TYPE, normalizePageRange, getContactEmail,
 } from '@/modules/library/core';
-import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { BaseMetadataProvider } from './base-metadata.provider';
 

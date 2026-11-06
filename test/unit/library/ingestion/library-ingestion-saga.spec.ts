@@ -1,7 +1,7 @@
 import {
   IngestionRunAggregate,
   IngestionStatusVo,
-} from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+} from '@/modules/library/ingestion/domain/ingestion-run.domain';
 import {
   IngestionSagaOrchestrator,
   IngestionSagaSession,

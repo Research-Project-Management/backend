@@ -28,7 +28,7 @@ import {
   repairFragmentedTitle,
 } from '@/modules/library/core';
 import { IngestionVerifierService } from '@/modules/library/ingestion/services/ingestion-verifier.service';
-import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
 
 // High-resolution timer utility (nanosecond precision)
 function hrtimeMs(startNs: bigint): number {

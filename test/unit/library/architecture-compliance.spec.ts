@@ -226,7 +226,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         normalized.endsWith('/catalog/services/collections.service.ts') ||
         normalized.endsWith('/extraction/services/pdf-annotation-importer.service.ts') ||
         normalized.endsWith('/extraction/services/attachment-renamer.service.ts') ||
-        normalized.endsWith('/library.facade.ts')
+        normalized.endsWith('/library.module.ts')
       );
     });
 
@@ -362,7 +362,122 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     // AND zero PrismaService / RedisCacheService / Repository imports inside /domain/ across all bounded contexts
     const beDirectPrismaInServices: Array<{ file: string; line: number; match: string }> = [];
     const beInfraInDomainViolations: Array<{ file: string; line: number; match: string }> = [];
+    const beUpwardLayerViolations: Array<{ file: string; line: number; match: string }> = [];
     for (const [, { relPath, lines }] of fileCache) {
+      const isControllerLayer = relPath.includes('/controllers/');
+      const isInnerModelLayer =
+        relPath.includes('/domain/') ||
+        relPath.includes('/dto/') ||
+        relPath.includes('/types/') ||
+        relPath.includes('/parsers/');
+      const isPureDomainLayer =
+        relPath.includes('/domain/') ||
+        relPath.includes('/policies/') ||
+        relPath.includes('/parsers/');
+      const isRepositoryLayer = relPath.includes('/repositories/');
+      const isServiceOrStageLayer =
+        relPath.includes('/services/') ||
+        relPath.includes('/stages/') ||
+        relPath.includes('/providers/');
+
+      lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+
+        if (
+          isControllerLayer &&
+          /from\s+['"][^'"]*\/(repositories|domain|policies|parsers|providers|stages|extractors)\//.test(line)
+        ) {
+          beUpwardLayerViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        } else if (
+          isPureDomainLayer &&
+          /from\s+['"][^'"]*\/dto\//.test(line)
+        ) {
+          beUpwardLayerViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        } else if (
+          relPath.includes('/domain/') &&
+          /from\s+['"][^'"]*\/parsers\//.test(line)
+        ) {
+          beUpwardLayerViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        } else if (
+          relPath.includes('/policies/') &&
+          /from\s+['"]@\/modules\/library\/ingestion\/domain\//.test(line)
+        ) {
+          beUpwardLayerViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        } else if (
+          relPath.includes('/types/') &&
+          /from\s+['"][^'"]*\/(domain|policies|parsers|ports)\//.test(line)
+        ) {
+          beUpwardLayerViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        } else if (
+          isInnerModelLayer &&
+          /from\s+['"][^'"]*\/(controllers|services|repositories|stages|providers)\//.test(line)
+        ) {
+          beUpwardLayerViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        } else if (
+          isRepositoryLayer &&
+          /from\s+['"][^'"]*\/(controllers|services|stages|dto|parsers)\//.test(line)
+        ) {
+          beUpwardLayerViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        } else if (
+          isServiceOrStageLayer &&
+          /from\s+['"][^'"]*\/controllers\//.test(line)
+        ) {
+          beUpwardLayerViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        } else if (
+          (relPath.includes('/providers/') || relPath.includes('/stages/')) &&
+          (/from\s+['"](?!@\/modules\/library\/core\/)[^'"]*\/services\//.test(line) ||
+            /from\s+['"][^'"]*\/repositories\//.test(line))
+        ) {
+          beUpwardLayerViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        } else if (
+          relPath === 'index.ts' &&
+          /from\s+['"][^'"]*\/controllers\//.test(line)
+        ) {
+          beUpwardLayerViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        }
+      });
+
       if (relPath.includes('/domain/')) {
         lines.forEach((line, index) => {
           const trimmed = line.trim();
@@ -403,6 +518,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     }
     expect(beDirectPrismaInServices).toEqual([]);
     expect(beInfraInDomainViolations).toEqual([]);
+    expect(beUpwardLayerViolations).toEqual([]);
 
     // 2. Frontend: Zero scattered useQueryClient, useQuery, useMutation, localStorage, or direct *Service.* in UI components
     if (!fs.existsSync(feRoot)) return;
@@ -448,7 +564,52 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
           }
           if (
             /from\s+['"]@\/features\/library\/(core|sdk|ui)\//.test(line) ||
-            /from\s+['"]\.\.\/(core|sdk|ui)\//.test(line)
+            /from\s+['"]\.\.\/(core|sdk|ui)\//.test(line) ||
+            (relPath.startsWith('domain/types/') &&
+              (/from\s+['"]\.\.\/[^'"]+['"]/.test(line) ||
+                /from\s+['"]@\/features\/library\/domain\/(?!types\/)[^'"]+['"]/.test(line)))
+          ) {
+            feLayerDirectionViolations.push({
+              file: relPath,
+              line: index + 1,
+              match: trimmed,
+            });
+          }
+        });
+      }
+
+      if (relPath.startsWith('ui/')) {
+        lines.forEach((line, index) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+          if (
+            /from\s+['"]@\/features\/library\/sdk(?:\/|['"])/.test(line) ||
+            /from\s+['"]\.\.\/.*sdk\//.test(line)
+          ) {
+            feLayerDirectionViolations.push({
+              file: relPath,
+              line: index + 1,
+              match: trimmed,
+            });
+          }
+        });
+      }
+
+      if (relPath.startsWith('core/')) {
+        lines.forEach((line, index) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+          if (
+            /from\s+['"]@\/features\/library\/ui\//.test(line) ||
+            /from\s+['"]@\/features\/library\/sdk(?:\/index)?['"]/.test(line) ||
+            /from\s+['"]@\/features\/library\/sdk\/clients\//.test(line) ||
+            (relPath.startsWith('core/store/') &&
+              (/from\s+['"]@\/features\/library\/(core\/(coordinator|manager)|sdk)\//.test(line) ||
+                /import\s*\(\s*['"]@\/features\/library\/(core\/(coordinator|manager)|sdk)\//.test(line) ||
+                /from\s+['"]\.\.\/(coordinator|manager)\//.test(line))) ||
+            (relPath.startsWith('core/adapters/') &&
+              (/from\s+['"]@\/features\/library\/(core\/(coordinator|store|manager)|sdk)\//.test(line) ||
+                /from\s+['"]\.\.\/(coordinator|store|manager)\//.test(line)))
           ) {
             feLayerDirectionViolations.push({
               file: relPath,
@@ -467,7 +628,13 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
             /from\s+['"]@\/features\/library\/(core|ui)\//.test(line) ||
             /import\s+['"]@\/features\/library\/(core|ui)\//.test(line) ||
             /from\s+['"]\.\.\/(core|ui)\//.test(line) ||
-            /from\s+['"]\.\.\/\.\.\/(core|ui)\//.test(line)
+            /from\s+['"]\.\.\/\.\.\/(core|ui)\//.test(line) ||
+            (relPath.startsWith('sdk/queries/') &&
+              (/from\s+['"]@\/features\/library\/sdk(?:\/index)?['"]/.test(line) ||
+                /export\s+\{[^}]*\b(?:ItemsService|CollectionsService|TagsService|NotesService|LinksService|StateService|SavedSearchesService|CitationService|ExportsService|AttachmentsService|UploadService|AnnotationService|IngestionService|CurationService|RetractionService|FeedsService|SearchService|SyncService|fetchPdfBlob|resolveLibraryUrl|resolveLibraryRawPath)\b[^}]*\}/.test(line))) ||
+            ((relPath.startsWith('sdk/clients/') || relPath === 'sdk/query-keys.ts') &&
+              (/from\s+['"]@\/features\/library\/sdk\/queries\//.test(line) ||
+                /from\s+['"]\.\.?\/queries\//.test(line)))
           ) {
             feLayerDirectionViolations.push({
               file: relPath,
@@ -482,6 +649,138 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     expect(feUiViolations).toEqual([]);
     expect(feDomainStorageViolations).toEqual([]);
     expect(feLayerDirectionViolations).toEqual([]);
+
+    // 3. End-to-End Tarjan Strongly Connected Components (SCC) Cycle Check across Backend & Frontend Library
+    const detectCycles = (
+      cache: Map<string, { relPath: string; content: string; lines: string[] }>,
+      rootDir: string,
+      aliasPrefix: string,
+    ): string[][] => {
+      const relPaths = new Set<string>();
+      for (const [, { relPath }] of cache) relPaths.add(relPath);
+
+      const resolveTarget = (fromRel: string, spec: string): string | null => {
+        let candidate = '';
+        if (spec.startsWith(aliasPrefix)) {
+          candidate = spec.slice(aliasPrefix.length);
+        } else if (spec.startsWith('.')) {
+          const resolved = path.posix.normalize(
+            path.posix.join(path.posix.dirname(fromRel), spec),
+          );
+          if (resolved.startsWith('..')) return null;
+          candidate = resolved;
+        } else {
+          return null;
+        }
+        for (const ext of ['', '.ts', '.tsx', '/index.ts', '/index.tsx']) {
+          if (relPaths.has(candidate + ext)) return candidate + ext;
+        }
+        return null;
+      };
+
+      const adj = new Map<string, Set<string>>();
+      for (const [, { relPath, content }] of cache) {
+        const edges = new Set<string>();
+        const importExportRe =
+          /(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+        let match: RegExpExecArray | null;
+        while ((match = importExportRe.exec(content)) !== null) {
+          const spec = match[1] || match[2];
+          if (!spec) continue;
+          const target = resolveTarget(relPath, spec);
+          if (target && target !== relPath) edges.add(target);
+        }
+        adj.set(relPath, edges);
+      }
+
+      let index = 0;
+      const indices = new Map<string, number>();
+      const lowlink = new Map<string, number>();
+      const stack: string[] = [];
+      const onStack = new Set<string>();
+      const cycles: string[][] = [];
+
+      const strongConnect = (v: string) => {
+        indices.set(v, index);
+        lowlink.set(v, index);
+        index++;
+        stack.push(v);
+        onStack.add(v);
+
+        for (const w of adj.get(v) ?? []) {
+          if (!indices.has(w)) {
+            strongConnect(w);
+            lowlink.set(v, Math.min(lowlink.get(v)!, lowlink.get(w)!));
+          } else if (onStack.has(w)) {
+            lowlink.set(v, Math.min(lowlink.get(v)!, indices.get(w)!));
+          }
+        }
+
+        if (lowlink.get(v) === indices.get(v)) {
+          const scc: string[] = [];
+          let w: string;
+          do {
+            w = stack.pop()!;
+            onStack.delete(w);
+            scc.push(w);
+          } while (w !== v);
+          if (scc.length > 1) {
+            cycles.push(scc.reverse());
+          }
+        }
+      };
+
+      for (const node of relPaths) {
+        if (!indices.has(node)) strongConnect(node);
+      }
+      return cycles;
+    };
+
+    const beCycles = detectCycles(fileCache, libraryRoot, '@/modules/library/');
+    const feCycles = detectCycles(feFileCache, feRoot, '@/features/library/');
+    expect(beCycles).toEqual([]);
+    expect(feCycles).toEqual([]);
+
+    // 4. Zero `utils` folders or `*util*` files in Backend or Frontend Library (strict Domain-only taxonomy)
+    const beUtilsViolations = Array.from(fileCache.values())
+      .map((f) => f.relPath)
+      .filter((relPath) => /(?:^|\/)utils\//i.test(relPath) || /util/i.test(path.basename(relPath)));
+    const feUtilsViolations = Array.from(feFileCache.values())
+      .map((f) => f.relPath)
+      .filter((relPath) => /(?:^|\/)utils\//i.test(relPath) || /util/i.test(path.basename(relPath)));
+    expect(beUtilsViolations).toEqual([]);
+    expect(feUtilsViolations).toEqual([]);
+
+    // 5. Strict Domain & Repository File Suffix Taxonomy (.domain.ts, .policy.ts, .mapper.ts, .lexicon.ts, .constants.ts) & Zero data/ or zotero-named files
+    const beDomainNamingViolations = Array.from(fileCache.values())
+      .map((f) => f.relPath)
+      .filter(
+        (relPath) =>
+          relPath.includes('/domain/') &&
+          !/\.(?:domain|policy|mapper|lexicon)\.ts$/.test(relPath),
+      );
+    const feDomainNamingViolations = Array.from(feFileCache.values())
+      .map((f) => f.relPath)
+      .filter(
+        (relPath) =>
+          relPath.startsWith('domain/') &&
+          !relPath.startsWith('domain/types/') &&
+          !/\.(?:domain|policy|mapper|constants)\.ts$/.test(relPath),
+      );
+    const beRepoHelperViolations = Array.from(fileCache.values())
+      .map((f) => f.relPath)
+      .filter((relPath) => relPath.includes('/repositories/') && /\.helper\.ts$/.test(relPath));
+    const beDataFolderOrZoteroFileViolations = Array.from(fileCache.values())
+      .map((f) => f.relPath)
+      .filter((relPath) => /(?:^|\/)data\//i.test(relPath) || /zotero/i.test(path.basename(relPath)));
+    const feDataFolderOrZoteroFileViolations = Array.from(feFileCache.values())
+      .map((f) => f.relPath)
+      .filter((relPath) => /(?:^|\/)data\//i.test(relPath) || /zotero/i.test(path.basename(relPath)));
+    expect(beDomainNamingViolations).toEqual([]);
+    expect(feDomainNamingViolations).toEqual([]);
+    expect(beRepoHelperViolations).toEqual([]);
+    expect(beDataFolderOrZoteroFileViolations).toEqual([]);
+    expect(feDataFolderOrZoteroFileViolations).toEqual([]);
   });
 
   it('SC-010: Schema & Query Integrity (soft-delete columns, table names, zero ghost delegates or TransactionClient casts)', () => {
@@ -796,7 +1095,6 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       path.join(libraryRoot, 'catalog/repositories/state.repository.ts'),
       path.join(libraryRoot, 'catalog/repositories/item-filter-where.builder.ts'),
       path.join(libraryRoot, 'catalog/catalog.facade.ts'),
-      path.join(libraryRoot, 'citation/dto/citation.dto.ts'),
       path.join(libraryRoot, 'citation/citation.facade.ts'),
       path.join(libraryRoot, 'extraction/extractors/xmp.parser.ts'),
       path.join(libraryRoot, 'extraction/extraction.facade.ts'),
@@ -868,6 +1166,32 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         __dirname,
         '../../../../frontend/src/features/library/core/coordinator/index.ts',
       ),
+      // Final Canonical Structural Consolidations
+      path.join(libraryRoot, 'core/utils/transaction-helpers.ts'),
+      path.join(libraryRoot, 'core/ports/index.ts'),
+      path.join(libraryRoot, 'extraction/extractors/layout.extractor.ts'),
+      path.join(libraryRoot, 'library.facade.ts'),
+      path.join(libraryRoot, 'ingestion/controllers/curation.controller.ts'),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/domain/types/item-fields.constants.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/inspector/fields/CreatorFields.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/inspector/fields/GeneralFields.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/reader/panel/AnnotationsPanel.tsx',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../../frontend/src/features/library/ui/reader/panel/AnnotationsPanelParts.tsx',
+      ),
     ];
     for (const shimPath of deletedPassThroughShims) {
       expect(fs.existsSync(shimPath)).toBe(false);
@@ -875,7 +1199,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
 
     const commandRelationsPath = path.join(
       libraryRoot,
-      'catalog/repositories/command-relations.helper.ts',
+      'catalog/repositories/command-relations.operations.ts',
     );
     const commandRelationsContent = fs.readFileSync(
       commandRelationsPath,
@@ -902,21 +1226,35 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   });
 
   it('SC-013: Hollywood Principle & Zero Shadow Backend Guardrails (Backend port inversion & Frontend server authority)', () => {
-    // 1. Backend: Zero concrete ItemCacheCoordinator imports outside catalog/
+    // 1. Backend: Zero concrete ItemCacheCoordinator imports outside catalog/ & Zero legacy architecture vestiges
     const cacheCoordinatorViolations: Array<{ file: string; line: number; match: string }> = [];
+    const backendLegacyVestigeViolations: Array<{ file: string; line: number; match: string }> = [];
     for (const [, { relPath, lines }] of fileCache) {
-      if (relPath.startsWith('catalog/')) continue;
       lines.forEach((line, index) => {
-        if (!line.trim().startsWith('//') && /\bItemCacheCoordinator\b/.test(line)) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+        if (!relPath.startsWith('catalog/') && /\bItemCacheCoordinator\b/.test(line)) {
           cacheCoordinatorViolations.push({
             file: relPath,
             line: index + 1,
-            match: line.trim(),
+            match: trimmed,
+          });
+        }
+        if (
+          /\b(?:rawTei|ClientResolved|preResolvedMetadata|prepareItemAiMetadataPatch|filterAiMetadataPatch|promoteFeedEntryToLibrary|syncTagsToItem|ALL_RECONCILABLE_METADATA_FIELDS)\b/.test(
+            line,
+          )
+        ) {
+          backendLegacyVestigeViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
           });
         }
       });
     }
     expect(cacheCoordinatorViolations).toEqual([]);
+    expect(backendLegacyVestigeViolations).toEqual([]);
 
     // 2. Frontend: Zero client-metadata-resolver / saved-search-evaluator shadow backend files, zero client-side RSS/Atom XML parser or SavedSearch/SystemView evaluators, and zero N+1 copySubtree
     if (!fs.existsSync(feRoot)) return;
@@ -936,7 +1274,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         const trimmed = line.trim();
         if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
         if (
-          /\b(?:parseFeedXml|evaluateSavedSearch|filterItemsBySavedSearch|filterItemsBySystemView|CollectionTreeComposite)\b/.test(
+          /\b(?:parseFeedXml|evaluateSavedSearch|filterItemsBySavedSearch|filterItemsBySystemView|CollectionTreeComposite|useOcrExtraction|resolveDocumentOcrState|presignUpload|completePresignedUpload|initiateMultipartSession)\b/.test(
             line,
           )
         ) {
@@ -958,7 +1296,10 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       collectionCoordinatorPath,
       'utf-8',
     );
-    expect(collectionCoordinatorContent).toContain('libraryServices.collections.copy(');
+    expect(
+      collectionCoordinatorContent.includes('CollectionsService.copy(') ||
+        collectionCoordinatorContent.includes('copyLibraryCollection('),
+    ).toBe(true);
     expect(collectionCoordinatorContent).not.toContain('copySubtree');
   });
 });

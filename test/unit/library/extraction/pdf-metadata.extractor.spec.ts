@@ -1,8 +1,8 @@
 import { XmpParser } from '@/modules/library/extraction/providers/pdf-outline.extractor';
-import { RegexExtractor } from '@/modules/library/core/domain/regex.extractor';
+import { RegexExtractor } from '@/modules/library/core/domain/regex.domain';
 import { MetadataQualityGate } from '@/modules/library/extraction/domain/attachments.domain';
-import { LayoutExtractor } from '@/modules/library/extraction/extractors/layout.extractor';
-import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
+import { LayoutExtractor } from '@/modules/library/extraction/providers/layout.extractor';
+import { PdfMetadataExtractor } from '@/modules/library/extraction/providers/pdf-metadata.extractor';
 import { MetadataCoalescePolicy as ReconciliationPolicy } from '@/modules/library/core';
 import { ResolveStage } from '@/modules/library/ingestion/stages/resolve.stage';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';

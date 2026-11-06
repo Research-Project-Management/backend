@@ -5,16 +5,18 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
-import type { Attachment } from '@prisma/client';
+
 import { createHash } from 'crypto';
 import { isUUID } from 'class-validator';
 import { AttachmentsService } from './attachments.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
-import { ExternalProviderException } from '@/modules/library/core/errors/domain.exception';
-import { AttachmentStorageException } from '@/modules/library/core/types/extraction.types';
+import {
+  ExternalProviderException,
+  AttachmentStorageException,
+} from '@/modules/library/core/errors/domain.exception';
 
-export interface SnapshotTemplateParams {
+interface SnapshotTemplateParams {
   canonicalUrl: string;
   capturedAtIso: string;
   formattedDate: string;
@@ -24,7 +26,7 @@ export interface SnapshotTemplateParams {
   sanitizedBody: string;
 }
 
-export function escapeSnapshotHtml(str: string): string {
+function escapeSnapshotHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -33,7 +35,7 @@ export function escapeSnapshotHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
-export function buildStandaloneSnapshotHtml(
+function buildStandaloneSnapshotHtml(
   params: SnapshotTemplateParams,
 ): string {
   const {
@@ -106,7 +108,7 @@ export function buildStandaloneSnapshotHtml(
 </html>`;
 }
 
-export interface SnapshotResult {
+interface SnapshotResult {
   title: string;
   byline?: string;
   excerpt?: string;
@@ -118,7 +120,7 @@ export interface SnapshotResult {
   checksum: string;
 }
 
-export interface CaptureAndAttachOptions {
+interface CaptureAndAttachOptions {
   title?: string;
   uploadedById?: string;
   projectId?: string;

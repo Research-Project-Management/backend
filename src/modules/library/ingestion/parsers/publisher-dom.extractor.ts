@@ -4,32 +4,9 @@ import {
   normalizeDoi,
   parseCreatorString,
 } from '@/modules/library/core';
+import { FallbackMeta } from '@/modules/library/ingestion/types/metadata.types';
 
-/** Partial metadata from a structured fallback source (JSON-LD / COinS). */
-export type FallbackMeta = {
-  title?: string;
-  authors?: string[];
-  creators?: Array<{
-    firstName?: string;
-    lastName: string;
-    fullName?: string;
-    creatorType?: string;
-    fieldMode?: number;
-  }>;
-  date?: string;
-  publicationTitle?: string;
-  publisher?: string;
-  doi?: string;
-  volume?: string;
-  issue?: string;
-  pages?: string;
-  issn?: string;
-  isbn?: string;
-  abstract?: string;
-  keywords?: string[];
-  language?: string;
-  itemType?: string;
-};
+export type { FallbackMeta };
 
 /** JSON-LD @type values considered bibliographic, in priority order. */
 export const JSONLD_TYPES = [

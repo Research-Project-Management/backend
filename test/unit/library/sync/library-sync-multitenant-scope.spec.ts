@@ -8,7 +8,7 @@ import { AnnotationsRepository } from '@/modules/library/extraction/repositories
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repository';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
-import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
+import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotations.domain';
 import { TransactionHelpers, UNIT_OF_WORK } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { PrismaService } from '@/core';

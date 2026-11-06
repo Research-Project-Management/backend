@@ -1,17 +1,14 @@
 export * from './sync.module';
 
-// Controllers
+// Controllers & DTOs
 export * from './controllers/sync.controller';
 
-// Domain
+// Services
 export * from './services/transaction.service';
-
-// DTOs
+export * from './services/idempotent-consumer.service';
+export * from './services/outbox.worker';
 
 // Repositories
 export * from './repositories/changelog.repository';
 export * from './repositories/outbox.repository';
 
-// Services
-export * from './services/idempotent-consumer.service';
-export * from './services/outbox.worker';

@@ -4,6 +4,7 @@ import {
   ProviderCapability,
   ProviderName,
   ProviderResult,
+  ProviderFetchError,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeDoi,
@@ -20,10 +21,9 @@ import {
   getContactEmail,
   getUserAgent,
 } from '@/modules/library/core';
-import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { BaseMetadataProvider } from './base-metadata.provider';
 
-export function parseMedlineDate(raw: string): string | undefined {
+function parseMedlineDate(raw: string): string | undefined {
   const str = raw.trim();
   if (!str) return undefined;
   const MONTHS: Record<string, string> = {
@@ -43,7 +43,7 @@ export function parseMedlineDate(raw: string): string | undefined {
   return med[3] ? `${year}-${month}-${med[3].padStart(2, '0')}` : `${year}-${month}`;
 }
 
-export async function enrichFromEuropePmc(
+async function enrichFromEuropePmc(
   result: ProviderResult,
   cleanPmid: string,
   rawTags: string[],

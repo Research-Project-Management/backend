@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, IngestionRun, IngestionStatus, IngestionStage as DbIngestionStage, Item } from '@prisma/client';
 import { IngestionStage, IngestionReviewCase } from '@/modules/library/ingestion/types/ingestion.types';
@@ -238,7 +238,6 @@ export class IngestionRepository {
     );
   }
 
-
   async transitionRunStatusAtomic(
     runId: string,
     expectedStatuses: IngestionStatus[],
@@ -309,7 +308,6 @@ export class IngestionRepository {
     });
   }
 
-
   async purgeOldRuns(olderThanOrDays: Date | number = 7, tx?: Prisma.TransactionClient): Promise<number> {
     const olderThan = typeof olderThanOrDays === 'number'
       ? new Date(Date.now() - olderThanOrDays * 24 * 60 * 60 * 1000) : olderThanOrDays;
@@ -369,8 +367,6 @@ export class IngestionRepository {
     }
     return stage;
   }
-
-
 
   // Review Case Operations
 
@@ -455,7 +451,6 @@ export class IngestionRepository {
       ? { AND: [scopeFilters, idFilter] }
       : idFilter;
   }
-
 
   async updateReviewCaseStatus(
     scope: IngestionScope,
@@ -607,58 +602,5 @@ export class IngestionRepository {
       where: { ...(Array.isArray(ids) && ids.length > 0 ? { id: { in: ids } } : {}), expiresAt: { lt: olderThan } },
     });
     return res.count;
-  }
-  async findItemByIdentifier(
-    type: string,
-    cleanQuery: string,
-    scope: { userId: string; projectId?: string | null },
-    tx?: Prisma.TransactionClient,
-  ) {
-    if (!scope?.userId) return null;
-    const upperType = type.trim().toUpperCase();
-    const cleanIsbn = cleanQuery.replace(/[-\s]/g, '').trim();
-    const baseArxiv = cleanQuery.replace(/v\d+$/i, '').trim();
-    const whereByType: Record<string, Prisma.ItemWhereInput> = {
-      DOI: {
-        deletedAt: null,
-        OR: [
-          { doi: { equals: cleanQuery, mode: 'insensitive' } },
-          { metadata: { path: ['doi'], equals: cleanQuery } },
-          { identifiers: { some: { type: 'doi', value: { equals: cleanQuery, mode: 'insensitive' } } } },
-        ],
-      },
-      ARXIV: {
-        deletedAt: null,
-        OR: [
-          { metadata: { path: ['arxivId'], equals: cleanQuery } },
-          { metadata: { path: ['arxivId'], equals: baseArxiv } },
-          { metadata: { path: ['arxiv'], equals: cleanQuery } },
-          { identifiers: { some: { type: { in: ['arxiv', 'arxivId'] }, value: { in: [cleanQuery, baseArxiv] } } } },
-        ],
-      },
-      PMID: {
-        deletedAt: null,
-        OR: [{ metadata: { path: ['pmid'], equals: cleanQuery } }, { identifiers: { some: { type: 'pmid', value: cleanQuery } } }],
-      },
-      ISBN: {
-        deletedAt: null,
-        OR: [
-          { metadata: { path: ['isbn'], equals: cleanIsbn } },
-          { metadata: { path: ['isbn'], equals: cleanQuery } },
-          { identifiers: { some: { type: 'isbn', value: { in: [cleanIsbn, cleanQuery] } } } },
-        ],
-      },
-    };
-    const whereClause = whereByType[upperType];
-    if (!whereClause) return null;
-    if (scope.projectId) whereClause.projectId = scope.projectId;
-    else {
-      whereClause.userId = scope.userId;
-      whereClause.projectId = null;
-    }
-    return this.getClient(tx).item.findFirst({
-      where: whereClause,
-      include: { contributors: { orderBy: { orderIndex: 'asc' } }, identifiers: true },
-    });
   }
 }

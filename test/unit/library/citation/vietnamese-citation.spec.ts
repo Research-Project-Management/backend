@@ -535,7 +535,7 @@ describe('Vietnamese & Cultural Citation Engine', () => {
     });
 
     it('does not misclassify foreign authors with short ASCII surnames (Chu, Ma, Le, Do) as Vietnamese in TCVN', () => {
-      const { TcvnCitationFormatterService } = require('@/modules/library/citation/services/tcvn-citation-formatter.service');
+      const { TcvnCitationFormatterService } = require('@/modules/library/citation/domain/tcvn-citation.domain');
       expect(
         TcvnCitationFormatterService.isVietnameseAuthor({
           family: 'Chu',
@@ -592,7 +592,7 @@ describe('Vietnamese & Cultural Citation Engine', () => {
     it('extracts multiple citation key alias lines, parses comma-containing institutions and month ranges, and escapes BibTeX special characters safely', () => {
       const { extractItemCitationAliases } = require('@/modules/library/citation/domain/citation.domain');
       const { CslStyleFormatterService } = require('@/modules/library/citation/services/csl-style-formatter.service');
-      const { TcvnCitationFormatterService } = require('@/modules/library/citation/services/tcvn-citation-formatter.service');
+      const { TcvnCitationFormatterService } = require('@/modules/library/citation/domain/tcvn-citation.domain');
 
       const aliases = extractItemCitationAliases({
         id: 'item-1',

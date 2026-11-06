@@ -41,7 +41,7 @@ require('@citation-js/plugin-bibtex');
  * Custom and non-standard BibTeX keys that @citation-js/plugin-bibtex either drops,
  * alters (e.g. stripping math/braces or corporate authors), or fails to map into CSL.
  */
-export const CUSTOM_BIBTEX_ENRICHMENT_KEYS = new Set<string>([
+const CUSTOM_BIBTEX_ENRICHMENT_KEYS = new Set<string>([
   'abstract',
   'archiveprefix',
   'eprint',
@@ -107,7 +107,7 @@ export const CUSTOM_BIBTEX_ENRICHMENT_KEYS = new Set<string>([
   'month',
 ]);
 
-export const DEFAULT_BIBTEX_STRING_MACROS: Readonly<Record<string, string>> = {
+const DEFAULT_BIBTEX_STRING_MACROS: Readonly<Record<string, string>> = {
   jan: 'January',
   feb: 'February',
   mar: 'March',
@@ -143,7 +143,7 @@ export const DEFAULT_BIBTEX_STRING_MACROS: Readonly<Record<string, string>> = {
   tcs: 'Theoretical Computer Science',
 };
 
-export function extractBibtexFields(
+function extractBibtexFields(
   body: string,
   allowedKeys?: ReadonlySet<string>,
   macros?: ReadonlyMap<string, string>,
@@ -285,7 +285,7 @@ export function extractBibtexFields(
   return fields;
 }
 
-export function extractBibtexStringMacros(
+function extractBibtexStringMacros(
   rawBibtex: string,
 ): Map<string, string> {
   const macros = new Map<string, string>(
@@ -351,7 +351,7 @@ export function extractBibtexStringMacros(
   return macros;
 }
 
-export interface RawBibtexBlock {
+interface RawBibtexBlock {
   rawType: string;
   citationKey: string;
   body: string;
@@ -361,7 +361,7 @@ export interface RawBibtexBlock {
  * Splits a raw BibTeX string into balanced `@type{key, body}` or `@type(key, body)` blocks in O(N) time.
  * Immune to `@` characters inside field values (e.g. emails or abstracts) and supports multiple entries on a single line.
  */
-export function splitBibtexEntryBlocks(rawBibtex: string): RawBibtexBlock[] {
+function splitBibtexEntryBlocks(rawBibtex: string): RawBibtexBlock[] {
   const blocks: RawBibtexBlock[] = [];
   const headerRe = /@([a-zA-Z]+)\s*([{(])/g;
   let match: RegExpExecArray | null;
@@ -432,7 +432,7 @@ export function splitBibtexEntryBlocks(rawBibtex: string): RawBibtexBlock[] {
   return blocks;
 }
 
-export class BibtexFallbackParser {
+class BibtexFallbackParser {
   /**
    * Resilient parser for non-standard BibTeX dialects
    */
@@ -626,52 +626,5 @@ export class QueryClassifier {
     }
 
     return { raw: trimmed, clean: trimmed, type: 'TITLE' };
-  }
-
-  static classifyBatch(rawInput: string): ClassifiedQuery[] {
-    if (!rawInput || typeof rawInput !== 'string') return [];
-    const lines = rawInput
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    const results: ClassifiedQuery[] = [];
-
-    for (const line of lines) {
-      if (/[,;\t]/.test(line)) {
-        const tokens = line
-          .split(/[\s,;]+/)
-          .map((t) => t.trim())
-          .filter(Boolean);
-        const tokenClassified = tokens.map((t) => this.classify(t));
-        if (
-          tokenClassified.length > 1 &&
-          tokenClassified.every((c) => c.type !== 'TITLE')
-        ) {
-          results.push(...tokenClassified);
-          continue;
-        }
-      }
-
-      const single = this.classify(line);
-      if (single.type !== 'TITLE') {
-        results.push(single);
-        continue;
-      }
-      const tokens = line
-        .split(/[\s,;]+/)
-        .map((t) => t.trim())
-        .filter(Boolean);
-      const tokenClassified = tokens.map((t) => this.classify(t));
-      if (
-        tokenClassified.length > 1 &&
-        tokenClassified.every((c) => c.type !== 'TITLE')
-      ) {
-        results.push(...tokenClassified);
-      } else {
-        results.push(single);
-      }
-    }
-
-    return results;
   }
 }

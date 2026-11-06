@@ -1,6 +1,6 @@
 import { InvalidStateTransitionException } from '@/modules/library/core/errors/domain.exception';
 
-export type IngestionDomainStatus =
+type IngestionDomainStatus =
   | 'PENDING'
   | 'RUNNING'
   | 'COMPLETED'
@@ -117,17 +117,10 @@ export class IngestionStatusVo {
   }
 }
 
-export type IngestionStageName =
-  | 'IDENTIFY'
-  | 'NORMALIZE'
-  | 'ENRICH'
-  | 'RECONCILE'
-  | 'MATCH'
-  | 'COMMIT'
-  | 'ENRICH_EXISTING'
-  | 'RESOLVE';
+import type { IngestionStageName } from '@/modules/library/ingestion/types/ingestion.types';
+export type { IngestionStageName };
 
-export interface CreateIngestionRunProps {
+interface CreateIngestionRunProps {
   id?: string;
   userId: string;
   projectId?: string | null;
@@ -135,7 +128,7 @@ export interface CreateIngestionRunProps {
   totalItems?: number;
 }
 
-export interface ReconstituteIngestionRunProps {
+interface ReconstituteIngestionRunProps {
   id: string;
   userId: string;
   projectId?: string | null;

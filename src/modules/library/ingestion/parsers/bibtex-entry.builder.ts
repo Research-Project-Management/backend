@@ -5,68 +5,12 @@ import {
   mapCslTypeToZoteroItemType,
 } from '@/modules/library/core';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
+import type {
+  ParsedBibtexEntry,
+  BibtexItem,
+} from '@/modules/library/ingestion/types/metadata.types';
 
-export interface ParsedBibtexEntry {
-  citationKey?: string;
-  itemType: string;
-  title: string;
-  shortTitle?: string;
-  authors: string[];
-  editors?: string[];
-  creators?: Array<{
-    name?: string;
-    fullName?: string;
-    firstName?: string;
-    lastName?: string;
-    creatorType: string;
-    fieldMode?: number;
-  }>;
-  year: number | null;
-  publicationDate?: string;
-  journal?: string;
-  journalAbbr?: string;
-  publisher?: string;
-  university?: string;
-  institution?: string;
-  thesisType?: string;
-  reportNumber?: string;
-  reportType?: string;
-  bookTitle?: string;
-  proceedingsTitle?: string;
-  conferenceName?: string;
-  eventPlace?: string;
-  place?: string;
-  volume?: string;
-  issue?: string;
-  pages?: string;
-  numPages?: string;
-  numberOfVolumes?: string;
-  seriesNumber?: string;
-  chapter?: string;
-  doi?: string;
-  pmid?: string;
-  pmcid?: string;
-  isbn?: string;
-  issn?: string;
-  url?: string;
-  accessedAt?: string;
-  abstract?: string;
-  series?: string;
-  edition?: string;
-  keywords?: string[];
-  tags?: string[];
-  notes?: string[];
-  language?: string;
-  rights?: string;
-  fileUrl?: string;
-  extra?: string;
-  arxivId?: string;
-  seeAlso?: string[];
-  relations?: Record<string, string | string[]>;
-  [key: string]: unknown;
-}
-
-export type BibtexItem = ParsedBibtexEntry;
+export type { ParsedBibtexEntry, BibtexItem };
 
 export interface CslPerson {
   literal?: string;
@@ -118,7 +62,7 @@ export interface CslItem {
   [key: string]: unknown;
 }
 
-export const BIBTEX_TYPE_MAP: Record<string, string> = {
+const BIBTEX_TYPE_MAP: Record<string, string> = {
   article: 'journalArticle',
   inproceedings: 'conferencePaper',
   conference: 'conferencePaper',
@@ -181,7 +125,7 @@ export function mapBibtexTypeToItemType(bibtexType: string): string {
  * Splits a raw BibTeX author/editor field on top-level `and` while detecting
  * brace-protected corporate/institutional names like `{World Health Organization}`.
  */
-export function extractStructuredBibtexPersons(
+function extractStructuredBibtexPersons(
   rawField: string | undefined,
   creatorType: string,
 ): Array<{
@@ -265,7 +209,7 @@ export function extractStructuredBibtexPersons(
   return results;
 }
 
-export function mapCslPersonListToStrings(persons: CslPerson[] = []): string[] {
+function mapCslPersonListToStrings(persons: CslPerson[] = []): string[] {
   const isOthersToken = (name: string) =>
     /^(?:others|and\s+others|et\s+al\.?)$/i.test(name.trim());
   return persons
@@ -278,7 +222,7 @@ export function mapCslPersonListToStrings(persons: CslPerson[] = []): string[] {
     .filter((name) => Boolean(name) && !isOthersToken(name));
 }
 
-export function mapCslPersonListToCreators(
+function mapCslPersonListToCreators(
   persons: CslPerson[] = [],
   creatorType: string,
 ): NonNullable<ParsedBibtexEntry['creators']> {

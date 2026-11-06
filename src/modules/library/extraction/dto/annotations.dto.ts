@@ -275,7 +275,7 @@ export class UpdateAnnotationDto {
 
 // Batch upsert item
 
-export class UpsertAnnotationItemDto {
+class UpsertAnnotationItemDto {
   /** If present → update existing annotation, otherwise create new */
   @IsUUID('all')
   @IsOptional()
@@ -558,4 +558,15 @@ export class CompleteMultipartDto {
 
   @IsArray()
   parts!: { partNumber: number; eTag: string }[];
+}
+
+export class BenchmarkPayloadDto {
+  @IsOptional()
+  @IsString()
+  base64Pdf?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  filename?: string;
 }

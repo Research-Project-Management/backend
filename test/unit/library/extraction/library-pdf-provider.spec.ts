@@ -1,8 +1,8 @@
 import { getDocumentProxy, getMeta } from 'unpdf';
 import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
 import { PdfTextMetadataExtractor } from '@/modules/library/extraction/providers/pdf-text-metadata.extractor';
-import { LayoutExtractor } from '@/modules/library/extraction/extractors/layout.extractor';
-import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
+import { LayoutExtractor } from '@/modules/library/extraction/providers/layout.extractor';
+import { PdfMetadataExtractor } from '@/modules/library/extraction/providers/pdf-metadata.extractor';
 import { ExtractionMetadataSynchronizer } from '@/modules/library/extraction/services/extraction-metadata.synchronizer';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 

@@ -14,15 +14,16 @@ import { AnnotationType } from '@/modules/library/core/types/extraction.types';
 import {
   AnnotationNormalizer,
   extractTopLeftAnchor,
-} from '@/modules/library/extraction/domain/annotation.normalizer';
+} from '@/modules/library/extraction/domain/annotations.domain';
 import {
   extractFileIdFromUrl,
   normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { getDocumentProxy } from 'unpdf';
 
-export interface ImportAnnotationsResult {
+interface ImportAnnotationsResult {
   imported: number;
+  importedCount: number;
   totalFound: number;
   pagesScanned: number;
 }
@@ -82,6 +83,8 @@ export class PdfAnnotationImporterService {
     const resolvedProjectId =
       effectiveProjectId ||
       normalizeProjectScopeId(attachment.item?.projectId ?? undefined);
+    const existingAnnotationsPromise =
+      this.annotationsRepo.findExistingForImport(attachmentId);
     const storageFile = await this.storagePort.readOwnedFile({
       fileId,
       userId,
@@ -90,6 +93,7 @@ export class PdfAnnotationImporterService {
     const buffer = storageFile.buffer;
 
     if (!buffer || buffer.byteLength === 0) {
+      void existingAnnotationsPromise.catch(() => undefined);
       throw new BadRequestException(
         `Empty or corrupted PDF payload for attachment ${attachmentId}`,
       );
@@ -102,6 +106,7 @@ export class PdfAnnotationImporterService {
     try {
       documentProxy = await this.loadPdfDocument(clonedData);
     } catch (err: unknown) {
+      void existingAnnotationsPromise.catch(() => undefined);
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
         `Failed to parse PDF document proxy for attachment ${attachmentId}: ${message}`,
@@ -114,11 +119,11 @@ export class PdfAnnotationImporterService {
     try {
       const numPages = documentProxy.numPages || 0;
       if (numPages === 0) {
-        return { imported: 0, totalFound: 0, pagesScanned: 0 };
+        void existingAnnotationsPromise.catch(() => undefined);
+        return { imported: 0, importedCount: 0, totalFound: 0, pagesScanned: 0 };
       }
 
-      const existingAnnotations =
-        await this.annotationsRepo.findExistingForImport(attachmentId);
+      const existingAnnotations = await existingAnnotationsPromise;
       const existingAnchorsByPageAndType = new Map<
         string,
         Array<{ x1: number; y1: number }>
@@ -354,6 +359,7 @@ export class PdfAnnotationImporterService {
 
       return {
         imported,
+        importedCount: imported,
         totalFound,
         pagesScanned: numPages,
       };

@@ -10,7 +10,7 @@ import {
   RegexExtractor,
 } from '@/modules/library/core';
 
-export interface LayoutExtractedFields {
+interface LayoutExtractedFields {
   title?: string;
   authors?: string[];
   abstract?: string;
@@ -19,7 +19,7 @@ export interface LayoutExtractedFields {
   maxFontSize?: number;
 }
 
-export interface LayoutTextItem {
+interface LayoutTextItem {
   str?: string;
   transform?: number[];
   hasEOL?: boolean;
@@ -599,8 +599,10 @@ export class LayoutExtractor {
     const headerLines =
       abstractStart !== -1 ? lines.slice(0, abstractStart) : lines.slice(0, 15);
     const candidateTitleLines: string[] = [];
+    let lastTitleHeaderIdx = -1;
 
-    for (const line of headerLines) {
+    for (let idx = 0; idx < headerLines.length; idx++) {
+      const line = headerLines[idx];
       if (
         /^(arxiv[:\s._/-]*\d|https?:|\d+$|submitted to|accepted|published|proceedings of|ieee|acm|springer|elsevier|under review|copyright|downloaded from|authorized licensed use)/i.test(
           line,
@@ -610,12 +612,14 @@ export class LayoutExtractor {
       }
       if (line.length > 8 && !candidateTitleLines.length) {
         candidateTitleLines.push(line);
+        lastTitleHeaderIdx = idx;
       } else if (
         candidateTitleLines.length === 1 &&
         line.length > 4 &&
         !/[,;@]|department|university|institute/i.test(line)
       ) {
         candidateTitleLines.push(line);
+        lastTitleHeaderIdx = idx;
       } else if (candidateTitleLines.length > 0) {
         break;
       }
@@ -637,7 +641,7 @@ export class LayoutExtractor {
       result.title = normalizeTitleCase(joinedRawTitle);
     }
 
-    const authorCandidates = headerLines.slice(candidateTitleLines.length);
+    const authorCandidates = headerLines.slice(lastTitleHeaderIdx + 1);
     for (const line of authorCandidates) {
       if (
         !/university|department|laboratory|institute|school|faculty|hospital|center for|group/i.test(

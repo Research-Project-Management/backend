@@ -10,7 +10,7 @@ import {
 } from '@/modules/library/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { METADATA_PORT, MetadataPort, QueryType } from '@/modules/library/ingestion/types/metadata.types';
-import { buildEnrichmentPatch, buildReResolvePatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import { buildEnrichmentPatch, buildReResolvePatch } from '@/modules/library/ingestion/domain/enrichment-patch.mapper';
 import { UrlMetadataScraperService } from './url-metadata-scraper.service';
 
 export interface ReResolveMetadataOptions {
@@ -38,17 +38,17 @@ export interface ReResolveMetadataResult {
   warnings?: string[];
 }
 
-export interface LookupQueryExtractorContext {
+interface LookupQueryExtractorContext {
   options?: ReResolveMetadataOptions;
   existingItem: ItemDetail;
   existingExtra: Record<string, unknown>;
 }
 
-export type LookupQueryExtractor = (
+type LookupQueryExtractor = (
   ctx: LookupQueryExtractorContext,
 ) => { query: string; queryType: QueryType } | null;
 
-export const LOOKUP_QUERY_EXTRACTORS: readonly LookupQueryExtractor[] = [
+const LOOKUP_QUERY_EXTRACTORS: readonly LookupQueryExtractor[] = [
   ({ options }) =>
     options?.doi ? { query: normalizeDoi(options.doi) || options.doi.trim(), queryType: 'DOI' } : null,
   ({ options }) =>

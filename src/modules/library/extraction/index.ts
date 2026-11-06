@@ -6,20 +6,12 @@ export * from './controllers/attachments.controller';
 export * from './controllers/attachment-storage.controller';
 export * from './controllers/annotations.controller';
 
-// Domain
-export * from './domain/attachments.domain';
-export * from './domain/annotation.normalizer';
-
-// DTOs
-export * from './dto/annotations.dto';
-
 // Services
 export * from './services/attachments.service';
 export * from './services/attachment-renamer.service';
 export * from './services/annotations.service';
 export * from './services/pdf-annotation-importer.service';
 export * from './services/web-snapshot.service';
-export * from './services/pdf-metadata.extractor';
 export * from './services/extraction-metadata.synchronizer';
 export * from './services/extraction.handler';
 
@@ -28,15 +20,18 @@ export * from './repositories/attachments.repository';
 export * from './repositories/annotations.repository';
 export * from './repositories/extraction.repository';
 
-// Extractors
-export * from './extractors/layout.extractor';
-export * from './providers/pdf-outline.extractor';
+// Domain
+export * from './domain/attachments.domain';
+export * from './domain/annotations.domain';
 
-// Providers
+// Providers & Extractors
 export * from './providers/pdf.provider';
+export * from './providers/pdf-metadata.extractor';
 export * from './providers/pdf-text-metadata.extractor';
+export * from './providers/pdf-outline.extractor';
+export * from './providers/layout.extractor';
 
-// Subscribers
-
-// Types
+// DTOs & Types
+export * from './dto/annotations.dto';
 export * from '../core/types/extraction.types';
+

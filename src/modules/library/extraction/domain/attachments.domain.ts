@@ -4,10 +4,10 @@ import {
   isInstitutionName,
   isNoiseAuthorName,
   isValidIsbnChecksum,
+  AttachmentInvariantError,
 } from '@/modules/library/core';
 import {
   AttachmentType,
-  AttachmentInvariantError,
   ExtractionEngineKind,
   QualityScoreBreakdown,
 } from '@/modules/library/core/types/extraction.types';
@@ -87,23 +87,7 @@ export function isValidFileHash(hash?: string | null): boolean {
   return /^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{64}$/.test(hash.trim());
 }
 
-/**
- * Validates standard MIME type format.
- */
-export function isValidMimeType(mimeType?: string | null): boolean {
-  if (!mimeType) return false;
-  return /^[a-zA-Z0-9.+_-]+\/[a-zA-Z0-9.+_-]+$/.test(mimeType.trim());
-}
-
-/**
- * Checks whether a MIME type represents a PDF document.
- */
-export function isPdfMimeType(mimeType?: string | null): boolean {
-  if (!mimeType) return false;
-  return mimeType.toLowerCase().trim() === 'application/pdf';
-}
-
-export type ExtractedMetadata = ItemMetadata;
+type ExtractedMetadata = ItemMetadata;
 
 export interface FieldExtractionProvenance {
   source: string;
@@ -225,6 +209,26 @@ export interface IPdfExtractionTier {
   executeTier(ctx: PdfExtractionTierContext): Promise<void>;
 }
 
+export function isBogusTitle(t?: string): boolean {
+  if (!t) return true;
+  const lower = t.toLowerCase().trim();
+  return (
+    lower.startsWith('microsoft') ||
+    lower.startsWith('untitled') ||
+    lower.startsWith('document') ||
+    lower.startsWith('arxiv:') ||
+    lower === 'technical report' ||
+    /^arxiv\s*:\s*[a-z0-9\-./]+/i.test(lower) ||
+    /^10\.\d{4,9}\/\S+$/i.test(lower) ||
+    /^(?:dvips(?:\(k\))?|pdftex|xelatex|lualatex|latex2e|tex\s+output| radical eye software)\b/i.test(
+      lower,
+    ) ||
+    /\.(docx?|pdf|tex|txt|ps|eps|dvi|ppt|pptx|rtf|html?)$/i.test(lower) ||
+    /^[a-z0-9_.-]+\s+\d+\.\.\d+$/i.test(lower) ||
+    lower.length < 5
+  );
+}
+
 export async function runPdfExtractionTierChain(
   ctx: PdfExtractionTierContext,
   tiers: readonly IPdfExtractionTier[],
@@ -234,7 +238,7 @@ export async function runPdfExtractionTierChain(
   }
 }
 
-export interface EvaluationResult {
+interface EvaluationResult {
   breakdown: QualityScoreBreakdown;
   isSelfSufficient: boolean;
   missingFields: string[];

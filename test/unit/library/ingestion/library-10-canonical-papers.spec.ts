@@ -20,7 +20,7 @@
  *   ⑨ book            — Deep Learning textbook (Goodfellow 2016)
  *   ⑩ dataset         — ImageNet (ILSVRC) dataset paper
  */
-import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
 import { inferItemTypeFromPdfSignals } from '@/modules/library/core';
 
 // helpers

@@ -1,9 +1,8 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { MetadataRequest, ProviderCapability, ProviderName, ProviderResult, MetadataProvider, QueryType } from '@/modules/library/ingestion/types/metadata.types';
+import { MetadataRequest, ProviderCapability, ProviderName, ProviderResult, MetadataProvider, QueryType, ProviderFetchError } from '@/modules/library/ingestion/types/metadata.types';
 import { cleanBibliographicText, cleanAbstractText, normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizePageRange, parseCreatorString, HttpClient, LibraryConfigService, libraryConfig, getUserAgent, normalizeIsbn, normalizeTags, getContactEmail } from '@/modules/library/core';
 import { BaseMetadataProvider } from './base-metadata.provider';
 import { createHash } from 'crypto';
-import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 
 /**
  * Semantic Scholar Graph API Provider.

@@ -1,15 +1,13 @@
-import { Logger, Injectable, Optional } from '@nestjs/common';
+import { Logger, Injectable, Inject, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { ItemMetadata, MetadataProvider, MetadataRequest, Provenance, ProviderCapability, ProviderName, ProviderResult, QueryType } from '@/modules/library/ingestion/types/metadata.types';
+import { ItemMetadata, MetadataProvider, MetadataRequest, Provenance, ProviderCapability, ProviderFetchError, ProviderName, ProviderResult, QueryType } from '@/modules/library/ingestion/types/metadata.types';
 import { HttpClient, TITLE_MATCH_THRESHOLD, titleSimilarity, extractNormalizedAuthorSurnames, normalizeDoi, normalizePmid, getContactEmail, getUserAgent } from '@/modules/library/core';
-import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import { RetractionDetails, RetractionLookupResult } from '@/modules/library/ingestion/types/ingestion.types';
-import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
+import { RetractionDetails, RetractionLookupResult, RETRACTION_DATABASE_PORT, IRetractionDatabasePort } from '@/modules/library/ingestion/types/ingestion.types';
 
-export type ProviderQueryInput =
+type ProviderQueryInput =
   QueryType | MetadataRequest | { type?: QueryType; queryType?: QueryType };
 
-export interface BuildProviderResultParams {
+interface BuildProviderResultParams {
   provider?: ProviderName;
   identifier?: string;
   metadata: Partial<ItemMetadata>;
@@ -22,7 +20,7 @@ export interface BuildProviderResultParams {
   openAccessPdfUrl?: string;
 }
 
-export function computeRawSnapshotHash(rawPayload: unknown): string {
+function computeRawSnapshotHash(rawPayload: unknown): string {
   const serialized =
     typeof rawPayload === 'string'
       ? rawPayload
@@ -92,7 +90,7 @@ export function buildProviderResult(
   };
 }
 
-export interface TitleCandidateRankingOptions<T> {
+interface TitleCandidateRankingOptions<T> {
   authorHint?: string;
   yearHint?: number | string;
   getAuthors?: (item: T) => unknown;
@@ -389,7 +387,8 @@ export class RetractionScannerProvider {
     return this.lookup(doi, pmid, options);
   }
   constructor(
-    private readonly retractionDb: RetractionDatabaseService,
+    @Inject(RETRACTION_DATABASE_PORT)
+    private readonly retractionDb: IRetractionDatabasePort,
     @Optional() private readonly httpClient?: HttpClient,
   ) {}
 

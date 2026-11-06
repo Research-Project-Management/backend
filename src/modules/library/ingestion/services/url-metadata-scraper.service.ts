@@ -10,7 +10,7 @@ import {
   DEFAULT_SAFE_REDIRECT_MAX_HOPS,
   UnsafeRedirectError,
 } from '@/modules/library/core/services/ssrf-guard.service';
-import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
+import { MetadataRoutingPolicy } from '@/modules/library/ingestion/domain/metadata.policy';
 import {
   EXTRACTION_FACADE,
   IExtractionFacade,
@@ -26,13 +26,13 @@ import {
   FallbackMeta,
   JSONLD_TYPES,
   JSONLD_TYPE_TO_ITEM_TYPE,
-} from './publisher-dom.extractor';
+} from '@/modules/library/ingestion/parsers/publisher-dom.extractor';
 import {
   HtmlMetaTagExtractor,
   ScrapedUrlResult,
   ScrapedCreator,
   MetaEntry,
-} from './html-meta-tag.extractor';
+} from '@/modules/library/ingestion/parsers/html-meta-tag.extractor';
 
 export type { ScrapedUrlResult, ScrapedCreator, MetaEntry, FallbackMeta };
 export {
@@ -43,7 +43,7 @@ export {
 };
 
 /** Canonical actor identifier for automated system-level ingestion downloads */
-export const SYSTEM_INGESTION_USER_ID = 'system';
+const SYSTEM_INGESTION_USER_ID = 'system';
 
 const FETCH_TIMEOUT_MS = 14000;
 
@@ -323,47 +323,54 @@ export class UrlMetadataScraperService {
 
     const effectiveFilename = options?.preferredFilename || slugHint.filename;
     let fileId: string | undefined;
-
-    if (this.storagePort) {
-      try {
-        const uploadRes = await this.storagePort.uploadFile({
-          userId: options?.userId || SYSTEM_INGESTION_USER_ID,
-          filename: effectiveFilename,
-          buffer,
-          mimeType: 'application/pdf',
-          projectId:
-            options?.scopeId && options.scopeId !== 'user'
-              ? options.scopeId
-              : undefined,
-          source: 'url_pdf_download',
-        });
-        fileId = uploadRes?.fileId;
-        this.logger.log(
-          `Stored downloaded PDF for "${canonicalUrl}" with fileId: ${fileId}`,
-        );
-      } catch (storageErr: unknown) {
-        const msg =
-          storageErr instanceof Error ? storageErr.message : String(storageErr);
-        this.logger.warn(`Failed to persist downloaded PDF to storage: ${msg}`);
-      }
-    }
-
     let pdfExtracted: Record<string, unknown> = {};
-    if (this.extractionGateway?.extractDocumentFromBuffer) {
-      try {
-        const doc = await this.extractionGateway.extractDocumentFromBuffer(
-          buffer,
-          {
-            headerOnly: true,
-          },
-        );
-        pdfExtracted =
-          (doc?.metadata as unknown as Record<string, unknown>) || {};
-      } catch (pdfErr: unknown) {
-        const msg = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
-        this.logger.warn(`ExtractionGateway pdf extraction failed: ${msg}`);
-      }
-    }
+
+    await Promise.all([
+      (async () => {
+        if (!this.storagePort) return;
+        try {
+          const uploadRes = await this.storagePort.uploadFile({
+            userId: options?.userId || SYSTEM_INGESTION_USER_ID,
+            filename: effectiveFilename,
+            buffer,
+            mimeType: 'application/pdf',
+            projectId:
+              options?.scopeId && options.scopeId !== 'user'
+                ? options.scopeId
+                : undefined,
+            source: 'url_pdf_download',
+          });
+          fileId = uploadRes?.fileId;
+          this.logger.log(
+            `Stored downloaded PDF for "${canonicalUrl}" with fileId: ${fileId}`,
+          );
+        } catch (storageErr: unknown) {
+          const msg =
+            storageErr instanceof Error
+              ? storageErr.message
+              : String(storageErr);
+          this.logger.warn(
+            `Failed to persist downloaded PDF to storage: ${msg}`,
+          );
+        }
+      })(),
+      (async () => {
+        if (!this.extractionGateway?.extractDocumentFromBuffer) return;
+        try {
+          const doc = await this.extractionGateway.extractDocumentFromBuffer(
+            buffer,
+            {
+              headerOnly: true,
+            },
+          );
+          pdfExtracted =
+            (doc?.metadata as unknown as Record<string, unknown>) || {};
+        } catch (pdfErr: unknown) {
+          const msg = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
+          this.logger.warn(`ExtractionGateway pdf extraction failed: ${msg}`);
+        }
+      })(),
+    ]);
 
     let binaryDoi: string | undefined;
     const scanBuffer = buffer

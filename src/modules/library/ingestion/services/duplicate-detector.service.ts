@@ -7,44 +7,13 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import {
-  CATALOG_FACADE,
-  ICatalogFacade,
-  IItemCacheInvalidator,
-  ITEM_CACHE_INVALIDATOR,
-  DuplicateCandidateItem,
-  normalizeProjectScopeId,
-  LIBRARY_REDIS_KEYS,
-  LIBRARY_EVENT_TYPES,
-  TransactionHelpers,
-  UNIT_OF_WORK,
-  IUnitOfWork,
-  ItemsMapper,
-} from '@/modules/library/core';
+import { CATALOG_FACADE, ICatalogFacade, IItemCacheInvalidator, ITEM_CACHE_INVALIDATOR, DuplicateCandidateItem, normalizeProjectScopeId, LIBRARY_EVENT_TYPES, TransactionHelpers, UNIT_OF_WORK, IUnitOfWork, ItemsMapper } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import {
-  DuplicateClusterResult,
-  DuplicateClusterItem,
-} from '@/modules/library/ingestion/types/ingestion.types';
+import { DuplicateClusterResult } from '@/modules/library/ingestion/types/ingestion.types';
 import { UserId, ProjectId } from '@/modules/library/core';
-import {
-  normalizeTitleForDedupe,
-  tokenizeTitleWords,
-  extractContributorAuthors,
-  generateDedupeBucketKey,
-  calculateTitleSimilarity,
-  hasConflictingPartOrSupplementMarkers,
-  isGenericBoilerplateTitle,
-} from '@/modules/library/ingestion/domain/deduplication.domain';
-import {
-  normalizeDoi,
-  normalizeArxivId,
-  normalizePmid,
-  normalizeIsbn,
-  ItemProvenancePolicy,
-  isPlaceholderItemTitle,
-} from '@/modules/library/core';
+import { normalizeTitleForDedupe, tokenizeTitleWords, extractContributorAuthors, calculateTitleSimilarity, hasConflictingPartOrSupplementMarkers, isGenericBoilerplateTitle } from '@/modules/library/ingestion/domain/deduplication.domain';
+import { normalizeDoi, normalizeArxivId, normalizePmid, normalizeIsbn, isPlaceholderItemTitle } from '@/modules/library/core';
 import {
   RawDuplicateCluster,
   mapCandidateToClusterItem,
@@ -58,7 +27,7 @@ import {
   asMetaObject,
   EffectiveFieldLookupOptions,
   getEffectiveItemField,
-} from '@/modules/library/ingestion/domain/duplicate-clustering.helper';
+} from '@/modules/library/ingestion/domain/duplicate-clustering.domain';
 import { invalidateIngestionItemCache } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 
 export { asMetaObject, getEffectiveItemField };
@@ -479,13 +448,28 @@ export class DuplicateDetectorService {
     projectId?: ProjectId | string,
   ): Promise<DuplicateClusterResult[]> {
     const effectiveProjectId = this.normalizeScopeProjectId(projectId);
-    const items = this.catalogGateway
-      ? await this.catalogGateway.findDuplicateCandidateItems(
-          userId,
-          undefined,
-          effectiveProjectId,
-        )
-      : [];
+    const [items, suspectsResult] = await Promise.all([
+      this.catalogGateway
+        ? this.catalogGateway.findDuplicateCandidateItems(
+            userId,
+            undefined,
+            effectiveProjectId,
+          )
+        : Promise.resolve([]),
+      this.ingestionRepo
+        ? this.ingestionRepo
+            .findIngestionDuplicateSuspects({
+              userId: String(userId),
+              projectId: effectiveProjectId,
+            })
+            .catch((err: unknown) => {
+              this.logger.warn(
+                `Could not load ingestion duplicate suspects: ${(err as Error).message}`,
+              );
+              return [];
+            })
+        : Promise.resolve([]),
+    ]);
 
     const candidateById = new Map<string, DuplicateCandidateItem>(
       items.map((it) => [it.id, it]),
@@ -494,40 +478,28 @@ export class DuplicateDetectorService {
     const groupedItemIds = new Set<string>();
 
     // Tier 0: Ingestion-Suspect Pairs
-    if (this.ingestionRepo) {
-      try {
-        const suspects =
-          await this.ingestionRepo.findIngestionDuplicateSuspects({
-            userId: String(userId),
-            projectId: effectiveProjectId,
+    if (suspectsResult.length > 0) {
+      for (const suspect of suspectsResult) {
+        const itemA = candidateById.get(suspect.createdItemId);
+        const itemB = candidateById.get(suspect.targetItemId);
+        if (
+          itemA &&
+          itemB &&
+          !groupedItemIds.has(itemA.id) &&
+          !groupedItemIds.has(itemB.id) &&
+          !this.isDismissedPair(itemA, itemB)
+        ) {
+          groupedItemIds.add(itemA.id);
+          groupedItemIds.add(itemB.id);
+          const pair = [itemA, itemB];
+          rawClusters.push({
+            clusterId: `ingest-${suspect.runId.substring(0, 8)}-${itemA.id.substring(0, 8)}`,
+            matchReason: 'INGESTION_SUSPECT',
+            confidence: suspect.confidence,
+            recommendedMasterId: this.computeRecommendedMasterId(pair),
+            rawGroup: pair,
           });
-
-        for (const suspect of suspects) {
-          const itemA = candidateById.get(suspect.createdItemId);
-          const itemB = candidateById.get(suspect.targetItemId);
-          if (
-            itemA &&
-            itemB &&
-            !groupedItemIds.has(itemA.id) &&
-            !groupedItemIds.has(itemB.id) &&
-            !this.isDismissedPair(itemA, itemB)
-          ) {
-            groupedItemIds.add(itemA.id);
-            groupedItemIds.add(itemB.id);
-            const pair = [itemA, itemB];
-            rawClusters.push({
-              clusterId: `ingest-${suspect.runId.substring(0, 8)}-${itemA.id.substring(0, 8)}`,
-              matchReason: 'INGESTION_SUSPECT',
-              confidence: suspect.confidence,
-              recommendedMasterId: this.computeRecommendedMasterId(pair),
-              rawGroup: pair,
-            });
-          }
         }
-      } catch (err) {
-        this.logger.warn(
-          `Could not load ingestion duplicate suspects: ${(err as Error).message}`,
-        );
       }
     }
 

@@ -285,7 +285,7 @@ describe('Library Academic Tag & Subject Taxonomy Engine', () => {
   describe('8. RegexExtractor Keywords Boundary & ASJC Noise Filtering', () => {
     it('should not extract mid-sentence "keywords" in prose as tags, and should extract line-anchored Keywords', async () => {
       const { RegexExtractor } =
-        await import('@/modules/library/core/domain/regex.extractor');
+        await import('@/modules/library/core/domain/regex.domain');
 
       const proseWithMidSentenceKeywords =
         'Abstract: In this paper we study how search keywords in large database systems affect query latency.\n' +
@@ -331,7 +331,7 @@ describe('Library Academic Tag & Subject Taxonomy Engine', () => {
 
     it('should preserve multi-paragraph structure and convert HTML to Markdown in NormalizationPolicy.normalize', async () => {
       const { NormalizationPolicy } =
-        await import('@/modules/library/ingestion/policies/normalization.policy');
+        await import('@/modules/library/ingestion/domain/normalization.policy');
       const policy = new NormalizationPolicy();
       const normalized = policy.normalize({
         title: 'Test Note Formatting',

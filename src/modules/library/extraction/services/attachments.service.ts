@@ -217,10 +217,6 @@ export class AttachmentsService {
           tx,
         );
 
-        if (resolvedFileId && !deduplicated) {
-          await this.repo.updateLinkedFile(resolvedFileId, targetItemId, tx);
-        }
-
         const eventScope = { userId, projectId: projectId || undefined };
 
         const serializedAttachment = {
@@ -264,9 +260,18 @@ export class AttachmentsService {
 
         if (helpers?.onAfterCommit) {
           postCommitRegistered = true;
-          helpers.onAfterCommit(() =>
-            this.invalidateAttachmentItemCache(targetItemId, userId, projectId),
-          );
+          helpers.onAfterCommit(async () => {
+            if (resolvedFileId && !deduplicated) {
+              await this.repo.updateLinkedFile(resolvedFileId, targetItemId);
+            }
+            await this.invalidateAttachmentItemCache(
+              targetItemId,
+              userId,
+              projectId,
+            );
+          });
+        } else if (resolvedFileId && !deduplicated) {
+          await this.repo.updateLinkedFile(resolvedFileId, targetItemId, tx);
         }
 
         return serializedAttachment;

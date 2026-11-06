@@ -17,7 +17,7 @@ import {
   CommitStage,
   isPreExistingMatchItem,
 } from '@/modules/library/ingestion/stages/commit.stage';
-import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/base-metadata.provider';
 import {
   LibraryItemSource,
@@ -28,12 +28,12 @@ import {
   MetadataCoalescePolicy,
 } from '@/modules/library/core';
 import { IngestionStatus } from '@prisma/client';
-import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.domain';
 import { IngestionSagaOrchestrator } from './ingestion-saga.orchestrator';
 import {
   sanitizeOverrides,
   mapPayloadToSource,
-} from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+} from '@/modules/library/ingestion/domain/enrichment-patch.mapper';
 import {
   isNonRetryableIngestionError,
   isRetryableIngestionError,
@@ -214,10 +214,6 @@ export class PipelineService {
     return false;
   }
 
-  async runTerminalMaintenanceGc(retentionDays = 7): Promise<void> {
-    await this.runMaintenanceGc({ retentionDays });
-  }
-
   async runMaintenanceGc(options?: {
     envelope?: IngestionSubmissionEnvelope;
     retentionDays?: number;
@@ -227,22 +223,24 @@ export class PipelineService {
     purgedRuns: number;
   }> {
     const retentionDays = options?.retentionDays ?? 7;
-    const deletedClaimCheckBlob = options?.envelope
-      ? await this.cleanupOffloadedPayload(options.envelope)
-      : false;
-    const expiredPreviewsDeleted = this.urlCapture?.cleanupExpiredPreviews
-      ? await this.urlCapture.cleanupExpiredPreviews(retentionDays).catch((err: unknown) => {
-          this.logger.warn(`[PipelineGC] Failed to cleanup expired previews: ${err instanceof Error ? err.message : String(err)}`);
-          return 0;
-        })
-      : 0;
-    const purgedRuns =
-      typeof this.repo?.purgeOldRuns === 'function'
-        ? await this.repo.purgeOldRuns(retentionDays).catch((err: unknown) => {
-            this.logger.warn(`[PipelineGC] Failed to purge old runs: ${err instanceof Error ? err.message : String(err)}`);
-            return 0;
-          })
-        : 0;
+    const [deletedClaimCheckBlob, expiredPreviewsDeleted, purgedRuns] =
+      await Promise.all([
+        options?.envelope
+          ? this.cleanupOffloadedPayload(options.envelope)
+          : Promise.resolve(false),
+        this.urlCapture?.cleanupExpiredPreviews
+          ? this.urlCapture.cleanupExpiredPreviews(retentionDays).catch((err: unknown) => {
+              this.logger.warn(`[PipelineGC] Failed to cleanup expired previews: ${err instanceof Error ? err.message : String(err)}`);
+              return 0;
+            })
+          : Promise.resolve(0),
+        typeof this.repo?.purgeOldRuns === 'function'
+          ? this.repo.purgeOldRuns(retentionDays).catch((err: unknown) => {
+              this.logger.warn(`[PipelineGC] Failed to purge old runs: ${err instanceof Error ? err.message : String(err)}`);
+              return 0;
+            })
+          : Promise.resolve(0),
+      ]);
 
     return { deletedClaimCheckBlob, expiredPreviewsDeleted, purgedRuns };
   }

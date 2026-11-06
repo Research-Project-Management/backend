@@ -6,50 +6,20 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
-import {
-  CATALOG_FACADE,
-  ICatalogFacade,
-  CreateItemData,
-  CreatorCreditInput,
-  ItemDetail,
-  INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
-  mergeCanonicalCreators,
-  cleanAbstractText,
-  cleanCommentText,
-  normalizeTags,
-  getEffectiveBaseFieldMap,
-  harmonizeZoteroFields,
-  generateCitationKey,
-  isPlaceholderItemTitle,
-  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
-  normalizeProjectScopeId,
-} from '@/modules/library/core';
+import { CATALOG_FACADE, ICatalogFacade, CreateItemData, ItemDetail, INTERNAL_SYSTEM_AND_TELEMETRY_KEYS, mergeCanonicalCreators, cleanAbstractText, cleanCommentText, normalizeTags, getEffectiveBaseFieldMap, harmonizeBibliographicFields, generateCitationKey, isPlaceholderItemTitle, CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, normalizeProjectScopeId } from '@/modules/library/core';
 import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/deduplication.domain';
 import {
   IWorkflowStage,
   CommitStageInput,
+  LibraryItemSource,
+  CommitStageOptions,
 } from '@/modules/library/ingestion/types/ingestion.types';
-import { buildEnrichmentPatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
-import { materializeDeduplicatedNotes } from '@/modules/library/ingestion/services/pipeline-side-effects.service';
+import {
+  buildEnrichmentPatch,
+  materializeDeduplicatedNotes,
+} from '@/modules/library/ingestion/domain/enrichment-patch.mapper';
 
-export type LibraryItemSource =
-  | 'WEB_CAPTURE'
-  | 'PDF_UPLOAD'
-  | 'IDENTIFIER_IMPORT'
-  | 'BIBTEX_IMPORT'
-  | 'MANUAL'
-  | 'CONNECTOR'
-  | (string & {});
-
-export interface CommitStageOptions {
-  collectionIds?: string[];
-  tagIds?: string[];
-  userId?: string;
-  source?: LibraryItemSource;
-  fileId?: string;
-  filename?: string;
-  skipPreMatch?: boolean;
-}
+export type { LibraryItemSource, CommitStageOptions };
 
 function normalizeAccessedAt(
   value: ItemMetadata['accessedAt'],
@@ -141,7 +111,7 @@ export function toItemData(
 
   const effectiveType = metadata.itemType || 'journalArticle';
   const baseMapForType = getEffectiveBaseFieldMap(effectiveType);
-  const harmonized = harmonizeZoteroFields(
+  const harmonized = harmonizeBibliographicFields(
     { ...metadata, extraFields },
     { itemType: effectiveType, syncExtraFields: true },
   ) as ItemMetadata & Record<string, unknown>;
@@ -349,7 +319,7 @@ export function toItemData(
   return result;
 }
 
-export interface CommitMatchedSideEffectsPort {
+interface CommitMatchedSideEffectsPort {
   saveItemMetadataSnapshot?: (
     itemId: string,
     payload: Record<string, unknown>,
@@ -374,7 +344,7 @@ export interface CommitMatchedSideEffectsPort {
   ) => Promise<unknown>;
 }
 
-export type CommittedItemDetail = ItemDetail & {
+type CommittedItemDetail = ItemDetail & {
   wasPreExistingMatch?: boolean;
 };
 
@@ -566,53 +536,51 @@ export class CommitStage implements IWorkflowStage<
     const createDataRec = createData as unknown as Record<string, unknown>;
     const existingRec = existingItem as unknown as Record<string, unknown>;
     try {
-      await this.sideEffects?.saveItemMetadataSnapshot?.(
-        existingItem.id,
-        createDataRec,
-      );
-      await this.sideEffects?.syncRelationsForCommittedItem?.(
-        existingItem.id,
-        createDataRec,
-        { userId, projectId },
-      );
-      if (Array.isArray(createData.notes) && createData.notes.length > 0) {
-        if (this.sideEffects?.materializeNotes) {
-          await this.sideEffects.materializeNotes(
-            userId,
-            projectId,
-            existingItem.id,
-            createData.notes,
-            existingRec,
-          );
-        } else {
-          await materializeDeduplicatedNotes({
-            catalogGateway: this.catalogGateway,
-            userId,
-            projectId,
-            itemId: existingItem.id,
-            notes: createData.notes,
-            createdItem: existingRec,
-            logger: this.logger,
-          });
-        }
-      }
-      if (
+      const uniqueCollectionIds =
         Array.isArray(createData.collectionIds) &&
         createData.collectionIds.length > 0 &&
         this.catalogGateway?.assignItemsToCollection
-      ) {
-        const uniqueCollectionIds = Array.from(
-          new Set(createData.collectionIds.filter(Boolean)),
-        );
-        for (const collectionId of uniqueCollectionIds) {
-          await this.catalogGateway.assignItemsToCollection(
+          ? Array.from(new Set(createData.collectionIds.filter(Boolean)))
+          : [];
+
+      await Promise.all([
+        this.sideEffects?.saveItemMetadataSnapshot?.(
+          existingItem.id,
+          createDataRec,
+        ),
+        this.sideEffects?.syncRelationsForCommittedItem?.(
+          existingItem.id,
+          createDataRec,
+          { userId, projectId },
+        ),
+        Array.isArray(createData.notes) && createData.notes.length > 0
+          ? this.sideEffects?.materializeNotes
+            ? this.sideEffects.materializeNotes(
+                userId,
+                projectId,
+                existingItem.id,
+                createData.notes,
+                existingRec,
+              )
+            : materializeDeduplicatedNotes({
+                catalogGateway: this.catalogGateway,
+                userId,
+                projectId,
+                itemId: existingItem.id,
+                notes: createData.notes,
+                createdItem: existingRec,
+                logger: this.logger,
+              })
+          : undefined,
+        ...uniqueCollectionIds.map((collectionId) =>
+          this.catalogGateway!.assignItemsToCollection!(
             userId,
             collectionId,
             [existingItem.id],
             projectId,
-          );
-        }
-      }
+          ),
+        ),
+      ]);
     } catch (sideEffectErr: unknown) {
       const msg = sideEffectErr instanceof Error ? sideEffectErr.message : String(sideEffectErr);
       this.logger.warn(`Side-effects failed for matched item ${existingItem.id}: ${msg}`);

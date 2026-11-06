@@ -2,12 +2,14 @@ import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import {
   MetadataCandidate, FieldEvidence, ReconciliationDecision, DuplicateMatchResult,
+  METADATA_PORT, MetadataPort, INGESTION_VERIFIER_PORT, IIngestionVerifierPort,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { METADATA_PORT, MetadataPort } from '@/modules/library/ingestion/types/metadata.types';
-import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { DuplicatePolicy } from '@/modules/library/ingestion/policies/metadata.policy';
-import { IngestionVerifierService } from '@/modules/library/ingestion/services/ingestion-verifier.service';
-import { calculateTitleSimilarity, tokenizeTitleWords } from '@/modules/library/ingestion/domain/deduplication.domain';
+import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
+import {
+  DuplicatePolicy,
+  calculateTitleSimilarity,
+  tokenizeTitleWords,
+} from '@/modules/library/ingestion/domain/deduplication.domain';
 import { IWorkflowStage, ResolveStageInput, ResolveMatchInput } from '@/modules/library/ingestion/types/ingestion.types';
 import {
   CATALOG_FACADE, ICatalogFacade, isPlaceholderItemTitle, ALIAS_EVIDENCE_FALLBACK_KEYS,
@@ -26,9 +28,9 @@ const VENUE_EXTRA_KEYS = [
   'issuingAuthority', 'court', 'code', 'websiteTitle',
 ] as const;
 
-export interface CandidateEnrichmentReadiness {
+interface CandidateEnrichmentReadiness {
   shouldSkip: boolean;
-  skipReason?: 'complete_or_client_resolved';
+  skipReason?: 'already_complete';
   isFilenameTitle: boolean;
   hasTitle: boolean;
   hasAuthors: boolean;
@@ -39,7 +41,7 @@ export interface CandidateEnrichmentReadiness {
   isCredibleTitle: boolean;
 }
 
-export function evaluateCandidateEnrichmentReadiness(
+function evaluateCandidateEnrichmentReadiness(
   candidate: MetadataCandidate,
   options?: { isBulkRecordBatch?: boolean },
 ): CandidateEnrichmentReadiness {
@@ -69,10 +71,6 @@ export function evaluateCandidateEnrichmentReadiness(
     ((candidate.sourceKind !== 'RECORD' && hasTitle && hasAuthors && hasVenueAndYear && (candidate.confidenceScore ?? 0) >= 0.9) ||
       isCompleteStructuredRecord ||
       isAlreadyResolvedByMirror);
-  const isClientResolved =
-    extra.resolutionSource === 'client' || candidate.sourceName === 'ClientResolved' ||
-    (candidate as unknown as { rawMetadata?: Record<string, unknown> })?.rawMetadata?.resolutionSource === 'client' ||
-    meta.resolutionSource === 'client';
   const hasExtractedTags = Boolean(
     (Array.isArray(meta.tags) && meta.tags.length > 0) || (Array.isArray(meta.keywords) && meta.keywords.length > 0),
   );
@@ -82,11 +80,11 @@ export function evaluateCandidateEnrichmentReadiness(
     !/\.(pdf|eps|png|jpe?g|svg)$/i.test(trimmedTitle!) && !/noname\s+manuscript/i.test(trimmedTitle!) &&
     !/\(will\s+be\s+inserted\s+by\s+the\s+editor\)/i.test(trimmedTitle!) && !/^\d{4}\s*\d{4,5}(v\d+)?$/i.test(trimmedTitle!);
   const base = { isFilenameTitle, hasTitle, hasAuthors, hasYearOrDate, hasVenueAndYear, hasAuthoritativeId, hasExtractedTags, isCredibleTitle };
-  if (isAlreadyComplete || isClientResolved) return { shouldSkip: true, skipReason: 'complete_or_client_resolved', ...base };
+  if (isAlreadyComplete) return { shouldSkip: true, skipReason: 'already_complete', ...base };
   return { shouldSkip: false, ...base };
 }
 
-export function selectCandidateEnrichmentQueries(candidate: MetadataCandidate, readiness: CandidateEnrichmentReadiness): string[] {
+function selectCandidateEnrichmentQueries(candidate: MetadataCandidate, readiness: CandidateEnrichmentReadiness): string[] {
   if (readiness.shouldSkip) return [];
   const meta = (candidate.normalizedMetadata || {}) as Record<string, unknown>;
   const doi = typeof meta.doi === 'string' ? meta.doi : undefined;
@@ -110,7 +108,7 @@ export class ResolveStage implements IWorkflowStage<ResolveStageInput, MetadataC
   constructor(
     @Optional() @Inject(METADATA_PORT) private readonly metadataService?: MetadataPort,
     @Optional() private readonly normalizer?: NormalizationPolicy,
-    @Optional() private readonly verifier?: IngestionVerifierService,
+    @Optional() @Inject(INGESTION_VERIFIER_PORT) private readonly verifier?: IIngestionVerifierPort,
     @Optional() private readonly duplicatePolicy: DuplicatePolicy = new DuplicatePolicy(),
     @Optional() @Inject(CATALOG_FACADE) private readonly catalogGateway?: ICatalogFacade,
   ) {}

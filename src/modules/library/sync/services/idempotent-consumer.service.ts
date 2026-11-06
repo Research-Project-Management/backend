@@ -1,15 +1,20 @@
-import { Injectable, Logger, Optional, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { RedisCacheService } from '@/core';
-import { IIdempotentConsumer, IdempotentConsumerOptions, IdempotentResult, DomainEventEnvelope, OutboxDispatchHandler } from '@/modules/library/core';
+import { IIdempotentConsumer, IdempotentConsumerOptions, IdempotentResult, DomainEventEnvelope, OutboxDispatchHandler, LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB, OUTBOX_REGISTRY_PORT } from '@/modules/library/core';
 import { OutboxRepository } from '../repositories/outbox.repository';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { OutboxEvent } from '@prisma/client';
 import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
-import { LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB } from '@/modules/library/sync/services/transaction.service';
-import type { OutboxWorker } from './outbox.worker';
+
+export interface IOutboxEventProcessor {
+  processEventById(
+    eventId: string,
+    options?: { rethrowOnRetryableFailure?: boolean },
+  ): Promise<boolean>;
+}
 
 export type { IdempotentConsumerOptions, IdempotentResult };
 
@@ -172,30 +177,35 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
     const key = this.buildKey(consumer, eventId);
     this.memoryStore.delete(key);
 
-    if (this.redis && this.redis.isReady()) {
-      try {
-        const client = this.redis.getClient();
-        if (client) {
-          await client.del(key);
+    await Promise.all([
+      (async () => {
+        if (this.redis && this.redis.isReady()) {
+          try {
+            const client = this.redis.getClient();
+            if (client) {
+              await client.del(key);
+            }
+          } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`Failed to reset Redis inbox key ${key}: ${errMsg}`);
+          }
         }
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Failed to reset Redis inbox key ${key}: ${errMsg}`);
-      }
-    }
-
-    if (this.outboxRepo) {
-      try {
-        await this.outboxRepo.deleteIdempotencyRecords(
-          `${consumer}:${eventId}`,
-        );
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        this.logger.debug(
-          `Failed to reset IdempotencyRecord for ${key}: ${errMsg}`,
-        );
-      }
-    }
+      })(),
+      (async () => {
+        if (this.outboxRepo) {
+          try {
+            await this.outboxRepo.deleteIdempotencyRecords(
+              `${consumer}:${eventId}`,
+            );
+          } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            this.logger.debug(
+              `Failed to reset IdempotencyRecord for ${key}: ${errMsg}`,
+            );
+          }
+        }
+      })(),
+    ]);
   }
 
   /**
@@ -614,7 +624,8 @@ export class OutboxQueueConsumer
 
   constructor(
     @Optional()
-    private readonly outboxWorker?: OutboxWorker,
+    @Inject(OUTBOX_REGISTRY_PORT)
+    private readonly outboxWorker?: IOutboxEventProcessor,
   ) {
     super();
   }

@@ -1,12 +1,79 @@
 import {
   CreatorCreditInput,
   CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
+  ItemCreator,
 } from '@/modules/library/core/types/bibliographic.types';
 import { SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
 import { libraryConfig } from '@/modules/library/core/config/library.config';
-import { IngestionStageName } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
 import { MetadataCandidate, ItemMetadata } from './metadata.types';
-import { CommitStageOptions } from '@/modules/library/ingestion/stages/commit.stage';
+
+export type IngestionStageName =
+  | 'IDENTIFY'
+  | 'NORMALIZE'
+  | 'ENRICH'
+  | 'RECONCILE'
+  | 'MATCH'
+  | 'COMMIT'
+  | 'ENRICH_EXISTING'
+  | 'RESOLVE';
+
+export type FeedFormat = 'rss2' | 'rss1-rdf' | 'atom';
+
+export interface ParsedFeedEntry {
+  id: string;
+  title: string;
+  url?: string;
+  pdfUrl?: string;
+  doi?: string;
+  arxivId?: string;
+  pmid?: string;
+  pmcid?: string;
+  primaryCategory?: string;
+  authors: string[];
+  creators: ItemCreator[];
+  abstract?: string;
+  publicationTitle?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  publicationDate?: string;
+  year?: number | null;
+  keywords: string[];
+  rights?: string;
+  itemType: 'journalArticle' | 'preprint' | 'webpage';
+  isRead?: boolean;
+  isSaved?: boolean;
+  savedItemId?: string | null;
+}
+
+export interface ParsedFeed {
+  format: FeedFormat;
+  feedTitle?: string;
+  feedUrl?: string;
+  siteUrl?: string;
+  description?: string;
+  updatedAt?: string;
+  entries: ParsedFeedEntry[];
+}
+
+export type LibraryItemSource =
+  | 'WEB_CAPTURE'
+  | 'PDF_UPLOAD'
+  | 'IDENTIFIER_IMPORT'
+  | 'BIBTEX_IMPORT'
+  | 'MANUAL'
+  | 'CONNECTOR'
+  | (string & {});
+
+export interface CommitStageOptions {
+  collectionIds?: string[];
+  tagIds?: string[];
+  userId?: string;
+  source?: LibraryItemSource;
+  fileId?: string;
+  filename?: string;
+  skipPreMatch?: boolean;
+}
 
 export const LIBRARY_INGESTION_QUEUE_STANDARD =
   libraryConfig().ingestion.standardQueue;
@@ -468,4 +535,116 @@ export interface RetractionStats {
   retractedCount: number;
   expressionsOfConcernCount: number;
   manualCount: number;
+}
+
+export interface IngestionSubmissionInput {
+  kind: SubmissionKind;
+  source?: string;
+  doi?: string;
+  arxivId?: string;
+  pmid?: string;
+  isbn?: string;
+  bibtex?: string;
+  ris?: string;
+  identifierType?: IdentifierType;
+  value?: string;
+  identifierValue?: string;
+  format?: RecordFormat;
+  recordFormat?: RecordFormat;
+  content?: string;
+  rawRecord?: string;
+  url?: string;
+  previewToken?: string;
+  fileId?: string;
+  filename?: string;
+  connectionId?: string;
+  externalObjectId?: string;
+  externalItemKey?: string;
+  externalVersion?: string;
+  payload?: unknown;
+  allowDuplicates?: boolean;
+  autoExtract?: boolean;
+  enableOcr?: boolean;
+  silent?: boolean;
+  idempotencyKey?: string;
+  collectionId?: string;
+  collectionIds?: string[];
+  tagIds?: string[];
+  overrides?: Record<string, unknown>;
+  contractVersion?: string;
+  projectId?: string;
+}
+
+export interface UnifiedIngestionInput {
+  source:
+    | 'doi'
+    | 'arxiv'
+    | 'pmid'
+    | 'isbn'
+    | 'url'
+    | 'bibtex'
+    | 'ris'
+    | 'csl_json'
+    | 'endnote_xml'
+    | 'mods'
+    | 'zotero_rdf'
+    | 'medline'
+    | 'csv'
+    | 'pdf'
+    | 'zotero';
+  doi?: string;
+  arxivId?: string;
+  pmid?: string;
+  isbn?: string;
+  url?: string;
+  previewToken?: string;
+  overrides?: Record<string, unknown>;
+  content?: string;
+  bibtex?: string;
+  ris?: string;
+  fileId?: string;
+  filename?: string;
+  connectionId?: string;
+  externalItemKey?: string;
+  payload?: unknown;
+  silent?: boolean;
+  collectionId?: string;
+  idempotencyKey?: string;
+  projectId?: string;
+}
+
+export const INGESTION_QUEUE_PORT = Symbol('INGESTION_QUEUE_PORT');
+
+export interface IIngestionQueuePort {
+  enqueue(
+    runId: string,
+    projectId: string,
+    envelope: IngestionSubmissionEnvelope,
+  ): Promise<boolean>;
+}
+
+export const RETRACTION_DATABASE_PORT = Symbol('RETRACTION_DATABASE_PORT');
+
+export interface IRetractionDatabasePort {
+  checkRetraction(
+    doi?: string | null,
+    pmid?: string | null,
+  ): Promise<RetractionDetails | false | null>;
+  saveRetraction(
+    doi: string,
+    details: RetractionDetails,
+    pmid?: string | null,
+    title?: string | null,
+  ): Promise<void>;
+  saveClean(doi: string, pmid?: string | null): Promise<void>;
+}
+
+export const RETRACTION_SERVICE_PORT = Symbol('RETRACTION_SERVICE_PORT');
+
+export interface IRetractionCheckPort {
+  checkItem(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<RetractionCheckResult>;
 }

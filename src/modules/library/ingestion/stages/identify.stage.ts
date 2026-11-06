@@ -16,6 +16,8 @@ import {
 import {
   MetadataCandidate,
   FieldEvidence,
+  URL_METADATA_SCRAPER_PORT,
+  IUrlMetadataScraperPort,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   BibtexParser,
@@ -26,7 +28,7 @@ import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
 import { XmlLegacyFormatsParser } from '@/modules/library/ingestion/parsers/xml-legacy-formats.parser';
 import { BibliographyFormatRegistry } from '@/modules/library/ingestion/parsers/bibliography-format.registry';
-import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   normalizeArxivId,
@@ -37,13 +39,12 @@ import {
   gunzipAsync,
 } from '@/modules/library/core';
 import { QueryClassifier } from '@/modules/library/ingestion/parsers/bibtex.parser';
-import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import {
   createCandidate,
   buildEvidenceFields,
   mapBibtexToRawRecord,
   applyUserOverridesToCandidate,
-} from '../domain/metadata.validator';
+} from '../domain/metadata-validation.policy';
 import { IdentifyFileResolver, cleanPdfTitle } from './identify-file.resolver';
 
 export {
@@ -55,7 +56,7 @@ export {
   buildEvidenceFields,
   mapBibtexToRawRecord,
   applyUserOverridesToCandidate,
-} from '../domain/metadata.validator';
+} from '../domain/metadata-validation.policy';
 
 @Injectable()
 export class IdentifyUrlResolver {
@@ -63,7 +64,9 @@ export class IdentifyUrlResolver {
 
   constructor(
     private readonly normalizer: NormalizationPolicy,
-    @Optional() private readonly urlScraper?: UrlMetadataScraperService,
+    @Optional()
+    @Inject(URL_METADATA_SCRAPER_PORT)
+    private readonly urlScraper?: IUrlMetadataScraperPort,
   ) {}
 
   async resolve(
@@ -186,7 +189,7 @@ type IdentifierCandidateApplier = (
   doiParser: DoiParser,
 ) => { fieldKey: 'doi' | 'arxivId' | 'pmid' | 'isbn'; cleanValue: string };
 
-export const IDENTIFIER_CANDIDATE_APPLIERS: Readonly<
+const IDENTIFIER_CANDIDATE_APPLIERS: Readonly<
   Record<IdentifierType, IdentifierCandidateApplier>
 > = {
   DOI: (rawValue, doiParser) => ({
@@ -229,7 +232,7 @@ type IdentifyPayloadStrategy<K extends SubmissionKind = SubmissionKind> = (
   context: IdentifyExecutionContext,
 ) => Promise<MetadataCandidate[]>;
 
-export const IDENTIFY_PAYLOAD_STRATEGIES: {
+const IDENTIFY_PAYLOAD_STRATEGIES: {
   readonly [K in SubmissionKind]: IdentifyPayloadStrategy<K>;
 } = {
   IDENTIFIER: async (stage, payload) => {

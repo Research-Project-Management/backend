@@ -255,6 +255,15 @@ export async function extractPdfOutlineSections(
           level: number,
           prefix: string,
         ) => {
+          const pageNums = await Promise.all(
+            items.map((item) => {
+              const rawTitle =
+                typeof item?.title === 'string'
+                  ? item.title.replace(/\s+/g, ' ').trim()
+                  : '';
+              return rawTitle ? resolvePageNum(item.dest) : Promise.resolve(1);
+            }),
+          );
           for (let i = 0; i < items.length; i++) {
             const item = items[i];
             const rawTitle =
@@ -264,7 +273,7 @@ export async function extractPdfOutlineSections(
             const num = prefix ? `${prefix}.${i + 1}` : `${i + 1}`;
             if (rawTitle) {
               sectionCounter++;
-              const pageNum = await resolvePageNum(item.dest);
+              const pageNum = pageNums[i] ?? 1;
               sections.push({
                 id: `sec-${sectionCounter}`,
                 num,

@@ -1,15 +1,15 @@
-import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
-import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
+import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
+import { SchemaValidatorService } from '@/modules/library/catalog/services/schema-validator.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 
 describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', () => {
   let typesService: TypesService;
-  let validator: ZoteroSchemaValidatorService;
+  let validator: SchemaValidatorService;
   let transformer: ItemTransformer;
 
   beforeEach(() => {
     typesService = new TypesService();
-    validator = new ZoteroSchemaValidatorService(typesService);
+    validator = new SchemaValidatorService(typesService);
     transformer = new ItemTransformer(typesService);
   });
 
@@ -141,7 +141,7 @@ describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', ()
         normalizeItemIdentifiers,
         syncMetadataIdentifierAliases,
       } = await import(
-        '@/modules/library/catalog/domain/identifier-change.helper'
+        '@/modules/library/catalog/domain/identifier-change.domain'
       );
       const { normalizeDoi } = await import('@/modules/library/core');
 
@@ -175,7 +175,7 @@ describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', ()
         buildMetadataPartial,
         normalizeItemIdentifiers,
       } = await import(
-        '@/modules/library/catalog/domain/command-payload.builder'
+        '@/modules/library/catalog/domain/item-command.mapper'
       );
 
       const updateData = {

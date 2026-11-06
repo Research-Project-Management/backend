@@ -1,4 +1,4 @@
-import { RegexExtractor } from '@/modules/library/core/domain/regex.extractor';
+import { RegexExtractor } from '@/modules/library/core/domain/regex.domain';
 
 describe('RegexExtractor - Page-1 Citation Disambiguation & DOI Scoring', () => {
   describe('scoreDoiCandidate', () => {

@@ -3,12 +3,15 @@ import { PrismaService } from '@/core';
 import { OutboxStatus, OutboxEvent, Prisma } from '@prisma/client';
 import { uuidv7, PublishOutboxInput as CorePublishOutboxInput } from '@/modules/library/core';
 import {
-  OutboxMetricsRecorder,
-  OutboxDiagnosticSummary,
+  type ChangeLogRepository,
+  type OutboxMetricsRecorder,
+  type OutboxDiagnosticSummary,
   evaluateOutboxFailureDecision,
   computeOutboxDiagnostics,
-} from '../services/transaction.service';
-import type { ChangeLogRepository } from './changelog.repository';
+} from './changelog.repository';
+
+export { evaluateOutboxFailureDecision, computeOutboxDiagnostics };
+export type { OutboxMetricsRecorder, OutboxDiagnosticSummary };
 
 export interface OutboxPublishInput extends CorePublishOutboxInput {
   dedupeKey?: string | null;
@@ -136,13 +139,12 @@ export class OutboxRepository {
             where: { id: { in: oldFailed.map((e) => e.id) } },
           })
         : Promise.resolve({ count: 0 }),
+      this.prisma?.idempotencyRecord?.deleteMany
+        ? this.prisma.idempotencyRecord.deleteMany({
+            where: { expiresAt: { lt: new Date() } },
+          })
+        : Promise.resolve(),
     ]);
-
-    if (this.prisma?.idempotencyRecord?.deleteMany) {
-      await this.prisma.idempotencyRecord.deleteMany({
-        where: { expiresAt: { lt: new Date() } },
-      });
-    }
 
     return {
       purgedPublished: publishedDeleteRes.count,
@@ -154,11 +156,6 @@ export class OutboxRepository {
     return this.prisma.outboxEvent.findUnique({
       where: { id },
     });
-  }
-
-  async findPending(batchSize: number = 50): Promise<OutboxEvent[]> {
-    const claimed = await this.claimBatch(batchSize);
-    return claimed.map((c) => c.event);
   }
 
   async claimSingleEvent(
@@ -683,16 +680,18 @@ export async function executeOutboxGarbageCollection(params: {
 
   try {
     const now = new Date();
-    const outboxRes = await repo.purgeProcessedOutboxEvents(3, 30, 1000);
+    const [outboxRes, , changeLogRes] = await Promise.all([
+      repo.purgeProcessedOutboxEvents(3, 30, 1000),
+      typeof repo.purgeExpiredIdempotencyRecords === 'function'
+        ? repo.purgeExpiredIdempotencyRecords(now)
+        : Promise.resolve(0),
+      changeLogRepo
+        ? changeLogRepo.compactAndPurgeChangeLog(30, 1000)
+        : Promise.resolve(undefined),
+    ]);
     purgedPublished = outboxRes.purgedPublished;
     purgedFailed = outboxRes.purgedFailed;
-
-    if (typeof repo.purgeExpiredIdempotencyRecords === 'function') {
-      await repo.purgeExpiredIdempotencyRecords(now);
-    }
-
-    if (changeLogRepo) {
-      const changeLogRes = await changeLogRepo.compactAndPurgeChangeLog(30, 1000);
+    if (changeLogRes) {
       purgedChanges = changeLogRes.purgedChanges;
       purgedTombstones = changeLogRes.purgedTombstones;
     }

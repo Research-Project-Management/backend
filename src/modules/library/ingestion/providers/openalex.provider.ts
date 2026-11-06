@@ -4,6 +4,7 @@ import {
   ProviderCapability,
   ProviderName,
   ProviderResult,
+  ProviderFetchError,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeDoi,
@@ -20,7 +21,6 @@ import {
   normalizePageRange,
   parseCreatorString,
 } from '@/modules/library/core';
-import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { BaseMetadataProvider } from './base-metadata.provider';
 

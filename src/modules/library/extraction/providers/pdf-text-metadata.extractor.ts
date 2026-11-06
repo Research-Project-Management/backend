@@ -6,9 +6,9 @@ import {
   splitAuthorString,
   cleanAuthorName,
   splitConcatenatedAuthors,
+  ExtractedPdfMetadata,
 } from '@/modules/library/core';
-import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
-import type { ExtractedPdfMetadata } from './pdf.provider';
+import { isBogusTitle } from '@/modules/library/extraction/domain/attachments.domain';
 import {
   extractPdfOutlineSections,
   extractPdfBibliographyReferences,
@@ -373,7 +373,7 @@ export class PdfTextMetadataExtractor {
         if (
           cleanTitle.length > 3 &&
           !cleanTitle.toLowerCase().endsWith('.pdf') &&
-          !PdfMetadataExtractor.isBogusTitle(cleanTitle)
+          !isBogusTitle(cleanTitle)
         ) {
           pdfLibMeta.title = cleanTitle;
         }

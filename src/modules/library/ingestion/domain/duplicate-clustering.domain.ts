@@ -147,7 +147,7 @@ export interface RawDuplicateCluster {
 /**
  * Guarded Disjoint-Set Union (Union-Find with Path Compression) for Equivalence Clustering.
  */
-export class DisjointSet<T> {
+class DisjointSet<T> {
   private readonly parent: Int32Array;
   private readonly members: number[][];
 
@@ -313,7 +313,7 @@ export function isLocalOrElectronicPageRange(raw: string): boolean {
   return false;
 }
 
-export function getCandidateItemAuthors(
+function getCandidateItemAuthors(
   item: DuplicateCandidateItem & { authors?: string[] },
 ): string[] {
   const fromContributors = extractContributorAuthors(item);

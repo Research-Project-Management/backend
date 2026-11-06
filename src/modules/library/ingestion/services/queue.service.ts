@@ -33,7 +33,7 @@ import {
   transitionRunToFailedIfActive,
 } from './ingestion-saga.orchestrator';
 
-export interface QueuedIngestionJob {
+interface QueuedIngestionJob {
   runId: string;
   projectId: string;
   scopeId?: string;
@@ -41,7 +41,7 @@ export interface QueuedIngestionJob {
   enqueuedAt?: number;
 }
 
-export interface IngestionQueueStats {
+interface IngestionQueueStats {
   activeCount: number;
   queuedCount: number;
   maxConcurrency: number;

@@ -1,8 +1,13 @@
-import { ItemMetadata, Provenance, MetadataCandidate, FieldEvidence } from '@/modules/library/ingestion/types/metadata.types';
+import {
+  ItemMetadata,
+  Provenance,
+  MetadataCandidate,
+  FieldEvidence,
+  ParsedBibtexEntry,
+} from '@/modules/library/ingestion/types/metadata.types';
 import { normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn, normalizeTags, ItemProvenancePolicy } from '@/modules/library/core';
 import { randomUUID } from 'crypto';
-import { ParsedBibtexEntry } from '@/modules/library/ingestion/parsers/bibtex.parser';
-import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
 
 export function validateMetadata(metadata: unknown): ItemMetadata | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
@@ -62,7 +67,7 @@ export const QUALITY_RULE_BIT = {
   abstract: 1 << 6,
 } as const;
 
-export interface IBibliographicQualityRule {
+interface IBibliographicQualityRule {
   readonly id: keyof typeof QUALITY_RULE_BIT;
   readonly bit: number;
   readonly fieldKey?: string;
@@ -71,7 +76,7 @@ export interface IBibliographicQualityRule {
   isSatisfied(item: Record<string, unknown>): boolean;
 }
 
-export const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
+const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
   [
     {
       id: 'title',
@@ -167,7 +172,7 @@ export const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
     },
   ];
 
-export interface MetadataQualityEvaluation {
+interface MetadataQualityEvaluation {
   score: number; // 0 - 100
   level: 'complete' | 'adequate' | 'minimal';
   missingKeyFields: string[];

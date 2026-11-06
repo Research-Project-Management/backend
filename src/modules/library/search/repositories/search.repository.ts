@@ -1,10 +1,15 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { PrismaService, RedisCacheService } from '@/core';
 import { Prisma } from '@prisma/client';
-import { SearchOptions, FacetResult } from '@/modules/library/search/controllers/search.controller';
-import { SearchSpecificationBuilder, TextSearchSpecification, sanitizeSearchQuery } from '@/modules/library/search/domain/item-specifications';
+import {
+  SearchOptions,
+  FacetResult,
+  SearchSpecificationBuilder,
+  TextSearchSpecification,
+  sanitizeSearchQuery,
+} from '@/modules/library/search/domain/item-search.policy';
 import { isProjectScopeId, LIBRARY_REDIS_KEYS, SingleFlightCoalescer, SearchQueryEngine } from '@/modules/library/core';
-import { isValidUuid, sanitizeUuidSearchOptions, resolveSearchCollectionOptions, buildSearchItemsCacheKey, buildSearchFacetCacheKey, aggregateFacetGroups, buildSearchFtsMatchingIdsSql, buildSearchFtsSqlQuery, buildSearchTrgmFallbackSqlQuery, escapeLikePattern } from './search-sql.helper';
+import { isValidUuid, sanitizeUuidSearchOptions, resolveSearchCollectionOptions, buildSearchItemsCacheKey, buildSearchFacetCacheKey, aggregateFacetGroups, buildSearchFtsMatchingIdsSql, buildSearchFtsSqlQuery, buildSearchTrgmFallbackSqlQuery, escapeLikePattern } from './search-sql.operations';
 
 export type { SearchOptions, FacetResult };
 

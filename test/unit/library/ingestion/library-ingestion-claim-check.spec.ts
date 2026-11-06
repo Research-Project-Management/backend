@@ -8,7 +8,7 @@ import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capt
 import { DoiParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
-import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
 import { fromPartial } from '@total-typescript/shoehorn';

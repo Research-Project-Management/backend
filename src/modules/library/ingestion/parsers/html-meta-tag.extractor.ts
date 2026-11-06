@@ -15,83 +15,13 @@ import {
   splitAuthorString,
 } from '@/modules/library/core';
 import { PublisherDomExtractor } from './publisher-dom.extractor';
+import {
+  ScrapedCreator,
+  ScrapedUrlResult,
+  MetaEntry,
+} from '@/modules/library/ingestion/types/metadata.types';
 
-export interface ScrapedCreator {
-  firstName?: string;
-  lastName: string;
-  fullName?: string;
-  creatorType?: string;
-  fieldMode?: number;
-}
-
-export interface ScrapedUrlResult {
-  url: string;
-  isPdf: boolean;
-  fileBuffer?: Buffer;
-  filename?: string;
-  fileId?: string;
-  title?: string;
-  shortTitle?: string;
-  authors?: string[];
-  creators?: ScrapedCreator[];
-  doi?: string;
-  arxivId?: string;
-  pmid?: string;
-  pmcid?: string;
-  isbn?: string;
-  issn?: string;
-  year?: number;
-  publicationDate?: string;
-  publicationTitle?: string;
-  journal?: string;
-  journalAbbr?: string;
-  publisher?: string;
-  abstract?: string;
-  keywords?: string[];
-  pdfUrl?: string;
-  /** Journal / periodical volume (citation_volume, prism.volume, …) */
-  volume?: string;
-  /** Journal issue / number (citation_issue, prism.number, …) */
-  issue?: string;
-  /** Page range "first-last" or single page */
-  pages?: string;
-  /** Language code/name as published (citation_language, dc.language, …) */
-  language?: string;
-  /** Place of publication (maps to Zotero `place`) */
-  publisherPlace?: string;
-  place?: string;
-  /** Conference / proceedings name (citation_conference_title) */
-  conferenceName?: string;
-  proceedingsTitle?: string;
-  /** Containing book title for chapters (citation_inbook_title) */
-  bookTitle?: string;
-  series?: string;
-  edition?: string;
-  rights?: string;
-  /** Degree-granting / report-issuing institution */
-  institution?: string;
-  university?: string;
-  thesisType?: string;
-  /** Report / technical report number */
-  reportNumber?: string;
-  /**
-   * Zotero item type hint derived from embedded metadata
-   * (journalArticle | conferencePaper | bookSection | book | thesis | report |
-   *  newspaperArticle | blogPost | dataset). Hint only — callers decide.
-   */
-  itemType?: string;
-  confidence: number;
-  isBlocked?: boolean;
-  wafKind?: string;
-  promptUploadPdf?: boolean;
-  ladderStepReached?: number;
-}
-
-export interface MetaEntry {
-  key: string;
-  value: string;
-  alias: boolean;
-}
+export type { ScrapedCreator, ScrapedUrlResult, MetaEntry };
 
 @Injectable()
 export class HtmlMetaTagExtractor {

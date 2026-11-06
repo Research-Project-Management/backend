@@ -7,7 +7,7 @@ import { AttachmentsService } from '@/modules/library/extraction/services/attach
 import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
 import { WebSnapshotService } from '@/modules/library/extraction/services/web-snapshot.service';
 import { AnnotationsService } from '@/modules/library/extraction/services/annotations.service';
-import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
+import { PdfMetadataExtractor } from '@/modules/library/extraction/providers/pdf-metadata.extractor';
 import { ExtractedPdfDocument, ExtractedPdfMetadata, PdfMetadataExtractionResult, AttachmentEntity, CreateAttachmentInput, AnnotationEntity, CreateAnnotationData, UpdateAnnotationData, BatchAnnotationsData, BatchAnnotationsResult, AnnotationType } from '@/modules/library/core/types/extraction.types';
 import { EXTRACTION_FACADE, IExtractionFacade, LIBRARY_EVENT_TYPES, DomainEventEnvelope, extractFileIdFromUrl } from '@/modules/library/core';
 import { OnEvent } from '@nestjs/event-emitter';
@@ -15,7 +15,7 @@ import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 
-export interface ExtractedReferenceCandidate {
+interface ExtractedReferenceCandidate {
   title?: string;
   doi?: string;
   arxivId?: string;
@@ -24,7 +24,7 @@ export interface ExtractedReferenceCandidate {
   rawText?: string;
 }
 
-export interface ReferenceMatchResult {
+interface ReferenceMatchResult {
   sourceItemId: string;
   targetItemId: string;
   matchType: 'DOI' | 'ARXIV' | 'TITLE_AUTHOR_YEAR' | 'TITLE';

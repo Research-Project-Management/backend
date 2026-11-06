@@ -8,8 +8,8 @@ import {
 } from '@/modules/library/core';
 import { SubmissionPayload } from '@/modules/library/ingestion/types/ingestion.types';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
-import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { createCandidate } from '../domain/metadata.validator';
+import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
+import { createCandidate } from '../domain/metadata-validation.policy';
 
 export { cleanPdfTitle };
 
@@ -158,25 +158,6 @@ export class IdentifyFileResolver {
       | undefined;
     if (inlineExtracted && typeof inlineExtracted === 'object') {
       extractedMetadata = { ...extractedMetadata, ...inlineExtracted };
-    }
-    const clientPreResolved = (rawPayloadAny.preResolvedMetadata ||
-      rawOverrides.preResolvedMetadata) as Record<string, unknown> | undefined;
-    const isClientResolved =
-      rawPayloadAny.resolutionSource === 'client' ||
-      rawOverrides.resolutionSource === 'client' ||
-      Boolean(clientPreResolved);
-
-    if (clientPreResolved && typeof clientPreResolved === 'object') {
-      extractedMetadata = {
-        ...extractedMetadata,
-        ...clientPreResolved,
-        isSelfSufficient: true,
-        qualityScore: 0.95,
-        extraFields: {
-          ...((clientPreResolved.extraFields as Record<string, unknown>) || {}),
-          resolutionSource: 'client',
-        },
-      };
     }
 
     const filenameWithoutPdf = payload.filename
@@ -345,7 +326,7 @@ export class IdentifyFileResolver {
     // Zero-guesswork abstract policy (Zotero-style):
     // Abstracts must come from authoritative registries, structured authoring XMP metadata,
     // or credible local extraction (matching ExtractionMetadataSynchronizer's high-confidence policy).
-    const isUnindexed = !hasAuthoritativeId && !isClientResolved;
+    const isUnindexed = !hasAuthoritativeId;
     const rawAbstract =
       typeof extractedMetadata.abstract === 'string'
         ? extractedMetadata.abstract.trim()
@@ -419,23 +400,19 @@ export class IdentifyFileResolver {
     };
 
     const isSelfSufficient = extractedMetadata.isSelfSufficient === true;
-    const candidateSourceName = isClientResolved
-      ? 'ClientResolved'
-      : isSelfSufficient
-        ? 'TrustedPaper'
-        : 'StagedPdf';
+    const candidateSourceName = isSelfSufficient
+      ? 'TrustedPaper'
+      : 'StagedPdf';
 
-    const candidateConfidence = isClientResolved
-      ? 0.95
-      : isSelfSufficient
-        ? extractedMetadata.qualityScore || 0.85
-        : extractedMetadata.doi || filenameDoi
-          ? 0.9
-          : extractedMetadata.arxivId || filenameArxivId
-            ? 0.88
-            : extractedMetadata.isbn
-              ? 0.85
-              : inferredConfidence;
+    const candidateConfidence = isSelfSufficient
+      ? extractedMetadata.qualityScore || 0.85
+      : extractedMetadata.doi || filenameDoi
+        ? 0.9
+        : extractedMetadata.arxivId || filenameArxivId
+          ? 0.88
+          : extractedMetadata.isbn
+            ? 0.85
+            : inferredConfidence;
 
     const fieldOverrides = isFilenameTitle
       ? {

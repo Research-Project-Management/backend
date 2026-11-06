@@ -8,28 +8,12 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
-import {
-  TransactionHelpers,
-  LIBRARY_EVENT_TYPES,
-  LIBRARY_REDIS_KEYS,
-  CATALOG_FACADE,
-  ICatalogFacade,
-  ITEM_CACHE_INVALIDATOR,
-  IItemCacheInvalidator,
-  EXTRACTION_FACADE,
-  IExtractionFacade,
-  normalizeDoi,
-  normalizeProjectScopeId,
-  deriveFirstAuthor,
-  UNIT_OF_WORK,
-  IUnitOfWork,
-  ItemsMapper,
-} from '@/modules/library/core';
+import { TransactionHelpers, LIBRARY_EVENT_TYPES, CATALOG_FACADE, ICatalogFacade, ITEM_CACHE_INVALIDATOR, IItemCacheInvalidator, EXTRACTION_FACADE, IExtractionFacade, normalizeProjectScopeId, deriveFirstAuthor, UNIT_OF_WORK, IUnitOfWork, ItemsMapper } from '@/modules/library/core';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/ingestion.dto';
 import { PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/ingestion.types';
 import { UserId, ProjectId } from '@/modules/library/core';
-import { asMetaObject } from './duplicate-detector.service';
+import { asMetaObject } from '@/modules/library/ingestion/domain/duplicate-clustering.domain';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 import {
@@ -52,7 +36,7 @@ import {
   softDeleteDuplicatesAndRecordOutboxInTx,
   updateAndReloadMergedPrimaryInTx,
 } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
-import { RetractionBloomFilter } from '@/modules/library/ingestion/domain/metadata.validator';
+import { RetractionBloomFilter } from '@/modules/library/ingestion/domain/metadata-validation.policy';
 
 export type { ContributorShape };
 export {
@@ -242,16 +226,10 @@ export class DuplicateMergerService {
           initialAttachments,
         });
 
-        const preMergeItemRelations = await rewireMergedItemRelations(
-          tx,
-          primary.id,
-          uniqueDupIds,
-        );
-        const preMergePubs = await consolidateUserPublications(
-          tx,
-          primary.id,
-          uniqueDupIds,
-        );
+        const [preMergeItemRelations, preMergePubs] = await Promise.all([
+          rewireMergedItemRelations(tx, primary.id, uniqueDupIds),
+          consolidateUserPublications(tx, primary.id, uniqueDupIds),
+        ]);
 
         const primaryMeta = { ...asMetaObject(primary.metadata) };
         delete primaryMeta.extraFields;
@@ -579,10 +557,14 @@ export class DuplicateMergerService {
         });
       }
     }
+    const mergedGroupCount = results.length;
+    const totalMergedItems = results.reduce((sum, r) => sum + r.mergedCount, 0);
     return {
       success: failedGroups.length === 0,
-      mergedGroupCount: results.length,
-      totalMergedItems: results.reduce((sum, r) => sum + r.mergedCount, 0),
+      mergedGroupCount,
+      mergedGroups: mergedGroupCount,
+      totalMergedItems,
+      mergedItems: totalMergedItems,
       results,
       failedGroups,
     };

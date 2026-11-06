@@ -11,8 +11,8 @@ import {
   PdfMetadataExtractionResult,
 } from '@/modules/library/core';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
-import { PdfMetadataExtractor } from '@/modules/library/extraction/services/pdf-metadata.extractor';
-import { LayoutExtractor } from '@/modules/library/extraction/extractors/layout.extractor';
+import { PdfMetadataExtractor } from '@/modules/library/extraction/providers/pdf-metadata.extractor';
+import { LayoutExtractor } from '@/modules/library/extraction/providers/layout.extractor';
 import {
   PdfTextMetadataExtractor,
   extractPdfOutlineSections,
@@ -496,8 +496,10 @@ export class PdfProvider {
         await Promise.resolve(disposable.cleanup?.()).catch(() => {});
         await Promise.resolve(disposable.destroy?.()).catch(() => {});
       };
-      await disposeProxy(fallbackDocumentProxy);
-      await disposeProxy(sharedDocumentProxy);
+      await Promise.all([
+        disposeProxy(fallbackDocumentProxy),
+        disposeProxy(sharedDocumentProxy),
+      ]);
     }
   }
 

@@ -4,7 +4,6 @@ import { BullModule } from '@nestjs/bullmq';
 import { CoreModule as AppCoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
 
-import { LIBRARY_OUTBOX_QUEUE } from './services/transaction.service';
 import { TransactionService } from './services/transaction.service';
 import { ChangeLogRepository } from './repositories/changelog.repository';
 import { OutboxRepository } from './repositories/outbox.repository';
@@ -19,6 +18,7 @@ import {
   LIBRARY_EVENT_TYPES,
   UNIT_OF_WORK,
   IDEMPOTENT_CONSUMER,
+  LIBRARY_OUTBOX_QUEUE,
 } from '@/modules/library/core';
 import { SyncController } from './controllers/sync.controller';
 import { IdempotentConsumerService } from './services/idempotent-consumer.service';

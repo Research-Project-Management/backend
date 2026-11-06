@@ -131,11 +131,33 @@ export class AttachmentsRepository {
     const client = this.getClient(tx);
     const existing = await client.attachment?.findUnique?.({
       where: { id },
-      select: { id: true, itemId: true, deletedAt: true },
+      select: { id: true, itemId: true, attachmentType: true, deletedAt: true },
     });
     const deleted = await client.attachment.delete({ where: { id } });
     const itemId = deleted?.itemId || existing?.itemId;
     if (itemId && (!existing || !existing.deletedAt)) {
+      if (
+        (existing?.attachmentType === 'primary_pdf' ||
+          (deleted as { attachmentType?: string } | undefined)?.attachmentType === 'primary_pdf') &&
+        client.attachment?.findFirst &&
+        client.attachment?.update
+      ) {
+        const nextPrimaryCandidate = await client.attachment.findFirst({
+          where: {
+            itemId,
+            deletedAt: null,
+            mimeType: 'application/pdf',
+          },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, attachmentType: true },
+        });
+        if (nextPrimaryCandidate && nextPrimaryCandidate.attachmentType !== 'primary_pdf') {
+          await client.attachment.update({
+            where: { id: nextPrimaryCandidate.id },
+            data: { attachmentType: 'primary_pdf' },
+          });
+        }
+      }
       await this.syncItemAttachmentCounts(itemId, tx);
     }
     return deleted;
@@ -251,24 +273,23 @@ export class AttachmentsRepository {
         (urlKey ? survivingByUrl.get(urlKey) : undefined);
 
       if (existingSurvivor && existingSurvivor.id !== att.id) {
-        // Consolidate annotations from duplicate attachment onto existingSurvivor
-        const [survivorAnnots, dupAnnots] = await Promise.all([
-          client.annotation?.findMany?.({
-            where: { attachmentId: existingSurvivor.id, deletedAt: null },
-          }) ?? [],
-          client.annotation?.findMany?.({
-            where: { attachmentId: att.id, deletedAt: null },
-          }) ?? [],
+        // Consolidate annotations, structure, FTS, and reading states from duplicate attachment onto existingSurvivor
+        const [survivorAnnots, dupAnnots, survivorFtsCount, survivorStruct, dupReadingStates] = await Promise.all([
+          client.annotation?.findMany?.({ where: { attachmentId: existingSurvivor.id, deletedAt: null } }) ?? Promise.resolve([]),
+          client.annotation?.findMany?.({ where: { attachmentId: att.id, deletedAt: null } }) ?? Promise.resolve([]),
+          typeof client.fullTextIndex?.updateMany === 'function' && typeof client.fullTextIndex?.count === 'function'
+            ? client.fullTextIndex.count({ where: { attachmentId: existingSurvivor.id } }).catch(() => 0) : Promise.resolve(0),
+          typeof client.attachmentStructure?.updateMany === 'function' && typeof client.attachmentStructure?.findUnique === 'function'
+            ? client.attachmentStructure.findUnique({ where: { attachmentId: existingSurvivor.id } }).catch(() => null) : Promise.resolve(null),
+          typeof client.attachmentReadingState?.findMany === 'function'
+            ? client.attachmentReadingState.findMany({ where: { attachmentId: att.id } }).catch(() => []) : Promise.resolve([]),
         ]);
 
         const duplicateAnnotIdsToDelete: string[] = [];
         const annotIdsToMove: string[] = [];
-        const extractQuote = (a: {
-          quoteText?: string | null;
-          textSelection?: string | null;
-        }) => (a.quoteText ?? a.textSelection ?? '').trim().toLowerCase();
-        const extractComment = (a: { comment?: string | null }) =>
-          (a.comment ?? '').trim();
+        const extractQuote = (a: { quoteText?: string | null; textSelection?: string | null }) =>
+          (a.quoteText ?? a.textSelection ?? '').trim().toLowerCase();
+        const extractComment = (a: { comment?: string | null }) => (a.comment ?? '').trim();
 
         for (const dupAnn of dupAnnots) {
           const dupQuote = extractQuote(dupAnn);
@@ -276,127 +297,80 @@ export class AttachmentsRepository {
           const isIdentical = survivorAnnots.some((sa) => {
             const saQuote = extractQuote(sa);
             const saComment = extractComment(sa);
-            const commentsCompatible =
-              dupComment.length === 0 || dupComment === saComment;
             return (
               sa.pageIndex === dupAnn.pageIndex &&
               sa.type === dupAnn.type &&
               dupQuote.length > 0 &&
               saQuote === dupQuote &&
-              commentsCompatible
+              (dupComment.length === 0 || dupComment === saComment)
             );
           });
-
-          if (isIdentical) {
-            duplicateAnnotIdsToDelete.push(dupAnn.id);
-          } else {
+          if (isIdentical) duplicateAnnotIdsToDelete.push(dupAnn.id);
+          else {
             annotIdsToMove.push(dupAnn.id);
             survivorAnnots.push(dupAnn);
           }
         }
 
+        const consolidationWrites: Promise<unknown>[] = [];
         if (duplicateAnnotIdsToDelete.length > 0) {
-          await client.annotation.updateMany({
+          consolidationWrites.push(client.annotation.updateMany({
             where: { id: { in: duplicateAnnotIdsToDelete } },
             data: { deletedAt: new Date(), version: { increment: 1 } },
-          });
+          }));
         }
         if (annotIdsToMove.length > 0) {
-          await client.annotation.updateMany({
+          consolidationWrites.push(client.annotation.updateMany({
             where: { id: { in: annotIdsToMove } },
-            data: {
-              attachmentId: existingSurvivor.id,
-              itemId: targetItemId,
-              version: { increment: 1 },
-            },
-          });
+            data: { attachmentId: existingSurvivor.id, itemId: targetItemId, version: { increment: 1 } },
+          }));
         }
-        if (client.fullTextIndex?.updateMany) {
-          try {
-            const survivorFtsCount = client.fullTextIndex.count
-              ? await client.fullTextIndex.count({
-                  where: { attachmentId: existingSurvivor.id },
-                })
-              : 0;
-            if (survivorFtsCount === 0) {
-              await client.fullTextIndex.updateMany({
-                where: { attachmentId: att.id },
-                data: {
-                  attachmentId: existingSurvivor.id,
-                  itemId: targetItemId,
-                },
-              });
-            }
-          } catch {
-            // Ignore unique constraint collisions if survivor already has pages
-          }
+        if (client.fullTextIndex?.updateMany && survivorFtsCount === 0) {
+          consolidationWrites.push(
+            Promise.resolve(client.fullTextIndex.updateMany({
+              where: { attachmentId: att.id },
+              data: { attachmentId: existingSurvivor.id, itemId: targetItemId },
+            })).catch(() => undefined),
+          );
         }
-        if (client.attachmentStructure?.updateMany) {
-          try {
-            const survivorStruct = client.attachmentStructure.findUnique
-              ? await client.attachmentStructure.findUnique({
-                  where: { attachmentId: existingSurvivor.id },
-                })
-              : null;
-            if (!survivorStruct) {
-              await client.attachmentStructure.updateMany({
-                where: { attachmentId: att.id },
-                data: {
-                  attachmentId: existingSurvivor.id,
-                  itemId: targetItemId,
-                },
-              });
-            }
-          } catch {
-            // Ignore unique constraint collisions if survivor already has structure
-          }
+        if (client.attachmentStructure?.updateMany && !survivorStruct) {
+          consolidationWrites.push(
+            Promise.resolve(client.attachmentStructure.updateMany({
+              where: { attachmentId: att.id },
+              data: { attachmentId: existingSurvivor.id, itemId: targetItemId },
+            })).catch(() => undefined),
+          );
         }
-        if (client.attachmentReadingState?.findMany) {
+        if (consolidationWrites.length > 0) await Promise.all(consolidationWrites);
+
+        if (typeof client.attachmentReadingState?.findMany === 'function' && Array.isArray(dupReadingStates) && dupReadingStates.length > 0) {
           try {
-            const dupReadingStates =
-              (await client.attachmentReadingState.findMany({
-                where: { attachmentId: att.id },
-              })) ?? [];
-            for (const rs of dupReadingStates) {
-              const existingSurvivorRs =
-                client.attachmentReadingState.findUnique
-                  ? await client.attachmentReadingState.findUnique({
-                      where: {
-                        userId_attachmentId: {
-                          userId: rs.userId,
-                          attachmentId: existingSurvivor.id,
-                        },
-                      },
+            const existingChecks = await Promise.all(
+              dupReadingStates.map((rs) =>
+                typeof client.attachmentReadingState.findUnique === 'function'
+                  ? client.attachmentReadingState.findUnique({
+                      where: { userId_attachmentId: { userId: rs.userId, attachmentId: existingSurvivor.id } },
                     })
-                  : null;
-              if (!existingSurvivorRs) {
-                if (client.attachmentReadingState.update) {
+                  : Promise.resolve(null),
+              ),
+            );
+            await Promise.all(
+              dupReadingStates.map(async (rs, idx) => {
+                if (existingChecks[idx]) return;
+                const data = { attachmentId: existingSurvivor.id, itemId: targetItemId };
+                if (typeof client.attachmentReadingState.update === 'function') {
                   await client.attachmentReadingState.update({
-                    where: {
-                      userId_attachmentId: {
-                        userId: rs.userId,
-                        attachmentId: rs.attachmentId,
-                      },
-                    },
-                    data: {
-                      attachmentId: existingSurvivor.id,
-                      itemId: targetItemId,
-                    },
+                    where: { userId_attachmentId: { userId: rs.userId, attachmentId: rs.attachmentId } },
+                    data,
                   });
-                } else if (client.attachmentReadingState.updateMany) {
+                } else if (typeof client.attachmentReadingState.updateMany === 'function') {
                   await client.attachmentReadingState.updateMany({
-                    where: {
-                      userId: rs.userId,
-                      attachmentId: rs.attachmentId,
-                    },
-                    data: {
-                      attachmentId: existingSurvivor.id,
-                      itemId: targetItemId,
-                    },
+                    where: { userId: rs.userId, attachmentId: rs.attachmentId },
+                    data,
                   });
                 }
-              }
-            }
+              }),
+            );
           } catch {
             // Ignore unique constraint collisions
           }
@@ -671,9 +645,16 @@ export class AttachmentsRepository {
   ): Promise<void> {
     if (!updates || updates.length === 0) return;
     const run = async (client: Prisma.TransactionClient) => {
-      for (const item of updates) {
-        await this.applyAttachmentFilenameAndFileRename(item.id, item.filename, item.fileId, client);
-      }
+      await Promise.all(
+        updates.map((item) =>
+          this.applyAttachmentFilenameAndFileRename(
+            item.id,
+            item.filename,
+            item.fileId,
+            client,
+          ),
+        ),
+      );
     };
     if (tx) await run(tx);
     else await this.prisma.$transaction(run);

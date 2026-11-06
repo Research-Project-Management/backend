@@ -19,7 +19,6 @@ import { ExtractionFacade, EXTRACTION_FACADE } from './services/reference-matche
 import { AttachmentsService } from './services/attachments.service';
 import { AttachmentRenamerService } from './services/attachment-renamer.service';
 import { WebSnapshotService } from './services/web-snapshot.service';
-import { PdfMetadataExtractor } from './services/pdf-metadata.extractor';
 import { AnnotationsService } from './services/annotations.service';
 import { PdfAnnotationImporterService } from './services/pdf-annotation-importer.service';
 import { ReferenceMatcherService } from './services/reference-matcher.service';
@@ -32,13 +31,14 @@ import { AnnotationsRepository } from './repositories/annotations.repository';
 
 // Providers & Infrastructure
 import { PdfProvider } from './providers/pdf.provider';
+import { PdfMetadataExtractor } from './providers/pdf-metadata.extractor';
 import { PdfTextMetadataExtractor } from './providers/pdf-text-metadata.extractor';
 import {
   ExtractionHandler,
   EXTRACTION_EVENT_TYPES,
 } from './services/extraction.handler';
 import { ItemLifecycleSubscriber } from './services/reference-matcher.service';
-import { AnnotationNormalizer } from './domain/annotation.normalizer';
+import { AnnotationNormalizer } from './domain/annotations.domain';
 
 @Global()
 @Module({

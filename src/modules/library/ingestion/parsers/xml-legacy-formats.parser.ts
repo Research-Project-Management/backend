@@ -5,9 +5,9 @@ import {
   normalizeDoi, normalizePmid, normalizeIsbn, normalizeIssn, parseCreatorString,
 } from '@/modules/library/core';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
-import { parseMedlineNbibRecords, parseCsvBibliographyRecords } from './bibliography-format.registry';
+import { parseMedlineNbibRecords, parseCsvBibliographyRecords } from './csl.parser';
 
-export type LegacyRecordFormat = 'ENDNOTE_XML' | 'MODS' | 'ZOTERO_RDF' | 'MEDLINE' | 'CSV';
+type LegacyRecordFormat = 'ENDNOTE_XML' | 'MODS' | 'ZOTERO_RDF' | 'MEDLINE' | 'CSV';
 
 function decodeXmlEntities(raw: string): string {
   if (!raw) return '';
@@ -18,7 +18,7 @@ function decodeXmlEntities(raw: string): string {
   return decodeHtmlEntities(stripped).replace(/\s+/g, ' ').trim();
 }
 
-export function extractFirstXmlBlock(xml: string, tagPattern: string): string | undefined {
+function extractFirstXmlBlock(xml: string, tagPattern: string): string | undefined {
   const re = new RegExp(
     `<(?:[a-zA-Z0-9_-]+:)?(?:${tagPattern})(?:\\s+[^>]*)?>([\\s\\S]*?)<\\/(?:[a-zA-Z0-9_-]+:)?(?:${tagPattern})>`,
     'i',
@@ -26,7 +26,7 @@ export function extractFirstXmlBlock(xml: string, tagPattern: string): string | 
   return xml.match(re)?.[1];
 }
 
-export function extractBalancedXmlTag(
+function extractBalancedXmlTag(
   xml: string,
   tagName: string,
   attrPredicate?: (openTagAttrs: string) => boolean,
@@ -243,6 +243,10 @@ export class XmlLegacyFormatsParser {
         publicationDate: dateStr,
         publicationTitle: pubTitle,
         journal: itemType === 'journalArticle' ? pubTitle : undefined,
+        bookTitle: itemType === 'bookSection' ? pubTitle : undefined,
+        proceedingsTitle: itemType === 'conferencePaper' ? pubTitle : undefined,
+        university: itemType === 'thesis' ? publisher : undefined,
+        institution: itemType === 'report' ? publisher : undefined,
         journalAbbr,
         shortTitle,
         volume,

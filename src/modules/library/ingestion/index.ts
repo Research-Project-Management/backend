@@ -1,18 +1,7 @@
 export * from './ingestion.module';
+
+// Controllers & Facade
 export * from './controllers/ingestion.controller';
-
-// Controllers
-export * from './controllers/curation.controller';
-
-// Domain
-export * from './domain/ingestion-run.aggregate';
-export * from './domain/deduplication.domain';
-export * from './domain/metadata.validator';
-export * from './domain/enrichment-patch.builder';
-export * from './domain/duplicate-merge.domain';
-
-// DTOs
-export * from './dto/ingestion.dto';
 
 // Services
 export * from './services/ingestion.service';
@@ -33,6 +22,7 @@ export * from './services/duplicate-detector.service';
 export * from './services/duplicate-merger.service';
 export * from './services/retraction.service';
 export * from './services/retraction-database.service';
+export * from './services/retraction-seeder.service';
 export * from './services/feeds.service';
 
 // Repositories
@@ -40,17 +30,17 @@ export * from './repositories/ingestion.repository';
 export * from './repositories/duplicate-merge.repository';
 export * from './repositories/retraction.repository';
 export * from './repositories/feeds.repository';
-export * from './services/retraction-seeder.service';
 
-// Parsers
-export * from './parsers/bibtex.parser';
-export * from './parsers/ris.parser';
-export * from './parsers/csl.parser';
-export * from './parsers/bibliography-format.registry';
+// Domain
+export * from './domain/ingestion-run.domain';
+export * from './domain/deduplication.domain';
+export * from './domain/metadata-validation.policy';
+export * from './domain/enrichment-patch.mapper';
+export * from './domain/duplicate-merge.domain';
 
 // Policies
-export * from './policies/normalization.policy';
-export * from './policies/metadata.policy';
+export * from './domain/normalization.policy';
+export * from './domain/metadata.policy';
 export {
   MetadataCoalescePolicy,
   PREPRINT_SERVER_VENUE_REGEX,
@@ -68,6 +58,12 @@ export {
   extractNormalizedAuthorSurnames,
 } from '@/modules/library/core';
 
+// Parsers
+export * from './parsers/bibtex.parser';
+export * from './parsers/ris.parser';
+export * from './parsers/csl.parser';
+export * from './parsers/bibliography-format.registry';
+
 // Stages
 export * from './stages/identify-file.resolver';
 export * from './stages/identify.stage';
@@ -83,8 +79,8 @@ export * from './providers/semantic-scholar.provider';
 export * from './providers/url-capture.provider';
 export * from './providers/base-metadata.provider';
 
-// Subscribers
-
-// Types
+// DTOs & Types
+export * from './dto/ingestion.dto';
 export * from './types/metadata.types';
 export * from './types/ingestion.types';
+

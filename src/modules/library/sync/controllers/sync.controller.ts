@@ -160,8 +160,16 @@ export class SyncController {
     const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId, userId } : { userId };
     const sinceSeq = parseSafeBigInt(query.since) ?? 0n;
-    const minRetainedSeq =
-      await this.transactionService.getMinRetainedSequence?.(scope);
+    const limit = query.limit ?? 100;
+
+    const [minRetainedSeq, changes] = await Promise.all([
+      sinceSeq > 0n
+        ? (this.transactionService.getMinRetainedSequence?.(scope) ??
+          Promise.resolve(undefined))
+        : Promise.resolve(undefined),
+      this.transactionService.getChangesSince(scope, sinceSeq, limit + 1),
+    ]);
+
     if (minRetainedSeq && sinceSeq > 0n && sinceSeq < minRetainedSeq - 1n) {
       throw new HttpException(
         {
@@ -175,13 +183,6 @@ export class SyncController {
         HttpStatus.GONE,
       );
     }
-    const limit = query.limit ?? 100;
-
-    const changes = await this.transactionService.getChangesSince(
-      scope,
-      sinceSeq,
-      limit + 1,
-    );
 
     const hasMore = changes.length > limit;
     const rawPaged = hasMore ? changes.slice(0, limit) : changes;
@@ -243,8 +244,16 @@ export class SyncController {
     const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId } : { userId };
     const sinceSeq = parseSafeBigInt(query.since);
-    const minRetainedTombSeq =
-      await this.transactionService.getMinRetainedSequence?.(scope);
+    const limit = query.limit ?? 100;
+
+    const [minRetainedTombSeq, tombstones] = await Promise.all([
+      sinceSeq !== undefined && sinceSeq > 0n
+        ? (this.transactionService.getMinRetainedSequence?.(scope) ??
+          Promise.resolve(undefined))
+        : Promise.resolve(undefined),
+      this.transactionService.getTombstonesSince(scope, sinceSeq, limit + 1),
+    ]);
+
     if (
       minRetainedTombSeq &&
       sinceSeq !== undefined &&
@@ -263,13 +272,6 @@ export class SyncController {
         HttpStatus.GONE,
       );
     }
-    const limit = query.limit ?? 100;
-
-    const tombstones = await this.transactionService.getTombstonesSince(
-      scope,
-      sinceSeq,
-      limit + 1,
-    );
 
     const hasMore = tombstones.length > limit;
     const pagedTombstones = hasMore ? tombstones.slice(0, limit) : tombstones;

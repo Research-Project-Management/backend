@@ -1,19 +1,19 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { normalizeDoi, normalizePmid, ExternalProviderException, EntityNotFoundException, LIBRARY_EVENT_TYPES, ReconcileExtractedCandidatePayload } from '@/modules/library/core';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
 import { OnEvent } from '@nestjs/event-emitter';
-import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
+import { RETRACTION_SERVICE_PORT, IRetractionCheckPort } from '@/modules/library/ingestion/types/ingestion.types';
 import { MetadataResolverService } from '@/modules/library/ingestion/services/metadata-resolver.service';
 import { createHash } from 'crypto';
 import { RedisCacheService } from '@/core';
 import { QueryType, ResolvedMetadata } from '@/modules/library/ingestion/types/metadata.types';
-import { METADATA_POLICY_VERSION } from '@/modules/library/ingestion/policies/metadata.policy';
+import { METADATA_POLICY_VERSION } from '@/modules/library/ingestion/domain/metadata.policy';
 
-export interface RetractionSeedResult {
+interface RetractionSeedResult {
   totalRows: number;
   validRecords: number;
   inserted: number;
@@ -283,7 +283,7 @@ export class RetractionSeederService {
   }
 }
 
-export interface SeedRetractionsCommandOptions {
+interface SeedRetractionsCommandOptions {
   filePath?: string;
   url?: string;
   chunkSize?: number;
@@ -333,7 +333,9 @@ export class RetractionItemEventsSubscriber {
   private readonly logger = new Logger(RetractionItemEventsSubscriber.name);
 
   constructor(
-    @Optional() private readonly retraction?: RetractionService,
+    @Optional()
+    @Inject(RETRACTION_SERVICE_PORT)
+    private readonly retraction?: IRetractionCheckPort,
     @Optional() private readonly metadataResolver?: MetadataResolverService,
   ) {}
 

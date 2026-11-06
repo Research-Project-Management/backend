@@ -1,5 +1,5 @@
-import { TypesService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
-import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
+import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
+import { SchemaValidatorService } from '@/modules/library/catalog/services/schema-validator.service';
 import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
 import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
@@ -19,14 +19,14 @@ import { buildMockLibraryItem } from '@test/factories';
 describe('Real-World User Journey: End-to-End Researcher Lifecycle Simulation', () => {
   const userId = '01920b92-1111-7111-8111-111111111111';
   let typesService: TypesService;
-  let schemaValidator: ZoteroSchemaValidatorService;
+  let schemaValidator: SchemaValidatorService;
   let transformer: ItemTransformer;
   let treeEngine: TreeEngine;
   let cslEngine: CslEngineService;
 
   beforeAll(() => {
     typesService = new TypesService();
-    schemaValidator = new ZoteroSchemaValidatorService(typesService);
+    schemaValidator = new SchemaValidatorService(typesService);
     transformer = new ItemTransformer(typesService);
     treeEngine = new TreeEngine();
     cslEngine = new CslEngineService();

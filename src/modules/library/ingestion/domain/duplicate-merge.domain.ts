@@ -1,7 +1,7 @@
 import { Prisma, IngestionStatus } from '@prisma/client';
 import { BadRequestException } from '@nestjs/common';
 import { isUUID } from 'class-validator';
-import { asMetaObject, getEffectiveItemField } from './duplicate-clustering.helper';
+import { asMetaObject, getEffectiveItemField } from './duplicate-clustering.domain';
 import {
   normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn,
   PRISMA_ITEM_SCALAR_COLUMNS, ItemProvenancePolicy, FieldProvenanceRecord, isPlaceholderItemTitle,
@@ -81,7 +81,7 @@ const INVERSE_RELATION_TYPE_MAP: Readonly<Record<string, string>> = {
   related_to: 'related_to', related: 'related',
 };
 
-export function registerRelationPairWithReciprocal(pairSet: Set<string>, sourceId: string, targetId: string, relationType: string): void {
+function registerRelationPairWithReciprocal(pairSet: Set<string>, sourceId: string, targetId: string, relationType: string): void {
   pairSet.add(`${sourceId}::${targetId}::${relationType}`);
   const inverseType = INVERSE_RELATION_TYPE_MAP[relationType];
   if (inverseType) pairSet.add(`${targetId}::${sourceId}::${inverseType}`);
@@ -145,7 +145,7 @@ export const RETRACTION_SURVIVAL_KEYS = [
   'retractionNoticeDoi', 'retractionSource',
 ] as const;
 
-export interface MappedContributorRecord extends Record<string, unknown> {
+interface MappedContributorRecord extends Record<string, unknown> {
   itemId: string; creatorType: string; fieldMode: number;
   firstName: string; lastName: string; fullName: string; shortName: string; orderIndex: number;
 }

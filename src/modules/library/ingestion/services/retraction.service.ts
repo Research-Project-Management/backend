@@ -10,13 +10,13 @@ import { RetractionCheckResult, RetractionStats, RetractionDetails, RetractionNa
 import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { RetractionSeederService } from '@/modules/library/ingestion/services/retraction-seeder.service';
 
-export interface RetractionSyncOptions {
+interface RetractionSyncOptions {
   maxDays?: number;
   limit?: number;
   concurrency?: number;
 }
 
-export interface RetractionSyncResult {
+interface RetractionSyncResult {
   totalEligible: number;
   scanned: number;
   newlyRetracted: number;
@@ -147,31 +147,72 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     );
     let updatedCount = 0;
     const now = new Date();
+    const updatedDeltaItems: Array<{
+      id: string;
+      userId?: string | null;
+      projectId?: string | null;
+    }> = [];
+    const DELTA_CONCURRENCY = 5;
 
-    for (const item of matchingItems) {
-      if (!item.isRetracted && item.doi) {
-        const lookupRes = await this.scanner.lookup(item.doi);
-        if (lookupRes.status === 'retracted') {
-          await this.repo.updateItemRetraction(
-            item.id,
-            true,
-            lookupRes.details.nature,
-            lookupRes.details,
-            now,
-          );
-          updatedCount++;
-          await invalidateIngestionItemCache({
+    for (let i = 0; i < matchingItems.length; i += DELTA_CONCURRENCY) {
+      const chunk = matchingItems.slice(i, i + DELTA_CONCURRENCY);
+      await Promise.all(
+        chunk.map(async (item) => {
+          if (!item.isRetracted && item.doi) {
+            const lookupRes = await this.scanner.lookup(item.doi);
+            if (lookupRes.status === 'retracted') {
+              await this.repo.updateItemRetraction(
+                item.id,
+                true,
+                lookupRes.details.nature,
+                lookupRes.details,
+                now,
+              );
+              updatedCount++;
+              updatedDeltaItems.push({
+                id: item.id,
+                userId: (item as { userId?: string | null }).userId,
+                projectId: (item as { projectId?: string | null }).projectId,
+              });
+            }
+          }
+        }),
+      );
+    }
+
+    if (updatedDeltaItems.length > 0) {
+      const groupedByScope = new Map<
+        string,
+        { userId?: string | null; projectId?: string | null; itemIds: string[] }
+      >();
+      for (const item of updatedDeltaItems) {
+        const validProjectId = normalizeProjectScopeId(item.projectId);
+        const scopeKey = `${item.userId || ''}:${validProjectId || ''}`;
+        const existingGroup = groupedByScope.get(scopeKey);
+        if (existingGroup) {
+          existingGroup.itemIds.push(item.id);
+        } else {
+          groupedByScope.set(scopeKey, {
+            userId: item.userId,
+            projectId: validProjectId,
             itemIds: [item.id],
-            userId: (item as { userId?: string | null }).userId,
-            projectId: (item as { projectId?: string | null }).projectId,
+          });
+        }
+      }
+      await Promise.all(
+        Array.from(groupedByScope.values()).map((group) =>
+          invalidateIngestionItemCache({
+            itemIds: group.itemIds,
+            userId: group.userId,
+            projectId: group.projectId,
             cacheCoordinator: this.cacheCoordinator,
             catalogGateway: this.catalogGateway,
             cache: this.cache,
             logger: this.logger,
             contextLabel: 'delta retraction sync',
-          });
-        }
-      }
+          }),
+        ),
+      );
     }
 
     this.logger.log(
@@ -333,18 +374,20 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
           });
         }
       }
-      for (const group of groupedByScope.values()) {
-        await invalidateIngestionItemCache({
-          itemIds: group.itemIds,
-          userId: group.userId,
-          projectId: group.projectId,
-          cacheCoordinator: this.cacheCoordinator,
-          catalogGateway: this.catalogGateway,
-          cache: this.cache,
-          logger: this.logger,
-          contextLabel: 'during retraction sync',
-        });
-      }
+      await Promise.all(
+        Array.from(groupedByScope.values()).map((group) =>
+          invalidateIngestionItemCache({
+            itemIds: group.itemIds,
+            userId: group.userId,
+            projectId: group.projectId,
+            cacheCoordinator: this.cacheCoordinator,
+            catalogGateway: this.catalogGateway,
+            cache: this.cache,
+            logger: this.logger,
+            contextLabel: 'during retraction sync',
+          }),
+        ),
+      );
     }
 
     return {

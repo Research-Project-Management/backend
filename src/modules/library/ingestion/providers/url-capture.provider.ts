@@ -7,17 +7,15 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'crypto';
-import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
+import { MetadataRoutingPolicy } from '@/modules/library/ingestion/domain/metadata.policy';
 import {
   METADATA_PORT,
   MetadataPort,
+  URL_METADATA_SCRAPER_PORT,
+  IUrlMetadataScraperPort,
+  ScrapedUrlResult,
 } from '@/modules/library/ingestion/types/metadata.types';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
-
-import {
-  UrlMetadataScraperService,
-  ScrapedUrlResult,
-} from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import {
   parseCreatorString,
   SubsystemUnavailableException,
@@ -104,7 +102,7 @@ export interface CapturedItemMetadata {
   rawMetadata?: Record<string, unknown>;
 }
 
-export interface PreviewTokenVerificationResult {
+interface PreviewTokenVerificationResult {
   valid: boolean;
   reason?: string;
 }
@@ -128,7 +126,9 @@ export class UrlCaptureProvider {
   constructor(
     @Optional() private readonly configService?: ConfigService,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
-    @Optional() private readonly urlScraper?: UrlMetadataScraperService,
+    @Optional()
+    @Inject(URL_METADATA_SCRAPER_PORT)
+    private readonly urlScraper?: IUrlMetadataScraperPort,
     @Optional() private readonly libraryConfigService?: LibraryConfigService,
     @Optional()
     @Inject(METADATA_PORT)

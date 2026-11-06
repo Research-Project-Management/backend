@@ -374,45 +374,65 @@ export class RetractionRepository {
       isRetracted: true,
     };
 
-    const [totalItems, retractedCount, expressionsOfConcernCount, manualCount] =
-      await Promise.all([
-        this.prisma.item.count({ where: baseWhere }).catch(() => 0),
-        this.prisma.item.count({ where: retractedBaseWhere }).catch(() => 0),
-        this.prisma.item
-          .count({
-            where: {
-              AND: [
-                retractedBaseWhere,
-                {
-                  metadata: {
-                    path: ['retractionNature'],
-                    equals: 'expression_of_concern',
-                  },
+    const [
+      totalItems,
+      checkedItemsCount,
+      retractedCount,
+      expressionsOfConcernCount,
+      manualCount,
+    ] = await Promise.all([
+      this.prisma.item.count({ where: baseWhere }).catch(() => 0),
+      this.prisma.item
+        .count({
+          where: {
+            ...baseWhere,
+            retractionCheckedAt: { not: null },
+          },
+        })
+        .catch(() => null),
+      this.prisma.item.count({ where: retractedBaseWhere }).catch(() => 0),
+      this.prisma.item
+        .count({
+          where: {
+            AND: [
+              retractedBaseWhere,
+              {
+                metadata: {
+                  path: ['retractionNature'],
+                  equals: 'expression_of_concern',
                 },
-              ],
-            },
-          })
-          .catch(() => 0),
-        this.prisma.item
-          .count({
-            where: {
-              AND: [
-                retractedBaseWhere,
-                {
-                  metadata: {
-                    path: ['retractionNature'],
-                    equals: 'manual',
-                  },
+              },
+            ],
+          },
+        })
+        .catch(() => 0),
+      this.prisma.item
+        .count({
+          where: {
+            AND: [
+              retractedBaseWhere,
+              {
+                metadata: {
+                  path: ['retractionNature'],
+                  equals: 'manual',
                 },
-              ],
-            },
-          })
-          .catch(() => 0),
-      ]);
+              },
+            ],
+          },
+        })
+        .catch(() => 0),
+    ]);
+
+    const resolvedTotal =
+      typeof totalItems === 'number' ? totalItems : retractedCount;
+    const resolvedChecked =
+      typeof checkedItemsCount === 'number'
+        ? Math.max(checkedItemsCount, retractedCount)
+        : resolvedTotal;
 
     return {
-      totalItems: typeof totalItems === 'number' ? totalItems : retractedCount,
-      checkedItems: totalItems,
+      totalItems: resolvedTotal,
+      checkedItems: resolvedChecked,
       retractedCount,
       expressionsOfConcernCount,
       manualCount,

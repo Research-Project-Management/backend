@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
-import { asMetaObject } from '@/modules/library/ingestion/domain/duplicate-clustering.helper';
+import { asMetaObject } from '@/modules/library/ingestion/domain/duplicate-clustering.domain';
 import {
   normalizeProjectScopeId, ItemProvenancePolicy, deriveFirstAuthor,
   executeStandardLibraryCacheInvalidation, ICatalogFacade, IItemCacheInvalidator,
@@ -23,7 +23,7 @@ export {
   TOP_LEVEL_ITEM_COLUMNS, VENUE_ALIAS_MERGE_KEYS, buildMergeAuditTrail,
 };
 
-export interface IngestionItemCacheInvalidationParams {
+interface IngestionItemCacheInvalidationParams {
   itemIds: string[]; userId?: string | null; projectId?: string | null;
   cacheCoordinator?: IItemCacheInvalidator; catalogGateway?: ICatalogFacade;
   cache?: RedisCacheService; logger?: Logger; includeExtendedRelations?: boolean; contextLabel?: string;
@@ -62,7 +62,7 @@ export async function invalidateMergedItemsCache(params: {
   });
 }
 
-export async function syncMergedContributors(
+async function syncMergedContributors(
   tx: Prisma.TransactionClient,
   primaryId: string,
   chosenContributors: ContributorShape[] | string[] | undefined,
@@ -170,13 +170,17 @@ export async function syncMergedIdentifiersInTx(params: {
     primaryId, existingIdRecords, clearedCanonicalTypes, topLevelData, primaryMeta, primaryDoi,
   });
 
-  if (identTx.itemIdentifier.deleteMany && uniqueDupIds.length > 0) {
-    await identTx.itemIdentifier.deleteMany({ where: { itemId: { in: uniqueDupIds } } });
-  }
-  if (identTx.itemIdentifier.deleteMany && clearedCanonicalTypes.size > 0) {
-    await identTx.itemIdentifier.deleteMany({
-      where: { itemId: primaryId, type: { in: Array.from(clearedCanonicalTypes) } },
-    });
+  if (identTx.itemIdentifier.deleteMany) {
+    await Promise.all([
+      uniqueDupIds.length > 0
+        ? identTx.itemIdentifier.deleteMany({ where: { itemId: { in: uniqueDupIds } } })
+        : Promise.resolve(),
+      clearedCanonicalTypes.size > 0
+        ? identTx.itemIdentifier.deleteMany({
+            where: { itemId: primaryId, type: { in: Array.from(clearedCanonicalTypes) } },
+          })
+        : Promise.resolve(),
+    ]);
   }
   if (identTx.itemIdentifier.upsert) {
     await Promise.all(
@@ -214,23 +218,19 @@ export async function rewireMergedItemRelations(
 
   const { relationIdsToDelete, relationUpdates } = planMergedItemRelations(existingRelations, primaryId, uniqueDupIds);
 
-  if (relationUpdates.length > 0) {
-    await Promise.all(
-      relationUpdates.map((upd) =>
-        tx.itemRelation.update({
-          where: { id: upd.id },
-          data: { sourceItemId: upd.sourceItemId, targetItemId: upd.targetItemId },
-        }),
-      ),
-    );
-  }
-  if (relationIdsToDelete.length > 0) {
-    if (tx.itemRelation.deleteMany) {
-      await tx.itemRelation.deleteMany({ where: { id: { in: relationIdsToDelete } } });
-    } else {
-      await Promise.all(relationIdsToDelete.map((relId) => tx.itemRelation.delete({ where: { id: relId } })));
-    }
-  }
+  await Promise.all([
+    ...relationUpdates.map((upd) =>
+      tx.itemRelation.update({
+        where: { id: upd.id },
+        data: { sourceItemId: upd.sourceItemId, targetItemId: upd.targetItemId },
+      }),
+    ),
+    ...(relationIdsToDelete.length > 0
+      ? tx.itemRelation.deleteMany
+        ? [tx.itemRelation.deleteMany({ where: { id: { in: relationIdsToDelete } } })]
+        : relationIdsToDelete.map((relId) => tx.itemRelation.delete({ where: { id: relId } }))
+      : []),
+  ]);
   return existingRelations;
 }
 
@@ -341,8 +341,6 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
   return { topLevelData };
 }
 
-export type MergePipelineContext = DuplicateMergeStepContext;
-
 export interface DuplicateMergeStepContext {
   tx: Prisma.TransactionClient;
   primary: Record<string, unknown> & { id: string; citationKey?: string | null; metadata?: unknown };
@@ -365,9 +363,9 @@ export interface DuplicateMergeStepContext {
   now: Date;
 }
 
-export type DuplicateMergeStepFn = (context: DuplicateMergeStepContext) => Promise<void> | void;
+type DuplicateMergeStepFn = (context: DuplicateMergeStepContext) => Promise<void> | void;
 
-export async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext): Promise<void> {
+async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext): Promise<void> {
   const { tx, primary, uniqueDupIds } = ctx;
   const [primaryMetaRows, dupMetas] = await Promise.all([
     tx.itemMetadata?.findMany
@@ -435,7 +433,7 @@ export async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext
   }
 }
 
-export async function backfillMetadataAndCreatorsStep(ctx: DuplicateMergeStepContext): Promise<void> {
+async function backfillMetadataAndCreatorsStep(ctx: DuplicateMergeStepContext): Promise<void> {
   const { tx, primary, duplicates, rawSelections, scalarSelections, primaryMeta, backfillFields } = ctx;
 
   const extraIsObject =
@@ -484,7 +482,7 @@ export async function backfillMetadataAndCreatorsStep(ctx: DuplicateMergeStepCon
   });
 }
 
-export function applyRetractionSurvivalStep(ctx: DuplicateMergeStepContext): void {
+function applyRetractionSurvivalStep(ctx: DuplicateMergeStepContext): void {
   const { primary, duplicates, uniqueDupIds, primaryMeta, backfillFields, now } = ctx;
 
   for (const dup of duplicates) {
@@ -535,7 +533,7 @@ export function applyRetractionSurvivalStep(ctx: DuplicateMergeStepContext): voi
   ];
 }
 
-export const DEFAULT_DUPLICATE_MERGE_STEPS: readonly DuplicateMergeStepFn[] = [
+const DEFAULT_DUPLICATE_MERGE_STEPS: readonly DuplicateMergeStepFn[] = [
   consolidateItemMetadataStep,
   backfillMetadataAndCreatorsStep,
   applyRetractionSurvivalStep,
@@ -628,7 +626,7 @@ export async function recordMergedAssetSyncEventsInTx(params: {
   }
 }
 
-export async function loadFinalRelationsForPrimary(client: Prisma.TransactionClient, primaryId: string) {
+async function loadFinalRelationsForPrimary(client: Prisma.TransactionClient, primaryId: string) {
   const [attachments, notes] = await Promise.all([
     client.attachment?.findMany
       ? client.attachment.findMany({ where: { itemId: primaryId, deletedAt: null } })

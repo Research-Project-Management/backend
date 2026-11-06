@@ -2,7 +2,7 @@ import { Injectable, Logger, Optional, ServiceUnavailableException } from '@nest
 import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import { parseCreatorString } from '@/modules/library/core';
-import type { ParsedFeed } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
+import type { ParsedFeed } from '@/modules/library/ingestion/types/ingestion.types';
 
 export interface FeedSubscriptionRecord {
   id: string; userId: string; feedId: string; customTitle: string | null;
@@ -144,28 +144,11 @@ export class FeedsRepository {
   }
 
   async findFeedItemsForUser(params: {
-    userId: string;
-    feedId: string;
-    readStatus: 'read' | 'unread' | 'all';
-    limit: number;
-    cursor?: string;
-    page?: number;
-    search?: string;
-    cleanupReadAfter?: number;
-    cleanupUnreadAfter?: number;
+    userId: string; feedId: string; readStatus: 'read' | 'unread' | 'all'; limit: number;
+    cursor?: string; page?: number; search?: string; cleanupReadAfter?: number; cleanupUnreadAfter?: number;
   }) {
     if (!this.prisma) return [];
-    const {
-      userId,
-      feedId,
-      readStatus,
-      limit,
-      cursor,
-      page,
-      search,
-      cleanupReadAfter,
-      cleanupUnreadAfter,
-    } = params;
+    const { userId, feedId, readStatus, limit, cursor, page, search, cleanupReadAfter, cleanupUnreadAfter } = params;
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
     const readCutoff = cleanupReadAfter && cleanupReadAfter > 0 ? new Date(now - cleanupReadAfter * dayMs) : null;
@@ -174,12 +157,20 @@ export class FeedsRepository {
     const retentionConditions: Prisma.FeedItemWhereInput[] = [];
     if (readCutoff) {
       retentionConditions.push({
-        OR: [{ readStates: { none: { userId } } }, { readStates: { some: { userId, readAt: { gte: readCutoff } } } }],
+        OR: [
+          { readStates: { none: { userId, isRead: true } } },
+          { readStates: { some: { userId, savedItemId: { not: null } } } },
+          { readStates: { some: { userId, isRead: true, readAt: { gte: readCutoff } } } },
+        ],
       });
     }
     if (unreadCutoff) {
       retentionConditions.push({
-        OR: [{ readStates: { some: { userId } } }, { publishedAt: { gte: unreadCutoff } }],
+        OR: [
+          { readStates: { some: { userId, isRead: true } } },
+          { readStates: { some: { userId, savedItemId: { not: null } } } },
+          { publishedAt: { gte: unreadCutoff } },
+        ],
       });
     }
 
@@ -191,12 +182,12 @@ export class FeedsRepository {
           { abstract: { contains: trimmedSearch, mode: 'insensitive' } },
           { doi: { contains: trimmedSearch, mode: 'insensitive' } },
           { arxivId: { contains: trimmedSearch, mode: 'insensitive' } },
+          { primaryCategory: { contains: trimmedSearch, mode: 'insensitive' } },
         ],
       });
     }
 
     const validPage = page && page > 0 ? page : 1;
-
     const rawItems = await this.prisma.feedItem.findMany({
       where: {
         feedId,
@@ -205,34 +196,26 @@ export class FeedsRepository {
           : readStatus === 'unread' ? { readStates: { none: { userId, isRead: true } } } : {}),
         ...(retentionConditions.length > 0 ? { AND: retentionConditions } : {}),
       },
-      include: {
-        readStates: { where: { userId }, select: { readAt: true, isRead: true, savedItemId: true } },
-      },
+      include: { readStates: { where: { userId }, select: { readAt: true, isRead: true, savedItemId: true } } },
       orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
       take: limit,
       ...(cursor && isUuid(cursor)
         ? { cursor: { id: cursor }, skip: 1 }
-        : validPage > 1
-          ? { skip: (validPage - 1) * limit }
-          : {}),
+        : validPage > 1 ? { skip: (validPage - 1) * limit } : {}),
     });
 
-    const filteredRaw =
-      !readCutoff && !unreadCutoff
-        ? rawItems
-        : rawItems.filter((item) => {
-            const state = item.readStates?.[0] as { readAt?: Date | null; isRead?: boolean; savedItemId?: string | null } | undefined;
-            if (state?.savedItemId) return true;
-            const isRead = Boolean(state?.isRead ?? state?.readAt);
-            const pubTime = item.publishedAt ? new Date(item.publishedAt) : null;
-            if (isRead) {
-              if (!readCutoff) return true;
-              const referenceDate = state?.readAt ? new Date(state.readAt) : pubTime;
-              return !referenceDate || referenceDate >= readCutoff;
-            }
-            if (!unreadCutoff) return true;
-            return !pubTime || pubTime >= unreadCutoff;
-          });
+    const filteredRaw = !readCutoff && !unreadCutoff ? rawItems : rawItems.filter((item) => {
+      const state = item.readStates?.[0] as { readAt?: Date | null; isRead?: boolean; savedItemId?: string | null } | undefined;
+      if (state?.savedItemId) return true;
+      const isRead = Boolean(state?.isRead ?? state?.readAt);
+      const pubTime = item.publishedAt ? new Date(item.publishedAt) : null;
+      if (isRead) {
+        if (!readCutoff) return true;
+        const referenceDate = state?.readAt ? new Date(state.readAt) : pubTime;
+        return !referenceDate || referenceDate >= readCutoff;
+      }
+      return !unreadCutoff || !pubTime || pubTime >= unreadCutoff;
+    });
 
     return filteredRaw.map((it) => {
       const state = it.readStates?.[0] as { readAt?: Date | null; isRead?: boolean; savedItemId?: string | null } | undefined;
@@ -310,13 +293,25 @@ export class FeedsRepository {
       resolvedId = found;
     }
     if (isRead) {
+      const now = new Date();
       await this.prisma.feedItemReadState.upsert({
         where: { userId_itemId: { userId, itemId: resolvedId } },
-        create: { userId, itemId: resolvedId },
-        update: { readAt: new Date() },
+        create: { userId, itemId: resolvedId, isRead: true, readAt: now },
+        update: { isRead: true, readAt: now },
       });
     } else {
-      await this.prisma.feedItemReadState.deleteMany({ where: { userId, itemId: resolvedId } });
+      const existing = await this.prisma.feedItemReadState.findUnique?.({
+        where: { userId_itemId: { userId, itemId: resolvedId } },
+        select: { savedItemId: true },
+      });
+      if (existing?.savedItemId && typeof this.prisma.feedItemReadState.update === 'function') {
+        await this.prisma.feedItemReadState.update({
+          where: { userId_itemId: { userId, itemId: resolvedId } },
+          data: { isRead: false },
+        });
+      } else {
+        await this.prisma.feedItemReadState.deleteMany({ where: { userId, itemId: resolvedId } });
+      }
     }
   }
 
@@ -331,18 +326,51 @@ export class FeedsRepository {
     const validIds = itemIds.filter((id) => isUuid(id));
     if (validIds.length === 0) return new Set();
     const states = await this.prisma.feedItemReadState.findMany({
-      where: { userId, itemId: { in: validIds } },
+      where: { userId, itemId: { in: validIds }, isRead: true },
       select: { itemId: true },
     });
     return new Set(states.map((s) => s.itemId));
   }
 
+  async findUserItemStates(
+    userId: string,
+    itemIds: string[],
+  ): Promise<{ readIds: Set<string>; savedMap: Map<string, string> }> {
+    const empty = { readIds: new Set<string>(), savedMap: new Map<string, string>() };
+    if (!this.prisma?.feedItemReadState?.findMany || itemIds.length === 0) return empty;
+    const validIds = itemIds.filter((id) => isUuid(id));
+    if (validIds.length === 0) return empty;
+    const states = await this.prisma.feedItemReadState.findMany({
+      where: { userId, itemId: { in: validIds } },
+      select: { itemId: true, isRead: true, savedItemId: true },
+    });
+    const readIds = new Set<string>();
+    const savedMap = new Map<string, string>();
+    for (const s of states) {
+      if ((s as { isRead?: boolean }).isRead !== false) {
+        readIds.add(s.itemId);
+      }
+      const savedId = (s as { savedItemId?: string | null }).savedItemId;
+      if (typeof savedId === 'string' && savedId) {
+        savedMap.set(s.itemId, savedId);
+      }
+    }
+    return { readIds, savedMap };
+  }
+
   async markManyItemsRead(userId: string, canonicalItemIds: string[]): Promise<void> {
     if (!this.prisma || canonicalItemIds.length === 0) return;
+    const now = new Date();
     await this.prisma.feedItemReadState.createMany({
-      data: canonicalItemIds.map((itemId) => ({ userId, itemId })),
+      data: canonicalItemIds.map((itemId) => ({ userId, itemId, isRead: true, readAt: now })),
       skipDuplicates: true,
     });
+    if (typeof this.prisma.feedItemReadState.updateMany === 'function') {
+      await this.prisma.feedItemReadState.updateMany({
+        where: { userId, itemId: { in: canonicalItemIds }, isRead: false },
+        data: { isRead: true, readAt: now },
+      });
+    }
   }
 
   async findActiveFeedsForPolling(take = 100) {
@@ -576,12 +604,16 @@ export class FeedsRepository {
         }
       }
 
-      if (newItemsData.length > 0) {
-        await prismaClient.feedItem
-          .createMany({ data: newItemsData, skipDuplicates: true })
-          .catch((err: unknown) => this.logger.warn(`Failed to createMany feed items: ${err instanceof Error ? err.message : String(err)}`));
-      }
-      if (updatesToRun.length > 0) await Promise.all(updatesToRun);
+      await Promise.all([
+        ...(newItemsData.length > 0
+          ? [
+              prismaClient.feedItem
+                .createMany({ data: newItemsData, skipDuplicates: true })
+                .catch((err: unknown) => this.logger.warn(`Failed to createMany feed items: ${err instanceof Error ? err.message : String(err)}`)),
+            ]
+          : []),
+        ...updatesToRun,
+      ]);
 
       const finalRows = (await prismaClient.feedItem.findMany({ where: { feedId: feed.id, guid: { in: entryGuids } } })) ?? [];
       const finalByGuid = new Map(finalRows.map((r) => [r.guid, r]));

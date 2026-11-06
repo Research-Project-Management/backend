@@ -14,7 +14,8 @@ import { randomUUID } from 'crypto';
 import {
   LIBRARY_OUTBOX_QUEUE,
   LIBRARY_OUTBOX_JOB,
-} from '@/modules/library/sync/services/transaction.service';
+  OutboxDispatchHandler,
+} from '@/modules/library/core';
 import {
   OutboxRepository,
   ClaimedOutboxEvent,
@@ -29,7 +30,6 @@ import {
   LibraryConfigService,
 } from '@/modules/library/core/config/library.config';
 import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
-import { OutboxDispatchHandler } from '@/modules/library/core';
 import { shouldRunWorkerConsumers } from '@/core';
 import {
   OutboxMetrics,

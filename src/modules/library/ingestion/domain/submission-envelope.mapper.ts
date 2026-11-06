@@ -5,12 +5,12 @@ import {
   IdentifierType,
   RecordFormat,
   SubmissionKind,
+  IngestionCommand,
+  IngestionSubmissionInput,
+  UnifiedIngestionInput,
 } from '@/modules/library/ingestion/types/ingestion.types';
-import { IngestionCommand } from '@/modules/library/ingestion/types/ingestion.types';
-import { IngestionSubmissionDto } from '@/modules/library/ingestion/dto/ingestion.dto';
-import { UnifiedIngestionDto } from '@/modules/library/ingestion/dto/ingestion.dto';
 
-type SubmissionPayloadBuilder = (dto: IngestionSubmissionDto) => SubmissionPayload;
+type SubmissionPayloadBuilder = (dto: IngestionSubmissionInput) => SubmissionPayload;
 
 const SUBMISSION_DTO_PAYLOAD_STRATEGIES: Readonly<
   Record<SubmissionKind, SubmissionPayloadBuilder>
@@ -51,7 +51,7 @@ const SUBMISSION_DTO_PAYLOAD_STRATEGIES: Readonly<
 };
 
 interface UnifiedCommandContext {
-  dto: UnifiedIngestionDto;
+  dto: UnifiedIngestionInput;
   userId: string;
   projectId?: string;
   collectionId?: string;
@@ -287,7 +287,7 @@ const COMMAND_PAYLOAD_STRATEGIES: Readonly<
  * unified ingestion DTOs, and IngestionCommands into canonical SubmissionEnvelopes.
  */
 export class SubmissionEnvelopeFactory {
-  static buildPayloadFromDto(dto: IngestionSubmissionDto): SubmissionPayload {
+  static buildPayloadFromDto(dto: IngestionSubmissionInput): SubmissionPayload {
     const strategy = SUBMISSION_DTO_PAYLOAD_STRATEGIES[dto.kind];
     if (!strategy) {
       throw new BadRequestException(
@@ -298,7 +298,7 @@ export class SubmissionEnvelopeFactory {
   }
 
   static fromSubmissionDto(params: {
-    dto: IngestionSubmissionDto;
+    dto: IngestionSubmissionInput;
     userId: string;
     projectId?: string;
     idempotencyKey?: string;
@@ -321,7 +321,7 @@ export class SubmissionEnvelopeFactory {
   }
 
   static mapUnifiedDtoToCommand(params: {
-    dto: UnifiedIngestionDto;
+    dto: UnifiedIngestionInput;
     userId: string;
     projectId?: string;
     idempotencyKey?: string;

@@ -8,10 +8,10 @@ import {
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
-import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.domain';
 import { IngestionSagaSession } from './ingestion-saga.orchestrator';
 import { IngestionStatus, Prisma } from '@prisma/client';
-import { mapPayloadToSource } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import { mapPayloadToSource } from '@/modules/library/ingestion/domain/enrichment-patch.mapper';
 import {
   CATALOG_FACADE,
   ICatalogFacade,
@@ -51,7 +51,7 @@ function isCompatibleTitleProviderMatch(
   return verifyCandidateMatch(recordCand, providerCand);
 }
 
-export function serializeSubRunRecordPayload(
+function serializeSubRunRecordPayload(
   cand: Pick<MetadataCandidate, 'normalizedMetadata'> &
     Partial<MetadataCandidate>,
 ): {
