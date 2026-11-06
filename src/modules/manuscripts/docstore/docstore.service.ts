@@ -8,7 +8,7 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { Readable } from 'stream';
 import * as crypto from 'crypto';
 import { mapWithConcurrency } from '@/core';
-import { WorkspaceFile } from '@/modules/manuscripts/core';
+import { WorkspaceFile } from '@/modules/manuscripts/core/domain/workspace-file.interface';
 import { DocstoreRepository } from './repositories/docstore.repository';
 import {
   DocArchiveRepository,

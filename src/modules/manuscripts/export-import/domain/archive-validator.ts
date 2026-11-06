@@ -9,7 +9,7 @@ import { Readable } from 'node:stream';
 import {
   KNOWN_TEXT_EXTENSIONS,
   KNOWN_BINARY_EXTENSIONS,
-} from '@/modules/manuscripts/core';
+} from '@/modules/manuscripts/core/domain/text-extensions';
 
 export { KNOWN_TEXT_EXTENSIONS, KNOWN_BINARY_EXTENSIONS };
 

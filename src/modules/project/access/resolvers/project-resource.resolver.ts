@@ -331,16 +331,67 @@ export class ProjectResourceResolver {
         }
 
         const noteId =
-          urlLower.includes('/notes/') &&
-          typeof request.params?.id === 'string' &&
-          request.params.id;
+          (typeof request.params?.noteId === 'string' &&
+            request.params.noteId) ||
+          (urlLower.includes('/notes/') &&
+            typeof request.params?.id === 'string' &&
+            request.params.id);
         if (noteId && isUUID(noteId) && (this.prisma as any).note?.findUnique) {
           const note = await this.prisma.note.findUnique({
             where: { id: noteId },
-            select: { item: { select: { projectId: true } } },
+            select: { projectId: true, item: { select: { projectId: true } } },
           });
-          if (note?.item?.projectId) {
-            resolvedResourceProjects.set(`note:${noteId}`, note.item.projectId);
+          const noteProjectId = note?.projectId || note?.item?.projectId;
+          if (noteProjectId) {
+            resolvedResourceProjects.set(`note:${noteId}`, noteProjectId);
+          }
+        }
+
+        const savedSearchId =
+          (typeof request.params?.savedSearchId === 'string' &&
+            request.params.savedSearchId) ||
+          ((urlLower.includes('/saved-searches/') ||
+            urlLower.includes('/saved_searches/')) &&
+            typeof request.params?.id === 'string' &&
+            request.params.id);
+        if (
+          savedSearchId &&
+          isUUID(savedSearchId) &&
+          (this.prisma as any).savedSearch?.findUnique
+        ) {
+          const savedSearch = await this.prisma.savedSearch.findUnique({
+            where: { id: savedSearchId },
+            select: { projectId: true },
+          });
+          if (savedSearch?.projectId) {
+            resolvedResourceProjects.set(
+              `savedSearch:${savedSearchId}`,
+              savedSearch.projectId,
+            );
+          }
+        }
+
+        const subscriptionId =
+          (typeof request.params?.subscriptionId === 'string' &&
+            request.params.subscriptionId) ||
+          ((urlLower.includes('/feeds/') ||
+            urlLower.includes('/subscriptions/')) &&
+            typeof request.params?.id === 'string' &&
+            request.params.id);
+        if (
+          subscriptionId &&
+          isUUID(subscriptionId) &&
+          (this.prisma as any).feedSubscription?.findUnique
+        ) {
+          const sub = await this.prisma.feedSubscription.findUnique({
+            where: { id: subscriptionId },
+            select: { projectId: true },
+          });
+          if (sub?.projectId) {
+            resolvedResourceProjects.set(
+              `feedSubscription:${subscriptionId}`,
+              sub.projectId,
+            );
           }
         }
 

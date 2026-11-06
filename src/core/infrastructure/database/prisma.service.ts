@@ -1,6 +1,11 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 
@@ -19,9 +24,10 @@ if (typeof BigInt.prototype.toJSON !== 'function') {
 
 @Injectable()
 export class PrismaService
-  extends PrismaClient
+  extends PrismaClient<Prisma.PrismaClientOptions, 'query' | 'warn' | 'error'>
   implements OnModuleInit, OnModuleDestroy
 {
+  private readonly logger = new Logger(PrismaService.name);
   private pool?: Pool;
 
   constructor(private configService: ConfigService) {
@@ -46,8 +52,36 @@ export class PrismaService
     });
 
     const adapter = new PrismaPg(pool);
-    super({ adapter });
+    const logQueries =
+      (configService.get<string>('PRISMA_LOG_QUERIES') ||
+        process.env.PRISMA_LOG_QUERIES) === 'true';
+    const slowQueryThresholdMs = Number(
+      configService.get<string>('SLOW_QUERY_THRESHOLD_MS') ||
+        process.env.SLOW_QUERY_THRESHOLD_MS ||
+        200,
+    );
+
+    super({
+      adapter,
+      log: [
+        { emit: 'event', level: 'query' },
+        { emit: 'stdout', level: 'warn' },
+        { emit: 'stdout', level: 'error' },
+      ],
+    });
     this.pool = pool;
+
+    this.$on('query', (event: Prisma.QueryEvent) => {
+      if (event.duration >= slowQueryThresholdMs) {
+        this.logger.warn(
+          `[SlowQuery ${event.duration}ms] ${event.query} | params=${event.params}`,
+        );
+      } else if (logQueries) {
+        this.logger.debug(
+          `[Query ${event.duration}ms] ${event.query} | params=${event.params}`,
+        );
+      }
+    });
   }
 
   async onModuleInit() {
@@ -55,8 +89,8 @@ export class PrismaService
       await this.$connect();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(
-        `[PrismaService] Initial database connection attempt failed: ${msg}. Continuing boot for retry...`,
+      this.logger.warn(
+        `Initial database connection attempt failed: ${msg}. Continuing boot for retry...`,
       );
     }
   }

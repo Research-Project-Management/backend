@@ -4,7 +4,7 @@
  */
 
 import { DocRanges, DocRangeVo } from './doc-range';
-import { WorkspaceFile } from '@/modules/manuscripts/core';
+import { WorkspaceFile } from '@/modules/manuscripts/core/domain/workspace-file.interface';
 
 export interface TextDocProps {
   id: string;

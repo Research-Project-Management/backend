@@ -20,8 +20,8 @@ import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-  ManuscriptDomainEventBus,
-} from '@/modules/manuscripts/core';
+} from '../ports/live-collaboration.port';
+import { ManuscriptDomainEventBus } from '../events/event-bus.service';
 import { NodePathVo } from '@/modules/manuscripts/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/manuscripts/structure/structure.repository';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';

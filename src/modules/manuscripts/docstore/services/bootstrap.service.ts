@@ -6,7 +6,7 @@
 
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
-import { escapeLatex } from '@/modules/manuscripts/core';
+import { escapeLatex } from '@/modules/manuscripts/core/domain/latex-escape';
 import { DocstoreService } from '../docstore.service';
 import { resolveProjectLabels } from '../controllers/doc.helpers';
 

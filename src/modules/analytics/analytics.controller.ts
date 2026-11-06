@@ -12,7 +12,7 @@ import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Analytics')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/analytics', 'api/analytics', 'api/v1', 'api'])
+@Controller(['api/v1/analytics', 'api/analytics'])
 @UseGuards(JwtAuthGuard)
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}

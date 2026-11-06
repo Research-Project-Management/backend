@@ -5,7 +5,7 @@
  */
 
 import * as path from 'path';
-import { escapeLatex } from '@/modules/manuscripts/core';
+import { escapeLatex } from '@/modules/manuscripts/core/domain/latex-escape';
 import {
   buildZipBuffer,
   type ZipEntry,
