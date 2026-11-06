@@ -331,35 +331,35 @@ function buildFtsWhereClause(params: {
     }
     if (ids.cleanIsbn) {
       pushIdentifierMatch(
-        `COALESCE(metadata->>'isbn', '')`,
-        `%${escapeLikePattern(ids.cleanIsbn)}%`,
+        `LOWER(COALESCE(isbn, metadata->>'isbn', ''))`,
+        `%${escapeLikePattern(ids.cleanIsbn.toLowerCase())}%`,
         'isbn',
       );
     }
     if (ids.cleanArxivBase || ids.cleanArxiv) {
       pushIdentifierMatch(
-        `LOWER(COALESCE(metadata->>'arxivId', ''))`,
+        `LOWER(COALESCE(arxiv_id, metadata->>'arxivId', ''))`,
         `%${escapeLikePattern((ids.cleanArxivBase || ids.cleanArxiv)!.toLowerCase())}%`,
         'arxiv',
       );
     }
     if (ids.cleanPmid) {
       pushIdentifierMatch(
-        `COALESCE(metadata->>'pmid', '')`,
-        `%${escapeLikePattern(ids.cleanPmid)}%`,
+        `LOWER(COALESCE(pmid, metadata->>'pmid', ''))`,
+        `%${escapeLikePattern(ids.cleanPmid.toLowerCase())}%`,
         'pmid',
       );
     }
     if (ids.cleanPmcid) {
       pushIdentifierMatch(
-        `UPPER(COALESCE(metadata->>'pmcid', ''))`,
+        `UPPER(COALESCE(pmcid, metadata->>'pmcid', ''))`,
         `%${escapeLikePattern(ids.cleanPmcid.toUpperCase())}%`,
         'pmcid',
       );
     }
     if (ids.cleanIssn) {
       pushIdentifierMatch(
-        `UPPER(COALESCE(metadata->>'issn', ''))`,
+        `UPPER(COALESCE(issn, metadata->>'issn', ''))`,
         `%${escapeLikePattern(ids.cleanIssn.toUpperCase())}%`,
         'issn',
       );

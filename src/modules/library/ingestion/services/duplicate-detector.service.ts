@@ -7,7 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { CATALOG_FACADE, ICatalogFacade, IItemCacheInvalidator, ITEM_CACHE_INVALIDATOR, DuplicateCandidateItem, normalizeProjectScopeId, LIBRARY_EVENT_TYPES, TransactionHelpers, UNIT_OF_WORK, IUnitOfWork, ItemsMapper } from '@/modules/library/core';
+import { CATALOG_FACADE, ICatalogFacade, IItemCacheInvalidator, ITEM_CACHE_INVALIDATOR, DuplicateCandidateItem, normalizeProjectScopeId, LIBRARY_EVENT_TYPES, TransactionHelpers, UNIT_OF_WORK, IUnitOfWork, ItemsMapper, SingleFlightCoalescer, BulkheadSemaphore, sortLockKeys } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { DuplicateClusterResult } from '@/modules/library/ingestion/types/ingestion.types';
@@ -36,6 +36,12 @@ export type { EffectiveFieldLookupOptions };
 @Injectable()
 export class DuplicateDetectorService {
   private readonly logger = new Logger(DuplicateDetectorService.name);
+  private readonly detectSingleFlight = new SingleFlightCoalescer();
+  private readonly detectBulkhead = new BulkheadSemaphore({
+    name: 'library-duplicate-detector',
+    maxConcurrent: 4,
+    maxQueueSize: 100,
+  });
 
   constructor(
     @Optional()
@@ -294,10 +300,8 @@ export class DuplicateDetectorService {
     itemIds: string[],
     projectId?: ProjectId | string,
   ): Promise<{ dismissed: boolean; itemIds: string[] }> {
-    const uniqueIds = Array.from(
-      new Set(
-        (itemIds || []).filter((id) => typeof id === 'string' && id.trim()),
-      ),
+    const uniqueIds = sortLockKeys(
+      (itemIds || []).filter((id) => typeof id === 'string' && id.trim()),
     );
     if (uniqueIds.length < 2) {
       throw new BadRequestException(
@@ -306,13 +310,16 @@ export class DuplicateDetectorService {
     }
 
     const effectiveProjectId = this.normalizeScopeProjectId(projectId);
-    const items = this.catalogGateway
+    const rawItems = this.catalogGateway
       ? await this.catalogGateway.findByIds(
           String(userId),
           uniqueIds,
           effectiveProjectId,
         )
       : [];
+    const items = [...rawItems].sort((a, b) =>
+      a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    );
 
     if (items.length !== uniqueIds.length) {
       throw new NotFoundException(
@@ -448,6 +455,18 @@ export class DuplicateDetectorService {
     projectId?: ProjectId | string,
   ): Promise<DuplicateClusterResult[]> {
     const effectiveProjectId = this.normalizeScopeProjectId(projectId);
+    const flightKey = `detect:${String(userId)}:${effectiveProjectId ?? 'personal'}`;
+    return this.detectSingleFlight.execute(flightKey, () =>
+      this.detectBulkhead.run(() =>
+        this.executeDetectDuplicates(userId, effectiveProjectId),
+      ),
+    );
+  }
+
+  private async executeDetectDuplicates(
+    userId: UserId | string,
+    effectiveProjectId?: string,
+  ): Promise<DuplicateClusterResult[]> {
     const [items, suspectsResult] = await Promise.all([
       this.catalogGateway
         ? this.catalogGateway.findDuplicateCandidateItems(

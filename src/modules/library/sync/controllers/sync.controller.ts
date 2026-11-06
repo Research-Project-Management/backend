@@ -1,57 +1,15 @@
-import { IsOptional, IsString, IsInt, IsBoolean, Min, Max, Matches } from 'class-validator';
-import { Type, Transform } from 'class-transformer';
-import { ApiPropertyOptional, ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { Controller, HttpException, HttpStatus, Get, Query, Param, UseGuards, Optional } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Controller, HttpException, HttpStatus, Get, Query, Param, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
-import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { ProjectAccessGuard, ProjectRoles, RequireOperator } from '@/modules/project/access';
+import { TransactionService, compactLibraryChanges } from '@/modules/library/sync/services/transaction.service';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
-import { OutboxWorker, OutboxMetrics } from '@/modules/library/sync/services/outbox.worker';
-import { compactLibraryChanges } from '@/modules/library/sync/services/transaction.service';
+import { OutboxWorker } from '@/modules/library/sync/services/outbox.worker';
+import { OutboxMetrics } from '@/modules/library/sync/services/outbox-metrics.service';
+import { SyncQueryDto } from '@/modules/library/sync/dto/sync.dto';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 
-export class SyncQueryDto {
-  @ApiPropertyOptional({
-    description:
-      'Fetch changes or tombstones with sequence strictly greater than this value',
-    default: '0',
-    example: '100',
-  })
-  @IsOptional()
-  @IsString()
-  @Matches(/^\d+$/, {
-    message: 'since sequence must be a numeric integer string',
-  })
-  since?: string;
-
-  @ApiPropertyOptional({
-    description: 'Maximum number of delta records to return (1-500)',
-    default: 100,
-    example: 100,
-  })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(500)
-  limit?: number = 100;
-
-  @ApiPropertyOptional({
-    description:
-      'Whether to run sliding-window compaction to squash redundant intermediate mutations',
-    default: true,
-    example: true,
-  })
-  @IsOptional()
-  @Transform(({ value }) => {
-    if (value === undefined || value === null || value === '') return true;
-    if (typeof value === 'boolean') return value;
-    const normalized = String(value).trim().toLowerCase();
-    return normalized !== 'false' && normalized !== '0';
-  })
-  @IsBoolean()
-  compact?: boolean = true;
-}
+export { SyncQueryDto };
 
 const PERSONAL_STATE_FIELDS_IN_ITEM_PAYLOAD = [
   'isStarred',
@@ -109,9 +67,9 @@ function parseSafeBigInt(val?: string): bigint | undefined {
 export class SyncController {
   constructor(
     private readonly transactionService: TransactionService,
-    @Optional() private readonly resilienceRegistry?: ResilienceRegistryService,
-    @Optional() private readonly outboxWorker?: OutboxWorker,
-    @Optional() private readonly outboxMetrics?: OutboxMetrics,
+    private readonly resilienceRegistry: ResilienceRegistryService,
+    private readonly outboxWorker: OutboxWorker,
+    private readonly outboxMetrics: OutboxMetrics,
   ) {}
 
   private resolveProjectId(
@@ -184,22 +142,27 @@ export class SyncController {
       );
     }
 
-    const hasMore = changes.length > limit;
-    const rawPaged = hasMore ? changes.slice(0, limit) : changes;
+    const visibleChanges = projectId
+      ? changes.filter((c) => {
+          const typeLower = c.entityType?.toLowerCase();
+          if (typeLower === 'state' || typeLower === 'attachmentreadingstate') {
+            return !c.userId || c.userId === userId;
+          }
+          return true;
+        })
+      : changes;
+    const hasMore = visibleChanges.length > limit || changes.length > limit;
+    const rawPaged = visibleChanges.slice(0, limit);
     const highWaterMarkSeq =
-      rawPaged.length > 0 ? rawPaged[rawPaged.length - 1].seq : sinceSeq;
-    const visibleRawPaged = projectId
-      ? rawPaged.filter(
-          (c) =>
-            c.entityType?.toLowerCase() !== 'state' ||
-            !c.userId ||
-            c.userId === userId,
-        )
-      : rawPaged;
+      rawPaged.length > 0
+        ? rawPaged[rawPaged.length - 1].seq
+        : changes.length > 0
+          ? changes[Math.min(changes.length, limit) - 1].seq
+          : sinceSeq;
     const pagedChanges =
       query.compact !== false
-        ? compactLibraryChanges(visibleRawPaged)
-        : visibleRawPaged;
+        ? compactLibraryChanges(rawPaged)
+        : rawPaged;
 
     return {
       since: sinceSeq.toString(),
@@ -242,7 +205,7 @@ export class SyncController {
     @Query('projectId') queryProjectId?: string,
   ) {
     const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
-    const scope = projectId ? { projectId } : { userId };
+    const scope = projectId ? { projectId, userId } : { userId };
     const sinceSeq = parseSafeBigInt(query.since);
     const limit = query.limit ?? 100;
 
@@ -299,7 +262,7 @@ export class SyncController {
   }
 
   @Get('diagnostics')
-  @ProjectRoles('owner', 'coordinator')
+  @RequireOperator()
   @ApiOperation({
     summary: 'Library Subsystem Diagnostics & Observability',
     description:

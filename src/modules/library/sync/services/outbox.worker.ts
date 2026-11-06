@@ -31,12 +31,12 @@ import {
 } from '@/modules/library/core/config/library.config';
 import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
 import { shouldRunWorkerConsumers } from '@/core';
+import { OutboxMetrics } from './outbox-metrics.service';
+import { OutboxDispatcher } from './outbox-dispatcher.service';
 import {
-  OutboxMetrics,
-  OutboxDispatcher,
   OutboxQueueConsumer,
   OutboxBullProcessor,
-} from './idempotent-consumer.service';
+} from './outbox.processor';
 
 export type { OutboxDispatchHandler };
 export {
@@ -181,8 +181,8 @@ export class OutboxWorker
     eventId: string,
     options?: { rethrowOnRetryableFailure?: boolean },
   ): Promise<boolean> {
-    const event = await this.repo.findById(eventId);
-    if (!event || event.status === OutboxStatus.PUBLISHED) {
+    const initialEvent = await this.repo.findById(eventId);
+    if (!initialEvent || initialEvent.status === OutboxStatus.PUBLISHED) {
       return true;
     }
 
@@ -198,6 +198,12 @@ export class OutboxWorker
       Boolean(options?.rethrowOnRetryableFailure),
     );
     if (!claimed) return true;
+
+    // Reload event after claim so retryCount, claimedBy, and leaseExpiresAt reflect the claim update
+    const event = (await this.repo.findById(eventId)) ?? initialEvent;
+    if (event.status === OutboxStatus.PUBLISHED) {
+      return true;
+    }
 
     const effectiveHandlers = this.getEffectiveHandlers(event.eventType);
     if (effectiveHandlers.length === 0) {
@@ -616,23 +622,44 @@ export class OutboxWorker
     let reclaimed = 0;
     let groupCursor = 0;
 
-    const workerCount = Math.min(OutboxWorker.CONCURRENCY, groups.length);
-    const workers = Array.from({ length: workerCount }, async () => {
-      while (groupCursor < groups.length && !this.isShuttingDown) {
-        const currentGroup = groups[groupCursor++];
-        if (!currentGroup) break;
-        for (const item of currentGroup) {
-          if (this.isShuttingDown) break;
-          const res = await this.processClaimedItem(item, leaseMs);
-          processed += res.processed;
-          failed += res.failed;
-          deadLettered += res.deadLettered;
-          reclaimed += res.reclaimed;
-        }
+    // Keep leases alive for claimed events waiting in the batch queue so slow earlier events
+    // do not cause queued items to expire their lease before processClaimedItem starts
+    const waitingEventIds = new Set<string>(
+      claimedItems.map((item) => item.event.id),
+    );
+    const batchHeartbeatIntervalMs = Math.max(1000, Math.floor(leaseMs / 3));
+    const batchHeartbeatTimer = setInterval(() => {
+      if (waitingEventIds.size === 0 || !this.repo.renewLease) return;
+      for (const waitingId of Array.from(waitingEventIds)) {
+        void this.repo
+          .renewLease(waitingId, this.workerId, leaseMs)
+          .catch(() => undefined);
       }
-    });
+    }, batchHeartbeatIntervalMs);
+    batchHeartbeatTimer.unref?.();
 
-    await Promise.all(workers);
+    try {
+      const workerCount = Math.min(OutboxWorker.CONCURRENCY, groups.length);
+      const workers = Array.from({ length: workerCount }, async () => {
+        while (groupCursor < groups.length && !this.isShuttingDown) {
+          const currentGroup = groups[groupCursor++];
+          if (!currentGroup) break;
+          for (const item of currentGroup) {
+            if (this.isShuttingDown) break;
+            waitingEventIds.delete(item.event.id);
+            const res = await this.processClaimedItem(item, leaseMs);
+            processed += res.processed;
+            failed += res.failed;
+            deadLettered += res.deadLettered;
+            reclaimed += res.reclaimed;
+          }
+        }
+      });
+
+      await Promise.all(workers);
+    } finally {
+      clearInterval(batchHeartbeatTimer);
+    }
     return { processed, failed, deadLettered, reclaimed };
   }
 

@@ -17,9 +17,7 @@ export class FeedsService {
 
   constructor(
     private readonly feedsRepo: FeedsRepository,
-    urlCaptureOrFeedRetrieval:
-      | UrlCaptureService
-      | FeedRetrievalService,
+    urlCaptureOrFeedRetrieval: FeedRetrievalService,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() feedRetrievalService?: FeedRetrievalService,
   ) {
@@ -53,26 +51,32 @@ export class FeedsService {
     let feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
 
     if (!feed) {
-      try {
-        const fetched =
-          await this.feedFetcher.fetchAcademicFeed(cleanUrl);
-        feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
-        if (!feed) {
+      const resolvedCustomTitle = customTitle?.trim();
+      if (resolvedCustomTitle && resolvedCustomTitle !== cleanUrl) {
+        // Fast-path: Client-Side Protocol Virtualizer already resolved the feed title
+        feed = await this.feedsRepo.createFeed({ url: cleanUrl, title: resolvedCustomTitle, siteUrl: cleanUrl, description: null });
+      } else {
+        try {
+          const fetched =
+            await this.feedFetcher.fetchAcademicFeed(cleanUrl);
+          feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
+          if (!feed) {
+            feed = await this.feedsRepo.createFeed({
+              url: cleanUrl,
+              title: fetched.feedTitle || cleanUrl,
+              siteUrl: fetched.feedUrl || null,
+              description: null,
+            });
+          }
+        } catch (err: unknown) {
+          this.logger.warn(
+            `Could not parse feed at ${cleanUrl} during subscribe: ${err}`,
+          );
           feed = await this.feedsRepo.createFeed({
             url: cleanUrl,
-            title: fetched.feedTitle || cleanUrl,
-            siteUrl: fetched.feedUrl || null,
-            description: null,
+            title: customTitle || cleanUrl,
           });
         }
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Could not parse feed at ${cleanUrl} during subscribe: ${err}`,
-        );
-        feed = await this.feedsRepo.createFeed({
-          url: cleanUrl,
-          title: customTitle || cleanUrl,
-        });
       }
     }
 
@@ -114,25 +118,30 @@ export class FeedsService {
       const cleanUrl = data.url.trim();
       let feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
       if (!feed) {
-        try {
-          const fetched = await this.feedFetcher.fetchAcademicFeed(
-            cleanUrl,
-            true,
-          );
-          feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
-          if (!feed) {
+        const resolvedCustomTitle = data.customTitle?.trim();
+        if (resolvedCustomTitle && resolvedCustomTitle !== cleanUrl) {
+          feed = await this.feedsRepo.createFeed({ url: cleanUrl, title: resolvedCustomTitle, siteUrl: cleanUrl, description: null });
+        } else {
+          try {
+            const fetched = await this.feedFetcher.fetchAcademicFeed(
+              cleanUrl,
+              true,
+            );
+            feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
+            if (!feed) {
+              feed = await this.feedsRepo.createFeed({
+                url: cleanUrl,
+                title: data.customTitle || fetched.feedTitle || cleanUrl,
+                siteUrl: fetched.siteUrl || fetched.feedUrl || null,
+                description: fetched.description || null,
+              });
+            }
+          } catch {
             feed = await this.feedsRepo.createFeed({
               url: cleanUrl,
-              title: data.customTitle || fetched.feedTitle || cleanUrl,
-              siteUrl: fetched.siteUrl || fetched.feedUrl || null,
-              description: fetched.description || null,
+              title: data.customTitle || cleanUrl,
             });
           }
-        } catch {
-          feed = await this.feedsRepo.createFeed({
-            url: cleanUrl,
-            title: data.customTitle || cleanUrl,
-          });
         }
       }
       targetFeedId = feed.id;
@@ -360,6 +369,12 @@ export class FeedsService {
     if (!opmlXml || typeof opmlXml !== 'string') {
       throw new BadRequestException('OPML XML content is required');
     }
+    if (opmlXml.length > 1024 * 1024) {
+      throw new BadRequestException('OPML XML content exceeds the 1MB limit');
+    }
+    if (/<!(?:doctype|entity)\b/i.test(opmlXml)) {
+      throw new BadRequestException('OPML XML must not contain DOCTYPE or ENTITY declarations');
+    }
     const outlineRegex = /<outline\b([^>]*?)\/?>/gi;
     const attrRegex = /([a-zA-Z0-9_:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
     const decodeXml = (val: string) =>
@@ -375,10 +390,11 @@ export class FeedsService {
     let match: RegExpExecArray | null;
     while ((match = outlineRegex.exec(opmlXml)) !== null) {
       const attrsRaw = match[1] || '';
-      const attrs: Record<string, string> = {};
+      const attrs: Record<string, string> = Object.create(null) as Record<string, string>;
       let attrMatch: RegExpExecArray | null;
       while ((attrMatch = attrRegex.exec(attrsRaw)) !== null) {
         const k = attrMatch[1].toLowerCase();
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
         const v = decodeXml(attrMatch[2] ?? attrMatch[3] ?? '').trim();
         attrs[k] = v;
       }
@@ -466,7 +482,7 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
   };
 
   constructor(
-    urlCaptureOrFeedRetrieval: UrlCaptureService | FeedRetrievalService,
+    urlCaptureOrFeedRetrieval: FeedRetrievalService,
     @Optional() private readonly feedsRepo?: FeedsRepository,
     @Optional()
     private readonly resilienceRegistry: ResilienceRegistryService = new ResilienceRegistryService(),

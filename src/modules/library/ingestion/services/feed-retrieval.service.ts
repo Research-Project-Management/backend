@@ -212,6 +212,7 @@ export class FeedRetrievalService {
       existingFeedRecord.items?.length > 0 &&
       this.feedsRepo
     ) {
+      await response.body?.cancel().catch(() => {});
       this.logger.log(
         `Feed "${redactFeedUrl(trimmed)}" returned 304 Not Modified. Reusing existing articles.`,
       );
@@ -220,6 +221,7 @@ export class FeedRetrievalService {
     }
 
     if (!response.ok || response.status === 403 || response.status === 503) {
+      await response.body?.cancel().catch(() => {});
       this.logger.warn(
         `Feed returned HTTP ${response.status} (likely Cloudflare / Bot Protection) for "${redactFeedUrl(trimmed)}". Initiating academic search fallback...`,
       );
@@ -510,6 +512,19 @@ export class DomainRateLimiterService {
   public getConfig(domainOrKey: string): DomainRateLimitConfig {
     const key = this.normalizeKey(domainOrKey);
     return this.domainConfigs[key] || { minIntervalMs: 50 };
+  }
+
+  /**
+   * Non-mutating check of the estimated wait time (ms) if a request were scheduled right now.
+   */
+  public peekEstimatedWaitMs(domainOrKey: string): number {
+    if (this.bypassDelayEnabled) return 0;
+    const normalizedDomain = this.normalizeKey(domainOrKey);
+    const config = this.getConfig(normalizedDomain);
+    const now = Date.now();
+    const lastExec = this.lastExecutionMap.get(normalizedDomain) ?? 0;
+    const nextExec = Math.max(now, lastExec + config.minIntervalMs);
+    return Math.max(0, nextExec - now);
   }
 
   private setLastExecution(key: string, timestamp: number): void {

@@ -369,7 +369,8 @@ export class PipelineService {
           const hasCredibleLocalTitle =
             typeof rawNormMeta.title === 'string' &&
             rawNormMeta.title.trim().length > 5 &&
-            !rawCandExtra.isFilenameTitle;
+            !rawCandExtra.isFilenameTitle &&
+            !rawCandExtra.hadOnlyFilenameTitleBeforeEdge;
           const deferFileEarlyMatch =
             envelope.payload.kind === 'FILE' && !hasCredibleLocalTitle;
 

@@ -205,9 +205,31 @@ export class PdfProvider {
           Awaited<ReturnType<typeof processSinglePage>>
         > = new Array(maxPagesToExtract);
 
+        const cachedFrontPageTexts = Array.isArray(
+          trustedResult?.provenance?.rawMatches?.frontPageTexts,
+        )
+          ? (trustedResult.provenance.rawMatches.frontPageTexts as string[])
+          : undefined;
+
+        let startPageNum = 1;
+        if (cachedFrontPageTexts && cachedFrontPageTexts.length > 0) {
+          const reusableCount = Math.min(
+            maxPagesToExtract,
+            cachedFrontPageTexts.length,
+          );
+          for (let i = 0; i < reusableCount; i++) {
+            rawPageOutputs[i] = {
+              pageIndex: i,
+              pageNumber: i + 1,
+              pageText: cachedFrontPageTexts[i] ?? '',
+            };
+          }
+          startPageNum = reusableCount + 1;
+        }
+
         const PAGE_EXTRACTION_CONCURRENCY = 4;
         for (
-          let batchStart = 1;
+          let batchStart = startPageNum;
           batchStart <= maxPagesToExtract;
           batchStart += PAGE_EXTRACTION_CONCURRENCY
         ) {

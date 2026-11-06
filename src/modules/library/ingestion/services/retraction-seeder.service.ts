@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { normalizeDoi, normalizePmid, ExternalProviderException, EntityNotFoundException, LIBRARY_EVENT_TYPES, ReconcileExtractedCandidatePayload } from '@/modules/library/core';
+import { normalizeDoi, normalizePmid, ExternalProviderException, EntityNotFoundException, LIBRARY_EVENT_TYPES, ReconcileExtractedCandidatePayload, HttpClient } from '@/modules/library/core';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
 import { OnEvent } from '@nestjs/event-emitter';
@@ -137,10 +137,13 @@ export class RetractionSeederService {
   private readonly logger = new Logger(RetractionSeederService.name);
   public static readonly OFFICIAL_GITLAB_CSV_URL =
     'https://gitlab.com/crossref/retraction-watch-data/-/raw/main/retraction_watch.csv';
+  private lastGitlabEtag: string | null = null;
+  private lastGitlabModified: string | null = null;
 
   constructor(
     private readonly repo: RetractionRepository,
     private readonly retractionDb: RetractionDatabaseService,
+    @Optional() private readonly httpClient?: HttpClient,
   ) {}
 
   /**
@@ -270,14 +273,44 @@ export class RetractionSeederService {
     this.logger.log(
       `Fetching Retraction Watch dataset from official Crossref repository: ${url}`,
     );
-    const res = await fetch(url, {
-      headers: { Accept: 'text/csv, text/plain' },
-    });
+    const reqHeaders: Record<string, string> = {
+      Accept: 'text/csv, text/plain',
+      ...(this.lastGitlabEtag ? { 'If-None-Match': this.lastGitlabEtag } : {}),
+      ...(this.lastGitlabModified
+        ? { 'If-Modified-Since': this.lastGitlabModified }
+        : {}),
+    };
+    const rawRes = this.httpClient
+      ? await this.httpClient.request(url, {
+          headers: reqHeaders,
+          timeoutMs: 120_000,
+          maxBytes: 150 * 1024 * 1024,
+        })
+      : await fetch(url, {
+          headers: reqHeaders,
+        });
+    const res = 'response' in rawRes ? rawRes.response : rawRes;
+    if (res.status === 304) {
+      this.logger.log(
+        'Crossref Retraction Watch CSV unchanged (HTTP 304 Not Modified); skipping download.',
+      );
+      return {
+        totalRows: 0,
+        validRecords: 0,
+        inserted: 0,
+        durationMs: 0,
+        deltaDois: [],
+      };
+    }
     if (!res.ok) {
       throw new ExternalProviderException(
         `Failed to fetch Crossref Retraction Watch CSV from ${url}: HTTP ${res.status} ${res.statusText}`,
       );
     }
+    const etag = res.headers?.get?.('etag');
+    const lastMod = res.headers?.get?.('last-modified');
+    if (etag) this.lastGitlabEtag = etag;
+    if (lastMod) this.lastGitlabModified = lastMod;
     const csvContent = await res.text();
     return this.seedFromCsv(csvContent);
   }

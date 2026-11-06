@@ -307,12 +307,32 @@ export async function extractPdfOutlineSections(
   }
 
   const numberedHeadingRegex =
-    /^(?:(\d+(?:\.\d+){0,2}|[IVX]{1,4})\.?\s+)([A-ZÀ-Ỹ][A-Za-zÀ-ỹ0-9\s,:;()\-–—/]{2,80})$/u;
+    /^(?:([1-9]\d?(?:\.\d+){0,2}|[IVX]{1,4})\.?\s+)([A-ZÀ-Ỹ][A-Za-zÀ-ỹ0-9\s,:;()\-–—/]{2,80})$/u;
   const canonicalHeadingRegex =
-    /^(Abstract|Introduction|Background|Related Work|Literature Review|Methodology|Methods|Materials and Methods|Experiments|Experimental Setup|Results|Results and Discussion|Evaluation|Discussion|Limitations|Conclusion|Conclusions|Future Work|Acknowledgments|Acknowledgements|References|Bibliography|Appendix|Tóm tắt|Đặt vấn đề|Mở đầu|Tổng quan|Tổng quan tài liệu|Phương pháp nghiên cứu|Phương pháp|Nội dung và phương pháp nghiên cứu|Kết quả|Kết quả và bàn luận|Bàn luận|Kết luận|Kiến nghị|Lời cảm ơn|Tài liệu tham khảo|Phụ lục)$/iu;
+    /^(Abstract|Introduction|Background|Related Work|Literature Review|Methodology|Methods|Materials and Methods|Experiments|Experimental Setup|Results|Results and Discussion|Evaluation|Discussion|Limitations|Conclusion|Conclusions|Future Work|Acknowledgments|Acknowledgements|References|Bibliography|Appendix|Appendices|Supplementary Material|Tóm tắt|Đặt vấn đề|Mở đầu|Tổng quan|Tổng quan tài liệu|Phương pháp nghiên cứu|Phương pháp|Nội dung và phương pháp nghiên cứu|Kết quả|Kết quả và bàn luận|Bàn luận|Kết luận|Kiến nghị|Lời cảm ơn|Tài liệu tham khảo|Phụ lục)$/iu;
 
   let fallbackCounter = 0;
   const seenTitles = new Set<string>();
+  let isInsideReferences = false;
+
+  const falseSentenceStarters = [
+    'in all cases',
+    'we note that',
+    'the vector',
+    'for example',
+    'the glue',
+    'the triviaqa',
+    'note that',
+    'question:',
+    'does bert',
+    'in addition',
+    'furthermore',
+    'however',
+    'as shown in',
+    'as described in',
+    'we also',
+    'we find that',
+  ];
 
   for (const p of pages) {
     const pageNum = p.pageNumber ?? p.pageIndex + 1;
@@ -334,7 +354,31 @@ export async function extractPdfOutlineSections(
         const title = (
           numberedMatch ? numberedMatch[2] : canonicalMatch![1]
         ).trim();
-        const dedupeKey = `${num || ''}:${title.toLowerCase()}`;
+
+        // Reject if line ends with period, comma, or colon (sentences / body text)
+        if (/[.,;:]$/.test(title)) continue;
+
+        // Reject if title is too long (sentence-like)
+        const wordCount = title.split(/\s+/).filter(Boolean).length;
+        if (wordCount > 10) continue;
+
+        const lowerTitle = title.toLowerCase();
+        if (falseSentenceStarters.some((prefix) => lowerTitle.startsWith(prefix))) {
+          continue;
+        }
+
+        const isRef = /^(?:references|bibliography|tài liệu tham khảo)$/i.test(title);
+        const isPostRefAppendix = /^(?:appendix|appendices|supplementary material|phụ lục)$/i.test(title);
+
+        if (isInsideReferences && !isPostRefAppendix) {
+          continue;
+        }
+
+        if (isRef) {
+          isInsideReferences = true;
+        }
+
+        const dedupeKey = `${num || ''}:${lowerTitle}`;
         if (seenTitles.has(dedupeKey)) continue;
         seenTitles.add(dedupeKey);
 

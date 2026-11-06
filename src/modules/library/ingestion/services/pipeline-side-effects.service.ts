@@ -73,6 +73,9 @@ export class PipelineSideEffectsService {
     options?: { localOnly?: boolean },
   ): Promise<void> {
     if (!this.retractionScanner || !proposedItem) return;
+    if (proposedItem.isRetracted === true && proposedItem.retractionDetails) {
+      return;
+    }
     try {
       const doi =
         typeof proposedItem.doi === 'string' ? proposedItem.doi : undefined;
@@ -106,6 +109,18 @@ export class PipelineSideEffectsService {
             `[RETRACTION_INGESTION_GUARD] Item "${titleStr}" recorded update notice: ${res.details.nature}`,
           );
         }
+      } else if (proposedItem.isRetracted === true) {
+        // Preserve upstream provider retraction flag (e.g. OpenAlex is_retracted=true or CrossRef CrossMark update-to)
+        // when the 0-day retraction is not yet in the local Retraction Watch CSV dump.
+        proposedItem.retractionNature =
+          proposedItem.retractionNature || 'retraction';
+        proposedItem.retractionDetails = proposedItem.retractionDetails || {
+          nature: 'retraction',
+          reason:
+            'Retracted according to authoritative publisher / OpenAlex registry',
+          source: 'openalex',
+        };
+        proposedItem.retractionCheckedAt = new Date().toISOString();
       } else if (res.status === 'clean') {
         proposedItem.isRetracted = false;
         proposedItem.retractionCheckedAt = new Date().toISOString();
@@ -284,7 +299,10 @@ export class PipelineSideEffectsService {
     let attachedPdfFileId = existingFileId;
     let capturedSnapshot = false;
 
-    const shouldAttachOaPdf = overrides?.attachOaPdf !== false;
+    const shouldAttachOaPdf =
+      overrides?._clientResolved === true
+        ? overrides?.attachOaPdf === true
+        : overrides?.attachOaPdf !== false;
     const shouldSaveSnapshot = overrides?.saveSnapshot !== false;
 
     // 1. Auto Open-Access PDF Download & Stored Attachment

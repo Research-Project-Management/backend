@@ -102,40 +102,73 @@ export class OpenAlexProvider extends BaseMetadataProvider {
     return this.searchByTitle(query, signal, request);
   }
 
+  private appendAuthParams(url: string): string {
+    const sep = url.includes('?') ? '&' : '?';
+    const withMailto = `${url}${sep}mailto=${encodeURIComponent(this.mailto)}`;
+    return this.apiKey
+      ? `${withMailto}&api_key=${encodeURIComponent(this.apiKey)}`
+      : withMailto;
+  }
+
+  private async fetchSingleItem(
+    endpointPath: string,
+    label: string,
+    signal?: AbortSignal,
+    requireTitle = false,
+  ): Promise<Record<string, unknown> | null> {
+    const url = this.appendAuthParams(`${this.BASE_URL}/${endpointPath}`);
+    const response = await this.executeFetch(url, signal);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new ProviderFetchError(
+        `OpenAlex API HTTP ${response.status} for ${label}`,
+        response.status,
+        this.parseRetryAfterHeader(response),
+      );
+    }
+    let item: unknown;
+    try {
+      item = await response.json();
+    } catch {
+      throw new ProviderFetchError(
+        `Failed to parse OpenAlex JSON for ${label}`,
+        undefined,
+        undefined,
+        false,
+        true,
+      );
+    }
+    if (!item || typeof item !== 'object') return null;
+    const payload = item as Record<string, unknown>;
+    if (
+      requireTitle &&
+      typeof payload.title !== 'string' &&
+      typeof payload.display_name !== 'string'
+    ) {
+      return null;
+    }
+    return payload;
+  }
+
   async fetchByPmcid(
     pmcid: string,
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
-    let url = `${this.BASE_URL}/pmcid:${encodeURIComponent(pmcid)}?mailto=${encodeURIComponent(this.mailto)}`;
-    if (this.apiKey) {
-      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
-    }
-
-    const response = await this.executeFetch(url, signal);
-    if (response.status === 404) return null;
-    if (!response.ok) {
-      const retryAfterMs = this.parseRetryAfterHeader(response);
-      throw new ProviderFetchError(
-        `OpenAlex API HTTP ${response.status} for PMCID: ${pmcid}`,
-        response.status,
-        retryAfterMs,
-      );
-    }
-
-    const item = (await response.json()) as Record<string, unknown> | null;
-    if (!item || typeof item !== 'object') return null;
-    return this.transformPayload(item, `pmcid:${pmcid}`, 0.95);
+    const item = await this.fetchSingleItem(
+      `pmcid:${encodeURIComponent(pmcid)}`,
+      `PMCID: ${pmcid}`,
+      signal,
+    );
+    return item ? this.transformPayload(item, `pmcid:${pmcid}`, 0.95) : null;
   }
 
   async fetchByUrl(
     targetUrl: string,
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
-    let url = `${this.BASE_URL}?filter=locations.landing_page_url:${encodeURIComponent(targetUrl)}&mailto=${encodeURIComponent(this.mailto)}`;
-    if (this.apiKey) {
-      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
-    }
-
+    const url = this.appendAuthParams(
+      `${this.BASE_URL}?filter=locations.landing_page_url:${encodeURIComponent(targetUrl)}`,
+    );
     const response = await this.executeFetch(url, signal);
     if (response.status === 404 || !response.ok) return null;
 
@@ -143,7 +176,9 @@ export class OpenAlexProvider extends BaseMetadataProvider {
       results?: Array<Record<string, unknown>>;
       [key: string]: unknown;
     } | null;
-    const item = (Array.isArray(data?.results) ? data.results[0] : data) as Record<string, unknown> | null | undefined;
+    const item = (
+      Array.isArray(data?.results) ? data.results[0] : data
+    ) as Record<string, unknown> | null | undefined;
     if (
       !item ||
       (typeof item.title !== 'string' && typeof item.display_name !== 'string')
@@ -159,43 +194,12 @@ export class OpenAlexProvider extends BaseMetadataProvider {
     pmid: string,
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
-    let url = `${this.BASE_URL}/pmid:${encodeURIComponent(pmid)}?mailto=${encodeURIComponent(this.mailto)}`;
-    if (this.apiKey) {
-      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
-    }
-
-    const response = await this.executeFetch(url, signal);
-
-    if (response.status === 404) return null;
-
-    if (!response.ok) {
-      const retryAfterMs = this.parseRetryAfterHeader(response);
-      throw new ProviderFetchError(
-        `OpenAlex API HTTP ${response.status} for PMID: ${pmid}`,
-        response.status,
-        retryAfterMs,
-      );
-    }
-
-    let item: unknown;
-    try {
-      item = await response.json();
-    } catch {
-      throw new ProviderFetchError(
-        `Failed to parse OpenAlex JSON for PMID: ${pmid}`,
-        undefined,
-        undefined,
-        false,
-        true,
-      );
-    }
-
-    if (!item || typeof item !== 'object') return null;
-    return this.transformPayload(
-      item as Record<string, unknown>,
-      `pmid:${pmid}`,
-      0.95,
+    const item = await this.fetchSingleItem(
+      `pmid:${encodeURIComponent(pmid)}`,
+      `PMID: ${pmid}`,
+      signal,
     );
+    return item ? this.transformPayload(item, `pmid:${pmid}`, 0.95) : null;
   }
 
   private async fetchByArxiv(
@@ -204,49 +208,15 @@ export class OpenAlexProvider extends BaseMetadataProvider {
   ): Promise<ProviderResult | null> {
     const rawId = cleanArxiv.replace(/^arxiv:\s*/i, '').trim();
     const idWithoutVersion = rawId.replace(/v\d+$/i, '');
-
-    let url = `${this.BASE_URL}/https://doi.org/10.48550/arXiv.${encodeURIComponent(idWithoutVersion)}?mailto=${encodeURIComponent(this.mailto)}`;
-    if (this.apiKey) {
-      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
-    }
-
-    const response = await this.executeFetch(url, signal);
-
-    if (response.status === 404) return null;
-
-    if (!response.ok) {
-      const retryAfterMs = this.parseRetryAfterHeader(response);
-      throw new ProviderFetchError(
-        `OpenAlex arXiv lookup HTTP ${response.status} for ${cleanArxiv}`,
-        response.status,
-        retryAfterMs,
-      );
-    }
-
-    let item: Record<string, unknown> | null = null;
-    try {
-      item = (await response.json()) as Record<string, unknown>;
-    } catch {
-      throw new ProviderFetchError(
-        `Failed to parse OpenAlex arXiv JSON for ${cleanArxiv}`,
-        undefined,
-        undefined,
-        false,
-        true,
-      );
-    }
-
-    if (
-      !item ||
-      typeof item !== 'object' ||
-      (typeof item.title !== 'string' && typeof item.display_name !== 'string')
-    ) {
-      return null;
-    }
-
+    const item = await this.fetchSingleItem(
+      `https://doi.org/10.48550/arXiv.${encodeURIComponent(idWithoutVersion)}`,
+      cleanArxiv,
+      signal,
+      true,
+    );
+    if (!item) return null;
     const itemDoi = typeof item.doi === 'string' ? item.doi : '';
     const doi = normalizeDoi(itemDoi) || `10.48550/arXiv.${idWithoutVersion}`;
-
     return this.transformPayload(item, doi, 0.95);
   }
 
@@ -254,46 +224,62 @@ export class OpenAlexProvider extends BaseMetadataProvider {
     doi: string,
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
-    let url = `${this.BASE_URL}/https://doi.org/${encodeURIComponent(doi)}?mailto=${encodeURIComponent(this.mailto)}`;
-    if (this.apiKey) {
-      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
-    }
+    const payload = await this.fetchSingleItem(
+      `https://doi.org/${encodeURIComponent(doi)}`,
+      `DOI: ${doi}`,
+      signal,
+      true,
+    );
+    return payload ? this.transformPayload(payload, doi, 0.9) : null;
+  }
 
+  /**
+   * Bulk resolution of up to 50 DOIs in a single OpenAlex HTTP request (`?filter=doi:d1|d2|...&per-page=50`).
+   */
+  async resolveDoiBatch(
+    rawDois: string[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, ProviderResult | null>> {
+    const resultMap = new Map<string, ProviderResult | null>();
+    const cleanDois: string[] = [];
+    for (const raw of rawDois) {
+      const clean = normalizeDoi(raw);
+      if (!clean) continue;
+      const lower = clean.toLowerCase();
+      if (!resultMap.has(lower)) {
+        resultMap.set(lower, null);
+        cleanDois.push(clean);
+      }
+    }
+    if (cleanDois.length === 0) return resultMap;
+
+    const filterExpr = cleanDois
+      .map((d) => `https://doi.org/${encodeURIComponent(d)}`)
+      .join('|');
+    const url = this.appendAuthParams(
+      `${this.BASE_URL}?filter=doi:${filterExpr}&per-page=${Math.min(50, cleanDois.length)}`,
+    );
     const response = await this.executeFetch(url, signal);
+    if (response.status === 404 || !response.ok) return resultMap;
 
-    if (response.status === 404) return null;
-
-    if (!response.ok) {
-      const retryAfterMs = this.parseRetryAfterHeader(response);
-      throw new ProviderFetchError(
-        `OpenAlex API HTTP ${response.status} for DOI: ${doi}`,
-        response.status,
-        retryAfterMs,
-      );
+    const data = (await response.json()) as {
+      results?: Array<Record<string, unknown>>;
+    } | null;
+    for (const item of data?.results ?? []) {
+      if (
+        !item ||
+        (typeof item.title !== 'string' &&
+          typeof item.display_name !== 'string')
+      ) {
+        continue;
+      }
+      const itemDoi =
+        typeof item.doi === 'string' ? normalizeDoi(item.doi) : undefined;
+      if (!itemDoi) continue;
+      const lower = itemDoi.toLowerCase();
+      resultMap.set(lower, this.transformPayload(item, itemDoi, 0.9));
     }
-
-    let item: unknown;
-    try {
-      item = await response.json();
-    } catch {
-      throw new ProviderFetchError(
-        `Failed to parse OpenAlex JSON for DOI: ${doi}`,
-        undefined,
-        undefined,
-        false,
-        true,
-      );
-    }
-
-    const payload = item as Record<string, unknown> | null;
-    if (
-      !payload ||
-      (typeof payload.title !== 'string' &&
-        typeof payload.display_name !== 'string')
-    ) {
-      return null;
-    }
-    return this.transformPayload(payload, doi, 0.9);
+    return resultMap;
   }
 
   private async searchByTitle(
@@ -699,6 +685,7 @@ export class OpenAlexProvider extends BaseMetadataProvider {
         keywords: keywords.length ? keywords : undefined,
         tags: keywords.length ? keywords : undefined,
         openAccessPdfUrl,
+        ...(typeof item.is_retracted === 'boolean' ? { isRetracted: item.is_retracted } : {}),
         libraryCatalog: 'OpenAlex',
       },
     });

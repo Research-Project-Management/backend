@@ -67,6 +67,7 @@ export class CrossRefProvider extends BaseMetadataProvider {
     const response = await this.executeFetch(url, signal);
     if (!response.ok) {
       const retryAfterMs = this.parseRetryAfterHeader(response);
+      await response.body?.cancel().catch(() => {});
       throw new ProviderFetchError(
         `Academic registry search responded with HTTP ${response.status}`,
         response.status,
@@ -89,11 +90,13 @@ export class CrossRefProvider extends BaseMetadataProvider {
     const response = await this.executeFetch(url, signal);
 
     if (response.status === 404) {
+      await response.body?.cancel().catch(() => {});
       return null;
     }
 
     if (!response.ok) {
       const retryAfterMs = this.parseRetryAfterHeader(response);
+      await response.body?.cancel().catch(() => {});
       throw new ProviderFetchError(
         `CrossRef API HTTP ${response.status} for DOI: ${doi}`,
         response.status,
@@ -131,10 +134,14 @@ export class CrossRefProvider extends BaseMetadataProvider {
 
     const response = await this.executeFetch(url, signal);
 
-    if (response.status === 404) return null;
+    if (response.status === 404) {
+      await response.body?.cancel().catch(() => {});
+      return null;
+    }
 
     if (!response.ok) {
       const retryAfterMs = this.parseRetryAfterHeader(response);
+      await response.body?.cancel().catch(() => {});
       throw new ProviderFetchError(
         `CrossRef search HTTP ${response.status} for title: ${cleanTitle}`,
         response.status,
@@ -655,6 +662,13 @@ export class CrossRefProvider extends BaseMetadataProvider {
       itemType === 'report' || itemType === 'standard'
         ? reportNumberStr
         : undefined;
+    const updates = [
+      ...(Array.isArray(message['updated-by']) ? message['updated-by'] : []),
+      ...(Array.isArray(message['update-to']) ? message['update-to'] : []),
+    ] as Array<{ type?: string; label?: string; doi?: string }>;
+    const hasRetractionNotice = updates.some((u) =>
+      /^(?:retraction|withdrawal|removal)$/i.test(String(u?.type || '')),
+    );
 
     return this.buildProviderResult({
       identifier: doi || title || 'crossref',
@@ -724,6 +738,7 @@ export class CrossRefProvider extends BaseMetadataProvider {
         archive,
         keywords: keywords.length ? keywords : undefined,
         openAccessPdfUrl: crossrefPdfUrl,
+        ...(hasRetractionNotice ? { isRetracted: true } : {}),
         itemType,
         libraryCatalog: 'DOI.org (Crossref)',
       },

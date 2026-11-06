@@ -97,6 +97,7 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
 
     expect(result).toEqual({
       imported: 0,
+      importedCount: 0,
       totalFound: 0,
       pagesScanned: 1,
     });

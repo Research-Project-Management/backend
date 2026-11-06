@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
@@ -97,9 +98,20 @@ function mergeExtractedPdfMetadata(
   return merged as unknown as ExtractedPdfMetadata;
 }
 
+const PDF_CONTENT_CACHE_MAX_ENTRIES = 500;
+const PDF_CONTENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class IdentifyFileResolver {
   private readonly logger = new Logger(IdentifyFileResolver.name);
+  private readonly contentHashCache = new Map<
+    string,
+    { metadata: ExtractedPdfMetadata; expiresAt: number }
+  >();
+  private readonly inFlightExtractions = new Map<
+    string,
+    Promise<ExtractedPdfMetadata>
+  >();
 
   constructor(
     private readonly normalizer: NormalizationPolicy,
@@ -110,6 +122,117 @@ export class IdentifyFileResolver {
     @Inject(EXTRACTION_FACADE)
     private readonly extractionGateway?: IExtractionFacade,
   ) {}
+
+  private cloneMetadata(meta: ExtractedPdfMetadata): ExtractedPdfMetadata {
+    return {
+      ...meta,
+      ...(meta.extraFields ? { extraFields: { ...meta.extraFields } } : {}),
+      ...(Array.isArray(meta.authors) ? { authors: [...meta.authors] } : {}),
+      ...(Array.isArray(meta.creators) ? { creators: [...meta.creators] } : {}),
+    };
+  }
+
+  private async extractBufferMetadataOnce(
+    fileBuffer: Buffer,
+  ): Promise<ExtractedPdfMetadata> {
+    const contentHash = createHash('sha256').update(fileBuffer).digest('hex');
+    const now = Date.now();
+    const cached = this.contentHashCache.get(contentHash);
+    if (cached && cached.expiresAt > now) {
+      return this.cloneMetadata(cached.metadata);
+    }
+    if (cached) {
+      this.contentHashCache.delete(contentHash);
+    }
+
+    const existingInFlight = this.inFlightExtractions.get(contentHash);
+    if (existingInFlight) {
+      const shared = await existingInFlight;
+      return this.cloneMetadata(shared);
+    }
+
+    const task = (async (): Promise<ExtractedPdfMetadata> => {
+      let result: ExtractedPdfMetadata = {};
+
+      if (this.extractionGateway?.extractTrustedMetadata) {
+        try {
+          // Pass undefined for filename so global content-hash cache remains 100% pure content-derived
+          const trusted = await this.extractionGateway.extractTrustedMetadata(
+            fileBuffer,
+            undefined,
+          );
+          if (trusted?.metadata) {
+            result = {
+              ...(trusted.metadata as unknown as ExtractedPdfMetadata),
+              isSelfSufficient: trusted.isSelfSufficient,
+              qualityScore: trusted.quality?.totalScore,
+              engineUsed: trusted.provenance?.engineUsed,
+            };
+          }
+        } catch {
+          // Fall through to header document extraction
+        }
+      }
+
+      const needsDocumentFallback =
+        Object.keys(result).length === 0 ||
+        (!result.doi &&
+          !result.arxivId &&
+          !result.isbn &&
+          (!result.title || result.title === 'Uploaded Document'));
+
+      if (
+        needsDocumentFallback &&
+        this.extractionGateway?.extractDocumentFromBuffer
+      ) {
+        const extractedDoc =
+          await this.extractionGateway.extractDocumentFromBuffer(fileBuffer, {
+            maxPages: 3,
+            headerOnly: true,
+            skipTrustedExtraction: true,
+          });
+        const docMeta =
+          ((extractedDoc?.metadata ||
+            extractedDoc) as unknown as ExtractedPdfMetadata) || {};
+        result = mergeExtractedPdfMetadata(result, docMeta);
+      }
+
+      if (
+        Object.keys(result).length === 0 &&
+        this.extractionGateway?.extractMetadataFromBuffer
+      ) {
+        try {
+          result =
+            (this.extractionGateway.extractMetadataFromBuffer(
+              fileBuffer,
+            ) as unknown as ExtractedPdfMetadata) || {};
+        } catch {
+          result = {};
+        }
+      }
+
+      if (Object.keys(result).length > 0) {
+        if (this.contentHashCache.size >= PDF_CONTENT_CACHE_MAX_ENTRIES) {
+          const oldestKey = this.contentHashCache.keys().next().value;
+          if (oldestKey) this.contentHashCache.delete(oldestKey);
+        }
+        this.contentHashCache.set(contentHash, {
+          metadata: this.cloneMetadata(result),
+          expiresAt: Date.now() + PDF_CONTENT_CACHE_TTL_MS,
+        });
+      }
+
+      return result;
+    })();
+
+    this.inFlightExtractions.set(contentHash, task);
+    try {
+      const resolved = await task;
+      return this.cloneMetadata(resolved);
+    } finally {
+      this.inFlightExtractions.delete(contentHash);
+    }
+  }
 
   cleanPdfTitle(
     rawTitle?: unknown,
@@ -195,73 +318,17 @@ export class IdentifyFileResolver {
         });
         if (fileRecord?.buffer) {
           fileBuffer = fileRecord.buffer;
-
-          if (this.extractionGateway.extractTrustedMetadata) {
-            try {
-              const trusted =
-                await this.extractionGateway.extractTrustedMetadata(
-                  fileBuffer,
-                  payload.filename,
-                );
-              if (trusted?.metadata) {
-                extractedMetadata = {
-                  ...(trusted.metadata as unknown as ExtractedPdfMetadata),
-                  isSelfSufficient: trusted.isSelfSufficient,
-                  qualityScore: trusted.quality?.totalScore,
-                  engineUsed: trusted.provenance?.engineUsed,
-                };
-              }
-            } catch {
-              // Fall through to header document extraction
-            }
-          }
-
-          const needsDocumentFallback =
-            Object.keys(extractedMetadata).length === 0 ||
-            (!extractedMetadata.doi &&
-              !extractedMetadata.arxivId &&
-              !extractedMetadata.isbn &&
-              (!extractedMetadata.title ||
-                extractedMetadata.title === 'Uploaded Document'));
-
-          if (needsDocumentFallback) {
-            const extractedDoc =
-              await this.extractionGateway.extractDocumentFromBuffer(
-                fileBuffer,
-                {
-                  maxPages: 3,
-                  headerOnly: true,
-                  skipTrustedExtraction: true,
-                },
-              );
-            const docMeta =
-              ((extractedDoc?.metadata ||
-                extractedDoc) as unknown as ExtractedPdfMetadata) || {};
-            extractedMetadata = mergeExtractedPdfMetadata(
-              extractedMetadata,
-              docMeta,
-            );
-          }
+          const bufferExtracted =
+            await this.extractBufferMetadataOnce(fileBuffer);
+          extractedMetadata = mergeExtractedPdfMetadata(
+            extractedMetadata,
+            bufferExtracted,
+          );
         }
       } catch (caughtError: unknown) {
         this.logger.warn(
           `PDF metadata extraction failed for file ${payload.fileId}: ${caughtError instanceof Error ? caughtError.message : String(caughtError)}`,
         );
-      }
-
-      if (
-        fileBuffer &&
-        Object.keys(extractedMetadata).length === 0 &&
-        this.extractionGateway.extractMetadataFromBuffer
-      ) {
-        try {
-          extractedMetadata =
-            (this.extractionGateway.extractMetadataFromBuffer(
-              fileBuffer,
-            ) as unknown as ExtractedPdfMetadata) || {};
-        } catch {
-          extractedMetadata = {};
-        }
       }
     }
 

@@ -157,6 +157,7 @@ export class UrlCaptureService {
     await this.repo.createCapturePreview({
       sourceUrl: result.url || url,
       userId: userId || effectiveScopeId,
+      projectId: projectId ?? null,
       canonicalMetadata:
         boundCanonicalMetadata as unknown as Prisma.InputJsonValue,
       metadataDigest,
@@ -211,9 +212,10 @@ export class UrlCaptureService {
       throw new ForbiddenException('Access denied to capture preview');
     }
     const boundProjectId =
-      typeof rawCanonical.projectId === 'string'
+      (preview as { projectId?: string | null }).projectId ||
+      (typeof rawCanonical.projectId === 'string'
         ? rawCanonical.projectId
-        : undefined;
+        : undefined);
     if (boundProjectId && projectId && boundProjectId !== projectId) {
       throw new ForbiddenException(
         'Capture preview project scope does not match confirmation project scope',

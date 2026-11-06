@@ -148,22 +148,67 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
       const clauses = (result as any).AND[1].AND;
 
       expect(clauses[0]).toEqual({
-        contributors: {
-          some: { fullName: { startsWith: 'Albert', mode: 'insensitive' } },
-        },
+        OR: [
+          {
+            contributors: {
+              some: {
+                OR: [
+                  { fullName: { startsWith: 'Albert', mode: 'insensitive' } },
+                  { lastName: { startsWith: 'Albert', mode: 'insensitive' } },
+                  { firstName: { startsWith: 'Albert', mode: 'insensitive' } },
+                ],
+              },
+            },
+          },
+          { firstAuthor: { startsWith: 'Albert', mode: 'insensitive' } },
+        ],
       });
       expect(clauses[1]).toEqual({
-        contributors: {
-          some: { fullName: { endsWith: 'Einstein', mode: 'insensitive' } },
-        },
+        OR: [
+          {
+            contributors: {
+              some: {
+                OR: [
+                  { fullName: { endsWith: 'Einstein', mode: 'insensitive' } },
+                  { lastName: { endsWith: 'Einstein', mode: 'insensitive' } },
+                  { firstName: { endsWith: 'Einstein', mode: 'insensitive' } },
+                ],
+              },
+            },
+          },
+          { firstAuthor: { endsWith: 'Einstein', mode: 'insensitive' } },
+        ],
       });
-      expect(clauses[2]).toEqual({ contributors: { some: {} } });
-      expect(clauses[3]).toEqual({ contributors: { none: {} } });
+      expect(clauses[2]).toEqual({
+        OR: [
+          { contributors: { some: {} } },
+          { AND: [{ firstAuthor: { not: null } }, { firstAuthor: { not: '' } }] },
+        ],
+      });
+      expect(clauses[3]).toEqual({
+        AND: [
+          { contributors: { none: {} } },
+          { OR: [{ firstAuthor: null }, { firstAuthor: '' }] },
+        ],
+      });
       expect(clauses[4]).toEqual({
         NOT: {
-          contributors: {
-            some: { fullName: { contains: 'Newton', mode: 'insensitive' } },
-          },
+          OR: [
+            {
+              contributors: {
+                some: {
+                  OR: [
+                    { fullName: { contains: 'Newton', mode: 'insensitive' } },
+                    { lastName: { contains: 'Newton', mode: 'insensitive' } },
+                    { firstName: { contains: 'Newton', mode: 'insensitive' } },
+                  ],
+                },
+              },
+            },
+            {
+              firstAuthor: { contains: 'Newton', mode: 'insensitive' },
+            },
+          ],
         },
       });
     });
@@ -511,7 +556,7 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
       };
 
       const result = await service.create(mockUserId, dto);
-      expect(mockRepo.create).toHaveBeenCalledWith(mockUserId, dto, undefined);
+      expect(mockRepo.create).toHaveBeenCalledWith(mockUserId, dto, undefined, undefined, 5);
       expect(mockRepo.countMatchingItems).toHaveBeenCalled();
       expect(result.cachedCount).toBe(5);
     });
@@ -541,6 +586,8 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
         mockUserId,
         dto,
         mockProjectId,
+        undefined,
+        5,
       );
       expect(result.cachedCount).toBe(5);
     });

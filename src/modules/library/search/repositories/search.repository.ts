@@ -95,7 +95,10 @@ export class SearchRepository implements OnModuleInit {
     contributors: { orderBy: { orderIndex: 'asc' as const } },
     attachments: { where: { deletedAt: null }, take: 5 },
     itemTags: { include: { tag: true } },
-    collectionItems: { include: { collection: true } },
+    collectionItems: {
+      where: { collection: { deletedAt: null } },
+      include: { collection: true },
+    },
     states: { where: { userId }, take: 1 },
     identifiers: true,
   });
@@ -457,16 +460,33 @@ export class SearchRepository implements OnModuleInit {
         // Non-fatal fallback to local version
       }
     }
-    const nextVer = String(baseVer + 1);
-    this.setLocalScopeVersion(normalizedScope, nextVer);
+    let nextVer = String(baseVer + 1);
 
     if (this.cache) {
       const versionKey = LIBRARY_REDIS_KEYS.searchVersion(normalizedScope);
+      const cacheWithIncr = this.cache as RedisCacheService & {
+        incr?: (key: string, ttlSeconds?: number) => Promise<number>;
+      };
+      if (typeof cacheWithIncr.incr === 'function') {
+        try {
+          const incremented = await cacheWithIncr.incr(versionKey, 86400);
+          if (Number.isFinite(incremented) && incremented > 0) {
+            nextVer = String(incremented);
+          }
+        } catch {
+          // Fallback to set
+        }
+      }
+      this.setLocalScopeVersion(normalizedScope, nextVer);
       await Promise.all([
         this.cache.delPattern?.(LIBRARY_REDIS_KEYS.searchFacetsPattern(normalizedScope)),
         this.cache.delPattern?.(LIBRARY_REDIS_KEYS.searchItemsPattern(normalizedScope)),
-        this.cache.set?.(versionKey, nextVer, 86400),
+        typeof cacheWithIncr.incr !== 'function'
+          ? this.cache.set?.(versionKey, nextVer, 86400)
+          : Promise.resolve(),
       ]);
+    } else {
+      this.setLocalScopeVersion(normalizedScope, nextVer);
     }
   }
 
@@ -674,38 +694,21 @@ export class SearchRepository implements OnModuleInit {
     attachmentId: string,
     pageIndexOrSearchTerm?: number | string,
     searchTerm?: string,
-  ): Promise<
-    Array<{ pageIndex: number; textContent: string; charOffset: number }>
-  > {
-    const resolvedPageIndex =
-      typeof pageIndexOrSearchTerm === 'number'
-        ? pageIndexOrSearchTerm
-        : undefined;
-    const resolvedSearchTerm =
-      typeof pageIndexOrSearchTerm === 'string'
-        ? pageIndexOrSearchTerm
-        : searchTerm;
+  ): Promise<Array<{ pageIndex: number; textContent: string; charOffset: number }>> {
+    const resolvedPageIndex = typeof pageIndexOrSearchTerm === 'number' ? pageIndexOrSearchTerm : undefined;
+    const resolvedSearchTerm = typeof pageIndexOrSearchTerm === 'string' ? pageIndexOrSearchTerm : searchTerm;
     const trimmedTerm = resolvedSearchTerm?.trim();
     const escapedTerm = trimmedTerm ? escapeLikePattern(trimmedTerm) : undefined;
+    const baseWhere: Prisma.FullTextIndexWhereInput = {
+      attachmentId,
+      attachment: { deletedAt: null, item: { deletedAt: null } },
+      ...(resolvedPageIndex !== undefined ? { pageIndex: resolvedPageIndex } : {}),
+    };
 
     const dbPages = await this.prisma.fullTextIndex.findMany({
       where: {
-        attachmentId,
-        attachment: {
-          deletedAt: null,
-          item: { deletedAt: null },
-        },
-        ...(resolvedPageIndex !== undefined
-          ? { pageIndex: resolvedPageIndex }
-          : {}),
-        ...(escapedTerm
-          ? {
-              textContent: {
-                contains: escapedTerm,
-                mode: 'insensitive',
-              },
-            }
-          : {}),
+        ...baseWhere,
+        ...(escapedTerm ? { textContent: { contains: escapedTerm, mode: 'insensitive' } } : {}),
       },
       orderBy: { pageIndex: 'asc' },
       take: trimmedTerm ? 200 : 1000,
@@ -715,31 +718,14 @@ export class SearchRepository implements OnModuleInit {
       const foldedTerm = SearchQueryEngine.stripDiacritics(trimmedTerm).trim();
       if (foldedTerm.length >= 2) {
         const allPages = await this.prisma.fullTextIndex.findMany({
-          where: {
-            attachmentId,
-            attachment: {
-              deletedAt: null,
-              item: { deletedAt: null },
-            },
-            ...(resolvedPageIndex !== undefined
-              ? { pageIndex: resolvedPageIndex }
-              : {}),
-          },
+          where: baseWhere,
           orderBy: { pageIndex: 'asc' },
           take: 500,
         });
-        return allPages.map((dbPage) => ({
-          pageIndex: dbPage.pageIndex,
-          textContent: dbPage.textContent || '',
-          charOffset: dbPage.charOffset ?? 0,
-        }));
+        return allPages.map((p) => ({ pageIndex: p.pageIndex, textContent: p.textContent || '', charOffset: p.charOffset ?? 0 }));
       }
     }
 
-    return dbPages.map((dbPage) => ({
-      pageIndex: dbPage.pageIndex,
-      textContent: dbPage.textContent || '',
-      charOffset: dbPage.charOffset ?? 0,
-    }));
+    return dbPages.map((p) => ({ pageIndex: p.pageIndex, textContent: p.textContent || '', charOffset: p.charOffset ?? 0 }));
   }
 }

@@ -52,13 +52,97 @@ export class ArxivProvider extends BaseMetadataProvider {
     return this.parseAtomXml(xmlText, cleanId);
   }
 
+  /**
+   * Bulk resolution of up to 50 arXiv IDs in a single HTTP request (`?id_list=id1,id2,...`).
+   * Consumes only 1 rate-limit token for the entire batch.
+   */
+  async resolveBatch(
+    rawIds: string[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, ProviderResult | null>> {
+    const resultMap = new Map<string, ProviderResult | null>();
+    const cleanToRawKeys = new Map<string, string[]>();
+    const baseToCleanIds = new Map<string, string[]>();
+
+    for (const raw of rawIds) {
+      const cleanId = normalizeArxivId(raw) ?? raw.trim();
+      if (!cleanId) continue;
+      resultMap.set(cleanId.toLowerCase(), null);
+      const baseId = (
+        normalizeArxivId(cleanId, { stripVersion: true }) ??
+        cleanId.replace(/v\d+$/i, '')
+      ).toLowerCase();
+      const existingClean = baseToCleanIds.get(baseId) ?? [];
+      if (!existingClean.includes(cleanId)) {
+        existingClean.push(cleanId);
+      }
+      baseToCleanIds.set(baseId, existingClean);
+
+      const rawList = cleanToRawKeys.get(cleanId.toLowerCase()) ?? [];
+      rawList.push(cleanId);
+      cleanToRawKeys.set(cleanId.toLowerCase(), rawList);
+    }
+
+    const uniqueCleanIds = Array.from(
+      new Set(Array.from(cleanToRawKeys.values()).map((v) => v[0])),
+    );
+    if (uniqueCleanIds.length === 0) return resultMap;
+
+    const url = `${this.baseUrl}?id_list=${uniqueCleanIds.map((id) => encodeURIComponent(id)).join(',')}&max_results=${uniqueCleanIds.length}`;
+    const headers = {
+      'User-Agent': getUserAgent('Arxiv'),
+      Accept: 'application/atom+xml, application/xml, text/xml',
+    };
+
+    const xmlText = await this.fetchTextWithResilience(
+      url,
+      signal,
+      headers,
+      `batch(${uniqueCleanIds.length} ids)`,
+    );
+    if (!xmlText) return resultMap;
+
+    const entryMatches = Array.from(
+      xmlText.matchAll(/<entry>([\s\S]*?)<\/entry>/gi),
+    );
+    for (const match of entryMatches) {
+      const entryXml = match[0];
+      const entryBody = match[1] || '';
+      const idTagMatch = entryBody.match(/<id>([\s\S]*?)<\/id>/i);
+      const entryIdRaw = idTagMatch ? idTagMatch[1].trim() : '';
+      const extractedEntryId = normalizeArxivId(entryIdRaw);
+      if (!extractedEntryId) continue;
+
+      const baseEntryId = (
+        normalizeArxivId(extractedEntryId, { stripVersion: true }) ??
+        extractedEntryId.replace(/v\d+$/i, '')
+      ).toLowerCase();
+
+      const matchedRequestedIds = baseToCleanIds.get(baseEntryId) ?? [
+        extractedEntryId,
+      ];
+      for (const reqId of matchedRequestedIds) {
+        const parsed = this.parseAtomEntryXml(entryBody, entryXml, reqId);
+        resultMap.set(reqId.toLowerCase(), parsed);
+      }
+    }
+
+    return resultMap;
+  }
+
   private parseAtomXml(xml: string, rawQueryId: string): ProviderResult | null {
     const cleanId = normalizeArxivId(rawQueryId) ?? rawQueryId.trim();
     const entryMatch = xml.match(/<entry>([\s\S]*?)<\/entry>/i);
     if (!entryMatch) return null;
 
-    const entry = entryMatch[1];
+    return this.parseAtomEntryXml(entryMatch[1], xml, cleanId);
+  }
 
+  private parseAtomEntryXml(
+    entry: string,
+    rawXmlPayload: string,
+    cleanId: string,
+  ): ProviderResult | null {
     if (entry.includes('<title>Error</title>')) return null;
 
     const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/i);
@@ -195,7 +279,7 @@ export class ArxivProvider extends BaseMetadataProvider {
     return this.buildProviderResult({
       identifier: cleanId,
       confidenceScore: 0.95,
-      rawPayload: xml,
+      rawPayload: rawXmlPayload,
       retrievalMethod: 'api',
       sourceUrl: canonicalUrl,
       canonicalId: `arxiv:${cleanId}`,

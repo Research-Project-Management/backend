@@ -20,13 +20,9 @@ import {
   normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { getDocumentProxy } from 'unpdf';
+import type { ImportAnnotationsResult } from '../types/pdf-extraction.types';
 
-interface ImportAnnotationsResult {
-  imported: number;
-  importedCount: number;
-  totalFound: number;
-  pagesScanned: number;
-}
+export type { ImportAnnotationsResult };
 
 @Injectable()
 export class PdfAnnotationImporterService {
@@ -162,6 +158,9 @@ export class PdfAnnotationImporterService {
       }> = [];
 
       for (let p = 1; p <= numPages; p++) {
+        if (p > 1 && (p - 1) % 10 === 0) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
         let page: Awaited<ReturnType<typeof documentProxy.getPage>> | undefined;
         try {
           page = await documentProxy.getPage(p);

@@ -13,7 +13,7 @@ import { AnnotationsController } from './controllers/annotations.controller';
 import { ExtractionTelemetryController } from './controllers/attachments.controller';
 
 // Facades
-import { ExtractionFacade, EXTRACTION_FACADE } from './services/reference-matcher.service';
+import { ExtractionFacade, EXTRACTION_FACADE } from './services/extraction.facade';
 
 // Services
 import { AttachmentsService } from './services/attachments.service';
@@ -37,7 +37,7 @@ import {
   ExtractionHandler,
   EXTRACTION_EVENT_TYPES,
 } from './services/extraction.handler';
-import { ItemLifecycleSubscriber } from './services/reference-matcher.service';
+import { ItemLifecycleSubscriber } from './services/item-lifecycle.subscriber';
 import { AnnotationNormalizer } from './domain/annotations.domain';
 
 @Global()

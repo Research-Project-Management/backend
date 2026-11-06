@@ -78,8 +78,9 @@ export class IngestionRepository {
 
   async createRun(scope: IngestionScope, data: CreateIngestionRunData, tx?: Prisma.TransactionClient): Promise<IngestionRun> {
     const { userId, projectId } = parseRunScope(scope, data.userId);
+    const scopeKey = projectId ? `proj:${projectId}` : `user:${userId}`;
     if (data.idempotencyKey) {
-      const lockToken = `idemp:${projectId || userId}:${data.idempotencyKey}`;
+      const lockToken = `idemp:${scopeKey}:${data.idempotencyKey}`;
       const idempWhere: Prisma.IngestionRunWhereInput = projectId
         ? { projectId, idempotencyKey: data.idempotencyKey }
         : { userId, projectId: null, idempotencyKey: data.idempotencyKey };
@@ -100,6 +101,7 @@ export class IngestionRepository {
     const created = await client.ingestionRun.create({
       data: {
         ...(data.id ? { id: data.id } : {}),
+        scopeKey,
         userId,
         projectId,
         traceId: data.traceId ?? null,
@@ -129,10 +131,12 @@ export class IngestionRepository {
     if (typeof scope === 'object') {
       if (scope.projectId && isUUID(scope.projectId)) return { id: runId, projectId: scope.projectId };
       if (scope.userId && scope.userId !== 'system' && isUUID(scope.userId)) return { id: runId, userId: scope.userId, projectId: null };
-      return { id: runId };
+      return { id: runId, userId: '00000000-0000-0000-0000-000000000000', projectId: '00000000-0000-0000-0000-000000000000' };
     }
     const trimmed = scope.trim();
-    if (!trimmed || trimmed === 'system' || trimmed === 'user' || trimmed === 'me' || !isUUID(trimmed)) return { id: runId };
+    if (!trimmed || trimmed === 'system' || trimmed === 'user' || trimmed === 'me' || !isUUID(trimmed)) {
+      return { id: runId, userId: '00000000-0000-0000-0000-000000000000', projectId: '00000000-0000-0000-0000-000000000000' };
+    }
     return { id: runId, OR: [{ userId: trimmed, projectId: null }, { projectId: trimmed }] };
   }
 
@@ -242,24 +246,35 @@ export class IngestionRepository {
     runId: string,
     expectedStatuses: IngestionStatus[],
     newStatus: IngestionStatus,
-    details?: { lastError?: string },
+    details?: { lastError?: string; completedAt?: Date },
     tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
     const client = this.getClient(tx);
-    if (
+    const isTerminal =
       newStatus === IngestionStatus.COMPLETED ||
       newStatus === IngestionStatus.FAILED_FINAL ||
-      newStatus === IngestionStatus.FAILED_RETRYABLE ||
-      newStatus === IngestionStatus.CANCELLED
-    ) {
+      newStatus === IngestionStatus.CANCELLED;
+    if (isTerminal || newStatus === IngestionStatus.FAILED_RETRYABLE) {
       this.executionLogCache.delete(runId);
     }
+    const shouldIncrementAttempts =
+      newStatus === IngestionStatus.RUNNING ||
+      (newStatus === IngestionStatus.PENDING &&
+        expectedStatuses.some(
+          (s) =>
+            s === IngestionStatus.FAILED_RETRYABLE ||
+            s === IngestionStatus.FAILED_FINAL ||
+            s === IngestionStatus.STALLED,
+        ));
+    const effectiveCompletedAt =
+      details?.completedAt ?? (isTerminal ? new Date() : undefined);
     const result = await client.ingestionRun.updateMany({
       where: { id: runId, status: { in: expectedStatuses } },
       data: {
         status: newStatus,
-        attempts: { increment: 1 },
+        ...(shouldIncrementAttempts ? { attempts: { increment: 1 } } : {}),
         ...(details?.lastError !== undefined ? { lastError: details.lastError } : {}),
+        ...(effectiveCompletedAt !== undefined ? { completedAt: effectiveCompletedAt } : {}),
       },
     });
     return result.count > 0;
@@ -564,10 +579,6 @@ export class IngestionRepository {
       if (updateOps.length > 0) await Promise.all(updateOps);
       return;
     }
-    await client.ingestionRun.updateMany({
-      where: { itemId: { in: itemIds }, reviewData: { not: Prisma.JsonNull } },
-      data: { reviewData: toJsonValue({ status: 'RESOLVED', resolvedAt }) },
-    });
   }
   async createCapturePreview(data: Prisma.CapturePreviewCreateInput, tx?: Prisma.TransactionClient) {
     return this.getClient(tx).capturePreview.create({ data });

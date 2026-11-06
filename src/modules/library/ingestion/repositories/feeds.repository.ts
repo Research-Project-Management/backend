@@ -76,13 +76,16 @@ export class FeedsRepository {
     const { userId, feedId, customTitle, cleanupDays } = params;
     const readDays = params.cleanupReadAfter !== undefined ? params.cleanupReadAfter : cleanupDays !== undefined ? cleanupDays : 7;
     const unreadDays = params.cleanupUnreadAfter !== undefined ? params.cleanupUnreadAfter : cleanupDays !== undefined ? cleanupDays : 30;
+    const scopeKey = `user:${userId}`;
     return this.prisma.feedSubscription.upsert({
       where: { userId_feedId: { userId, feedId } },
       create: {
+        scopeKey,
         userId, feedId, customTitle: customTitle || null,
         cleanupReadAfter: readDays, cleanupUnreadAfter: unreadDays,
       },
       update: {
+        scopeKey,
         customTitle: customTitle || undefined,
         cleanupReadAfter: readDays, cleanupUnreadAfter: unreadDays,
       },
@@ -204,20 +207,7 @@ export class FeedsRepository {
         : validPage > 1 ? { skip: (validPage - 1) * limit } : {}),
     });
 
-    const filteredRaw = !readCutoff && !unreadCutoff ? rawItems : rawItems.filter((item) => {
-      const state = item.readStates?.[0] as { readAt?: Date | null; isRead?: boolean; savedItemId?: string | null } | undefined;
-      if (state?.savedItemId) return true;
-      const isRead = Boolean(state?.isRead ?? state?.readAt);
-      const pubTime = item.publishedAt ? new Date(item.publishedAt) : null;
-      if (isRead) {
-        if (!readCutoff) return true;
-        const referenceDate = state?.readAt ? new Date(state.readAt) : pubTime;
-        return !referenceDate || referenceDate >= readCutoff;
-      }
-      return !unreadCutoff || !pubTime || pubTime >= unreadCutoff;
-    });
-
-    return filteredRaw.map((it) => {
+    return rawItems.map((it) => {
       const state = it.readStates?.[0] as { readAt?: Date | null; isRead?: boolean; savedItemId?: string | null } | undefined;
       const extraMeta = this.extractItemExtraMeta(it);
       const cleanComments = typeof it.comments === 'string' && it.comments.trim().startsWith('{') ? null : it.comments;
@@ -360,14 +350,18 @@ export class FeedsRepository {
 
   async markManyItemsRead(userId: string, canonicalItemIds: string[]): Promise<void> {
     if (!this.prisma || canonicalItemIds.length === 0) return;
+    const orderedIds = Array.from(new Set(canonicalItemIds.filter(Boolean))).sort(
+      (a, b) => (a < b ? -1 : a > b ? 1 : 0),
+    );
+    if (orderedIds.length === 0) return;
     const now = new Date();
     await this.prisma.feedItemReadState.createMany({
-      data: canonicalItemIds.map((itemId) => ({ userId, itemId, isRead: true, readAt: now })),
+      data: orderedIds.map((itemId) => ({ userId, itemId, isRead: true, readAt: now })),
       skipDuplicates: true,
     });
     if (typeof this.prisma.feedItemReadState.updateMany === 'function') {
       await this.prisma.feedItemReadState.updateMany({
-        where: { userId, itemId: { in: canonicalItemIds }, isRead: false },
+        where: { userId, itemId: { in: orderedIds }, isRead: false },
         data: { isRead: true, readAt: now },
       });
     }

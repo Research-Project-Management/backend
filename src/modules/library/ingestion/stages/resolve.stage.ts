@@ -41,7 +41,7 @@ interface CandidateEnrichmentReadiness {
   isCredibleTitle: boolean;
 }
 
-function evaluateCandidateEnrichmentReadiness(
+export function evaluateCandidateEnrichmentReadiness(
   candidate: MetadataCandidate,
   options?: { isBulkRecordBatch?: boolean },
 ): CandidateEnrichmentReadiness {
@@ -66,11 +66,21 @@ function evaluateCandidateEnrichmentReadiness(
     ((hasAuthors && hasVenueAndYear && hasAbstract) || (isBulkRecordBatch && (hasAuthors || hasYearOrDate)));
   const isAlreadyResolvedByMirror =
     extra.alreadyResolvedByMirror === true && hasTitle && (hasAuthors || hasYearOrDate);
+  const isBookLike = meta.itemType === 'book' || Boolean(meta.isbn);
+  const isEdgeResolvedFileComplete =
+    candidate.sourceKind === 'FILE' &&
+    candidate.fields?.title?.sourceProvider === 'DirectIdentifier' &&
+    extra.hadOnlyFilenameTitleBeforeEdge !== true &&
+    hasTitle &&
+    hasAuthors &&
+    hasVenueAndYear &&
+    (hasAbstract || isBookLike);
   const isAlreadyComplete =
-    candidate.sourceKind !== 'FILE' &&
-    ((candidate.sourceKind !== 'RECORD' && hasTitle && hasAuthors && hasVenueAndYear && (candidate.confidenceScore ?? 0) >= 0.9) ||
-      isCompleteStructuredRecord ||
-      isAlreadyResolvedByMirror);
+    isEdgeResolvedFileComplete ||
+    (candidate.sourceKind !== 'FILE' &&
+      ((candidate.sourceKind !== 'RECORD' && hasTitle && hasAuthors && hasVenueAndYear && (hasAbstract || isBookLike) && (candidate.confidenceScore ?? 0) >= 0.9) ||
+        isCompleteStructuredRecord ||
+        isAlreadyResolvedByMirror));
   const hasExtractedTags = Boolean(
     (Array.isArray(meta.tags) && meta.tags.length > 0) || (Array.isArray(meta.keywords) && meta.keywords.length > 0),
   );
@@ -208,7 +218,7 @@ export class ResolveStage implements IWorkflowStage<ResolveStageInput, MetadataC
     if (pendingTasks.length === 0) return enrichedCandidates;
 
     const metadataService = this.metadataService;
-    const concurrency = Math.min(4, pendingTasks.length);
+    const concurrency = Math.min(20, pendingTasks.length);
     let taskIndex = 0;
 
     const runWorker = async (): Promise<void> => {

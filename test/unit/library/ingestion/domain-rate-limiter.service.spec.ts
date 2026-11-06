@@ -74,12 +74,12 @@ describe('DomainRateLimiterService', () => {
   });
 
   it('aborts cleanly when AbortSignal is triggered', async () => {
-    service.setDomainConfig('abort-domain', { minIntervalMs: 500 });
+    service.setDomainConfig('abort-domain', { minIntervalMs: 200 });
 
     await service.acquire('abort-domain');
 
     const controller = new AbortController();
-    setTimeout(() => controller.abort(new Error('User aborted')), 20);
+    setTimeout(() => controller.abort(new Error('User aborted')), 5);
 
     await expect(
       service.acquire('abort-domain', controller.signal),

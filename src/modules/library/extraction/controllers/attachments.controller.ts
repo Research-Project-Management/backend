@@ -31,7 +31,7 @@ export class AttachmentController {
   @ApiOperation({ summary: 'Get thumbnail image for an attachment' })
   async getAttachmentThumbnail(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
+    @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
     @Res() res: FastifyReply,
     @Param('projectId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
@@ -55,7 +55,7 @@ export class AttachmentController {
   @ApiOperation({ summary: 'Get all attachments for a library item' })
   async getItemAttachments(
     @CurrentUser('id') userId: string,
-    @Param('itemId') itemId: string,
+    @Param('itemId', new ParseUUIDPipe()) itemId: string,
     @Param('projectId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
     @Query('projectId') queryProjectId?: string,
@@ -72,8 +72,8 @@ export class AttachmentController {
   @ApiOperation({ summary: 'Get attachment details by ID' })
   async getItemAttachment(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
-    @Param('itemId') itemId?: string,
+    @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
+    @Param('itemId', new ParseUUIDPipe({ optional: true })) itemId?: string,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
@@ -92,7 +92,7 @@ export class AttachmentController {
   @ApiOperation({ summary: 'Create and associate a new attachment' })
   async createAttachment(
     @CurrentUser('id') userId: string,
-    @Param('itemId') paramItemId: string | undefined,
+    @Param('itemId', new ParseUUIDPipe({ optional: true })) paramItemId: string | undefined,
     @Body() dto: CreateAttachmentDto,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId', new ParseUUIDPipe({ optional: true }))
@@ -121,7 +121,7 @@ export class AttachmentController {
   @ApiOperation({ summary: 'Trigger re-extraction on an attachment' })
   async reExtractAttachment(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
+    @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
     @Param('projectId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
     @Query('projectId') queryProjectId?: string,
@@ -138,7 +138,7 @@ export class AttachmentController {
   @ApiOperation({ summary: 'Delete an attachment' })
   async deleteAttachment(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
+    @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
     @Param('projectId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
     @Query('projectId') queryProjectId?: string,
@@ -159,8 +159,8 @@ export class AttachmentController {
   @ApiOperation({ summary: 'Set attachment as primary PDF for item' })
   async setPrimaryAttachment(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
-    @Param('itemId') paramItemId?: string,
+    @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
+    @Param('itemId', new ParseUUIDPipe({ optional: true })) paramItemId?: string,
     @Query('itemId') queryItemId?: string,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId', new ParseUUIDPipe({ optional: true }))
@@ -189,7 +189,7 @@ export class AttachmentController {
   @ApiOperation({ summary: 'Rename attachment file' })
   async renameAttachment(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
+    @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
     @Body() dto: RenameAttachmentDto,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId', new ParseUUIDPipe({ optional: true }))

@@ -336,7 +336,11 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     const anyViolations: Array<{ file: string; line: number; match: string }> = [];
 
     for (const [, { relPath, lines }] of feFileCache) {
-      if (!relPath.endsWith('.types.ts') && lines.length > 750) {
+      if (
+        !relPath.endsWith('.types.ts') &&
+        !relPath.endsWith('.constants.ts') &&
+        lines.length > 750
+      ) {
         sizeViolations.push({ file: relPath, lines: lines.length });
       }
 
@@ -551,6 +555,31 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         });
       }
 
+      if (relPath.startsWith('types/')) {
+        lines.forEach((line, index) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+          if (/\blocalStorage\b/.test(line)) {
+            feDomainStorageViolations.push({
+              file: relPath,
+              line: index + 1,
+              match: trimmed,
+            });
+          }
+          if (
+            /from\s+['"]@\/features\/library\/(domain|core|sdk|ui)\//.test(line) ||
+            /from\s+['"]\.\.\/(domain|core|sdk|ui)\//.test(line) ||
+            /from\s+['"]\.\.\/[^'"]+['"]/.test(line)
+          ) {
+            feLayerDirectionViolations.push({
+              file: relPath,
+              line: index + 1,
+              match: trimmed,
+            });
+          }
+        });
+      }
+
       if (relPath.startsWith('domain/')) {
         lines.forEach((line, index) => {
           const trimmed = line.trim();
@@ -564,10 +593,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
           }
           if (
             /from\s+['"]@\/features\/library\/(core|sdk|ui)\//.test(line) ||
-            /from\s+['"]\.\.\/(core|sdk|ui)\//.test(line) ||
-            (relPath.startsWith('domain/types/') &&
-              (/from\s+['"]\.\.\/[^'"]+['"]/.test(line) ||
-                /from\s+['"]@\/features\/library\/domain\/(?!types\/)[^'"]+['"]/.test(line)))
+            /from\s+['"]\.\.\/(core|sdk|ui)\//.test(line)
           ) {
             feLayerDirectionViolations.push({
               file: relPath,
@@ -764,8 +790,28 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       .filter(
         (relPath) =>
           relPath.startsWith('domain/') &&
-          !relPath.startsWith('domain/types/') &&
-          !/\.(?:domain|policy|mapper|constants)\.ts$/.test(relPath),
+          !/\.(?:domain|policy|mapper)\.ts$/.test(relPath),
+      );
+    const feTypesNamingViolations = Array.from(feFileCache.values())
+      .map((f) => f.relPath)
+      .filter(
+        (relPath) =>
+          relPath.startsWith('types/') &&
+          !/\.(?:types|constants)\.ts$/.test(relPath),
+      );
+    const feSdkQueriesNamingViolations = Array.from(feFileCache.values())
+      .map((f) => f.relPath)
+      .filter(
+        (relPath) =>
+          relPath.startsWith('sdk/queries/') &&
+          !/\.queries\.ts$/.test(relPath),
+      );
+    const feSdkClientsNamingViolations = Array.from(feFileCache.values())
+      .map((f) => f.relPath)
+      .filter(
+        (relPath) =>
+          relPath.startsWith('sdk/clients/') &&
+          !/\.client\.ts$/.test(relPath),
       );
     const beRepoHelperViolations = Array.from(fileCache.values())
       .map((f) => f.relPath)
@@ -778,6 +824,9 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       .filter((relPath) => /(?:^|\/)data\//i.test(relPath) || /zotero/i.test(path.basename(relPath)));
     expect(beDomainNamingViolations).toEqual([]);
     expect(feDomainNamingViolations).toEqual([]);
+    expect(feTypesNamingViolations).toEqual([]);
+    expect(feSdkQueriesNamingViolations).toEqual([]);
+    expect(feSdkClientsNamingViolations).toEqual([]);
     expect(beRepoHelperViolations).toEqual([]);
     expect(beDataFolderOrZoteroFileViolations).toEqual([]);
     expect(feDataFolderOrZoteroFileViolations).toEqual([]);

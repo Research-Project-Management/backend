@@ -409,15 +409,24 @@ export class ExtractionHandler implements OutboxDispatchHandler {
   }
 
   private async runPostExtractionPipeline(ctx: PostExtractionPipelineContext): Promise<void> {
-    const steps: ReadonlyArray<(context: PostExtractionPipelineContext) => Promise<void>> = [
-      (c) => this.indexExtractedPagesStep(c),
-      (c) => this.linkCitationsStep(c),
-      (c) => this.markReadyAndSyncMetadataStep(c),
-      (c) => this.invalidateExtractionCachesStep(c),
-      (c) => this.publishPostExtractionEventsStep(c),
-    ];
-    for (const step of steps) {
-      await step(ctx);
+    await this.indexExtractedPagesStep(ctx);
+    await this.linkCitationsStep(ctx);
+    await this.markReadyAndSyncMetadataStep(ctx);
+
+    try {
+      await this.invalidateExtractionCachesStep(ctx);
+    } catch (cacheErr: unknown) {
+      this.logger.warn(
+        `Non-fatal post-markReady cache invalidation failure for ${ctx.attachmentId}: ${cacheErr instanceof Error ? cacheErr.message : String(cacheErr)}`,
+      );
+    }
+
+    try {
+      await this.publishPostExtractionEventsStep(ctx);
+    } catch (eventErr: unknown) {
+      this.logger.warn(
+        `Non-fatal post-markReady event emission failure for ${ctx.attachmentId}: ${eventErr instanceof Error ? eventErr.message : String(eventErr)}`,
+      );
     }
   }
 
@@ -442,7 +451,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       await this.dispatchExtractedPagesIndexing(attachment.id, attachment.itemId, normalizedPages);
     } catch (indexErr: unknown) {
       const msg = indexErr instanceof Error ? indexErr.message : String(indexErr);
-      this.logger.warn(`Failed to index extracted pages for attachment ${attachment.id}: ${msg}`);
+      this.logger.error(`Failed to index extracted pages for attachment ${attachment.id}: ${msg}`);
+      throw indexErr;
     }
   }
 
@@ -489,7 +499,10 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         { eventId: event.id, attachmentId },
       );
     }
-    if (doc?.references && doc.references.length > 0 && scopeId) {
+    const hasValidScope = Boolean(
+      effectiveProjectId || (effectiveUserId && effectiveUserId !== 'system'),
+    );
+    if (doc?.references && doc.references.length > 0 && scopeId && hasValidScope) {
       try {
         await this.linkInLibraryCitations(
           { userId: effectiveUserId, projectId: effectiveProjectId },

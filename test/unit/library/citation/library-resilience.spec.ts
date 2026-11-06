@@ -14,7 +14,7 @@ describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter
       breaker = new CircuitBreaker({
         name: 'test-api',
         failureThreshold: 3,
-        resetTimeoutMs: 200, // 200ms for fast testing
+        resetTimeoutMs: 15, // fast unit testing
         halfOpenMaxAttempts: 1,
       });
     });
@@ -84,8 +84,8 @@ describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter
       breaker.recordFailure();
       expect(breaker.getState()).toBe('OPEN');
 
-      // Wait for resetTimeoutMs (200ms)
-      await new Promise((resolve) => setTimeout(resolve, 220));
+      // Wait for resetTimeoutMs
+      await new Promise((resolve) => setTimeout(resolve, 25));
 
       expect(breaker.getState()).toBe('HALF_OPEN');
 
@@ -103,8 +103,8 @@ describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter
       breaker.recordFailure();
       breaker.recordFailure();
 
-      // Wait for resetTimeoutMs (200ms)
-      await new Promise((resolve) => setTimeout(resolve, 220));
+      // Wait for resetTimeoutMs
+      await new Promise((resolve) => setTimeout(resolve, 25));
       expect(breaker.getState()).toBe('HALF_OPEN');
 
       // Probe request fails
@@ -137,14 +137,14 @@ describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter
       const limiter = new TokenBucketRateLimiter({
         name: 'test-limiter',
         capacity: 2,
-        refillRatePerSec: 10, // 10 tokens per second = 1 token per 100ms
+        refillRatePerSec: 100, // 100 tokens per second = 1 token per 10ms
       });
 
       expect(limiter.tryAcquire(2)).toBe(true);
       expect(limiter.tryAcquire()).toBe(false);
 
-      // Wait 150ms to gain at least 1 token
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Wait 25ms to gain at least 1 token
+      await new Promise((resolve) => setTimeout(resolve, 25));
 
       expect(limiter.tryAcquire()).toBe(true);
     });

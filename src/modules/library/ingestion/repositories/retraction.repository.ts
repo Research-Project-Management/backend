@@ -113,6 +113,7 @@ export class RetractionRepository {
       projectId?: string | null;
       pmid?: string | null;
       isbn?: string | null;
+      isRetracted?: boolean;
       identifiers?: Array<{ type?: string; value?: string }>;
     },
   >(item: T) {
@@ -136,7 +137,7 @@ export class RetractionRepository {
         meta.isbn ??
         findIdentVal(item.identifiers, 'isbn') ??
         null,
-      isRetracted: Boolean(meta.isRetracted),
+      isRetracted: Boolean(item.isRetracted || meta.isRetracted),
       retractionNature: meta.retractionNature ?? null,
       retractionCheckedAt: checkedAt,
     };
@@ -160,6 +161,9 @@ export class RetractionRepository {
         id: true,
         title: true,
         doi: true,
+        pmid: true,
+        isbn: true,
+        isRetracted: true,
         metadata: true,
         identifiers: { select: { type: true, value: true } },
       },
@@ -191,6 +195,9 @@ export class RetractionRepository {
         id: true,
         title: true,
         doi: true,
+        pmid: true,
+        isbn: true,
+        isRetracted: true,
         metadata: true,
         retractionCheckedAt: true,
         identifiers: { select: { type: true, value: true } },
@@ -456,6 +463,9 @@ export class RetractionRepository {
         projectId: true,
         title: true,
         doi: true,
+        pmid: true,
+        isbn: true,
+        isRetracted: true,
         metadata: true,
         retractionCheckedAt: true,
         identifiers: { select: { type: true, value: true } },
@@ -581,6 +591,7 @@ export class RetractionRepository {
         userId: true,
         projectId: true,
         doi: true,
+        isRetracted: true,
         metadata: true,
         identifiers: { select: { type: true, value: true } },
       },
@@ -592,7 +603,7 @@ export class RetractionRepository {
         userId: it.userId,
         projectId: it.projectId,
         doi: it.doi ?? findIdentVal(it.identifiers, 'doi'),
-        isRetracted: Boolean(meta.isRetracted),
+        isRetracted: Boolean((it as { isRetracted?: boolean }).isRetracted || meta.isRetracted),
         retractionNature: meta.retractionNature ?? null,
       };
     });

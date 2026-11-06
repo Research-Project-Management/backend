@@ -291,11 +291,13 @@ export abstract class BaseMetadataProvider implements MetadataProvider {
     }
 
     if (response.status === 404) {
+      await response.body?.cancel().catch(() => {});
       return null;
     }
 
     if (!response.ok) {
       const retryAfterMs = this.parseRetryAfterHeader(response);
+      await response.body?.cancel().catch(() => {});
       throw new ProviderFetchError(
         `${this.id} API HTTP ${response.status} for ${options?.contextLabel ?? url}`,
         response.status,
@@ -324,11 +326,13 @@ export abstract class BaseMetadataProvider implements MetadataProvider {
   ): Promise<string | null> {
     const response = await this.executeHttpFetch(url, signal, headers);
     if (response.status === 404) {
+      await response.body?.cancel().catch(() => {});
       return null;
     }
 
     if (!response.ok) {
       const retryAfterMs = this.parseRetryAfterHeader(response);
+      await response.body?.cancel().catch(() => {});
       throw new ProviderFetchError(
         `${this.id} API HTTP ${response.status} for ${contextLabel ?? url}`,
         response.status,
@@ -528,6 +532,8 @@ export class RetractionScannerProvider {
               isVerifiedClean: false,
             };
           }
+        } else {
+          await oaRes.body?.cancel().catch(() => {});
         }
       }
     } catch (oaErr: unknown) {
@@ -667,6 +673,8 @@ export class RetractionScannerProvider {
           }
 
           return { retraction: null, isVerifiedClean: true };
+        } else {
+          await crRes.body?.cancel().catch(() => {});
         }
       } catch (crErr: unknown) {
         const msg = crErr instanceof Error ? crErr.message : String(crErr);

@@ -87,12 +87,11 @@ export function isValidFileHash(hash?: string | null): boolean {
   return /^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{64}$/.test(hash.trim());
 }
 
+import type { FieldExtractionProvenance } from '../types/pdf-extraction.types';
+
 type ExtractedMetadata = ItemMetadata;
 
-export interface FieldExtractionProvenance {
-  source: string;
-  confidence: number;
-}
+export type { FieldExtractionProvenance };
 
 /**
  * Context Object for the 4-Tier PDF Metadata Extraction Chain of Responsibility.

@@ -1,19 +1,20 @@
 import { BadRequestException } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { ExtractionTelemetryController } from '@/modules/library/extraction/controllers/attachments.controller';
-import { PdfMetadataExtractor } from '@/modules/library/extraction/providers/pdf-metadata.extractor';
+import { IExtractionEnginePort } from '@/modules/library/extraction/services/extraction.handler';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { PdfMetadataExtractionResult } from '@/modules/library/core/types/extraction.types';
 
 describe('ExtractionTelemetryController', () => {
   let controller: ExtractionTelemetryController;
-  let trustedExtractor: jest.Mocked<PdfMetadataExtractor>;
+  let trustedExtractor: jest.Mocked<IExtractionEnginePort>;
   let attachmentsService: jest.Mocked<AttachmentsService>;
 
   beforeEach(() => {
     trustedExtractor = {
-      extract: jest.fn(),
-    } as unknown as jest.Mocked<PdfMetadataExtractor>;
+      extractTrustedMetadata: jest.fn(),
+      extractAttachmentAsync: jest.fn(),
+    } as unknown as jest.Mocked<IExtractionEnginePort>;
 
     attachmentsService = {
       getExtractionStatusBreakdown: jest.fn().mockResolvedValue({
@@ -92,7 +93,7 @@ describe('ExtractionTelemetryController', () => {
     });
 
     it('extracts metadata from JSON base64Pdf payload and formats benchmark metrics', async () => {
-      trustedExtractor.extract.mockResolvedValueOnce(mockExtractionResult);
+      trustedExtractor.extractTrustedMetadata.mockResolvedValueOnce(mockExtractionResult);
 
       const fakePdfBytes = Buffer.from('%PDF-1.4 test content');
       const base64Pdf = `data:application/pdf;base64,${fakePdfBytes.toString('base64')}`;
@@ -103,7 +104,7 @@ describe('ExtractionTelemetryController', () => {
         filename: 'resnet.pdf',
       });
 
-      expect(trustedExtractor.extract).toHaveBeenCalledWith(
+      expect(trustedExtractor.extractTrustedMetadata).toHaveBeenCalledWith(
         expect.any(Buffer),
         'resnet.pdf',
       );
@@ -118,7 +119,7 @@ describe('ExtractionTelemetryController', () => {
     });
 
     it('handles raw base64 string without data: prefix', async () => {
-      trustedExtractor.extract.mockResolvedValueOnce(mockExtractionResult);
+      trustedExtractor.extractTrustedMetadata.mockResolvedValueOnce(mockExtractionResult);
 
       const fakePdfBytes = Buffer.from('%PDF-1.5 test raw');
       const rawBase64 = fakePdfBytes.toString('base64');
@@ -128,7 +129,7 @@ describe('ExtractionTelemetryController', () => {
         base64Pdf: rawBase64,
       });
 
-      expect(trustedExtractor.extract).toHaveBeenCalledWith(
+      expect(trustedExtractor.extractTrustedMetadata).toHaveBeenCalledWith(
         expect.any(Buffer),
         'benchmark.pdf',
       );
@@ -137,7 +138,7 @@ describe('ExtractionTelemetryController', () => {
     });
 
     it('handles multipart/form-data upload when req.parts() is available', async () => {
-      trustedExtractor.extract.mockResolvedValueOnce(mockExtractionResult);
+      trustedExtractor.extractTrustedMetadata.mockResolvedValueOnce(mockExtractionResult);
 
       const fakePdfBytes = Buffer.from('%PDF-1.7 multipart stream');
       const mockParts = async function* () {
@@ -154,7 +155,7 @@ describe('ExtractionTelemetryController', () => {
 
       const res = await controller.benchmarkExtraction(mockReq, {});
 
-      expect(trustedExtractor.extract).toHaveBeenCalledWith(
+      expect(trustedExtractor.extractTrustedMetadata).toHaveBeenCalledWith(
         fakePdfBytes,
         'multipart-paper.pdf',
       );

@@ -388,6 +388,20 @@ export class ExtractionRepository {
 
   async markReady(attachmentId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
+    if (typeof client.attachment?.updateMany === 'function' && typeof client.attachment?.findUnique === 'function') {
+      await client.attachment.updateMany({
+        where: {
+          id: attachmentId,
+          extractionStatus: { in: ['PROCESSING', 'PENDING', 'FAILED_RETRYABLE'] },
+        },
+        data: {
+          extractionStatus: 'READY',
+          extractionCompletedAt: new Date(),
+          extractionLastError: null,
+        },
+      });
+      return client.attachment.findUnique({ where: { id: attachmentId } });
+    }
     return client.attachment.update({
       where: { id: attachmentId },
       data: {
@@ -406,6 +420,20 @@ export class ExtractionRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
+    if (typeof client.attachment?.updateMany === 'function' && typeof client.attachment?.findUnique === 'function') {
+      await client.attachment.updateMany({
+        where: {
+          id: attachmentId,
+          extractionStatus: { not: 'READY' },
+        },
+        data: {
+          extractionStatus: status,
+          extractionLastError: error,
+          ...(isFinal ? { extractionCompletedAt: new Date() } : {}),
+        },
+      });
+      return client.attachment.findUnique({ where: { id: attachmentId } });
+    }
     return client.attachment.update({
       where: { id: attachmentId },
       data: {
@@ -440,13 +468,26 @@ export class ExtractionRepository {
     let scopeWhere: Prisma.ItemWhereInput;
     if (typeof scope === 'object' && scope !== null) {
       const normalizedProjectId = normalizeProjectScopeId(scope.projectId);
-      scopeWhere = normalizedProjectId
-        ? { projectId: normalizedProjectId }
-        : { userId: scope.userId, projectId: null };
-    } else {
+      const validUserId =
+        typeof scope.userId === 'string' &&
+        scope.userId.trim().length > 0 &&
+        scope.userId !== 'system'
+          ? scope.userId.trim()
+          : undefined;
+      if (normalizedProjectId) {
+        scopeWhere = { projectId: normalizedProjectId };
+      } else if (validUserId) {
+        scopeWhere = { userId: validUserId, projectId: null };
+      } else {
+        return [];
+      }
+    } else if (typeof scope === 'string' && scope.trim().length > 0 && scope !== 'system') {
+      const cleanScope = scope.trim();
       scopeWhere = {
-        OR: [{ projectId: scope }, { userId: scope, projectId: null }],
+        OR: [{ projectId: cleanScope }, { userId: cleanScope, projectId: null }],
       };
+    } else {
+      return [];
     }
 
     const cleanDois =
@@ -481,6 +522,7 @@ export class ExtractionRepository {
         id: true,
         title: true,
         doi: true,
+        arxivId: true,
         year: true,
         metadata: true,
         contributors: {
@@ -684,26 +726,13 @@ export class ExtractionRepository {
       const lower = idObj.type.trim().toLowerCase();
       const t = lower === 'arxivid' || lower === 'arxiv' ? 'arxiv' : lower;
       const metaKey = t === 'arxiv' ? 'arxivId' : t;
-      if (
-        freshItem &&
-        (ItemProvenancePolicy.isFieldLocked(freshMeta, metaKey) ||
-          ItemProvenancePolicy.isFieldLocked(freshMeta, t))
-      ) {
+      if (freshItem && (ItemProvenancePolicy.isFieldLocked(freshMeta, metaKey) || ItemProvenancePolicy.isFieldLocked(freshMeta, t))) {
         return false;
       }
-      const existingVal =
-        t === 'doi' ? freshItem?.doi || freshMeta.doi : freshItemRec[metaKey] || freshMeta[metaKey] || freshMeta[t];
-      if (
-        existingVal &&
-        String(existingVal).trim() &&
-        String(existingVal).trim().toLowerCase() !== idObj.value.trim().toLowerCase()
-      ) {
-        return false;
-      }
-      return true;
+      const existingVal = t === 'doi' ? freshItem?.doi || freshMeta.doi : freshItemRec[metaKey] || freshMeta[metaKey] || freshMeta[t];
+      return !(existingVal && String(existingVal).trim() && String(existingVal).trim().toLowerCase() !== idObj.value.trim().toLowerCase());
     });
-    if (filtered.length === 0) return;
-    if (!rawClient.itemIdentifier?.upsert) return;
+    if (filtered.length === 0 || !rawClient.itemIdentifier?.upsert) return;
     await Promise.all(
       filtered.map((idObj) => {
         const lower = idObj.type.trim().toLowerCase();
@@ -711,12 +740,7 @@ export class ExtractionRepository {
         return rawClient.itemIdentifier.upsert({
           where: { itemId_type: { itemId, type: canonicalType } },
           update: { value: idObj.value, canonicalUri: idObj.canonicalUri },
-          create: {
-            itemId,
-            type: canonicalType,
-            value: idObj.value,
-            canonicalUri: idObj.canonicalUri,
-          },
+          create: { itemId, type: canonicalType, value: idObj.value, canonicalUri: idObj.canonicalUri },
         });
       }),
     );

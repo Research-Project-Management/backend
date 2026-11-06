@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Delete, Param, Query, Body, Headers, UseG
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles, RequireOperator } from '@/modules/project/access';
 import {
   IngestionSubmissionDto, UnifiedIngestionDto, CaptureUrlDto, ConfirmCapturedUrlDto, FetchAcademicFeedDto,
   MergeDuplicatesDto, BatchMergeDuplicatesDto, DismissDuplicatesDto, UpdateReviewCaseStatusDto,
@@ -215,7 +215,7 @@ export class IngestionController {
   }
 
   @Post('fetch-feed')
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Fetch and parse an external RSS/Atom journal or arXiv feed with DB caching & ETag support',
   })
@@ -392,6 +392,7 @@ export class RetractionController {
   }
 
   @Post('database/seed')
+  @RequireOperator()
   @ProjectRoles('owner')
   async seedDatabase(
     @CurrentUser('id') _userId: string,

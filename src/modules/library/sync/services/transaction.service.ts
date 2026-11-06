@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, BadRequestException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService, RedisCacheService } from '@/core';
@@ -74,17 +74,15 @@ export class TransactionService implements IUnitOfWork {
     const validUuid =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         rawUserId,
+      ) && rawUserId !== '00000000-0000-0000-0000-000000000000';
+    if (!validUuid) {
+      throw new BadRequestException(
+        `OutboxEvent requires a valid non-zero UUID userId, received: "${rawUserId || 'empty'}"`,
       );
-    const resolvedUserId = validUuid
-      ? rawUserId
-      : '00000000-0000-0000-0000-000000000000';
+    }
     return {
-      userId: resolvedUserId,
-      actorId:
-        ev.actorId ??
-        (resolvedUserId !== '00000000-0000-0000-0000-000000000000'
-          ? resolvedUserId
-          : null),
+      userId: rawUserId,
+      actorId: ev.actorId ?? rawUserId,
       projectId: ev.projectId || null,
       aggregateId: ev.aggregateId,
       eventType: ev.eventType,
@@ -220,16 +218,27 @@ export class TransactionService implements IUnitOfWork {
               typeof (payload as Record<string, unknown>).dedupeKey === 'string'
                 ? ((payload as Record<string, unknown>).dedupeKey as string)
                 : null);
-            const event = await tx.outboxEvent.create({
-              data: this.buildOutboxEventData({
-                userId: scope.userId,
-                projectId: scope.projectId || null,
-                aggregateId,
-                eventType,
-                payload,
-                dedupeKey,
-              }),
+            const eventData = this.buildOutboxEventData({
+              userId: scope.userId,
+              projectId: scope.projectId || null,
+              aggregateId,
+              eventType,
+              payload,
+              dedupeKey,
             });
+            const event =
+              dedupeKey && typeof tx.outboxEvent?.upsert === 'function'
+                ? await tx.outboxEvent.upsert({
+                    where: { dedupeKey },
+                    create: eventData,
+                    update: {
+                      payload: eventData.payload,
+                      status: OutboxStatus.PENDING,
+                    },
+                  })
+                : await tx.outboxEvent.create({
+                    data: eventData,
+                  });
             pendingOutboxEvents.push({
               id: event.id,
               eventType: event.eventType,
@@ -459,108 +468,11 @@ export class TransactionService implements IUnitOfWork {
   }
 }
 
-interface CompactableChange {
-  id?: string;
-  seq: bigint | number | string;
-  userId?: string | null;
-  projectId?: string | null;
-  entityType: string;
-  entityId: string;
-  action: string;
-  version?: number;
-  data?: unknown;
-  createdAt?: Date | string;
-}
-
-/**
- * Sliding-Window Delta Compaction Algorithm.
- * Squashes multiple consecutive mutations for the same entity within a sync window.
- * Reduces bandwidth and client processing overhead by 70%-90%.
- */
-export function compactLibraryChanges<T extends CompactableChange>(
-  changes: T[],
-): T[] {
-  const entityMap = new Map<string, T>();
-
-  for (const change of changes) {
-    const key = `${change.entityType.toLowerCase()}:${change.entityId}`;
-    const existing = entityMap.get(key);
-
-    if (!existing) {
-      entityMap.set(key, { ...change });
-      continue;
-    }
-
-    const prevAction = existing.action.toUpperCase();
-    const currAction = change.action.toUpperCase();
-
-    if (
-      (prevAction === 'CREATE' && currAction === 'UPDATE') ||
-      (prevAction === 'UPDATE' && currAction === 'UPDATE')
-    ) {
-      entityMap.set(key, {
-        ...change,
-        action: existing.action,
-        seq: change.seq,
-        version: change.version ?? existing.version,
-        data: mergePayloadData(existing.data, change.data),
-      });
-      continue;
-    }
-
-    if (currAction === 'DELETE') {
-      if (prevAction === 'CREATE') {
-        const prevTitle =
-          existing.data && typeof existing.data === 'object'
-            ? (existing.data as { title?: unknown }).title
-            : undefined;
-        const isRestoredLifecycle =
-          typeof prevTitle === 'string' &&
-          prevTitle.toLowerCase().includes('restored');
-        if (!isRestoredLifecycle) {
-          entityMap.delete(key);
-          continue;
-        }
-      }
-      entityMap.set(key, {
-        ...change,
-        seq: change.seq,
-        version: change.version ?? existing.version,
-        data: change.data ?? null,
-      });
-      continue;
-    }
-
-    entityMap.set(key, { ...change });
-  }
-
-  return Array.from(entityMap.values()).sort((a, b) => {
-    const seqA = typeof a.seq === 'bigint' ? a.seq : BigInt(a.seq);
-    const seqB = typeof b.seq === 'bigint' ? b.seq : BigInt(b.seq);
-    return seqA < seqB ? -1 : seqA > seqB ? 1 : 0;
-  });
-}
-
-function mergePayloadData(prev: unknown, next: unknown): unknown {
-  if (!prev) return next;
-  if (!next) return prev;
-  if (
-    typeof prev !== 'object' ||
-    typeof next !== 'object' ||
-    Array.isArray(prev) ||
-    Array.isArray(next)
-  ) {
-    return next;
-  }
-  return {
-    ...(prev as Record<string, unknown>),
-    ...(next as Record<string, unknown>),
-  };
-}
-
 export {
+  compactLibraryChanges,
   evaluateOutboxFailureDecision,
   computeOutboxDiagnostics,
+  type CompactableChange,
   type OutboxMetricsRecorder,
   type OutboxDiagnosticSummary,
-} from '../repositories/changelog.repository';
+} from '../domain/sync-compaction.policy';

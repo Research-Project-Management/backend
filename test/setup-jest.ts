@@ -3,6 +3,8 @@
  * Applied to all test suites via `setupFilesAfterEnv` in package.json.
  */
 
+import { Logger } from '@nestjs/common';
+
 // 1. Environment Variable Guard (Never hit live cloud/DB accidentally)
 process.env.NODE_ENV = 'test';
 process.env.DISABLE_REDIS = process.env.DISABLE_REDIS ?? 'true';
@@ -19,11 +21,14 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-// 3. Suppress noisy NestJS info/debug logs during testing unless DEBUG_TESTS is set
+// 3. Suppress noisy NestJS info/debug/warn logs during testing unless DEBUG_TESTS is set
 if (!process.env.DEBUG_TESTS) {
+  Logger.overrideLogger(false);
+
   const originalLog = console.log;
   const originalDebug = console.debug;
   const originalInfo = console.info;
+  const originalWarn = console.warn;
 
   // Filter out [Nest] runtime startup and use-case info logs
   const filterNestNoise =
@@ -33,7 +38,8 @@ if (!process.env.DEBUG_TESTS) {
         typeof args[0] === 'string' &&
         (args[0].includes('[Nest]') ||
           args[0].includes('DEBUG') ||
-          args[0].includes('LOG'))
+          args[0].includes('LOG') ||
+          args[0].includes('WARN'))
       ) {
         return;
       }
@@ -43,6 +49,7 @@ if (!process.env.DEBUG_TESTS) {
   console.log = filterNestNoise(originalLog);
   console.debug = filterNestNoise(originalDebug);
   console.info = filterNestNoise(originalInfo);
+  console.warn = filterNestNoise(originalWarn);
 }
 
 // 4. Custom Domain Matchers

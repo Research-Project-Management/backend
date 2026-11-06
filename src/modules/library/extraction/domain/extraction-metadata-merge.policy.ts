@@ -7,35 +7,13 @@ import {
   resolveOrCreateAutomaticTagsInClient as resolveOrCreateTags,
   isRejectedCitedIdentifier,
 } from '@/modules/library/core';
+import type {
+  ExtractionSyncAttachmentInput,
+  ExtractionSyncDocumentInput,
+} from '../types/pdf-extraction.types';
 
 export { disambiguateCitationKey, resolveOrCreateTags, isRejectedCitedIdentifier };
-
-export interface ExtractionSyncAttachmentInput {
-  id: string; itemId: string; attachmentType?: string | null;
-  item?: (Record<string, unknown> & {
-    id?: string; userId?: string; projectId?: string | null; title?: string; doi?: string | null;
-    arxivId?: string | null; pmid?: string | null; pmcid?: string | null; isbn?: string | null;
-    issn?: string | null; abstract?: string | null; year?: number | null;
-    publicationTitle?: string | null; itemType?: string | null; metadata?: unknown;
-  }) | null;
-  [key: string]: unknown;
-}
-
-export interface ExtractionSyncDocumentInput {
-  references?: unknown[];
-  metadata?: {
-    keywords?: string[]; notes?: Array<{ content: string; type?: string }>;
-    title?: string; doi?: string; arxivId?: string; abstract?: string; year?: number;
-    numberOfPages?: number; publicationTitle?: string; journal?: string; proceedingsTitle?: string;
-    conferenceName?: string; bookTitle?: string; isbn?: string; issn?: string; pmid?: string;
-    pmcid?: string; volume?: string; issue?: string; pages?: string; publisher?: string;
-    place?: string; publicationDate?: string; primaryCategory?: string; authors?: string[];
-    creators?: Array<{
-      creatorType?: string; fullName?: string; name?: string; firstName?: string; lastName?: string; fieldMode?: number;
-    }>;
-    fieldProvenance?: Record<string, { source?: string; confidence?: number; extractedAt?: string }>;
-  };
-}
+export type { ExtractionSyncAttachmentInput, ExtractionSyncDocumentInput };
 
 interface FreshItemExtractionTarget {
   userId: string; projectId?: string | null; citationKey?: string | null; title?: string | null;

@@ -95,12 +95,13 @@ export function planMergedItemRelations(
   relationIdsToDelete: string[];
   relationUpdates: Array<{ id: string; sourceItemId: string; targetItemId: string }>;
 } {
+  const dupIdSet = new Set(uniqueDupIds);
   const primaryExistingPairs = new Set<string>();
   for (const rel of existingRelations) {
     if (
       (rel.sourceItemId === primaryId || rel.targetItemId === primaryId) &&
-      !uniqueDupIds.includes(rel.sourceItemId) &&
-      !uniqueDupIds.includes(rel.targetItemId)
+      !dupIdSet.has(rel.sourceItemId) &&
+      !dupIdSet.has(rel.targetItemId)
     ) {
       registerRelationPairWithReciprocal(primaryExistingPairs, rel.sourceItemId, rel.targetItemId, rel.relationType);
     }
@@ -108,8 +109,8 @@ export function planMergedItemRelations(
   const relationIdsToDelete: string[] = [];
   const relationUpdates: Array<{ id: string; sourceItemId: string; targetItemId: string }> = [];
   for (const rel of existingRelations) {
-    const isSourceDup = uniqueDupIds.includes(rel.sourceItemId);
-    const isTargetDup = uniqueDupIds.includes(rel.targetItemId);
+    const isSourceDup = dupIdSet.has(rel.sourceItemId);
+    const isTargetDup = dupIdSet.has(rel.targetItemId);
     if (!isSourceDup && !isTargetDup) continue;
     const newSourceId = isSourceDup ? primaryId : rel.sourceItemId;
     const newTargetId = isTargetDup ? primaryId : rel.targetItemId;

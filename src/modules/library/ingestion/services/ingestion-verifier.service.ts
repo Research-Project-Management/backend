@@ -23,6 +23,9 @@ import {
   INGESTION_FACADE,
   IIngestionFacade,
   ReconcileExtractedCandidatePayload,
+  SingleFlightCoalescer,
+  BulkheadSemaphore,
+  normalizeProjectScopeId,
 } from '@/modules/library/core';
 import { BOT_CHALLENGE_TITLE_RE, BOT_CHALLENGE_HTML_RE } from '@/modules/library/core/domain/text.lexicon';
 import { IngestionService } from './ingestion.service';
@@ -454,14 +457,30 @@ export interface QualityAuditReport {
 
 @Injectable()
 export class QualityService {
+  private readonly auditSingleFlight = new SingleFlightCoalescer();
+  private readonly auditBulkhead = new BulkheadSemaphore({
+    name: 'library-quality-audit',
+    maxConcurrent: 4,
+    maxQueueSize: 100,
+  });
+
   constructor(
     @Optional()
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway?: ICatalogFacade,
   ) {}
 
-
   async getQualityAudit(userId: string, projectId?: string) {
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const flightKey = `audit:${userId}:${effectiveProjectId ?? 'personal'}`;
+    return this.auditSingleFlight.execute(flightKey, () =>
+      this.auditBulkhead.run(() =>
+        this.executeQualityAudit(userId, effectiveProjectId),
+      ),
+    );
+  }
+
+  private async executeQualityAudit(userId: string, projectId?: string) {
     const items = this.catalogGateway
       ? await this.catalogGateway.findQualityAuditItems(userId, 2000, projectId)
       : [];
@@ -471,6 +490,7 @@ export class QualityService {
     let missingAbstract = 0;
     let missingYear = 0;
     let missingAuthors = 0;
+    let missingPdf = 0;
     let healthyItems = 0;
     const flaggedItems: Array<{
       itemId: string;
@@ -479,16 +499,21 @@ export class QualityService {
     }> = [];
 
     for (const it of items) {
+      const itRec = it as unknown as Record<string, unknown>;
       const { evaluation, issues, isHealthy } =
-        diagnoseBibliographicQualityIssues(
-          it as unknown as Record<string, unknown>,
-        );
+        diagnoseBibliographicQualityIssues(itRec);
 
       const issueMask = evaluation.missingIssueMask;
       if (issueMask & QUALITY_RULE_BIT.authors) missingAuthors += 1;
       if (issueMask & QUALITY_RULE_BIT.year) missingYear += 1;
       if (issueMask & QUALITY_RULE_BIT.doi) missingDoi += 1;
       if (issueMask & QUALITY_RULE_BIT.abstract) missingAbstract += 1;
+      if (
+        itRec.hasFile === false &&
+        (typeof itRec.attachmentCount !== 'number' || itRec.attachmentCount === 0)
+      ) {
+        missingPdf += 1;
+      }
 
       if (isHealthy) {
         healthyItems += 1;
@@ -515,7 +540,7 @@ export class QualityService {
       missingYearCount: missingYear,
       missingAuthorsCount: missingAuthors,
       missingAbstractCount: missingAbstract,
-      missingPdfCount: 0,
+      missingPdfCount: missingPdf,
       flaggedItems,
       healthReport: {
         missingDoi,

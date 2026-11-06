@@ -1,6 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { RecordFormat } from '@/modules/library/ingestion/types/ingestion.types';
-import { BibtexParser } from './bibtex.parser';
+import { BibtexParser, QueryClassifier } from './bibtex.parser';
 import { RisParser } from './ris.parser';
 import {
   CslParser,
@@ -11,6 +11,55 @@ import { XmlLegacyFormatsParser } from './xml-legacy-formats.parser';
 import { mapBibtexToRawRecord } from '@/modules/library/ingestion/domain/metadata-validation.policy';
 
 export { parseMedlineNbibRecords, parseCsvBibliographyRecords };
+
+const MAX_IDENTIFIER_LIST_ITEMS = 200;
+
+function parsePlainTextIdentifierList(content: string): Record<string, unknown>[] {
+  const lines = (content || '')
+    .split(/[\r\n,;]+/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith('#') && !l.startsWith('//'));
+  if (lines.length === 0) return [];
+
+  const records: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    if (records.length >= MAX_IDENTIFIER_LIST_ITEMS) break;
+    const classified = QueryClassifier.classify(line);
+    if (classified.type === 'DOI') {
+      const key = `doi:${classified.clean.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        records.push({ doi: classified.clean, citationKey: classified.clean });
+      }
+    } else if (classified.type === 'ARXIV') {
+      const key = `arxiv:${classified.clean.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        records.push({ arxivId: classified.clean, citationKey: `arXiv:${classified.clean}` });
+      }
+    } else if (classified.type === 'PMID') {
+      const key = `pmid:${classified.clean.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        records.push({ pmid: classified.clean, citationKey: `PMID:${classified.clean}` });
+      }
+    } else if (classified.type === 'ISBN') {
+      const key = `isbn:${classified.clean.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        records.push({ isbn: classified.clean, citationKey: `ISBN:${classified.clean}` });
+      }
+    } else if (classified.type === 'URL') {
+      const key = `url:${classified.clean}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        records.push({ url: classified.clean, citationKey: classified.clean });
+      }
+    }
+  }
+  return records;
+}
 
 interface ParsedBibliographyRecordEnvelope {
   sourceName: string;
@@ -324,24 +373,37 @@ export class BibliographyFormatRegistry {
     formatHint?: string,
   ): Promise<ParsedBibliographyRecordEnvelope[]> {
     const resolvedFormat = this.detectRecordFormat(content, formatHint);
-    if (!resolvedFormat) return [];
+    if (resolvedFormat) {
+      const strategy = this.getStrategy(resolvedFormat);
+      if (strategy) {
+        const records = await strategy.parseRecords(content);
+        if (records.length > 0) {
+          const sourceName =
+            strategy.format === 'REFER' && formatHint
+              ? formatHint
+              : strategy.sourceName;
 
-    const strategy = this.getStrategy(resolvedFormat);
-    if (!strategy) return [];
+          return records.map((rawMetadata) => ({
+            sourceName,
+            sourceRecordId: strategy.extractRecordId
+              ? strategy.extractRecordId(rawMetadata)
+              : undefined,
+            rawMetadata,
+            confidenceScore: strategy.confidenceScore,
+          }));
+        }
+      }
+    }
 
-    const records = await strategy.parseRecords(content);
-    const sourceName =
-      strategy.format === 'REFER' && formatHint
-        ? formatHint
-        : strategy.sourceName;
-
-    return records.map((rawMetadata) => ({
-      sourceName,
-      sourceRecordId: strategy.extractRecordId
-        ? strategy.extractRecordId(rawMetadata)
-        : undefined,
+    const fallbackIdRecords = parsePlainTextIdentifierList(content);
+    return fallbackIdRecords.map((rawMetadata) => ({
+      sourceName: 'DirectIdentifier',
+      sourceRecordId:
+        typeof rawMetadata.citationKey === 'string'
+          ? rawMetadata.citationKey
+          : undefined,
       rawMetadata,
-      confidenceScore: strategy.confidenceScore,
+      confidenceScore: 1.0,
     }));
   }
 }

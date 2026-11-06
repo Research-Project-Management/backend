@@ -185,10 +185,12 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
     let controller: IngestionController;
     let mockIngestionService: {
       submit: jest.Mock;
+      submitFromDto: jest.Mock;
       getRunStatus: jest.Mock;
       getRunProgress: jest.Mock;
       retryRun: jest.Mock;
       ingest: jest.Mock;
+      ingestUnifiedDto: jest.Mock;
     };
     let mockUrlCaptureService: {
       captureUrl: jest.Mock;
@@ -198,6 +200,9 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
     beforeEach(() => {
       mockIngestionService = {
         submit: jest
+          .fn()
+          .mockResolvedValue({ runId: 'run-1', status: 'ACCEPTED' }),
+        submitFromDto: jest
           .fn()
           .mockResolvedValue({ runId: 'run-1', status: 'ACCEPTED' }),
         getRunStatus: jest
@@ -212,6 +217,7 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
           .fn()
           .mockResolvedValue({ runId: 'run-2', status: 'RETRYING' }),
         ingest: jest.fn().mockResolvedValue({ success: true }),
+        ingestUnifiedDto: jest.fn().mockResolvedValue({ success: true }),
       };
       mockUrlCaptureService = {
         captureUrl: jest.fn().mockResolvedValue({ previewToken: 'tok-123' }),
@@ -240,12 +246,12 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
       );
 
-      expect(mockIngestionService.submit).toHaveBeenCalledWith(
+      expect(mockIngestionService.submitFromDto).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-1',
           idempotencyKey: 'idem-1',
           projectId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
-          payload: {
+          dto: {
             kind: 'IDENTIFIER',
             identifierType: 'DOI',
             value: '10.1038/nature12373',
@@ -336,10 +342,9 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
       );
 
-      expect(mockIngestionService.ingest).toHaveBeenCalledWith(
+      expect(mockIngestionService.ingestUnifiedDto).toHaveBeenCalledWith(
         expect.objectContaining({
-          source: 'doi',
-          doi: '10.1038/nature12373',
+          dto: { source: 'doi', doi: '10.1038/nature12373' },
           userId: 'user-1',
           idempotencyKey: 'idem-2',
           projectId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',

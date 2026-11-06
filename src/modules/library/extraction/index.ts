@@ -1,5 +1,7 @@
 export * from './extraction.module';
 export * from './services/reference-matcher.service';
+export * from './services/extraction.facade';
+export * from './services/item-lifecycle.subscriber';
 
 // Controllers
 export * from './controllers/attachments.controller';
@@ -33,5 +35,5 @@ export * from './providers/layout.extractor';
 
 // DTOs & Types
 export * from './dto/annotations.dto';
-export * from '../core/types/extraction.types';
+export * from './types/pdf-extraction.types';
 

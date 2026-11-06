@@ -29,11 +29,14 @@ import {
   IUnitOfWork,
   LIBRARY_EVENT_TYPES,
   isUuid,
+  SingleFlightCoalescer,
 } from '@/modules/library/core';
 import { AttachmentsService } from './attachments.service';
 
 @Injectable()
 export class AnnotationsService {
+  private readonly singleFlight = new SingleFlightCoalescer();
+
   constructor(
     private readonly annotationsRepo: AnnotationsRepository,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
@@ -101,15 +104,17 @@ export class AnnotationsService {
     }
 
     if (pageIndex === undefined && type === undefined) {
-      const all = await this.annotationsRepo.findByAttachment(attachmentId);
-      if (this.cache) {
-        try {
-          await this.cache.set(cacheKey, all, 300);
-        } catch {
-          // Ignore cache write errors
+      return this.singleFlight.execute(cacheKey, async () => {
+        const all = await this.annotationsRepo.findByAttachment(attachmentId);
+        if (this.cache) {
+          try {
+            await this.cache.set(cacheKey, all, 300);
+          } catch {
+            // Ignore cache write errors
+          }
         }
-      }
-      return all;
+        return all;
+      });
     }
 
     return this.annotationsRepo.findByAttachment(attachmentId, pageIndex, type);

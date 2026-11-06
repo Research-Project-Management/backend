@@ -1,7 +1,11 @@
 export * from './search.module';
 
-// Controllers, Facade & DTOs
+// Controllers & Facade
 export * from './controllers/search.controller';
+
+// DTOs & Types
+export * from './dto/search-items.dto';
+export * from './types/search.types';
 
 // Services
 export * from './services/search.service';

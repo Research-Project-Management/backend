@@ -199,10 +199,16 @@ export class PubMedProvider extends BaseMetadataProvider {
     };
 
     const response = await this.executeHttpFetch(url, signal, headers);
-    if (response.status === 404 || !response.ok) return null;
+    if (response.status === 404 || !response.ok) {
+      await response.body?.cancel().catch(() => {});
+      return null;
+    }
 
     const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('text/html')) return null;
+    if (contentType.includes('text/html')) {
+      await response.body?.cancel().catch(() => {});
+      return null;
+    }
 
     let data: Record<string, unknown> | null = null;
     try {
@@ -228,10 +234,14 @@ export class PubMedProvider extends BaseMetadataProvider {
     };
 
     const response = await this.executeHttpFetch(url, signal, headers);
-    if (response.status === 404) return null;
+    if (response.status === 404) {
+      await response.body?.cancel().catch(() => {});
+      return null;
+    }
 
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('text/html')) {
+      await response.body?.cancel().catch(() => {});
       throw new ProviderFetchError(
         `NCBI E-utilities blocked or returned HTML diagnostic for PMID: ${cleanPmid}`,
         403,
@@ -243,6 +253,7 @@ export class PubMedProvider extends BaseMetadataProvider {
 
     if (!response.ok) {
       const retryAfterMs = this.parseRetryAfterHeader(response);
+      await response.body?.cancel().catch(() => {});
       throw new ProviderFetchError(
         `PubMed API HTTP ${response.status} for PMID: ${cleanPmid}`,
         response.status,

@@ -49,11 +49,12 @@ interface IngestionQueueStats {
 
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
-  public static readonly MAX_FALLBACK_QUEUE_SIZE = 500;
+  public static readonly MAX_FALLBACK_QUEUE_SIZE = 5000;
   private static readonly FALLBACK_JOB_TTL_MS = 30 * 60 * 1000;
 
   private readonly logger = new Logger(QueueService.name);
   private readonly queue: QueuedIngestionJob[] = [];
+  private readonly syncWaiters: Array<() => void> = [];
   private activeCount = 0;
   private readonly runningRunIds = new Set<string>();
   private readonly queuedRunIds = new Set<string>();
@@ -126,6 +127,17 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
           await Promise.all(
             chunk.map((run) => {
               const targetId = run.projectId || run.userId || '';
+              if (typeof this.repo.transitionRunStatusAtomic === 'function') {
+                return this.repo.transitionRunStatusAtomic(
+                  run.id,
+                  [IngestionStatus.PENDING, IngestionStatus.RUNNING],
+                  IngestionStatus.FAILED_RETRYABLE,
+                  {
+                    lastError:
+                      'Pipeline interrupted by server restart. Eligible for retry.',
+                  },
+                );
+              }
               return this.repo.updateRunStatus(
                 targetId,
                 run.id,
@@ -261,6 +273,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     };
 
     this.queuedRunIds.add(runId);
+    const tenantKey = envelope?.userId || projectId || 'anonymous';
     if (isFastPath) {
       // Prioritize fast path jobs ahead of heavy file OCR/parsing jobs to prevent head-of-line blocking
       const insertIdx = this.queue.findIndex(
@@ -272,7 +285,37 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         this.queue.push(job);
       }
     } else {
-      this.queue.push(job);
+      // Fair-Queuing Interleaving: Prevent a single user uploading 100+ files from starving
+      // newly arriving users who only uploaded 1-2 files.
+      const existingTenantJobs = this.queue.reduce(
+        (acc, j) =>
+          (j.envelope?.userId || j.projectId || 'anonymous') === tenantKey
+            ? acc + 1
+            : acc,
+        0,
+      );
+      if (existingTenantJobs === 0 && this.queue.length >= 4) {
+        let seenPerTenant = new Map<string, number>();
+        let fairInsertIdx = -1;
+        for (let i = 0; i < this.queue.length; i++) {
+          const item = this.queue[i];
+          if (item.envelope?.payload?.kind !== 'FILE') continue;
+          const tk = item.envelope?.userId || item.projectId || 'anonymous';
+          const count = (seenPerTenant.get(tk) ?? 0) + 1;
+          seenPerTenant.set(tk, count);
+          if (count > 2) {
+            fairInsertIdx = i;
+            break;
+          }
+        }
+        if (fairInsertIdx !== -1) {
+          this.queue.splice(fairInsertIdx, 0, job);
+        } else {
+          this.queue.push(job);
+        }
+      } else {
+        this.queue.push(job);
+      }
     }
     this.logger.log(
       `[In-Memory] Enqueued run ${runId} (fastPath=${isFastPath}) for project ${projectId} (queue length: ${this.queue.length}, active: ${this.activeCount}/${this.maxConcurrency})`,
@@ -345,10 +388,42 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Executes a synchronous pipeline operation within the queue's concurrency budget
+   * so direct `POST /ingestion` callers cannot bypass `maxConcurrency`.
+   */
+  async runWithConcurrencySlot<T>(
+    runId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    if (this.activeCount >= this.maxConcurrency) {
+      await new Promise<void>((resolve) => this.syncWaiters.push(resolve));
+    }
+    this.activeCount++;
+    this.runningRunIds.add(runId);
+    try {
+      return await fn();
+    } finally {
+      this.runningRunIds.delete(runId);
+      this.activeCount--;
+      const nextSync = this.syncWaiters.shift();
+      if (nextSync) {
+        nextSync();
+      } else {
+        this.pump();
+      }
+    }
+  }
+
+  /**
    * Dispatches jobs from the queue up to maxConcurrency.
    */
   private pump(): void {
-    while (this.activeCount < this.maxConcurrency && this.queue.length > 0) {
+    while (this.activeCount < this.maxConcurrency) {
+      const nextSync = this.syncWaiters.shift();
+      if (nextSync) {
+        nextSync();
+        break;
+      }
       const job = this.queue.shift();
       if (!job) break;
 
@@ -482,15 +557,17 @@ export class IngestionQueueConsumer
 
     try {
       clearRunStatusTransition(runId);
-      await this.repo
-        .updateRunStatus(projectId, runId, IngestionStatus.RUNNING)
-        .catch((statusErr: unknown) => {
-          const statusMsg =
-            statusErr instanceof Error ? statusErr.message : String(statusErr);
-          this.logger.warn(
-            `Failed to set RUNNING status for run ${runId}: ${statusMsg}`,
-          );
-        });
+      const claimed = await this.repo.transitionRunStatusAtomic(
+        runId,
+        [IngestionStatus.PENDING, IngestionStatus.FAILED_RETRYABLE],
+        IngestionStatus.RUNNING,
+      );
+      if (!claimed) {
+        this.logger.warn(
+          `Ingestion run ${runId} is already active or in terminal status. Skipping execution.`,
+        );
+        return;
+      }
 
       await this.pipeline.executePipeline(
         runId,

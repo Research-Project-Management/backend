@@ -1,5 +1,5 @@
 import {
-  Injectable, Logger, NotFoundException, BadRequestException, Inject, Optional,
+  Injectable, Logger, NotFoundException, BadRequestException, InternalServerErrorException, Inject, Optional,
 } from '@nestjs/common';
 import { Prisma, AttachmentType } from '@prisma/client';
 import { RedisCacheService } from '@/core';
@@ -37,10 +37,11 @@ export class AttachmentsService {
   ) {}
 
   public async assertItemExists(userId: string, itemId: string, projectId?: string): Promise<void> {
-    if (this.catalogGateway) {
-      const exists = await this.catalogGateway.itemExists(userId, itemId, projectId);
-      if (!exists) throw new NotFoundException(`Item ${itemId} not found`);
+    if (!this.catalogGateway) {
+      throw new InternalServerErrorException('Catalog gateway is unavailable for item authorization');
     }
+    const exists = await this.catalogGateway.itemExists(userId, itemId, projectId);
+    if (!exists) throw new NotFoundException(`Item ${itemId} not found`);
   }
 
   async createAttachment(input: CreateAttachmentInput, projectId?: string) {
@@ -244,7 +245,7 @@ export class AttachmentsService {
           serializedAttachment,
         );
 
-        if (attachment.mimeType === 'application/pdf') {
+        if (isExtractablePdf && resolvedLinkMode !== 'linked_url') {
           await helpers.publishOutbox(
             eventScope,
             attachment.id,

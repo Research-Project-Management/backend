@@ -12,7 +12,8 @@ import { CitationModule } from './citation/citation.module';
 
 // Core (primitives, resilience & cross-cutting concerns)
 import { LibraryCoreModule } from './core/core.module';
-import { ExportLibraryDto, ExportResult } from './citation/types/citation.types';
+import { ExportResult } from './citation/types/citation.types';
+import { ExportLibraryDto } from './citation/dto/citation.dto';
 import {
   CATALOG_FACADE,
   ICatalogFacade,

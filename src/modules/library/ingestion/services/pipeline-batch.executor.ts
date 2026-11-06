@@ -239,7 +239,15 @@ export class PipelineBatchExecutor {
       );
     }
 
-    for (const initialCand of normalizedCandidates) {
+    let lastCheckpointAt = Date.now();
+    const inFlightRecordCommitPromises = new Map<
+      string,
+      Promise<{ itemId?: string; status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED' }>
+    >();
+
+    const processSingleRecordCandidate = async (
+      initialCand: MetadataCandidate,
+    ): Promise<void> => {
       const itemTitle =
         initialCand.normalizedMetadata?.title ||
         initialCand.normalizedMetadata?.shortTitle ||
@@ -278,25 +286,60 @@ export class PipelineBatchExecutor {
       const legacyCandidateKey = `title:${itemTitle.trim().toLowerCase()}|year:${candYearKey}`;
       const retryPayload = serializeSubRunRecordPayload(initialCand);
 
-      const alreadyCommitted =
+      let alreadyCommitted =
         committedRecordKeys.get(candidateKey) ||
         (!candAuthorKey
           ? committedRecordKeys.get(legacyCandidateKey)
           : undefined);
-      if (alreadyCommitted) {
-        createdItemIds.push(alreadyCommitted.itemId);
-        duplicates++;
-        processed++;
-        progressItems.push({
-          title: itemTitle,
-          status: 'DUPLICATE',
-          itemId: alreadyCommitted.itemId,
+
+      if (!alreadyCommitted) {
+        const pendingSameKey = inFlightRecordCommitPromises.get(candidateKey);
+        if (pendingSameKey) {
+          const settled = await pendingSameKey;
+          if (
+            settled.itemId &&
+            (settled.status === 'SUCCEEDED' || settled.status === 'DUPLICATE')
+          ) {
+            alreadyCommitted = {
+              itemId: settled.itemId,
+              status: settled.status,
+            };
+          }
+        }
+      }
+
+      let resolveInFlightLock:
+        | ((val: {
+            itemId?: string;
+            status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
+          }) => void)
+        | undefined;
+      if (!alreadyCommitted && !inFlightRecordCommitPromises.has(candidateKey)) {
+        inFlightRecordCommitPromises.set(
           candidateKey,
-        });
-        continue;
+          new Promise((resolve) => {
+            resolveInFlightLock = resolve;
+          }),
+        );
       }
 
       try {
+        if (alreadyCommitted) {
+          createdItemIds.push(alreadyCommitted.itemId);
+          duplicates++;
+          progressItems.push({
+            title: itemTitle,
+            status: 'DUPLICATE',
+            itemId: alreadyCommitted.itemId,
+            candidateKey,
+          });
+          resolveInFlightLock?.({
+            itemId: alreadyCommitted.itemId,
+            status: 'DUPLICATE',
+          });
+          return;
+        }
+
         const matchedSet = new Set<MetadataCandidate>();
         const refMatches = byEvidenceRef.get(initialCand.candidateId);
         if (refMatches) refMatches.forEach((m) => matchedSet.add(m));
@@ -381,7 +424,6 @@ export class PipelineBatchExecutor {
             );
           }
 
-          // Ensure duplicate items are assigned to target envelope collections
           if (envelope.collectionIds && envelope.collectionIds.length > 0) {
             await Promise.all(
               envelope.collectionIds.map((colId) =>
@@ -406,6 +448,10 @@ export class PipelineBatchExecutor {
             status: 'DUPLICATE',
             itemId: matchRes.targetItemId,
             candidateKey,
+          });
+          resolveInFlightLock?.({
+            itemId: matchRes.targetItemId,
+            status: 'DUPLICATE',
           });
         } else {
           await this.sideEffects.scanRetraction(itemDecision.proposedItem, {
@@ -459,6 +505,10 @@ export class PipelineBatchExecutor {
               itemDecision.proposedItem?.notes,
               created,
             );
+            resolveInFlightLock?.({
+              itemId: created.id,
+              status: itemStatus,
+            });
           } else {
             failed++;
             progressItems.push({
@@ -468,6 +518,7 @@ export class PipelineBatchExecutor {
               candidateKey,
               retryPayload,
             });
+            resolveInFlightLock?.({ status: 'FAILED' });
           }
         }
       } catch (itemErr: unknown) {
@@ -480,16 +531,21 @@ export class PipelineBatchExecutor {
           candidateKey,
           retryPayload,
         });
+        resolveInFlightLock?.({ status: 'FAILED' });
       } finally {
+        inFlightRecordCommitPromises.delete(candidateKey);
         processed++;
         const isFinal = processed === total;
-        const shouldCheckpoint =
-          isFinal ||
+        const now = Date.now();
+        const countMilestone =
           total <= 10 ||
           processed % 5 === 0 ||
           (total > 50 && processed % 10 === 0);
+        const shouldCheckpoint =
+          isFinal || (countMilestone && now - lastCheckpointAt >= 500);
 
         if (shouldCheckpoint) {
+          lastCheckpointAt = now;
           try {
             await this.repo.updateRunProgress(scopeId, runId, {
               total,
@@ -510,7 +566,25 @@ export class PipelineBatchExecutor {
           }
         }
       }
-    }
+    };
+
+    const BATCH_COMMIT_CONCURRENCY = 6;
+    let nextCandidateIndex = 0;
+    const workerCount = Math.min(
+      BATCH_COMMIT_CONCURRENCY,
+      normalizedCandidates.length,
+    );
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (nextCandidateIndex < normalizedCandidates.length) {
+          const idx = nextCandidateIndex++;
+          const cand = normalizedCandidates[idx];
+          if (cand) {
+            await processSingleRecordCandidate(cand);
+          }
+        }
+      }),
+    );
 
     await session.executeStep(
       'COMMIT',

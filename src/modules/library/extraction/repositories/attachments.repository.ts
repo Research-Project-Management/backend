@@ -644,9 +644,12 @@ export class AttachmentsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     if (!updates || updates.length === 0) return;
+    const orderedUpdates = [...updates].sort((a, b) =>
+      a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    );
     const run = async (client: Prisma.TransactionClient) => {
       await Promise.all(
-        updates.map((item) =>
+        orderedUpdates.map((item) =>
           this.applyAttachmentFilenameAndFileRename(
             item.id,
             item.filename,

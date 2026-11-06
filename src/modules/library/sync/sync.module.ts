@@ -8,11 +8,9 @@ import { TransactionService } from './services/transaction.service';
 import { ChangeLogRepository } from './repositories/changelog.repository';
 import { OutboxRepository } from './repositories/outbox.repository';
 import { OutboxWorker } from './services/outbox.worker';
-import {
-  OutboxDispatcher,
-  OutboxMetrics,
-  OutboxQueueConsumer,
-} from './services/idempotent-consumer.service';
+import { OutboxDispatcher } from './services/outbox-dispatcher.service';
+import { OutboxMetrics } from './services/outbox-metrics.service';
+import { OutboxQueueConsumer } from './services/outbox.processor';
 import {
   OUTBOX_REGISTRY_PORT,
   LIBRARY_EVENT_TYPES,

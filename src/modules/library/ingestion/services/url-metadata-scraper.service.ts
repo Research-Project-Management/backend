@@ -222,14 +222,6 @@ export class UrlMetadataScraperService {
       return fallbackResult();
     }
 
-    try {
-      await this.assertSafeUrl(canonicalUrl);
-    } catch (ssrfErr: unknown) {
-      const msg = ssrfErr instanceof Error ? ssrfErr.message : String(ssrfErr);
-      this.logger.warn(`SSRF rejection for URL "${canonicalUrl}": ${msg}`);
-      return fallbackResult();
-    }
-
     let response: Response;
     let finalUrl = canonicalUrl;
     try {
@@ -250,6 +242,7 @@ export class UrlMetadataScraperService {
     }
 
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       this.logger.warn(
         `HTTP ${response.status} when fetching URL "${canonicalUrl}"`,
       );

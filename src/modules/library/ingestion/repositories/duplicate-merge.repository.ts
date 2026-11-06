@@ -675,9 +675,12 @@ export async function softDeleteDuplicatesAndRecordOutboxInTx(params: {
   effectiveProjectId?: string; now: Date;
 }): Promise<void> {
   const { tx, helpers, eventScope, primaryId, duplicates, userId, effectiveProjectId, now } = params;
+  const orderedDuplicates = [...duplicates].sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  );
 
   const softDeletedDuplicates = await Promise.all(
-    duplicates.map((dup) => {
+    orderedDuplicates.map((dup) => {
       const baseMeta =
         dup.metadata && typeof dup.metadata === 'object' && !Array.isArray(dup.metadata)
           ? (dup.metadata as Record<string, unknown>)
@@ -690,12 +693,12 @@ export async function softDeleteDuplicatesAndRecordOutboxInTx(params: {
     }),
   );
 
-  const dupTombstones = duplicates.map((dup) => ({ entityType: 'Item' as const, entityId: dup.id }));
-  const dupChangeEntries = duplicates.map((dup, idx) => ({
+  const dupTombstones = orderedDuplicates.map((dup) => ({ entityType: 'Item' as const, entityId: dup.id }));
+  const dupChangeEntries = orderedDuplicates.map((dup, idx) => ({
     entityType: 'Item' as const, entityId: dup.id, action: 'delete' as const,
     version: softDeletedDuplicates[idx].version, data: softDeletedDuplicates[idx],
   }));
-  const dupOutboxEvents = duplicates.map((dup) => ({
+  const dupOutboxEvents = orderedDuplicates.map((dup) => ({
     aggregateId: dup.id,
     eventType: 'library.item.merged_into',
     payload: {

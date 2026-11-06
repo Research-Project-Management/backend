@@ -306,32 +306,34 @@ export class IngestionService {
     // for bounded concurrency and worker resilience (unless direct synchronous execution is requested).
     const shouldEnqueue =
       (options?.enqueue ?? true) && !options?.skipAsyncDispatch;
+    let finalStatus = run?.status || IngestionStatus.PENDING;
     if (shouldEnqueue) {
-      void this.queue
-        .enqueue(runId, projectId, envelopeToPersist)
-        .catch(async (enqueueErr: unknown) => {
-          const errMsg =
-            enqueueErr instanceof Error
-              ? enqueueErr.message
-              : String(enqueueErr);
-          this.logger.error(
-            `Failed to enqueue ingestion run ${runId}: ${errMsg}`,
-          );
-          await this.repo
-            .updateRunStatus(
-              { userId: envelope.userId, projectId: envelope.projectId },
-              runId,
-              IngestionStatus.FAILED_RETRYABLE,
-              {
-                lastError: `Failed to enqueue ingestion run: ${errMsg}`,
-              },
-            )
-            .catch((repoErr: unknown) => {
-              this.logger.error(
-                `Failed to mark run ${runId} as FAILED_RETRYABLE after queue failure: ${repoErr instanceof Error ? repoErr.message : String(repoErr)}`,
-              );
-            });
-        });
+      try {
+        await this.queue.enqueue(runId, projectId, envelopeToPersist);
+      } catch (enqueueErr: unknown) {
+        const errMsg =
+          enqueueErr instanceof Error
+            ? enqueueErr.message
+            : String(enqueueErr);
+        this.logger.error(
+          `Failed to enqueue ingestion run ${runId}: ${errMsg}`,
+        );
+        finalStatus = IngestionStatus.FAILED_RETRYABLE;
+        await this.repo
+          .updateRunStatus(
+            { userId: envelope.userId, projectId: envelope.projectId },
+            runId,
+            IngestionStatus.FAILED_RETRYABLE,
+            {
+              lastError: `Failed to enqueue ingestion run: ${errMsg}`,
+            },
+          )
+          .catch((repoErr: unknown) => {
+            this.logger.error(
+              `Failed to mark run ${runId} as FAILED_RETRYABLE after queue failure: ${repoErr instanceof Error ? repoErr.message : String(repoErr)}`,
+            );
+          });
+      }
     }
 
     return {
@@ -341,7 +343,7 @@ export class IngestionService {
         ? run.startedAt.toISOString()
         : new Date().toISOString(),
       requestHash,
-      status: run?.status || IngestionStatus.PENDING,
+      status: finalStatus,
       existingItemId: run?.itemId ?? undefined,
       deduplicated: false,
     };
@@ -459,7 +461,13 @@ export class IngestionService {
 
     try {
       clearRunStatusTransition(runId);
-      await this.pipeline.executePipeline(runId, projectId, envelope);
+      if (this.queue && typeof this.queue.runWithConcurrencySlot === 'function') {
+        await this.queue.runWithConcurrencySlot(runId, () =>
+          this.pipeline.executePipeline(runId, projectId, envelope),
+        );
+      } else {
+        await this.pipeline.executePipeline(runId, projectId, envelope);
+      }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.error(

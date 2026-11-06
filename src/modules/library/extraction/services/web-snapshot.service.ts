@@ -15,16 +15,7 @@ import {
   ExternalProviderException,
   AttachmentStorageException,
 } from '@/modules/library/core/errors/domain.exception';
-
-interface SnapshotTemplateParams {
-  canonicalUrl: string;
-  capturedAtIso: string;
-  formattedDate: string;
-  title: string;
-  byline?: string;
-  siteName: string;
-  sanitizedBody: string;
-}
+import type { SnapshotTemplateParams } from '../types/pdf-extraction.types';
 
 function escapeSnapshotHtml(str: string): string {
   return str
@@ -153,8 +144,6 @@ export class WebSnapshotService {
   ): Promise<SnapshotResult> {
     const canonicalUrl = url.trim();
 
-    await this.ssrfGuard.assertSafeUrl(canonicalUrl, { maxRedirects: 5 });
-
     const timeoutMs = options?.timeoutMs ?? 15000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -177,6 +166,7 @@ export class WebSnapshotService {
       );
 
       if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
         throw new ExternalProviderException(
           `WebSnapshot failed: HTTP ${response.status} ${response.statusText}`,
           { provider: 'WebSnapshot', status: response.status },
@@ -185,6 +175,7 @@ export class WebSnapshotService {
 
       const contentLength = response.headers.get('content-length');
       if (contentLength && parseInt(contentLength, 10) > MAX_SNAPSHOT_SIZE) {
+        await response.body?.cancel().catch(() => {});
         throw new BadRequestException(
           `Target document size exceeds 10MB limit (${contentLength} bytes)`,
         );

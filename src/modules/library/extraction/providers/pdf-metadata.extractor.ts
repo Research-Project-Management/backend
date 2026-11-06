@@ -129,9 +129,12 @@ export class PdfMetadataExtractor implements IPdfMetadataExtractorPort {
     } finally {
       if (ctx.sharedDoc && ctx.sharedDoc !== pdfDocument) {
         try {
-          await (
-            ctx.sharedDoc as { destroy?: () => Promise<void> | void }
-          ).destroy?.();
+          const disposable = ctx.sharedDoc as {
+            cleanup?: () => Promise<void> | void;
+            destroy?: () => Promise<void> | void;
+          };
+          await Promise.resolve(disposable.cleanup?.()).catch(() => {});
+          await Promise.resolve(disposable.destroy?.()).catch(() => {});
         } catch {
           // Ignore PDF.js cleanup errors
         }
@@ -330,6 +333,9 @@ export class PdfMetadataExtractor implements IPdfMetadataExtractorPort {
               readPageText(idx + 1),
             ),
           );
+          if (rawPageTexts.some((t) => t.length > 0)) {
+            ctx.rawMatches.frontPageTexts = rawPageTexts;
+          }
           for (const pText of rawPageTexts) {
             if (pText.length > 0) {
               pageChunks.push(pText);

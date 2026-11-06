@@ -23,7 +23,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
       const slowDbOperation = () =>
         new Promise<{ seq: string }>((resolve) => {
           executionCount++;
-          setTimeout(() => resolve({ seq: '1042' }), 15);
+          setTimeout(() => resolve({ seq: '1042' }), 1);
         });
 
       const callers = Array.from({ length: 1000 }, () =>
@@ -84,7 +84,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
         getLatestSequence: jest.fn(
           () =>
             new Promise<bigint>((resolve) => {
-              setTimeout(() => resolve(88n), 10);
+              setTimeout(() => resolve(88n), 1);
             }),
         ),
         getMinRetainedSequence: jest.fn(async () => 12n),
@@ -188,7 +188,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
                     items: [{ id: 'it-1' }, { id: 'it-2' }],
                     meta: { hasNextPage: false, totalCount: 2 },
                   }),
-                10,
+                1,
               ),
             ),
         ),
@@ -247,12 +247,12 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
       // 1. ItemQueryService.getCounts
       const mockQueryRepo = {
         count: jest.fn(
-          () => new Promise<number>((r) => setTimeout(() => r(5), 10)),
+          () => new Promise<number>((r) => setTimeout(() => r(5), 1)),
         ),
         countByItemType: jest.fn(
           () =>
             new Promise<Record<string, number>>((r) =>
-              setTimeout(() => r({ journalArticle: 10 }), 10),
+              setTimeout(() => r({ journalArticle: 10 }), 1),
             ),
         ),
         getProjectMemberRole: jest.fn(async () => 'owner'),
@@ -271,7 +271,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
           () =>
             new Promise<Array<{ id: string; name: string; parentId: null }>>(
               (r) =>
-                setTimeout(() => r([{ id: 'c1', name: 'Root', parentId: null }]), 10),
+                setTimeout(() => r([{ id: 'c1', name: 'Root', parentId: null }]), 1),
             ),
         ),
       };
@@ -290,7 +290,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
         findMany: jest.fn(
           () =>
             new Promise<Array<{ id: string; name: string }>>((r) =>
-              setTimeout(() => r([{ id: 't1', name: 'tag' }]), 10),
+              setTimeout(() => r([{ id: 't1', name: 'tag' }]), 1),
             ),
         ),
       };
@@ -310,7 +310,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
         findAll: jest.fn(
           () =>
             new Promise<Array<{ id: string; cachedCount: number }>>((r) =>
-              setTimeout(() => r([{ id: 's1', cachedCount: 3 }]), 10),
+              setTimeout(() => r([{ id: 's1', cachedCount: 3 }]), 1),
             ),
         ),
       };

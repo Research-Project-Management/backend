@@ -636,34 +636,36 @@ export class IngestionRunReporterService {
       resolvedProjectId || resolvedUserId || effectiveScopeId;
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
+    let finalStatus: IngestionStatus = IngestionStatus.PENDING;
     if (envelope && typeof envelope === 'object' && this.queue) {
-      void this.queue
-        .enqueue(runId, queueTargetScope, {
+      try {
+        await this.queue.enqueue(runId, queueTargetScope, {
           ...envelope,
           userId: resolvedUserId,
           projectId: resolvedProjectId,
-        })
-        .catch(async (enqueueErr: unknown) => {
-          const errMsg =
-            enqueueErr instanceof Error
-              ? enqueueErr.message
-              : String(enqueueErr);
-          this.logger.error(
-            `Failed to enqueue retried ingestion run ${runId}: ${errMsg}`,
-          );
-          await this.repo
-            .updateRunStatus(scope, runId, IngestionStatus.FAILED_RETRYABLE, {
-              lastError: `Failed to enqueue retry run: ${errMsg}`,
-            })
-            .catch((repoErr: unknown) => {
-              this.logger.error(
-                `Failed to revert run ${runId} to FAILED_RETRYABLE after queue failure: ${repoErr instanceof Error ? repoErr.message : String(repoErr)}`,
-              );
-            });
         });
-      this.logger.log(
-        `Retry initiated and re-enqueued for run ${runId} (scope: ${queueTargetScope})`,
-      );
+        this.logger.log(
+          `Retry initiated and re-enqueued for run ${runId} (scope: ${queueTargetScope})`,
+        );
+      } catch (enqueueErr: unknown) {
+        const errMsg =
+          enqueueErr instanceof Error
+            ? enqueueErr.message
+            : String(enqueueErr);
+        this.logger.error(
+          `Failed to enqueue retried ingestion run ${runId}: ${errMsg}`,
+        );
+        finalStatus = IngestionStatus.FAILED_RETRYABLE;
+        await this.repo
+          .updateRunStatus(scope, runId, IngestionStatus.FAILED_RETRYABLE, {
+            lastError: `Failed to enqueue retry run: ${errMsg}`,
+          })
+          .catch((repoErr: unknown) => {
+            this.logger.error(
+              `Failed to revert run ${runId} to FAILED_RETRYABLE after queue failure: ${repoErr instanceof Error ? repoErr.message : String(repoErr)}`,
+            );
+          });
+      }
     } else {
       this.logger.warn(
         `Retry requested for run ${runId}, but inputParams is missing or invalid.`,
@@ -672,8 +674,11 @@ export class IngestionRunReporterService {
 
     return {
       runId,
-      status: IngestionStatus.PENDING,
-      message: 'Ingestion run retry initiated and enqueued',
+      status: finalStatus,
+      message:
+        finalStatus === IngestionStatus.PENDING
+          ? 'Ingestion run retry initiated and enqueued'
+          : 'Ingestion run retry enqueue failed; marked as FAILED_RETRYABLE',
     };
   }
 }

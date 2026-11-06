@@ -51,11 +51,18 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
       const where: any = queryRepo.buildWhereClause(userId, {
         readStatus: 'unread,reading',
       });
-      expect(where.states).toEqual({
-        some: {
-          userId,
-          readStatus: { in: ['unread', 'reading'] },
-        },
+      expect(where.AND).toContainEqual({
+        OR: [
+          { states: { none: { userId } } },
+          {
+            states: {
+              some: {
+                userId,
+                readStatus: { in: ['unread', 'reading'] },
+              },
+            },
+          },
+        ],
       });
     });
 
@@ -169,7 +176,7 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
 
       expect(mockPrisma.item.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderBy: [{ firstAuthor: 'asc' }, { id: 'asc' }],
+          orderBy: [{ firstAuthor: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }],
         }),
       );
     });
@@ -183,7 +190,7 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
 
       expect(mockPrisma.item.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderBy: [{ publicationTitle: 'desc' }, { id: 'desc' }],
+          orderBy: [{ publicationTitle: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
         }),
       );
     });
@@ -197,7 +204,7 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
 
       expect(mockPrisma.item.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderBy: [{ publicationTitle: 'asc' }, { id: 'asc' }],
+          orderBy: [{ publicationTitle: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }],
         }),
       );
     });

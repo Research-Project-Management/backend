@@ -220,12 +220,12 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
   describe('IngestionController', () => {
     let controller: IngestionController;
     let mockIngestionService: {
-      submit: jest.Mock;
+      submitFromDto: jest.Mock;
     };
 
     beforeEach(() => {
       mockIngestionService = {
-        submit: jest.fn().mockResolvedValue({
+        submitFromDto: jest.fn().mockResolvedValue({
           runId: 'run-project-1',
           status: 'ACCEPTED',
         }),
@@ -249,7 +249,7 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
         sampleProjectId,
       );
 
-      expect(mockIngestionService.submit).toHaveBeenCalledWith(
+      expect(mockIngestionService.submitFromDto).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: sampleUserId,
           idempotencyKey: 'idemp-proj-1',

@@ -13,6 +13,8 @@ import {
   HttpStatus,
   BadRequestException,
   NotFoundException,
+  NotImplementedException,
+  PayloadTooLargeException,
   Inject,
   ParseUUIDPipe,
 } from '@nestjs/common';
@@ -73,20 +75,37 @@ export class AttachmentStorageController {
         type: string;
         filename?: string;
         mimetype?: string;
+        file?: AsyncIterable<Buffer>;
         toBuffer: () => Promise<Buffer>;
       }>;
     };
     const parts = multipartReq.parts();
     for await (const part of parts) {
       if (part.type === 'file') {
-        buffer = await part.toBuffer();
-        if (buffer.length > MAX_SAFE_HTTP_PAYLOAD_BYTES) {
-          throw new BadRequestException(
-            `File size (${(buffer.length / (1024 * 1024)).toFixed(1)} MB) exceeds direct upload limit of ${MAX_SAFE_HTTP_PAYLOAD_BYTES / (1024 * 1024)} MB. Please use presigned S3 upload.`,
-          );
-        }
         filename = part.filename || filename;
         mimeType = part.mimetype || mimeType;
+        if (part.file && typeof part.file[Symbol.asyncIterator] === 'function') {
+          const chunks: Buffer[] = [];
+          let totalBytes = 0;
+          for await (const chunk of part.file) {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            totalBytes += buf.length;
+            if (totalBytes > MAX_SAFE_HTTP_PAYLOAD_BYTES) {
+              throw new PayloadTooLargeException(
+                `File size exceeds direct upload limit of ${MAX_SAFE_HTTP_PAYLOAD_BYTES / (1024 * 1024)} MB. Please use presigned S3 upload.`,
+              );
+            }
+            chunks.push(buf);
+          }
+          buffer = Buffer.concat(chunks, totalBytes);
+        } else {
+          buffer = await part.toBuffer();
+          if (buffer.length > MAX_SAFE_HTTP_PAYLOAD_BYTES) {
+            throw new PayloadTooLargeException(
+              `File size (${(buffer.length / (1024 * 1024)).toFixed(1)} MB) exceeds direct upload limit of ${MAX_SAFE_HTTP_PAYLOAD_BYTES / (1024 * 1024)} MB. Please use presigned S3 upload.`,
+            );
+          }
+        }
       }
     }
 
@@ -94,6 +113,18 @@ export class AttachmentStorageController {
       throw new BadRequestException(
         'No binary file provided in multipart body',
       );
+    }
+
+    const isPdfDeclared =
+      mimeType.toLowerCase().includes('application/pdf') ||
+      filename.toLowerCase().endsWith('.pdf');
+    if (isPdfDeclared && buffer.length >= 5) {
+      const headerWindow = buffer.subarray(0, Math.min(1024, buffer.length)).toString('latin1');
+      if (!headerWindow.includes('%PDF-')) {
+        throw new BadRequestException(
+          'Uploaded file does not have a valid %PDF- magic header',
+        );
+      }
     }
 
     const uploadResult = await this.storagePort.uploadFile({
@@ -149,7 +180,9 @@ export class AttachmentStorageController {
     @Query('projectId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.completePresignedUpload) {
-      return { success: true, storageKey: dto.storageKey };
+      throw new NotImplementedException(
+        'Presigned upload completion is not supported by the active storage adapter',
+      );
     }
 
     return this.storagePort.completePresignedUpload({
@@ -251,12 +284,15 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('projectId') queryProjectId?: string,
   ) {
-    if (this.storagePort?.abortMultipartUpload) {
-      await this.storagePort.abortMultipartUpload(sessionId, {
-        userId,
-        projectId: paramProjectId || queryProjectId,
-      });
+    if (!this.storagePort?.abortMultipartUpload) {
+      throw new NotImplementedException(
+        'Multipart upload abort is not supported by the active storage adapter',
+      );
     }
+    await this.storagePort.abortMultipartUpload(sessionId, {
+      userId,
+      projectId: paramProjectId || queryProjectId,
+    });
     return { success: true };
   }
 
@@ -373,7 +409,7 @@ export class AttachmentStorageController {
   })
   async getAttachmentPresignedUrl(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
+    @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
     @Param('projectId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
     @Query('projectId') queryProjectId?: string,
@@ -436,7 +472,7 @@ export class AttachmentStorageController {
   })
   async streamAttachmentContent(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
+    @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
     @Req() req: FastifyRequest,
     @Res() res: FastifyReply,
     @Param('projectId', new ParseUUIDPipe({ optional: true }))

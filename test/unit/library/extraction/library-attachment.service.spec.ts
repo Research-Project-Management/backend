@@ -408,7 +408,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
             type: 'file',
             filename: 'thesis.pdf',
             mimetype: 'application/pdf',
-            toBuffer: async () => Buffer.from('PDF_CONTENT'),
+            toBuffer: async () => Buffer.from('%PDF-1.7\nPDF_CONTENT'),
           };
         },
       };

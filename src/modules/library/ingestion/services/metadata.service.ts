@@ -12,7 +12,10 @@ import {
   ResolvedMetadata,
   Provenance,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { QueryClassifier } from '@/modules/library/ingestion/parsers/bibtex.parser';
+import {
+  QueryClassifier,
+  type QueryType,
+} from '@/modules/library/ingestion/parsers/bibtex.parser';
 import {
   deriveDoiFromPublisherUrl,
   extractNormalizedAuthorSurnames,
@@ -42,6 +45,10 @@ import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.ser
 export class MetadataService implements MetadataPort {
   private readonly logger = new Logger(MetadataService.name);
   private readonly providerMap = new Map<ProviderName, MetadataProvider>();
+  private readonly inFlightResolutions = new Map<
+    string,
+    Promise<ResolvedMetadata | null>
+  >();
 
   constructor(
     @Inject(METADATA_PROVIDERS)
@@ -188,6 +195,50 @@ export class MetadataService implements MetadataPort {
         }
       }
     }
+
+    const inFlightKey = `${cacheKey}|c:${Number(wantsCitations)}|r:${Number(wantsReferences)}|a:${Number(Boolean(request.aggressive))}`;
+    if (!request.forceRefresh && !request.signal) {
+      const existingInFlight = this.inFlightResolutions.get(inFlightKey);
+      if (existingInFlight) {
+        const shared = await existingInFlight;
+        return shared ? { ...shared, cached: true } : null;
+      }
+    }
+
+    const resolutionTask = this.executeProviderResolution(
+      request,
+      cleanQuery,
+      classified,
+      canonicalId,
+      cacheKey,
+      cacheOutcome,
+      wantsCitations,
+      wantsReferences,
+      startedAt,
+    );
+
+    if (!request.forceRefresh && !request.signal) {
+      this.inFlightResolutions.set(inFlightKey, resolutionTask);
+      try {
+        return await resolutionTask;
+      } finally {
+        this.inFlightResolutions.delete(inFlightKey);
+      }
+    }
+    return resolutionTask;
+  }
+
+  private async executeProviderResolution(
+    request: MetadataRequest,
+    cleanQuery: string,
+    classified: { raw: string; clean: string; type: QueryType },
+    canonicalId: string,
+    cacheKey: string,
+    cacheOutcome: string,
+    wantsCitations: boolean,
+    wantsReferences: boolean,
+    startedAt: number,
+  ): Promise<ResolvedMetadata | null> {
 
     // 5. Routing tiers (Zotero-style: single-hit authoritative unless citations/graph explicitly requested)
     const tiers = MetadataRoutingPolicy.getTiers(classified.type, {

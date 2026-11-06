@@ -5,7 +5,7 @@ import {
   FieldEvidence,
   ParsedBibtexEntry,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn, normalizeTags, ItemProvenancePolicy } from '@/modules/library/core';
+import { normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn, normalizeTags, ItemProvenancePolicy, evaluateCitationTrap } from '@/modules/library/core';
 import { randomUUID } from 'crypto';
 import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
 
@@ -366,16 +366,44 @@ export function applyUserOverridesToCandidate(
     return candidate;
   }
 
-  // Clear coupled aliases from base candidate metadata before merging overrides so stale candidate
-  // alias values (e.g. `journal` when user overrode `publicationTitle`) cannot survive normalization.
+  const isClientAutoResolved = overrides._clientResolved === true;
+  const userTitleKey = overrides._userTitle === true ? 'title' : undefined;
   const baseMetaClean: Record<string, unknown> = {
     ...(candidate.normalizedMetadata || {}),
   };
+
+  const baseExtra = (baseMetaClean.extraFields || {}) as Record<
+    string,
+    unknown
+  >;
+  const isFilenameFallback = Boolean(baseExtra.isFilenameTitle);
+
+  // Citation-Trap Disambiguation Guard for Client-Resolved FILE candidates:
+  // If the uploaded PDF has a credible local title that conflicts with the edge-resolved
+  // DOI/arXiv metadata (e.g. a page-1 cited paper DOI), reject the edge-resolved bibliographic fields.
+  if (
+    isClientAutoResolved &&
+    candidate.sourceKind === 'FILE' &&
+    typeof baseMetaClean.title === 'string' &&
+    baseMetaClean.title.trim().length > 5 &&
+    typeof overrides.title === 'string' &&
+    overrides.title.trim().length > 5 &&
+    !isFilenameFallback
+  ) {
+    const trap = evaluateCitationTrap(
+      baseMetaClean,
+      overrides,
+      isFilenameFallback,
+    );
+    if (trap.isTrap) {
+      return candidate;
+    }
+  }
   const explicitOverrideKeys = new Set<string>();
   const coupledOverrideKeys = new Set<string>();
 
   for (const [key, rawVal] of Object.entries(overrides)) {
-    if (rawVal === undefined || rawVal === null) continue;
+    if (rawVal === undefined || rawVal === null || key.startsWith('_')) continue;
     explicitOverrideKeys.add(key);
     for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(key)) {
       if (!(alias in overrides)) {
@@ -385,27 +413,43 @@ export function applyUserOverridesToCandidate(
     }
   }
 
+  const cleanOverrides: Record<string, unknown> = {};
+  for (const k of explicitOverrideKeys) {
+    cleanOverrides[k] = overrides[k];
+  }
+
   const mergedNormalized = normalizer.normalize({
     ...baseMetaClean,
-    ...overrides,
+    ...cleanOverrides,
   });
+  if (
+    isClientAutoResolved &&
+    candidate.sourceKind === 'FILE' &&
+    isFilenameFallback
+  ) {
+    mergedNormalized.extraFields = {
+      ...(mergedNormalized.extraFields || {}),
+      hadOnlyFilenameTitleBeforeEdge: true,
+    };
+  }
   const nowIso = new Date().toISOString();
   const updatedFields: Record<string, FieldEvidence> = {
     ...(candidate.fields || {}),
   };
 
   for (const key of explicitOverrideKeys) {
-    const rawVal = overrides[key];
+    const rawVal = cleanOverrides[key];
     const normVal =
       (mergedNormalized as Record<string, unknown>)[key] ?? rawVal;
+    const isFieldUserLocked = !isClientAutoResolved || key === userTitleKey;
     updatedFields[key] = {
       path: key,
       value: rawVal,
       normalizedValue: normVal,
-      confidence: 1.0,
-      sourceProvider: 'UserOverride',
+      confidence: isFieldUserLocked ? 1.0 : 0.95,
+      sourceProvider: isFieldUserLocked ? 'UserOverride' : 'DirectIdentifier',
       retrievedAt: nowIso,
-      isUserOverride: true,
+      ...(isFieldUserLocked ? { isUserOverride: true } : {}),
     };
   }
 
@@ -413,14 +457,15 @@ export function applyUserOverridesToCandidate(
     if (explicitOverrideKeys.has(aliasKey)) continue;
     const aliasVal = (mergedNormalized as Record<string, unknown>)[aliasKey];
     if (aliasVal === undefined || aliasVal === null) continue;
+    const isAliasUserLocked = !isClientAutoResolved;
     updatedFields[aliasKey] = {
       path: aliasKey,
       value: aliasVal,
       normalizedValue: aliasVal,
-      confidence: 1.0,
-      sourceProvider: 'UserOverride',
+      confidence: isAliasUserLocked ? 1.0 : 0.95,
+      sourceProvider: isAliasUserLocked ? 'UserOverride' : 'DirectIdentifier',
       retrievedAt: nowIso,
-      isUserOverride: true,
+      ...(isAliasUserLocked ? { isUserOverride: true } : {}),
     };
   }
 

@@ -1,6 +1,15 @@
 import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
-import { SearchOptions, FacetResult, SearchItemsQueryDto, SearchPageAnchorsQueryDto } from '@/modules/library/search/domain/item-search.policy';
+import {
+  SearchItemsQueryDto,
+  SearchPageAnchorsQueryDto,
+} from '@/modules/library/search/dto/search-items.dto';
+import type {
+  SearchOptions,
+  FacetResult,
+  PageTextExtraction,
+  PageAnchorMatch,
+} from '@/modules/library/search/types/search.types';
 import { isProjectScopeId, isSafeSearchRegex, parseSafeSearchRegex, SearchQueryEngine, ItemsMapper, SubsystemUnavailableException, LIBRARY_EVENT_TYPES, DomainEventEnvelope, CatalogItemSummary, SEARCH_FACADE, ISearchFacade, type SearchPageTextInput } from '@/modules/library/core';
 import { OnEvent } from '@nestjs/event-emitter';
 
@@ -11,28 +20,7 @@ export {
   SearchItemsQueryDto,
   SearchPageAnchorsQueryDto,
 };
-export type { ISearchFacade, SearchOptions, FacetResult };
-
-interface PageTextExtraction {
-  pageIndex: number;
-  textContent: string;
-  charOffset?: number;
-  itemId?: string;
-}
-
-export interface PageAnchorMatch {
-  attachmentId: string;
-  pageIndex: number;
-  snippet: string;
-  charOffsetStart: number;
-  charOffsetEnd: number;
-  /** Alias for frontend SDK compatibility */
-  text: string;
-  /** Alias for frontend SDK compatibility */
-  startOffset: number;
-  /** Alias for frontend SDK compatibility */
-  endOffset: number;
-}
+export type { ISearchFacade, SearchOptions, FacetResult, PageAnchorMatch };
 
 function buildContextualSnippet(
   textContent: string,
@@ -108,9 +96,14 @@ export class FullTextProvider {
       safeRegex ? undefined : normalizedTerm,
     );
     const matches: PageAnchorMatch[] = [];
+    const scanStartTime = Date.now();
+    const MAX_REGEX_SCAN_TIME_MS = 250;
 
     for (const page of pages) {
-      const textContent = page.textContent || '';
+      if (safeRegex && Date.now() - scanStartTime > MAX_REGEX_SCAN_TIME_MS) {
+        break;
+      }
+      const textContent = (page.textContent || '').slice(0, 100_000);
       let pageMatches = 0;
 
       if (safeRegex) {
@@ -121,6 +114,9 @@ export class FullTextProvider {
           matches.length < FullTextProvider.MAX_MATCHES_PER_ATTACHMENT &&
           pageMatches < FullTextProvider.MAX_MATCHES_PER_PAGE
         ) {
+          if (Date.now() - scanStartTime > MAX_REGEX_SCAN_TIME_MS) {
+            break;
+          }
           const matchedText = match[0] || '';
           if (matchedText.length === 0) {
             safeRegex.lastIndex++;
@@ -379,6 +375,21 @@ export class SearchEventsSubscriber {
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_MERGED, { async: true })
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_TAGGED, { async: true })
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_UNTAGGED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_INGESTED_URL, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_INGESTED_DOI, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_INGESTED_BIBTEX, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.NOTE_CREATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.NOTE_UPDATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.NOTE_DELETED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.TAG_UPDATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.TAG_DELETED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.COLLECTION_UPDATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.COLLECTION_DELETED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.COLLECTION_ITEM_ADDED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.COLLECTION_ITEM_REMOVED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.COLLECTION_ITEMS_ASSIGNED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.COLLECTION_ITEMS_DETACHED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.READING_STATE_UPDATED, { async: true })
   async handleItemChanged(event: DomainEventEnvelope): Promise<void> {
     const payload = event?.payload as
       | {

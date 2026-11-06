@@ -1,22 +1,31 @@
-import { Injectable, Inject, Logger, Optional, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { RedisCacheService } from '@/core';
-import { IIdempotentConsumer, IdempotentConsumerOptions, IdempotentResult, DomainEventEnvelope, OutboxDispatchHandler, LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB, OUTBOX_REGISTRY_PORT } from '@/modules/library/core';
+import {
+  IIdempotentConsumer,
+  IdempotentConsumerOptions,
+  IdempotentResult,
+} from '@/modules/library/core';
 import { OutboxRepository } from '../repositories/outbox.repository';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
-import { OutboxEvent } from '@prisma/client';
-import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
+import { OutboxMetrics } from './outbox-metrics.service';
+import { OutboxDispatcher } from './outbox-dispatcher.service';
+import {
+  IOutboxEventProcessor,
+  OutboxQueueConsumer,
+  OutboxBullProcessor,
+} from './outbox.processor';
 
-export interface IOutboxEventProcessor {
-  processEventById(
-    eventId: string,
-    options?: { rethrowOnRetryableFailure?: boolean },
-  ): Promise<boolean>;
-}
-
-export type { IdempotentConsumerOptions, IdempotentResult };
+export type {
+  IdempotentConsumerOptions,
+  IdempotentResult,
+  IOutboxEventProcessor,
+};
+export {
+  OutboxMetrics,
+  OutboxDispatcher,
+  OutboxQueueConsumer,
+  OutboxBullProcessor,
+};
 
 interface MemoryInboxEntry {
   status: 'processing' | 'completed';
@@ -30,7 +39,8 @@ interface MemoryInboxEntry {
  * Guarantees exactly-once processing semantics for distributed event subscribers
  * and asynchronous background consumers (such as PDF extraction, OCR, indexing).
  *
- * Employs atomic Redis lease locking (`SET ... NX EX`) with automatic in-memory LRU fallback.
+ * Employs atomic Redis lease locking (`SET ... NX EX`) with automatic lease heartbeat
+ * renewal, durable `LibraryInboxRecord` database fallback, and in-memory LRU cache.
  */
 @Injectable()
 export class IdempotentConsumerService implements IIdempotentConsumer {
@@ -39,6 +49,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
   // In-memory fallback cache
   private readonly memoryStore = new Map<string, MemoryInboxEntry>();
   private static readonly MAX_MEMORY_STORE_SIZE = 5000;
+  private static readonly DEFAULT_RETENTION_TTL_SECONDS = 7 * 86400; // 7 days retention
 
   constructor(
     @Optional() private readonly redis?: RedisCacheService,
@@ -71,14 +82,14 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       consumer,
       eventId,
       leaseTtlSeconds = 300, // 5 minutes processing lock lease
-      retentionTtlSeconds = 86400, // 24 hours completed state retention
+      retentionTtlSeconds = IdempotentConsumerService.DEFAULT_RETENTION_TTL_SECONDS,
       handler,
     } = options;
 
     const key = this.buildKey(consumer, eventId);
     const ownerToken = randomUUID();
 
-    // 1. Check if already processed or in-flight in Redis / Memory
+    // 1. Check if already processed or in-flight in Redis / DB / Memory
     const claim = await this.tryAcquireProcessingLease(
       key,
       leaseTtlSeconds,
@@ -96,11 +107,29 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       };
     }
 
-    // 2. Acquired processing lease - execute handler
+    // 2. Start periodic lease renewal heartbeat so long-running handlers never lose their lease
+    const heartbeatIntervalMs = Math.max(
+      1000,
+      Math.floor((leaseTtlSeconds * 1000) / 3),
+    );
+    const heartbeatTimer = setInterval(() => {
+      void this.renewProcessingLease(key, leaseTtlSeconds, ownerToken).catch(
+        (err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.debug(
+            `[IdempotentConsumer] Lease heartbeat renewal failed for ${key}: ${msg}`,
+          );
+        },
+      );
+    }, heartbeatIntervalMs);
+    heartbeatTimer.unref?.();
+
+    // 3. Acquired processing lease - execute handler
     try {
       const result = await handler();
+      clearInterval(heartbeatTimer);
 
-      // 3. Mark completed with retention TTL (verified by ownerToken)
+      // 4. Mark completed with retention TTL (verified by ownerToken)
       await this.markCompleted(key, retentionTtlSeconds, ownerToken);
 
       return {
@@ -109,7 +138,8 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
         result,
       };
     } catch (err) {
-      // 4. On failure, clear lease so BullMQ retry can execute
+      clearInterval(heartbeatTimer);
+      // 5. On failure, clear lease so BullMQ/Outbox retry can execute
       await this.releaseLease(key, ownerToken);
       this.logger.warn(
         `[IdempotentConsumer] Event ${eventId} failed during execution. Processing lease released for retry.`,
@@ -147,11 +177,13 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       }
     }
 
-    // 3. Check durable IdempotencyRecord fallback when Redis is unavailable
+    // 3. Check durable Inbox record fallback when Redis is unavailable
     if (this.outboxRepo) {
       try {
         const dbKey = `${consumer}:${eventId}`;
-        const record = await this.outboxRepo.findIdempotencyRecord(dbKey);
+        const record = this.outboxRepo.findInboxRecord
+          ? await this.outboxRepo.findInboxRecord(consumer, eventId)
+          : await this.outboxRepo.findIdempotencyRecord(dbKey);
         if (
           record &&
           record.status === 'completed' &&
@@ -162,7 +194,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.debug(
-          `Error checking IdempotencyRecord for ${key}: ${errMsg}`,
+          `Error checking Inbox record for ${key}: ${errMsg}`,
         );
       }
     }
@@ -194,13 +226,17 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       (async () => {
         if (this.outboxRepo) {
           try {
-            await this.outboxRepo.deleteIdempotencyRecords(
-              `${consumer}:${eventId}`,
-            );
+            if (this.outboxRepo.deleteInboxRecord) {
+              await this.outboxRepo.deleteInboxRecord(consumer, eventId);
+            } else {
+              await this.outboxRepo.deleteIdempotencyRecords(
+                `${consumer}:${eventId}`,
+              );
+            }
           } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
             this.logger.debug(
-              `Failed to reset IdempotencyRecord for ${key}: ${errMsg}`,
+              `Failed to reset Inbox record for ${key}: ${errMsg}`,
             );
           }
         }
@@ -216,6 +252,57 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
   }
 
   // Internal Lease & State Management
+
+  private async renewProcessingLease(
+    key: string,
+    leaseTtlSeconds: number,
+    ownerToken: string,
+  ): Promise<void> {
+    const memEntry = this.memoryStore.get(key);
+    if (
+      memEntry &&
+      memEntry.status === 'processing' &&
+      (!memEntry.ownerToken || memEntry.ownerToken === ownerToken)
+    ) {
+      this.setMemoryEntry(key, 'processing', leaseTtlSeconds, ownerToken);
+    }
+
+    if (this.redis && this.redis.isReady()) {
+      const client = this.redis.getClient();
+      if (client && client.eval) {
+        try {
+          const luaScript = `
+            local val = redis.call('GET', KEYS[1])
+            if not val then return 0 end
+            if string.find(val, 'PROCESSING:' .. ARGV[1] .. ':', 1, true) then
+              return redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+            end
+            return 0
+          `;
+          await client.eval(
+            luaScript,
+            1,
+            key,
+            ownerToken,
+            String(leaseTtlSeconds),
+          );
+          return;
+        } catch {
+          // Fallback to DB renewal if Redis fails
+        }
+      }
+    }
+
+    if (this.outboxRepo) {
+      const dbKey = this.extractDbIdempotencyKey(key);
+      const expiresAt = new Date(Date.now() + leaseTtlSeconds * 1000);
+      await this.outboxRepo.upsertIdempotencyRecord(
+        dbKey,
+        'processing',
+        expiresAt,
+      );
+    }
+  }
 
   private async tryAcquireProcessingLease(
     key: string,
@@ -250,7 +337,6 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
           );
 
           if (setRes === 'OK') {
-            // Successfully acquired distributed lease
             this.setMemoryEntry(key, 'processing', leaseTtlSeconds, ownerToken);
             return { acquired: true };
           }
@@ -261,19 +347,27 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
             try {
               const existing = JSON.parse(existingRaw) as { status?: string };
               if (existing.status === 'completed') {
-                this.setMemoryEntry(key, 'completed', 86400);
+                this.setMemoryEntry(
+                  key,
+                  'completed',
+                  IdempotentConsumerService.DEFAULT_RETENTION_TTL_SECONDS,
+                );
                 return { acquired: false, reason: 'ALREADY_COMPLETED' };
               }
               this.setMemoryEntry(key, 'processing', leaseTtlSeconds);
               return { acquired: false, reason: 'IN_FLIGHT' };
             } catch {
-              // Corrupted JSON, treat as in-flight
               return { acquired: false, reason: 'IN_FLIGHT' };
             }
           }
 
-          // Key was present during SET NX but expired before GET: retry once or treat as in flight
-          const retrySet = await client.set(key, leasePayload, 'EX', leaseTtlSeconds, 'NX');
+          const retrySet = await client.set(
+            key,
+            leasePayload,
+            'EX',
+            leaseTtlSeconds,
+            'NX',
+          );
           if (retrySet === 'OK') {
             this.setMemoryEntry(key, 'processing', leaseTtlSeconds, ownerToken);
             return { acquired: true };
@@ -282,13 +376,13 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
           this.logger.warn(
-            `Redis atomic lease acquisition failed (${errMsg}). Falling back to memory store.`,
+            `Redis atomic lease acquisition failed (${errMsg}). Falling back to durable/memory store.`,
           );
         }
       }
     }
 
-    // 2. Durable IdempotencyRecord Fallback when Redis is unavailable
+    // 2. Durable Inbox / IdempotencyRecord Fallback when Redis is unavailable
     if (this.outboxRepo) {
       try {
         const dbKey = this.extractDbIdempotencyKey(key);
@@ -299,7 +393,11 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
           new Date(existingRecord.expiresAt).getTime() > now
         ) {
           if (existingRecord.status === 'completed') {
-            this.setMemoryEntry(key, 'completed', 86400);
+            this.setMemoryEntry(
+              key,
+              'completed',
+              IdempotentConsumerService.DEFAULT_RETENTION_TTL_SECONDS,
+            );
             return { acquired: false, reason: 'ALREADY_COMPLETED' };
           }
           if (
@@ -319,7 +417,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.debug(
-          `IdempotencyRecord fallback lease check skipped for ${key}: ${errMsg}`,
+          `Durable inbox fallback lease check skipped for ${key}: ${errMsg}`,
         );
       }
     }
@@ -409,7 +507,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.debug(
-          `Failed to mark IdempotencyRecord completed for ${key}: ${errMsg}`,
+          `Failed to mark durable inbox record completed for ${key}: ${errMsg}`,
         );
       }
     }
@@ -470,7 +568,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.debug(
-          `Failed to release IdempotencyRecord lease for ${key}: ${errMsg}`,
+          `Failed to release durable inbox lease for ${key}: ${errMsg}`,
         );
       }
     }
@@ -519,160 +617,3 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
     });
   }
 }
-
-@Injectable()
-export class OutboxMetrics {
-  private readonly logger = new Logger(OutboxMetrics.name);
-  private readonly counters = new Map<string, number>();
-  private readonly gauges = new Map<string, number>();
-
-  incrementCounter(name: string, value: number = 1): number {
-    const next = (this.counters.get(name) || 0) + value;
-    this.counters.set(name, next);
-    return next;
-  }
-
-  getCounter(name: string): number {
-    return this.counters.get(name) || 0;
-  }
-
-  setGauge(name: string, value: number) {
-    this.gauges.set(name, value);
-  }
-
-  getGauge(name: string): number {
-    return this.gauges.get(name) || 0;
-  }
-
-  recordOutboxDispatch(durationMs: number, success: boolean) {
-    const safeDuration = Math.max(
-      0,
-      Number.isFinite(durationMs) ? durationMs : 0,
-    );
-    this.incrementCounter('outbox.dispatch.total', 1);
-    this.incrementCounter(
-      success ? 'outbox.dispatch.succeeded' : 'outbox.dispatch.failed',
-      1,
-    );
-    this.incrementCounter('outbox.dispatch.duration_ms.sum', safeDuration);
-    this.setGauge('outbox.dispatch.last_duration_ms', safeDuration);
-    this.setGauge('outbox.dispatch.last_timestamp_ms', Date.now());
-    this.logger.debug(
-      `[OutboxMetrics] Outbox dispatch executed in ${safeDuration}ms (success=${success})`,
-    );
-  }
-
-  getSnapshot() {
-    return {
-      dispatchedTotal: this.getCounter('outbox.dispatch.total'),
-      succeededTotal: this.getCounter('outbox.dispatch.succeeded'),
-      failedTotal: this.getCounter('outbox.dispatch.failed'),
-      totalDurationMs: this.getCounter('outbox.dispatch.duration_ms.sum'),
-      lastDurationMs: this.getGauge('outbox.dispatch.last_duration_ms'),
-      lastDispatchAt: this.getGauge('outbox.dispatch.last_timestamp_ms'),
-    };
-  }
-}
-
-@Injectable()
-export class OutboxDispatcher implements OutboxDispatchHandler {
-  private readonly logger = new Logger(OutboxDispatcher.name);
-
-  constructor(
-    @Optional() private readonly eventEmitter?: EventEmitter2,
-    @Optional() private readonly metricsService?: OutboxMetrics,
-  ) {}
-
-  async publish<T = unknown>(envelope: DomainEventEnvelope<T>): Promise<void> {
-    this.logger.debug(
-      `[DomainEventHandler] Dispatched ${envelope.eventType} for aggregate ${envelope.aggregateId} (scope: ${envelope.scopeId || envelope.projectId || envelope.userId})`,
-    );
-    if (this.eventEmitter)
-      await this.eventEmitter.emitAsync(envelope.eventType, envelope);
-    this.metricsService?.incrementCounter('outbox_dispatched_total');
-  }
-
-  handle(event: OutboxEvent, signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted) {
-      return Promise.reject(
-        new SubsystemUnavailableException(
-          `Handler execution aborted for event ${event.id} (lease lost)`,
-          { eventId: event.id },
-        ),
-      );
-    }
-    return this.publish({
-      eventId: event.id,
-      userId: event.userId,
-      projectId: event.projectId ?? undefined,
-      scopeId: event.projectId || event.userId,
-      aggregateId: event.aggregateId,
-      eventType: event.eventType,
-      payload: event.payload,
-      createdAt: event.createdAt,
-      schemaVersion: 1,
-    });
-  }
-}
-
-@Processor(LIBRARY_OUTBOX_QUEUE, { concurrency: 5 })
-export class OutboxQueueConsumer
-  extends WorkerHost
-  implements OnApplicationBootstrap, OnApplicationShutdown
-{
-  private readonly logger = new Logger(OutboxQueueConsumer.name);
-
-  constructor(
-    @Optional()
-    @Inject(OUTBOX_REGISTRY_PORT)
-    private readonly outboxWorker?: IOutboxEventProcessor,
-  ) {
-    super();
-  }
-
-  onApplicationBootstrap() {
-    try {
-      this.worker?.on('error', (err) => {
-        this.logger.warn(
-          `Outbox BullMQ Worker connection notice: ${err.message}`,
-        );
-      });
-      this.logger.log(
-        `OutboxQueueConsumer registered with BullMQ on queue: ${LIBRARY_OUTBOX_QUEUE} (concurrency: 5)`,
-      );
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.debug(`OutboxQueueConsumer worker listener skipped: ${msg}`);
-    }
-  }
-
-  async onApplicationShutdown() {
-    try {
-      if (this.worker) {
-        this.logger.log('Closing OutboxQueueConsumer worker on shutdown...');
-        await this.worker.close();
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Error closing OutboxQueueConsumer worker: ${msg}`);
-    }
-  }
-
-  async process(
-    job: Job<{ eventId: string; eventType?: string }>,
-  ): Promise<void> {
-    if (job.name !== LIBRARY_OUTBOX_JOB && job.name !== '__default__') {
-      this.logger.debug(`Ignoring unknown job name: ${job.name}`);
-      return;
-    }
-
-    const { eventId } = job.data;
-    if (!eventId || !this.outboxWorker) return;
-
-    await this.outboxWorker.processEventById(eventId, {
-      rethrowOnRetryableFailure: true,
-    });
-  }
-}
-
-export { OutboxQueueConsumer as OutboxBullProcessor };

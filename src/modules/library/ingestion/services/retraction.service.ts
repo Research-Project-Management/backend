@@ -98,27 +98,69 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async shouldFetchGitlabDump(): Promise<boolean> {
+    try {
+      if (typeof this.repo.getDatabaseStats === 'function') {
+        const stats = await this.repo.getDatabaseStats();
+        if (stats.totalRecords === 0) {
+          return true;
+        }
+        const utcDay = new Date().getUTCDay();
+        if (utcDay === 0 || utcDay === 6) {
+          this.logger.debug(
+            'Skipping Crossref GitLab CSV download on weekend (Saturday/Sunday UTC); dataset only updates Mon-Fri.',
+          );
+          return false;
+        }
+        if (stats.lastCheckedAt) {
+          const ageHours =
+            (Date.now() - new Date(stats.lastCheckedAt).getTime()) /
+            (60 * 60 * 1000);
+          if (ageHours < 20) {
+            this.logger.debug(
+              `Skipping Crossref GitLab CSV download: local dataset is fresh (${ageHours.toFixed(1)}h old < 20h).`,
+            );
+            return false;
+          }
+        }
+      } else {
+        const utcDay = new Date().getUTCDay();
+        if (utcDay === 0 || utcDay === 6) return false;
+      }
+    } catch {
+      // Fallback to allowing sync if stats check fails
+    }
+    return true;
+  }
+
   /**
    * Autonomous daily delta sync:
-   * 1. Updates local canonical retraction dataset if seeder is present.
+   * 1. Updates local canonical retraction dataset if seeder is present (Mon-Fri working days only once populated).
    * 2. Executes targeted Delta Set reconciliation on newly discovered retractions.
    * 3. Scans stale user library items and reconciles against the updated dataset.
    */
   async syncDailyRetractionDelta(
-    options?: RetractionSyncOptions,
+    options?: RetractionSyncOptions & { forceGitlabFetch?: boolean },
   ): Promise<RetractionSyncResult> {
     this.logger.log(
       'Executing autonomous daily retraction delta synchronization',
     );
     if (this.seeder) {
-      try {
-        const seedResult = await this.seeder.seedFromGitlab();
-        if (seedResult.deltaDois && seedResult.deltaDois.length > 0) {
-          await this.reconcileDeltaRetractions(seedResult.deltaDois);
+      const shouldFetch =
+        options?.forceGitlabFetch === true ||
+        (await this.shouldFetchGitlabDump());
+      if (shouldFetch) {
+        try {
+          const seedResult = await this.seeder.seedFromGitlab();
+          if (seedResult.deltaDois && seedResult.deltaDois.length > 0) {
+            await this.reconcileDeltaRetractions(seedResult.deltaDois);
+          }
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Automated Crossref dump sync skipped/failed: ${msg}`,
+          );
         }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Automated Crossref dump sync skipped/failed: ${msg}`);
       }
     }
     return this.syncAllStaleItems(options);
