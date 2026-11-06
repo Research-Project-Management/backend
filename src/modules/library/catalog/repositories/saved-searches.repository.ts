@@ -122,6 +122,7 @@ export class SavedSearchesRepository {
     dto: UpdateSavedSearchInput,
     projectId?: string,
     tx?: Prisma.TransactionClient,
+    cachedCount?: number,
   ) {
     const client = this.getClient(tx);
     const effectiveProjectId = this.normalizeProjectId(projectId);
@@ -156,6 +157,9 @@ export class SavedSearchesRepository {
         ...(dto.sortBy !== undefined ? { sortBy: dto.sortBy } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         ...(dto.isPinned !== undefined ? { isPinned: dto.isPinned } : {}),
+        ...(typeof cachedCount === 'number'
+          ? { cachedCount, lastEvaluatedAt: new Date() }
+          : {}),
         version: { increment: 1 },
       },
     });
@@ -655,8 +659,11 @@ export class StateRepository {
       userStateByUser.set(us.userId, list);
     }
 
+    const userStateEntries = Array.from(userStateByUser.entries()).sort(
+      ([uidA], [uidB]) => (uidA < uidB ? -1 : uidA > uidB ? 1 : 0),
+    );
     await Promise.all([
-      ...Array.from(userStateByUser.entries()).map(([userId, states]) => {
+      ...userStateEntries.map(([userId, states]) => {
         const merged = pickPreferredMergedState(states);
         const targetState = states.find((s) => s.itemId === targetItemId) as
           | { lastActiveAttachmentId?: string | null }

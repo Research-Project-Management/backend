@@ -53,12 +53,12 @@ export class ItemMatchQueryRepository {
     projectId?: string,
   ) {
     const activeClient = this.getClient(client);
-    let scopeWhere: Prisma.ItemWhereInput = { deletedAt: null };
+    let scopeWhere: Prisma.ItemWhereInput;
     if (projectId && isUuid(projectId)) {
       scopeWhere = { projectId, deletedAt: null };
     } else if (userId && isUuid(userId)) {
       scopeWhere = { userId, projectId: null, deletedAt: null };
-    } else if (userId && !isUuid(userId)) {
+    } else {
       return [];
     }
 
@@ -69,9 +69,21 @@ export class ItemMatchQueryRepository {
       select: {
         id: true,
         title: true,
+        itemType: true,
         doi: true,
+        arxivId: true,
+        pmid: true,
+        pmcid: true,
+        isbn: true,
+        issn: true,
+        url: true,
+        publicationTitle: true,
         abstract: true,
         year: true,
+        hasFile: true,
+        attachmentCount: true,
+        noteCount: true,
+        isRetracted: true,
         contributors: {
           select: { id: true, creatorType: true },
         },
@@ -90,12 +102,12 @@ export class ItemMatchQueryRepository {
     projectId?: string,
   ) {
     const activeClient = this.getClient(client);
-    let scopeWhere: Prisma.ItemWhereInput = { deletedAt: null };
+    let scopeWhere: Prisma.ItemWhereInput;
     if (projectId && isUuid(projectId)) {
       scopeWhere = { projectId, deletedAt: null };
     } else if (userId && isUuid(userId)) {
       scopeWhere = { userId, projectId: null, deletedAt: null };
-    } else if (userId && !isUuid(userId)) {
+    } else {
       return [];
     }
 
@@ -108,6 +120,18 @@ export class ItemMatchQueryRepository {
         title: true,
         itemType: true,
         doi: true,
+        arxivId: true,
+        pmid: true,
+        pmcid: true,
+        isbn: true,
+        issn: true,
+        url: true,
+        publicationTitle: true,
+        abstract: true,
+        hasFile: true,
+        attachmentCount: true,
+        noteCount: true,
+        isRetracted: true,
         metadata: true,
         citationKey: true,
         year: true,
@@ -472,12 +496,19 @@ export class ItemMatchQueryRepository {
 
     for (const r of relations) {
       const isOutgoing = r.sourceItemId === itemId;
+      const anchorItem = isOutgoing ? r.sourceItem : r.targetItem;
       const peerItem = isOutgoing ? r.targetItem : r.sourceItem;
       const direction = isOutgoing ? 'outgoing' : 'incoming';
       const rawType = r.relationType as string;
       const dedupKey = `${peerItem?.id ?? ''}:${rawType}:${direction}`;
       if (!peerItem || peerItem.id === itemId || seenRelationKeys.has(dedupKey)) {
         continue;
+      }
+      if (anchorItem) {
+        const sameScope = anchorItem.projectId
+          ? peerItem.projectId === anchorItem.projectId
+          : !peerItem.projectId && peerItem.userId === anchorItem.userId;
+        if (!sameScope) continue;
       }
       seenRelationKeys.add(dedupKey);
 

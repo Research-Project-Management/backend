@@ -7,7 +7,7 @@ import { libraryConfig, LibraryConfigService } from './config/library.config';
 
 // Core Cross-Cutting Concerns
 import { SsrfGuardService } from './services/ssrf-guard.service';
-import { HttpClient } from './services/ssrf-guard.service';
+import { HttpClient } from './services/http-client.service';
 
 // Resilience Patterns
 import { ResilienceRegistryService } from './resilience/resilience-registry.service';

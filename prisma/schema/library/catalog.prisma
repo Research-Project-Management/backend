@@ -207,3 +207,20 @@ model ItemIdentifier {
   @@index([type, value])
   @@map("item_identifiers")
 }
+
+model CitationStyle {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  scopeKey   String   @default("") @map("scope_key") @db.VarChar(128)
+  userId     String   @map("user_id") @db.Uuid
+  projectId  String?  @map("project_id") @db.Uuid
+  slug       String   @db.VarChar(128)
+  title      String   @db.VarChar(512)
+  xmlContent String   @map("xml_content") @db.Text
+  sha256     String   @db.VarChar(64)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([scopeKey, slug])
+  @@index([userId, projectId])
+  @@map("citation_styles")
+}

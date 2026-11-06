@@ -157,6 +157,7 @@ export function resolveExtraPlainText(
 
 export const IGNORED_SYSTEM_KEYS = new Set([
   ...INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
+  '__proto__', 'constructor', 'prototype',
   'id', 'userId', 'projectId', 'createdById', 'uploadedById',
   'createdAt', 'updatedAt', 'deletedAt', 'version', '_version',
   'expectedVersion', 'isDeleted', 'silent', 'creators', 'authors', 'author',

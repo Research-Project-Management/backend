@@ -519,6 +519,7 @@ const MAX_SAFE_TEXT_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB default for HTML/XM
 
 export class PayloadTooLargeException extends BaseDomainException {
   override readonly code = 'LIBRARY_PAYLOAD_TOO_LARGE';
+  override readonly statusCode = 413;
 
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, details);
@@ -534,6 +535,9 @@ export async function readSafeResponseBuffer(
   if (contentLengthHeader) {
     const declaredLength = parseInt(contentLengthHeader, 10);
     if (!isNaN(declaredLength) && declaredLength > maxBytes) {
+      if (typeof response.body?.cancel === 'function') {
+        await response.body.cancel().catch(() => {});
+      }
       throw new PayloadTooLargeException(
         `Payload size (${(declaredLength / (1024 * 1024)).toFixed(1)} MB) exceeds safe OS limit of ${(maxBytes / (1024 * 1024)).toFixed(0)} MB`,
       );

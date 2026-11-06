@@ -21,8 +21,8 @@ import {
   ExportFormatType,
   CitationStyleId,
   FormattedCitationResult,
-  ExportLibraryDto,
 } from '@/modules/library/citation/types/citation.types';
+import { ExportLibraryDto } from '@/modules/library/citation/dto/citation.dto';
 import {
   resolveExportFormatStrategy,
   formatItemsAsBibtex,
@@ -83,6 +83,16 @@ export class ExportsService {
         );
       }
       scopeWhere = { projectId: effectiveProjectId, deletedAt: null };
+      if (dto.collectionId) {
+        const collection = await this.exportsRepo.findCollection(
+          dto.collectionId,
+        );
+        if (!collection || collection.projectId !== effectiveProjectId) {
+          throw new NotFoundException(
+            `Collection ${dto.collectionId} not found or access denied`,
+          );
+        }
+      }
     } else if (dto.collectionId) {
       const collection = await this.exportsRepo.findCollection(
         dto.collectionId,
@@ -103,22 +113,31 @@ export class ExportsService {
           );
         }
         scopeWhere = { projectId: collection.projectId, deletedAt: null };
-      } else if (
-        'userId' in collection &&
-        collection.userId &&
-        collection.userId !== userId
-      ) {
+      } else if (collection.userId !== userId) {
         throw new NotFoundException(
           `Collection ${dto.collectionId} not found or access denied`,
         );
       }
     }
 
+    const boundedItemIds =
+      dto.itemIds && dto.itemIds.length > 0
+        ? Array.from(
+            new Set(
+              dto.itemIds
+                .map((id) => (typeof id === 'string' ? id.trim() : ''))
+                .filter((id) => isUuid(id)),
+            ),
+          ).slice(0, EXPORT_MAX_ITEMS)
+        : undefined;
+
     const where = {
       ...scopeWhere,
-      ...(dto.itemIds && dto.itemIds.length > 0
-        ? { id: { in: dto.itemIds } }
-        : {}),
+      ...(boundedItemIds && boundedItemIds.length > 0
+        ? { id: { in: boundedItemIds } }
+        : dto.itemIds && dto.itemIds.length > 0
+          ? { id: { in: ['00000000-0000-0000-0000-000000000000'] } }
+          : {}),
       ...(dto.collectionId
         ? { collectionItems: { some: { collectionId: dto.collectionId } } }
         : {}),
@@ -161,37 +180,31 @@ export class ExportsService {
     const collection = await this.exportsRepo.findCollection(collectionId);
 
     if (!collection) {
-      throw new BadRequestException(`Collection ${collectionId} not found`);
+      throw new NotFoundException(`Collection ${collectionId} not found`);
     }
 
     const normalizedProjectId = normalizeProjectScopeId(projectId);
-    const effectiveProjectId = collection.projectId || normalizedProjectId;
+    let scopeWhere: Prisma.ItemWhereInput;
 
-    let scopeWhere: Prisma.ItemWhereInput = {
-      userId,
-      projectId: null,
-      deletedAt: null,
-    };
-    if (effectiveProjectId) {
-      if (
-        collection.projectId &&
-        normalizedProjectId &&
-        collection.projectId !== normalizedProjectId
-      ) {
-        throw new BadRequestException(`Collection ${collectionId} not found`);
+    if (collection.projectId) {
+      if (normalizedProjectId && collection.projectId !== normalizedProjectId) {
+        throw new NotFoundException(`Collection ${collectionId} not found`);
       }
       const member = await this.exportsRepo.findProjectMember(
-        effectiveProjectId,
+        collection.projectId,
         userId,
       );
       if (!member) {
-        throw new BadRequestException(
+        throw new NotFoundException(
           `Collection ${collectionId} not found or access denied`,
         );
       }
-      scopeWhere = { projectId: effectiveProjectId, deletedAt: null };
-    } else if (collection.userId !== userId) {
-      throw new BadRequestException(`Collection ${collectionId} not found`);
+      scopeWhere = { projectId: collection.projectId, deletedAt: null };
+    } else {
+      if (collection.userId !== userId) {
+        throw new NotFoundException(`Collection ${collectionId} not found`);
+      }
+      scopeWhere = { userId, projectId: null, deletedAt: null };
     }
 
     const items = await this.exportsRepo.findItems(
@@ -420,9 +433,15 @@ export class ExportsService {
       };
     }
 
-    const trimmedKeys = safeKeys
-      .map((k) => (typeof k === 'string' ? k.trim() : ''))
-      .filter(Boolean);
+    const trimmedKeys = Array.from(
+      new Set(
+        safeKeys
+          .map((k) =>
+            typeof k === 'string' ? k.trim().slice(0, 256) : '',
+          )
+          .filter(Boolean),
+      ),
+    ).slice(0, 500);
     const normalizedKeys = trimmedKeys.map((k) => k.toLowerCase());
 
     const effectiveProjectId = normalizeProjectScopeId(projectId);

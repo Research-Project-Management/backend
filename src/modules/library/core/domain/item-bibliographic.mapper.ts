@@ -572,10 +572,8 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
     Array.isArray(normalized.states) && normalized.states.length > 0
       ? (normalized.states as StateRecordLike[])
       : null;
-  const userState = statesArr
-    ? userId
-      ? statesArr.find((s) => !s.userId || s.userId === userId)
-      : statesArr[0]
+  const userState = statesArr && userId
+    ? statesArr.find((s) => s.userId === userId)
     : undefined;
   const { states: _states, ...rest } = normalized;
   return {

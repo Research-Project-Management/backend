@@ -184,9 +184,11 @@ export function resolveCanonicalCommandFields(
   };
 }
 
-const SERVER_RESERVED_METADATA_KEYS = new Set([
+export const SERVER_RESERVED_METADATA_KEYS = new Set([
+  '__proto__', 'constructor', 'prototype',
   'mergedIntoId', 'mergedCitationKeys', 'mergeHistory', 'isRetracted', 'retractionNature', 'retractionDetails',
   'retractionCheckedAt', 'uploadedById', 'tags', 'keywords', 'labels', 'keywordsList', 'itemTags', 'zoteroTags',
+  'fieldProvenance', 'lockedFields', 'dismissedDuplicateIds',
 ]);
 
 export function buildMetadataPartial(params: {
@@ -316,7 +318,13 @@ export function buildMetadataPartial(params: {
     }
   }
 
-  if (effectiveExtraFields && typeof effectiveExtraFields === 'object') Object.assign(result, effectiveExtraFields);
+  if (effectiveExtraFields && typeof effectiveExtraFields === 'object') {
+    for (const [k, v] of Object.entries(effectiveExtraFields)) {
+      if (!SERVER_RESERVED_METADATA_KEYS.has(k) && !k.startsWith('__')) {
+        result[k] = v;
+      }
+    }
+  }
   applyMetadataProvenanceAndTelemetry(result, dataRecord, dataExtra, { isCreate, rawTitle: canonical.rawTitle });
   const directStringSet = new Set<string>(DIRECT_STRING_METADATA_KEYS);
   for (const [k, v] of Object.entries(extraPatchWithTombstones)) {

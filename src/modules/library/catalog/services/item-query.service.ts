@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, ForbiddenException } from '@nestjs/common';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
 import {
@@ -333,13 +333,18 @@ export class ItemQueryService {
         this.logger.debug(`Cache lookup error for ${cacheKey}: ${msg}`);
       }
 
-      item = await fetchRaw();
-      if (item) {
-        const itemTtl = applyJitter(300);
-        await this.cache.set(cacheKey, item, itemTtl).catch(() => undefined);
-      }
+      item = await this.singleFlight.execute(cacheKey, async () => {
+        const fetched = await fetchRaw();
+        if (fetched && this.cache) {
+          const itemTtl = applyJitter(300);
+          await this.cache
+            .set(cacheKey, fetched, itemTtl)
+            .catch(() => undefined);
+        }
+        return fetched;
+      });
     } else {
-      item = await fetchRaw();
+      item = await this.singleFlight.execute(cacheKey, fetchRaw);
     }
 
     if (!item) return null;
@@ -393,6 +398,7 @@ export class ItemQueryService {
       isRetracted?: boolean;
       onlyFlagged?: boolean;
       checkInProjectId?: string;
+      ids?: string[];
     },
   ): Promise<CursorPaginatedResult<ItemDetail | Record<string, unknown>>> {
     const limit = Math.min(options.limit ?? 50, 1000);
@@ -419,6 +425,9 @@ export class ItemQueryService {
       options.tag ? `t=${options.tag}` : '',
       options.collectionIds?.length
         ? `cids=${options.collectionIds.join(',')}`
+        : '',
+      options.ids?.length
+        ? `ids=${[...options.ids].sort().join(',')}`
         : '',
       options.includeSubcollections !== undefined
         ? `sub=${options.includeSubcollections}`
@@ -501,6 +510,15 @@ export class ItemQueryService {
         .filter((it): it is NonNullable<typeof it> => it !== null);
 
       if (validCheckInProjectId && items.length > 0) {
+        const memberRole = await this.query.getProjectMemberRole(
+          validCheckInProjectId,
+          userId,
+        );
+        if (!memberRole) {
+          throw new ForbiddenException(
+            `Access to project '${validCheckInProjectId}' denied`,
+          );
+        }
         const existingInProject = await this.query.findDuplicatesInProject(
           validCheckInProjectId,
           items.map((it) => ({

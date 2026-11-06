@@ -54,6 +54,7 @@ model CollectionItem {
 
 model Tag {
   id             String    @id @default(uuid(7)) @db.Uuid
+  scopeKey       String    @default("") @map("scope_key") @db.VarChar(128)
   name           String
   normalizedName String    @default("") @map("normalized_name")
   color          String?   @default("#3b82f6")
@@ -68,6 +69,7 @@ model Tag {
 
   itemTags    ItemTag[]
 
+  @@unique([scopeKey, normalizedName])
   @@unique([userId, projectId, normalizedName])
   @@index([projectId, normalizedName])
   @@index([userId, projectId, name])

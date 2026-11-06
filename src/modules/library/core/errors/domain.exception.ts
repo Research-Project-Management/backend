@@ -9,6 +9,7 @@ import { HttpStatus } from '@nestjs/common';
  */
 export abstract class BaseDomainException extends Error {
   readonly code: string = 'LIBRARY_DOMAIN_ERROR';
+  readonly statusCode: number = HttpStatus.BAD_REQUEST;
   readonly details?: Record<string, unknown>;
 
   constructor(message: string, details?: Record<string, unknown>) {
@@ -16,6 +17,10 @@ export abstract class BaseDomainException extends Error {
     this.details = details;
     this.name = this.constructor.name;
     Object.setPrototypeOf(this, new.target.prototype);
+  }
+
+  getStatus(): number {
+    return this.statusCode;
   }
 }
 
@@ -98,6 +103,7 @@ export { VersionMismatchException as OptimisticLockException };
  */
 export class InvalidStateTransitionException extends BaseDomainException {
   override readonly code = 'LIBRARY_INVALID_STATE_TRANSITION';
+  override readonly statusCode = HttpStatus.CONFLICT;
 
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, details);
@@ -109,6 +115,7 @@ export class InvalidStateTransitionException extends BaseDomainException {
  */
 export class ExternalProviderException extends BaseDomainException {
   override readonly code = 'LIBRARY_EXTERNAL_PROVIDER_ERROR';
+  override readonly statusCode = HttpStatus.BAD_GATEWAY;
 
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, details);
@@ -120,6 +127,7 @@ export class ExternalProviderException extends BaseDomainException {
  */
 export class ExtractionProcessException extends BaseDomainException {
   override readonly code = 'LIBRARY_EXTRACTION_PROCESS_ERROR';
+  override readonly statusCode = HttpStatus.UNPROCESSABLE_ENTITY;
 
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, details);
@@ -131,6 +139,7 @@ export class ExtractionProcessException extends BaseDomainException {
  */
 export class SubsystemUnavailableException extends BaseDomainException {
   override readonly code = 'LIBRARY_SUBSYSTEM_UNAVAILABLE';
+  override readonly statusCode = HttpStatus.SERVICE_UNAVAILABLE;
 
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, details);
@@ -142,6 +151,7 @@ export class SubsystemUnavailableException extends BaseDomainException {
  */
 export class EntityNotFoundException extends BaseDomainException {
   override readonly code = 'LIBRARY_ENTITY_NOT_FOUND';
+  override readonly statusCode = HttpStatus.NOT_FOUND;
 
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, details);
@@ -153,6 +163,7 @@ export class EntityNotFoundException extends BaseDomainException {
  */
 export class ConfigurationException extends BaseDomainException {
   override readonly code = 'LIBRARY_CONFIGURATION_ERROR';
+  override readonly statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
 
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, details);
@@ -267,15 +278,19 @@ export interface DomainEventEnvelope<T = unknown> {
 }
 
 export class AttachmentInvariantError extends BaseDomainException {
+  override readonly code = 'LIBRARY_ATTACHMENT_INVARIANT_ERROR';
+  override readonly statusCode = HttpStatus.BAD_REQUEST;
   public override name = 'AttachmentInvariantError';
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, details);
   }
 }
 
 export class AttachmentStorageException extends BaseDomainException {
-  constructor(message: string) {
-    super(message);
+  override readonly code = 'LIBRARY_ATTACHMENT_STORAGE_ERROR';
+  override readonly statusCode = HttpStatus.BAD_GATEWAY;
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, details);
   }
 }
 

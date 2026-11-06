@@ -1,4 +1,5 @@
 import { Injectable, Inject, Optional, Logger } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { RedisCacheService } from '@/core';
 import { normalizeProjectScopeId, libraryConfig, LIBRARY_REDIS_KEYS, UNIT_OF_WORK, IUnitOfWork, SingleFlightCoalescer, invalidateLibraryScopeCaches, LibraryItemSource, CATALOG_FACADE, ICatalogFacade, CatalogItemSummary, ItemsMapper } from '@/modules/library/core';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
@@ -97,20 +98,16 @@ export class LibraryBootstrapService {
       ? { projectId: validProjectId }
       : { userId };
 
+    const optionsHash = createHash('sha256')
+      .update(JSON.stringify(options || {}))
+      .digest('hex')
+      .slice(0, 16);
+
     const flightKey = [
       validProjectId ? `proj:${validProjectId}` : `user:${userId}`,
       userId,
       shouldIncludeItems ? 'items:1' : 'items:0',
-      options.view || 'all',
-      options.collectionId || '',
-      options.tagId || '',
-      options.tag || '',
-      options.search || '',
-      options.cursor || '',
-      options.page || 1,
-      options.limit || 50,
-      options.orderBy || '',
-      options.orderDirection || '',
+      optionsHash,
     ].join(':');
 
     return this.singleFlight.execute(flightKey, async () => {

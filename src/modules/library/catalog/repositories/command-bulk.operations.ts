@@ -216,15 +216,24 @@ export class CommandBulkOperations {
         );
       }
 
+      const deletedBuckets = new Map<string, { deletedAt: Date | null; ids: string[] }>();
+      for (const id of succeededIds) {
+        const itemDeletedAt = restorableMap.get(id)?.deletedAt ?? null;
+        const bucketKey = itemDeletedAt ? String(itemDeletedAt.getTime()) : 'null';
+        const bucket = deletedBuckets.get(bucketKey) ?? { deletedAt: itemDeletedAt, ids: [] };
+        bucket.ids.push(id);
+        deletedBuckets.set(bucketKey, bucket);
+      }
+
       await Promise.all(
-        succeededIds.flatMap((id) => {
-          const itemDeletedAt = restorableMap.get(id)?.deletedAt;
-          const deletedFilter = itemDeletedAt ? { gte: itemDeletedAt } : { not: null };
+        Array.from(deletedBuckets.values()).flatMap(({ deletedAt, ids }) => {
+          const deletedFilter = deletedAt ? { gte: deletedAt } : { not: null };
+          const itemFilter = ids.length === 1 ? ids[0] : { in: ids };
           return [
-            client.note?.updateMany?.({ where: { itemId: id, deletedAt: deletedFilter }, data: { deletedAt: null } }),
-            client.attachment?.updateMany?.({ where: { itemId: id, deletedAt: deletedFilter }, data: { deletedAt: null } }),
+            client.note?.updateMany?.({ where: { itemId: itemFilter, deletedAt: deletedFilter }, data: { deletedAt: null } }),
+            client.attachment?.updateMany?.({ where: { itemId: itemFilter, deletedAt: deletedFilter }, data: { deletedAt: null } }),
             client.annotation?.updateMany?.({
-              where: { attachment: { itemId: id }, deletedAt: deletedFilter },
+              where: { attachment: { itemId: itemFilter }, deletedAt: deletedFilter },
               data: { deletedAt: null },
             }),
           ];
@@ -477,7 +486,27 @@ export class CommandBulkOperations {
         storagePaths: [],
       };
     }
-    return this.purgeMany(client, userId, trashedIds, projectId);
+    const CHUNK_SIZE = 500;
+    const allSucceeded: string[] = [];
+    const allFailed: string[] = [];
+    const allFileIds: string[] = [];
+    const allStoragePaths: string[] = [];
+
+    for (let i = 0; i < trashedIds.length; i += CHUNK_SIZE) {
+      const chunk = trashedIds.slice(i, i + CHUNK_SIZE);
+      const res = await this.purgeMany(client, userId, chunk, projectId);
+      allSucceeded.push(...res.succeededIds);
+      allFailed.push(...res.failedIds);
+      allFileIds.push(...res.fileIdsToDelete);
+      allStoragePaths.push(...res.storagePaths);
+    }
+
+    return {
+      succeededIds: allSucceeded,
+      failedIds: allFailed,
+      fileIdsToDelete: allFileIds,
+      storagePaths: allStoragePaths,
+    };
   }
 }
 
@@ -536,10 +565,24 @@ export async function executeBulkRestoreInTx(params: {
     const restoredFullItems = await query.findByIds(userId, res.succeededIds, validProjectId, tx, false);
     const fullItemMap = new Map((restoredFullItems || []).map((it) => [it.id, it]));
     const restoredAt = new Date().toISOString();
+    const stripPersonalOverlay = <T>(item: T, projId?: string | null): T => {
+      if (!projId || !item || typeof item !== 'object') return item;
+      const clone = { ...(item as unknown as Record<string, unknown>) };
+      for (const k of [
+        'isStarred', 'starred', 'isRead', 'readStatus', 'rating', 'currentPage',
+        'lastReadPage', 'scrollPosition', 'lastOpenedAt', 'lastReadAt', 'isMyPublication', 'states', 'publications',
+      ]) {
+        delete clone[k];
+      }
+      return clone as unknown as T;
+    };
     await helpers.appendChangesBatch(
       res.restoredItems.map((restored) => {
         const effectiveProjectId = validProjectId || restored.projectId || undefined;
         const fullItem = fullItemMap.get(restored.id);
+        const mapped = fullItem
+          ? stripPersonalOverlay(ItemsMapper.toDomain(fullItem), effectiveProjectId)
+          : { id: restored.id, version: restored.version, projectId: effectiveProjectId };
         return {
           userId,
           projectId: effectiveProjectId,
@@ -547,9 +590,7 @@ export async function executeBulkRestoreInTx(params: {
           entityId: restored.id,
           action: 'update' as const,
           version: restored.version,
-          data: fullItem
-            ? ItemsMapper.toDomain(fullItem)
-            : { id: restored.id, version: restored.version, projectId: effectiveProjectId },
+          data: mapped,
         };
       }),
     );
@@ -584,40 +625,7 @@ export async function executeBulkPurgeInTx(params: {
 }) {
   const { command, userId, itemIds, tx, helpers, validProjectId } = params;
   const res = await command.purgeMany(userId, itemIds, tx, validProjectId);
-  if (res.succeededIds.length > 0) {
-    const eventScope = { userId, projectId: validProjectId };
-    const purgedAt = new Date().toISOString();
-    await helpers.recordTombstonesBatch(
-      eventScope,
-      res.succeededIds.map((entityId) => ({ entityType: 'Item', entityId })),
-    );
-    await helpers.appendChangesBatch(
-      eventScope,
-      res.succeededIds.map((entityId) => ({
-        entityType: 'Item',
-        entityId,
-        action: 'delete',
-        version: 0,
-      })),
-    );
-    await helpers.publishOutboxBatch(
-      eventScope,
-      res.succeededIds.map((id, idx) => ({
-        aggregateId: id,
-        eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
-        payload: {
-          itemId: id,
-          itemIds: res.succeededIds,
-          userId,
-          projectId: validProjectId,
-          filePaths: idx === 0 ? res.storagePaths : [],
-          purgedAt,
-          cascadedInTx: true,
-          storageDeletedInTx: true,
-        },
-      })),
-    );
-  }
+  await emitPurgeChangeAndOutbox(res, userId, validProjectId, helpers);
   return res;
 }
 
@@ -630,41 +638,49 @@ export async function executeEmptyTrashInTx(params: {
 }) {
   const { command, userId, tx, helpers, validProjectId } = params;
   const res = await command.emptyTrash(userId, tx, validProjectId);
-  if (res.succeededIds.length > 0) {
-    const eventScope = { userId, projectId: validProjectId };
-    const purgedAt = new Date().toISOString();
-    await helpers.recordTombstonesBatch(
-      eventScope,
-      res.succeededIds.map((entityId) => ({ entityType: 'Item', entityId })),
-    );
-    await helpers.appendChangesBatch(
-      eventScope,
-      res.succeededIds.map((entityId) => ({
-        entityType: 'Item',
-        entityId,
-        action: 'delete',
-        version: 0,
-      })),
-    );
-    await helpers.publishOutboxBatch(
-      eventScope,
-      res.succeededIds.map((id, idx) => ({
-        aggregateId: id,
-        eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
-        payload: {
-          itemId: id,
-          itemIds: res.succeededIds,
-          userId,
-          projectId: validProjectId,
-          filePaths: idx === 0 ? res.storagePaths : [],
-          purgedAt,
-          cascadedInTx: true,
-          storageDeletedInTx: true,
-        },
-      })),
-    );
-  }
+  await emitPurgeChangeAndOutbox(res, userId, validProjectId, helpers);
   return res;
+}
+
+async function emitPurgeChangeAndOutbox(
+  res: { succeededIds: string[]; storagePaths?: string[] },
+  userId: string,
+  validProjectId: string | undefined,
+  helpers: TransactionHelpers,
+) {
+  if (res.succeededIds.length === 0) return;
+  const eventScope = { userId, projectId: validProjectId };
+  const purgedAt = new Date().toISOString();
+  await helpers.recordTombstonesBatch(
+    eventScope,
+    res.succeededIds.map((entityId) => ({ entityType: 'Item', entityId })),
+  );
+  await helpers.appendChangesBatch(
+    eventScope,
+    res.succeededIds.map((entityId) => ({
+      entityType: 'Item',
+      entityId,
+      action: 'delete',
+      version: 0,
+    })),
+  );
+  await helpers.publishOutboxBatch(
+    eventScope,
+    res.succeededIds.map((id, idx) => ({
+      aggregateId: id,
+      eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
+      payload: {
+        itemId: id,
+        ...(idx === 0 ? { itemIds: res.succeededIds } : {}),
+        userId,
+        projectId: validProjectId,
+        filePaths: idx === 0 ? res.storagePaths : [],
+        purgedAt,
+        cascadedInTx: true,
+        storageDeletedInTx: false,
+      },
+    })),
+  );
 }
 
 const executeBulkHardDeleteInTx = executeBulkPurgeInTx;
@@ -718,13 +734,13 @@ export async function executePurgeExpiredTrashInTx(params: {
         eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
         payload: {
           itemId: it.id,
-          itemIds: allExpiredItemIds,
+          ...(idx === 0 ? { itemIds: allExpiredItemIds } : {}),
           userId: it.userId,
           projectId: it.projectId ?? undefined,
           filePaths: idx === 0 ? res.storagePaths : [],
           purgedAt,
           cascadedInTx: true,
-          storageDeletedInTx: true,
+          storageDeletedInTx: false,
         },
       })),
     );

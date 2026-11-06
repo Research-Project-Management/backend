@@ -170,6 +170,9 @@ export class ItemListQueryRepository {
         },
       },
       collectionItems: {
+        where: {
+          collection: { deletedAt: null },
+        },
         select: {
           collectionId: true,
           sortOrder: true,

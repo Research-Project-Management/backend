@@ -1,9 +1,8 @@
 import { Injectable, Logger, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
-import { LibraryConfigService, libraryConfig } from '@/modules/library/core/config/library.config';
-import { ExternalProviderException } from '@/modules/library/core/errors/domain.exception';
+import { libraryConfig } from '@/modules/library/core/config/library.config';
+import { SingleFlightCoalescer } from '@/modules/library/core/resilience/circuit-breaker';
 
 interface SsrfGuardOptions {
   requireHttps?: boolean;
@@ -14,8 +13,10 @@ interface SsrfGuardOptions {
 export const DEFAULT_SAFE_REDIRECT_MAX_HOPS = 5;
 
 export const DEFAULT_BROWSER_FETCH_HEADERS: Record<string, string> = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (Academic Client; mailto:contact@flux.academic)',
+  get 'User-Agent'() {
+    const email = libraryConfig().academic.contactEmail;
+    return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (Academic Client; mailto:${email})`;
+  },
   Accept:
     'text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.9,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.9',
@@ -30,6 +31,88 @@ type SafeUrlResult = URL & { resolvedIps?: string[] };
 export class SsrfGuardService {
   private readonly logger = new Logger(SsrfGuardService.name);
   private readonly defaultAllowedSchemes = new Set(['http:', 'https:']);
+
+  /**
+   * OS Networking Optimization: Short-TTL DNS Cache + SingleFlight Coalescer.
+   * `dns.lookup` invokes `uv_getaddrinfo` on the libuv threadpool (4 threads by default).
+   * Coalescing in-flight lookups and caching validated public host IPs for 10 seconds
+   * prevents libuv threadpool starvation under bursty outbound traffic while preserving
+   * strict SSRF / DNS-rebinding defenses.
+   */
+  private static readonly DNS_CACHE_TTL_MS = 10_000;
+  private static readonly DNS_CACHE_MAX_SIZE = 500;
+  private readonly dnsCache = new Map<
+    string,
+    { ips: string[]; expiresAt: number }
+  >();
+  private readonly dnsSingleFlight = new SingleFlightCoalescer();
+
+  private async resolveAndValidateHostIps(
+    rawHostname: string,
+  ): Promise<string[]> {
+    const now = Date.now();
+    const cached = this.dnsCache.get(rawHostname);
+    if (cached && cached.expiresAt > now) {
+      return cached.ips;
+    }
+
+    return this.dnsSingleFlight.execute(rawHostname, async () => {
+      const recheck = this.dnsCache.get(rawHostname);
+      if (recheck && recheck.expiresAt > Date.now()) {
+        return recheck.ips;
+      }
+
+      const resolvedIps: string[] = [];
+      try {
+        const addresses = await lookup(rawHostname, { all: true });
+        if (!addresses || addresses.length === 0) {
+          throw new BadRequestException(
+            `Unable to resolve host '${rawHostname}'.`,
+          );
+        }
+
+        for (const record of addresses) {
+          if (this.isPrivateOrReservedIp(record.address)) {
+            this.logger.warn(
+              `SSRF attempt detected: ${rawHostname} resolved to private/reserved IP ${record.address}`,
+            );
+            throw new ForbiddenException(
+              `Host '${rawHostname}' resolves to a private or reserved IP address.`,
+            );
+          }
+          resolvedIps.push(record.address);
+        }
+      } catch (err: unknown) {
+        if (
+          err instanceof ForbiddenException ||
+          err instanceof BadRequestException
+        ) {
+          throw err;
+        }
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`DNS resolution failed for ${rawHostname}: ${errMsg}`);
+        throw new BadRequestException(`Unable to resolve host '${rawHostname}'.`);
+      }
+
+      // Bounded LRU cache insertion
+      const cacheNow = Date.now();
+      if (this.dnsCache.size >= SsrfGuardService.DNS_CACHE_MAX_SIZE) {
+        for (const [k, v] of this.dnsCache.entries()) {
+          if (v.expiresAt <= cacheNow) this.dnsCache.delete(k);
+        }
+        if (this.dnsCache.size >= SsrfGuardService.DNS_CACHE_MAX_SIZE) {
+          const oldestKey = this.dnsCache.keys().next().value;
+          if (oldestKey) this.dnsCache.delete(oldestKey);
+        }
+      }
+      this.dnsCache.set(rawHostname, {
+        ips: resolvedIps,
+        expiresAt: cacheNow + SsrfGuardService.DNS_CACHE_TTL_MS,
+      });
+
+      return resolvedIps;
+    });
+  }
 
   /**
    * Validates a URL against SSRF vectors:
@@ -119,38 +202,8 @@ export class SsrfGuardService {
       return Object.assign(url, { resolvedIps: [rawHostname] });
     }
 
-    // Resolve all DNS records (A and AAAA)
-    const resolvedIps: string[] = [];
-    try {
-      const addresses = await lookup(rawHostname, { all: true });
-      if (!addresses || addresses.length === 0) {
-        throw new BadRequestException(
-          `Unable to resolve host '${rawHostname}'.`,
-        );
-      }
-
-      for (const record of addresses) {
-        if (this.isPrivateOrReservedIp(record.address)) {
-          this.logger.warn(
-            `SSRF attempt detected: ${rawHostname} resolved to private/reserved IP ${record.address}`,
-          );
-          throw new ForbiddenException(
-            `Host '${rawHostname}' resolves to a private or reserved IP address.`,
-          );
-        }
-        resolvedIps.push(record.address);
-      }
-    } catch (err: unknown) {
-      if (
-        err instanceof ForbiddenException ||
-        err instanceof BadRequestException
-      ) {
-        throw err;
-      }
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.debug(`DNS resolution failed for ${rawHostname}: ${errMsg}`);
-      throw new BadRequestException(`Unable to resolve host '${rawHostname}'.`);
-    }
+    // Resolve all DNS records (A and AAAA) with SingleFlight coalescing & short-TTL cache
+    const resolvedIps = await this.resolveAndValidateHostIps(rawHostname);
 
     return Object.assign(url, { resolvedIps });
   }
@@ -289,8 +342,7 @@ export class SsrfGuardService {
       beforeHop?: (url: string, signal?: AbortSignal | null) => Promise<void>;
     } = {},
   ): Promise<{ response: Response; finalUrl: string; resolvedIps?: string[] }> {
-    const initialSafe = await this.assertSafeUrl(rawUrl, options);
-    let lastResolvedIps = initialSafe.resolvedIps;
+    let lastResolvedIps: string[] | undefined;
 
     const result = await SsrfGuardService.executeSafeRedirectFetch(
       rawUrl,
@@ -556,112 +608,3 @@ export class SsrfGuardService {
   }
 }
 
-/**
- * Canonical Academic Polite Pool Email and User-Agent configuration.
- * Used for CrossRef, OpenAlex, PubMed, Unpaywall, DOI content negotiation,
- * Retraction Watch, and academic crawler polite pools.
- */
-export function getContactEmail(): string {
-  return libraryConfig().academic.contactEmail;
-}
-
-export function getUserAgent(subsystem = 'Platform'): string {
-  const email = getContactEmail();
-  return `FluxResearch${subsystem}/1.0 (mailto:${email}; https://flux.study)`;
-}
-
-interface HttpRequestOptions {
-  method?: 'GET' | 'POST' | 'HEAD';
-  headers?: Record<string, string>;
-  timeoutMs?: number;
-  maxRedirects?: number;
-  maxBytes?: number;
-  resilienceKey?: string;
-  requireSsrfCheck?: boolean;
-  body?: string | Buffer | URLSearchParams;
-  signal?: AbortSignal;
-}
-
-@Injectable()
-export class HttpClient {
-  private readonly logger = new Logger(HttpClient.name);
-
-  constructor(
-    private readonly ssrfGuard: SsrfGuardService,
-    private readonly resilience: ResilienceRegistryService,
-    private readonly config: LibraryConfigService,
-  ) {}
-
-  private getDefaultHeaders(): Record<string, string> {
-    return {
-      'User-Agent': this.config.academic.userAgent,
-      Accept: 'application/json, text/plain, */*',
-    };
-  }
-
-  private async fetchWithRedirects(
-    url: string,
-    options: HttpRequestOptions = {},
-    externalSignal?: AbortSignal,
-  ): Promise<{ response: Response; finalUrl: string }> {
-    const timeoutMs = options.timeoutMs ?? this.config.http.defaultTimeoutMs;
-    const maxRedirects = options.maxRedirects ?? this.config.http.maxRedirects;
-    const requireSsrf = options.requireSsrfCheck ?? true;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    const signals = [
-      controller.signal,
-      ...(options.signal ? [options.signal] : []),
-      ...(externalSignal ? [externalSignal] : []),
-    ];
-    const effectiveSignal =
-      signals.length > 1 && AbortSignal.any
-        ? AbortSignal.any(signals)
-        : controller.signal;
-
-    const init: RequestInit = {
-      method: options.method ?? 'GET',
-      headers: {
-        ...this.getDefaultHeaders(),
-        ...(options.headers || {}),
-      },
-      body: options.body as BodyInit | null | undefined,
-      signal: effectiveSignal,
-    };
-
-    try {
-      if (requireSsrf) {
-        return await this.ssrfGuard.safeFetchWithRedirects(url, init, {
-          maxRedirects,
-        });
-      }
-      return await SsrfGuardService.executeSafeRedirectFetch(url, init, {
-        maxRedirects,
-      });
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      throw new ExternalProviderException(
-        `HTTP fetch failed for URL ${url}: ${errMsg}`,
-        { url, cause: errMsg },
-      );
-    } finally {
-      if (!externalSignal) {
-        clearTimeout(timeoutId);
-      }
-    }
-  }
-
-  async request(
-    url: string,
-    options: HttpRequestOptions = {},
-  ): Promise<{ response: Response; finalUrl: string }> {
-    const resilienceKey = options.resilienceKey ?? new URL(url).hostname;
-    return this.resilience.execute(
-      resilienceKey,
-      () => this.fetchWithRedirects(url, options),
-      { signal: options.signal },
-    );
-  }
-}

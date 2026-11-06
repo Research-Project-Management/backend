@@ -125,11 +125,15 @@ export class SearchQueryEngine {
    * inner repeating quantifier or overlapping alternation, regardless of group nesting depth.
    */
   static isSafeRegex(pattern: string): boolean {
-    if (!pattern || pattern.length > 200) return false;
+    if (!pattern || pattern.length > 100) return false;
     // Reject backreferences which are non-regular and can cause exponential evaluation
-    if (/\\[1-9]/.test(pattern)) return false;
+    if (/\\[1-9]/.test(pattern) || /\\k<[^>]+>/.test(pattern)) return false;
     // Reject overlapping alternation inside a quantified group, e.g. (a|aa)+ or (aa|a)+
     if (/\(([^()|]+)\|\1[^()]*\)[+*?{]/.test(pattern)) return false;
+    // Reject repeated quantifiers/tokens (e.g. .*.*, \w+\w+, a*a*a*, (.*a){10})
+    if (/(?:[.+*?]\s*){3,}/.test(pattern)) return false;
+    if (/(\.\*|\.\+|\w\+|\d\+){2,}/.test(pattern)) return false;
+    if (/(?:\{[0-9,]+\}\s*){2,}/.test(pattern)) return false;
 
     const groupStack: Array<{
       hasQuantifierInside: boolean;
@@ -262,14 +266,18 @@ export class SearchQueryEngine {
   ): Array<Record<string, unknown>> {
     const clauses: Array<Record<string, unknown>> = [];
     if (ids.cleanDoi) {
-      clauses.push({
-        identifiers: {
-          some: {
-            type: 'doi',
-            value: { contains: ids.cleanDoi, mode: 'insensitive' },
+      clauses.push(
+        { doi: { contains: ids.cleanDoi, mode: 'insensitive' } },
+        { metadata: { path: ['doi'], string_contains: ids.cleanDoi } },
+        {
+          identifiers: {
+            some: {
+              type: 'doi',
+              value: { contains: ids.cleanDoi, mode: 'insensitive' },
+            },
           },
         },
-      });
+      );
     }
     if (ids.cleanIsbn) {
       clauses.push(

@@ -248,10 +248,15 @@ export class ResilienceRegistryService {
     const limiter = this.getRateLimiter(name);
     const breaker = this.getCircuitBreaker(name);
 
-    // 1. Enforce rate limit (waits if rate limit reached, abortable)
+    // 1. Fast-fail if circuit is OPEN before consuming rate limit tokens
+    if (!breaker.peekCanExecute()) {
+      return breaker.execute(fn, options?.fallback);
+    }
+
+    // 2. Enforce rate limit (waits if rate limit reached, abortable)
     await limiter.acquire(options?.tokens ?? 1, options?.signal);
 
-    // 2. Execute via circuit breaker (fast-fails if circuit is OPEN)
+    // 3. Execute via circuit breaker
     return breaker.execute(fn, options?.fallback);
   }
 

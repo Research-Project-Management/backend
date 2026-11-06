@@ -84,7 +84,10 @@ export class QueryRepository {
     return {
       identifiers: true,
       contributors: { orderBy: { orderIndex: 'asc' as const } },
-      collectionItems: { include: { collection: true } },
+      collectionItems: {
+        where: { collection: { deletedAt: null } },
+        include: { collection: true },
+      },
       itemTags: { include: { tag: true } },
       states: { where: { userId }, take: 1 },
       publications: { where: { userId } },
@@ -320,6 +323,7 @@ export class QueryRepository {
           orderBy: { orderIndex: 'asc' },
         },
         collectionItems: {
+          where: { collection: { deletedAt: null } },
           include: { collection: true },
         },
         itemTags: {
@@ -663,12 +667,19 @@ export class QueryRepository {
   async findAttachmentByFileId(
     fileId: string,
     tx?: Prisma.TransactionClient,
+    scope?: { userId?: string; projectId?: string | null },
   ): Promise<AttachmentWithOwner | null> {
     if (!fileId) return null;
     const client = this.getClient(tx);
     if (!client?.attachment?.findFirst) return null;
+    const validProjectId = normalizeProjectScopeId(scope?.projectId);
+    const itemScopeFilter: Prisma.ItemWhereInput = validProjectId
+      ? { deletedAt: null, projectId: validProjectId }
+      : scope?.userId
+        ? { deletedAt: null, userId: scope.userId, projectId: null }
+        : { deletedAt: null };
     return client.attachment.findFirst({
-      where: { fileId, deletedAt: null, item: { deletedAt: null } },
+      where: { fileId, deletedAt: null, item: itemScopeFilter },
       select: ATTACHMENT_WITH_OWNER_SELECT,
     });
   }
@@ -712,7 +723,10 @@ export class QueryRepository {
         metadata: true,
         contributors: { orderBy: { orderIndex: 'asc' } },
         itemTags: { include: { tag: true } },
-        collectionItems: { include: { collection: true } },
+        collectionItems: {
+        where: { collection: { deletedAt: null } },
+        include: { collection: true },
+      },
         attachments: { where: { deletedAt: null } },
         notesList: { where: { deletedAt: null } },
         identifiers: true,

@@ -39,6 +39,11 @@ const IGNORED_EXTRA_FIELD_PROMOTION_KEYS = new Set([
   'citeKey', 'labels', 'keywordsList', 'tags', 'keywords', 'zoteroTags',
 ]);
 
+const FORBIDDEN_PROMOTION_KEYS = new Set([
+  '__proto__', 'constructor', 'prototype', 'deletedAt', 'deletedById',
+  'projectId', 'userId', 'id', 'version', 'createdAt', 'updatedAt', 'scopeKey',
+]);
+
 function escapeHtmlText(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -58,7 +63,7 @@ function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
       : null;
   if (metaObj) {
     for (const [key, value] of Object.entries(metaObj)) {
-      if (key === 'extraFields' || key === 'metadata') continue;
+      if (key === 'extraFields' || key === 'metadata' || key.startsWith('__') || FORBIDDEN_PROMOTION_KEYS.has(key)) continue;
       if (hasRelationalPublications && key === 'isMyPublication') continue;
       if (
         hasRelationalItemTags &&
@@ -181,7 +186,9 @@ function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
       v !== null &&
       v !== '' &&
       (it[k] === undefined || it[k] === null || it[k] === '') &&
-      !IGNORED_EXTRA_FIELD_PROMOTION_KEYS.has(k)
+      !IGNORED_EXTRA_FIELD_PROMOTION_KEYS.has(k) &&
+      !FORBIDDEN_PROMOTION_KEYS.has(k) &&
+      !k.startsWith('__')
     ) {
       it[k] = v;
     }
@@ -608,21 +615,30 @@ function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
   delete it.keywordsList;
 
   if (Array.isArray(it.collectionItems) && it.collectionItems.length > 0) {
-    const colItems = it.collectionItems;
-    const firstCol = colItems[0].collection as { id?: string } | undefined;
-    it.collectionId =
-      it.collectionId ||
-      (colItems[0].collectionId as string | undefined) ||
-      firstCol?.id ||
-      null;
-    it.collectionIds = colItems
-      .map(
-        (ci) =>
-          (ci.collectionId as string | undefined) ||
-          (ci.collection as { id?: string } | undefined)?.id,
-      )
-      .filter(Boolean) as string[];
-    it.collections = colItems.map((ci) => ci.collection).filter(Boolean);
+    const colItems = it.collectionItems.filter((ci) => {
+      const col = ci.collection as { deletedAt?: unknown } | null | undefined;
+      return !col || col.deletedAt === null || col.deletedAt === undefined;
+    });
+    if (colItems.length > 0) {
+      const firstCol = colItems[0].collection as { id?: string } | undefined;
+      it.collectionId =
+        it.collectionId ||
+        (colItems[0].collectionId as string | undefined) ||
+        firstCol?.id ||
+        null;
+      it.collectionIds = colItems
+        .map(
+          (ci) =>
+            (ci.collectionId as string | undefined) ||
+            (ci.collection as { id?: string } | undefined)?.id,
+        )
+        .filter(Boolean) as string[];
+      it.collections = colItems.map((ci) => ci.collection).filter(Boolean);
+    } else {
+      it.collectionId = null;
+      it.collectionIds = [];
+      it.collections = [];
+    }
   } else {
     it.collectionId = it.collectionId || null;
     it.collectionIds = it.collectionIds || [];
@@ -699,9 +715,13 @@ export class ItemsMapper {
     }
     visited.add(raw as object);
     const it = { ...(raw as Record<string, unknown>) } as MutableItemPayload;
-    if (userId && Array.isArray(it.states) && it.states.length > 1) {
-      const matchedState = it.states.find((s) => !s?.userId || s.userId === userId);
-      if (matchedState) it.states = [matchedState];
+    if (Array.isArray(it.states)) {
+      if (userId) {
+        const matchedState = it.states.find((s) => s?.userId === userId);
+        it.states = matchedState ? [matchedState] : [];
+      } else {
+        it.states = [];
+      }
     }
     unpackMetadataAndExtraPartial(it);
     const primaryPdf = mapAttachmentsAndPrimaryFilePartial(it);

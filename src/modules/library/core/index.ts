@@ -11,6 +11,8 @@ export * from './errors/domain.exception';
 
 // Services
 export * from './services/ssrf-guard.service';
+export * from './services/http-client.service';
+export * from './services/cache-invalidation.helper';
 
 // Resilience
 export * from './resilience/circuit-breaker';

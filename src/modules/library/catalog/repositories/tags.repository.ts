@@ -73,6 +73,8 @@ export class TagsRepository {
   ) {
     const client = this.getClient(tx);
     const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const scopeKey = effectiveProjectId ? `proj:${effectiveProjectId}` : `user:${userId}`;
+    const normalizedName = name.trim().toLowerCase();
     const resolvedType = type || TagType.manual;
     const defaultColor = color ?? '#3b82f6';
     const scopeWhere: Prisma.TagWhereInput = effectiveProjectId
@@ -103,19 +105,28 @@ export class TagsRepository {
       return existingTag;
     }
 
-    try {
-      return await client.tag.create({
-        data: {
-          userId,
-          createdById: userId,
-          name,
-          normalizedName: name.trim().toLowerCase(),
-          color: defaultColor,
-          type: resolvedType,
-          projectId: effectiveProjectId ?? null,
-          ...(shortcut !== undefined ? { shortcut } : {}),
-        },
+    const tagData = {
+      userId,
+      createdById: userId,
+      scopeKey,
+      name,
+      normalizedName,
+      color: defaultColor,
+      type: resolvedType,
+      projectId: effectiveProjectId ?? null,
+      ...(shortcut !== undefined ? { shortcut } : {}),
+    };
+
+    if (client.tag?.upsert) {
+      return client.tag.upsert({
+        where: { scopeKey_normalizedName: { scopeKey, normalizedName } },
+        update: {},
+        create: tagData,
       });
+    }
+
+    try {
+      return await client.tag.create({ data: tagData });
     } catch (err: unknown) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
@@ -159,32 +170,13 @@ export class TagsRepository {
     if (!tag) return null;
 
     const expectedVersion = data.expectedVersion ?? data.version;
-    if (expectedVersion !== undefined) {
-      if (client.tag.updateMany) {
-        const versionCheck = await client.tag.updateMany({
-          where: { ...scopeWhere, version: expectedVersion },
-          data: { version: { increment: 1 } },
-        });
-        if (versionCheck.count === 0) {
-          const fresh = await client.tag.findFirst({
-            where: scopeWhere,
-            select: { version: true },
-          });
-          throw new VersionMismatchException({
-            aggregateType: 'Tag',
-            entityId: id,
-            currentVersion: fresh?.version ?? tag.version ?? 1,
-            providedVersion: expectedVersion,
-          });
-        }
-      } else if (tag.version !== expectedVersion) {
-        throw new VersionMismatchException({
-          aggregateType: 'Tag',
-          entityId: id,
-          currentVersion: tag.version ?? 1,
-          providedVersion: expectedVersion,
-        });
-      }
+    if (expectedVersion !== undefined && tag.version !== expectedVersion) {
+      throw new VersionMismatchException({
+        aggregateType: 'Tag',
+        entityId: id,
+        currentVersion: tag.version ?? 1,
+        providedVersion: expectedVersion,
+      });
     }
 
     if (
@@ -281,9 +273,38 @@ export class TagsRepository {
       }
     }
 
-    return client.tag.update({
-      where: { id: tag.id },
-      data: {
+    const updatePayload: Prisma.TagUpdateInput = {
+      ...(data.name !== undefined
+        ? {
+            name: data.name,
+            normalizedName: data.name.trim().toLowerCase(),
+          }
+        : {}),
+      ...(data.color !== undefined ? { color: data.color } : {}),
+      ...(data.type !== undefined ? { type: data.type } : {}),
+      ...(data.shortcut !== undefined ? { shortcut: data.shortcut } : {}),
+      version: { increment: 1 },
+    };
+
+    if (expectedVersion !== undefined && client.tag.updateMany) {
+      const affected = await client.tag.updateMany({
+        where: { ...scopeWhere, version: expectedVersion },
+        data: updatePayload,
+      });
+      if (affected.count === 0) {
+        const fresh = await client.tag.findFirst({
+          where: scopeWhere,
+          select: { version: true },
+        });
+        throw new VersionMismatchException({
+          aggregateType: 'Tag',
+          entityId: id,
+          currentVersion: fresh?.version ?? tag.version ?? 1,
+          providedVersion: expectedVersion,
+        });
+      }
+      return {
+        ...tag,
         ...(data.name !== undefined
           ? {
               name: data.name,
@@ -293,8 +314,14 @@ export class TagsRepository {
         ...(data.color !== undefined ? { color: data.color } : {}),
         ...(data.type !== undefined ? { type: data.type } : {}),
         ...(data.shortcut !== undefined ? { shortcut: data.shortcut } : {}),
-        ...(expectedVersion !== undefined ? {} : { version: { increment: 1 } }),
-      },
+        version: (tag.version ?? 1) + 1,
+        updatedAt: new Date(),
+      };
+    }
+
+    return client.tag.update({
+      where: { id: tag.id },
+      data: updatePayload,
     });
   }
 
@@ -422,7 +449,7 @@ export class TagsRepository {
       });
     }
 
-    return deletedTagIds.length > 0 ? deletedTagIds : affectedAutoTagIds;
+    return deletedTagIds;
   }
 
   async assignToItem(
@@ -567,11 +594,13 @@ export class TagsRepository {
     if (resolvedTags.length === 0) return false;
 
     await client.itemTag.createMany({
-      data: resolvedTags.map((tag) => ({
-        tagId: tag.id,
-        itemId,
-        type: tag.type,
-      })),
+      data: [...resolvedTags]
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .map((tag) => ({
+          tagId: tag.id,
+          itemId,
+          type: tag.type,
+        })),
       skipDuplicates: true,
     });
     return true;
@@ -626,6 +655,9 @@ export class TagsRepository {
         upgradeTagIds.push(tagId);
       }
     }
+
+    newEntries.sort((a, b) => (a.tagId < b.tagId ? -1 : a.tagId > b.tagId ? 1 : 0));
+    upgradeTagIds.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
     await Promise.all([
       newEntries.length > 0

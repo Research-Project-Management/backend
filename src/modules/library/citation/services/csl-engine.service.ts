@@ -183,10 +183,14 @@ export class CslEngineService implements OnModuleInit {
       cslItem.title ||
       '';
     const digest = this.getOrComputeContentFingerprint(cslItem);
+    const tplDigest =
+      typeof this.loader?.getTemplateDigest === 'function'
+        ? this.loader.getTemplateDigest(style)
+        : '';
     const ctxSig = context
       ? `::${context.locator || ''}:${context.label || ''}:${context.prefix || ''}:${context.suffix || ''}:${context.suppressAuthor ? '1' : '0'}:${context.locale || ''}`
       : '';
-    return `${rawId}::${style}::${digest}${index !== undefined ? `::${index}` : ''}${ctxSig}`;
+    return `${rawId}::${style}${tplDigest ? `@${tplDigest}` : ''}::${digest}${index !== undefined ? `::${index}` : ''}${ctxSig}`;
   }
 
   private getCacheKey(

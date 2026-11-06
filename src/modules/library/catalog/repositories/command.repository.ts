@@ -51,18 +51,26 @@ export class CommandRepository {
       await syncCreatedIdentifiers(client, item.id, identifiersToCreate);
       (item as Record<string, unknown>).identifiers = identifiersToCreate;
     }
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeWhere: Prisma.ItemWhereInput =
+      validProjectId && isUuid(validProjectId)
+        ? { projectId: validProjectId }
+        : { userId, projectId: null };
     const existingAttIds = Array.isArray(data.attachments)
       ? data.attachments.map((a) => (a && typeof a.id === 'string' && isUuid(a.id) ? a.id : null)).filter((id): id is string => Boolean(id))
       : [];
     if (existingAttIds.length > 0 && typeof client.attachment?.updateMany === 'function') {
-      await client.attachment.updateMany({
-        where: { id: { in: existingAttIds }, deletedAt: null },
+      const updatedAtts = await client.attachment.updateMany({
+        where: { id: { in: existingAttIds }, deletedAt: null, item: scopeWhere },
         data: { itemId: item.id },
       });
       await syncItemDenormalizedCountsInClient(client, item.id, { attachments: true });
-      (item as Record<string, unknown>).hasFile = true;
-      if (typeof item.attachmentCount === 'number') {
-        (item as Record<string, unknown>).attachmentCount = Math.max(item.attachmentCount, existingAttIds.length);
+      const attachedCount = typeof updatedAtts?.count === 'number' ? updatedAtts.count : existingAttIds.length;
+      if (attachedCount > 0) {
+        (item as Record<string, unknown>).hasFile = true;
+        if (typeof item.attachmentCount === 'number') {
+          (item as Record<string, unknown>).attachmentCount = Math.max(item.attachmentCount, attachedCount);
+        }
       }
     } else if (
       Array.isArray(item.attachments) && item.attachments.length > 0 &&
@@ -418,27 +426,18 @@ export class CommandRepository {
     if (!existing) throw new NotFoundException(`Trashed item ${id} not found`);
     const metadataObj =
       existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)
-        ? (existing.metadata as Record<string, unknown>)
+        ? { ...(existing.metadata as Record<string, unknown>) }
         : {};
+    let cleanedMetadata: Prisma.InputJsonValue | undefined;
     if (typeof metadataObj.mergedIntoId === 'string' && metadataObj.mergedIntoId) {
-      throw new BadRequestException(
-        `Cannot restore item ${id}: it was merged into primary item ${metadataObj.mergedIntoId}`,
-      );
+      delete metadataObj.mergedIntoId;
+      delete metadataObj.mergedAt;
+      cleanedMetadata = metadataObj as Prisma.InputJsonValue;
     }
     if (expectedVersion !== undefined) {
       if (existing.version !== expectedVersion) {
         throw new VersionMismatchException({
           aggregateType: 'CatalogItem', entityId: id, currentVersion: existing.version, providedVersion: expectedVersion,
-        });
-      }
-      const affected = await client.item.updateMany({
-        where: { id, deletedAt: { not: null }, version: expectedVersion, ...scopeFilter },
-        data: { version: { increment: 1 } },
-      });
-      if (affected.count === 0) {
-        const fresh = await client.item.findUnique({ where: { id }, select: { version: true } });
-        throw new VersionMismatchException({
-          aggregateType: 'CatalogItem', entityId: id, currentVersion: fresh?.version ?? existing.version, providedVersion: expectedVersion,
         });
       }
     }
@@ -456,12 +455,37 @@ export class CommandRepository {
       client.note.count({ where: { itemId: id, deletedAt: null } }),
       client.attachment.count({ where: { itemId: id, deletedAt: null } }),
     ]);
+    if (expectedVersion !== undefined && typeof client.item.updateMany === 'function') {
+      const affected = await client.item.updateMany({
+        where: { id, deletedAt: { not: null }, version: expectedVersion, ...scopeFilter },
+        data: {
+          deletedAt: null, deletedById: null, updatedById: userId,
+          noteCount: activeNoteCount, attachmentCount: activeAttCount, hasFile: activeAttCount > 0,
+          ...(cleanedMetadata !== undefined ? { metadata: cleanedMetadata } : {}),
+          version: { increment: 1 },
+        },
+      });
+      if (affected.count === 0) {
+        const fresh = await client.item.findUnique({ where: { id }, select: { version: true } });
+        throw new VersionMismatchException({
+          aggregateType: 'CatalogItem', entityId: id, currentVersion: fresh?.version ?? existing.version, providedVersion: expectedVersion,
+        });
+      }
+      if (typeof client.item.findUnique === 'function') {
+        const reloaded = await client.item.findUnique({
+          where: { id },
+          include: buildCommandMutationInclude(userId, { includeAttachmentRevisions: true, orderNotes: true }),
+        });
+        if (reloaded) return reloaded;
+      }
+    }
     return client.item.update({
       where: { id },
       data: {
         deletedAt: null, deletedById: null, updatedById: userId,
         noteCount: activeNoteCount, attachmentCount: activeAttCount, hasFile: activeAttCount > 0,
-        ...(expectedVersion !== undefined ? {} : { version: { increment: 1 } }),
+        ...(cleanedMetadata !== undefined ? { metadata: cleanedMetadata } : {}),
+        version: { increment: 1 },
       },
       include: buildCommandMutationInclude(userId, { includeAttachmentRevisions: true, orderNotes: true }),
     });

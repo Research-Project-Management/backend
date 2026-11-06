@@ -146,10 +146,12 @@ export class ItemTypeConversionService {
               innerHelpers: TransactionHelpers,
             ) => {
               ranPostCommitHook = Boolean(innerHelpers?.onAfterCommit);
+              const expectedVersion =
+                options.expectedVersion ?? rawExisting.version;
               const res = await this.command.update(
                 userId,
                 itemId,
-                options.expectedVersion,
+                expectedVersion,
                 updatePayload,
                 innerTx,
                 projectId,
@@ -166,10 +168,12 @@ export class ItemTypeConversionService {
             },
           )
         : await (async () => {
+            const expectedVersion =
+              options.expectedVersion ?? rawExisting.version;
             const res = await this.command.update(
               userId,
               itemId,
-              options.expectedVersion,
+              expectedVersion,
               updatePayload,
               tx,
               projectId,
@@ -320,6 +324,11 @@ function buildTypeConversionUpdatePayload(
       if (/^__unmapped_/i.test(k) && dynamicExtraFields[k] === undefined) {
         dynamicExtraFields[k] = null;
         metadataPatch[k] = null;
+      }
+    }
+    for (const [k, v] of Object.entries(dynamicExtraFields)) {
+      if (/^__unmapped_/i.test(k) && v !== null && v !== undefined) {
+        metadataPatch[k] = v;
       }
     }
   }

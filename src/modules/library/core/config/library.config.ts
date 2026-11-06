@@ -138,7 +138,7 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
     },
     retraction: {
       syncIntervalHours:
-        Number(process.env.RETRACTION_SYNC_INTERVAL_HOURS) || 12,
+        Number(process.env.RETRACTION_SYNC_INTERVAL_HOURS) || 24,
       enableGitlabDump: process.env.ENABLE_RETRACTION_GITLAB_DUMP === 'true',
     },
     http: {
@@ -193,6 +193,10 @@ export class LibraryConfigService {
   }
 }
 
+export function escapeRedisGlob(segment: string): string {
+  return String(segment ?? '').replace(/([*?[\]\\])/g, '\\$1');
+}
+
 /**
  * Redis Key Namespaces for Library Module (redis-core convention)
  * Colon-separated hierarchical structure with user/project scope isolation.
@@ -203,16 +207,17 @@ export const LIBRARY_REDIS_KEYS = {
   collectionTree: (projectId: string) =>
     `library:${projectId}:collections:tree`,
   collectionsPattern: (projectId: string) =>
-    `library:${projectId}:collections*`,
+    `library:${escapeRedisGlob(projectId)}:collections*`,
 
   // Tags
   tags: (projectId: string) => `library:${projectId}:tags`,
-  tagsPattern: (projectId: string) => `library:${projectId}:tags*`,
+  tagsPattern: (projectId: string) =>
+    `library:${escapeRedisGlob(projectId)}:tags*`,
 
   // Saved Searches
   savedSearches: (scopeId: string) => `library:${scopeId}:saved-searches`,
   savedSearchesPattern: (scopeId: string) =>
-    `library:${scopeId}:saved-searches*`,
+    `library:${escapeRedisGlob(scopeId)}:saved-searches*`,
 
   // Feed Subscriptions
   feedSubscriptions: (userId: string) =>
@@ -232,15 +237,17 @@ export const LIBRARY_REDIS_KEYS = {
     `library:item:${itemId}:u:${userId}`,
   itemsList: (scopeKey: string, optionsHash: string) =>
     `library:${scopeKey}:items:list:${optionsHash}`,
-  itemsPattern: (scopeKey: string) => `library:${scopeKey}:items*`,
-  itemPattern: (itemId: string) => `library:item:${itemId}*`,
+  itemsPattern: (scopeKey: string) =>
+    `library:${escapeRedisGlob(scopeKey)}:items*`,
+  itemPattern: (itemId: string) => `library:item:${escapeRedisGlob(itemId)}*`,
   counts: (userId: string, projectId?: string | null) =>
     projectId
       ? `library:counts:proj:${projectId}:u:${userId}`
       : userId.startsWith('proj:') || userId.startsWith('user:')
         ? `library:counts:${userId}`
         : `library:counts:user:${userId}`,
-  countsPattern: (scopeId: string) => `library:counts:*${scopeId}*`,
+  countsPattern: (scopeId: string) =>
+    `library:counts:*${escapeRedisGlob(scopeId)}*`,
 
   // Search & Facets Cache
   searchItems: (scopeKey: string, version: string, filterHash: string) =>
@@ -248,8 +255,9 @@ export const LIBRARY_REDIS_KEYS = {
   searchFacets: (scopeKey: string, version: string, filterHash: string) =>
     `library:search:facets:${scopeKey}:v${version}:${filterHash}`,
   searchFacetsPattern: (scopeId: string) =>
-    `library:search:facets:*${scopeId}*`,
-  searchItemsPattern: (scopeId: string) => `library:search:items:*${scopeId}*`,
+    `library:search:facets:*${escapeRedisGlob(scopeId)}*`,
+  searchItemsPattern: (scopeId: string) =>
+    `library:search:items:*${escapeRedisGlob(scopeId)}*`,
   searchVersion: (scopeKey: string) => `library:search:version:${scopeKey}`,
 
   // Sync Sequence & Retention Checkpoints (High-Concurrency CDC Polling)

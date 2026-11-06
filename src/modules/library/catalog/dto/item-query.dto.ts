@@ -399,7 +399,7 @@ export class BulkPurgeItemsDto {
   })
   @IsArray()
   @ArrayMaxSize(500)
-  @IsString({ each: true })
+  @IsUUID('all', { each: true })
   @MaxLength(100, { each: true })
   itemIds!: string[];
 }
@@ -411,7 +411,7 @@ export class BulkTrashItemsDto {
   })
   @IsArray()
   @ArrayMaxSize(500)
-  @IsString({ each: true })
+  @IsUUID('all', { each: true })
   @MaxLength(100, { each: true })
   itemIds!: string[];
 }
@@ -423,7 +423,7 @@ export class BulkRestoreItemsDto {
   })
   @IsArray()
   @ArrayMaxSize(500)
-  @IsString({ each: true })
+  @IsUUID('all', { each: true })
   @MaxLength(100, { each: true })
   itemIds!: string[];
 }

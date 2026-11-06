@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { IUnitOfWork, TransactionHelpers } from '../ports/catalog.port';
+import { ConfigurationException } from '../errors/domain.exception';
 
 export type QueryCriteria = Record<string, unknown>;
 
@@ -21,37 +22,23 @@ export abstract class CompositeSpecification<T = unknown, TWhere = QueryCriteria
   and(other: ISpecification<T, TWhere>): ISpecification<T, TWhere> {
     return new AndSpecification<T, TWhere>(this, other);
   }
-
   or(other: ISpecification<T, TWhere>): ISpecification<T, TWhere> {
     return new OrSpecification<T, TWhere>(this, other);
   }
-
   not(): ISpecification<T, TWhere> {
     return new NotSpecification<T, TWhere>(this);
   }
 }
 
 function isEmptyWhereObject(where: unknown): boolean {
-  return (
-    !where ||
-    (typeof where === 'object' &&
-      !Array.isArray(where) &&
-      Object.keys(where).length === 0)
-  );
+  return !where || (typeof where === 'object' && !Array.isArray(where) && Object.keys(where).length === 0);
 }
 
-function extractCombinatorClauses(
-  where: unknown,
-  operator: 'AND' | 'OR',
-): unknown[] {
+function extractCombinatorClauses(where: unknown, operator: 'AND' | 'OR'): unknown[] {
   if (where && typeof where === 'object' && !Array.isArray(where)) {
     const rec = where as Record<string, unknown>;
     const keys = Object.keys(rec);
-    if (
-      keys.length === 1 &&
-      keys[0] === operator &&
-      Array.isArray(rec[operator])
-    ) {
+    if (keys.length === 1 && keys[0] === operator && Array.isArray(rec[operator])) {
       return rec[operator] as unknown[];
     }
   }
@@ -180,40 +167,29 @@ export class NotSpecification<
  * (Catalog, Search, Sync, Ingestion, Extraction, Citation) to distinguish
  * collaborative project scope from personal user library scope.
  */
-const PERSONAL_SCOPE_ALIASES = new Set([
-  'user',
-  'me',
-  'personal',
-  'none',
-  'undefined',
-  'null',
-]);
+const PERSONAL_SCOPE_ALIASES = new Set(['user', 'me', 'personal', 'none', 'undefined', 'null']);
 
-/**
- * Type guard that checks whether a candidate projectId represents a valid
- * collaborative project scope (as opposed to personal library aliases like
- * 'user', 'me', 'personal', 'none', or empty values).
- */
-export function isProjectScopeId(
-  projectId?: string | null,
-): projectId is string {
-  if (!projectId || typeof projectId !== 'string') {
-    return false;
-  }
+export function isProjectScopeId(projectId?: string | null): projectId is string {
+  if (!projectId || typeof projectId !== 'string') return false;
   const trimmed = projectId.trim();
-  return (
-    trimmed.length > 0 && !PERSONAL_SCOPE_ALIASES.has(trimmed.toLowerCase())
-  );
+  return trimmed.length > 0 && !PERSONAL_SCOPE_ALIASES.has(trimmed.toLowerCase());
 }
 
-/**
- * Normalizes a candidate projectId into a valid project UUID/identifier string
- * or `undefined` if it is empty or a personal library alias ('user', 'me', 'personal', 'none').
- */
-export function normalizeProjectScopeId(
-  projectId?: string | null,
-): string | undefined {
+export function normalizeProjectScopeId(projectId?: string | null): string | undefined {
   return isProjectScopeId(projectId) ? projectId.trim() : undefined;
+}
+
+export function resolveCanonicalScopeKey(scope: {
+  userId?: string | null;
+  projectId?: string | null;
+}): string {
+  const validProjectId = normalizeProjectScopeId(scope.projectId);
+  if (validProjectId) return `proj:${validProjectId}`;
+  const cleanUserId = typeof scope.userId === 'string' ? scope.userId.trim() : '';
+  if (!cleanUserId) {
+    throw new ConfigurationException('Scope resolution requires either a valid projectId or userId');
+  }
+  return `user:${cleanUserId}`;
 }
 
 /**

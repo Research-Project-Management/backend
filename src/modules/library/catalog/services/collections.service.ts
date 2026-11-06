@@ -280,11 +280,12 @@ export class CollectionsService {
         ? sanitizeCollectionDescription(dto.description)
         : undefined;
     const updatePayload = {
-      ...dto,
       ...(cleanName !== undefined ? { name: cleanName } : {}),
       ...(cleanDescription !== undefined
         ? { description: cleanDescription }
         : {}),
+      ...(dto.color !== undefined ? { color: dto.color } : {}),
+      ...(dto.icon !== undefined ? { icon: dto.icon } : {}),
       ...(hasParentIdChange ? { parentId: rawParentId } : {}),
     };
     const expectedVersion = dto.expectedVersion ?? dto.version;
@@ -306,6 +307,10 @@ export class CollectionsService {
             effectiveProjectId =
               normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
             if (hasParentIdChange && rawParentId) {
+              if (tx && typeof tx.$queryRaw === 'function') {
+                const [firstLock, secondLock] = [collectionId, rawParentId].sort();
+                await tx.$queryRaw`SELECT id FROM collections WHERE id IN (${firstLock}::uuid, ${secondLock}::uuid) FOR UPDATE`;
+              }
               await this.validateParentNoCycle(
                 userId,
                 collectionId,
@@ -429,7 +434,7 @@ export class CollectionsService {
           if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
           ownedItemIds = resolvedOwnedIds;
           if (ownedItemIds.length === 0) return;
-          await this.repo.moveItems(
+          const moveRes = await this.repo.moveItems(
             userId,
             destinationCollectionId,
             ownedItemIds,
@@ -437,53 +442,66 @@ export class CollectionsService {
             validProjectId,
             sourceCollectionId,
           );
+          const detachedLinks = moveRes?.detached ?? [];
           const eventScope = { userId, projectId: validProjectId };
           const eventType =
             destinationCollectionId === null
               ? LIBRARY_EVENT_TYPES.COLLECTION_ITEMS_DETACHED
               : LIBRARY_EVENT_TYPES.COLLECTION_ITEMS_ASSIGNED;
-          if (destinationCollectionId === null) {
+          if (detachedLinks.length > 0) {
             if (helpers.recordTombstonesBatch) {
               await helpers.recordTombstonesBatch(
                 eventScope,
-                ownedItemIds.map((itemId) => ({
+                detachedLinks.map((link) => ({
                   entityType: 'CollectionItem',
-                  entityId: `${collectionId}:${itemId}`,
+                  entityId: `${link.collectionId}:${link.itemId}`,
                 })),
               );
             } else if (helpers.recordTombstone) {
-              for (const itemId of ownedItemIds) {
+              for (const link of detachedLinks) {
                 await helpers.recordTombstone(eventScope, {
                   entityType: 'CollectionItem',
-                  entityId: `${collectionId}:${itemId}`,
+                  entityId: `${link.collectionId}:${link.itemId}`,
                 });
               }
             }
           }
-          if (helpers.appendChangesBatch) {
-            await helpers.appendChangesBatch(
-              eventScope,
-              ownedItemIds.map((itemId) => ({
-                entityType: 'CollectionItem',
-                entityId: `${collectionId}:${itemId}`,
-                action: destinationCollectionId === null ? 'delete' : 'update',
-                version: 1,
-                data: { collectionId: destinationCollectionId, itemId },
-              })),
-            );
-          } else {
-            for (const itemId of ownedItemIds) {
-              await helpers.appendChange(eventScope, {
-                entityType: 'CollectionItem',
-                entityId: `${collectionId}:${itemId}`,
-                action: destinationCollectionId === null ? 'delete' : 'update',
-                version: 1,
-                data: { collectionId: destinationCollectionId, itemId },
-              });
+          const changeEntries: Array<{
+            entityType: string;
+            entityId: string;
+            action: 'create' | 'update' | 'delete';
+            version: number;
+            data: unknown;
+          }> = [
+            ...detachedLinks.map((link) => ({
+              entityType: 'CollectionItem',
+              entityId: `${link.collectionId}:${link.itemId}`,
+              action: 'delete' as const,
+              version: 0,
+              data: { collectionId: link.collectionId, itemId: link.itemId },
+            })),
+            ...(destinationCollectionId !== null
+              ? ownedItemIds.map((itemId) => ({
+                  entityType: 'CollectionItem',
+                  entityId: `${destinationCollectionId}:${itemId}`,
+                  action: 'update' as const,
+                  version: 1,
+                  data: { collectionId: destinationCollectionId, itemId },
+                }))
+              : []),
+          ];
+          if (changeEntries.length > 0) {
+            if (helpers.appendChangesBatch) {
+              await helpers.appendChangesBatch(eventScope, changeEntries);
+            } else {
+              for (const entry of changeEntries) {
+                await helpers.appendChange(eventScope, entry);
+              }
             }
           }
-          await helpers.publishOutbox(eventScope, collectionId, eventType, {
+          await helpers.publishOutbox(eventScope, destinationCollectionId ?? 'unfiled', eventType, {
             collectionId: destinationCollectionId,
+            detachedCollectionIds: Array.from(new Set(detachedLinks.map((l) => l.collectionId))),
             itemIds: ownedItemIds,
             userId,
             projectId: validProjectId,
@@ -629,35 +647,39 @@ export class CollectionsService {
     if (!itemIds || itemIds.length === 0) return { success: true, count: 0 };
     const validProjectId = normalizeProjectScopeId(projectId);
     let ranPostCommitHook = false;
+    let removedIds: string[] = [];
     if (this.libraryTx?.executeInTransaction) {
       await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
           ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           const collection = await this.repo.findById(userId, collectionId, tx, projectId);
           if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
-          await this.repo.removeItems(collectionId, itemIds, tx);
+          const res = await this.repo.removeItems(collectionId, itemIds, tx);
+          removedIds = Array.isArray(res) ? res : itemIds;
+          if (removedIds.length === 0) return;
           const eventScope = { userId, projectId: validProjectId };
           if (helpers.recordTombstonesBatch) {
-            await helpers.recordTombstonesBatch(eventScope, itemIds.map((itemId) => ({ entityType: 'CollectionItem', entityId: `${collectionId}:${itemId}` })));
+            await helpers.recordTombstonesBatch(eventScope, removedIds.map((itemId) => ({ entityType: 'CollectionItem', entityId: `${collectionId}:${itemId}` })));
           } else {
-            for (const itemId of itemIds) await helpers.recordTombstone(eventScope, { entityType: 'CollectionItem', entityId: `${collectionId}:${itemId}` });
+            for (const itemId of removedIds) await helpers.recordTombstone(eventScope, { entityType: 'CollectionItem', entityId: `${collectionId}:${itemId}` });
           }
           if (helpers.appendChangesBatch) {
-            await helpers.appendChangesBatch(eventScope, itemIds.map((itemId) => ({ entityType: 'CollectionItem', entityId: `${collectionId}:${itemId}`, action: 'delete' as const, version: 0, data: { collectionId, itemId } })));
+            await helpers.appendChangesBatch(eventScope, removedIds.map((itemId) => ({ entityType: 'CollectionItem', entityId: `${collectionId}:${itemId}`, action: 'delete' as const, version: 0, data: { collectionId, itemId } })));
           } else {
-            for (const itemId of itemIds) await helpers.appendChange(eventScope, { entityType: 'CollectionItem', entityId: `${collectionId}:${itemId}`, action: 'delete', version: 0, data: { collectionId, itemId } });
+            for (const itemId of removedIds) await helpers.appendChange(eventScope, { entityType: 'CollectionItem', entityId: `${collectionId}:${itemId}`, action: 'delete', version: 0, data: { collectionId, itemId } });
           }
-          await helpers.publishOutbox(eventScope, collectionId, LIBRARY_EVENT_TYPES.COLLECTION_ITEMS_DETACHED, { collectionId, itemIds, userId, projectId: validProjectId });
-          helpers?.onAfterCommit?.(() => this.invalidateCollectionsCache(userId, projectId, itemIds));
+          await helpers.publishOutbox(eventScope, collectionId, LIBRARY_EVENT_TYPES.COLLECTION_ITEMS_DETACHED, { collectionId, itemIds: removedIds, userId, projectId: validProjectId });
+          helpers?.onAfterCommit?.(() => this.invalidateCollectionsCache(userId, projectId, removedIds));
         },
       );
     } else {
       const collection = await this.repo.findById(userId, collectionId, undefined, projectId);
       if (!collection) throw new NotFoundException(`Collection not found: ${collectionId}`);
-      await this.repo.removeItems(collectionId, itemIds);
+      const res = await this.repo.removeItems(collectionId, itemIds);
+      removedIds = Array.isArray(res) ? res : itemIds;
     }
-    if (!ranPostCommitHook) await this.invalidateCollectionsCache(userId, projectId, itemIds);
-    return { success: true, count: itemIds.length };
+    if (removedIds.length > 0 && !ranPostCommitHook) await this.invalidateCollectionsCache(userId, projectId, removedIds);
+    return { success: true, count: removedIds.length };
   }
   async copyCollection(userId: string, collectionId: string, dto?: CopyCollectionDto, projectId?: string) {
     const { collection, copiedCount, effectiveProjectId, affectedItemIds, ranPostCommitHook } = await executeCopyCollectionSubtree(

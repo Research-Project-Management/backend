@@ -8,6 +8,7 @@ import {
   LIBRARY_REDIS_KEYS,
   normalizeDoi,
   getUserAgent,
+  SingleFlightCoalescer,
 } from '@/modules/library/core';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
 
@@ -45,6 +46,8 @@ export class DoiContentNegotiationService {
     string,
     { result: ReferenceData; expiresAt: number }
   >();
+
+  private readonly singleFlight = new SingleFlightCoalescer();
 
   private setWithLru<T>(
     map: Map<string, { result: T; expiresAt: number }>,
@@ -152,10 +155,12 @@ export class DoiContentNegotiationService {
             });
 
         if (response.status === 404) {
+          await response.body?.cancel().catch(() => {});
           return null;
         }
 
         if (response.status === 429 || response.status >= 500) {
+          await response.body?.cancel().catch(() => {});
           throw new ExternalProviderException(
             `doi.org returned HTTP ${response.status}`,
             {
@@ -166,11 +171,13 @@ export class DoiContentNegotiationService {
         }
 
         if (!response.ok) {
+          await response.body?.cancel().catch(() => {});
           return null;
         }
 
         const contentType = (response.headers.get('content-type') || '').toLowerCase();
         if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
+          await response.body?.cancel().catch(() => {});
           return null;
         }
 
@@ -211,27 +218,29 @@ export class DoiContentNegotiationService {
       }
     };
 
-    try {
-      if (this.resilienceRegistry) {
-        return await this.resilienceRegistry.execute('doi-org', executeFetch, {
-          fallback: (err: unknown) => {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            this.logger.debug(
-              `DOI Content Negotiation fallback for ${doi} (${normalizedStyle}): ${errMsg}`,
-            );
-            return Promise.resolve(null);
-          },
-        });
-      }
+    return this.singleFlight.execute(`cite:${cacheKey}`, async () => {
+      try {
+        if (this.resilienceRegistry) {
+          return await this.resilienceRegistry.execute('doi-org', executeFetch, {
+            fallback: (err: unknown) => {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              this.logger.debug(
+                `DOI Content Negotiation fallback for ${doi} (${normalizedStyle}): ${errMsg}`,
+              );
+              return Promise.resolve(null);
+            },
+          });
+        }
 
-      return await executeFetch();
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.debug(
-        `DOI Content Negotiation bypassed for ${doi} (${normalizedStyle}): ${errMsg}`,
-      );
-      return null;
-    }
+        return await executeFetch();
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `DOI Content Negotiation bypassed for ${doi} (${normalizedStyle}): ${errMsg}`,
+        );
+        return null;
+      }
+    });
   }
 
   private formatBibliographyHtml(text: string, doi: string): string {
@@ -313,11 +322,13 @@ export class DoiContentNegotiationService {
 
         if (response.status === 404) {
           clearTimeout(timer);
+          await response.body?.cancel().catch(() => {});
           return null;
         }
 
         if (response.status === 429 || response.status >= 500) {
           clearTimeout(timer);
+          await response.body?.cancel().catch(() => {});
           throw new ExternalProviderException(
             `doi.org metadata HTTP ${response.status}`,
             {
@@ -329,12 +340,14 @@ export class DoiContentNegotiationService {
 
         if (!response.ok) {
           clearTimeout(timer);
+          await response.body?.cancel().catch(() => {});
           return null;
         }
 
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('text/html')) {
           clearTimeout(timer);
+          await response.body?.cancel().catch(() => {});
           return null;
         }
 
@@ -363,26 +376,28 @@ export class DoiContentNegotiationService {
       }
     };
 
-    try {
-      if (this.resilienceRegistry) {
-        return await this.resilienceRegistry.execute('doi-org', executeFetch, {
-          fallback: (err: unknown) => {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            this.logger.debug(
-              `DOI Content Negotiation metadata fallback for ${doi}: ${errMsg}`,
-            );
-            return Promise.resolve(null);
-          },
-        });
-      }
+    return this.singleFlight.execute(`meta:${doi}`, async () => {
+      try {
+        if (this.resilienceRegistry) {
+          return await this.resilienceRegistry.execute('doi-org', executeFetch, {
+            fallback: (err: unknown) => {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              this.logger.debug(
+                `DOI Content Negotiation metadata fallback for ${doi}: ${errMsg}`,
+              );
+              return Promise.resolve(null);
+            },
+          });
+        }
 
-      return await executeFetch();
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.debug(
-        `DOI Content Negotiation metadata resolution bypassed for ${doi}: ${errMsg}`,
-      );
-      return null;
-    }
+        return await executeFetch();
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(
+          `DOI Content Negotiation metadata resolution bypassed for ${doi}: ${errMsg}`,
+        );
+        return null;
+      }
+    });
   }
 }

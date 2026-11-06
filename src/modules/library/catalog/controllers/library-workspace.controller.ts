@@ -275,7 +275,6 @@ export class TypeController {
     };
   }
 
-  @Public()
   @Post('validate')
   validateItemPayload(@Body() body: ValidateItemPayloadDto) {
     const type = body?.itemType || 'journalArticle';

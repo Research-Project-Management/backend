@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import {
@@ -12,12 +12,71 @@ export { EXPORT_CHUNK_SIZE, EXPORT_MAX_ITEMS };
 export type { ExportItemRecord };
 
 /**
- * ExportsRepository — CQRS Read-Side Optimized Data Store for Bulk Citation Export.
+ * ExportsRepository — CQRS Read-Side Optimized Data Store for Bulk Citation Export & Custom CSL Styles.
  * Serves read-only projection streaming to prevent N+1 queries across thousands of items.
  */
 @Injectable()
 export class ExportsRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  async findCustomStyle(scopeKey: string, slug: string) {
+    if (!this.prisma?.citationStyle?.findUnique) return null;
+    return this.prisma.citationStyle.findUnique({
+      where: { scopeKey_slug: { scopeKey, slug } },
+    });
+  }
+
+  async upsertCustomStyle(params: {
+    scopeKey: string;
+    slug: string;
+    title: string;
+    xmlContent: string;
+    sha256: string;
+    userId?: string;
+    projectId?: string;
+  }) {
+    if (!this.prisma?.citationStyle?.upsert) return null;
+    const { scopeKey, slug, title, xmlContent, sha256 } = params;
+    const rawProjectId =
+      params.projectId ||
+      (scopeKey.startsWith('proj:') ? scopeKey.slice(5) : null);
+    const resolvedProjectId =
+      rawProjectId && isUuid(rawProjectId) ? rawProjectId : null;
+    const rawUserId =
+      params.userId ||
+      (!scopeKey.startsWith('proj:') && isUuid(scopeKey) ? scopeKey : null);
+    const safeUserId =
+      rawUserId && isUuid(rawUserId)
+        ? rawUserId
+        : '00000000-0000-0000-0000-000000000000';
+    return this.prisma.citationStyle.upsert({
+      where: { scopeKey_slug: { scopeKey, slug } },
+      create: {
+        scopeKey,
+        userId: safeUserId,
+        projectId: resolvedProjectId,
+        slug,
+        title,
+        xmlContent,
+        sha256,
+      },
+      update: {
+        title,
+        xmlContent,
+        sha256,
+        projectId: resolvedProjectId,
+      },
+    });
+  }
+
+  async findCustomStylesByScope(scopeKey: string, take: number = 100) {
+    if (!this.prisma?.citationStyle?.findMany) return [];
+    return this.prisma.citationStyle.findMany({
+      where: { scopeKey },
+      orderBy: { updatedAt: 'desc' },
+      take,
+    });
+  }
 
   async fetchItemsInChunks(
     where: Prisma.ItemWhereInput,

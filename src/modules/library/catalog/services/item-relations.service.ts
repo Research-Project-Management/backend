@@ -5,7 +5,7 @@ import { RedisCacheService } from '@/core';
 import { QueryRepository, hydrateOffloadedMetadataPayload } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
-import { LIBRARY_EVENT_TYPES, TransactionHelpers, UNIT_OF_WORK, IUnitOfWork, normalizeProjectScopeId, executeStandardLibraryCacheInvalidation, libraryConfig, SingleFlightCoalescer } from '@/modules/library/core';
+import { LIBRARY_EVENT_TYPES, TransactionHelpers, UNIT_OF_WORK, IUnitOfWork, normalizeProjectScopeId, executeStandardLibraryCacheInvalidation, libraryConfig, SingleFlightCoalescer, sortLockKeys } from '@/modules/library/core';
 import { ItemCacheCoordinator } from './schema-validator.service';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
@@ -99,8 +99,8 @@ export class ItemRelationsService {
       ...(Array.isArray(data.targetItemIds) ? data.targetItemIds : []),
       ...(data.targetItemId ? [data.targetItemId] : []),
     ];
-    const targetIds = Array.from(
-      new Set(rawIds.filter((id) => id && id !== sourceItemId)),
+    const targetIds = sortLockKeys(
+      rawIds.filter((id) => id && id !== sourceItemId),
     );
 
     if (targetIds.length === 0) {
@@ -186,9 +186,14 @@ export class ItemRelationsService {
           await Promise.all(
             resolvedTargets.map(async ({ targetItem, relation }) => {
               const persisted = await this.command.putRelation(sourceItemId, relation, tx);
+              if (!persisted?.id) {
+                throw new BadRequestException(
+                  `Cannot link item ${sourceItemId} to target item ${relation.targetItemId}: scope mismatch or item unavailable`,
+                );
+              }
               linkedRelations.push({
                 ...relation,
-                id: persisted?.id || relation.id,
+                id: persisted.id,
                 targetTitle: targetItem.title,
               });
             }),
@@ -224,9 +229,14 @@ export class ItemRelationsService {
       await Promise.all(
         resolvedTargets.map(async ({ targetItem, relation }) => {
           const persisted = await this.command.putRelation(sourceItemId, relation);
+          if (persisted === null) {
+            throw new BadRequestException(
+              `Cannot link item ${sourceItemId} to target item ${relation.targetItemId}: scope mismatch or item unavailable`,
+            );
+          }
           linkedRelations.push({
             ...relation,
-            id: persisted?.id || relation.id,
+            id: persisted?.id || '',
             targetTitle: targetItem.title,
           });
         }),

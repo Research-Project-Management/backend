@@ -298,12 +298,7 @@ export class StateService {
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
-      const existing = await this.stateRepository.findState(userId, itemId, tx);
-
-      const nextStatus =
-        existing?.readStatus === ReadingStatus.COMPLETED
-          ? ReadingStatus.COMPLETED
-          : ReadingStatus.READING;
+      const nextStatus = ReadingStatus.COMPLETED;
 
       const now = new Date();
       const updated = await this.stateRepository.upsertState(

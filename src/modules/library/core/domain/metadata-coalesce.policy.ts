@@ -594,6 +594,7 @@ export async function resolveOrCreateAutomaticTagsInClient(
     projectId && projectId !== 'user' && projectId !== 'me' && projectId !== 'personal' && isUuid(projectId)
       ? projectId
       : null;
+  const scopeKey = effectiveProjectId ? `proj:${effectiveProjectId}` : `user:${userId}`;
   const scopeWhere: Prisma.TagWhereInput = effectiveProjectId
     ? { projectId: effectiveProjectId }
     : { userId, projectId: null };
@@ -655,6 +656,7 @@ export async function resolveOrCreateAutomaticTagsInClient(
         data: missingTagNames.map((name) => {
           const lower = name.trim().toLowerCase();
           return {
+            scopeKey,
             userId,
             createdById: userId,
             name,
@@ -671,6 +673,7 @@ export async function resolveOrCreateAutomaticTagsInClient(
           const lower = name.trim().toLowerCase();
           await db.tag.create({
             data: {
+              scopeKey,
               userId,
               createdById: userId,
               name,

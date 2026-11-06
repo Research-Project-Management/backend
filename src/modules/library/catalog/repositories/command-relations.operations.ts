@@ -1,7 +1,7 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma, RelationType, TagType } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import { normalizeProjectScopeId, disambiguateCitationKey, normalizeTags, resolveOrCreateAutomaticTagsInClient } from '@/modules/library/core';
+import { normalizeProjectScopeId, disambiguateCitationKey, normalizeTags, resolveOrCreateAutomaticTagsInClient, sortLockKeys } from '@/modules/library/core';
 import { CreateItemData, UpdateItemData, ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 import { TagInput } from '@/modules/library/catalog/types/catalog.types';
 import {
@@ -110,8 +110,11 @@ export async function syncTagsForCatalogItem(
           }
         : { itemId, tagId: { notIn: resolvedIds } },
   });
+  const orderedResolvedTags = [...resolvedTags].sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  );
   await client.itemTag.createMany({
-    data: resolvedTags.map((t) => ({ tagId: t.id, itemId, type: t.type })),
+    data: orderedResolvedTags.map((t) => ({ tagId: t.id, itemId, type: t.type })),
     skipDuplicates: true,
   });
 }
@@ -321,7 +324,7 @@ export async function putItemRelationInClient(
     ? target.projectId === source.projectId
     : !target.projectId && target.userId === source.userId;
   if (!sameScope) return undefined;
-  const rawType = String(relation.relationType || '')
+  const rawType = String(relation.relationType ?? '')
     .trim()
     .toLowerCase();
   const validRelationTypes = new Set<string>([
@@ -338,7 +341,12 @@ export async function putItemRelationInClient(
     'uses_dataset',
     'survey_of',
   ]);
-  const relationType: RelationType = validRelationTypes.has(rawType)
+  if (rawType && !validRelationTypes.has(rawType)) {
+    throw new BadRequestException(
+      `Invalid relationType '${relation.relationType}'. Must be one of: ${Array.from(validRelationTypes).join(', ')}`,
+    );
+  }
+  const relationType: RelationType = rawType
     ? (rawType as RelationType)
     : RelationType.related;
   const description = relation.description || '';
@@ -361,7 +369,25 @@ export async function removeItemRelationInClient(
   targetItemId: string,
   relationType?: RelationType,
 ): Promise<void> {
-  if (!isUuid(itemId) || !isUuid(targetItemId)) return;
+  if (!isUuid(itemId) || !isUuid(targetItemId) || itemId === targetItemId) {
+    return;
+  }
+  const [source, target] = await Promise.all([
+    client.item.findUnique({
+      where: { id: itemId },
+      select: { userId: true, projectId: true, deletedAt: true },
+    }),
+    client.item.findUnique({
+      where: { id: targetItemId },
+      select: { userId: true, projectId: true, deletedAt: true },
+    }),
+  ]);
+  if (source && target) {
+    const sameScope = source.projectId
+      ? target.projectId === source.projectId
+      : !target.projectId && target.userId === source.userId;
+    if (!sameScope) return;
+  }
   await client.itemRelation.deleteMany({
     where: {
       ...(relationType ? { relationType } : {}),
@@ -385,7 +411,10 @@ export function buildCommandMutationInclude(
   options?: { includeAttachmentRevisions?: boolean; orderNotes?: boolean },
 ) {
   return {
-    collectionItems: { include: { collection: true } },
+    collectionItems: {
+      where: { collection: { deletedAt: null } },
+      include: { collection: true },
+    },
     itemTags: { include: { tag: true } },
     contributors: { orderBy: { orderIndex: 'asc' as const } },
     attachments: options?.includeAttachmentRevisions

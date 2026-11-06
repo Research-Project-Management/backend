@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import {
   Injectable,
   Logger,
@@ -11,7 +12,9 @@ import {
   ExtractionProcessException,
   ExternalProviderException,
   LIBRARY_REDIS_KEYS,
+  SingleFlightCoalescer,
 } from '@/modules/library/core';
+import { ExportsRepository } from '../repositories/exports.repository';
 import {
   IEEE_CSL,
   NATURE_CSL,
@@ -25,72 +28,15 @@ import {
   normalizeEngineStyleId,
 } from '@/modules/library/citation/domain/citation.domain';
 
-interface CslStyleMetadata {
-  id: string;
-  name: string;
-  title: string;
-  titleShort?: string;
-  category: 'author-date' | 'numeric' | 'label' | 'note' | 'raw';
-  fields?: string[];
-  updated?: string;
-  isCustom?: boolean;
-}
+import {
+  CslStyleMetadata,
+  parseCslCategory,
+  POPULAR_STYLES,
+  REMOTE_STYLE_SLUG_ALIASES,
+} from '@/modules/library/citation/domain/csl-styles.lexicon';
 
-function parseCslCategory(val?: unknown): CslStyleMetadata['category'] {
-  if (
-    val === 'author-date' ||
-    val === 'numeric' ||
-    val === 'label' ||
-    val === 'note' ||
-    val === 'raw'
-  ) {
-    return val;
-  }
-  return 'author-date';
-}
-
-/**
- * Authoritative built-in offline catalog of the most widely used international
- * academic journals and publisher styles (Nature, Science, Cell, IEEE, ACM, Lancet, etc.).
- * Ensures instant search and rendering even when the network is restricted.
- */
-const POPULAR_STYLES: ReadonlyArray<CslStyleMetadata> = [
-  { id: 'apa', name: 'apa', title: 'American Psychological Association 7th edition (APA)', category: 'author-date' },
-  { id: 'apa-7th', name: 'apa-7th', title: 'APA 7th edition', category: 'author-date' },
-  { id: 'ieee', name: 'ieee', title: 'IEEE (Institute of Electrical and Electronics Engineers)', category: 'numeric' },
-  { id: 'nature', name: 'nature', title: 'Nature', category: 'numeric' },
-  { id: 'science', name: 'science', title: 'Science (AAAS)', category: 'numeric' },
-  { id: 'cell', name: 'cell', title: 'Cell Press', category: 'author-date' },
-  { id: 'the-lancet', name: 'the-lancet', title: 'The Lancet', category: 'numeric' },
-  { id: 'plos-one', name: 'plos-one', title: 'PLOS ONE', category: 'numeric' },
-  { id: 'pnas', name: 'pnas', title: 'Proceedings of the National Academy of Sciences (PNAS)', category: 'numeric' },
-  { id: 'chicago', name: 'chicago-author-date', title: 'Chicago Manual of Style 17th/18th (Author-Date)', category: 'author-date' },
-  { id: 'chicago-author-date', name: 'chicago-author-date', title: 'Chicago Manual of Style (Author-Date)', category: 'author-date' },
-  { id: 'harvard', name: 'harvard-cite-them-right', title: 'Harvard (Cite Them Right 12th edition)', category: 'author-date' },
-  { id: 'vancouver', name: 'vancouver', title: 'Vancouver (ICMJE Recommended)', category: 'numeric' },
-  { id: 'mla', name: 'modern-language-association', title: 'MLA 9th edition (Modern Language Association)', category: 'author-date' },
-  { id: 'mla-9th', name: 'modern-language-association', title: 'MLA 9th edition', category: 'author-date' },
-  { id: 'acm-siggraph', name: 'acm-siggraph', title: 'ACM SIGGRAPH / Computer Graphics', category: 'author-date' },
-  { id: 'association-for-computing-machinery', name: 'association-for-computing-machinery', title: 'ACM (Association for Computing Machinery)', category: 'numeric' },
-  { id: 'american-chemical-society', name: 'american-chemical-society', title: 'ACS (American Chemical Society)', category: 'numeric' },
-  { id: 'american-medical-association', name: 'american-medical-association', title: 'AMA (American Medical Association 11th edition)', category: 'numeric' },
-  { id: 'american-institute-of-physics', name: 'american-institute-of-physics', title: 'American Institute of Physics (AIP)', category: 'numeric' },
-  { id: 'biomed-central', name: 'biomed-central', title: 'BioMed Central (BMC)', category: 'numeric' },
-  { id: 'british-medical-journal', name: 'bmj', title: 'British Medical Journal (BMJ)', category: 'numeric' },
-  { id: 'cambridge-university-press-author-date', name: 'cambridge-university-press-author-date', title: 'Cambridge University Press (Author-Date)', category: 'author-date' },
-  { id: 'oxford-university-press-note', name: 'oxford-university-press-note', title: 'Oxford University Press', category: 'note' },
-  { id: 'elsevier-harvard', name: 'elsevier-harvard', title: 'Elsevier - Harvard (with titles)', category: 'author-date' },
-  { id: 'elsevier-vancouver', name: 'elsevier-vancouver', title: 'Elsevier - Vancouver', category: 'numeric' },
-  { id: 'elsevier-with-titles', name: 'elsevier-with-titles', title: 'Elsevier Numeric (with titles)', category: 'numeric' },
-  { id: 'springer-basic-author-date', name: 'springer-basic-author-date', title: 'Springer Basic (Author-Date)', category: 'author-date' },
-  { id: 'springer-vancouver', name: 'springer-vancouver', title: 'Springer - Vancouver', category: 'numeric' },
-  { id: 'royal-society-of-chemistry', name: 'royal-society-of-chemistry', title: 'Royal Society of Chemistry (RSC)', category: 'numeric' },
-  { id: 'frontiers', name: 'frontiers', title: 'Frontiers Journals', category: 'author-date' },
-  { id: 'mdpi', name: 'multidisciplinary-digital-publishing-institute', title: 'MDPI Journals', category: 'numeric' },
-  { id: 'springer-lecture-notes-in-computer-science', name: 'springer-lecture-notes-in-computer-science', title: 'Springer LNCS (Lecture Notes in Computer Science)', category: 'numeric' },
-  { id: 'bibtex', name: 'bibtex', title: 'BibTeX (LaTeX Standard)', category: 'raw' },
-  { id: 'ris', name: 'ris', title: 'Research Information Systems (RIS)', category: 'raw' },
-];
+export type { CslStyleMetadata };
+export { POPULAR_STYLES, REMOTE_STYLE_SLUG_ALIASES };
 
 @Injectable()
 export class CslRepositoryService implements OnModuleInit {
@@ -108,7 +54,7 @@ export class CslRepositoryService implements OnModuleInit {
   /** In-memory cached index of 10,000+ CSL styles from Zotero/CSL repo */
   private remoteStylesIndex: CslStyleMetadata[] | null = null;
   private remoteStylesIndexExpiresAt = 0;
-  private isIndexLoading = false;
+  private readonly singleFlight = new SingleFlightCoalescer();
 
   constructor(
     @Optional()
@@ -116,6 +62,8 @@ export class CslRepositoryService implements OnModuleInit {
     private readonly redisCache?: RedisCacheService,
     @Optional()
     private readonly httpClient?: HttpClient,
+    @Optional()
+    private readonly exportsRepo?: ExportsRepository,
   ) {}
 
   onModuleInit() {
@@ -161,20 +109,25 @@ export class CslRepositoryService implements OnModuleInit {
     const catalog = await this.getStylesCatalog();
     const remoteMatches: CslStyleMetadata[] = [];
 
-    const seenIds = new Set<string>(
-      localMatches.map((s) => s.id.toLowerCase()),
-    );
+    const seenIds = new Set<string>();
+    for (const s of localMatches) {
+      seenIds.add(s.id.toLowerCase());
+      if (s.name) seenIds.add(s.name.toLowerCase());
+    }
 
     for (const item of catalog) {
-      if (seenIds.has(item.id.toLowerCase())) continue;
+      const lowerId = item.id.toLowerCase();
+      const lowerName = item.name?.toLowerCase() || lowerId;
+      if (seenIds.has(lowerId) || seenIds.has(lowerName)) continue;
 
       const titleMatch = item.title.toLowerCase().includes(q);
-      const idMatch = item.id.toLowerCase().includes(q);
+      const idMatch = lowerId.includes(q);
       const shortMatch = item.titleShort?.toLowerCase().includes(q);
 
       if (titleMatch || idMatch || shortMatch) {
         remoteMatches.push(item);
-        seenIds.add(item.id.toLowerCase());
+        seenIds.add(lowerId);
+        seenIds.add(lowerName);
         if (localMatches.length + remoteMatches.length >= limit * 2) {
           break;
         }
@@ -207,8 +160,11 @@ export class CslRepositoryService implements OnModuleInit {
   public async fetchCslXml(
     styleId: string,
     scopeId?: string,
+    depth: number = 0,
   ): Promise<string | null> {
-    const normalized = styleId.trim().toLowerCase();
+    if (depth > 2) return null;
+    const rawNormalized = styleId.trim().toLowerCase();
+    const normalized = REMOTE_STYLE_SLUG_ALIASES[rawNormalized] ?? rawNormalized;
     if (!/^[a-z0-9][a-z0-9._-]{0,100}$/.test(normalized)) {
       return null;
     }
@@ -217,111 +173,94 @@ export class CslRepositoryService implements OnModuleInit {
     // 1. Built-in bundled high-performance styles
     if (normalized === 'ieee') return IEEE_CSL;
     if (normalized === 'nature') return NATURE_CSL;
-    if (normalized === 'chicago' || normalized === 'chicago-author-date')
-      return CHICAGO_CSL;
-    if (normalized === 'mla' || normalized === 'mla-9th') return MLA_CSL;
+    if (normalized === 'chicago' || normalized === 'chicago-author-date') return CHICAGO_CSL;
+    if (normalized === 'mla' || normalized === 'mla-9th' || normalized === 'modern-language-association') return MLA_CSL;
 
-    // 2. Cache lookup (scoped custom style lookup first, then global official cache)
+    // 2. Cache & DB lookup (scoped custom style lookup first, then global official cache)
+    const scopeKey = scopeId?.trim() || 'global';
     if (this.redisCache) {
-      const scopeKey = scopeId?.trim() || 'global';
-      const scoped = await this.redisCache.get<string>(
-        LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey),
-      );
-      if (scoped && typeof scoped === 'string' && scoped.includes('<style')) {
-        return scoped;
-      }
+      const scoped = await this.redisCache.get<string>(LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey));
+      if (scoped && typeof scoped === 'string' && scoped.includes('<style')) return scoped;
       if (!scopeId) {
-        const legacyCustom = await this.redisCache.get<string>(
-          LIBRARY_REDIS_KEYS.cslStyleXml(normalized, 'custom'),
-        );
-        if (
-          legacyCustom &&
-          typeof legacyCustom === 'string' &&
-          legacyCustom.includes('<style')
-        ) {
-          return legacyCustom;
-        }
+        const legacyCustom = await this.redisCache.get<string>(LIBRARY_REDIS_KEYS.cslStyleXml(normalized, 'custom'));
+        if (legacyCustom && typeof legacyCustom === 'string' && legacyCustom.includes('<style')) return legacyCustom;
       }
       const cached = await this.redisCache.get<string>(cacheKey);
-      if (cached && typeof cached === 'string' && cached.includes('<style')) {
-        return cached;
+      if (cached && typeof cached === 'string' && cached.includes('<style')) return cached;
+    }
+
+    if (this.exportsRepo) {
+      try {
+        const dbRow = await this.exportsRepo.findCustomStyle(scopeKey, normalized);
+        if (dbRow?.xmlContent && dbRow.xmlContent.includes('<style')) {
+          if (this.redisCache) {
+            await this.redisCache.set(LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey), dbRow.xmlContent, 86400 * 365);
+          }
+          return dbRow.xmlContent;
+        }
+      } catch {
+        // Non-fatal fallback
       }
     }
 
-    // 3. Remote Fetch from Zotero Style Repository
-    try {
-      const zoteroUrl = `${CslRepositoryService.ZOTERO_STYLE_XML_BASE}${encodeURIComponent(normalized)}`;
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 6000);
-      const headers = {
-        Accept:
-          'application/vnd.citationstyles.style+xml, application/xml, text/xml',
-      };
-
-      const res = this.httpClient
-        ? (
-            await this.httpClient.request(zoteroUrl, {
-              headers,
-              signal: controller.signal,
-              timeoutMs: 6000,
-            })
-          ).response
-        : await fetch(zoteroUrl, {
-            headers,
-            signal: controller.signal,
-          });
-      clearTimeout(timeout);
-
-      if (res.ok) {
-        const xml = await res.text();
-        if (this.isValidCslXml(xml)) {
-          if (this.redisCache) {
-            // Cache for 30 days
-            await this.redisCache.set(cacheKey, xml, 86400 * 30);
-          }
-          return xml;
+    const resolveOrValidateFetchedXml = async (xml: string): Promise<string | null> => {
+      if (this.isValidCslXml(xml)) {
+        if (this.redisCache) await this.redisCache.set(cacheKey, xml, 86400 * 30);
+        return xml;
+      }
+      const parentSlug = this.extractDependentParentSlug(xml);
+      if (parentSlug && parentSlug !== normalized) {
+        const parentXml = await this.fetchCslXml(parentSlug, scopeId, depth + 1);
+        if (parentXml && this.isValidCslXml(parentXml)) {
+          if (this.redisCache) await this.redisCache.set(cacheKey, parentXml, 86400 * 30);
+          return parentXml;
         }
       }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.debug(
-        `Zotero style fetch for "${normalized}" failed: ${errMsg}. Trying GitHub raw...`,
-      );
-    }
+      return null;
+    };
 
-    // 4. Remote Fetch Fallback from GitHub CSL Repository
-    try {
-      const githubUrl = `${CslRepositoryService.GITHUB_RAW_CSL_BASE}${encodeURIComponent(normalized)}.csl`;
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 6000);
-
-      const res = this.httpClient
-        ? (
-            await this.httpClient.request(githubUrl, {
-              signal: controller.signal,
-              timeoutMs: 6000,
-            })
-          ).response
-        : await fetch(githubUrl, { signal: controller.signal });
-      clearTimeout(timeout);
-
-      if (res.ok) {
-        const xml = await res.text();
-        if (this.isValidCslXml(xml)) {
-          if (this.redisCache) {
-            await this.redisCache.set(cacheKey, xml, 86400 * 30);
-          }
-          return xml;
+    return this.singleFlight.execute(`xml:${scopeKey}:${normalized}:${depth}`, async () => {
+      // 3. Remote Fetch from Zotero Style Repository
+      try {
+        const zoteroUrl = `${CslRepositoryService.ZOTERO_STYLE_XML_BASE}${encodeURIComponent(normalized)}`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+        const headers = { Accept: 'application/vnd.citationstyles.style+xml, application/xml, text/xml' };
+        const res = this.httpClient
+          ? (await this.httpClient.request(zoteroUrl, { headers, signal: controller.signal, timeoutMs: 6000 })).response
+          : await fetch(zoteroUrl, { headers, signal: controller.signal });
+        clearTimeout(timeout);
+        if (res.ok) {
+          const resolved = await resolveOrValidateFetchedXml(await res.text());
+          if (resolved) return resolved;
+        } else {
+          await res.body?.cancel().catch(() => {});
         }
+      } catch (err: unknown) {
+        this.logger.debug(`Zotero style fetch for "${normalized}" failed: ${err instanceof Error ? err.message : String(err)}. Trying GitHub raw...`);
       }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `GitHub CSL fetch for "${normalized}" failed: ${errMsg}`,
-      );
-    }
 
-    return null;
+      // 4. Remote Fetch Fallback from GitHub CSL Repository
+      try {
+        const githubUrl = `${CslRepositoryService.GITHUB_RAW_CSL_BASE}${encodeURIComponent(normalized)}.csl`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+        const res = this.httpClient
+          ? (await this.httpClient.request(githubUrl, { signal: controller.signal, timeoutMs: 6000 })).response
+          : await fetch(githubUrl, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (res.ok) {
+          const resolved = await resolveOrValidateFetchedXml(await res.text());
+          if (resolved) return resolved;
+        } else {
+          await res.body?.cancel().catch(() => {});
+        }
+      } catch (err: unknown) {
+        this.logger.warn(`GitHub CSL fetch for "${normalized}" failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      return null;
+    });
   }
 
   /**
@@ -344,23 +283,12 @@ export class CslRepositoryService implements OnModuleInit {
       );
     }
 
-    // Extract title and ID from XML
     const titleMatch = cslXml.match(/<title>([^<]+)<\/title>/i);
     const idMatch = cslXml.match(/<id>([^<]+)<\/id>/i);
-
-    const rawTitle =
-      customTitle || titleMatch?.[1]?.trim() || 'Custom CSL Style';
-    const title =
-      rawTitle
-        .replace(/<[^>]*>/g, '')
-        .replace(/[<>]/g, '')
-        .trim()
-        .slice(0, 200) || 'Custom CSL Style';
+    const rawTitle = customTitle || titleMatch?.[1]?.trim() || 'Custom CSL Style';
+    const title = rawTitle.replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, 200) || 'Custom CSL Style';
     const rawId = idMatch?.[1]?.trim() || `custom-${Date.now()}`;
-    const slug = rawId
-      .replace(/^https?:\/\/www\.zotero\.org\/styles\//i, '')
-      .replace(/[^a-zA-Z0-9_-]/g, '-')
-      .toLowerCase();
+    const slug = rawId.replace(/^https?:\/\/www\.zotero\.org\/styles\//i, '').replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
 
     const RESERVED_OFFICIAL_STYLES = new Set([
       'ieee', 'nature', 'science', 'chicago', 'chicago-author-date', 'mla', 'mla-9th',
@@ -371,26 +299,23 @@ export class CslRepositoryService implements OnModuleInit {
     ]);
     const normalizedEngineId = normalizeEngineStyleId(slug);
     if (RESERVED_OFFICIAL_STYLES.has(slug) || RESERVED_OFFICIAL_STYLES.has(normalizedEngineId)) {
-      throw new ExtractionProcessException(
-        `Cannot overwrite official built-in or standard CSL style ID: '${slug}'`,
-      );
+      throw new ExtractionProcessException(`Cannot overwrite official built-in or standard CSL style ID: '${slug}'`);
     }
 
     const formatMatch = cslXml.match(/citation-format="([^"]+)"/i);
     const category = parseCslCategory(formatMatch?.[1]);
-
-    const meta: CslStyleMetadata = {
-      id: slug,
-      name: slug,
-      title,
-      category,
-      isCustom: true,
-      updated: new Date().toISOString(),
-    };
-
+    const meta: CslStyleMetadata = { id: slug, name: slug, title, category, isCustom: true, updated: new Date().toISOString() };
     const scopeKey = scopeId?.trim() || 'global';
+    const sha256 = createHash('sha256').update(cslXml).digest('hex');
 
-    // Cache XML and metadata with user/project scope isolation
+    if (this.exportsRepo) {
+      try {
+        await this.exportsRepo.upsertCustomStyle({ scopeKey, slug, title, xmlContent: cslXml, sha256 });
+      } catch (dbErr: unknown) {
+        this.logger.warn(`Could not persist custom CSL style "${slug}" to DB: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+      }
+    }
+
     if (this.redisCache) {
       const xmlKey = LIBRARY_REDIS_KEYS.cslStyleXml(slug, scopeKey);
       const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey);
@@ -398,10 +323,7 @@ export class CslRepositoryService implements OnModuleInit {
         this.redisCache.set(xmlKey, cslXml, 86400 * 365),
         this.getCustomStyles(scopeKey),
       ]);
-      const updated = [meta, ...existing.filter((s) => s.id !== slug)].slice(
-        0,
-        CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE,
-      );
+      const updated = [meta, ...existing.filter((s) => s.id !== slug)].slice(0, CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE);
       await this.redisCache.set(listKey, updated, 86400 * 365);
     }
 
@@ -412,17 +334,38 @@ export class CslRepositoryService implements OnModuleInit {
    * Retrieves user-defined custom styles.
    */
   public async getCustomStyles(scopeId?: string): Promise<CslStyleMetadata[]> {
-    if (!this.redisCache) return [];
-    try {
-      const scopeKey = scopeId?.trim() || 'global';
-      const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey);
-      const styles = await this.redisCache.get<CslStyleMetadata[]>(listKey);
-      return Array.isArray(styles)
-        ? styles.slice(0, CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE)
-        : [];
-    } catch {
-      return [];
+    const scopeKey = scopeId?.trim() || 'global';
+    if (this.redisCache) {
+      try {
+        const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey);
+        const styles = await this.redisCache.get<CslStyleMetadata[]>(listKey);
+        if (Array.isArray(styles) && styles.length > 0) {
+          return styles.slice(0, CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE);
+        }
+      } catch {
+        // Fallback to DB
+      }
     }
+    if (this.exportsRepo) {
+      try {
+        const rows = await this.exportsRepo.findCustomStylesByScope(scopeKey, CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE);
+        const mapped: CslStyleMetadata[] = rows.map((r) => ({
+          id: r.slug,
+          name: r.slug,
+          title: r.title,
+          category: 'author-date',
+          isCustom: true,
+          updated: r.updatedAt.toISOString(),
+        }));
+        if (mapped.length > 0 && this.redisCache) {
+          await this.redisCache.set(LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey), mapped, 86400 * 365);
+        }
+        return mapped;
+      } catch {
+        return [];
+      }
+    }
+    return [];
   }
 
   /**
@@ -451,17 +394,15 @@ export class CslRepositoryService implements OnModuleInit {
       }
     }
 
-    // Trigger on-demand refresh if not in progress
-    if (!this.isIndexLoading) {
-      try {
-        await this.refreshStylesCatalog();
-        if (this.remoteStylesIndex && this.remoteStylesIndex.length > 0) {
-          return this.remoteStylesIndex;
-        }
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        this.logger.debug(`On-demand CSL refresh error: ${errMsg}`);
+    // Trigger on-demand refresh coalesced via SingleFlight so concurrent callers await the same load
+    try {
+      await this.refreshStylesCatalog();
+      if (this.remoteStylesIndex && this.remoteStylesIndex.length > 0) {
+        return this.remoteStylesIndex;
       }
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      this.logger.debug(`On-demand CSL refresh error: ${errMsg}`);
     }
 
     return [...POPULAR_STYLES];
@@ -471,92 +412,111 @@ export class CslRepositoryService implements OnModuleInit {
    * Refreshes the styles.json catalog from Zotero repository.
    */
   public async refreshStylesCatalog(): Promise<number> {
-    if (this.isIndexLoading) return this.remoteStylesIndex?.length || 0;
-    this.isIndexLoading = true;
+    return this.singleFlight.execute('catalog:styles.json', async () => {
+      try {
+        this.logger.log(
+          'Fetching official CSL 10,000+ styles index from Zotero...',
+        );
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
 
-    try {
-      this.logger.log(
-        'Fetching official CSL 10,000+ styles index from Zotero...',
-      );
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 12000);
+        const res = this.httpClient
+          ? (
+              await this.httpClient.request(
+                CslRepositoryService.ZOTERO_STYLES_JSON_URL,
+                { signal: controller.signal, timeoutMs: 12000 },
+              )
+            ).response
+          : await fetch(CslRepositoryService.ZOTERO_STYLES_JSON_URL, {
+              signal: controller.signal,
+            });
+        clearTimeout(timeout);
 
-      const res = this.httpClient
-        ? (
-            await this.httpClient.request(
-              CslRepositoryService.ZOTERO_STYLES_JSON_URL,
-              { signal: controller.signal, timeoutMs: 12000 },
-            )
-          ).response
-        : await fetch(CslRepositoryService.ZOTERO_STYLES_JSON_URL, {
-            signal: controller.signal,
-          });
-      clearTimeout(timeout);
+        if (!res.ok) {
+          await res.body?.cancel().catch(() => {});
+          throw new ExternalProviderException(
+            `Zotero styles.json responded with HTTP ${res.status}`,
+            {
+              url: CslRepositoryService.ZOTERO_STYLES_JSON_URL,
+              status: res.status,
+            },
+          );
+        }
 
-      if (!res.ok) {
-        throw new ExternalProviderException(
-          `Zotero styles.json responded with HTTP ${res.status}`,
-          {
+        const rawList = (await res.json()) as Array<{
+          name: string;
+          title: string;
+          titleShort?: string;
+          categories?: { format?: string; fields?: string[] };
+          updated?: string;
+        }>;
+
+        if (!Array.isArray(rawList) || rawList.length === 0) {
+          throw new ExternalProviderException('Received empty styles list', {
             url: CslRepositoryService.ZOTERO_STYLES_JSON_URL,
-            status: res.status,
-          },
-        );
-      }
+          });
+        }
 
-      const rawList = (await res.json()) as Array<{
-        name: string;
-        title: string;
-        titleShort?: string;
-        categories?: { format?: string; fields?: string[] };
-        updated?: string;
-      }>;
+        const parsed: CslStyleMetadata[] = rawList.map((item) => {
+          const validCategory = parseCslCategory(item.categories?.format);
 
-      if (!Array.isArray(rawList) || rawList.length === 0) {
-        throw new ExternalProviderException('Received empty styles list', {
-          url: CslRepositoryService.ZOTERO_STYLES_JSON_URL,
+          return {
+            id: item.name,
+            name: item.name,
+            title: item.title,
+            titleShort: item.titleShort,
+            category: validCategory,
+            fields: item.categories?.fields,
+            updated: item.updated,
+          };
         });
-      }
 
-      const parsed: CslStyleMetadata[] = rawList.map((item) => {
-        const validCategory = parseCslCategory(item.categories?.format);
-
-        return {
-          id: item.name,
-          name: item.name,
-          title: item.title,
-          titleShort: item.titleShort,
-          category: validCategory,
-          fields: item.categories?.fields,
-          updated: item.updated,
-        };
-      });
-
-      this.remoteStylesIndex = parsed;
-      this.remoteStylesIndexExpiresAt =
-        Date.now() + CslRepositoryService.REMOTE_INDEX_TTL_MS;
-      this.logger.log(
-        `Successfully indexed ${parsed.length} official CSL styles from repository.`,
-      );
-
-      if (this.redisCache) {
-        // Cache index for 7 days
-        await this.redisCache.set(
-          LIBRARY_REDIS_KEYS.cslStylesCatalogIndex(),
-          parsed,
-          86400 * 7,
+        this.remoteStylesIndex = parsed;
+        this.remoteStylesIndexExpiresAt =
+          Date.now() + CslRepositoryService.REMOTE_INDEX_TTL_MS;
+        this.logger.log(
+          `Successfully indexed ${parsed.length} official CSL styles from repository.`,
         );
-      }
 
-      return parsed.length;
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Could not refresh remote CSL catalog: ${errMsg}. Using offline fallback.`,
-      );
-      return POPULAR_STYLES.length;
-    } finally {
-      this.isIndexLoading = false;
+        if (this.redisCache) {
+          // Cache index for 7 days
+          await this.redisCache.set(
+            LIBRARY_REDIS_KEYS.cslStylesCatalogIndex(),
+            parsed,
+            86400 * 7,
+          );
+        }
+
+        return parsed.length;
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Could not refresh remote CSL catalog: ${errMsg}. Using offline fallback.`,
+        );
+        return POPULAR_STYLES.length;
+      }
+    });
+  }
+
+  private extractDependentParentSlug(xml?: string): string | null {
+    if (!xml || typeof xml !== 'string') return null;
+    const linkTags = xml.match(/<link\b[^>]*>/gi);
+    if (!linkTags) return null;
+    for (const tag of linkTags) {
+      if (!/\brel\s*=\s*["']independent-parent["']/i.test(tag)) continue;
+      const hrefMatch = tag.match(/\bhref\s*=\s*["']([^"']+)["']/i);
+      const href = hrefMatch?.[1]?.trim();
+      if (!href) continue;
+      const slug = href
+        .replace(/^https?:\/\/(?:www\.)?zotero\.org\/styles\//i, '')
+        .replace(/\.csl$/i, '')
+        .trim()
+        .toLowerCase();
+      if (/^[a-z0-9][a-z0-9._-]{0,100}$/.test(slug)) {
+        return slug;
+      }
     }
+    return null;
   }
 
   private isValidCslXml(xml?: string): boolean {
@@ -564,6 +524,7 @@ export class CslRepositoryService implements OnModuleInit {
     if (xml.length > 512 * 1024) return false;
     const trimmed = xml.trim();
     if (!trimmed || trimmed.length > 512 * 1024) return false;
+    if (/<!(?:doctype|entity)\b|<script\b/i.test(trimmed)) return false;
     const lower = trimmed.toLowerCase();
     return (
       (lower.startsWith('<?xml') || lower.startsWith('<style')) &&
@@ -617,12 +578,17 @@ export class CslLocaleLoaderService {
     'chicago-author-date', 'mla', 'mla-9th', 'tcvn', 'tcvn-author-date', 'tcvn-numeric',
   ]);
   private readonly dynamicTemplateIds = new Set<string>();
+  private readonly templateDigestMap = new Map<string, string>();
 
   constructor(
     @Optional()
     @Inject(CslRepositoryService)
     private readonly cslRepo?: CslRepositoryService,
   ) {}
+
+  public getTemplateDigest(scopedStyleId: string): string {
+    return this.templateDigestMap.get(scopedStyleId) || '';
+  }
 
   private evictTemplateFromStore(templates: CitationJsTemplateStore, id: string): void {
     if (typeof templates.remove === 'function') {
@@ -713,6 +679,10 @@ export class CslLocaleLoaderService {
         }
         csl.templates.add(scopedId, xml);
         this.dynamicTemplateIds.add(scopedId);
+        this.templateDigestMap.set(
+          scopedId,
+          createHash('sha256').update(xml).digest('hex').slice(0, 12),
+        );
         this.logger.log(`Dynamically registered on-demand scoped CSL template: "${scopedId}"`);
         return true;
       }

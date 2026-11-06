@@ -280,12 +280,16 @@ export class ItemCurationService {
           );
 
           const domainItem = ItemsMapper.toDomain(item);
+          const sharedDomainItem = this.stripPersonalOverlayForSharedScope(
+            domainItem,
+            projectId,
+          );
           changeEntries.push({
             entityType: 'Item',
             entityId: item.id,
             action: 'create',
             version: item.version,
-            data: domainItem,
+            data: sharedDomainItem,
           });
 
           const payload = buildItemCreatedOutboxPayload({
@@ -370,6 +374,32 @@ export class ItemCurationService {
     };
   }
 
+  private stripPersonalOverlayForSharedScope<T>(
+    item: T,
+    projectId?: string | null,
+  ): T {
+    if (!projectId || !item || typeof item !== 'object') return item;
+    const clone = { ...(item as unknown as Record<string, unknown>) };
+    for (const k of [
+      'isStarred',
+      'starred',
+      'isRead',
+      'readStatus',
+      'rating',
+      'currentPage',
+      'lastReadPage',
+      'scrollPosition',
+      'lastOpenedAt',
+      'lastReadAt',
+      'isMyPublication',
+      'states',
+      'publications',
+    ]) {
+      delete clone[k];
+    }
+    return clone as unknown as T;
+  }
+
   /**
    * Fail-closed tenant check. When a scope is supplied the owner MUST be known
    * and match; an unknown owner is treated as out-of-scope (never as in-scope).
@@ -378,11 +408,15 @@ export class ItemCurationService {
     owner: { userId?: string | null; projectId?: string | null } | null | undefined,
     scope?: { userId?: string; projectId?: string },
   ): boolean {
-    if (!scope || (!scope.userId && !scope.projectId)) return true;
+    if (!scope || (!scope.userId && !scope.projectId)) return false;
     if (!owner) return false;
-    if (scope.userId && owner.userId !== scope.userId) return false;
-    if (scope.projectId && owner.projectId !== scope.projectId) return false;
-    return true;
+    if (scope.projectId) {
+      return owner.projectId === scope.projectId;
+    }
+    if (scope.userId) {
+      return owner.userId === scope.userId && !owner.projectId;
+    }
+    return false;
   }
 
   async findAttachmentByFileId(
@@ -390,7 +424,8 @@ export class ItemCurationService {
     scope?: { userId?: string; projectId?: string },
   ): Promise<{ id: string; itemId: string; metadata?: unknown } | null> {
     if (!fileId) return null;
-    const result = await this.query.findAttachmentByFileId(fileId);
+    if (!scope || (!scope.userId && !scope.projectId)) return null;
+    const result = await this.query.findAttachmentByFileId(fileId, undefined, scope);
     if (!result) return null;
     if (!this.isOwnedWithinScope(result.item, scope)) return null;
     return { id: result.id, itemId: result.itemId, metadata: result.metadata };
@@ -405,7 +440,7 @@ export class ItemCurationService {
     if (!attachmentId) return;
     const existing = await this.query.findAttachmentById(attachmentId);
     if (!existing) return;
-    if (!this.isOwnedWithinScope(existing.item, scope)) return;
+    if (scope && (scope.userId || scope.projectId) && !this.isOwnedWithinScope(existing.item, scope)) return;
 
     const currentMeta =
       existing.metadata &&
@@ -443,7 +478,7 @@ export class ItemCurationService {
     if (!itemId) return;
     const existing = await this.query.findItemForAiMetadata(itemId);
     if (!existing) return;
-    if (!this.isOwnedWithinScope(existing, scope)) return;
+    if (scope && (scope.userId || scope.projectId) && !this.isOwnedWithinScope(existing, scope)) return;
 
     const currentMeta =
       existing.metadata &&
@@ -491,6 +526,10 @@ export class ItemCurationService {
           metadata: updated?.metadata ?? mergedMetadata,
         };
         const domainUpdated = ItemsMapper.toDomain(mergedUpdated);
+        const sharedDomainUpdated = this.stripPersonalOverlayForSharedScope(
+          domainUpdated,
+          validProjectId,
+        );
         const eventScope = {
           userId: existing.userId,
           projectId: validProjectId,
@@ -500,13 +539,13 @@ export class ItemCurationService {
           entityId: itemId,
           action: 'update',
           version: updated?.version ?? 1,
-          data: domainUpdated,
+          data: sharedDomainUpdated,
         });
         await helpers.publishOutbox(
           eventScope,
           itemId,
           LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-          domainUpdated,
+          sharedDomainUpdated,
         );
         helpers?.onAfterCommit?.(invalidateUpdatedItemCache);
       });

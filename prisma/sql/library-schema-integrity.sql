@@ -104,6 +104,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS "tombstones_project_entity_uq"
   ON "tombstones" ("project_id", "entity_type", "entity_id")
   WHERE "project_id" IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS "attachments_active_item_file_hash_uq"
+  ON "attachments" ("item_id", "file_hash")
+  WHERE "deleted_at" IS NULL AND "file_hash" IS NOT NULL;
+
 -- 4. Reader Data Modeling Standardization Partial Indexes
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_attachments_one_primary_per_item"
   ON "attachments" ("item_id")

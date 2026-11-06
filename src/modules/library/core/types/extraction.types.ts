@@ -267,6 +267,7 @@ export interface PdfMetadataExtractionProvenance {
     detectedIsbn?: string;
     matchedPublisherBanner?: string;
     maxFontSize?: number;
+    frontPageTexts?: string[];
     [key: string]: unknown;
   };
 }

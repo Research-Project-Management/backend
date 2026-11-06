@@ -405,3 +405,100 @@ export class SingleFlightCoalescer {
     this.inFlight.clear();
   }
 }
+
+/**
+ * Deterministic Lock Ordering Helper (Coffman Deadlock Prevention — Condition #4: Circular Wait).
+ *
+ * Returns a deduplicated, lexicographically sorted copy of resource IDs (`string[]`)
+ * so concurrent transactions acquiring row/index locks on multiple entities always
+ * lock in strictly ascending canonical order, eliminating circular-wait deadlocks (`40P01`).
+ */
+export function sortLockKeys(ids: readonly string[]): string[] {
+  if (!ids || ids.length === 0) return [];
+  const unique = Array.from(
+    new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0)),
+  );
+  return unique.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+export interface BulkheadSemaphoreOptions {
+  name?: string;
+  maxConcurrent: number;
+  maxQueueSize?: number;
+}
+
+/**
+ * Counting Semaphore / Bulkhead Admission Controller (OS Memory Thrashing & Resource Isolation).
+ *
+ * Caps the number of concurrent heavy background operations (e.g., full-library duplicate scans,
+ * quality audits, retraction batch scans, or vector backfills) so background tasks never starve
+ * interactive user queries in the shared PostgreSQL connection pool (`pg.Pool`).
+ */
+export class BulkheadSemaphore {
+  public readonly name: string;
+  public readonly maxConcurrent: number;
+  public readonly maxQueueSize: number;
+
+  private activeCount = 0;
+  private readonly waitQueue: Array<{
+    resolve: (release: () => void) => void;
+    reject: (err: Error) => void;
+  }> = [];
+
+  constructor(options: BulkheadSemaphoreOptions) {
+    this.name = options.name || 'default-bulkhead';
+    this.maxConcurrent = Math.max(1, options.maxConcurrent);
+    this.maxQueueSize = Math.max(0, options.maxQueueSize ?? 200);
+  }
+
+  public get active(): number {
+    return this.activeCount;
+  }
+
+  public get queued(): number {
+    return this.waitQueue.length;
+  }
+
+  public acquire(): Promise<() => void> {
+    if (this.activeCount < this.maxConcurrent) {
+      this.activeCount += 1;
+      return Promise.resolve(this.createReleaseFn());
+    }
+
+    if (this.waitQueue.length >= this.maxQueueSize) {
+      return Promise.reject(
+        new Error(
+          `BulkheadSemaphore "${this.name}" wait queue is full (${this.maxQueueSize})`,
+        ),
+      );
+    }
+
+    return new Promise<() => void>((resolve, reject) => {
+      this.waitQueue.push({ resolve, reject });
+    });
+  }
+
+  public async run<T>(task: () => Promise<T>): Promise<T> {
+    const release = await this.acquire();
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  }
+
+  private createReleaseFn(): () => void {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const next = this.waitQueue.shift();
+      if (next) {
+        next.resolve(this.createReleaseFn());
+      } else {
+        this.activeCount = Math.max(0, this.activeCount - 1);
+      }
+    };
+  }
+}
+

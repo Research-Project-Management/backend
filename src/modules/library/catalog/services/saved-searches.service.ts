@@ -125,13 +125,12 @@ export class SavedSearchesService {
             dto,
             effectiveProjectId,
             tx,
+            initialCount,
           );
-          if (typeof initialCount === 'number') {
-            await this.repo.updateCachedCount(
-              createdRecord.id,
-              initialCount,
-              tx,
-            );
+          if (
+            typeof initialCount === 'number' &&
+            (createdRecord.cachedCount == null || createdRecord.cachedCount === 0)
+          ) {
             createdRecord.cachedCount = initialCount;
             createdRecord.lastEvaluatedAt = new Date();
           }
@@ -161,9 +160,17 @@ export class SavedSearchesService {
       return created;
     }
 
-    const created = await this.repo.create(userId, dto, effectiveProjectId);
-    if (typeof initialCount === 'number') {
-      await this.repo.updateCachedCount(created.id, initialCount);
+    const created = await this.repo.create(
+      userId,
+      dto,
+      effectiveProjectId,
+      undefined,
+      initialCount,
+    );
+    if (
+      typeof initialCount === 'number' &&
+      (created.cachedCount == null || created.cachedCount === 0)
+    ) {
       created.cachedCount = initialCount;
       created.lastEvaluatedAt = new Date();
     }
@@ -318,10 +325,14 @@ export class SavedSearchesService {
       const updated = await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
           ranPostCommitHook = Boolean(helpers?.onAfterCommit);
-          await this.repo.update(userId, id, dto, projectId, tx);
-          if (recalculatedCount !== undefined) {
-            await this.repo.updateCachedCount(id, recalculatedCount, tx);
-          }
+          await this.repo.update(
+            userId,
+            id,
+            dto,
+            projectId,
+            tx,
+            recalculatedCount,
+          );
           const updatedRecord = await this.repo.findById(
             userId,
             id,
@@ -359,12 +370,14 @@ export class SavedSearchesService {
       return updated;
     }
 
-    await Promise.all([
-      this.repo.update(userId, id, dto, projectId),
-      ...(recalculatedCount !== undefined
-        ? [this.repo.updateCachedCount(id, recalculatedCount)]
-        : []),
-    ]);
+    await this.repo.update(
+      userId,
+      id,
+      dto,
+      projectId,
+      undefined,
+      recalculatedCount,
+    );
 
     await this.invalidateCache(userId, effectiveProjectId);
     return this.findById(userId, id, projectId);

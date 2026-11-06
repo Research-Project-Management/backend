@@ -218,7 +218,7 @@ export class ItemService {
         id,
         LIBRARY_EVENT_TYPES.ITEM_UPDATED,
         {
-          ...(domainUpdated as unknown as Record<string, unknown>),
+          ...(sharedUpdatedData as unknown as Record<string, unknown>),
           updatedFields,
         },
       );
@@ -422,12 +422,16 @@ export class ItemService {
         const eventScope = { userId, projectId: effectiveProjectId };
         const domainItem = (ItemsMapper.mapFlattenedState(restored, userId) ??
           ItemsMapper.toDomain(restored)) as ItemDetail;
+        const sharedRestoredData = this.stripPersonalOverlayForSharedScope(
+          domainItem,
+          effectiveProjectId,
+        );
         await helpers.appendChange(eventScope, {
           entityType: 'Item',
           entityId: id,
           action: 'update',
           version: restored.version,
-          data: domainItem,
+          data: sharedRestoredData,
         });
         await helpers.removeTombstone(eventScope, 'Item', id);
         await helpers.publishOutbox(
@@ -483,7 +487,7 @@ export class ItemService {
             {
               itemId: id, itemIds: [id], userId, projectId: validProjectId,
               filePaths: purgeRes.storagePaths, purgedAt: new Date().toISOString(),
-              cascadedInTx: true, storageDeletedInTx: true,
+              cascadedInTx: true, storageDeletedInTx: false,
             },
           );
         }

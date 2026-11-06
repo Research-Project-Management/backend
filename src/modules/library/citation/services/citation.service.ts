@@ -252,7 +252,7 @@ export class CitationService {
     const normalizedStyleId = normalizeCitationStyleId(styleId);
     const effectiveProjectId = normalizeProjectScopeId(projectId);
     const scopeId = effectiveProjectId || userId;
-    const [item] = await Promise.all([
+    const [item, styleLoaded] = await Promise.all([
       this.catalogGateway
         ? this.catalogGateway.getItem<CatalogItemRecord>(
             userId,
@@ -265,6 +265,16 @@ export class CitationService {
 
     if (!item) {
       throw new NotFoundException('Item not found in library');
+    }
+
+    if (
+      !styleLoaded &&
+      !this.registry.has(normalizedStyleId) &&
+      !this.cslEngine.isStyleSupported(normalizedStyleId)
+    ) {
+      throw new BadRequestException(
+        `Unsupported citation style: ${normalizedStyleId}`,
+      );
     }
 
     const cslItem = CslJsonMapper.toCsl(item);
