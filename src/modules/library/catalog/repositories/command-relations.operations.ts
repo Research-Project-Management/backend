@@ -192,11 +192,12 @@ export async function syncUpdatedIdentifiers(
     explicitIdentifiers,
   );
   await Promise.all(
-    changes.map((change) => {
+    changes.map(async (change) => {
       if (!change.value) {
-        return deleteManyFn?.({ where: { itemId, type: change.type } });
+        await deleteManyFn?.({ where: { itemId, type: change.type } });
+        return;
       }
-      return upsertFn?.({
+      await upsertFn?.({
         where: { itemId_type: { itemId, type: change.type } },
         create: {
           itemId,

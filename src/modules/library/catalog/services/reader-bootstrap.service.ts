@@ -169,7 +169,7 @@ export class ReaderBootstrapService {
         return null;
       }
 
-      const itemRec = { ...(rawItem as Record<string, unknown>) };
+      const itemRec: Record<string, unknown> = { ...rawItem };
       const rawAttachments = Array.isArray(itemRec.attachments)
         ? (itemRec.attachments as Array<Record<string, unknown>>)
         : [];

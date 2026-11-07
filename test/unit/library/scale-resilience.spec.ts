@@ -380,6 +380,11 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
         },
       });
       expect(callArg.include?.collectionItems).toEqual({
+        where: {
+          collection: {
+            deletedAt: null,
+          },
+        },
         select: {
           collectionId: true,
           sortOrder: true,

@@ -91,13 +91,15 @@ describe('ReaderBootstrapService (Document-Scoped BFF Bootstrap)', () => {
       getPermissions: jest.fn().mockResolvedValue({
         role: 'editor',
         permissions: {
-          canView: true,
-          canCreate: true,
-          canEdit: true,
-          canDelete: false,
+          canRead: true,
+          canCreateItem: true,
+          canEditItem: true,
+          canDeleteItem: false,
+          canPurgeItem: false,
           canManageCollections: true,
-          canManageTags: true,
-          canTriggerOcr: true,
+          canImport: true,
+          canExport: true,
+          canAnnotate: true,
         },
       }),
     };
@@ -169,7 +171,8 @@ describe('ReaderBootstrapService (Document-Scoped BFF Bootstrap)', () => {
       outline: [{ title: '1 Introduction', page: 1 }],
     });
     expect(res?.role).toBe('editor');
-    expect(res?.permissions?.canEdit).toBe(true);
+    expect(res?.permissions?.canEditItem).toBe(true);
+    expect(res?.permissions?.canAnnotate).toBe(true);
   });
 
   it('selects explicit attachmentId when requested and returns its normalized annotations', async () => {

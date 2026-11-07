@@ -1,20 +1,20 @@
 import { BadRequestException } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { ExtractionTelemetryController } from '@/modules/library/extraction/controllers/attachments.controller';
-import { IExtractionEnginePort } from '@/modules/library/extraction/services/extraction.handler';
+import { IExtractionFacade } from '@/modules/library/core';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { PdfMetadataExtractionResult } from '@/modules/library/core/types/extraction.types';
 
 describe('ExtractionTelemetryController', () => {
   let controller: ExtractionTelemetryController;
-  let trustedExtractor: jest.Mocked<IExtractionEnginePort>;
+  let trustedExtractor: jest.Mocked<IExtractionFacade>;
   let attachmentsService: jest.Mocked<AttachmentsService>;
 
   beforeEach(() => {
     trustedExtractor = {
       extractTrustedMetadata: jest.fn(),
       extractAttachmentAsync: jest.fn(),
-    } as unknown as jest.Mocked<IExtractionEnginePort>;
+    } as unknown as jest.Mocked<IExtractionFacade>;
 
     attachmentsService = {
       getExtractionStatusBreakdown: jest.fn().mockResolvedValue({

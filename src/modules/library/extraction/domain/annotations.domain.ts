@@ -418,6 +418,7 @@ export class AnnotationNormalizer {
 
   normalizePageLabel(pageLabel?: string | null): string {
     if (!pageLabel || typeof pageLabel !== 'string') return '';
+    // eslint-disable-next-line no-control-regex
     return pageLabel.replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, 64);
   }
 

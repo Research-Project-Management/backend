@@ -599,7 +599,7 @@ describe('Black-Box Zotero / Mendeley / Paperpile Community User Workflows', () 
     it('P5.2: normalizes PDF/EPUB annotations (highlights, area rectangles, hex colors, page bounds)', () => {
       const normalizer = new AnnotationNormalizer();
       const normalizedCreate = normalizer.normalizeCreateData({
-        type: 'highlight' as never, color: '#FFEB3B', pageNumber: 3, pageLabel: 'iii',
+        type: 'highlight', color: '#FFEB3B', pageIndex: 2, pageLabel: 'iii',
         quoteText: 'Self-attention relates different positions of a single sequence.',
         comment: 'Core definition of <b>self-attention</b><script>evil()</script>',
         tags: ['  Self-Attention ', 'self-attention'], rectCoords: [480.0, 524.8, 72.5, 512.3],
@@ -607,7 +607,7 @@ describe('Black-Box Zotero / Mendeley / Paperpile Community User Workflows', () 
 
       expect(normalizedCreate.type).toBe('highlight');
       expect(normalizedCreate.color).toBe('#ffeb3b');
-      expect(normalizedCreate.pageNumber).toBe(3);
+      expect(normalizedCreate.pageIndex).toBe(2);
       expect(normalizedCreate.quoteText).toContain('Self-attention relates');
       expect(normalizedCreate.comment).toBe('Core definition of self-attention');
       expect(normalizedCreate.rectCoords).toEqual([72.5, 512.3, 480.0, 524.8]);
