@@ -1,6 +1,6 @@
 import { Module, Global } from '@nestjs/common';
 import { RealtimeCoreModule } from './core/core.module';
-import { RealtimeManuscriptsModule } from './manuscripts/manuscripts.module';
+import { RealtimePagesModule } from './pages/pages.module';
 import { RealtimeNotificationsModule } from './notifications/notifications.module';
 import { RealtimeFacade } from './realtime.facade';
 
@@ -8,14 +8,14 @@ import { RealtimeFacade } from './realtime.facade';
 @Module({
   imports: [
     RealtimeCoreModule,
-    RealtimeManuscriptsModule,
+    RealtimePagesModule,
     RealtimeNotificationsModule,
   ],
   providers: [RealtimeFacade],
   exports: [
     RealtimeFacade,
     RealtimeCoreModule,
-    RealtimeManuscriptsModule,
+    RealtimePagesModule,
     RealtimeNotificationsModule,
   ],
 })

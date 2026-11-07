@@ -1,0 +1,51 @@
+// ============================================================================
+// Pages Subsystem: File Tree & Hierarchy Sub-Domain
+// Self-managed domain schema: PageNode
+// ============================================================================
+
+enum PageNodeType {
+  FOLDER
+  DOC
+  FILE
+}
+
+model PageNode {
+  id         String       @id @default(uuid(7)) @db.Uuid
+  spaceId    String       @map("space_id") @db.Uuid
+  space      Space        @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_nodes_space_id")
+  pageId     String?      @map("page_id") @db.Uuid
+  page       Page?        @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_nodes_page_id")
+
+  parentId   String?      @map("parent_id") @db.Uuid
+  parent     PageNode?    @relation("NodeHierarchy", fields: [parentId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_nodes_parent_id")
+  children   PageNode[]   @relation("NodeHierarchy")
+
+  type       PageNodeType
+  name       String       @db.VarChar(255)
+  path       String       @db.VarChar(1000)
+  depth      Int          @default(0)
+
+  docId      String?      @unique(map: "uq_page_nodes_doc_id") @map("doc_id") @db.Uuid
+  doc        PageDoc?     @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_nodes_doc_id")
+  fileId     String?      @unique(map: "uq_page_nodes_file_id") @map("file_id") @db.Uuid
+  file       PageFile?    @relation(fields: [fileId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_nodes_file_id")
+
+  isRootDoc  Boolean      @default(false) @map("is_root_doc")
+  sizeBytes  Int          @default(0) @map("size_bytes")
+  hash       String?      @db.VarChar(64)
+  sortOrder  Int          @default(0) @map("sort_order")
+
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([pageId, path], map: "uq_page_nodes_page_path")
+  @@index([spaceId, path], map: "idx_page_nodes_space_path")
+  @@index([spaceId, parentId, name], map: "idx_page_nodes_parent_name")
+  @@index([pageId, parentId, name], map: "idx_page_nodes_page_parent_name")
+  @@index([spaceId, depth, sortOrder, name], map: "idx_page_nodes_space_tree")
+  @@index([pageId, depth, sortOrder, name], map: "idx_page_nodes_page_tree")
+  @@index([spaceId, type, isRootDoc(sort: Desc), sortOrder], map: "idx_page_nodes_space_type_root_sort")
+  @@index([pageId, type, isRootDoc(sort: Desc), sortOrder], map: "idx_page_nodes_page_type_root_sort")
+  @@index([spaceId, isRootDoc], map: "idx_page_nodes_space_root")
+  @@map("page_nodes")
+}

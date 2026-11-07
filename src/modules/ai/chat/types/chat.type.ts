@@ -15,6 +15,7 @@ export type ChatWithMessages = Prisma.AiChatGetPayload<{
 export interface FormattedChatSession {
   id: string;
   title: string;
+  spaceId?: string;
   projectId?: string | null;
   pageId?: string | null;
   scopeSlug?: string;
@@ -47,6 +48,7 @@ export interface IChatRepository {
   findPageChat(
     pageId: string,
     userId: string,
+    projectId?: string | null,
   ): Promise<ChatWithMessages | null>;
   createChat(
     data: Prisma.AiChatCreateInput | Prisma.AiChatUncheckedCreateInput,
@@ -56,7 +58,11 @@ export interface IChatRepository {
     data: Prisma.AiChatUpdateInput | Prisma.AiChatUncheckedUpdateInput,
   ): Promise<ChatWithMessages>;
   deleteChat(chatId: string): Promise<AiChat>;
-  deletePageChat(pageId: string, userId: string): Promise<{ count: number }>;
+  deletePageChat(
+    pageId: string,
+    userId: string,
+    projectId?: string | null,
+  ): Promise<{ count: number }>;
   clearUserChats(
     userId: string,
     projectId?: string | null,

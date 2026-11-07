@@ -157,6 +157,7 @@ export class BulkHandler {
     const data: Prisma.WorkItemUpdateManyMutationInput & {
       assigneeId?: string | null;
       columnId?: string;
+      labels?: string[];
     } = {};
     if (payload.columnId !== undefined) {
       const targetState = matchProjectState(
@@ -216,7 +217,7 @@ export class BulkHandler {
       data.labels = [];
     } else if (payload.labels !== undefined && Array.isArray(payload.labels)) {
       data.labels = payload.labels.filter(
-        (l: unknown) => typeof l === 'string' && l.trim().length > 0,
+        (l: unknown): l is string => typeof l === 'string' && l.trim().length > 0,
       );
     }
 

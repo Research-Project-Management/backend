@@ -60,9 +60,9 @@ model FeedItem {
 
 model FeedSubscription {
   id                 String    @id @default(uuid(7)) @db.Uuid
-  scopeKey           String    @default("") @map("scope_key") @db.VarChar(128)
-  userId             String    @db.Uuid @map("user_id")
-  projectId          String?   @db.Uuid @map("project_id")
+  spaceId            String    @db.Uuid @map("space_id")
+  space              Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_feed_subscriptions_space_id")
+  createdById        String    @db.Uuid @map("created_by_id")
   feedId             String    @db.Uuid @map("feed_id")
   feed               Feed      @relation(fields: [feedId], references: [id], onDelete: Cascade, map: "fk_feed_subscriptions_feed_id")
 
@@ -73,10 +73,8 @@ model FeedSubscription {
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([scopeKey, feedId])
-  @@unique([userId, feedId])
-  @@index([userId, createdAt(sort: Desc)])
-  @@index([projectId])
+  @@unique([spaceId, feedId])
+  @@index([spaceId, createdAt(sort: Desc)])
   @@index([feedId])
   @@map("feed_subscriptions")
 }

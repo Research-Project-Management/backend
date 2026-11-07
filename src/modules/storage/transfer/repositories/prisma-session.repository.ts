@@ -13,10 +13,14 @@ export interface IUploadSessionRepository {
 
 export class UploadSessionMapper {
   public static toDomain(record: PrismaSession): UploadSession {
+    const projectId =
+      record.spaceId && record.spaceId !== record.createdById
+        ? record.spaceId
+        : null;
     return new UploadSession({
       id: record.id,
-      projectId: record.projectId,
-      userId: record.userId,
+      projectId,
+      userId: record.createdById,
       s3UploadId: record.s3UploadId,
       s3Key: record.s3Key,
       filename: record.filename,
@@ -28,7 +32,7 @@ export class UploadSessionMapper {
         ? Buffer.from(record.expectedHash)
         : null,
       parentId: record.parentId,
-      scope: record.projectId ? FileScope.Project : FileScope.Personal,
+      scope: projectId ? FileScope.Project : FileScope.Personal,
       status: record.status as UploadSessionStatus,
       expiresAt: record.expiresAt,
       createdAt: record.createdAt,
@@ -39,8 +43,8 @@ export class UploadSessionMapper {
   public static toPrismaCreate(session: UploadSession) {
     return {
       id: session.id,
-      projectId: session.projectId,
-      userId: session.userId,
+      spaceId: session.projectId || session.userId,
+      createdById: session.userId,
       s3UploadId: session.s3UploadId,
       s3Key: session.s3Key,
       filename: session.filename,

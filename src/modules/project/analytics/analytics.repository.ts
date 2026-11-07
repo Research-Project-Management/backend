@@ -27,7 +27,6 @@ export class ProjectAnalyticsRepository {
   async getWorkItemsCountsByStateGroup(
     projectId: string,
   ): Promise<Record<string, number>> {
-    // Query work items with their state group
     const rows = await this.prisma.workItem.findMany({
       where: {
         projectId,
@@ -85,7 +84,6 @@ export class ProjectAnalyticsRepository {
       where: { projectId, deletedAt: null },
       select: {
         id: true,
-        labels: true,
         labelAssignments: {
           select: {
             label: {

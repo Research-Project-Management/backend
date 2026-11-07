@@ -115,7 +115,7 @@ export class TemplateRepository {
     dto: InstantiateProjectTemplateDto,
   ): Promise<Project> {
     return this.prisma.$transaction(async (tx) => {
-      // 1. Create the project
+      // 1. Create the project (triggerstrg_projects_ensure_project_space creates Space row)
       const project = await tx.project.create({
         data: {
           name: dto.name.trim(),
@@ -167,9 +167,9 @@ export class TemplateRepository {
       const rawLabels =
         (template.initialLabels as unknown as InitialLabelDto[]) || [];
       for (const lbl of rawLabels) {
-        await tx.workItemLabel.create({
+        await tx.spaceLabel.create({
           data: {
-            projectId: project.id,
+            spaceId: project.id,
             name: lbl.name,
             color: lbl.color,
             createdById: userId,
@@ -183,6 +183,7 @@ export class TemplateRepository {
       let sequence = 0;
 
       for (const wi of rawWorkItems) {
+        if (!defaultState) break;
         sequence++;
         await tx.workItem.create({
           data: {
@@ -196,9 +197,9 @@ export class TemplateRepository {
               )
                 ? (wi.priority as WorkItemPriority)
                 : WorkItemPriority.medium,
-            columnId: defaultState?.id || '',
+            stateId: defaultState.id,
             sequenceNumber: sequence,
-            authorId: userId,
+            createdById: userId,
           },
         });
       }

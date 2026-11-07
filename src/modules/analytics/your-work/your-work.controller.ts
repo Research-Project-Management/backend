@@ -51,8 +51,14 @@ export class YourWorkController {
     @Param('projectId') projectId?: string,
     @Query('projectId') queryProjectId?: string,
   ): Promise<YourWorkSummaryDto> {
-    const targetProjectId = projectId || queryProjectId;
+    const rawProjectId = (projectId || queryProjectId)?.trim();
+    const isPersonal =
+      !rawProjectId ||
+      ['personal', 'me', 'user', 'null', 'undefined', 'default', ''].includes(
+        rawProjectId.toLowerCase(),
+      ) ||
+      (userId && rawProjectId.toLowerCase() === userId.trim().toLowerCase());
+    const targetProjectId = isPersonal ? undefined : rawProjectId;
     return this.yourWorkService.getYourWork(targetProjectId, userId);
   }
 }
-

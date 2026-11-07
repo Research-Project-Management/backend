@@ -16,7 +16,7 @@ import {
   RealtimeServiceUnavailableException,
 } from './ws-errors';
 import { REALTIME_EVENTS } from './realtime.constant';
-import { RealtimeAccessService } from '../manuscripts/realtime-access.service';
+import { RealtimeAccessService } from '../pages/realtime-access.service';
 import { WsRateLimiter } from './ws-rate-limiter';
 
 export interface WsAccessEvaluationContext {
@@ -230,6 +230,17 @@ export class WsAccessGuard implements CanActivate {
 
     if (!authenticated || !userId) {
       throw new RealtimeAuthRequiredException('Authentication required');
+    }
+
+    if (
+      data &&
+      typeof data === 'object' &&
+      typeof data.projectId === 'string' &&
+      ['personal', 'me', 'user', 'default'].includes(
+        data.projectId.trim().toLowerCase(),
+      )
+    ) {
+      data.projectId = userId;
     }
 
     const evalCtx: WsAccessEvaluationContext = {

@@ -144,11 +144,9 @@ export class AssignmentRepository {
         data: assigneeId
           ? {
               assignee: { connect: { id: assigneeId } },
-              assigneeIds: [assigneeId],
             }
           : {
               assignee: { disconnect: true },
-              assigneeIds: [],
             },
       });
 
@@ -184,7 +182,6 @@ export class AssignmentRepository {
         },
         data: {
           assigneeId: assigneeId || null,
-          assigneeIds: assigneeId ? [assigneeId] : [],
         },
       });
 
@@ -219,7 +216,6 @@ export class AssignmentRepository {
       this.prismaService.workItem.update({
         where: { id: workItemId },
         data: {
-          assigneeIds,
           assigneeId: primaryAssigneeId,
         },
       }),

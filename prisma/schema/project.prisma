@@ -1,10 +1,10 @@
 // -- 2. Project Context (Collaborative Research Microservice) ----------------
 
 enum Role {
-  owner // Truong nhom / Chu nhiem de tai — toan quyen toi cao & doc quyen nhan su
-  coordinator // Dieu phoi vien — quan ly cycles, work items (khong quan ly nhan su)
-  contributor // Thanh vien nghien cuu — tao/sua work items, tai lieu, upload paper
-  reviewer // GVHD / Hoi dong phan bien — read-only, comment va suggestion
+  owner
+  coordinator
+  contributor
+  reviewer
 }
 
 enum InvitationStatus {
@@ -16,17 +16,17 @@ enum InvitationStatus {
 }
 
 enum ProjectPriority {
-  urgent // Khẩn cấp
-  high // Cao
-  medium // Trung bình
-  low // Thấp
-  none // Không xác định
+  urgent
+  high
+  medium
+  low
+  none
 }
 
 enum ProjectUpdateStatus {
-  on_track // Tiến triển đúng kế hoạch (On Track)
-  at_risk // Có rủi ro / rào cản tiềm ẩn (At Risk)
-  off_track // Chậm tiến độ nghiêm trọng (Off Track)
+  on_track
+  at_risk
+  off_track
 }
 
 model Project {
@@ -37,7 +37,6 @@ model Project {
   avatar      String?
   coverImage  String? @map("cover_image")
 
-  // Trạng thái dự án (Dữ liệu động, do user tự do tạo/sửa/xóa/kéo thả; null nếu chưa gán hoặc xóa hết)
   stateId       String?         @map("state_id") @db.Uuid
   state         ProjectState?   @relation("CurrentProjectState", fields: [stateId], references: [id], onDelete: SetNull)
   projectStates ProjectState[]  @relation("ProjectStates")
@@ -45,7 +44,6 @@ model Project {
   startDate     DateTime?       @map("start_date") @db.Date
   targetDate    DateTime?       @map("target_date") @db.Date
 
-  // Trạng thái vận hành & Lưu trữ
   isActive   Boolean   @default(true) @map("is_active")
   isArchived Boolean   @default(false) @map("is_archived")
   archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
@@ -55,44 +53,30 @@ model Project {
   modules     String[] @default(["overview", "work_items", "pages"])
   settings    Json?    @default("{}")
 
-  // Template liên kết (nếu được tạo từ Project Template)
   templateId String?          @map("template_id") @db.Uuid
   template   ProjectTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_projects_template_id")
 
-  // WorkItem & Board extensions
   workItemSequence Int @default(0) @map("work_item_sequence")
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  // Relations
-  members        ProjectMember[]
-  invitations    ProjectInvitation[]
-  labels         ProjectLabel[]
-  favorites      ProjectFavorite[]
-  states         WorkItemState[]
-  workItems      WorkItem[]
-  workItemLabels WorkItemLabel[]       @relation("ProjectWorkItemLabels")
-  drafts         WorkItemDraft[]
-  views          WorkItemView[]
+  // Space 1:1 Relation
+  space            Space?                   @relation("ProjectSpace")
+
+  // Project-Scoped Relations
+  members          ProjectMember[]
+  invitations      ProjectInvitation[]
+  labels           ProjectLabel[]
+  favorites        ProjectFavorite[]
+  states           WorkItemState[]
+  workItems        WorkItem[]
+  views            WorkItemView[]
   activityEvents   ActivityEvent[]
-  aiChats          AiChat[]                 @relation("ProjectAiChats")
   updates          ProjectUpdate[]
   integrationLinks ProjectIntegrationLink[]
   channels         Conversation[]           @relation("ProjectChannels")
-  manuscriptPages         ManuscriptPage[]
-  manuscriptDocs          ManuscriptDoc[]
-  manuscriptNodes         ManuscriptNode[]
-  manuscriptFiles         ManuscriptFile[]
-  manuscriptLinkedFiles   ManuscriptLinkedFile[]
-  manuscriptSnapshots     ManuscriptSnapshot[]
-  manuscriptLabels        ManuscriptLabel[]
-  manuscriptTrackChanges  ManuscriptTrackChange[]
-  manuscriptComments      ManuscriptCommentThread[]
-  manuscriptCustomWords   ManuscriptCustomWord[]
-  manuscriptNotifications ManuscriptNotification[]
-  manuscriptDocReviews    ManuscriptDocReview[]
 
   @@index([createdById], map: "idx_projects_created_by_id")
   @@index([identifier], map: "idx_projects_identifier")
@@ -138,31 +122,15 @@ model ProjectInvitation {
   @@map("project_invitations")
 }
 
-model Label {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  name        String   @db.VarChar(50)
-  color       String   @db.VarChar(10) // Hex color code e.g. #3B82F6
-  description String?  @db.VarChar(200)
-  userId      String   @map("user_id") @db.Uuid
-  user        User     @relation("UserLabels", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_labels_user_id")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  projects ProjectLabel[]
-
-  @@unique([userId, name], map: "uq_labels_user_name")
-  @@map("labels")
-}
-
 model ProjectLabel {
   projectId    String   @map("project_id") @db.Uuid
   labelId      String   @map("label_id") @db.Uuid
   assignedAt   DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
   assignedById String?  @map("assigned_by_id") @db.Uuid
 
-  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_labels_project_id")
-  label      Label   @relation(fields: [labelId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_labels_label_id")
-  assignedBy User?   @relation("ProjectLabelAssigner", fields: [assignedById], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_project_labels_assigned_by_id")
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_labels_project_id")
+  label      SpaceLabel @relation(fields: [labelId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_labels_label_id")
+  assignedBy User?      @relation("ProjectLabelAssigner", fields: [assignedById], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_project_labels_assigned_by_id")
 
   @@id([projectId, labelId], map: "pk_project_labels")
   @@index([labelId, projectId], map: "idx_project_labels_covering")
@@ -193,11 +161,9 @@ model ProjectTemplate {
   createdById String  @map("created_by_id") @db.Uuid
   createdBy   User    @relation("UserProjectTemplates", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_templates_created_by_id")
 
-  // Cấu hình dự án mẫu (Features / Modules)
   defaultModules String[] @default(["overview", "work_items", "pages"]) @map("default_modules")
   settings       Json?    @default("{}")
 
-  // Cấu hình khởi tạo khi sinh Project từ Template
   initialStates    Json? @default("[]") @map("initial_states")
   initialLabels    Json? @default("[]") @map("initial_labels")
   initialWorkItems Json? @default("[]") @map("initial_work_items")

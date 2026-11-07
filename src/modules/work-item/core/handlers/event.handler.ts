@@ -93,7 +93,7 @@ export class EventHandler {
   }
 
   dispatchUpdateEvents(
-    existing: WorkItem,
+    existing: WorkItem & { columnId?: string },
     updateDto: UpdateWorkItemDto,
     userId?: string,
     resolvedColumnId?: string,
@@ -107,14 +107,15 @@ export class EventHandler {
       projectId: existing.projectId,
     };
 
+    const existingColumnId = existing.columnId ?? existing.stateId;
     const nextColumnId =
       resolvedColumnId !== undefined ? resolvedColumnId : updateDto.columnId;
-    if (nextColumnId !== undefined && nextColumnId !== existing.columnId) {
+    if (nextColumnId !== undefined && nextColumnId !== existingColumnId) {
       this.eventEmitter.emit('work-item.state.changed', {
         ...baseEvent,
         verb: 'transitioned',
         field: 'state',
-        oldValue: existing.columnId,
+        oldValue: existingColumnId,
         newValue: nextColumnId,
       });
     }

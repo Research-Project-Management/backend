@@ -1,7 +1,30 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
-import { Prisma, WorkItemLabel as Label } from '@prisma/client';
-import { LabelWithChildren, ReorderLabelItem } from './dto/label.dto';
+import { PrismaService, isUuid } from '@/core';
+import { Prisma, SpaceLabel } from '@prisma/client';
+import { Label, LabelWithChildren, ReorderLabelItem } from './dto/label.dto';
+
+function mapLabel(raw: SpaceLabel): Label {
+  const isPersonal = raw.spaceId === raw.createdById;
+  return {
+    ...raw,
+    projectId: isPersonal ? null : raw.spaceId,
+  };
+}
+
+function mapLabelWithChildren(
+  raw: SpaceLabel & {
+    children?: SpaceLabel[];
+    parent?: SpaceLabel | null;
+  },
+): LabelWithChildren {
+  return {
+    ...mapLabel(raw),
+    ...(raw.children ? { children: raw.children.map(mapLabel) } : {}),
+    ...(raw.parent !== undefined
+      ? { parent: raw.parent ? mapLabel(raw.parent) : null }
+      : {}),
+  };
+}
 
 @Injectable()
 export class LabelRepository {
@@ -12,9 +35,9 @@ export class LabelRepository {
     type?: string,
   ): Promise<LabelWithChildren[]> {
     const normalizedType = type?.trim().toLowerCase();
-    return this.prisma.workItemLabel.findMany({
+    const labels = await this.prisma.spaceLabel.findMany({
       where: {
-        projectId,
+        spaceId: projectId,
         ...(normalizedType === 'root' || normalizedType === 'parent'
           ? { parentId: null }
           : normalizedType === 'sub' || normalizedType === 'child'
@@ -28,6 +51,7 @@ export class LabelRepository {
       },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
+    return labels.map(mapLabelWithChildren);
   }
 
   async findUserLabels(
@@ -36,10 +60,20 @@ export class LabelRepository {
     projectId?: string | null,
   ): Promise<Label[]> {
     const normalizedType = type?.trim().toLowerCase();
-    return this.prisma.workItemLabel.findMany({
+    const effectiveSpaceId =
+      projectId &&
+      !['personal', 'me', 'user', 'null', 'undefined', 'default', ''].includes(
+        projectId.trim().toLowerCase(),
+      ) &&
+      isUuid(projectId.trim())
+        ? projectId.trim()
+        : userId;
+    const spaceFilter =
+      projectId !== undefined ? { spaceId: effectiveSpaceId } : {};
+    const labels = await this.prisma.spaceLabel.findMany({
       where: {
         createdById: userId,
-        ...(projectId !== undefined && { projectId }),
+        ...spaceFilter,
         ...(normalizedType === 'root' || normalizedType === 'parent'
           ? { parentId: null }
           : normalizedType === 'sub' || normalizedType === 'child'
@@ -53,10 +87,11 @@ export class LabelRepository {
       },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
+    return labels.map(mapLabelWithChildren);
   }
 
   async findById(labelId: string): Promise<LabelWithChildren | null> {
-    return this.prisma.workItemLabel.findUnique({
+    const label = await this.prisma.spaceLabel.findUnique({
       where: { id: labelId },
       include: {
         children: {
@@ -65,6 +100,7 @@ export class LabelRepository {
         parent: true,
       },
     });
+    return label ? mapLabelWithChildren(label) : null;
   }
 
   async findByNameInProject(
@@ -72,16 +108,18 @@ export class LabelRepository {
     name: string,
     excludeId?: string,
   ): Promise<Label | null> {
-    return this.prisma.workItemLabel.findFirst({
+    const label = await this.prisma.spaceLabel.findFirst({
       where: {
-        projectId,
+        spaceId: projectId,
         name: { equals: name.trim(), mode: 'insensitive' },
         ...(excludeId && { id: { not: excludeId } }),
       },
     });
+    return label ? mapLabel(label) : null;
   }
 
   async findProject(projectId: string): Promise<{ id: string } | null> {
+    if (!isUuid(projectId)) return null;
     return this.prisma.project.findUnique({
       where: { id: projectId },
       select: { id: true },
@@ -92,9 +130,9 @@ export class LabelRepository {
     projectId: string,
     parentId?: string | null,
   ): Promise<number | null> {
-    const lastLabel = await this.prisma.workItemLabel.findFirst({
+    const lastLabel = await this.prisma.spaceLabel.findFirst({
       where: {
-        projectId,
+        spaceId: projectId,
         parentId: parentId || null,
       },
       orderBy: { sortOrder: 'desc' },
@@ -110,44 +148,59 @@ export class LabelRepository {
     excludeId?: string;
     createdById?: string;
   }): Promise<Label | null> {
-    return this.prisma.workItemLabel.findFirst({
+    const spaceId = params.projectId || params.createdById;
+    const label = await this.prisma.spaceLabel.findFirst({
       where: {
         ...(params.excludeId && { id: { not: params.excludeId } }),
         ...(params.createdById && { createdById: params.createdById }),
-        projectId: params.projectId,
+        ...(spaceId && { spaceId }),
         name: { equals: params.name.trim(), mode: 'insensitive' },
         parentId: params.parentId ?? null,
       },
     });
+    return label ? mapLabel(label) : null;
   }
 
-  async create(data: Prisma.WorkItemLabelUncheckedCreateInput): Promise<Label> {
-    return this.prisma.workItemLabel.create({
-      data,
+  async create(
+    data: Omit<Prisma.SpaceLabelUncheckedCreateInput, 'spaceId'> & {
+      spaceId?: string;
+      projectId?: string | null;
+    },
+  ): Promise<Label> {
+    const { projectId, spaceId, ...rest } = data;
+    const effectiveSpaceId = spaceId || projectId || rest.createdById;
+    const created = await this.prisma.spaceLabel.create({
+      data: {
+        ...rest,
+        spaceId: effectiveSpaceId,
+      },
     });
+    return mapLabel(created);
   }
 
   async update(
     labelId: string,
-    data: Prisma.WorkItemLabelUncheckedUpdateInput,
+    data: Prisma.SpaceLabelUncheckedUpdateInput,
   ): Promise<Label> {
-    return this.prisma.workItemLabel.update({
+    const updated = await this.prisma.spaceLabel.update({
       where: { id: labelId },
       data,
     });
+    return mapLabel(updated);
   }
 
   async delete(labelId: string): Promise<Label> {
-    return this.prisma.workItemLabel.delete({
+    const deleted = await this.prisma.spaceLabel.delete({
       where: { id: labelId },
     });
+    return mapLabel(deleted);
   }
 
   async reorder(projectId: string, updates: ReorderLabelItem[]): Promise<void> {
     await this.prisma.$transaction(
       updates.map((item) =>
-        this.prisma.workItemLabel.updateMany({
-          where: { id: item.id, projectId },
+        this.prisma.spaceLabel.updateMany({
+          where: { id: item.id, spaceId: projectId },
           data: { sortOrder: item.sortOrder },
         }),
       ),
@@ -157,38 +210,19 @@ export class LabelRepository {
   async detachMultipleFromWorkItems(
     projectId: string,
     labelIds: string[],
-    labelNames?: string[],
+    _labelNames?: string[],
   ): Promise<number> {
-    const targets = Array.from(
-      new Set([...labelIds, ...(labelNames || [])].filter(Boolean)),
-    );
-    if (!targets.length) return 0;
+    const validLabelIds = Array.from(new Set(labelIds.filter(Boolean)));
+    if (!validLabelIds.length) return 0;
 
     try {
-      const workItems = await this.prisma.workItem.findMany({
+      const result = await this.prisma.workItemLabelAssignment.deleteMany({
         where: {
-          projectId,
-          labels: { hasSome: targets },
+          labelId: { in: validLabelIds },
+          workItem: { projectId },
         },
-        select: { id: true, labels: true },
       });
-
-      if (!workItems.length) return 0;
-
-      const targetSet = new Set(targets);
-      await this.prisma.$transaction(
-        workItems.map((item) => {
-          const cleaned = item.labels.filter(
-            (label: string) => !targetSet.has(label),
-          );
-          return this.prisma.workItem.update({
-            where: { id: item.id },
-            data: { labels: cleaned },
-          });
-        }),
-      );
-
-      return workItems.length;
+      return result.count;
     } catch {
       return 0;
     }

@@ -1,0 +1,37 @@
+// ============================================================================
+// Pages Subsystem: Notifications & Mentions Sub-Domain
+// Self-managed domain schema: PageNotification
+// ============================================================================
+
+enum PageNotificationType {
+  mention
+  comment_reply
+  thread_resolved
+  project_invite
+  review_request
+  system
+}
+
+model PageNotification {
+  id          String               @id @default(uuid(7)) @db.Uuid
+  userId      String               @map("user_id") @db.Uuid
+  key         String?              @db.VarChar(255)
+  templateKey String               @map("template_key") @db.VarChar(100)
+  type        PageNotificationType @default(mention)
+  spaceId     String?              @map("space_id") @db.Uuid
+  space       Space?               @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_notifications_space_id")
+  docId       String?              @map("doc_id") @db.Uuid
+  doc         PageDoc?             @relation(fields: [docId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_page_notifications_doc_id")
+  actorId     String?              @map("actor_id") @db.Uuid
+  messageOpts Json                 @default("{}") @map("message_opts")
+  isRead      Boolean              @default(false) @map("is_read")
+  expiresAt   DateTime?            @map("expires_at") @db.Timestamptz(6)
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  readAt      DateTime?            @map("read_at") @db.Timestamptz(6)
+
+  @@index([userId, isRead, createdAt(sort: Desc)], map: "idx_page_notifications_user")
+  @@index([key], map: "idx_page_notifications_key")
+  @@index([expiresAt], map: "idx_page_notifications_expires")
+  @@index([spaceId, docId], map: "idx_page_notifications_space")
+  @@map("page_notifications")
+}

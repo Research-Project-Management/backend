@@ -74,7 +74,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
   constructor(private readonly prisma: PrismaService) {}
 
   async create(version: StorageVersion): Promise<StorageVersion> {
-    const created = await this.prisma.fileVersion.create({
+    const created = await this.prisma.storageFileVersion.create({
       data: {
         id: version.id,
         fileId: version.fileId,
@@ -100,7 +100,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
   }
 
   async findByFileId(fileId: string): Promise<StorageVersion[]> {
-    const records = await this.prisma.fileVersion.findMany({
+    const records = await this.prisma.storageFileVersion.findMany({
       where: { fileId },
       orderBy: { versionNumber: 'desc' },
       include: {
@@ -126,7 +126,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
     fileId: string,
     versionNumber: number,
   ): Promise<StorageVersion | null> {
-    const record = await this.prisma.fileVersion.findFirst({
+    const record = await this.prisma.storageFileVersion.findFirst({
       where: { fileId, versionNumber },
       include: {
         blob: true,
@@ -144,7 +144,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
   }
 
   async getLatestVersionNumber(fileId: string): Promise<number> {
-    const latest = await this.prisma.fileVersion.findFirst({
+    const latest = await this.prisma.storageFileVersion.findFirst({
       where: { fileId },
       orderBy: { versionNumber: 'desc' },
       select: { versionNumber: true },
@@ -154,7 +154,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
   }
 
   async deleteByFileId(fileId: string): Promise<void> {
-    await this.prisma.fileVersion.deleteMany({
+    await this.prisma.storageFileVersion.deleteMany({
       where: { fileId },
     });
   }

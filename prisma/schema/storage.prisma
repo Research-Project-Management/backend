@@ -1,4 +1,4 @@
-// -- 3. Storage & Asset Bounded Context (Enterprise Storage Platform) ------------
+// -- 3. Storage & Asset Bounded Context (Unified Space Storage Platform) ------
 
 enum FilePermission {
   view
@@ -20,53 +20,67 @@ enum UploadSessionStatus {
 }
 
 // -------------------------
-// Logical File Node (Drive / Project / Page / Library)
+// Logical File Node (Space-Scoped: Personal Space vs Project Space)
 // -------------------------
 
-model File {
-  id       String  @id @default(uuid()) @db.Uuid
-  filename String
-  size     BigInt  @default(0)
-  mimeType String  @default("application/octet-stream") @map("mime_type")
-  isFolder Boolean @default(false) @map("is_folder")
-  starred  Boolean @default(false)
-  metaData Json?   @default("{}") @map("meta_data")
-  parentId String? @map("parent_id") @db.Uuid
-  parent   File?   @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children File[]  @relation("FolderHierarchy")
+model StorageFile {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  spaceId     String        @map("space_id") @db.Uuid
+  space       Space         @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  createdById String        @map("created_by_id") @db.Uuid
+  createdBy   User          @relation("UserFiles", fields: [createdById], references: [id], onDelete: Restrict)
 
-  // Storage Isolation (Two-Tier Scope: Personal Drive vs Project / Page Scope)
-  linkedToType String? @map("linked_to_type")
-  linkedToId   String? @map("linked_to_id")
+  filename    String
+  size        BigInt        @default(0)
+  mimeType    String        @default("application/octet-stream") @map("mime_type")
+  isFolder    Boolean       @default(false) @map("is_folder")
+  metadata    Json?         @default("{}") @map("metadata") @db.JsonB
+  parentId    String?       @map("parent_id") @db.Uuid
+  parent      StorageFile?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    StorageFile[] @relation("FolderHierarchy")
+
+  // Optional Entity Link (e.g. 'page' | 'library' | 'paper' | 'experiment')
+  linkedToType String?      @map("linked_to_type")
+  linkedToId   String?      @map("linked_to_id")
 
   // CAS Physical Blob Link
-  blobId String?      @map("blob_id") @db.Uuid
-  blob   StorageBlob? @relation(fields: [blobId], references: [id], onDelete: Restrict)
+  blobId       String?      @map("blob_id") @db.Uuid
+  blob         StorageBlob? @relation(fields: [blobId], references: [id], onDelete: Restrict)
 
-  // Ownership & Sharing
-  authorId   String        @map("author_id") @db.Uuid
-  author     User          @relation("UserFiles", fields: [authorId], references: [id], onDelete: Restrict)
-  sharedWith FileShare[]
-  versions   FileVersion[]
+  stars        StorageFileStar[]
+  sharedWith   StorageFileShare[]
+  versions     StorageFileVersion[]
 
-  trashedAt DateTime? @map("trashed_at") @db.Timestamptz(6)
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz(6)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([authorId])
-  @@index([parentId, trashedAt])
-  @@index([authorId, parentId, trashedAt, isFolder(sort: Desc), filename])
-  @@index([linkedToType, linkedToId, parentId, trashedAt, isFolder(sort: Desc), filename])
-  @@index([authorId, starred, trashedAt])
-  @@index([trashedAt])
+  @@index([spaceId, parentId, deletedAt, isFolder(sort: Desc), filename])
+  @@index([spaceId, deletedAt, updatedAt(sort: Desc)])
+  @@index([createdById])
+  @@index([parentId, deletedAt])
+  @@index([linkedToType, linkedToId, parentId, deletedAt, isFolder(sort: Desc), filename])
+  @@index([deletedAt])
   @@index([blobId])
-  @@map("files")
+  @@map("storage_files")
 }
 
-model FileShare {
-  id         String         @id @default(uuid()) @db.Uuid
+model StorageFileStar {
+  fileId    String      @map("file_id") @db.Uuid
+  file      StorageFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId    String      @map("user_id") @db.Uuid
+  user      User        @relation("UserStarredFiles", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([fileId, userId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("storage_file_stars")
+}
+
+model StorageFileShare {
+  id         String         @id @default(uuid(7)) @db.Uuid
   fileId     String         @map("file_id") @db.Uuid
-  file       File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  file       StorageFile    @relation(fields: [fileId], references: [id], onDelete: Cascade)
   userId     String         @map("user_id") @db.Uuid
   user       User           @relation("UserSharedFiles", fields: [userId], references: [id], onDelete: Cascade)
   permission FilePermission @default(view)
@@ -74,7 +88,7 @@ model FileShare {
 
   @@unique([fileId, userId])
   @@index([userId, createdAt(sort: Desc)])
-  @@map("file_shares")
+  @@map("storage_file_shares")
 }
 
 // -------------------------
@@ -82,7 +96,7 @@ model FileShare {
 // -------------------------
 
 model StorageBlob {
-  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id            String     @id @default(uuid(7)) @db.Uuid
   contentHash   Bytes      @map("content_hash")
   hashAlgorithm String     @default("SHA256") @map("hash_algorithm") @db.VarChar(16)
   sizeBytes     BigInt     @map("size_bytes")
@@ -94,8 +108,8 @@ model StorageBlob {
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   tombstoneAt   DateTime?  @map("tombstone_at") @db.Timestamptz(6)
 
-  files    File[]
-  versions FileVersion[]
+  files    StorageFile[]
+  versions StorageFileVersion[]
 
   @@unique([contentHash], map: "uq_blobs_content_hash")
   @@index([refCount, tombstoneAt], map: "idx_blobs_orphan_gc")
@@ -108,24 +122,24 @@ model StorageBlob {
 // File Revisions / Versioning (Scientific Reproducibility)
 // -------------------------
 
-model FileVersion {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  fileId        String   @map("file_id") @db.Uuid
-  blobId        String   @map("blob_id") @db.Uuid
-  versionNumber Int      @map("version_number")
-  sizeBytes     BigInt?  @map("size_bytes")
-  mimeType      String?  @map("mime_type") @db.VarChar(150)
-  changeComment String?  @map("change_comment") @db.VarChar(500)
-  createdById   String   @map("created_by_id") @db.Uuid
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+model StorageFileVersion {
+  id            String      @id @default(uuid(7)) @db.Uuid
+  fileId        String      @map("file_id") @db.Uuid
+  blobId        String      @map("blob_id") @db.Uuid
+  versionNumber Int         @map("version_number")
+  sizeBytes     BigInt?     @map("size_bytes")
+  mimeType      String?     @map("mime_type") @db.VarChar(150)
+  changeComment String?     @map("change_comment") @db.VarChar(500)
+  createdById   String      @map("created_by_id") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  file File        @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  file StorageFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
   blob StorageBlob @relation(fields: [blobId], references: [id], onDelete: Restrict)
 
-  @@unique([fileId, versionNumber], map: "uq_file_version")
-  @@index([blobId], map: "idx_file_version_blob_fk")
-  @@index([createdById], map: "idx_file_version_created_by")
-  @@map("file_versions")
+  @@unique([fileId, versionNumber], map: "uq_storage_file_version")
+  @@index([blobId], map: "idx_storage_file_version_blob_fk")
+  @@index([createdById], map: "idx_storage_file_version_created_by")
+  @@map("storage_file_versions")
 }
 
 // -------------------------
@@ -133,9 +147,10 @@ model FileVersion {
 // -------------------------
 
 model UploadSession {
-  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  projectId    String?             @map("project_id") @db.Uuid
-  userId       String              @map("user_id") @db.Uuid
+  id           String              @id @default(uuid(7)) @db.Uuid
+  spaceId      String              @map("space_id") @db.Uuid
+  space        Space               @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  createdById  String              @map("created_by_id") @db.Uuid
   s3UploadId   String              @map("s3_upload_id") @db.VarChar(1024)
   s3Key        String              @map("s3_key") @db.VarChar(512)
   filename     String              @db.VarChar(255)
@@ -151,25 +166,23 @@ model UploadSession {
   updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([status, expiresAt], map: "idx_upload_sessions_cleanup")
-  @@index([userId], map: "idx_upload_sessions_user")
-  @@index([projectId], map: "idx_upload_sessions_project")
+  @@index([spaceId], map: "idx_upload_sessions_space")
+  @@index([createdById], map: "idx_upload_sessions_creator")
   @@index([parentId], map: "idx_upload_sessions_parent")
   @@map("upload_sessions")
 }
 
 // -------------------------
-// Quota Ledger
+// Space Quota Ledger (1 Quota per Space)
 // -------------------------
 
 model StorageQuota {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String?  @map("user_id") @db.Uuid
-  projectId String?  @map("project_id") @db.Uuid
+  id        String   @id @default(uuid(7)) @db.Uuid
+  spaceId   String   @unique(map: "uq_storage_quotas_space_id") @map("space_id") @db.Uuid
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   usedBytes BigInt   @default(0) @map("used_bytes")
   maxBytes  BigInt   @map("max_bytes")
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([userId, projectId], map: "uq_quota_scope")
-  @@index([projectId], map: "idx_quota_project")
   @@map("storage_quotas")
 }

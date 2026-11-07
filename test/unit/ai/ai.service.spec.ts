@@ -59,7 +59,7 @@ describe('AiService (Server-Authoritative Chat & Streaming)', () => {
       project: {
         findFirst: jest.fn(),
       },
-      manuscriptDoc: {
+      pageDoc: {
         findFirst: jest.fn(),
       },
       aiChat: {
@@ -151,7 +151,7 @@ describe('AiService (Server-Authoritative Chat & Streaming)', () => {
     });
 
     it('should resolve or create pageChat when pageId is provided', async () => {
-      prisma.manuscriptDoc.findFirst.mockResolvedValue({
+      prisma.pageDoc.findFirst.mockResolvedValue({
         id: mockPageId,
         projectId: null,
       });

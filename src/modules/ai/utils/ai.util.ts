@@ -120,6 +120,7 @@ export function buildAiPayload(
   return {
     messages,
     user_id: userId,
+    space_id: scopeId,
     project_id: projectId,
     chat_id: chatId,
     document_ids: documentIds,

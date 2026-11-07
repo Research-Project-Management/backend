@@ -1,0 +1,66 @@
+// ============================================================================
+// Core Multi-Space Bounded Context (Unified Space Container)
+// 1 User = 1 Personal Space (id == user.id) + N Project Spaces (id == project.id)
+// ============================================================================
+
+enum SpaceType {
+  personal
+  project
+}
+
+model Space {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  type        SpaceType
+  ownerUserId String?   @unique(map: "uq_spaces_owner_user_id") @map("owner_user_id") @db.Uuid
+  ownerUser   User?     @relation("UserPersonalSpace", fields: [ownerUserId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_spaces_owner_user_id")
+  projectId   String?   @unique(map: "uq_spaces_project_id") @map("project_id") @db.Uuid
+  project     Project?  @relation("ProjectSpace", fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_spaces_project_id")
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Pages Domain Relations
+  pages                Page[]
+  pageDocs             PageDoc[]
+  pageNodes            PageNode[]
+  pageFiles            PageFile[]
+  pageSnapshots        PageSnapshot[]
+  pageSnapshotLabels   PageSnapshotLabel[]
+  pageTrackChanges     PageTrackChange[]
+  pageComments         PageCommentThread[]
+  customWords          CustomDictionaryWord[]
+  pageNotifications    PageNotification[]
+  pageDocReviews       PageDocReview[]
+
+  // Library Domain Relations
+  libraryItems         LibraryItem[]
+  libraryCollections   LibraryCollection[]
+  libraryTags          LibraryTag[]
+  librarySavedSearches LibrarySavedSearch[]
+  libraryNotes         LibraryNote[]
+  citationStyles       CitationStyle[]
+  feedSubscriptions    FeedSubscription[]
+  ingestionRuns        IngestionRun[]
+  capturePreviews      CapturePreview[]
+  idempotencyRecords   IdempotencyRecord[]
+  syncSequence         SyncSequence?
+  libraryChanges       LibraryChange[]
+  tombstones           Tombstone[]
+  outboxEvents         OutboxEvent[]
+
+  // Storage & Labs Domain Relations
+  storageFiles         StorageFile[]
+  uploadSessions       UploadSession[]
+  storageQuota         StorageQuota?
+
+  // AI & Intelligence Domain Relations
+  aiChats              AiChat[]
+
+  // Work-Item Drafts & Labels Relations
+  workItemDrafts       WorkItemDraft[]
+  spaceLabels          SpaceLabel[]
+  activityEvents       ActivityEvent[]
+
+  @@index([type], map: "idx_spaces_type")
+  @@map("spaces")
+}

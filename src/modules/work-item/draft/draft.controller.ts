@@ -20,6 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { DraftService } from './draft.service';
+import { normalizeDraftProjectId } from './draft.repository';
 import {
   CreateDraftDto,
   UpdateDraftDto,
@@ -42,6 +43,10 @@ export class DraftController {
     @CurrentUser('id') userId: string,
     @Query() queryDraftDto: QueryDraftDto,
   ) {
+    queryDraftDto.projectId = normalizeDraftProjectId(
+      queryDraftDto.projectId,
+      userId,
+    );
     return this.draftService.getUserDrafts(userId, queryDraftDto);
   }
 
@@ -52,6 +57,10 @@ export class DraftController {
     @CurrentUser('id') userId: string,
     @Body() createDraftDto: CreateDraftDto,
   ) {
+    createDraftDto.projectId = normalizeDraftProjectId(
+      createDraftDto.projectId,
+      userId,
+    );
     return this.draftService.createDraft(createDraftDto, userId);
   }
 
@@ -73,6 +82,12 @@ export class DraftController {
     @CurrentUser('id') userId: string,
     @Body() updateDraftDto: UpdateDraftDto,
   ) {
+    if (updateDraftDto.projectId !== undefined) {
+      updateDraftDto.projectId = normalizeDraftProjectId(
+        updateDraftDto.projectId,
+        userId,
+      );
+    }
     return this.draftService.updateDraft(id, updateDraftDto, userId);
   }
 
@@ -88,6 +103,10 @@ export class DraftController {
     @CurrentUser('id') userId: string,
     @Body() publishDraftDto: PublishDraftDto,
   ) {
+    publishDraftDto.projectId = normalizeDraftProjectId(
+      publishDraftDto.projectId,
+      userId,
+    );
     return this.draftService.publishDraft(id, publishDraftDto, userId);
   }
 

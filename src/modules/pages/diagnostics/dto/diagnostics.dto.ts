@@ -1,0 +1,207 @@
+/**
+ * diagnostics/dto/diagnostics.dto.ts
+ * Data Transfer Objects for Diagnostics API endpoints.
+ */
+
+import { IsArray, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export class ParseLogDto {
+  @ApiProperty({ description: 'Raw compilation log text to parse' })
+  @IsString()
+  @IsNotEmpty({ message: 'logText is required and cannot be empty' })
+  logText!: string;
+
+  @ApiPropertyOptional({
+    description: 'Default filename if none detected in log',
+    default: 'main.tex',
+  })
+  @IsString()
+  @IsOptional()
+  defaultFile?: string;
+
+  @ApiPropertyOptional({
+    description: 'Compiler engine (pdflatex, xelatex, lualatex)',
+    default: 'pdflatex',
+  })
+  @IsString()
+  @IsOptional()
+  engine?: string;
+}
+
+export class LintDocumentDto {
+  @ApiPropertyOptional({ description: 'LaTeX source content to statically lint' })
+  @IsString()
+  @IsOptional()
+  source?: string;
+
+  @ApiPropertyOptional({
+    description: 'LaTeX content alias for source',
+  })
+  @IsString()
+  @IsOptional()
+  content?: string;
+
+  @ApiPropertyOptional({
+    description: 'Target filename for lint reports',
+    default: 'main.tex',
+  })
+  @IsString()
+  @IsOptional()
+  filename?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional project ID to cross-check citations and labels against',
+  })
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional document ID in DocstoreService',
+  })
+  @IsString()
+  @IsOptional()
+  docId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional known bibliography keys override',
+    type: [String],
+  })
+  @IsArray()
+  @IsOptional()
+  knownBibKeys?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Optional known label names override',
+    type: [String],
+  })
+  @IsArray()
+  @IsOptional()
+  knownLabels?: string[];
+}
+
+export class ErrorExplanationDto {
+  @ApiProperty()
+  code!: string;
+
+  @ApiProperty()
+  title!: string;
+
+  @ApiProperty()
+  explanation!: string;
+
+  @ApiProperty({ type: [String] })
+  commonCauses!: string[];
+
+  @ApiPropertyOptional()
+  suggestedFix?: string;
+
+  @ApiPropertyOptional()
+  exampleSnippet?: string;
+
+  @ApiPropertyOptional()
+  documentationUrl?: string;
+}
+
+export class DiagnosticItemDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  file!: string;
+
+  @ApiPropertyOptional({ type: Number, nullable: true })
+  line!: number | null;
+
+  @ApiPropertyOptional({ type: Number, nullable: true })
+  column!: number | null;
+
+  @ApiProperty({ enum: ['error', 'warning', 'info', 'badbox'] })
+  severity!: string;
+
+  @ApiPropertyOptional({ enum: ['error', 'warning', 'info', 'badbox'] })
+  category?: string;
+
+  @ApiPropertyOptional({
+    enum: ['font', 'package', 'citation', 'reference', 'badbox'],
+  })
+  warningSubtype?: string;
+
+  @ApiProperty()
+  message!: string;
+
+  @ApiPropertyOptional()
+  context?: string;
+
+  @ApiPropertyOptional()
+  code?: string;
+
+  @ApiPropertyOptional({ type: () => ErrorExplanationDto })
+  explanation?: ErrorExplanationDto;
+
+  @ApiPropertyOptional()
+  quickFix?: {
+    description: string;
+    replacementText: string;
+  };
+}
+
+export class AutoFixRequestDto {
+  @ApiProperty({ description: 'LaTeX source content to auto-fix' })
+  @IsString()
+  source!: string;
+
+  @ApiPropertyOptional({ description: 'Target filename', default: 'main.tex' })
+  @IsString()
+  @IsOptional()
+  filename?: string;
+}
+
+export class AppliedFixDto {
+  @ApiProperty()
+  line!: number;
+
+  @ApiProperty()
+  rule!: string;
+
+  @ApiProperty()
+  description!: string;
+}
+
+export class AutoFixResponseDto {
+  @ApiProperty()
+  isFixed!: boolean;
+
+  @ApiProperty()
+  fixedSource!: string;
+
+  @ApiProperty({ type: [AppliedFixDto] })
+  appliedFixes!: AppliedFixDto[];
+}
+
+export class DiagnosticReportDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  isSuccess!: boolean;
+
+  @ApiProperty()
+  errorsCount!: number;
+
+  @ApiProperty()
+  warningsCount!: number;
+
+  @ApiProperty()
+  badboxesCount!: number;
+
+  @ApiProperty()
+  infoCount!: number;
+
+  @ApiProperty()
+  totalCount!: number;
+
+  @ApiProperty({ type: [DiagnosticItemDto] })
+  items!: DiagnosticItemDto[];
+}

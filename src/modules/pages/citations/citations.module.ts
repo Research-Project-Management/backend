@@ -1,0 +1,45 @@
+/**
+ * citations/citations.module.ts
+ * NestJS Module for Manuscripts Citations & Bibliography subsystem.
+ */
+
+import { Module } from '@nestjs/common';
+import { StructureModule } from '@/modules/pages/structure/structure.module';
+import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
+import { PrismaModule } from '@/core';
+import { ManuscriptsCoreModule } from '@/modules/pages/core';
+import { IntegrationsModule } from '@/modules/integrations/integrations.module';
+import { LibraryModule } from '@/modules/library';
+
+import {
+  CitationsController,
+  CitationsUtilityController,
+} from './citations.controller';
+import { CitationsService } from './citations.service';
+import { CitationsRepository } from './citations.repository';
+import { BibtexParser, IdentifierResolver } from './domain';
+
+@Module({
+  imports: [
+    ManuscriptsCoreModule,
+    StructureModule,
+    DocstoreModule,
+    PrismaModule,
+    IntegrationsModule,
+    LibraryModule,
+  ],
+  controllers: [CitationsController, CitationsUtilityController],
+  providers: [
+    CitationsRepository,
+    CitationsService,
+    BibtexParser,
+    IdentifierResolver,
+  ],
+  exports: [
+    CitationsService,
+    CitationsRepository,
+    BibtexParser,
+    IdentifierResolver,
+  ],
+})
+export class CitationsModule {}

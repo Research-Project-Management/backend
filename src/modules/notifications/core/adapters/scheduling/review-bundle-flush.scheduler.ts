@@ -14,7 +14,7 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { ManuscriptNotificationType } from '@prisma/client';
+import { PageNotificationType } from '@prisma/client';
 import { ReviewNotificationBundlingUseCase } from '../../use-cases/review-notification-bundling.use-case';
 import { REVIEW_NOTIFICATION_TYPES } from '../../domain/value-objects/review-bundle';
 
@@ -63,13 +63,13 @@ export class ReviewBundleFlushScheduler
           if (!rows?.[0]?.locked) return 0;
 
           // Smallest allowed window is 1 minute: anything newer cannot be due.
-          const users = await this.prisma.manuscriptNotification.findMany({
+          const users = await this.prisma.pageNotification.findMany({
             where: {
               isRead: false,
               type: {
                 in: [
                   ...REVIEW_NOTIFICATION_TYPES,
-                ] as ManuscriptNotificationType[],
+                ] as PageNotificationType[],
               },
               createdAt: { lte: new Date(now.getTime() - 60_000) },
             },

@@ -69,12 +69,68 @@ export const BASE_WORK_ITEM_INCLUDE = {
   project: { select: { id: true } },
 } as const;
 
+export type WorkItemCreatePayload = (
+  | Omit<Prisma.WorkItemCreateInput, 'createdBy' | 'state'> & {
+      createdBy?: Prisma.UserCreateNestedOneWithoutCreatedWorkItemsInput;
+      state?: Prisma.WorkItemStateCreateNestedOneWithoutWorkItemsInput;
+    }
+  | Omit<Prisma.WorkItemUncheckedCreateInput, 'createdById' | 'stateId'> & {
+      createdById?: string;
+      stateId?: string;
+    }
+) & {
+  columnId?: string;
+  authorId?: string;
+  author?: { connect?: { id: string } };
+  labels?: string[];
+  assigneeIds?: string[];
+  relations?: Prisma.InputJsonValue;
+};
+
+export type WorkItemUpdatePayload = (
+  | Prisma.WorkItemUpdateInput
+  | Prisma.WorkItemUncheckedUpdateInput
+) & {
+  columnId?: string;
+  authorId?: string;
+  author?: { connect?: { id: string } };
+  labels?: string[];
+  assigneeIds?: string[];
+  relations?: Prisma.InputJsonValue;
+};
+
 @Injectable()
 export class CoreRepository {
   constructor(
     private readonly prismaService: PrismaService,
     @Optional() private readonly syncHandler: SyncHandler = new SyncHandler(),
   ) {}
+
+  private mapWorkItemRelations(
+    record: Prisma.WorkItemGetPayload<{
+      include: typeof BASE_WORK_ITEM_INCLUDE;
+    }>,
+  ): WorkItemWithRelations {
+    const labelNames = Array.isArray(record.labelAssignments)
+      ? record.labelAssignments
+          .map((la) => la.label?.name)
+          .filter((name): name is string => Boolean(name))
+      : [];
+    const assigneeUserIds = Array.isArray(record.assignees)
+      ? record.assignees
+          .map((a) => a.user?.id)
+          .filter((id): id is string => Boolean(id))
+      : record.assigneeId
+        ? [record.assigneeId]
+        : [];
+    return {
+      ...record,
+      columnId: record.stateId,
+      authorId: record.createdById,
+      labels: labelNames,
+      assigneeIds: assigneeUserIds,
+    };
+  }
 
   private async executeTx<T>(
     fn: (tx: Prisma.TransactionClient) => Promise<T>,
@@ -129,29 +185,50 @@ export class CoreRepository {
     }
   }
 
-  private normalizeStateConnect(
+  private normalizeWorkItemMutationData(
     rawData: Record<string, unknown>,
   ): Record<string, unknown> {
-    const { columnId, ...restData } = rawData as {
+    const {
+      columnId,
+      author,
+      authorId,
+      labels: _labels,
+      assigneeIds: _assigneeIds,
+      relations: _relations,
+      ...restData
+    } = rawData as {
       columnId?: string;
+      author?: { connect?: { id: string } };
+      authorId?: string;
+      labels?: unknown;
+      assigneeIds?: unknown;
+      relations?: unknown;
       [key: string]: unknown;
     };
     const normalized: Record<string, unknown> = { ...restData };
+    if (author && !normalized.createdBy) {
+      normalized.createdBy = author;
+    }
+    if (authorId && !normalized.createdById && !normalized.createdBy) {
+      normalized.createdById = authorId;
+    }
     const hasRelationConnect = Boolean(
       (normalized.project as { connect?: unknown } | undefined)?.connect ||
-      (normalized.author as { connect?: unknown } | undefined)?.connect ||
+      (normalized.createdBy as { connect?: unknown } | undefined)?.connect ||
       (normalized.assignee as { connect?: unknown } | undefined)?.connect ||
       (normalized.parentWorkItem as { connect?: unknown } | undefined)
         ?.connect ||
       (normalized.state as { connect?: unknown } | undefined)?.connect,
     );
 
-    if (columnId && hasRelationConnect) {
+    const effectiveStateId = (normalized.stateId as string | undefined) || columnId;
+    if (effectiveStateId && hasRelationConnect) {
+      delete normalized.stateId;
       if (!normalized.state) {
-        normalized.state = { connect: { id: columnId } };
+        normalized.state = { connect: { id: effectiveStateId } };
       }
-    } else if (columnId) {
-      normalized.columnId = columnId;
+    } else if (columnId && !normalized.stateId) {
+      normalized.stateId = columnId;
     }
     return normalized;
   }
@@ -171,7 +248,7 @@ export class CoreRepository {
       this.prismaService,
     );
 
-    const records = await this.prismaService.workItem.findMany({
+    const rawRecords = await this.prismaService.workItem.findMany({
       where,
       include: BASE_WORK_ITEM_INCLUDE,
       orderBy,
@@ -179,6 +256,7 @@ export class CoreRepository {
       ...(skip ? { skip } : {}),
     });
 
+    const records = rawRecords.map((r) => this.mapWorkItemRelations(r));
     await this.hydrateWorkItemAttachments(records);
     return records;
   }
@@ -203,13 +281,15 @@ export class CoreRepository {
       }
     }
 
-    return this.prismaService.workItem.findMany({
+    const rawRecords = await this.prismaService.workItem.findMany({
       where,
       include: BASE_WORK_ITEM_INCLUDE,
       orderBy: [{ updatedAt: 'desc' }, { rank: 'asc' }],
       ...(take ? { take } : {}),
       ...(skip ? { skip } : {}),
     });
+
+    return rawRecords.map((r) => this.mapWorkItemRelations(r));
   }
 
   async findProjectWithStates(projectId: string) {
@@ -228,13 +308,14 @@ export class CoreRepository {
   async findWorkItemById(
     workItemId: string,
   ): Promise<WorkItemWithRelations | null> {
-    const item = await this.prismaService.workItem.findFirst({
+    const rawItem = await this.prismaService.workItem.findFirst({
       where: buildWorkItemIdOrIdentifierWhere(workItemId),
       include: BASE_WORK_ITEM_INCLUDE,
     });
 
-    if (!item) return null;
+    if (!rawItem) return null;
 
+    const item = this.mapWorkItemRelations(rawItem);
     await this.hydrateWorkItemAttachments([item]);
     return item;
   }
@@ -259,7 +340,12 @@ export class CoreRepository {
     columnId: string,
   ): Promise<number> {
     return this.prismaService.workItem.count({
-      where: { projectId, columnId, deletedAt: null, archivedAt: null },
+      where: {
+        projectId,
+        stateId: columnId,
+        deletedAt: null,
+        archivedAt: null,
+      },
     });
   }
 
@@ -272,21 +358,30 @@ export class CoreRepository {
   // ── Mutations ───────────────────────────────────────────────────────────────
 
   async createWorkItem(
-    data: Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput,
+    data: WorkItemCreatePayload,
   ): Promise<WorkItemWithRelations> {
-    const createData = this.normalizeStateConnect(data);
+    const rawData = data as Record<string, unknown>;
+    const createData = this.normalizeWorkItemMutationData(rawData);
 
     return this.executeTx<WorkItemWithRelations>(async (tx) => {
-      const created = await tx.workItem.create({
+      const rawCreated = await tx.workItem.create({
         data: createData as Prisma.WorkItemCreateInput,
         include: BASE_WORK_ITEM_INCLUDE,
       });
+
+      const created = this.mapWorkItemRelations(rawCreated);
+      const rawLabels = Array.isArray(rawData.labels)
+        ? (rawData.labels as string[])
+        : created.labels || [];
+      const rawAssigneeIds = Array.isArray(rawData.assigneeIds)
+        ? (rawData.assigneeIds as string[])
+        : created.assigneeIds || [];
 
       await this.syncHandler.syncAssignees(
         tx,
         created.id,
         created.assigneeId,
-        created.assigneeIds,
+        rawAssigneeIds,
         false,
       );
 
@@ -294,10 +389,16 @@ export class CoreRepository {
         tx,
         created.id,
         created.projectId,
-        created.authorId,
-        created.labels,
+        created.createdById,
+        rawLabels,
         false,
       );
+
+      created.labels = rawLabels;
+      created.assigneeIds = rawAssigneeIds;
+      if (rawData.relations !== undefined) {
+        created.relations = rawData.relations as Prisma.JsonValue;
+      }
 
       return created;
     });
@@ -305,41 +406,57 @@ export class CoreRepository {
 
   async updateWorkItem(
     workItemId: string,
-    data: Prisma.WorkItemUpdateInput | Prisma.WorkItemUncheckedUpdateInput,
+    data: WorkItemUpdatePayload,
   ): Promise<WorkItemWithRelations> {
     const rawData = data as Record<string, unknown>;
-    const updateData = this.normalizeStateConnect(rawData);
+    const updateData = this.normalizeWorkItemMutationData(rawData);
 
     return this.executeTx<WorkItemWithRelations>(async (tx) => {
-      const updated = await tx.workItem.update({
+      const rawUpdated = await tx.workItem.update({
         where: { id: workItemId },
-        data: updateData,
+        data: updateData as Prisma.WorkItemUpdateInput,
         include: BASE_WORK_ITEM_INCLUDE,
       });
+
+      const updated = this.mapWorkItemRelations(rawUpdated);
 
       if (
         rawData.assigneeId !== undefined ||
         rawData.assigneeIds !== undefined ||
         rawData.assignee !== undefined
       ) {
+        const assigneeIdsToSync = Array.isArray(rawData.assigneeIds)
+          ? (rawData.assigneeIds as string[])
+          : updated.assigneeIds;
         await this.syncHandler.syncAssignees(
           tx,
           workItemId,
           updated.assigneeId,
-          updated.assigneeIds,
+          assigneeIdsToSync,
           true,
         );
+        if (Array.isArray(rawData.assigneeIds)) {
+          updated.assigneeIds = rawData.assigneeIds as string[];
+        }
       }
 
       if (rawData.labels !== undefined) {
+        const labelsToSync = Array.isArray(rawData.labels)
+          ? (rawData.labels as string[])
+          : [];
         await this.syncHandler.syncLabels(
           tx,
           workItemId,
           updated.projectId,
-          updated.authorId,
-          updated.labels,
+          updated.createdById,
+          labelsToSync,
           true,
         );
+        updated.labels = labelsToSync;
+      }
+
+      if (rawData.relations !== undefined) {
+        updated.relations = rawData.relations as Prisma.JsonValue;
       }
 
       return updated;
@@ -353,11 +470,19 @@ export class CoreRepository {
     });
   }
 
-  async findStateWorkItems(projectId: string, columnId: string) {
-    return this.prismaService.workItem.findMany({
-      where: { projectId, columnId, deletedAt: null },
+  async findStateWorkItems(
+    projectId: string,
+    columnId: string,
+  ): Promise<Array<WorkItem & { columnId: string; authorId: string }>> {
+    const items = await this.prismaService.workItem.findMany({
+      where: { projectId, stateId: columnId, deletedAt: null },
       orderBy: { rank: 'asc' },
     });
+    return items.map((item) => ({
+      ...item,
+      columnId: item.stateId,
+      authorId: item.createdById,
+    }));
   }
 
   async updateWorkItemsRank(
@@ -376,7 +501,7 @@ export class CoreRepository {
           where: { id: updateItem.id },
           data: {
             rank: updateItem.rank,
-            ...(updateItem.columnId && { columnId: updateItem.columnId }),
+            ...(updateItem.columnId && { stateId: updateItem.columnId }),
             ...(updateItem.completed !== undefined && {
               completed: updateItem.completed,
             }),
@@ -386,12 +511,33 @@ export class CoreRepository {
     );
   }
 
-  async findWorkItemsByIds(workItemIds: string[]): Promise<WorkItem[]> {
+  async findWorkItemsByIds(
+    workItemIds: string[],
+  ): Promise<
+    Array<WorkItem & { columnId: string; authorId: string; labels: string[] }>
+  > {
     const validIds = workItemIds.filter(isUuid);
     if (validIds.length === 0) return [];
-    return this.prismaService.workItem.findMany({
+    const items = await this.prismaService.workItem.findMany({
       where: { id: { in: validIds }, deletedAt: null },
+      include: {
+        labelAssignments: {
+          select: {
+            label: { select: { name: true } },
+          },
+        },
+      },
     });
+    return items.map((item) => ({
+      ...item,
+      columnId: item.stateId,
+      authorId: item.createdById,
+      labels: Array.isArray(item.labelAssignments)
+        ? item.labelAssignments
+            .map((la) => la.label?.name)
+            .filter((n): n is string => Boolean(n))
+        : [],
+    }));
   }
 
   async bulkUpdateWorkItems(
@@ -400,16 +546,24 @@ export class CoreRepository {
     data: Prisma.WorkItemUpdateManyMutationInput & {
       assigneeId?: string | null;
       columnId?: string;
+      labels?: string[];
     },
   ) {
     const validIds = workItemIds.filter(isUuid);
     if (validIds.length === 0 || !projectId || !isUuid(projectId)) {
       return { count: 0 };
     }
-    const updatePayload: Prisma.WorkItemUpdateManyMutationInput = { ...data };
-    if (data.assigneeId !== undefined) {
-      updatePayload.assigneeIds = data.assigneeId ? [data.assigneeId] : [];
-    }
+    const {
+      columnId,
+      labels,
+      assigneeId,
+      ...restData
+    } = data;
+    const updatePayload: Prisma.WorkItemUncheckedUpdateManyInput = {
+      ...restData,
+      ...(columnId !== undefined ? { stateId: columnId } : {}),
+      ...(assigneeId !== undefined ? { assigneeId } : {}),
+    };
 
     const result = await this.prismaService.workItem.updateMany({
       where: {
@@ -420,20 +574,20 @@ export class CoreRepository {
     });
 
     try {
-      if (data.assigneeId !== undefined) {
+      if (assigneeId !== undefined) {
         await this.syncHandler.bulkSyncAssignees(
           this.prismaService,
           validIds,
-          data.assigneeId,
+          assigneeId,
         );
       }
 
-      if (Array.isArray(data.labels)) {
+      if (Array.isArray(labels)) {
         await this.syncHandler.bulkSyncLabels(
           this.prismaService,
           projectId,
           validIds,
-          data.labels as string[],
+          labels,
         );
       }
     } catch {
@@ -527,11 +681,12 @@ export class CoreRepository {
   async disconnectParentWorkItem(
     workItemId: string,
   ): Promise<WorkItemWithRelations> {
-    return this.prismaService.workItem.update({
+    const rawUpdated = await this.prismaService.workItem.update({
       where: { id: workItemId },
       data: { parentWorkItemId: null },
       include: BASE_WORK_ITEM_INCLUDE,
     });
+    return this.mapWorkItemRelations(rawUpdated);
   }
 
   async findLabelsByIds(
@@ -545,7 +700,7 @@ export class CoreRepository {
     const uuids = uniqueInputs.filter((id) => isUuid(id));
     const names = uniqueInputs.filter((id) => !isUuid(id));
 
-    const orConditions: Prisma.WorkItemLabelWhereInput[] = [];
+    const orConditions: Prisma.SpaceLabelWhereInput[] = [];
     if (uuids.length > 0) {
       orConditions.push({ id: { in: uuids } });
     }
@@ -559,10 +714,10 @@ export class CoreRepository {
       ? { in: projectId }
       : projectId;
 
-    return this.prismaService.workItemLabel.findMany({
+    return this.prismaService.spaceLabel.findMany({
       where: {
         AND: [
-          { projectId: projectFilter },
+          { spaceId: projectFilter },
           orConditions.length === 1 ? orConditions[0] : { OR: orConditions },
         ],
       },
@@ -619,7 +774,7 @@ export class CoreRepository {
     try {
       const [columnCounts, states] = await Promise.all([
         this.prismaService.workItem.groupBy({
-          by: ['columnId'],
+          by: ['stateId'],
           where: {
             projectId,
             deletedAt: null,
@@ -636,7 +791,7 @@ export class CoreRepository {
 
       const stateGroupMap = new Map(states.map((s) => [s.id, s.group]));
       for (const col of columnCounts) {
-        const group = stateGroupMap.get(col.columnId) || 'backlog';
+        const group = stateGroupMap.get(col.stateId) || 'backlog';
         counts[group] = (counts[group] || 0) + col._count.id;
       }
       return counts;

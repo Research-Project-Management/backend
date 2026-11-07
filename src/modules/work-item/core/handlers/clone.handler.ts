@@ -19,13 +19,13 @@ export class CloneHandler {
     const targetProjectId = destinationProjectId || sourceWorkItem.projectId;
     const isSameProject = targetProjectId === sourceWorkItem.projectId;
 
-    let targetColumnId = sourceWorkItem.columnId;
+    let targetColumnId = sourceWorkItem.columnId || sourceWorkItem.stateId;
     let isCompleted = sourceWorkItem.completed;
 
     if (!isSameProject) {
       const sourceState =
         sourceWorkItem.state ??
-        (await this.coreRepository.findStateWithGroup(sourceWorkItem.columnId));
+        (await this.coreRepository.findStateWithGroup(targetColumnId));
 
       const targetStates =
         (await this.coreRepository.findProjectStates(targetProjectId)) || [];
@@ -53,20 +53,30 @@ export class CloneHandler {
     const { identifier, sequenceNumber } =
       await this.idHandler.nextIdentifier(targetProjectId);
 
-    const cloneData: Prisma.WorkItemUncheckedCreateInput = {
+    const sourceLabels = Array.isArray(sourceWorkItem.labels)
+      ? sourceWorkItem.labels
+      : Array.isArray(sourceWorkItem.labelAssignments)
+        ? sourceWorkItem.labelAssignments
+            .map((la) => la.label?.name)
+            .filter((n): n is string => Boolean(n))
+        : [];
+
+    const cloneData: Prisma.WorkItemUncheckedCreateInput & {
+      labels?: string[];
+    } = {
       title: `${sourceWorkItem.title} (Copy)`,
       content: sourceWorkItem.content ?? '',
-      columnId: targetColumnId,
+      stateId: targetColumnId,
       rank: (sourceWorkItem.rank ?? 0) + 1,
       priority: sourceWorkItem.priority,
       identifier,
       sequenceNumber,
-      labels: isSameProject ? sourceWorkItem.labels || [] : [],
+      labels: isSameProject ? sourceLabels : [],
       completed: isCompleted,
       startDate: sourceWorkItem.startDate,
       dueDate: sourceWorkItem.dueDate,
       projectId: targetProjectId,
-      authorId: authorId,
+      createdById: authorId,
       assigneeId: isSameProject ? sourceWorkItem.assigneeId || null : null,
       parentWorkItemId:
         isSameProject && sourceWorkItem.parentWorkItemId

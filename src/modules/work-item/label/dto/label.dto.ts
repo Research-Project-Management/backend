@@ -11,7 +11,11 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { WorkItemLabel as Label } from '@prisma/client';
+import { SpaceLabel } from '@prisma/client';
+
+export type Label = SpaceLabel & {
+  projectId?: string | null;
+};
 
 export interface LabelWithChildren extends Label {
   children?: Label[];

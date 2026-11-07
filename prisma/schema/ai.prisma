@@ -1,4 +1,4 @@
-// -- 5. AI & Intelligence Context (AI Microservice) ---------------------------
+// -- 5. AI & Intelligence Context (Space-Scoped AI Microservice) --------------
 
 enum MessageRole {
   user
@@ -7,11 +7,11 @@ enum MessageRole {
 }
 
 model AiChat {
-  id            String   @id @default(uuid()) @db.Uuid
-  userId        String   @map("user_id") @db.Uuid
-  user          User     @relation("UserAiChats", fields: [userId], references: [id], onDelete: Cascade)
-  projectId     String?  @map("project_id") @db.Uuid
-  project       Project? @relation("ProjectAiChats", fields: [projectId], references: [id], onDelete: Cascade)
+  id            String   @id @default(uuid(7)) @db.Uuid
+  spaceId       String   @map("space_id") @db.Uuid
+  space         Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  createdById   String   @map("created_by_id") @db.Uuid
+  createdBy     User     @relation("UserAiChats", fields: [createdById], references: [id], onDelete: Cascade)
   pageId        String?  @map("page_id") @db.Uuid
   title         String   @default("New Chat")
   summary       String?  @default("")
@@ -21,17 +21,16 @@ model AiChat {
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  // Relations
   messages AiMessage[]
 
-  @@index([userId, updatedAt])
-  @@index([projectId, userId, updatedAt])
-  @@index([pageId, userId])
+  @@index([spaceId, updatedAt(sort: Desc)])
+  @@index([createdById, updatedAt(sort: Desc)])
+  @@index([pageId, spaceId])
   @@map("ai_chats")
 }
 
 model AiMessage {
-  id               String      @id @default(uuid()) @db.Uuid
+  id               String      @id @default(uuid(7)) @db.Uuid
   chatId           String      @map("chat_id") @db.Uuid
   chat             AiChat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
   role             MessageRole

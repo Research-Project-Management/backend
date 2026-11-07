@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RedisCacheService } from '@/core';
-import { Prisma, WorkItemRelationType } from '@prisma/client';
+import { WorkItemRelationType } from '@prisma/client';
 import { RelationRepository } from './relation.repository';
 import { AddRelationDto } from './dto/relation.dto';
 import {
@@ -192,7 +192,7 @@ export class RelationService {
               id: target.id,
               title: target.title,
               identifier: target.identifier,
-              columnId: target.columnId,
+              columnId: target.columnId ?? target.stateId,
               priority: target.priority,
               completed: target.completed,
             }
@@ -315,20 +315,6 @@ export class RelationService {
         }
       }
 
-      const currentItem =
-        await this.relationRepository.prisma.workItem.findUnique({
-          where: { id: currentId },
-          select: { relations: true },
-        });
-
-      if (currentItem && Array.isArray(currentItem.relations)) {
-        for (const r of currentItem.relations as unknown as WorkItemRelationItem[]) {
-          if (r.type === relationCategory && r.targetWorkItemId) {
-            nextNodeIds.add(r.targetWorkItemId);
-          }
-        }
-      }
-
       for (const nextId of nextNodeIds) {
         if (nextId === goalId) {
           return true;
@@ -436,8 +422,6 @@ export class RelationService {
       }
     }
 
-    const targetType =
-      INVERSE_RELATION_MAP[normalizedInputType] || 'relates_to';
     const now = new Date().toISOString();
 
     const sourceRelations: WorkItemRelationItem[] =
@@ -449,17 +433,6 @@ export class RelationService {
       id: crypto.randomUUID(),
       targetWorkItemId: targetItem.id,
       type: addRelationDto.type,
-      createdAt: now,
-    });
-
-    const targetRelations: WorkItemRelationItem[] = this.extractRelations(
-      targetItem,
-    ).filter((relation) => relation.targetWorkItemId !== sourceItem.id);
-
-    targetRelations.push({
-      id: crypto.randomUUID(),
-      targetWorkItemId: sourceItem.id,
-      type: targetType,
       createdAt: now,
     });
 
@@ -475,20 +448,6 @@ export class RelationService {
           : WorkItemRelationType.relates_to;
 
     await this.relationRepository.prisma.$transaction(async (tx) => {
-      await tx.workItem.update({
-        where: { id: sourceItem.id },
-        data: {
-          relations: sourceRelations as unknown as Prisma.InputJsonValue,
-        },
-      });
-
-      await tx.workItem.update({
-        where: { id: targetItem.id },
-        data: {
-          relations: targetRelations as unknown as Prisma.InputJsonValue,
-        },
-      });
-
       await tx.workItemRelation.upsert({
         where: {
           sourceId_targetId_type: {
@@ -545,40 +504,9 @@ export class RelationService {
     const targetItem =
       await this.relationRepository.findWorkItem(targetWorkItemId);
 
-    const sourceRelations = (
-      Array.isArray(sourceItem.relations)
-        ? (sourceItem.relations as unknown as WorkItemRelationItem[])
-        : []
-    ).filter(
-      (relation) =>
-        relation.targetWorkItemId !== (targetItem?.id || targetWorkItemId),
-    );
-
     const effectiveTargetId = targetItem?.id || targetWorkItemId;
 
     await this.relationRepository.prisma.$transaction(async (tx) => {
-      await tx.workItem.update({
-        where: { id: sourceItem.id },
-        data: {
-          relations: sourceRelations as unknown as Prisma.InputJsonValue,
-        },
-      });
-
-      if (targetItem) {
-        const targetRelations = (
-          Array.isArray(targetItem.relations)
-            ? (targetItem.relations as unknown as WorkItemRelationItem[])
-            : []
-        ).filter((relation) => relation.targetWorkItemId !== sourceItem.id);
-
-        await tx.workItem.update({
-          where: { id: targetItem.id },
-          data: {
-            relations: targetRelations as unknown as Prisma.InputJsonValue,
-          },
-        });
-      }
-
       await tx.workItemRelation.deleteMany({
         where: {
           OR: [

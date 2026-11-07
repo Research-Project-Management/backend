@@ -7,10 +7,12 @@ datasource db {
 }
 
 enum EntityType {
+  space
   paper
   page
   cycle
   file
+  experiment
   sticky
   comment
   collection

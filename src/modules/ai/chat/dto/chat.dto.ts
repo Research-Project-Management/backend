@@ -17,6 +17,10 @@ export class CreateChatDto {
 
   @IsString()
   @IsOptional()
+  spaceId?: string;
+
+  @IsString()
+  @IsOptional()
   pageId?: string;
 
   @IsString()
@@ -55,4 +59,3 @@ export class RenameChatDto {
   @IsOptional()
   projectId?: string;
 }
-

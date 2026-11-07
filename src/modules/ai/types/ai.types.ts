@@ -29,6 +29,7 @@ export interface EditorWritingContext {
 export interface AiEnginePayload {
   messages: AiMessageDto[];
   user_id: string;
+  space_id?: string;
   workspace_id?: string;
   project_id: string;
   chat_id: string;

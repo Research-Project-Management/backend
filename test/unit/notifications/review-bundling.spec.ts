@@ -15,7 +15,7 @@ describe('ReviewBundleFlushScheduler', () => {
   it('flushes due bundles for candidate users only when lock acquired', async () => {
     const findMany = jest.fn(async () => [{ userId: 'u1' }, { userId: 'u2' }]);
     const mkPrisma = (locked: boolean): any => ({
-      manuscriptNotification: { findMany },
+      pageNotification: { findMany },
       $transaction: (fn: any) => fn({ $queryRaw: async () => [{ locked }] }),
     });
     const bundling: any = {

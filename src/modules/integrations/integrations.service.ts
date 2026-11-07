@@ -19,9 +19,9 @@ import { ZoteroProvider } from './providers/zotero.provider';
 import { MendeleyProvider } from './providers/mendeley.provider';
 import { GithubProvider } from './providers/github.provider';
 import { decryptToken, encryptToken } from './utils/integration-crypto.utils';
-import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
-import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { StructureService } from '@/modules/manuscripts/structure/structure.service';
+import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
+import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+import { StructureService } from '@/modules/pages/structure/structure.service';
 import { SyncCollectionDto } from './dto/sync-collection.dto';
 import {
   CreateGithubRepoDto,
@@ -33,7 +33,7 @@ import {
 import {
   ExportImportService,
   ArchiveEntryVo,
-} from '@/modules/manuscripts/export-import';
+} from '@/modules/pages/export-import';
 
 export interface ProviderStatusSummary {
   provider: IntegrationProviderType;

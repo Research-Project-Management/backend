@@ -62,7 +62,7 @@ export class OverviewRepository {
   ): Promise<Record<string, number>> {
     const [grouped, states] = await Promise.all([
       this.prisma.workItem.groupBy({
-        by: ['columnId'],
+        by: ['stateId'],
         where: {
           projectId,
           deletedAt: null,
@@ -91,7 +91,8 @@ export class OverviewRepository {
     };
 
     for (const item of grouped) {
-      const group = (item.columnId ? stateGroupMap.get(item.columnId) : null) || 'backlog';
+      const group =
+        (item.stateId ? stateGroupMap.get(item.stateId) : null) || 'backlog';
       counts[group] = (counts[group] || 0) + item._count.id;
     }
 
@@ -179,7 +180,6 @@ export class OverviewRepository {
     } | null;
     completedIssues: number;
   }> {
-    // Placeholder: returns null until Cycle entity is wired in Prisma schema
     return { activeCycle: null, completedIssues: 0 };
   }
 }

@@ -4,7 +4,7 @@ export * from './notifications.controller';
 export * from './dto/notification.dto';
 
 // Manuscripts Submodule
-export * from './manuscripts';
+export * from './pages';
 
 // Projects Submodule
 export * from './projects';

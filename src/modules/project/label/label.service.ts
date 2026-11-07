@@ -3,7 +3,7 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
-import { Label } from '@prisma/client';
+import { SpaceLabel } from '@prisma/client';
 import { LabelRepository } from './label.repository';
 import {
   CreateProjectLabelDto,
@@ -14,14 +14,14 @@ import {
 export class LabelService {
   constructor(private readonly labelRepo: LabelRepository) {}
 
-  async getUserLabels(userId: string): Promise<Label[]> {
+  async getUserLabels(userId: string): Promise<SpaceLabel[]> {
     return this.labelRepo.findLabelsByUser(userId);
   }
 
   async createLabel(
     userId: string,
     dto: CreateProjectLabelDto,
-  ): Promise<Label> {
+  ): Promise<SpaceLabel> {
     const existing = await this.labelRepo.findLabelByName(
       dto.name.trim(),
       userId,
@@ -36,7 +36,7 @@ export class LabelService {
     id: string,
     userId: string,
     dto: UpdateProjectLabelDto,
-  ): Promise<Label> {
+  ): Promise<SpaceLabel> {
     const label = await this.labelRepo.findLabelById(id, userId);
     if (!label) {
       throw new NotFoundException(`Project label with ID "${id}" not found`);
@@ -66,7 +66,7 @@ export class LabelService {
     return { message: 'Project label deleted successfully' };
   }
 
-  async getProjectLabels(projectId: string): Promise<Label[]> {
+  async getProjectLabels(projectId: string): Promise<SpaceLabel[]> {
     const assignments = await this.labelRepo.findProjectLabels(projectId);
     return assignments.map((a) => a.label);
   }
@@ -75,7 +75,7 @@ export class LabelService {
     projectId: string,
     labelIds: string[],
     assignedById?: string,
-  ): Promise<Label[]> {
+  ): Promise<SpaceLabel[]> {
     await this.labelRepo.assignLabelsToProject(
       projectId,
       labelIds,
@@ -87,7 +87,7 @@ export class LabelService {
   async removeLabelFromProject(
     projectId: string,
     labelId: string,
-  ): Promise<Label[]> {
+  ): Promise<SpaceLabel[]> {
     await this.labelRepo.removeLabelFromProject(projectId, labelId);
     return this.getProjectLabels(projectId);
   }
@@ -96,7 +96,7 @@ export class LabelService {
     projectId: string,
     labelIds: string[],
     assignedById?: string,
-  ): Promise<Label[]> {
+  ): Promise<SpaceLabel[]> {
     await this.labelRepo.replaceProjectLabels(
       projectId,
       labelIds,

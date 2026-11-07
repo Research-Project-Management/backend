@@ -26,27 +26,27 @@ import * as path from 'path';
 import {
   CompileManuscriptDto,
   ClsiWordCountDto,
-} from './modules/manuscripts/clsi/dto/clsi.dto';
+} from './modules/pages/clsi/dto/clsi.dto';
 import {
   ForwardSyncDto,
   ReverseSyncDto,
-} from './modules/manuscripts/clsi/dto/synctex.dto';
+} from './modules/pages/clsi/dto/synctex.dto';
 import {
   WorkspaceRepository,
   DiskUsageCleaner,
   createZipStreamFromDisk,
   ZipDiskEntry,
-} from './modules/manuscripts/clsi/repositories/workspace.repository';
+} from './modules/pages/clsi/repositories/workspace.repository';
 import {
   CompilePipeline,
   LocalProcessRunner,
   LatexmkEngine,
   ClsiHealthCheck,
-} from './modules/manuscripts/clsi/services/compile-pipeline.service';
-import { CompileLogAnalyzer } from './modules/manuscripts/diagnostics/domain';
-import { SyncTexProcessor } from './modules/manuscripts/clsi/domain/synctex.parser';
-import { TexWordCounter } from './modules/manuscripts/clsi/domain/tex-word.counter';
-import { ClsiMetrics } from './modules/manuscripts/clsi/domain/clsi.metrics';
+} from './modules/pages/clsi/services/compile-pipeline.service';
+import { CompileLogAnalyzer } from './modules/pages/diagnostics/domain';
+import { SyncTexProcessor } from './modules/pages/clsi/domain/synctex.parser';
+import { TexWordCounter } from './modules/pages/clsi/domain/tex-word.counter';
+import { ClsiMetrics } from './modules/pages/clsi/domain/clsi.metrics';
 
 @Injectable()
 export class ClsiStandaloneService {

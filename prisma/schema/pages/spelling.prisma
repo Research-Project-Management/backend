@@ -1,0 +1,17 @@
+// ============================================================================
+// Pages Subsystem: Spelling & Custom Dictionaries Sub-Domain
+// Self-managed domain schema: CustomDictionaryWord
+// ============================================================================
+
+model CustomDictionaryWord {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  spaceId     String   @map("space_id") @db.Uuid
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_custom_dictionary_words_space_id")
+  word        String   @db.VarChar(128)
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([spaceId, word], map: "uq_custom_dictionary_words_space_word")
+  @@index([spaceId], map: "idx_custom_dictionary_words_space")
+  @@map("custom_dictionary_words")
+}

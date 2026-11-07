@@ -1,4 +1,4 @@
-// -- 4. Work-Item & Issue Tracking Context (WorkItem Microservice) -----------
+// -- 4. Work-Item, Drafts & Unified Space Labels Context ---------------------
 
 enum WorkItemPriority {
   urgent
@@ -21,7 +21,7 @@ enum ViewAccess {
 }
 
 model WorkItemState {
-  id          String   @id @default(uuid())
+  id          String   @id @default(uuid(7)) @db.Uuid
   projectId   String   @map("project_id") @db.Uuid
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name        String
@@ -34,7 +34,6 @@ model WorkItemState {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  // Relations
   workItems WorkItem[]
 
   @@unique([projectId, name])
@@ -46,14 +45,12 @@ model WorkItem {
   id               String           @id @default(uuid(7)) @db.Uuid
   title            String
   content          String?          @default("")
-  columnId         String           @map("column_id")
-  state            WorkItemState?   @relation(fields: [columnId], references: [id], onDelete: Restrict)
+  stateId          String           @map("state_id") @db.Uuid
+  state            WorkItemState    @relation(fields: [stateId], references: [id], onDelete: Restrict)
   startDate        DateTime?        @map("start_date") @db.Timestamptz(6)
   dueDate          DateTime?        @map("due_date") @db.Timestamptz(6)
-  labels           String[]         @default([])
   rank             Float            @default(0)
   priority         WorkItemPriority @default(none)
-  relations        Json?            @default("[]")
   identifier       String?          @map("identifier")
   sequenceNumber   Int?             @map("sequence_number")
   timeSpent        Float?           @default(0) @map("time_spent")
@@ -61,11 +58,10 @@ model WorkItem {
   archivedAt       DateTime?        @map("archived_at") @db.Timestamptz(6)
   projectId        String           @map("project_id") @db.Uuid
   project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  authorId         String           @map("author_id") @db.Uuid
-  author           User             @relation("WorkItemAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  createdById      String           @map("created_by_id") @db.Uuid
+  createdBy        User             @relation("WorkItemCreator", fields: [createdById], references: [id], onDelete: Restrict)
   assigneeId       String?          @map("assignee_id") @db.Uuid
   assignee         User?            @relation("WorkItemAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  assigneeIds      Json             @default("[]") @map("assignee_ids")
   subscriberIds    Json             @default("[]") @map("subscriber_ids")
   parentWorkItemId String?          @map("parent_work_item_id") @db.Uuid
   parentWorkItem   WorkItem?        @relation("WorkItemHierarchy", fields: [parentWorkItemId], references: [id], onDelete: Cascade)
@@ -74,7 +70,6 @@ model WorkItem {
   updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt        DateTime?        @map("deleted_at") @db.Timestamptz(6)
 
-  // Relations
   comments          WorkItemComment[]
   assignees         WorkItemAssignee[]
   labelAssignments  WorkItemLabelAssignment[]
@@ -82,8 +77,8 @@ model WorkItem {
   incomingRelations WorkItemRelation[]        @relation("TargetWorkItemRelations")
   entityLinks       WorkItemEntityLink[]
 
-  @@index([projectId, columnId, rank])
-  @@index([projectId, columnId, deletedAt, rank])
+  @@index([projectId, stateId, rank])
+  @@index([projectId, stateId, deletedAt, rank])
   @@index([projectId, deletedAt, archivedAt, rank])
   @@index([projectId, deletedAt, updatedAt(sort: Desc)])
   @@index([projectId, deletedAt, dueDate])
@@ -92,17 +87,17 @@ model WorkItem {
   @@index([projectId, identifier])
   @@index([assigneeId, deletedAt])
   @@index([assigneeId, deletedAt, archivedAt, updatedAt(sort: Desc)])
-  @@index([authorId])
-  @@index([authorId, deletedAt, updatedAt(sort: Desc)])
+  @@index([createdById])
+  @@index([createdById, deletedAt, updatedAt(sort: Desc)])
   @@map("work_items")
 }
 
 model WorkItemComment {
-  id          String   @id @default(uuid()) @db.Uuid
+  id          String   @id @default(uuid(7)) @db.Uuid
   workItemId  String   @map("work_item_id") @db.Uuid
   workItem    WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
-  authorId    String   @map("author_id") @db.Uuid
-  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  createdById String   @map("created_by_id") @db.Uuid
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
   content     String
   isEdited    Boolean  @default(false) @map("is_edited")
   reactions   Json?    @default("[]")
@@ -112,79 +107,79 @@ model WorkItemComment {
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([workItemId, createdAt])
-  @@index([authorId])
+  @@index([createdById])
   @@map("work_item_comments")
 }
 
 model WorkItemDraft {
-  id          String           @id @default(uuid()) @db.Uuid
+  id          String           @id @default(uuid(7)) @db.Uuid
+  spaceId     String           @map("space_id") @db.Uuid
+  space       Space            @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  createdById String           @map("created_by_id") @db.Uuid
+  createdBy   User             @relation("UserDrafts", fields: [createdById], references: [id], onDelete: Cascade)
   title       String           @default("")
-  content     String?          @default("")
-  description String?          @default("")
-  columnId    String?          @map("column_id")
+  content     String           @default("")
+  stateId     String?          @map("state_id") @db.Uuid
   priority    WorkItemPriority @default(none)
   startDate   DateTime?        @map("start_date") @db.Timestamptz(6)
   dueDate     DateTime?        @map("due_date") @db.Timestamptz(6)
   labels      String[]         @default([])
   assigneeId  String?          @map("assignee_id") @db.Uuid
   assigneeIds Json             @default("[]") @map("assignee_ids")
-  metadata    Json?            @default("{}")
-  projectId   String?          @map("project_id") @db.Uuid
-  project     Project?         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  authorId    String           @map("author_id") @db.Uuid
-  author      User             @relation("UserDrafts", fields: [authorId], references: [id], onDelete: Cascade)
+  metadata    Json?            @default("{}") @db.JsonB
   createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([authorId, createdAt])
-  @@index([projectId, authorId])
+  @@index([spaceId, updatedAt(sort: Desc)])
+  @@index([createdById, createdAt])
   @@map("work_item_drafts")
 }
 
 model EntityAttachment {
-  id         String     @id @default(uuid()) @db.Uuid
-  entityType EntityType @map("entity_type")
-  entityId   String     @map("entity_id")
-  projectId  String?    @map("project_id") @db.Uuid
-  filename   String
-  url        String
-  storageKey String?    @map("storage_key")
-  size       Int        @default(0)
-  mimeType   String     @default("application/octet-stream") @map("mime_type")
-  metadata   Json?      @default("{}")
-  authorId   String?    @map("author_id") @db.Uuid
-  author     User?      @relation("UserAttachments", fields: [authorId], references: [id], onDelete: SetNull)
-  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id          String     @id @default(uuid(7)) @db.Uuid
+  entityType  EntityType @map("entity_type")
+  entityId    String     @map("entity_id")
+  spaceId     String?    @map("space_id") @db.Uuid
+  filename    String
+  url         String
+  storageKey  String?    @map("storage_key")
+  size        Int        @default(0)
+  mimeType    String     @default("application/octet-stream") @map("mime_type")
+  metadata    Json?      @default("{}") @db.JsonB
+  createdById String?    @map("created_by_id") @db.Uuid
+  createdBy   User?      @relation("UserAttachments", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([entityType, entityId, createdAt], map: "idx_entity_attachments_entity")
-  @@index([projectId, createdAt], map: "idx_entity_attachments_project")
-  @@index([authorId], map: "idx_entity_attachments_author")
+  @@index([spaceId, createdAt], map: "idx_entity_attachments_space")
+  @@index([createdById], map: "idx_entity_attachments_creator")
   @@map("entity_attachments")
 }
 
-model WorkItemLabel {
+model SpaceLabel {
   id                  String                    @id @default(uuid(7)) @db.Uuid
-  name                String
-  color               String                    @default("#3b82f6")
-  description         String?
+  spaceId             String                    @map("space_id") @db.Uuid
+  space               Space                     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  createdById         String                    @map("created_by_id") @db.Uuid
+  createdBy           User                      @relation("UserCreatedLabels", fields: [createdById], references: [id], onDelete: Cascade)
+  name                String                    @db.VarChar(100)
+  color               String                    @default("#3b82f6") @db.VarChar(30)
+  description         String?                   @db.VarChar(500)
   sortOrder           Float                     @default(65535) @map("sort_order")
   parentId            String?                   @map("parent_id") @db.Uuid
-  parent              WorkItemLabel?            @relation("WorkItemLabelHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children            WorkItemLabel[]           @relation("WorkItemLabelHierarchy")
-  projectId           String?                   @map("project_id") @db.Uuid
-  project             Project?                  @relation("ProjectWorkItemLabels", fields: [projectId], references: [id], onDelete: Cascade)
-  createdById         String                    @map("created_by_id") @db.Uuid
-  createdBy           User                      @relation("UserCreatedWorkItemLabels", fields: [createdById], references: [id], onDelete: Cascade)
+  parent              SpaceLabel?               @relation("SpaceLabelHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children            SpaceLabel[]              @relation("SpaceLabelHierarchy")
   workItemAssignments WorkItemLabelAssignment[] @relation("WorkItemLabelAssignments")
+  projectAssignments  ProjectLabel[]
   createdAt           DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([name])
-  @@index([projectId, sortOrder])
-  @@index([projectId, parentId])
+  @@unique([spaceId, parentId, name], map: "uq_space_labels_space_parent_name")
+  @@index([spaceId, sortOrder])
+  @@index([spaceId, parentId])
   @@index([createdById])
-  @@map("work_item_labels")
+  @@map("space_labels")
 }
 
 model WorkItemAssignee {
@@ -202,7 +197,7 @@ model WorkItemAssignee {
 }
 
 model WorkItemRelation {
-  id        String               @id @default(uuid()) @db.Uuid
+  id        String               @id @default(uuid(7)) @db.Uuid
   sourceId  String               @map("source_id") @db.Uuid
   targetId  String               @map("target_id") @db.Uuid
   type      WorkItemRelationType
@@ -221,8 +216,8 @@ model WorkItemLabelAssignment {
   labelId    String   @map("label_id") @db.Uuid
   assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
 
-  workItem WorkItem      @relation(fields: [workItemId], references: [id], onDelete: Cascade)
-  label    WorkItemLabel @relation("WorkItemLabelAssignments", fields: [labelId], references: [id], onDelete: Cascade)
+  workItem WorkItem   @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  label    SpaceLabel @relation("WorkItemLabelAssignments", fields: [labelId], references: [id], onDelete: Cascade)
 
   @@id([workItemId, labelId])
   @@index([labelId])
@@ -230,12 +225,12 @@ model WorkItemLabelAssignment {
 }
 
 model WorkItemEntityLink {
-  id          String     @id @default(uuid()) @db.Uuid
+  id          String     @id @default(uuid(7)) @db.Uuid
   workItemId  String     @map("work_item_id") @db.Uuid
   entityType  EntityType @map("entity_type")
   entityId    String     @map("entity_id") @db.Uuid
   description String?    @default("")
-  metadata    Json?      @default("{}")
+  metadata    Json?      @default("{}") @db.JsonB
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
@@ -246,7 +241,7 @@ model WorkItemEntityLink {
 }
 
 model WorkItemView {
-  id                String         @id @default(uuid()) @db.Uuid
+  id                String         @id @default(uuid(7)) @db.Uuid
   name              String
   description       String?        @default("")
   query             Json           @default("{}")
@@ -273,7 +268,7 @@ model WorkItemView {
 }
 
 model ViewFavorite {
-  id        String       @id @default(uuid()) @db.Uuid
+  id        String       @id @default(uuid(7)) @db.Uuid
   viewId    String       @map("view_id") @db.Uuid
   view      WorkItemView @relation(fields: [viewId], references: [id], onDelete: Cascade)
   userId    String       @map("user_id") @db.Uuid

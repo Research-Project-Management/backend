@@ -10,7 +10,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { StickyModule } from './modules/sticky/sticky.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { LibraryModule } from './modules/library/library.module';
-import { ManuscriptsModule } from './modules/manuscripts/manuscripts.module';
+import { PagesModule } from './modules/pages/pages.module';
 
 import { WorkItemModule } from './modules/work-item';
 import { AiModule } from './modules/ai/ai.module';
@@ -42,7 +42,7 @@ import { AppController } from './app.controller';
     AnalyticsModule,
     StickyModule,
     WorkItemModule,
-    ManuscriptsModule,
+    PagesModule,
 
     LibraryModule,
     StorageModule,

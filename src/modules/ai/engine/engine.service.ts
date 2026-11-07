@@ -364,6 +364,7 @@ export class EngineService {
     const blob = new Blob([new Uint8Array(rawBody)], { type: contentType });
     formData.append('file', blob, filename);
     if (context.userId) formData.append('user_id', context.userId);
+    if (context.scopeId) formData.append('space_id', context.scopeId);
     if (context.projectId) formData.append('project_id', context.projectId);
     if (context.chatId) formData.append('chat_id', context.chatId);
     if (context.title) formData.append('title', context.title);
@@ -471,6 +472,7 @@ export class EngineService {
       headers = this.getInternalHeaders(delegationToken);
       const params = new URLSearchParams();
       if (context.userId) params.append('user_id', context.userId);
+      if (context.scopeId) params.append('space_id', context.scopeId);
       if (context.projectId) params.append('project_id', context.projectId);
       const queryStr = params.toString();
       docQuery = queryStr ? `?${queryStr}` : '';

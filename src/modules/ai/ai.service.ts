@@ -74,7 +74,7 @@ export class AiService {
       const chat = await this.prisma.aiChat.findFirst({
         where: { id: chatId },
       });
-      if (chat && chat.userId !== userId) {
+      if (chat && chat.createdById !== userId) {
         throw new ForbiddenException(
           'You do not have access to this chat session',
         );
@@ -82,16 +82,16 @@ export class AiService {
     }
 
     if (pageId) {
-      const doc = await this.prisma.manuscriptDoc.findFirst({
-        where: { id: pageId, deleted: false },
-        select: { id: true, projectId: true },
+      const doc = await this.prisma.pageDoc.findFirst({
+        where: { id: pageId, deletedAt: null },
+        select: { id: true, spaceId: true },
       });
       if (!doc) {
         throw new NotFoundException('Manuscript doc not found');
       }
-      if (doc.projectId) {
+      if (doc.spaceId && doc.spaceId !== userId) {
         const project = await this.prisma.project.findFirst({
-          where: { id: doc.projectId },
+          where: { id: doc.spaceId },
           select: {
             createdById: true,
             members: { where: { userId }, select: { userId: true } },
@@ -118,12 +118,12 @@ export class AiService {
     const fileMap = new Map<string, string>();
 
     // 1. Storage Files
-    const files = await this.prisma.file.findMany({
+    const files = await this.prisma.storageFile.findMany({
       where: { id: { in: documentIds } },
-      select: { id: true, metaData: true },
+      select: { id: true, metadata: true },
     });
     for (const f of files) {
-      const meta = f.metaData as Record<string, unknown> | null;
+      const meta = f.metadata as Record<string, unknown> | null;
       if (typeof meta?.ragDocId === 'string') {
         fileMap.set(f.id, meta.ragDocId);
       }
@@ -132,7 +132,7 @@ export class AiService {
     // 2. Library Items
     const missingForItems = documentIds.filter((id) => !fileMap.has(id));
     if (missingForItems.length > 0) {
-      const items = await this.prisma.item.findMany({
+      const items = await this.prisma.libraryItem.findMany({
         where: { id: { in: missingForItems } },
         include: {
           attachments: {
@@ -157,11 +157,11 @@ export class AiService {
             if (typeof attMeta?.ragDocId === 'string') {
               fileMap.set(it.id, attMeta.ragDocId);
             } else if (att.fileId) {
-              const file = await this.prisma.file.findUnique({
+              const file = await this.prisma.storageFile.findUnique({
                 where: { id: att.fileId },
-                select: { metaData: true },
+                select: { metadata: true },
               });
-              const fMeta = file?.metaData as Record<string, unknown> | null;
+              const fMeta = file?.metadata as Record<string, unknown> | null;
               if (typeof fMeta?.ragDocId === 'string') {
                 fileMap.set(it.id, fMeta.ragDocId);
               }
@@ -418,7 +418,7 @@ export class AiService {
     scopeId: string;
   }> {
     // 1. Try finding Library Item
-    const item = await this.prisma.item.findFirst({
+    const item = await this.prisma.libraryItem.findFirst({
       where: { id: paperOrFileId, deletedAt: null },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
@@ -431,11 +431,12 @@ export class AiService {
 
     if (item) {
       const hasAccess =
-        item.userId === userId ||
-        (item.projectId
+        item.createdById === userId ||
+        item.spaceId === userId ||
+        (item.spaceId
           ? (await this.prisma.projectMember.findFirst({
               where: {
-                projectId: item.projectId,
+                projectId: item.spaceId,
                 userId,
               },
             })) !== null
@@ -466,11 +467,11 @@ export class AiService {
         if (typeof attMeta.ragDocId === 'string') {
           ragDocId = attMeta.ragDocId;
         } else if (primaryAtt?.fileId) {
-          const file = await this.prisma.file.findUnique({
+          const file = await this.prisma.storageFile.findUnique({
             where: { id: primaryAtt.fileId },
-            select: { metaData: true },
+            select: { metadata: true },
           });
-          const fileMeta = (file?.metaData as Record<string, unknown>) || {};
+          const fileMeta = (file?.metadata as Record<string, unknown>) || {};
           if (typeof fileMeta.ragDocId === 'string') {
             ragDocId = fileMeta.ragDocId;
           }
@@ -484,21 +485,34 @@ export class AiService {
         doi: item.doi || undefined,
         abstract: item.abstract || undefined,
         ragDocId,
-        scopeId: item.projectId || userId,
+        scopeId: item.spaceId || userId,
       };
     }
 
     // 2. Try finding Storage File directly
-    const file = await this.prisma.file.findFirst({
-      where: { id: paperOrFileId, trashedAt: null },
+    const file = await this.prisma.storageFile.findFirst({
+      where: { id: paperOrFileId, deletedAt: null },
       include: {
         sharedWith: { where: { userId } },
       },
     });
 
     if (file) {
-      let hasAccess = file.authorId === userId || file.sharedWith.length > 0;
-      if (!hasAccess && file.linkedToType?.toLowerCase() === 'project' && file.linkedToId) {
+      let hasAccess =
+        file.createdById === userId ||
+        file.spaceId === userId ||
+        file.sharedWith.length > 0;
+      if (!hasAccess && file.spaceId) {
+        const isMember = await this.prisma.projectMember.findFirst({
+          where: { projectId: file.spaceId, userId },
+        });
+        hasAccess = isMember !== null;
+      }
+      if (
+        !hasAccess &&
+        file.linkedToType?.toLowerCase() === 'project' &&
+        file.linkedToId
+      ) {
         const isMember = await this.prisma.projectMember.findFirst({
           where: { projectId: file.linkedToId, userId },
         });
@@ -517,11 +531,12 @@ export class AiService {
         abstract?: string;
         ragDocId?: string | null;
       }
-      const meta = (file.metaData as FileDocMetadata | null) || {};
+      const meta = (file.metadata as FileDocMetadata | null) || {};
       const scopeId =
-        file.linkedToType?.toLowerCase() === 'project' && file.linkedToId
+        file.spaceId ||
+        (file.linkedToType?.toLowerCase() === 'project' && file.linkedToId
           ? file.linkedToId
-          : userId;
+          : userId);
 
       return {
         title: meta.title || file.filename,
@@ -570,7 +585,7 @@ export class AiService {
       const existingChat = await this.prisma.aiChat.findFirst({
         where: { id: chatId },
       });
-      if (existingChat && existingChat.userId !== userId) {
+      if (existingChat && existingChat.createdById !== userId) {
         throw new ForbiddenException(
           'You do not have access to this chat session',
         );
@@ -615,7 +630,7 @@ export class AiService {
       const existingChat = await this.prisma.aiChat.findFirst({
         where: { id: chatId },
       });
-      if (existingChat && existingChat.userId !== userId) {
+      if (existingChat && existingChat.createdById !== userId) {
         throw new ForbiddenException(
           'You do not have access to this chat session',
         );
@@ -798,7 +813,7 @@ export class AiService {
 
       // 1. If documentIds exist, try to name after the first document
       if (documentIds && documentIds.length > 0) {
-        const file = await this.prisma.file.findFirst({
+        const file = await this.prisma.storageFile.findFirst({
           where: { id: { in: documentIds } },
           select: { filename: true },
         });

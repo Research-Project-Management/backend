@@ -1,6 +1,6 @@
 // ============================================================================
 // Library Shared Kernel: Taxonomy Sub-Domain
-// Self-managed domain schema: Collections, Tags, Saved Searches
+// Self-managed domain schema: LibraryCollection, LibraryTag, LibrarySavedSearch
 // ============================================================================
 
 enum TagType {
@@ -8,91 +8,87 @@ enum TagType {
   automatic
 }
 
-model Collection {
-  id          String       @id @default(uuid(7)) @db.Uuid
+model LibraryCollection {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  spaceId     String              @map("space_id") @db.Uuid
+  space       Space               @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_library_collections_space_id")
   name        String
-  description String?      @default("")
+  description String?             @default("")
   color       String?
-  icon        String?      @default("")
-  sortOrder   Int          @default(0) @map("sort_order")
-  createdById String?      @map("created_by_id") @db.Uuid
-  updatedById String?      @map("updated_by_id") @db.Uuid
-  deletedById String?      @map("deleted_by_id") @db.Uuid
-  parentId    String?      @map("parent_id") @db.Uuid
-  parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: SetNull, map: "fk_collections_parent_id")
-  children    Collection[] @relation("CollectionHierarchy")
-  userId      String       @map("user_id") @db.Uuid
-  projectId   String?      @map("project_id") @db.Uuid
-  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(6)
-  version     Int          @default(1)
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  icon        String?             @default("")
+  sortOrder   Int                 @default(0) @map("sort_order")
+  createdById String              @map("created_by_id") @db.Uuid
+  updatedById String?             @map("updated_by_id") @db.Uuid
+  deletedById String?             @map("deleted_by_id") @db.Uuid
+  parentId    String?             @map("parent_id") @db.Uuid
+  parent      LibraryCollection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: SetNull, map: "fk_library_collections_parent_id")
+  children    LibraryCollection[] @relation("CollectionHierarchy")
+  deletedAt   DateTime?           @map("deleted_at") @db.Timestamptz(6)
+  version     Int                 @default(1)
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  collectionItems CollectionItem[]
+  collectionItems LibraryCollectionItem[]
 
   @@index([parentId])
-  @@index([userId, projectId, deletedAt, parentId, sortOrder])
-  @@index([userId, projectId, deletedAt, createdAt])
-  @@index([projectId, deletedAt, parentId, sortOrder])
-  @@index([projectId, deletedAt, createdAt])
-  @@map("collections")
+  @@index([spaceId, deletedAt, parentId, sortOrder])
+  @@index([spaceId, deletedAt, createdAt])
+  @@map("library_collections")
 }
 
-model CollectionItem {
-  collectionId String     @map("collection_id") @db.Uuid
-  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade, map: "fk_collection_items_collection_id")
-  itemId       String     @map("item_id") @db.Uuid
-  item         Item       @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_collection_items_item_id")
-  sortOrder    Int        @default(0) @map("sort_order")
-  addedAt      DateTime   @default(now()) @map("added_at") @db.Timestamptz(6)
+model LibraryCollectionItem {
+  collectionId String            @map("collection_id") @db.Uuid
+  collection   LibraryCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade, map: "fk_library_collection_items_collection_id")
+  itemId       String            @map("item_id") @db.Uuid
+  item         LibraryItem       @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_library_collection_items_item_id")
+  sortOrder    Int               @default(0) @map("sort_order")
+  addedAt      DateTime          @default(now()) @map("added_at") @db.Timestamptz(6)
 
   @@id([collectionId, itemId])
   @@index([itemId])
   @@index([collectionId, sortOrder])
-  @@map("collection_items")
+  @@map("library_collection_items")
 }
 
-model Tag {
-  id             String    @id @default(uuid(7)) @db.Uuid
-  scopeKey       String    @default("") @map("scope_key") @db.VarChar(128)
+model LibraryTag {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  spaceId        String           @map("space_id") @db.Uuid
+  space          Space            @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_library_tags_space_id")
   name           String
-  normalizedName String    @default("") @map("normalized_name")
-  color          String?   @default("#3b82f6")
-  shortcut       Int?      @map("shortcut")
-  type           TagType   @default(manual)
-  userId         String    @map("user_id") @db.Uuid
-  projectId      String?   @map("project_id") @db.Uuid
-  createdById    String?   @map("created_by_id") @db.Uuid
-  version        Int       @default(1)
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  normalizedName String           @default("") @map("normalized_name")
+  color          String?          @default("#3b82f6")
+  shortcut       Int?             @map("shortcut")
+  type           TagType          @default(manual)
+  createdById    String           @map("created_by_id") @db.Uuid
+  version        Int              @default(1)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  itemTags    ItemTag[]
+  itemTags       LibraryItemTag[]
 
-  @@unique([scopeKey, normalizedName])
-  @@unique([userId, projectId, normalizedName])
-  @@index([projectId, normalizedName])
-  @@index([userId, projectId, name])
-  @@index([projectId, name])
-  @@map("tags")
+  @@unique([spaceId, normalizedName])
+  @@index([spaceId, name])
+  @@map("library_tags")
 }
 
-model ItemTag {
-  tagId      String   @map("tag_id") @db.Uuid
-  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade, map: "fk_item_tags_tag_id")
-  itemId     String   @map("item_id") @db.Uuid
-  item       Item     @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_item_tags_item_id")
-  type       TagType  @default(manual)
-  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+model LibraryItemTag {
+  tagId      String      @map("tag_id") @db.Uuid
+  tag        LibraryTag  @relation(fields: [tagId], references: [id], onDelete: Cascade, map: "fk_library_item_tags_tag_id")
+  itemId     String      @map("item_id") @db.Uuid
+  item       LibraryItem @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_library_item_tags_item_id")
+  type       TagType     @default(manual)
+  assignedAt DateTime    @default(now()) @map("assigned_at") @db.Timestamptz(6)
 
   @@id([tagId, itemId])
   @@index([itemId])
   @@index([type, tagId])
-  @@map("item_tags")
+  @@map("library_item_tags")
 }
 
-model SavedSearch {
+model LibrarySavedSearch {
   id              String    @id @default(uuid(7)) @db.Uuid
+  spaceId         String    @map("space_id") @db.Uuid
+  space           Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_library_saved_searches_space_id")
   name            String
   query           String?   @default("")
   description     String?   @default("")
@@ -107,15 +103,12 @@ model SavedSearch {
   lastEvaluatedAt DateTime? @map("last_evaluated_at") @db.Timestamptz(6)
   version         Int       @default(1)
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
-  userId          String    @map("user_id") @db.Uuid
-  projectId       String?   @map("project_id") @db.Uuid
-  createdById     String?   @map("created_by_id") @db.Uuid
+  createdById     String    @map("created_by_id") @db.Uuid
   updatedById     String?   @map("updated_by_id") @db.Uuid
   deletedById     String?   @map("deleted_by_id") @db.Uuid
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([userId, projectId, deletedAt, isPinned(sort: Desc), name])
-  @@index([projectId, deletedAt, isPinned(sort: Desc), name])
-  @@map("saved_searches")
+  @@index([spaceId, deletedAt, isPinned(sort: Desc), name])
+  @@map("library_saved_searches")
 }

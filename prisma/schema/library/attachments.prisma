@@ -46,7 +46,7 @@ enum AnnotationType {
 model Attachment {
   id                    String                     @id @default(uuid(7)) @db.Uuid
   itemId                String                     @map("item_id") @db.Uuid
-  item                  Item                       @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_attachments_item_id")
+  item                  LibraryItem                @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_attachments_item_id")
   linkMode              LinkMode                   @default(imported_file) @map("link_mode")
   attachmentType        AttachmentType             @default(primary_pdf) @map("attachment_type")
   filename              String                     @default("document.pdf")
@@ -119,7 +119,7 @@ model Annotation {
   quoteText           String?        @map("quote_text")
   comment             String?        @default("")
   tags                String[]       @default([])
-  authorId            String         @map("author_id") @db.Uuid
+  createdById         String         @map("created_by_id") @db.Uuid
   version             Int            @default(1)
   createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -128,7 +128,7 @@ model Annotation {
   @@index([attachmentId, deletedAt, pageIndex, annotationSortIndex, createdAt])
   @@index([attachmentId, deletedAt, type, pageIndex, annotationSortIndex])
   @@index([itemId, deletedAt, pageIndex, annotationSortIndex])
-  @@index([authorId, deletedAt])
+  @@index([createdById, deletedAt])
   @@index([tags], type: Gin)
   @@map("annotations")
 }
@@ -150,24 +150,24 @@ model FullTextIndex {
 }
 
 model AttachmentStructure {
-  attachmentId      String     @id @map("attachment_id") @db.Uuid
-  attachment        Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_attachment_structures_attachment_id")
-  itemId            String     @map("item_id") @db.Uuid
-  item              Item       @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_attachment_structures_item_id")
-  isScanned         Boolean    @default(false) @map("is_scanned")
-  ocrStatus         String?    @map("ocr_status") @db.VarChar(32)
-  qualityScore      Float?     @map("quality_score") @db.Real
-  engineUsed        String?    @map("engine_used") @db.VarChar(64)
-  pageCount         Int        @default(0) @map("page_count")
-  sections          Json       @default("[]") @db.JsonB
-  figures           Json       @default("[]") @db.JsonB
-  tables            Json       @default("[]") @db.JsonB
-  formulas          Json       @default("[]") @db.JsonB
-  references        Json       @default("[]") @db.JsonB
-  fulltextFileId    String?    @map("fulltext_file_id") @db.Uuid
-  fulltextByteSize  Int?       @map("fulltext_byte_size")
-  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  attachmentId      String      @id @map("attachment_id") @db.Uuid
+  attachment        Attachment  @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_attachment_structures_attachment_id")
+  itemId            String      @map("item_id") @db.Uuid
+  item              LibraryItem @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_attachment_structures_item_id")
+  isScanned         Boolean     @default(false) @map("is_scanned")
+  ocrStatus         String?     @map("ocr_status") @db.VarChar(32)
+  qualityScore      Float?      @map("quality_score") @db.Real
+  engineUsed        String?     @map("engine_used") @db.VarChar(64)
+  pageCount         Int         @default(0) @map("page_count")
+  sections          Json        @default("[]") @db.JsonB
+  figures           Json        @default("[]") @db.JsonB
+  tables            Json        @default("[]") @db.JsonB
+  formulas          Json        @default("[]") @db.JsonB
+  references        Json        @default("[]") @db.JsonB
+  fulltextFileId    String?     @map("fulltext_file_id") @db.Uuid
+  fulltextByteSize  Int?        @map("fulltext_byte_size")
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([itemId])
   @@map("attachment_structures")

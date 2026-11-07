@@ -32,6 +32,18 @@ export class YourWorkService {
     projectId: string | undefined,
     userId: string,
   ): Promise<YourWorkSummaryDto> {
+    const rawProjectId = projectId?.trim();
+    if (
+      !rawProjectId ||
+      ['personal', 'me', 'user', 'null', 'undefined', 'default', ''].includes(
+        rawProjectId.toLowerCase(),
+      ) ||
+      (userId && rawProjectId.toLowerCase() === userId.trim().toLowerCase())
+    ) {
+      projectId = undefined;
+    } else {
+      projectId = rawProjectId;
+    }
 
     if (projectId) {
       const accessCheck = await this.yourWorkRepo.checkProjectAccess(

@@ -8,13 +8,15 @@ import {
   resolveWorkItemUuid as resolveSharedWorkItemUuid,
 } from '@/modules/work-item/common/types/shared.types';
 
-function mapCommentAuthor<T extends { author?: UserProfileSource | null }>(
-  comment: T | null,
-) {
+function mapCommentAuthor<
+  T extends { createdBy?: UserProfileSource | null; createdById: string },
+>(comment: T | null) {
   if (!comment) return null;
+  const { createdBy, ...rest } = comment;
   return {
-    ...comment,
-    author: comment.author ? mapUserMinimal(comment.author) : comment.author,
+    ...rest,
+    authorId: comment.createdById,
+    author: createdBy ? mapUserMinimal(createdBy) : null,
   };
 }
 
@@ -46,7 +48,7 @@ export class CommentRepository {
       where: { workItemId: itemUuid },
       orderBy: { createdAt: 'asc' },
       include: {
-        author: { select: USER_MINIMAL_SELECT },
+        createdBy: { select: USER_MINIMAL_SELECT },
       },
     });
     return comments.map((c) => mapCommentAuthor(c));
@@ -56,14 +58,14 @@ export class CommentRepository {
     const comment = await this.prismaService.workItemComment.findUnique({
       where: { id: commentId },
       include: {
-        author: { select: USER_MINIMAL_SELECT },
+        createdBy: { select: USER_MINIMAL_SELECT },
       },
     });
     return mapCommentAuthor(comment);
   }
 
   async findCommentWithProject(commentId: string) {
-    return this.prismaService.workItemComment.findUnique({
+    const comment = await this.prismaService.workItemComment.findUnique({
       where: { id: commentId },
       include: {
         workItem: {
@@ -74,6 +76,11 @@ export class CommentRepository {
         },
       },
     });
+    if (!comment) return null;
+    return {
+      ...comment,
+      authorId: comment.createdById,
+    };
   }
 
   async createComment(data: {
@@ -89,12 +96,12 @@ export class CommentRepository {
     const comment = await this.prismaService.workItemComment.create({
       data: {
         workItemId: itemUuid,
-        authorId: data.authorId,
+        createdById: data.authorId,
         content: data.content,
         attachments: data.attachments ?? [],
       },
       include: {
-        author: { select: USER_MINIMAL_SELECT },
+        createdBy: { select: USER_MINIMAL_SELECT },
       },
     });
     return mapCommentAuthor(comment)!;
@@ -114,7 +121,7 @@ export class CommentRepository {
       where: { id: commentId },
       data,
       include: {
-        author: { select: USER_MINIMAL_SELECT },
+        createdBy: { select: USER_MINIMAL_SELECT },
       },
     });
     return mapCommentAuthor(comment)!;

@@ -24,7 +24,10 @@ import {
 } from '@/modules/storage/drive';
 import { STORAGE_QUOTA_REPOSITORY } from '@/modules/storage/storage.tokens';
 import { getFileContentPath } from '@/modules/storage/storage.port';
-import { StorageAccessPolicy } from '../services/access.policy';
+import {
+  StorageAccessPolicy,
+  normalizeStorageProjectId,
+} from '../services/access.policy';
 import {
   CreateFolderDto,
   MoveFileDto,
@@ -189,8 +192,7 @@ export class DriveController {
       !parentId || parentId === 'null' || parentId === 'root'
         ? null
         : parentId;
-    const normalizedProjectId =
-      projectId && projectId !== 'null' ? projectId : undefined;
+    const normalizedProjectId = normalizeStorageProjectId(projectId, userId);
 
     if (normalizedProjectId && userId) {
       await this.accessPolicy.assertCanAccessProject(
@@ -289,8 +291,7 @@ export class DriveController {
     @Query('offset') offset?: number,
     @Query('page') page?: number,
   ) {
-    const normalizedProjectId =
-      projectId && projectId !== 'null' ? projectId : undefined;
+    const normalizedProjectId = normalizeStorageProjectId(projectId, userId);
     if (normalizedProjectId && userId) {
       await this.accessPolicy.assertCanAccessProject(
         userId,
@@ -327,8 +328,7 @@ export class DriveController {
   ) {
     const pagination = parsePagination(limit, offset, page);
     const parsedTypes = parseTypesQuery(types, type);
-    const normalizedProjectId =
-      projectId && projectId !== 'null' ? projectId : undefined;
+    const normalizedProjectId = normalizeStorageProjectId(projectId, userId);
 
     if (normalizedProjectId && userId) {
       await this.accessPolicy.assertCanAccessProject(
@@ -409,9 +409,13 @@ export class DriveController {
     @CurrentUser('id') userId: string,
     @Body() dto: CreateFolderDto,
   ) {
+    const normalizedProjectId = normalizeStorageProjectId(
+      dto.projectId,
+      userId,
+    );
     if (userId) {
       await this.accessPolicy.assertCanWriteScope(userId, {
-        projectId: dto.projectId || null,
+        projectId: normalizedProjectId || null,
         parentId: dto.parentId || null,
       });
     }
@@ -419,8 +423,8 @@ export class DriveController {
     const created = await this.driveService.createFolder({
       userId,
       name: folderName,
-      projectId: dto.projectId || null,
-      scope: dto.projectId ? FileScope.Project : FileScope.Personal,
+      projectId: normalizedProjectId || null,
+      scope: normalizedProjectId ? FileScope.Project : FileScope.Personal,
       parentId: dto.parentId || null,
     });
     return this.mapNodeToDto(created);
@@ -435,14 +439,18 @@ export class DriveController {
     @Param('pageId') pageId?: string,
     @Param('projectId') projectId?: string,
   ) {
+    const normalizedProjectId = normalizeStorageProjectId(
+      projectId ?? dto.projectId,
+      userId,
+    );
     if (userId) {
       await this.accessPolicy.assertCanWriteScope(userId, {
-        projectId: projectId || null,
+        projectId: normalizedProjectId || null,
         parentId: dto.parentId || null,
       });
     }
     const folderName = dto.name || dto.filename || 'New Folder';
-    const scope = projectId
+    const scope = normalizedProjectId
       ? FileScope.Project
       : pageId
         ? FileScope.Page
@@ -450,8 +458,8 @@ export class DriveController {
     const created = await this.driveService.createFolder({
       userId,
       name: folderName,
-      projectId: projectId || null,
-      linkedToId: projectId || pageId || null,
+      projectId: normalizedProjectId || null,
+      linkedToId: normalizedProjectId || pageId || null,
       scope,
       parentId: dto.parentId || null,
       metadata: pageId ? { pageId } : {},
@@ -618,8 +626,7 @@ export class TrashController {
   ) {
     const pagination = parsePagination(limit, offset, page);
     const parsedTypes = parseTypesQuery(types, type);
-    const normalizedProjectId =
-      projectId && projectId !== 'null' ? projectId : undefined;
+    const normalizedProjectId = normalizeStorageProjectId(projectId, userId);
 
     if (normalizedProjectId && userId) {
       await this.accessPolicy.assertCanAccessProject(
@@ -721,7 +728,8 @@ export class QuotaController {
     @CurrentUser('id') userId: string,
     @Query('projectId') projectId?: string,
   ) {
-    const quota = await this.quotaRepo.findByScope(userId, projectId);
+    const normalizedProjectId = normalizeStorageProjectId(projectId, userId);
+    const quota = await this.quotaRepo.findByScope(userId, normalizedProjectId);
     const usedBigInt = quota ? quota.usedBytes : 0n;
     const maxBigInt = quota ? quota.maxBytes : DEFAULT_STORAGE_QUOTA_BYTES;
     const usedBytes = Number(usedBigInt);
@@ -736,7 +744,7 @@ export class QuotaController {
       percentage,
       usedFormatted: formatBytes(usedBytes),
       limitFormatted: formatBytes(maxBytes),
-      scope: projectId ? 'project' : 'personal',
+      scope: normalizedProjectId ? 'project' : 'personal',
     };
   }
 }

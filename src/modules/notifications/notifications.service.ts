@@ -20,12 +20,13 @@ import {
 import { QueryNotificationsOptions } from './core/ports/notification-repository.port';
 import { NotificationEntity } from './core/domain/entities/notification.entity';
 import { MentionToken } from './core/domain/value-objects/mention-token.vo';
-import { ManuscriptsNotificationsService } from './manuscripts/manuscripts-notifications.service';
+import { PagesNotificationsService } from './pages/pages-notifications.service';
 import { ProjectsNotificationsService } from './projects/projects-notifications.service';
 
 @Injectable()
 export class NotificationsService {
-  public readonly manuscripts?: ManuscriptsNotificationsService | null;
+  public readonly pages?: PagesNotificationsService | null;
+  public readonly manuscripts?: PagesNotificationsService | null;
   public readonly projects: ProjectsNotificationsService;
 
   constructor(
@@ -41,20 +42,21 @@ export class NotificationsService {
     @Inject(MENTION_PARSER_PORT)
     private readonly mentionParser?: IMentionParserPort,
     @Optional()
-    manuscriptsNotificationsService?: ManuscriptsNotificationsService,
+    pagesNotificationsService?: PagesNotificationsService,
     @Optional()
     projectsNotificationsService?: ProjectsNotificationsService,
   ) {
-    this.manuscripts =
-      manuscriptsNotificationsService ||
+    this.pages =
+      pagesNotificationsService ||
       (this.parseAndNotifyMentionsUseCase && this.mentionParser
-        ? new ManuscriptsNotificationsService(
+        ? new PagesNotificationsService(
             this.parseAndNotifyMentionsUseCase,
             this.mentionParser,
             this.createNotificationUseCase,
             this.deleteNotificationUseCase,
           )
         : null);
+    this.manuscripts = this.pages;
 
     this.projects =
       projectsNotificationsService ||
@@ -98,13 +100,13 @@ export class NotificationsService {
   }
 
   /**
-   * Delegates to Manuscripts Notifications Submodule
+   * Delegates to Pages Notifications Submodule
    */
   async parseAndNotifyMentions(
     command: ParseAndNotifyMentionsCommand,
   ): Promise<ParseMentionsResult> {
-    if (this.manuscripts) {
-      return this.manuscripts.parseAndNotifyMentions(command);
+    if (this.pages) {
+      return this.pages.parseAndNotifyMentions(command);
     }
     if (this.parseAndNotifyMentionsUseCase) {
       return this.parseAndNotifyMentionsUseCase.execute(command);
@@ -113,11 +115,11 @@ export class NotificationsService {
   }
 
   /**
-   * Delegates to Manuscripts Mention Parser
+   * Delegates to Pages Mention Parser
    */
   extractMentions(text: string): MentionToken[] {
-    if (this.manuscripts) {
-      return this.manuscripts.extractMentions(text);
+    if (this.pages) {
+      return this.pages.extractMentions(text);
     }
     if (this.mentionParser) {
       return this.mentionParser.extractMentions(text);

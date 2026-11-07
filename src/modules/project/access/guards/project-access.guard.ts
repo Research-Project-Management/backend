@@ -8,7 +8,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import {
   ROLES_KEY,
   MIN_ROLE_KEY,
@@ -127,15 +127,25 @@ export class ProjectAccessGuard implements CanActivate {
     if (!resolvedResult || !resolvedResult.projectId) {
       // Check if dual-context library route in personal scope
       const url = request.url || request.raw?.url || '';
-      const isDualContextLibraryRoute =
+      const isLibraryOrAttachmentRoute =
         !url.includes('/manuscripts/') &&
+        !url.includes('/pages/') &&
         (url.includes('/library') ||
           url.includes('/attachments') ||
-          url.includes('/files')) &&
+          url.includes('/files'));
+      const isDualContextLibraryRoute =
+        isLibraryOrAttachmentRoute &&
         !url.includes('/projects/') &&
         !url.includes('/project/');
 
-      if (isDualContextLibraryRoute) {
+      if (
+        isDualContextLibraryRoute ||
+        (request.isPersonalSpace === true && isLibraryOrAttachmentRoute)
+      ) {
+        if (request.isPersonalSpace === true) {
+          request.role = Role.OWNER;
+          request.projectRole = Role.OWNER;
+        }
         return true;
       }
 
@@ -150,11 +160,61 @@ export class ProjectAccessGuard implements CanActivate {
     request.resolvedProjectId = projectId;
     request.projectId = projectId;
 
-    // 7. Verify project membership
-    const accessContext = await this.accessService.getMemberAccessContext(
-      projectId,
-      userId,
-    );
+    // 7. Verify Personal Space vs Project Space membership
+    const isPersonalSpace =
+      resolvedResult.isPersonalSpace ||
+      projectId.toLowerCase() === String(userId).toLowerCase();
+
+    let accessContext = isPersonalSpace
+      ? {
+          projectId: userId,
+          userId,
+          role: Role.OWNER,
+          permissionOverrides: {},
+          effectivePermissions: this.accessService.getRolePermissions(
+            Role.OWNER,
+          ),
+        }
+      : await this.accessService.getMemberAccessContext(projectId, userId);
+
+    if (!accessContext && isUuid(projectId)) {
+      const [space, page] = await Promise.all([
+        this.prisma.space?.findUnique
+          ? Promise.resolve(
+              this.prisma.space.findUnique({
+                where: { id: projectId },
+                select: { ownerUserId: true },
+              }),
+            ).catch(() => null)
+          : Promise.resolve(null),
+        this.prisma.page?.findUnique
+          ? Promise.resolve(
+              this.prisma.page.findUnique({
+                where: { id: projectId },
+                select: { spaceId: true },
+              }),
+            ).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
+      const isOwnedPersonalSpace =
+        (space?.ownerUserId &&
+          space.ownerUserId.toLowerCase() === String(userId).toLowerCase()) ||
+        (page?.spaceId &&
+          page.spaceId.toLowerCase() === String(userId).toLowerCase());
+
+      if (isOwnedPersonalSpace) {
+        accessContext = {
+          projectId,
+          userId,
+          role: Role.OWNER,
+          permissionOverrides: {},
+          effectivePermissions: this.accessService.getRolePermissions(
+            Role.OWNER,
+          ),
+        };
+      }
+    }
 
     if (!accessContext) {
       throw new ForbiddenException({
@@ -166,6 +226,7 @@ export class ProjectAccessGuard implements CanActivate {
 
     // Attach access context to request for downstream handlers and decorators
     request.role = accessContext.role;
+    request.projectRole = accessContext.role;
     request.projectMember = accessContext;
     request.accessContext = accessContext;
     request.permissions = accessContext.effectivePermissions;

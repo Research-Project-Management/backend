@@ -25,7 +25,12 @@ import {
   InitiateMultipartDto,
   CompleteMultipartDto,
 } from '../dto/file.dto';
-import { DriveService, FileScope, StorageAccessPolicy } from '@/modules/storage/drive';
+import {
+  DriveService,
+  FileScope,
+  StorageAccessPolicy,
+  normalizeStorageProjectId,
+} from '@/modules/storage/drive';
 import { cleanUuid } from '@/modules/storage/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 
@@ -145,8 +150,13 @@ export class UploadController {
     const requestedSize = dto.size ?? dto.sizeBytes ?? 10 * 1024 * 1024;
     this.assertVerifiedUploadLimit(user, requestedSize);
 
+    const normalizedProjectId = normalizeStorageProjectId(
+      dto.projectId,
+      userId,
+    );
+
     await this.accessPolicy.assertCanWriteScope(userId, {
-      projectId: dto.projectId || null,
+      projectId: normalizedProjectId || null,
       parentId: dto.parentId || null,
     });
 
@@ -155,7 +165,7 @@ export class UploadController {
       filename: dto.filename,
       mimeType: dto.mimeType || dto.contentType || 'application/octet-stream',
       sizeBytes: requestedSize,
-      projectId: dto.projectId,
+      projectId: normalizedProjectId,
       pageId: dto.pageId,
       parentId: dto.parentId,
       scope: dto.scope as FileScope | undefined,
@@ -179,8 +189,13 @@ export class UploadController {
     const reportedSize = dto.size ?? dto.sizeBytes ?? 0;
     this.assertVerifiedUploadLimit(user, reportedSize);
 
+    const normalizedProjectId = normalizeStorageProjectId(
+      dto.projectId,
+      userId,
+    );
+
     await this.accessPolicy.assertCanWriteScope(userId, {
-      projectId: dto.projectId || null,
+      projectId: normalizedProjectId || null,
       parentId: dto.parentId || null,
     });
 
@@ -190,7 +205,7 @@ export class UploadController {
       filename: dto.filename,
       sizeBytes: dto.size ?? dto.sizeBytes,
       mimeType: dto.mimeType,
-      projectId: dto.projectId,
+      projectId: normalizedProjectId,
       pageId: dto.pageId,
       parentId: dto.parentId,
       scope: dto.scope as FileScope | undefined,
@@ -220,14 +235,18 @@ export class UploadController {
 
     if (!isMultipart) {
       if (body && (body.filename || body.name)) {
-        const projectId = cleanUuid(body.projectId as string | undefined);
+        const rawProjectId = normalizeStorageProjectId(
+          body.projectId as string | undefined,
+          userId,
+        );
         const parentId = cleanUuid(body.parentId as string | undefined);
         if (userId) {
           await this.accessPolicy.assertCanWriteScope(userId, {
-            projectId,
+            projectId: rawProjectId ?? null,
             parentId,
           });
         }
+        const projectId = cleanUuid(rawProjectId);
         const created = await this.driveService.createLogicalNode({
           userId,
           projectId,
@@ -264,16 +283,20 @@ export class UploadController {
       await this.extractMultipartPayload(uploadReq);
     this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
 
-    const projectId = cleanUuid(fields.projectId?.value) ?? undefined;
+    const rawProjectId = normalizeStorageProjectId(
+      fields.projectId?.value,
+      userId,
+    );
     const pageId = cleanUuid(fields.pageId?.value) ?? undefined;
     const parentId = cleanUuid(fields.parentId?.value) ?? undefined;
 
     if (userId) {
       await this.accessPolicy.assertCanWriteScope(userId, {
-        projectId: projectId ?? null,
+        projectId: rawProjectId ?? null,
         parentId: parentId ?? null,
       });
     }
+    const projectId = cleanUuid(rawProjectId) ?? undefined;
 
     const result = await this.uploadService.upload({
       userId,
@@ -309,15 +332,19 @@ export class UploadController {
       const { buffer, filename, mimeType, fields } =
         await this.extractMultipartPayload(uploadReq);
       this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
-      const projectId = cleanUuid(fields.projectId?.value) ?? null;
+      const rawProjectId = normalizeStorageProjectId(
+        fields.projectId?.value,
+        userId,
+      );
       const parentId = cleanUuid(fields.parentId?.value) ?? null;
 
       if (userId) {
         await this.accessPolicy.assertCanWriteScope(userId, {
-          projectId,
+          projectId: rawProjectId ?? null,
           parentId,
         });
       }
+      const projectId = cleanUuid(rawProjectId) ?? null;
 
       const res = await this.uploadService.upload({
         userId,
@@ -346,15 +373,16 @@ export class UploadController {
 
     this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
 
-    const projectId = cleanUuid(body?.projectId) ?? null;
+    const rawProjectId = normalizeStorageProjectId(body?.projectId, userId);
     const parentId = cleanUuid(body?.parentId) ?? null;
 
     if (userId) {
       await this.accessPolicy.assertCanWriteScope(userId, {
-        projectId,
+        projectId: rawProjectId ?? null,
         parentId,
       });
     }
+    const projectId = cleanUuid(rawProjectId) ?? null;
 
     const res = await this.uploadService.upload({
       userId,
@@ -394,8 +422,12 @@ export class UploadController {
       );
     }
     this.assertVerifiedUploadLimit(user, totalSize);
+    const normalizedProjectId = normalizeStorageProjectId(
+      dto.projectId,
+      userId,
+    );
     await this.accessPolicy.assertCanWriteScope(userId, {
-      projectId: dto.projectId || null,
+      projectId: normalizedProjectId || null,
       parentId: dto.parentId || null,
     });
     return this.multipartService.initiate({
@@ -403,7 +435,7 @@ export class UploadController {
       filename: dto.filename,
       mimeType: dto.mimeType || 'application/octet-stream',
       totalSize,
-      projectId: dto.projectId,
+      projectId: normalizedProjectId,
       parentId: dto.parentId,
       scope: dto.scope as FileScope | undefined,
       expectedHash: dto.expectedHash,

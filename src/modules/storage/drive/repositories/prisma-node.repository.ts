@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { File as PrismaFile, Prisma } from '@prisma/client';
+import { StorageFile as PrismaFile, Prisma } from '@prisma/client';
 import { isValidUuid } from '@/modules/storage/core';
 import {
   StorageNode,
@@ -18,9 +18,14 @@ export interface SharedNodeItem {
 }
 
 export interface IStorageNodeRepository {
-  findById(id: string): Promise<StorageNode | null>;
+  findById(id: string, userId?: string): Promise<StorageNode | null>;
   create(node: StorageNode): Promise<StorageNode>;
-  update(node: StorageNode): Promise<StorageNode>;
+  update(node: StorageNode, userId?: string): Promise<StorageNode>;
+  setStarred?(
+    fileId: string,
+    userId: string,
+    starred: boolean,
+  ): Promise<boolean>;
   delete(id: string): Promise<void>;
   deleteMany(ids: string[]): Promise<void>;
   list(
@@ -68,7 +73,7 @@ const FILE_AUTHOR_SELECT = {
 } as const;
 
 type PrismaFileWithAuthor = PrismaFile & {
-  author?: {
+  createdBy?: {
     id: string;
     email: string | null;
     profile?: {
@@ -76,9 +81,12 @@ type PrismaFileWithAuthor = PrismaFile & {
       avatar: string | null;
     } | null;
   } | null;
+  stars?: Array<{ userId: string }>;
 };
 
-function buildFileTypeCondition(rawType: string): Prisma.FileWhereInput | null {
+function buildFileTypeCondition(
+  rawType: string,
+): Prisma.StorageFileWhereInput | null {
   const t = rawType.trim().toLowerCase();
   if (!t) return null;
   if (t === 'folder' || t === 'directory') {
@@ -162,13 +170,13 @@ function buildFileTypeCondition(rawType: string): Prisma.FileWhereInput | null {
 }
 
 function applyFileTypeFilter(
-  where: Prisma.FileWhereInput,
+  where: Prisma.StorageFileWhereInput,
   types?: string[],
 ): void {
   if (!types || types.length === 0) return;
   const typeConditions = types
     .map(buildFileTypeCondition)
-    .filter((c): c is Prisma.FileWhereInput => c !== null);
+    .filter((c): c is Prisma.StorageFileWhereInput => c !== null);
 
   if (typeConditions.length === 1) {
     Object.assign(where, typeConditions[0]);
@@ -183,8 +191,8 @@ function applyFileTypeFilter(
 function parseFileOrderBy(
   sortBy?: string,
   sortOrder?: 'asc' | 'desc',
-): Prisma.FileOrderByWithRelationInput[] {
-  const defaultOrder: Prisma.FileOrderByWithRelationInput[] = [
+): Prisma.StorageFileOrderByWithRelationInput[] {
+  const defaultOrder: Prisma.StorageFileOrderByWithRelationInput[] = [
     { isFolder: 'desc' },
     { filename: 'asc' },
   ];
@@ -234,17 +242,25 @@ function parseFileOrderBy(
 
 export class StorageNodeMapper {
   public static toDomain(record: PrismaFileWithAuthor): StorageNode {
-    const scope = normalizeFileScope(record.linkedToType);
-    const metadata = (record.metaData as Record<string, unknown>) || {};
+    const isProjectSpace =
+      record.spaceId && record.spaceId !== record.createdById;
+    const scope = normalizeFileScope(record.linkedToType, Boolean(isProjectSpace));
+    const metadata = (record.metadata as Record<string, unknown>) || {};
     const projectId =
       (typeof metadata.projectId === 'string' ? metadata.projectId : null) ??
-      (scope === FileScope.Project || scope === FileScope.Library
-        ? record.linkedToId
-        : null);
+      (isProjectSpace
+        ? record.spaceId
+        : scope === FileScope.Project || scope === FileScope.Library
+          ? record.linkedToId
+          : null);
+    const isStarred =
+      Array.isArray(record.stars) && record.stars.length > 0
+        ? true
+        : Boolean(metadata.starred);
     return new StorageNode({
       id: record.id,
       projectId,
-      linkedToId: record.linkedToId,
+      linkedToId: record.linkedToId ?? (isProjectSpace ? record.spaceId : null),
       parentId: record.parentId,
       name: record.filename,
       isFolder: record.isFolder,
@@ -252,18 +268,18 @@ export class StorageNodeMapper {
       mimeType: record.mimeType,
       blobId: record.blobId,
       scope,
-      starred: record.starred,
+      starred: isStarred,
       metadata,
-      authorId: record.authorId,
-      author: record.author
+      authorId: record.createdById,
+      author: record.createdBy
         ? {
-            id: record.author.id,
-            email: record.author.email,
-            name: record.author.profile?.name ?? null,
-            avatar: record.author.profile?.avatar ?? null,
+            id: record.createdBy.id,
+            email: record.createdBy.email,
+            name: record.createdBy.profile?.name ?? null,
+            avatar: record.createdBy.profile?.avatar ?? null,
           }
         : null,
-      trashedAt: record.trashedAt,
+      trashedAt: record.deletedAt,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     });
@@ -274,20 +290,21 @@ export class StorageNodeMapper {
       node.projectId && node.scope !== FileScope.Project
         ? { ...node.metadata, projectId: node.projectId }
         : node.metadata;
+    const spaceId = node.projectId || node.authorId;
     return {
       id: node.id,
+      spaceId,
+      createdById: node.authorId,
       filename: node.name,
       size: node.size,
       mimeType: node.mimeType,
       isFolder: node.isFolder,
-      starred: node.starred,
-      metaData: metadata as Prisma.InputJsonValue,
+      metadata: metadata as Prisma.InputJsonValue,
       parentId: node.parentId,
       linkedToType: node.scope,
       linkedToId: node.linkedToId ?? node.projectId,
       blobId: node.blobId,
-      authorId: node.authorId,
-      trashedAt: node.trashedAt,
+      deletedAt: node.trashedAt,
       createdAt: node.createdAt,
       updatedAt: node.updatedAt,
     };
@@ -300,54 +317,98 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<StorageNode | null> {
-    const record = await this.prisma.file.findUnique({
+  async findById(id: string, userId?: string): Promise<StorageNode | null> {
+    const record = await this.prisma.storageFile.findUnique({
       where: { id },
-      include: { author: { select: FILE_AUTHOR_SELECT } },
+      include: {
+        createdBy: { select: FILE_AUTHOR_SELECT },
+        stars: userId
+          ? { where: { userId }, select: { userId: true } }
+          : { select: { userId: true }, take: 1 },
+      },
     });
     return record ? StorageNodeMapper.toDomain(record) : null;
   }
 
   async create(node: StorageNode): Promise<StorageNode> {
     const data = StorageNodeMapper.toPrismaCreate(node);
-    const created = await this.prisma.file.create({
+    const created = await this.prisma.storageFile.create({
       data,
-      include: { author: { select: FILE_AUTHOR_SELECT } },
+      include: {
+        createdBy: { select: FILE_AUTHOR_SELECT },
+        stars: { where: { userId: node.authorId }, select: { userId: true } },
+      },
     });
+    if (node.starred && isValidUuid(node.authorId)) {
+      await this.setStarred(node.id, node.authorId, true);
+      created.stars = [{ userId: node.authorId }];
+    }
     return StorageNodeMapper.toDomain(created);
   }
 
-  async update(node: StorageNode): Promise<StorageNode> {
+  async setStarred(
+    fileId: string,
+    userId: string,
+    starred: boolean,
+  ): Promise<boolean> {
+    if (!isValidUuid(fileId) || !isValidUuid(userId)) return starred;
+    if (starred) {
+      await this.prisma.storageFileStar.upsert({
+        where: {
+          fileId_userId: { fileId, userId },
+        },
+        create: { fileId, userId },
+        update: {},
+      });
+    } else {
+      await this.prisma.storageFileStar.deleteMany({
+        where: { fileId, userId },
+      });
+    }
+    return starred;
+  }
+
+  async update(node: StorageNode, userId?: string): Promise<StorageNode> {
     const data = StorageNodeMapper.toPrismaCreate(node);
-    const updated = await this.prisma.file.update({
+    const targetStarUserId = userId || node.authorId;
+    if (isValidUuid(node.id) && isValidUuid(targetStarUserId)) {
+      await this.setStarred(node.id, targetStarUserId, node.starred);
+    }
+
+    const updated = await this.prisma.storageFile.update({
       where: { id: node.id },
       data: {
+        spaceId: data.spaceId,
         filename: data.filename,
         size: data.size,
         mimeType: data.mimeType,
         parentId: data.parentId,
         linkedToType: data.linkedToType,
         linkedToId: data.linkedToId,
-        starred: data.starred,
-        metaData: data.metaData,
+        metadata: data.metadata,
         blobId: data.blobId,
-        trashedAt: data.trashedAt,
+        deletedAt: data.deletedAt,
         updatedAt: data.updatedAt,
       },
-      include: { author: { select: FILE_AUTHOR_SELECT } },
+      include: {
+        createdBy: { select: FILE_AUTHOR_SELECT },
+        stars: isValidUuid(targetStarUserId)
+          ? { where: { userId: targetStarUserId }, select: { userId: true } }
+          : { select: { userId: true }, take: 1 },
+      },
     });
     return StorageNodeMapper.toDomain(updated);
   }
 
   async delete(id: string): Promise<void> {
-    await this.prisma.file.delete({
+    await this.prisma.storageFile.delete({
       where: { id },
     });
   }
 
   async deleteMany(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
-    await this.prisma.file.deleteMany({
+    await this.prisma.storageFile.deleteMany({
       where: { id: { in: ids } },
     });
   }
@@ -356,26 +417,30 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     filter: ListDriveFilter,
   ): Promise<{ nodes: StorageNode[]; total: number }> {
     const targetUserId = filter.userId ?? filter.authorId;
-    const where: Prisma.FileWhereInput = {};
-    const andConditions: Prisma.FileWhereInput[] = [];
+    const where: Prisma.StorageFileWhereInput = {};
+    const andConditions: Prisma.StorageFileWhereInput[] = [];
 
-    // Only restrict by authorId when querying Personal Drive (no projectId and no linkedToId)
-    // or when explicitly filtering by authorId
+    if (filter.projectId) {
+      where.spaceId = filter.projectId;
+    } else if (targetUserId && !filter.linkedToId) {
+      where.spaceId = targetUserId;
+    }
+
     if (filter.authorId) {
-      where.authorId = filter.authorId;
+      where.createdById = filter.authorId;
     } else if (targetUserId && !filter.projectId && !filter.linkedToId) {
-      where.authorId = targetUserId;
+      where.createdById = targetUserId;
     }
 
     if (filter.trashedOnly) {
-      where.trashedAt = { not: null };
+      where.deletedAt = { not: null };
       if (filter.parentId === undefined && !filter.search?.trim()) {
         andConditions.push({
-          OR: [{ parentId: null }, { parent: { trashedAt: null } }],
+          OR: [{ parentId: null }, { parent: { deletedAt: null } }],
         });
       }
     } else {
-      where.trashedAt = null;
+      where.deletedAt = null;
     }
 
     if (filter.parentId !== undefined) {
@@ -383,7 +448,11 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     }
 
     if (filter.starredOnly) {
-      where.starred = true;
+      if (targetUserId && isValidUuid(targetUserId)) {
+        where.stars = { some: { userId: targetUserId } };
+      } else {
+        where.stars = { some: {} };
+      }
     }
 
     if (filter.search && filter.search.trim()) {
@@ -438,14 +507,20 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     const orderBy = parseFileOrderBy(filter.sortBy, filter.sortOrder);
 
     const [records, total] = await Promise.all([
-      this.prisma.file.findMany({
+      this.prisma.storageFile.findMany({
         where,
         orderBy,
         take: filter.limit ?? 100,
         skip: filter.offset ?? 0,
-        include: { author: { select: FILE_AUTHOR_SELECT } },
+        include: {
+          createdBy: { select: FILE_AUTHOR_SELECT },
+          stars:
+            targetUserId && isValidUuid(targetUserId)
+              ? { where: { userId: targetUserId }, select: { userId: true } }
+              : { select: { userId: true }, take: 1 },
+        },
       }),
-      this.prisma.file.count({ where }),
+      this.prisma.storageFile.count({ where }),
     ]);
 
     return {
@@ -459,13 +534,13 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     const now = new Date();
     const result = await this.prisma.$executeRaw`
       WITH RECURSIVE subtree AS (
-        SELECT id, 0 as depth FROM files WHERE id = ${rootNodeId}::uuid
+        SELECT id, 0 as depth FROM storage_files WHERE id = ${rootNodeId}::uuid
         UNION ALL
-        SELECT f.id, s.depth + 1 FROM files f JOIN subtree s ON f.parent_id = s.id
+        SELECT f.id, s.depth + 1 FROM storage_files f JOIN subtree s ON f.parent_id = s.id
         WHERE s.depth < 50
       )
-      UPDATE files SET trashed_at = ${now}
-      WHERE id IN (SELECT id FROM subtree) AND trashed_at IS NULL;
+      UPDATE storage_files SET deleted_at = ${now}
+      WHERE id IN (SELECT id FROM subtree) AND deleted_at IS NULL;
     `;
     return Number(result);
   }
@@ -474,12 +549,12 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     if (!isValidUuid(rootNodeId)) return 0;
     const result = await this.prisma.$executeRaw`
       WITH RECURSIVE subtree AS (
-        SELECT id, 0 as depth FROM files WHERE id = ${rootNodeId}::uuid
+        SELECT id, 0 as depth FROM storage_files WHERE id = ${rootNodeId}::uuid
         UNION ALL
-        SELECT f.id, s.depth + 1 FROM files f JOIN subtree s ON f.parent_id = s.id
+        SELECT f.id, s.depth + 1 FROM storage_files f JOIN subtree s ON f.parent_id = s.id
         WHERE s.depth < 50
       )
-      UPDATE files SET trashed_at = NULL
+      UPDATE storage_files SET deleted_at = NULL
       WHERE id IN (SELECT id FROM subtree);
     `;
     return Number(result);
@@ -490,12 +565,12 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     try {
       const records = await this.prisma.$queryRaw<PrismaFile[]>`
         WITH RECURSIVE subtree AS (
-          SELECT id, 0 as depth FROM files WHERE id = ${rootNodeId}::uuid
+          SELECT id, 0 as depth FROM storage_files WHERE id = ${rootNodeId}::uuid
           UNION ALL
-          SELECT f.id, s.depth + 1 FROM files f JOIN subtree s ON f.parent_id = s.id
+          SELECT f.id, s.depth + 1 FROM storage_files f JOIN subtree s ON f.parent_id = s.id
           WHERE s.depth < 50
         )
-        SELECT f.* FROM files f JOIN subtree s ON f.id = s.id;
+        SELECT f.* FROM storage_files f JOIN subtree s ON f.id = s.id;
       `;
       return records.map((r) => StorageNodeMapper.toDomain(r));
     } catch (err: unknown) {
@@ -509,9 +584,9 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     limit: number,
   ): Promise<StorageNode[]> {
     const threshold = new Date(Date.now() - daysOld * 24 * 3600 * 1000);
-    const records = await this.prisma.file.findMany({
+    const records = await this.prisma.storageFile.findMany({
       where: {
-        trashedAt: { lt: threshold },
+        deletedAt: { lt: threshold },
       },
       take: limit,
     });
@@ -526,9 +601,9 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     try {
       const result = await this.prisma.$queryRaw<Array<{ exists: boolean }>>`
         WITH RECURSIVE ancestors AS (
-          SELECT id, parent_id, 0 as depth FROM files WHERE id = ${candidateId}::uuid
+          SELECT id, parent_id, 0 as depth FROM storage_files WHERE id = ${candidateId}::uuid
           UNION ALL
-          SELECT f.id, f.parent_id, a.depth + 1 FROM files f JOIN ancestors a ON f.id = a.parent_id
+          SELECT f.id, f.parent_id, a.depth + 1 FROM storage_files f JOIN ancestors a ON f.id = a.parent_id
           WHERE a.id <> ${rootNodeId}::uuid AND a.depth < 50
         )
         SELECT EXISTS(SELECT 1 FROM ancestors WHERE id = ${rootNodeId}::uuid) AS "exists";
@@ -549,10 +624,10 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
         Array<{ id: string; filename: string; depth: number }>
       >`
         WITH RECURSIVE breadcrumbs AS (
-          SELECT id, filename, parent_id, 0 as depth FROM files WHERE id = ${folderId}::uuid
+          SELECT id, filename, parent_id, 0 as depth FROM storage_files WHERE id = ${folderId}::uuid
           UNION ALL
           SELECT f.id, f.filename, f.parent_id, b.depth + 1
-          FROM files f JOIN breadcrumbs b ON f.id = b.parent_id
+          FROM storage_files f JOIN breadcrumbs b ON f.id = b.parent_id
           WHERE b.depth < 50
         )
         SELECT id, filename, depth FROM breadcrumbs ORDER BY depth DESC;
@@ -582,7 +657,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     }>;
     total: number;
   }> {
-    const fileWhere: Prisma.FileWhereInput = { trashedAt: null };
+    const fileWhere: Prisma.StorageFileWhereInput = { deletedAt: null };
     if (filter?.search && filter.search.trim()) {
       fileWhere.filename = {
         contains: filter.search.trim(),
@@ -591,24 +666,29 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     }
     applyFileTypeFilter(fileWhere, filter?.types);
 
-    const where: Prisma.FileShareWhereInput = {
+    const where: Prisma.StorageFileShareWhereInput = {
       userId,
       file: fileWhere,
     };
 
     const [shares, total] = await Promise.all([
-      this.prisma.fileShare.findMany({
+      this.prisma.storageFileShare.findMany({
         where,
         include: {
           file: {
-            include: { author: { select: FILE_AUTHOR_SELECT } },
+            include: {
+              createdBy: { select: FILE_AUTHOR_SELECT },
+              stars: isValidUuid(userId)
+                ? { where: { userId }, select: { userId: true } }
+                : { select: { userId: true }, take: 1 },
+            },
           },
         },
         orderBy: { createdAt: 'desc' },
         take,
         skip,
       }),
-      this.prisma.fileShare.count({ where }),
+      this.prisma.storageFileShare.count({ where }),
     ]);
 
     const items = shares
@@ -636,7 +716,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     const permission =
       permissionType === 'edit' ? ('edit' as const) : ('view' as const);
 
-    const share = await this.prisma.fileShare.upsert({
+    const share = await this.prisma.storageFileShare.upsert({
       where: {
         fileId_userId: {
           fileId,

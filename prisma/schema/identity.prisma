@@ -48,7 +48,10 @@ model User {
   updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt DateTime?  @map("deleted_at") @db.Timestamptz(6)
 
-  // Identity Internal Relations (100% Isolated)
+  // Personal Space (1:1)
+  personalSpace      Space?              @relation("UserPersonalSpace")
+
+  // Identity Internal Relations
   profile            UserProfile?
   settings           UserSettings?
   accounts           UserAccount[]
@@ -57,35 +60,35 @@ model User {
   verificationTokens VerificationToken[]
   auditLogs          AuditLog[]          @relation("AuditActor")
 
-  // Collaborative Project Relations (Clean & Two-Tier)
+  // Collaborative Project Relations
   createdProjects       Project[]         @relation("ProjectCreator")
   projectMembers        ProjectMember[]   @relation("UserProjectMemberships")
   projectFavorites      ProjectFavorite[] @relation("UserProjectFavorites")
-  labels                Label[]           @relation("UserLabels")
   assignedProjectLabels ProjectLabel[]    @relation("ProjectLabelAssigner")
   projectTemplates      ProjectTemplate[] @relation("UserProjectTemplates")
   projectUpdates        ProjectUpdate[]   @relation("UserProjectUpdates")
 
-  // Storage Relations (Personal Scope & File Sharing)
-  authoredFiles File[]      @relation("UserFiles")
-  sharedFiles   FileShare[] @relation("UserSharedFiles")
+  // Storage Relations
+  createdFiles       StorageFile[]      @relation("UserFiles")
+  starredFiles       StorageFileStar[]  @relation("UserStarredFiles")
+  sharedFiles        StorageFileShare[] @relation("UserSharedFiles")
 
-  // Work-Item Relations (Collaborative Issue Tracking)
+  // Work-Item & Space Label Relations
   userActivityEvents    ActivityEvent[]       @relation("UserActivityEvents")
-  createdWorkItems      WorkItem[]            @relation("WorkItemAuthor")
+  createdWorkItems      WorkItem[]            @relation("WorkItemCreator")
   assignedWorkItems     WorkItem[]            @relation("WorkItemAssignee")
   workItemComments      WorkItemComment[]
   userDrafts            WorkItemDraft[]       @relation("UserDrafts")
   userAttachments       EntityAttachment[]    @relation("UserAttachments")
-  createdWorkItemLabels WorkItemLabel[]       @relation("UserCreatedWorkItemLabels")
+  createdSpaceLabels    SpaceLabel[]          @relation("UserCreatedLabels")
   workItemCoAssignments WorkItemAssignee[]    @relation("WorkItemCoAssignees")
   createdViews          WorkItemView[]        @relation("ViewAuthor")
   viewFavorites         ViewFavorite[]
 
-  // AI & Intelligence Relations (Unified Copilot & Chat History)
+  // AI & Intelligence Relations
   aiChats AiChat[] @relation("UserAiChats")
 
-  // Sticky Notes & Canvas Relations
+  // Sticky Notes Relations
   stickies Sticky[] @relation("UserStickies")
 
   // Chat & Social Relations
@@ -181,6 +184,7 @@ model AuditLog {
   action         String        @db.VarChar(100)
   outcome        AuditOutcome  @default(success)
   severity       AuditSeverity @default(info)
+  spaceId        String?       @map("space_id") @db.Uuid
   projectId      String?       @map("project_id") @db.Uuid
   targetType     String?       @map("target_type") @db.VarChar(50)
   targetId       String?       @map("target_id") @db.VarChar(100)
@@ -191,6 +195,7 @@ model AuditLog {
   occurredAt     DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
 
   @@index([actorId, occurredAt(sort: Desc)])
+  @@index([spaceId, occurredAt(sort: Desc)])
   @@index([projectId, occurredAt(sort: Desc)])
   @@index([action, occurredAt(sort: Desc)])
   @@index([severity, occurredAt(sort: Desc)])

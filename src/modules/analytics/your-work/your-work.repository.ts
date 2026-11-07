@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import {
   IYourWorkRepository,
   ProjectMinimal,
@@ -53,15 +53,18 @@ export class YourWorkRepository implements IYourWorkRepository {
         deletedAt: null,
         OR: [
           { assigneeId: userId },
-          { authorId: userId },
-          { comments: { some: { authorId: userId } } },
-          { assigneeIds: { array_contains: userId } },
+          { createdById: userId },
+          { comments: { some: { createdById: userId } } },
+          { assignees: { some: { userId } } },
           { subscriberIds: { array_contains: userId } },
         ],
       },
       include: {
-        author: { select: USER_SELECT },
+        createdBy: { select: USER_SELECT },
         assignee: { select: USER_SELECT },
+        assignees: {
+          select: { userId: true },
+        },
         project: {
           select: {
             id: true,
@@ -72,7 +75,7 @@ export class YourWorkRepository implements IYourWorkRepository {
           },
         },
         comments: {
-          where: { authorId: userId },
+          where: { createdById: userId },
           select: { id: true },
           take: 1,
         },
@@ -83,7 +86,10 @@ export class YourWorkRepository implements IYourWorkRepository {
 
     return items.map((item) => ({
       ...item,
-      author: mapUserMinimal(item.author)!,
+      authorId: item.createdById,
+      columnId: item.stateId,
+      assigneeIds: item.assignees.map((a) => a.userId),
+      author: mapUserMinimal(item.createdBy)!,
       assignee: mapUserMinimal(item.assignee),
     }));
   }
@@ -145,6 +151,9 @@ export class YourWorkRepository implements IYourWorkRepository {
     hasAccess: boolean;
     project?: ProjectMinimal;
   }> {
+    if (!isUuid(projectId)) {
+      return { exists: false, hasAccess: false };
+    }
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, deletedAt: null },
       select: {

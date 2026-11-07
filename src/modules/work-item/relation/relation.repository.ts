@@ -1,13 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService, isUuid } from '@/core';
-import { WorkItem, Prisma, WorkItemRelationType } from '@prisma/client';
-import { WorkItemRelationItem } from './types/relation.types';
+import { PrismaService } from '@/core';
+import { WorkItem, WorkItemRelationType } from '@prisma/client';
 import {
   buildWorkItemIdOrIdentifierWhere,
   resolveCanonicalProjectId as resolveSharedProjectId,
 } from '@/modules/work-item/common/types/shared.types';
 
 export type WorkItemWithRelationalLinks = WorkItem & {
+  columnId: string;
+  authorId: string;
   outgoingRelations?: Array<{
     id: string;
     sourceId: string;
@@ -41,7 +42,7 @@ export class RelationRepository {
   ): Promise<WorkItemWithRelationalLinks[]> {
     const canonicalProjectId = await this.resolveCanonicalProjectId(projectId);
     if (!canonicalProjectId) return [];
-    return this.prismaService.workItem.findMany({
+    const items = await this.prismaService.workItem.findMany({
       where: {
         projectId: canonicalProjectId,
         deletedAt: null,
@@ -71,12 +72,17 @@ export class RelationRepository {
       },
       orderBy: [{ rank: 'asc' }, { createdAt: 'asc' }],
     });
+    return items.map((item) => ({
+      ...item,
+      columnId: item.stateId,
+      authorId: item.createdById,
+    }));
   }
 
   async findWorkItem(
     workItemId: string,
   ): Promise<WorkItemWithRelationalLinks | null> {
-    return this.prismaService.workItem.findFirst({
+    const item = await this.prismaService.workItem.findFirst({
       where: buildWorkItemIdOrIdentifierWhere(workItemId),
       include: {
         outgoingRelations: {
@@ -101,16 +107,29 @@ export class RelationRepository {
         },
       },
     });
+    if (!item) return null;
+    return {
+      ...item,
+      columnId: item.stateId,
+      authorId: item.createdById,
+    };
   }
 
-  async findWorkItemsByIds(workItemIds: string[]): Promise<WorkItem[]> {
+  async findWorkItemsByIds(
+    workItemIds: string[],
+  ): Promise<Array<WorkItem & { columnId: string; authorId: string }>> {
     if (!workItemIds || workItemIds.length === 0) return [];
-    return this.prismaService.workItem.findMany({
+    const items = await this.prismaService.workItem.findMany({
       where: {
         id: { in: workItemIds },
         deletedAt: null,
       },
     });
+    return items.map((item) => ({
+      ...item,
+      columnId: item.stateId,
+      authorId: item.createdById,
+    }));
   }
 
   async findProjectGraphEdges(
@@ -119,17 +138,6 @@ export class RelationRepository {
   ): Promise<Array<{ sourceId: string; targetId: string }>> {
     const edges: Array<{ sourceId: string; targetId: string }> = [];
     const isBlocks = relationCategory === 'blocks';
-    const forwardTypes = isBlocks
-      ? [
-          'blocks',
-          'finish_to_start',
-          'start_to_start',
-          'finish_to_finish',
-          'start_to_finish',
-          'starts_before',
-          'finishes_before',
-        ]
-      : ['duplicate_of'];
     const inverseTypes = isBlocks
       ? ['blocked_by', 'starts_after', 'finishes_after']
       : ['duplicated_by'];
@@ -138,24 +146,14 @@ export class RelationRepository {
       ? [WorkItemRelationType.blocks, WorkItemRelationType.blocked_by]
       : [WorkItemRelationType.duplicate_of];
 
-    const [dbRelations, items] = await Promise.all([
-      this.prismaService.workItemRelation.findMany({
-        where: {
-          sourceWorkItem: { projectId, deletedAt: null },
-          targetWorkItem: { projectId, deletedAt: null },
-          type: { in: prismaRelationTypes },
-        },
-        select: { sourceId: true, targetId: true, type: true },
-      }),
-      this.prismaService.workItem.findMany({
-        where: {
-          projectId,
-          deletedAt: null,
-          relations: { not: Prisma.DbNull },
-        },
-        select: { id: true, relations: true },
-      }),
-    ]);
+    const dbRelations = await this.prismaService.workItemRelation.findMany({
+      where: {
+        sourceWorkItem: { projectId, deletedAt: null },
+        targetWorkItem: { projectId, deletedAt: null },
+        type: { in: prismaRelationTypes },
+      },
+      select: { sourceId: true, targetId: true, type: true },
+    });
 
     for (const rel of dbRelations as Array<{
       sourceId: string;
@@ -167,20 +165,6 @@ export class RelationRepository {
         edges.push({ sourceId: rel.targetId, targetId: rel.sourceId });
       } else {
         edges.push({ sourceId: rel.sourceId, targetId: rel.targetId });
-      }
-    }
-
-    for (const item of items) {
-      if (Array.isArray(item.relations)) {
-        for (const r of item.relations as unknown as WorkItemRelationItem[]) {
-          if (!r.targetWorkItemId) continue;
-          const normalizedType = String(r.type || '').toLowerCase();
-          if (forwardTypes.includes(normalizedType)) {
-            edges.push({ sourceId: item.id, targetId: r.targetWorkItemId });
-          } else if (inverseTypes.includes(normalizedType)) {
-            edges.push({ sourceId: r.targetWorkItemId, targetId: item.id });
-          }
-        }
       }
     }
 

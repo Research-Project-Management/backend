@@ -25,18 +25,18 @@ export class DocumentAiIngestionService {
   async ingestFile(event: FileUploadedEvent): Promise<void> {
     const fileId = event.fileId;
 
-    const file = await this.prisma.file.findUnique({
+    const file = await this.prisma.storageFile.findUnique({
       where: { id: fileId },
     });
 
-    if (!file || file.trashedAt) {
+    if (!file || file.deletedAt) {
       this.logger.warn(
         `Storage file ${fileId} not found or deleted. Skipping AI ingestion.`,
       );
       return;
     }
 
-    const currentMeta = (file.metaData as Record<string, unknown>) || {};
+    const currentMeta = (file.metadata as Record<string, unknown>) || {};
 
     // Idempotency: Skip if already indexed
     if (currentMeta.ragStatus === 'indexed' && currentMeta.ragDocId) {
@@ -51,10 +51,10 @@ export class DocumentAiIngestionService {
     );
 
     // 1. Mark status as processing
-    await this.prisma.file.update({
+    await this.prisma.storageFile.update({
       where: { id: fileId },
       data: {
-        metaData: {
+        metadata: {
           ...currentMeta,
           ragStatus: 'processing',
           ragStartedAt: new Date().toISOString(),
@@ -111,6 +111,7 @@ export class DocumentAiIngestionService {
 
       // 6. Upload to FLux-AI / Qdrant vector database
       let ragDocId: string | null = null;
+      const spaceId = file.spaceId || event.projectId || event.authorId;
       try {
         const uploadResult = await this.engineService.uploadDocument(
           Buffer.from(fullDocumentMarkdown, 'utf8'),
@@ -118,7 +119,7 @@ export class DocumentAiIngestionService {
           `${event.filename}.md`,
           {
             userId: event.authorId,
-            scopeId: event.projectId || event.authorId,
+            scopeId: spaceId,
             projectId: event.projectId ?? undefined,
             title,
             tags: 'scientific-paper,rag,drive',
@@ -139,10 +140,10 @@ export class DocumentAiIngestionService {
 
       // 7. Update file metadata with extraction results and RAG status
       const isIndexed = Boolean(ragDocId);
-      await this.prisma.file.update({
+      await this.prisma.storageFile.update({
         where: { id: fileId },
         data: {
-          metaData: {
+          metadata: {
             ...currentMeta,
             ragDocId: ragDocId || undefined,
             ragStatus: isIndexed ? 'indexed' : 'failed',
@@ -215,10 +216,10 @@ export class DocumentAiIngestionService {
         `AI RAG Ingestion failed for file ${fileId}: ${errorMessage}`,
         stack,
       );
-      await this.prisma.file.update({
+      await this.prisma.storageFile.update({
         where: { id: fileId },
         data: {
-          metaData: {
+          metadata: {
             ...currentMeta,
             ragStatus: 'failed',
             ragError: errorMessage,

@@ -31,13 +31,16 @@ export type { FormattedChatSession };
 function formatChat(chat: ChatWithMessages): FormattedChatSession {
   const msgs = Array.isArray(chat.messages) ? chat.messages : [];
   const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1].content || '' : '';
+  const projectId =
+    chat.spaceId && chat.spaceId !== chat.createdById ? chat.spaceId : null;
 
   return {
     id: chat.id,
     title: chat.title,
-    projectId: chat.projectId,
+    spaceId: chat.spaceId,
+    projectId,
     pageId: chat.pageId,
-    scopeSlug: chat.projectId || chat.userId,
+    scopeSlug: chat.spaceId || chat.createdById,
     messageCount: msgs.length,
     lastMessage: lastMsg,
     documentIds: chat.documentIds || [],
@@ -121,7 +124,7 @@ export class ChatService {
       if (cached) return cached;
     }
 
-    const rawChats = await this.chatRepo.findUserChats(userId, projectId);
+    const rawChats = await this.chatRepo.findUserChats(userId, cleanProjectId);
     const result = rawChats.map(formatChat);
 
     if (this.cache) {
@@ -164,20 +167,22 @@ export class ChatService {
       return formatChat(raw);
     }
 
-    const doc = await this.prisma.manuscriptDoc.findUnique({
+    const doc = await this.prisma.pageDoc.findUnique({
       where: { id: pageId },
-      select: { path: true, projectId: true },
+      select: { path: true, spaceId: true },
     });
 
     const docTitle = doc?.path;
     const title = docTitle
       ? `${sanitizeChatTitle(docTitle)} Discussion`
       : 'Manuscript Chat';
-    const effectiveProjectId = projectId || doc?.projectId || null;
+    const effectiveSpaceId = projectId || doc?.spaceId || userId;
+    const effectiveProjectId =
+      effectiveSpaceId !== userId ? effectiveSpaceId : null;
 
     const created = await this.chatRepo.createChat({
-      userId,
-      projectId: effectiveProjectId,
+      createdById: userId,
+      spaceId: effectiveSpaceId,
       pageId,
       title,
     });
@@ -210,7 +215,7 @@ export class ChatService {
     userId: string,
     dto: CreateChatDto,
   ): Promise<FormattedChatSession> {
-    const cleanProjectId = this.sanitizeProjectId(dto.projectId);
+    let cleanProjectId = this.sanitizeProjectId(dto.projectId);
     // Verify project access if specified
     if (cleanProjectId) {
       const isUuid =
@@ -237,39 +242,43 @@ export class ChatService {
           'User does not have access to this project',
         );
       }
+      cleanProjectId = project.id;
     }
 
     // Verify document access if specified
     if (dto.pageId) {
-      const doc = await this.prisma.manuscriptDoc.findFirst({
-        where: { id: dto.pageId, deleted: false },
-        select: { id: true, projectId: true },
+      const doc = await this.prisma.pageDoc.findFirst({
+        where: { id: dto.pageId, deletedAt: null },
+        select: { id: true, spaceId: true },
       });
       if (!doc) {
         throw new NotFoundException('Manuscript doc not found');
       }
-      const project = await this.prisma.project.findFirst({
-        where: { id: doc.projectId },
-        select: {
-          id: true,
-          identifier: true,
-          createdById: true,
-          members: { where: { userId }, select: { userId: true } },
-        },
-      });
-      const canAccess =
-        project?.createdById === userId ||
-        (project?.members && project.members.length > 0);
-      if (!canAccess) {
-        throw new ForbiddenException(
-          'User does not have access to this manuscript document',
-        );
+      if (doc.spaceId !== userId) {
+        const project = await this.prisma.project.findFirst({
+          where: { id: doc.spaceId },
+          select: {
+            id: true,
+            identifier: true,
+            createdById: true,
+            members: { where: { userId }, select: { userId: true } },
+          },
+        });
+        const canAccess =
+          project?.createdById === userId ||
+          (project?.members && project.members.length > 0);
+        if (!canAccess) {
+          throw new ForbiddenException(
+            'User does not have access to this manuscript document',
+          );
+        }
       }
     }
 
+    const spaceId = cleanProjectId || userId;
     const created = await this.chatRepo.createChat({
-      userId,
-      projectId: cleanProjectId,
+      createdById: userId,
+      spaceId,
       pageId: dto.pageId,
       title: sanitizeChatTitle(dto.title),
       documentIds: dto.documentIds,
@@ -280,10 +289,12 @@ export class ChatService {
         role: validateAndSanitizeRole(m.role),
         content: sanitizeChatMessageContent(m.content),
         sources: (m.attachments || m.sources) as
-          Prisma.InputJsonValue | undefined,
+          | Prisma.InputJsonValue
+          | undefined,
         widgets: m.widgets as Prisma.InputJsonValue | undefined,
         selectionContext: m.selectionContext as
-          Prisma.InputJsonValue | undefined,
+          | Prisma.InputJsonValue
+          | undefined,
       }));
       const updated = await this.chatRepo.createMessages(
         created.id,
@@ -321,7 +332,8 @@ export class ChatService {
       role: validateAndSanitizeRole(m.role),
       content: sanitizeChatMessageContent(m.content),
       sources: (m.attachments || m.sources) as
-        Prisma.InputJsonValue | undefined,
+        | Prisma.InputJsonValue
+        | undefined,
       widgets: m.widgets as Prisma.InputJsonValue | undefined,
       selectionContext: m.selectionContext as Prisma.InputJsonValue | undefined,
     }));
@@ -339,8 +351,10 @@ export class ChatService {
       throw new NotFoundException('Chat not found');
     }
     const result = formatChat(updated);
+    const projectId =
+      chat.spaceId && chat.spaceId !== chat.createdById ? chat.spaceId : null;
 
-    await this.invalidateChatCache(chat.userId, chatId, chat.projectId);
+    await this.invalidateChatCache(chat.createdById, chatId, projectId);
 
     return result;
   }
@@ -358,8 +372,10 @@ export class ChatService {
     const cleanTitle = sanitizeChatTitle(dto.title);
     const updated = await this.chatRepo.updateChatTitle(chatId, cleanTitle);
     const result = formatChat(updated);
+    const projectId =
+      chat.spaceId && chat.spaceId !== chat.createdById ? chat.spaceId : null;
 
-    await this.invalidateChatCache(chat.userId, chatId, chat.projectId);
+    await this.invalidateChatCache(chat.createdById, chatId, projectId);
 
     return result;
   }
@@ -371,8 +387,10 @@ export class ChatService {
     }
     await this.chatRepo.deleteChat(chatId);
     await this.engineService?.deleteDocumentsByChat(chatId, userId);
+    const projectId =
+      chat.spaceId && chat.spaceId !== chat.createdById ? chat.spaceId : null;
 
-    await this.invalidateChatCache(chat.userId, chatId, chat.projectId);
+    await this.invalidateChatCache(chat.createdById, chatId, projectId);
 
     return { success: true };
   }
@@ -385,4 +403,3 @@ export class ChatService {
     return { success: true };
   }
 }
-

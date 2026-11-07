@@ -452,9 +452,9 @@ export class UserRepository implements IUserRepository {
     query: string,
   ): Promise<Array<{ id: string; title: string; updatedAt: Date }>> {
     try {
-      return await this.prisma.item.findMany({
+      return await this.prisma.libraryItem.findMany({
         where: {
-          userId,
+          spaceId: userId,
           deletedAt: null,
           title: { contains: query, mode: 'insensitive' },
         },
@@ -491,16 +491,16 @@ export class UserRepository implements IUserRepository {
       });
       const projectIds = userProjects.map((up) => up.projectId);
 
-      const docs = await this.prisma.manuscriptDoc.findMany({
+      const docs = await this.prisma.pageDoc.findMany({
         where: {
-          deleted: false,
-          projectId: { in: projectIds },
+          deletedAt: null,
+          spaceId: { in: projectIds },
           path: { contains: query, mode: 'insensitive' },
         },
         select: {
           id: true,
           path: true,
-          projectId: true,
+          spaceId: true,
           updatedAt: true,
         },
         take: 10,
@@ -508,9 +508,9 @@ export class UserRepository implements IUserRepository {
       return docs.map((doc) => ({
         id: doc.id,
         title: doc.path,
-        projectId: doc.projectId,
-        project: projectMap.has(doc.projectId)
-          ? { name: projectMap.get(doc.projectId)! }
+        projectId: doc.spaceId,
+        project: projectMap.has(doc.spaceId)
+          ? { name: projectMap.get(doc.spaceId)! }
           : undefined,
         updatedAt: doc.updatedAt,
       }));
@@ -533,10 +533,10 @@ export class UserRepository implements IUserRepository {
     }>
   > {
     try {
-      const files = await this.prisma.file.findMany({
+      const files = await this.prisma.storageFile.findMany({
         where: {
-          authorId: userId,
-          trashedAt: null,
+          spaceId: userId,
+          deletedAt: null,
           filename: { contains: query, mode: 'insensitive' },
         },
         select: {

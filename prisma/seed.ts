@@ -34,16 +34,16 @@ async function main() {
     await prisma.workItemAssignee.deleteMany();
     await prisma.workItemDraft.deleteMany();
     await prisma.workItem.deleteMany();
-    await prisma.workItemLabel.deleteMany();
     await prisma.workItemState.deleteMany();
-    await prisma.manuscriptNode.deleteMany();
-    await prisma.manuscriptDoc.deleteMany();
-    await prisma.collectionItem.deleteMany();
-    await prisma.item.deleteMany();
-    await prisma.collection.deleteMany();
+    await prisma.pageNode.deleteMany();
+    await prisma.pageDoc.deleteMany();
+    await prisma.page.deleteMany();
+    await prisma.libraryCollectionItem.deleteMany();
+    await prisma.libraryItem.deleteMany();
+    await prisma.libraryCollection.deleteMany();
     await prisma.projectLabel.deleteMany();
-    await prisma.label.deleteMany();
-    await prisma.file.deleteMany();
+    await prisma.spaceLabel.deleteMany();
+    await prisma.storageFile.deleteMany();
     await prisma.projectMember.deleteMany();
     await prisma.projectState.deleteMany();
     await prisma.project.deleteMany();
@@ -162,6 +162,17 @@ async function main() {
     `👤 Users configured: ${userThanh.email} (Owner), ${adminUser.email} (PI), ${researcherUser.email} (Fellow), ${reviewerUser.email} (Reviewer)`,
   );
 
+  // Ensure Personal Space exists for userThanh (in case user existed before trigger)
+  await prisma.space.upsert({
+    where: { id: userThanh.id },
+    update: {},
+    create: {
+      id: userThanh.id,
+      type: 'personal',
+      ownerUserId: userThanh.id,
+    },
+  });
+
   // 3. Create Project "flux" (identifier: FLUX)
   const project = await prisma.project.create({
     data: {
@@ -182,138 +193,158 @@ async function main() {
     },
   });
 
+  // Ensure Project Space exists for project "flux"
+  await prisma.space.upsert({
+    where: { id: project.id },
+    update: {},
+    create: {
+      id: project.id,
+      type: 'project',
+      projectId: project.id,
+    },
+  });
+
   console.log(
     `📁 Created project: ${project.name} (${project.identifier}) owned by ${userThanh.email}`,
   );
 
   // 4. Seed default WorkItemState workflow states (5 default state groups)
-  await prisma.workItemState.createMany({
-    data: [
-      {
-        id: 'backlog',
-        name: 'Backlog',
-        color: '#6B7280',
-        group: 'backlog',
-        sequence: 1000,
-        isDefault: true,
-        projectId: project.id,
-      },
-      {
-        id: 'todo',
-        name: 'To Do',
-        color: '#94A3B8',
-        group: 'unstarted',
-        sequence: 2000,
-        isDefault: false,
-        projectId: project.id,
-      },
-      {
-        id: 'in_progress',
-        name: 'In Progress',
-        color: '#D97706',
-        group: 'started',
-        sequence: 3000,
-        isDefault: false,
-        projectId: project.id,
-      },
-      {
-        id: 'done',
-        name: 'Done',
-        color: '#1A7F37',
-        group: 'completed',
-        sequence: 4000,
-        isDefault: false,
-        projectId: project.id,
-      },
-      {
-        id: 'cancelled',
-        name: 'Cancelled',
-        color: '#9CA3AF',
-        group: 'cancelled',
-        sequence: 5000,
-        isDefault: false,
-        projectId: project.id,
-      },
-    ],
+  const stateBacklog = await prisma.workItemState.create({
+    data: {
+      name: 'Backlog',
+      color: '#6B7280',
+      group: 'backlog',
+      sequence: 1000,
+      isDefault: true,
+      projectId: project.id,
+    },
+  });
+  const stateTodo = await prisma.workItemState.create({
+    data: {
+      name: 'To Do',
+      color: '#94A3B8',
+      group: 'unstarted',
+      sequence: 2000,
+      isDefault: false,
+      projectId: project.id,
+    },
+  });
+  const stateInProgress = await prisma.workItemState.create({
+    data: {
+      name: 'In Progress',
+      color: '#D97706',
+      group: 'started',
+      sequence: 3000,
+      isDefault: false,
+      projectId: project.id,
+    },
+  });
+  const stateDone = await prisma.workItemState.create({
+    data: {
+      name: 'Done',
+      color: '#1A7F37',
+      group: 'completed',
+      sequence: 4000,
+      isDefault: false,
+      projectId: project.id,
+    },
+  });
+  const stateCancelled = await prisma.workItemState.create({
+    data: {
+      name: 'Cancelled',
+      color: '#9CA3AF',
+      group: 'cancelled',
+      sequence: 5000,
+      isDefault: false,
+      projectId: project.id,
+    },
   });
 
-  // 5. Seed WorkItemLabels (Academic & Technical taxonomy)
-  const lblDL = await prisma.workItemLabel.create({
+  const stateIdByCol: Record<string, string> = {
+    backlog: stateBacklog.id,
+    todo: stateTodo.id,
+    in_progress: stateInProgress.id,
+    done: stateDone.id,
+    cancelled: stateCancelled.id,
+  };
+
+  // 5. Seed SpaceLabels (Academic & Technical taxonomy)
+  const lblDL = await prisma.spaceLabel.create({
     data: {
       name: 'Deep Learning',
       color: '#3B82F6',
       description: 'Neural operator models and deep learning architectures',
-      projectId: project.id,
+      spaceId: project.id,
       createdById: userThanh.id,
       sortOrder: 1,
     },
   });
-  const lblOpt = await prisma.workItemLabel.create({
+  const lblOpt = await prisma.spaceLabel.create({
     data: {
       name: 'Optimization',
       color: '#06B6D4',
       description: 'Stochastic gradients, Adam, momentum, and learning rates',
-      projectId: project.id,
+      spaceId: project.id,
       createdById: userThanh.id,
       sortOrder: 2,
     },
   });
-  const lblLoss = await prisma.workItemLabel.create({
+  const lblLoss = await prisma.spaceLabel.create({
     data: {
       name: 'Loss Function',
       color: '#8B5CF6',
       description: 'Empirical risk, weight decay, and regularization',
-      projectId: project.id,
+      spaceId: project.id,
       createdById: adminUser.id,
       sortOrder: 3,
     },
   });
-  const lblLatex = await prisma.workItemLabel.create({
+  const lblLatex = await prisma.spaceLabel.create({
     data: {
       name: 'LaTeX Manuscript',
       color: '#10B981',
       description: 'Paper drafting, figures, and CLSI compilation',
-      projectId: project.id,
+      spaceId: project.id,
       createdById: userThanh.id,
       sortOrder: 4,
     },
   });
-  const lblGPU = await prisma.workItemLabel.create({
+  const lblGPU = await prisma.spaceLabel.create({
     data: {
       name: 'GPU Cluster & HPC',
       color: '#F59E0B',
       description: 'CUDA, DDP, multi-GPU scaling, and memory efficiency',
-      projectId: project.id,
+      spaceId: project.id,
       createdById: adminUser.id,
       sortOrder: 5,
     },
   });
-  const lblBib = await prisma.workItemLabel.create({
+  const lblBib = await prisma.spaceLabel.create({
     data: {
       name: 'BibTeX & Literature',
       color: '#EC4899',
       description: 'Reference management and literature integration',
-      projectId: project.id,
+      spaceId: project.id,
       createdById: researcherUser.id,
       sortOrder: 6,
     },
   });
-  const lblReview = await prisma.workItemLabel.create({
+  const lblReview = await prisma.spaceLabel.create({
     data: {
       name: 'Peer Review',
       color: '#F97316',
       description: 'Reviewer comments, rebuttals, and revisions',
-      projectId: project.id,
+      spaceId: project.id,
       createdById: reviewerUser.id,
       sortOrder: 7,
     },
   });
-  const lblBench = await prisma.workItemLabel.create({
+  const lblBench = await prisma.spaceLabel.create({
     data: {
       name: 'Benchmark',
       color: '#6366F1',
       description: 'Performance comparison across MNIST, CIFAR, and ImageNet',
-      projectId: project.id,
+      spaceId: project.id,
       createdById: userThanh.id,
       sortOrder: 8,
     },
@@ -972,13 +1003,11 @@ async function main() {
         identifier: `FLUX-${def.seq}`,
         title: def.title,
         content: def.content,
-        columnId: def.col,
+        stateId: stateIdByCol[def.col] ?? stateBacklog.id,
         priority: def.prio,
         rank: def.seq * 100,
-        labels: def.labels,
-        authorId: def.author,
+        createdById: def.author,
         assigneeId: def.assignee,
-        assigneeIds: [def.assignee],
         parentWorkItemId: parentId,
         projectId: project.id,
         completed: def.completed ?? def.col === 'done',
@@ -1032,7 +1061,7 @@ async function main() {
   await prisma.workItemComment.create({
     data: {
       workItemId: createdWorkItemsMap.get(19)!,
-      authorId: adminUser.id,
+      createdById: adminUser.id,
       content:
         'The bias-corrected second moment estimate prevents the optimizer from stalling in the early epochs when gradients are sparse.',
     },
@@ -1040,7 +1069,7 @@ async function main() {
   await prisma.workItemComment.create({
     data: {
       workItemId: createdWorkItemsMap.get(19)!,
-      authorId: userThanh.id,
+      createdById: userThanh.id,
       content:
         'Verified convergence curves on CIFAR-10 and ImageNet. Adam converges ~2.8x faster than standard SGD with momentum while maintaining optimal numerical stability.',
     },
@@ -1048,7 +1077,7 @@ async function main() {
   await prisma.workItemComment.create({
     data: {
       workItemId: createdWorkItemsMap.get(29)!,
-      authorId: reviewerUser.id,
+      createdById: reviewerUser.id,
       content:
         'The mathematical step from Lemma 2 to Theorem 1 is rigorous. Lemma 3 bounding the sum of alpha_t / sqrt(t) has been verified against Euler-Maclaurin summation.',
     },
@@ -1058,60 +1087,60 @@ async function main() {
     `✅ Successfully seeded 42 Work Items (${createdWorkItemsMap.size} created).`,
   );
 
-  // 7. Seed 32 Academic Papers Across 4 Major Collections (All Owned by userThanh)
+  // 7. Seed 32 Academic Papers Across 4 Major Collections in Project Space (spaceId = project.id)
   console.log(
     '📚 Seeding comprehensive 32 Library papers across 4 collections...',
   );
 
   // Collection 1: Foundation Models & LLM Architectures
-  const col1 = await prisma.collection.create({
+  const col1 = await prisma.libraryCollection.create({
     data: {
       name: 'Foundation Models & LLM Architectures',
       description:
         'Landmark breakthroughs in Transformers, Attention, Pretraining, and Mixture-of-Experts.',
       color: '#3B82F6',
       icon: 'Cpu',
-      userId: userThanh.id,
-      projectId: project.id,
+      spaceId: project.id,
+      createdById: userThanh.id,
     },
   });
 
   // Collection 2: Optimization & Gradient Dynamics
-  const col2 = await prisma.collection.create({
+  const col2 = await prisma.libraryCollection.create({
     data: {
       name: 'Optimization & Gradient Dynamics',
       description:
         'First and second-order adaptive algorithms: Adam, AdamW, AMSGrad, Lion, Sophia, Adafactor.',
       color: '#06B6D4',
       icon: 'TrendingUp',
-      userId: userThanh.id,
-      projectId: project.id,
+      spaceId: project.id,
+      createdById: userThanh.id,
     },
   });
 
   // Collection 3: Vision & Multimodal Intelligence
-  const col3 = await prisma.collection.create({
+  const col3 = await prisma.libraryCollection.create({
     data: {
       name: 'Vision & Multimodal Intelligence',
       description:
         'Deep Residual networks, Vision Transformers (ViT), Diffusion Models, and Multimodal CLIP.',
       color: '#8B5CF6',
       icon: 'Eye',
-      userId: userThanh.id,
-      projectId: project.id,
+      spaceId: project.id,
+      createdById: userThanh.id,
     },
   });
 
   // Collection 4: Scientific Machine Learning & Neural Operators
-  const col4 = await prisma.collection.create({
+  const col4 = await prisma.libraryCollection.create({
     data: {
       name: 'Scientific ML & Neural Operators',
       description:
         'Fourier Neural Operators, Physics-Informed Neural Networks, DeepONets, and Neural ODEs.',
       color: '#10B981',
       icon: 'Atom',
-      userId: userThanh.id,
-      projectId: project.id,
+      spaceId: project.id,
+      createdById: userThanh.id,
     },
   });
 
@@ -1668,7 +1697,7 @@ async function main() {
   ];
 
   for (const p of papersData) {
-    await prisma.item.create({
+    await prisma.libraryItem.create({
       data: {
         title: p.title,
         abstract: p.abstract,
@@ -1676,8 +1705,8 @@ async function main() {
         publicationTitle: p.pub,
         doi: p.doi,
         citationKey: p.key,
-        userId: userThanh.id,
-        projectId: project.id,
+        spaceId: project.id,
+        createdById: userThanh.id,
         contributors: {
           create: p.authors.map((name, idx) => ({
             creatorType: 'author',
@@ -1747,9 +1776,9 @@ async function main() {
     );
   }
 
-  // 9. Create Comprehensive Manuscript Documents & File Tree (25 files across 7 directories)
+  // 9. Create Comprehensive Pages Documents & File Tree in Project Space (spaceId = project.id)
   console.log(
-    '📝 Seeding full multi-file LaTeX research manuscript (25 files across 7 directories)...',
+    '📝 Seeding full multi-file LaTeX research manuscript in Project Space...',
   );
 
   // Create folder nodes in hierarchy
@@ -1766,9 +1795,9 @@ async function main() {
 
   for (let i = 0; i < folderNames.length; i++) {
     const fName = folderNames[i];
-    const node = await prisma.manuscriptNode.create({
+    const node = await prisma.pageNode.create({
       data: {
-        projectId: project.id,
+        spaceId: project.id,
         name: fName,
         path: `/${fName}`,
         type: 'FOLDER',
@@ -1826,9 +1855,9 @@ Deep learning operators solve PDEs orders of magnitude faster than classical sol
   const demoFiles = getDemoBackendFiles('main');
   for (let idx = 0; idx < demoFiles.length; idx++) {
     const f = demoFiles[idx];
-    const doc = await prisma.manuscriptDoc.create({
+    const doc = await prisma.pageDoc.create({
       data: {
-        projectId: project.id,
+        spaceId: project.id,
         path: f.path,
         lines: f.content.split('\n'),
         sizeBytes: f.size,
@@ -1845,9 +1874,9 @@ Deep learning operators solve PDEs orders of magnitude faster than classical sol
     const fileName = segments[segments.length - 1];
 
     const isRoot = f.name === 'main.tex';
-    await prisma.manuscriptNode.create({
+    await prisma.pageNode.create({
       data: {
-        projectId: project.id,
+        spaceId: project.id,
         name: isRoot ? 'flux' : fileName,
         path: f.path,
         type: 'DOC',
@@ -1862,6 +1891,44 @@ Deep learning operators solve PDEs orders of magnitude faster than classical sol
   }
   console.log(
     `   ✅ Seeded ${demoFiles.length} LaTeX files into project "${project.name}" (across 7 folders).`,
+  );
+
+  // 9b. Seed Personal Space Pages & Library items for userThanh (spaceId = userThanh.id)
+  const personalRootContent = `\\documentclass{article}
+\\usepackage{amsmath}
+\\title{Personal Research Notes \\& Drafts}
+\\author{Tấn Thành}
+\\date{\\today}
+\\begin{document}
+\\maketitle
+\\section{Personal Scratchpad}
+Private notes and personal LaTeX drafts in Personal Space.
+\\end{document}`;
+  const personalDoc = await prisma.pageDoc.create({
+    data: {
+      spaceId: userThanh.id,
+      path: '/personal-notes.tex',
+      lines: personalRootContent.split('\n'),
+      sizeBytes: Buffer.byteLength(personalRootContent, 'utf8'),
+      rev: 1,
+      version: 1,
+    },
+  });
+  await prisma.pageNode.create({
+    data: {
+      spaceId: userThanh.id,
+      name: 'Personal Research Notes',
+      path: '/personal-notes.tex',
+      type: 'DOC',
+      docId: personalDoc.id,
+      depth: 0,
+      isRootDoc: true,
+      sizeBytes: Buffer.byteLength(personalRootContent, 'utf8'),
+      sortOrder: 0,
+    },
+  });
+  console.log(
+    `   ✅ Seeded Personal Space Page for ${userThanh.email} (spaceId=${userThanh.id}).`,
   );
 
   // 10. Create 6 Personal Stickies for userThanh

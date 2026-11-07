@@ -1,0 +1,359 @@
+/**
+ * modules/manuscripts/export-import/export-import.service.ts
+ * Deep service orchestrating Project Archiving, ZIP Export/Import, Template Scaffolding,
+ * and Document Conversion directly without shallow pass-through use-case ceremony.
+ */
+
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
+import * as path from 'node:path';
+import { Readable } from 'node:stream';
+import {
+  IManuscriptAggregatorPort,
+  IZipEnginePort,
+  IManuscriptHydratorPort,
+  IDocumentTranspilerPort,
+  ArchiveEntryVo,
+  ArchiveManifest,
+  ImportSummaryVo,
+  validateExtractedArchiveEntries,
+  IncludedProjectDoc,
+  ExportFormattedDocResult,
+  transpileLatexDocument,
+} from './domain';
+import { ZipAdapter } from './services/zip.adapter';
+import { TranspilerAdapter } from './services/transpiler.adapter';
+import {
+  ManuscriptAggregatorAdapter,
+  ManuscriptHydratorAdapter,
+} from './repositories/aggregator.repository';
+import { TemplatesService } from '@/modules/pages/templates/templates.service';
+import { TemplateNotFoundException } from '@/modules/pages/templates/domain';
+import { ProjectHistoryService } from '@/modules/pages/project-history/project-history.service';
+import {
+  ExportZipQueryDto,
+  ImportSummaryResponseDto,
+} from './dto/export-import.dto';
+
+export interface ExportProjectZipInput {
+  projectId: string;
+  projectName?: string;
+  includePdf?: boolean;
+  cleanArxiv?: boolean;
+}
+
+export interface ExportProjectZipOutput {
+  zipBuffer: Buffer;
+  manifest: ArchiveManifest;
+}
+
+export interface ExportProjectZipStreamOutput {
+  zipStream: Readable;
+  projectName: string;
+  fileCount: number;
+  hasCompiledPdf: boolean;
+}
+
+export interface ImportProjectZipInput {
+  projectId: string;
+  zipBuffer: Buffer;
+  userId?: string | null;
+  preferredRootDoc?: string;
+}
+
+export interface ScaffoldTemplateInput {
+  projectId: string;
+  templateId: string;
+  userId?: string | null;
+}
+
+export interface ConvertDocumentInput {
+  projectId: string;
+  fileBuffer: Buffer;
+  fileName: string;
+  format?: 'docx' | 'md';
+  userId?: string | null;
+}
+
+@Injectable()
+export class ExportImportService {
+  private readonly logger = new Logger(ExportImportService.name);
+  private readonly aggregator: IManuscriptAggregatorPort;
+  private readonly zipEngine: IZipEnginePort;
+  private readonly hydrator: IManuscriptHydratorPort;
+  private readonly templatesService?: TemplatesService;
+  private readonly transpiler: IDocumentTranspilerPort;
+  private readonly projectHistoryService?: ProjectHistoryService;
+
+  constructor(
+    aggregator: ManuscriptAggregatorAdapter,
+    zipEngine: ZipAdapter = new ZipAdapter(),
+    hydrator: ManuscriptHydratorAdapter,
+    @Optional() templatesService?: TemplatesService,
+    @Optional() transpiler?: TranspilerAdapter,
+    @Optional() projectHistoryService?: ProjectHistoryService,
+  ) {
+    this.aggregator = aggregator;
+    this.zipEngine = zipEngine;
+    this.hydrator = hydrator;
+    this.templatesService = templatesService;
+    this.transpiler =
+      transpiler ?? new TranspilerAdapter(this.zipEngine as ZipAdapter);
+    this.projectHistoryService = projectHistoryService;
+  }
+
+  public async collectProjectEntries(
+    projectId: string,
+    includePdf = false,
+    cleanArxiv = false,
+  ) {
+    return await this.aggregator.collectProjectEntries(
+      projectId,
+      includePdf,
+      cleanArxiv,
+    );
+  }
+
+  public async hydrateProjectEntries(
+    projectId: string,
+    entries: ArchiveEntryVo[],
+    userId?: string | null,
+    preferredRootDoc?: string,
+  ): Promise<ImportSummaryVo> {
+    return await this.hydrator.hydrateProjectEntries(
+      projectId,
+      entries,
+      userId,
+      preferredRootDoc,
+    );
+  }
+
+  private static readonly DEFAULT_MAIN_TEX_FALLBACK = Buffer.from(
+    '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}',
+    'utf8',
+  );
+
+  /**
+   * Shared Template Method / Plan resolver for both buffered and streaming ZIP exports.
+   * Ensures identical fallback `main.tex` generation, PDF detection, and `arxiv-` naming.
+   */
+  private prepareExportPlan<T extends { path: string }>(
+    files: T[],
+    createFallbackEntry: (path: string, data: Buffer) => T,
+    query?: ExportZipQueryDto,
+  ): {
+    files: T[];
+    hasPdf: boolean;
+    resolvedName: string;
+  } {
+    const cleanArxiv =
+      (query?.cleanArxiv ?? false) || query?.mode?.toLowerCase() === 'arxiv';
+    const projectName = query?.projectName;
+
+    if (files.length === 0) {
+      files.push(
+        createFallbackEntry(
+          'main.tex',
+          ExportImportService.DEFAULT_MAIN_TEX_FALLBACK,
+        ),
+      );
+    }
+
+    const hasPdf = files.some((f) => f.path.toLowerCase().endsWith('.pdf'));
+    const baseName = projectName || 'manuscript';
+    const resolvedName = cleanArxiv
+      ? projectName?.startsWith('arxiv-')
+        ? projectName
+        : `arxiv-${baseName}`
+      : baseName;
+
+    return {
+      files,
+      hasPdf,
+      resolvedName,
+    };
+  }
+
+  public async exportProjectZip(
+    projectId: string,
+    query?: ExportZipQueryDto,
+  ): Promise<ExportProjectZipOutput> {
+    const cleanArxiv =
+      (query?.cleanArxiv ?? false) || query?.mode?.toLowerCase() === 'arxiv';
+    const includePdf = query?.includePdf ?? false;
+
+    const collected = await this.aggregator.collectProjectEntries(
+      projectId,
+      includePdf,
+      cleanArxiv,
+    );
+
+    const { files, hasPdf, resolvedName } = this.prepareExportPlan(
+      collected,
+      (entryPath, data) => ({ path: entryPath, data }),
+      query,
+    );
+
+    const zipBuffer = this.zipEngine.buildZip(files);
+
+    const manifest = new ArchiveManifest({
+      projectId,
+      projectName: resolvedName,
+      fileCount: files.length,
+      totalSizeBytes: zipBuffer.length,
+      hasCompiledPdf: hasPdf,
+    });
+
+    return {
+      zipBuffer,
+      manifest,
+    };
+  }
+
+  public async exportProjectZipStream(
+    projectId: string,
+    query?: ExportZipQueryDto,
+  ): Promise<ExportProjectZipStreamOutput> {
+    if (query?.version && this.projectHistoryService) {
+      const versionResult =
+        await this.projectHistoryService.exportVersionZipStream(
+          projectId,
+          Number(query.version),
+          query.projectName,
+        );
+      return {
+        zipStream: versionResult.zipStream,
+        projectName: versionResult.filename.replace(/\.zip$/i, ''),
+        fileCount: versionResult.fileCount,
+        hasCompiledPdf: false,
+      };
+    }
+
+    const cleanArxiv =
+      (query?.cleanArxiv ?? false) || query?.mode?.toLowerCase() === 'arxiv';
+    const includePdf = query?.includePdf ?? false;
+
+    const collected = await this.aggregator.collectLazyProjectEntries(
+      projectId,
+      includePdf,
+      cleanArxiv,
+    );
+
+    const { files, hasPdf, resolvedName } = this.prepareExportPlan(
+      collected,
+      (entryPath, data) => ({ path: entryPath, data }),
+      query,
+    );
+
+    const zipStream = this.zipEngine.createZipStream(files);
+
+    return {
+      zipStream,
+      projectName: resolvedName,
+      fileCount: files.length,
+      hasCompiledPdf: hasPdf,
+    };
+  }
+
+  public async importProjectZip(
+    projectId: string,
+    zipBuffer: Buffer,
+    userId?: string | null,
+    preferredRootDoc?: string,
+  ): Promise<ImportSummaryResponseDto> {
+    const entries = validateExtractedArchiveEntries(
+      this.zipEngine.extractZip(zipBuffer),
+    );
+    const summary = await this.hydrator.hydrateProjectEntries(
+      projectId,
+      entries,
+      userId,
+      preferredRootDoc,
+    );
+    return summary.toJSON();
+  }
+
+  public async scaffoldTemplate(
+    projectId: string,
+    templateId: string,
+    userId?: string | null,
+  ): Promise<ImportSummaryResponseDto> {
+    if (!this.templatesService) {
+      throw new TemplateNotFoundException(templateId);
+    }
+
+    const template = await this.templatesService.getTemplate(templateId);
+    if (!template) {
+      throw new TemplateNotFoundException(templateId);
+    }
+
+    const entries: ArchiveEntryVo[] = Object.entries(template.files || {}).map(
+      ([filePath, content]) => {
+        const data = Buffer.isBuffer(content)
+          ? content
+          : Buffer.from(String(content), 'utf8');
+        return ArchiveEntryVo.create(filePath, data, false);
+      },
+    );
+
+    const summary = await this.hydrator.hydrateProjectEntries(
+      projectId,
+      entries,
+      userId,
+      template.mainFile || 'main.tex',
+    );
+    return summary.toJSON();
+  }
+
+  public async convertDocument(
+    input: ConvertDocumentInput,
+  ): Promise<ImportSummaryResponseDto> {
+    const { projectId, fileBuffer, fileName, userId } = input;
+    if (!fileBuffer || fileBuffer.length === 0) {
+      throw new BadRequestException('Uploaded document payload is empty.');
+    }
+
+    const ext = path.extname(fileName).toLowerCase();
+    const effectiveFormat =
+      input.format || (ext === '.docx' ? 'docx' : ext === '.md' ? 'md' : null);
+
+    if (!effectiveFormat) {
+      throw new BadRequestException(
+        `Unsupported document format for conversion: "${ext}". Supported formats: .docx, .md`,
+      );
+    }
+
+    this.logger.log(
+      `Converting ${effectiveFormat.toUpperCase()} document "${fileName}" (${fileBuffer.length} bytes) for project ${projectId}`,
+    );
+
+    const transpileResult =
+      effectiveFormat === 'docx'
+        ? await this.transpiler.transpileDocx(fileBuffer, fileName)
+        : await this.transpiler.transpileMarkdown(
+            fileBuffer.toString('utf8'),
+            fileName,
+          );
+
+    const summary = await this.hydrator.hydrateProjectEntries(
+      projectId,
+      transpileResult.entries,
+      userId,
+      'main.tex',
+    );
+    return summary.toJSON();
+  }
+
+  public exportDocumentFormat(params: {
+    rawFilename: string;
+    content: string;
+    format: string;
+    projectDocs?: IncludedProjectDoc[];
+  }): ExportFormattedDocResult {
+    return transpileLatexDocument(params);
+  }
+}

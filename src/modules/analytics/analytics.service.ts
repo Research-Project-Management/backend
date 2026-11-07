@@ -81,13 +81,7 @@ export class AnalyticsService {
             .map((a) => a.label?.name)
             .filter((name): name is string => Boolean(name))
         : [];
-      const itemLabels =
-        relationalLabels.length > 0
-          ? relationalLabels
-          : Array.isArray(item.labels)
-            ? item.labels
-            : [];
-      const uniqueLabels = new Set(itemLabels.filter(Boolean));
+      const uniqueLabels = new Set(relationalLabels.filter(Boolean));
       for (const label of uniqueLabels) {
         labelCount[label] = (labelCount[label] || 0) + 1;
       }
@@ -140,4 +134,3 @@ export class AnalyticsService {
     return { series };
   }
 }
-

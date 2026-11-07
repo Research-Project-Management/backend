@@ -31,6 +31,31 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
+const PERSONAL_LABEL_ALIASES = new Set([
+  'personal',
+  'me',
+  'user',
+  'null',
+  'undefined',
+  'default',
+  '',
+]);
+
+function normalizeLabelProjectId(
+  projectId?: string | null,
+  userId?: string,
+): string | undefined {
+  if (!projectId) return undefined;
+  const trimmed = projectId.trim();
+  if (PERSONAL_LABEL_ALIASES.has(trimmed.toLowerCase())) {
+    return undefined;
+  }
+  if (userId && trimmed.toLowerCase() === userId.trim().toLowerCase()) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 @ApiTags('Work Item Labels')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1', 'api'])
@@ -50,8 +75,16 @@ export class LabelController {
   async getProjectLabels(
     @Param('projectId') projectId: string,
     @Query() query?: QueryLabelDto,
+    @CurrentUser('id') userId?: string,
   ) {
-    return this.labelService.getProjectLabels(projectId, query?.type);
+    const normalizedProjectId = normalizeLabelProjectId(projectId, userId);
+    if (!normalizedProjectId && userId) {
+      return this.labelService.getLabels(userId, query?.type, undefined);
+    }
+    return this.labelService.getProjectLabels(
+      normalizedProjectId || projectId,
+      query?.type,
+    );
   }
 
   @Post('projects/:projectId/labels')
@@ -65,7 +98,18 @@ export class LabelController {
     @CurrentUser('id') userId: string,
     @Body() dto: CreateProjectLabelDto,
   ) {
-    return this.labelService.createProjectLabel(projectId, userId, dto);
+    const normalizedProjectId = normalizeLabelProjectId(projectId, userId);
+    if (!normalizedProjectId) {
+      return this.labelService.createLabel(userId, {
+        ...dto,
+        projectId: undefined,
+      });
+    }
+    return this.labelService.createProjectLabel(
+      normalizedProjectId,
+      userId,
+      dto,
+    );
   }
 
   @Get('projects/:projectId/labels/:labelId')
@@ -127,8 +171,15 @@ export class LabelController {
     @CurrentUser('id') userId: string,
     @Query() query?: QueryLabelDto,
   ) {
-    if (query?.projectId) {
-      return this.labelService.getProjectLabels(query.projectId, query?.type);
+    const normalizedProjectId = normalizeLabelProjectId(
+      query?.projectId,
+      userId,
+    );
+    if (normalizedProjectId) {
+      return this.labelService.getProjectLabels(
+        normalizedProjectId,
+        query?.type,
+      );
     }
     return this.labelService.getLabels(userId, query?.type, undefined);
   }
@@ -140,10 +191,19 @@ export class LabelController {
     @CurrentUser('id') userId: string,
     @Body() dto: CreateLabelDto,
   ) {
-    if (dto.projectId) {
-      return this.labelService.createProjectLabel(dto.projectId, userId, dto);
+    const normalizedProjectId = normalizeLabelProjectId(dto.projectId, userId);
+    if (normalizedProjectId) {
+      const { projectId: _projectId, ...projectLabelDto } = dto;
+      return this.labelService.createProjectLabel(
+        normalizedProjectId,
+        userId,
+        projectLabelDto,
+      );
     }
-    return this.labelService.createLabel(userId, dto);
+    return this.labelService.createLabel(userId, {
+      ...dto,
+      projectId: undefined,
+    });
   }
 
   @Patch('labels/:labelId')

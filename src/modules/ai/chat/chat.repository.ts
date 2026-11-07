@@ -13,12 +13,11 @@ export class ChatRepository implements IChatRepository {
     userId: string,
     projectId?: string | null,
   ): Promise<ChatWithMessages[]> {
+    const spaceId = projectId || userId;
     const where: Prisma.AiChatWhereInput = {
-      userId,
+      spaceId,
+      createdById: userId,
     };
-    if (projectId !== undefined) {
-      where.projectId = projectId;
-    }
 
     return this.prisma.aiChat.findMany({
       where,
@@ -47,7 +46,7 @@ export class ChatRepository implements IChatRepository {
     userId: string,
   ): Promise<ChatWithMessages | null> {
     return this.prisma.aiChat.findFirst({
-      where: { id: chatId, userId },
+      where: { id: chatId, createdById: userId },
       include: {
         messages: {
           orderBy: { createdAt: 'asc' },
@@ -59,12 +58,18 @@ export class ChatRepository implements IChatRepository {
   async findPageChat(
     pageId: string,
     userId: string,
+    projectId?: string | null,
   ): Promise<ChatWithMessages | null> {
+    const where: Prisma.AiChatWhereInput = {
+      pageId,
+      createdById: userId,
+    };
+    if (projectId !== undefined) {
+      where.spaceId = projectId || userId;
+    }
+
     return this.prisma.aiChat.findFirst({
-      where: {
-        pageId,
-        userId,
-      },
+      where,
       include: {
         messages: {
           orderBy: { createdAt: 'asc' },
@@ -77,8 +82,9 @@ export class ChatRepository implements IChatRepository {
   async deletePageChat(
     pageId: string,
     userId: string,
+    projectId?: string | null,
   ): Promise<{ count: number }> {
-    const chat = await this.findPageChat(pageId, userId);
+    const chat = await this.findPageChat(pageId, userId, projectId);
     if (chat) {
       await this.prisma.aiChat.delete({
         where: { id: chat.id },
@@ -172,15 +178,13 @@ export class ChatRepository implements IChatRepository {
     userId: string,
     projectId?: string | null,
   ): Promise<{ count: number }> {
+    const spaceId = projectId || userId;
     const where: Prisma.AiChatWhereInput = {
-      userId,
+      spaceId,
+      createdById: userId,
     };
-    if (projectId !== undefined) {
-      where.projectId = projectId;
-    }
     return this.prisma.aiChat.deleteMany({
       where,
     });
   }
 }
-

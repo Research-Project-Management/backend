@@ -57,7 +57,7 @@ export class SyncHandler {
     rawLabels: unknown[],
     isUpdate = false,
   ): Promise<void> {
-    if (!tx.workItemLabel || !tx.workItemLabelAssignment) return;
+    if (!tx.spaceLabel || !tx.workItemLabelAssignment) return;
     if (!Array.isArray(rawLabels)) return;
 
     if (isUpdate) {
@@ -82,9 +82,9 @@ export class SyncHandler {
     const uuidTokens = uniqueRawTokens.filter((t) => isUuid(t));
     const nameTokens = uniqueRawTokens.filter((t) => !isUuid(t));
 
-    const existingLabels = await tx.workItemLabel.findMany({
+    const existingLabels = await tx.spaceLabel.findMany({
       where: {
-        projectId,
+        spaceId: projectId,
         ...(uuidTokens.length > 0 && nameTokens.length > 0
           ? {
               OR: [
@@ -109,10 +109,10 @@ export class SyncHandler {
     );
 
     if (missingNames.length > 0) {
-      await tx.workItemLabel.createMany({
+      await tx.spaceLabel.createMany({
         data: missingNames.map((name: string) => ({
           name,
-          projectId,
+          spaceId: projectId,
           createdById: authorId,
         })),
         skipDuplicates: true,
@@ -121,9 +121,9 @@ export class SyncHandler {
 
     const allLabels =
       missingNames.length > 0
-        ? await tx.workItemLabel.findMany({
+        ? await tx.spaceLabel.findMany({
             where: {
-              projectId,
+              spaceId: projectId,
               ...(uuidTokens.length > 0
                 ? {
                     OR: [
@@ -184,9 +184,9 @@ export class SyncHandler {
 
   async bulkSyncLabels(
     tx: {
-      workItemLabel?: {
+      spaceLabel?: {
         findMany: (args: {
-          where: Prisma.WorkItemLabelWhereInput;
+          where: Prisma.SpaceLabelWhereInput;
           select: { id: true };
         }) => Promise<Array<{ id: string }>>;
       };
@@ -208,10 +208,10 @@ export class SyncHandler {
     await tx.workItemLabelAssignment.deleteMany({
       where: { workItemId: { in: workItemIds } },
     });
-    if (labels.length > 0 && tx.workItemLabel) {
-      const matchedLabels = await tx.workItemLabel.findMany({
+    if (labels.length > 0 && tx.spaceLabel) {
+      const matchedLabels = await tx.spaceLabel.findMany({
         where: {
-          projectId,
+          spaceId: projectId,
           OR: [
             { name: { in: labels, mode: 'insensitive' } },
             { id: { in: labels.filter((l) => isUuid(l)) } },

@@ -12,9 +12,9 @@ enum OutboxStatus {
 
 model IdempotencyRecord {
   id             String    @id @default(uuid(7)) @db.Uuid
-  scopeKey       String    @default("") @map("scope_key") @db.VarChar(128)
-  userId         String    @map("user_id") @db.Uuid
-  projectId      String?   @map("project_id") @db.Uuid
+  spaceId        String    @map("space_id") @db.Uuid
+  space          Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_idempotency_records_space_id")
+  actorId        String    @map("actor_id") @db.Uuid
   idempotencyKey String    @map("idempotency_key")
   requestHash    String?   @map("request_hash")
   statusCode     Int?      @map("status_code")
@@ -24,9 +24,8 @@ model IdempotencyRecord {
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([scopeKey, idempotencyKey])
-  @@index([userId, idempotencyKey])
-  @@index([projectId, idempotencyKey])
+  @@unique([spaceId, idempotencyKey])
+  @@index([actorId, idempotencyKey])
   @@index([expiresAt])
   @@map("idempotency_records")
 }
@@ -50,9 +49,8 @@ model LibraryInboxRecord {
 
 model SyncSequence {
   id              String   @id @default(uuid(7)) @db.Uuid
-  scopeKey        String   @unique @default("") @map("scope_key") @db.VarChar(128)
-  userId          String?  @unique @map("user_id") @db.Uuid
-  projectId       String?  @unique @map("project_id") @db.Uuid
+  spaceId         String   @unique @map("space_id") @db.Uuid
+  space           Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_sync_sequences_space_id")
   currentSequence BigInt   @default(0) @map("current_sequence")
   updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -61,10 +59,9 @@ model SyncSequence {
 
 model LibraryChange {
   id          String   @id @default(uuid(7)) @db.Uuid
-  scopeKey    String   @default("") @map("scope_key") @db.VarChar(128)
+  spaceId     String   @map("space_id") @db.Uuid
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_library_changes_space_id")
   seq         BigInt
-  userId      String?  @map("user_id") @db.Uuid
-  projectId   String?  @map("project_id") @db.Uuid
   actorId     String?  @map("actor_id") @db.Uuid
   entityType  String   @map("entity_type")
   entityId    String   @map("entity_id")
@@ -73,41 +70,32 @@ model LibraryChange {
   data        Json?    @db.JsonB
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@unique([scopeKey, seq])
-  @@index([scopeKey, entityType, entityId, seq(sort: Desc)])
-  @@index([userId, projectId, seq])
-  @@index([projectId, seq])
-  @@index([userId, projectId, entityType, entityId, seq(sort: Desc)])
-  @@index([projectId, entityType, entityId, seq(sort: Desc)])
+  @@unique([spaceId, seq])
+  @@index([spaceId, entityType, entityId, seq(sort: Desc)])
   @@index([createdAt])
   @@map("library_changes")
 }
 
 model Tombstone {
   id          String    @id @default(uuid(7)) @db.Uuid
-  scopeKey    String    @default("") @map("scope_key") @db.VarChar(128)
-  userId      String?   @map("user_id") @db.Uuid
-  projectId   String?   @map("project_id") @db.Uuid
+  spaceId     String    @map("space_id") @db.Uuid
+  space       Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_tombstones_space_id")
   entityType  String    @map("entity_type")
   entityId    String    @map("entity_id")
   seq         BigInt
   deletedById String?   @map("deleted_by_id") @db.Uuid
   deletedAt   DateTime  @default(now()) @map("deleted_at") @db.Timestamptz(6)
 
-  @@unique([scopeKey, entityType, entityId])
-  @@index([scopeKey, seq])
-  @@index([userId, projectId, entityType, entityId])
-  @@index([userId, projectId, seq])
-  @@index([projectId, seq])
-  @@index([projectId, entityType, entityId])
+  @@unique([spaceId, entityType, entityId])
+  @@index([spaceId, seq])
   @@index([deletedAt])
   @@map("tombstones")
 }
 
 model OutboxEvent {
   id             String       @id @default(uuid(7)) @db.Uuid
-  userId         String       @map("user_id") @db.Uuid
-  projectId      String?      @map("project_id") @db.Uuid
+  spaceId        String       @map("space_id") @db.Uuid
+  space          Space        @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_outbox_events_space_id")
   actorId        String?      @map("actor_id") @db.Uuid
   aggregateId    String       @map("aggregate_id")
   eventType      String       @map("event_type")
@@ -129,5 +117,6 @@ model OutboxEvent {
   @@index([status, leaseExpiresAt])
   @@index([status, scheduledAt, leaseExpiresAt])
   @@index([aggregateId, status])
+  @@index([spaceId, status])
   @@map("outbox_events")
 }

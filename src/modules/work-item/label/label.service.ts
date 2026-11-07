@@ -13,9 +13,9 @@ import {
   ReorderLabelsDto,
   CreateLabelDto,
   UpdateLabelDto,
+  Label,
   LabelWithChildren,
 } from './dto/label.dto';
-import { WorkItemLabel as Label } from '@prisma/client';
 import { RedisCacheService } from '@/core';
 import {
   WORK_ITEM_REDIS_KEYS,
@@ -79,7 +79,8 @@ export class LabelService {
     if (!label) {
       throw new NotFoundException('Label not found');
     }
-    if (label.projectId && label.projectId !== projectId) {
+    const labelProjectId = label.projectId ?? label.spaceId;
+    if (labelProjectId && labelProjectId !== projectId) {
       throw new ForbiddenException('Label does not belong to this project');
     }
     return label;
@@ -97,7 +98,8 @@ export class LabelService {
     if (!parent) {
       throw new NotFoundException('Parent label not found');
     }
-    if (parent.projectId !== projectId) {
+    const parentProjectId = parent.projectId ?? parent.spaceId;
+    if (parentProjectId !== projectId) {
       throw new BadRequestException(
         'Parent label must belong to the same project',
       );
@@ -187,6 +189,7 @@ export class LabelService {
       description: dto.description?.trim() || null,
       sortOrder,
       parentId: dto.parentId || null,
+      spaceId: projectId,
       projectId,
       createdById: userId,
     });
@@ -224,9 +227,9 @@ export class LabelService {
       }
       if (dto.parentId) {
         if (existing.children && existing.children.length > 0) {
-          throw new BadRequestException(
-            'Cannot nest a label that already contains sub-labels. Nesting is limited to 1 level deep.',
-          );
+           throw new BadRequestException(
+             'Cannot nest a label that already contains sub-labels. Nesting is limited to 1 level deep.',
+           );
         }
         await this.validateParentLabel(projectId, dto.parentId, labelId);
       }
@@ -304,8 +307,16 @@ export class LabelService {
   }
 
   async createLabel(userId: string, dto: CreateLabelDto) {
-    if (dto.projectId) {
-      return this.createProjectLabel(dto.projectId, userId, dto);
+    const rawProjectId = dto.projectId?.trim();
+    const isPersonalProjectId =
+      !rawProjectId ||
+      ['personal', 'me', 'user', 'null', 'undefined', 'default', ''].includes(
+        rawProjectId.toLowerCase(),
+      ) ||
+      rawProjectId.toLowerCase() === userId.trim().toLowerCase();
+
+    if (rawProjectId && !isPersonalProjectId) {
+      return this.createProjectLabel(rawProjectId, userId, dto);
     }
 
     const existing = await this.labelRepository.findDuplicate?.({
@@ -326,6 +337,8 @@ export class LabelService {
       color,
       description: dto.description || null,
       parentId: dto.parentId || null,
+      spaceId: userId,
+      projectId: null,
       createdById: userId,
     });
 

@@ -199,8 +199,8 @@ export function buildAttachmentRecords(
         records.push({
           entityType: EntityType.work_item,
           entityId: workItemId,
-          projectId,
-          authorId,
+          spaceId: projectId,
+          createdById: authorId,
           filename: p.title || 'Untitled Page',
           url: `/pages/${pageId}`,
           mimeType: 'application/x-page',
@@ -223,8 +223,8 @@ export function buildAttachmentRecords(
         records.push({
           entityType: EntityType.work_item,
           entityId: workItemId,
-          projectId,
-          authorId,
+          spaceId: projectId,
+          createdById: authorId,
           filename: p.title || 'Untitled Paper',
           url: p.doi ? `https://doi.org/${p.doi}` : '',
           mimeType: 'application/x-paper',
@@ -248,8 +248,8 @@ export function buildAttachmentRecords(
         records.push({
           entityType: EntityType.work_item,
           entityId: workItemId,
-          projectId,
-          authorId,
+          spaceId: projectId,
+          createdById: authorId,
           filename: f.name || f.filename || 'file',
           url: f.url,
           mimeType: f.type || f.mimeType || 'application/octet-stream',
@@ -271,8 +271,8 @@ export function buildAttachmentRecords(
         records.push({
           entityType: EntityType.work_item,
           entityId: workItemId,
-          projectId,
-          authorId,
+          spaceId: projectId,
+          createdById: authorId,
           filename: l.title || l.url,
           url: l.url,
           mimeType: 'text/uri-list',

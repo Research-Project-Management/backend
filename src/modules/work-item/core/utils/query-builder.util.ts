@@ -311,7 +311,29 @@ export async function buildWorkItemQuery(
     }
 
     // 2. State and State Group
-    const stateFilters = normalizeFilterArray(filter.columnId || filter.state);
+    let stateFilters = normalizeFilterArray(filter.columnId || filter.state);
+    if (stateFilters.some((s) => !isUuid(s)) && prismaService.workItemState) {
+      const nonUuids = stateFilters.filter((s) => !isUuid(s));
+      const matched = await prismaService.workItemState
+        .findMany({
+          where: {
+            projectId: canonicalProjectId,
+            OR: [
+              { name: { in: nonUuids, mode: 'insensitive' } },
+              { group: { in: nonUuids, mode: 'insensitive' } },
+            ],
+          },
+          select: { id: true },
+        })
+        .catch(() => []);
+      const uuids = stateFilters.filter(isUuid);
+      stateFilters = Array.from(
+        new Set([...uuids, ...matched.map((s) => s.id)]),
+      );
+      if (stateFilters.length === 0) {
+        stateFilters = ['00000000-0000-0000-0000-000000000000'];
+      }
+    }
     if (filter.stateGroup && prismaService.workItemState) {
       const groups = normalizeFilterArray(filter.stateGroup);
       if (groups.length > 0) {
@@ -324,17 +346,20 @@ export async function buildWorkItemQuery(
           const intersection = stateFilters.filter((id) =>
             stateIdsFromGroup.includes(id),
           );
-          where.columnId = {
-            in: intersection.length > 0 ? intersection : ['__no_match__'],
+          where.stateId = {
+            in:
+              intersection.length > 0
+                ? intersection
+                : ['00000000-0000-0000-0000-000000000000'],
           };
         } else {
-          where.columnId = { in: stateIdsFromGroup };
+          where.stateId = { in: stateIdsFromGroup };
         }
       }
     } else if (stateFilters.length === 1) {
-      where.columnId = stateFilters[0];
+      where.stateId = stateFilters[0];
     } else if (stateFilters.length > 1) {
-      where.columnId = { in: stateFilters };
+      where.stateId = { in: stateFilters };
     }
 
     // 3. Priority
@@ -371,9 +396,7 @@ export async function buildWorkItemQuery(
         andConditions.push({
           OR: [
             { assigneeId: { in: specificAssigneeIds } },
-            ...specificAssigneeIds.map((uid) => ({
-              assigneeIds: { array_contains: [uid] },
-            })),
+            { assignees: { some: { userId: { in: specificAssigneeIds } } } },
             { assigneeId: null },
           ],
         });
@@ -383,16 +406,14 @@ export async function buildWorkItemQuery(
         andConditions.push({
           OR: [
             { assigneeId: specificAssigneeIds[0] },
-            { assigneeIds: { array_contains: [specificAssigneeIds[0]] } },
+            { assignees: { some: { userId: specificAssigneeIds[0] } } },
           ],
         });
       } else if (specificAssigneeIds.length > 1) {
         andConditions.push({
           OR: [
             { assigneeId: { in: specificAssigneeIds } },
-            ...specificAssigneeIds.map((uid) => ({
-              assigneeIds: { array_contains: [uid] },
-            })),
+            { assignees: { some: { userId: { in: specificAssigneeIds } } } },
           ],
         });
       }
@@ -447,16 +468,32 @@ export async function buildWorkItemQuery(
       const specificLabels = labelFilters.filter(
         (l) => l !== '__no_label__' && l !== 'none' && l !== 'no_label',
       );
+      const labelUuids = specificLabels.filter(isUuid);
+      const labelNames = specificLabels.filter((l) => !isUuid(l));
+      const labelMatchClause: Prisma.WorkItemWhereInput = {
+        labelAssignments: {
+          some: {
+            ...(labelUuids.length > 0 && labelNames.length > 0
+              ? {
+                  OR: [
+                    { labelId: { in: labelUuids } },
+                    { label: { name: { in: labelNames, mode: 'insensitive' } } },
+                  ],
+                }
+              : labelUuids.length > 0
+                ? { labelId: { in: labelUuids } }
+                : { label: { name: { in: labelNames, mode: 'insensitive' } } }),
+          },
+        },
+      };
+
       if (hasNoLabel && specificLabels.length === 0) {
-        where.labels = { isEmpty: true };
+        where.labelAssignments = { none: {} };
       } else if (specificLabels.length > 0 && !hasNoLabel) {
-        where.labels = { hasSome: specificLabels };
+        andConditions.push(labelMatchClause);
       } else if (hasNoLabel && specificLabels.length > 0) {
         andConditions.push({
-          OR: [
-            { labels: { isEmpty: true } },
-            { labels: { hasSome: specificLabels } },
-          ],
+          OR: [{ labelAssignments: { none: {} } }, labelMatchClause],
         });
       }
     }
@@ -468,7 +505,7 @@ export async function buildWorkItemQuery(
         const allAtts = await prismaService.entityAttachment.findMany({
           where: {
             entityType: EntityType.work_item,
-            projectId: canonicalProjectId,
+            spaceId: canonicalProjectId,
           },
           select: {
             entityId: true,
@@ -546,9 +583,9 @@ export async function buildWorkItemQuery(
     );
     const validAuthorIds = authorFilters.filter(isUuid);
     if (validAuthorIds.length === 1) {
-      where.authorId = validAuthorIds[0];
+      where.createdById = validAuthorIds[0];
     } else if (validAuthorIds.length > 1) {
-      where.authorId = { in: validAuthorIds };
+      where.createdById = { in: validAuthorIds };
     }
 
     // 10. Dates (dueDate, startDate, createdAt, updatedAt)

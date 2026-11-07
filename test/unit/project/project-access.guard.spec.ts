@@ -1,7 +1,6 @@
 import {
   ExecutionContext,
   ForbiddenException,
-  NotFoundException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ProjectAccessGuard } from '@/modules/project/access/guards/project-access.guard';
@@ -33,7 +32,13 @@ describe('ProjectAccessGuard & SEC-01 Characterization', () => {
     };
 
     mockPrisma = {
-      manuscriptDoc: {
+      pageDoc: {
+        findUnique: jest.fn(),
+      },
+      page: {
+        findUnique: jest.fn(),
+      },
+      space: {
         findUnique: jest.fn(),
       },
       project: {
@@ -67,6 +72,7 @@ describe('ProjectAccessGuard & SEC-01 Characterization', () => {
         }),
       hasRole: jest.fn().mockReturnValue(true),
       hasPermission: jest.fn().mockReturnValue(true),
+      getRolePermissions: jest.fn().mockReturnValue([]),
     };
 
     mockResolver = {
@@ -78,7 +84,6 @@ describe('ProjectAccessGuard & SEC-01 Characterization', () => {
       isOperator: jest.fn().mockReturnValue(false),
     };
 
-    // When resolver is provided, guard uses it; otherwise fallback to prisma
     guard = new ProjectAccessGuard(
       mockReflector as any,
       mockPrisma,
@@ -99,8 +104,6 @@ describe('ProjectAccessGuard & SEC-01 Characterization', () => {
 
   describe('SEC-01 IDOR Probe: Pairing Foreign Resource with Owned Project Hint', () => {
     it('PROBE: should reject an attacker accessing Victim Page A while providing Attacker Project B in headers', async () => {
-      // Mock resolver behavior (when S1 is wired):
-      // The resource pageA belongs to projectA, but header claims projectB -> mismatch!
       if (mockResolver.resolveAuthoritativeProjectId) {
         mockResolver.resolveAuthoritativeProjectId.mockRejectedValue(
           new ForbiddenException({
@@ -131,7 +134,9 @@ describe('ProjectAccessGuard & SEC-01 Characterization', () => {
       if (mockResolver.resolveAuthoritativeProjectId) {
         mockResolver.resolveAuthoritativeProjectId.mockResolvedValue({
           projectId: projectAId,
-          source: 'pageId',
+          spaceId: projectAId,
+          isPersonalSpace: false,
+          source: 'resource',
         });
       }
 
@@ -152,7 +157,9 @@ describe('ProjectAccessGuard & SEC-01 Characterization', () => {
       if (mockResolver.resolveAuthoritativeProjectId) {
         mockResolver.resolveAuthoritativeProjectId.mockResolvedValue({
           projectId: projectAId,
-          source: 'pageId',
+          spaceId: projectAId,
+          isPersonalSpace: false,
+          source: 'resource',
         });
       }
 
@@ -173,24 +180,24 @@ describe('ProjectAccessGuard & SEC-01 Characterization', () => {
   describe('ProjectResourceResolver — Library Dual-Context Resource Resolution', () => {
     it('should resolve authoritative projectId from Library Item, Attachment, Collection, Annotation, and Tag on /library routes', async () => {
       const realResolver = new ProjectResourceResolver({
-        item: {
-          findUnique: jest.fn().mockResolvedValue({ projectId: projectAId }),
+        libraryItem: {
+          findUnique: jest.fn().mockResolvedValue({ spaceId: projectAId }),
         },
         attachment: {
           findUnique: jest.fn().mockResolvedValue({
-            item: { projectId: projectAId },
+            item: { spaceId: projectAId },
           }),
         },
-        collection: {
-          findUnique: jest.fn().mockResolvedValue({ projectId: projectAId }),
+        libraryCollection: {
+          findUnique: jest.fn().mockResolvedValue({ spaceId: projectAId }),
         },
         annotation: {
           findUnique: jest.fn().mockResolvedValue({
-            attachment: { item: { projectId: projectAId } },
+            attachment: { item: { spaceId: projectAId } },
           }),
         },
-        tag: {
-          findUnique: jest.fn().mockResolvedValue({ projectId: projectAId }),
+        libraryTag: {
+          findUnique: jest.fn().mockResolvedValue({ spaceId: projectAId }),
         },
       } as any);
 
@@ -203,6 +210,8 @@ describe('ProjectAccessGuard & SEC-01 Characterization', () => {
       });
       expect(resolvedItem).toEqual({
         projectId: projectAId,
+        spaceId: projectAId,
+        isPersonalSpace: false,
         source: 'resource',
       });
 

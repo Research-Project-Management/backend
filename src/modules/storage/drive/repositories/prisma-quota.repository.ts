@@ -22,11 +22,14 @@ export interface IStorageQuotaRepository {
 }
 
 export class StorageQuotaMapper {
-  public static toDomain(record: PrismaQuota): StorageQuota {
+  public static toDomain(
+    record: PrismaQuota,
+    scope?: { userId: string | null; projectId: string | null },
+  ): StorageQuota {
     return new StorageQuota({
       id: record.id,
-      userId: record.userId,
-      projectId: record.projectId,
+      userId: scope ? scope.userId : record.spaceId,
+      projectId: scope ? scope.projectId : null,
       usedBytes: record.usedBytes,
       maxBytes: record.maxBytes,
       updatedAt: record.updatedAt,
@@ -40,19 +43,27 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
 
   /**
    * Resolves the canonical quota scope:
-   * - If projectId is provided, the quota belongs to the Project scope (userId = null, projectId = validProjectId).
-   * - Otherwise, the quota belongs to the Personal Drive scope (userId = validUserId, projectId = null).
+   * - If projectId is provided, the quota belongs to the Project scope (spaceId = validProjectId).
+   * - Otherwise, the quota belongs to the Personal Drive scope (spaceId = validUserId).
    */
   private resolveCanonicalScope(
     userId?: string | null,
     projectId?: string | null,
-  ): { userId: string | null; projectId: string | null } {
+  ): { spaceId: string | null; userId: string | null; projectId: string | null } {
     const validProjectId = cleanUuid(projectId);
     if (validProjectId) {
-      return { userId: null, projectId: validProjectId };
+      return {
+        spaceId: validProjectId,
+        userId: null,
+        projectId: validProjectId,
+      };
     }
     const validUserId = cleanUuid(userId);
-    return { userId: validUserId, projectId: null };
+    return {
+      spaceId: validUserId,
+      userId: validUserId,
+      projectId: null,
+    };
   }
 
   async findByScope(
@@ -60,18 +71,16 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     projectId?: string | null,
   ): Promise<StorageQuota | null> {
     const scope = this.resolveCanonicalScope(userId, projectId);
-    if (!scope.userId && !scope.projectId) {
+    if (!scope.spaceId) {
       return null;
     }
 
-    const record = await this.prisma.storageQuota.findFirst({
+    const record = await this.prisma.storageQuota.findUnique({
       where: {
-        userId: scope.userId,
-        projectId: scope.projectId,
+        spaceId: scope.spaceId,
       },
-      orderBy: { updatedAt: 'desc' },
     });
-    return record ? StorageQuotaMapper.toDomain(record) : null;
+    return record ? StorageQuotaMapper.toDomain(record, scope) : null;
   }
 
   async incrementUsage(
@@ -85,21 +94,18 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     }
 
     const scope = this.resolveCanonicalScope(userId, projectId);
-    if (!scope.userId && !scope.projectId) {
+    if (!scope.spaceId) {
       return 0n;
     }
+    const spaceId = scope.spaceId;
 
     return this.prisma.$transaction(async (tx) => {
-      // Advisory lock scoped to the user or project UUID to prevent NULL unique constraint duplicate creation
-      const lockKey = scope.projectId ?? scope.userId!;
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${spaceId}))`;
 
-      const existing = await tx.storageQuota.findFirst({
+      const existing = await tx.storageQuota.findUnique({
         where: {
-          userId: scope.userId,
-          projectId: scope.projectId,
+          spaceId,
         },
-        orderBy: { updatedAt: 'desc' },
       });
 
       if (existing) {
@@ -119,8 +125,7 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
 
       const created = await tx.storageQuota.create({
         data: {
-          userId: scope.userId,
-          projectId: scope.projectId,
+          spaceId,
           usedBytes: bytes,
           maxBytes: DEFAULT_STORAGE_QUOTA_BYTES,
         },
@@ -140,20 +145,18 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     }
 
     const scope = this.resolveCanonicalScope(userId, projectId);
-    if (!scope.userId && !scope.projectId) {
+    if (!scope.spaceId) {
       return 0n;
     }
+    const spaceId = scope.spaceId;
 
     return this.prisma.$transaction(async (tx) => {
-      const lockKey = scope.projectId ?? scope.userId!;
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${spaceId}))`;
 
-      const quota = await tx.storageQuota.findFirst({
+      const quota = await tx.storageQuota.findUnique({
         where: {
-          userId: scope.userId,
-          projectId: scope.projectId,
+          spaceId,
         },
-        orderBy: { updatedAt: 'desc' },
       });
       if (!quota) return 0n;
 

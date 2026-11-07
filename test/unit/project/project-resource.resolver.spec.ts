@@ -8,24 +8,29 @@ describe('ProjectResourceResolver', () => {
   const projectAId = 'a0000000-0000-4000-8000-000000000001';
   const projectBId = 'b0000000-0000-4000-8000-000000000002';
   const pageAId = 'c0000000-0000-4000-8000-000000000003';
-  const docAId = 'd0000000-0000-4000-8000-000000000004';
   const docBId = 'd0000000-0000-4000-8000-000000000005';
 
   beforeEach(() => {
     mockPrisma = {
-      manuscriptDoc: {
+      pageDoc: {
         findUnique: jest.fn(),
       },
-      manuscriptNode: {
+      page: {
         findUnique: jest.fn(),
       },
-      manuscriptSnapshot: {
+      pageNode: {
         findUnique: jest.fn(),
       },
-      manuscriptCommentThread: {
+      pageSnapshot: {
         findUnique: jest.fn(),
       },
-      file: {
+      pageCommentThread: {
+        findUnique: jest.fn(),
+      },
+      pageFile: {
+        findUnique: jest.fn(),
+      },
+      storageFile: {
         findUnique: jest.fn(),
       },
       workItem: {
@@ -42,9 +47,9 @@ describe('ProjectResourceResolver', () => {
   });
 
   it('should resolve projectId from pageId resource', async () => {
-    mockPrisma.manuscriptDoc.findUnique.mockResolvedValue({
+    mockPrisma.pageDoc.findUnique.mockResolvedValue({
       id: pageAId,
-      projectId: projectAId,
+      spaceId: projectAId,
     });
 
     const req = {
@@ -57,6 +62,8 @@ describe('ProjectResourceResolver', () => {
     const result = await resolver.resolveAuthoritativeProjectId(req);
     expect(result).toEqual({
       projectId: projectAId,
+      spaceId: projectAId,
+      isPersonalSpace: false,
       source: 'resource',
     });
     expect((req as any).resolvedProjectId).toBe(projectAId);
@@ -64,9 +71,9 @@ describe('ProjectResourceResolver', () => {
   });
 
   it('should throw PROJECT_CONTEXT_MISMATCH if client project hint disagrees with resource project', async () => {
-    mockPrisma.manuscriptDoc.findUnique.mockResolvedValue({
+    mockPrisma.pageDoc.findUnique.mockResolvedValue({
       id: pageAId,
-      projectId: projectAId,
+      spaceId: projectAId,
     });
 
     const req = {
@@ -90,11 +97,11 @@ describe('ProjectResourceResolver', () => {
   });
 
   it('should throw PROJECT_CONTEXT_MISMATCH if multiple referenced resources belong to different projects', async () => {
-    mockPrisma.manuscriptDoc.findUnique.mockImplementation(({ where }: any) => {
+    mockPrisma.pageDoc.findUnique.mockImplementation(({ where }: any) => {
       if (where.id === pageAId)
-        return Promise.resolve({ projectId: projectAId });
+        return Promise.resolve({ spaceId: projectAId });
       if (where.id === docBId)
-        return Promise.resolve({ projectId: projectBId });
+        return Promise.resolve({ spaceId: projectBId });
       return Promise.resolve(null);
     });
 
@@ -121,6 +128,8 @@ describe('ProjectResourceResolver', () => {
     const result = await resolver.resolveAuthoritativeProjectId(req);
     expect(result).toEqual({
       projectId: projectAId,
+      spaceId: projectAId,
+      isPersonalSpace: false,
       source: 'param',
     });
   });
@@ -141,12 +150,14 @@ describe('ProjectResourceResolver', () => {
     const result = await resolver.resolveAuthoritativeProjectId(req);
     expect(result).toEqual({
       projectId: projectAId,
+      spaceId: projectAId,
+      isPersonalSpace: false,
       source: 'param',
     });
   });
 
   it('should fail closed on database exception and throw ACCESS_DENIED', async () => {
-    mockPrisma.manuscriptDoc.findUnique.mockRejectedValue(
+    mockPrisma.pageDoc.findUnique.mockRejectedValue(
       new Error('DB Connection Timeout'),
     );
 

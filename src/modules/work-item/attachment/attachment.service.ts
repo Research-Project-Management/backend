@@ -257,7 +257,7 @@ export class AttachmentService {
                 id: true,
                 title: true,
                 identifier: true,
-                columnId: true,
+                stateId: true,
                 completed: true,
                 rank: true,
                 assigneeId: true,
@@ -741,7 +741,7 @@ export class AttachmentService {
                   id: true,
                   identifier: true,
                   title: true,
-                  columnId: true,
+                  stateId: true,
                   state: true,
                   priority: true,
                   projectId: true,
@@ -760,7 +760,10 @@ export class AttachmentService {
       entityId: link.entityId,
       description: link.description,
       createdAt: link.createdAt,
-      workItem: link.workItem,
+      workItem: {
+        ...link.workItem,
+        columnId: link.workItem.stateId,
+      },
     }));
   }
 }

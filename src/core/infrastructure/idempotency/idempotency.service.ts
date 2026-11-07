@@ -23,6 +23,10 @@ export class IdempotencyService {
     @Optional() private readonly redisCache?: RedisCacheService,
   ) {}
 
+  private getSpaceId(userId: string, projectId?: string): string {
+    return projectId && projectId.trim().length > 0 ? projectId.trim() : userId;
+  }
+
   private getScopeKey(userId: string, projectId?: string): string {
     return projectId ? `proj:${projectId}` : `user:${userId}`;
   }
@@ -87,12 +91,12 @@ export class IdempotencyService {
       }
     }
 
-    // 2. Check Database Record scoped by canonical scopeKey + idempotencyKey
-    const scopeKey = this.getScopeKey(userId, projectId);
+    // 2. Check Database Record scoped by canonical spaceId + idempotencyKey
+    const spaceId = this.getSpaceId(userId, projectId);
     const record = await this.prisma.idempotencyRecord.findUnique({
       where: {
-        scopeKey_idempotencyKey: {
-          scopeKey,
+        spaceId_idempotencyKey: {
+          spaceId,
           idempotencyKey,
         },
       },
@@ -141,13 +145,13 @@ export class IdempotencyService {
     projectId?: string,
   ): Promise<void> {
     const expiresAt = new Date(Date.now() + this.DEFAULT_TTL_SEC * 1000);
-    const scopeKey = this.getScopeKey(userId, projectId);
+    const spaceId = this.getSpaceId(userId, projectId);
 
-    // Save to DB atomically via upsert on (scopeKey, idempotencyKey)
+    // Save to DB atomically via upsert on (spaceId, idempotencyKey)
     await this.prisma.idempotencyRecord.upsert({
       where: {
-        scopeKey_idempotencyKey: {
-          scopeKey,
+        spaceId_idempotencyKey: {
+          spaceId,
           idempotencyKey,
         },
       },
@@ -155,13 +159,11 @@ export class IdempotencyService {
         status: 'in_progress',
         requestHash,
         expiresAt,
-        projectId: projectId ?? null,
       },
       create: {
-        scopeKey,
+        spaceId,
         idempotencyKey,
-        userId,
-        projectId: projectId ?? null,
+        actorId: userId,
         requestHash,
         status: 'in_progress',
         expiresAt,
@@ -190,12 +192,12 @@ export class IdempotencyService {
   async saveResult(input: SaveIdempotencyResultInput): Promise<void> {
     const ttl = input.ttlSeconds || this.DEFAULT_TTL_SEC;
     const expiresAt = new Date(Date.now() + ttl * 1000);
-    const scopeKey = this.getScopeKey(input.userId, input.projectId);
+    const spaceId = this.getSpaceId(input.userId, input.projectId);
 
     await this.prisma.idempotencyRecord.upsert({
       where: {
-        scopeKey_idempotencyKey: {
-          scopeKey,
+        spaceId_idempotencyKey: {
+          spaceId,
           idempotencyKey: input.idempotencyKey,
         },
       },
@@ -207,10 +209,9 @@ export class IdempotencyService {
         expiresAt,
       },
       create: {
-        scopeKey,
+        spaceId,
         idempotencyKey: input.idempotencyKey,
-        userId: input.userId,
-        projectId: input.projectId ?? null,
+        actorId: input.userId,
         requestHash: input.requestHash,
         statusCode: input.statusCode,
         responseBody:
@@ -252,11 +253,11 @@ export class IdempotencyService {
     userId: string,
     projectId?: string,
   ): Promise<void> {
-    const scopeKey = this.getScopeKey(userId, projectId);
+    const spaceId = this.getSpaceId(userId, projectId);
     try {
       await this.prisma.idempotencyRecord.deleteMany({
         where: {
-          scopeKey,
+          spaceId,
           idempotencyKey,
         },
       });

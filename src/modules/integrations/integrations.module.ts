@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
-import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
-import { ExportImportModule } from '@/modules/manuscripts/export-import/export-import.module';
+import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
+import { ExportImportModule } from '@/modules/pages/export-import/export-import.module';
 import { IntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
 import { IntegrationsRepository } from './integrations.repository';
@@ -9,8 +9,8 @@ import { ZoteroProvider } from './providers/zotero.provider';
 import { MendeleyProvider } from './providers/mendeley.provider';
 import { GithubProvider } from './providers/github.provider';
 
-import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
-import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
+import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
+import { StructureModule } from '@/modules/pages/structure/structure.module';
 
 @Module({
   imports: [

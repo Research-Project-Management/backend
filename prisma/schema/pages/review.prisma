@@ -1,0 +1,117 @@
+// ============================================================================
+// Pages Subsystem: Review, Track Changes & Comments Sub-Domain
+// Self-managed domain schema: PageDocReview, PageTrackChange, PageCommentThread, PageCommentReply
+// ============================================================================
+
+enum PageChangeType {
+  insert
+  delete
+}
+
+enum PageChangeStatus {
+  pending
+  accepted
+  rejected
+}
+
+enum PageReviewStatus {
+  draft
+  in_review
+  changes_requested
+  approved
+  submitted
+  locked
+}
+
+model PageDocReview {
+  docId         String           @id @map("doc_id") @db.Uuid
+  doc           PageDoc          @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_doc_review_doc_id")
+  spaceId       String           @map("space_id") @db.Uuid
+  space         Space            @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_doc_review_space_id")
+  status        PageReviewStatus @default(draft)
+  roundNumber   Int              @default(1) @map("round_number")
+  version       Int              @default(1)
+  requestedById String?          @map("requested_by_id") @db.Uuid
+  requestedAt   DateTime?        @map("requested_at") @db.Timestamptz(6)
+  verdictById   String?          @map("verdict_by_id") @db.Uuid
+  verdictAt     DateTime?        @map("verdict_at") @db.Timestamptz(6)
+  notes         String?          @db.Text
+  deadline      DateTime?        @db.Timestamptz(6)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([spaceId, status], map: "idx_page_doc_reviews_space_status")
+  @@map("page_doc_reviews")
+}
+
+model PageTrackChange {
+  id           String           @id @default(uuid(7)) @db.Uuid
+  spaceId      String           @map("space_id") @db.Uuid
+  space        Space            @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_track_changes_space_id")
+  pageId       String?          @map("page_id") @db.Uuid
+  page         Page?            @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_track_changes_page_id")
+  docId        String           @map("doc_id") @db.Uuid
+  doc          PageDoc          @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_track_changes_doc_id")
+  type         PageChangeType
+  status       PageChangeStatus @default(pending)
+  text         String           @db.Text
+  startLine    Int              @map("start_line")
+  startCol     Int              @map("start_col")
+  endLine      Int              @map("end_line")
+  endCol       Int              @map("end_col")
+  createdById  String?          @map("created_by_id") @db.Uuid
+  resolvedById String?          @map("resolved_by_id") @db.Uuid
+  resolvedAt   DateTime?        @map("resolved_at") @db.Timestamptz(6)
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([spaceId, docId, status, createdAt], map: "idx_page_changes_lookup")
+  @@index([spaceId, startLine, startCol, createdAt], map: "idx_page_changes_space_line_created")
+  @@index([pageId, docId, status, createdAt], map: "idx_page_changes_page_lookup")
+  @@index([docId, status, createdAt(sort: Desc)], map: "idx_page_changes_doc_id")
+  @@index([createdById], map: "idx_page_changes_author")
+  @@map("page_track_changes")
+}
+
+model PageCommentThread {
+  id           String             @id @default(uuid(7)) @db.Uuid
+  spaceId      String             @map("space_id") @db.Uuid
+  space        Space              @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_comment_threads_space_id")
+  pageId       String?            @map("page_id") @db.Uuid
+  page         Page?              @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_comment_threads_page_id")
+  docId        String             @map("doc_id") @db.Uuid
+  doc          PageDoc            @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_comment_threads_doc_id")
+  quote        String?            @db.Text
+  startLine    Int                @map("start_line")
+  startCol     Int                @map("start_col")
+  endLine      Int                @map("end_line")
+  endCol       Int                @map("end_col")
+  isResolved   Boolean            @default(false) @map("is_resolved")
+  createdById  String?            @map("created_by_id") @db.Uuid
+  resolvedById String?            @map("resolved_by_id") @db.Uuid
+  resolvedAt   DateTime?          @map("resolved_at") @db.Timestamptz(6)
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  replies      PageCommentReply[]
+
+  @@index([spaceId, docId, isResolved, createdAt], map: "idx_page_comments_lookup")
+  @@index([spaceId, startLine, createdAt], map: "idx_page_comments_space_line_created")
+  @@index([pageId, docId, isResolved, createdAt], map: "idx_page_comments_page_lookup")
+  @@index([docId, isResolved, createdAt(sort: Desc)], map: "idx_page_comments_doc_id")
+  @@index([createdById], map: "idx_page_comments_author")
+  @@map("page_comment_threads")
+}
+
+model PageCommentReply {
+  id          String            @id @default(uuid(7)) @db.Uuid
+  threadId    String            @map("thread_id") @db.Uuid
+  thread      PageCommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade, map: "fk_page_comment_replies_thread_id")
+  content     String            @db.Text
+  createdById String?           @map("created_by_id") @db.Uuid
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([threadId, createdAt], map: "idx_page_comment_replies_thread")
+  @@map("page_comment_replies")
+}

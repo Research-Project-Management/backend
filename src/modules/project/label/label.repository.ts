@@ -1,35 +1,38 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { Label, ProjectLabel } from '@prisma/client';
+import { SpaceLabel, ProjectLabel } from '@prisma/client';
 import {
   CreateProjectLabelDto,
   UpdateProjectLabelDto,
 } from './dto/create-label.dto';
 
+export type Label = SpaceLabel;
+
 @Injectable()
 export class LabelRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findLabelsByUser(userId: string): Promise<Label[]> {
-    return this.prisma.label.findMany({
-      where: { userId },
+  async findLabelsByUser(userId: string): Promise<SpaceLabel[]> {
+    return this.prisma.spaceLabel.findMany({
+      where: { spaceId: userId },
       orderBy: { name: 'asc' },
     });
   }
 
-  async findLabelById(id: string, userId: string): Promise<Label | null> {
-    return this.prisma.label.findFirst({
-      where: { id, userId },
+  async findLabelById(id: string, userId: string): Promise<SpaceLabel | null> {
+    return this.prisma.spaceLabel.findFirst({
+      where: { id, spaceId: userId },
     });
   }
 
-  async findLabelByName(name: string, userId: string): Promise<Label | null> {
-    return this.prisma.label.findUnique({
+  async findLabelByName(
+    name: string,
+    userId: string,
+  ): Promise<SpaceLabel | null> {
+    return this.prisma.spaceLabel.findFirst({
       where: {
-        userId_name: {
-          userId,
-          name,
-        },
+        spaceId: userId,
+        name,
       },
     });
   }
@@ -37,10 +40,11 @@ export class LabelRepository {
   async createLabel(
     userId: string,
     dto: CreateProjectLabelDto,
-  ): Promise<Label> {
-    return this.prisma.label.create({
+  ): Promise<SpaceLabel> {
+    return this.prisma.spaceLabel.create({
       data: {
-        userId,
+        spaceId: userId,
+        createdById: userId,
         name: dto.name.trim(),
         color: dto.color,
         description: dto.description?.trim() || null,
@@ -48,8 +52,11 @@ export class LabelRepository {
     });
   }
 
-  async updateLabel(id: string, dto: UpdateProjectLabelDto): Promise<Label> {
-    return this.prisma.label.update({
+  async updateLabel(
+    id: string,
+    dto: UpdateProjectLabelDto,
+  ): Promise<SpaceLabel> {
+    return this.prisma.spaceLabel.update({
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
@@ -61,15 +68,15 @@ export class LabelRepository {
     });
   }
 
-  async deleteLabel(id: string): Promise<Label> {
-    return this.prisma.label.delete({
+  async deleteLabel(id: string): Promise<SpaceLabel> {
+    return this.prisma.spaceLabel.delete({
       where: { id },
     });
   }
 
   async findProjectLabels(
     projectId: string,
-  ): Promise<(ProjectLabel & { label: Label })[]> {
+  ): Promise<(ProjectLabel & { label: SpaceLabel })[]> {
     return this.prisma.projectLabel.findMany({
       where: { projectId },
       include: { label: true },
@@ -83,8 +90,7 @@ export class LabelRepository {
     assignedById?: string,
   ): Promise<void> {
     if (!labelIds.length) return;
-    // Verify valid label IDs
-    const validLabels = await this.prisma.label.findMany({
+    const validLabels = await this.prisma.spaceLabel.findMany({
       where: { id: { in: labelIds } },
       select: { id: true },
     });
@@ -123,7 +129,7 @@ export class LabelRepository {
         where: { projectId },
       });
       if (labelIds.length > 0) {
-        const validLabels = await tx.label.findMany({
+        const validLabels = await tx.spaceLabel.findMany({
           where: { id: { in: labelIds } },
           select: { id: true },
         });

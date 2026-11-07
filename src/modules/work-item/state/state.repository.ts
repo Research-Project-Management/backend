@@ -105,7 +105,7 @@ export class StateRepository {
     projectId: string,
   ): Promise<Record<string, number>> {
     const counts = await this.prismaService.workItem.groupBy({
-      by: ['columnId'],
+      by: ['stateId'],
       where: {
         projectId,
         deletedAt: null,
@@ -117,7 +117,7 @@ export class StateRepository {
 
     const result: Record<string, number> = {};
     for (const item of counts) {
-      result[item.columnId] = item._count.id;
+      result[item.stateId] = item._count.id;
     }
     return result;
   }
@@ -129,7 +129,7 @@ export class StateRepository {
     return this.prismaService.workItem.count({
       where: {
         projectId,
-        columnId: stateId,
+        stateId,
         deletedAt: null,
       },
     });
@@ -144,11 +144,11 @@ export class StateRepository {
     const result = await this.prismaService.workItem.updateMany({
       where: {
         projectId,
-        columnId: fromStateId,
+        stateId: fromStateId,
         deletedAt: null,
       },
       data: {
-        columnId: toStateId,
+        stateId: toStateId,
         completed: isToCompleted,
       },
     });
@@ -168,11 +168,11 @@ export class StateRepository {
         await transaction.workItem.updateMany({
           where: {
             projectId,
-            columnId: deletedStateId,
+            stateId: deletedStateId,
             deletedAt: null,
           },
           data: {
-            columnId: fallbackStateId,
+            stateId: fallbackStateId,
             completed: isFallbackCompleted,
           },
         });

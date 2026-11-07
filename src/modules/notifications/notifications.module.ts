@@ -3,7 +3,7 @@ import { PrismaModule } from '@/core';
 import { RealtimeModule } from '@/modules/realtime/realtime.module';
 
 // Submodules
-import { ManuscriptsNotificationsModule } from './manuscripts/manuscripts-notifications.module';
+import { PagesNotificationsModule } from './pages/pages-notifications.module';
 import { ProjectsNotificationsModule } from './projects/projects-notifications.module';
 
 // Controllers
@@ -36,7 +36,7 @@ import { ReviewBundleFlushScheduler } from './core/adapters/scheduling/review-bu
   imports: [
     PrismaModule,
     RealtimeModule,
-    ManuscriptsNotificationsModule,
+    PagesNotificationsModule,
     ProjectsNotificationsModule,
   ],
   controllers: [NotificationsController],
@@ -73,7 +73,7 @@ import { ReviewBundleFlushScheduler } from './core/adapters/scheduling/review-bu
   ],
   exports: [
     NotificationsService,
-    ManuscriptsNotificationsModule,
+    PagesNotificationsModule,
     ProjectsNotificationsModule,
     NOTIFICATION_REPOSITORY_PORT,
     REALTIME_NOTIFIER_PORT,

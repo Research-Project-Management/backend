@@ -6,10 +6,6 @@ import { ProjectPortfolioOverviewDto } from './dto/project-analytics.dto';
 export class ProjectAnalyticsService {
   constructor(private readonly analyticsRepo: ProjectAnalyticsRepository) {}
 
-  /**
-   * Calculate high-level portfolio overview metrics for a project:
-   * % complete, work item counts by group, timeline deadline status.
-   */
   async getProjectOverview(
     projectId: string,
   ): Promise<ProjectPortfolioOverviewDto> {
@@ -35,7 +31,6 @@ export class ProjectAnalyticsService {
         ? Number(((completed / actionableTotal) * 100).toFixed(1))
         : 0;
 
-    // Timeline calculations
     let daysRemaining: number | null = null;
     let isOverdue = false;
 
@@ -76,9 +71,6 @@ export class ProjectAnalyticsService {
     };
   }
 
-  /**
-   * Detailed breakdown across dimensions (Priority, State Group, Assignee)
-   */
   async getProjectDetailedBreakdown(projectId: string) {
     const items = await this.analyticsRepo.getWorkItemsDetailed(projectId);
 
@@ -91,15 +83,12 @@ export class ProjectAnalyticsService {
     const byAssignee: Record<string, number> = {};
 
     for (const item of items) {
-      // Priority
       const p = item.priority || 'none';
       byPriority[p] = (byPriority[p] || 0) + 1;
 
-      // State group
       const grp = item.state?.group || 'backlog';
       byStateGroup[grp] = (byStateGroup[grp] || 0) + 1;
 
-      // Specific state
       if (item.state) {
         if (!byState[item.state.id]) {
           byState[item.state.id] = {
@@ -112,7 +101,6 @@ export class ProjectAnalyticsService {
         byState[item.state.id].count += 1;
       }
 
-      // Assignee
       const a = item.assigneeId || 'unassigned';
       byAssignee[a] = (byAssignee[a] || 0) + 1;
     }
@@ -126,9 +114,6 @@ export class ProjectAnalyticsService {
     };
   }
 
-  /**
-   * Daily WorkItem creation and completion trend for a date range
-   */
   async getTimeSeries(
     projectId: string,
     fromDate: string,
@@ -167,9 +152,6 @@ export class ProjectAnalyticsService {
     }));
   }
 
-  /**
-   * Label distribution for a project
-   */
   async getLabelDistribution(
     projectId: string,
   ): Promise<{ labels: { label: string; count: number }[] }> {
@@ -182,13 +164,7 @@ export class ProjectAnalyticsService {
             .map((a) => a.label?.name)
             .filter((name): name is string => Boolean(name))
         : [];
-      const itemLabels =
-        relationalLabels.length > 0
-          ? relationalLabels
-          : Array.isArray(item.labels)
-            ? item.labels
-            : [];
-      const uniqueLabels = new Set(itemLabels.filter(Boolean));
+      const uniqueLabels = new Set(relationalLabels.filter(Boolean));
       for (const label of uniqueLabels) {
         labelCount[label] = (labelCount[label] || 0) + 1;
       }
@@ -199,4 +175,3 @@ export class ProjectAnalyticsService {
     return { labels };
   }
 }
-

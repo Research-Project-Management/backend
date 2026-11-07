@@ -192,20 +192,20 @@ export class ActivityRepository implements IActivityRepository {
           })
         : [],
       validPaperIds.length
-        ? this.prisma.item.findMany({
+        ? this.prisma.libraryItem.findMany({
             where: { id: { in: validPaperIds }, deletedAt: null },
             select: { id: true, title: true },
           })
         : [],
       validPageIds.length
-        ? this.prisma.manuscriptDoc.findMany({
-            where: { id: { in: validPageIds }, deleted: false },
+        ? this.prisma.pageDoc.findMany({
+            where: { id: { in: validPageIds }, deletedAt: null },
             select: { id: true, path: true },
           })
         : [],
       validFileIds.length
-        ? this.prisma.file.findMany({
-            where: { id: { in: validFileIds }, trashedAt: null },
+        ? this.prisma.storageFile.findMany({
+            where: { id: { in: validFileIds }, deletedAt: null },
             select: { id: true, filename: true },
           })
         : [],
@@ -233,13 +233,13 @@ export class ActivityRepository implements IActivityRepository {
   }
 
   async findWorkItemWithProject(workItemId: string) {
-    return this.prisma.workItem.findUnique({
+    const item = await this.prisma.workItem.findUnique({
       where: { id: workItemId },
       select: {
         id: true,
         title: true,
         projectId: true,
-        columnId: true,
+        stateId: true,
         completed: true,
         createdAt: true,
         updatedAt: true,
@@ -252,6 +252,11 @@ export class ActivityRepository implements IActivityRepository {
         },
       },
     });
+    if (!item) return null;
+    return {
+      ...item,
+      columnId: item.stateId,
+    };
   }
 
   async findWorkItemComments(workItemId: string, sort: 'asc' | 'desc' = 'asc') {
@@ -259,19 +264,20 @@ export class ActivityRepository implements IActivityRepository {
       where: { workItemId },
       orderBy: { createdAt: sort },
       include: {
-        author: { select: ACTOR_MINIMAL_SELECT },
+        createdBy: { select: ACTOR_MINIMAL_SELECT },
       },
     });
     return comments.map((c) => ({
       ...c,
-      author: c.author
+      authorId: c.createdById,
+      author: c.createdBy
         ? {
-            id: c.author.id,
-            email: c.author.email,
-            name: c.author.profile?.name ?? 'User',
-            avatar: c.author.profile?.avatar ?? null,
+            id: c.createdBy.id,
+            email: c.createdBy.email,
+            name: c.createdBy.profile?.name ?? 'User',
+            avatar: c.createdBy.profile?.avatar ?? null,
           }
-        : c.author,
+        : null,
     }));
   }
 

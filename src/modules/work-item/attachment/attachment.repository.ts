@@ -8,14 +8,20 @@ import {
   UserProfileSource,
 } from '@/modules/work-item/common/types/shared.types';
 
-function mapAttachment<T extends { author?: UserProfileSource | null }>(
-  attachment: T,
-) {
+function mapAttachment<
+  T extends {
+    createdBy?: UserProfileSource | null;
+    createdById?: string | null;
+    spaceId?: string | null;
+  },
+>(attachment: T) {
   if (!attachment) return attachment;
-  const { author, ...rest } = attachment;
+  const { createdBy, ...rest } = attachment;
   return {
     ...rest,
-    author: mapUserMinimal(author),
+    projectId: attachment.spaceId ?? null,
+    authorId: attachment.createdById ?? null,
+    author: mapUserMinimal(createdBy),
   };
 }
 
@@ -28,17 +34,17 @@ export class AttachmentRepository {
       data: {
         entityType: data.entityType,
         entityId: data.entityId,
-        projectId: data.projectId,
+        spaceId: data.projectId,
         filename: data.filename,
         url: data.url,
         storageKey: data.storageKey,
         size: data.size || 0,
         mimeType: data.mimeType || 'application/octet-stream',
         metadata: (data.metadata || {}) as Prisma.InputJsonValue,
-        authorId,
+        createdById: authorId,
       },
       include: {
-        author: {
+        createdBy: {
           select: USER_MINIMAL_SELECT,
         },
       },
@@ -50,7 +56,7 @@ export class AttachmentRepository {
     const res = await this.prisma.entityAttachment.findUnique({
       where: { id },
       include: {
-        author: {
+        createdBy: {
           select: USER_MINIMAL_SELECT,
         },
       },
@@ -66,7 +72,7 @@ export class AttachmentRepository {
       },
       orderBy: { createdAt: 'desc' },
       include: {
-        author: {
+        createdBy: {
           select: USER_MINIMAL_SELECT,
         },
       },
@@ -165,7 +171,7 @@ export class AttachmentRepository {
 
   async findLinkedWorkItems(entityType: EntityType, entityId: string) {
     if (!this.prisma.workItemEntityLink) return [];
-    return this.prisma.workItemEntityLink.findMany({
+    const links = await this.prisma.workItemEntityLink.findMany({
       where: {
         entityType,
         entityId,
@@ -176,7 +182,7 @@ export class AttachmentRepository {
             id: true,
             identifier: true,
             title: true,
-            columnId: true,
+            stateId: true,
             state: true,
             priority: true,
             projectId: true,
@@ -187,5 +193,12 @@ export class AttachmentRepository {
       },
       orderBy: { createdAt: 'desc' },
     });
+    return links.map((link) => ({
+      ...link,
+      workItem: {
+        ...link.workItem,
+        columnId: link.workItem.stateId,
+      },
+    }));
   }
 }

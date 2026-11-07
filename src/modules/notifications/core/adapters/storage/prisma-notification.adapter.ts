@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import {
-  ManuscriptNotification,
-  ManuscriptNotificationType,
+  PageNotification,
+  PageNotificationType,
   Prisma,
 } from '@prisma/client';
 import {
@@ -22,7 +22,7 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
       key: notification.key,
       templateKey: notification.templateKey,
       type: notification.type,
-      projectId: notification.projectId,
+      spaceId: notification.projectId,
       docId: notification.docId,
       actorId: notification.actorId,
       messageOpts: (notification.messageOpts ?? {}) as Prisma.InputJsonObject,
@@ -32,7 +32,7 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
       readAt: notification.readAt,
     };
 
-    const record = await this.prisma.manuscriptNotification.upsert({
+    const record = await this.prisma.pageNotification.upsert({
       where: { id: notification.id },
       create: data,
       update: data,
@@ -42,7 +42,7 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
   }
 
   async findById(id: string): Promise<NotificationEntity | null> {
-    const record = await this.prisma.manuscriptNotification.findUnique({
+    const record = await this.prisma.pageNotification.findUnique({
       where: { id },
     });
     return record ? this.mapToEntity(record) : null;
@@ -52,10 +52,10 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
     key: string,
     userId?: string,
   ): Promise<NotificationEntity | null> {
-    const where: Prisma.ManuscriptNotificationWhereInput = { key };
+    const where: Prisma.PageNotificationWhereInput = { key };
     if (userId) where.userId = userId;
 
-    const record = await this.prisma.manuscriptNotification.findFirst({
+    const record = await this.prisma.pageNotification.findFirst({
       where,
       orderBy: { createdAt: 'desc' },
     });
@@ -66,17 +66,17 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
     key: string,
     userId?: string,
   ): Promise<string[]> {
-    if (!this.prisma.manuscriptNotification?.findMany) {
+    if (!this.prisma.pageNotification?.findMany) {
       return userId ? [userId] : [];
     }
-    const where: Prisma.ManuscriptNotificationWhereInput = {
+    const where: Prisma.PageNotificationWhereInput = {
       key: {
         startsWith: key,
       },
     };
     if (userId) where.userId = userId;
 
-    const records = await this.prisma.manuscriptNotification
+    const records = await this.prisma.pageNotification
       .findMany({
         where,
         select: { userId: true },
@@ -98,7 +98,7 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
     options?: QueryNotificationsOptions,
   ): Promise<NotificationEntity[]> {
     const now = new Date();
-    const where: Prisma.ManuscriptNotificationWhereInput = {
+    const where: Prisma.PageNotificationWhereInput = {
       userId,
       OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
     };
@@ -107,10 +107,10 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
       where.isRead = options.isRead;
     }
     if (options?.type) {
-      where.type = options.type as ManuscriptNotificationType;
+      where.type = options.type as PageNotificationType;
     }
 
-    const records = await this.prisma.manuscriptNotification.findMany({
+    const records = await this.prisma.pageNotification.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       skip: options?.offset ?? 0,
@@ -122,7 +122,7 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
 
   async countUnread(userId: string): Promise<number> {
     const now = new Date();
-    return this.prisma.manuscriptNotification.count({
+    return this.prisma.pageNotification.count({
       where: {
         userId,
         isRead: false,
@@ -132,10 +132,10 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
   }
 
   async markAsRead(id: string, userId?: string): Promise<boolean> {
-    const where: Prisma.ManuscriptNotificationWhereInput = { id };
+    const where: Prisma.PageNotificationWhereInput = { id };
     if (userId) where.userId = userId;
 
-    const result = await this.prisma.manuscriptNotification.updateMany({
+    const result = await this.prisma.pageNotification.updateMany({
       where,
       data: {
         isRead: true,
@@ -146,7 +146,7 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
   }
 
   async markAllAsRead(userId: string): Promise<number> {
-    const result = await this.prisma.manuscriptNotification.updateMany({
+    const result = await this.prisma.pageNotification.updateMany({
       where: {
         userId,
         isRead: false,
@@ -160,31 +160,31 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
   }
 
   async deleteById(id: string, userId?: string): Promise<boolean> {
-    const where: Prisma.ManuscriptNotificationWhereInput = { id };
+    const where: Prisma.PageNotificationWhereInput = { id };
     if (userId) where.userId = userId;
 
-    const result = await this.prisma.manuscriptNotification.deleteMany({
+    const result = await this.prisma.pageNotification.deleteMany({
       where,
     });
     return result.count > 0;
   }
 
   async deleteByKey(key: string, userId?: string): Promise<number> {
-    const where: Prisma.ManuscriptNotificationWhereInput = {
+    const where: Prisma.PageNotificationWhereInput = {
       key: {
         startsWith: key,
       },
     };
     if (userId) where.userId = userId;
 
-    const result = await this.prisma.manuscriptNotification.deleteMany({
+    const result = await this.prisma.pageNotification.deleteMany({
       where,
     });
     return result.count;
   }
 
   async deleteExpired(now: Date = new Date()): Promise<number> {
-    const result = await this.prisma.manuscriptNotification.deleteMany({
+    const result = await this.prisma.pageNotification.deleteMany({
       where: {
         expiresAt: {
           lte: now,
@@ -194,14 +194,14 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
     return result.count;
   }
 
-  private mapToEntity(record: ManuscriptNotification): NotificationEntity {
+  private mapToEntity(record: PageNotification): NotificationEntity {
     return new NotificationEntity({
       id: record.id,
       userId: record.userId,
       key: record.key,
       templateKey: record.templateKey,
       type: record.type,
-      projectId: record.projectId,
+      projectId: record.spaceId,
       docId: record.docId,
       actorId: record.actorId,
       messageOpts:

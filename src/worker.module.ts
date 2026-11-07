@@ -11,8 +11,8 @@ import { StorageModule } from './modules/storage/storage.module';
 import { LibraryModule } from './modules/library/library.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { ProjectModule } from './modules/project/project.module';
-import { ManuscriptsModule } from './modules/manuscripts/manuscripts.module';
-import { ClsiCompileProcessor } from './modules/manuscripts/clsi/processors/clsi-compile.processor';
+import { PagesModule } from './modules/pages/pages.module';
+import { ClsiCompileProcessor } from './modules/pages/clsi/processors/clsi-compile.processor';
 
 /**
  * Composition root dedicated exclusively for Flux Background Workers.
@@ -42,7 +42,7 @@ import { ClsiCompileProcessor } from './modules/manuscripts/clsi/processors/clsi
     ProjectModule,
     StorageModule,
     LibraryModule,
-    ManuscriptsModule,
+    PagesModule,
   ],
   providers: [ClsiCompileProcessor],
 })

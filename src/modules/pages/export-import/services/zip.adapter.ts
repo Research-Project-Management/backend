@@ -1,0 +1,210 @@
+/**
+ * modules/manuscripts/export-import/services/zip.adapter.ts
+ * Infrastructure / Adapter: PKZIP streaming & buffer engine implementing IZipEnginePort.
+ */
+
+import * as zlib from 'node:zlib';
+import { Readable } from 'node:stream';
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  buildZipBuffer,
+  createZipStream,
+} from '@/modules/pages/core';
+import {
+  IZipEnginePort,
+  RawZipEntryInput,
+  ArchiveEntryVo,
+  InvalidZipArchiveException,
+  ArchiveQuotaExceededException,
+  MAX_SINGLE_FILE_BYTES,
+  MAX_UNCOMPRESSED_PROJECT_BYTES,
+  MAX_PROJECT_ENTRY_COUNT,
+} from '../domain/archive-validator';
+
+@Injectable()
+export class ZipAdapter extends IZipEnginePort {
+  private readonly logger = new Logger(ZipAdapter.name);
+
+  public buildZip(entries: RawZipEntryInput[]): Buffer {
+    return buildZipBuffer(entries);
+  }
+
+  public createZipStream(entries: RawZipEntryInput[]): Readable {
+    return createZipStream(entries);
+  }
+
+  public extractZip(zipBuffer: Buffer): ArchiveEntryVo[] {
+    if (!zipBuffer || zipBuffer.length < 22) {
+      throw new InvalidZipArchiveException(
+        'Provided buffer is too small to be a valid ZIP archive.',
+      );
+    }
+
+    let eocdOffset = -1;
+    const maxScan = Math.min(zipBuffer.length, 65557);
+    const scanStart = zipBuffer.length - 22;
+    const scanEnd = Math.max(0, zipBuffer.length - maxScan);
+
+    for (let i = scanStart; i >= scanEnd; i--) {
+      if (zipBuffer.readUInt32LE(i) === 0x06054b50) {
+        eocdOffset = i;
+        break;
+      }
+    }
+
+    if (eocdOffset === -1) {
+      throw new InvalidZipArchiveException(
+        'End of Central Directory (EOCD) signature not found in archive.',
+      );
+    }
+
+    const cdTotalEntries = zipBuffer.readUInt16LE(eocdOffset + 10);
+    const cdOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
+
+    if (cdTotalEntries === 0xffff || cdOffset === 0xffffffff) {
+      throw new InvalidZipArchiveException(
+        'ZIP64 archives are not supported.',
+      );
+    }
+
+    if (cdTotalEntries > MAX_PROJECT_ENTRY_COUNT) {
+      throw new ArchiveQuotaExceededException(
+        cdTotalEntries,
+        MAX_PROJECT_ENTRY_COUNT,
+      );
+    }
+
+    let offset = cdOffset;
+    let totalUncompressedBytes = 0;
+    const entries: ArchiveEntryVo[] = [];
+
+    for (let i = 0; i < cdTotalEntries; i++) {
+      if (
+        offset + 46 > zipBuffer.length ||
+        zipBuffer.readUInt32LE(offset) !== 0x02014b50
+      ) {
+        throw new InvalidZipArchiveException(
+          `Corrupted or truncated ZIP central directory at entry ${i} of ${cdTotalEntries}.`,
+        );
+      }
+
+      const compressionMethod = zipBuffer.readUInt16LE(offset + 10);
+      const compressedSize = zipBuffer.readUInt32LE(offset + 20);
+      const uncompressedSize = zipBuffer.readUInt32LE(offset + 24);
+      const fileNameLength = zipBuffer.readUInt16LE(offset + 28);
+      const extraFieldLength = zipBuffer.readUInt16LE(offset + 30);
+      const commentLength = zipBuffer.readUInt16LE(offset + 32);
+      const localHeaderOffset = zipBuffer.readUInt32LE(offset + 42);
+
+      const fileName = zipBuffer.toString(
+        'utf8',
+        offset + 46,
+        offset + 46 + fileNameLength,
+      );
+
+      offset += 46 + fileNameLength + extraFieldLength + commentLength;
+
+      if (localHeaderOffset + 30 > zipBuffer.length) {
+        continue;
+      }
+      if (zipBuffer.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
+        continue;
+      }
+
+      const localFileNameLength = zipBuffer.readUInt16LE(
+        localHeaderOffset + 26,
+      );
+      const localExtraFieldLength = zipBuffer.readUInt16LE(
+        localHeaderOffset + 28,
+      );
+
+      const dataOffset =
+        localHeaderOffset + 30 + localFileNameLength + localExtraFieldLength;
+      const isDirectory =
+        fileName.endsWith('/') ||
+        fileName.endsWith('\\') ||
+        (compressedSize === 0 &&
+          uncompressedSize === 0 &&
+          fileName.includes('/'));
+
+      let uncompressedData: Buffer = Buffer.alloc(0);
+
+      if (!isDirectory && compressedSize > 0) {
+        const compressedSlice = zipBuffer.subarray(
+          dataOffset,
+          dataOffset + compressedSize,
+        );
+
+        if (compressionMethod === 0) {
+          if (compressedSlice.length > MAX_SINGLE_FILE_BYTES) {
+            throw new ArchiveQuotaExceededException(
+              compressedSlice.length,
+              MAX_SINGLE_FILE_BYTES,
+            );
+          }
+          uncompressedData = Buffer.from(compressedSlice);
+        } else if (compressionMethod === 8) {
+          if (
+            compressedSize > 0 &&
+            uncompressedSize > 10 * 1024 * 1024 &&
+            uncompressedSize / compressedSize > 100
+          ) {
+            throw new InvalidZipArchiveException(
+              `Suspicious compression ratio detected in entry '${fileName}' (zip bomb protection).`,
+            );
+          }
+          try {
+            uncompressedData = zlib.inflateRawSync(compressedSlice, {
+              maxOutputLength: MAX_SINGLE_FILE_BYTES,
+            });
+          } catch (inflateErr: unknown) {
+            const errCode = (inflateErr as { code?: string })?.code;
+            if (errCode === 'ERR_BUFFER_TOO_LARGE') {
+              throw new ArchiveQuotaExceededException(
+                MAX_SINGLE_FILE_BYTES + 1,
+                MAX_SINGLE_FILE_BYTES,
+              );
+            }
+            const inflateMsg =
+              inflateErr instanceof Error
+                ? inflateErr.message
+                : String(inflateErr);
+            this.logger.warn(
+              `Failed to inflate entry '${fileName}': ${inflateMsg}`,
+            );
+            throw new InvalidZipArchiveException(
+              `Failed to decompress entry '${fileName}'.`,
+            );
+          }
+        } else {
+          this.logger.warn(
+            `Unsupported ZIP compression method ${compressionMethod} for '${fileName}'. Skipping.`,
+          );
+          continue;
+        }
+      }
+
+      totalUncompressedBytes += uncompressedData.length;
+      if (totalUncompressedBytes > MAX_UNCOMPRESSED_PROJECT_BYTES) {
+        throw new ArchiveQuotaExceededException(
+          totalUncompressedBytes,
+          MAX_UNCOMPRESSED_PROJECT_BYTES,
+        );
+      }
+
+      const entryVo = ArchiveEntryVo.create(
+        fileName,
+        uncompressedData,
+        isDirectory,
+      );
+
+      if (!entryVo.isIgnoredSystemArtifact()) {
+        entries.push(entryVo);
+      }
+    }
+
+    return entries;
+  }
+}
+
+export { ZipAdapter as PkzipEngineAdapter };

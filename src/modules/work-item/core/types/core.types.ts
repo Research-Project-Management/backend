@@ -27,7 +27,7 @@ export const CHILD_WORK_ITEM_SELECT = {
   id: true,
   title: true,
   identifier: true,
-  columnId: true,
+  stateId: true,
   completed: true,
   rank: true,
   assigneeId: true,
@@ -160,6 +160,11 @@ export type WorkItemWithRelations = Prisma.WorkItemGetPayload<{
     project: { select: { id: true } };
   };
 }> & {
+  columnId: string;
+  authorId: string;
+  labels?: string[];
+  assigneeIds?: string[];
+  relations?: Prisma.JsonValue;
   attachments?: WorkItemAttachments;
 };
 

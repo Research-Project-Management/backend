@@ -79,9 +79,11 @@ export interface RawWorkItemRecord {
   description?: string | null;
   content?: string | null;
   columnId?: string;
+  stateId?: string;
   priority?: string;
   projectId?: string;
   authorId?: string;
+  createdById?: string;
   assigneeId?: string | null;
   assigneeIds?: unknown;
   dueDate?: Date | string | null;
@@ -283,7 +285,7 @@ export const formatWorkItem = (
           id: child.id || '',
           title: child.title || '',
           identifier: child.identifier || null,
-          columnId: child.columnId || '',
+          columnId: child.columnId || child.stateId || '',
           completed: childIsCompleted,
           rank: typeof child.rank === 'number' ? child.rank : 0,
           stateGroup:
@@ -320,8 +322,20 @@ export const formatWorkItem = (
   const labels = resolveLabels(record, labelLookup);
 
   const jsonSubtypeMap = new Map<string, string>();
-  if (Array.isArray(record.relations)) {
-    for (const jr of record.relations as Array<{
+  const rawMetadata =
+    record.metadata &&
+    typeof record.metadata === 'object' &&
+    !Array.isArray(record.metadata)
+      ? (record.metadata as Record<string, unknown>)
+      : null;
+  const rawRelationsSource = Array.isArray(record.relations)
+    ? record.relations
+    : Array.isArray(rawMetadata?.relations)
+      ? rawMetadata.relations
+      : null;
+
+  if (Array.isArray(rawRelationsSource)) {
+    for (const jr of rawRelationsSource as Array<{
       targetWorkItemId?: string;
       targetId?: string;
       type?: string;
@@ -372,7 +386,7 @@ export const formatWorkItem = (
               : undefined,
           })),
         ]
-      : (record.relations as unknown[]) || [];
+      : (rawRelationsSource as unknown[]) || [];
 
   const state: StateMinimal | null = record.state
     ? {
@@ -442,10 +456,10 @@ export const formatWorkItem = (
     sequenceNumber: record.sequenceNumber || null,
     description: record.content || record.description || '',
     content: record.content || record.description || '',
-    columnId: record.columnId || '',
+    columnId: record.columnId || record.stateId || '',
     priority,
     projectId: record.projectId || '',
-    authorId: record.authorId || '',
+    authorId: record.authorId || record.createdById || '',
     rank: typeof record.rank === 'number' ? record.rank : 0,
     state,
     stateGroup,

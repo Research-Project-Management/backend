@@ -47,6 +47,9 @@ export interface WorkItemCommentMinimal {
 }
 
 export interface UserWorkItem extends WorkItem {
+  authorId: string;
+  columnId: string;
+  assigneeIds: string[];
   author: UserMinimal;
   assignee: UserMinimal | null;
   project: ProjectMinimal;

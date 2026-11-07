@@ -45,6 +45,7 @@ export type WorkItemWithProject = {
   id: string;
   title: string;
   projectId: string;
+  stateId: string;
   columnId: string;
   completed: boolean;
   createdAt: Date;
@@ -62,6 +63,7 @@ export type WorkItemCommentWithAuthor = {
   workItemId: string;
   createdAt: Date;
   updatedAt: Date;
+  createdById: string;
   authorId: string;
   author: ActivityActor | null;
   [key: string]: unknown;

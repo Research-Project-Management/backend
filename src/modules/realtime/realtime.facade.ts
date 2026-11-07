@@ -1,11 +1,11 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { RoomStore } from './manuscripts/room.store';
-import { YjsService } from './manuscripts/yjs.service';
-import { ManuscriptsGateway } from './manuscripts/manuscripts.gateway';
+import { RoomStore } from './pages/room.store';
+import { YjsService } from './pages/yjs.service';
+import { PagesGateway } from './pages/pages.gateway';
 import { NotificationGateway } from './notifications/notifications.gateway';
 import { CoreService, RealtimeStats } from './core/core.service';
-import { UserPresence } from './manuscripts/types/presence.type';
+import { UserPresence } from './pages/types/presence.type';
 import { REALTIME_EVENTS } from './core/realtime.constant';
 
 @Injectable()
@@ -16,7 +16,7 @@ export class RealtimeFacade {
     private readonly roomStore: RoomStore,
     @Optional() private readonly coreService?: CoreService,
     @Optional() private readonly yjs?: YjsService,
-    @Optional() private readonly manuscriptsGateway?: ManuscriptsGateway,
+    @Optional() private readonly PagesGateway?: PagesGateway,
     @Optional() private readonly notificationGateway?: NotificationGateway,
   ) {}
 
@@ -105,8 +105,8 @@ export class RealtimeFacade {
     event: string,
     payload: unknown,
   ): void {
-    if (this.manuscriptsGateway) {
-      this.manuscriptsGateway.broadcastToProject(projectId, event, payload);
+    if (this.PagesGateway) {
+      this.PagesGateway.broadcastToProject(projectId, event, payload);
     }
   }
 

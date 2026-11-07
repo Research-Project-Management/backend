@@ -634,7 +634,7 @@ export class CoreRepository {
           projectId,
           deletedAt: null,
           ...(completedStateIds.length > 0
-            ? { columnId: { in: completedStateIds } }
+            ? { stateId: { in: completedStateIds } }
             : { completed: true }),
         },
       }),
@@ -643,10 +643,10 @@ export class CoreRepository {
           projectId,
           deletedAt: null,
           ...(startedStateIds.length > 0
-            ? { columnId: { in: startedStateIds } }
+            ? { stateId: { in: startedStateIds } }
             : backlogStateIds.length > 0
               ? {
-                  columnId: {
+                  stateId: {
                     notIn: [...backlogStateIds, ...completedStateIds],
                   },
                   completed: false,
@@ -659,15 +659,15 @@ export class CoreRepository {
           projectId,
           deletedAt: null,
           ...(backlogStateIds.length > 0
-            ? { columnId: { in: backlogStateIds } }
+            ? { stateId: { in: backlogStateIds } }
             : startedStateIds.length > 0 || completedStateIds.length > 0
               ? {
-                  columnId: {
+                  stateId: {
                     notIn: [...startedStateIds, ...completedStateIds],
                   },
                   completed: false,
                 }
-              : { completed: false, columnId: 'backlog' }),
+              : { completed: false }),
         },
       }),
       this.prisma.projectMember.count({
@@ -763,11 +763,11 @@ export class CoreRepository {
       await tx.workItem.updateMany({
         where: {
           projectId,
-          columnId: stateId,
+          stateId,
           deletedAt: null,
         },
         data: {
-          columnId: fallbackStateId,
+          stateId: fallbackStateId,
         },
       });
 
@@ -844,8 +844,8 @@ export class CoreRepository {
             projectStates: true,
           },
         }),
-        this.prisma.manuscriptDoc.findMany({
-          where: { projectId, deleted: false },
+        this.prisma.pageDoc.findMany({
+          where: { spaceId: projectId, deletedAt: null },
           select: {
             id: true,
             path: true,
@@ -858,8 +858,8 @@ export class CoreRepository {
           },
           orderBy: { createdAt: 'asc' },
         }),
-        this.prisma.manuscriptFile.findMany({
-          where: { projectId, deleted: false },
+        this.prisma.pageFile.findMany({
+          where: { spaceId: projectId, deletedAt: null },
           select: {
             id: true,
             name: true,
@@ -871,8 +871,8 @@ export class CoreRepository {
           },
           orderBy: { createdAt: 'asc' },
         }),
-        this.prisma.manuscriptNode.findMany({
-          where: { projectId },
+        this.prisma.pageNode.findMany({
+          where: { spaceId: projectId },
           orderBy: { depth: 'asc' },
         }),
       ]);
@@ -962,9 +962,9 @@ export class CoreRepository {
       const docIdMap = new Map<string, string>();
       if (source.manuscriptDocs && source.manuscriptDocs.length > 0) {
         for (const doc of source.manuscriptDocs) {
-          const newDoc = await tx.manuscriptDoc.create({
+          const newDoc = await tx.pageDoc.create({
             data: {
-              projectId: newProject.id,
+              spaceId: newProject.id,
               path: doc.path,
               lines: doc.lines ?? [],
               rev: 0,
@@ -982,9 +982,9 @@ export class CoreRepository {
       const fileIdMap = new Map<string, string>();
       const manuscriptFiles = source.manuscriptFiles || [];
       for (const file of manuscriptFiles) {
-        const newFile = await tx.manuscriptFile.create({
+        const newFile = await tx.pageFile.create({
           data: {
-            projectId: newProject.id,
+            spaceId: newProject.id,
             name: file.name,
             mimeType: file.mimeType,
             sizeBytes: file.sizeBytes,
@@ -1009,9 +1009,9 @@ export class CoreRepository {
           ? fileIdMap.get(node.fileId) || null
           : null;
 
-        const newNode = await tx.manuscriptNode.create({
+        const newNode = await tx.pageNode.create({
           data: {
-            projectId: newProject.id,
+            spaceId: newProject.id,
             parentId: newParentId,
             type: node.type,
             name: node.name,

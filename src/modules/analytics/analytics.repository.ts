@@ -58,20 +58,19 @@ export class AnalyticsRepository {
       this.prisma.workItem.count({
         where: { projectId: canonicalProjectId, deletedAt: null },
       }),
-      this.prisma.manuscriptDoc.count({
-        where: { projectId: canonicalProjectId, deleted: false },
+      this.prisma.pageDoc.count({
+        where: { spaceId: canonicalProjectId, deletedAt: null },
       }),
-      this.prisma.file.count({
+      this.prisma.storageFile.count({
         where: {
-          linkedToType: 'project',
-          linkedToId: canonicalProjectId,
-          trashedAt: null,
+          spaceId: canonicalProjectId,
+          deletedAt: null,
         },
       }),
       Promise.resolve(0),
       Promise.resolve(0),
-      this.prisma.item.count({
-        where: { projectId: canonicalProjectId, deletedAt: null },
+      this.prisma.libraryItem.count({
+        where: { spaceId: canonicalProjectId, deletedAt: null },
       }),
     ]);
 
@@ -113,22 +112,23 @@ export class AnalyticsRepository {
         where: { assigneeId: userId, deletedAt: null },
       }),
       this.prisma.workItem.count({
-        where: { authorId: userId, deletedAt: null },
+        where: { createdById: userId, deletedAt: null },
       }),
       this.prisma.sticky.count({
         where: { userId, deletedAt: null },
       }),
-      this.prisma.item.count({
-        where: { userId, deletedAt: null },
+      this.prisma.libraryItem.count({
+        where: { spaceId: userId, deletedAt: null },
       }),
     ]);
 
     const projectIds = userProjects.map((p) => p.projectId);
-    const pagesCount = projectIds.length
-      ? await this.prisma.manuscriptDoc.count({
+    const spaceIds = Array.from(new Set([userId, ...projectIds]));
+    const pagesCount = spaceIds.length
+      ? await this.prisma.pageDoc.count({
           where: {
-            projectId: { in: projectIds },
-            deleted: false,
+            spaceId: { in: spaceIds },
+            deletedAt: null,
           },
         })
       : 0;
@@ -163,7 +163,7 @@ export class AnalyticsRepository {
       where: { projectId: canonicalProjectId, deletedAt: null },
       select: {
         id: true,
-        columnId: true,
+        stateId: true,
         priority: true,
         completed: true,
         assigneeId: true,
@@ -173,6 +173,7 @@ export class AnalyticsRepository {
 
     return items.map((item) => ({
       ...item,
+      columnId: item.stateId,
       assignee: item.assignee
         ? {
             id: item.assignee.id,
@@ -191,7 +192,6 @@ export class AnalyticsRepository {
       where: { projectId, deletedAt: null },
       select: {
         id: true,
-        labels: true,
         labelAssignments: {
           select: {
             label: {

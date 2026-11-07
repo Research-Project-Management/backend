@@ -2,14 +2,40 @@ import {
   Injectable,
   ForbiddenException,
   NotFoundException,
+  BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { StorageNode } from '../types';
 import { IStorageNodeRepository } from '../repositories/prisma-node.repository';
 import { STORAGE_NODE_REPOSITORY } from '@/modules/storage/storage.tokens';
 
 export type StorageAction = 'read' | 'write' | 'delete' | 'share';
+
+const STORAGE_PERSONAL_ALIASES = new Set([
+  'null',
+  'undefined',
+  'personal',
+  'me',
+  'user',
+  'default',
+  '',
+]);
+
+export function normalizeStorageProjectId(
+  projectId?: string | null,
+  userId?: string,
+): string | undefined {
+  if (!projectId) return undefined;
+  const trimmed = projectId.trim();
+  if (STORAGE_PERSONAL_ALIASES.has(trimmed.toLowerCase())) {
+    return undefined;
+  }
+  if (userId && trimmed === userId.trim()) {
+    return undefined;
+  }
+  return trimmed;
+}
 
 @Injectable()
 export class StorageAccessPolicy {
@@ -55,7 +81,7 @@ export class StorageAccessPolicy {
       }
     }
 
-    const shares = await this.prisma.fileShare.findMany({
+    const shares = await this.prisma.storageFileShare.findMany({
       where: {
         fileId: { in: candidateFileIds },
         userId,
@@ -123,15 +149,51 @@ export class StorageAccessPolicy {
     projectId: string,
     action: StorageAction,
   ): Promise<void> {
-    if (!userId || !projectId) {
+    if (!userId) {
       throw new ForbiddenException('Authentication required for project access');
+    }
+    if (
+      !projectId ||
+      STORAGE_PERSONAL_ALIASES.has(projectId.trim().toLowerCase()) ||
+      projectId.trim() === userId
+    ) {
+      return;
+    }
+    const trimmedProjectId = projectId.trim();
+    if (!isUuid(trimmedProjectId)) {
+      throw new BadRequestException('Invalid projectId: expected a valid UUID');
     }
     const membership = await this.prisma.projectMember.findUnique({
       where: {
-        projectId_userId: { projectId, userId },
+        projectId_userId: { projectId: trimmedProjectId, userId },
       },
     });
     if (!membership) {
+      const [space, page] = await Promise.all([
+        this.prisma.space?.findUnique
+          ? Promise.resolve(
+              this.prisma.space.findUnique({
+                where: { id: trimmedProjectId },
+                select: { ownerUserId: true },
+              }),
+            ).catch(() => null)
+          : Promise.resolve(null),
+        this.prisma.page?.findUnique
+          ? Promise.resolve(
+              this.prisma.page.findUnique({
+                where: { id: trimmedProjectId },
+                select: { spaceId: true, createdById: true },
+              }),
+            ).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      if (
+        space?.ownerUserId === userId ||
+        page?.spaceId === userId ||
+        page?.createdById === userId
+      ) {
+        return;
+      }
       throw new ForbiddenException(
         'Access denied: you are not a member of this project',
       );
@@ -168,8 +230,12 @@ export class StorageAccessPolicy {
     if (options.parentId && options.parentId !== 'null' && options.parentId !== 'root') {
       await this.assertCanAccess(userId, options.parentId, 'write');
     }
-    if (options.projectId && options.projectId !== 'null') {
-      await this.assertCanAccessProject(userId, options.projectId, 'write');
+    const normalizedProjectId = normalizeStorageProjectId(
+      options.projectId,
+      userId,
+    );
+    if (normalizedProjectId) {
+      await this.assertCanAccessProject(userId, normalizedProjectId, 'write');
     }
   }
 }

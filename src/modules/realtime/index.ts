@@ -8,14 +8,16 @@ export { RealtimeModule } from './realtime.module';
 export { RealtimeFacade } from './realtime.facade';
 export { RealtimeCoreModule, CoreModule } from './core/core.module';
 export {
+  RealtimePagesModule,
   RealtimeManuscriptsModule,
+  PagesModule,
   ManuscriptsModule,
-} from './manuscripts/manuscripts.module';
+} from './pages/pages.module';
 export {
   RealtimeNotificationsModule,
   NotificationsModule,
 } from './notifications/notifications.module';
-export { YjsUpdateValidator } from './manuscripts/yjs-update-validator';
+export { YjsUpdateValidator } from './pages/yjs-update-validator';
 export { WsAuthService, type WsUserSession } from './core/ws-auth.guard';
 export { createWsConnectionMiddleware } from './core/ws-connection.middleware';
 export { WsAllExceptionsFilter } from './core/ws-exception.filter';
