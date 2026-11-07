@@ -33,70 +33,9 @@ async function seedSettings() {
     }
     console.log(`✅ Seeded ${labelsData.length} research labels.`);
 
-    // 2. Scientific Integrations
+    // 2. Scientific Integrations — clean up any AI-generated mock integrations
     await pool.query('DELETE FROM user_integrations WHERE user_id = $1', [userId]);
-    const integrations = [
-      {
-        provider: 'github',
-        status: 'connected',
-        accountName: 'tanthanh-flux-research',
-        accountEmail: 'ngotanthanh92.26@gmail.com',
-        metadata: {
-          repos: ['flux-foundation-models', 'distributed-vit-training', 'scientific-eval-suite'],
-          scopes: ['repo', 'read:org', 'workflow'],
-        },
-      },
-      {
-        provider: 'orcid',
-        status: 'connected',
-        accountName: 'Tan Thanh Ngo, Ph.D.',
-        accountEmail: 'ngotanthanh92.26@gmail.com',
-        metadata: {
-          orcid_id: '0009-0004-8219-5820',
-          verified_institution: 'Flux Laboratory for Neural Computing',
-        },
-      },
-      {
-        provider: 'zotero',
-        status: 'connected',
-        accountName: 'flux-lab-library',
-        accountEmail: 'ngotanthanh92.26@gmail.com',
-        metadata: {
-          sync_items: 2450,
-          collections_count: 18,
-          last_sync: '2026-10-30T16:00:00Z',
-        },
-      },
-      {
-        provider: 'mendeley',
-        status: 'connected',
-        accountName: 'tanthanh.ngo',
-        accountEmail: 'ngotanthanh92.26@gmail.com',
-        metadata: {
-          group_libraries: ['NeurIPS-2026-Working-Group', 'Transformer-Interpretability'],
-        },
-      },
-    ];
-
-    for (const i of integrations) {
-      await pool.query(
-        `INSERT INTO user_integrations (
-          id, user_id, provider, status, account_name, account_email, provider_user_id, metadata, access_token, connected_at, last_synced_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), NOW())`,
-        [
-          randomUUID(),
-          userId,
-          i.provider,
-          i.status,
-          i.accountName,
-          i.accountEmail,
-          `uid_${i.provider}_${randomUUID().slice(0, 8)}`,
-          JSON.stringify(i.metadata),
-          `mock_token_${randomUUID().replace(/-/g, '')}`,
-        ]
-      );
-    }
-    console.log(`✅ Seeded ${integrations.length} scientific integrations.`);
+    console.log('✅ Cleaned up mock user_integrations.');
 
     // 3. User Preferences & Scientific Editor Defaults
     await pool.query(
