@@ -165,35 +165,19 @@ const CANONICAL_ALIAS_GROUPS: ReadonlyArray<{
   { canonical: ['issn'], sources: ['issn', 'ISSN'] },
   { canonical: ['pmid'], sources: ['pmid', 'PMID'] },
   { canonical: ['pmcid'], sources: ['pmcid', 'PMCID'] },
-  {
-    canonical: ['arxivId', 'archiveId'],
-    sources: ['arxivId', 'archiveId', 'archiveID'],
-  },
-  {
-    canonical: ['journalAbbreviation', 'journalAbbr'],
-    sources: ['journalAbbreviation', 'journalAbbr'],
-  },
-  {
-    canonical: ['abstract', 'abstractNote'],
-    sources: ['abstract', 'abstractNote'],
-  },
+  { canonical: ['arxivId', 'archiveId'], sources: ['arxivId', 'archiveId', 'archiveID'] },
+  { canonical: ['journalAbbreviation', 'journalAbbr'], sources: ['journalAbbreviation', 'journalAbbr'] },
+  { canonical: ['abstract', 'abstractNote'], sources: ['abstract', 'abstractNote'] },
   { canonical: ['accessDate'], sources: ['accessDate', 'accessedAt'] },
   { canonical: ['citationKey'], sources: ['citationKey', 'citeKey'] },
   { canonical: ['url'], sources: ['url', 'URL'] },
   { canonical: ['rights', 'license'], sources: ['rights', 'license'] },
-  {
-    canonical: ['numPages', 'numberOfPages'],
-    sources: ['numPages', 'numberOfPages'],
-  },
-  {
-    canonical: ['authority', 'issuingAuthority'],
-    sources: ['authority', 'issuingAuthority'],
-  },
+  { canonical: ['numPages', 'numberOfPages'], sources: ['numPages', 'numberOfPages'] },
+  { canonical: ['authority', 'issuingAuthority'], sources: ['authority', 'issuingAuthority'] },
 ];
 
 /**
  * Resolves all legacy alias inputs into canonical fields in-place on `record`.
- * Does not overwrite existing non-empty values on `record` and does not write duplicate legacy alias keys unless `syncLegacyAliases` is true.
  */
 export function resolveFieldAliases(
   record: Record<string, unknown>,
@@ -210,9 +194,7 @@ export function resolveFieldAliases(
             record[key] = val.toISOString();
           } else if (key === 'accessedAt' && typeof val === 'string') {
             const parsed = new Date(val);
-            if (!Number.isNaN(parsed.getTime())) {
-              record[key] = parsed;
-            }
+            if (!Number.isNaN(parsed.getTime())) record[key] = parsed;
           } else {
             record[key] = val;
           }
@@ -225,69 +207,39 @@ export function resolveFieldAliases(
 const SUPPLEMENTAL_BASE_FIELD_MAPPINGS: Readonly<
   Record<string, Readonly<Record<string, string>>>
 > = {
-  case: {
-    publicationTitle: 'reporter',
-  },
-  statute: {
-    publicationTitle: 'code',
-    volume: 'codeNumber',
-  },
-  patent: {
-    place: 'country',
-  },
-  conferencePaper: {
-    place: 'eventPlace',
-  },
-  presentation: {
-    place: 'eventPlace',
-  },
+  case: { publicationTitle: 'reporter' },
+  statute: { publicationTitle: 'code', volume: 'codeNumber' },
+  patent: { place: 'country' },
+  conferencePaper: { place: 'eventPlace' },
+  presentation: { place: 'eventPlace' },
 };
 
 /**
  * Returns the complete base-field-to-type-specific-field mapping for `itemType`,
  * combining Zotero Schema v42 `BASE_FIELD_MAPPINGS` with CSL/Zotero container & place semantics.
  */
-export function getEffectiveBaseFieldMap(
-  itemType?: string,
-): Record<string, string> {
+export function getEffectiveBaseFieldMap(itemType?: string): Record<string, string> {
   if (!itemType) return {};
-  const schemaMap = BASE_FIELD_MAPPINGS[itemType] || {};
-  const supplemental = SUPPLEMENTAL_BASE_FIELD_MAPPINGS[itemType] || {};
   return {
-    ...supplemental,
-    ...schemaMap,
+    ...(SUPPLEMENTAL_BASE_FIELD_MAPPINGS[itemType] || {}),
+    ...(BASE_FIELD_MAPPINGS[itemType] || {}),
   };
 }
 
 /**
  * Returns the reverse mapping (type-specific-field -> base-field) for `itemType`.
  */
-export function getEffectiveReverseBaseFieldMap(
-  itemType?: string,
-): Record<string, string> {
+export function getEffectiveReverseBaseFieldMap(itemType?: string): Record<string, string> {
   const forward = getEffectiveBaseFieldMap(itemType);
   const reverse: Record<string, string> = {};
   for (const [base, mapped] of Object.entries(forward)) {
-    if (mapped) {
-      reverse[mapped] = base;
-    }
+    if (mapped) reverse[mapped] = base;
   }
   return reverse;
 }
 
 /**
  * Applies Zotero v42 `BASE_FIELD_MAPPINGS` bidirectionally in-place on `record` for the given `itemType`.
- *
- * Note: `BASE_FIELD_MAPPINGS` is indexed by `itemType` -> `Record<baseField, mappedField>`.
- * Examples:
- * - `case`: `title` <-> `caseName`, `publicationTitle` <-> `reporter`, `volume` <-> `reporterVolume`, `pages` <-> `firstPage`, `date` <-> `dateDecided`, `authority` <-> `court`, `number` <-> `docketNumber`
- * - `statute`: `title` <-> `nameOfAct`, `publicationTitle` <-> `code`, `volume` <-> `codeNumber`, `number` <-> `publicLawNumber`, `date` <-> `dateEnacted`
- * - `patent`: `number` <-> `patentNumber`, `date` <-> `issueDate`, `place` <-> `country`, `authority` <-> `issuingAuthority`
- * - `thesis`: `publisher` <-> `university`, `type` <-> `thesisType`
- * - `report`: `publisher` <-> `institution`, `number` <-> `reportNumber`, `type` <-> `reportType`
- * - `conferencePaper`: `publicationTitle` <-> `proceedingsTitle`, `place` <-> `eventPlace`
- * - `bookSection`: `publicationTitle` <-> `bookTitle`
- * - `webpage`: `publicationTitle` <-> `websiteTitle`, `type` <-> `websiteType`
  */
 export function resolveBidirectionalBaseFields(
   record: Record<string, unknown>,
@@ -305,41 +257,22 @@ export function resolveBidirectionalBaseFields(
         ? record.type.trim()
         : 'journalArticle');
 
-  // Resolve legacy journal/venue -> publicationTitle and date <-> publicationDate on input
-  const pubTitleVal = getFirstNonEmpty(
-    ['publicationTitle', 'journal', 'venue'],
-    record,
-    extraSources,
-  );
+  const pubTitleVal = getFirstNonEmpty(['publicationTitle', 'journal', 'venue'], record, extraSources);
   if (pubTitleVal !== undefined) {
-    if (!isNonEmptyValue(record.publicationTitle)) {
-      record.publicationTitle = pubTitleVal;
-    }
-    if (syncLegacyAliases && !isNonEmptyValue(record.journal)) {
-      record.journal = pubTitleVal;
-    }
+    if (!isNonEmptyValue(record.publicationTitle)) record.publicationTitle = pubTitleVal;
+    if (syncLegacyAliases && !isNonEmptyValue(record.journal)) record.journal = pubTitleVal;
   }
 
-  const dateVal = getFirstNonEmpty(
-    ['date', 'publicationDate'],
-    record,
-    extraSources,
-  );
+  const dateVal = getFirstNonEmpty(['date', 'publicationDate'], record, extraSources);
   if (dateVal !== undefined) {
-    if (!isNonEmptyValue(record.date)) {
-      record.date = dateVal;
-    }
-    if (!isNonEmptyValue(record.publicationDate)) {
-      record.publicationDate = dateVal;
-    }
+    if (!isNonEmptyValue(record.date)) record.date = dateVal;
+    if (!isNonEmptyValue(record.publicationDate)) record.publicationDate = dateVal;
   }
 
   const typeMappings = getEffectiveBaseFieldMap(resolvedType);
   for (const [baseField, mappedField] of Object.entries(typeMappings)) {
     if (!mappedField) continue;
 
-    // Never overwrite itemType (`type`) with genre/subtype when `baseField === 'type'`
-    // unless we are reading from `mappedField` (`thesisType`, `reportType`, `websiteType`, etc.)
     if (baseField === 'type') {
       const rawTypeCandidate =
         typeof record.type === 'string' &&
@@ -348,8 +281,7 @@ export function resolveBidirectionalBaseFields(
           ? record.type.trim()
           : undefined;
       const mappedVal =
-        getFirstNonEmpty([mappedField, 'genre'], record, extraSources) ??
-        rawTypeCandidate;
+        getFirstNonEmpty([mappedField, 'genre'], record, extraSources) ?? rawTypeCandidate;
       if (mappedVal !== undefined && !isNonEmptyValue(record[mappedField])) {
         record[mappedField] = mappedVal;
       }
@@ -369,45 +301,25 @@ export function resolveBidirectionalBaseFields(
 
     const resolvedVal = getFirstNonEmpty(keysToSearch, record, extraSources);
     if (resolvedVal !== undefined) {
-      if (!isNonEmptyValue(record[mappedField])) {
-        record[mappedField] = resolvedVal;
-      }
+      if (!isNonEmptyValue(record[mappedField])) record[mappedField] = resolvedVal;
       if (!isNonEmptyValue(record[baseField])) {
         if (baseField === 'date' && !syncLegacyAliases) {
-          if (!isNonEmptyValue(record.publicationDate)) {
-            record.publicationDate = resolvedVal;
-          }
-          if (!isNonEmptyValue(record.date)) {
-            record.date = resolvedVal;
-          }
+          if (!isNonEmptyValue(record.publicationDate)) record.publicationDate = resolvedVal;
+          if (!isNonEmptyValue(record.date)) record.date = resolvedVal;
         } else {
           record[baseField] = resolvedVal;
         }
       }
-      // In Flux DB schema, `issue` column stores `number`/`issue` base semantics
-      if (baseField === 'number' && !isNonEmptyValue(record.issue)) {
-        record.issue = resolvedVal;
-      }
-      if (baseField === 'issue' && !isNonEmptyValue(record.number)) {
-        record.number = resolvedVal;
-      }
+      if (baseField === 'number' && !isNonEmptyValue(record.issue)) record.issue = resolvedVal;
+      if (baseField === 'issue' && !isNonEmptyValue(record.number)) record.number = resolvedVal;
     }
   }
 
-  if (
-    isNonEmptyValue(record.date) &&
-    !isNonEmptyValue(record.publicationDate)
-  ) {
+  if (isNonEmptyValue(record.date) && !isNonEmptyValue(record.publicationDate)) {
     record.publicationDate = record.date;
   }
-
-  if (syncLegacyAliases) {
-    if (
-      isNonEmptyValue(record.publicationTitle) &&
-      !isNonEmptyValue(record.journal)
-    ) {
-      record.journal = record.publicationTitle;
-    }
+  if (syncLegacyAliases && isNonEmptyValue(record.publicationTitle) && !isNonEmptyValue(record.journal)) {
+    record.journal = record.publicationTitle;
   }
 }
 
@@ -458,9 +370,14 @@ interface HarmonizeFieldsOptions {
  */
 export function harmonizeBibliographicFields<T extends Record<string, unknown>>(
   input: T,
-  options?: HarmonizeFieldsOptions,
-): T {
+  optionsOrItemType?: HarmonizeFieldsOptions | string,
+  maybeOptions?: HarmonizeFieldsOptions,
+): T & Record<string, unknown> {
   if (!input || typeof input !== 'object') return input;
+  const options: HarmonizeFieldsOptions | undefined =
+    typeof optionsOrItemType === 'string'
+      ? { ...maybeOptions, itemType: optionsOrItemType }
+      : optionsOrItemType;
 
   const clone: Record<string, unknown> = { ...input };
   const existingExtraFields =
@@ -469,18 +386,11 @@ export function harmonizeBibliographicFields<T extends Record<string, unknown>>(
     !Array.isArray(clone.extraFields)
       ? { ...(clone.extraFields as Record<string, unknown>) }
       : undefined;
-
-  if (existingExtraFields) {
-    clone.extraFields = existingExtraFields;
-  }
+  if (existingExtraFields) clone.extraFields = existingExtraFields;
 
   const sources: Array<Record<string, unknown> | null | undefined> = [];
-  if (existingExtraFields) {
-    sources.push(existingExtraFields);
-  }
-  if (options?.extraSources) {
-    sources.push(...options.extraSources);
-  }
+  if (existingExtraFields) sources.push(existingExtraFields);
+  if (options?.extraSources) sources.push(...options.extraSources);
 
   const resolvedItemType =
     options?.itemType ||
@@ -494,7 +404,6 @@ export function harmonizeBibliographicFields<T extends Record<string, unknown>>(
 
   const syncLegacyAliases = options?.syncLegacyAliases ?? false;
 
-  // 0. Extract CSL braced & line-based identifiers/metadata from `extra` if present
   if (typeof clone.extra === 'string' && clone.extra.trim()) {
     const extraKv = extractExtraKeyValues(clone.extra);
     const kvToCanonical: ReadonlyArray<readonly [readonly string[], string]> = [
@@ -520,36 +429,20 @@ export function harmonizeBibliographicFields<T extends Record<string, unknown>>(
     }
   }
 
-  // 1. Synchronize aliases across top-level and extraSources
+  resolveFieldAliases(clone, sources, syncLegacyAliases);
+  resolveBidirectionalBaseFields(clone, resolvedItemType, sources, syncLegacyAliases);
   resolveFieldAliases(clone, sources, syncLegacyAliases);
 
-  // 2. Synchronize bidirectional BASE_FIELD_MAPPINGS for resolvedItemType
-  resolveBidirectionalBaseFields(
-    clone,
-    resolvedItemType,
-    sources,
-    syncLegacyAliases,
-  );
-
-  // 3. Re-run alias resolution in case base field mapping populated a field with an alias
-  resolveFieldAliases(clone, sources, syncLegacyAliases);
-
-  // 4. Mirror type-specific mapped fields into extraFields if extraFields exists and syncExtraFields !== false
   if (existingExtraFields && options?.syncExtraFields !== false) {
-    const typeMappingsForItem = Object.values(
-      getEffectiveBaseFieldMap(resolvedItemType),
-    );
+    const typeMappingsForItem = Object.values(getEffectiveBaseFieldMap(resolvedItemType));
     for (const mappedField of typeMappingsForItem) {
-      if (
-        isNonEmptyValue(clone[mappedField]) &&
-        !isNonEmptyValue(existingExtraFields[mappedField])
-      ) {
+      if (isNonEmptyValue(clone[mappedField]) && !isNonEmptyValue(existingExtraFields[mappedField])) {
         existingExtraFields[mappedField] = clone[mappedField];
       }
     }
   }
 
-  return clone as T;
+  return clone as T & Record<string, unknown>;
 }
 
 /**
@@ -573,14 +466,9 @@ export function mergeExtraTextWithStatus(
       const lowerLine = trimmed.toLowerCase();
       if (seenLinesLower.has(lowerLine)) continue;
 
-      const kvMatch = trimmed.match(
-        /^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/,
-      );
+      const kvMatch = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/);
       if (kvMatch) {
-        const compactKey = kvMatch[1]
-          .trim()
-          .toLowerCase()
-          .replace(/[\s_-]+/g, '');
+        const compactKey = kvMatch[1].trim().toLowerCase().replace(/[\s_-]+/g, '');
         if (seenKeysCompact.has(compactKey)) continue;
         seenKeysCompact.add(compactKey);
       }
@@ -592,10 +480,7 @@ export function mergeExtraTextWithStatus(
   };
 
   ingest(existingText, true);
-  for (const variant of incomingVariants) {
-    ingest(variant, false);
-  }
-
+  for (const variant of incomingVariants) ingest(variant, false);
   return { merged: lines.join('\n'), addedNewLine };
 }
 
@@ -606,3 +491,199 @@ export function mergeExtraTextLines(variants: unknown[]): string {
     ...(typeof first === 'string' ? rest : variants),
   ).merged;
 }
+
+export const harmonizeFields = harmonizeBibliographicFields;
+
+export interface VenueSynchronizationOptions {
+  primaryVenue?: string;
+  pruneForeignContainerKeys?: boolean;
+  syncExtraFields?: boolean;
+}
+
+const VENUE_CONTAINER_TYPE_KEYS = [
+  'proceedingsTitle',
+  'bookTitle',
+  'forumTitle',
+  'websiteTitle',
+  'blogTitle',
+  'programTitle',
+  'dictionaryTitle',
+  'encyclopediaTitle',
+  'Series',
+] as const;
+
+const pickFirstTrimmedString = (...candidates: unknown[]): string | undefined => {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Unified Base Field venue synchronization (`publicationTitle` <-> `proceedingsTitle` <-> `bookTitle`
+ * <-> `forumTitle` <-> `venue` based on `itemType`).
+ */
+export function synchronizeVenueBaseFields<T extends Record<string, unknown>>(
+  record: T,
+  itemType?: string,
+  options?: VenueSynchronizationOptions,
+): T {
+  const target = record as Record<string, unknown>;
+  const resolvedType =
+    pickFirstTrimmedString(itemType, target.itemType, target.type) || 'journalArticle';
+  const typeMap = getEffectiveBaseFieldMap(resolvedType);
+  const mappedPublicationTarget = typeMap.publicationTitle || 'publicationTitle';
+  const extraObj =
+    target.extraFields &&
+    typeof target.extraFields === 'object' &&
+    !Array.isArray(target.extraFields)
+      ? (target.extraFields as Record<string, unknown>)
+      : undefined;
+
+  const primaryVenue = pickFirstTrimmedString(
+    options?.primaryVenue,
+    target[mappedPublicationTarget],
+    extraObj?.[mappedPublicationTarget],
+    target.publicationTitle,
+    target.venue,
+    target.proceedingsTitle,
+    target.bookTitle,
+    target.forumTitle,
+    target.websiteTitle,
+    target.blogTitle,
+    target.journal,
+    target.reporter,
+    target.code,
+    extraObj?.publicationTitle,
+    extraObj?.venue,
+    extraObj?.proceedingsTitle,
+    extraObj?.bookTitle,
+    extraObj?.forumTitle,
+  );
+  if (!primaryVenue) return record;
+
+  target.publicationTitle = primaryVenue;
+  target.venue = primaryVenue;
+  if (mappedPublicationTarget !== 'publicationTitle') {
+    target[mappedPublicationTarget] = primaryVenue;
+  }
+
+  if (resolvedType === 'journalArticle' && !pickFirstTrimmedString(target.journal)) {
+    target.journal = primaryVenue;
+  } else if (resolvedType === 'preprint' && !pickFirstTrimmedString(target.repository)) {
+    target.repository = primaryVenue;
+  }
+
+  if (options?.pruneForeignContainerKeys) {
+    for (const containerKey of VENUE_CONTAINER_TYPE_KEYS) {
+      if (containerKey !== mappedPublicationTarget) {
+        delete target[containerKey];
+        if (extraObj && options?.syncExtraFields !== false) {
+          delete extraObj[containerKey];
+        }
+      }
+    }
+  }
+
+  if (extraObj && options?.syncExtraFields !== false) {
+    extraObj.publicationTitle = primaryVenue;
+    extraObj.venue = primaryVenue;
+    if (mappedPublicationTarget !== 'publicationTitle') {
+      extraObj[mappedPublicationTarget] = primaryVenue;
+    }
+  }
+
+  return record;
+}
+
+export interface BibliographicMutationPayloadResult {
+  harmonized: Record<string, unknown>;
+  resolvedType: string;
+  resolvedTitle: string | undefined;
+  primaryVenue: string | undefined;
+  mappedPublicationField: string;
+  publicationDateStr: string | undefined;
+  resolvedYear: number | undefined;
+}
+
+/**
+ * Normalizes and harmonizes a bibliographic record or mutation command into canonical
+ * base fields, resolved title fallback, venue container synchronization, and publication year/date.
+ */
+export function buildBibliographicMutationPayload(
+  input: Record<string, unknown>,
+  options?: {
+    itemType?: string;
+    extraSources?: Array<Record<string, unknown> | null | undefined>;
+    pruneForeignContainerKeys?: boolean;
+  },
+): BibliographicMutationPayloadResult {
+  const resolvedType =
+    pickFirstTrimmedString(options?.itemType, input.itemType, input.type) || 'journalArticle';
+  const harmonized = harmonizeBibliographicFields({ ...input }, {
+    itemType: resolvedType,
+    extraSources: options?.extraSources,
+    syncLegacyAliases: true,
+    syncExtraFields: true,
+  });
+
+  synchronizeVenueBaseFields(harmonized, resolvedType, {
+    pruneForeignContainerKeys: options?.pruneForeignContainerKeys,
+    syncExtraFields: true,
+  });
+
+  const typeMap = getEffectiveBaseFieldMap(resolvedType);
+  const mappedPublicationField = typeMap.publicationTitle || 'publicationTitle';
+  const resolvedTitle = pickFirstTrimmedString(
+    harmonized.title,
+    harmonized.caseName,
+    harmonized.nameOfAct,
+    harmonized.subject,
+  );
+  if (resolvedTitle && !pickFirstTrimmedString(harmonized.title)) {
+    harmonized.title = resolvedTitle;
+  }
+
+  const primaryVenue = pickFirstTrimmedString(
+    harmonized[mappedPublicationField],
+    harmonized.publicationTitle,
+    harmonized.venue,
+    harmonized.proceedingsTitle,
+    harmonized.bookTitle,
+    harmonized.forumTitle,
+    harmonized.journal,
+  );
+  const publicationDateStr = pickFirstTrimmedString(
+    harmonized.publicationDate,
+    harmonized.date,
+    harmonized.dateDecided,
+    harmonized.dateEnacted,
+    harmonized.issueDate,
+    harmonized.filingDate,
+  );
+
+  let resolvedYear: number | undefined =
+    typeof harmonized.year === 'number' && Number.isFinite(harmonized.year)
+      ? harmonized.year
+      : undefined;
+  if (resolvedYear === undefined && publicationDateStr) {
+    const yearMatch = publicationDateStr.match(/\b(1[0-9]{3}|20[0-9]{2})\b/);
+    if (yearMatch) {
+      const parsed = parseInt(yearMatch[1], 10);
+      if (parsed >= 1000 && parsed <= 2100) resolvedYear = parsed;
+    }
+  }
+
+  return {
+    harmonized,
+    resolvedType,
+    resolvedTitle,
+    primaryVenue,
+    mappedPublicationField,
+    publicationDateStr,
+    resolvedYear,
+  };
+}
+

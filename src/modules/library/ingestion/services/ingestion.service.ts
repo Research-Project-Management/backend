@@ -39,7 +39,6 @@ import {
 import {
   IngestionRunReporterService,
   IngestionRunProgressResult,
-  clearRunStatusTransition,
 } from './ingestion-saga.orchestrator';
 import { isRetryableIngestionError } from '@/modules/library/ingestion/types/metadata.types';
 
@@ -460,7 +459,7 @@ export class IngestionService {
     }
 
     try {
-      clearRunStatusTransition(runId);
+      this.runReporter.clearRunTracking(runId);
       if (this.queue && typeof this.queue.runWithConcurrencySlot === 'function') {
         await this.queue.runWithConcurrencySlot(runId, () =>
           this.pipeline.executePipeline(runId, projectId, envelope),

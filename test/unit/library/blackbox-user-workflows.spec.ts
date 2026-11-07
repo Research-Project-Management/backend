@@ -651,8 +651,8 @@ describe('Black-Box Zotero / Mendeley / Paperpile Community User Workflows', () 
         title: 'Collaborative Project Paper', itemType: 'journalArticle', doi: '10.1038/s41586-021-03819-2',
         authors: ['John Jumper', 'Demis Hassabis'], tags: ['AlphaFold', 'Protein Folding'], projectId: projectUuid, collectionId: 'col-proteins',
       });
-      expect(createInput.createData.userId).toBe('user-123');
-      expect(createInput.createData.projectId).toBe(projectUuid);
+      expect(createInput.createData.createdById).toBe('user-123');
+      expect(createInput.createData.spaceId).toBe(projectUuid);
       expect(createInput.createData.doi).toBe('10.1038/s41586-021-03819-2');
 
       const updateInput = buildCommandUpdateInput(

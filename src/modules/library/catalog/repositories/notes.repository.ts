@@ -1,6 +1,6 @@
 import { Prisma, ReadStatus, Annotation } from '@prisma/client';
 import { isUuid, PrismaService } from '@/core';
-import { normalizeProjectScopeId, SearchQueryEngine, ScopeSpecification, ActiveItemsSpecification, TrashItemsSpecification, ItemTypeSpecification, YearRangeSpecification, CollectionSpecification, TagSpecification, TagNamesSpecification, CompositeSpecification, AndSpecification, OrSpecification, NotSpecification, syncItemDenormalizedCountsInClient } from '@/modules/library/core';
+import { normalizeProjectScopeId, resolveSpaceId, SearchQueryEngine, ScopeSpecification, ActiveItemsSpecification, TrashItemsSpecification, ItemTypeSpecification, YearRangeSpecification, CollectionSpecification, TagSpecification, TagNamesSpecification, CompositeSpecification, AndSpecification, OrSpecification, NotSpecification, syncItemDenormalizedCountsInClient } from '@/modules/library/core';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
@@ -63,7 +63,7 @@ export interface ItemFilterOptions {
 export function buildItemSearchCondition(
   search: string,
   searchMode?: string,
-): Prisma.ItemWhereInput[] {
+): Prisma.LibraryItemWhereInput[] {
   const effectiveMode =
     searchMode === 'title_creator_year'
       ? 'title_creator_year'
@@ -73,21 +73,21 @@ export function buildItemSearchCondition(
   return SearchQueryEngine.buildComprehensiveItemSearchClauses(
     search,
     effectiveMode,
-  ) as Prisma.ItemWhereInput[];
+  ) as Prisma.LibraryItemWhereInput[];
 }
 
 class ItemWhereSpecification extends CompositeSpecification<
   Record<string, unknown>,
-  Prisma.ItemWhereInput
+  Prisma.LibraryItemWhereInput
 > {
   constructor(
-    private readonly clause: Prisma.ItemWhereInput,
+    private readonly clause: Prisma.LibraryItemWhereInput,
     private readonly predicate?: (item: Record<string, unknown>) => boolean,
   ) {
     super();
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
+  toPrismaWhere(): Prisma.LibraryItemWhereInput {
     return this.clause;
   }
 
@@ -98,13 +98,13 @@ class ItemWhereSpecification extends CompositeSpecification<
 
 function composeAndSpecifications(
   specs: ItemWhereSpecification[],
-): Prisma.ItemWhereInput[] {
+): Prisma.LibraryItemWhereInput[] {
   if (specs.length === 0) return [];
   if (specs.length === 1) return [specs[0].toPrismaWhere()];
   const combined = specs
     .slice(1)
     .reduce<
-      CompositeSpecification<Record<string, unknown>, Prisma.ItemWhereInput>
+      CompositeSpecification<Record<string, unknown>, Prisma.LibraryItemWhereInput>
     >((acc, spec) => acc.and(spec), specs[0])
     .toPrismaWhere();
   if (combined && Array.isArray(combined.AND)) {
@@ -121,15 +121,15 @@ function composeAndSpecifications(
 export function buildItemWhereClause(
   userId: string,
   options: ItemFilterOptions,
-): Prisma.ItemWhereInput {
+): Prisma.LibraryItemWhereInput {
   const view = options.view ?? 'all';
   const validProjectId = normalizeProjectScopeId(options.projectId);
   const scopeSpec = new ScopeSpecification(
     userId,
     validProjectId && isUuid(validProjectId) ? validProjectId : null,
   );
-  const where: Prisma.ItemWhereInput = {
-    ...(scopeSpec.toPrismaWhere() as Prisma.ItemWhereInput),
+  const where: Prisma.LibraryItemWhereInput = {
+    ...(scopeSpec.toPrismaWhere() as Prisma.LibraryItemWhereInput),
   };
 
   const andSpecs: ItemWhereSpecification[] = [];
@@ -234,17 +234,17 @@ export function buildItemWhereClause(
   if (targetCollectionIds && targetCollectionIds.length > 0) {
     where.collectionItems = new CollectionSpecification(
       targetCollectionIds,
-    ).toPrismaWhere().collectionItems as Prisma.CollectionItemListRelationFilter;
+    ).toPrismaWhere().collectionItems as Prisma.LibraryCollectionItemListRelationFilter;
   } else if (options.collectionId) {
     where.collectionItems = new CollectionSpecification(
       options.collectionId,
-    ).toPrismaWhere().collectionItems as Prisma.CollectionItemListRelationFilter;
+    ).toPrismaWhere().collectionItems as Prisma.LibraryCollectionItemListRelationFilter;
   }
 
   if (options.tagId) {
     tagSpecs.push(
       new ItemWhereSpecification(
-        new TagSpecification(options.tagId).toPrismaWhere() as Prisma.ItemWhereInput,
+        new TagSpecification(options.tagId).toPrismaWhere() as Prisma.LibraryItemWhereInput,
       ),
     );
   }
@@ -253,7 +253,7 @@ export function buildItemWhereClause(
     const tagNamesWhere = new TagNamesSpecification(options.tag).toPrismaWhere();
     if (tagNamesWhere.itemTags) {
       tagSpecs.push(
-        new ItemWhereSpecification(tagNamesWhere as Prisma.ItemWhereInput),
+        new ItemWhereSpecification(tagNamesWhere as Prisma.LibraryItemWhereInput),
       );
     }
   }
@@ -353,9 +353,12 @@ export class NotesRepository {
 
   private buildScopeWhere(userId: string, projectId?: string) {
     const validProjectId = normalizeProjectScopeId(projectId);
-    return validProjectId && isUuid(validProjectId)
-      ? { projectId: validProjectId }
-      : { userId, projectId: null };
+    return {
+      spaceId: resolveSpaceId({
+        userId,
+        projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+      }),
+    };
   }
 
   async findMany(
@@ -366,13 +369,13 @@ export class NotesRepository {
     limit?: number,
   ) {
     const client = this.getClient(tx);
-    const where: Prisma.NoteWhereInput = {
+    const where: Prisma.LibraryNoteWhereInput = {
       ...this.buildScopeWhere(userId, projectId),
       ...(itemId !== undefined ? { itemId } : {}),
       deletedAt: null,
     };
 
-    return client.note.findMany({
+    return client.libraryNote.findMany({
       where,
       orderBy: { updatedAt: 'desc' },
       take: limit ?? 500,
@@ -387,7 +390,7 @@ export class NotesRepository {
   ) {
     const client = this.getClient(tx);
     const scopeWhere = this.buildScopeWhere(userId, projectId);
-    return client.note.findFirst({
+    return client.libraryNote.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
   }
@@ -409,21 +412,20 @@ export class NotesRepository {
   ) {
     const client = this.getClient(tx);
     let effectiveProjectId = normalizeProjectScopeId(data.projectId) ?? null;
+    let resolvedSpaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
 
     if (data.itemId) {
-      const parentItem = await client.item.findFirst({
-        where: effectiveProjectId
-          ? { id: data.itemId, projectId: effectiveProjectId, deletedAt: null }
-          : { id: data.itemId, userId, projectId: null, deletedAt: null },
-        select: { id: true, projectId: true },
+      const parentItem = await client.libraryItem.findFirst({
+        where: { id: data.itemId, spaceId: resolvedSpaceId, deletedAt: null },
+        select: { id: true, spaceId: true },
       });
       if (!parentItem) {
         throw new NotFoundException(
           `Target item ${data.itemId} not found or has been deleted`,
         );
       }
-      if (!effectiveProjectId && parentItem.projectId) {
-        effectiveProjectId = parentItem.projectId;
+      if (parentItem.spaceId) {
+        resolvedSpaceId = parentItem.spaceId;
       }
     }
     const effectiveContentMd =
@@ -432,10 +434,9 @@ export class NotesRepository {
         : data.contentJson !== undefined && data.contentJson !== null
           ? extractPlainTextFromTipTap(data.contentJson)
           : (data.contentMd ?? '');
-    const created = await client.note.create({
+    const created = await client.libraryNote.create({
       data: {
-        userId,
-        projectId: effectiveProjectId,
+        spaceId: resolvedSpaceId,
         itemId: data.itemId ?? null,
         title: data.title ?? 'Untitled Note',
         contentJson:
@@ -464,7 +465,7 @@ export class NotesRepository {
   ) {
     const client = this.getClient(tx);
     const scopeWhere = this.buildScopeWhere(userId, projectId);
-    const existing = await client.note.findFirst({
+    const existing = await client.libraryNote.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
 
@@ -501,7 +502,7 @@ export class NotesRepository {
     };
 
     if (effectiveExpectedVersion !== undefined) {
-      const affected = await client.note.updateMany({
+      const affected = await client.libraryNote.updateMany({
         where: {
           id,
           ...scopeWhere,
@@ -515,7 +516,7 @@ export class NotesRepository {
       });
 
       if (affected.count === 0) {
-        const fresh = await client.note.findUnique({
+        const fresh = await client.libraryNote.findUnique({
           where: { id },
           select: { version: true },
         });
@@ -539,7 +540,7 @@ export class NotesRepository {
       };
     }
 
-    return client.note.update({
+    return client.libraryNote.update({
       where: { id },
       data: {
         ...updatePayload,
@@ -557,11 +558,11 @@ export class NotesRepository {
   ): Promise<boolean> {
     const client = this.getClient(tx);
     const scopeWhere = this.buildScopeWhere(userId, projectId);
-    const existing = await client.note.findFirst({
+    const existing = await client.libraryNote.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
 
-    const result = await client.note.updateMany({
+    const result = await client.libraryNote.updateMany({
       where: {
         id,
         ...scopeWhere,
@@ -576,7 +577,7 @@ export class NotesRepository {
     });
 
     if (result.count === 0 && expectedVersion !== undefined && existing) {
-      const fresh = await client.note.findUnique?.({
+      const fresh = await client.libraryNote.findUnique?.({
         where: { id },
         select: { version: true },
       });
@@ -604,7 +605,7 @@ export class NotesRepository {
     const cleanSourceIds = sourceItemIds.filter((id) => id !== targetItemId);
     if (cleanSourceIds.length === 0) return;
     const client = this.getClient(tx);
-    await client.note.updateMany({
+    await client.libraryNote.updateMany({
       where: { itemId: { in: cleanSourceIds } },
       data: { itemId: targetItemId },
     });
@@ -626,22 +627,21 @@ export class NotesRepository {
     if (!trimmed) return;
     const client = this.getClient(tx);
 
-    let effectiveProjectId = normalizeProjectScopeId(projectId) ?? null;
-    if (!effectiveProjectId && typeof client.item?.findFirst === 'function') {
-      const parentItem = await client.item.findFirst({
+    const effectiveProjectId = normalizeProjectScopeId(projectId) ?? null;
+    let resolvedSpaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
+    if (!effectiveProjectId && typeof client.libraryItem?.findFirst === 'function') {
+      const parentItem = await client.libraryItem.findFirst({
         where: { id: itemId, deletedAt: null },
-        select: { projectId: true },
+        select: { spaceId: true },
       });
-      if (parentItem?.projectId) {
-        effectiveProjectId = parentItem.projectId;
+      if (parentItem?.spaceId) {
+        resolvedSpaceId = parentItem.spaceId;
       }
     }
 
-    const existing = await client.note.findFirst({
+    const existing = await client.libraryNote.findFirst({
       where: {
-        ...(effectiveProjectId
-          ? { projectId: effectiveProjectId }
-          : { userId, projectId: null }),
+        spaceId: resolvedSpaceId,
         itemId,
         contentMd: trimmed,
         deletedAt: null,
@@ -649,10 +649,9 @@ export class NotesRepository {
     });
     if (existing) return;
 
-    await client.note.create({
+    await client.libraryNote.create({
       data: {
-        userId,
-        projectId: effectiveProjectId,
+        spaceId: resolvedSpaceId,
         itemId,
         title: source ? `Imported Note (${source})` : 'Imported Note',
         contentMd: trimmed,

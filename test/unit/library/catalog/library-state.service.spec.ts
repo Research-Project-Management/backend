@@ -331,35 +331,37 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
     });
 
     it('transferUserItemStates should not self-delete target item when targetItemId is in sourceItemIds', async () => {
+      const stateMock1 = {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            userId: mockUserId,
+            itemId: 'item-dup-1',
+            isStarred: true,
+            rating: 4,
+            readStatus: 'reading',
+            currentPage: 10,
+            scrollPosition: null,
+            lastOpenedAt: new Date('2026-09-10'),
+            lastReadAt: new Date('2026-09-10'),
+          },
+          {
+            userId: mockUserId,
+            itemId: 'item-dup-2',
+            isStarred: false,
+            rating: 5,
+            readStatus: 'completed',
+            currentPage: 25,
+            scrollPosition: { top: 50 },
+            lastOpenedAt: new Date('2026-09-15'),
+            lastReadAt: new Date('2026-09-15'),
+          },
+        ]),
+        upsert: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
+      };
       const mockTx = {
-        state: {
-          findMany: jest.fn().mockResolvedValue([
-            {
-              userId: mockUserId,
-              itemId: 'item-dup-1',
-              isStarred: true,
-              rating: 4,
-              readStatus: 'reading',
-              currentPage: 10,
-              scrollPosition: null,
-              lastOpenedAt: new Date('2026-09-10'),
-              lastReadAt: new Date('2026-09-10'),
-            },
-            {
-              userId: mockUserId,
-              itemId: 'item-dup-2',
-              isStarred: false,
-              rating: 5,
-              readStatus: 'completed',
-              currentPage: 25,
-              scrollPosition: { top: 50 },
-              lastOpenedAt: new Date('2026-09-15'),
-              lastReadAt: new Date('2026-09-15'),
-            },
-          ]),
-          upsert: jest.fn().mockResolvedValue({}),
-          deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
-        },
+        state: stateMock1,
+        libraryItemState: stateMock1,
       } as any;
 
       // Notice 'item-target' is mistakenly passed in sourceItemIds
@@ -398,43 +400,45 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
     });
 
     it('transferUserItemStates should union bookmarks and byAttachment state across merged items', async () => {
+      const stateMock2 = {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            userId: mockUserId,
+            itemId: 'item-older',
+            isStarred: false,
+            rating: 3,
+            readStatus: 'reading',
+            currentPage: 5,
+            scrollPosition: {
+              page: 5,
+              bookmarks: [2, { page: 5, label: 'Methodology' }],
+              byAttachment: { 'att-1': { page: 5, zoom: 1.25 } },
+            },
+            lastOpenedAt: new Date('2026-09-10'),
+            lastReadAt: new Date('2026-09-10'),
+          },
+          {
+            userId: mockUserId,
+            itemId: 'item-newer',
+            isStarred: true,
+            rating: 5,
+            readStatus: 'completed',
+            currentPage: 12,
+            scrollPosition: {
+              page: 12,
+              bookmarks: [5, { page: 9, label: 'Results' }],
+              byAttachment: { 'att-2': { page: 12, zoom: 1.5 } },
+            },
+            lastOpenedAt: new Date('2026-09-15'),
+            lastReadAt: new Date('2026-09-15'),
+          },
+        ]),
+        upsert: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      };
       const mockTx = {
-        state: {
-          findMany: jest.fn().mockResolvedValue([
-            {
-              userId: mockUserId,
-              itemId: 'item-older',
-              isStarred: false,
-              rating: 3,
-              readStatus: 'reading',
-              currentPage: 5,
-              scrollPosition: {
-                page: 5,
-                bookmarks: [2, { page: 5, label: 'Methodology' }],
-                byAttachment: { 'att-1': { page: 5, zoom: 1.25 } },
-              },
-              lastOpenedAt: new Date('2026-09-10'),
-              lastReadAt: new Date('2026-09-10'),
-            },
-            {
-              userId: mockUserId,
-              itemId: 'item-newer',
-              isStarred: true,
-              rating: 5,
-              readStatus: 'completed',
-              currentPage: 12,
-              scrollPosition: {
-                page: 12,
-                bookmarks: [5, { page: 9, label: 'Results' }],
-                byAttachment: { 'att-2': { page: 12, zoom: 1.5 } },
-              },
-              lastOpenedAt: new Date('2026-09-15'),
-              lastReadAt: new Date('2026-09-15'),
-            },
-          ]),
-          upsert: jest.fn().mockResolvedValue({}),
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
+        state: stateMock2,
+        libraryItemState: stateMock2,
       } as any;
 
       await service.transferUserItemStates(

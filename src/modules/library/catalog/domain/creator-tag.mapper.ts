@@ -12,6 +12,7 @@ import {
   ItemProvenancePolicy,
   ManualLockMutationInput,
   ItemsMapper,
+  resolveSpaceId,
 } from '@/modules/library/core';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
@@ -314,10 +315,10 @@ export function prepareNotesToCreate(
         { allowManualAcademicTerms: true },
       );
       const mergedTags = Array.from(new Set([...baseTags, ...customTags]));
+      const spaceId = resolveSpaceId({ userId, projectId });
       return {
-        userId,
+        spaceId,
         createdById: createdById || userId,
-        projectId: projectId ?? null,
         title: noteTitle,
         contentMd,
         contentJson: contentJson as Prisma.InputJsonValue,
@@ -404,10 +405,12 @@ export function prepareAttachmentsToCreate(
                   quoteText: typeof ann.quoteText === 'string' ? ann.quoteText : null,
                   comment: typeof ann.comment === 'string' ? ann.comment : '',
                   tags: Array.isArray(ann.tags) ? (ann.tags as string[]).filter((t): t is string => typeof t === 'string') : [],
-                  authorId:
-                    typeof ann.authorId === 'string' && isUuid(ann.authorId)
-                      ? ann.authorId
-                      : userId && isUuid(userId) ? userId : '00000000-0000-0000-0000-000000000000',
+                  createdById:
+                    typeof ann.createdById === 'string' && isUuid(ann.createdById)
+                      ? ann.createdById
+                      : typeof ann.authorId === 'string' && isUuid(ann.authorId)
+                        ? ann.authorId
+                        : userId && isUuid(userId) ? userId : '00000000-0000-0000-0000-000000000000',
                   version: 1,
                 };
               })

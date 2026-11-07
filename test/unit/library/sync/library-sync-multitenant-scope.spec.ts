@@ -84,7 +84,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
           id: mockNoteId,
           version: 1,
           title: 'Project Note',
-          projectId: mockProjectId,
+          spaceId: mockProjectId,
         }),
       );
 
@@ -118,7 +118,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
           id: mockNoteId,
           version: 2,
           title: 'Updated Note',
-          projectId: mockProjectId,
+          spaceId: mockProjectId,
         }),
       );
 
@@ -151,7 +151,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
       repo.findById.mockResolvedValue(
         fromPartial({
           id: mockNoteId,
-          projectId: mockProjectId,
+          spaceId: mockProjectId,
         }),
       );
       repo.softDelete.mockResolvedValue(true);
@@ -310,7 +310,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
         fromPartial({
           id: mockTagId,
           name: 'physics',
-          projectId: mockProjectId,
+          spaceId: mockProjectId,
         }),
       );
 
@@ -340,9 +340,13 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should propagate projectId on assignTag and removeTag', async () => {
+      const tagMock = { findFirst: jest.fn().mockResolvedValue({ id: mockTagId }) };
+      const itemMock = { findFirst: jest.fn().mockResolvedValue({ id: mockItemId }) };
       const mockTx = {
-        tag: { findFirst: jest.fn().mockResolvedValue({ id: mockTagId }) },
-        item: { findFirst: jest.fn().mockResolvedValue({ id: mockItemId }) },
+        tag: tagMock,
+        libraryTag: tagMock,
+        item: itemMock,
+        libraryItem: itemMock,
       };
       mockLibraryTx.executeInTransaction.mockImplementation((cb: any) =>
         cb(mockTx, mockHelpers),

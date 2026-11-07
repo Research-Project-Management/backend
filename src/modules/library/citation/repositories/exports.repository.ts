@@ -19,10 +19,23 @@ export type { ExportItemRecord };
 export class ExportsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private normalizeScopeToSpaceId(scopeKey: string, userId?: string, projectId?: string): string {
+    const rawProjectId =
+      projectId ||
+      (scopeKey.startsWith('proj:') ? scopeKey.slice(5) : null);
+    if (rawProjectId && isUuid(rawProjectId)) return rawProjectId;
+    const rawUserId =
+      userId ||
+      (scopeKey.startsWith('user:') ? scopeKey.slice(5) : !scopeKey.startsWith('proj:') && isUuid(scopeKey) ? scopeKey : null);
+    if (rawUserId && isUuid(rawUserId)) return rawUserId;
+    return scopeKey;
+  }
+
   async findCustomStyle(scopeKey: string, slug: string) {
     if (!this.prisma?.citationStyle?.findUnique) return null;
+    const spaceId = this.normalizeScopeToSpaceId(scopeKey);
     return this.prisma.citationStyle.findUnique({
-      where: { scopeKey_slug: { scopeKey, slug } },
+      where: { spaceId_slug: { spaceId, slug } },
     });
   }
 
@@ -37,24 +50,19 @@ export class ExportsRepository {
   }) {
     if (!this.prisma?.citationStyle?.upsert) return null;
     const { scopeKey, slug, title, xmlContent, sha256 } = params;
-    const rawProjectId =
-      params.projectId ||
-      (scopeKey.startsWith('proj:') ? scopeKey.slice(5) : null);
-    const resolvedProjectId =
-      rawProjectId && isUuid(rawProjectId) ? rawProjectId : null;
+    const spaceId = this.normalizeScopeToSpaceId(scopeKey, params.userId, params.projectId);
     const rawUserId =
       params.userId ||
-      (!scopeKey.startsWith('proj:') && isUuid(scopeKey) ? scopeKey : null);
+      (scopeKey.startsWith('user:') ? scopeKey.slice(5) : !scopeKey.startsWith('proj:') && isUuid(scopeKey) ? scopeKey : null);
     const safeUserId =
       rawUserId && isUuid(rawUserId)
         ? rawUserId
         : '00000000-0000-0000-0000-000000000000';
     return this.prisma.citationStyle.upsert({
-      where: { scopeKey_slug: { scopeKey, slug } },
+      where: { spaceId_slug: { spaceId, slug } },
       create: {
-        scopeKey,
-        userId: safeUserId,
-        projectId: resolvedProjectId,
+        spaceId,
+        createdById: safeUserId,
         slug,
         title,
         xmlContent,
@@ -64,22 +72,22 @@ export class ExportsRepository {
         title,
         xmlContent,
         sha256,
-        projectId: resolvedProjectId,
       },
     });
   }
 
   async findCustomStylesByScope(scopeKey: string, take: number = 100) {
     if (!this.prisma?.citationStyle?.findMany) return [];
+    const spaceId = this.normalizeScopeToSpaceId(scopeKey);
     return this.prisma.citationStyle.findMany({
-      where: { scopeKey },
+      where: { spaceId },
       orderBy: { updatedAt: 'desc' },
       take,
     });
   }
 
   async fetchItemsInChunks(
-    where: Prisma.ItemWhereInput,
+    where: Prisma.LibraryItemWhereInput,
     maxItems: number = EXPORT_MAX_ITEMS,
     chunkSize: number = EXPORT_CHUNK_SIZE,
   ): Promise<{ items: ExportItemRecord[]; truncated: boolean }> {
@@ -92,7 +100,7 @@ export class ExportsRepository {
       const pageSize = Math.min(chunkSize, remaining);
       const take = pageSize + 1;
 
-      const chunk = await this.prisma.item.findMany({
+      const chunk = await this.prisma.libraryItem.findMany({
         where,
         include: {
           contributors: { orderBy: { orderIndex: 'asc' } },
@@ -148,14 +156,14 @@ export class ExportsRepository {
   }
 
   async findCollection(collectionId: string) {
-    return this.prisma.collection.findFirst({
+    return this.prisma.libraryCollection.findFirst({
       where: { id: collectionId, deletedAt: null },
-      select: { id: true, name: true, userId: true, projectId: true },
+      select: { id: true, name: true, spaceId: true, createdById: true },
     });
   }
 
-  async findItems(where: Prisma.ItemWhereInput, take?: number) {
-    return this.prisma.item.findMany({
+  async findItems(where: Prisma.LibraryItemWhereInput, take?: number) {
+    return this.prisma.libraryItem.findMany({
       where,
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
@@ -172,10 +180,10 @@ export class ExportsRepository {
 
   async findItemById(userId: string, itemId: string, projectId?: string) {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.ItemWhereInput = effectiveProjectId
-      ? { projectId: effectiveProjectId }
-      : { userId, projectId: null };
-    return this.prisma.item.findFirst({
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: effectiveProjectId || userId,
+    };
+    return this.prisma.libraryItem.findFirst({
       where: {
         id: itemId,
         deletedAt: null,
@@ -199,10 +207,10 @@ export class ExportsRepository {
   }
 
   async findItemsByScope(
-    scopeWhere: Prisma.ItemWhereInput,
+    scopeWhere: Prisma.LibraryItemWhereInput,
     take: number = EXPORT_MAX_ITEMS,
   ) {
-    return this.prisma.item.findMany({
+    return this.prisma.libraryItem.findMany({
       where: scopeWhere,
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
@@ -215,7 +223,7 @@ export class ExportsRepository {
   }
 
   async findItemsByMetadataAliases(
-    scopeWhere: Prisma.ItemWhereInput,
+    scopeWhere: Prisma.LibraryItemWhereInput,
     missingKeys: string[],
   ): Promise<ExportItemRecord[]> {
     if (!missingKeys || missingKeys.length === 0) return [];
@@ -226,7 +234,7 @@ export class ExportsRepository {
     for (let i = 0; i < missingKeys.length; i += CHUNK_SIZE) {
       if (collectedById.size >= MAX_RESULTS) break;
       const chunkKeys = missingKeys.slice(i, i + CHUNK_SIZE);
-      const aliasClauses: Prisma.ItemWhereInput[] = chunkKeys.flatMap((key) => [
+      const aliasClauses: Prisma.LibraryItemWhereInput[] = chunkKeys.flatMap((key) => [
         { metadata: { path: ['mergedCitationKeys'], array_contains: key } },
         { metadata: { path: ['citationKey'], equals: key } },
         { metadata: { path: ['citation-key'], equals: key } },
@@ -234,7 +242,7 @@ export class ExportsRepository {
         { metadata: { path: ['extra'], string_contains: key } },
       ]);
 
-      const batchItems = await this.prisma.item.findMany({
+      const batchItems = await this.prisma.libraryItem.findMany({
         where: {
           AND: [scopeWhere, { OR: aliasClauses }],
         },

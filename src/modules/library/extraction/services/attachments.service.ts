@@ -84,9 +84,7 @@ export class AttachmentsService {
         fileHash: input.fileHash.trim(),
         storageKey: { not: null },
         deletedAt: null,
-        item: effectiveProjectId
-          ? { projectId: effectiveProjectId, deletedAt: null }
-          : { userId, projectId: null, deletedAt: null },
+        item: { spaceId: effectiveProjectId || userId, deletedAt: null },
       });
       if (existingWithHash?.storageKey) {
         storageKey = existingWithHash.storageKey;
@@ -218,7 +216,7 @@ export class AttachmentsService {
           tx,
         );
 
-        const eventScope = { userId, projectId: projectId || undefined };
+        const eventScope = { userId, projectId: effectiveProjectId };
 
         const serializedAttachment = {
           ...attachment,
@@ -254,7 +252,7 @@ export class AttachmentsService {
               attachmentId: attachment.id,
               itemId: attachment.itemId,
               userId,
-              projectId: projectId || undefined,
+              projectId: effectiveProjectId,
             },
           );
         }
@@ -268,7 +266,7 @@ export class AttachmentsService {
             await this.invalidateAttachmentItemCache(
               targetItemId,
               userId,
-              projectId,
+              effectiveProjectId,
             );
           });
         } else if (resolvedFileId && !deduplicated) {
@@ -282,7 +280,7 @@ export class AttachmentsService {
         await this.invalidateAttachmentItemCache(
           targetItemId,
           userId,
-          projectId,
+          effectiveProjectId,
         );
       }
       return attachment;
@@ -334,9 +332,7 @@ export class AttachmentsService {
     projectId?: ProjectId | string,
   ) {
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeItemWhere = validProjectId
-      ? { projectId: validProjectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
+    const scopeItemWhere = { spaceId: validProjectId || userId, deletedAt: null };
     const where: Prisma.AttachmentWhereInput = {
       id: attachmentId,
       deletedAt: null,
@@ -369,9 +365,7 @@ export class AttachmentsService {
   ) {
     if (!attachmentId) throw new BadRequestException('Attachment ID is required');
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeItemWhere = validProjectId
-      ? { projectId: validProjectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
+    const scopeItemWhere = { spaceId: validProjectId || userId, deletedAt: null };
     const attachment = await this.repo.findFirst(
       { id: attachmentId, deletedAt: null, item: scopeItemWhere },
       { item: true, revisions: true },
@@ -386,8 +380,10 @@ export class AttachmentsService {
         if (revFileId) fileIdsToDelete.add(revFileId);
       }
     }
+    const itemRec = attachment.item as { projectId?: string | null; spaceId?: string; createdById?: string } | null | undefined;
+    const itemProjectId = itemRec?.projectId ?? (itemRec?.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
     const effectiveProjectId =
-      validProjectId || normalizeProjectScopeId(attachment.item?.projectId) || undefined;
+      validProjectId || normalizeProjectScopeId(itemProjectId) || undefined;
     let postCommitRegistered = false;
     const result = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
@@ -521,9 +517,14 @@ export class AttachmentsService {
     }
 
     if (attachment.item) {
-      const item = attachment.item;
+      const item = attachment.item as { spaceId?: string; createdById?: string; projectId?: string | null; userId?: string };
       const validProjectId = normalizeProjectScopeId(projectId);
-      if (validProjectId) {
+      if (item.spaceId) {
+        const expectedSpaceId = validProjectId || userId;
+        if (expectedSpaceId && item.spaceId !== expectedSpaceId) {
+          throw new NotFoundException(`Attachment ${attachmentId} not found`);
+        }
+      } else if (validProjectId) {
         if (item.projectId !== validProjectId) {
           throw new NotFoundException(`Attachment ${attachmentId} not found`);
         }
@@ -544,9 +545,7 @@ export class AttachmentsService {
     projectId?: ProjectId | string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const scopeItemWhere = effectiveProjectId
-      ? { projectId: effectiveProjectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
+    const scopeItemWhere = { spaceId: effectiveProjectId || userId, deletedAt: null };
     const attachment = await this.repo.findFirst({
       id: attachmentId,
       itemId,
@@ -678,11 +677,14 @@ export class AttachmentsService {
   ): Promise<{ status: string; attachmentId: string; message: string }> {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
     const attachment = await this.repo.findUnique(attachmentId, { item: true });
+    const itemRec = attachment?.item as { spaceId?: string; createdById?: string; projectId?: string | null; userId?: string; deletedAt?: Date | null } | null | undefined;
     const isAuthorized =
-      attachment && !attachment.deletedAt && attachment.item && !attachment.item.deletedAt &&
-      (effectiveProjectId
-        ? attachment.item.projectId === effectiveProjectId
-        : attachment.item.userId === userId && !attachment.item.projectId);
+      attachment && !attachment.deletedAt && itemRec && !itemRec.deletedAt &&
+      (itemRec.spaceId
+        ? itemRec.spaceId === (effectiveProjectId || userId)
+        : effectiveProjectId
+          ? itemRec.projectId === effectiveProjectId
+          : itemRec.userId === userId && !itemRec.projectId);
     if (!isAuthorized) throw new NotFoundException(`Attachment ${attachmentId} not found`);
     if (
       attachment.mimeType !== 'application/pdf' &&

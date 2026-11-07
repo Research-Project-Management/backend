@@ -202,9 +202,13 @@ export class HttpClient {
     };
 
     try {
-      const resObj = await this.ssrfGuard.safeFetchWithRedirects(url, init, {
-        maxRedirects,
-      });
+      const resObj = requireSsrf
+        ? await this.ssrfGuard.safeFetchWithRedirects(url, init, {
+            maxRedirects,
+          })
+        : await SsrfGuardService.executeSafeRedirectFetch(url, init, {
+            maxRedirects,
+          });
       return {
         ...resObj,
         response: wrapResponseWithBodyTimeout(

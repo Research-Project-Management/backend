@@ -16,7 +16,7 @@ export { disambiguateCitationKey, resolveOrCreateTags, isRejectedCitedIdentifier
 export type { ExtractionSyncAttachmentInput, ExtractionSyncDocumentInput };
 
 interface FreshItemExtractionTarget {
-  userId: string; projectId?: string | null; citationKey?: string | null; title?: string | null;
+  userId?: string; spaceId?: string; createdById?: string; projectId?: string | null; citationKey?: string | null; title?: string | null;
   doi?: string | null; arxivId?: string | null; pmid?: string | null; pmcid?: string | null;
   isbn?: string | null; issn?: string | null; abstract?: string | null; year?: number | null;
   publicationTitle?: string | null; itemType?: string | null; metadata?: unknown;
@@ -57,7 +57,7 @@ export function buildExtractedMetadataSyncPlan(
   const attachmentType = String(attachment.attachmentType || '').trim().toLowerCase();
   if (attachmentType === 'supplementary') {
     return {
-      itemPatch: {} as Prisma.ItemUpdateInput,
+      itemPatch: {} as Prisma.LibraryItemUpdateInput,
       metaPatch: {} as Record<string, unknown>,
       extractedIdentifiers: [] as Array<{ type: string; value: string; canonicalUri: string }>,
       creatorsToSync: [],
@@ -405,7 +405,7 @@ export function buildExtractedMetadataSyncPlan(
   const cleanIsbn = findExtractedIdent('isbn') || safeDocId('isbn');
   const cleanIssn = findExtractedIdent('issn') || safeDocId('issn');
 
-  const itemPatch: Prisma.ItemUpdateInput = {
+  const itemPatch: Prisma.LibraryItemUpdateInput = {
     ...(shouldInferItemType && inferredItemType ? { itemType: inferredItemType } : {}),
     ...(effectiveUpdateTitle ? { title: cleanedExtractedTitle } : {}),
     ...(regeneratedCitKey && !/^anon/i.test(regeneratedCitKey) ? { citationKey: regeneratedCitKey } : {}),
@@ -441,15 +441,15 @@ export function buildExtractedMetadataSyncPlan(
 }
 
 export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
-  data: Prisma.ItemUpdateInput;
+  data: Prisma.LibraryItemUpdateInput;
   freshItem: FreshItemExtractionTarget | null;
   resolveCitationKey?: (candidateKey: string) => Promise<string | null>;
 }): Promise<{
-  sanitizedData: Prisma.ItemUpdateInput;
+  sanitizedData: Prisma.LibraryItemUpdateInput;
   mergedMetadata: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined;
 }> {
   const { data, freshItem, resolveCitationKey } = params;
-  const sanitizedData: Prisma.ItemUpdateInput = { ...data };
+  const sanitizedData: Prisma.LibraryItemUpdateInput = { ...data };
   let disambiguatedCitKey: string | undefined;
 
   const freshestMeta = asMetaRecord(freshItem?.metadata);

@@ -234,7 +234,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
 
       const first = concurrentCalls[0];
       expect(first.tags).toEqual([{ id: 'tag-1', name: 'llm', count: 2 }]);
-      expect(first.syncVersion.version).toBe('42');
+      expect(first.syncVersion?.version).toBe('42');
       expect(first.items).toHaveLength(2);
     });
   });
@@ -349,9 +349,10 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
 
     it('uses lean select projections on itemTags, collectionItems, and publications in ItemListQueryRepository.findMany', async () => {
       const userId = '66666666-6666-4666-8666-666666666666';
-      const mockFindMany = jest.fn(async () => []);
+      const mockFindMany = jest.fn(async (..._args: unknown[]) => []);
       const mockPrisma = {
         item: { findMany: mockFindMany },
+        libraryItem: { findMany: mockFindMany },
       };
       const repo = new ItemListQueryRepository(mockPrisma as never);
 
@@ -361,7 +362,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
       });
 
       expect(mockFindMany).toHaveBeenCalledTimes(1);
-      const callArg = mockFindMany.mock.calls[0]?.[0] as {
+      const callArg = mockFindMany.mock.calls[0]?.[0] as unknown as {
         include?: Record<string, unknown>;
       };
       expect(callArg.include?.itemTags).toEqual({
@@ -445,7 +446,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
     it('skips fetching heavy notesList JSON in CommandRepository.update when notes are not being updated', async () => {
       const userId = '88888888-8888-4888-8888-888888888888';
       const itemId = '99999999-9999-4999-8999-999999999999';
-      const mockFindFirst = jest.fn(async () => ({
+      const mockFindFirst = jest.fn(async (..._args: unknown[]) => ({
         id: itemId,
         userId,
         projectId: null,
@@ -462,13 +463,15 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
         version: 2,
         title: 'New Title',
       }));
+      const itemMock = {
+        findFirst: mockFindFirst,
+        update: mockUpdate,
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        findMany: jest.fn(async () => []),
+      };
       const mockPrisma = {
-        item: {
-          findFirst: mockFindFirst,
-          update: mockUpdate,
-          updateMany: jest.fn(async () => ({ count: 1 })),
-          findMany: jest.fn(async () => []),
-        },
+        item: itemMock,
+        libraryItem: itemMock,
         itemIdentifier: {
           deleteMany: jest.fn(async () => ({ count: 0 })),
           upsert: jest.fn(async () => ({})),
@@ -478,7 +481,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
 
       await repo.update(userId, itemId, 1, { title: 'New Title' });
 
-      const findFirstArg = mockFindFirst.mock.calls[0]?.[0] as {
+      const findFirstArg = mockFindFirst.mock.calls[0]?.[0] as unknown as {
         include?: Record<string, unknown>;
       };
       expect(findFirstArg.include?.notesList).toBeUndefined();

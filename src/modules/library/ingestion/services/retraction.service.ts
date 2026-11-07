@@ -10,13 +10,13 @@ import { RetractionCheckResult, RetractionStats, RetractionDetails, RetractionNa
 import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { RetractionSeederService } from '@/modules/library/ingestion/services/retraction-seeder.service';
 
-interface RetractionSyncOptions {
+export interface RetractionSyncOptions {
   maxDays?: number;
   limit?: number;
   concurrency?: number;
 }
 
-interface RetractionSyncResult {
+export interface RetractionSyncResult {
   totalEligible: number;
   scanned: number;
   newlyRetracted: number;
@@ -36,6 +36,21 @@ interface SyncCandidate {
   pmid?: string | null;
   isRetracted?: boolean | null;
   retractionNature?: string | null;
+}
+
+function isRetractedNoticeNature(nature?: string | null): boolean {
+  const norm = (nature || '').trim().toLowerCase();
+  if (!norm) return true;
+  if (
+    norm === 'correction' ||
+    norm === 'erratum' ||
+    norm === 'corrigendum' ||
+    norm === 'reinstatement' ||
+    norm === 'expression_of_concern'
+  ) {
+    return false;
+  }
+  return norm === 'retraction' || norm === 'manual' || norm.includes('retract');
 }
 
 @Injectable()
@@ -102,7 +117,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     try {
       if (typeof this.repo.getDatabaseStats === 'function') {
         const stats = await this.repo.getDatabaseStats();
-        if (stats.totalRecords === 0) {
+        if (stats.totalRecords === 0 || !stats.lastCheckedAt) {
           return true;
         }
         const utcDay = new Date().getUTCDay();
@@ -166,10 +181,6 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     return this.syncAllStaleItems(options);
   }
 
-  /**
-   * Targeted Delta Set Inverted Lookup ($O(|Δ|)): Instantly finds and flags user items
-   * that match newly added or updated retractions without scanning the entire library.
-   */
   async reconcileDeltaRetractions(
     newlyRetractedDois: string[],
   ): Promise<number> {
@@ -203,14 +214,11 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
           if (!item.isRetracted && item.doi) {
             const lookupRes = await this.scanner.lookup(item.doi);
             if (lookupRes.status === 'retracted') {
+              const isActuallyRetracted = isRetractedNoticeNature(lookupRes.details.nature);
               await this.repo.updateItemRetraction(
-                item.id,
-                true,
-                lookupRes.details.nature,
-                lookupRes.details,
-                now,
+                item.id, isActuallyRetracted, lookupRes.details.nature, lookupRes.details, now,
               );
-              updatedCount++;
+              if (isActuallyRetracted) updatedCount++;
               updatedDeltaItems.push({
                 id: item.id,
                 userId: (item as { userId?: string | null }).userId,
@@ -244,14 +252,9 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
       await Promise.all(
         Array.from(groupedByScope.values()).map((group) =>
           invalidateIngestionItemCache({
-            itemIds: group.itemIds,
-            userId: group.userId,
-            projectId: group.projectId,
-            cacheCoordinator: this.cacheCoordinator,
-            catalogGateway: this.catalogGateway,
-            cache: this.cache,
-            logger: this.logger,
-            contextLabel: 'delta retraction sync',
+            itemIds: group.itemIds, userId: group.userId, projectId: group.projectId,
+            cacheCoordinator: this.cacheCoordinator, catalogGateway: this.catalogGateway,
+            cache: this.cache, logger: this.logger, contextLabel: 'delta retraction sync',
           }),
         ),
       );
@@ -263,9 +266,6 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     return updatedCount;
   }
 
-  /**
-   * Periodically scans stale items across all active users and projects.
-   */
   async syncAllStaleItems(
     options?: RetractionSyncOptions,
   ): Promise<RetractionSyncResult> {
@@ -275,18 +275,10 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     const concurrency = this.resolveConcurrency(options);
 
     const staleBefore = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000);
-    const items = await this.repo.findGlobalStaleItemsForSync(
-      staleBefore,
-      limit,
-    );
-
+    const items = await this.repo.findGlobalStaleItemsForSync(staleBefore, limit);
     return this.processItems(items, concurrency, startTime);
   }
 
-  /**
-   * Scans stale library items whose retraction status has not been checked
-   * within `maxDays` (default 14 days), re-evaluating them against local database & Crossref.
-   */
   async syncStaleLibraryItems(
     userId: string,
     projectId?: string,
@@ -298,13 +290,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     const concurrency = this.resolveConcurrency(options);
 
     const staleBefore = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000);
-
-    const items = await this.repo.findStaleItemsForSync(
-      userId,
-      staleBefore,
-      projectId,
-      limit,
-    );
+    const items = await this.repo.findStaleItemsForSync(userId, staleBefore, projectId, limit);
 
     this.logger.log(
       `Starting retraction delta sync: found ${items.length} eligible stale item(s) (stale threshold: ${maxDays} days, concurrency: ${concurrency})`,
@@ -361,10 +347,13 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
             const now = new Date();
 
             if (result.status === 'retracted') {
-              if (!item.isRetracted) newlyRetracted++;
+              const isActuallyRetracted = isRetractedNoticeNature(
+                result.details.nature,
+              );
+              if (isActuallyRetracted && !item.isRetracted) newlyRetracted++;
               await this.repo.updateItemRetraction(
                 item.id,
-                true,
+                isActuallyRetracted,
                 result.details.nature,
                 result.details,
                 now,
@@ -461,6 +450,7 @@ export class RetractionService {
     @Optional()
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway?: ICatalogFacade,
+    @Optional() private readonly seeder?: RetractionSeederService,
   ) {}
 
   private async invalidateRetractionCache(
@@ -518,7 +508,9 @@ export class RetractionService {
           : null;
     const lookup = await this.scanner.lookup(item.doi, pmid);
     const now = new Date();
-    const effectiveProjectId = projectId || item.projectId || undefined;
+    const itemRec = item as { projectId?: string | null; spaceId?: string; createdById?: string };
+    const itemProjectId = itemRec.projectId ?? (itemRec.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
+    const effectiveProjectId = projectId || itemProjectId || undefined;
 
     if (lookup.status === 'retracted') {
       const isActuallyRetracted =
@@ -613,12 +605,15 @@ export class RetractionService {
             const result = await this.scanner.lookup(item.doi, item.pmid);
             const now = new Date();
             if (result.status === 'retracted') {
-              if (!item.isRetracted) {
+              const isActuallyRetracted = isRetractedNoticeNature(
+                result.details.nature,
+              );
+              if (isActuallyRetracted && !item.isRetracted) {
                 newlyRetracted++;
               }
               await this.repo.updateItemRetraction(
                 item.id,
-                true,
+                isActuallyRetracted,
                 result.details.nature,
                 result.details,
                 now,
@@ -680,10 +675,12 @@ export class RetractionService {
       new Date(),
     );
 
+    const itemRec = item as { projectId?: string | null; spaceId?: string; createdById?: string };
+    const itemProjectId = itemRec.projectId ?? (itemRec.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
     await this.invalidateRetractionCache(
       [itemId],
       userId,
-      projectId || item.projectId || undefined,
+      projectId || itemProjectId || undefined,
     );
 
     return updated;
@@ -703,10 +700,12 @@ export class RetractionService {
       new Date(),
     );
 
+    const itemRec = item as { projectId?: string | null; spaceId?: string; createdById?: string };
+    const itemProjectId = itemRec.projectId ?? (itemRec.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
     await this.invalidateRetractionCache(
       [itemId],
       userId,
-      projectId || item.projectId || undefined,
+      projectId || itemProjectId || undefined,
     );
 
     return updated;
@@ -725,7 +724,11 @@ export class RetractionService {
   }
 
   async seedDatabase(force = false): Promise<{ seeded: number }> {
-    const seeded = await this.retractionDb.seedIfEmpty(force);
+    let seeded = await this.retractionDb.seedIfEmpty(force);
+    if ((force || seeded === 0) && this.seeder?.seedFromGitlab) {
+      const seedRes = await this.seeder.seedFromGitlab();
+      seeded = seedRes.inserted || (await this.retractionDb.seedIfEmpty(false));
+    }
     return { seeded };
   }
 

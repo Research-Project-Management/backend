@@ -42,13 +42,24 @@ export class FeedsRepository {
     return Boolean(this.prisma);
   }
 
+  private mapSubscriptionRecord<
+    T extends {
+      id: string; spaceId?: string; createdById?: string; userId?: string;
+      feedId: string; customTitle: string | null; cleanupReadAfter: number;
+      cleanupUnreadAfter: number; feed: FeedSubscriptionRecord['feed'];
+    },
+  >(row: T): FeedSubscriptionRecord {
+    return { ...row, userId: row.userId ?? row.createdById ?? row.spaceId ?? '' };
+  }
+
   async findSubscriptionsByUser(userId: string): Promise<FeedSubscriptionRecord[]> {
     if (!this.prisma) return [];
-    return this.prisma.feedSubscription.findMany({
-      where: { userId },
+    const rows = await this.prisma.feedSubscription.findMany({
+      where: { spaceId: userId },
       include: { feed: { select: FEED_SUMMARY_SELECT } },
       orderBy: { createdAt: 'desc' },
     });
+    return rows.map((r) => this.mapSubscriptionRecord(r));
   }
 
   async findFeedByUrl(url: string) {
@@ -76,36 +87,37 @@ export class FeedsRepository {
     const { userId, feedId, customTitle, cleanupDays } = params;
     const readDays = params.cleanupReadAfter !== undefined ? params.cleanupReadAfter : cleanupDays !== undefined ? cleanupDays : 7;
     const unreadDays = params.cleanupUnreadAfter !== undefined ? params.cleanupUnreadAfter : cleanupDays !== undefined ? cleanupDays : 30;
-    const scopeKey = `user:${userId}`;
-    return this.prisma.feedSubscription.upsert({
-      where: { userId_feedId: { userId, feedId } },
+    const row = await this.prisma.feedSubscription.upsert({
+      where: { spaceId_feedId: { spaceId: userId, feedId } },
       create: {
-        scopeKey,
-        userId, feedId, customTitle: customTitle || null,
+        spaceId: userId,
+        createdById: userId,
+        feedId, customTitle: customTitle || null,
         cleanupReadAfter: readDays, cleanupUnreadAfter: unreadDays,
       },
       update: {
-        scopeKey,
         customTitle: customTitle || undefined,
         cleanupReadAfter: readDays, cleanupUnreadAfter: unreadDays,
       },
       include: { feed: { select: FEED_SUMMARY_SELECT } },
     });
+    return this.mapSubscriptionRecord(row);
   }
 
   async deleteSubscription(userId: string, feedId: string): Promise<void> {
     if (!this.prisma) return;
     await this.prisma.feedSubscription.deleteMany({
-      where: { userId, OR: [{ feedId }, { id: feedId }] },
+      where: { spaceId: userId, OR: [{ feedId }, { id: feedId }] },
     });
   }
 
-  async findSubscription(userId: string, feedId: string) {
+  async findSubscription(userId: string, feedId: string): Promise<FeedSubscriptionRecord | null> {
     if (!this.prisma) return null;
-    return this.prisma.feedSubscription.findFirst({
-      where: { userId, OR: [{ feedId }, { id: feedId }] },
+    const row = await this.prisma.feedSubscription.findFirst({
+      where: { spaceId: userId, OR: [{ feedId }, { id: feedId }] },
       include: { feed: { select: FEED_SUMMARY_SELECT } },
     });
+    return row ? this.mapSubscriptionRecord(row) : null;
   }
 
   async updateSubscriptionById(
@@ -118,7 +130,7 @@ export class FeedsRepository {
     if (!this.prisma) throw new ServiceUnavailableException('Database is unavailable');
     const nextReadAfter = data.cleanupReadAfter !== undefined ? data.cleanupReadAfter : data.cleanupDays;
     const nextUnreadAfter = data.cleanupUnreadAfter !== undefined ? data.cleanupUnreadAfter : data.cleanupDays;
-    return this.prisma.feedSubscription.update({
+    const row = await this.prisma.feedSubscription.update({
       where: { id },
       data: {
         ...(data.customTitle !== undefined ? { customTitle: data.customTitle } : {}),
@@ -128,6 +140,7 @@ export class FeedsRepository {
       },
       include: { feed: { select: FEED_SUMMARY_SELECT } },
     });
+    return this.mapSubscriptionRecord(row);
   }
 
   private extractItemExtraMeta(it: { metadata?: unknown; comments?: string | null }): FeedItemExtraMeta {
@@ -232,7 +245,7 @@ export class FeedsRepository {
     if (!this.prisma?.feedItem?.findFirst) return isUuid(trimmed) ? trimmed : null;
     const found = await this.prisma.feedItem.findFirst({
       where: {
-        ...(userId ? { feed: { subscriptions: { some: { userId } } } } : {}),
+        ...(userId ? { feed: { subscriptions: { some: { spaceId: userId } } } } : {}),
         OR: [
           ...(isUuid(trimmed) ? [{ id: trimmed }] : []),
           { guid: trimmed },
@@ -243,7 +256,7 @@ export class FeedsRepository {
       },
       select: { id: true },
     });
-    return found?.id || (isUuid(trimmed) && !userId ? trimmed : null);
+    return found?.id ?? null;
   }
 
   async resolveFeedItemUuids(rawItemIds: string[], userId?: string): Promise<string[]> {
@@ -265,7 +278,7 @@ export class FeedsRepository {
     if (orFilters.length === 0) return [];
     const foundItems = await this.prisma.feedItem.findMany({
       where: {
-        ...(userId ? { feed: { subscriptions: { some: { userId } } } } : {}),
+        ...(userId ? { feed: { subscriptions: { some: { spaceId: userId } } } } : {}),
         OR: orFilters,
       },
       select: { id: true },
@@ -413,7 +426,7 @@ export class FeedsRepository {
   async findFeedsWithRetentionPreferences(take = 500) {
     if (!this.prisma) return [];
     return this.prisma.feed.findMany({
-      select: { id: true, subscriptions: { select: { userId: true, cleanupReadAfter: true, cleanupUnreadAfter: true } } },
+      select: { id: true, subscriptions: { select: { spaceId: true, createdById: true, cleanupReadAfter: true, cleanupUnreadAfter: true } } },
       take,
     });
   }
@@ -429,25 +442,16 @@ export class FeedsRepository {
     let whereClause: Prisma.FeedItemWhereInput;
     if (readStatus === 'read') {
       const readFilter: Prisma.FeedItemWhereInput = activeUserIds.length > 0
-        ? { AND: activeUserIds.map((uid) => ({ readStates: { some: { userId: uid, readAt: { lt: cutoffDate } } } })) }
-        : { readStates: { some: { readAt: { lt: cutoffDate } } } };
+        ? { AND: activeUserIds.map((uid) => ({ readStates: { some: { userId: uid, isRead: true, readAt: { lt: cutoffDate } } } })) }
+        : { readStates: { some: { isRead: true, readAt: { lt: cutoffDate } } } };
       whereClause = { ...(feedId ? { feedId } : {}), readStates: { none: { savedItemId: { not: null } } }, ...readFilter };
     } else if (readStatus === 'unread') {
       const unreadFilter: Prisma.FeedItemWhereInput = activeUserIds.length > 0
-        ? { OR: [{ readStates: { none: {} } }, ...activeUserIds.map((uid) => ({ readStates: { none: { userId: uid } } }))] }
-        : { readStates: { none: {} } };
-      whereClause = {
-        ...(feedId ? { feedId } : {}),
-        publishedAt: { lt: cutoffDate },
-        readStates: { none: { savedItemId: { not: null } } },
-        ...unreadFilter,
-      };
+        ? { OR: [{ readStates: { none: {} } }, ...activeUserIds.flatMap((uid) => [{ readStates: { none: { userId: uid } } }, { readStates: { some: { userId: uid, isRead: false } } }])] }
+        : { OR: [{ readStates: { none: {} } }, { readStates: { every: { isRead: false } } }] };
+      whereClause = { ...(feedId ? { feedId } : {}), publishedAt: { lt: cutoffDate }, readStates: { none: { savedItemId: { not: null } } }, ...unreadFilter };
     } else {
-      whereClause = {
-        ...(feedId ? { feedId } : {}),
-        publishedAt: { lt: cutoffDate },
-        ...(subscriberUserIds !== undefined ? { readStates: { none: { savedItemId: { not: null } } } } : {}),
-      };
+      whereClause = { ...(feedId ? { feedId } : {}), publishedAt: { lt: cutoffDate }, ...(subscriberUserIds !== undefined ? { readStates: { none: { savedItemId: { not: null } } } } : {}) };
     }
     const res = await this.prisma.feedItem.deleteMany({ where: whereClause });
     return res.count;

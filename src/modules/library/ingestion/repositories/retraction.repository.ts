@@ -1,6 +1,8 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
-import { Prisma, Item } from '@prisma/client';
+import { Prisma, LibraryItem } from '@prisma/client';
 import { PrismaService, isUuid as isValidId } from '@/core';
+
+type Item = LibraryItem;
 import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,
@@ -36,7 +38,7 @@ function parseItemMetadata(metadata: unknown): ItemRetractionMetadata {
  * Filter matching Zotero's retraction checking constraint:
  * Only papers with a non-empty DOI or PMID are eligible for retraction audits.
  */
-const RETRACTION_IDENTIFIER_FILTER: Prisma.ItemWhereInput = {
+const RETRACTION_IDENTIFIER_FILTER: Prisma.LibraryItemWhereInput = {
   OR: [
     {
       doi: { not: null },
@@ -83,15 +85,15 @@ export class RetractionRepository {
   private getScopeWhere(userId: string, projectId?: string) {
     const normalizedProjectId = normalizeProjectScopeId(projectId);
     if (normalizedProjectId) {
-      return { projectId: normalizedProjectId, deletedAt: null };
+      return { spaceId: normalizedProjectId, deletedAt: null };
     }
-    return { userId, projectId: null, deletedAt: null };
+    return { spaceId: userId, deletedAt: null };
   }
 
   async findItemById(userId: string, itemId: string, projectId?: string) {
     if (!isValidId(itemId) || !isValidId(userId)) return null;
     const scopeWhere = this.getScopeWhere(userId, projectId);
-    return this.prisma.item.findFirst({
+    return this.prisma.libraryItem.findFirst({
       where: {
         id: itemId,
         ...scopeWhere,
@@ -109,6 +111,8 @@ export class RetractionRepository {
       doi: string | null;
       metadata: unknown;
       retractionCheckedAt?: Date | null;
+      spaceId?: string;
+      createdById?: string;
       userId?: string;
       projectId?: string | null;
       pmid?: string | null;
@@ -121,10 +125,17 @@ export class RetractionRepository {
     const checkedAt =
       item.retractionCheckedAt ??
       (meta.retractionCheckedAt ? new Date(meta.retractionCheckedAt) : null);
+    const resolvedUserId = item.userId ?? item.createdById;
+    const resolvedProjectId =
+      item.projectId !== undefined
+        ? item.projectId
+        : item.spaceId && item.createdById && item.spaceId !== item.createdById
+          ? item.spaceId
+          : null;
     return {
       id: item.id,
-      ...(item.userId !== undefined ? { userId: item.userId } : {}),
-      ...(item.projectId !== undefined ? { projectId: item.projectId } : {}),
+      ...(resolvedUserId !== undefined ? { userId: resolvedUserId } : {}),
+      ...(resolvedProjectId !== undefined ? { projectId: resolvedProjectId } : {}),
       title: item.title,
       doi: item.doi ?? findIdentVal(item.identifiers, 'doi'),
       pmid:
@@ -149,7 +160,7 @@ export class RetractionRepository {
     projectId?: string,
   ) {
     const scopeWhere = this.getScopeWhere(userId, projectId);
-    const items = await this.prisma.item.findMany({
+    const items = await this.prisma.libraryItem.findMany({
       where: {
         ...scopeWhere,
         ...(itemIds && itemIds.length > 0
@@ -181,7 +192,7 @@ export class RetractionRepository {
     limit = 100,
   ) {
     const scopeWhere = this.getScopeWhere(userId, projectId);
-    const items = await this.prisma.item.findMany({
+    const items = await this.prisma.libraryItem.findMany({
       where: {
         ...scopeWhere,
         ...RETRACTION_IDENTIFIER_FILTER,
@@ -225,12 +236,12 @@ export class RetractionRepository {
       helpers?: TransactionHelpers,
     ) => {
       const findUniqueFn =
-        typeof client.item?.findUnique === 'function'
-          ? client.item.findUnique.bind(client.item)
-          : this.prisma.item.findUnique.bind(this.prisma.item);
+        typeof client.libraryItem?.findUnique === 'function'
+          ? client.libraryItem.findUnique.bind(client.libraryItem)
+          : this.prisma.libraryItem.findUnique.bind(this.prisma.libraryItem);
       const existing = await findUniqueFn({
         where: { id: itemId },
-        select: { metadata: true, userId: true, projectId: true },
+        select: { metadata: true, spaceId: true, createdById: true },
       });
       const prevMeta = parseItemMetadata(existing?.metadata);
       const statusChanged =
@@ -244,7 +255,7 @@ export class RetractionRepository {
         retractionCheckedAt: checkedAt.toISOString(),
       };
 
-      const updated = await client.item.update({
+      const updated = await client.libraryItem.update({
         where: { id: itemId },
         data: {
           isRetracted: Boolean(isRetracted),
@@ -265,10 +276,18 @@ export class RetractionRepository {
             }
           : {}),
       });
-      const effectiveUserId = existing?.userId || updated?.userId;
-      const effectiveProjectId = normalizeProjectScopeId(
-        existing?.projectId ?? updated?.projectId,
-      );
+      const existingRec = existing as { userId?: string; createdById?: string; projectId?: string | null; spaceId?: string } | null | undefined;
+      const updatedRec = updated as { userId?: string; createdById?: string; projectId?: string | null; spaceId?: string } | null | undefined;
+      const effectiveUserId = existingRec?.userId ?? existingRec?.createdById ?? updatedRec?.userId ?? updatedRec?.createdById;
+      const rawProjectId =
+        existingRec?.projectId ??
+        updatedRec?.projectId ??
+        (existingRec?.spaceId && existingRec.spaceId !== existingRec.createdById
+          ? existingRec.spaceId
+          : updatedRec?.spaceId && updatedRec.spaceId !== updatedRec.createdById
+            ? updatedRec.spaceId
+            : undefined);
+      const effectiveProjectId = normalizeProjectScopeId(rawProjectId);
       const rawDomainUpdated =
         statusChanged && updated
           ? ItemsMapper.mapFlattenedState(updated, effectiveUserId)
@@ -339,7 +358,7 @@ export class RetractionRepository {
 
   async findRetractedItems(userId: string, projectId?: string) {
     const scopeWhere = this.getScopeWhere(userId, projectId);
-    const items = await this.prisma.item.findMany({
+    const items = await this.prisma.libraryItem.findMany({
       where: {
         ...scopeWhere,
         isRetracted: true,
@@ -376,7 +395,7 @@ export class RetractionRepository {
 
   async getStats(userId: string, projectId?: string): Promise<RetractionStats> {
     const baseWhere = this.getScopeWhere(userId, projectId);
-    const retractedBaseWhere: Prisma.ItemWhereInput = {
+    const retractedBaseWhere: Prisma.LibraryItemWhereInput = {
       ...baseWhere,
       isRetracted: true,
     };
@@ -388,8 +407,8 @@ export class RetractionRepository {
       expressionsOfConcernCount,
       manualCount,
     ] = await Promise.all([
-      this.prisma.item.count({ where: baseWhere }).catch(() => 0),
-      this.prisma.item
+      this.prisma.libraryItem.count({ where: baseWhere }).catch(() => 0),
+      this.prisma.libraryItem
         .count({
           where: {
             ...baseWhere,
@@ -397,8 +416,8 @@ export class RetractionRepository {
           },
         })
         .catch(() => null),
-      this.prisma.item.count({ where: retractedBaseWhere }).catch(() => 0),
-      this.prisma.item
+      this.prisma.libraryItem.count({ where: retractedBaseWhere }).catch(() => 0),
+      this.prisma.libraryItem
         .count({
           where: {
             AND: [
@@ -413,7 +432,7 @@ export class RetractionRepository {
           },
         })
         .catch(() => 0),
-      this.prisma.item
+      this.prisma.libraryItem
         .count({
           where: {
             AND: [
@@ -447,7 +466,7 @@ export class RetractionRepository {
   }
 
   async findGlobalStaleItemsForSync(staleBefore: Date, limit = 100) {
-    const items = await this.prisma.item.findMany({
+    const items = await this.prisma.libraryItem.findMany({
       where: {
         deletedAt: null,
         ...RETRACTION_IDENTIFIER_FILTER,
@@ -459,8 +478,8 @@ export class RetractionRepository {
       orderBy: { retractionCheckedAt: { sort: 'asc', nulls: 'first' } },
       select: {
         id: true,
-        userId: true,
-        projectId: true,
+        spaceId: true,
+        createdById: true,
         title: true,
         doi: true,
         pmid: true,
@@ -474,12 +493,13 @@ export class RetractionRepository {
     });
 
     return items
-      .map((item) =>
-        Object.assign(this.mapRetractionRow(item), {
-          userId: item.userId,
-          projectId: item.projectId,
-        }),
-      )
+      .map((item) => {
+        const mapped = this.mapRetractionRow(item);
+        const itemRec = item as { userId?: string; createdById?: string; projectId?: string | null; spaceId?: string };
+        const userId = itemRec.userId ?? itemRec.createdById ?? '';
+        const projectId = itemRec.projectId !== undefined ? itemRec.projectId : itemRec.spaceId && itemRec.spaceId !== userId ? itemRec.spaceId : null;
+        return Object.assign(mapped, { userId, projectId });
+      })
       .filter((item) => Boolean(item.doi?.trim() || item.pmid?.trim()))
       .filter(
         (i) => !i.retractionCheckedAt || i.retractionCheckedAt < staleBefore,
@@ -578,7 +598,7 @@ export class RetractionRepository {
     const normalized = Array.from(
       new Set(dois.map((d) => d.toLowerCase().trim())),
     );
-    const items = await this.prisma.item.findMany({
+    const items = await this.prisma.libraryItem.findMany({
       where: {
         OR: [
           { doi: { in: normalized } },
@@ -588,8 +608,8 @@ export class RetractionRepository {
       },
       select: {
         id: true,
-        userId: true,
-        projectId: true,
+        spaceId: true,
+        createdById: true,
         doi: true,
         isRetracted: true,
         metadata: true,
@@ -598,12 +618,15 @@ export class RetractionRepository {
     });
     return items.map((it) => {
       const meta = parseItemMetadata(it.metadata);
+      const itRec = it as { userId?: string; createdById?: string; projectId?: string | null; spaceId?: string; isRetracted?: boolean };
+      const userId = itRec.userId ?? itRec.createdById ?? '';
+      const projectId = itRec.projectId !== undefined ? itRec.projectId : itRec.spaceId && itRec.spaceId !== userId ? itRec.spaceId : null;
       return {
         id: it.id,
-        userId: it.userId,
-        projectId: it.projectId,
+        userId,
+        projectId,
         doi: it.doi ?? findIdentVal(it.identifiers, 'doi'),
-        isRetracted: Boolean((it as { isRetracted?: boolean }).isRetracted || meta.isRetracted),
+        isRetracted: Boolean(itRec.isRetracted || meta.isRetracted),
         retractionNature: meta.retractionNature ?? null,
       };
     });

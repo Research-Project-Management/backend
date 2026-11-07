@@ -96,9 +96,7 @@ export class AttachmentRenamerService {
       {
         id: attachmentId,
         deletedAt: null,
-        item: validProjectId
-          ? { projectId: validProjectId, deletedAt: null }
-          : { userId, projectId: null, deletedAt: null },
+        item: { spaceId: validProjectId || userId, deletedAt: null },
       },
       {
         item: {
@@ -239,9 +237,7 @@ export class AttachmentRenamerService {
     const validProjectId = normalizeProjectScopeId(projectId);
     const whereClause: Prisma.AttachmentWhereInput = {
       deletedAt: null,
-      item: validProjectId
-        ? { projectId: validProjectId, deletedAt: null }
-        : { userId, projectId: null, deletedAt: null },
+      item: { spaceId: validProjectId || userId, deletedAt: null },
     };
 
     if (dto.attachmentIds && dto.attachmentIds.length > 0) {

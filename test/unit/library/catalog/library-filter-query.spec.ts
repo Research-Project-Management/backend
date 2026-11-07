@@ -2,11 +2,13 @@ import { QueryRepository } from '@/modules/library/catalog/repositories/query.re
 
 describe('QueryRepository Filtering & Grounding Specification', () => {
   let queryRepo: QueryRepository;
+  const itemMock = {
+    findMany: jest.fn(),
+    findFirst: jest.fn(),
+  };
   const mockPrisma: any = {
-    item: {
-      findMany: jest.fn(),
-      findFirst: jest.fn(),
-    },
+    item: itemMock,
+    libraryItem: itemMock,
   };
 
   beforeEach(() => {
@@ -18,8 +20,7 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
 
     it('should build where clause for personal scope by default', () => {
       const where: any = queryRepo.buildWhereClause(userId, { view: 'all' });
-      expect(where.userId).toBe(userId);
-      expect(where.projectId).toBeNull();
+      expect(where.spaceId).toBe(userId);
       expect(where.deletedAt).toBeNull();
     });
 
@@ -29,8 +30,7 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
         view: 'all',
         projectId,
       });
-      expect(where.projectId).toBe(projectId);
-      expect(where.userId).toBeUndefined();
+      expect(where.spaceId).toBe(projectId);
       expect(where.deletedAt).toBeNull();
     });
 

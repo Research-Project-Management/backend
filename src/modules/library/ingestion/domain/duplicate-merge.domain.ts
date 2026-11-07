@@ -11,6 +11,7 @@ import {
 import { ALLOWED_MERGE_METADATA_FIELDS, PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/ingestion.types';
 
 export interface ContributorShape {
+  id?: string;
   creatorType?: string; fieldMode?: number; firstName?: string; lastName?: string;
   fullName?: string; shortName?: string | null; name?: string; orderIndex?: number;
 }
@@ -168,6 +169,7 @@ export function mapContributorInputForPrimary(
     fullName = parsed.fullName || fullName;
   }
   return {
+    ...(typeof cObj?.id === 'string' && cObj.id ? { id: cObj.id } : {}),
     itemId: primaryId, creatorType, fieldMode: cObj?.fieldMode ?? 0,
     firstName, lastName, fullName, shortName: cObj?.shortName ?? '', orderIndex: cObj?.orderIndex ?? idx,
   };

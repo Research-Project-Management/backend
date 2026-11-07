@@ -65,9 +65,8 @@ export class ExportsService {
     userId: string,
     dto: ExportLibraryDto,
   ): Promise<ExportResult> {
-    let scopeWhere: Prisma.ItemWhereInput = {
-      userId,
-      projectId: null,
+    let scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: userId,
       deletedAt: null,
     };
 
@@ -82,12 +81,15 @@ export class ExportsService {
           `Project ${effectiveProjectId} not found or access denied`,
         );
       }
-      scopeWhere = { projectId: effectiveProjectId, deletedAt: null };
+      scopeWhere = { spaceId: effectiveProjectId, deletedAt: null };
       if (dto.collectionId) {
         const collection = await this.exportsRepo.findCollection(
           dto.collectionId,
         );
-        if (!collection || collection.projectId !== effectiveProjectId) {
+        const colProjectId =
+          (collection as { projectId?: string | null } | null)?.projectId ??
+          (collection && collection.spaceId !== collection.createdById ? collection.spaceId : null);
+        if (!collection || (colProjectId ?? collection.spaceId) !== effectiveProjectId) {
           throw new NotFoundException(
             `Collection ${dto.collectionId} not found or access denied`,
           );
@@ -102,9 +104,16 @@ export class ExportsService {
           `Collection ${dto.collectionId} not found or access denied`,
         );
       }
-      if (collection.projectId) {
+      const colProjectId =
+        (collection as { projectId?: string | null }).projectId ??
+        (collection.spaceId && collection.spaceId !== collection.createdById && collection.spaceId !== userId
+          ? collection.spaceId
+          : null);
+      const colUserId =
+        (collection as { userId?: string }).userId ?? collection.createdById ?? collection.spaceId;
+      if (colProjectId) {
         const member = await this.exportsRepo.findProjectMember(
-          collection.projectId,
+          colProjectId,
           userId,
         );
         if (!member) {
@@ -112,8 +121,8 @@ export class ExportsService {
             `Collection ${dto.collectionId} not found or access denied`,
           );
         }
-        scopeWhere = { projectId: collection.projectId, deletedAt: null };
-      } else if (collection.userId !== userId) {
+        scopeWhere = { spaceId: colProjectId, deletedAt: null };
+      } else if (colUserId !== userId && collection.spaceId !== userId) {
         throw new NotFoundException(
           `Collection ${dto.collectionId} not found or access denied`,
         );
@@ -184,14 +193,24 @@ export class ExportsService {
     }
 
     const normalizedProjectId = normalizeProjectScopeId(projectId);
-    let scopeWhere: Prisma.ItemWhereInput;
+    let scopeWhere: Prisma.LibraryItemWhereInput;
 
-    if (collection.projectId) {
-      if (normalizedProjectId && collection.projectId !== normalizedProjectId) {
+    const colProjectId =
+      (collection as { projectId?: string | null }).projectId ??
+      (collection.spaceId && collection.spaceId !== collection.createdById && collection.spaceId !== userId
+        ? collection.spaceId
+        : normalizedProjectId && collection.spaceId === normalizedProjectId
+          ? collection.spaceId
+          : null);
+    const colUserId =
+      (collection as { userId?: string }).userId ?? collection.createdById ?? collection.spaceId;
+
+    if (colProjectId) {
+      if (normalizedProjectId && colProjectId !== normalizedProjectId) {
         throw new NotFoundException(`Collection ${collectionId} not found`);
       }
       const member = await this.exportsRepo.findProjectMember(
-        collection.projectId,
+        colProjectId,
         userId,
       );
       if (!member) {
@@ -199,12 +218,12 @@ export class ExportsService {
           `Collection ${collectionId} not found or access denied`,
         );
       }
-      scopeWhere = { projectId: collection.projectId, deletedAt: null };
+      scopeWhere = { spaceId: colProjectId, deletedAt: null };
     } else {
-      if (collection.userId !== userId) {
+      if (colUserId !== userId && collection.spaceId !== userId) {
         throw new NotFoundException(`Collection ${collectionId} not found`);
       }
-      scopeWhere = { userId, projectId: null, deletedAt: null };
+      scopeWhere = { spaceId: userId, deletedAt: null };
     }
 
     const items = await this.exportsRepo.findItems(
@@ -446,14 +465,15 @@ export class ExportsService {
 
     const effectiveProjectId = normalizeProjectScopeId(projectId);
 
-    const scopeWhere: Prisma.ItemWhereInput = effectiveProjectId
-      ? { projectId: effectiveProjectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: effectiveProjectId || userId,
+      deletedAt: null,
+    };
 
     const idKeys = normalizedKeys.filter((k) => isUuid(k));
     const citeKeys = normalizedKeys;
 
-    const targetedScopeWhere: Prisma.ItemWhereInput = {
+    const targetedScopeWhere: Prisma.LibraryItemWhereInput = {
       AND: [
         scopeWhere,
         {

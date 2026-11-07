@@ -192,6 +192,21 @@ export function resolveCanonicalScopeKey(scope: {
   return `user:${cleanUserId}`;
 }
 
+export function resolveSpaceId(scope: {
+  userId?: string | null;
+  projectId?: string | null;
+  spaceId?: string | null;
+}): string {
+  if (scope.spaceId && scope.spaceId.trim()) return scope.spaceId.trim();
+  const validProjectId = normalizeProjectScopeId(scope.projectId);
+  if (validProjectId) return validProjectId;
+  const cleanUserId = typeof scope.userId === 'string' ? scope.userId.trim() : '';
+  if (!cleanUserId) {
+    throw new ConfigurationException('Scope resolution requires either a valid projectId or userId');
+  }
+  return cleanUserId;
+}
+
 /**
  * Cycle-safe O(V + E) Breadth-First Search (BFS) descendant collection ID resolver.
  * Shared across Catalog and Search bounded contexts.
@@ -260,15 +275,16 @@ export class ScopeSpecification extends CompositeSpecification<
   }
 
   toPrismaWhere(): QueryCriteria {
-    if (isProjectScopeId(this.projectId)) {
-      return { projectId: this.projectId.trim() };
-    }
-    return { userId: this.userId, projectId: null };
+    return { spaceId: resolveSpaceId({ userId: this.userId, projectId: this.projectId }) };
   }
 
   isSatisfiedBy(item: unknown): boolean {
     if (!item || typeof item !== 'object') return false;
     const rec = item as Record<string, unknown>;
+    const expectedSpaceId = resolveSpaceId({ userId: this.userId, projectId: this.projectId });
+    if (typeof rec.spaceId === 'string') {
+      return rec.spaceId === expectedSpaceId;
+    }
     if (isProjectScopeId(this.projectId)) {
       return rec.projectId === this.projectId.trim();
     }
@@ -589,8 +605,15 @@ interface ItemDenormalizedCountClient {
   attachment?: {
     count?: (args: { where: { itemId: string; deletedAt: null } }) => Promise<number>;
   };
+  libraryNote?: {
+    count?: (args: { where: { itemId: string; deletedAt: null } }) => Promise<number>;
+  };
   note?: {
     count?: (args: { where: { itemId: string; deletedAt: null } }) => Promise<number>;
+  };
+  libraryItem?: {
+    updateMany?: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+    update?: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
   };
   item?: {
     updateMany?: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
@@ -603,14 +626,15 @@ const SPEC_UUID_REGEX =
 
 /**
  * Shared repository helper to recount and synchronize denormalized `attachmentCount`,
- * `hasFile`, and `noteCount` columns on `Item` within a Prisma client or transaction.
+ * `hasFile`, and `noteCount` columns on `LibraryItem` within a Prisma client or transaction.
  */
 export async function syncItemDenormalizedCountsInClient(
   db: ItemDenormalizedCountClient | null | undefined,
   itemId: string | null | undefined,
   options?: { attachments?: boolean; notes?: boolean; requireUuid?: boolean },
 ): Promise<void> {
-  if (!itemId || !db?.item) return;
+  const itemClient = db?.libraryItem ?? db?.item;
+  if (!itemId || !itemClient) return;
   if (options?.requireUuid && !SPEC_UUID_REGEX.test(itemId)) return;
 
   const syncAttachments = options?.attachments ?? false;
@@ -618,15 +642,16 @@ export async function syncItemDenormalizedCountsInClient(
   if (!syncAttachments && !syncNotes) return;
 
   const data: Record<string, unknown> = {};
+  const noteClient = db?.libraryNote ?? db?.note;
 
   const [rawAttachmentCount, activeNoteCount] = await Promise.all([
-    syncAttachments && db.attachment
+    syncAttachments && db?.attachment
       ? db.attachment.count
         ? db.attachment.count({ where: { itemId, deletedAt: null } })
         : 1
       : undefined,
-    syncNotes && db.note?.count
-      ? db.note.count({ where: { itemId, deletedAt: null } })
+    syncNotes && noteClient?.count
+      ? noteClient.count({ where: { itemId, deletedAt: null } })
       : undefined,
   ]);
 
@@ -641,10 +666,10 @@ export async function syncItemDenormalizedCountsInClient(
 
   if (Object.keys(data).length === 0) return;
 
-  if (db.item.updateMany) {
-    await db.item.updateMany({ where: { id: itemId }, data });
-  } else if (db.item.update) {
-    await db.item.update({ where: { id: itemId }, data });
+  if (itemClient.updateMany) {
+    await itemClient.updateMany({ where: { id: itemId }, data });
+  } else if (itemClient.update) {
+    await itemClient.update({ where: { id: itemId }, data });
   }
 }
 
@@ -680,23 +705,19 @@ export async function executeWithPostCommit<T>(
  * Follows BibTeX / BetterBibTeX convention: vaswani2017attention -> vaswani2017attentiona -> vaswani2017attentionb.
  */
 export async function disambiguateCitationKey(
-  db:
-    | Prisma.TransactionClient
-    | { item?: { findMany?: Prisma.TransactionClient['item']['findMany'] } }
-    | null
-    | undefined,
+  db: Prisma.TransactionClient | { libraryItem?: { findMany?: Prisma.TransactionClient['libraryItem']['findMany'] }; item?: { findMany?: Prisma.TransactionClient['libraryItem']['findMany'] } } | null | undefined,
   baseKey: string | null | undefined,
   scope: { userId: string; projectId?: string | null },
   excludeItemId?: string,
 ): Promise<string | null> {
   if (!baseKey || !baseKey.trim()) return null;
   const cleanKey = baseKey.trim();
-  if (typeof db?.item?.findMany !== 'function') return cleanKey;
-  const scopeWhere: Prisma.ItemWhereInput =
-    scope.projectId && SPEC_UUID_REGEX.test(scope.projectId)
-      ? { projectId: scope.projectId }
-      : { userId: scope.userId, projectId: null };
-  const rows = await db.item.findMany({
+  const itemDelegate = (db as { libraryItem?: { findMany?: Prisma.TransactionClient['libraryItem']['findMany'] }; item?: { findMany?: Prisma.TransactionClient['libraryItem']['findMany'] } } | null | undefined)?.libraryItem ?? (db as { item?: { findMany?: Prisma.TransactionClient['libraryItem']['findMany'] } } | null | undefined)?.item;
+  if (typeof itemDelegate?.findMany !== 'function') return cleanKey;
+  const scopeWhere: Prisma.LibraryItemWhereInput = {
+    spaceId: resolveSpaceId(scope),
+  };
+  const rows = await itemDelegate.findMany({
     where: {
       ...scopeWhere,
       deletedAt: null,

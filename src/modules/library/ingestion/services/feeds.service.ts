@@ -706,7 +706,7 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
         }
 
         const subscriberUserIds = feed.subscriptions
-          .map((s) => (s as { userId?: string }).userId)
+          .map((s) => (s as { userId?: string; createdById?: string; spaceId?: string }).userId ?? (s as { createdById?: string }).createdById ?? (s as { spaceId?: string }).spaceId)
           .filter((uid): uid is string => typeof uid === 'string' && Boolean(uid));
 
         const readCutoffDate = new Date(

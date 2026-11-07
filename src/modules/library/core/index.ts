@@ -32,6 +32,7 @@ export * from './domain/tag-taxonomy.lexicon';
 export * from './domain/regex.domain';
 export * from './domain/renamer.domain';
 export * from './domain/field-harmonizer.domain';
+export * from './domain/bibliographic-reconciler.domain';
 export * from './domain/metadata-coalesce.policy';
 export * from './domain/item-provenance.domain';
 export * from './domain/search-query.domain';

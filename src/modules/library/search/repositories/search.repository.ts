@@ -84,11 +84,11 @@ export class SearchRepository implements OnModuleInit {
     return fallbackVer;
   }
 
-  private buildBaseWhere(userId: string, options: SearchOptions): Prisma.ItemWhereInput {
-    return SearchSpecificationBuilder.baseFromOptions(userId, sanitizeUuidSearchOptions(options)).toPrismaWhere();
+  private buildBaseWhere(userId: string, options: SearchOptions): Prisma.LibraryItemWhereInput {
+    return SearchSpecificationBuilder.baseFromOptions(userId, sanitizeUuidSearchOptions(options)).toPrismaWhere() as Prisma.LibraryItemWhereInput;
   }
-  private buildTextWhereIlike(queryText: string, searchMode?: string): Prisma.ItemWhereInput {
-    return new TextSearchSpecification(escapeLikePattern(queryText), searchMode).toPrismaWhere();
+  private buildTextWhereIlike(queryText: string, searchMode?: string): Prisma.LibraryItemWhereInput {
+    return new TextSearchSpecification(queryText, searchMode).toPrismaWhere() as Prisma.LibraryItemWhereInput;
   }
 
   private static readonly ITEM_SEARCH_INCLUDE = (userId: string) => ({
@@ -120,7 +120,7 @@ export class SearchRepository implements OnModuleInit {
     client: Prisma.TransactionClient | PrismaService,
     userId: string,
     rawOptions: SearchOptions,
-  ): Promise<Prisma.ItemWhereInput> {
+  ): Promise<Prisma.LibraryItemWhereInput> {
     const resolvedOptions = await resolveSearchCollectionOptions(
       client,
       userId,
@@ -128,7 +128,7 @@ export class SearchRepository implements OnModuleInit {
     );
     const q = resolvedOptions.q?.trim();
     const ftsSanitized = sanitizeSearchQuery(q);
-    let textWhere: Prisma.ItemWhereInput = {};
+    let textWhere: Prisma.LibraryItemWhereInput = {};
 
     if (q) {
       if (ftsSanitized && this.hasFtsColumn()) {
@@ -146,9 +146,26 @@ export class SearchRepository implements OnModuleInit {
               typeof client.$queryRawUnsafe === 'function'
                 ? client
                 : this.prisma;
-            const ftsRows = await rawRunner.$queryRawUnsafe<
+            let ftsRows = await rawRunner.$queryRawUnsafe<
               Array<{ id: string }>
             >(builtIds.sql, ...builtIds.params);
+            if (ftsRows.length === 0 && ftsSanitized.trim().length >= 3) {
+              const trgmBuilt = buildSearchTrgmFallbackSqlQuery({
+                userId,
+                options: resolvedOptions,
+                queryText: ftsSanitized,
+                limit: 500,
+              });
+              if (trgmBuilt) {
+                try {
+                  ftsRows = await rawRunner.$queryRawUnsafe<
+                    Array<{ id: string }>
+                  >(trgmBuilt.sql, ...trgmBuilt.params);
+                } catch {
+                  // pg_trgm extension may not be installed in all environments; ignore silently
+                }
+              }
+            }
             textWhere = { id: { in: ftsRows.map((r) => r.id) } };
           }
         } catch {
@@ -275,8 +292,11 @@ export class SearchRepository implements OnModuleInit {
 
     if (ids.length === 0) return { items: [], nextCursor: undefined, hasNextPage: false };
 
-    const items = await client.item.findMany({
-      where: { id: { in: ids } },
+    const items = await client.libraryItem.findMany({
+      where: {
+        ...this.buildBaseWhere(userId, options),
+        id: { in: ids },
+      },
       include: SearchRepository.ITEM_SEARCH_INCLUDE(userId),
     });
 
@@ -299,7 +319,7 @@ export class SearchRepository implements OnModuleInit {
     const textWhere = q
       ? this.buildTextWhereIlike(q, options.searchMode)
       : undefined;
-    const where: Prisma.ItemWhereInput = textWhere
+    const where: Prisma.LibraryItemWhereInput = textWhere
       ? { AND: [baseWhere, textWhere] }
       : baseWhere;
 
@@ -307,7 +327,7 @@ export class SearchRepository implements OnModuleInit {
     const effectiveSortDir: Prisma.SortOrder =
       (options.sortOrder || options.orderDirection) === 'asc' ? 'asc' : 'desc';
 
-    const orderBy: Prisma.ItemOrderByWithRelationInput[] =
+    const orderBy: Prisma.LibraryItemOrderByWithRelationInput[] =
       effectiveSortBy === 'year'
         ? [
             { year: { sort: effectiveSortDir, nulls: 'last' } },
@@ -357,7 +377,7 @@ export class SearchRepository implements OnModuleInit {
 
     const page = options.page && options.page > 0 ? options.page : 1;
 
-    return client.item
+    return client.libraryItem
       .findMany({
         where,
         orderBy,
@@ -391,9 +411,9 @@ export class SearchRepository implements OnModuleInit {
     }
 
     const client = this.getClient(tx);
-    if (!client.item?.count) return 0;
+    if (!client.libraryItem?.count) return 0;
     const where = await this.resolveMatchingSearchWhere(client, userId, options);
-    return client.item.count({ where });
+    return client.libraryItem.count({ where });
   }
 
 
@@ -425,9 +445,9 @@ export class SearchRepository implements OnModuleInit {
       );
 
       const [typeGroups, yearGroups, tagItems] = await Promise.all([
-        client.item.groupBy({ by: ['itemType'], where, _count: { _all: true } }),
-        client.item.groupBy({ by: ['year'], where, _count: { _all: true } }),
-        client.itemTag.findMany({ where: { item: where }, take: 1000, select: { tag: { select: { name: true } } } }),
+        client.libraryItem.groupBy({ by: ['itemType'], where, _count: { _all: true } }),
+        client.libraryItem.groupBy({ by: ['year'], where, _count: { _all: true } }),
+        client.libraryItemTag.findMany({ where: { item: where }, take: 1000, select: { tag: { select: { name: true } } } }),
       ]);
 
       const facetResult: FacetResult = aggregateFacetGroups({ typeGroups, yearGroups, tagItems });
@@ -512,7 +532,7 @@ export class SearchRepository implements OnModuleInit {
       const res = await this.prisma.$queryRaw<unknown[]>`
         SELECT 1 FROM pg_attribute a
         JOIN pg_class c ON c.oid = a.attrelid
-        WHERE c.relname = 'items'
+        WHERE c.relname = 'library_items'
           AND a.attname = 'search_vector'
           AND NOT a.attisdropped
         LIMIT 1
@@ -524,7 +544,7 @@ export class SearchRepository implements OnModuleInit {
         );
       } else {
         this.logger.warn(
-          'PostgreSQL FTS: search_vector column not found on table "items" — run migration "add_catalog_item_fts" to enable. Falling back to ILIKE.',
+          'PostgreSQL FTS: search_vector column not found on table "library_items" — run migration "add_catalog_item_fts" to enable. Falling back to ILIKE.',
         );
       }
     } catch (err: unknown) {
@@ -547,7 +567,7 @@ export class SearchRepository implements OnModuleInit {
         },
       },
       include: {
-        item: { select: { id: true, userId: true, projectId: true } },
+        item: { select: { id: true, spaceId: true, createdById: true } },
       },
     });
   }
@@ -558,13 +578,13 @@ export class SearchRepository implements OnModuleInit {
     scopeId?: string,
   ): Promise<{ indexed: boolean; scopeId?: string }> {
     let resolvedScope = scopeId;
-    if (itemId && this.prisma?.item?.findUnique) {
-      const item = await this.prisma.item.findUnique({
+    if (itemId && this.prisma?.libraryItem?.findUnique) {
+      const item = await this.prisma.libraryItem.findUnique({
         where: { id: itemId },
         select: {
           id: true,
-          userId: true,
-          projectId: true,
+          spaceId: true,
+          createdById: true,
           deletedAt: true,
           title: true,
           abstract: true,
@@ -579,7 +599,8 @@ export class SearchRepository implements OnModuleInit {
         }
         return { indexed: false, scopeId: resolvedScope };
       }
-      resolvedScope = resolvedScope || item.projectId || item.userId;
+      const rawItem = item as { spaceId?: string; createdById?: string; projectId?: string | null; userId?: string };
+      resolvedScope = resolvedScope || rawItem.spaceId || rawItem.projectId || rawItem.userId || rawItem.createdById;
 
       if (this.hasFtsColumn() && typeof this.prisma.$executeRaw === 'function') {
         try {
@@ -607,7 +628,7 @@ export class SearchRepository implements OnModuleInit {
           );
 
           await this.prisma.$executeRaw`
-            UPDATE "items" i
+            UPDATE "library_items" i
             SET "search_vector" =
               setweight(to_tsvector('english', COALESCE(i."title", '') || ' ' || COALESCE(i."citation_key", '') || ' ' || COALESCE(i."doi", '')), 'A') ||
               setweight(to_tsvector('simple', ${foldedTitle}), 'A') ||
@@ -617,8 +638,8 @@ export class SearchRepository implements OnModuleInit {
                 WHERE c."item_id" = i."id"
               ), '') || ' ' || COALESCE((
                 SELECT string_agg(t."name", ' ')
-                FROM "item_tags" it
-                JOIN "tags" t ON t."id" = it."tag_id"
+                FROM "library_item_tags" it
+                JOIN "library_tags" t ON t."id" = it."tag_id"
                 WHERE it."item_id" = i."id"
               ), '') || ' ' || ${foldedAuthorsTags}), 'B') ||
               setweight(to_tsvector('english', COALESCE(i."abstract", '') || ' ' || ${foldedAbstractPub}), 'B') ||
@@ -668,14 +689,10 @@ export class SearchRepository implements OnModuleInit {
         }
       }
 
-      await tx.fullTextIndex.deleteMany({
-        where: { attachmentId },
-      });
-
+      await tx.fullTextIndex.deleteMany({ where: { attachmentId } });
       if (pages.length > 0) {
-        const CHUNK_SIZE = 100;
-        for (let i = 0; i < pages.length; i += CHUNK_SIZE) {
-          const chunk = pages.slice(i, i + CHUNK_SIZE);
+        for (let i = 0; i < pages.length; i += 100) {
+          const chunk = pages.slice(i, i + 100);
           await tx.fullTextIndex.createMany({
             data: chunk.map((page) => ({
               attachmentId,
@@ -708,13 +725,13 @@ export class SearchRepository implements OnModuleInit {
     const dbPages = await this.prisma.fullTextIndex.findMany({
       where: {
         ...baseWhere,
-        ...(escapedTerm ? { textContent: { contains: escapedTerm, mode: 'insensitive' } } : {}),
+        ...(trimmedTerm ? { textContent: { contains: trimmedTerm, mode: 'insensitive' } } : {}),
       },
       orderBy: { pageIndex: 'asc' },
       take: trimmedTerm ? 200 : 1000,
     });
 
-    if (dbPages.length === 0 && escapedTerm && trimmedTerm) {
+    if (dbPages.length === 0 && trimmedTerm) {
       const foldedTerm = SearchQueryEngine.stripDiacritics(trimmedTerm).trim();
       if (foldedTerm.length >= 2) {
         const allPages = await this.prisma.fullTextIndex.findMany({

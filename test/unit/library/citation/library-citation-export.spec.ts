@@ -189,7 +189,7 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
         expect.objectContaining({
           AND: expect.arrayContaining([
             {
-              projectId: mockProjectId,
+              spaceId: mockProjectId,
               deletedAt: null,
             },
           ]),
@@ -207,7 +207,7 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
           AND: expect.arrayContaining([
             expect.objectContaining({
               deletedAt: null,
-              userId: mockUserId,
+              spaceId: mockUserId,
             }),
           ]),
         }),

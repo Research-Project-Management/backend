@@ -66,12 +66,12 @@ export interface FieldEvidence {
 }
 
 export interface MetadataCandidate {
-  candidateId: string;
+  candidateId?: string;
   sourceKind: CandidateSourceKind;
-  sourceName: string; // Crossref, OpenAlex, PubMed, BibTeX, RIS, etc.
+  sourceName?: string; // Crossref, OpenAlex, PubMed, BibTeX, RIS, etc.
   sourceProvider?: string;
   sourceRecordId?: string;
-  retrievedAt: string;
+  retrievedAt?: string;
   schemaVersion?: string;
   rawEvidenceRef?: string;
   rawMetadata?: Record<string, unknown>;
@@ -82,6 +82,7 @@ export interface MetadataCandidate {
   id?: string;
   metadata?: ItemMetadata;
   rawPayload?: unknown;
+  rawData?: Record<string, unknown>;
   fetchedAt?: string;
 }
 

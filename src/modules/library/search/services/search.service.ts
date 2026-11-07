@@ -154,7 +154,17 @@ export class FullTextProvider {
 
         // Diacritic-insensitive fallback on the page if exact lowercase had no hits
         if (pageMatches === 0 && foldedTerm.length >= 2) {
-          const foldedText = SearchQueryEngine.stripDiacritics(lower);
+          let foldedText = '';
+          const foldedToRawIdx: number[] = [];
+          for (let i = 0; i < lower.length; i++) {
+            const chFolded = SearchQueryEngine.stripDiacritics(lower[i]);
+            for (let j = 0; j < chFolded.length; j++) {
+              foldedToRawIdx.push(i);
+            }
+            foldedText += chFolded;
+          }
+          foldedToRawIdx.push(lower.length);
+
           let fPos = 0;
           while (
             (fPos = foldedText.indexOf(foldedTerm, fPos)) !== -1 &&
@@ -162,12 +172,16 @@ export class FullTextProvider {
             pageMatches < FullTextProvider.MAX_MATCHES_PER_PAGE
           ) {
             pageMatches++;
+            const rawStart = foldedToRawIdx[fPos] ?? fPos;
+            const rawEnd =
+              foldedToRawIdx[fPos + foldedTerm.length] ??
+              rawStart + foldedTerm.length;
             matches.push(
               createPageAnchorMatch(
                 attachmentId,
                 page,
-                fPos,
-                foldedTerm.length,
+                rawStart,
+                Math.max(1, rawEnd - rawStart),
               ),
             );
             fPos += foldedTerm.length;
@@ -300,12 +314,16 @@ export class SearchService {
     }
 
     const attachment = await this.repo.findAttachmentWithItem(attachmentId);
-    const ownerItem = attachment?.item;
+    const ownerItem = attachment?.item as
+      | { spaceId?: string; createdById?: string; userId?: string; projectId?: string | null }
+      | undefined;
     const isAuthorized = Boolean(
       ownerItem &&
         (isProjectScopeId(projectId)
-          ? ownerItem.projectId === projectId.trim()
-          : ownerItem.userId === userId && !ownerItem.projectId),
+          ? (ownerItem.projectId ?? ownerItem.spaceId) === projectId.trim()
+          : ownerItem.spaceId
+            ? ownerItem.spaceId === userId
+            : ownerItem.userId === userId && !ownerItem.projectId),
     );
     if (!isAuthorized) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
@@ -381,6 +399,12 @@ export class SearchEventsSubscriber {
   @OnEvent(LIBRARY_EVENT_TYPES.NOTE_CREATED, { async: true })
   @OnEvent(LIBRARY_EVENT_TYPES.NOTE_UPDATED, { async: true })
   @OnEvent(LIBRARY_EVENT_TYPES.NOTE_DELETED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ANNOTATION_CREATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ANNOTATION_UPDATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ANNOTATION_DELETED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_CREATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_UPDATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_DELETED, { async: true })
   @OnEvent(LIBRARY_EVENT_TYPES.TAG_UPDATED, { async: true })
   @OnEvent(LIBRARY_EVENT_TYPES.TAG_DELETED, { async: true })
   @OnEvent(LIBRARY_EVENT_TYPES.COLLECTION_UPDATED, { async: true })

@@ -53,7 +53,7 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
       const result = engine.compile(mockUserId, group);
       expect(result).toEqual({
         AND: [
-          { userId: mockUserId, projectId: null, deletedAt: null },
+          { spaceId: mockUserId, deletedAt: null },
           {
             AND: [{ title: { contains: 'Quantum', mode: 'insensitive' } }],
           },
@@ -72,7 +72,7 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
       const result = engine.compile(mockUserId, group, mockProjectId);
       expect(result).toEqual({
         AND: [
-          { projectId: mockProjectId, deletedAt: null },
+          { spaceId: mockProjectId, deletedAt: null },
           {
             AND: [
               { title: { contains: 'Machine Learning', mode: 'insensitive' } },
@@ -90,14 +90,13 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
 
       const personalResult = engine.compile(mockUserId, group);
       expect(personalResult).toEqual({
-        userId: mockUserId,
-        projectId: null,
+        spaceId: mockUserId,
         deletedAt: null,
       });
 
       const projectResult = engine.compile(mockUserId, group, mockProjectId);
       expect(projectResult).toEqual({
-        projectId: mockProjectId,
+        spaceId: mockProjectId,
         deletedAt: null,
       });
     });

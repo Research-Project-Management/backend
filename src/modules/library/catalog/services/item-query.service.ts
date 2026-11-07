@@ -16,13 +16,13 @@ import {
 } from '@/modules/library/core/types/bibliographic.types';
 import { AccessService, Permission } from '@/modules/project/access';
 
-interface LibraryPermissionsContract {
+export interface LibraryPermissionsContract {
   canRead: boolean; canCreateItem: boolean; canEditItem: boolean; canDeleteItem: boolean;
   canPurgeItem: boolean; canManageCollections: boolean; canImport: boolean;
   canExport: boolean; canAnnotate: boolean;
 }
 
-interface LibraryScopeAccessContract {
+export interface LibraryScopeAccessContract {
   scope: 'personal' | 'project';
   role: 'owner' | 'coordinator' | 'contributor' | 'reviewer';
   permissions: LibraryPermissionsContract;
@@ -113,8 +113,10 @@ export class ItemQueryService {
     let effectivePerms: readonly string[] | undefined =
       accessHint?.effectivePermissions;
 
+    let roleLookupAttempted = false;
     if (!resolvedRole && this.accessService?.getMemberAccessContext) {
       try {
+        roleLookupAttempted = true;
         const ctx = await this.accessService.getMemberAccessContext(
           projectId,
           userId,
@@ -129,12 +131,42 @@ export class ItemQueryService {
       }
     }
 
-    if (!resolvedRole) {
+    if (
+      !resolvedRole &&
+      typeof this.query?.getProjectMemberRole === 'function'
+    ) {
       try {
-        resolvedRole = await this.query.getProjectMemberRole(userId, projectId);
+        roleLookupAttempted = true;
+        const memberRole = await this.query.getProjectMemberRole(
+          userId,
+          projectId,
+        );
+        if (memberRole !== undefined) {
+          resolvedRole = memberRole;
+        } else if (!this.accessService?.getMemberAccessContext) {
+          roleLookupAttempted = false;
+        }
       } catch {
         resolvedRole = null;
       }
+    }
+
+    if (!resolvedRole && roleLookupAttempted) {
+      return {
+        scope: 'project',
+        role: 'reviewer',
+        permissions: {
+          canRead: false,
+          canCreateItem: false,
+          canEditItem: false,
+          canDeleteItem: false,
+          canPurgeItem: false,
+          canManageCollections: false,
+          canImport: false,
+          canExport: false,
+          canAnnotate: false,
+        },
+      };
     }
 
     const normalizedRole = (
@@ -301,9 +333,15 @@ export class ItemQueryService {
           ItemDetail | Record<string, unknown>
         >(cacheKey);
         if (cached) {
-          const isOwner = cached.userId === userId && !cached.projectId;
+          const cachedRec = cached as Record<string, unknown>;
+          const cachedSpaceId = cachedRec.spaceId as string | undefined;
+          const isOwner = cachedSpaceId
+            ? cachedSpaceId === userId
+            : cached.userId === userId && !cached.projectId;
           const isProjectMatch = Boolean(
-            validProjectId && cached.projectId === validProjectId,
+            validProjectId &&
+              (cachedSpaceId === validProjectId ||
+                cached.projectId === validProjectId),
           );
           if (isOwner || isProjectMatch) {
             const cachedStates = Array.isArray(
@@ -349,9 +387,13 @@ export class ItemQueryService {
 
     if (!item) return null;
 
+    const itemRec = item as Record<string, unknown>;
+    const itemSpaceId = itemRec.spaceId as string | undefined;
     const isAuthorized = validProjectId
-      ? item.projectId === validProjectId
-      : item.userId === userId && !item.projectId;
+      ? itemSpaceId === validProjectId || item.projectId === validProjectId
+      : itemSpaceId
+        ? itemSpaceId === userId
+        : item.userId === userId && !item.projectId;
     if (!isAuthorized) {
       return null;
     }
@@ -511,8 +553,8 @@ export class ItemQueryService {
 
       if (validCheckInProjectId && items.length > 0) {
         const memberRole = await this.query.getProjectMemberRole(
-          validCheckInProjectId,
           userId,
+          validCheckInProjectId,
         );
         if (!memberRole) {
           throw new ForbiddenException(
@@ -603,52 +645,29 @@ export class ItemQueryService {
     return this.query.getItemSnapshot(userId, itemId, undefined, projectId);
   }
 
-  async getItemSnapshots(
-    userId: string,
-    itemIds: string[],
-    projectId?: string | null,
-  ) {
+  async getItemSnapshots(userId: string, itemIds: string[], projectId?: string | null) {
     return this.query.getItemSnapshots(userId, itemIds, undefined, projectId);
   }
 
   // IItemExistencePort Implementation
-
-  async exists(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<boolean> {
+  async exists(userId: string, itemId: string, projectId?: string): Promise<boolean> {
     return this.query.exists(userId, itemId, undefined, projectId);
   }
 
-  async assertExists(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<void> {
+  async assertExists(userId: string, itemId: string, projectId?: string): Promise<void> {
     return this.query.assertExists(userId, itemId, undefined, projectId);
   }
 
-  async existMany(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-  ): Promise<Map<string, boolean>> {
+  async existMany(userId: string, itemIds: string[], projectId?: string): Promise<Map<string, boolean>> {
     return this.query.existMany(userId, itemIds, undefined, projectId);
   }
 
   // IItemReadPort Implementation
-
   async findById(userId: string, itemId: string, projectId?: string) {
     return this.query.findById(userId, itemId, projectId);
   }
 
-  async findByIds(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-    options?: { includeContent?: boolean },
-  ) {
+  async findByIds(userId: string, itemIds: string[], projectId?: string, options?: { includeContent?: boolean }) {
     return options?.includeContent !== undefined
       ? this.query.findByIds(userId, itemIds, projectId, undefined, options.includeContent)
       : this.query.findByIds(userId, itemIds, projectId);
@@ -662,65 +681,31 @@ export class ItemQueryService {
     return this.query.findSummaryById(userId, itemId, undefined, projectId);
   }
 
-  async findSummariesByIds(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-  ) {
+  async findSummariesByIds(userId: string, itemIds: string[], projectId?: string) {
     return projectId !== undefined
       ? this.query.findSummariesByIds(userId, itemIds, projectId)
       : this.query.findSummariesByIds(userId, itemIds);
   }
 
-  async findQualityAuditItems(
-    userId?: string,
-    limit?: number,
-    projectId?: string,
-  ): Promise<QualityAuditCandidateItem[]> {
-    return (await this.query.findQualityAuditItems(
-      userId,
-      limit,
-      projectId,
-    )) as unknown as QualityAuditCandidateItem[];
+  async findQualityAuditItems(userId?: string, limit?: number, projectId?: string): Promise<QualityAuditCandidateItem[]> {
+    return (await this.query.findQualityAuditItems(userId, limit, projectId)) as unknown as QualityAuditCandidateItem[];
   }
 
-  async findDuplicateCandidateItems(
-    userId?: string,
-    limit?: number,
-    projectId?: string,
-  ): Promise<DuplicateCandidateItem[]> {
-    return (await this.query.findDuplicateCandidateItems(
-      userId,
-      limit,
-      projectId,
-    )) as unknown as DuplicateCandidateItem[];
+  async findDuplicateCandidateItems(userId?: string, limit?: number, projectId?: string): Promise<DuplicateCandidateItem[]> {
+    return (await this.query.findDuplicateCandidateItems(userId, limit, projectId)) as unknown as DuplicateCandidateItem[];
   }
 
-  async count(
-    userId: string,
-    options?: Record<string, unknown>,
-  ): Promise<number> {
+  async count(userId: string, options?: Record<string, unknown>): Promise<number> {
     return this.query.count(userId, options || { view: 'all' });
   }
 
-  async findMany(
-    userId: string,
-    options?: Record<string, unknown>,
-  ): Promise<ItemDetail[]> {
+  async findMany(userId: string, options?: Record<string, unknown>): Promise<ItemDetail[]> {
     return await this.query.findMany(userId, options || {});
   }
 
   async findMatchCandidates(
     scope: { userId?: string; projectId?: string | null },
-    criteria: {
-      doi?: string | null;
-      arxivId?: string | null;
-      pmid?: string | null;
-      isbn?: string | null;
-      year?: number | null;
-      titleWords?: string[];
-      titlePrefix?: string;
-    },
+    criteria: { doi?: string | null; arxivId?: string | null; pmid?: string | null; isbn?: string | null; year?: number | null; titleWords?: string[]; titlePrefix?: string },
   ) {
     return this.query.findMatchCandidates(scope, criteria);
   }

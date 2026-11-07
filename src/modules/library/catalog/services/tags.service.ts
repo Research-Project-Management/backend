@@ -396,19 +396,20 @@ export class TagsService {
           tx,
         );
       } else {
-        const tagWhere: Prisma.TagWhereInput = effectiveProjectId
-          ? { id: tagId, projectId: effectiveProjectId }
-          : { id: tagId, userId, projectId: null };
-        const itemWhere: Prisma.ItemWhereInput = effectiveProjectId
-          ? { id: itemId, projectId: effectiveProjectId, deletedAt: null }
-          : { id: itemId, userId, projectId: null, deletedAt: null };
+        const spaceId = effectiveProjectId || userId;
+        const tagWhere: Prisma.LibraryTagWhereInput = { id: tagId, spaceId };
+        const itemWhere: Prisma.LibraryItemWhereInput = {
+          id: itemId,
+          spaceId,
+          deletedAt: null,
+        };
 
         const [tag, item] = await Promise.all([
-          tx.tag.findFirst({
+          tx.libraryTag.findFirst({
             where: tagWhere,
             select: { id: true },
           }),
-          tx.item.findFirst({
+          tx.libraryItem.findFirst({
             where: itemWhere,
             select: { id: true },
           }),
@@ -473,19 +474,20 @@ export class TagsService {
           tx,
         );
       } else {
-        const tagWhere: Prisma.TagWhereInput = effectiveProjectId
-          ? { id: tagId, projectId: effectiveProjectId }
-          : { id: tagId, userId, projectId: null };
-        const itemWhere: Prisma.ItemWhereInput = effectiveProjectId
-          ? { id: itemId, projectId: effectiveProjectId, deletedAt: null }
-          : { id: itemId, userId, projectId: null, deletedAt: null };
+        const spaceId = effectiveProjectId || userId;
+        const tagWhere: Prisma.LibraryTagWhereInput = { id: tagId, spaceId };
+        const itemWhere: Prisma.LibraryItemWhereInput = {
+          id: itemId,
+          spaceId,
+          deletedAt: null,
+        };
 
         const [tag, item] = await Promise.all([
-          tx.tag.findFirst({
+          tx.libraryTag.findFirst({
             where: tagWhere,
             select: { id: true },
           }),
-          tx.item.findFirst({
+          tx.libraryItem.findFirst({
             where: itemWhere,
             select: { id: true },
           }),
@@ -540,20 +542,20 @@ export class TagsService {
     }
 
     const [primaryTags, dupTags] = await Promise.all([
-      tx.itemTag.findMany({ where: { itemId: targetItemId }, select: { tagId: true } }),
-      tx.itemTag.findMany({ where: { itemId: { in: sourceItemIds } }, select: { tagId: true } }),
+      tx.libraryItemTag.findMany({ where: { itemId: targetItemId }, select: { tagId: true } }),
+      tx.libraryItemTag.findMany({ where: { itemId: { in: sourceItemIds } }, select: { tagId: true } }),
     ]);
     const primaryTagIds = new Set(primaryTags.map((it) => it.tagId));
     const newTagIds = Array.from(
       new Set(dupTags.map((dup) => dup.tagId).filter((tagId) => !primaryTagIds.has(tagId))),
     );
     if (newTagIds.length > 0) {
-      await tx.itemTag.createMany({
+      await tx.libraryItemTag.createMany({
         data: newTagIds.map((tagId) => ({ itemId: targetItemId, tagId })),
         skipDuplicates: true,
       });
     }
-    await tx.itemTag.deleteMany({ where: { itemId: { in: sourceItemIds } } });
+    await tx.libraryItemTag.deleteMany({ where: { itemId: { in: sourceItemIds } } });
   }
 
   async splitTag(

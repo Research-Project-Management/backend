@@ -6,6 +6,7 @@ import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { OutboxEvent } from '@prisma/client';
 import {
   OutboxDispatchHandler,
+  OutboxEventRecord,
   LIBRARY_EVENT_TYPES,
   CATALOG_FACADE,
   ICatalogFacade,
@@ -42,7 +43,7 @@ type ExtractionResultWithPages = Omit<ExtractedPdfDocument, 'pages'> & {
   pages?: Array<{ pageIndex?: number; pageNumber?: number; textContent?: string; text?: string; charOffset?: number }>;
 };
 interface PostExtractionPipelineContext {
-  event: OutboxEvent;
+  event: OutboxEvent | OutboxEventRecord;
   attachmentId: string;
   attachment: ClaimedAttachmentRecord;
   doc: ExtractedPdfDocument;
@@ -103,7 +104,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       );
   }
 
-  async handle(event: OutboxEvent, signal?: AbortSignal): Promise<void> {
+  async handle(event: OutboxEvent | OutboxEventRecord, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) {
       throw new ExtractionProcessException(
         `Extraction aborted for outbox event ${event.id}`,
@@ -152,7 +153,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
   }
 
   private async processExtraction(
-    event: OutboxEvent,
+    event: OutboxEvent | OutboxEventRecord,
     attachmentId: string,
     payload: Record<string, unknown>,
     signal?: AbortSignal,
@@ -250,6 +251,9 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       }
 
       // 2. Backfill fileId (if missing) & storage-first reading in parallel
+      const itemRec = attachment.item as { spaceId?: string; createdById?: string; userId?: string; projectId?: string | null } | null | undefined;
+      const resolvedItemUserId = itemRec?.userId ?? itemRec?.createdById;
+      const resolvedItemProjectId = itemRec?.projectId ?? (itemRec?.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
       const [, storageFile] = await Promise.all([
         !attachment.fileId
           ? this.extractionRepo
@@ -262,8 +266,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           : Promise.resolve(),
         this.storagePort.readOwnedFile({
           fileId,
-          userId: attachment.item?.userId,
-          projectId: attachment.item?.projectId ?? undefined,
+          userId: resolvedItemUserId,
+          projectId: resolvedItemProjectId ?? undefined,
         }),
       ]);
       const rawBuffer =
@@ -298,11 +302,11 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       }
       const extractionResult = doc as ExtractionResultWithPages;
       const effectiveUserId =
-        attachment.item?.userId ||
+        resolvedItemUserId ||
         (typeof payload.userId === 'string' ? payload.userId : undefined) ||
         'system';
       const effectiveProjectId = normalizeProjectScopeId(
-        attachment.item?.projectId ||
+        resolvedItemProjectId ||
           (typeof payload.projectId === 'string' ? payload.projectId : undefined),
       );
       const scopeId = effectiveProjectId || effectiveUserId;

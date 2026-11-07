@@ -456,10 +456,13 @@ export class ExtractionMetadataSynchronizer {
                   itemPatch,
                   tx,
                 );
-                const domainSnapshot = ItemsMapper.toDomain({
-                  ...(attachment.item || {}),
-                  ...updatedItem,
-                });
+                const domainSnapshot = ItemsMapper.stripPersonalOverlayForSharedScope(
+                  ItemsMapper.toDomain({
+                    ...(attachment.item || {}),
+                    ...updatedItem,
+                  }),
+                  ownerProjectId,
+                );
                 await helpers.appendChange(eventScope, {
                   entityType: 'Item',
                   entityId: updatedItem.id,

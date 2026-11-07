@@ -17,6 +17,7 @@ import {
   mapCreatorsPartial,
   harmonizeDomainMetadataAndIdentifiersPartial,
   mapFlattenedStateHelper,
+  stripPersonalOverlayForSharedScope,
 } from './item-bibliographic.mapper';
 
 export {
@@ -27,6 +28,7 @@ export {
   mapCreatorsPartial,
   harmonizeDomainMetadataAndIdentifiersPartial,
   mapFlattenedStateHelper,
+  stripPersonalOverlayForSharedScope,
 };
 
 const NON_COLUMN_LOWER_SET = new Set(
@@ -715,13 +717,13 @@ export class ItemsMapper {
     }
     visited.add(raw as object);
     const it = { ...(raw as Record<string, unknown>) } as MutableItemPayload;
+    if (typeof it.spaceId === 'string' && it.spaceId) {
+      if (it.userId === undefined && typeof it.createdById === 'string') it.userId = it.createdById;
+      if (it.projectId === undefined) it.projectId = it.spaceId !== it.createdById ? it.spaceId : null;
+    }
     if (Array.isArray(it.states)) {
-      if (userId) {
-        const matchedState = it.states.find((s) => s?.userId === userId);
-        it.states = matchedState ? [matchedState] : [];
-      } else {
-        it.states = [];
-      }
+      const matchedState = userId ? it.states.find((s) => s?.userId === userId) : undefined;
+      it.states = matchedState ? [matchedState] : [];
     }
     unpackMetadataAndExtraPartial(it);
     const primaryPdf = mapAttachmentsAndPrimaryFilePartial(it);
@@ -743,4 +745,5 @@ export class ItemsMapper {
   ): (T & { readStatus: string; rating: number; lastReadAt: string | null }) | null {
     return mapFlattenedStateHelper(item, (it) => ItemsMapper.toDomain(it, userId), userId);
   }
+  static stripPersonalOverlayForSharedScope = stripPersonalOverlayForSharedScope;
 }

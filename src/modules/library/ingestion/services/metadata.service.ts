@@ -28,8 +28,10 @@ import {
   normalizeTags,
   resolveBidirectionalBaseFields,
   resolveFieldAliases,
+  synchronizeVenueBaseFields,
   titleSimilarity,
   finalizeReconciledBibliographicMetadata,
+  PUBLISHED_UPGRADE_FIELDS,
   ALIAS_EVIDENCE_FALLBACK_KEYS,
 } from '@/modules/library/core';
 import {
@@ -531,19 +533,7 @@ export class MetadataService implements MetadataPort {
         const shouldUpgradePublishedField =
           isPublishedUpgrade &&
           (field === 'itemType' ||
-            field === 'publicationTitle' ||
-            field === 'journal' ||
-            field === 'proceedingsTitle' ||
-            field === 'conferenceName' ||
-            field === 'publisher' ||
-            field === 'volume' ||
-            field === 'issue' ||
-            field === 'pages' ||
-            field === 'year' ||
-            field === 'publicationDate' ||
-            field === 'date' ||
-            field === 'issn' ||
-            field === 'isbn');
+            (PUBLISHED_UPGRADE_FIELDS as readonly string[]).includes(field));
 
         if (isExistingEmpty || shouldUpgradePublishedField) {
           coalescedRecord[field] = Array.isArray(val)
@@ -564,6 +554,7 @@ export class MetadataService implements MetadataPort {
     const resolvedItemType = String(
       coalescedRecord.itemType || 'journalArticle',
     );
+    synchronizeVenueBaseFields(coalescedRecord, resolvedItemType);
     resolveBidirectionalBaseFields(
       coalescedRecord,
       resolvedItemType,

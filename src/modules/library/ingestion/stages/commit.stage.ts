@@ -6,7 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
-import { CATALOG_FACADE, ICatalogFacade, CreateItemData, ItemDetail, INTERNAL_SYSTEM_AND_TELEMETRY_KEYS, mergeCanonicalCreators, cleanAbstractText, cleanCommentText, normalizeTags, getEffectiveBaseFieldMap, harmonizeBibliographicFields, generateCitationKey, isPlaceholderItemTitle, CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, normalizeProjectScopeId } from '@/modules/library/core';
+import { CATALOG_FACADE, ICatalogFacade, CreateItemData, ItemDetail, INTERNAL_SYSTEM_AND_TELEMETRY_KEYS, mergeCanonicalCreators, cleanAbstractText, cleanCommentText, normalizeTags, getEffectiveBaseFieldMap, buildBibliographicMutationPayload, harmonizeBibliographicFields, generateCitationKey, isPlaceholderItemTitle, CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, normalizeProjectScopeId } from '@/modules/library/core';
 import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/deduplication.domain';
 import {
   IWorkflowStage,
@@ -16,6 +16,7 @@ import {
 } from '@/modules/library/ingestion/types/ingestion.types';
 import {
   buildEnrichmentPatch,
+  executeDuplicateItemEnrichment,
   materializeDeduplicatedNotes,
 } from '@/modules/library/ingestion/domain/enrichment-patch.mapper';
 
@@ -111,24 +112,17 @@ export function toItemData(
 
   const effectiveType = metadata.itemType || 'journalArticle';
   const baseMapForType = getEffectiveBaseFieldMap(effectiveType);
-  const harmonized = harmonizeBibliographicFields(
+  const mutationPayload = buildBibliographicMutationPayload(
     { ...metadata, extraFields },
-    { itemType: effectiveType, syncExtraFields: true },
-  ) as ItemMetadata & Record<string, unknown>;
+    { itemType: effectiveType },
+  );
+  const harmonized = mutationPayload.harmonized as ItemMetadata & Record<string, unknown>;
   const syncedExtraFields =
     harmonized.extraFields && typeof harmonized.extraFields === 'object'
       ? { ...harmonized.extraFields }
       : { ...extraFields };
 
-  const resolvedTitle =
-    harmonized.title ||
-    (typeof syncedExtraFields.caseName === 'string' &&
-      syncedExtraFields.caseName) ||
-    (typeof syncedExtraFields.nameOfAct === 'string' &&
-      syncedExtraFields.nameOfAct) ||
-    (typeof syncedExtraFields.subject === 'string' &&
-      syncedExtraFields.subject) ||
-    'Untitled Document';
+  const resolvedTitle = mutationPayload.resolvedTitle || 'Untitled Document';
 
   if (
     baseMapForType.title &&
@@ -139,17 +133,12 @@ export function toItemData(
   }
 
   const resolvedPubDate =
-    harmonized.publicationDate ??
-    harmonized.date ??
+    mutationPayload.publicationDateStr ??
     (typeof syncedExtraFields.filingDate === 'string'
       ? syncedExtraFields.filingDate
       : undefined);
 
-  let resolvedYear = harmonized.year ?? undefined;
-  if (!resolvedYear && resolvedPubDate) {
-    const match = String(resolvedPubDate).match(/\b(?:1\d{3}|20\d{2})\b/);
-    if (match) resolvedYear = parseInt(match[0], 10);
-  }
+  const resolvedYear = mutationPayload.resolvedYear;
 
   const mappedTypeKey = baseMapForType.type || baseMapForType.medium;
   const mappedTypeVal =
@@ -508,87 +497,22 @@ export class CommitStage implements IWorkflowStage<
     }
   }
 
-  private async enrichMatchedExistingItem(
+  public async enrichMatchedExistingItem(
     userId: string,
     projectId: string | undefined,
     existingItem: ItemDetail,
     createData: CreateItemData,
   ): Promise<CommittedItemDetail> {
-    let resultItem: CommittedItemDetail = existingItem;
-    if (this.catalogGateway?.updateItem) {
-      try {
-        const patch = buildEnrichmentPatch(existingItem, createData);
-        if (Object.keys(patch).length > 0) {
-          const updated = await this.catalogGateway.updateItem(
-            userId,
-            existingItem.id,
-            patch,
-            { projectId },
-          );
-          if (updated) resultItem = updated;
-        }
-      } catch (enrichErr: unknown) {
-        const msg = enrichErr instanceof Error ? enrichErr.message : String(enrichErr);
-        this.logger.warn(`Failed to enrich pre-matched item ${existingItem.id}: ${msg}`);
-      }
-    }
-
-    const createDataRec = createData as unknown as Record<string, unknown>;
-    const existingRec = existingItem as unknown as Record<string, unknown>;
-    try {
-      const uniqueCollectionIds =
-        Array.isArray(createData.collectionIds) &&
-        createData.collectionIds.length > 0 &&
-        this.catalogGateway?.assignItemsToCollection
-          ? Array.from(new Set(createData.collectionIds.filter(Boolean)))
-          : [];
-
-      await Promise.all([
-        this.sideEffects?.saveItemMetadataSnapshot?.(
-          existingItem.id,
-          createDataRec,
-        ),
-        this.sideEffects?.syncRelationsForCommittedItem?.(
-          existingItem.id,
-          createDataRec,
-          { userId, projectId },
-        ),
-        Array.isArray(createData.notes) && createData.notes.length > 0
-          ? this.sideEffects?.materializeNotes
-            ? this.sideEffects.materializeNotes(
-                userId,
-                projectId,
-                existingItem.id,
-                createData.notes,
-                existingRec,
-              )
-            : materializeDeduplicatedNotes({
-                catalogGateway: this.catalogGateway,
-                userId,
-                projectId,
-                itemId: existingItem.id,
-                notes: createData.notes,
-                createdItem: existingRec,
-                logger: this.logger,
-              })
-          : undefined,
-        ...uniqueCollectionIds.map((collectionId) =>
-          this.catalogGateway!.assignItemsToCollection!(
-            userId,
-            collectionId,
-            [existingItem.id],
-            projectId,
-          ),
-        ),
-      ]);
-    } catch (sideEffectErr: unknown) {
-      const msg = sideEffectErr instanceof Error ? sideEffectErr.message : String(sideEffectErr);
-      this.logger.warn(`Side-effects failed for matched item ${existingItem.id}: ${msg}`);
-    }
-
-    return {
-      ...resultItem,
-      wasPreExistingMatch: true,
-    };
+    const { item } = await executeDuplicateItemEnrichment({
+      catalogGateway: this.catalogGateway,
+      userId,
+      projectId,
+      existingItem,
+      candidateData: createData as unknown as Record<string, unknown>,
+      collectionIds: createData.collectionIds ?? undefined,
+      sideEffects: this.sideEffects,
+      logger: this.logger,
+    });
+    return item;
   }
 }

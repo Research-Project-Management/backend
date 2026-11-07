@@ -83,18 +83,20 @@ export class OutboxRepository {
     }
 
     const data: Prisma.OutboxEventCreateManyInput[] = dedupedEvents.map(
-      (ev) => ({
-        id: uuidv7(),
-        userId: this.normalizeUserId(ev.userId),
-        actorId: this.resolveActorId(ev.userId, ev.actorId),
-        projectId: ev.projectId || null,
-        aggregateId: ev.aggregateId,
-        eventType: ev.eventType,
-        payload: (ev.payload as Prisma.InputJsonValue) ?? {},
-        dedupeKey: ev.dedupeKey ?? null,
-        status: OutboxStatus.PENDING,
-        retryCount: 0,
-      }),
+      (ev) => {
+        const validUserId = this.normalizeUserId(ev.userId);
+        return {
+          id: uuidv7(),
+          spaceId: ev.projectId || validUserId,
+          actorId: this.resolveActorId(validUserId, ev.actorId),
+          aggregateId: ev.aggregateId,
+          eventType: ev.eventType,
+          payload: (ev.payload as Prisma.InputJsonValue) ?? {},
+          dedupeKey: ev.dedupeKey ?? null,
+          status: OutboxStatus.PENDING,
+          retryCount: 0,
+        };
+      },
     );
 
     if (client.outboxEvent?.createMany) {
@@ -119,7 +121,10 @@ export class OutboxRepository {
         const upserted = await client.outboxEvent.upsert({
           where: { dedupeKey: row.dedupeKey },
           create: row,
-          update: {},
+          update: {
+            payload: row.payload, status: OutboxStatus.PENDING, retryCount: 0, error: null,
+            claimedBy: null, claimedAt: null, leaseExpiresAt: null, processedAt: null,
+          },
         });
         createdIds.push(upserted.id);
       } else {
@@ -322,9 +327,8 @@ export class OutboxRepository {
     const rows = await this.prisma.$queryRaw<
       Array<{
         id: string;
-        userId: string;
+        spaceId: string;
         actorId: string | null;
-        projectId: string | null;
         aggregateId: string;
         eventType: string;
         payload: Prisma.JsonValue;
@@ -350,7 +354,7 @@ export class OutboxRepository {
           lease_expires_at,
           created_at,
           ROW_NUMBER() OVER (
-            PARTITION BY COALESCE(project_id, user_id)
+            PARTITION BY space_id
             ORDER BY created_at ASC
           ) AS tenant_seq
         FROM outbox_events
@@ -379,9 +383,8 @@ export class OutboxRepository {
       WHERE e.id = c.id
       RETURNING 
         e.id,
-        e.user_id AS "userId",
+        e.space_id AS "spaceId",
         e.actor_id AS "actorId",
-        e.project_id AS "projectId",
         e.aggregate_id AS "aggregateId",
         e.event_type AS "eventType",
         e.payload,
@@ -404,32 +407,48 @@ export class OutboxRepository {
       return [];
     }
 
-    return rows.map((r) => ({
-      event: {
-        id: r.id,
-        userId: r.userId,
-        actorId: r.actorId ?? null,
-        projectId: r.projectId,
-        aggregateId: r.aggregateId,
-        eventType: r.eventType,
-        payload: r.payload,
-        status: r.status,
-        retryCount: r.retryCount,
-        error: r.error,
-        scheduledAt: r.scheduledAt ? new Date(r.scheduledAt) : null,
-        claimedAt: r.claimedAt ? new Date(r.claimedAt) : null,
-        leaseExpiresAt: r.leaseExpiresAt ? new Date(r.leaseExpiresAt) : null,
-        claimedBy: r.claimedBy,
-        dedupeKey: r.dedupeKey,
-        createdAt: new Date(r.createdAt),
-        updatedAt: new Date(r.updatedAt),
-        processedAt: r.processedAt ? new Date(r.processedAt) : null,
-      },
-      isLeaseRecovery:
-        r.previousStatus === OutboxStatus.PROCESSING &&
-        r.previousLeaseExpiresAt !== null &&
-        new Date(r.previousLeaseExpiresAt) <= now,
-    }));
+    return rows.map((r) => {
+      const legacyRow = r as { userId?: string; projectId?: string | null };
+      const effectiveSpaceId =
+        r.spaceId || legacyRow.projectId || legacyRow.userId || '';
+      const effectiveUserId =
+        legacyRow.userId || r.actorId || effectiveSpaceId;
+      const effectiveProjectId =
+        legacyRow.projectId !== undefined
+          ? legacyRow.projectId
+          : effectiveSpaceId && effectiveSpaceId !== effectiveUserId
+            ? effectiveSpaceId
+            : null;
+      return {
+        event: {
+          id: r.id,
+          spaceId: effectiveSpaceId,
+          actorId: r.actorId ?? null,
+          userId: effectiveUserId,
+          projectId: effectiveProjectId,
+          aggregateId: r.aggregateId,
+          eventType: r.eventType,
+          payload: r.payload,
+          status: r.status,
+          retryCount: r.retryCount,
+          error: r.error,
+          scheduledAt: r.scheduledAt ? new Date(r.scheduledAt) : null,
+          claimedAt: r.claimedAt ? new Date(r.claimedAt) : null,
+          leaseExpiresAt: r.leaseExpiresAt
+            ? new Date(r.leaseExpiresAt)
+            : null,
+          claimedBy: r.claimedBy,
+          dedupeKey: r.dedupeKey,
+          createdAt: new Date(r.createdAt),
+          updatedAt: new Date(r.updatedAt),
+          processedAt: r.processedAt ? new Date(r.processedAt) : null,
+        } as OutboxEvent,
+        isLeaseRecovery:
+          r.previousStatus === OutboxStatus.PROCESSING &&
+          r.previousLeaseExpiresAt !== null &&
+          new Date(r.previousLeaseExpiresAt) <= now,
+      };
+    });
   }
 
   async renewLease(
@@ -542,12 +561,12 @@ export class OutboxRepository {
       return this.prisma.libraryInboxRecord.findUnique({ where: { consumer_eventId: { consumer, eventId } } });
     }
     if (!this.prisma?.idempotencyRecord) return null;
-    const scopeKey = projectId ? `proj:${projectId}` : `user:${userId}`;
+    const spaceId = projectId || userId;
     if (typeof this.prisma.idempotencyRecord.findUnique === 'function') {
-      return this.prisma.idempotencyRecord.findUnique({ where: { scopeKey_idempotencyKey: { scopeKey, idempotencyKey } } });
+      return this.prisma.idempotencyRecord.findUnique({ where: { spaceId_idempotencyKey: { spaceId, idempotencyKey } } });
     }
     if (typeof this.prisma.idempotencyRecord.findFirst === 'function') {
-      return this.prisma.idempotencyRecord.findFirst({ where: { scopeKey, idempotencyKey } });
+      return this.prisma.idempotencyRecord.findFirst({ where: { spaceId, idempotencyKey } });
     }
     return null;
   }
@@ -564,14 +583,14 @@ export class OutboxRepository {
       return this.upsertInboxRecord(consumer, eventId, status, expiresAt);
     }
     if (!this.prisma?.idempotencyRecord) return null;
-    const scopeKey = projectId ? `proj:${projectId}` : `user:${userId}`;
     const safeUserId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)
       ? userId
       : '00000000-0000-0000-0000-000000000000';
+    const spaceId = projectId || safeUserId;
     if (typeof this.prisma.idempotencyRecord.upsert === 'function') {
       return this.prisma.idempotencyRecord.upsert({
-        where: { scopeKey_idempotencyKey: { scopeKey, idempotencyKey } },
-        create: { scopeKey, userId: safeUserId, projectId: projectId || null, idempotencyKey, status, expiresAt },
+        where: { spaceId_idempotencyKey: { spaceId, idempotencyKey } },
+        create: { spaceId, actorId: safeUserId, idempotencyKey, status, expiresAt },
         update: { status, expiresAt },
       });
     }
@@ -590,9 +609,9 @@ export class OutboxRepository {
       return;
     }
     if (typeof this.prisma?.idempotencyRecord?.deleteMany !== 'function') return;
-    const scopeKey = projectId ? `proj:${projectId}` : `user:${userId}`;
+    const spaceId = projectId || userId;
     await this.prisma.idempotencyRecord.deleteMany({
-      where: { scopeKey, idempotencyKey, ...(statuses?.length ? { status: { in: statuses } } : {}) },
+      where: { spaceId, idempotencyKey, ...(statuses?.length ? { status: { in: statuses } } : {}) },
     });
   }
 

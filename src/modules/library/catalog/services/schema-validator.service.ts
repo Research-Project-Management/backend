@@ -1,13 +1,393 @@
 import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
-import { SchemaValidationResult, CreatorHarmonizationChange, CreatorTypeDefinition, ItemFieldDefinition, ItemTypeDefinition, SchemaRegistrySnapshot } from '@/modules/library/core/types/schema.types';
-import { FIELD_ALIASES, REVERSE_FIELD_ALIASES, SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
-import { CreatorCreditInput, getEffectiveBaseFieldMap, getEffectiveReverseBaseFieldMap, getValidCreatorMapForType, normalizeCanonicalItemType, normalizeProjectScopeId, libraryConfig, invalidateLibraryScopeCaches } from '@/modules/library/core';
+import {
+  SchemaValidationResult,
+  CreatorHarmonizationChange,
+  CreatorTypeDefinition,
+  ItemFieldDefinition,
+  ItemTypeDefinition,
+  SchemaRegistrySnapshot,
+} from '@/modules/library/core/types/schema.types';
+import {
+  FIELD_ALIASES,
+  REVERSE_FIELD_ALIASES,
+  SCHEMA_V42_DATA,
+} from '@/modules/library/core/types/schema.constants';
+import {
+  CreatorCreditInput,
+  getEffectiveBaseFieldMap,
+  getEffectiveReverseBaseFieldMap,
+  getValidCreatorMapForType,
+  normalizeCanonicalItemType,
+  normalizeProjectScopeId,
+  libraryConfig,
+  invalidateLibraryScopeCaches,
+} from '@/modules/library/core';
 import {
   PRIVILEGED_INTERNAL_KEYS,
   SYSTEM_AND_TELEMETRY_KEYS,
   UNIVERSAL_FIELDS,
 } from '@/modules/library/catalog/types/catalog.types';
+
+const CREATOR_SYNONYMS: Readonly<Record<string, string>> = {
+  primary_author: 'author',
+  primaryauthor: 'author',
+  corresponding_author: 'author',
+  correspondingauthor: 'author',
+  first_author: 'author',
+  firstauthor: 'author',
+  co_author: 'author',
+  coauthor: 'author',
+  'co-author': 'author',
+  advisor: 'contributor',
+  supervisor: 'contributor',
+  thesis_advisor: 'contributor',
+  thesisadvisor: 'contributor',
+};
+
+const PRIMARY_CREATOR_ROLES = new Set([
+  'author',
+  'inventor',
+  'director',
+  'artist',
+  'cartographer',
+  'interviewee',
+  'podcaster',
+  'presenter',
+  'programmer',
+  'sponsor',
+]);
+
+/**
+ * Pure Zotero schema lookup and validation helpers (callable without NestJS DI or Redis).
+ */
+export function normalizeSchemaTypeKey(
+  key: string,
+  snapshot: SchemaRegistrySnapshot = SCHEMA_V42_DATA,
+): string {
+  if (!key) return key;
+  if (snapshot.itemTypes[key]) return key;
+  const lower = key.toLowerCase();
+  const found = Object.keys(snapshot.itemTypes).find((k) => k.toLowerCase() === lower);
+  return found || key;
+}
+
+export function isSchemaValidItemType(
+  itemType: string,
+  snapshot: SchemaRegistrySnapshot = SCHEMA_V42_DATA,
+): boolean {
+  if (!itemType) return false;
+  const normalized = normalizeSchemaTypeKey(itemType, snapshot);
+  return Object.prototype.hasOwnProperty.call(snapshot.itemTypes, normalized);
+}
+
+export function getSchemaOrderedFields(
+  itemType: string,
+  snapshot: SchemaRegistrySnapshot = SCHEMA_V42_DATA,
+): ItemFieldDefinition[] {
+  const def = snapshot.itemTypes[normalizeSchemaTypeKey(itemType, snapshot)];
+  return def ? [...def.fields] : [];
+}
+
+export function getSchemaValidCreatorTypes(
+  itemType: string,
+  snapshot: SchemaRegistrySnapshot = SCHEMA_V42_DATA,
+): CreatorTypeDefinition[] {
+  const def = snapshot.itemTypes[normalizeSchemaTypeKey(itemType, snapshot)];
+  return def ? [...def.creatorTypes] : [];
+}
+
+export function getSchemaPrimaryCreatorType(
+  itemType: string,
+  snapshot: SchemaRegistrySnapshot = SCHEMA_V42_DATA,
+): string {
+  const def = snapshot.itemTypes[normalizeSchemaTypeKey(itemType, snapshot)];
+  return def?.primaryCreatorType ?? 'author';
+}
+
+export function validateSchemaItemType(
+  rawType?: string | null,
+  snapshot: SchemaRegistrySnapshot = SCHEMA_V42_DATA,
+): string {
+  const normalized = normalizeCanonicalItemType(rawType, snapshot.itemTypes);
+  if (!isSchemaValidItemType(normalized, snapshot)) {
+    throw new BadRequestException(
+      `Invalid itemType '${rawType}'. Must be one of registered Zotero schema types.`,
+    );
+  }
+  return normalized;
+}
+
+export function validateAndHarmonizeSchemaCreators(
+  itemType: string,
+  creators?: CreatorCreditInput[],
+  options?: {
+    validCreatorTypes?: CreatorTypeDefinition[];
+    primaryCreatorType?: string;
+    onHarmonized?: (msg: string) => void;
+  },
+): {
+  creators: CreatorCreditInput[];
+  changes: CreatorHarmonizationChange[];
+} {
+  if (!Array.isArray(creators) || creators.length === 0) {
+    return { creators: [], changes: [] };
+  }
+
+  const serviceCreatorTypes =
+    options?.validCreatorTypes ?? getSchemaValidCreatorTypes(itemType);
+  const validCreatorMap =
+    Array.isArray(serviceCreatorTypes) && serviceCreatorTypes.length > 0
+      ? new Map(
+          serviceCreatorTypes.flatMap((c: CreatorTypeDefinition) => {
+            const lower = c.creatorType.toLowerCase();
+            const snake = c.creatorType.replace(/([A-Z])/g, '_$1').toLowerCase();
+            return [
+              [lower, c.creatorType] as const,
+              [snake, c.creatorType] as const,
+            ];
+          }),
+        )
+      : getValidCreatorMapForType(itemType);
+  const primaryCreatorRaw =
+    options?.primaryCreatorType ?? getSchemaPrimaryCreatorType(itemType);
+  const primaryCreator =
+    validCreatorMap.get(primaryCreatorRaw.toLowerCase()) || primaryCreatorRaw;
+
+  const changes: CreatorHarmonizationChange[] = [];
+  const harmonizedCreators = creators.map((c, index) => {
+    if (!c || typeof c !== 'object') return c;
+    const rawRole = (c.creatorType || 'author').trim();
+    const lowerRole = rawRole.toLowerCase();
+    const effectiveRole = CREATOR_SYNONYMS[lowerRole] ?? lowerRole;
+
+    const canonicalRole =
+      validCreatorMap.get(lowerRole) ?? validCreatorMap.get(effectiveRole);
+    if (canonicalRole && (canonicalRole === rawRole || lowerRole === effectiveRole)) {
+      return { ...c, creatorType: canonicalRole };
+    }
+
+    let targetRole = canonicalRole || primaryCreator;
+    let reason: CreatorHarmonizationChange['reason'] = 'normalized-to-primary';
+
+    const contributorCanonical = validCreatorMap.get('contributor');
+    const isPrimaryLike = PRIMARY_CREATOR_ROLES.has(effectiveRole);
+    if (!canonicalRole && !isPrimaryLike && index > 0 && contributorCanonical) {
+      targetRole = contributorCanonical;
+      reason = 'fallback-to-contributor';
+    } else if (canonicalRole && effectiveRole === 'contributor') {
+      targetRole = canonicalRole;
+      reason = 'fallback-to-contributor';
+    }
+
+    const creatorName =
+      c.fullName ||
+      c.name ||
+      [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+      `Creator #${index + 1}`;
+
+    options?.onHarmonized?.(
+      `[SchemaTrace] Harmonized creator '${creatorName}' from '${rawRole}' to '${targetRole}' for itemType '${itemType}' (${reason})`,
+    );
+
+    changes.push({
+      index,
+      originalName: creatorName,
+      fromRole: rawRole,
+      toRole: targetRole,
+      reason,
+    });
+
+    return { ...c, creatorType: targetRole };
+  });
+
+  return { creators: harmonizedCreators, changes };
+}
+
+export function validateAndSanitizeSchemaFields(
+  itemType: string,
+  data: Record<string, unknown>,
+  options?: {
+    orderedFields?: ItemFieldDefinition[];
+    onWarning?: (msg: string) => void;
+  },
+): {
+  cleanFields: Record<string, unknown>;
+  demotedToExtra: Record<string, unknown>;
+  warnings: string[];
+} {
+  const orderedFields = options?.orderedFields ?? getSchemaOrderedFields(itemType);
+  const validFields = new Set(orderedFields.map((f: ItemFieldDefinition) => f.key));
+  const typeBaseMap = getEffectiveBaseFieldMap(itemType);
+  const typeReverseBaseMap = getEffectiveReverseBaseFieldMap(itemType);
+  const mappedMediumField = typeBaseMap.medium;
+
+  const cleanFields: Record<string, unknown> = {};
+  const demotedToExtra: Record<string, unknown> = {};
+  const warnings: string[] = [];
+
+  const extraLines: string[] = [];
+  const demotedExtraLines: string[] = [];
+  if (typeof data.extra === 'string' && data.extra.trim()) {
+    extraLines.push(data.extra.trim());
+  }
+
+  for (const [key, value] of Object.entries(data)) {
+    if (PRIVILEGED_INTERNAL_KEYS.has(key)) continue;
+    if (value === undefined || value === null || value === '') {
+      cleanFields[key] = value;
+      continue;
+    }
+
+    if (
+      SYSTEM_AND_TELEMETRY_KEYS.has(key) ||
+      UNIVERSAL_FIELDS.has(key) ||
+      (key === 'type' &&
+        typeof value === 'string' &&
+        value.trim().toLowerCase() === itemType.toLowerCase())
+    ) {
+      cleanFields[key] = value;
+      continue;
+    }
+
+    const canonicalAlias = FIELD_ALIASES[key] || REVERSE_FIELD_ALIASES[key];
+    const mappedBase =
+      typeBaseMap[key] ||
+      typeReverseBaseMap[key] ||
+      (canonicalAlias
+        ? typeBaseMap[canonicalAlias] || typeReverseBaseMap[canonicalAlias]
+        : undefined);
+
+    const isValidDirect = validFields.has(key);
+    const isValidAlias = Boolean(canonicalAlias && validFields.has(canonicalAlias));
+    const isValidMappedBase = Boolean(
+      (mappedBase && validFields.has(mappedBase)) ||
+        (key === 'type' && mappedMediumField && validFields.has(mappedMediumField)),
+    );
+
+    if (isValidDirect || isValidAlias || isValidMappedBase) {
+      cleanFields[key] = value;
+      continue;
+    }
+
+    demotedToExtra[key] = value;
+    const warningMsg = `[SchemaTrace] Field '${key}' is not part of Zotero schema for itemType '${itemType}'; safely demoting to 'extra'`;
+    options?.onWarning?.(warningMsg);
+    warnings.push(warningMsg);
+
+    if (
+      !SYSTEM_AND_TELEMETRY_KEYS.has(key) &&
+      (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+    ) {
+      const line = `${key}: ${value}`;
+      if (!extraLines.some((l) => l.startsWith(`${key}:`))) extraLines.push(line);
+      if (!demotedExtraLines.some((l) => l.startsWith(`${key}:`))) demotedExtraLines.push(line);
+    }
+  }
+
+  if (
+    cleanFields.extraFields &&
+    typeof cleanFields.extraFields === 'object' &&
+    !Array.isArray(cleanFields.extraFields)
+  ) {
+    const sanitizedExtraFields = { ...(cleanFields.extraFields as Record<string, unknown>) };
+    for (const pk of PRIVILEGED_INTERNAL_KEYS) delete sanitizedExtraFields[pk];
+    cleanFields.extraFields = sanitizedExtraFields;
+  }
+
+  if (
+    typeof cleanFields.author === 'string' &&
+    cleanFields.author.trim() &&
+    cleanFields.creators === undefined &&
+    cleanFields.contributors === undefined &&
+    cleanFields.authors === undefined
+  ) {
+    cleanFields.authors = [cleanFields.author.trim()];
+  }
+
+  if (demotedExtraLines.length > 0) {
+    cleanFields.demotedExtraLines = demotedExtraLines;
+    cleanFields.demotedToExtra = demotedToExtra;
+  }
+
+  if (data.extra !== undefined) {
+    cleanFields.extra = data.extra === null || data.extra === '' ? '' : extraLines.join('\n');
+  } else if (extraLines.length > 0) {
+    cleanFields.extra = extraLines.join('\n');
+  }
+
+  return { cleanFields, demotedToExtra, warnings };
+}
+
+export function validateAndSanitizeSchemaItem(
+  rawType: string | undefined | null,
+  rawData: Record<string, unknown>,
+  snapshot: SchemaRegistrySnapshot = SCHEMA_V42_DATA,
+): SchemaValidationResult {
+  const itemType = validateSchemaItemType(
+    rawType ||
+      (rawData.itemType as string | undefined) ||
+      (typeof rawData.type === 'string' && isSchemaValidItemType(rawData.type.trim(), snapshot)
+        ? rawData.type.trim()
+        : undefined),
+    snapshot,
+  );
+
+  let creators = rawData.creators as CreatorCreditInput[] | undefined;
+  let changes: CreatorHarmonizationChange[] = [];
+  if (rawData.creators !== undefined) {
+    const harm = validateAndHarmonizeSchemaCreators(
+      itemType,
+      rawData.creators as CreatorCreditInput[],
+      {
+        validCreatorTypes: getSchemaValidCreatorTypes(itemType, snapshot),
+        primaryCreatorType: getSchemaPrimaryCreatorType(itemType, snapshot),
+      },
+    );
+    creators = harm.creators;
+    changes = harm.changes;
+  }
+
+  const hasExplicitItemType = Boolean(rawType || typeof rawData.itemType === 'string');
+  let resolvedTypeVal: string | null | undefined = itemType;
+  if (rawData.type === null) {
+    resolvedTypeVal = null;
+  } else if (typeof rawData.type === 'string') {
+    const trimmedType = rawData.type.trim();
+    if (trimmedType === '') {
+      resolvedTypeVal = '';
+    } else if (
+      trimmedType.toLowerCase() !== itemType.toLowerCase() &&
+      (hasExplicitItemType || !isSchemaValidItemType(trimmedType, snapshot))
+    ) {
+      resolvedTypeVal = trimmedType;
+    }
+  }
+
+  const dataWithCreators: Record<string, unknown> = {
+    ...rawData,
+    itemType,
+    type: resolvedTypeVal,
+    ...(rawData.creators !== undefined ? { creators } : {}),
+  };
+
+  const { cleanFields, demotedToExtra, warnings } = validateAndSanitizeSchemaFields(
+    itemType,
+    dataWithCreators,
+    { orderedFields: getSchemaOrderedFields(itemType, snapshot) },
+  );
+
+  if (rawData.creators === undefined) delete cleanFields.creators;
+
+  return {
+    valid: true,
+    itemType,
+    sanitizedItem: cleanFields,
+    warnings,
+    demotedToExtra,
+    creatorChanges: changes,
+  };
+}
 
 @Injectable()
 export class TypesService {
@@ -19,56 +399,41 @@ export class TypesService {
 
   getAllItemTypes(includeSpecial = false): ItemTypeDefinition[] {
     const types = Object.values(this.snapshot.itemTypes);
-    if (includeSpecial) {
-      return types;
-    }
-    return types.filter((t: ItemTypeDefinition) => t.isBibliographic);
+    return includeSpecial ? types : types.filter((t: ItemTypeDefinition) => t.isBibliographic);
   }
 
   getItemType(itemType: string): ItemTypeDefinition | undefined {
     if (!itemType) return undefined;
-    const normalized = this.normalizeTypeKey(itemType);
-    return this.snapshot.itemTypes[normalized];
+    return this.snapshot.itemTypes[this.normalizeTypeKey(itemType)];
   }
 
   isValidItemType(itemType: string): boolean {
-    if (!itemType) return false;
-    const normalized = this.normalizeTypeKey(itemType);
-    return Object.prototype.hasOwnProperty.call(
-      this.snapshot.itemTypes,
-      normalized,
-    );
+    return isSchemaValidItemType(itemType, this.snapshot);
   }
 
   isBibliographic(itemType: string): boolean {
-    const def = this.getItemType(itemType);
-    return def?.isBibliographic ?? false;
+    return this.getItemType(itemType)?.isBibliographic ?? false;
   }
 
   isSpecial(itemType: string): boolean {
-    const def = this.getItemType(itemType);
-    return def?.isSpecial ?? false;
+    return this.getItemType(itemType)?.isSpecial ?? false;
   }
 
   getOrderedFields(itemType: string): ItemFieldDefinition[] {
-    const def = this.getItemType(itemType);
-    return def ? [...def.fields] : [];
+    return getSchemaOrderedFields(itemType, this.snapshot);
   }
 
   isValidFieldForType(itemType: string, fieldKey: string): boolean {
     const def = this.getItemType(itemType);
-    if (!def) return false;
-    return def.fields.some((f: ItemFieldDefinition) => f.key === fieldKey);
+    return def ? def.fields.some((f: ItemFieldDefinition) => f.key === fieldKey) : false;
   }
 
   getValidCreatorTypes(itemType: string): CreatorTypeDefinition[] {
-    const def = this.getItemType(itemType);
-    return def ? [...def.creatorTypes] : [];
+    return getSchemaValidCreatorTypes(itemType, this.snapshot);
   }
 
   getPrimaryCreatorType(itemType: string): string {
-    const def = this.getItemType(itemType);
-    return def?.primaryCreatorType ?? 'author';
+    return getSchemaPrimaryCreatorType(itemType, this.snapshot);
   }
 
   getBaseFieldMapping(itemType: string): Record<string, string> {
@@ -92,10 +457,7 @@ export class TypesService {
     return reverse[fieldKey] || fieldKey;
   }
 
-  getTypeSpecificFieldFor(
-    itemType: string,
-    baseField: string,
-  ): string | undefined {
+  getTypeSpecificFieldFor(itemType: string, baseField: string): string | undefined {
     const mapping = this.getBaseFieldMapping(itemType);
     return mapping[baseField] || baseField;
   }
@@ -109,32 +471,15 @@ export class TypesService {
     if (!baseField) return undefined;
     const targetField = this.getTypeSpecificFieldFor(toType, baseField);
     if (!targetField) return undefined;
-    return {
-      targetField,
-      baseSemantic: baseField,
-    };
+    return { targetField, baseSemantic: baseField };
   }
-
-
 
   normalizeItemType(rawType: string | undefined | null): string {
     return normalizeCanonicalItemType(rawType, this.snapshot.itemTypes);
   }
 
-
-
-
-
-
   private normalizeTypeKey(key: string): string {
-    if (this.snapshot.itemTypes[key]) {
-      return key;
-    }
-    const lower = key.toLowerCase();
-    const found = Object.keys(this.snapshot.itemTypes).find(
-      (k) => k.toLowerCase() === lower,
-    );
-    return found || key;
+    return normalizeSchemaTypeKey(key, this.snapshot);
   }
 }
 
@@ -161,126 +506,11 @@ export class SchemaValidatorService {
     creators: CreatorCreditInput[];
     changes: CreatorHarmonizationChange[];
   } {
-    if (!Array.isArray(creators) || creators.length === 0) {
-      return { creators: [], changes: [] };
-    }
-
-    const serviceCreatorTypes =
-      this.typesService.getValidCreatorTypes(itemType);
-    const validCreatorMap =
-      Array.isArray(serviceCreatorTypes) && serviceCreatorTypes.length > 0
-        ? new Map(
-            serviceCreatorTypes.flatMap((c: CreatorTypeDefinition) => {
-              const lower = c.creatorType.toLowerCase();
-              const snake = c.creatorType
-                .replace(/([A-Z])/g, '_$1')
-                .toLowerCase();
-              return [
-                [lower, c.creatorType] as const,
-                [snake, c.creatorType] as const,
-              ];
-            }),
-          )
-        : getValidCreatorMapForType(itemType);
-    const primaryCreatorRaw = this.typesService.getPrimaryCreatorType(itemType);
-    const primaryCreator =
-      validCreatorMap.get(primaryCreatorRaw.toLowerCase()) || primaryCreatorRaw;
-
-    const CREATOR_SYNONYMS: Record<string, string> = {
-      primary_author: 'author',
-      primaryauthor: 'author',
-      corresponding_author: 'author',
-      correspondingauthor: 'author',
-      first_author: 'author',
-      firstauthor: 'author',
-      co_author: 'author',
-      coauthor: 'author',
-      'co-author': 'author',
-      advisor: 'contributor',
-      supervisor: 'contributor',
-      thesis_advisor: 'contributor',
-      thesisadvisor: 'contributor',
-    };
-
-    const PRIMARY_CREATOR_ROLES = new Set([
-      'author',
-      'inventor',
-      'director',
-      'artist',
-      'cartographer',
-      'interviewee',
-      'podcaster',
-      'presenter',
-      'programmer',
-      'sponsor',
-    ]);
-
-    const changes: CreatorHarmonizationChange[] = [];
-    const harmonizedCreators = creators.map((c, index) => {
-      if (!c || typeof c !== 'object') return c;
-      const rawRole = (c.creatorType || 'author').trim();
-      const lowerRole = rawRole.toLowerCase();
-      const effectiveRole = CREATOR_SYNONYMS[lowerRole] ?? lowerRole;
-
-      const canonicalRole =
-        validCreatorMap.get(lowerRole) ?? validCreatorMap.get(effectiveRole);
-      if (canonicalRole && canonicalRole === rawRole) {
-        return {
-          ...c,
-          creatorType: canonicalRole,
-        };
-      }
-      if (canonicalRole && lowerRole === effectiveRole) {
-        return {
-          ...c,
-          creatorType: canonicalRole,
-        };
-      }
-
-      let targetRole = canonicalRole || primaryCreator;
-      let reason: CreatorHarmonizationChange['reason'] =
-        'normalized-to-primary';
-
-      const contributorCanonical = validCreatorMap.get('contributor');
-      const isPrimaryLike = PRIMARY_CREATOR_ROLES.has(effectiveRole);
-      if (
-        !canonicalRole &&
-        !isPrimaryLike &&
-        index > 0 &&
-        contributorCanonical
-      ) {
-        targetRole = contributorCanonical;
-        reason = 'fallback-to-contributor';
-      } else if (canonicalRole && effectiveRole === 'contributor') {
-        targetRole = canonicalRole;
-        reason = 'fallback-to-contributor';
-      }
-
-      const creatorName =
-        c.fullName ||
-        c.name ||
-        [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-        `Creator #${index + 1}`;
-
-      this.logger.log(
-        `[SchemaTrace] Harmonized creator '${creatorName}' from '${rawRole}' to '${targetRole}' for itemType '${itemType}' (${reason})`,
-      );
-
-      changes.push({
-        index,
-        originalName: creatorName,
-        fromRole: rawRole,
-        toRole: targetRole,
-        reason,
-      });
-
-      return {
-        ...c,
-        creatorType: targetRole,
-      };
+    return validateAndHarmonizeSchemaCreators(itemType, creators, {
+      validCreatorTypes: this.typesService.getValidCreatorTypes(itemType),
+      primaryCreatorType: this.typesService.getPrimaryCreatorType(itemType),
+      onHarmonized: (msg) => this.logger.log(msg),
     });
-
-    return { creators: harmonizedCreators, changes };
   }
 
   validateAndSanitizeFields(
@@ -291,130 +521,10 @@ export class SchemaValidatorService {
     demotedToExtra: Record<string, unknown>;
     warnings: string[];
   } {
-    const validFields = new Set(
-      this.typesService
-        .getOrderedFields(itemType)
-        .map((f: ItemFieldDefinition) => f.key),
-    );
-    const typeBaseMap = getEffectiveBaseFieldMap(itemType);
-    const typeReverseBaseMap = getEffectiveReverseBaseFieldMap(itemType);
-    const mappedMediumField = typeBaseMap.medium;
-
-    const cleanFields: Record<string, unknown> = {};
-    const demotedToExtra: Record<string, unknown> = {};
-    const warnings: string[] = [];
-
-    const extraLines: string[] = [];
-    const demotedExtraLines: string[] = [];
-    if (typeof data.extra === 'string' && data.extra.trim()) {
-      extraLines.push(data.extra.trim());
-    }
-
-    for (const [key, value] of Object.entries(data)) {
-      if (PRIVILEGED_INTERNAL_KEYS.has(key)) {
-        continue;
-      }
-      if (value === undefined || value === null || value === '') {
-        cleanFields[key] = value;
-        continue;
-      }
-
-      if (
-        SYSTEM_AND_TELEMETRY_KEYS.has(key) ||
-        UNIVERSAL_FIELDS.has(key) ||
-        (key === 'type' &&
-          typeof value === 'string' &&
-          value.trim().toLowerCase() === itemType.toLowerCase())
-      ) {
-        cleanFields[key] = value;
-        continue;
-      }
-
-      const canonicalAlias = FIELD_ALIASES[key] || REVERSE_FIELD_ALIASES[key];
-      const mappedBase =
-        typeBaseMap[key] ||
-        typeReverseBaseMap[key] ||
-        (canonicalAlias
-          ? typeBaseMap[canonicalAlias] || typeReverseBaseMap[canonicalAlias]
-          : undefined);
-
-      const isValidDirect = validFields.has(key);
-      const isValidAlias = Boolean(
-        canonicalAlias && validFields.has(canonicalAlias),
-      );
-      const isValidMappedBase = Boolean(
-        (mappedBase && validFields.has(mappedBase)) ||
-        (key === 'type' &&
-          mappedMediumField &&
-          validFields.has(mappedMediumField)),
-      );
-
-      if (isValidDirect || isValidAlias || isValidMappedBase) {
-        cleanFields[key] = value;
-        continue;
-      }
-
-      demotedToExtra[key] = value;
-      const warningMsg = `[SchemaTrace] Field '${key}' is not part of Zotero schema for itemType '${itemType}'; safely demoting to 'extra'`;
-      this.logger.debug(warningMsg);
-      warnings.push(warningMsg);
-
-      if (
-        !SYSTEM_AND_TELEMETRY_KEYS.has(key) &&
-        (typeof value === 'string' ||
-          typeof value === 'number' ||
-          typeof value === 'boolean')
-      ) {
-        const line = `${key}: ${value}`;
-        if (!extraLines.some((l) => l.startsWith(`${key}:`))) {
-          extraLines.push(line);
-        }
-        if (!demotedExtraLines.some((l) => l.startsWith(`${key}:`))) {
-          demotedExtraLines.push(line);
-        }
-      }
-    }
-
-    if (
-      cleanFields.extraFields &&
-      typeof cleanFields.extraFields === 'object' &&
-      !Array.isArray(cleanFields.extraFields)
-    ) {
-      const sanitizedExtraFields = {
-        ...(cleanFields.extraFields as Record<string, unknown>),
-      };
-      for (const pk of PRIVILEGED_INTERNAL_KEYS) {
-        delete sanitizedExtraFields[pk];
-      }
-      cleanFields.extraFields = sanitizedExtraFields;
-    }
-
-    // Map single string `author` into `authors: [author]` if `creators`/`contributors`/`authors` are not provided
-    if (
-      typeof cleanFields.author === 'string' &&
-      cleanFields.author.trim() &&
-      cleanFields.creators === undefined &&
-      cleanFields.contributors === undefined &&
-      cleanFields.authors === undefined
-    ) {
-      cleanFields.authors = [cleanFields.author.trim()];
-    }
-
-    if (demotedExtraLines.length > 0) {
-      cleanFields.demotedExtraLines = demotedExtraLines;
-      cleanFields.demotedToExtra = demotedToExtra;
-    }
-
-    // Only emit `extra` when the client sent it or fields were demoted into it; otherwise
-    // an empty string would wipe the stored extra on every PATCH.
-    if (data.extra !== undefined) {
-      cleanFields.extra =
-        data.extra === null || data.extra === '' ? '' : extraLines.join('\n');
-    } else if (extraLines.length > 0) {
-      cleanFields.extra = extraLines.join('\n');
-    }
-
-    return { cleanFields, demotedToExtra, warnings };
+    return validateAndSanitizeSchemaFields(itemType, data, {
+      orderedFields: this.typesService.getOrderedFields(itemType),
+      onWarning: (msg) => this.logger.debug(msg),
+    });
   }
 
   validateAndSanitizeItem(
@@ -441,9 +551,7 @@ export class SchemaValidatorService {
       changes = harm.changes;
     }
 
-    const hasExplicitItemType = Boolean(
-      rawType || typeof rawData.itemType === 'string',
-    );
+    const hasExplicitItemType = Boolean(rawType || typeof rawData.itemType === 'string');
     let resolvedTypeVal: string | null | undefined = itemType;
     if (rawData.type === null) {
       resolvedTypeVal = null;
@@ -466,12 +574,12 @@ export class SchemaValidatorService {
       ...(rawData.creators !== undefined ? { creators } : {}),
     };
 
-    const { cleanFields, demotedToExtra, warnings } =
-      this.validateAndSanitizeFields(itemType, dataWithCreators);
+    const { cleanFields, demotedToExtra, warnings } = this.validateAndSanitizeFields(
+      itemType,
+      dataWithCreators,
+    );
 
-    if (rawData.creators === undefined) {
-      delete cleanFields.creators;
-    }
+    if (rawData.creators === undefined) delete cleanFields.creators;
 
     return {
       valid: true,
@@ -495,9 +603,6 @@ export class ItemCacheCoordinator {
 
   constructor(@Optional() private readonly cache?: RedisCacheService) {}
 
-  /**
-   * Invalidates Redis cache entries for an item and affected library lists.
-   */
   async invalidateItemCache(
     id: string,
     userId?: string,
@@ -514,8 +619,7 @@ export class ItemCacheCoordinator {
         userId,
         projectId,
         itemIds: [id],
-        skipScopeInvalidation:
-          options?.skipScopeInvalidation === true || !userId,
+        skipScopeInvalidation: options?.skipScopeInvalidation === true || !userId,
         onlyUserStateOverlay: options?.onlyUserStateOverlay,
         preserveContentCaches: options?.preserveContentCaches,
       });
@@ -525,28 +629,16 @@ export class ItemCacheCoordinator {
     }
   }
 
-  /**
-   * Performs a single scope-level cache invalidation for list/count/tag caches.
-   */
-  async invalidateScopeListCache(
-    userId: string,
-    projectId?: string,
-  ): Promise<void> {
+  async invalidateScopeListCache(userId: string, projectId?: string): Promise<void> {
     if (!this.cache) return;
     try {
-      await invalidateLibraryScopeCaches(this.cache, {
-        userId,
-        projectId,
-      });
+      await invalidateLibraryScopeCaches(this.cache, { userId, projectId });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Failed to invalidate scope caches: ${message}`);
     }
   }
 
-  /**
-   * Batch invalidates Redis cache entries across multiple items and scopes.
-   */
   async invalidateBulkItemsCache(
     itemIds: string[],
     userId: string,
@@ -577,9 +669,6 @@ export class ItemCacheCoordinator {
     }
   }
 
-  /**
-   * Unified write-path invalidation helper for item mutations across services.
-   */
   async invalidateForWrite(params: {
     userId: string;
     projectId?: string | null;
@@ -589,9 +678,7 @@ export class ItemCacheCoordinator {
     onlyUserStateOverlay?: boolean;
     preserveContentCaches?: boolean;
   }): Promise<void> {
-    const validProjectId = normalizeProjectScopeId(
-      params.projectId ?? undefined,
-    );
+    const validProjectId = normalizeProjectScopeId(params.projectId ?? undefined);
     if (params.itemIds && params.itemIds.length > 0) {
       await this.invalidateBulkItemsCache(
         params.itemIds,

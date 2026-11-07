@@ -72,7 +72,7 @@ export interface ExtractionSyncDocumentInput {
 }
 
 export interface ExtractedMetadataSyncPlan {
-  itemPatch: Prisma.ItemUpdateInput;
+  itemPatch: Prisma.LibraryItemUpdateInput;
   metaPatch: Record<string, unknown>;
   extractedIdentifiers: Array<{
     type: string;

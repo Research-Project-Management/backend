@@ -397,7 +397,7 @@ export class CslEngineService implements OnModuleInit {
       bibliography = bibliography.replace(/[\u201C\u201D]/g, '"');
     }
 
-    const bibliographyHtml = cite
+    let bibliographyHtml = cite
       .format('bibliography', {
         template: activeTemplate,
         lang: effectiveLang,
@@ -405,13 +405,31 @@ export class CslEngineService implements OnModuleInit {
       })
       .trim();
 
-    const inText = cite
+    let inText = cite
       .format('citation', {
         template: activeTemplate,
         lang: effectiveLang,
         entry: this.buildCiteEntryParam(cslItem.id, context),
       })
       .trim();
+
+    const isNumericStyle = NUMERIC_STYLE_TOKENS.some((s) =>
+      normalizedStyle.includes(s),
+    );
+    if (isNumericStyle && index > 1) {
+      const numStr = String(index);
+      if (inText === '[1]') inText = `[${numStr}]`;
+      else if (inText === '(1)') inText = `(${numStr})`;
+      else if (inText === '1') inText = numStr;
+      if (/^\[1\]\s/.test(bibliography)) {
+        bibliography = bibliography.replace(/^\[1\](\s)/, `[${numStr}]$1`);
+      } else if (/^1\.\s/.test(bibliography)) {
+        bibliography = bibliography.replace(/^1\.(\s)/, `${numStr}.$1`);
+      }
+      bibliographyHtml = bibliographyHtml
+        .replace(/(\[)1(\])/g, `$1${numStr}$2`)
+        .replace(/(>\s*)1(\.\s*<)/g, `$1${numStr}$2`);
+    }
 
     return this.setCache(cacheKey, {
       styleId: normalizedStyle,
@@ -621,6 +639,7 @@ export class CslEngineService implements OnModuleInit {
           .trim();
         let itemBib =
           baseStyle === 'ieee' ? rawBib.replace(/[\u201C\u201D]/g, '"') : rawBib;
+        let itemBibHtml = bibHtml;
         let cit = rawCit;
         if (isNumericStyle && idx > 0) {
           const numStr = String(idx + 1);
@@ -632,18 +651,21 @@ export class CslEngineService implements OnModuleInit {
           } else if (/^1\.\s/.test(itemBib)) {
             itemBib = itemBib.replace(/^1\.(\s)/, `${numStr}.$1`);
           }
+          itemBibHtml = itemBibHtml
+            .replace(/(\[)1(\])/g, `$1${numStr}$2`)
+            .replace(/(>\s*)1(\.\s*<)/g, `$1${numStr}$2`);
         }
         const entryResult = {
           id: item.id,
           inText: cit,
           bibliography: itemBib,
-          bibliographyHtml: bibHtml,
+          bibliographyHtml: itemBibHtml,
         };
         this.setCache(cacheKey, {
           styleId: baseStyle,
           inText: cit,
           bibliography: itemBib,
-          bibliographyHtml: bibHtml,
+          bibliographyHtml: itemBibHtml,
           source: 'csl-engine',
         });
         return entryResult;

@@ -329,7 +329,7 @@ export class ResolveStage implements IWorkflowStage<ResolveStageInput, MetadataC
           if (v !== undefined && v !== null) {
             cand.fields[k] = {
               path: k, value: v, normalizedValue: v, confidence: cand.confidenceScore || 0.9,
-              sourceProvider: cand.sourceName, retrievedAt: cand.retrievedAt || new Date().toISOString(),
+              sourceProvider: cand.sourceName || cand.sourceProvider || 'UNKNOWN', retrievedAt: cand.retrievedAt || new Date().toISOString(),
             };
           }
         }

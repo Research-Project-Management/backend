@@ -88,7 +88,9 @@ export class AttachmentsRepository {
             updatePayload[strKey] = sanitizedData[strKey];
           }
         }
-        if (typeof sanitizedData.size === 'number') updatePayload.size = sanitizedData.size;
+        if (typeof sanitizedData.size === 'number' || typeof sanitizedData.size === 'bigint') {
+          updatePayload.size = sanitizedData.size;
+        }
         if (sanitizedData.metadata && typeof sanitizedData.metadata === 'object') {
           const existingMeta =
             existingSameFile.metadata && typeof existingSameFile.metadata === 'object' && !Array.isArray(existingSameFile.metadata)
@@ -381,11 +383,13 @@ export class AttachmentsRepository {
             where: { id: att.id },
             data: { deletedAt: new Date() },
           });
+          if (att.fileId) candidateOrphanFileIds.push(att.fileId);
         } else if (typeof client.attachment.updateMany === 'function') {
           await client.attachment.updateMany({
             where: { id: att.id },
             data: { deletedAt: new Date() },
           });
+          if (att.fileId) candidateOrphanFileIds.push(att.fileId);
         } else if (typeof client.attachment.delete === 'function') {
           await client.attachment.delete({ where: { id: att.id } });
           if (att.fileId) candidateOrphanFileIds.push(att.fileId);
@@ -472,8 +476,8 @@ export class AttachmentsRepository {
   ) {
     if (!fileId) return;
     const client = this.getClient(tx);
-    if (client.file?.findUnique) {
-      const existingFile = await client.file.findUnique({
+    if (client.storageFile?.findUnique) {
+      const existingFile = await client.storageFile.findUnique({
         where: { id: fileId },
         select: { linkedToId: true },
       });
@@ -537,26 +541,27 @@ export class AttachmentsRepository {
         attachmentId,
         client,
       );
-      if (otherRefs > 0 && client.file?.findUnique && client.file?.create) {
-        const existingFile = await client.file.findUnique({
+      if (otherRefs > 0 && client.storageFile?.findUnique && client.storageFile?.create) {
+        const existingFile = await client.storageFile.findUnique({
           where: { id: fileId },
         });
         if (existingFile) {
           const clonedFileId = randomUUID();
-          await client.file.create({
+          await client.storageFile.create({
             data: {
               id: clonedFileId,
+              spaceId: existingFile.spaceId,
+              createdById: existingFile.createdById,
               filename: newFilename,
               size: existingFile.size,
               mimeType: existingFile.mimeType,
               isFolder: existingFile.isFolder,
-              starred: existingFile.starred,
-              metaData: existingFile.metaData ?? undefined,
+              metadata:
+                (existingFile.metadata as Prisma.InputJsonValue) ?? undefined,
               parentId: existingFile.parentId,
               linkedToType: 'Paper',
               linkedToId: updated?.itemId ?? existingFile.linkedToId,
               blobId: existingFile.blobId,
-              authorId: existingFile.authorId,
             },
           });
           if (existingFile.blobId && client.storageBlob?.update) {
@@ -581,7 +586,7 @@ export class AttachmentsRepository {
           return { clonedFileId, nextUrl };
         }
       }
-      await client.file.update({
+      await client.storageFile.update({
         where: { id: fileId },
         data: { filename: newFilename },
       });
@@ -621,8 +626,8 @@ export class AttachmentsRepository {
         });
       }
     }
-    if (updated?.itemId && client.item?.updateMany) {
-      await client.item.updateMany({
+    if (updated?.itemId && client.libraryItem?.updateMany) {
+      await client.libraryItem.updateMany({
         where: { id: updated.itemId },
         data: { version: { increment: 1 } },
       });

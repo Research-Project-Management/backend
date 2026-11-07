@@ -163,7 +163,7 @@ function toCitationItemInput(
     ...(it as unknown as Record<string, unknown>),
     id: effectiveKey || it.id,
     itemType: it.itemType ?? 'journalArticle',
-    title: it.title,
+    title: it.title ?? '',
     publicationTitle: it.publicationTitle ?? undefined,
     publisher: it.publisher ?? undefined,
     year: it.year ?? undefined,

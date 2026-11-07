@@ -188,7 +188,7 @@ export class DuplicateMergerService {
         const eventScope = { userId, projectId: effectiveProjectId };
 
         const [rawInitialNotes, rawInitialAttachments] = await Promise.all([
-          tx.note?.findMany?.({
+          tx.libraryNote?.findMany?.({
             where: { itemId: { in: uniqueDupIds } },
             select: { id: true, itemId: true },
           }),
@@ -286,14 +286,33 @@ export class DuplicateMergerService {
         };
         await executeDuplicateMergePipeline(pipelineCtx);
 
+        const syncedWithIds =
+          Array.isArray(pipelineCtx.syncedContributors) &&
+          pipelineCtx.syncedContributors.length > 0 &&
+          typeof (pipelineCtx.syncedContributors[0] as { id?: unknown })?.id ===
+            'string'
+            ? pipelineCtx.syncedContributors
+            : null;
+        const dbContributors =
+          !syncedWithIds && typeof tx.contributor?.findMany === 'function'
+            ? await tx.contributor.findMany({
+                where: { itemId: primary.id },
+                orderBy: { orderIndex: 'asc' },
+              })
+            : null;
         const primaryContributors =
-          pipelineCtx.syncedContributors ??
-          (await tx.contributor?.findMany?.({
-            where: { itemId: primary.id },
-            orderBy: { orderIndex: 'asc' },
-          })) ??
-          (primary as { contributors?: Array<Record<string, unknown>> })
-            .contributors ??
+          syncedWithIds ??
+          (Array.isArray(dbContributors) && dbContributors.length > 0
+            ? dbContributors
+            : null) ??
+          (Array.isArray(pipelineCtx.syncedContributors) &&
+          pipelineCtx.syncedContributors.length > 0
+            ? pipelineCtx.syncedContributors
+            : null) ??
+          (backfillFields.firstAuthor === null
+            ? []
+            : (primary as { contributors?: Array<Record<string, unknown>> })
+                .contributors) ??
           [];
 
         if (
@@ -347,7 +366,7 @@ export class DuplicateMergerService {
               });
 
         const needNoteRecount =
-          !this.catalogGateway && Boolean(tx.note?.count);
+          !this.catalogGateway && Boolean(tx.libraryNote?.count);
         const needAttachmentRecount =
           !this.extractionGateway?.reassignContentToItem &&
           Boolean(tx.attachment?.count);
@@ -355,7 +374,7 @@ export class DuplicateMergerService {
           needNoteRecount || needAttachmentRecount
             ? await Promise.all([
                 needNoteRecount
-                  ? tx.note.count({
+                  ? tx.libraryNote.count({
                       where: { itemId: primary.id, deletedAt: null },
                     })
                   : Promise.resolve(undefined),
@@ -445,9 +464,9 @@ export class DuplicateMergerService {
         }
 
         const finalPrimary = reloadedPrimary ?? updatedPrimary;
-        const domainPrimary = ItemsMapper.toDomain(
-          finalPrimary,
-          String(userId),
+        const domainPrimary = ItemsMapper.stripPersonalOverlayForSharedScope(
+          ItemsMapper.toDomain(finalPrimary, String(userId)),
+          effectiveProjectId,
         );
         await helpers.appendChange(eventScope, {
           entityType: 'Item',

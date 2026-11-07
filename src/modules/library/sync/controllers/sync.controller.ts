@@ -1,5 +1,5 @@
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { Controller, HttpException, HttpStatus, Get, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, HttpException, HttpStatus, Get, Query, Param, UseGuards, Optional } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles, RequireOperator } from '@/modules/project/access';
 import { TransactionService, compactLibraryChanges } from '@/modules/library/sync/services/transaction.service';
@@ -67,9 +67,12 @@ function parseSafeBigInt(val?: string): bigint | undefined {
 export class SyncController {
   constructor(
     private readonly transactionService: TransactionService,
-    private readonly resilienceRegistry: ResilienceRegistryService,
-    private readonly outboxWorker: OutboxWorker,
-    private readonly outboxMetrics: OutboxMetrics,
+    @Optional()
+    private readonly resilienceRegistry?: ResilienceRegistryService,
+    @Optional()
+    private readonly outboxWorker?: OutboxWorker,
+    @Optional()
+    private readonly outboxMetrics?: OutboxMetrics,
   ) {}
 
   private resolveProjectId(
@@ -142,23 +145,24 @@ export class SyncController {
       );
     }
 
-    const visibleChanges = projectId
-      ? changes.filter((c) => {
+    const hasMore = changes.length > limit;
+    const windowChanges = changes.slice(0, limit);
+    const rawPaged = projectId
+      ? windowChanges.filter((c) => {
           const typeLower = c.entityType?.toLowerCase();
           if (typeLower === 'state' || typeLower === 'attachmentreadingstate') {
-            return !c.userId || c.userId === userId;
+            const cActor =
+              (c as { userId?: string | null; actorId?: string | null })
+                .userId ?? c.actorId;
+            return !cActor || cActor === userId;
           }
           return true;
         })
-      : changes;
-    const hasMore = visibleChanges.length > limit || changes.length > limit;
-    const rawPaged = visibleChanges.slice(0, limit);
+      : windowChanges;
     const highWaterMarkSeq =
-      rawPaged.length > 0
-        ? rawPaged[rawPaged.length - 1].seq
-        : changes.length > 0
-          ? changes[Math.min(changes.length, limit) - 1].seq
-          : sinceSeq;
+      windowChanges.length > 0
+        ? windowChanges[windowChanges.length - 1].seq
+        : sinceSeq;
     const pagedChanges =
       query.compact !== false
         ? compactLibraryChanges(rawPaged)
@@ -170,24 +174,39 @@ export class SyncController {
       compacted: query.compact !== false,
       hasMore,
       nextCursor: hasMore ? highWaterMarkSeq.toString() : null,
-      changes: pagedChanges.map((c) => ({
-        id: c.id,
-        seq: c.seq.toString(),
-        userId: c.userId,
-        projectId: c.projectId,
-        entityType: c.entityType,
-        entityId: c.entityId,
-        action: c.action,
-        version: c.version,
-        data: stripCrossUserItemState(
-          c.data,
-          c.userId,
-          userId,
-          c.entityType,
-          projectId,
-        ),
-        createdAt: c.createdAt,
-      })),
+      changes: pagedChanges.map((c) => {
+        const cRec = c as {
+          userId?: string | null;
+          projectId?: string | null;
+          actorId?: string | null;
+          spaceId?: string;
+        };
+        const effectiveUserId = cRec.userId ?? c.actorId ?? null;
+        const effectiveProjectId =
+          cRec.projectId ??
+          (projectId ||
+            (cRec.spaceId && cRec.spaceId !== effectiveUserId
+              ? cRec.spaceId
+              : null));
+        return {
+          id: c.id,
+          seq: c.seq.toString(),
+          userId: effectiveUserId,
+          projectId: effectiveProjectId,
+          entityType: c.entityType,
+          entityId: c.entityId,
+          action: c.action,
+          version: c.version,
+          data: stripCrossUserItemState(
+            c.data,
+            effectiveUserId,
+            userId,
+            c.entityType,
+            projectId,
+          ),
+          createdAt: c.createdAt,
+        };
+      }),
     };
   }
 
@@ -248,16 +267,30 @@ export class SyncController {
       count: pagedTombstones.length,
       hasMore,
       nextCursor: hasMore ? highWaterMarkSeq.toString() : null,
-      tombstones: pagedTombstones.map((t) => ({
-        id: t.id,
-        seq: t.seq.toString(),
-        userId: t.userId,
-        projectId: t.projectId,
-        entityType: t.entityType,
-        entityId: t.entityId,
-        deletedById: t.deletedById,
-        deletedAt: t.deletedAt,
-      })),
+      tombstones: pagedTombstones.map((t) => {
+        const tRec = t as {
+          userId?: string | null;
+          projectId?: string | null;
+          spaceId?: string;
+        };
+        const effectiveUserId = tRec.userId ?? t.deletedById ?? null;
+        const effectiveProjectId =
+          tRec.projectId ??
+          (projectId ||
+            (tRec.spaceId && tRec.spaceId !== effectiveUserId
+              ? tRec.spaceId
+              : null));
+        return {
+          id: t.id,
+          seq: t.seq.toString(),
+          userId: effectiveUserId,
+          projectId: effectiveProjectId,
+          entityType: t.entityType,
+          entityId: t.entityId,
+          deletedById: t.deletedById,
+          deletedAt: t.deletedAt,
+        };
+      }),
     };
   }
 

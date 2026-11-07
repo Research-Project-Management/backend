@@ -39,26 +39,34 @@ describe('Academic Tags & Notes Synchronization', () => {
     let mockPrisma: any;
 
     beforeEach(() => {
+      const itemTagMock = {
+        count: jest.fn(),
+        upsert: jest.fn(),
+      };
+      const tagMock = {
+        findFirst: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+        createMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn(),
+      };
+      const itemMock = {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      };
+      const noteMock = {
+        count: jest.fn(),
+        findMany: jest.fn(),
+        create: jest.fn(),
+      };
       mockPrisma = {
-        itemTag: {
-          count: jest.fn(),
-          upsert: jest.fn(),
-        },
-        tag: {
-          findFirst: jest.fn(),
-          findMany: jest.fn().mockResolvedValue([]),
-          createMany: jest.fn().mockResolvedValue({ count: 0 }),
-          create: jest.fn(),
-        },
-        item: {
-          findUnique: jest.fn(),
-          update: jest.fn(),
-        },
-        note: {
-          count: jest.fn(),
-          findMany: jest.fn(),
-          create: jest.fn(),
-        },
+        itemTag: itemTagMock,
+        libraryItemTag: itemTagMock,
+        tag: tagMock,
+        libraryTag: tagMock,
+        item: itemMock,
+        libraryItem: itemMock,
+        note: noteMock,
+        libraryNote: noteMock,
       };
 
       repo = new ExtractionRepository(mockPrisma);
@@ -178,7 +186,8 @@ describe('Academic Tags & Notes Synchronization', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             itemId: 'item-1',
-            userId: 'user-1',
+            spaceId: 'user-1',
+            createdById: 'user-1',
             title: 'Extracted Note (summary)',
             contentMd:
               'This paper proposes a new multi-head attention mechanism.',

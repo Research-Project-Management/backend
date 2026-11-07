@@ -103,6 +103,7 @@ export interface StateEntity {
   lastActiveAttachmentId?: string | null;
   lastOpenedAt: Date | null;
   lastReadAt: Date | null;
+  createdAt?: Date;
   updatedAt: Date;
 }
 

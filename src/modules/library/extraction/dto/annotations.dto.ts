@@ -32,8 +32,9 @@ export function normalizeAnnotationType(
 ): AnnotationType | undefined {
   if (typeof value !== 'string') return value as AnnotationType | undefined;
   const lower = value.trim().toLowerCase();
-  if (lower === 'box' || lower === 'area' || lower === 'image')
+  if (lower === 'box' || lower === 'area')
     return AnnotationType.rect;
+  if (lower === 'image') return AnnotationType.image;
   if (lower === 'strikethrough' || lower === 'strikeout')
     return AnnotationType.strike;
   if (lower === 'squiggly') return AnnotationType.underline;

@@ -304,12 +304,15 @@ export class CollectionsService {
             if (!existing) {
               throw new NotFoundException(`Collection not found: ${collectionId}`);
             }
+            const existingProjId =
+              (existing as { projectId?: string | null }).projectId ??
+              (existing.spaceId !== existing.createdById ? existing.spaceId : null);
             effectiveProjectId =
-              normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
+              normalizeProjectScopeId(projectId ?? existingProjId) ?? undefined;
             if (hasParentIdChange && rawParentId) {
               if (tx && typeof tx.$queryRaw === 'function') {
                 const [firstLock, secondLock] = [collectionId, rawParentId].sort();
-                await tx.$queryRaw`SELECT id FROM collections WHERE id IN (${firstLock}::uuid, ${secondLock}::uuid) FOR UPDATE`;
+                await tx.$queryRaw`SELECT id FROM library_collections WHERE id IN (${firstLock}::uuid, ${secondLock}::uuid) FOR UPDATE`;
               }
               await this.validateParentNoCycle(
                 userId,
@@ -360,8 +363,11 @@ export class CollectionsService {
           if (!existing) {
             throw new NotFoundException(`Collection not found: ${collectionId}`);
           }
+          const existingProjId =
+            (existing as { projectId?: string | null }).projectId ??
+            (existing.spaceId !== existing.createdById ? existing.spaceId : null);
           effectiveProjectId =
-            normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
+            normalizeProjectScopeId(projectId ?? existingProjId) ?? undefined;
           if (hasParentIdChange && rawParentId) {
             await this.validateParentNoCycle(
               userId,
@@ -416,9 +422,10 @@ export class CollectionsService {
   ) {
     const destinationCollectionId = collectionId === 'unfiled' ? null : collectionId;
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere = validProjectId
-      ? { projectId: validProjectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: validProjectId || userId,
+      deletedAt: null,
+    };
     let ownedItemIds: string[] = [];
     let ranPostCommitHook = false;
     if (this.libraryTx?.executeInTransaction) {
@@ -571,7 +578,7 @@ export class CollectionsService {
             await helpers.appendChangesBatch(
               eventScope,
               orderedList.map((col) => {
-                const updatedCol = refreshedMap.get(col.id);
+                const updatedCol = refreshedMap.get(col.id) as { version?: number } | undefined;
                 return { entityType: 'Collection', entityId: col.id, action: 'update' as const, version: updatedCol?.version ?? 1, data: updatedCol ?? col };
               }),
             );
@@ -584,7 +591,7 @@ export class CollectionsService {
             );
           } else {
             for (const col of orderedList) {
-              const updatedCol = refreshedMap.get(col.id);
+              const updatedCol = refreshedMap.get(col.id) as { version?: number } | undefined;
               const payload = updatedCol ?? col;
               await helpers.appendChange(eventScope, { entityType: 'Collection', entityId: col.id, action: 'update', version: updatedCol?.version ?? 1, data: payload });
               await helpers.publishOutbox(eventScope, col.id, LIBRARY_EVENT_TYPES.COLLECTION_UPDATED, payload);
@@ -611,7 +618,7 @@ export class CollectionsService {
   }
   async detachItemFromCollection(userId: string, collectionId: string, itemId: string, projectId?: string) {
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere = validProjectId ? { projectId: validProjectId } : { userId, projectId: null };
+    const scopeWhere: Prisma.LibraryItemWhereInput = { spaceId: validProjectId || userId };
     let ranPostCommitHook = false;
     if (this.libraryTx?.executeInTransaction) {
       await this.libraryTx.executeInTransaction(

@@ -1,7 +1,30 @@
 import { Injectable, Inject, Optional, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { RedisCacheService } from '@/core';
-import { normalizeProjectScopeId, libraryConfig, LIBRARY_REDIS_KEYS, UNIT_OF_WORK, IUnitOfWork, SingleFlightCoalescer, invalidateLibraryScopeCaches, LibraryItemSource, CATALOG_FACADE, ICatalogFacade, CatalogItemSummary, ItemsMapper } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  libraryConfig,
+  LIBRARY_REDIS_KEYS,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  SingleFlightCoalescer,
+  invalidateLibraryScopeCaches,
+  LibraryItemSource,
+  CATALOG_FACADE,
+  CATALOG_READER_PORT,
+  CATALOG_WRITER_PORT,
+  CATALOG_COLLECTION_PORT,
+  CATALOG_TRASH_PORT,
+  CATALOG_IMPORT_EXPORT_PORT,
+  ICatalogFacade,
+  ICatalogReaderPort,
+  ICatalogWriterPort,
+  ICatalogCollectionPort,
+  ICatalogTrashPort,
+  ICatalogImportExportPort,
+  CatalogItemSummary,
+  ItemsMapper,
+} from '@/modules/library/core';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { SavedSearchesService } from './saved-searches.service';
 import { Prisma } from '@prisma/client';
@@ -209,12 +232,29 @@ export class LibraryBootstrapService {
   }
 }
 
-export { CATALOG_FACADE, ItemsMapper };
-export type { ICatalogFacade, CatalogItemSummary };
+export {
+  CATALOG_FACADE,
+  CATALOG_READER_PORT,
+  CATALOG_WRITER_PORT,
+  CATALOG_COLLECTION_PORT,
+  CATALOG_TRASH_PORT,
+  CATALOG_IMPORT_EXPORT_PORT,
+  ItemsMapper,
+};
+export type {
+  ICatalogFacade,
+  ICatalogReaderPort,
+  ICatalogWriterPort,
+  ICatalogCollectionPort,
+  ICatalogTrashPort,
+  ICatalogImportExportPort,
+  CatalogItemSummary,
+};
 
 /**
  * Public Facade for Catalog Bounded Context.
- * Directly communicates with clean, modular services.
+ * Implements role-segregated Catalog ports (`ICatalogReaderPort`, `ICatalogWriterPort`,
+ * `ICatalogCollectionPort`, `ICatalogTrashPort`, `ICatalogImportExportPort`).
  */
 @Injectable()
 export class CatalogFacade implements ICatalogFacade {
@@ -231,6 +271,10 @@ export class CatalogFacade implements ICatalogFacade {
     @Optional()
     private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
+
+  // ===========================================================================
+  // 1. ICatalogReaderPort
+  // ===========================================================================
 
   async getItem<T = ItemDetail>(
     userId: string,
@@ -283,6 +327,126 @@ export class CatalogFacade implements ICatalogFacade {
     )) as unknown as T | null;
   }
 
+  async findByIds<T = ItemDetail>(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+    options?: { includeContent?: boolean },
+  ): Promise<T[]> {
+    const raw =
+      options?.includeContent !== undefined
+        ? await this.queryService.findByIds(userId, itemIds, projectId, options)
+        : await this.queryService.findByIds(userId, itemIds, projectId);
+    return ItemsMapper.toDomainList(raw, userId) as unknown as T[];
+  }
+
+  async getItemsByIds<T = ItemDetail>(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+    options?: { includeContent?: boolean },
+  ): Promise<T[]> {
+    return this.findByIds<T>(userId, itemIds, projectId, options);
+  }
+
+  async countItems(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<number> {
+    return this.queryService.count(userId, options || { view: 'all' });
+  }
+
+  async findMany<T = ItemDetail>(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<T[]> {
+    return (await this.queryService.findMany(
+      userId,
+      options || {},
+    )) as unknown as T[];
+  }
+
+  async listItems<T = ItemDetail>(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<{ items: T[]; meta?: Record<string, unknown> } | T[]> {
+    return (await this.queryService.listItems(
+      userId,
+      options || {},
+    )) as unknown as { items: T[]; meta?: Record<string, unknown> };
+  }
+
+  async validateItemType(type: string): Promise<boolean> {
+    return this.typesService.isValidItemType(type);
+  }
+
+  getPrimaryCreatorType(itemType: string): string {
+    return this.typesService.getPrimaryCreatorType(itemType);
+  }
+
+  getOrderedFields(itemType: string): ItemFieldDefinition[] {
+    return this.typesService.getOrderedFields(itemType);
+  }
+
+  async findQualityAuditItems<T = QualityAuditCandidateItem>(
+    userId: string,
+    limit?: number,
+    projectId?: string,
+  ): Promise<T[]> {
+    return (await this.queryService.findQualityAuditItems(
+      userId,
+      limit,
+      projectId,
+    )) as unknown as T[];
+  }
+
+  async findDuplicateCandidateItems<T = DuplicateCandidateItem>(
+    userId: string,
+    limit?: number,
+    projectId?: string,
+  ): Promise<T[]> {
+    return (await this.queryService.findDuplicateCandidateItems(
+      userId,
+      limit,
+      projectId,
+    )) as unknown as T[];
+  }
+
+  async listNotes(
+    userId: string,
+    itemId?: string,
+    projectId?: string,
+  ): Promise<NoteEntity[]> {
+    return this.notesService.listNotes(userId, itemId, projectId);
+  }
+
+  async findMatchCandidates(
+    scope: { userId?: string; projectId?: string | null },
+    criteria: {
+      doi?: string | null;
+      arxivId?: string | null;
+      pmid?: string | null;
+      isbn?: string | null;
+      year?: number | null;
+      titleWords?: string[];
+      titlePrefix?: string;
+    },
+  ) {
+    return this.queryService.findMatchCandidates(scope, criteria);
+  }
+
+  async findAttachmentByFileId(
+    fileId: string,
+    scope?: { userId?: string; projectId?: string },
+  ): Promise<{ id: string; itemId: string; metadata?: unknown } | null> {
+    if (!this.curationService) return null;
+    return this.curationService.findAttachmentByFileId(fileId, scope);
+  }
+
+  // ===========================================================================
+  // 2. ICatalogWriterPort
+  // ===========================================================================
+
   async createItem<T = ItemDetail, D = CreateItemData>(
     userId: string,
     data: D,
@@ -334,70 +498,12 @@ export class CatalogFacade implements ICatalogFacade {
     );
   }
 
-  async findByIds<T = ItemDetail>(
+  async bulkDeleteItems(
     userId: string,
     itemIds: string[],
     projectId?: string,
-    options?: { includeContent?: boolean },
-  ): Promise<T[]> {
-    const raw =
-      options?.includeContent !== undefined
-        ? await this.queryService.findByIds(userId, itemIds, projectId, options)
-        : await this.queryService.findByIds(userId, itemIds, projectId);
-    return ItemsMapper.toDomainList(raw, userId) as unknown as T[];
-  }
-
-  async countItems(
-    userId: string,
-    options?: Record<string, unknown>,
-  ): Promise<number> {
-    return this.queryService.count(userId, options || { view: 'all' });
-  }
-
-  async findMany<T = ItemDetail>(
-    userId: string,
-    options?: Record<string, unknown>,
-  ): Promise<T[]> {
-    return (await this.queryService.findMany(
-      userId,
-      options || {},
-    )) as unknown as T[];
-  }
-
-  async validateItemType(type: string): Promise<boolean> {
-    return this.typesService.isValidItemType(type);
-  }
-
-  getPrimaryCreatorType(itemType: string): string {
-    return this.typesService.getPrimaryCreatorType(itemType);
-  }
-
-  getOrderedFields(itemType: string): ItemFieldDefinition[] {
-    return this.typesService.getOrderedFields(itemType);
-  }
-
-  async findQualityAuditItems<T = QualityAuditCandidateItem>(
-    userId: string,
-    limit?: number,
-    projectId?: string,
-  ): Promise<T[]> {
-    return (await this.queryService.findQualityAuditItems(
-      userId,
-      limit,
-      projectId,
-    )) as unknown as T[];
-  }
-
-  async findDuplicateCandidateItems<T = DuplicateCandidateItem>(
-    userId: string,
-    limit?: number,
-    projectId?: string,
-  ): Promise<T[]> {
-    return (await this.queryService.findDuplicateCandidateItems(
-      userId,
-      limit,
-      projectId,
-    )) as unknown as T[];
+  ): Promise<unknown> {
+    return this.itemService.bulkTrash(userId, itemIds, projectId);
   }
 
   async mergeItems(
@@ -423,63 +529,8 @@ export class CatalogFacade implements ICatalogFacade {
     ]);
   }
 
-  async listNotes(
-    userId: string,
-    itemId?: string,
-    projectId?: string,
-  ): Promise<NoteEntity[]> {
-    return this.notesService.listNotes(userId, itemId, projectId);
-  }
-
   async createNote(userId: string, data: CreateNoteData): Promise<NoteEntity> {
     return this.notesService.createNote(userId, data);
-  }
-
-  async listCollections(
-    userId: string,
-    projectId?: string,
-  ): Promise<
-    Awaited<ReturnType<CollectionsService['getCollections']>>['collections']
-  > {
-    const res = await this.collectionsService.getCollections(userId, projectId);
-    return res.collections;
-  }
-
-  async assignItemsToCollection(
-    userId: string,
-    collectionId: string,
-    itemIds: string[],
-    projectId?: string,
-  ): Promise<unknown> {
-    return this.collectionsService.assignItemsToCollection(
-      userId,
-      collectionId,
-      { itemIds },
-      projectId,
-    );
-  }
-
-  async findMatchCandidates(
-    scope: { userId?: string; projectId?: string | null },
-    criteria: {
-      doi?: string | null;
-      arxivId?: string | null;
-      pmid?: string | null;
-      isbn?: string | null;
-      year?: number | null;
-      titleWords?: string[];
-      titlePrefix?: string;
-    },
-  ) {
-    return this.queryService.findMatchCandidates(scope, criteria);
-  }
-
-  async findAttachmentByFileId(
-    fileId: string,
-    scope?: { userId?: string; projectId?: string },
-  ): Promise<{ id: string; itemId: string; metadata?: unknown } | null> {
-    if (!this.curationService) return null;
-    return this.curationService.findAttachmentByFileId(fileId, scope);
   }
 
   async updateAttachmentProcessingStatus(
@@ -517,6 +568,58 @@ export class CatalogFacade implements ICatalogFacade {
   }): Promise<void> {
     if (!this.cacheCoordinator) return;
     await this.cacheCoordinator.invalidateForWrite(params);
+  }
+
+  // ===========================================================================
+  // 3. ICatalogCollectionPort
+  // ===========================================================================
+
+  async listCollections(
+    userId: string,
+    projectId?: string,
+  ): Promise<
+    Awaited<ReturnType<CollectionsService['getCollections']>>['collections']
+  > {
+    const res = await this.collectionsService.getCollections(userId, projectId);
+    return res.collections;
+  }
+
+  async getCollections(userId: string, projectId?: string): Promise<unknown> {
+    return this.collectionsService.getCollections(userId, projectId);
+  }
+
+  async assignItemsToCollection(
+    userId: string,
+    collectionId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<unknown> {
+    return this.collectionsService.assignItemsToCollection(
+      userId,
+      collectionId,
+      { itemIds },
+      projectId,
+    );
+  }
+
+  // ===========================================================================
+  // 4. ICatalogTrashPort
+  // ===========================================================================
+
+  async restoreItems(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<unknown> {
+    return this.itemService.bulkRestore(userId, itemIds, projectId);
+  }
+
+  async emptyTrash(userId: string, projectId?: string): Promise<unknown> {
+    return this.itemService.emptyTrash(userId, projectId);
+  }
+
+  async purgeOldTrash(retentionDays?: number, limit?: number): Promise<unknown> {
+    return this.itemService.purgeExpiredTrash(retentionDays, limit);
   }
 }
 

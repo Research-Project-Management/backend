@@ -71,29 +71,31 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         publishOutbox: jest.fn().mockResolvedValue(fromPartial({})),
       };
 
-      mockTx = fromPartial<Prisma.TransactionClient>({
-        $executeRaw: jest.fn().mockResolvedValue(1),
-        item: fromPartial({
-          update: jest
-            .fn()
-            .mockImplementation(({ where, data }) =>
-              Promise.resolve({ id: where.id, ...data, version: 2 }),
-            ),
-          findUnique: jest.fn().mockImplementation(({ where }) =>
-            Promise.resolve({
-              id: where.id,
-              title: 'Resolved Primary Title',
-              itemType: 'journalArticle',
-              version: 2,
-              contributors: [],
-              identifiers: [],
-              collectionItems: [],
-              itemTags: [],
-              notesList: [],
-              attachments: [],
-            }),
+      const itemTxMock = fromPartial({
+        update: jest
+          .fn()
+          .mockImplementation(({ where, data }) =>
+            Promise.resolve({ id: where.id, ...data, version: 2 }),
           ),
-        }),
+        findUnique: jest.fn().mockImplementation(({ where }) =>
+          Promise.resolve({
+            id: where.id,
+            title: 'Resolved Primary Title',
+            itemType: 'journalArticle',
+            version: 2,
+            contributors: [],
+            identifiers: [],
+            collectionItems: [],
+            itemTags: [],
+            notesList: [],
+            attachments: [],
+          }),
+        ),
+      });
+      mockTx = fromPartial<Prisma.TransactionClient & { item: unknown }>({
+        $executeRaw: jest.fn().mockResolvedValue(1),
+        item: itemTxMock,
+        libraryItem: itemTxMock as never,
         itemRelation: fromPartial({
           findMany: jest.fn().mockResolvedValue([]),
           delete: jest.fn().mockResolvedValue({}),

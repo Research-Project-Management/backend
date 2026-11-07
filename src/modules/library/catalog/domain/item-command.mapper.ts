@@ -2,7 +2,8 @@ import { Prisma, TagType } from '@prisma/client';
 import { generateCitationKey } from '@/modules/library/core/domain/identifier.domain';
 import {
   cleanAbstractText, getEffectiveBaseFieldMap, getEffectiveReverseBaseFieldMap,
-  getPrimaryCreatorRoleForType, getValidCreatorMapForType, harmonizeBibliographicFields, normalizeTags, sanitizeItemTitle,
+  getPrimaryCreatorRoleForType, getValidCreatorMapForType, harmonizeFields, isPreprintDoi,
+  normalizeTags, sanitizeItemTitle, resolveSpaceId,
 } from '@/modules/library/core';
 import {
   ITEM_COLUMN_METADATA_FIELDS, FIELD_ALIASES, BASE_FIELD_MAPPINGS, parseAccessDate, TagInput,
@@ -83,9 +84,7 @@ export function resolveCanonicalCommandFields(
         targetItemType === 'preprint' ? ['repository', 'archive', 'institution', 'publisher'] : [baseMap.publicationTitle, 'publicationTitle', 'journal', ...VENUE_BASE_FIELDS],
       );
       if (candidate !== undefined) return candidate;
-      return targetItemType === 'preprint' &&
-        Boolean(getVal('arxivId') || getVal('archiveId') || (typeof getVal('doi') === 'string' && /^10\.48550\/arxiv\./i.test(String(getVal('doi')))))
-        ? 'arXiv' : undefined;
+      return targetItemType === 'preprint' && Boolean(getVal('arxivId') || getVal('archiveId') || isPreprintDoi(getVal('doi'))) ? 'arXiv' : undefined;
     })(),
   );
   const rawPublisher = toNullableStr(
@@ -151,7 +150,7 @@ export function resolveCanonicalCommandFields(
       : candidateType && candidateType.toLowerCase() !== targetItemType.toLowerCase() ? candidateType : undefined;
 
   if (!(dataRecord as { isPreNormalized?: boolean }).isPreNormalized) {
-    const harmonizedProbe = harmonizeBibliographicFields(
+    const harmonizedProbe = harmonizeFields(
       { ...dataRecord, itemType: targetItemType, extraFields: { ...effectiveExtraFields, ...dataExtra } },
       { itemType: targetItemType, syncExtraFields: true },
     );
@@ -161,13 +160,7 @@ export function resolveCanonicalCommandFields(
       if (probeRec[hk] !== undefined && syncedExtra[hk] === undefined) syncedExtra[hk] = probeRec[hk];
     }
     for (const [k, v] of Object.entries(syncedExtra)) {
-      if (
-        v !== undefined &&
-        effectiveExtraFields[k] === undefined &&
-        !IGNORED_SYSTEM_KEYS.has(k) &&
-        !ITEM_COLUMN_METADATA_FIELDS.has(k) &&
-        !FIELD_ALIASES[k]
-      ) {
+      if (v !== undefined && effectiveExtraFields[k] === undefined && !IGNORED_SYSTEM_KEYS.has(k) && !ITEM_COLUMN_METADATA_FIELDS.has(k) && !FIELD_ALIASES[k]) {
         effectiveExtraFields[k] = v;
       }
     }
@@ -454,7 +447,7 @@ export function resolveCreateDefaultTagType(data: CreateItemData): TagType {
 export function buildCommandCreateInput(
   userId: string, data: CreateItemData, options?: PreResolvedCreateRelations, projectId?: string,
 ): {
-  createData: Prisma.ItemUncheckedCreateInput;
+  createData: Prisma.LibraryItemUncheckedCreateInput;
   resolvedFileId: string | null;
   identifiersToCreate: Array<{ type: string; value: string; canonicalUri: string | null }>;
   rawCitationKey: string | null;
@@ -528,11 +521,16 @@ export function buildCommandCreateInput(
     options?.disambiguatedCitationKey !== undefined ? options.disambiguatedCitationKey : rawCitationKey;
 
   const resolvedCreatedById =
-    data.uploadedById && isUuid(data.uploadedById) ? data.uploadedById : userId && isUuid(userId) ? userId : null;
+    data.uploadedById && isUuid(data.uploadedById)
+      ? data.uploadedById
+      : userId && isUuid(userId)
+        ? userId
+        : userId;
+  const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
 
   const createData = {
-    userId,
-    ...(resolvedCreatedById ? { createdById: resolvedCreatedById } : {}),
+    spaceId,
+    createdById: resolvedCreatedById,
     title: resolvedCreateTitle, itemType: resolvedItemType,
     ...(resolvedPubTitle ? { publicationTitle: resolvedPubTitle } : {}),
     year: resolvedCreateYear,
@@ -546,7 +544,7 @@ export function buildCommandCreateInput(
     ...(data.isRetracted !== undefined || (metadataPayload as Record<string, unknown>)?.isRetracted !== undefined
       ? { isRetracted: Boolean(data.isRetracted ?? (metadataPayload as Record<string, unknown>)?.isRetracted) }
       : {}),
-    projectId: effectiveProjectId, version: 1,
+    version: 1,
     ...(uniqueCollectionIds.length > 0
       ? { collectionItems: { create: uniqueCollectionIds.map((cid, idx) => ({ collectionId: cid, sortOrder: idx })) } }
       : {}),
@@ -555,7 +553,7 @@ export function buildCommandCreateInput(
     ...(attachmentsToCreate.length > 0 ? { attachments: { create: attachmentsToCreate } } : {}),
     ...(notes.length > 0 ? { notesList: { create: notes } } : {}),
     ...(identifiersToCreate.length > 0 ? { identifiers: { create: identifiersToCreate } } : {}),
-  } as unknown as Prisma.ItemUncheckedCreateInput;
+  } as unknown as Prisma.LibraryItemUncheckedCreateInput;
 
   return { createData, resolvedFileId, identifiersToCreate, rawCitationKey };
 }
@@ -563,7 +561,7 @@ export function buildCommandCreateInput(
 export function buildCommandUpdateInput(
   userId: string, existing: ItemDetail | Record<string, unknown>, data: UpdateItemData, options?: { skipVersionIncrement?: boolean },
 ): {
-  updateData: Prisma.ItemUpdateInput;
+  updateData: Prisma.LibraryItemUpdateInput;
   cleanIds: ReturnType<typeof normalizeItemIdentifiers>;
   rawTags?: (TagInput | null | undefined)[];
 } {
@@ -682,7 +680,7 @@ export function buildCommandUpdateInput(
   const collectionItemsPatch = buildCollectionItemsUpdatePatch(data);
 
   const resolvedUpdatedById = userId && isUuid(userId) ? userId : undefined;
-  const updateData: Prisma.ItemUpdateInput = {
+  const updateData: Prisma.LibraryItemUpdateInput = {
     ...(resolvedUpdatedById ? { updatedById: resolvedUpdatedById } : {}),
     title: canonical.rawTitle !== undefined ? sanitizeItemTitle(canonical.rawTitle) || (existing.title as string) : (existing.title as string),
     itemType: targetItemType,

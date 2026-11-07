@@ -356,7 +356,7 @@ export class DuplicateDetectorService {
                 new Set([...existingDismissed, ...peerIds]),
               );
 
-              const updated = await tx.item.update({
+              const updated = await tx.libraryItem.update({
                 where: { id: item.id },
                 data: {
                   metadata: meta as Prisma.InputJsonValue,
@@ -390,12 +390,15 @@ export class DuplicateDetectorService {
                 entityId: item.id,
                 action: 'update' as const,
                 version: updated.version,
-                data: {
-                  ...itemRecord,
-                  ...domainMapped,
-                  metadata: (updatedRecord.metadata ??
-                    domainMapped.metadata) as Record<string, unknown>,
-                },
+                data: ItemsMapper.stripPersonalOverlayForSharedScope(
+                  {
+                    ...itemRecord,
+                    ...domainMapped,
+                    metadata: (updatedRecord.metadata ??
+                      domainMapped.metadata) as Record<string, unknown>,
+                  },
+                  effectiveProjectId,
+                ),
               };
             });
             const outboxEvents = updatedResults.map(

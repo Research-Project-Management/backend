@@ -53,8 +53,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       ).toBe(false);
 
       expect(userSpec.toPrismaWhere()).toEqual({
-        userId: 'user-1',
-        projectId: null,
+        spaceId: 'user-1',
       });
 
       const projectSpec = new ScopeSpecification('user-1', 'proj-1');
@@ -62,7 +61,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
         projectSpec.isSatisfiedBy({ ...sampleItem, projectId: 'proj-1' }),
       ).toBe(true);
       expect(projectSpec.toPrismaWhere()).toEqual({
-        projectId: 'proj-1',
+        spaceId: 'proj-1',
       });
     });
 
@@ -202,14 +201,18 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
     let mockCache: Partial<RedisCacheService>;
 
     beforeEach(() => {
+      const itemMock = {
+        findMany: jest.fn(),
+        groupBy: jest.fn(),
+      };
+      const itemTagMock = {
+        findMany: jest.fn(),
+      };
       mockPrisma = {
-        item: {
-          findMany: jest.fn(),
-          groupBy: jest.fn(),
-        },
-        itemTag: {
-          findMany: jest.fn(),
-        },
+        item: itemMock,
+        libraryItem: itemMock,
+        itemTag: itemTagMock,
+        libraryItemTag: itemTagMock,
       };
 
       mockCache = {

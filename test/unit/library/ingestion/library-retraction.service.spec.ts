@@ -97,16 +97,18 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       groupBy: jest.fn(async () => [{ source: 'retraction_watch', _count: 2 }]),
     };
 
+    const itemMock = {
+      findFirst: jest.fn(),
+      findUnique: jest.fn().mockResolvedValue({ metadata: {} }),
+      findMany: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn().mockResolvedValue(10),
+    };
     mockPrisma = {
       retraction: mockRetractionOps,
       retractionRecord: mockRetractionOps,
-      item: {
-        findFirst: jest.fn(),
-        findUnique: jest.fn().mockResolvedValue({ metadata: {} }),
-        findMany: jest.fn(),
-        update: jest.fn(),
-        count: jest.fn().mockResolvedValue(10),
-      },
+      item: itemMock,
+      libraryItem: itemMock,
     };
 
     repo = new RetractionRepository(mockPrisma);

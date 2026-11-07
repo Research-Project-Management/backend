@@ -52,10 +52,11 @@ export class CitationController {
         ? Math.min(parsedLimit, 200)
         : 30;
     const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const scopeId = effectiveProjectId ? `proj:${effectiveProjectId}` : userId;
     const styles = await this.citationService.searchStyles(
       query || '',
       numLimit,
-      effectiveProjectId || userId,
+      scopeId,
     );
     return {
       total: styles.length,
@@ -79,10 +80,12 @@ export class CitationController {
     @Param('projectId') projectId?: string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const scopeId = effectiveProjectId ? `proj:${effectiveProjectId}` : userId;
     return this.citationService.registerCustomStyle(
       xml,
       title,
-      effectiveProjectId || userId,
+      scopeId,
+      userId,
     );
   }
 

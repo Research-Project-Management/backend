@@ -126,7 +126,18 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
           const chunk = orphanedRuns.slice(i, i + CHUNK_SIZE);
           await Promise.all(
             chunk.map((run) => {
-              const targetId = run.projectId || run.userId || '';
+              const runRec = run as {
+                spaceId?: string;
+                createdById?: string;
+                projectId?: string | null;
+                userId?: string;
+              };
+              const targetId =
+                runRec.spaceId ||
+                runRec.projectId ||
+                runRec.userId ||
+                runRec.createdById ||
+                '';
               if (typeof this.repo.transitionRunStatusAtomic === 'function') {
                 return this.repo.transitionRunStatusAtomic(
                   run.id,

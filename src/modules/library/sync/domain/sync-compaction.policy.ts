@@ -67,13 +67,17 @@ export function compactLibraryChanges<T extends CompactableChange>(
 
     if (currAction === 'DELETE') {
       if (prevAction === 'CREATE') {
-        const prevTitle =
+        const prevData =
           existing.data && typeof existing.data === 'object'
-            ? (existing.data as { title?: unknown }).title
+            ? (existing.data as { restored?: unknown; isRestored?: unknown; title?: unknown })
             : undefined;
         const isRestoredLifecycle =
-          typeof prevTitle === 'string' &&
-          prevTitle.toLowerCase().includes('restored');
+          prevData?.restored === true ||
+          prevData?.isRestored === true ||
+          (typeof existing.version === 'number' && existing.version > 1) ||
+          (typeof prevData?.title === 'string' &&
+            /^restored\b/i.test(prevData.title.trim()) &&
+            /\bdeleted\b/i.test(prevData.title));
         if (!isRestoredLifecycle) {
           entityMap.delete(key);
           continue;

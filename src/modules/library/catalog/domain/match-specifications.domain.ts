@@ -31,6 +31,9 @@ interface MatchedCandidateRow {
   id: string;
   title: string;
   doi?: string | null;
+  arxivId?: string | null;
+  pmid?: string | null;
+  isbn?: string | null;
   metadata?: unknown;
   identifiers?: MatchedCandidateIdentifierRow[];
 }
@@ -38,7 +41,7 @@ interface MatchedCandidateRow {
 interface IExactMatchSpecification {
   readonly reason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
   isApplicable(input: ExactMatchCandidateInput): boolean;
-  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.ItemWhereInput[];
+  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.LibraryItemWhereInput[];
   evaluateMatchedItem(
     input: ExactMatchCandidateInput,
     match: MatchedCandidateRow,
@@ -102,21 +105,14 @@ function getIdentifierValue(
   return '';
 }
 
-function hasAnyPopulatedIdentifier(match: MatchedCandidateRow): boolean {
-  const meta = asMetaRecord(match.metadata);
-  const idents = Array.isArray(match.identifiers) ? match.identifiers : [];
-  const metaIdents = Array.isArray(meta.identifiers) ? meta.identifiers : [];
-  const metaArxiv = String(
-    meta.arxivId || meta.archiveId || meta.archiveID || '',
-  ).trim();
-  return Boolean(
-    (typeof match.doi === 'string' && match.doi.trim()) ||
-    meta.doi ||
-    metaArxiv ||
-    meta.pmid ||
-    meta.isbn ||
-    idents.length > 0 ||
-    metaIdents.length > 0,
+function isUnprojectedIdentifierStub(match: MatchedCandidateRow): boolean {
+  return (
+    match.doi === undefined &&
+    match.arxivId === undefined &&
+    match.pmid === undefined &&
+    match.isbn === undefined &&
+    match.metadata === undefined &&
+    match.identifiers === undefined
   );
 }
 
@@ -127,7 +123,7 @@ class DoiExactMatchSpecification implements IExactMatchSpecification {
     return Boolean(input.cleanDoi && input.cleanDoi.trim().length > 0);
   }
 
-  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.ItemWhereInput[] {
+  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.LibraryItemWhereInput[] {
     if (!this.isApplicable(input) || !input.cleanDoi) return [];
     const cleanDoi = input.cleanDoi.trim().toLowerCase();
     return [
@@ -188,11 +184,12 @@ class ArxivExactMatchSpecification implements IExactMatchSpecification {
     return Boolean(input.cleanArxiv && input.cleanArxiv.trim().length > 0);
   }
 
-  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.ItemWhereInput[] {
+  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.LibraryItemWhereInput[] {
     if (!this.isApplicable(input) || !input.cleanArxiv) return [];
     const cleanArxiv = input.cleanArxiv.trim();
     const baseArxiv = stripArxivVersion(cleanArxiv);
     return [
+      { arxivId: { in: [cleanArxiv, baseArxiv], mode: 'insensitive' } },
       { metadata: { path: ['arxivId'], equals: cleanArxiv } },
       { metadata: { path: ['arxivId'], equals: baseArxiv } },
       { metadata: { path: ['arxiv'], equals: cleanArxiv } },
@@ -219,6 +216,10 @@ class ArxivExactMatchSpecification implements IExactMatchSpecification {
     const cleanArxiv = input.cleanArxiv.trim();
     const baseArxiv = stripArxivVersion(cleanArxiv);
     const meta = asMetaRecord(match.metadata);
+    const colArxiv = String(match.arxivId || '')
+      .replace(/^arxiv:\s*/i, '')
+      .trim()
+      .toLowerCase();
     const metaArxiv = String(
       meta.arxivId || meta.archiveId || meta.archiveID || '',
     )
@@ -234,6 +235,9 @@ class ArxivExactMatchSpecification implements IExactMatchSpecification {
     const baseArxivLower = baseArxiv.toLowerCase();
 
     const isArxivMatch = Boolean(
+      colArxiv === cleanArxivLower ||
+      colArxiv === baseArxivLower ||
+      (colArxiv && stripArxivVersion(colArxiv) === baseArxivLower) ||
       metaArxiv === cleanArxivLower ||
       metaArxiv === baseArxivLower ||
       (metaArxiv && stripArxivVersion(metaArxiv) === baseArxivLower) ||
@@ -270,10 +274,11 @@ class PmidExactMatchSpecification implements IExactMatchSpecification {
     return Boolean(input.cleanPmid && input.cleanPmid.trim().length > 0);
   }
 
-  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.ItemWhereInput[] {
+  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.LibraryItemWhereInput[] {
     if (!this.isApplicable(input) || !input.cleanPmid) return [];
     const cleanPmid = input.cleanPmid.trim();
     return [
+      { pmid: cleanPmid },
       { metadata: { path: ['pmid'], equals: cleanPmid } },
       {
         identifiers: {
@@ -295,7 +300,9 @@ class PmidExactMatchSpecification implements IExactMatchSpecification {
     const meta = asMetaRecord(match.metadata);
     const identPmid = getIdentifierValue(match, 'pmid');
     const isPmidMatch = Boolean(
-      String(meta.pmid || '').trim() === cleanPmid || identPmid === cleanPmid,
+      String(match.pmid || '').trim() === cleanPmid ||
+      String(meta.pmid || '').trim() === cleanPmid ||
+      identPmid === cleanPmid,
     );
 
     if (isPmidMatch) {
@@ -326,10 +333,11 @@ class IsbnExactMatchSpecification implements IExactMatchSpecification {
     return Boolean(input.cleanIsbn && input.cleanIsbn.trim().length > 0);
   }
 
-  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.ItemWhereInput[] {
+  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.LibraryItemWhereInput[] {
     if (!this.isApplicable(input) || !input.cleanIsbn) return [];
     const cleanIsbn = input.cleanIsbn.replace(/[-\s]/g, '').trim();
     return [
+      { isbn: { equals: cleanIsbn, mode: 'insensitive' } },
       { metadata: { path: ['isbn'], equals: cleanIsbn } },
       {
         identifiers: {
@@ -351,9 +359,13 @@ class IsbnExactMatchSpecification implements IExactMatchSpecification {
     const meta = asMetaRecord(match.metadata);
     const identIsbn = getIdentifierValue(match, 'isbn').replace(/[-\s]/g, '');
     const isIsbnMatch = Boolean(
+      String(match.isbn || '')
+        .replace(/[-\s]/g, '')
+        .trim() === cleanIsbn ||
       String(meta.isbn || '')
         .replace(/[-\s]/g, '')
-        .trim() === cleanIsbn || identIsbn === cleanIsbn,
+        .trim() === cleanIsbn ||
+      identIsbn === cleanIsbn,
     );
 
     if (isIsbnMatch) {
@@ -414,8 +426,8 @@ export function normalizeExactMatchCandidateInput(criteria: {
 
 export function buildExactMatchOrClauses(
   input: ExactMatchCandidateInput,
-): Prisma.ItemWhereInput[] {
-  const clauses: Prisma.ItemWhereInput[] = [];
+): Prisma.LibraryItemWhereInput[] {
+  const clauses: Prisma.LibraryItemWhereInput[] = [];
   for (const spec of EXACT_MATCH_SPECIFICATIONS) {
     if (spec.isApplicable(input)) {
       clauses.push(...spec.toPrismaOrClauses(input));
@@ -446,7 +458,7 @@ function evaluateExactMatchSpecifications(
     }
   }
 
-  if (!hasAnyPopulatedIdentifier(match)) {
+  if (isUnprojectedIdentifierStub(match)) {
     for (const spec of EXACT_MATCH_SPECIFICATIONS) {
       if (!spec.isApplicable(input)) continue;
       const fallbackEvidence = spec.buildFallbackEvidence(input);

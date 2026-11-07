@@ -65,6 +65,12 @@ export function sanitizeUuidSearchOptions(
 
 export async function resolveSearchCollectionOptions(
   client: {
+    libraryCollection?: {
+      findMany?: (args: {
+        where: Record<string, unknown>;
+        select: { id: true; parentId: true };
+      }) => Promise<Array<{ id: string; parentId: string | null }>>;
+    };
     collection?: {
       findMany?: (args: {
         where: Record<string, unknown>;
@@ -75,13 +81,14 @@ export async function resolveSearchCollectionOptions(
   userId: string,
   options: SearchOptions,
 ): Promise<SearchOptions> {
+  const collectionDelegate = client?.libraryCollection ?? client?.collection;
   if (
     !options.collectionId ||
     !isValidUuid(options.collectionId) ||
     (options.collectionIds && options.collectionIds.length > 0) ||
     options.includeSubcollections === false ||
     options.recursive === false ||
-    typeof client?.collection?.findMany !== 'function'
+    typeof collectionDelegate?.findMany !== 'function'
   ) {
     return options;
   }
@@ -90,12 +97,10 @@ export async function resolveSearchCollectionOptions(
     const hasProject =
       isProjectScopeId(options.projectId) &&
       isValidUuid(options.projectId.trim());
-    const collections = await client.collection.findMany({
+    const collections = await collectionDelegate.findMany({
       where: {
         deletedAt: null,
-        ...(hasProject
-          ? { projectId: options.projectId!.trim() }
-          : { userId, projectId: null }),
+        spaceId: hasProject ? options.projectId!.trim() : userId,
       },
       select: { id: true, parentId: true },
     });
@@ -180,6 +185,12 @@ export function buildSearchFacetCacheKey(
   const scopeKey = isProjectScopeId(sanitized.projectId)
     ? `proj:${sanitized.projectId}`
     : `user:${userId}`;
+  const hasPerUserFilter = Boolean(
+    sanitized.view === 'starred' ||
+      sanitized.view === 'my-publications' ||
+      sanitized.onlyFlagged ||
+      sanitized.readStatus,
+  );
   const filterHash = createHash('sha256')
     .update(
       JSON.stringify({
@@ -187,6 +198,9 @@ export function buildSearchFacetCacheKey(
         searchMode: sanitized.searchMode || '',
         view: sanitized.view || '',
         projectId: sanitized.projectId,
+        ...(isProjectScopeId(sanitized.projectId) && hasPerUserFilter
+          ? { userId }
+          : {}),
         collectionId: sanitized.collectionId,
         targetCollectionIds: Array.isArray(sanitized.targetCollectionIds)
           ? [...sanitized.targetCollectionIds].sort()
@@ -279,7 +293,7 @@ function buildFtsWhereClause(params: {
     textOrClauses.push(
       `${titleCreatorFtsVector} @@ ${tsQuerySqlExpr}`,
       `LOWER(COALESCE(title, '')) LIKE ('%' || LOWER($3) || '%')`,
-      `EXISTS (SELECT 1 FROM "contributors" c WHERE c.item_id = "items".id AND (LOWER(COALESCE(c.full_name, '')) LIKE ('%' || LOWER($3) || '%') OR LOWER(COALESCE(c.last_name, '')) LIKE ('%' || LOWER($3) || '%')))`,
+      `EXISTS (SELECT 1 FROM "contributors" c WHERE c.item_id = "library_items".id AND (LOWER(COALESCE(c.full_name, '')) LIKE ('%' || LOWER($3) || '%') OR LOWER(COALESCE(c.last_name, '')) LIKE ('%' || LOWER($3) || '%')))`,
     );
     if (/^\d{4}$/.test(rawQuery)) {
       const yearIdx = paramIdx++;
@@ -291,14 +305,16 @@ function buildFtsWhereClause(params: {
       `${ITEM_FTS_VECTOR_SQL} @@ ${tsQuerySqlExpr}`,
       `LOWER(COALESCE(title, '')) LIKE ('%' || LOWER($3) || '%')`,
       `LOWER(COALESCE(citation_key, '')) LIKE ('%' || LOWER($3) || '%')`,
-      `EXISTS (SELECT 1 FROM "contributors" c WHERE c.item_id = "items".id AND (LOWER(COALESCE(c.full_name, '')) LIKE ('%' || LOWER($3) || '%') OR LOWER(COALESCE(c.last_name, '')) LIKE ('%' || LOWER($3) || '%')))`,
-      `EXISTS (SELECT 1 FROM "item_tags" it JOIN "tags" t ON t.id = it.tag_id WHERE it.item_id = "items".id AND LOWER(t.name) LIKE ('%' || LOWER($3) || '%'))`,
+      `EXISTS (SELECT 1 FROM "contributors" c WHERE c.item_id = "library_items".id AND (LOWER(COALESCE(c.full_name, '')) LIKE ('%' || LOWER($3) || '%') OR LOWER(COALESCE(c.last_name, '')) LIKE ('%' || LOWER($3) || '%')))`,
+      `EXISTS (SELECT 1 FROM "library_item_tags" it JOIN "library_tags" t ON t.id = it.tag_id WHERE it.item_id = "library_items".id AND LOWER(t.name) LIKE ('%' || LOWER($3) || '%'))`,
     );
 
     if (searchMode === 'everything') {
       textOrClauses.push(
-        `EXISTS (SELECT 1 FROM "notes" n WHERE n.item_id = "items".id AND n.deleted_at IS NULL AND (LOWER(COALESCE(n.title, '')) LIKE ('%' || LOWER($3) || '%') OR LOWER(COALESCE(n.content_md, '')) LIKE ('%' || LOWER($3) || '%')))`,
-        `EXISTS (SELECT 1 FROM "attachments" a JOIN "full_text_indexes" fti ON fti.attachment_id = a.id WHERE a.item_id = "items".id AND a.deleted_at IS NULL AND (COALESCE(fti.search_vector, to_tsvector('english', COALESCE(fti.text_content, ''))) @@ ${tsQuerySqlExpr} OR fti.text_content ILIKE ('%' || $3 || '%')))`,
+        `EXISTS (SELECT 1 FROM "library_notes" n WHERE n.item_id = "library_items".id AND n.deleted_at IS NULL AND (LOWER(COALESCE(n.title, '')) LIKE ('%' || LOWER($3) || '%') OR LOWER(COALESCE(n.content_md, '')) LIKE ('%' || LOWER($3) || '%')))`,
+        `EXISTS (SELECT 1 FROM "attachments" a WHERE a.item_id = "library_items".id AND a.deleted_at IS NULL AND LOWER(COALESCE(a.filename, '')) LIKE ('%' || LOWER($3) || '%'))`,
+        `EXISTS (SELECT 1 FROM "attachments" a JOIN "annotations" ann ON ann.attachment_id = a.id WHERE a.item_id = "library_items".id AND a.deleted_at IS NULL AND ann.deleted_at IS NULL AND (LOWER(COALESCE(ann.quote_text, '')) LIKE ('%' || LOWER($3) || '%') OR LOWER(COALESCE(ann.comment, '')) LIKE ('%' || LOWER($3) || '%')))`,
+        `EXISTS (SELECT 1 FROM "attachments" a JOIN "full_text_indexes" fti ON fti.attachment_id = a.id WHERE a.item_id = "library_items".id AND a.deleted_at IS NULL AND (COALESCE(fti.search_vector, to_tsvector('english', COALESCE(fti.text_content, ''))) @@ ${tsQuerySqlExpr} OR fti.text_content ILIKE ('%' || $3 || '%')))`,
       );
     }
 
@@ -313,11 +329,11 @@ function buildFtsWhereClause(params: {
         const typeIdx = paramIdx++;
         sqlParams.push(identType);
         textOrClauses.push(
-          `(${jsonOrColExpr} LIKE $${pIdx} OR EXISTS (SELECT 1 FROM "item_identifiers" ii WHERE ii."item_id" = "items"."id" AND LOWER(ii."type") = $${typeIdx} AND LOWER(ii."value") LIKE LOWER($${pIdx})))`,
+          `(${jsonOrColExpr} LIKE $${pIdx} OR EXISTS (SELECT 1 FROM "item_identifiers" ii WHERE ii."item_id" = "library_items"."id" AND LOWER(ii."type") = $${typeIdx} AND LOWER(ii."value") LIKE LOWER($${pIdx})))`,
         );
       } else {
         textOrClauses.push(
-          `(${jsonOrColExpr} LIKE $${pIdx} OR EXISTS (SELECT 1 FROM "item_identifiers" ii WHERE ii."item_id" = "items"."id" AND LOWER(ii."value") LIKE LOWER($${pIdx})))`,
+          `(${jsonOrColExpr} LIKE $${pIdx} OR EXISTS (SELECT 1 FROM "item_identifiers" ii WHERE ii."item_id" = "library_items"."id" AND LOWER(ii."value") LIKE LOWER($${pIdx})))`,
         );
       }
     };
@@ -368,9 +384,7 @@ function buildFtsWhereClause(params: {
 
   const view = options.view ?? 'all';
   const baseFilters: string[] = [
-    hasProject
-      ? `project_id = $1::uuid`
-      : `user_id = $1::uuid AND project_id IS NULL`,
+    `space_id = $1::uuid`,
     view === 'trash' ? `deleted_at IS NOT NULL` : `deleted_at IS NULL`,
     `(${textOrClauses.join(' OR ')})`,
   ];
@@ -389,20 +403,20 @@ function buildFtsWhereClause(params: {
 
   if (view === 'unfiled') {
     baseFilters.push(
-      `NOT EXISTS (SELECT 1 FROM "collection_items" ci JOIN "collections" c ON c.id = ci.collection_id AND c.deleted_at IS NULL WHERE ci.item_id = "items".id)`,
+      `NOT EXISTS (SELECT 1 FROM "library_collection_items" ci JOIN "library_collections" c ON c.id = ci.collection_id AND c.deleted_at IS NULL WHERE ci.item_id = "library_items".id)`,
     );
   } else if (view === 'starred') {
     const uRef = ensureUserParamRef();
     if (uRef) {
       baseFilters.push(
-        `EXISTS (SELECT 1 FROM "states" s WHERE s.item_id = "items".id AND s.user_id = ${uRef} AND s.is_starred = true)`,
+        `EXISTS (SELECT 1 FROM "library_item_states" s WHERE s.item_id = "library_items".id AND s.user_id = ${uRef} AND s.is_starred = true)`,
       );
     }
   } else if (view === 'my-publications' || view === 'publications') {
     const uRef = ensureUserParamRef();
     if (uRef) {
       baseFilters.push(
-        `(COALESCE(metadata->>'isMyPublication', 'false') = 'true' OR EXISTS (SELECT 1 FROM "publications" p WHERE p.item_id = "items".id AND p.user_id = ${uRef}))`,
+        `(COALESCE(metadata->>'isMyPublication', 'false') = 'true' OR EXISTS (SELECT 1 FROM "publications" p WHERE p.item_id = "library_items".id AND p.user_id = ${uRef}))`,
       );
     } else {
       baseFilters.push(
@@ -466,7 +480,7 @@ function buildFtsWhereClause(params: {
     const uRef = ensureUserParamRef();
     if (uRef) {
       baseFilters.push(
-        `EXISTS (SELECT 1 FROM "states" s WHERE s.item_id = "items".id AND s.user_id = ${uRef} AND s.is_starred = true)`,
+        `EXISTS (SELECT 1 FROM "library_item_states" s WHERE s.item_id = "library_items".id AND s.user_id = ${uRef} AND s.is_starred = true)`,
       );
     }
   }
@@ -482,22 +496,22 @@ function buildFtsWhereClause(params: {
       if (statuses.includes('unread')) {
         if (statuses.length === 1) {
           baseFilters.push(
-            `(NOT EXISTS (SELECT 1 FROM "states" s WHERE s.item_id = "items".id AND s.user_id = ${uRef}) OR EXISTS (SELECT 1 FROM "states" s WHERE s.item_id = "items".id AND s.user_id = ${uRef} AND s.read_status::text = 'unread'))`,
+            `(NOT EXISTS (SELECT 1 FROM "library_item_states" s WHERE s.item_id = "library_items".id AND s.user_id = ${uRef}) OR EXISTS (SELECT 1 FROM "library_item_states" s WHERE s.item_id = "library_items".id AND s.user_id = ${uRef} AND s.read_status::text = 'unread'))`,
           );
         } else {
           baseFilters.push(
-            `(NOT EXISTS (SELECT 1 FROM "states" s WHERE s.item_id = "items".id AND s.user_id = ${uRef}) OR EXISTS (SELECT 1 FROM "states" s WHERE s.item_id = "items".id AND s.user_id = ${uRef} AND s.read_status::text = ANY($${paramIdx++}::text[])))`,
+            `(NOT EXISTS (SELECT 1 FROM "library_item_states" s WHERE s.item_id = "library_items".id AND s.user_id = ${uRef}) OR EXISTS (SELECT 1 FROM "library_item_states" s WHERE s.item_id = "library_items".id AND s.user_id = ${uRef} AND s.read_status::text = ANY($${paramIdx++}::text[])))`,
           );
           sqlParams.push(statuses);
         }
       } else if (statuses.length === 1) {
         baseFilters.push(
-          `EXISTS (SELECT 1 FROM "states" s WHERE s.item_id = "items".id AND s.user_id = ${uRef} AND s.read_status::text = $${paramIdx++})`,
+          `EXISTS (SELECT 1 FROM "library_item_states" s WHERE s.item_id = "library_items".id AND s.user_id = ${uRef} AND s.read_status::text = $${paramIdx++})`,
         );
         sqlParams.push(statuses[0]);
       } else {
         baseFilters.push(
-          `EXISTS (SELECT 1 FROM "states" s WHERE s.item_id = "items".id AND s.user_id = ${uRef} AND s.read_status::text = ANY($${paramIdx++}::text[]))`,
+          `EXISTS (SELECT 1 FROM "library_item_states" s WHERE s.item_id = "library_items".id AND s.user_id = ${uRef} AND s.read_status::text = ANY($${paramIdx++}::text[]))`,
         );
         sqlParams.push(statuses);
       }
@@ -513,12 +527,12 @@ function buildFtsWhereClause(params: {
   const validCollectionIds = rawCollectionIds.filter(isValidUuid);
   if (validCollectionIds.length > 1) {
     baseFilters.push(
-      `EXISTS (SELECT 1 FROM "collection_items" ci JOIN "collections" c ON c.id = ci.collection_id AND c.deleted_at IS NULL WHERE ci.item_id = "items".id AND ci.collection_id = ANY($${paramIdx++}::uuid[]))`,
+      `EXISTS (SELECT 1 FROM "library_collection_items" ci JOIN "library_collections" c ON c.id = ci.collection_id AND c.deleted_at IS NULL WHERE ci.item_id = "library_items".id AND ci.collection_id = ANY($${paramIdx++}::uuid[]))`,
     );
     sqlParams.push(validCollectionIds);
   } else if (validCollectionIds.length === 1) {
     baseFilters.push(
-      `EXISTS (SELECT 1 FROM "collection_items" ci JOIN "collections" c ON c.id = ci.collection_id AND c.deleted_at IS NULL WHERE ci.item_id = "items".id AND ci.collection_id = $${paramIdx++}::uuid)`,
+      `EXISTS (SELECT 1 FROM "library_collection_items" ci JOIN "library_collections" c ON c.id = ci.collection_id AND c.deleted_at IS NULL WHERE ci.item_id = "library_items".id AND ci.collection_id = $${paramIdx++}::uuid)`,
     );
     sqlParams.push(validCollectionIds[0]);
   } else if (options.collectionId) {
@@ -526,7 +540,7 @@ function buildFtsWhereClause(params: {
       return null;
     }
     baseFilters.push(
-      `EXISTS (SELECT 1 FROM "collection_items" ci JOIN "collections" c ON c.id = ci.collection_id AND c.deleted_at IS NULL WHERE ci.item_id = "items".id AND ci.collection_id = $${paramIdx++}::uuid)`,
+      `EXISTS (SELECT 1 FROM "library_collection_items" ci JOIN "library_collections" c ON c.id = ci.collection_id AND c.deleted_at IS NULL WHERE ci.item_id = "library_items".id AND ci.collection_id = $${paramIdx++}::uuid)`,
     );
     sqlParams.push(options.collectionId);
   }
@@ -535,7 +549,7 @@ function buildFtsWhereClause(params: {
       return null;
     }
     baseFilters.push(
-      `EXISTS (SELECT 1 FROM "item_tags" it WHERE it.item_id = "items".id AND it.tag_id = $${paramIdx++}::uuid)`,
+      `EXISTS (SELECT 1 FROM "library_item_tags" it WHERE it.item_id = "library_items".id AND it.tag_id = $${paramIdx++}::uuid)`,
     );
     sqlParams.push(options.tagId);
   }
@@ -546,12 +560,12 @@ function buildFtsWhereClause(params: {
       .filter(Boolean);
     if (tagNames.length === 1) {
       baseFilters.push(
-        `EXISTS (SELECT 1 FROM "item_tags" it JOIN "tags" t ON t.id = it.tag_id WHERE it.item_id = "items".id AND LOWER(t.name) = $${paramIdx++})`,
+        `EXISTS (SELECT 1 FROM "library_item_tags" it JOIN "library_tags" t ON t.id = it.tag_id WHERE it.item_id = "library_items".id AND LOWER(t.name) = $${paramIdx++})`,
       );
       sqlParams.push(tagNames[0]);
     } else if (tagNames.length > 1) {
       baseFilters.push(
-        `EXISTS (SELECT 1 FROM "item_tags" it JOIN "tags" t ON t.id = it.tag_id WHERE it.item_id = "items".id AND LOWER(t.name) = ANY($${paramIdx++}::text[]))`,
+        `EXISTS (SELECT 1 FROM "library_item_tags" it JOIN "library_tags" t ON t.id = it.tag_id WHERE it.item_id = "library_items".id AND LOWER(t.name) = ANY($${paramIdx++}::text[]))`,
       );
       sqlParams.push(tagNames);
     }
@@ -586,7 +600,7 @@ export function buildSearchFtsMatchingIdsSql(params: {
   });
   if (!builtWhere) return null;
 
-  const sql = `SELECT id FROM "items" WHERE ${builtWhere.whereClause} LIMIT ${Math.max(1, Math.floor(limit))}`;
+  const sql = `SELECT id FROM "library_items" WHERE ${builtWhere.whereClause} LIMIT ${Math.max(1, Math.floor(limit))}`;
   return { sql, params: [scopeParamVal, ...builtWhere.sqlParams] };
 }
 
@@ -679,7 +693,7 @@ export function buildSearchFtsSqlQuery(params: {
 
   const sql = `WITH search_results AS (
          SELECT id, ROW_NUMBER() OVER (ORDER BY ${orderExpr}) AS _row_num
-         FROM "items"
+         FROM "library_items"
          WHERE ${whereClause}
        )${cursorCte}
        SELECT id FROM search_results
@@ -705,16 +719,14 @@ export function buildSearchTrgmFallbackSqlQuery(params: {
   if (!isValidUuid(scopeParamVal)) return null;
 
   const foldedQuery = SearchQueryEngine.stripDiacritics(trimmed);
-  const scopeWhere = hasProject
-    ? `project_id = $1::uuid`
-    : `user_id = $1::uuid AND project_id IS NULL`;
+  const scopeWhere = `space_id = $1::uuid`;
 
   const deletedWhere =
     options.view === 'trash' ? `deleted_at IS NOT NULL` : `deleted_at IS NULL`;
 
   const sql = `
     SELECT id
-    FROM "items"
+    FROM "library_items"
     WHERE ${scopeWhere}
       AND ${deletedWhere}
       AND (

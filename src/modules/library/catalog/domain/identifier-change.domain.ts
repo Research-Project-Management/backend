@@ -349,7 +349,7 @@ export function buildCollectionItemsUpdatePatch(data: {
   collectionIds?: string[] | null;
   collections?: string[] | null;
   collectionId?: string | null;
-}): Prisma.CollectionItemUpdateManyWithoutItemNestedInput | undefined {
+}): Prisma.LibraryCollectionItemUpdateManyWithoutItemNestedInput | undefined {
   const effectiveArray = data.collectionIds !== undefined ? data.collectionIds : data.collections;
   if (effectiveArray !== undefined) {
     const unique = Array.from(

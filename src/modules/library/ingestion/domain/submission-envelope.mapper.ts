@@ -12,25 +12,56 @@ import {
 
 type SubmissionPayloadBuilder = (dto: IngestionSubmissionInput) => SubmissionPayload;
 
+const RECORD_FORMAT_ALIASES: Readonly<Record<string, RecordFormat>> = {
+  RDF: 'ZOTERO_RDF',
+  NBIB: 'PUBMED_NBIB',
+  CSL: 'CSL_JSON',
+  JSON: 'CSL_JSON',
+};
+
 const SUBMISSION_DTO_PAYLOAD_STRATEGIES: Readonly<
   Record<SubmissionKind, SubmissionPayloadBuilder>
 > = {
-  IDENTIFIER: (dto) => ({
-    kind: 'IDENTIFIER',
-    identifierType: (
-      dto.identifierType || 'DOI'
-    ).toUpperCase() as IdentifierType,
-    value: (dto.value || dto.identifierValue || '').trim(),
-  }),
-  RECORD: (dto) => ({
-    kind: 'RECORD',
-    format: (
+  IDENTIFIER: (dto) => {
+    const inferredType =
+      dto.identifierType ||
+      (dto.doi
+        ? 'DOI'
+        : dto.arxivId
+          ? 'ARXIV'
+          : dto.pmid
+            ? 'PMID'
+            : dto.isbn
+              ? 'ISBN'
+              : 'DOI');
+    const inferredValue =
+      dto.value ||
+      dto.identifierValue ||
+      dto.doi ||
+      dto.arxivId ||
+      dto.pmid ||
+      dto.isbn ||
+      '';
+    return {
+      kind: 'IDENTIFIER',
+      identifierType: inferredType.toUpperCase() as IdentifierType,
+      value: inferredValue.trim(),
+    };
+  },
+  RECORD: (dto) => {
+    const rawFormat = (
       dto.format ||
       dto.recordFormat ||
-      'BIBTEX'
-    ).toUpperCase() as RecordFormat,
-    content: dto.content || dto.rawRecord || '',
-  }),
+      (dto.ris && !dto.bibtex ? 'RIS' : 'BIBTEX')
+    ).toUpperCase();
+    const normalizedFormat = (RECORD_FORMAT_ALIASES[rawFormat] ??
+      rawFormat) as RecordFormat;
+    return {
+      kind: 'RECORD',
+      format: normalizedFormat,
+      content: dto.content || dto.rawRecord || dto.bibtex || dto.ris || '',
+    };
+  },
   URL: (dto) => ({
     kind: 'URL',
     url: dto.url || '',
@@ -45,8 +76,8 @@ const SUBMISSION_DTO_PAYLOAD_STRATEGIES: Readonly<
   CONNECTOR: (dto) => ({
     kind: 'CONNECTOR',
     connectionId: dto.connectionId || '',
-    externalObjectId: dto.externalObjectId || '',
-    externalVersion: dto.externalVersion || '',
+    externalObjectId: dto.externalObjectId || dto.externalItemKey || '',
+    externalVersion: dto.externalVersion || '1',
   }),
 };
 

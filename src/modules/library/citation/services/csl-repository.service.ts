@@ -191,7 +191,14 @@ export class CslRepositoryService implements OnModuleInit {
 
     if (this.exportsRepo) {
       try {
-        const dbRow = await this.exportsRepo.findCustomStyle(scopeKey, normalized);
+        const dbRow =
+          (await this.exportsRepo.findCustomStyle(scopeKey, normalized)) ??
+          (!scopeKey.startsWith('proj:') && scopeKey !== 'global'
+            ? await this.exportsRepo.findCustomStyle(
+                `proj:${scopeKey}`,
+                normalized,
+              )
+            : null);
         if (dbRow?.xmlContent && dbRow.xmlContent.includes('<style')) {
           if (this.redisCache) {
             await this.redisCache.set(LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey), dbRow.xmlContent, 86400 * 365);
@@ -270,6 +277,7 @@ export class CslRepositoryService implements OnModuleInit {
     cslXml: string,
     customTitle?: string,
     scopeId?: string,
+    actorUserId?: string,
   ): Promise<CslStyleMetadata> {
     if (!cslXml || typeof cslXml !== 'string' || cslXml.length > 512 * 1024) {
       throw new ExtractionProcessException(
@@ -310,7 +318,15 @@ export class CslRepositoryService implements OnModuleInit {
 
     if (this.exportsRepo) {
       try {
-        await this.exportsRepo.upsertCustomStyle({ scopeKey, slug, title, xmlContent: cslXml, sha256 });
+        await this.exportsRepo.upsertCustomStyle({
+          scopeKey,
+          slug,
+          title,
+          xmlContent: cslXml,
+          sha256,
+          userId: actorUserId,
+          projectId: scopeKey.startsWith('proj:') ? scopeKey.slice(5) : undefined,
+        });
       } catch (dbErr: unknown) {
         this.logger.warn(`Could not persist custom CSL style "${slug}" to DB: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
       }
@@ -349,14 +365,20 @@ export class CslRepositoryService implements OnModuleInit {
     if (this.exportsRepo) {
       try {
         const rows = await this.exportsRepo.findCustomStylesByScope(scopeKey, CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE);
-        const mapped: CslStyleMetadata[] = rows.map((r) => ({
-          id: r.slug,
-          name: r.slug,
-          title: r.title,
-          category: 'author-date',
-          isCustom: true,
-          updated: r.updatedAt.toISOString(),
-        }));
+        const mapped: CslStyleMetadata[] = rows.map((r) => {
+          const formatMatch =
+            typeof r.xmlContent === 'string'
+              ? r.xmlContent.match(/citation-format="([^"]+)"/i)
+              : null;
+          return {
+            id: r.slug,
+            name: r.slug,
+            title: r.title,
+            category: parseCslCategory(formatMatch?.[1]),
+            isCustom: true,
+            updated: r.updatedAt.toISOString(),
+          };
+        });
         if (mapped.length > 0 && this.redisCache) {
           await this.redisCache.set(LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey), mapped, 86400 * 365);
         }
@@ -519,7 +541,7 @@ export class CslRepositoryService implements OnModuleInit {
     return null;
   }
 
-  private isValidCslXml(xml?: string): boolean {
+  public isValidCslXml(xml?: string): boolean {
     if (!xml || typeof xml !== 'string') return false;
     if (xml.length > 512 * 1024) return false;
     const trimmed = xml.trim();

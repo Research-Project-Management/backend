@@ -27,10 +27,15 @@ export type {
 };
 
 export const CATALOG_FACADE = 'CATALOG_FACADE';
+export const CATALOG_READER_PORT = 'CATALOG_READER_PORT';
+export const CATALOG_WRITER_PORT = 'CATALOG_WRITER_PORT';
+export const CATALOG_COLLECTION_PORT = 'CATALOG_COLLECTION_PORT';
+export const CATALOG_TRASH_PORT = 'CATALOG_TRASH_PORT';
+export const CATALOG_IMPORT_EXPORT_PORT = 'CATALOG_IMPORT_EXPORT_PORT';
 export const ITEM_CACHE_INVALIDATOR = Symbol('ITEM_CACHE_INVALIDATOR');
 export type CatalogItemSummary = ItemDetail;
 
-export interface ICatalogFacade {
+export interface ICatalogReaderPort {
   getItem<T = ItemDetail>(
     userId: string,
     itemId: string,
@@ -55,20 +60,13 @@ export interface ICatalogFacade {
     itemId: string,
     projectId?: string,
   ): Promise<T | null>;
-  createItem<T = ItemDetail, D = CreateItemData>(
-    userId: string,
-    data: D,
-    options?: Record<string, unknown>,
-    projectId?: string,
-  ): Promise<T>;
-  updateItem<T = ItemDetail, D = UpdateItemData>(
-    userId: string,
-    itemId: string,
-    data: D,
-    options?: { expectedVersion?: number; projectId?: string },
-  ): Promise<T>;
-  deleteItem(userId: string, itemId: string, projectId?: string): Promise<void>;
   findByIds<T = ItemDetail>(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+    options?: { includeContent?: boolean },
+  ): Promise<T[]>;
+  getItemsByIds?<T = ItemDetail>(
     userId: string,
     itemIds: string[],
     projectId?: string,
@@ -82,6 +80,31 @@ export interface ICatalogFacade {
     userId: string,
     options?: Record<string, unknown>,
   ): Promise<T[]>;
+  listItems?<T = ItemDetail>(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<{ items: T[]; meta?: Record<string, unknown> } | T[]>;
+  listSubItems?<T = unknown>(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<T[]>;
+  getStats?<T = unknown>(userId: string, projectId?: string): Promise<T>;
+  getLibraryCounters?<T = unknown>(
+    userId: string,
+    projectId?: string,
+  ): Promise<T>;
+  getItemsBatch?<T = ItemDetail>(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<T[]>;
+  getBatchCitationData?<T = unknown>(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<T[]>;
+  getTrashInfo?<T = unknown>(userId: string, projectId?: string): Promise<T>;
   validateItemType?(type: string): Promise<boolean>;
   getPrimaryCreatorType?(itemType: string): string;
   getOrderedFields?(itemType: string): ItemFieldDefinition[];
@@ -95,34 +118,21 @@ export interface ICatalogFacade {
     limit?: number,
     projectId?: string,
   ): Promise<T[]>;
-  mergeItems(
-    tx: Prisma.TransactionClient,
-    duplicateItemIds: string[],
-    primaryItemId: string,
-  ): Promise<unknown>;
-  createNote?(userId: string, data: CreateNoteData): Promise<NoteEntity>;
+  listDuplicateReviews?<T = unknown>(
+    userId: string,
+    projectId?: string,
+  ): Promise<T[]>;
+  previewTypeConversion?<T = unknown>(
+    userId: string,
+    itemId: string,
+    targetType: string,
+    projectId?: string,
+  ): Promise<T>;
   listNotes?(
     userId: string,
     itemId?: string,
     projectId?: string,
   ): Promise<NoteEntity[]>;
-  listCollections(
-    userId: string,
-    projectId?: string,
-  ): Promise<
-    Array<{
-      id: string;
-      name: string;
-      itemCount?: number;
-      _count?: { collectionItems?: number };
-    }>
-  >;
-  assignItemsToCollection?(
-    userId: string,
-    collectionId: string,
-    itemIds: string[],
-    projectId?: string,
-  ): Promise<unknown>;
   findMatchCandidates?(
     scope: { userId?: string; projectId?: string | null },
     criteria: {
@@ -157,16 +167,98 @@ export interface ICatalogFacade {
       creators?: unknown[];
     }>;
   }>;
+  findAttachmentByFileId(
+    fileId: string,
+    scope?: { userId?: string; projectId?: string },
+  ): Promise<{ id: string; itemId: string; metadata?: unknown } | null>;
+}
+
+export interface ICatalogWriterPort {
+  createItem<T = ItemDetail, D = CreateItemData>(
+    userId: string,
+    data: D,
+    options?: Record<string, unknown>,
+    projectId?: string,
+  ): Promise<T>;
+  updateItem<T = ItemDetail, D = UpdateItemData>(
+    userId: string,
+    itemId: string,
+    data: D,
+    options?: { expectedVersion?: number; projectId?: string },
+  ): Promise<T>;
+  deleteItem(userId: string, itemId: string, projectId?: string): Promise<void>;
+  bulkDeleteItems?(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<unknown>;
+  updateUserItemState?(
+    userId: string,
+    itemId: string,
+    state: Record<string, unknown>,
+    projectId?: string,
+  ): Promise<unknown>;
+  batchUpdateItems?(
+    userId: string,
+    itemIds: string[],
+    patch: Record<string, unknown>,
+    projectId?: string,
+  ): Promise<unknown>;
+  mergeItems(
+    tx: Prisma.TransactionClient,
+    duplicateItemIds: string[],
+    primaryItemId: string,
+  ): Promise<unknown>;
+  convertItemType?(
+    userId: string,
+    itemId: string,
+    targetType: string,
+    options?: { expectedVersion?: number; projectId?: string },
+  ): Promise<unknown>;
+  resolveDuplicateReview?(
+    userId: string,
+    reviewId: string,
+    resolution: Record<string, unknown>,
+    projectId?: string,
+  ): Promise<unknown>;
+  reconcileExtractedCandidate?(
+    payload: ReconcileExtractedCandidatePayload,
+  ): Promise<unknown>;
+  createNote?(userId: string, data: CreateNoteData): Promise<NoteEntity>;
+  updateNote?(
+    userId: string,
+    noteId: string,
+    data: Record<string, unknown>,
+    projectId?: string,
+  ): Promise<NoteEntity>;
+  deleteNote?(
+    userId: string,
+    noteId: string,
+    projectId?: string,
+  ): Promise<void>;
+  addAttachment?(
+    userId: string,
+    itemId: string,
+    data: Record<string, unknown>,
+    projectId?: string,
+  ): Promise<unknown>;
+  updateAttachment?(
+    userId: string,
+    attachmentId: string,
+    data: Record<string, unknown>,
+    projectId?: string,
+  ): Promise<unknown>;
+  removeAttachment?(
+    userId: string,
+    attachmentId: string,
+    projectId?: string,
+  ): Promise<void>;
   invalidateForWrite?(params: {
     userId: string;
     projectId?: string | null;
     itemIds?: string[];
     additionalProjectIds?: Array<string | null | undefined>;
   }): Promise<void>;
-  findAttachmentByFileId(
-    fileId: string,
-    scope?: { userId?: string; projectId?: string },
-  ): Promise<{ id: string; itemId: string; metadata?: unknown } | null>;
   updateAttachmentProcessingStatus(
     attachmentId: string,
     status: string,
@@ -179,6 +271,99 @@ export interface ICatalogFacade {
     scope?: { userId?: string; projectId?: string },
   ): Promise<void>;
 }
+
+export interface ICatalogCollectionPort {
+  listCollections(
+    userId: string,
+    projectId?: string,
+  ): Promise<
+    Array<{
+      id: string;
+      name: string;
+      itemCount?: number;
+      _count?: { collectionItems?: number };
+    }>
+  >;
+  getCollections?(userId: string, projectId?: string): Promise<unknown>;
+  createCollection?(
+    userId: string,
+    data: Record<string, unknown>,
+    projectId?: string,
+  ): Promise<unknown>;
+  updateCollection?(
+    userId: string,
+    collectionId: string,
+    data: Record<string, unknown>,
+    projectId?: string,
+  ): Promise<unknown>;
+  deleteCollection?(
+    userId: string,
+    collectionId: string,
+    projectId?: string,
+  ): Promise<unknown>;
+  assignItemsToCollection?(
+    userId: string,
+    collectionId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<unknown>;
+  removeItemsFromCollection?(
+    userId: string,
+    collectionId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<unknown>;
+  getCollectionItemIds?(
+    userId: string,
+    collectionId: string,
+    projectId?: string,
+  ): Promise<string[]>;
+}
+
+export interface ICatalogTrashPort {
+  listTrash?(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<unknown>;
+  restoreItems?(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<unknown>;
+  emptyTrash?(userId: string, projectId?: string): Promise<unknown>;
+  purgeOldTrash?(retentionDays?: number, limit?: number): Promise<unknown>;
+}
+
+export interface ICatalogImportExportPort {
+  importBibtex?(
+    userId: string,
+    content: string,
+    options?: Record<string, unknown>,
+  ): Promise<unknown>;
+  importRis?(
+    userId: string,
+    content: string,
+    options?: Record<string, unknown>,
+  ): Promise<unknown>;
+  exportItems?(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<unknown>;
+  generateCitation?(
+    userId: string,
+    itemId: string,
+    styleId?: string,
+    projectId?: string,
+  ): Promise<unknown>;
+  getAvailableCitationStyles?(): Promise<unknown>;
+}
+
+export interface ICatalogFacade
+  extends ICatalogReaderPort,
+    ICatalogWriterPort,
+    ICatalogCollectionPort,
+    ICatalogTrashPort,
+    ICatalogImportExportPort {}
 
 export interface IItemCacheInvalidator {
   invalidateForWrite(params: {
@@ -488,14 +673,16 @@ export type TransactionService = IUnitOfWork;
 // 2. OUTBOX PORT
 // ============================================================================
 
-interface OutboxEventRecord {
+export interface OutboxEventRecord {
   id: string;
   aggregateId: string;
   eventType: string;
   payload: unknown;
   status: string;
   retryCount: number;
-  userId: string;
+  spaceId?: string;
+  actorId?: string | null;
+  userId?: string;
   projectId?: string | null;
   createdAt: Date;
   processedAt?: Date | null;

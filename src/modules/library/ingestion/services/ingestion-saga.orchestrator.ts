@@ -157,7 +157,7 @@ export class IngestionSagaSession {
           ...(this.isFinalAttempt ? { completedAt: new Date() } : {}),
         },
       );
-      markRunStatusTransitioned(this.runId);
+      IngestionSagaOrchestrator.markRunTransitioned(this.runId);
     } catch (statusErr: unknown) {
       const statusMsg =
         statusErr instanceof Error ? statusErr.message : String(statusErr);
@@ -177,14 +177,61 @@ export class IngestionSagaSession {
 }
 
 /**
- * IngestionSagaOrchestrator manages the lifecycle and execution sessions
- * of multi-stage ingestion sagas.
+ * IngestionSagaOrchestrator manages the lifecycle, run-transition tracking,
+ * and execution sessions of multi-stage ingestion sagas.
  */
 @Injectable()
 export class IngestionSagaOrchestrator {
+  private static readonly MAX_TRANSITIONED_RUN_CACHE = 1000;
+  private static readonly transitionedRunIds = new Set<string>();
   private readonly logger = new Logger(IngestionSagaOrchestrator.name);
 
   constructor(private readonly repo: IngestionRepository) {}
+
+  static clearRunTracking(runId: string): void {
+    if (!runId) return;
+    IngestionSagaOrchestrator.transitionedRunIds.delete(runId);
+  }
+
+  static markRunTransitioned(runId: string): void {
+    if (!runId) return;
+    if (
+      IngestionSagaOrchestrator.transitionedRunIds.size >=
+      IngestionSagaOrchestrator.MAX_TRANSITIONED_RUN_CACHE
+    ) {
+      const oldest = IngestionSagaOrchestrator.transitionedRunIds.values().next().value;
+      if (oldest !== undefined) {
+        IngestionSagaOrchestrator.transitionedRunIds.delete(oldest);
+      }
+    }
+    IngestionSagaOrchestrator.transitionedRunIds.add(runId);
+  }
+
+  static hasTransitioned(runId: string): boolean {
+    return Boolean(runId && IngestionSagaOrchestrator.transitionedRunIds.has(runId));
+  }
+
+  static consumeRunTransition(runId: string): boolean {
+    if (!IngestionSagaOrchestrator.hasTransitioned(runId)) return false;
+    IngestionSagaOrchestrator.transitionedRunIds.delete(runId);
+    return true;
+  }
+
+  clearRunTracking(runId: string): void {
+    IngestionSagaOrchestrator.clearRunTracking(runId);
+  }
+
+  markRunTransitioned(runId: string): void {
+    IngestionSagaOrchestrator.markRunTransitioned(runId);
+  }
+
+  hasTransitioned(runId: string): boolean {
+    return IngestionSagaOrchestrator.hasTransitioned(runId);
+  }
+
+  consumeRunTransition(runId: string): boolean {
+    return IngestionSagaOrchestrator.consumeRunTransition(runId);
+  }
 
   createSession(
     runId: string,
@@ -235,29 +282,16 @@ export function getSubmissionPayloadSize(
     : 0;
 }
 
-const transitionedRunIds = new Set<string>();
-const MAX_TRANSITIONED_RUN_CACHE = 1000;
-
 export function clearRunStatusTransition(runId: string): void {
-  if (!runId) return;
-  transitionedRunIds.delete(runId);
+  IngestionSagaOrchestrator.clearRunTracking(runId);
 }
 
 export function markRunStatusTransitioned(runId: string): void {
-  if (!runId) return;
-  if (transitionedRunIds.size >= MAX_TRANSITIONED_RUN_CACHE) {
-    const oldest = transitionedRunIds.values().next().value;
-    if (oldest !== undefined) {
-      transitionedRunIds.delete(oldest);
-    }
-  }
-  transitionedRunIds.add(runId);
+  IngestionSagaOrchestrator.markRunTransitioned(runId);
 }
 
 function consumeRunStatusTransition(runId: string): boolean {
-  if (!runId || !transitionedRunIds.has(runId)) return false;
-  transitionedRunIds.delete(runId);
-  return true;
+  return IngestionSagaOrchestrator.consumeRunTransition(runId);
 }
 
 export async function transitionRunToFailedIfActive(params: {
@@ -382,6 +416,14 @@ export class IngestionRunReporterService {
       return executionLog as IngestionExecutionLog;
     }
     return {};
+  }
+
+  clearRunTracking(runId: string): void {
+    IngestionSagaOrchestrator.clearRunTracking(runId);
+  }
+
+  hasTransitioned(runId: string): boolean {
+    return IngestionSagaOrchestrator.hasTransitioned(runId);
   }
 
   async transitionRunToFailedIfActive(
@@ -627,11 +669,23 @@ export class IngestionRunReporterService {
       );
     }
 
+    const runRec = run as {
+      projectId?: string | null;
+      userId?: string;
+      spaceId?: string;
+      createdById?: string;
+    };
+    const runProjectId =
+      runRec.projectId ??
+      (runRec.spaceId && runRec.spaceId !== runRec.createdById
+        ? runRec.spaceId
+        : undefined);
     const resolvedProjectId =
       projectId && projectId !== 'user' && projectId !== userIdOrScopeId
         ? projectId
-        : (run.projectId ?? undefined);
-    const resolvedUserId = run.userId || userIdOrScopeId;
+        : (runProjectId ?? undefined);
+    const resolvedUserId =
+      runRec.userId || runRec.createdById || userIdOrScopeId;
     const queueTargetScope =
       resolvedProjectId || resolvedUserId || effectiveScopeId;
 

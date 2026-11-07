@@ -341,7 +341,9 @@ export class PipelineBatchExecutor {
         }
 
         const matchedSet = new Set<MetadataCandidate>();
-        const refMatches = byEvidenceRef.get(initialCand.candidateId);
+        const refMatches = initialCand.candidateId
+          ? byEvidenceRef.get(initialCand.candidateId)
+          : undefined;
         if (refMatches) refMatches.forEach((m) => matchedSet.add(m));
 
         const candDoi = initialCand.normalizedMetadata?.doi
@@ -403,39 +405,14 @@ export class PipelineBatchExecutor {
           : { matchType: 'NO_MATCH' as const, confidence: 0 };
 
         if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
-          try {
-            const { existingRecord: existingRec } =
-              await this.sideEffects.enrichExistingMatchedItem({
-                userId: resolvedScope.userId,
-                projectId: resolvedScope.projectId,
-                targetItemId: matchRes.targetItemId,
-                candidateItem: itemDecision.proposedItem,
-              });
-            await this.sideEffects.materializeNotes(
-              resolvedScope.userId,
-              resolvedScope.projectId,
-              matchRes.targetItemId,
-              itemDecision.proposedItem?.notes,
-              existingRec,
-            );
-          } catch (enrichErr: unknown) {
-            this.logger.warn(
-              `Additive enrichment on duplicate item ${matchRes.targetItemId} failed: ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`,
-            );
-          }
-
-          if (envelope.collectionIds && envelope.collectionIds.length > 0) {
-            await Promise.all(
-              envelope.collectionIds.map((colId) =>
-                this.sideEffects.assignItemToCollection(
-                  resolvedScope.userId,
-                  colId,
-                  matchRes.targetItemId!,
-                  resolvedScope.projectId,
-                ),
-              ),
-            );
-          }
+          await this.sideEffects.enrichAndLinkDuplicateItem({
+            userId: resolvedScope.userId,
+            projectId: resolvedScope.projectId,
+            targetItemId: matchRes.targetItemId,
+            candidateItem: itemDecision.proposedItem,
+            envelope,
+            mode: 'batch',
+          });
 
           createdItemIds.push(matchRes.targetItemId);
           duplicates++;

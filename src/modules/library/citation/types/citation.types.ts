@@ -166,14 +166,35 @@ export const EXPORT_MAX_ITEMS = 1000;
 /** Cursor-page size used when fetching from the DB. */
 export const EXPORT_CHUNK_SIZE = 200;
 
-export type ExportItemRecord = Prisma.ItemGetPayload<{
-  include: {
-    contributors: { orderBy: { orderIndex: 'asc' } };
-    itemTags: { include: { tag: true } };
-    notesList: { where: { deletedAt: null } };
-    identifiers: true;
-  };
-}> & {
+export type ExportItemRecord = Partial<
+  Omit<
+    Prisma.LibraryItemGetPayload<{
+      include: {
+        contributors: { orderBy: { orderIndex: 'asc' } };
+        itemTags: { include: { tag: true } };
+        notesList: { where: { deletedAt: null } };
+        identifiers: true;
+      };
+    }>,
+    'contributors'
+  >
+> & {
+  id: string;
+  title?: string;
+  contributors?: Array<
+    Partial<
+      Prisma.LibraryItemGetPayload<{
+        include: { contributors: true };
+      }>['contributors'][number]
+    > & {
+      name?: string | null;
+      firstName?: string | null;
+      lastName?: string | null;
+      fullName?: string | null;
+      role?: string | null;
+      creatorType?: string | null;
+    }
+  >;
   publisher?: string | null;
   volume?: string | null;
   issue?: string | null;

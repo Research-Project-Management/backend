@@ -176,35 +176,37 @@ describe('PdfProvider', () => {
     });
 
     it('protects coupled fields (journal -> publicationTitle, date -> year) and higher-authority itemType in ExtractionRepository', async () => {
-      const mockPrisma = {
-        item: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: 'item-locked-1',
-            userId: 'user-1',
-            projectId: null,
-            title: 'Existing Title',
-            doi: null,
-            abstract: null,
-            year: null,
-            publicationTitle: null,
-            itemType: 'journalArticle',
-            citationKey: 'smith2024existing',
-            metadata: {
-              lockedFields: ['journal', 'date'],
-              fieldProvenance: {
-                itemType: {
-                  source: 'CrossRef',
-                  sourceProvider: 'CrossRef',
-                  confidence: 0.95,
-                },
+      const itemMock = {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'item-locked-1',
+          userId: 'user-1',
+          projectId: null,
+          title: 'Existing Title',
+          doi: null,
+          abstract: null,
+          year: null,
+          publicationTitle: null,
+          itemType: 'journalArticle',
+          citationKey: 'smith2024existing',
+          metadata: {
+            lockedFields: ['journal', 'date'],
+            fieldProvenance: {
+              itemType: {
+                source: 'CrossRef',
+                sourceProvider: 'CrossRef',
+                confidence: 0.95,
               },
             },
-          }),
-          update: jest.fn().mockImplementation(async ({ data }) => ({
-            id: 'item-locked-1',
-            ...data,
-          })),
-        },
+          },
+        }),
+        update: jest.fn().mockImplementation(async ({ data }) => ({
+          id: 'item-locked-1',
+          ...data,
+        })),
+      };
+      const mockPrisma = {
+        item: itemMock,
+        libraryItem: itemMock,
       };
 
       const repo = new ExtractionRepository(mockPrisma as never);

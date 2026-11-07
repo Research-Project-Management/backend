@@ -38,12 +38,17 @@ const ANNOTATION_SELECT = {
   comment: true,
   tags: true,
   rectCoords: true,
-  authorId: true,
+  createdById: true,
   version: true,
   deletedAt: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.AnnotationSelect;
+
+type RawAnnotationRow = Omit<AnnotationEntity, 'authorId'> & {
+  authorId?: string;
+  createdById?: string;
+};
 
 @Injectable()
 export class AnnotationsRepository {
@@ -53,9 +58,12 @@ export class AnnotationsRepository {
     return tx ?? this.prisma;
   }
 
-  private mapEntity(raw: AnnotationEntity): AnnotationEntity {
+  private mapEntity(raw: RawAnnotationRow): AnnotationEntity {
+    const { createdById, ...rest } = raw;
+    const authorId = raw.authorId ?? createdById ?? '';
     return {
-      ...raw,
+      ...rest,
+      authorId,
       text: raw.quoteText ?? '',
       rects: normalizeRectCoordsToBoxes(raw.rectCoords),
     };
@@ -217,7 +225,7 @@ export class AnnotationsRepository {
           data.rectCoords != null
             ? (data.rectCoords as Prisma.InputJsonValue)
             : Prisma.JsonNull,
-        authorId: data.authorId,
+        createdById: data.authorId,
         version: 1,
       },
       select: ANNOTATION_SELECT,
@@ -359,7 +367,7 @@ export class AnnotationsRepository {
         select: ANNOTATION_SELECT,
       });
       for (const row of existingRows) {
-        existingMap.set(row.id, row);
+        existingMap.set(row.id, this.mapEntity(row));
       }
     }
 
@@ -528,7 +536,7 @@ export class AnnotationsRepository {
               item.rectCoords != null
                 ? (item.rectCoords as Prisma.InputJsonValue)
                 : Prisma.JsonNull,
-            authorId,
+            createdById: authorId,
             version: 1,
             createdAt: now,
             updatedAt: now,
@@ -598,7 +606,7 @@ export class AnnotationsRepository {
                 item.rectCoords != null
                   ? (item.rectCoords as Prisma.InputJsonValue)
                   : Prisma.JsonNull,
-              authorId,
+              createdById: authorId,
               version: 1,
             },
             select: ANNOTATION_SELECT,
@@ -613,7 +621,7 @@ export class AnnotationsRepository {
         where: {
           id: { in: deletes },
           attachmentId,
-          ...(allowAdminDelete ? {} : { authorId }),
+          ...(allowAdminDelete ? {} : { createdById: authorId }),
           deletedAt: null,
         },
         select: { id: true },

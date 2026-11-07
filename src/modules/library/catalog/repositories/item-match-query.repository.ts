@@ -53,16 +53,16 @@ export class ItemMatchQueryRepository {
     projectId?: string,
   ) {
     const activeClient = this.getClient(client);
-    let scopeWhere: Prisma.ItemWhereInput;
+    let scopeWhere: Prisma.LibraryItemWhereInput;
     if (projectId && isUuid(projectId)) {
-      scopeWhere = { projectId, deletedAt: null };
+      scopeWhere = { spaceId: projectId, deletedAt: null };
     } else if (userId && isUuid(userId)) {
-      scopeWhere = { userId, projectId: null, deletedAt: null };
+      scopeWhere = { spaceId: userId, deletedAt: null };
     } else {
       return [];
     }
 
-    return activeClient.item.findMany({
+    return activeClient.libraryItem.findMany({
       where: scopeWhere,
       take: limit,
       orderBy: { createdAt: 'desc' },
@@ -102,18 +102,18 @@ export class ItemMatchQueryRepository {
     projectId?: string,
   ) {
     const activeClient = this.getClient(client);
-    let scopeWhere: Prisma.ItemWhereInput;
+    let scopeWhere: Prisma.LibraryItemWhereInput;
     if (projectId && isUuid(projectId)) {
-      scopeWhere = { projectId, deletedAt: null };
+      scopeWhere = { spaceId: projectId, deletedAt: null };
     } else if (userId && isUuid(userId)) {
-      scopeWhere = { userId, projectId: null, deletedAt: null };
+      scopeWhere = { spaceId: userId, deletedAt: null };
     } else {
       return [];
     }
 
     const effectiveTake = limit && limit > 0 ? Math.min(limit, 5000) : 5000;
 
-    return activeClient.item.findMany({
+    return activeClient.libraryItem.findMany({
       where: scopeWhere,
       select: {
         id: true,
@@ -185,7 +185,7 @@ export class ItemMatchQueryRepository {
       .map((c) => c.title?.trim())
       .filter((t): t is string => Boolean(t));
 
-    const orConditions: Prisma.ItemWhereInput[] = [];
+    const orConditions: Prisma.LibraryItemWhereInput[] = [];
     if (dois.length > 0) orConditions.push({ doi: { in: dois } });
     if (citationKeys.length > 0)
       orConditions.push({ citationKey: { in: citationKeys } });
@@ -193,9 +193,9 @@ export class ItemMatchQueryRepository {
 
     if (orConditions.length === 0) return [];
 
-    return activeClient.item.findMany({
+    return activeClient.libraryItem.findMany({
       where: {
-        projectId,
+        spaceId: projectId,
         deletedAt: null,
         OR: orConditions,
       },
@@ -216,12 +216,12 @@ export class ItemMatchQueryRepository {
   ) {
     if (!citationKey?.trim()) return null;
     const activeClient = this.getClient(client);
-    const scopeWhere: Prisma.ItemWhereInput =
+    const scopeWhere: Prisma.LibraryItemWhereInput =
       projectId && isUuid(projectId)
-        ? { projectId, deletedAt: null }
-        : { userId, projectId: null, deletedAt: null };
+        ? { spaceId: projectId, deletedAt: null }
+        : { spaceId: userId, deletedAt: null };
 
-    return activeClient.item.findFirst({
+    return activeClient.libraryItem.findFirst({
       where: {
         citationKey: { equals: citationKey.trim(), mode: 'insensitive' },
         ...scopeWhere,
@@ -250,12 +250,12 @@ export class ItemMatchQueryRepository {
       .filter((k): k is string => Boolean(k));
     if (cleanKeys.length === 0) return [];
     const activeClient = this.getClient(client);
-    const scopeWhere: Prisma.ItemWhereInput =
+    const scopeWhere: Prisma.LibraryItemWhereInput =
       projectId && isUuid(projectId)
-        ? { projectId, deletedAt: null }
-        : { userId, projectId: null, deletedAt: null };
+        ? { spaceId: projectId, deletedAt: null }
+        : { spaceId: userId, deletedAt: null };
 
-    return activeClient.item.findMany({
+    return activeClient.libraryItem.findMany({
       where: {
         citationKey: { in: cleanKeys, mode: 'insensitive' },
         ...scopeWhere,
@@ -286,11 +286,11 @@ export class ItemMatchQueryRepository {
       titlePrefix?: string;
     },
   ): Promise<MatchCandidateResult> {
-    let scopeWhere: Prisma.ItemWhereInput | null = null;
+    let scopeWhere: Prisma.LibraryItemWhereInput | null = null;
     if (scope.projectId && isUuid(scope.projectId)) {
-      scopeWhere = { projectId: scope.projectId, deletedAt: null };
+      scopeWhere = { spaceId: scope.projectId, deletedAt: null };
     } else if (scope.userId && isUuid(scope.userId)) {
-      scopeWhere = { userId: scope.userId, projectId: null, deletedAt: null };
+      scopeWhere = { spaceId: scope.userId, deletedAt: null };
     }
 
     if (!scopeWhere) {
@@ -308,6 +308,9 @@ export class ItemMatchQueryRepository {
         id: string;
         title: string;
         doi?: string | null;
+        arxivId?: string | null;
+        pmid?: string | null;
+        isbn?: string | null;
         metadata?: unknown;
         identifiers?: Array<{
           type?: string;
@@ -319,6 +322,9 @@ export class ItemMatchQueryRepository {
         id: true,
         title: true,
         doi: true,
+        arxivId: true,
+        pmid: true,
+        isbn: true,
         metadata: true,
         identifiers: {
           select: { type: true, value: true, canonicalUri: true },
@@ -328,7 +334,7 @@ export class ItemMatchQueryRepository {
         ...scopeWhere,
         OR: exactOrConditions,
       };
-      const firstMatch = (await activeClient.item.findFirst({
+      const firstMatch = (await activeClient.libraryItem.findFirst({
         where: whereSpec,
         select: selectSpec,
       })) as CandidateRow | null;
@@ -342,9 +348,9 @@ export class ItemMatchQueryRepository {
       if (
         firstMatch &&
         (appliedSpecCount > 1 || Boolean(matchInput.cleanIsbn)) &&
-        typeof activeClient.item.findMany === 'function'
+        typeof activeClient.libraryItem.findMany === 'function'
       ) {
-        const extraRows = (await activeClient.item
+        const extraRows = (await activeClient.libraryItem
           .findMany({
             where: whereSpec,
             select: selectSpec,
@@ -374,7 +380,7 @@ export class ItemMatchQueryRepository {
     const words = (criteria.titleWords || [])
       .filter((w) => w.length >= 3)
       .slice(0, 3);
-    let titleCondition: Prisma.ItemWhereInput | null = null;
+    let titleCondition: Prisma.LibraryItemWhereInput | null = null;
     if (words.length > 0) {
       titleCondition = {
         OR: words.map((w) => ({ title: { contains: w, mode: 'insensitive' } })),
@@ -398,7 +404,7 @@ export class ItemMatchQueryRepository {
       Number.isFinite(Number(criteria.year));
     const targetYear = hasValidYear ? Number(criteria.year) : undefined;
 
-    const items = await activeClient.item.findMany({
+    const items = await activeClient.libraryItem.findMany({
       where: {
         ...scopeWhere,
         ...(targetYear !== undefined
@@ -505,9 +511,15 @@ export class ItemMatchQueryRepository {
         continue;
       }
       if (anchorItem) {
-        const sameScope = anchorItem.projectId
-          ? peerItem.projectId === anchorItem.projectId
-          : !peerItem.projectId && peerItem.userId === anchorItem.userId;
+        const anchorSpaceId =
+          anchorItem.spaceId ??
+          (anchorItem as { projectId?: string | null; userId?: string }).projectId ??
+          (anchorItem as { userId?: string }).userId;
+        const peerSpaceId =
+          peerItem.spaceId ??
+          (peerItem as { projectId?: string | null; userId?: string }).projectId ??
+          (peerItem as { userId?: string }).userId;
+        const sameScope = anchorSpaceId === peerSpaceId;
         if (!sameScope) continue;
       }
       seenRelationKeys.add(dedupKey);

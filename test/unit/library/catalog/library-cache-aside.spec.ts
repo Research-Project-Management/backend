@@ -407,16 +407,18 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
         version: 2,
         metadata: { aiSummary: 'Summary' },
       });
+      const itemMock = {
+        findUnique: jest.fn().mockResolvedValue({
+          id: mockItemId,
+          userId: mockUserId,
+          projectId: validProjUuid,
+          metadata: { existingKey: 'val' },
+        }),
+        update: mockItemUpdate,
+      };
       const mockPrisma = {
-        item: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: mockItemId,
-            userId: mockUserId,
-            projectId: validProjUuid,
-            metadata: { existingKey: 'val' },
-          }),
-          update: mockItemUpdate,
-        },
+        item: itemMock,
+        libraryItem: itemMock,
       };
       const mockAppendChange = jest.fn().mockResolvedValue({});
       const mockPublishOutbox = jest.fn().mockResolvedValue({});

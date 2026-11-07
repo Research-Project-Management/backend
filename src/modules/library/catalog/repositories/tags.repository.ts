@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, TagType } from '@prisma/client';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectScopeId, resolveSpaceId } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { resolveOrCreateTags } from '@/modules/library/catalog/repositories/command-relations.operations';
 
@@ -20,7 +20,7 @@ export class TagsRepository {
   ) {
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(options?.projectId);
-    const activeFilter: Prisma.TagWhereInput = options?.includeInactive
+    const activeFilter: Prisma.LibraryTagWhereInput = options?.includeInactive
       ? {}
       : {
           OR: [
@@ -34,18 +34,12 @@ export class TagsRepository {
             },
           ],
         };
-    const where: Prisma.TagWhereInput = validProjectId
-      ? {
-          projectId: validProjectId,
-          ...activeFilter,
-        }
-      : {
-          userId,
-          projectId: null,
-          ...activeFilter,
-        };
+    const where: Prisma.LibraryTagWhereInput = {
+      spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+      ...activeFilter,
+    };
 
-    return client.tag.findMany({
+    return client.libraryTag.findMany({
       where,
       orderBy: { name: 'asc' },
       include: {
@@ -73,15 +67,13 @@ export class TagsRepository {
   ) {
     const client = this.getClient(tx);
     const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const scopeKey = effectiveProjectId ? `proj:${effectiveProjectId}` : `user:${userId}`;
+    const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
     const normalizedName = name.trim().toLowerCase();
     const resolvedType = type || TagType.manual;
     const defaultColor = color ?? '#3b82f6';
-    const scopeWhere: Prisma.TagWhereInput = effectiveProjectId
-      ? { projectId: effectiveProjectId }
-      : { userId, projectId: null };
+    const scopeWhere: Prisma.LibraryTagWhereInput = { spaceId };
 
-    const existingTag = await client.tag.findFirst({
+    const existingTag = await client.libraryTag.findFirst({
       where: {
         ...scopeWhere,
         name: { equals: name, mode: 'insensitive' },
@@ -93,7 +85,7 @@ export class TagsRepository {
         (color !== undefined && existingTag.color !== color) ||
         (shortcut !== undefined && existingTag.shortcut !== shortcut)
       ) {
-        return client.tag.update({
+        return client.libraryTag.update({
           where: { id: existingTag.id },
           data: {
             ...(color !== undefined ? { color } : {}),
@@ -106,33 +98,31 @@ export class TagsRepository {
     }
 
     const tagData = {
-      userId,
+      spaceId,
       createdById: userId,
-      scopeKey,
       name,
       normalizedName,
       color: defaultColor,
       type: resolvedType,
-      projectId: effectiveProjectId ?? null,
       ...(shortcut !== undefined ? { shortcut } : {}),
     };
 
-    if (client.tag?.upsert) {
-      return client.tag.upsert({
-        where: { scopeKey_normalizedName: { scopeKey, normalizedName } },
+    if (client.libraryTag?.upsert) {
+      return client.libraryTag.upsert({
+        where: { spaceId_normalizedName: { spaceId, normalizedName } },
         update: {},
         create: tagData,
       });
     }
 
     try {
-      return await client.tag.create({ data: tagData });
+      return await client.libraryTag.create({ data: tagData });
     } catch (err: unknown) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002'
       ) {
-        const raceTag = await client.tag.findFirst({
+        const raceTag = await client.libraryTag.findFirst({
           where: {
             ...scopeWhere,
             name: { equals: name, mode: 'insensitive' },
@@ -160,11 +150,10 @@ export class TagsRepository {
   ) {
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.TagWhereInput = validProjectId
-      ? { id, projectId: validProjectId }
-      : { id, userId, projectId: null };
+    const spaceId = resolveSpaceId({ userId, projectId: validProjectId });
+    const scopeWhere: Prisma.LibraryTagWhereInput = { id, spaceId };
 
-    const tag = await client.tag.findFirst({
+    const tag = await client.libraryTag.findFirst({
       where: scopeWhere,
     });
     if (!tag) return null;
@@ -184,19 +173,12 @@ export class TagsRepository {
       data.shortcut >= 1 &&
       data.shortcut <= 9
     ) {
-      const shortcutScopeWhere: Prisma.TagWhereInput = validProjectId
-        ? {
-            projectId: validProjectId,
-            shortcut: data.shortcut,
-            id: { not: tag.id },
-          }
-        : {
-            userId,
-            projectId: null,
-            shortcut: data.shortcut,
-            id: { not: tag.id },
-          };
-      await client.tag.updateMany({
+      const shortcutScopeWhere: Prisma.LibraryTagWhereInput = {
+        spaceId,
+        shortcut: data.shortcut,
+        id: { not: tag.id },
+      };
+      await client.libraryTag.updateMany({
         where: shortcutScopeWhere,
         data: { shortcut: null },
       });
@@ -206,29 +188,22 @@ export class TagsRepository {
       data.name !== undefined &&
       data.name.trim().toLowerCase() !== tag.name.trim().toLowerCase()
     ) {
-      const targetWhere: Prisma.TagWhereInput = validProjectId
-        ? {
-            projectId: validProjectId,
-            id: { not: tag.id },
-            name: { equals: data.name, mode: 'insensitive' },
-          }
-        : {
-            userId,
-            projectId: null,
-            id: { not: tag.id },
-            name: { equals: data.name, mode: 'insensitive' },
-          };
-      const conflictingTag = await client.tag.findFirst({
+      const targetWhere: Prisma.LibraryTagWhereInput = {
+        spaceId,
+        id: { not: tag.id },
+        name: { equals: data.name, mode: 'insensitive' },
+      };
+      const conflictingTag = await client.libraryTag.findFirst({
         where: targetWhere,
       });
 
       if (conflictingTag) {
         const [sourceLinks, targetLinks] = await Promise.all([
-          client.itemTag.findMany({
+          client.libraryItemTag.findMany({
             where: { tagId: tag.id },
             select: { itemId: true, type: true },
           }),
-          client.itemTag.findMany({
+          client.libraryItemTag.findMany({
             where: { tagId: conflictingTag.id },
             select: { itemId: true },
           }),
@@ -240,7 +215,7 @@ export class TagsRepository {
 
         await Promise.all([
           missingLinks.length > 0
-            ? client.itemTag.createMany({
+            ? client.libraryItemTag.createMany({
                 data: missingLinks.map((l) => ({
                   tagId: conflictingTag.id,
                   itemId: l.itemId,
@@ -249,15 +224,15 @@ export class TagsRepository {
                 skipDuplicates: true,
               })
             : Promise.resolve(),
-          client.itemTag.deleteMany({
+          client.libraryItemTag.deleteMany({
             where: { tagId: tag.id },
           }),
         ]);
         const [, updatedConflicting] = await Promise.all([
-          client.tag.delete({
+          client.libraryTag.delete({
             where: { id: tag.id },
           }),
-          client.tag.update({
+          client.libraryTag.update({
             where: { id: conflictingTag.id },
             data: {
               ...(data.color !== undefined ? { color: data.color } : {}),
@@ -273,7 +248,7 @@ export class TagsRepository {
       }
     }
 
-    const updatePayload: Prisma.TagUpdateInput = {
+    const updatePayload: Prisma.LibraryTagUpdateInput = {
       ...(data.name !== undefined
         ? {
             name: data.name,
@@ -286,13 +261,13 @@ export class TagsRepository {
       version: { increment: 1 },
     };
 
-    if (expectedVersion !== undefined && client.tag.updateMany) {
-      const affected = await client.tag.updateMany({
+    if (expectedVersion !== undefined && client.libraryTag.updateMany) {
+      const affected = await client.libraryTag.updateMany({
         where: { ...scopeWhere, version: expectedVersion },
         data: updatePayload,
       });
       if (affected.count === 0) {
-        const fresh = await client.tag.findFirst({
+        const fresh = await client.libraryTag.findFirst({
           where: scopeWhere,
           select: { version: true },
         });
@@ -319,7 +294,7 @@ export class TagsRepository {
       };
     }
 
-    return client.tag.update({
+    return client.libraryTag.update({
       where: { id: tag.id },
       data: updatePayload,
     });
@@ -331,8 +306,8 @@ export class TagsRepository {
   ): Promise<string[]> {
     if (!tagIds || tagIds.length === 0) return [];
     const client = this.getClient(tx);
-    if (!client.itemTag?.findMany) return [];
-    const rows = await client.itemTag.findMany({
+    if (!client.libraryItemTag?.findMany) return [];
+    const rows = await client.libraryItemTag.findMany({
       where: {
         tagId: tagIds.length === 1 ? tagIds[0] : { in: tagIds },
         item: { deletedAt: null },
@@ -353,13 +328,11 @@ export class TagsRepository {
   ): Promise<boolean> {
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const where: Prisma.TagWhereInput = {
+    const where: Prisma.LibraryTagWhereInput = {
       id,
-      ...(validProjectId
-        ? { projectId: validProjectId }
-        : { userId, projectId: null }),
+      spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
     };
-    const result = await client.tag.deleteMany({
+    const result = await client.libraryTag.deleteMany({
       where,
     });
     return result.count > 0;
@@ -372,10 +345,10 @@ export class TagsRepository {
   ): Promise<string[]> {
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.TagWhereInput = validProjectId
-      ? { projectId: validProjectId }
-      : { userId, projectId: null };
-    const links = await client.itemTag.findMany({
+    const scopeWhere: Prisma.LibraryTagWhereInput = {
+      spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+    };
+    const links = await client.libraryItemTag.findMany({
       where: {
         item: { deletedAt: null },
         OR: [
@@ -395,12 +368,12 @@ export class TagsRepository {
   ): Promise<string[]> {
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.TagWhereInput = validProjectId
-      ? { projectId: validProjectId }
-      : { userId, projectId: null };
+    const scopeWhere: Prisma.LibraryTagWhereInput = {
+      spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+    };
 
-    const autoItemTags = client.itemTag?.findMany
-      ? (await client.itemTag.findMany({
+    const autoItemTags = client.libraryItemTag?.findMany
+      ? (await client.libraryItemTag.findMany({
           where: {
             type: TagType.automatic,
             tag: scopeWhere,
@@ -412,15 +385,15 @@ export class TagsRepository {
       new Set(autoItemTags.map((it) => it.tagId).filter(Boolean)),
     );
 
-    await client.itemTag.deleteMany({
+    await client.libraryItemTag.deleteMany({
       where: {
         type: TagType.automatic,
         tag: scopeWhere,
       },
     });
 
-    if (typeof client.tag?.updateMany === 'function') {
-      await client.tag.updateMany({
+    if (typeof client.libraryTag?.updateMany === 'function') {
+      await client.libraryTag.updateMany({
         where: {
           ...scopeWhere,
           type: TagType.automatic,
@@ -433,7 +406,7 @@ export class TagsRepository {
     }
 
     const automaticTagsToDelete =
-      (await client.tag.findMany({
+      (await client.libraryTag.findMany({
         where: {
           ...scopeWhere,
           type: TagType.automatic,
@@ -444,7 +417,7 @@ export class TagsRepository {
     const deletedTagIds = automaticTagsToDelete.map((t) => t.id);
 
     if (deletedTagIds.length > 0) {
-      await client.tag.deleteMany({
+      await client.libraryTag.deleteMany({
         where: { id: { in: deletedTagIds } },
       });
     }
@@ -459,7 +432,7 @@ export class TagsRepository {
   ): Promise<void> {
     const client = this.getClient(tx);
     await Promise.all([
-      client.itemTag.upsert({
+      client.libraryItemTag.upsert({
         where: {
           tagId_itemId: {
             tagId,
@@ -475,8 +448,8 @@ export class TagsRepository {
           type: TagType.manual,
         },
       }),
-      typeof client.tag?.updateMany === 'function'
-        ? client.tag.updateMany({
+      typeof client.libraryTag?.updateMany === 'function'
+        ? client.libraryTag.updateMany({
             where: { id: tagId, type: TagType.automatic },
             data: { type: TagType.manual },
           })
@@ -490,7 +463,7 @@ export class TagsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const client = this.getClient(tx);
-    await client.itemTag.deleteMany({
+    await client.libraryItemTag.deleteMany({
       where: {
         tagId,
         itemId,
@@ -507,19 +480,20 @@ export class TagsRepository {
   ): Promise<{ tagFound: boolean; itemFound: boolean }> {
     const client = this.getClient(tx);
     const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const tagWhere: Prisma.TagWhereInput = effectiveProjectId
-      ? { id: tagId, projectId: effectiveProjectId }
-      : { id: tagId, userId, projectId: null };
-    const itemWhere: Prisma.ItemWhereInput = effectiveProjectId
-      ? { id: itemId, projectId: effectiveProjectId, deletedAt: null }
-      : { id: itemId, userId, projectId: null, deletedAt: null };
+    const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
+    const tagWhere: Prisma.LibraryTagWhereInput = { id: tagId, spaceId };
+    const itemWhere: Prisma.LibraryItemWhereInput = {
+      id: itemId,
+      spaceId,
+      deletedAt: null,
+    };
 
     const [tag, item] = await Promise.all([
-      client.tag.findFirst({
+      client.libraryTag.findFirst({
         where: tagWhere,
         select: { id: true },
       }),
-      client.item.findFirst({
+      client.libraryItem.findFirst({
         where: itemWhere,
         select: { id: true },
       }),
@@ -593,7 +567,7 @@ export class TagsRepository {
     );
     if (resolvedTags.length === 0) return false;
 
-    await client.itemTag.createMany({
+    await client.libraryItemTag.createMany({
       data: [...resolvedTags]
         .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
         .map((tag) => ({
@@ -614,11 +588,11 @@ export class TagsRepository {
     if (sourceItemIds.length === 0) return;
     const client = this.getClient(tx);
     const [primaryTags, dupTags] = await Promise.all([
-      client.itemTag.findMany({
+      client.libraryItemTag.findMany({
         where: { itemId: targetItemId },
         select: { tagId: true, type: true },
       }),
-      client.itemTag.findMany({
+      client.libraryItemTag.findMany({
         where: { itemId: { in: sourceItemIds } },
         select: { tagId: true, type: true },
       }),
@@ -661,10 +635,10 @@ export class TagsRepository {
 
     await Promise.all([
       newEntries.length > 0
-        ? client.itemTag.createMany({ data: newEntries, skipDuplicates: true })
+        ? client.libraryItemTag.createMany({ data: newEntries, skipDuplicates: true })
         : Promise.resolve(),
-      upgradeTagIds.length > 0 && typeof client.itemTag.updateMany === 'function'
-        ? client.itemTag.updateMany({
+      upgradeTagIds.length > 0 && typeof client.libraryItemTag.updateMany === 'function'
+        ? client.libraryItemTag.updateMany({
             where: {
               itemId: targetItemId,
               tagId: { in: upgradeTagIds },
@@ -673,7 +647,7 @@ export class TagsRepository {
             data: { type: TagType.manual },
           })
         : Promise.resolve(),
-      client.itemTag.deleteMany({
+      client.libraryItemTag.deleteMany({
         where: { itemId: { in: sourceItemIds } },
       }),
     ]);
@@ -688,14 +662,13 @@ export class TagsRepository {
   ) {
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.TagWhereInput = validProjectId
-      ? { id: tagId, projectId: validProjectId }
-      : { id: tagId, userId, projectId: null };
+    const spaceId = resolveSpaceId({ userId, projectId: validProjectId });
+    const scopeWhere: Prisma.LibraryTagWhereInput = { id: tagId, spaceId };
 
-    const sourceTag = await client.tag.findFirst({ where: scopeWhere });
+    const sourceTag = await client.libraryTag.findFirst({ where: scopeWhere });
     if (!sourceTag) return null;
 
-    const sourceLinks = await client.itemTag.findMany({
+    const sourceLinks = await client.libraryItemTag.findMany({
       where: { tagId: sourceTag.id, item: { deletedAt: null } },
       select: { itemId: true, type: true },
     });
@@ -722,7 +695,7 @@ export class TagsRepository {
       if (targetTag) {
         resultTags.push(targetTag);
         if (sourceLinks.length > 0 && targetTag.id !== firstTag?.id) {
-          await client.itemTag.createMany({
+          await client.libraryItemTag.createMany({
             data: sourceLinks.map((l) => ({
               tagId: targetTag.id,
               itemId: l.itemId,

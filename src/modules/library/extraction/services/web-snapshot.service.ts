@@ -99,7 +99,7 @@ function buildStandaloneSnapshotHtml(
 </html>`;
 }
 
-interface SnapshotResult {
+export interface SnapshotResult {
   title: string;
   byline?: string;
   excerpt?: string;

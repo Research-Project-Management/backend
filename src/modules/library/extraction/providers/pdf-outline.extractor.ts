@@ -7,39 +7,24 @@ import { decodeHtmlEntities } from '@/modules/library/core/domain/text.domain';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { RawXmpMetadata } from '@/modules/library/core/types/extraction.types';
 
-export type ExtractedPdfBibliographyReference = BibliographicReference & {
-  rawText: string;
-};
+export type ExtractedPdfBibliographyReference = BibliographicReference & { rawText: string };
 
-export function extractPdfBibliographyReferences(
-  fullText: string,
-): ExtractedPdfBibliographyReference[] {
+export function extractPdfBibliographyReferences(fullText: string): ExtractedPdfBibliographyReference[] {
   if (!fullText || fullText.trim().length < 20) return [];
-
   const normalizedText = fullText.normalize('NFKC');
   const headingPattern =
     /(?:^|\n)[^\S\r\n]*(?:(?:\d+(?:\.\d+)*\.?|[IVX]+\.?)\s+)?(?:references|bibliography|literature\s+cited|works\s+cited|tài\s+liệu\s+tham\s+khảo)\b([^\r\n]*)/gi;
   let refBodyStart = -1;
-
   for (const match of normalizedText.matchAll(headingPattern)) {
     const idx = match.index ?? -1;
     if (idx === -1) continue;
     const trailing = (match[1] || '').trim();
-    if (trailing !== '' && trailing !== ':') {
-      continue;
-    }
+    if (trailing !== '' && trailing !== ':') continue;
     const afterHeadingIdx = idx + match[0].length;
     const previewAfter = normalizedText.slice(afterHeadingIdx, afterHeadingIdx + 80);
-    if (
-      /^(?:\r?\n)?\s*(?:[.\u2026·]{2,}\s*\d+|\d{1,4}\s*(?:\r?\n|$))/.test(
-        previewAfter,
-      )
-    ) {
-      continue;
-    }
+    if (/^(?:\r?\n)?\s*(?:[.\u2026·]{2,}\s*\d+|\d{1,4}\s*(?:\r?\n|$))/.test(previewAfter)) continue;
     refBodyStart = afterHeadingIdx;
   }
-
   if (refBodyStart === -1) return [];
 
   let refSection = normalizedText.slice(refBodyStart);
@@ -49,21 +34,15 @@ export function extractPdfBibliographyReferences(
   if (stopMatch && stopMatch.index !== undefined && stopMatch.index > 60) {
     refSection = refSection.slice(0, stopMatch.index);
   }
-
   const lines = refSection
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => {
-      if (!l) return true;
-      if (/^(?:page\s+)?\d+(?:\s+of\s+\d+)?$/i.test(l)) return false;
-      return true;
-    });
+    .filter((l) => !l || !/^(?:page\s+)?\d+(?:\s+of\s+\d+)?$/i.test(l));
 
   const rawEntries: string[] = [];
   const numberedStartRe = /^(?:\[\d{1,4}\]|\d{1,4}\.(?=\s+[A-Z"\u201C]))\s*/;
   const authorYearStartRe =
     /^[A-ZÀ-Ỹ][A-Za-zÀ-ỹ'-]+,\s*(?:[A-Z]\.|[A-ZÀ-Ỹ][A-Za-zÀ-ỹ'-]+)\b.*?\b(?:19\d{2}|20\d{2})[a-z]?\b/;
-
   const hasNumberedEntries = lines.some((l) => numberedStartRe.test(l));
   let currentEntry = '';
 
@@ -75,29 +54,20 @@ export function extractPdfBibliographyReferences(
       }
       continue;
     }
-
     if (hasNumberedEntries) {
       if (numberedStartRe.test(line)) {
-        if (currentEntry.trim().length > 12) {
-          rawEntries.push(currentEntry.trim());
-        }
+        if (currentEntry.trim().length > 12) rawEntries.push(currentEntry.trim());
         currentEntry = line;
       } else if (currentEntry) {
-        currentEntry = currentEntry.endsWith('-')
-          ? `${currentEntry.slice(0, -1)}${line}`
-          : `${currentEntry} ${line}`;
+        currentEntry = currentEntry.endsWith('-') ? `${currentEntry.slice(0, -1)}${line}` : `${currentEntry} ${line}`;
       }
+    } else if (authorYearStartRe.test(line) && currentEntry.trim().length > 25) {
+      rawEntries.push(currentEntry.trim());
+      currentEntry = line;
     } else {
-      if (authorYearStartRe.test(line) && currentEntry.trim().length > 25) {
-        rawEntries.push(currentEntry.trim());
-        currentEntry = line;
-      } else {
-        currentEntry = currentEntry
-          ? currentEntry.endsWith('-')
-            ? `${currentEntry.slice(0, -1)}${line}`
-            : `${currentEntry} ${line}`
-          : line;
-      }
+      currentEntry = currentEntry
+        ? currentEntry.endsWith('-') ? `${currentEntry.slice(0, -1)}${line}` : `${currentEntry} ${line}`
+        : line;
     }
   }
 

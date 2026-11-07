@@ -35,11 +35,25 @@ export class OutboxDispatcher implements OutboxDispatchHandler {
         ),
       );
     }
+    const evRec = event as {
+      userId?: string;
+      projectId?: string | null;
+      spaceId?: string;
+      actorId?: string | null;
+    };
+    const effectiveUserId =
+      evRec.userId || evRec.actorId || evRec.spaceId || '';
+    const effectiveProjectId =
+      evRec.projectId !== undefined
+        ? (evRec.projectId ?? undefined)
+        : evRec.spaceId && evRec.spaceId !== effectiveUserId
+          ? evRec.spaceId
+          : undefined;
     return this.publish({
       eventId: event.id,
-      userId: event.userId,
-      projectId: event.projectId ?? undefined,
-      scopeId: event.projectId || event.userId,
+      userId: effectiveUserId,
+      projectId: effectiveProjectId,
+      scopeId: evRec.spaceId || effectiveProjectId || effectiveUserId,
       aggregateId: event.aggregateId,
       eventType: event.eventType,
       payload: event.payload,

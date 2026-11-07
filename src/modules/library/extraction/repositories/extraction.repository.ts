@@ -3,7 +3,7 @@ import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/renamer.domain';
-import { normalizeProjectScopeId, ItemProvenancePolicy, deriveFirstAuthor, syncItemDenormalizedCountsInClient } from '@/modules/library/core';
+import { normalizeProjectScopeId, resolveSpaceId, ItemProvenancePolicy, deriveFirstAuthor, syncItemDenormalizedCountsInClient } from '@/modules/library/core';
 import {
   sanitizeExtractedItemUpdateAgainstFreshState,
   isRejectedCitedIdentifier,
@@ -31,10 +31,10 @@ export class ExtractionRepository {
     const client = this.getClient(effectiveTx);
     if (typeof client.attachment?.groupBy !== 'function') return {};
     const validProjectId = normalizeProjectScopeId(scope?.projectId);
-    const itemScopeWhere: Prisma.ItemWhereInput | undefined = validProjectId
-      ? { projectId: validProjectId, deletedAt: null }
+    const itemScopeWhere: Prisma.LibraryItemWhereInput | undefined = validProjectId
+      ? { spaceId: validProjectId, deletedAt: null }
       : scope?.userId
-        ? { userId: scope.userId, projectId: null, deletedAt: null }
+        ? { spaceId: scope.userId, deletedAt: null }
         : undefined;
     const groups = await client.attachment.groupBy({
       by: ['extractionStatus'],
@@ -227,7 +227,7 @@ export class ExtractionRepository {
 
   async updateItem(
     itemId: string,
-    data: Prisma.ItemUpdateInput,
+    data: Prisma.LibraryItemUpdateInput,
     tx?: Prisma.TransactionClient,
   ) {
     return this.updateItemWithExtractedMetadata(itemId, data, tx);
@@ -235,15 +235,15 @@ export class ExtractionRepository {
 
   async updateItemWithExtractedMetadata(
     itemId: string,
-    data: Prisma.ItemUpdateInput,
+    data: Prisma.LibraryItemUpdateInput,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    const freshItem = await client.item.findUnique({
+    const freshItem = await client.libraryItem.findUnique({
       where: { id: itemId },
       select: {
-        userId: true,
-        projectId: true,
+        spaceId: true,
+        createdById: true,
         citationKey: true,
         title: true,
         doi: true,
@@ -270,15 +270,15 @@ export class ExtractionRepository {
                 client,
                 candidateKey,
                 {
-                  userId: freshItem.userId,
-                  projectId: normalizeProjectScopeId(freshItem.projectId),
+                  userId: freshItem.createdById,
+                  projectId: freshItem.spaceId !== freshItem.createdById ? freshItem.spaceId : null,
                 },
                 itemId,
               )
           : undefined,
       });
 
-    return client.item.update({
+    return client.libraryItem.update({
       where: { id: itemId },
       data: {
         ...sanitizedData,
@@ -374,7 +374,7 @@ export class ExtractionRepository {
         contributors: data as unknown as Array<Record<string, unknown>>,
       });
       if (firstAuthor) {
-        await client.item.update({
+        await client.libraryItem.update({
           where: { id: itemId },
           data: {
             firstAuthor,
@@ -465,7 +465,7 @@ export class ExtractionRepository {
       : (hintsOrTx as Prisma.TransactionClient | undefined);
 
     const client = this.getClient(effectiveTx);
-    let scopeWhere: Prisma.ItemWhereInput;
+    let scopeWhere: Prisma.LibraryItemWhereInput;
     if (typeof scope === 'object' && scope !== null) {
       const normalizedProjectId = normalizeProjectScopeId(scope.projectId);
       const validUserId =
@@ -475,17 +475,15 @@ export class ExtractionRepository {
           ? scope.userId.trim()
           : undefined;
       if (normalizedProjectId) {
-        scopeWhere = { projectId: normalizedProjectId };
+        scopeWhere = { spaceId: normalizedProjectId };
       } else if (validUserId) {
-        scopeWhere = { userId: validUserId, projectId: null };
+        scopeWhere = { spaceId: validUserId };
       } else {
         return [];
       }
     } else if (typeof scope === 'string' && scope.trim().length > 0 && scope !== 'system') {
       const cleanScope = scope.trim();
-      scopeWhere = {
-        OR: [{ projectId: cleanScope }, { userId: cleanScope, projectId: null }],
-      };
+      scopeWhere = { spaceId: cleanScope };
     } else {
       return [];
     }
@@ -497,7 +495,7 @@ export class ExtractionRepository {
         (y): y is number => typeof y === 'number' && Number.isFinite(y),
       ) ?? [];
 
-    const hintOrFilters: Prisma.ItemWhereInput[] = [];
+    const hintOrFilters: Prisma.LibraryItemWhereInput[] = [];
     if (cleanDois.length > 0) {
       hintOrFilters.push({ doi: { in: cleanDois } });
     }
@@ -505,7 +503,7 @@ export class ExtractionRepository {
       hintOrFilters.push({ year: { in: cleanYears } });
     }
 
-    const combinedWhere: Prisma.ItemWhereInput = {
+    const combinedWhere: Prisma.LibraryItemWhereInput = {
       ...scopeWhere,
       id: { not: excludeItemId },
       deletedAt: null,
@@ -515,7 +513,7 @@ export class ExtractionRepository {
     const takeLimit =
       hints?.limit && hints.limit > 0 ? Math.min(hints.limit, 2000) : 500;
 
-    return client.item.findMany({
+    return client.libraryItem.findMany({
       where: combinedWhere,
       take: takeLimit,
       select: {
@@ -564,7 +562,7 @@ export class ExtractionRepository {
   }
 
   async countItemTags(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
-    return this.getClient(tx).itemTag.count({ where: { itemId } });
+    return this.getClient(tx).libraryItemTag.count({ where: { itemId } });
   }
 
   async syncItemTags(
@@ -590,14 +588,14 @@ export class ExtractionRepository {
     );
 
     if (resolvedTags.length > 0) {
-      if (typeof client.itemTag?.createMany === 'function') {
-        await client.itemTag.createMany({
+      if (typeof client.libraryItemTag?.createMany === 'function') {
+        await client.libraryItemTag.createMany({
           data: resolvedTags.map((t) => ({ itemId: params.itemId, tagId: t.id, type: 'automatic' })),
           skipDuplicates: true,
         });
-      } else if (typeof client.itemTag?.upsert === 'function') {
+      } else if (typeof client.libraryItemTag?.upsert === 'function') {
         for (const t of resolvedTags) {
-          await client.itemTag.upsert({
+          await client.libraryItemTag.upsert({
             where: { tagId_itemId: { itemId: params.itemId, tagId: t.id } },
             create: { itemId: params.itemId, tagId: t.id, type: 'automatic' },
             update: {},
@@ -605,7 +603,7 @@ export class ExtractionRepository {
         }
       }
 
-      const existingItem = await client.item.findUnique({
+      const existingItem = await client.libraryItem.findUnique({
         where: { id: params.itemId },
         select: { metadata: true },
       });
@@ -617,7 +615,7 @@ export class ExtractionRepository {
       const mergedTags = Array.from(new Set([...existingTags, ...normalized]));
       const mergedKeywords = Array.from(new Set([...existingKeywords, ...normalized]));
 
-      await client.item.update({
+      await client.libraryItem.update({
         where: { id: params.itemId },
         data: {
           ...(params.skipVersionIncrement ? {} : { version: { increment: 1 } }),
@@ -630,7 +628,7 @@ export class ExtractionRepository {
   }
 
   async countItemNotes(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
-    return this.getClient(tx).note.count({ where: { itemId, deletedAt: null } });
+    return this.getClient(tx).libraryNote.count({ where: { itemId, deletedAt: null } });
   }
 
   async createItemNotes(
@@ -646,22 +644,22 @@ export class ExtractionRepository {
     const client = this.getClient(tx);
     if (!params.notes || params.notes.length === 0) return 0;
 
-    const existing = await client.note.findMany({
+    const existing = await client.libraryNote.findMany({
       where: { itemId: params.itemId, deletedAt: null },
       select: { contentMd: true },
     });
     const existingContents = new Set(existing.map((n) => n.contentMd.trim()));
 
-    const toCreate: Prisma.NoteCreateManyInput[] = [];
+    const spaceId = resolveSpaceId({ userId: params.userId, projectId: params.projectId });
+    const toCreate: Prisma.LibraryNoteCreateManyInput[] = [];
     for (const n of params.notes) {
       const cleanContent = n.content.trim();
       if (!cleanContent || existingContents.has(cleanContent)) continue;
       const title = n.type ? `Extracted Note (${n.type})` : 'Extracted Document Note';
       const contentJson = buildTipTapDocFromText(cleanContent);
       toCreate.push({
-        userId: params.userId,
+        spaceId,
         createdById: params.userId,
-        projectId: params.projectId ?? null,
         itemId: params.itemId,
         title,
         contentMd: cleanContent,
@@ -674,25 +672,25 @@ export class ExtractionRepository {
 
     const createdCount = toCreate.length;
     if (createdCount > 0) {
-      if (typeof client.note?.createMany === 'function') {
-        await client.note.createMany({ data: toCreate });
+      if (typeof client.libraryNote?.createMany === 'function') {
+        await client.libraryNote.createMany({ data: toCreate });
       } else {
         for (const row of toCreate) {
-          await client.note.create({ data: row });
+          await client.libraryNote.create({ data: row });
         }
       }
-      if (typeof client.note?.count === 'function') {
+      if (typeof client.libraryNote?.count === 'function') {
         await syncItemDenormalizedCountsInClient(client, params.itemId, {
           notes: true,
         });
-        if (!params.skipVersionIncrement && typeof client.item?.update === 'function') {
-          await client.item.update({
+        if (!params.skipVersionIncrement && typeof client.libraryItem?.update === 'function') {
+          await client.libraryItem.update({
             where: { id: params.itemId },
             data: { version: { increment: 1 } },
           });
         }
       } else {
-        await client.item.update({
+        await client.libraryItem.update({
           where: { id: params.itemId },
           data: {
             noteCount: { increment: createdCount },
@@ -712,8 +710,8 @@ export class ExtractionRepository {
   ): Promise<void> {
     if (identifiers.length === 0) return;
     const rawClient = this.getClient(tx);
-    const freshItem = rawClient.item?.findUnique
-      ? await rawClient.item.findUnique({
+    const freshItem = rawClient.libraryItem?.findUnique
+      ? await rawClient.libraryItem.findUnique({
           where: { id: itemId },
           select: { doi: true, arxivId: true, pmid: true, pmcid: true, isbn: true, issn: true, metadata: true },
         })

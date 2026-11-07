@@ -9,6 +9,7 @@ import { normalizeParentId } from '@/modules/library/catalog/domain/state.domain
 import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 import {
   normalizeProjectScopeId,
+  resolveSpaceId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
   IUnitOfWork,
@@ -80,9 +81,9 @@ export async function executeAssignItemsToCollection(
 ): Promise<{ ids: string[]; count: number; ranPostCommitHook?: boolean }> {
   const ids = dto.itemIds || [];
   const validProjectId = normalizeProjectScopeId(projectId);
-  const scopeWhere = validProjectId
-    ? { projectId: validProjectId }
-    : { userId, projectId: null };
+  const scopeWhere: Prisma.LibraryItemWhereInput = {
+    spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+  };
 
   const validateInClient = async (tx?: Prisma.TransactionClient) => {
     const [collection, validItemIds] = await Promise.all([
@@ -180,12 +181,12 @@ export async function transferCollectionItemMembershipsInTx(
   tx: Prisma.TransactionClient,
 ): Promise<void> {
   if (sourceItemIds.length === 0) return;
-  const sourceItems = await tx.collectionItem.findMany({
+  const sourceItems = await tx.libraryCollectionItem.findMany({
     where: { itemId: { in: sourceItemIds } },
     select: { collectionId: true },
   });
   if (sourceItems.length > 0) {
-    await tx.collectionItem.createMany({
+    await tx.libraryCollectionItem.createMany({
       data: sourceItems.map((item) => ({
         itemId: targetItemId,
         collectionId: item.collectionId,
@@ -193,7 +194,7 @@ export async function transferCollectionItemMembershipsInTx(
       skipDuplicates: true,
     });
   }
-  await tx.collectionItem.deleteMany({
+  await tx.libraryCollectionItem.deleteMany({
     where: { itemId: { in: sourceItemIds } },
   });
 }
@@ -220,8 +221,16 @@ export async function executeDeleteCollectionWithCascade(
     if (!existing) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
+    const existingRec = existing as Record<string, unknown>;
     const effectiveProjectId =
-      normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
+      normalizeProjectScopeId(
+        projectId ??
+          (typeof existingRec.projectId === 'string'
+            ? existingRec.projectId
+            : typeof existingRec.spaceId === 'string' && existingRec.spaceId !== userId
+              ? existingRec.spaceId
+              : undefined),
+      ) ?? undefined;
     const [initialAffectedItemIds, allCollections] = await Promise.all([
       repo.findItemIdsByCollection(
         userId,
@@ -316,12 +325,12 @@ export async function executeDeleteCollectionWithCascade(
         let reparentedChildCollections: Array<{ id: string; version: number }> = [];
         if (
           (strategy === 'orphan' || strategy === 'move-to-parent') &&
-          tx?.collection?.findMany
+          tx?.libraryCollection?.findMany
         ) {
-          const scopeWhere = effectiveProjectId
-            ? { projectId: effectiveProjectId }
-            : { userId, projectId: null };
-          reparentedChildCollections = await tx.collection.findMany({
+          const scopeWhere = {
+            spaceId: resolveSpaceId({ userId, projectId: effectiveProjectId }),
+          };
+          reparentedChildCollections = await tx.libraryCollection.findMany({
             where: { ...scopeWhere, parentId: collectionId, deletedAt: null },
             select: { id: true, version: true },
           });
@@ -538,8 +547,16 @@ export async function executeCopyCollectionSubtree(
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
+    const rootRec = root as Record<string, unknown>;
     const effectiveProjectId =
-      normalizeProjectScopeId(projectId ?? root.projectId) ?? undefined;
+      normalizeProjectScopeId(
+        projectId ??
+          (typeof rootRec.projectId === 'string'
+            ? rootRec.projectId
+            : typeof rootRec.spaceId === 'string' && rootRec.spaceId !== userId
+              ? rootRec.spaceId
+              : undefined),
+      ) ?? undefined;
     const allCollections =
       (await repo.findAll(userId, effectiveProjectId, tx)) || [];
 

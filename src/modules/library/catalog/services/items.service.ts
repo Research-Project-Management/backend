@@ -32,7 +32,6 @@ export class ItemService {
   ) {
     this.cacheCoordinator = cacheCoordinator ?? new ItemCacheCoordinator(cache);
   }
-
   private stripPersonalOverlayForSharedScope<T>(item: T, projectId?: string | null): T {
     if (!projectId || !item || typeof item !== 'object') return item;
     const clone = { ...(item as unknown as Record<string, unknown>) };
@@ -44,18 +43,39 @@ export class ItemService {
     }
     return clone as unknown as T;
   }
+
   async invalidateItemCache(
     id: string, userId?: string, projectId?: string, options?: { skipScopeInvalidation?: boolean },
   ): Promise<void> {
     return this.cacheCoordinator.invalidateItemCache(id, userId, projectId, options);
   }
+
   async invalidateScopeListCache(userId: string, projectId?: string): Promise<void> {
     return this.cacheCoordinator.invalidateScopeListCache(userId, projectId);
   }
+
+  private async invalidateBulkItemsCache(
+    itemIds: string[],
+    userId: string,
+    projectId?: string,
+    additionalProjectIds?: Array<string | null | undefined>,
+  ): Promise<void> {
+    return this.cacheCoordinator.invalidateBulkItemsCache(itemIds, userId, projectId, additionalProjectIds);
+  }
+
+  // ===========================================================================
+  // 2. CATALOG READER ROLE (Item Lookup)
+  // ===========================================================================
+
   async getItem(userId: string, id: string, projectId?: string) {
     const item = await this.query.findById(userId, id, projectId);
     return item ? (ItemsMapper.mapFlattenedState(item, userId) ?? ItemsMapper.toDomain(item)) : null;
   }
+
+  // ===========================================================================
+  // 3. CATALOG WRITER ROLE (Create, Update, Publication State, Reindex, Soft-Delete)
+  // ===========================================================================
+
   async createItem(
     userId: string,
     data: CreateItemData,
@@ -195,8 +215,17 @@ export class ItemService {
         tx,
         resolvedProjectId,
       );
+      const updatedRec = updated as {
+        projectId?: string | null;
+        spaceId?: string;
+        createdById?: string;
+      };
       const effectiveProjectId =
-        resolvedProjectId || updated.projectId || undefined;
+        resolvedProjectId ||
+        updatedRec.projectId ||
+        (updatedRec.spaceId && updatedRec.spaceId !== userId
+          ? updatedRec.spaceId
+          : undefined);
       resolvedProjectId = effectiveProjectId;
       const eventScope = { userId, projectId: effectiveProjectId };
       const domainUpdated = (ItemsMapper.mapFlattenedState(updated, userId) ??
@@ -263,10 +292,17 @@ export class ItemService {
           options,
           tx,
         );
+        const updatedRec = updated as {
+          projectId?: string | null;
+          spaceId?: string;
+          createdById?: string;
+        };
         const effectiveProjectId =
           normalizeProjectScopeId(options?.projectId) ||
-          updated.projectId ||
-          undefined;
+          updatedRec.projectId ||
+          (updatedRec.spaceId && updatedRec.spaceId !== userId
+            ? updatedRec.spaceId
+            : undefined);
         resolvedProjectId = effectiveProjectId;
         const isSharedProjectItem = Boolean(effectiveProjectId);
         // Personal UserPublication in a shared project must emit to the user's personal sync stream
@@ -399,6 +435,10 @@ export class ItemService {
       },
     );
   }
+  // ===========================================================================
+  // 4. CATALOG TRASH & BULK OPERATIONS ROLE (Restore, Purge, Bulk Trash, Empty Trash)
+  // ===========================================================================
+
   async restoreItem(
     userId: string,
     id: string,
@@ -417,15 +457,27 @@ export class ItemService {
           tx,
           validProjectId,
         );
+        const restoredRec = restored as {
+          projectId?: string | null;
+          spaceId?: string;
+          createdById?: string;
+        };
         const effectiveProjectId =
-          validProjectId || restored.projectId || undefined;
+          validProjectId ||
+          restoredRec.projectId ||
+          (restoredRec.spaceId && restoredRec.spaceId !== userId
+            ? restoredRec.spaceId
+            : undefined);
         const eventScope = { userId, projectId: effectiveProjectId };
         const domainItem = (ItemsMapper.mapFlattenedState(restored, userId) ??
           ItemsMapper.toDomain(restored)) as ItemDetail;
-        const sharedRestoredData = this.stripPersonalOverlayForSharedScope(
-          domainItem,
-          effectiveProjectId,
-        );
+        const sharedRestoredData = {
+          ...this.stripPersonalOverlayForSharedScope(
+            domainItem,
+            effectiveProjectId,
+          ),
+          isRestored: true,
+        };
         await helpers.appendChange(eventScope, {
           entityType: 'Item',
           entityId: id,
@@ -446,6 +498,7 @@ export class ItemService {
         }),
     );
   }
+
   async purgeItem(
     userId: string,
     id: string,
@@ -506,19 +559,7 @@ export class ItemService {
     }
     return purged;
   }
-  private async invalidateBulkItemsCache(
-    itemIds: string[],
-    userId: string,
-    projectId?: string,
-    additionalProjectIds?: Array<string | null | undefined>,
-  ): Promise<void> {
-    return this.cacheCoordinator.invalidateBulkItemsCache(
-      itemIds,
-      userId,
-      projectId,
-      additionalProjectIds,
-    );
-  }
+
   async bulkTrash(userId: string, itemIds: string[], projectId?: string) {
     if (!Array.isArray(itemIds) || itemIds.length === 0) {
       return {

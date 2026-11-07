@@ -56,14 +56,19 @@ export class PdfAnnotationImporterService {
     }
 
     const effectiveProjectId = normalizeProjectScopeId(projectId);
-    if (attachment.item) {
-      if (effectiveProjectId) {
-        if (attachment.item.projectId !== effectiveProjectId) {
+    const itemRec = attachment.item as { spaceId?: string; createdById?: string; projectId?: string | null; userId?: string } | null | undefined;
+    if (itemRec) {
+      if (itemRec.spaceId) {
+        if (itemRec.spaceId !== (effectiveProjectId || userId)) {
           throw new NotFoundException(`Attachment ${attachmentId} not found`);
         }
-      } else if (attachment.item.userId && attachment.item.userId !== userId) {
+      } else if (effectiveProjectId) {
+        if (itemRec.projectId !== effectiveProjectId) {
+          throw new NotFoundException(`Attachment ${attachmentId} not found`);
+        }
+      } else if (itemRec.userId && itemRec.userId !== userId) {
         throw new NotFoundException(`Attachment ${attachmentId} not found`);
-      } else if (attachment.item.projectId && !attachment.item.userId) {
+      } else if (itemRec.projectId && !itemRec.userId) {
         throw new NotFoundException(`Attachment ${attachmentId} not found`);
       }
     }
@@ -76,9 +81,10 @@ export class PdfAnnotationImporterService {
       );
     }
 
+    const itemProjectId = itemRec?.projectId ?? (itemRec?.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
     const resolvedProjectId =
       effectiveProjectId ||
-      normalizeProjectScopeId(attachment.item?.projectId ?? undefined);
+      normalizeProjectScopeId(itemProjectId ?? undefined);
     const existingAnnotationsPromise =
       this.annotationsRepo.findExistingForImport(attachmentId);
     const storageFile = await this.storagePort.readOwnedFile({

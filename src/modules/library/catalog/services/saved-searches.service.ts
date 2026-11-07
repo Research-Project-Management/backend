@@ -64,7 +64,7 @@ export class SavedSearchesService {
     group: SavedSearchConditionGroup,
     projectId?: string,
     precomputedDescendantMap?: Map<string, string[]>,
-  ): Promise<Prisma.ItemWhereInput> {
+  ): Promise<Prisma.LibraryItemWhereInput> {
     const referencedColIds = this.evaluator.extractReferencedCollectionIds(group);
     const descendantMap =
       precomputedDescendantMap ??
@@ -91,7 +91,7 @@ export class SavedSearchesService {
       dto.conditions.scopeOptions =
         dto.conditions.scopeOptions || dto.scopeOptions;
     }
-    let where: Prisma.ItemWhereInput;
+    let where: Prisma.LibraryItemWhereInput;
     try {
       where = await this.compileConditions(
         userId,
@@ -283,8 +283,11 @@ export class SavedSearchesService {
     projectId?: string,
   ) {
     const existing = await this.findById(userId, id, projectId);
+    const existingProjectId =
+      (existing as { projectId?: string | null }).projectId ??
+      (existing.spaceId !== existing.createdById ? existing.spaceId : undefined);
     const effectiveProjectId = normalizeProjectScopeId(
-      projectId || existing.projectId,
+      projectId || existingProjectId,
     );
 
     let recalculatedCount: number | undefined;
@@ -298,7 +301,7 @@ export class SavedSearchesService {
         dto.conditions.scopeOptions =
           dto.conditions.scopeOptions || dto.scopeOptions;
       }
-      let where: Prisma.ItemWhereInput;
+      let where: Prisma.LibraryItemWhereInput;
       try {
         where = await this.compileConditions(
           userId,
@@ -390,8 +393,11 @@ export class SavedSearchesService {
     expectedVersion?: number,
   ) {
     const existing = await this.findById(userId, id, projectId);
+    const existingProjectId =
+      (existing as { projectId?: string | null }).projectId ??
+      (existing.spaceId !== existing.createdById ? existing.spaceId : undefined);
     const effectiveProjectId = normalizeProjectScopeId(
-      projectId || existing.projectId,
+      projectId || existingProjectId,
     );
 
     if (this.libraryTx) {
@@ -504,8 +510,11 @@ export class SavedSearchesService {
     const conditions =
       savedSearch.conditions as unknown as SavedSearchConditionGroup;
 
+    const savedSearchProjectId =
+      (savedSearch as { projectId?: string | null }).projectId ??
+      (savedSearch.spaceId !== savedSearch.createdById ? savedSearch.spaceId : undefined);
     const queryProjectId = normalizeProjectScopeId(
-      effectiveProjectId || savedSearch.projectId,
+      effectiveProjectId || savedSearchProjectId,
     );
     const where = await this.compileConditions(
       userId,

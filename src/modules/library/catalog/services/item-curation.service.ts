@@ -405,16 +405,18 @@ export class ItemCurationService {
    * and match; an unknown owner is treated as out-of-scope (never as in-scope).
    */
   private isOwnedWithinScope(
-    owner: { userId?: string | null; projectId?: string | null } | null | undefined,
+    owner: { spaceId?: string | null; createdById?: string | null; userId?: string | null; projectId?: string | null } | null | undefined,
     scope?: { userId?: string; projectId?: string },
   ): boolean {
     if (!scope || (!scope.userId && !scope.projectId)) return false;
     if (!owner) return false;
     if (scope.projectId) {
-      return owner.projectId === scope.projectId;
+      if (owner.projectId !== undefined) return owner.projectId === scope.projectId;
+      return owner.spaceId === scope.projectId;
     }
     if (scope.userId) {
-      return owner.userId === scope.userId && !owner.projectId;
+      if (owner.userId !== undefined) return owner.userId === scope.userId && !owner.projectId;
+      return owner.spaceId === scope.userId;
     }
     return false;
   }
@@ -487,23 +489,28 @@ export class ItemCurationService {
         ? (existing.metadata as Record<string, unknown>)
         : {};
 
-    const validProjectId = normalizeProjectScopeId(existing.projectId);
+    const existingProjectId =
+      (existing as { projectId?: string | null }).projectId ??
+      (existing.spaceId !== existing.createdById ? existing.spaceId : null);
+    const existingUserId =
+      (existing as { userId?: string }).userId ?? existing.createdById ?? existing.spaceId;
+    const validProjectId = normalizeProjectScopeId(existingProjectId);
     const mergedMetadata = {
       ...currentMeta,
       ...aiMetadataPatch,
     } as Prisma.InputJsonValue;
 
     const invalidateUpdatedItemCache = async () => {
-      if (this.cacheCoordinator && existing.userId) {
+      if (this.cacheCoordinator && existingUserId) {
         await this.cacheCoordinator.invalidateForWrite({
-          userId: existing.userId,
+          userId: existingUserId,
           projectId: validProjectId,
           itemIds: [itemId],
         });
       } else if (this.cacheCoordinator) {
         await this.cacheCoordinator.invalidateItemCache(
           itemId,
-          existing.userId,
+          existingUserId,
           validProjectId,
         );
       } else if (this.cache) {
@@ -512,7 +519,7 @@ export class ItemCurationService {
     };
 
     let ranPostCommitHook = false;
-    if (this.libraryTx && existing.userId) {
+    if (this.libraryTx && existingUserId) {
       await this.libraryTx.executeInTransaction(async (tx, helpers) => {
         ranPostCommitHook = Boolean(helpers?.onAfterCommit);
         const updated = await this.command.applyItemAiMetadataUpdate({
@@ -531,7 +538,7 @@ export class ItemCurationService {
           validProjectId,
         );
         const eventScope = {
-          userId: existing.userId,
+          userId: existingUserId,
           projectId: validProjectId,
         };
         await helpers.appendChange(eventScope, {

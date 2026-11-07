@@ -2,9 +2,10 @@ import { Logger } from '@nestjs/common';
 import {
   SCHEMA_V42_DATA, CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, FIELD_ALIASES,
   getPrimaryCreatorRoleForType, harmonizeBibliographicFields, isPaperLevelKeywordSource,
-  isPlaceholderItemTitle, isRejectedCitedIdentifier, LibraryItemSource, mergeExtraTextWithStatus,
-  parseCreatorString, resolveCanonicalCreatorRole, resolveProviderFieldWeight,
-  ItemProvenancePolicy, FieldProvenanceRecord, ICatalogFacade,
+  isPlaceholderItemTitle, isPreprintVenue, isRejectedCitedIdentifier, LibraryItemSource,
+  mergeExtraTextWithStatus, parseCreatorString, resolveCanonicalCreatorRole,
+  resolveProviderFieldWeight, synchronizeVenueBaseFields, ItemProvenancePolicy,
+  FieldProvenanceRecord, ICatalogFacade,
 } from '@/modules/library/core';
 
 const REJECTABLE_IDENTIFIER_FIELDS = new Set([
@@ -209,7 +210,10 @@ export function buildEnrichmentPatch(
   rawProposed: Record<string, unknown>,
 ): Record<string, unknown> {
   const resolvedType = pickFirstString(rawProposed.itemType, existingRec?.itemType) || 'journalArticle';
-  const p = harmonizeBibliographicFields(rawProposed, { itemType: resolvedType, syncExtraFields: true });
+  const p = synchronizeVenueBaseFields(
+    harmonizeBibliographicFields(rawProposed, { itemType: resolvedType, syncExtraFields: true }),
+    resolvedType,
+  );
   const enrichPatch: Record<string, unknown> = {};
   const pExtraObj = asObj(p.extraFields);
   const { existingMetaObj, existingExtraObj, existingProvMap, incomingProvMap, isFilenameTitle, findProv, isFieldLocked } =
@@ -424,9 +428,12 @@ export function buildReResolvePatch(
   options?: { fields?: string[]; lockedFields?: string[] },
 ): { updateData: Record<string, unknown>; updatedFields: string[] } {
   const effectiveItemType = pickFirstString(resolvedMetadata.itemType, existingRec.itemType, existingRec.type) || 'journalArticle';
-  const m: Record<string, unknown> = harmonizeBibliographicFields(
-    { ...resolvedMetadata, extraFields: { ...asObj(resolvedMetadata.extraFields) } },
-    { itemType: effectiveItemType, syncExtraFields: true },
+  const m: Record<string, unknown> = synchronizeVenueBaseFields(
+    harmonizeBibliographicFields(
+      { ...resolvedMetadata, extraFields: { ...asObj(resolvedMetadata.extraFields) } },
+      { itemType: effectiveItemType, syncExtraFields: true },
+    ),
+    effectiveItemType,
   );
 
   const updateData: Record<string, unknown> = {};
@@ -471,8 +478,8 @@ export function buildReResolvePatch(
       if (existingVal !== undefined) {
         if (
           (fieldName === 'publicationTitle' || fieldName === 'journal' || fieldName === 'venue') &&
-          typeof existingVal === 'string' && !/^arxiv(\s+e-?prints)?$/i.test(existingVal.trim()) &&
-          typeof value === 'string' && /^arxiv(\s+e-?prints)?$/i.test(value.trim())
+          typeof existingVal === 'string' && !isPreprintVenue(existingVal) &&
+          typeof value === 'string' && isPreprintVenue(value)
         ) return;
         const existingAuth = getExistingProvAuthority(fieldName);
         if (existingAuth > 0 && getIncomingProvAuthority(fieldName) + 0.05 < existingAuth) return;
@@ -623,22 +630,14 @@ export async function materializeDeduplicatedNotes(params: {
   logger?: Logger;
 }): Promise<void> {
   const { catalogGateway, userId, projectId, itemId, notes, createdItem, logger } = params;
-  if (!Array.isArray(notes) || notes.length === 0 || !catalogGateway?.createNote) {
-    return;
-  }
+  if (!Array.isArray(notes) || notes.length === 0 || !catalogGateway?.createNote) return;
 
   const existingNotes = Array.isArray(createdItem?.notes)
     ? createdItem.notes
-    : Array.isArray(createdItem?.notesList)
-      ? createdItem.notesList
-      : [];
+    : Array.isArray(createdItem?.notesList) ? createdItem.notesList : [];
   if (
-    (existingNotes.length === 0 &&
-      typeof createdItem?.noteCount === 'number' &&
-      createdItem.noteCount > 0) ||
-    (existingNotes.length >= notes.length &&
-      typeof createdItem?.noteCount === 'number' &&
-      createdItem.noteCount >= notes.length)
+    (existingNotes.length === 0 && typeof createdItem?.noteCount === 'number' && createdItem.noteCount > 0) ||
+    (existingNotes.length >= notes.length && typeof createdItem?.noteCount === 'number' && createdItem.noteCount >= notes.length)
   ) {
     return;
   }
@@ -650,51 +649,96 @@ export async function materializeDeduplicatedNotes(params: {
     } else if (existingNote && typeof existingNote === 'object') {
       const rec = existingNote as Record<string, unknown>;
       const txt = rec.contentMd ?? rec.content ?? rec.note;
-      if (typeof txt === 'string' && txt.trim()) {
-        seenContents.add(txt.trim().toLowerCase());
-      }
+      if (typeof txt === 'string' && txt.trim()) seenContents.add(txt.trim().toLowerCase());
     }
   }
 
   for (const noteItem of notes) {
-    const rawContent =
-      typeof noteItem === 'object' && noteItem !== null
-        ? (noteItem as Record<string, unknown>).content
-        : undefined;
-    const rawNoteSource =
-      typeof noteItem === 'object' && noteItem !== null
-        ? (noteItem as Record<string, unknown>).source
-        : undefined;
-    const noteSource =
-      typeof rawNoteSource === 'string' || typeof rawNoteSource === 'number'
-        ? String(rawNoteSource)
-        : '';
-    const noteContent =
-      typeof noteItem === 'string'
-        ? noteItem
-        : typeof rawContent === 'string'
-          ? rawContent
-          : '';
-
+    const noteObj = typeof noteItem === 'object' && noteItem !== null ? (noteItem as Record<string, unknown>) : undefined;
+    const rawContent = noteObj?.content;
+    const rawNoteSource = noteObj?.source;
+    const noteSource = typeof rawNoteSource === 'string' || typeof rawNoteSource === 'number' ? String(rawNoteSource) : '';
+    const noteContent = typeof noteItem === 'string' ? noteItem : typeof rawContent === 'string' ? rawContent : '';
     const trimmed = noteContent.trim();
     if (!trimmed || seenContents.has(trimmed.toLowerCase())) continue;
     seenContents.add(trimmed.toLowerCase());
 
     try {
       await catalogGateway.createNote(userId, {
-        itemId,
-        contentMd: trimmed,
-        title: noteSource || 'Imported Note',
-        projectId,
-        createdById: userId,
+        itemId, contentMd: trimmed, title: noteSource || 'Imported Note', projectId, createdById: userId,
       });
-      logger?.log(
-        `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
-      );
+      logger?.log(`[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`);
     } catch (err: unknown) {
-      logger?.warn(
-        `[NOTE] Failed to create note for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      logger?.warn(`[NOTE] Failed to create note for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+}
+
+export async function executeDuplicateItemEnrichment<TItem extends { id: string }>(params: {
+  catalogGateway?: ICatalogFacade;
+  userId: string;
+  projectId?: string;
+  existingItem: TItem;
+  candidateData: Record<string, unknown>;
+  collectionIds?: string[];
+  sideEffects?: {
+    saveItemMetadataSnapshot?: (itemId: string, metadata: Record<string, unknown>) => Promise<unknown>;
+    syncRelationsForCommittedItem?: (
+      itemId: string,
+      metadata: Record<string, unknown>,
+      scope: { userId: string; projectId?: string },
+    ) => Promise<unknown>;
+    materializeNotes?: (
+      userId: string,
+      projectId: string | undefined,
+      itemId: string,
+      notes?: unknown[],
+      createdItem?: Record<string, unknown> | null,
+    ) => Promise<unknown>;
+  };
+  logger?: Logger;
+}): Promise<{ item: TItem & { wasPreExistingMatch: true }; patchedFields: string[] }> {
+  const { catalogGateway, userId, projectId, existingItem, candidateData, collectionIds, sideEffects, logger } = params;
+  let resultItem: TItem = existingItem;
+  let patchedFields: string[] = [];
+
+  if (catalogGateway?.updateItem) {
+    try {
+      const patch = buildEnrichmentPatch(existingItem as unknown as Record<string, unknown>, candidateData);
+      patchedFields = Object.keys(patch);
+      if (patchedFields.length > 0) {
+        const updated = await catalogGateway.updateItem(userId, existingItem.id, patch, { projectId });
+        if (updated) resultItem = updated as unknown as TItem;
+      }
+    } catch (enrichErr: unknown) {
+      logger?.warn(`Failed to enrich pre-matched item ${existingItem.id}: ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`);
+    }
+  }
+
+  const existingRec = existingItem as unknown as Record<string, unknown>;
+  const rawNotes = Array.isArray(candidateData.notes) ? candidateData.notes : undefined;
+  const rawColIds = collectionIds ?? (Array.isArray(candidateData.collectionIds) ? (candidateData.collectionIds as string[]) : undefined);
+  const uniqueCollectionIds =
+    Array.isArray(rawColIds) && rawColIds.length > 0 && catalogGateway?.assignItemsToCollection
+      ? Array.from(new Set(rawColIds.filter(Boolean)))
+      : [];
+
+  try {
+    await Promise.all([
+      sideEffects?.saveItemMetadataSnapshot?.(existingItem.id, candidateData),
+      sideEffects?.syncRelationsForCommittedItem?.(existingItem.id, candidateData, { userId, projectId }),
+      rawNotes && rawNotes.length > 0
+        ? sideEffects?.materializeNotes
+          ? sideEffects.materializeNotes(userId, projectId, existingItem.id, rawNotes, existingRec)
+          : materializeDeduplicatedNotes({ catalogGateway, userId, projectId, itemId: existingItem.id, notes: rawNotes, createdItem: existingRec, logger })
+        : undefined,
+      ...uniqueCollectionIds.map((colId) =>
+        catalogGateway!.assignItemsToCollection!(userId, colId, [existingItem.id], projectId),
+      ),
+    ]);
+  } catch (sideEffectErr: unknown) {
+    logger?.warn(`Side-effects failed for matched item ${existingItem.id}: ${sideEffectErr instanceof Error ? sideEffectErr.message : String(sideEffectErr)}`);
+  }
+
+  return { item: { ...resultItem, wasPreExistingMatch: true }, patchedFields };
 }

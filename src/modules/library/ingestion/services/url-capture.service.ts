@@ -156,8 +156,8 @@ export class UrlCaptureService {
 
     await this.repo.createCapturePreview({
       sourceUrl: result.url || url,
-      userId: userId || effectiveScopeId,
-      projectId: projectId ?? null,
+      spaceId: projectId || userId || effectiveScopeId,
+      createdById: userId || effectiveScopeId,
       canonicalMetadata:
         boundCanonicalMetadata as unknown as Prisma.InputJsonValue,
       metadataDigest,
@@ -196,7 +196,10 @@ export class UrlCaptureService {
       throw new BadRequestException('Invalid or expired capture preview token');
     }
 
-    if (preview.userId && preview.userId !== targetUserId) {
+    const previewUserId =
+      (preview as { userId?: string; createdById?: string }).userId ??
+      preview.createdById;
+    if (previewUserId && previewUserId !== targetUserId) {
       throw new ForbiddenException('Access denied to capture preview');
     }
 
@@ -213,6 +216,9 @@ export class UrlCaptureService {
     }
     const boundProjectId =
       (preview as { projectId?: string | null }).projectId ||
+      (preview.spaceId && preview.spaceId !== preview.createdById
+        ? preview.spaceId
+        : undefined) ||
       (typeof rawCanonical.projectId === 'string'
         ? rawCanonical.projectId
         : undefined);
@@ -254,8 +260,15 @@ export class UrlCaptureService {
         canonicalMeta,
         dto.previewToken,
         {
-          scopeId: scopeId || targetUserId || 'unassigned',
+          scopeId:
+            boundProjectId ||
+            projectId ||
+            (typeof rawCanonical.scopeId === 'string' && rawCanonical.scopeId) ||
+            scopeId ||
+            targetUserId ||
+            'unassigned',
           userId: targetUserId,
+          projectId: boundProjectId || projectId,
         },
       );
       if (!verifyRes.valid) {

@@ -17,9 +17,11 @@ interface NormalizedRectBox {
   y2: number;
   width: number;
   height: number;
-  paths?: number[][][];
+  paths?: Array<number[][] | string>;
   imageDataUrl?: string;
 }
+
+const SVG_PATH_DATA_REGEX = /^[MLCQZmlcqz0-9.,\s+-]+$/;
 
 /**
  * Extracts canonical top-left anchor { x1, y1 } from either a 4-number tuple [x1, y1, x2, y2],
@@ -125,7 +127,7 @@ function normalizeSingleRectBox(
     ) {
       const extra: Partial<NormalizedRectBox> = {};
       if (Array.isArray(r.paths)) {
-        extra.paths = r.paths as number[][][];
+        extra.paths = r.paths as Array<number[][] | string>;
       }
       if (typeof r.imageDataUrl === 'string' && r.imageDataUrl.length <= 500_000) {
         extra.imageDataUrl = r.imageDataUrl;
@@ -267,10 +269,21 @@ export class AnnotationNormalizer {
 
       const extraProps: Record<string, unknown> = {};
       if (Array.isArray(r.paths)) {
-        const sanitizedPaths: number[][][] = [];
-        const maxPaths = Math.min(r.paths.length, 64);
+        const sanitizedPaths: Array<number[][] | string> = [];
+        const maxPaths = Math.min(r.paths.length, 256);
         for (let pIdx = 0; pIdx < maxPaths; pIdx++) {
           const stroke = r.paths[pIdx];
+          if (typeof stroke === 'string') {
+            const trimmedStroke = stroke.trim();
+            if (
+              trimmedStroke.length > 0 &&
+              trimmedStroke.length <= 32_768 &&
+              SVG_PATH_DATA_REGEX.test(trimmedStroke)
+            ) {
+              sanitizedPaths.push(trimmedStroke);
+            }
+            continue;
+          }
           if (!Array.isArray(stroke)) continue;
           const sanitizedStroke: number[][] = [];
           const maxPts = Math.min(stroke.length, 1024);
@@ -425,7 +438,12 @@ export class AnnotationNormalizer {
   /**
    * Normalizes complete CreateAnnotationData payload.
    */
-  normalizeCreateData(data: CreateAnnotationData) {
+  normalizeCreateData<
+    T extends Omit<CreateAnnotationData, 'attachmentId' | 'authorId'> & {
+      attachmentId?: string;
+      authorId?: string;
+    },
+  >(data: T) {
     return {
       ...data,
       pageLabel: this.normalizePageLabel(data.pageLabel),

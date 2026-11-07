@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, ReadStatus } from '@prisma/client';
-import { normalizeProjectScopeId, VersionMismatchException, collectDescendantCollectionIds } from '@/modules/library/core';
+import { normalizeProjectScopeId, resolveSpaceId, VersionMismatchException, collectDescendantCollectionIds } from '@/modules/library/core';
 import {
   ExecuteSavedSearchOptions,
   StateEntity,
@@ -21,13 +21,14 @@ export class SavedSearchesRepository {
     rootCollectionIds: string[],
   ): Promise<Map<string, string[]>> {
     const descendantMap = new Map<string, string[]>();
-    if (!rootCollectionIds.length || !this.prisma?.collection?.findMany) return descendantMap;
+    if (!rootCollectionIds.length || !this.prisma?.libraryCollection?.findMany) return descendantMap;
     const effectiveProjectId = this.normalizeProjectId(projectId);
-    const scopeWhere: Prisma.CollectionWhereInput = effectiveProjectId
-      ? { projectId: effectiveProjectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
+    const scopeWhere: Prisma.LibraryCollectionWhereInput = {
+      spaceId: resolveSpaceId({ userId, projectId: effectiveProjectId }),
+      deletedAt: null,
+    };
     try {
-      const allCollections = await this.prisma.collection.findMany({
+      const allCollections = await this.prisma.libraryCollection.findMany({
         where: scopeWhere,
         select: { id: true, parentId: true },
       });
@@ -59,11 +60,11 @@ export class SavedSearchesRepository {
     const client = this.getClient(tx);
     const effectiveProjectId =
       this.normalizeProjectId(projectId || dto.projectId) || null;
-    return client.savedSearch.create({
+    const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
+    return client.librarySavedSearch.create({
       data: {
-        userId,
+        spaceId,
         createdById: userId,
-        projectId: effectiveProjectId,
         name: dto.name.trim(),
         description: dto.description?.trim() || '',
         icon: dto.icon || '',
@@ -88,29 +89,23 @@ export class SavedSearchesRepository {
   ) {
     const client = this.getClient(tx);
     const effectiveProjectId = this.normalizeProjectId(projectId);
-    const scopeWhere = effectiveProjectId
-      ? { projectId: effectiveProjectId }
-      : { userId, projectId: null };
-    const where: Prisma.SavedSearchWhereInput = {
+    const where: Prisma.LibrarySavedSearchWhereInput = {
       id,
       deletedAt: null,
-      ...scopeWhere,
+      spaceId: resolveSpaceId({ userId, projectId: effectiveProjectId }),
     };
-    return client.savedSearch.findFirst({
+    return client.librarySavedSearch.findFirst({
       where,
     });
   }
 
   async findAll(userId: string, projectId?: string) {
     const effectiveProjectId = this.normalizeProjectId(projectId);
-    const scopeWhere = effectiveProjectId
-      ? { projectId: effectiveProjectId }
-      : { userId, projectId: null };
-    const where: Prisma.SavedSearchWhereInput = {
+    const where: Prisma.LibrarySavedSearchWhereInput = {
       deletedAt: null,
-      ...scopeWhere,
+      spaceId: resolveSpaceId({ userId, projectId: effectiveProjectId }),
     };
-    return this.prisma.savedSearch.findMany({
+    return this.prisma.librarySavedSearch.findMany({
       where,
       orderBy: [{ isPinned: 'desc' }, { name: 'asc' }],
     });
@@ -126,17 +121,17 @@ export class SavedSearchesRepository {
   ) {
     const client = this.getClient(tx);
     const effectiveProjectId = this.normalizeProjectId(projectId);
-    const scopeWhere = effectiveProjectId
-      ? { projectId: effectiveProjectId }
-      : { userId, projectId: null };
+    const scopeWhere = {
+      spaceId: resolveSpaceId({ userId, projectId: effectiveProjectId }),
+    };
     const expectedVersion = dto.expectedVersion ?? dto.version;
-    const where: Prisma.SavedSearchWhereInput = {
+    const where: Prisma.LibrarySavedSearchWhereInput = {
       id,
       deletedAt: null,
       ...scopeWhere,
       ...(expectedVersion !== undefined ? { version: expectedVersion } : {}),
     };
-    const res = await client.savedSearch.updateMany({
+    const res = await client.librarySavedSearch.updateMany({
       where,
       data: {
         updatedById: userId,
@@ -164,7 +159,7 @@ export class SavedSearchesRepository {
       },
     });
     if (res.count === 0) {
-      const current = await client.savedSearch?.findFirst?.({
+      const current = await client.librarySavedSearch?.findFirst?.({
         where: { id, deletedAt: null, ...scopeWhere },
       });
       if (!current) {
@@ -188,7 +183,7 @@ export class SavedSearchesRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.savedSearch.update({
+    return client.librarySavedSearch.update({
       where: { id },
       data: {
         cachedCount,
@@ -206,16 +201,16 @@ export class SavedSearchesRepository {
   ) {
     const client = this.getClient(tx);
     const effectiveProjectId = this.normalizeProjectId(projectId);
-    const scopeWhere = effectiveProjectId
-      ? { projectId: effectiveProjectId }
-      : { userId, projectId: null };
-    const where: Prisma.SavedSearchWhereInput = {
+    const scopeWhere = {
+      spaceId: resolveSpaceId({ userId, projectId: effectiveProjectId }),
+    };
+    const where: Prisma.LibrarySavedSearchWhereInput = {
       id,
       deletedAt: null,
       ...scopeWhere,
       ...(expectedVersion !== undefined ? { version: expectedVersion } : {}),
     };
-    const res = await client.savedSearch.updateMany({
+    const res = await client.librarySavedSearch.updateMany({
       where,
       data: {
         deletedAt: new Date(),
@@ -224,7 +219,7 @@ export class SavedSearchesRepository {
       },
     });
     if (res.count === 0 && expectedVersion !== undefined) {
-      const current = await client.savedSearch?.findFirst?.({
+      const current = await client.librarySavedSearch?.findFirst?.({
         where: { id, deletedAt: null, ...scopeWhere },
       });
       if (!current) {
@@ -240,16 +235,17 @@ export class SavedSearchesRepository {
     return res;
   }
 
-  async countMatchingItems(where: Prisma.ItemWhereInput): Promise<number> {
-    return this.prisma.item.count({ where });
+  async countMatchingItems(where: Prisma.LibraryItemWhereInput): Promise<number> {
+    return this.prisma.libraryItem.count({ where });
   }
 
   private extractUserIdFromWhere(
-    where?: Prisma.ItemWhereInput,
+    where?: Prisma.LibraryItemWhereInput,
   ): string | undefined {
     if (!where || typeof where !== 'object') return undefined;
-    if (typeof where.userId === 'string' && where.userId.trim()) {
-      return where.userId.trim();
+    const rawWhere = where as { userId?: string; spaceId?: string };
+    if (typeof rawWhere.userId === 'string' && rawWhere.userId.trim()) {
+      return rawWhere.userId.trim();
     }
     const statesSome = (
       where.states as { some?: { userId?: string } } | undefined
@@ -281,11 +277,14 @@ export class SavedSearchesRepository {
       const found = this.extractUserIdFromWhere(clause);
       if (found) return found;
     }
+    if (typeof rawWhere.spaceId === 'string' && rawWhere.spaceId.trim()) {
+      return rawWhere.spaceId.trim();
+    }
     return undefined;
   }
 
   async findMatchingItems(
-    where: Prisma.ItemWhereInput,
+    where: Prisma.LibraryItemWhereInput,
     options: ExecuteSavedSearchOptions & { userId?: string } = {},
     userIdParam?: string,
   ) {
@@ -295,7 +294,7 @@ export class SavedSearchesRepository {
 
     const sortDir: Prisma.SortOrder =
       options.sortOrder === 'asc' ? 'asc' : 'desc';
-    let orderBy: Prisma.ItemOrderByWithRelationInput[];
+    let orderBy: Prisma.LibraryItemOrderByWithRelationInput[];
 
     if (options.sortBy === 'year') {
       orderBy = [{ year: { sort: sortDir, nulls: 'last' } }, { id: sortDir }];
@@ -347,7 +346,7 @@ export class SavedSearchesRepository {
     const page = options.page && options.page > 0 ? options.page : 1;
     const skip = options.cursor ? 1 : page > 1 ? (page - 1) * limit : undefined;
 
-    const items = await this.prisma.item.findMany({
+    const items = await this.prisma.libraryItem.findMany({
       where,
       orderBy,
       take: limit + 1,
@@ -400,7 +399,7 @@ const STATE_SELECT = {
   lastOpenedAt: true,
   lastReadAt: true,
   updatedAt: true,
-} satisfies Prisma.StateSelect;
+} satisfies Prisma.LibraryItemStateSelect;
 
 @Injectable()
 export class StateRepository {
@@ -416,7 +415,7 @@ export class StateRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<StateEntity | null> {
     const client = this.getClient(tx);
-    return client.state.findUnique({
+    return client.libraryItemState.findUnique({
       where: {
         userId_itemId: {
           userId,
@@ -435,12 +434,12 @@ export class StateRepository {
   ): Promise<StateEntity[]> {
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    return client.state.findMany({
+    return client.libraryItemState.findMany({
       where: {
         userId,
         itemId: { in: itemIds },
         ...(validProjectId
-          ? { item: { projectId: validProjectId, deletedAt: null } }
+          ? { item: { spaceId: validProjectId, deletedAt: null } }
           : {}),
       },
       select: STATE_SELECT,
@@ -518,7 +517,7 @@ export class StateRepository {
         : undefined;
 
       const [upsertedState] = await Promise.all([
-        client.state.upsert({
+        client.libraryItemState.upsert({
           where: {
             userId_itemId: {
               userId,
@@ -587,7 +586,7 @@ export class StateRepository {
       return upsertedState;
     }
 
-    return client.state.upsert({
+    return client.libraryItemState.upsert({
       where: {
         userId_itemId: {
           userId,
@@ -630,7 +629,7 @@ export class StateRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<{ count: number }> {
     const client = this.getClient(tx);
-    return client.state.deleteMany({
+    return client.libraryItemState.deleteMany({
       where: {
         userId,
         itemId,
@@ -648,7 +647,7 @@ export class StateRepository {
     if (cleanSourceIds.length === 0) return;
 
     const client = this.getClient(tx);
-    const allUserStates = await client.state.findMany({
+    const allUserStates = await client.libraryItemState.findMany({
       where: { itemId: { in: [targetItemId, ...cleanSourceIds] } },
     });
 
@@ -682,7 +681,7 @@ export class StateRepository {
             ? (merged.latestScroll as Prisma.InputJsonValue)
             : undefined;
 
-        return client.state.upsert({
+        return client.libraryItemState.upsert({
           where: {
             userId_itemId: {
               userId,
@@ -694,7 +693,7 @@ export class StateRepository {
             itemId: targetItemId,
             isStarred: merged.isStarred,
             rating: merged.maxRating,
-            readStatus: merged.readStatus as Prisma.StateUncheckedCreateInput['readStatus'],
+            readStatus: merged.readStatus as Prisma.LibraryItemStateUncheckedCreateInput['readStatus'],
             currentPage: merged.maxCurrentPage,
             scrollPosition: scrollJson ?? Prisma.JsonNull,
             ...(lastActiveAttachmentId
@@ -706,7 +705,7 @@ export class StateRepository {
           update: {
             isStarred: merged.isStarred,
             rating: merged.maxRating,
-            readStatus: merged.readStatus as Prisma.StateUncheckedUpdateInput['readStatus'],
+            readStatus: merged.readStatus as Prisma.LibraryItemStateUncheckedUpdateInput['readStatus'],
             currentPage: merged.maxCurrentPage,
             scrollPosition: scrollJson,
             ...(lastActiveAttachmentId !== null
@@ -723,7 +722,7 @@ export class StateRepository {
             data: { itemId: targetItemId },
           })
         : undefined,
-      client.state.deleteMany({
+      client.libraryItemState.deleteMany({
         where: { itemId: { in: cleanSourceIds } },
       }),
     ]);

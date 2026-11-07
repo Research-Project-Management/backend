@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, Inject, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import { normalizeProjectScopeId, gunzipAsync } from '@/modules/library/core';
+import { normalizeProjectScopeId, resolveSpaceId, gunzipAsync } from '@/modules/library/core';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { ItemSummary, ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
@@ -58,12 +58,12 @@ interface AttachmentWithOwner {
   id: string;
   itemId: string;
   metadata?: unknown;
-  item?: { userId: string; projectId: string | null; deletedAt: Date | null } | null;
+  item?: { spaceId?: string; createdById?: string; userId?: string; projectId?: string | null; deletedAt: Date | null } | null;
 }
 
 const ATTACHMENT_WITH_OWNER_SELECT = {
   id: true, itemId: true, metadata: true,
-  item: { select: { userId: true, projectId: true, deletedAt: true } },
+  item: { select: { spaceId: true, createdById: true, deletedAt: true } },
 } as const;
 
 @Injectable()
@@ -126,17 +126,21 @@ export class QueryRepository {
     const client = this.getClient(tx);
 
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId) ? { projectId: validProjectId } : { userId, projectId: null };
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: resolveSpaceId({
+        userId,
+        projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+      }),
+    };
 
-    const item = await client.item.findFirst({
+    const item = await client.libraryItem.findFirst({
       where: { id, ...scopeWhere, ...(includeDeleted ? {} : { deletedAt: null }) },
       include: this.buildItemDetailInclude(userId, includeContent),
     });
 
     if (!item) {
       if (!includeDeleted) {
-        const tombstone = await client.item.findFirst({
+        const tombstone = await client.libraryItem.findFirst({
           where: { id, ...scopeWhere },
           select: { metadata: true, deletedAt: true },
         });
@@ -169,12 +173,14 @@ export class QueryRepository {
     const client = this.getClient(tx);
 
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId }
-        : { userId, projectId: null };
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: resolveSpaceId({
+        userId,
+        projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+      }),
+    };
 
-    return client.item.findMany({
+    return client.libraryItem.findMany({
       where: {
         id: { in: validIds },
         deletedAt: null,
@@ -205,11 +211,16 @@ export class QueryRepository {
     if (!isUuid(itemId) || !isUuid(userId)) return null;
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId)
-        ? { id: itemId, projectId: validProjectId, deletedAt: null }
-        : { id: itemId, userId, projectId: null, deletedAt: null };
-    const item = await client.item.findFirst({
+    const expectedSpaceId = resolveSpaceId({
+      userId,
+      projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+    });
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      id: itemId,
+      spaceId: expectedSpaceId,
+      deletedAt: null,
+    };
+    const item = await client.libraryItem.findFirst({
       where: scopeWhere,
       include: {
         itemTags: { include: { tag: true } },
@@ -220,9 +231,11 @@ export class QueryRepository {
     if (!item) {
       return null;
     }
-    if (validProjectId && isUuid(validProjectId)) {
-      if (item.projectId !== validProjectId) return null;
-    } else if (item.userId !== userId || item.projectId) {
+    const itemSpaceId =
+      item.spaceId ??
+      (item as { projectId?: string | null; userId?: string }).projectId ??
+      (item as { userId?: string }).userId;
+    if (itemSpaceId !== expectedSpaceId) {
       return null;
     }
 
@@ -241,7 +254,7 @@ export class QueryRepository {
 
     return {
       id: item.id,
-      userId: item.userId,
+      userId: (item as { userId?: string }).userId ?? item.createdById ?? item.spaceId,
       title: item.title,
       abstract: item.abstract,
       year: item.year,
@@ -271,11 +284,13 @@ export class QueryRepository {
 
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId }
-        : { userId, projectId: null };
-    return client.item.findMany({
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: resolveSpaceId({
+        userId,
+        projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+      }),
+    };
+    return client.libraryItem.findMany({
       where: {
         ...scopeWhere,
         id: { in: validIds },
@@ -300,11 +315,13 @@ export class QueryRepository {
     if (!isUuid(userId)) return null;
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId }
-        : { userId, projectId: null };
-    return client.item.findFirst({
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: resolveSpaceId({
+        userId,
+        projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+      }),
+    };
+    return client.libraryItem.findFirst({
       where: {
         ...scopeWhere,
         OR: [
@@ -476,7 +493,7 @@ export class QueryRepository {
   buildWhereClause(
     userId: string,
     options: ItemFilterOptions,
-  ): Prisma.ItemWhereInput {
+  ): Prisma.LibraryItemWhereInput {
     return this.listRepo.buildWhereClause(userId, options);
   }
 
@@ -544,20 +561,25 @@ export class QueryRepository {
 
     const client = this.getClient(tx);
 
-    const item = await client.item.findUnique({
+    const item = await client.libraryItem.findUnique({
       where: { id: itemId },
-      select: { id: true, userId: true, projectId: true, deletedAt: true },
+      select: { id: true, spaceId: true, createdById: true, deletedAt: true },
     });
 
     if (!item || item.deletedAt !== null) return false;
 
     if (userId === 'system') return true;
 
+    const itemSpaceId =
+      item.spaceId ??
+      (item as { projectId?: string | null; userId?: string }).projectId ??
+      (item as { userId?: string }).userId;
+
     if (hasValidProject) {
-      return item.projectId === validProjectId;
+      return itemSpaceId === validProjectId;
     }
 
-    return item.userId === userId && !item.projectId;
+    return itemSpaceId === userId;
   }
 
   async assertExists(
@@ -583,9 +605,9 @@ export class QueryRepository {
     const validProjectId = normalizeProjectScopeId(projectId);
     const scopeWhere =
       validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId }
+        ? { spaceId: validProjectId }
         : isUuid(userId)
-          ? { userId, projectId: null }
+          ? { spaceId: userId }
           : null;
     if (!scopeWhere) {
       for (const id of itemIds) result.set(id, false);
@@ -594,7 +616,7 @@ export class QueryRepository {
 
     const validIds = itemIds.filter(isUuid);
     const client = this.getClient(tx);
-    const found = await client.item.findMany({
+    const found = await client.libraryItem.findMany({
       where: { id: { in: validIds }, ...scopeWhere, deletedAt: null },
       select: { id: true },
     });
@@ -673,10 +695,10 @@ export class QueryRepository {
     const client = this.getClient(tx);
     if (!client?.attachment?.findFirst) return null;
     const validProjectId = normalizeProjectScopeId(scope?.projectId);
-    const itemScopeFilter: Prisma.ItemWhereInput = validProjectId
-      ? { deletedAt: null, projectId: validProjectId }
+    const itemScopeFilter: Prisma.LibraryItemWhereInput = validProjectId
+      ? { deletedAt: null, spaceId: validProjectId }
       : scope?.userId
-        ? { deletedAt: null, userId: scope.userId, projectId: null }
+        ? { deletedAt: null, spaceId: scope.userId }
         : { deletedAt: null };
     return client.attachment.findFirst({
       where: { fileId, deletedAt: null, item: itemScopeFilter },
@@ -699,34 +721,19 @@ export class QueryRepository {
     return row;
   }
 
-  async findItemForAiMetadata(
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async findItemForAiMetadata(itemId: string, tx?: Prisma.TransactionClient) {
     if (!itemId) return null;
     const client = this.getClient(tx);
-    if (!client?.item?.findUnique) return null;
-    const row = await client.item.findUnique({
+    if (!client?.libraryItem?.findUnique) return null;
+    const row = await client.libraryItem.findUnique({
       where: { id: itemId },
       select: {
-        id: true,
-        deletedAt: true,
-        userId: true,
-        projectId: true,
-        itemType: true,
-        title: true,
-        year: true,
-        doi: true,
-        abstract: true,
-        publicationTitle: true,
-        url: true,
-        metadata: true,
+        id: true, deletedAt: true, spaceId: true, createdById: true,
+        itemType: true, title: true, year: true, doi: true, abstract: true,
+        publicationTitle: true, url: true, metadata: true,
         contributors: { orderBy: { orderIndex: 'asc' } },
         itemTags: { include: { tag: true } },
-        collectionItems: {
-        where: { collection: { deletedAt: null } },
-        include: { collection: true },
-      },
+        collectionItems: { where: { collection: { deletedAt: null } }, include: { collection: true } },
         attachments: { where: { deletedAt: null } },
         notesList: { where: { deletedAt: null } },
         identifiers: true,

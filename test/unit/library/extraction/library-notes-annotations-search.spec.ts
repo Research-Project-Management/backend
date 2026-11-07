@@ -199,20 +199,22 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
     });
 
     it('should synchronize contentMd from contentJson when updating a note with only contentJson', async () => {
+      const noteMock = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'note-1',
+          userId: '018f3a21-1234-7000-8000-000000000001',
+          projectId: null,
+          title: 'Old Title',
+          contentMd: 'Stale old markdown',
+          contentJson: { type: 'doc', content: [] },
+          tags: [],
+          version: 1,
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      };
       const mockPrisma = {
-        note: {
-          findFirst: jest.fn().mockResolvedValue({
-            id: 'note-1',
-            userId: '018f3a21-1234-7000-8000-000000000001',
-            projectId: null,
-            title: 'Old Title',
-            contentMd: 'Stale old markdown',
-            contentJson: { type: 'doc', content: [] },
-            tags: [],
-            version: 1,
-          }),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
+        note: noteMock,
+        libraryNote: noteMock,
       };
       const notesRepo = new NotesRepository(
         mockPrisma as unknown as PrismaService,

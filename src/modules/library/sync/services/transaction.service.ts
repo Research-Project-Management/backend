@@ -81,9 +81,8 @@ export class TransactionService implements IUnitOfWork {
       );
     }
     return {
-      userId: rawUserId,
+      spaceId: ev.projectId || rawUserId,
       actorId: ev.actorId ?? rawUserId,
-      projectId: ev.projectId || null,
       aggregateId: ev.aggregateId,
       eventType: ev.eventType,
       payload: (ev.payload as Prisma.InputJsonValue) ?? {},
@@ -234,6 +233,12 @@ export class TransactionService implements IUnitOfWork {
                     update: {
                       payload: eventData.payload,
                       status: OutboxStatus.PENDING,
+                      claimedBy: null,
+                      claimedAt: null,
+                      leaseExpiresAt: null,
+                      processedAt: null,
+                      retryCount: 0,
+                      error: null,
                     },
                   })
                 : await tx.outboxEvent.create({

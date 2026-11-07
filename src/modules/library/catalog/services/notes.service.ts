@@ -138,10 +138,19 @@ export class NotesService {
           note,
         );
 
+        const noteRec = note as
+          | { projectId?: string | null; spaceId?: string }
+          | null
+          | undefined;
+        const noteProjectId =
+          noteRec?.projectId ??
+          (noteRec?.spaceId && noteRec.spaceId !== userId
+            ? noteRec.spaceId
+            : data.projectId);
         helpers?.onAfterCommit?.(() =>
           this.invalidateNoteItemCaches(
             userId,
-            note?.projectId ?? data.projectId,
+            noteProjectId,
             note?.itemId ?? data.itemId,
           ),
         );
@@ -151,9 +160,16 @@ export class NotesService {
     );
 
     if (!ranPostCommitHook) {
+      const createdNoteRec = createdNote as
+        | { projectId?: string | null; spaceId?: string }
+        | null
+        | undefined;
       await this.invalidateNoteItemCaches(
         userId,
-        createdNote?.projectId ?? data.projectId,
+        createdNoteRec?.projectId ??
+          (createdNoteRec?.spaceId && createdNoteRec.spaceId !== userId
+            ? createdNoteRec.spaceId
+            : data.projectId),
         createdNote?.itemId ?? data.itemId,
       );
     }
@@ -200,10 +216,15 @@ export class NotesService {
           effectiveProjectId,
         );
 
+        const updatedRec = updated as {
+          projectId?: string | null;
+          spaceId?: string;
+        };
         const noteProjectId =
           effectiveProjectId ||
-          ('projectId' in updated && typeof updated.projectId === 'string'
-            ? updated.projectId
+          updatedRec.projectId ||
+          (updatedRec.spaceId && updatedRec.spaceId !== userId
+            ? updatedRec.spaceId
             : undefined);
         const eventScope = { userId, projectId: noteProjectId };
 
@@ -225,7 +246,7 @@ export class NotesService {
         helpers?.onAfterCommit?.(() =>
           this.invalidateNoteItemCaches(
             userId,
-            updated?.projectId ?? effectiveProjectId,
+            noteProjectId,
             updated?.itemId,
           ),
         );
@@ -235,9 +256,16 @@ export class NotesService {
     );
 
     if (!ranPostCommitHook) {
+      const updatedNoteRec = updatedNote as
+        | { projectId?: string | null; spaceId?: string }
+        | null
+        | undefined;
       await this.invalidateNoteItemCaches(
         userId,
-        updatedNote?.projectId ?? effectiveProjectId,
+        updatedNoteRec?.projectId ??
+          (updatedNoteRec?.spaceId && updatedNoteRec.spaceId !== userId
+            ? updatedNoteRec.spaceId
+            : effectiveProjectId),
         updatedNote?.itemId,
       );
     }
@@ -264,8 +292,17 @@ export class NotesService {
           tx,
           validProjectId,
         );
+        const existingRec = existing as
+          | { projectId?: string | null; spaceId?: string }
+          | null
+          | undefined;
         deletedItemId = existing?.itemId;
-        deletedProjectId = validProjectId || existing?.projectId || undefined;
+        deletedProjectId =
+          validProjectId ||
+          existingRec?.projectId ||
+          (existingRec?.spaceId && existingRec.spaceId !== userId
+            ? existingRec.spaceId
+            : undefined);
 
         const isDeleted = await this.repo.softDelete(
           userId,

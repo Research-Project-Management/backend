@@ -302,7 +302,7 @@ export function resolveEmittedCitationEntries(
   };
 }
 
-interface StyleSummary {
+export interface StyleSummary {
   id: CitationStyleId;
   name: string;
   shortTitle?: string;

@@ -308,6 +308,7 @@ export type RecordFormat =
   | 'MODS'
   | 'ZOTERO_RDF'
   | 'MEDLINE'
+  | 'PUBMED_NBIB'
   | 'CSV'
   | 'REFER';
 

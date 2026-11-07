@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger, Inject, Opt
 import { Prisma, AttachmentExtractionStatus, RelationType, TagType } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
-import { normalizeProjectScopeId, syncItemDenormalizedCountsInClient } from '@/modules/library/core';
+import { normalizeProjectScopeId, resolveSpaceId, syncItemDenormalizedCountsInClient } from '@/modules/library/core';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { CreateItemData, UpdateItemData } from '@/modules/library/core/types/bibliographic.types';
 import {
@@ -43,7 +43,7 @@ export class CommandRepository {
     const { createData, identifiersToCreate } = await resolveCreateItemRelations(
       client, userId, data, normalizeProjectScopeId(projectId),
     );
-    const item = await client.item.create({
+    const item = await client.libraryItem.create({
       data: createData,
       include: { ...buildCommandMutationInclude(userId), attachments: true },
     });
@@ -52,10 +52,9 @@ export class CommandRepository {
       (item as Record<string, unknown>).identifiers = identifiersToCreate;
     }
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId }
-        : { userId, projectId: null };
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: resolveSpaceId({ userId, projectId: validProjectId && isUuid(validProjectId) ? validProjectId : undefined }),
+    };
     const existingAttIds = Array.isArray(data.attachments)
       ? data.attachments.map((a) => (a && typeof a.id === 'string' && isUuid(a.id) ? a.id : null)).filter((id): id is string => Boolean(id))
       : [];
@@ -95,17 +94,16 @@ export class CommandRepository {
     }
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId }
-        : { userId, projectId: null };
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: resolveSpaceId({ userId, projectId: validProjectId && isUuid(validProjectId) ? validProjectId : undefined }),
+    };
     const hasIncomingNotes = Array.isArray(data.notes) && data.notes.length > 0;
     const hasIncomingTags = Boolean(
       data.tags !== undefined ||
         data.keywords !== undefined ||
         data.labels !== undefined,
     );
-    const existing = await client.item.findFirst({
+    const existing = await client.libraryItem.findFirst({
       where: {
         id,
         deletedAt: null,
@@ -142,11 +140,18 @@ export class CommandRepository {
         providedVersion: expectedVersion,
       });
     }
+    const existingRec = existing as Record<string, unknown>;
+    const existingProjectId =
+      typeof existingRec.projectId === 'string'
+        ? existingRec.projectId
+        : existing.spaceId && existing.spaceId !== userId
+          ? existing.spaceId
+          : null;
     const sanitizedData = await sanitizeUpdateCollectionIds({
       client,
       userId,
       validProjectId,
-      existingProjectId: existing.projectId,
+      existingProjectId,
       data,
     });
     const { updateData, cleanIds, rawTags } = buildCommandUpdateInput(
@@ -169,7 +174,7 @@ export class CommandRepository {
     const needNoteCount = Boolean(
       Array.isArray(createdNotes) &&
       createdNotes.length > 0 &&
-      client.note?.count,
+      client.libraryNote?.count,
     );
     if (needAttCount || needNoteCount) {
       const [existingAttCount, existingNoteCount] = await Promise.all([
@@ -177,7 +182,7 @@ export class CommandRepository {
           ? client.attachment.count({ where: { itemId: id, deletedAt: null } })
           : Promise.resolve(0),
         needNoteCount
-          ? client.note.count({ where: { itemId: id, deletedAt: null } })
+          ? client.libraryNote.count({ where: { itemId: id, deletedAt: null } })
           : Promise.resolve(0),
       ]);
       if (needAttCount && Array.isArray(createdAttachments)) {
@@ -190,7 +195,7 @@ export class CommandRepository {
       }
     }
     if (expectedVersion !== undefined) {
-      const affected = await client.item.updateMany({
+      const affected = await client.libraryItem.updateMany({
         where: {
           id,
           version: expectedVersion,
@@ -202,7 +207,7 @@ export class CommandRepository {
         },
       });
       if (affected.count === 0) {
-        const fresh = await client.item.findUnique({
+        const fresh = await client.libraryItem.findUnique({
           where: { id },
           select: { version: true },
         });
@@ -239,7 +244,7 @@ export class CommandRepository {
         ? disambiguateCitationKey(
             client,
             (updateData.citationKey as string).trim(),
-            { userId, projectId: validProjectId ?? existing.projectId },
+            { userId, projectId: validProjectId ?? existingProjectId },
             id,
           )
         : Promise.resolve(undefined),
@@ -259,7 +264,7 @@ export class CommandRepository {
             include: { contributor: true },
           })
         : [];
-    const updated = await client.item.update({
+    const updated = await client.libraryItem.update({
       where: { id },
       data: updateData,
       ...(hasTagSync
@@ -341,10 +346,10 @@ export class CommandRepository {
         updated.id,
         rawTags,
         isSystemTagUpdate ? TagType.automatic : TagType.manual,
-        validProjectId ?? existing.projectId,
+        validProjectId ?? existingProjectId,
         existingItemTags,
       );
-      const reloaded = await client.item.findUnique({
+      const reloaded = await client.libraryItem.findUnique({
         where: { id: updated.id },
         include: itemRelationsInclude,
       });
@@ -356,7 +361,7 @@ export class CommandRepository {
     client: Prisma.TransactionClient | PrismaService, itemId: string, deletedDate: Date,
   ): Promise<void> {
     await Promise.all([
-      client.note?.updateMany?.({ where: { itemId, deletedAt: null }, data: { deletedAt: deletedDate } }),
+      client.libraryNote?.updateMany?.({ where: { itemId, deletedAt: null }, data: { deletedAt: deletedDate } }),
       client.attachment?.updateMany?.({ where: { itemId, deletedAt: null }, data: { deletedAt: deletedDate } }),
       client.annotation?.updateMany?.({
         where: { attachment: { itemId }, deletedAt: null },
@@ -370,13 +375,13 @@ export class CommandRepository {
     if (!isUuid(id) || !isUuid(userId)) return false;
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.ItemWhereInput = {
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
       id, deletedAt: null,
-      ...(validProjectId && isUuid(validProjectId) ? { projectId: validProjectId } : { userId, projectId: null }),
+      spaceId: resolveSpaceId({ userId, projectId: validProjectId && isUuid(validProjectId) ? validProjectId : undefined }),
     };
     const deletedDate = new Date();
     if (expectedVersion !== undefined) {
-      const result = await client.item.updateMany({
+      const result = await client.libraryItem.updateMany({
         where: { ...scopeWhere, version: expectedVersion },
         data: {
           deletedAt: deletedDate,
@@ -388,7 +393,7 @@ export class CommandRepository {
         },
       });
       if (result.count === 0) {
-        const existing = await client.item.findFirst({ where: scopeWhere, select: { version: true } });
+        const existing = await client.libraryItem.findFirst({ where: scopeWhere, select: { version: true } });
         if (existing && existing.version !== expectedVersion) {
           throw new VersionMismatchException({
             aggregateType: 'CatalogItem', entityId: id, currentVersion: existing.version, providedVersion: expectedVersion,
@@ -399,7 +404,7 @@ export class CommandRepository {
       await this.cascadeSoftDeleteItemChildren(client, id, deletedDate);
       return true;
     }
-    const result = await client.item.updateMany({
+    const result = await client.libraryItem.updateMany({
       where: scopeWhere,
       data: {
         deletedAt: deletedDate,
@@ -419,8 +424,10 @@ export class CommandRepository {
     if (!isUuid(id) || !isUuid(userId)) throw new NotFoundException(`Trashed item ${id} not found`);
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeFilter: Prisma.ItemWhereInput = validProjectId ? { projectId: validProjectId } : { userId, projectId: null };
-    const existing = await client.item.findFirst({
+    const scopeFilter: Prisma.LibraryItemWhereInput = {
+      spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+    };
+    const existing = await client.libraryItem.findFirst({
       where: { id, deletedAt: { not: null }, ...scopeFilter },
     });
     if (!existing) throw new NotFoundException(`Trashed item ${id} not found`);
@@ -444,7 +451,7 @@ export class CommandRepository {
     const deletedFilter = existing.deletedAt ? { gte: existing.deletedAt } : { not: null };
 
     await Promise.all([
-      client.note?.updateMany?.({ where: { itemId: id, deletedAt: deletedFilter }, data: { deletedAt: null } }),
+      client.libraryNote?.updateMany?.({ where: { itemId: id, deletedAt: deletedFilter }, data: { deletedAt: null } }),
       client.attachment?.updateMany?.({ where: { itemId: id, deletedAt: deletedFilter }, data: { deletedAt: null } }),
       client.annotation?.updateMany?.({
         where: { attachment: { itemId: id }, deletedAt: deletedFilter },
@@ -452,11 +459,11 @@ export class CommandRepository {
       }),
     ]);
     const [activeNoteCount, activeAttCount] = await Promise.all([
-      client.note.count({ where: { itemId: id, deletedAt: null } }),
+      client.libraryNote.count({ where: { itemId: id, deletedAt: null } }),
       client.attachment.count({ where: { itemId: id, deletedAt: null } }),
     ]);
-    if (expectedVersion !== undefined && typeof client.item.updateMany === 'function') {
-      const affected = await client.item.updateMany({
+    if (expectedVersion !== undefined && typeof client.libraryItem.updateMany === 'function') {
+      const affected = await client.libraryItem.updateMany({
         where: { id, deletedAt: { not: null }, version: expectedVersion, ...scopeFilter },
         data: {
           deletedAt: null, deletedById: null, updatedById: userId,
@@ -466,20 +473,20 @@ export class CommandRepository {
         },
       });
       if (affected.count === 0) {
-        const fresh = await client.item.findUnique({ where: { id }, select: { version: true } });
+        const fresh = await client.libraryItem.findUnique({ where: { id }, select: { version: true } });
         throw new VersionMismatchException({
           aggregateType: 'CatalogItem', entityId: id, currentVersion: fresh?.version ?? existing.version, providedVersion: expectedVersion,
         });
       }
-      if (typeof client.item.findUnique === 'function') {
-        const reloaded = await client.item.findUnique({
+      if (typeof client.libraryItem.findUnique === 'function') {
+        const reloaded = await client.libraryItem.findUnique({
           where: { id },
           include: buildCommandMutationInclude(userId, { includeAttachmentRevisions: true, orderNotes: true }),
         });
         if (reloaded) return reloaded;
       }
     }
-    return client.item.update({
+    return client.libraryItem.update({
       where: { id },
       data: {
         deletedAt: null, deletedById: null, updatedById: userId,
@@ -509,15 +516,15 @@ export class CommandRepository {
     if (!isUuid(id) || !isUuid(userId)) throw new NotFoundException(`Item ${id} not found`);
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(projectId);
-    const existing = await client.item.findFirst({
-      where: { id, ...(validProjectId ? { projectId: validProjectId } : { userId, projectId: null }) },
+    const existing = await client.libraryItem.findFirst({
+      where: { id, spaceId: resolveSpaceId({ userId, projectId: validProjectId }) },
     });
     if (!existing) throw new NotFoundException(`Item ${id} not found`);
     if (!existing.deletedAt) {
       throw new BadRequestException(`Item ${id} must be in trash before it can be permanently purged`);
     }
     const storagePaths = await this.collectStoragePathsForItems(client, [id]);
-    await client.item.delete({ where: { id } });
+    await client.libraryItem.delete({ where: { id } });
     if (storagePaths.length > 0 && !options?.skipStorageDelete) {
       await this.deleteStorageFilesBatch(storagePaths);
     }
@@ -607,10 +614,10 @@ export class CommandRepository {
       attachments: { where: { deletedAt: null } },
       notesList: { where: { deletedAt: null } },
       identifiers: true,
-    } satisfies Prisma.ItemInclude;
+    } satisfies Prisma.LibraryItemInclude;
 
     const client = this.getClient(tx);
-    const itemDelegate = client?.item ?? this.prisma?.item;
+    const itemDelegate = client?.libraryItem ?? this.prisma?.libraryItem;
     if (!itemDelegate?.update) return null;
     return itemDelegate.update({
       where: { id: itemId },

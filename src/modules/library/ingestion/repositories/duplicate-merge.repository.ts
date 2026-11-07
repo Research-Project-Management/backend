@@ -328,11 +328,11 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
       .filter((dup) => typeof dup.citationKey === 'string' && dup.citationKey.trim().toLowerCase() === targetCitKey && typeof dup.id === 'string')
       .map((dup) => dup.id as string);
     if (collidingDupIds.length > 0) {
-      if (typeof tx.item?.updateMany === 'function') {
-        await tx.item.updateMany({ where: { id: { in: collidingDupIds } }, data: { citationKey: null } });
-      } else if (typeof tx.item?.update === 'function') {
+      if (typeof tx.libraryItem?.updateMany === 'function') {
+        await tx.libraryItem.updateMany({ where: { id: { in: collidingDupIds } }, data: { citationKey: null } });
+      } else if (typeof tx.libraryItem?.update === 'function') {
         for (const dupId of collidingDupIds) {
-          await tx.item.update({ where: { id: dupId }, data: { citationKey: null } });
+          await tx.libraryItem.update({ where: { id: dupId }, data: { citationKey: null } });
         }
       }
     }
@@ -559,7 +559,7 @@ export async function recordMergedAssetSyncEventsInTx(params: {
 
   const [survivingNotes, survivingAttachments] = await Promise.all([
     initialNotes.length > 0
-      ? tx.note?.findMany?.({ where: { id: { in: initialNotes.map((n) => n.id) } } }) ?? Promise.resolve([])
+      ? tx.libraryNote?.findMany?.({ where: { id: { in: initialNotes.map((n) => n.id) } } }) ?? Promise.resolve([])
       : Promise.resolve([]),
     initialAttachments.length > 0
       ? tx.attachment?.findMany?.({ where: { id: { in: initialAttachments.map((a) => a.id) } } }) ?? Promise.resolve([])
@@ -631,8 +631,8 @@ async function loadFinalRelationsForPrimary(client: Prisma.TransactionClient, pr
     client.attachment?.findMany
       ? client.attachment.findMany({ where: { itemId: primaryId, deletedAt: null } })
       : Promise.resolve([]),
-    client.note?.findMany
-      ? client.note.findMany({ where: { itemId: primaryId, deletedAt: null } })
+    client.libraryNote?.findMany
+      ? client.libraryNote.findMany({ where: { itemId: primaryId, deletedAt: null } })
       : Promise.resolve([]),
   ]);
   const attachmentCount = Array.isArray(attachments) ? attachments.length : 0;
@@ -649,11 +649,11 @@ export async function updateAndReloadMergedPrimaryInTx(params: {
   topLevelData: Record<string, unknown>; primaryMeta: Record<string, unknown>;
 }) {
   const { tx, primaryId, userId, topLevelData, primaryMeta } = params;
-  const updatedPrimary = await tx.item.update({
+  const updatedPrimary = await tx.libraryItem.update({
     where: { id: primaryId },
     data: { ...topLevelData, metadata: primaryMeta as Prisma.InputJsonValue, version: { increment: 1 } },
   });
-  const reloadedPrimary = await tx.item.findUnique({
+  const reloadedPrimary = await tx.libraryItem.findUnique({
     where: { id: primaryId },
     include: {
       contributors: { orderBy: { orderIndex: 'asc' } },
@@ -686,7 +686,7 @@ export async function softDeleteDuplicatesAndRecordOutboxInTx(params: {
           ? (dup.metadata as Record<string, unknown>)
           : {};
       const dupMeta = { ...baseMeta, mergedIntoId: primaryId, mergedAt: now.toISOString() };
-      return tx.item.update({
+      return tx.libraryItem.update({
         where: { id: dup.id },
         data: { deletedAt: now, metadata: dupMeta, version: { increment: 1 } },
       });

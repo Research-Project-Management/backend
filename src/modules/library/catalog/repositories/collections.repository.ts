@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
-import { normalizeProjectScopeId, sortLockKeys } from '@/modules/library/core';
+import { normalizeProjectScopeId, resolveSpaceId, sortLockKeys } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/catalog.types';
 import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
@@ -32,15 +32,15 @@ export class CollectionsRepository {
     return normalized && isUuid(normalized) ? normalized : undefined;
   }
 
-  private buildScopeWhere(userId: string, projectId?: string | null): Prisma.CollectionWhereInput {
+  private buildScopeWhere(userId: string, projectId?: string | null): Prisma.LibraryCollectionWhereInput {
     const validProjectId = this.resolveProjectScopeId(projectId);
-    return validProjectId ? { projectId: validProjectId } : { userId, projectId: null };
+    return { spaceId: resolveSpaceId({ userId, projectId: validProjectId }) };
   }
 
   async findById(userId: string, id: string, tx?: Prisma.TransactionClient, projectId?: string) {
     const client = this.getClient(tx);
     const scopeWhere = this.buildScopeWhere(userId, projectId);
-    return client.collection.findFirst({
+    return client.libraryCollection.findFirst({
       where: { id, deletedAt: null, ...scopeWhere },
       include: {
         children: { where: { deletedAt: null } },
@@ -51,7 +51,7 @@ export class CollectionsRepository {
 
   async findAll(userId: string, projectId?: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
-    return client.collection.findMany({
+    return client.libraryCollection.findMany({
       where: { ...this.buildScopeWhere(userId, projectId), deletedAt: null },
       include: {
         collectionItems: { where: { item: { deletedAt: null } }, select: { itemId: true } },
@@ -65,7 +65,7 @@ export class CollectionsRepository {
     userId: string, projectId?: string, tx?: Prisma.TransactionClient,
   ): Promise<Array<{ id: string; parentId: string | null }>> {
     const client = this.getClient(tx);
-    return client.collection.findMany({
+    return client.libraryCollection.findMany({
       where: { ...this.buildScopeWhere(userId, projectId), deletedAt: null },
       select: { id: true, parentId: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -74,18 +74,19 @@ export class CollectionsRepository {
 
   async create(userId: string, input: CreateCollectionInput, tx?: Prisma.TransactionClient) {
     const effectiveProjectId = this.resolveProjectScopeId(input.projectId) ?? null;
+    const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
     const client = this.getClient(tx);
-    if (input.parentId && typeof client.collection?.findFirst === 'function') {
-      const scopeWhere = effectiveProjectId ? { projectId: effectiveProjectId } : { userId, projectId: null };
-      const parent = await client.collection.findFirst({
+    if (input.parentId && typeof client.libraryCollection?.findFirst === 'function') {
+      const scopeWhere = { spaceId };
+      const parent = await client.libraryCollection.findFirst({
         where: { id: input.parentId, ...scopeWhere, deletedAt: null },
         select: { id: true },
       });
       if (!parent) throw new NotFoundException(`Parent collection ${input.parentId} not found in scope`);
     }
-    return client.collection.create({
+    return client.libraryCollection.create({
       data: {
-        userId, projectId: effectiveProjectId, name: input.name,
+        spaceId, name: input.name,
         description: input.description ?? '', color: input.color ?? '#3370ff',
         icon: input.icon ?? '', parentId: input.parentId ?? null,
         createdById: input.createdById || userId, version: 1,
@@ -115,9 +116,9 @@ export class CollectionsRepository {
     if (
       input.parentId &&
       input.parentId !== existing.parentId &&
-      typeof client.collection?.findFirst === 'function'
+      typeof client.libraryCollection?.findFirst === 'function'
     ) {
-      const parent = await client.collection.findFirst({
+      const parent = await client.libraryCollection.findFirst({
         where: {
           id: input.parentId,
           ...scopeWhere,
@@ -153,8 +154,8 @@ export class CollectionsRepository {
       version: { increment: 1 },
     };
 
-    if (versionToVerify !== undefined && client.collection?.updateMany) {
-      const affected = await client.collection.updateMany({
+    if (versionToVerify !== undefined && client.libraryCollection?.updateMany) {
+      const affected = await client.libraryCollection.updateMany({
         where: {
           id,
           ...scopeWhere,
@@ -189,7 +190,7 @@ export class CollectionsRepository {
       };
     }
 
-    return client.collection.update({
+    return client.libraryCollection.update({
       where: {
         id,
         ...(versionToVerify !== undefined ? { version: versionToVerify } : {}),
@@ -219,7 +220,7 @@ export class CollectionsRepository {
     if (strategy === 'cascade') {
       let targetCollectionIds = preResolved?.targetCollectionIds;
       if (!targetCollectionIds || targetCollectionIds.length === 0) {
-        const allCollections = await client.collection.findMany({
+        const allCollections = await client.libraryCollection.findMany({
           where: { ...scopeWhere, deletedAt: null },
           select: { id: true, parentId: true },
         });
@@ -232,7 +233,7 @@ export class CollectionsRepository {
 
       let itemIds = preResolved?.itemIds;
       if (itemIds === undefined) {
-        const links = await client.collectionItem.findMany({
+        const links = await client.libraryCollectionItem.findMany({
           where: {
             collectionId:
               targetCollectionIds.length === 1
@@ -245,13 +246,13 @@ export class CollectionsRepository {
       }
       if (itemIds.length > 0) {
         const validProjectId = normalizeProjectScopeId(projectId);
-        const itemScopeWhere: Prisma.ItemWhereInput = validProjectId
-          ? { projectId: validProjectId }
-          : { userId, projectId: null };
+        const itemScopeWhere: Prisma.LibraryItemWhereInput = {
+          spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+        };
 
         let orphanItemIds = itemIds;
-        if (typeof client.item?.findMany === 'function') {
-          const orphanItems = await client.item.findMany({
+        if (typeof client.libraryItem?.findMany === 'function') {
+          const orphanItems = await client.libraryItem.findMany({
             where: {
               ...itemScopeWhere,
               id: { in: itemIds },
@@ -269,7 +270,7 @@ export class CollectionsRepository {
         }
 
         if (orphanItemIds.length > 0) {
-          await client.item.updateMany({
+          await client.libraryItem.updateMany({
             where: {
               ...itemScopeWhere,
               id: { in: orphanItemIds },
@@ -292,7 +293,7 @@ export class CollectionsRepository {
           });
 
           await Promise.all([
-            client.note?.updateMany?.({
+            client.libraryNote?.updateMany?.({
               where: {
                 itemId: { in: orphanItemIds },
                 deletedAt: null,
@@ -317,7 +318,7 @@ export class CollectionsRepository {
         }
       }
 
-      await client.collectionItem?.deleteMany?.({
+      await client.libraryCollectionItem?.deleteMany?.({
         where: {
           collectionId:
             targetCollectionIds.length === 1
@@ -326,7 +327,7 @@ export class CollectionsRepository {
         },
       });
 
-      const result = await client.collection.updateMany({
+      const result = await client.libraryCollection.updateMany({
         where: {
           id:
             targetCollectionIds.length === 1
@@ -340,25 +341,25 @@ export class CollectionsRepository {
       return result.count > 0;
     } else {
       let nextParentId: string | null = null;
-      if (strategy === 'move-to-parent' && typeof client.collection?.findFirst === 'function') {
-        const existing = await client.collection.findFirst({
+      if (strategy === 'move-to-parent' && typeof client.libraryCollection?.findFirst === 'function') {
+        const existing = await client.libraryCollection.findFirst({
           where: { id, ...scopeWhere, deletedAt: null },
           select: { parentId: true },
         });
         nextParentId = existing?.parentId ?? null;
       }
       await Promise.all([
-        client.collectionItem?.deleteMany?.({
+        client.libraryCollectionItem?.deleteMany?.({
           where: { collectionId: id },
         }),
-        client.collection.updateMany({
+        client.libraryCollection.updateMany({
           where: { ...scopeWhere, parentId: id, deletedAt: null },
           data: { parentId: nextParentId, updatedById: userId, version: { increment: 1 } },
         }),
       ]);
     }
 
-    const result = await client.collection.updateMany({
+    const result = await client.libraryCollection.updateMany({
       where: { id, ...scopeWhere, deletedAt: null },
       data: { deletedAt: now, deletedById: userId, version: { increment: 1 } },
     });
@@ -380,12 +381,12 @@ export class CollectionsRepository {
     const client = this.getClient(tx);
 
     let validItemIds = orderedInputIds;
-    if (client.item?.findMany) {
+    if (client.libraryItem?.findMany) {
       const validProjectId = normalizeProjectScopeId(projectId);
-      const scopeWhere: Prisma.ItemWhereInput = validProjectId
-        ? { projectId: validProjectId }
-        : { userId, projectId: null };
-      const matched = await client.item.findMany({
+      const scopeWhere: Prisma.LibraryItemWhereInput = {
+        spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+      };
+      const matched = await client.libraryItem.findMany({
         where: {
           ...scopeWhere,
           id: { in: orderedInputIds },
@@ -398,7 +399,7 @@ export class CollectionsRepository {
 
     if (validItemIds.length === 0) return;
 
-    await client.collectionItem.createMany({
+    await client.libraryCollectionItem.createMany({
       data: validItemIds.map((itemId) => ({
         collectionId,
         itemId,
@@ -419,7 +420,7 @@ export class CollectionsRepository {
   ): Promise<void> {
     const client = this.getClient(tx);
 
-    await client.collectionItem.deleteMany({
+    await client.libraryCollectionItem.deleteMany({
       where: {
         collectionId,
         itemId,
@@ -435,8 +436,8 @@ export class CollectionsRepository {
     if (!itemIds || itemIds.length === 0) return [];
     const client = this.getClient(tx);
     let existingItemIds = itemIds;
-    if (typeof client.collectionItem?.findMany === 'function') {
-      const existing = await client.collectionItem.findMany({
+    if (typeof client.libraryCollectionItem?.findMany === 'function') {
+      const existing = await client.libraryCollectionItem.findMany({
         where: {
           collectionId,
           itemId: { in: itemIds },
@@ -448,7 +449,7 @@ export class CollectionsRepository {
       }
     }
     if (existingItemIds.length === 0) return [];
-    await client.collectionItem.deleteMany({
+    await client.libraryCollectionItem.deleteMany({
       where: {
         collectionId,
         itemId: { in: existingItemIds },
@@ -475,9 +476,9 @@ export class CollectionsRepository {
     const client = this.getClient(tx);
 
     const validProjectId = normalizeProjectScopeId(projectId);
-    const collectionScope: Prisma.CollectionWhereInput = validProjectId
-      ? { projectId: validProjectId }
-      : { userId, projectId: null };
+    const collectionScope: Prisma.LibraryCollectionWhereInput = {
+      spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+    };
 
     const normalizedSourceId =
       sourceCollectionId &&
@@ -490,34 +491,34 @@ export class CollectionsRepository {
 
     if (targetCollectionId !== null && normalizedSourceId) {
       if (normalizedSourceId !== targetCollectionId) {
-        const detachWhere: Prisma.CollectionItemWhereInput = {
+        const detachWhere: Prisma.LibraryCollectionItemWhereInput = {
           itemId: { in: itemIds },
           collectionId: normalizedSourceId,
           collection: collectionScope,
         };
-        if (typeof client.collectionItem?.findMany === 'function') {
-          const existing = await client.collectionItem.findMany({
+        if (typeof client.libraryCollectionItem?.findMany === 'function') {
+          const existing = await client.libraryCollectionItem.findMany({
             where: detachWhere,
             select: { collectionId: true, itemId: true },
           });
           if (Array.isArray(existing)) detached = existing;
         }
-        await client.collectionItem.deleteMany({ where: detachWhere });
+        await client.libraryCollectionItem.deleteMany({ where: detachWhere });
       }
     } else {
-      const detachWhere: Prisma.CollectionItemWhereInput = {
+      const detachWhere: Prisma.LibraryCollectionItemWhereInput = {
         itemId: { in: itemIds },
         collection: collectionScope,
         ...(targetCollectionId ? { collectionId: { not: targetCollectionId } } : {}),
       };
-      if (typeof client.collectionItem?.findMany === 'function') {
-        const existing = await client.collectionItem.findMany({
+      if (typeof client.libraryCollectionItem?.findMany === 'function') {
+        const existing = await client.libraryCollectionItem.findMany({
           where: detachWhere,
           select: { collectionId: true, itemId: true },
         });
         if (Array.isArray(existing)) detached = existing;
       }
-      await client.collectionItem.deleteMany({ where: detachWhere });
+      await client.libraryCollectionItem.deleteMany({ where: detachWhere });
     }
 
     if (targetCollectionId !== null) {
@@ -555,7 +556,7 @@ export class CollectionsRepository {
     ) => {
       await Promise.all(
         sortedCollections.map((c) =>
-          client.collection.updateMany({
+          client.libraryCollection.updateMany({
             where: { id: c.id, ...scopeWhere, deletedAt: null },
             data: {
               ...(c.parentId !== undefined ? { parentId: c.parentId } : {}),
@@ -591,13 +592,11 @@ export class CollectionsRepository {
     const client = this.getClient(tx);
     const validProjectId = this.resolveProjectScopeId(projectId);
 
-    const items = await client.collectionItem.findMany({
+    const items = await client.libraryCollectionItem.findMany({
       where: {
         collectionId,
         item: {
-          ...(validProjectId
-            ? { projectId: validProjectId }
-            : { userId, projectId: null }),
+          spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
           deletedAt: null,
         },
       },
@@ -623,14 +622,12 @@ export class CollectionsRepository {
     const client = this.getClient(tx);
     const validProjectId = this.resolveProjectScopeId(projectId);
 
-    const items = await client.collectionItem.findMany({
+    const items = await client.libraryCollectionItem.findMany({
       where: {
         collectionId:
           collectionIds.length === 1 ? collectionIds[0] : { in: collectionIds },
         item: {
-          ...(validProjectId
-            ? { projectId: validProjectId }
-            : { userId, projectId: null }),
+          spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
           deletedAt: null,
         },
       },
@@ -654,14 +651,12 @@ export class CollectionsRepository {
   ): Promise<string[]> {
     if (!candidateItemIds || candidateItemIds.length === 0) return [];
     const client = this.getClient(tx);
-    if (typeof client.item?.findMany !== 'function') return [];
+    if (typeof client.libraryItem?.findMany !== 'function') return [];
     const validProjectId = this.resolveProjectScopeId(projectId);
 
-    const items = await client.item.findMany({
+    const items = await client.libraryItem.findMany({
       where: {
-        ...(validProjectId
-          ? { projectId: validProjectId }
-          : { userId, projectId: null }),
+        spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
         id: { in: candidateItemIds },
         deletedAt: null,
         collectionItems: {
@@ -679,12 +674,12 @@ export class CollectionsRepository {
 
   async findOwnedItemIds(
     itemIds: string[],
-    scopeWhere: Prisma.ItemWhereInput,
+    scopeWhere: Prisma.LibraryItemWhereInput,
     tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
     const client = this.getClient(tx);
-    if (!client.item?.findMany) return [];
-    const owned = await client.item.findMany({
+    if (!client.libraryItem?.findMany) return [];
+    const owned = await client.libraryItem.findMany({
       where: { id: { in: itemIds }, ...scopeWhere, deletedAt: null },
       select: { id: true },
     });
@@ -693,12 +688,12 @@ export class CollectionsRepository {
 
   async findValidItemIds(
     itemIds: string[],
-    scopeWhere: Prisma.ItemWhereInput,
+    scopeWhere: Prisma.LibraryItemWhereInput,
     tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
     const client = this.getClient(tx);
-    if (!client.item?.findMany) return [];
-    const valid = await client.item.findMany({
+    if (!client.libraryItem?.findMany) return [];
+    const valid = await client.libraryItem.findMany({
       where: { id: { in: itemIds }, ...scopeWhere, deletedAt: null },
       select: { id: true },
     });
@@ -707,12 +702,12 @@ export class CollectionsRepository {
 
   async verifyItemInScope(
     itemId: string,
-    scopeWhere: Prisma.ItemWhereInput,
+    scopeWhere: Prisma.LibraryItemWhereInput,
     tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
     const client = this.getClient(tx);
-    if (!client.item?.findFirst) return false;
-    const item = await client.item.findFirst({
+    if (!client.libraryItem?.findFirst) return false;
+    const item = await client.libraryItem.findFirst({
       where: { id: itemId, ...scopeWhere, deletedAt: null },
       select: { id: true },
     });

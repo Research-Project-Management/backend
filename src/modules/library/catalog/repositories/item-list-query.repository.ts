@@ -1,7 +1,7 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectScopeId, resolveSpaceId } from '@/modules/library/core';
 import {
   ItemDetail,
   ItemSummary,
@@ -55,11 +55,15 @@ export class ItemListQueryRepository {
     const validProjectId = normalizeProjectScopeId(options.projectId);
     const hasValidProject = Boolean(validProjectId && isUuid(validProjectId));
 
-    const scopeWhere: Prisma.CollectionWhereInput = hasValidProject
-      ? { projectId: validProjectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
+    const scopeWhere: Prisma.LibraryCollectionWhereInput = {
+      spaceId: resolveSpaceId({
+        userId,
+        projectId: hasValidProject ? validProjectId : null,
+      }),
+      deletedAt: null,
+    };
 
-    const allCollections = await client.collection.findMany({
+    const allCollections = await client.libraryCollection.findMany({
       where: scopeWhere,
       select: { id: true, parentId: true },
     });
@@ -75,7 +79,7 @@ export class ItemListQueryRepository {
   buildWhereClause(
     userId: string,
     options: ItemFilterOptions,
-  ): Prisma.ItemWhereInput {
+  ): Prisma.LibraryItemWhereInput {
     return buildItemWhereClause(userId, options);
   }
 
@@ -230,7 +234,7 @@ export class ItemListQueryRepository {
         view: 'all',
       });
 
-      const userStates = await client.state.findMany({
+      const userStates = await client.libraryItemState.findMany({
         where: {
           userId: effectiveUserId,
           lastReadAt: { not: null },
@@ -302,11 +306,11 @@ export class ItemListQueryRepository {
       'firstAuthor',
       'deletedAt',
     ]);
-    const primaryOrderBy: Prisma.ItemOrderByWithRelationInput =
+    const primaryOrderBy: Prisma.LibraryItemOrderByWithRelationInput =
       nullableSortFields.has(safeSortField)
         ? { [safeSortField]: { sort: sortDir, nulls: 'last' } }
         : { [safeSortField]: sortDir };
-    const orderByClause: Prisma.ItemOrderByWithRelationInput[] = [
+    const orderByClause: Prisma.LibraryItemOrderByWithRelationInput[] = [
       primaryOrderBy,
       { id: sortDir },
     ];
@@ -314,7 +318,7 @@ export class ItemListQueryRepository {
     const page = options.page && options.page > 0 ? options.page : 1;
     const skip = options.cursor ? 1 : page > 1 ? (page - 1) * limit : undefined;
 
-    return client.item.findMany({
+    return client.libraryItem.findMany({
       where: this.buildWhereClause(userId, { ...options, targetCollectionIds }),
       take: limit + 1,
       ...(options.cursor
@@ -350,7 +354,7 @@ export class ItemListQueryRepository {
         view: 'all',
       });
 
-      return client.state.count({
+      return client.libraryItemState.count({
         where: {
           userId: effectiveUserId,
           lastReadAt: { not: null },
@@ -359,7 +363,7 @@ export class ItemListQueryRepository {
       });
     }
 
-    return client.item.count({
+    return client.libraryItem.count({
       where: this.buildWhereClause(userId, { ...options, targetCollectionIds }),
     });
   }
@@ -372,13 +376,16 @@ export class ItemListQueryRepository {
     if (!isUuid(userId)) return {};
 
     const validProjectId = normalizeProjectScopeId(projectId);
-    const where: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId, deletedAt: null }
-        : { userId, projectId: null, deletedAt: null };
+    const where: Prisma.LibraryItemWhereInput = {
+      spaceId: resolveSpaceId({
+        userId,
+        projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+      }),
+      deletedAt: null,
+    };
 
     try {
-      const grouped = await client.item.groupBy({
+      const grouped = await client.libraryItem.groupBy({
         by: ['itemType'],
         where,
         _count: { _all: true },
@@ -422,16 +429,17 @@ export class ItemListQueryRepository {
     const validProjectId = normalizeProjectScopeId(projectId);
     const scopeWhere =
       validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId }
+        ? { spaceId: validProjectId }
         : isUuid(userId)
-          ? { userId, projectId: null }
+          ? { spaceId: userId }
           : null;
     if (!scopeWhere) return null;
-    const item = await client.item.findFirst({
+    const item = await client.libraryItem.findFirst({
       where: { id: itemId, ...scopeWhere, deletedAt: null },
       select: {
         id: true,
-        userId: true,
+        spaceId: true,
+        createdById: true,
         title: true,
         itemType: true,
         year: true,
@@ -449,7 +457,7 @@ export class ItemListQueryRepository {
     if (!item) return null;
     return {
       id: item.id,
-      userId: item.userId,
+      userId: (item as { userId?: string }).userId ?? item.createdById ?? item.spaceId,
       title: item.title,
       itemType: item.itemType || undefined,
       year: item.year,
@@ -477,16 +485,19 @@ export class ItemListQueryRepository {
     if (validIds.length === 0) return [];
 
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeWhere: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId }
-        : { userId, projectId: null };
+    const scopeWhere: Prisma.LibraryItemWhereInput = {
+      spaceId: resolveSpaceId({
+        userId,
+        projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+      }),
+    };
 
-    const items = await client.item.findMany({
+    const items = await client.libraryItem.findMany({
       where: { id: { in: validIds }, ...scopeWhere, deletedAt: null },
       select: {
         id: true,
-        userId: true,
+        spaceId: true,
+        createdById: true,
         title: true,
         itemType: true,
         year: true,
@@ -504,7 +515,7 @@ export class ItemListQueryRepository {
 
     return items.map((item) => ({
       id: item.id,
-      userId: item.userId,
+      userId: (item as { userId?: string }).userId ?? item.createdById ?? item.spaceId,
       title: item.title,
       itemType: item.itemType || undefined,
       year: item.year,
@@ -521,7 +532,7 @@ export class ItemListQueryRepository {
     if (!isUuid(userId)) return [];
     try {
       return await client.feedSubscription.findMany({
-        where: { userId },
+        where: { spaceId: userId },
         include: {
           feed: {
             select: {

@@ -11,26 +11,18 @@ import {
   ConvertTypeOptions,
 } from '@/modules/library/core/types/bibliographic.types';
 import {
-  ITEM_COLUMN_METADATA_FIELDS,
-  FIELD_ALIASES,
-  REVERSE_FIELD_ALIASES,
-} from '@/modules/library/catalog/types/catalog.types';
-import {
   normalizeProjectScopeId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
   UNIT_OF_WORK,
   IUnitOfWork,
-  ItemProvenancePolicy,
-  getEffectiveBaseFieldMap,
 } from '@/modules/library/core';
-
-import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';
+import { buildTypeConversionUpdatePayload } from '../domain/type-conversion.policy';
 
 /**
  * ItemTypeConversionService — Dedicated Domain Service for Item Type conversions.
- * Encapsulates deterministic conversion preview, CSL field preservation,
- * dynamic extra-field projection, and database transactional updates.
+ * Delegates pure conversion preview, CSL Base Field remapping, and Unmapped Field Tombstone
+ * (`__unmapped_*`) payload construction to `type-conversion.policy.ts`.
  */
 @Injectable()
 export class ItemTypeConversionService {
@@ -122,18 +114,22 @@ export class ItemTypeConversionService {
     ) => {
       if (!activeHelpers) return;
       const domainRes = ItemsMapper.toDomain(res);
+      const sharedData = ItemsMapper.stripPersonalOverlayForSharedScope(
+        domainRes,
+        effectiveProjectId,
+      );
       await activeHelpers.appendChange(eventScope, {
         entityType: 'Item',
         entityId: itemId,
         action: 'update',
         version: res.version,
-        data: domainRes,
+        data: sharedData,
       });
       await activeHelpers.publishOutbox(
         eventScope,
         itemId,
         LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-        domainRes,
+        sharedData,
       );
     };
 
@@ -203,196 +199,4 @@ export class ItemTypeConversionService {
       conversionReport: preview,
     };
   }
-}
-
-function buildTypeConversionUpdatePayload(
-  targetType: string,
-  existing: ItemDetail,
-  preview: TypeConversionPreview,
-  targetFields: ItemFieldDefinition[],
-  transformer: ItemTransformer,
-  options?: { retainUnmappedInExtra?: boolean },
-): Record<string, unknown> {
-  const projected = preview.projectedItem;
-  const dynamicExtraFields: Record<string, unknown> = {
-    ...((projected.extraFields as Record<string, unknown> | undefined) || {}),
-  };
-  delete dynamicExtraFields.itemType;
-  delete dynamicExtraFields.type;
-
-  const targetFieldKeySet = new Set(targetFields.map((f) => f.key));
-  const droppedSet = new Set(
-    preview.droppedFields.map((d) => d.field.toLowerCase()),
-  );
-  const mappedOutSet = new Set(
-    preview.mappedFields
-      .filter((m) => m.fromField.toLowerCase() !== m.toField.toLowerCase())
-      .map((m) => m.fromField.toLowerCase()),
-  );
-
-  for (const dropped of preview.droppedFields) {
-    dynamicExtraFields[dropped.field] = null;
-    const aliasKey =
-      FIELD_ALIASES[dropped.field] || REVERSE_FIELD_ALIASES[dropped.field];
-    if (aliasKey && !targetFieldKeySet.has(aliasKey)) {
-      dynamicExtraFields[aliasKey] = null;
-    }
-  }
-  for (const mapped of preview.mappedFields) {
-    if (mapped.fromField !== mapped.toField) {
-      dynamicExtraFields[mapped.fromField] = null;
-      const aliasKey =
-        FIELD_ALIASES[mapped.fromField] ||
-        REVERSE_FIELD_ALIASES[mapped.fromField];
-      if (aliasKey && aliasKey !== mapped.toField) {
-        dynamicExtraFields[aliasKey] = null;
-      }
-    }
-  }
-
-  for (const field of targetFields) {
-    const val = transformer.getItemFieldValue(projected, field.key);
-    if (
-      val !== undefined &&
-      val !== null &&
-      val !== '' &&
-      !ITEM_COLUMN_METADATA_FIELDS.has(field.key) &&
-      !ITEM_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[field.key])
-    ) {
-      dynamicExtraFields[field.key] = val;
-    }
-  }
-
-  const metadataPatch: Record<string, unknown> = {};
-  for (const dropped of preview.droppedFields) {
-    metadataPatch[dropped.field] = null;
-    const aliasKey =
-      FIELD_ALIASES[dropped.field] || REVERSE_FIELD_ALIASES[dropped.field];
-    if (aliasKey && !targetFieldKeySet.has(aliasKey)) {
-      metadataPatch[aliasKey] = null;
-    }
-  }
-  for (const mapped of preview.mappedFields) {
-    if (mapped.fromField !== mapped.toField) {
-      metadataPatch[mapped.fromField] = null;
-      const aliasKey =
-        FIELD_ALIASES[mapped.fromField] ||
-        REVERSE_FIELD_ALIASES[mapped.fromField];
-      if (aliasKey && aliasKey !== mapped.toField) {
-        metadataPatch[aliasKey] = null;
-      }
-    }
-  }
-
-  const existingRec = existing as unknown as Record<string, unknown>;
-  const existingMetaRec =
-    existing.metadata &&
-    typeof existing.metadata === 'object' &&
-    !Array.isArray(existing.metadata)
-      ? (existing.metadata as Record<string, unknown>)
-      : {};
-  const existingExtraRec =
-    existing.extraFields &&
-    typeof existing.extraFields === 'object' &&
-    !Array.isArray(existing.extraFields)
-      ? existing.extraFields
-      : {};
-
-  if (options?.retainUnmappedInExtra === false) {
-    for (const container of [
-      existingMetaRec,
-      existingExtraRec,
-      dynamicExtraFields,
-    ]) {
-      for (const k of Object.keys(container)) {
-        if (/^__unmapped_/i.test(k)) {
-          dynamicExtraFields[k] = null;
-          metadataPatch[k] = null;
-        }
-      }
-    }
-    for (const dropped of preview.droppedFields) {
-      const unmappedKey = `__unmapped_${preview.sourceType}_${dropped.field}`;
-      dynamicExtraFields[unmappedKey] = null;
-      metadataPatch[unmappedKey] = null;
-    }
-  } else {
-    for (const k of new Set([
-      ...Object.keys(existingMetaRec),
-      ...Object.keys(existingExtraRec),
-    ])) {
-      if (/^__unmapped_/i.test(k) && dynamicExtraFields[k] === undefined) {
-        dynamicExtraFields[k] = null;
-        metadataPatch[k] = null;
-      }
-    }
-    for (const [k, v] of Object.entries(dynamicExtraFields)) {
-      if (/^__unmapped_/i.test(k) && v !== null && v !== undefined) {
-        metadataPatch[k] = v;
-      }
-    }
-  }
-
-  const hadShortTitle = Boolean(
-    existingRec.shortTitle ||
-    existingMetaRec.shortTitle ||
-    existingExtraRec.shortTitle,
-  );
-  const projectedShortTitle = transformer.getItemFieldValue(
-    projected,
-    'shortTitle',
-  );
-  if (
-    hadShortTitle &&
-    (projectedShortTitle === undefined ||
-      projectedShortTitle === null ||
-      projectedShortTitle === '')
-  ) {
-    dynamicExtraFields.shortTitle = null;
-    metadataPatch.shortTitle = null;
-  }
-
-  const { fieldProvenance, lockedFields } =
-    ItemProvenancePolicy.transferConversionProvenance(existing, preview);
-
-  metadataPatch.fieldProvenance = fieldProvenance;
-  metadataPatch.lockedFields = lockedFields;
-
-  const updatePayload: Record<string, unknown> = {
-    __isSystemUpdate: true,
-    itemType: targetType,
-    type: targetType,
-    creators: projected.creators ?? existing.creators,
-    contributors:
-      projected.creators ?? existing.contributors ?? existing.creators,
-    extraFields: dynamicExtraFields,
-    ...(projected.extra !== undefined ? { extra: projected.extra } : {}),
-    metadata: metadataPatch,
-  };
-
-  const targetBaseMap = getEffectiveBaseFieldMap(targetType);
-  for (const col of ITEM_COLUMN_METADATA_FIELDS) {
-    if (FIELD_ALIASES[col] && FIELD_ALIASES[col] !== col) continue;
-
-    const colLower = col.toLowerCase();
-    if (droppedSet.has(colLower) || mappedOutSet.has(colLower)) {
-      updatePayload[col] = null;
-    } else {
-      const mappedTargetField =
-        targetBaseMap[col] ||
-        (col === 'issue' ? targetBaseMap.number : undefined);
-      const val =
-        transformer.getItemFieldValue(projected, col) ??
-        (mappedTargetField
-          ? transformer.getItemFieldValue(projected, mappedTargetField)
-          : undefined);
-      if (val !== undefined && val !== null && val !== '') {
-        updatePayload[col] = val;
-      } else if (col !== 'title' && col !== 'itemType') {
-        updatePayload[col] = null;
-      }
-    }
-  }
-
-  return updatePayload;
 }

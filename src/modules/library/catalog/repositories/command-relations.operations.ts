@@ -1,7 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma, RelationType, TagType } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import { normalizeProjectScopeId, disambiguateCitationKey, normalizeTags, resolveOrCreateAutomaticTagsInClient, sortLockKeys } from '@/modules/library/core';
+import { normalizeProjectScopeId, resolveSpaceId, disambiguateCitationKey, normalizeTags, resolveOrCreateAutomaticTagsInClient, sortLockKeys } from '@/modules/library/core';
 import { CreateItemData, UpdateItemData, ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 import { TagInput } from '@/modules/library/catalog/types/catalog.types';
 import {
@@ -60,7 +60,7 @@ export async function syncTagsForCatalogItem(
     allowManualAcademicTerms: defaultTagType !== TagType.automatic,
   });
   if (normalizedTagsList.length === 0) {
-    await client.itemTag.deleteMany({ where: { itemId } });
+    await client.libraryItemTag.deleteMany({ where: { itemId } });
     return;
   }
   const resolvedTags = await resolveOrCreateTags(
@@ -72,7 +72,7 @@ export async function syncTagsForCatalogItem(
     existingItemTags,
   );
   if (resolvedTags.length === 0) {
-    await client.itemTag.deleteMany({ where: { itemId } });
+    await client.libraryItemTag.deleteMany({ where: { itemId } });
     return;
   }
   const existingTypeByTagId = new Map<string, TagType>();
@@ -98,7 +98,7 @@ export async function syncTagsForCatalogItem(
     })
     .map((t) => t.id);
 
-  await client.itemTag.deleteMany({
+  await client.libraryItemTag.deleteMany({
     where:
       changedTypeTagIds.length > 0
         ? {
@@ -113,7 +113,7 @@ export async function syncTagsForCatalogItem(
   const orderedResolvedTags = [...resolvedTags].sort((a, b) =>
     a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
   );
-  await client.itemTag.createMany({
+  await client.libraryItemTag.createMany({
     data: orderedResolvedTags.map((t) => ({ tagId: t.id, itemId, type: t.type })),
     skipDuplicates: true,
   });
@@ -246,24 +246,18 @@ export async function sanitizeUpdateCollectionIds(params: {
       ),
     ),
   );
-  if (candidateColIds.length === 0 || !client.collection) {
+  if (candidateColIds.length === 0 || !client.libraryCollection) {
     return data;
   }
 
   const targetProjectId = validProjectId ?? existingProjectId;
-  const validCols = await client.collection.findMany({
-    where: targetProjectId
-      ? {
-          id: { in: candidateColIds },
-          projectId: targetProjectId,
-          deletedAt: null,
-        }
-      : {
-          id: { in: candidateColIds },
-          userId,
-          projectId: null,
-          deletedAt: null,
-        },
+  const spaceId = resolveSpaceId({ userId, projectId: targetProjectId });
+  const validCols = await client.libraryCollection.findMany({
+    where: {
+      id: { in: candidateColIds },
+      spaceId,
+      deletedAt: null,
+    },
     select: { id: true },
   });
   if (!Array.isArray(validCols)) {
@@ -308,22 +302,27 @@ export async function putItemRelationInClient(
     return undefined;
   }
   const [source, target] = await Promise.all([
-    client.item.findUnique({
+    client.libraryItem.findUnique({
       where: { id: itemId },
-      select: { userId: true, projectId: true, deletedAt: true },
+      select: { spaceId: true, deletedAt: true },
     }),
-    client.item.findUnique({
+    client.libraryItem.findUnique({
       where: { id: targetItemId },
-      select: { userId: true, projectId: true, deletedAt: true },
+      select: { spaceId: true, deletedAt: true },
     }),
   ]);
   if (!source || source.deletedAt || !target || target.deletedAt) {
     return undefined;
   }
   // Enforce strict scope boundary: target item must belong to the same project or personal library
-  const sameScope = source.projectId
-    ? target.projectId === source.projectId
-    : !target.projectId && target.userId === source.userId;
+  const srcRec = source as Record<string, unknown>;
+  const tgtRec = target as Record<string, unknown>;
+  const sameScope =
+    typeof source.spaceId === 'string' && typeof target.spaceId === 'string'
+      ? source.spaceId === target.spaceId
+      : srcRec.projectId
+        ? tgtRec.projectId === srcRec.projectId
+        : !tgtRec.projectId && tgtRec.userId === srcRec.userId;
   if (!sameScope) return undefined;
   const rawType = String(relation.relationType ?? '')
     .trim()
@@ -374,19 +373,24 @@ export async function removeItemRelationInClient(
     return;
   }
   const [source, target] = await Promise.all([
-    client.item.findUnique({
+    client.libraryItem.findUnique({
       where: { id: itemId },
-      select: { userId: true, projectId: true, deletedAt: true },
+      select: { spaceId: true, deletedAt: true },
     }),
-    client.item.findUnique({
+    client.libraryItem.findUnique({
       where: { id: targetItemId },
-      select: { userId: true, projectId: true, deletedAt: true },
+      select: { spaceId: true, deletedAt: true },
     }),
   ]);
   if (source && target) {
-    const sameScope = source.projectId
-      ? target.projectId === source.projectId
-      : !target.projectId && target.userId === source.userId;
+    const srcRec = source as Record<string, unknown>;
+    const tgtRec = target as Record<string, unknown>;
+    const sameScope =
+      typeof source.spaceId === 'string' && typeof target.spaceId === 'string'
+        ? source.spaceId === target.spaceId
+        : srcRec.projectId
+          ? tgtRec.projectId === srcRec.projectId
+          : !tgtRec.projectId && tgtRec.userId === srcRec.userId;
     if (!sameScope) return;
   }
   await client.itemRelation.deleteMany({
@@ -429,7 +433,7 @@ export function buildCommandMutationInclude(
     publications: { where: { userId } },
     outgoingRel: { include: { targetItem: { select: RELATION_PEER_SELECT } } },
     incomingRel: { include: { sourceItem: { select: RELATION_PEER_SELECT } } },
-  } satisfies Prisma.ItemInclude;
+  } satisfies Prisma.LibraryItemInclude;
 }
 
 export async function setMyPublicationInClient(
@@ -452,10 +456,10 @@ export async function setMyPublicationInClient(
     throw new NotFoundException(`CatalogItem ${id} not found`);
   }
   const validProjectId = normalizeProjectScopeId(options?.projectId);
-  const scopeWhere = validProjectId
-    ? { projectId: validProjectId }
-    : { userId, projectId: null };
-  const existing = await client.item.findFirst({
+  const scopeWhere = {
+    spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+  };
+  const existing = await client.libraryItem.findFirst({
     where: { id, ...scopeWhere, deletedAt: null },
   });
   if (!existing) throw new NotFoundException(`CatalogItem ${id} not found`);
@@ -480,6 +484,7 @@ export async function setMyPublicationInClient(
   const isSharedProjectItem = Boolean(
     validProjectId ||
     (existing as { projectId?: string | null }).projectId ||
+    (existing.spaceId && existing.spaceId !== userId) ||
     options?.stripSharedPublicationFlag,
   );
   if (isSharedProjectItem) {
@@ -500,8 +505,8 @@ export async function setMyPublicationInClient(
       'includeNotesInMyPublications',
       'authorshipConfirmed',
     ].some((k) => k in existingMetaObj);
-    if (!hasStaleSharedPubKeys && typeof client.item?.findUnique === 'function') {
-      const reloaded = await client.item.findUnique({
+    if (!hasStaleSharedPubKeys && typeof client.libraryItem?.findUnique === 'function') {
+      const reloaded = await client.libraryItem.findUnique({
         where: { id },
         include: buildCommandMutationInclude(userId),
       });
@@ -512,7 +517,7 @@ export async function setMyPublicationInClient(
       false,
       { ...options, stripSharedFlag: true },
     );
-    return client.item.update({
+    return client.libraryItem.update({
       where: { id },
       data: {
         metadata: strippedMeta as Prisma.InputJsonValue,
@@ -525,7 +530,7 @@ export async function setMyPublicationInClient(
     isMyPublication,
     options,
   );
-  return client.item.update({
+  return client.libraryItem.update({
     where: { id },
     data: {
       metadata: metadataObj as Prisma.InputJsonValue,
@@ -549,13 +554,12 @@ export async function resolveCreateItemRelations(
   const rawTagList = [...(data.tags || []), ...(data.keywords || []), ...(data.labels || [])];
   const defaultTagType = resolveCreateDefaultTagType(data);
   const rawUniqueCollectionIds = extractUniqueCreateCollectionIds(data);
+  const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
   const [resolvedTags, validCollections] = await Promise.all([
     resolveOrCreateTags(client, userId, rawTagList, defaultTagType, effectiveProjectId),
-    rawUniqueCollectionIds.length > 0 && client.collection
-      ? client.collection.findMany({
-          where: effectiveProjectId
-            ? { id: { in: rawUniqueCollectionIds }, projectId: effectiveProjectId, deletedAt: null }
-            : { id: { in: rawUniqueCollectionIds }, userId, projectId: null, deletedAt: null },
+    rawUniqueCollectionIds.length > 0 && client.libraryCollection
+      ? client.libraryCollection.findMany({
+          where: { id: { in: rawUniqueCollectionIds }, spaceId, deletedAt: null },
           select: { id: true },
         })
       : Promise.resolve(undefined),

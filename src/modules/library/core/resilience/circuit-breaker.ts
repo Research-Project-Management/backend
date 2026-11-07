@@ -183,9 +183,12 @@ export class CircuitBreaker {
       throw openErr;
     }
 
+    const failureSeqBefore = this.failureSequence;
     try {
       const result = await fn();
-      this.recordSuccess();
+      if (this.failureSequence === failureSeqBefore) {
+        this.recordSuccess();
+      }
       return result;
     } catch (err: unknown) {
       const status =

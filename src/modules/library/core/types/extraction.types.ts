@@ -325,6 +325,8 @@ export interface ClaimedAttachmentRecord {
   metadata?: unknown;
   item?: {
     id?: string;
+    spaceId?: string;
+    createdById?: string;
     userId?: string;
     projectId?: string | null;
     title?: string;

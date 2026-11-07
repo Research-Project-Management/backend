@@ -583,49 +583,76 @@ export class PipelineSideEffectsService {
 
   /**
    * Enriches an existing item upon an EXACT duplicate match (local retraction scan + additive field patch).
-   * Returns the fetched existing item record and the list of patched field keys.
    */
   async enrichExistingMatchedItem(params: {
     userId: string;
     projectId?: string;
     targetItemId: string;
     candidateItem?: Record<string, unknown>;
-  }): Promise<{
-    existingRecord?: Record<string, unknown> | null;
-    patchedFields: string[];
-  }> {
+  }): Promise<{ existingRecord?: Record<string, unknown> | null; patchedFields: string[] }> {
     const { userId, projectId, targetItemId, candidateItem } = params;
     await this.scanRetraction(candidateItem, { localOnly: true });
+    if (!this.catalogGateway?.getItem) return { patchedFields: [] };
 
-    if (!this.catalogGateway?.getItem) {
-      return { patchedFields: [] };
-    }
-
-    const existing = await this.catalogGateway.getItem(
-      userId,
-      targetItemId,
-      projectId,
-    );
+    const existing = await this.catalogGateway.getItem(userId, targetItemId, projectId);
     const existingRecord = existing as Record<string, unknown> | null | undefined;
-    const enrichPatch = buildEnrichmentPatch(
-      existingRecord,
-      candidateItem || {},
-    );
+    const enrichPatch = buildEnrichmentPatch(existingRecord, candidateItem || {});
     const patchedFields = Object.keys(enrichPatch);
 
     if (patchedFields.length > 0 && this.catalogGateway.updateItem) {
-      await this.catalogGateway.updateItem(userId, targetItemId, enrichPatch, {
-        projectId,
-      });
-      this.logger.log(
-        `[EXACT_MERGE] Enriched item ${targetItemId} with ${patchedFields.join(', ')}`,
-      );
+      await this.catalogGateway.updateItem(userId, targetItemId, enrichPatch, { projectId });
+      this.logger.log(`[EXACT_MERGE] Enriched item ${targetItemId} with ${patchedFields.join(', ')}`);
     } else {
-      this.logger.log(
-        `[EXACT_MERGE] Item ${targetItemId} already fully populated — no patch needed`,
-      );
+      this.logger.log(`[EXACT_MERGE] Item ${targetItemId} already fully populated — no patch needed`);
+    }
+    return { existingRecord, patchedFields };
+  }
+
+  /**
+   * Unified workflow for "Duplicate Item Match -> Enrich Metadata -> Link Attachment -> Emit Side Effects"
+   * shared across single-item (`PipelineService`) and multi-record batch (`PipelineBatchExecutor`) ingestion flows.
+   */
+  async enrichAndLinkDuplicateItem(params: {
+    userId: string;
+    projectId?: string;
+    targetItemId: string;
+    candidateItem?: Record<string, unknown>;
+    envelope: IngestionSubmissionEnvelope;
+    fileId?: string;
+    filename?: string;
+    payloadSize?: number;
+    mode?: 'single' | 'batch';
+  }): Promise<{ existingRecord?: Record<string, unknown> | null; patchedFields: string[] }> {
+    const { userId, projectId, targetItemId, candidateItem = {}, envelope, fileId, filename, payloadSize, mode = 'single' } = params;
+    let existingRecord: Record<string, unknown> | null | undefined;
+    let patchedFields: string[] = [];
+
+    if (mode === 'batch') {
+      try {
+        const res = await this.enrichExistingMatchedItem({ userId, projectId, targetItemId, candidateItem });
+        existingRecord = res.existingRecord;
+        patchedFields = res.patchedFields;
+        await this.materializeNotes(userId, projectId, targetItemId, candidateItem?.notes as unknown[] | undefined, existingRecord);
+      } catch (enrichErr: unknown) {
+        this.logger.warn(`Additive enrichment on duplicate item ${targetItemId} failed: ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`);
+      }
+      if (envelope.collectionIds && envelope.collectionIds.length > 0) {
+        await Promise.all(envelope.collectionIds.map((colId) => this.assignItemToCollection(userId, colId, targetItemId, projectId)));
+      }
+      return { existingRecord, patchedFields };
     }
 
+    const res = await this.enrichExistingMatchedItem({ userId, projectId, targetItemId, candidateItem });
+    existingRecord = res.existingRecord;
+    patchedFields = res.patchedFields;
+    if (this.catalogGateway?.getItem) {
+      await this.runPostPersistSideEffects(
+        targetItemId,
+        { userId, projectId, envelope },
+        candidateItem,
+        { fileId, filename, payloadSize, existingRecord, assignCollections: true },
+      );
+    }
     return { existingRecord, patchedFields };
   }
 
@@ -639,11 +666,8 @@ export class PipelineSideEffectsService {
     proposedMetadata?: Record<string, unknown>;
     createdItemId?: string;
   }): Promise<void> {
-    const { scope, runId, matchResult, proposedMetadata, createdItemId } =
-      params;
-    if (matchResult?.matchType !== 'PROBABLE' || !matchResult.targetItemId) {
-      return;
-    }
+    const { scope, runId, matchResult, proposedMetadata, createdItemId } = params;
+    if (matchResult?.matchType !== 'PROBABLE' || !matchResult.targetItemId) return;
 
     await this.repo
       .createReviewCase(scope, runId, {
@@ -655,15 +679,11 @@ export class PipelineSideEffectsService {
           details: matchResult.evidence,
           ...(createdItemId ? { createdItemId } : {}),
         } as unknown as Prisma.InputJsonValue,
-        options: {
-          proposedMetadata: proposedMetadata || {},
-        } as unknown as Prisma.InputJsonValue,
+        options: { proposedMetadata: proposedMetadata || {} } as unknown as Prisma.InputJsonValue,
         assignedToId: scope.userId,
       })
       .catch((rcErr: unknown) => {
-        this.logger.warn(
-          `Failed to create review case for run ${runId}: ${rcErr instanceof Error ? rcErr.message : String(rcErr)}`,
-        );
+        this.logger.warn(`Failed to create review case for run ${runId}: ${rcErr instanceof Error ? rcErr.message : String(rcErr)}`);
       });
   }
 }

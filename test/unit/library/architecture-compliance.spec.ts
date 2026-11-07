@@ -858,7 +858,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     const missingDeletedAtModels: string[] = [];
     for (const modelName of softDeletableModels) {
       const modelBlockRegex = new RegExp(
-        `model\\s+${modelName}\\s*\\{([\\s\\S]*?)\\n\\}`,
+        `model\\s+(?:Library)?${modelName}\\s*\\{([\\s\\S]*?)\\r?\\n\\}`,
       );
       const match = combinedSchema.match(modelBlockRegex);
       if (!match || !/\bdeletedAt\s+DateTime\?/.test(match[1])) {
@@ -878,7 +878,6 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
         if (
           /"full_text_index"/.test(line) ||
-          /\blibraryItem\b/.test(line) ||
           /as\s+unknown\s+as\s+Prisma\.TransactionClient/.test(line)
         ) {
           queryAndCastViolations.push({

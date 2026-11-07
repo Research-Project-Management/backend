@@ -259,11 +259,31 @@ export class PipelineService {
 
     const existingInputParams = existingRun?.inputParams as
       Record<string, unknown> | null | undefined;
+    const existingRunRec = existingRun as
+      | {
+          userId?: string;
+          projectId?: string | null;
+          createdById?: string;
+          spaceId?: string;
+        }
+      | null
+      | undefined;
+    const existingRunUserId =
+      existingRunRec?.userId ??
+      existingRunRec?.createdById ??
+      resolvedScope.userId;
+    const existingRunProjectId =
+      existingRunRec?.projectId !== undefined
+        ? existingRunRec.projectId
+        : existingRunRec?.spaceId &&
+            existingRunRec.spaceId !== existingRunUserId
+          ? existingRunRec.spaceId
+          : resolvedScope.projectId;
     const aggregate = existingRun
       ? IngestionRunAggregate.reconstitute({
           id: existingRun.id,
-          userId: existingRun.userId,
-          projectId: existingRun.projectId,
+          userId: existingRunUserId,
+          projectId: existingRunProjectId,
           sourceType:
             (typeof existingInputParams?.sourceType === 'string'
               ? existingInputParams.sourceType
@@ -545,32 +565,18 @@ export class PipelineService {
       await session.executeStep(
         'ENRICH_EXISTING',
         async () => {
-          const { existingRecord: existingRec, patchedFields } =
-            await this.sideEffects.enrichExistingMatchedItem({
+          const { patchedFields } =
+            await this.sideEffects.enrichAndLinkDuplicateItem({
               userId: resolvedScope.userId,
               projectId: resolvedScope.projectId,
               targetItemId,
               candidateItem,
+              envelope,
+              fileId: finalFileIdentifier,
+              filename: finalFilename,
+              payloadSize,
+              mode: 'single',
             });
-
-          if (this.catalogGateway?.getItem) {
-            await this.sideEffects.runPostPersistSideEffects(
-              targetItemId,
-              {
-                userId: resolvedScope.userId,
-                projectId: resolvedScope.projectId,
-                envelope,
-              },
-              candidateItem,
-              {
-                fileId: finalFileIdentifier,
-                filename: finalFilename,
-                payloadSize,
-                existingRecord: existingRec,
-                assignCollections: true,
-              },
-            );
-          }
 
           const exactSourceLabel =
             getSubmissionPayloadLabel(envelope.payload) ||

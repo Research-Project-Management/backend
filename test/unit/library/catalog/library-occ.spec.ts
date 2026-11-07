@@ -15,16 +15,20 @@ describe('Library OCC (Optimistic Concurrency Control) Pattern', () => {
     let mockPrisma: any;
 
     beforeEach(async () => {
+      const itemMock = {
+        findFirst: jest.fn(),
+        findUnique: jest.fn(),
+        updateMany: jest.fn(),
+        update: jest.fn(),
+      };
+      const fileMock = {
+        updateMany: jest.fn(),
+      };
       mockPrisma = {
-        item: {
-          findFirst: jest.fn(),
-          findUnique: jest.fn(),
-          updateMany: jest.fn(),
-          update: jest.fn(),
-        },
-        file: {
-          updateMany: jest.fn(),
-        },
+        item: itemMock,
+        libraryItem: itemMock,
+        file: fileMock,
+        storageFile: fileMock,
       };
 
       const module: TestingModule = await Test.createTestingModule({
@@ -67,7 +71,7 @@ describe('Library OCC (Optimistic Concurrency Control) Pattern', () => {
           id: itemId,
           version: 1,
           deletedAt: null,
-          userId,
+          spaceId: userId,
         }),
         data: {
           version: { increment: 1 },
@@ -137,7 +141,7 @@ describe('Library OCC (Optimistic Concurrency Control) Pattern', () => {
           id: itemId,
           version: 1,
           deletedAt: null,
-          userId,
+          spaceId: userId,
         }),
         data: expect.objectContaining({
           version: { increment: 1 },

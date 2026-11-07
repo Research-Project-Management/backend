@@ -599,3 +599,18 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
       : null,
   } as unknown as T & { readStatus: string; rating: number; lastReadAt: string | null };
 }
+
+export function stripPersonalOverlayForSharedScope<T>(
+  item: T,
+  projectId?: string | null,
+): T {
+  if (!projectId || !item || typeof item !== 'object') return item;
+  const clone = { ...(item as unknown as Record<string, unknown>) };
+  for (const k of [
+    'isStarred', 'starred', 'isRead', 'readStatus', 'rating', 'currentPage',
+    'lastReadPage', 'scrollPosition', 'lastOpenedAt', 'lastReadAt', 'isMyPublication', 'states', 'publications',
+  ]) {
+    delete clone[k];
+  }
+  return clone as unknown as T;
+}

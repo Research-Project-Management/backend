@@ -1,12 +1,13 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { Prisma, IngestionRun, IngestionStatus, IngestionStage as DbIngestionStage, Item } from '@prisma/client';
+import { Prisma, IngestionRun, IngestionStatus, IngestionStage as DbIngestionStage, LibraryItem } from '@prisma/client';
 import { IngestionStage, IngestionReviewCase } from '@/modules/library/ingestion/types/ingestion.types';
 import { uuidv7 } from '@/modules/library/core';
 import { isUUID } from 'class-validator';
 import { CreateIngestionRunData, CreateIngestionStageData, CreateIngestionReviewCaseData, IngestionScope, parseRunScope } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
 export type { CreateIngestionRunData, CreateIngestionStageData, CreateIngestionReviewCaseData, IngestionScope };
 export { parseRunScope };
+export type Item = LibraryItem;
 
 function parseReviewCase(val: unknown): IngestionReviewCase | null {
   if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
@@ -78,12 +79,14 @@ export class IngestionRepository {
 
   async createRun(scope: IngestionScope, data: CreateIngestionRunData, tx?: Prisma.TransactionClient): Promise<IngestionRun> {
     const { userId, projectId } = parseRunScope(scope, data.userId);
+    const spaceId = projectId || userId;
     const scopeKey = projectId ? `proj:${projectId}` : `user:${userId}`;
     if (data.idempotencyKey) {
       const lockToken = `idemp:${scopeKey}:${data.idempotencyKey}`;
-      const idempWhere: Prisma.IngestionRunWhereInput = projectId
-        ? { projectId, idempotencyKey: data.idempotencyKey }
-        : { userId, projectId: null, idempotencyKey: data.idempotencyKey };
+      const idempWhere: Prisma.IngestionRunWhereInput = {
+        spaceId,
+        idempotencyKey: data.idempotencyKey,
+      };
       if (tx) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockToken}))`;
         const existing = await tx.ingestionRun.findFirst({ where: idempWhere });
@@ -101,9 +104,8 @@ export class IngestionRepository {
     const created = await client.ingestionRun.create({
       data: {
         ...(data.id ? { id: data.id } : {}),
-        scopeKey,
-        userId,
-        projectId,
+        spaceId,
+        createdById: userId,
         traceId: data.traceId ?? null,
         inputParams: data.inputParams,
         inputHash: data.inputHash,
@@ -129,15 +131,15 @@ export class IngestionRepository {
   private buildRunIdWhere(scope: IngestionScope | undefined, runId: string): Prisma.IngestionRunWhereInput {
     if (!scope) return { id: runId };
     if (typeof scope === 'object') {
-      if (scope.projectId && isUUID(scope.projectId)) return { id: runId, projectId: scope.projectId };
-      if (scope.userId && scope.userId !== 'system' && isUUID(scope.userId)) return { id: runId, userId: scope.userId, projectId: null };
-      return { id: runId, userId: '00000000-0000-0000-0000-000000000000', projectId: '00000000-0000-0000-0000-000000000000' };
+      if (scope.projectId && isUUID(scope.projectId)) return { id: runId, spaceId: scope.projectId };
+      if (scope.userId && scope.userId !== 'system' && isUUID(scope.userId)) return { id: runId, spaceId: scope.userId };
+      return { id: runId, spaceId: '00000000-0000-0000-0000-000000000000' };
     }
     const trimmed = scope.trim();
     if (!trimmed || trimmed === 'system' || trimmed === 'user' || trimmed === 'me' || !isUUID(trimmed)) {
-      return { id: runId, userId: '00000000-0000-0000-0000-000000000000', projectId: '00000000-0000-0000-0000-000000000000' };
+      return { id: runId, spaceId: '00000000-0000-0000-0000-000000000000' };
     }
-    return { id: runId, OR: [{ userId: trimmed, projectId: null }, { projectId: trimmed }] };
+    return { id: runId, spaceId: trimmed };
   }
 
   async findRunById(
@@ -171,8 +173,8 @@ export class IngestionRepository {
   async findRunByIdempotencyKey(scope: IngestionScope, idempotencyKey: string, tx?: Prisma.TransactionClient): Promise<IngestionRun | null> {
     const client = this.getClient(tx);
     const { userId, projectId } = parseRunScope(scope);
-    const where: Prisma.IngestionRunWhereInput = projectId ? { projectId, idempotencyKey } : { userId, projectId: null, idempotencyKey };
-    return client.ingestionRun.findFirst({ where });
+    const spaceId = projectId || userId;
+    return client.ingestionRun.findFirst({ where: { spaceId, idempotencyKey } });
   }
 
   async updateRunStatus(
@@ -311,9 +313,10 @@ export class IngestionRepository {
       projectId = parsed.projectId || undefined;
       userId = parsed.userId !== 'system' ? parsed.userId : undefined;
     }
+    const spaceId = projectId || userId;
     return client.ingestionRun.findMany({
       where: {
-        ...(projectId ? { projectId } : userId ? { userId } : {}),
+        ...(spaceId ? { spaceId } : {}),
         status: { in: [IngestionStatus.PENDING, IngestionStatus.RUNNING] },
         updatedAt: { lt: olderThan },
         completedAt: null,
@@ -393,11 +396,12 @@ export class IngestionRepository {
   ): Promise<IngestionReviewCase> {
     const client = this.getClient(tx);
     const existingRun = await client.ingestionRun
-      .findUnique({ where: { id: ingestionRunId }, select: { userId: true, reviewData: true } })
+      .findUnique({ where: { id: ingestionRunId }, select: { createdById: true, reviewData: true } })
       .catch(() => null);
     let fallbackUserId = data.assignedToId || data.assignedToUserId;
     if (!fallbackUserId && (!scope || scope === 'user' || scope === 'me' || (typeof scope === 'object' && !scope.userId))) {
-      if (existingRun?.userId) fallbackUserId = existingRun.userId;
+      const runUserId = (existingRun as { userId?: string; createdById?: string } | null)?.userId ?? existingRun?.createdById;
+      if (runUserId) fallbackUserId = runUserId;
     }
     const { userId, projectId } = parseRunScope(scope, fallbackUserId);
     const existingCases = parseReviewCases(existingRun?.reviewData);
@@ -437,10 +441,11 @@ export class IngestionRepository {
   ): Promise<IngestionReviewCase[]> {
     const client = this.getClient(tx);
     const { userId, projectId } = parseRunScope(scope);
+    const spaceId = projectId || (userId && userId !== 'system' ? userId : undefined);
     const statusFilter = options?.status?.trim().toUpperCase();
     const runs = await client.ingestionRun.findMany({
       where: {
-        ...(projectId ? { projectId } : userId && userId !== 'system' ? { userId, projectId: null } : {}),
+        ...(spaceId ? { spaceId } : {}),
         reviewData: statusFilter ? { path: ['status'], equals: statusFilter } : { not: Prisma.JsonNull },
       },
       take: options?.limit ?? 50,
@@ -520,9 +525,10 @@ export class IngestionRepository {
   ): Promise<Array<{ runId: string; createdItemId: string; targetItemId: string; confidence: number; matchReason: string }>> {
     const client = this.getClient(tx);
     const { userId, projectId } = parseRunScope(scope);
+    const spaceId = projectId || (userId && userId !== 'system' ? userId : undefined);
     const runs = await client.ingestionRun.findMany({
       where: {
-        ...(projectId ? { projectId } : userId && userId !== 'system' ? { userId, projectId: null } : {}),
+        ...(spaceId ? { spaceId } : {}),
         itemId: { not: null },
         reviewData: { not: Prisma.JsonNull },
       },
@@ -580,8 +586,8 @@ export class IngestionRepository {
       return;
     }
   }
-  async createCapturePreview(data: Prisma.CapturePreviewCreateInput, tx?: Prisma.TransactionClient) {
-    return this.getClient(tx).capturePreview.create({ data });
+  async createCapturePreview(data: Prisma.CapturePreviewCreateInput | Prisma.CapturePreviewUncheckedCreateInput, tx?: Prisma.TransactionClient) {
+    return this.getClient(tx).capturePreview.create({ data: data as Prisma.CapturePreviewUncheckedCreateInput });
   }
 
   async findCapturePreviewByTokenHash(tokenHash: string, tx?: Prisma.TransactionClient) {
