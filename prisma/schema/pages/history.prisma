@@ -19,7 +19,7 @@ model PageSnapshot {
   storageKey  String?  @map("storage_key") @db.VarChar(512)
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  labels      PageSnapshotLabel[]
+  labels PageSnapshotLabel[]
 
   @@unique([pageId, version], map: "uq_page_snapshots_page_version")
   @@index([spaceId, version], map: "idx_page_snapshots_space_version")

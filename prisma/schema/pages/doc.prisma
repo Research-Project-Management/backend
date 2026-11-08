@@ -22,12 +22,12 @@ model PageDoc {
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  node            PageNode?
-  rootForPages    Page[]              @relation("PageRootDoc")
-  trackChanges    PageTrackChange[]
-  commentThreads  PageCommentThread[]
-  notifications   PageNotification[]
-  docReview       PageDocReview?
+  node           PageNode?
+  rootForPages   Page[]              @relation("PageRootDoc")
+  trackChanges   PageTrackChange[]
+  commentThreads PageCommentThread[]
+  notifications  PageNotification[]
+  docReview      PageDocReview?
 
   @@index([spaceId, deletedAt, updatedAt], map: "idx_page_docs_space_del_updated")
   @@index([spaceId, deletedAt, createdAt], map: "idx_page_docs_space_del_created")

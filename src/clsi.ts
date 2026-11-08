@@ -17,12 +17,12 @@ import {
 } from '@nestjs/platform-fastify';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { ClsiStandaloneModule } from './clsi-standalone.module';
+import { ClsiModule } from './clsi.module';
 
 async function bootstrap() {
   const logger = new Logger('CLSI-Service');
   const app = await NestFactory.create<NestFastifyApplication>(
-    ClsiStandaloneModule,
+    ClsiModule,
     new FastifyAdapter({
       trustProxy: true,
       bodyLimit: 100 * 1024 * 1024,

@@ -477,6 +477,7 @@ export async function resolvePageFilesList(
   docstoreService: DocstoreService,
   pageId: string,
   targetProjectId?: string,
+  options?: { includeContent?: boolean },
 ) {
   let projectId: string | null = targetProjectId ?? null;
   let rootDoc: PageDoc | null = null;
@@ -549,6 +550,8 @@ export async function resolvePageFilesList(
     return { files: [] };
   }
 
+  const shouldHydrate = Boolean(options?.includeContent);
+
   const [nodes, allDocs] = await Promise.all([
     prisma.pageNode.findMany({
       where: { spaceId: projectId },
@@ -560,11 +563,11 @@ export async function resolvePageFilesList(
         id: true,
         spaceId: true,
         path: true,
-        lines: true,
         inStorage: true,
         sizeBytes: true,
         createdAt: true,
         updatedAt: true,
+        ...(shouldHydrate ? { lines: true } : {}),
       },
       orderBy: { createdAt: 'asc' },
     }),
@@ -581,15 +584,16 @@ export async function resolvePageFilesList(
     filteredNodes.map(async (node) => {
       const cleanName = node.path.replace(/^\//, '') || node.name || 'main.tex';
       const targetDoc = node.docId ? docMap.get(node.docId) : null;
-      const docLines = targetDoc
-        ? await hydratePageDocLines(docstoreService, {
-            id: targetDoc.id,
-            spaceId: getRecordSpaceId(targetDoc) || projectId,
-            lines: targetDoc.lines,
-            inStorage: targetDoc.inStorage,
-          })
-        : [];
-      const content = docLines.join('\n');
+      let content = '';
+      if (shouldHydrate && targetDoc) {
+        const docLines = await hydratePageDocLines(docstoreService, {
+          id: targetDoc.id,
+          spaceId: getRecordSpaceId(targetDoc) || projectId,
+          lines: (targetDoc as unknown as { lines?: string[] }).lines || [],
+          inStorage: targetDoc.inStorage,
+        });
+        content = docLines.join('\n');
+      }
       return {
         id: node.docId || node.id,
         nodeId: node.id,
@@ -609,8 +613,11 @@ export async function resolvePageFilesList(
 
   if (files.length === 0 && rootDoc && !isRecordDeleted(rootDoc)) {
     const cleanName = rootDoc.path.replace(/^\//, '') || 'main.tex';
-    const rootLines = await hydratePageDocLines(docstoreService, rootDoc);
-    const content = rootLines.join('\n');
+    let content = '';
+    if (shouldHydrate) {
+      const rootLines = await hydratePageDocLines(docstoreService, rootDoc);
+      content = rootLines.join('\n');
+    }
     files.push({
       id: rootDoc.id,
       nodeId: rootDoc.id,

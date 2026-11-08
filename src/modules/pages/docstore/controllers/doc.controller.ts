@@ -43,12 +43,7 @@ export type { PageDocRanges };
 
 @ApiTags('Manuscripts - Pages Compatibility Bridge')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/pages',
-  'api/v1/manuscripts',
-  'api/v1/pages/projects/:projectId',
-  'api/v1/manuscripts/projects/:projectId',
-])
+@Controller(['api/v1/pages', 'api/v1/manuscripts'])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class DocController {
@@ -191,9 +186,13 @@ export class DocController {
   @Get(['pages/:pageId/files', 'docs/:pageId/files'])
   async getPageFiles(
     @Param('pageId') pageId: string,
+    @Query('includeContent') includeContent?: string,
     @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
-    return this.pageService.getPageFiles(pageId, authorizedProjectId);
+    const shouldInclude = includeContent === 'true' || includeContent === '1';
+    return this.pageService.getPageFiles(pageId, authorizedProjectId, {
+      includeContent: shouldInclude,
+    });
   }
 
   /**

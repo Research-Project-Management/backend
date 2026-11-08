@@ -498,6 +498,7 @@ export class PageService {
   public async getPageFiles(
     pageId: string,
     authorizedProjectId?: string | { id: string } | null,
+    options?: { includeContent?: boolean },
   ) {
     try {
       if (!isUuid(pageId)) {
@@ -517,6 +518,7 @@ export class PageService {
         this.docstoreService,
         pageId,
         targetProjectId,
+        options,
       );
     } catch (err) {
       if (err instanceof NotFoundException) {
