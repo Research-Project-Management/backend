@@ -1,0 +1,211 @@
+import { Injectable, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { WorkItem } from '@prisma/client';
+import { UpdateWorkItemDto } from '@/modules/project/work-item/core/dto/core.dto';
+import { mapPriority } from '@/modules/project/work-item/core/utils/core.util';
+
+@Injectable()
+export class EventHandler {
+  constructor(@Optional() private readonly eventEmitter?: EventEmitter2) {}
+
+  emitWorkItemCreated(params: {
+    workItemId: string;
+    actorId: string;
+    projectId: string;
+    columnId: string;
+    title?: string;
+    identifier?: string | null;
+    sequenceNumber?: number | null;
+  }) {
+    if (!this.eventEmitter) return;
+
+    const payload = {
+      entityType: 'work_item',
+      entityId: params.workItemId,
+      verb: 'created',
+      actorId: params.actorId,
+      projectId: params.projectId,
+      columnId: params.columnId,
+      title: params.title,
+      identifier: params.identifier,
+      sequenceNumber: params.sequenceNumber,
+    };
+    this.eventEmitter.emit('work-item.created', payload);
+  }
+
+  emitWorkItemDeleted(params: {
+    workItemId: string;
+    actorId?: string;
+    projectId: string;
+  }) {
+    if (!this.eventEmitter) return;
+
+    const payload = {
+      entityType: 'work_item',
+      entityId: params.workItemId,
+      verb: 'deleted',
+      actorId: params.actorId || '',
+      projectId: params.projectId,
+    };
+    this.eventEmitter.emit('work-item.deleted', payload);
+  }
+
+  emitWorkItemDuplicated(params: {
+    workItemId: string;
+    actorId: string;
+    projectId: string;
+  }) {
+    if (!this.eventEmitter) return;
+
+    const payload = {
+      entityType: 'work_item',
+      entityId: params.workItemId,
+      verb: 'created',
+      actorId: params.actorId,
+      projectId: params.projectId,
+    };
+    this.eventEmitter.emit('work-item.duplicated', payload);
+  }
+
+  emitWorkItemReordered(params: {
+    workItemId: string;
+    projectId: string;
+    columnId: string;
+    rank: number;
+    actorId?: string;
+  }) {
+    if (!this.eventEmitter) return;
+
+    const payload = {
+      entityType: 'work_item',
+      entityId: params.workItemId,
+      verb: 'reordered',
+      actorId: params.actorId || '',
+      projectId: params.projectId,
+      columnId: params.columnId,
+      rank: params.rank,
+    };
+    this.eventEmitter.emit('work-item.reordered', payload);
+    this.eventEmitter.emit('work-item.updated', {
+      ...payload,
+      verb: 'updated',
+    });
+  }
+
+  dispatchUpdateEvents(
+    existing: WorkItem & { columnId?: string },
+    updateDto: UpdateWorkItemDto,
+    userId?: string,
+    resolvedColumnId?: string,
+  ) {
+    if (!this.eventEmitter) return;
+
+    const baseEvent = {
+      entityType: 'work_item',
+      entityId: existing.id,
+      actorId: userId || '',
+      projectId: existing.projectId,
+    };
+
+    const existingColumnId = existing.columnId ?? existing.stateId;
+    const nextColumnId =
+      resolvedColumnId !== undefined ? resolvedColumnId : updateDto.columnId;
+    if (nextColumnId !== undefined && nextColumnId !== existingColumnId) {
+      this.eventEmitter.emit('work-item.state.changed', {
+        ...baseEvent,
+        verb: 'transitioned',
+        field: 'state',
+        oldValue: existingColumnId,
+        newValue: nextColumnId,
+      });
+    }
+
+    if (updateDto.priority !== undefined) {
+      const newPriority = mapPriority(updateDto.priority);
+      if (newPriority !== existing.priority) {
+        this.eventEmitter.emit('work-item.priority.changed', {
+          ...baseEvent,
+          verb: 'updated',
+          field: 'priority',
+          oldValue: existing.priority,
+          newValue: newPriority,
+        });
+      }
+    }
+
+    if (updateDto.title !== undefined && updateDto.title !== existing.title) {
+      this.eventEmitter.emit('work-item.title.changed', {
+        ...baseEvent,
+        verb: 'updated',
+        field: 'title',
+        oldValue: existing.title,
+        newValue: updateDto.title,
+      });
+    }
+
+    const newContent = updateDto.description ?? updateDto.content;
+    if (newContent !== undefined && newContent !== (existing.content || '')) {
+      this.eventEmitter.emit('work-item.content.changed', {
+        ...baseEvent,
+        verb: 'updated',
+        field: 'description',
+        oldValue: existing.content || '',
+        newValue: newContent,
+      });
+    }
+
+    if (
+      updateDto.assigneeId !== undefined &&
+      updateDto.assigneeId !== existing.assigneeId
+    ) {
+      this.eventEmitter.emit('work-item.assignee.changed', {
+        ...baseEvent,
+        verb: 'updated',
+        field: 'assignee',
+        oldValue: existing.assigneeId || '',
+        newValue: updateDto.assigneeId || '',
+      });
+    }
+
+    this.eventEmitter.emit('work-item.updated', {
+      ...baseEvent,
+      verb: 'updated',
+    });
+  }
+
+  emitBulkUpdated(projectId: string, userId?: string, itemIds?: string[]) {
+    this.eventEmitter?.emit('work-item.bulk-updated', {
+      entityType: 'project',
+      entityId: projectId,
+      itemIds: itemIds || [],
+      verb: 'updated',
+      actorId: userId || '',
+      projectId,
+    });
+    this.eventEmitter?.emit('work-item.updated', {
+      entityType: 'project',
+      entityId: projectId,
+      verb: 'bulk_updated',
+      actorId: userId || '',
+      projectId,
+    });
+  }
+
+  emitBulkDeleted(projectId: string, userId?: string, itemIds?: string[]) {
+    this.eventEmitter?.emit('work-item.bulk-deleted', {
+      entityType: 'project',
+      entityId: projectId,
+      itemIds: itemIds || [],
+      verb: 'deleted',
+      actorId: userId || '',
+      projectId,
+    });
+    this.eventEmitter?.emit('work-item.deleted', {
+      entityType: 'project',
+      entityId: projectId,
+      verb: 'bulk_deleted',
+      actorId: userId || '',
+      projectId,
+    });
+  }
+}

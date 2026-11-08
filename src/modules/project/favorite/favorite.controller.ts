@@ -12,8 +12,7 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/identity/auth';
-import { CurrentUser } from '@/modules/identity/auth';
+import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { FavoriteService } from './favorite.service';
 

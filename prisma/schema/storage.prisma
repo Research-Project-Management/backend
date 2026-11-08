@@ -24,36 +24,36 @@ enum UploadSessionStatus {
 // -------------------------
 
 model StorageFile {
-  id          String        @id @default(uuid(7)) @db.Uuid
-  spaceId     String        @map("space_id") @db.Uuid
-  space       Space         @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  createdById String        @map("created_by_id") @db.Uuid
-  createdBy   User          @relation("UserFiles", fields: [createdById], references: [id], onDelete: Restrict)
+  id          String @id @default(uuid(7)) @db.Uuid
+  spaceId     String @map("space_id") @db.Uuid
+  space       Space  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  createdById String @map("created_by_id") @db.Uuid
+  createdBy   User   @relation("UserFiles", fields: [createdById], references: [id], onDelete: Restrict)
 
-  filename    String
-  size        BigInt        @default(0)
-  mimeType    String        @default("application/octet-stream") @map("mime_type")
-  isFolder    Boolean       @default(false) @map("is_folder")
-  metadata    Json?         @default("{}") @map("metadata") @db.JsonB
-  parentId    String?       @map("parent_id") @db.Uuid
-  parent      StorageFile?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children    StorageFile[] @relation("FolderHierarchy")
+  filename String
+  size     BigInt        @default(0)
+  mimeType String        @default("application/octet-stream") @map("mime_type")
+  isFolder Boolean       @default(false) @map("is_folder")
+  metadata Json?         @default("{}") @map("metadata") @db.JsonB
+  parentId String?       @map("parent_id") @db.Uuid
+  parent   StorageFile?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children StorageFile[] @relation("FolderHierarchy")
 
   // Optional Entity Link (e.g. 'page' | 'library' | 'paper' | 'experiment')
-  linkedToType String?      @map("linked_to_type")
-  linkedToId   String?      @map("linked_to_id")
+  linkedToType String? @map("linked_to_type")
+  linkedToId   String? @map("linked_to_id")
 
   // CAS Physical Blob Link
-  blobId       String?      @map("blob_id") @db.Uuid
-  blob         StorageBlob? @relation(fields: [blobId], references: [id], onDelete: Restrict)
+  blobId String?      @map("blob_id") @db.Uuid
+  blob   StorageBlob? @relation(fields: [blobId], references: [id], onDelete: Restrict)
 
-  stars        StorageFileStar[]
-  sharedWith   StorageFileShare[]
-  versions     StorageFileVersion[]
+  stars      StorageFileStar[]
+  sharedWith StorageFileShare[]
+  versions   StorageFileVersion[]
 
-  deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz(6)
-  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([spaceId, parentId, deletedAt, isFolder(sort: Desc), filename])
   @@index([spaceId, deletedAt, updatedAt(sort: Desc)])
@@ -123,15 +123,15 @@ model StorageBlob {
 // -------------------------
 
 model StorageFileVersion {
-  id            String      @id @default(uuid(7)) @db.Uuid
-  fileId        String      @map("file_id") @db.Uuid
-  blobId        String      @map("blob_id") @db.Uuid
-  versionNumber Int         @map("version_number")
-  sizeBytes     BigInt?     @map("size_bytes")
-  mimeType      String?     @map("mime_type") @db.VarChar(150)
-  changeComment String?     @map("change_comment") @db.VarChar(500)
-  createdById   String      @map("created_by_id") @db.Uuid
-  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  id            String   @id @default(uuid(7)) @db.Uuid
+  fileId        String   @map("file_id") @db.Uuid
+  blobId        String   @map("blob_id") @db.Uuid
+  versionNumber Int      @map("version_number")
+  sizeBytes     BigInt?  @map("size_bytes")
+  mimeType      String?  @map("mime_type") @db.VarChar(150)
+  changeComment String?  @map("change_comment") @db.VarChar(500)
+  createdById   String   @map("created_by_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   file StorageFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
   blob StorageBlob @relation(fields: [blobId], references: [id], onDelete: Restrict)

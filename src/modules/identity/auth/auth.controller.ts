@@ -38,7 +38,7 @@ import {
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/user.decorator';
 import { JwtAuthGuard } from './guards/auth.guard';
-import { BypassEnvelope } from '@/core';
+import { BypassEnvelope, UserRateLimit } from '@/core';
 
 function extractRefreshTokenFromCookie(cookieHeader?: string): string | null {
   if (!cookieHeader) return null;
@@ -70,6 +70,7 @@ export class AuthController {
   @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  @UserRateLimit({ bucket: 'auth-register', keyType: 'ip' })
   @ApiOperation({ summary: 'Register a new user account' })
   @ApiResponse({
     status: HttpStatus.CREATED,
@@ -93,6 +94,7 @@ export class AuthController {
   @Public()
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
+  @UserRateLimit({ bucket: 'auth-verify', keyType: 'ip' })
   @ApiOperation({
     summary: 'Verify user email with cryptographic verification token',
   })
@@ -118,6 +120,10 @@ export class AuthController {
   @Public()
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
+  @UserRateLimit([
+    { bucket: 'auth-login-ip', keyType: 'ip' },
+    { bucket: 'auth-verify', keyType: 'email' },
+  ])
   @ApiOperation({ summary: 'Resend email verification token' })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -133,6 +139,10 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @UserRateLimit([
+    { bucket: 'auth-login-ip', keyType: 'ip' },
+    { bucket: 'auth-login-target', keyType: 'email' },
+  ])
   @ApiOperation({ summary: 'Authenticate user with email and password' })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -286,6 +296,10 @@ export class AuthController {
   @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
+  @UserRateLimit([
+    { bucket: 'auth-login-ip', keyType: 'ip' },
+    { bucket: 'auth-forgot-password', keyType: 'email' },
+  ])
   @ApiOperation({ summary: 'Request password reset email' })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -299,6 +313,7 @@ export class AuthController {
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
+  @UserRateLimit({ bucket: 'auth-login-ip', keyType: 'ip' })
   @ApiOperation({ summary: 'Confirm password reset using token from email' })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -309,13 +324,33 @@ export class AuthController {
     return this.authnService.resetPassword(dto.token, dto.newPassword);
   }
 
-  // ─── Active Sessions (User Story 3) ────────────────────────────────────────
+  // ─── Active Sessions (User Story 3 & Multi-Device Governance) ─────────────
 
   @Get('sessions')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all active sessions for current user' })
-  async getActiveSessions(@CurrentUser('id') userId: string) {
-    return this.authnService.getActiveSessions(userId);
+  async getActiveSessions(
+    @CurrentUser('id') userId: string,
+    @Req() req: FastifyRequest & { user?: { sid?: string } },
+  ) {
+    const currentSessionId = req.user?.sid;
+    return this.authnService.getActiveSessions(userId, currentSessionId);
+  }
+
+  @Post('sessions/revoke-others')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Revoke all other active sessions except current device',
+  })
+  async revokeOtherSessions(
+    @CurrentUser('id') userId: string,
+    @Req() req: FastifyRequest & { user?: { sid?: string } },
+  ) {
+    const currentSessionId = req.user?.sid;
+    if (!currentSessionId) {
+      throw new BadRequestException('Current session identifier missing from token');
+    }
+    return this.authnService.revokeAllOtherSessions(userId, currentSessionId);
   }
 
   @Post('sessions/:id/revoke')

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import * as crypto from 'crypto';
 
 import { getErrorMessage } from '../../utils/error.util';
 
@@ -288,6 +289,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   async incr(key: string): Promise<number> {
+    this.memoryCache.delete(key);
     if (!this.isReady() || !this.redisClient) {
       const current = this.memoryCache.get(key);
       const next = (Number(current?.value) || 0) + 1;
@@ -295,7 +297,9 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       return next;
     }
     try {
-      return await this.redisClient.incr(key);
+      const next = await this.redisClient.incr(key);
+      this.memoryCache.set(key, { value: next.toString() });
+      return next;
     } catch (err: unknown) {
       this.logger.warn(`INCR failed for key "${key}": ${getErrorMessage(err)}`);
       return 0;
@@ -311,6 +315,25 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `Cache del failed for key "${key}": ${getErrorMessage(err)}`,
       );
+    }
+  }
+
+  /**
+   * Retrieves the remaining time to live (in seconds) of a key.
+   * Returns -2 if the key does not exist, -1 if the key exists but has no associated expire.
+   */
+  async ttl(key: string): Promise<number> {
+    if (!this.isReady() || !this.redisClient) {
+      const entry = this.memoryCache.get(key);
+      if (!entry || !entry.expiresAt) return -2;
+      const remainingMs = entry.expiresAt - Date.now();
+      return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : -2;
+    }
+    try {
+      return await this.redisClient.ttl(key);
+    } catch (err: unknown) {
+      this.logger.warn(`TTL check failed for key "${key}": ${getErrorMessage(err)}`);
+      return -1;
     }
   }
 
@@ -574,6 +597,149 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
         `ZCARD failed for key "${key}": ${getErrorMessage(err)}`,
       );
       return 0;
+    }
+  }
+
+  // ─── Distributed Mutex Lock (SET NX PX + Lua Atomic Release) ────────────────
+
+  private static readonly UNLOCK_LUA_SCRIPT = `
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+      return redis.call("del", KEYS[1])
+    else
+      return 0
+    end
+  `;
+
+  private static readonly EXTEND_LOCK_LUA_SCRIPT = `
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+      return redis.call("pexpire", KEYS[1], tonumber(ARGV[2]))
+    else
+      return 0
+    end
+  `;
+
+  private inMemoryLocks = new Map<string, { token: string; expiresAt: number }>();
+
+  /**
+   * Acquires a distributed mutex lock using atomic Redis SET NX PX.
+   * Returns a unique lock token (UUID) if acquired, or null if lock is currently held.
+   * Falls back to in-memory lock store if Redis is unavailable.
+   */
+  async acquireLock(resource: string, ttlMs: number = 30000): Promise<string | null> {
+    const token = crypto.randomUUID();
+    const lockKey = resource.startsWith('lock:') ? resource : `lock:${resource}`;
+
+    if (this.isReady() && this.redisClient) {
+      try {
+        const result = await this.redisClient.set(lockKey, token, 'PX', ttlMs, 'NX');
+        return result === 'OK' ? token : null;
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Redis acquireLock failed for "${resource}": ${getErrorMessage(err)}`,
+        );
+      }
+    }
+
+    // In-memory fallback
+    const now = Date.now();
+    const current = this.inMemoryLocks.get(lockKey);
+    if (!current || current.expiresAt <= now) {
+      this.inMemoryLocks.set(lockKey, { token, expiresAt: now + ttlMs });
+      return token;
+    }
+    return null;
+  }
+
+  /**
+   * Releases a distributed mutex lock atomically via Lua script, ensuring
+   * only the token holder can release the lock (prevents accidental release of expired locks).
+   */
+  async releaseLock(resource: string, token: string): Promise<boolean> {
+    const lockKey = resource.startsWith('lock:') ? resource : `lock:${resource}`;
+
+    if (this.isReady() && this.redisClient) {
+      try {
+        const result = (await this.redisClient.eval(
+          RedisCacheService.UNLOCK_LUA_SCRIPT,
+          1,
+          lockKey,
+          token,
+        )) as number;
+        return result === 1;
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Redis releaseLock failed for "${resource}": ${getErrorMessage(err)}`,
+        );
+      }
+    }
+
+    // In-memory fallback
+    const current = this.inMemoryLocks.get(lockKey);
+    if (current && current.token === token) {
+      this.inMemoryLocks.delete(lockKey);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Extends the TTL of an active distributed lock held by token.
+   */
+  async extendLock(
+    resource: string,
+    token: string,
+    ttlMs: number = 30000,
+  ): Promise<boolean> {
+    const lockKey = resource.startsWith('lock:') ? resource : `lock:${resource}`;
+
+    if (this.isReady() && this.redisClient) {
+      try {
+        const result = (await this.redisClient.eval(
+          RedisCacheService.EXTEND_LOCK_LUA_SCRIPT,
+          1,
+          lockKey,
+          token,
+          ttlMs,
+        )) as number;
+        return result === 1;
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Redis extendLock failed for "${resource}": ${getErrorMessage(err)}`,
+        );
+      }
+    }
+
+    // In-memory fallback
+    const now = Date.now();
+    const current = this.inMemoryLocks.get(lockKey);
+    if (current && current.token === token && current.expiresAt > now) {
+      current.expiresAt = now + ttlMs;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Executes a callback within a distributed lock scope.
+   * Automatically releases the lock when callback completes or throws.
+   * Returns null if lock could not be acquired.
+   */
+  async withLock<T>(
+    resource: string,
+    ttlMs: number,
+    fn: (handle: { heartbeat: () => Promise<boolean> }) => Promise<T>,
+  ): Promise<T | null> {
+    const token = await this.acquireLock(resource, ttlMs);
+    if (!token) {
+      return null;
+    }
+
+    const heartbeat = () => this.extendLock(resource, token, ttlMs);
+
+    try {
+      return await fn({ heartbeat });
+    } finally {
+      await this.releaseLock(resource, token);
     }
   }
 }

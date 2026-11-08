@@ -12,6 +12,8 @@ import {
   getPermissionsForRole,
   evaluateMemberPermission,
   roleHasPermission,
+  PermissionBitmaskUtil,
+  ALL_PERMISSIONS_MASK,
 } from './constants/permission.constant';
 import { PROJECT_ACCESS_REDIS_KEYS } from './constants/redis.constant';
 import { AccessRepository } from './access.repository';
@@ -80,8 +82,44 @@ export class AccessService {
     role: Role | string,
     permission: Permission,
     overrides?: PermissionOverrideMap | null,
+    bitmaskHex?: string,
   ): boolean {
+    if (bitmaskHex) {
+      const mask = PermissionBitmaskUtil.fromHex(bitmaskHex);
+      if (mask !== 0n) {
+        return PermissionBitmaskUtil.has(mask, permission);
+      }
+    }
     return evaluateMemberPermission(role as Role, permission, overrides);
+  }
+
+  /**
+   * Fast batch check for all required permissions in a single bitwise operation.
+   */
+  hasAllPermissions(
+    permissions: readonly Permission[],
+    bitmaskHex?: string,
+    role?: Role | string,
+    overrides?: PermissionOverrideMap | null,
+  ): boolean {
+    if (!permissions || permissions.length === 0) return true;
+
+    if (bitmaskHex) {
+      const mask = PermissionBitmaskUtil.fromHex(bitmaskHex);
+      if (mask !== 0n) {
+        return PermissionBitmaskUtil.hasAll(mask, permissions);
+      }
+    }
+
+    if (role) {
+      const mask = PermissionBitmaskUtil.computeEffectiveBitmask(
+        role as Role,
+        overrides,
+      );
+      return PermissionBitmaskUtil.hasAll(mask, permissions);
+    }
+
+    return permissions.every((p) => this.hasPermission(role!, p, overrides));
   }
 
   /**
@@ -141,7 +179,12 @@ export class AccessService {
     }
 
     if (
-      !this.hasPermission(context.role, permission, context.permissionOverrides)
+      !this.hasPermission(
+        context.role,
+        permission,
+        context.permissionOverrides,
+        context.permissionBitmask,
+      )
     ) {
       throw new ForbiddenException(
         `Access denied: Missing required permission '${permission}'`,

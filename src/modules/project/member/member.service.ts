@@ -27,7 +27,7 @@ import {
   AuditOutcome,
   AuditSeverity,
 } from '@/modules/identity/identity.facade';
-import { WORK_ITEM_REDIS_KEYS } from '@/modules/work-item';
+import { WORK_ITEM_REDIS_KEYS } from '@/modules/project/work-item';
 
 @Injectable()
 export class MemberService {

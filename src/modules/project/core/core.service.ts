@@ -17,7 +17,6 @@ import { ProjectQueryDto } from './dto/query.dto';
 import {
   ProjectWithMembers,
   EnrichedProject,
-  ProjectOverview,
   AllocatedIdentifier,
   ProjectPermissions,
 } from './types/project.type';
@@ -31,24 +30,26 @@ export const ALLOWED_PROJECT_MODULES = new Set([
   'overview',
   'work-items',
   'pages',
+  'chat',
 ]);
 
 export function sanitizeModules(modules?: string[]): string[] {
   if (!modules || !Array.isArray(modules) || modules.length === 0) {
-    return ['overview', 'work-items', 'pages'];
+    return ['overview', 'work-items', 'pages', 'chat'];
   }
   const filtered = Array.from(
     new Set(
       modules
-        .map((m) =>
-          String(m).trim().toLowerCase() === 'work_items'
-            ? 'work-items'
-            : String(m).trim().toLowerCase(),
-        )
+        .map((m) => {
+          const lower = String(m).trim().toLowerCase();
+          if (lower === 'work_items') return 'work-items';
+          if (lower === 'messages') return 'chat';
+          return lower;
+        })
         .filter((m) => ALLOWED_PROJECT_MODULES.has(m)),
     ),
   );
-  return filtered.length > 0 ? filtered : ['overview', 'work-items', 'pages'];
+  return filtered.length > 0 ? filtered : ['overview', 'work-items', 'pages', 'chat'];
 }
 
 @Injectable()
@@ -207,51 +208,6 @@ export class CoreService {
       },
       yourRole,
       permissions,
-    };
-  }
-
-  /**
-   * Find project dashboard overview metrics.
-   */
-  async findOverview(
-    projectId: string,
-    userId: string,
-  ): Promise<{
-    overview: ProjectOverview;
-    yourRole: Role;
-  }> {
-    const cacheKey = CACHE_KEYS.overview(projectId);
-
-    const overviewFetch = async (): Promise<ProjectOverview> => {
-      const overview = await this.projectRepo.findProjectOverview(projectId);
-      if (!overview) {
-        throw new NotFoundException('Project not found');
-      }
-      return overview;
-    };
-
-    const projectDetailCacheKey = CACHE_KEYS.detail(projectId);
-    const [overview, project] = await Promise.all([
-      this.cache
-        ? this.cache.wrap(
-            cacheKey,
-            overviewFetch,
-            CACHE_TTL_SECONDS.OVERVIEW,
-          )
-        : overviewFetch(),
-      this.cache
-        ? this.cache.wrap(
-            projectDetailCacheKey,
-            () => this.projectRepo.findProjectById(projectId),
-            CACHE_TTL_SECONDS.DETAIL,
-          )
-        : this.projectRepo.findProjectById(projectId),
-    ]);
-    const yourRole = this.resolveUserRoleInProject(project, userId);
-
-    return {
-      overview,
-      yourRole,
     };
   }
 
@@ -572,6 +528,86 @@ export class CoreService {
     );
 
     return { message: 'Project permanently deleted' };
+  }
+
+  async softDeleteProject(
+    projectId: string,
+    userId: string,
+  ): Promise<{ message: string }> {
+    const project = await this.projectRepo.findProjectById(projectId);
+    if (!project) throw new NotFoundException(`Project ${projectId} not found`);
+
+    const isOwner =
+      project.createdById === userId ||
+      project.members?.some(
+        (m) => m.userId === userId && m.role === Role.owner,
+      );
+    if (!isOwner) {
+      throw new ForbiddenException('Only project owner can delete project');
+    }
+
+    await this.projectRepo.softDeleteProject(projectId);
+    const memberIds = project.members?.map((m) => m.userId) || [userId];
+    await this.invalidateProjectCache(projectId, memberIds);
+
+    this.eventEmitter?.emit(
+      'project.deleted',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'deleted',
+        actorId: userId,
+        projectId,
+      }),
+    );
+
+    return { message: 'Project moved to trash successfully' };
+  }
+
+  async restoreProject(
+    projectId: string,
+    userId: string,
+  ): Promise<{ message: string; project: EnrichedProject }> {
+    const restored = await this.projectRepo.restoreProject(projectId);
+    if (!restored) {
+      throw new NotFoundException(`Project ${projectId} not found in trash`);
+    }
+
+    const memberIds = restored.members?.map((m) => m.userId) || [userId];
+    await this.invalidateProjectCache(projectId, memberIds);
+
+    const yourRole =
+      restored.createdById === userId
+        ? Role.owner
+        : restored.members?.find((m) => m.userId === userId)?.role || Role.reviewer;
+
+    const enriched: EnrichedProject = {
+      ...restored,
+      yourRole,
+      isFavorite: false,
+      permissions: calculateProjectPermissions(yourRole),
+    };
+
+    return {
+      message: 'Project restored successfully',
+      project: enriched,
+    };
+  }
+
+  async findTrashedProjects(userId: string): Promise<EnrichedProject[]> {
+    const raw = await this.projectRepo.findTrashedProjectsByUser(userId);
+    return raw.map((p) => {
+      const yourRole =
+        p.createdById === userId
+          ? Role.owner
+          : p.members?.find((m) => m.userId === userId)?.role || Role.reviewer;
+      return {
+        ...p,
+        yourRole,
+        isFavorite: false,
+        permissions: calculateProjectPermissions(yourRole),
+      };
+    });
   }
 
   /**

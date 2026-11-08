@@ -13,10 +13,10 @@ describe('Project Overview Module', () => {
       const mockRepo = {
         getProjectMetadata: jest.fn(),
         getWorkItemStateGroupCounts: jest.fn(),
-        getActiveCycle: jest.fn(),
         getOverdueCount: jest.fn(),
         getRecentActivities: jest.fn(),
         getLatestStatusUpdate: jest.fn(),
+        getProjectAssets: jest.fn().mockResolvedValue({ pagesCount: 3, libraryCount: 7, filesCount: 12 }),
       };
 
       const module: TestingModule = await Test.createTestingModule({
@@ -50,26 +50,37 @@ describe('Project Overview Module', () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         },
-        priority: ProjectPriority.high,
+        priority: ProjectPriority.urgent,
         startDate: new Date('2026-01-01'),
         targetDate: new Date('2026-12-31'),
         createdBy: {
           id: 'u-1',
-          name: 'Dr. John',
-          profile: { name: 'Dr. John', avatar: null },
-          avatar: null,
+          profile: {
+            name: 'Dr. John',
+            avatar: null,
+          },
         },
         members: [
           {
+            userId: 'u-1',
+            role: 'owner',
             user: {
               id: 'u-1',
-              name: 'Dr. John',
               profile: { name: 'Dr. John', avatar: null },
-              avatar: null,
+            },
+          },
+          {
+            userId: 'u-2',
+            role: 'contributor',
+            user: {
+              id: 'u-2',
+              profile: { name: 'Alice', avatar: null },
             },
           },
         ],
-        _count: { members: 5 },
+        _count: {
+          members: 5,
+        },
       };
 
       repo.getProjectMetadata.mockResolvedValue(mockProject as any);
@@ -79,16 +90,6 @@ describe('Project Overview Module', () => {
         started: 10,
         completed: 20,
         cancelled: 2,
-      });
-      repo.getActiveCycle.mockResolvedValue({
-        activeCycle: {
-          id: 'cycle-1',
-          name: 'Sprint 1',
-          startDate: new Date('2026-02-01'),
-          endDate: new Date('2026-02-14'),
-          _count: { workItems: 10 },
-        },
-        completedIssues: 6,
       });
       repo.getOverdueCount.mockResolvedValue(3);
       repo.getLatestStatusUpdate.mockResolvedValue({
@@ -111,7 +112,10 @@ describe('Project Overview Module', () => {
           oldIdentifier: null,
           newIdentifier: null,
           createdAt: new Date(),
-          actor: { id: 'u-2', profile: { name: 'Bob', avatar: null } },
+          actor: {
+            id: 'u-3',
+            profile: { name: 'Bob', avatar: null },
+          },
         },
       ]);
 
@@ -136,6 +140,11 @@ describe('Project Overview Module', () => {
       // Check activities
       expect(result.recentActivities).toHaveLength(1);
       expect(result.recentActivities[0].actor.name).toBe('Bob');
+
+      // Check assets
+      expect(result.assets?.pagesCount).toBe(3);
+      expect(result.assets?.libraryCount).toBe(7);
+      expect(result.assets?.filesCount).toBe(12);
     });
 
     it('should throw NotFoundException if project does not exist', async () => {

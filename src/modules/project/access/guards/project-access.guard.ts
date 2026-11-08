@@ -19,6 +19,7 @@ import { NO_PROJECT_CONTEXT_KEY } from '../decorators/no-project-context.decorat
 import { REQUIRE_OPERATOR_KEY } from '../decorators/require-operator.decorator';
 import { Role, RoleHierarchy } from '../enums/role.enum';
 import { Permission } from '../enums/permission.enum';
+import { PermissionBitmaskUtil, ALL_PERMISSIONS_MASK } from '../utils/permission-bitmask.util';
 import { AccessService } from '../access.service';
 import { ProjectResourceResolver } from '../resolvers/project-resource.resolver';
 import { AccessConfigService } from '../config/access.config';
@@ -174,6 +175,7 @@ export class ProjectAccessGuard implements CanActivate {
           effectivePermissions: this.accessService.getRolePermissions(
             Role.OWNER,
           ),
+          permissionBitmask: PermissionBitmaskUtil.toHex(ALL_PERMISSIONS_MASK),
         }
       : await this.accessService.getMemberAccessContext(projectId, userId);
 
@@ -212,6 +214,7 @@ export class ProjectAccessGuard implements CanActivate {
           effectivePermissions: this.accessService.getRolePermissions(
             Role.OWNER,
           ),
+          permissionBitmask: PermissionBitmaskUtil.toHex(ALL_PERMISSIONS_MASK),
         };
       }
     }
@@ -259,22 +262,21 @@ export class ProjectAccessGuard implements CanActivate {
       });
     }
 
-    // 10. Verify against Required Permissions (with Granular Overrides + Owner Bypass)
+    // 10. Verify against Required Permissions (Ultra-fast Bitmask Check)
     if (requiredPermissions && requiredPermissions.length > 0) {
-      for (const permission of requiredPermissions) {
-        const hasPerm = this.accessService.hasPermission(
-          accessContext.role,
-          permission,
-          accessContext.permissionOverrides,
-        );
+      const hasAll = this.accessService.hasAllPermissions(
+        requiredPermissions,
+        accessContext.permissionBitmask,
+        accessContext.role,
+        accessContext.permissionOverrides,
+      );
 
-        if (!hasPerm) {
-          throw new ForbiddenException({
-            statusCode: 403,
-            code: 'ROLE_INSUFFICIENT',
-            message: 'Insufficient role for this action',
-          });
-        }
+      if (!hasAll) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'ROLE_INSUFFICIENT',
+          message: 'Insufficient role for this action',
+        });
       }
     }
 

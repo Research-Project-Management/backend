@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
+import { ProjectOverviewAssets } from './types/overview.types';
 
 @Injectable()
 export class OverviewRepository {
@@ -170,16 +171,32 @@ export class OverviewRepository {
     });
   }
 
-  async getActiveCycle(projectId: string): Promise<{
-    activeCycle: {
-      id: string;
-      name: string;
-      startDate: Date;
-      endDate: Date;
-      _count: { workItems: number };
-    } | null;
-    completedIssues: number;
-  }> {
-    return { activeCycle: null, completedIssues: 0 };
+  async getProjectAssets(projectId: string): Promise<ProjectOverviewAssets> {
+    const space = await this.prisma.space.findFirst({
+      where: { projectId },
+      select: { id: true },
+    });
+    const spaceIds = Array.from(
+      new Set([projectId, space?.id].filter(Boolean) as string[]),
+    );
+    if (spaceIds.length === 0) {
+      return { pagesCount: 0, libraryCount: 0, filesCount: 0 };
+    }
+    const [pagesCount, libraryCount, filesCount] = await Promise.all([
+      this.prisma.pageDoc.count({
+        where: { spaceId: { in: spaceIds }, deletedAt: null },
+      }),
+      this.prisma.libraryItem.count({
+        where: { spaceId: { in: spaceIds }, deletedAt: null },
+      }),
+      this.prisma.storageFile.count({
+        where: {
+          spaceId: { in: spaceIds },
+          deletedAt: null,
+          isFolder: false,
+        },
+      }),
+    ]);
+    return { pagesCount, libraryCount, filesCount };
   }
 }

@@ -5,7 +5,7 @@
   },
   "include": [
     "src/clsi.ts",
-    "src/clsi-standalone.module.ts"
+    "src/clsi.module.ts"
   ],
   "exclude": [
     "node_modules",

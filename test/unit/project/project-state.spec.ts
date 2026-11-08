@@ -44,13 +44,13 @@ describe('StateService (Dynamic Project State)', () => {
       const template = service.getDefaultStatesTemplate();
       const stateNames = template.map((s) => s.name);
       expect(stateNames).toEqual([
-        'Proposal & Literature Review',
-        'Review & Approval',
-        'Execution & Experimentation',
-        'Drafting & Publication',
-        'Evaluation & Defense',
-        'Completed & Archived',
-        'Suspended',
+        'Ideation',
+        'Planning',
+        'Experimentation',
+        'Drafting',
+        'Review',
+        'Published',
+        'Paused',
         'Cancelled',
       ]);
     });

@@ -25,7 +25,7 @@ export class OverviewController {
   @ApiResponse({
     status: 200,
     description:
-      'Aggregated project metadata, metrics, links, cycle and activities',
+      'Aggregated project metadata, metrics, assets, status update and recent activities',
   })
   getProjectOverview(@Param('projectId') projectId: string) {
     return this.overviewService.getProjectOverview(projectId);

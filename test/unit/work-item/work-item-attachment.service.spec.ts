@@ -1,5 +1,5 @@
-import { AttachmentService } from '@/modules/work-item/attachment/attachment.service';
-import { AttachmentRepository } from '@/modules/work-item/attachment/attachment.repository';
+import { AttachmentService } from '@/modules/project/work-item/attachment/attachment.service';
+import { AttachmentRepository } from '@/modules/project/work-item/attachment/attachment.repository';
 import { PrismaService } from '@/core';
 import { IStoragePort } from '@/modules/storage/storage.port';
 import { EntityType } from '@prisma/client';

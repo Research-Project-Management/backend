@@ -27,4 +27,12 @@ export const IDENTITY_REDIS_KEYS = {
 
   /** Refresh token rotation grace period cache: identity:grace:{tokenHash} */
   graceToken: (tokenHash: string): string => `identity:grace:${tokenHash}`,
+
+  /** Consecutive failed login attempts counter: identity:auth:fails:{email} */
+  loginFails: (email: string): string =>
+    `identity:auth:fails:${email.toLowerCase().trim()}`,
+
+  /** Temporary account lockout flag: identity:auth:locked:{email} */
+  accountLockout: (email: string): string =>
+    `identity:auth:locked:${email.toLowerCase().trim()}`,
 } as const;

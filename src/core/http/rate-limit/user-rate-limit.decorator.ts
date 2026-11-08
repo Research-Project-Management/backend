@@ -3,18 +3,28 @@ import { RateLimitBucket } from './rate-limit.config';
 
 export const USER_RATE_LIMIT_KEY = 'user_rate_limit';
 
-export interface UserRateLimitOptions {
+export type RateLimitKeyType = 'user' | 'ip' | 'email' | 'user-or-ip';
+
+export interface UserRateLimitRule {
   bucket: RateLimitBucket;
   limit?: number;
   windowSeconds?: number;
+  keyType?: RateLimitKeyType;
 }
 
+export type UserRateLimitOptions =
+  | RateLimitBucket
+  | UserRateLimitRule
+  | UserRateLimitRule[];
+
 export function UserRateLimit(
-  bucketOrOptions: RateLimitBucket | UserRateLimitOptions,
+  options: UserRateLimitOptions,
 ): MethodDecorator & ClassDecorator {
-  const options: UserRateLimitOptions =
-    typeof bucketOrOptions === 'string'
-      ? { bucket: bucketOrOptions }
-      : bucketOrOptions;
-  return SetMetadata(USER_RATE_LIMIT_KEY, options);
+  const normalizedRules: UserRateLimitRule[] = Array.isArray(options)
+    ? options
+    : typeof options === 'string'
+      ? [{ bucket: options }]
+      : [options];
+
+  return SetMetadata(USER_RATE_LIMIT_KEY, normalizedRules);
 }

@@ -6,7 +6,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { AuthGuard } from '@/modules/identity/auth';
+import { AuthGuard, AuthService } from '@/modules/identity/auth';
 import {
   ProjectAccessGuard as RoleGuard,
   Role,
@@ -247,6 +247,158 @@ describe('Identity Security Suite (BOLA Prevention & Real-time Revocation)', () 
       await expect(roleGuard.canActivate(mockContext)).rejects.toThrow(
         ForbiddenException,
       );
+    });
+  });
+  describe('Token Rotation & Multi-Tab Concurrency Grace Window', () => {
+    let authService: AuthService;
+    let mockAuthRepo: any;
+    let mockUserService: any;
+    let mockJwtService: any;
+    let mockConfigService: any;
+    let mockRedis: any;
+    let mockPrisma: any;
+    let mockAuditService: any;
+
+    beforeEach(() => {
+      mockAuthRepo = {
+        findRefreshToken: jest.fn(),
+        rotateToken: jest.fn(),
+        createSession: jest.fn(),
+        revokeFamily: jest.fn(),
+        revokeAllUserTokens: jest.fn(),
+      };
+      mockUserService = {};
+      mockJwtService = {
+        signAsync: jest.fn().mockResolvedValue('fresh-jwt-token'),
+      };
+      mockConfigService = {
+        get: jest.fn((k: string) => {
+          if (k === 'JWT_REFRESH_EXPIRATION') return '7d';
+          return 'default-secret';
+        }),
+      };
+      mockRedis = {
+        get: jest.fn().mockResolvedValue(null),
+        set: jest.fn().mockResolvedValue('OK'),
+        del: jest.fn().mockResolvedValue(1),
+      };
+      mockPrisma = {
+        refreshToken: {
+          findFirst: jest.fn(),
+        },
+      };
+      mockAuditService = {
+        record: jest.fn().mockResolvedValue(undefined),
+      };
+
+      authService = new AuthService(
+        mockAuthRepo,
+        mockUserService,
+        mockJwtService,
+        mockConfigService,
+        mockRedis,
+        mockPrisma,
+        mockAuditService,
+      );
+    });
+
+    it('should serve cached token refresh on fast-path Redis grace window hit', async () => {
+      const cachedResponse = {
+        accessToken: 'cached-access-token',
+        refreshToken: 'cached-refresh-token',
+        user: { id: 'u1', email: 'test@flux.study', name: 'Tester', avatar: null, status: 'active' },
+      };
+      mockRedis.get.mockResolvedValue(cachedResponse);
+
+      const result = await authService.refresh('raw-token-123');
+
+      expect(result).toEqual(cachedResponse);
+      expect(mockAuthRepo.findRefreshToken).not.toHaveBeenCalled();
+      expect(mockAuthRepo.rotateToken).not.toHaveBeenCalled();
+    });
+
+    it('should issue sibling tokens within 30-second database grace window for concurrent tabs', async () => {
+      const revokedTokenRecord = {
+        id: 'token-old-id',
+        userId: 'u1',
+        familyId: 'family-1',
+        isRevoked: true,
+        revokedAt: new Date(Date.now() - 5000),
+        expiresAt: new Date(Date.now() + 86400000),
+        user: { id: 'u1', email: 'test@flux.study', status: 'active', profile: { name: 'Tester', avatar: null } },
+      };
+      mockAuthRepo.findRefreshToken.mockResolvedValue(revokedTokenRecord);
+      mockPrisma.refreshToken.findFirst.mockResolvedValue({
+        id: 'child-token-id',
+        userId: 'u1',
+        familyId: 'family-1',
+        user: revokedTokenRecord.user,
+      });
+
+      const result = await authService.refresh('raw-token-123');
+
+      expect(result.accessToken).toBe('fresh-jwt-token');
+      expect(mockAuthRepo.createSession).toHaveBeenCalled();
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        expect.stringContaining('identity:grace:'),
+        expect.any(Object),
+        30,
+      );
+    });
+
+    it('should terminate entire token family on breach replay attempt outside grace window (>30s)', async () => {
+      const compromisedToken = {
+        id: 'token-old-id',
+        userId: 'u1',
+        familyId: 'family-1',
+        isRevoked: true,
+        revokedAt: new Date(Date.now() - 45000),
+        expiresAt: new Date(Date.now() + 86400000),
+        user: { id: 'u1', email: 'test@flux.study', status: 'active' },
+      };
+      mockAuthRepo.findRefreshToken.mockResolvedValue(compromisedToken);
+
+      await expect(authService.refresh('stolen-token-123')).rejects.toThrow(
+        UnauthorizedException,
+      );
+
+      expect(mockAuthRepo.revokeFamily).toHaveBeenCalledWith('family-1');
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'auth.token_breach_detected',
+          severity: 'critical',
+        }),
+      );
+    });
+
+    it('should recover gracefully when rotateToken fails due to concurrency race', async () => {
+      const activeToken = {
+        id: 'token-racing-id',
+        userId: 'u1',
+        familyId: 'family-1',
+        isRevoked: false,
+        expiresAt: new Date(Date.now() + 86400000),
+        user: { id: 'u1', email: 'test@flux.study', status: 'active', profile: { name: 'Tester', avatar: null } },
+      };
+      mockAuthRepo.findRefreshToken.mockResolvedValue(activeToken);
+      mockAuthRepo.rotateToken.mockRejectedValue(new Error('Refresh token already used'));
+
+      mockAuthRepo.findRefreshToken.mockResolvedValueOnce(activeToken).mockResolvedValueOnce({
+        ...activeToken,
+        revokedAt: new Date(),
+        isRevoked: true,
+      });
+      mockPrisma.refreshToken.findFirst.mockResolvedValue({
+        id: 'winner-child-id',
+        userId: 'u1',
+        familyId: 'family-1',
+        user: activeToken.user,
+      });
+
+      const result = await authService.refresh('racing-token');
+
+      expect(result.accessToken).toBe('fresh-jwt-token');
+      expect(result.user.email).toBe('test@flux.study');
     });
   });
 });

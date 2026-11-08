@@ -9,6 +9,8 @@ export interface MemberAccessContext {
   role: Role;
   permissionOverrides: PermissionOverrideMap;
   effectivePermissions: readonly Permission[];
+  /** Compact Hex BigInt representation of effective permissions for O(1) bitwise checks */
+  permissionBitmask?: string;
   joinedAt?: Date;
   user?: {
     id: string;

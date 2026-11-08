@@ -1,4 +1,4 @@
-import { RankHandler } from '@/modules/work-item/core/handlers/rank.handler';
+import { RankHandler } from '@/modules/project/work-item/core/handlers/rank.handler';
 
 describe('RankHandler - Algorithmic Reorder Optimization', () => {
   let rankHandler: RankHandler;

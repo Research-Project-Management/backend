@@ -6,6 +6,7 @@ import { OperatorGuard } from './guards/operator.guard';
 import { AccessController } from './access.controller';
 import { ProjectResourceResolver } from './resolvers/project-resource.resolver';
 import { AccessConfigService } from './config/access.config';
+import { ResourceAccessPolicy } from './policies/resource-access.policy';
 
 @Global()
 @Module({
@@ -17,6 +18,8 @@ import { AccessConfigService } from './config/access.config';
     OperatorGuard,
     ProjectResourceResolver,
     AccessConfigService,
+    ResourceAccessPolicy,
+    ResourceAccessPolicy,
   ],
   exports: [
     AccessRepository,

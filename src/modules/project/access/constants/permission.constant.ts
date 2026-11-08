@@ -1,6 +1,13 @@
 import { Permission } from '../enums/permission.enum';
 import { Role } from '../enums/role.enum';
 import { PermissionOverrideMap } from '../types/access.type';
+import {
+  PermissionBitmaskUtil,
+  ROLE_BASE_BITMASKS,
+  decodeBitmaskToPermissions,
+} from '../utils/permission-bitmask.util';
+
+export * from '../utils/permission-bitmask.util';
 
 /**
  * Canonical Role-to-Permission Baseline Matrix
@@ -258,8 +265,7 @@ export function getPermissionsForRole(role: Role): readonly Permission[] {
 }
 
 export function roleHasPermission(role: Role, permission: Permission): boolean {
-  const permissions = ROLE_PERMISSIONS[role];
-  return permissions ? permissions.includes(permission) : false;
+  return PermissionBitmaskUtil.has(ROLE_BASE_BITMASKS[role] ?? 0n, permission);
 }
 
 /**
@@ -273,18 +279,7 @@ export function evaluateMemberPermission(
   permission: Permission,
   overrides?: PermissionOverrideMap | null,
 ): boolean {
-  // 1. OWNER has full unconditional authority across the project
-  if (role === Role.OWNER) {
-    return true;
-  }
-
-  // 2. Explicit member-level overrides take precedence
-  if (overrides && typeof overrides[permission] === 'boolean') {
-    return overrides[permission];
-  }
-
-  // 3. Fallback to Role Baseline
-  return roleHasPermission(role, permission);
+  return PermissionBitmaskUtil.evaluate(role, permission, overrides);
 }
 
 /**
@@ -294,24 +289,8 @@ export function computeEffectivePermissions(
   role: Role,
   overrides?: PermissionOverrideMap | null,
 ): Permission[] {
-  if (role === Role.OWNER) {
-    return Object.values(Permission);
-  }
-
-  const baseline = new Set<Permission>(ROLE_PERMISSIONS[role] || []);
-
-  if (overrides) {
-    for (const [permKey, isAllowed] of Object.entries(overrides)) {
-      const perm = permKey as Permission;
-      if (isAllowed) {
-        baseline.add(perm);
-      } else {
-        baseline.delete(perm);
-      }
-    }
-  }
-
-  return Array.from(baseline);
+  const mask = PermissionBitmaskUtil.computeEffectiveBitmask(role, overrides);
+  return decodeBitmaskToPermissions(mask);
 }
 
 export type RolePermissionsMap = typeof ROLE_PERMISSIONS;

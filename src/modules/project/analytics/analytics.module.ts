@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
-import { ProjectAnalyticsController } from './analytics.controller';
-import { ProjectAnalyticsService } from './analytics.service';
-import { ProjectAnalyticsRepository } from './analytics.repository';
+import { AnalyticsController } from './analytics.controller';
+import { AnalyticsService } from './analytics.service';
+import { AnalyticsRepository } from './analytics.repository';
+import { CacheModule } from '@/core';
 
 @Module({
-  controllers: [ProjectAnalyticsController],
-  providers: [ProjectAnalyticsService, ProjectAnalyticsRepository],
-  exports: [ProjectAnalyticsService, ProjectAnalyticsRepository],
+  imports: [CacheModule],
+  controllers: [AnalyticsController],
+  providers: [AnalyticsService, AnalyticsRepository],
+  exports: [AnalyticsService, AnalyticsRepository],
 })
-export class ProjectAnalyticsModule {}
+export class AnalyticsModule {}

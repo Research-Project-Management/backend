@@ -42,23 +42,6 @@ export type EnrichedProject = ProjectWithMembers & {
   projectLabelsList?: ProjectLabel[];
 };
 
-export interface ProjectOverview {
-  totalWorkItems: number;
-  completedWorkItems: number;
-  inProgressWorkItems: number;
-  backlogWorkItems: number;
-  completionPercentage: number;
-  daysRemaining?: number | null;
-  isOverdue?: boolean;
-  totalMembers: number;
-  totalCycles: number;
-  activeCycle?: {
-    id: string;
-    name: string;
-    progressPercentage: number;
-  } | null;
-}
-
 export interface AllocatedIdentifier {
   identifier: string;
   sequenceNumber: number;

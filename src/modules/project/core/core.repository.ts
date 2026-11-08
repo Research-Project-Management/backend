@@ -9,13 +9,12 @@ import {
 } from '@prisma/client';
 import {
   ProjectWithMembers,
-  ProjectOverview,
   AllocatedIdentifier,
   MinimalUser,
   ProjectMemberWithUser,
 } from './types/project.type';
 import { isUuid } from '@/core';
-import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item';
+import { DEFAULT_WORK_ITEM_STATES } from '@/modules/project/work-item';
 import { DEFAULT_PROJECT_STATES } from '../state/state.constants';
 import { deriveProjectPrefix } from './utils/identifier.util';
 import { ProjectQueryDto } from './dto/query.dto';
@@ -577,144 +576,6 @@ export class CoreRepository {
       orderBy: { updatedAt: 'desc' },
     });
     return projects.map(mapProjectWithMembers);
-  }
-
-  /**
-   * Retrieve aggregated project dashboard overview statistics.
-   */
-  async findProjectOverview(
-    projectId: string,
-  ): Promise<ProjectOverview | null> {
-    if (!isUuid(projectId)) {
-      const proj = await this.findProjectById(projectId);
-      if (!proj) return null;
-      projectId = proj.id;
-    }
-
-    const [project, states] = await Promise.all([
-      this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: {
-          startDate: true,
-          targetDate: true,
-          state: true,
-        },
-      }),
-      this.prisma.workItemState.findMany({
-        where: { projectId },
-        select: { id: true, group: true },
-      }),
-    ]);
-
-    const stateList: { id: string; group: string }[] = states;
-
-    const completedStateIds = stateList
-      .filter((s) => s.group === 'completed')
-      .map((s) => s.id);
-    const startedStateIds = stateList
-      .filter((s) => s.group === 'started')
-      .map((s) => s.id);
-    const backlogStateIds = stateList
-      .filter((s) => ['backlog', 'unstarted'].includes(s.group))
-      .map((s) => s.id);
-
-    const [
-      workItemTotal,
-      completedWorkItems,
-      inProgressWorkItems,
-      backlogWorkItems,
-      membersCount,
-      cyclesCount,
-    ] = await Promise.all([
-      this.prisma.workItem.count({
-        where: { projectId, deletedAt: null },
-      }),
-      this.prisma.workItem.count({
-        where: {
-          projectId,
-          deletedAt: null,
-          ...(completedStateIds.length > 0
-            ? { stateId: { in: completedStateIds } }
-            : { completed: true }),
-        },
-      }),
-      this.prisma.workItem.count({
-        where: {
-          projectId,
-          deletedAt: null,
-          ...(startedStateIds.length > 0
-            ? { stateId: { in: startedStateIds } }
-            : backlogStateIds.length > 0
-              ? {
-                  stateId: {
-                    notIn: [...backlogStateIds, ...completedStateIds],
-                  },
-                  completed: false,
-                }
-              : { completed: false }),
-        },
-      }),
-      this.prisma.workItem.count({
-        where: {
-          projectId,
-          deletedAt: null,
-          ...(backlogStateIds.length > 0
-            ? { stateId: { in: backlogStateIds } }
-            : startedStateIds.length > 0 || completedStateIds.length > 0
-              ? {
-                  stateId: {
-                    notIn: [...startedStateIds, ...completedStateIds],
-                  },
-                  completed: false,
-                }
-              : { completed: false }),
-        },
-      }),
-      this.prisma.projectMember.count({
-        where: { projectId },
-      }),
-      Promise.resolve(0),
-    ]);
-
-    const completionPercentage =
-      workItemTotal > 0
-        ? Math.round((completedWorkItems / workItemTotal) * 100)
-        : 0;
-
-    let daysRemaining: number | null = null;
-    let isOverdue = false;
-
-    if (project?.targetDate) {
-      const now = new Date();
-      const target = new Date(project.targetDate);
-      const diffMs = target.getTime() - now.getTime();
-      daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      const terminalStates = [
-        'completed',
-        'completed & archived',
-        'cancelled',
-        'suspended',
-      ];
-      isOverdue =
-        daysRemaining < 0 &&
-        Boolean(
-          project.state &&
-          !terminalStates.includes(project.state.name?.toLowerCase()),
-        );
-    }
-
-    return {
-      totalWorkItems: workItemTotal,
-      completedWorkItems,
-      inProgressWorkItems,
-      backlogWorkItems,
-      completionPercentage,
-      daysRemaining,
-      isOverdue,
-      totalMembers: membersCount,
-      totalCycles: cyclesCount,
-      activeCycle: null,
-    };
   }
 
   // ─── 2. Identifier Sequence Allocation ──────────────────────────────────

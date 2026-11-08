@@ -1,0 +1,169 @@
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+  Optional,
+} from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { DraftRepository } from './draft.repository';
+import { CoreService } from '@/modules/project/work-item/core/core.service';
+import {
+  CreateDraftDto,
+  UpdateDraftDto,
+  PublishDraftDto,
+  QueryDraftDto,
+} from './dto/draft.dto';
+
+@Injectable()
+export class DraftService {
+  private readonly logger = new Logger(DraftService.name);
+
+  constructor(
+    private readonly draftRepository: DraftRepository,
+    private readonly coreService: CoreService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+  ) {}
+
+  async createDraft(createDraftDto: CreateDraftDto, authorId: string) {
+    const draft = await this.draftRepository.create(createDraftDto, authorId);
+    this.eventEmitter?.emit('draft.created', {
+      draftId: draft.id,
+      authorId,
+      projectId: draft.projectId,
+    });
+    return draft;
+  }
+
+  async getDraft(id: string, authorId: string) {
+    const draft = await this.draftRepository.findById(id, authorId);
+    if (!draft) {
+      throw new NotFoundException(`Draft ${id} not found`);
+    }
+    return draft;
+  }
+
+  async getUserDrafts(authorId: string, queryDraftDto: QueryDraftDto) {
+    const page = Number(queryDraftDto.page) || 1;
+    const limit = Number(queryDraftDto.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    const result = await this.draftRepository.findUserDrafts(
+      authorId,
+      { projectId: queryDraftDto.projectId, search: queryDraftDto.search },
+      skip,
+      limit,
+    );
+
+    return {
+      ...result,
+      isEmpty: result.drafts.length === 0,
+    };
+  }
+
+  async updateDraft(
+    id: string,
+    updateDraftDto: UpdateDraftDto,
+    authorId: string,
+  ) {
+    await this.getDraft(id, authorId);
+    return this.draftRepository.update(id, authorId, updateDraftDto);
+  }
+
+  async publishDraft(
+    id: string,
+    publishDraftDto: PublishDraftDto,
+    authorId: string,
+  ) {
+    const draft = await this.getDraft(id, authorId);
+
+    const targetProjectId = publishDraftDto.projectId || draft.projectId;
+    if (!targetProjectId) {
+      throw new BadRequestException(
+        'Project ID is required to publish a draft into a work item',
+      );
+    }
+
+    const title = publishDraftDto.title || draft.title || 'Untitled';
+
+    const targetColumn =
+      publishDraftDto.columnId || draft.columnId || 'backlog';
+
+    const result = await this.coreService.createWorkItem(
+      targetProjectId,
+      authorId,
+      {
+        title,
+        content: draft.content || draft.description || '',
+        description: draft.description || draft.content || '',
+        columnId: targetColumn,
+        priority: publishDraftDto.priority || draft.priority,
+        startDate: draft.startDate ? draft.startDate.toISOString() : undefined,
+        dueDate: draft.dueDate ? draft.dueDate.toISOString() : undefined,
+        labels: draft.labels,
+        assigneeId: draft.assigneeId || undefined,
+        assigneeIds: Array.isArray(draft.assigneeIds)
+          ? (draft.assigneeIds as string[])
+          : undefined,
+      },
+    );
+
+    try {
+      await this.draftRepository.delete(id, authorId);
+    } catch (delErr) {
+      const msg = delErr instanceof Error ? delErr.message : String(delErr);
+      this.logger.warn(`Failed to delete draft ${id} after publishing: ${msg}`);
+    }
+
+    const publishedWorkItem = result?.workItem || result?.item;
+
+    this.eventEmitter?.emit('draft.published', {
+      draftId: id,
+      workItemId: publishedWorkItem?.id,
+      projectId: targetProjectId,
+      authorId,
+    });
+
+    return result;
+  }
+
+  async duplicateDraft(id: string, authorId: string) {
+    const draft = await this.getDraft(id, authorId);
+
+    const title = draft.title ? `${draft.title} (Copy)` : 'Untitled (Copy)';
+
+    const duplicated = await this.draftRepository.create(
+      {
+        title,
+        content: draft.content || draft.description || '',
+        description: draft.description || draft.content || '',
+        columnId: draft.columnId || undefined,
+        priority: draft.priority,
+        startDate: draft.startDate ? draft.startDate.toISOString() : undefined,
+        dueDate: draft.dueDate ? draft.dueDate.toISOString() : undefined,
+        labels: draft.labels,
+        assigneeId: draft.assigneeId || undefined,
+        assigneeIds: Array.isArray(draft.assigneeIds)
+          ? (draft.assigneeIds as string[])
+          : undefined,
+        metadata: (draft.metadata as Record<string, unknown>) || undefined,
+        projectId: draft.projectId || undefined,
+      },
+      authorId,
+    );
+
+    this.eventEmitter?.emit('draft.created', {
+      draftId: duplicated.id,
+      authorId,
+      projectId: duplicated.projectId,
+    });
+
+    return duplicated;
+  }
+
+  async deleteDraft(id: string, authorId: string) {
+    await this.getDraft(id, authorId);
+    await this.draftRepository.delete(id, authorId);
+    return { success: true, id };
+  }
+}

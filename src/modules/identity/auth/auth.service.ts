@@ -5,6 +5,8 @@ import {
   ForbiddenException,
   Logger,
   NotFoundException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -71,6 +73,13 @@ import { resolvePublicUrl } from '../../../core/utils/public-urls';
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  /** Precomputed valid bcrypt hash (cost 10) for constant-time comparisons */
+  public static readonly DUMMY_BCRYPT_HASH =
+    '$2b$10$m2xs6UaNy5sq47uxrDxq..Xo2fNvbkrH.MOrVSo2Vh6EOZBlztTRW';
+  public static readonly MAX_CONSECUTIVE_LOGIN_FAILS = 5;
+  public static readonly LOCKOUT_DURATION_SECONDS = 900; // 15 minutes
+  public static readonly FAIL_WINDOW_SECONDS = 900; // 15 minutes
+
   constructor(
     private readonly authnRepo: AuthRepository,
     private readonly userService: UserService,
@@ -80,6 +89,72 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
   ) {}
+
+  async getAccountLockoutTtl(email: string): Promise<number> {
+    const key = IDENTITY_REDIS_KEYS.accountLockout(email);
+    const ttl = await this.redis.ttl(key);
+    return ttl > 0 ? ttl : 0;
+  }
+
+  async recordFailedLogin(email: string): Promise<number> {
+    const key = IDENTITY_REDIS_KEYS.loginFails(email);
+    const fails = await this.redis.incr(key);
+    if (fails === 1) {
+      await this.redis.expire(key, AuthService.FAIL_WINDOW_SECONDS);
+    }
+    return fails;
+  }
+
+  async clearFailedLogins(email: string): Promise<void> {
+    const failKey = IDENTITY_REDIS_KEYS.loginFails(email);
+    const lockKey = IDENTITY_REDIS_KEYS.accountLockout(email);
+    await Promise.all([
+      this.redis.del(failKey),
+      this.redis.del(lockKey),
+    ]);
+  }
+
+  async lockAccount(
+    email: string,
+    durationSeconds = AuthService.LOCKOUT_DURATION_SECONDS,
+  ): Promise<void> {
+    const key = IDENTITY_REDIS_KEYS.accountLockout(email);
+    await this.redis.set(key, { lockedAt: Date.now() }, durationSeconds);
+  }
+
+  private async handleFailedLogin(
+    email: string,
+    reason: string,
+    userId?: string,
+  ): Promise<void> {
+    await this.auditService.record({
+      actorId: userId,
+      action: AUDIT_ACTIONS.AUTH_LOGIN_FAILED,
+      outcome: AuditOutcome.failure,
+      severity: AuditSeverity.warning,
+      targetType: 'user',
+      targetId: userId,
+      metadata: { email, reason },
+    });
+
+    const currentFails = await this.recordFailedLogin(email);
+    if (currentFails >= AuthService.MAX_CONSECUTIVE_LOGIN_FAILS) {
+      await this.lockAccount(email, AuthService.LOCKOUT_DURATION_SECONDS);
+      await this.auditService.record({
+        actorId: userId,
+        action: AUDIT_ACTIONS.AUTH_ACCOUNT_LOCKED,
+        outcome: AuditOutcome.failure,
+        severity: AuditSeverity.critical,
+        targetType: 'user',
+        targetId: userId,
+        metadata: {
+          email,
+          consecutiveFails: currentFails,
+          lockoutSeconds: AuthService.LOCKOUT_DURATION_SECONDS,
+        },
+      });
+    }
+  }
 
   /**
    * Cryptographically hashes a refresh token before persistence (SHA-256).
@@ -128,16 +203,20 @@ export class AuthService {
     return expiresAt;
   }
 
-  private async signTokenPair(user: {
-    id: string;
-    email: string | null;
-    status?: string;
-    profile?: { name?: string; avatar?: string | null } | null;
-  }): Promise<TokenPair> {
+  private async signTokenPair(
+    user: {
+      id: string;
+      email: string | null;
+      status?: string;
+      profile?: { name?: string; avatar?: string | null } | null;
+    },
+    sessionId?: string,
+  ): Promise<TokenPair> {
     const isVerified = user.status === 'active';
     const payload = {
       sub: user.id,
       id: user.id,
+      ...(sessionId ? { sid: sessionId } : {}),
       email: user.email,
       name: user.profile?.name ?? 'User',
       status: user.status || 'active',
@@ -185,14 +264,20 @@ export class AuthService {
       parentId?: string;
       userAgent?: string;
       ipAddress?: string;
+      sessionId?: string;
     },
   ): Promise<TokenPair> {
-    const { accessToken, refreshToken } = await this.signTokenPair(user);
+    const sessionId = options?.sessionId || crypto.randomUUID();
+    const { accessToken, refreshToken } = await this.signTokenPair(
+      user,
+      sessionId,
+    );
     const expiresAt = this.getRefreshTokenExpiresAt();
     const tokenHash = this.hashToken(refreshToken);
     const familyId = options?.familyId || crypto.randomUUID();
 
     const session = await this.authnRepo.createSession({
+      id: sessionId,
       userId: user.id,
       tokenHash,
       familyId,
@@ -805,32 +890,39 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<AuthnResponseDto> {
+    const normalizedEmail = dto.email.toLowerCase().trim();
+
+    // 1. Circuit breaker: Check temporary account lockout BEFORE bcrypt.compare (DoS prevention)
+    const lockoutTtl = await this.getAccountLockoutTtl(normalizedEmail);
+    if (lockoutTtl > 0) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          code: 'ACCOUNT_TEMPORARILY_LOCKED',
+          message: `Too many failed login attempts. Account temporarily locked for security. Please try again in ${lockoutTtl} seconds.`,
+          retryAfter: lockoutTtl,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const user = await this.authnRepo.findUserByEmail(dto.email);
 
     if (!user || !user.password) {
-      await this.auditService.record({
-        action: AUDIT_ACTIONS.AUTH_LOGIN_FAILED,
-        outcome: AuditOutcome.failure,
-        severity: AuditSeverity.warning,
-        targetType: 'user',
-        metadata: { email: dto.email, reason: 'user_not_found_or_no_password' },
-      });
+      // Execute constant-time dummy comparison to prevent user enumeration timing attacks
+      await bcrypt.compare(dto.password, AuthService.DUMMY_BCRYPT_HASH);
+      await this.handleFailedLogin(normalizedEmail, 'user_not_found_or_no_password');
       throw new UnauthorizedException('Invalid email or password');
     }
 
     const isMatch = await bcrypt.compare(dto.password, user.password);
     if (!isMatch) {
-      await this.auditService.record({
-        actorId: user.id,
-        action: AUDIT_ACTIONS.AUTH_LOGIN_FAILED,
-        outcome: AuditOutcome.failure,
-        severity: AuditSeverity.warning,
-        targetType: 'user',
-        targetId: user.id,
-        metadata: { email: dto.email, reason: 'password_mismatch' },
-      });
+      await this.handleFailedLogin(normalizedEmail, 'password_mismatch', user.id);
       throw new UnauthorizedException('Invalid email or password');
     }
+
+    // Credentials verified - clear failed attempts counter
+    await this.clearFailedLogins(normalizedEmail);
 
     if (user.status === 'suspended') {
       await this.auditService.record({
@@ -1049,18 +1141,80 @@ export class AuthService {
     }
 
     const familyId = tokenRecord.familyId || crypto.randomUUID();
-    const newTokens = await this.signTokenPair(tokenRecord.user);
+    const newSessionId = crypto.randomUUID();
+    const newTokens = await this.signTokenPair(tokenRecord.user, newSessionId);
     const newTokenHash = this.hashToken(newTokens.refreshToken);
 
     try {
       await this.authnRepo.rotateToken({
+        newSessionId,
         oldTokenId: tokenRecord.id,
         newTokenHash,
         familyId,
         userId: tokenRecord.userId,
         expiresAt: this.getRefreshTokenExpiresAt(),
       });
+      // Invalidate the old session in Redis
+      await Promise.all([
+        this.redis.del(IDENTITY_REDIS_KEYS.session(tokenRecord.id)),
+        this.redis.set(
+          IDENTITY_REDIS_KEYS.revokedSession(tokenRecord.id),
+          Date.now(),
+          3600,
+        ),
+      ]);
     } catch {
+      // Concurrency Race Recovery: If another concurrent browser tab rotated this token
+      // within the last few milliseconds, recover via Redis grace window or database grace period
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      try {
+        const graceCached = await this.redis.get<TokenRefreshResponseDto>(
+          IDENTITY_REDIS_KEYS.graceToken(tokenHash),
+        );
+        if (graceCached) {
+          return graceCached;
+        }
+      } catch {
+        // Fallback to database check
+      }
+
+      const freshRecord = await this.authnRepo.findRefreshToken(tokenHash);
+      if (freshRecord && freshRecord.revokedAt) {
+        const revokedTime = new Date(freshRecord.revokedAt).getTime();
+        if (Date.now() - revokedTime < 30_000) {
+          const childToken = await this.prisma.refreshToken.findFirst({
+            where: {
+              parentId: freshRecord.id,
+              isRevoked: false,
+              expiresAt: { gt: new Date() },
+            },
+            include: {
+              user: {
+                include: {
+                  profile: {
+                    select: {
+                      name: true,
+                      avatar: true,
+                    },
+                  },
+                },
+              },
+            },
+          });
+          if (childToken) {
+            const freshTokens = await this.signTokenPair(
+              childToken.user,
+              childToken.id,
+            );
+            return {
+              accessToken: freshTokens.accessToken,
+              refreshToken: freshTokens.refreshToken,
+              user: this.formatUser(childToken.user),
+            };
+          }
+        }
+      }
+
       throw new UnauthorizedException('Refresh token is invalid or expired');
     }
 
@@ -1172,6 +1326,11 @@ export class AuthService {
     );
     await this.redis.del(resetKey);
 
+    const user = await this.authnRepo.findUserById(record.userId);
+    if (user?.email) {
+      await this.clearFailedLogins(user.email);
+    }
+
     await this.auditService.record({
       actorId: record.userId,
       action: AUDIT_ACTIONS.AUTH_PASSWORD_RESET_COMPLETED,
@@ -1191,9 +1350,57 @@ export class AuthService {
     return safeSession;
   }
 
-  async getActiveSessions(userId: string): Promise<SessionSummary[]> {
+  async getActiveSessions(
+    userId: string,
+    currentSessionId?: string,
+  ): Promise<SessionSummary[]> {
     const sessions = await this.authnRepo.findActiveSessionsByUser(userId);
-    return sessions.map((session) => this.formatSession(session));
+    return sessions.map((session) => ({
+      ...this.formatSession(session),
+      isCurrent: currentSessionId ? session.id === currentSessionId : false,
+    }));
+  }
+
+  /**
+   * Revokes all active sessions for a user EXCEPT the current caller device session.
+   */
+  async revokeAllOtherSessions(
+    userId: string,
+    currentSessionId: string,
+  ): Promise<{ revokedCount: number }> {
+    const revokedSessionIds = await this.authnRepo.revokeOtherUserSessions(
+      userId,
+      currentSessionId,
+    );
+
+    if (revokedSessionIds.length > 0) {
+      await Promise.all(
+        revokedSessionIds.flatMap((sid) => [
+          this.redis.del(IDENTITY_REDIS_KEYS.session(sid)),
+          this.redis.set(
+            IDENTITY_REDIS_KEYS.revokedSession(sid),
+            Date.now(),
+            3600,
+          ),
+        ]),
+      );
+    }
+
+    await this.auditService.record({
+      actorId: userId,
+      action: AUDIT_ACTIONS.AUTH_TOKEN_REVOKED,
+      outcome: AuditOutcome.success,
+      severity: AuditSeverity.info,
+      targetType: 'user',
+      targetId: userId,
+      metadata: {
+        count: revokedSessionIds.length,
+        currentSessionId,
+        scope: 'other_sessions',
+      },
+    });
+
+    return { revokedCount: revokedSessionIds.length };
   }
 
   async revokeSession(userId: string, sessionId: string): Promise<void> {

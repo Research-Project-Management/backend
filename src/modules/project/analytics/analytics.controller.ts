@@ -4,45 +4,90 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiQuery,
-  ApiResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectAnalyticsService } from './analytics.service';
+import { AnalyticsService } from './analytics.service';
+import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
-@ApiTags('Project Analytics & Portfolio')
+@ApiTags('Project Analytics')
 @ApiBearerAuth('JWT-auth')
+@Controller(['api/v1/analytics', 'api/analytics', 'api/v1/projects', 'api/projects'])
 @UseGuards(JwtAuthGuard)
-@Controller(['api/v1/projects', 'api/projects'])
-export class ProjectAnalyticsController {
-  constructor(private readonly analyticsService: ProjectAnalyticsService) {}
+export class AnalyticsController {
+  constructor(private readonly analyticsService: AnalyticsService) {}
 
-  @Get(':projectId/analytics')
+  @Get([
+    'projects/:projectId/analytics',
+    'project/:projectId/analytics',
+    ':projectId/analytics',
+    ':projectId/analytics/insights',
+  ])
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'Get detailed dimensional breakdown for a project' })
-  getAnalytics(@Param('projectId') projectId: string) {
-    return this.analyticsService.getProjectDetailedBreakdown(projectId);
+  @ApiOperation({
+    summary:
+      'Get project dimensional insights (KPIs, State Groups, Columns, Priority, Assignee Workload, Labels)',
+  })
+  async getProjectAnalytics(@Param('projectId') projectId: string) {
+    return this.analyticsService.getProjectAnalytics(projectId);
   }
 
-  @Get(':projectId/analytics/overview')
+  @Get([
+    'projects/:projectId/analytics/overview',
+    ':projectId/analytics/overview',
+  ])
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'Get high-level portfolio overview for a project' })
-  getOverview(@Param('projectId') projectId: string) {
+  @ApiOperation({ summary: 'Get project aggregate entity counts' })
+  async getProjectOverview(@Param('projectId') projectId: string) {
     return this.analyticsService.getProjectOverview(projectId);
   }
 
-  @Get(':projectId/analytics/timeseries')
+  @Get(['me/overview', 'overview'])
+  @ApiOperation({ summary: 'Get user personal aggregate metrics overview' })
+  async getUserOverview(@CurrentUser('id') userId: string) {
+    return this.analyticsService.getUserOverview(userId);
+  }
+
+  @Get([
+    'projects/:projectId/analytics/labels',
+    ':projectId/analytics/labels',
+  ])
+  @UseGuards(ProjectAccessGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary: 'Get WorkItem count grouped by label for a project',
+  })
+  async getLabelDistribution(@Param('projectId') projectId: string) {
+    return this.analyticsService.getLabelDistribution(projectId);
+  }
+
+  @Get([
+    'projects/:projectId/analytics/timeseries',
+    'projects/:projectId/timeseries',
+    'project/:projectId/timeseries',
+    ':projectId/analytics/timeseries',
+    ':projectId/timeseries',
+  ])
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get daily WorkItem creation and completion trend' })
-  @ApiQuery({ name: 'from', required: false, example: '2026-09-01' })
-  @ApiQuery({ name: 'to', required: false, example: '2026-09-16' })
-  getTimeSeries(
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    description: 'Start date (ISO 8601)',
+    example: '2026-09-01',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    description: 'End date (ISO 8601)',
+    example: '2026-09-30',
+  })
+  async getTimeSeries(
     @Param('projectId') projectId: string,
-    @Query('from') from: string,
-    @Query('to') to: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     const fromDate =
       from ||
@@ -51,13 +96,5 @@ export class ProjectAnalyticsController {
         .slice(0, 10);
     const toDate = to || new Date().toISOString().slice(0, 10);
     return this.analyticsService.getTimeSeries(projectId, fromDate, toDate);
-  }
-
-  @Get(':projectId/analytics/labels')
-  @UseGuards(ProjectAccessGuard)
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'Get WorkItem distribution by label for a project' })
-  getLabelDistribution(@Param('projectId') projectId: string) {
-    return this.analyticsService.getLabelDistribution(projectId);
   }
 }

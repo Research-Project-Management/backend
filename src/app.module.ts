@@ -6,13 +6,10 @@ import { CoreModule, getBullMqConfig } from './core';
 import { IdentityModule } from './modules/identity/identity.module';
 import { ProjectModule } from './modules/project/project.module';
 import { ActivityModule } from './modules/activity/activity.module';
-import { AnalyticsModule } from './modules/analytics/analytics.module';
-import { StickyModule } from './modules/sticky/sticky.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { LibraryModule } from './modules/library/library.module';
 import { PagesModule } from './modules/pages/pages.module';
 
-import { WorkItemModule } from './modules/work-item';
 import { AiModule } from './modules/ai/ai.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -39,9 +36,6 @@ import { AppController } from './app.controller';
     IdentityModule,
     ProjectModule,
     ActivityModule,
-    AnalyticsModule,
-    StickyModule,
-    WorkItemModule,
     PagesModule,
 
     LibraryModule,

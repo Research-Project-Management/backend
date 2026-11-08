@@ -116,8 +116,8 @@ export class CacheInvalidationListener {
 
   @OnEvent('project.*', { async: true })
   async handleProjectChanged(event: EntityChangeEvent) {
-    if (event.entityId || event.projectId) {
-      const pid = event.entityId || event.projectId;
+    const pid = event.entityId || event.projectId;
+    if (pid) {
       await this.redisCache.del(`project:${pid}`);
       await this.redisCache.del(`flux:proj:overview:${pid}`);
       await this.redisCache.del(`flux:wi:work-items:${pid}`);
@@ -128,6 +128,27 @@ export class CacheInvalidationListener {
     if (event.userId) {
       await this.redisCache.delPattern(`projects:${event.userId}:*`);
       await this.redisCache.delPattern(`analytics:user:${event.userId}:*`);
+    }
+
+    // Zero-Latency Stale Window Eviction: Immediately purge cached access contexts on membership changes
+    const anyEvent = event as Record<string, unknown>;
+    const targetUserIds = [
+      anyEvent.targetUserId,
+      anyEvent.userId,
+      event.verb === 'member_removed' ? anyEvent.oldValue : undefined,
+      event.verb === 'member_added' ? anyEvent.newValue : undefined,
+      event.verb === 'ownership_transferred' ? anyEvent.oldValue : undefined,
+      event.verb === 'ownership_transferred' ? anyEvent.newValue : undefined,
+    ].filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+    if (pid && targetUserIds.length > 0) {
+      for (const uid of targetUserIds) {
+        await Promise.all([
+          this.redisCache.del(`project:access:${pid}:${uid}`),
+          this.redisCache.del(`project:access:role:${pid}:${uid}`),
+          this.redisCache.del(`project:access:perms:${pid}:${uid}`),
+        ]);
+      }
     }
   }
 

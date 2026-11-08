@@ -94,6 +94,17 @@ export class CoreController {
     );
   }
 
+  @Get('trash')
+  @ApiOperation({ summary: 'List all soft-deleted projects in trash for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of trashed projects',
+    type: [ProjectListResponseDto],
+  })
+  async getTrashedProjects(@CurrentUser('id') userId: string) {
+    return this.projectService.findTrashedProjects(userId);
+  }
+
   @Get(':projectId')
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
@@ -130,16 +141,29 @@ export class CoreController {
   @Delete(':projectId')
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
-  @ApiOperation({ summary: 'Permanently delete a project (Owner only)' })
+  @ApiOperation({ summary: 'Soft-delete a project (moves to trash)' })
   @ApiResponse({
     status: 200,
-    description: 'Project permanently deleted successfully',
+    description: 'Project moved to trash successfully',
   })
   async deleteProject(
     @Param('projectId') projectId: string,
     @CurrentUser('id') actorId: string,
   ) {
-    return this.projectService.permanentDeleteProject(projectId, actorId);
+    return this.projectService.softDeleteProject(projectId, actorId);
+  }
+
+  @Post(':projectId/restore')
+  @ApiOperation({ summary: 'Restore a soft-deleted project from trash' })
+  @ApiResponse({
+    status: 200,
+    description: 'Project restored successfully',
+  })
+  async restoreProject(
+    @Param('projectId') projectId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.projectService.restoreProject(projectId, userId);
   }
 
   @Post([':projectId/duplicate', ':projectId/clone'])

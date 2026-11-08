@@ -6,10 +6,6 @@ import { FavoriteService } from '@/modules/project/favorite/favorite.service';
 import { FavoriteRepository } from '@/modules/project/favorite/favorite.repository';
 import { ArchiveService } from '@/modules/project/archive/archive.service';
 import { ArchiveRepository } from '@/modules/project/archive/archive.repository';
-import { ProjectAnalyticsService } from '@/modules/project/analytics/analytics.service';
-import { ProjectAnalyticsRepository } from '@/modules/project/analytics/analytics.repository';
-import { TemplateService } from '@/modules/project/template/template.service';
-import { TemplateRepository } from '@/modules/project/template/template.repository';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { ProjectPriority } from '@prisma/client';
 
@@ -32,13 +28,13 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
       const template = stateService.getDefaultStatesTemplate();
       expect(template).toHaveLength(8);
       expect(template.map((c) => c.name)).toEqual([
-        'Proposal & Literature Review',
-        'Review & Approval',
-        'Execution & Experimentation',
-        'Drafting & Publication',
-        'Evaluation & Defense',
-        'Completed & Archived',
-        'Suspended',
+        'Ideation',
+        'Planning',
+        'Experimentation',
+        'Drafting',
+        'Review',
+        'Published',
+        'Paused',
         'Cancelled',
       ]);
     });
@@ -197,6 +193,10 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
         archiveProject: jest.fn(),
         unarchiveProject: jest.fn(),
         findArchivedProjectsByUser: jest.fn(),
+        findProjectArchivedWorkItems: jest.fn().mockResolvedValue([]),
+        findProjectArchivedPages: jest.fn().mockResolvedValue([]),
+        restoreProjectWorkItems: jest.fn().mockResolvedValue(0),
+        restoreProjectPage: jest.fn().mockResolvedValue(true),
       };
       mockCoreRepo = {
         findMembershipsForUser: jest.fn().mockResolvedValue(new Map()),
@@ -233,131 +233,43 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
         BadRequestException,
       );
     });
-  });
 
-  // ─── 5. Analytics Module ───────────────────────────────────────────────────
-  describe('ProjectAnalyticsService', () => {
-    let analyticsService: ProjectAnalyticsService;
-    let mockRepo: any;
-
-    beforeEach(() => {
-      mockRepo = {
-        getProjectWithMetadata: jest.fn(),
-        getWorkItemsCountsByStateGroup: jest.fn(),
-        getActiveCycle: jest.fn(),
-        getWorkItemsDetailed: jest.fn(),
-      };
-      analyticsService = new ProjectAnalyticsService(mockRepo);
-    });
-
-    it('should compute completion percentage and deadline days remaining', async () => {
-      const futureDate = new Date();
-      futureDate.setDate(futureDate.getDate() + 30);
-
-      mockRepo.getProjectWithMetadata.mockResolvedValue({
-        id: 'proj-1',
-        name: 'Research Engine',
-        stateId: 's1',
-        state: { id: 's1', name: 'Triển khai & Thực nghiệm' } as any,
-        priority: ProjectPriority.urgent,
-        startDate: new Date('2026-01-01'),
-        targetDate: futureDate,
-        _count: { members: 5, cycles: 2 },
-      });
-
-      mockRepo.getWorkItemsCountsByStateGroup.mockResolvedValue({
-        backlog: 5,
-        unstarted: 5,
-        started: 10,
-        completed: 30,
-        cancelled: 0,
-      });
-
-      mockRepo.getActiveCycle.mockResolvedValue(null);
-
-      const overview = await analyticsService.getProjectOverview('proj-1');
-      expect(overview.totalWorkItems).toBe(50);
-      expect(overview.completedWorkItems).toBe(30);
-      expect(overview.completionPercentage).toBe(60); // 30 / 50 * 100
-      expect(overview.isOverdue).toBe(false);
-      expect(overview.daysRemaining).toBeGreaterThanOrEqual(29);
-    });
-
-    it('should compute time series data correctly for a date range', async () => {
-      mockRepo.findProjectWorkItemsTimeSeries = jest.fn().mockResolvedValue([
+    it('should return project-scoped archived work items and pages for a single project', async () => {
+      mockArchiveRepo.findProjectArchivedWorkItems.mockResolvedValue([
         {
-          id: 'wi-1',
-          createdAt: new Date('2026-09-01T10:00:00Z'),
-          updatedAt: new Date('2026-09-02T10:00:00Z'),
+          id: 'wi-arch-1',
+          identifier: 'FLUX-10',
+          title: 'Archived Benchmark Task',
+          priority: 'high',
+          stateId: 'st-1',
+          stateGroup: 'completed',
           completed: true,
+          archivedAt: '2026-11-01T00:00:00.000Z',
+          updatedAt: '2026-11-01T00:00:00.000Z',
+          projectId: 'proj-1',
+          assignee: null,
+        },
+      ]);
+      mockArchiveRepo.findProjectArchivedPages.mockResolvedValue([
+        {
+          id: 'page-arch-1',
+          title: 'Old Literature Draft',
+          description: '',
+          status: 'archived',
+          path: '/draft.tex',
+          projectId: 'proj-1',
+          version: 1,
+          rev: 1,
+          createdAt: '2026-11-01T00:00:00.000Z',
+          updatedAt: '2026-11-01T00:00:00.000Z',
         },
       ]);
 
-      const series = await analyticsService.getTimeSeries(
-        'proj-1',
-        '2026-09-01',
-        '2026-09-02',
-      );
-      expect(series).toHaveLength(2);
-      expect(series[0].date).toBe('2026-09-01');
-      expect(series[0].created).toBe(1);
-      expect(series[1].date).toBe('2026-09-02');
-      expect(series[1].completed).toBe(1);
-    });
-
-    it('should return sorted label distribution for a project', async () => {
-      mockRepo.findProjectWorkItemsByLabel = jest.fn().mockResolvedValue([
-        { id: '1', labels: ['bug', 'frontend'] },
-        { id: '2', labels: ['bug'] },
-      ]);
-
-      const result = await analyticsService.getLabelDistribution('proj-1');
-      expect(result.labels).toEqual([
-        { label: 'bug', count: 2 },
-        { label: 'frontend', count: 1 },
-      ]);
-    });
-  });
-
-  // ─── 6. Template Module ────────────────────────────────────────────────────
-  describe('TemplateService', () => {
-    let templateService: TemplateService;
-    let mockRepo: any;
-
-    beforeEach(() => {
-      mockRepo = {
-        findAccessibleTemplates: jest.fn(),
-        findTemplateById: jest.fn(),
-        createTemplate: jest.fn(),
-        instantiateProject: jest.fn(),
-      };
-      templateService = new TemplateService(mockRepo, {} as any);
-    });
-
-    it('should instantiate project atomically from template with initial items', async () => {
-      mockRepo.findTemplateById.mockResolvedValue({
-        id: 'tpl-1',
-        name: 'Scrum Sprint Template',
-        description: 'Template for scrum',
-        avatar: '🚀',
-        defaultModules: ['work_items', 'cycles'],
-        initialStates: [{ group: 'unstarted', name: 'To Do' }],
-        initialLabels: [{ name: 'Bug', color: '#EF4444' }],
-        initialWorkItems: [{ title: 'Setup Repository', priority: 'high' }],
-      });
-      mockRepo.instantiateProject.mockResolvedValue({
-        id: 'new-proj-id',
-        name: 'Scrum Sprint Project',
-        identifier: 'SCRUM',
-      });
-
-      const project = await templateService.instantiate('tpl-1', 'user-1', {
-        name: 'Scrum Sprint Project',
-        identifier: 'SCRUM',
-      });
-
-      expect(project.id).toBe('new-proj-id');
-      expect(mockRepo.instantiateProject).toHaveBeenCalled();
+      const res = await archiveService.getProjectArchives('proj-1', {});
+      expect(res.projectId).toBe('proj-1');
+      expect(res.counts.workItems).toBe(1);
+      expect(res.counts.pages).toBe(1);
+      expect(res.counts.total).toBe(2);
     });
   });
 });

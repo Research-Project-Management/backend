@@ -7,7 +7,12 @@ export interface AuthSessionTokens {
 
 export interface JwtTokenPayload {
   readonly sub: string;
+  readonly id?: string;
+  readonly sid?: string;
   readonly email: string;
+  readonly name?: string;
+  readonly status?: string;
+  readonly isVerified?: boolean;
   readonly iat?: number;
   readonly exp?: number;
 }
@@ -88,6 +93,10 @@ export interface IRefreshTokenRepository {
   revokeToken(id: string): Promise<void>;
   revokeFamily(familyId: string): Promise<number>;
   revokeAllUserTokens(userId: string): Promise<{ count: number }>;
+  revokeOtherUserSessions(
+    userId: string,
+    currentSessionId: string,
+  ): Promise<string[]>;
   findActiveSessionsByUser(userId: string): Promise<
     Array<{
       id: string;

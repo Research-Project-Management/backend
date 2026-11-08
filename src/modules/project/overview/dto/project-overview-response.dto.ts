@@ -68,20 +68,16 @@ export interface ProjectOverviewStatusUpdateDto {
   };
 }
 
-export interface ProjectOverviewActiveCycleDto {
-  id: string;
-  name: string;
-  startDate: Date;
-  endDate: Date;
-  totalIssues: number;
-  completedIssues: number;
-  completionPercentage: number;
+export interface ProjectOverviewAssetsResponseDto {
+  pagesCount: number;
+  libraryCount: number;
+  filesCount?: number;
 }
 
 export interface ProjectOverviewResponseDto {
   project: ProjectOverviewProjectDto;
   metrics: ProjectOverviewMetricsDto;
+  assets?: ProjectOverviewAssetsResponseDto;
   recentActivities: ProjectOverviewActivityDto[];
   currentUpdate: ProjectOverviewStatusUpdateDto | null;
-  activeCycle?: ProjectOverviewActiveCycleDto | null;
 }

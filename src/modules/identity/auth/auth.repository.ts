@@ -81,6 +81,7 @@ export class AuthRepository implements IRefreshTokenRepository {
    * Creates a new Refresh Token / Session record with token hash and optional family lineage.
    */
   async createSession(data: {
+    id?: string;
     userId: string;
     token?: string;
     tokenHash: string;
@@ -94,6 +95,7 @@ export class AuthRepository implements IRefreshTokenRepository {
     const tokenHash = this.normalizeTokenHash(data.tokenHash);
     return this.prisma.refreshToken.create({
       data: {
+        ...(data.id ? { id: data.id } : {}),
         userId: data.userId,
         tokenHash,
         familyId: data.familyId,
@@ -137,6 +139,7 @@ export class AuthRepository implements IRefreshTokenRepository {
    * Rotates a refresh token: revokes old token and issues child token with same familyId.
    */
   async rotateToken(params: {
+    newSessionId?: string;
     oldTokenId: string;
     newTokenHash: string;
     familyId: string;
@@ -166,6 +169,7 @@ export class AuthRepository implements IRefreshTokenRepository {
       const newTokenHash = this.normalizeTokenHash(params.newTokenHash);
       return tx.refreshToken.create({
         data: {
+          ...(params.newSessionId ? { id: params.newSessionId } : {}),
           userId: params.userId,
           tokenHash: newTokenHash,
           familyId: params.familyId,
@@ -177,6 +181,37 @@ export class AuthRepository implements IRefreshTokenRepository {
         },
       });
     });
+  }
+
+  async revokeOtherUserSessions(
+    userId: string,
+    currentSessionId: string,
+  ): Promise<string[]> {
+    const activeSessions = await this.prisma.refreshToken.findMany({
+      where: {
+        userId,
+        id: { not: currentSessionId },
+        isRevoked: false,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+
+    if (activeSessions.length === 0) return [];
+
+    const sessionIds = activeSessions.map((s) => s.id);
+
+    await this.prisma.refreshToken.updateMany({
+      where: {
+        id: { in: sessionIds },
+      },
+      data: {
+        isRevoked: true,
+        revokedAt: new Date(),
+      },
+    });
+
+    return sessionIds;
   }
 
   async revokeUserSession(userId: string, sessionId: string): Promise<number> {

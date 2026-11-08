@@ -2,7 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export type RateLimitBucket =
-  'compile' | 'import' | 'upload' | 'linked-file' | 'search-replace' | 'git';
+  | 'compile'
+  | 'import'
+  | 'upload'
+  | 'linked-file'
+  | 'search-replace'
+  | 'git'
+  | 'auth-login-ip'
+  | 'auth-login-target'
+  | 'auth-register'
+  | 'auth-forgot-password'
+  | 'auth-verify'
+  | 'default';
 
 export interface RateLimitBudget {
   limit: number;
@@ -19,6 +30,12 @@ export const DEFAULT_RATE_LIMIT_BUDGETS: Record<
   'linked-file': { limit: 10, windowSeconds: 60 },
   'search-replace': { limit: 20, windowSeconds: 60 },
   git: { limit: 60, windowSeconds: 60 },
+  'auth-login-ip': { limit: 30, windowSeconds: 60 },
+  'auth-login-target': { limit: 5, windowSeconds: 60 },
+  'auth-register': { limit: 5, windowSeconds: 300 },
+  'auth-forgot-password': { limit: 3, windowSeconds: 300 },
+  'auth-verify': { limit: 10, windowSeconds: 60 },
+  default: { limit: 60, windowSeconds: 60 },
 };
 
 @Injectable()

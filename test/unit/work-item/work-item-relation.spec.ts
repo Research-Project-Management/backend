@@ -1,5 +1,5 @@
-import { RelationService } from '@/modules/work-item/relation/relation.service';
-import { RelationRepository } from '@/modules/work-item/relation/relation.repository';
+import { RelationService } from '@/modules/project/work-item/relation/relation.service';
+import { RelationRepository } from '@/modules/project/work-item/relation/relation.repository';
 import { BadRequestException } from '@nestjs/common';
 
 describe('WorkItem Relation Service & DAG Cycle Detection', () => {

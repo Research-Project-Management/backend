@@ -3,18 +3,18 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { CoreService } from '@/modules/work-item/core/core.service';
-import { RankHandler } from '@/modules/work-item/core/handlers/rank.handler';
-import { BulkHandler } from '@/modules/work-item/core/handlers/bulk.handler';
-import { RelationService } from '@/modules/work-item/relation/relation.service';
-import { ArchiveService } from '@/modules/work-item/archive/archive.service';
-import { AssignmentService } from '@/modules/work-item/assignment/assignment.service';
-import { LabelService } from '@/modules/work-item/label/label.service';
+import { CoreService } from '@/modules/project/work-item/core/core.service';
+import { RankHandler } from '@/modules/project/work-item/core/handlers/rank.handler';
+import { BulkHandler } from '@/modules/project/work-item/core/handlers/bulk.handler';
+import { RelationService } from '@/modules/project/work-item/relation/relation.service';
+import { ArchiveService } from '@/modules/project/work-item/archive/archive.service';
+import { AssignmentService } from '@/modules/project/work-item/assignment/assignment.service';
+import { LabelService } from '@/modules/project/work-item/label/label.service';
 import {
   HistoryService,
   summarizeDiff,
-} from '@/modules/work-item/history/history.service';
-import { validateHierarchyCycle } from '@/modules/work-item/core/utils/core.util';
+} from '@/modules/project/work-item/history/history.service';
+import { validateHierarchyCycle } from '@/modules/project/work-item/core/utils/core.util';
 
 describe('Work-Item Real-World Dataset & Edge-Case Experimentation Suite', () => {
   // ═══════════════════════════════════════════════════════════════════════════
@@ -71,6 +71,17 @@ describe('Work-Item Real-World Dataset & Edge-Case Experimentation Suite', () =>
                 targetId: create.targetId,
                 type: create.type,
               });
+              const src = itemStore.get(create.sourceId);
+              if (src) {
+                if (!src.outgoingRelations) src.outgoingRelations = [];
+                src.outgoingRelations.push({
+                  id: `rel-${edgeStore.length}`,
+                  sourceId: create.sourceId,
+                  targetId: create.targetId,
+                  type: create.type,
+                  createdAt: new Date(),
+                });
+              }
               return Promise.resolve(create);
             }),
             deleteMany: jest.fn().mockResolvedValue({ count: 1 }),

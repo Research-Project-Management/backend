@@ -17,6 +17,7 @@ export * from './decorators/resolved-project.decorator';
 export * from './decorators/no-project-context.decorator';
 export * from './decorators/require-operator.decorator';
 export * from './config/access.config';
+export * from './policies/resource-access.policy';
 
 // ─── Guards ─────────────────────────────────────────────────────────────────
 export * from './guards/project-access.guard';

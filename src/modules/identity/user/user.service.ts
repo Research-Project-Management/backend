@@ -8,7 +8,10 @@ import {
   NotFoundException,
   BadRequestException,
   UnauthorizedException,
+  Optional,
 } from '@nestjs/common';
+import { RedisCacheService } from '@/core';
+import { IDENTITY_REDIS_KEYS } from '../core/constants/identity.constant';
 import { UserRepository } from './user.repository';
 import { UpdateProfileDto } from './dto/profile.dto';
 import { ChangePasswordDto } from './dto/password.dto';
@@ -29,6 +32,7 @@ export class UserService {
   constructor(
     private readonly userRepo: UserRepository,
     private readonly auditService: AuditService,
+    @Optional() private readonly redis?: RedisCacheService,
   ) {}
 
   // ─── 1. Profile & Account ───────────────────────────────────────────────────
@@ -84,6 +88,15 @@ export class UserService {
       password: hashedPassword,
     });
     await this.userRepo.revokeAllUserRefreshTokens(userId);
+
+    // Instant nuclear revocation: Purge all existing access tokens issued prior to password change
+    if (this.redis) {
+      await this.redis.set(
+        IDENTITY_REDIS_KEYS.revoked(userId),
+        Date.now(),
+        7 * 86400,
+      );
+    }
 
     return { message: 'Password updated successfully' };
   }
@@ -143,6 +156,15 @@ export class UserService {
     }
 
     await this.userRepo.deactivateAccount(userId);
+
+    // Instant nuclear revocation: Invalidate all active sessions and access tokens for deactivated user
+    if (this.redis) {
+      await this.redis.set(
+        IDENTITY_REDIS_KEYS.revoked(userId),
+        Date.now(),
+        7 * 86400,
+      );
+    }
 
     await this.auditService.record({
       actorId: userId,

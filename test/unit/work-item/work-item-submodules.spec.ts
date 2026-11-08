@@ -5,19 +5,19 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EntityType } from '@prisma/client';
-import { ArchiveService } from '@/modules/work-item/archive/archive.service';
-import { AssignmentService } from '@/modules/work-item/assignment/assignment.service';
-import { DraftService } from '@/modules/work-item/draft/draft.service';
-import { LabelService } from '@/modules/work-item/label/label.service';
-import { LabelRepository } from '@/modules/work-item/label/label.repository';
-import { StateService } from '@/modules/work-item/state/state.service';
-import { CommentService } from '@/modules/work-item/comment/comment.service';
+import { ArchiveService } from '@/modules/project/work-item/archive/archive.service';
+import { AssignmentService } from '@/modules/project/work-item/assignment/assignment.service';
+import { DraftService } from '@/modules/project/work-item/draft/draft.service';
+import { LabelService } from '@/modules/project/work-item/label/label.service';
+import { LabelRepository } from '@/modules/project/work-item/label/label.repository';
+import { StateService } from '@/modules/project/work-item/state/state.service';
+import { CommentService } from '@/modules/project/work-item/comment/comment.service';
 import {
   HistoryService,
   summarizeDiff,
-} from '@/modules/work-item/history/history.service';
-import { WorkItemFacade } from '@/modules/work-item/work-item.facade';
-import { CoreService } from '@/modules/work-item/core/core.service';
+} from '@/modules/project/work-item/history/history.service';
+import { WorkItemFacade } from '@/modules/project/work-item/work-item.facade';
+import { CoreService } from '@/modules/project/work-item/core/core.service';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 
 describe('Work-Item Submodules Comprehensive Unit Suite', () => {
@@ -546,23 +546,23 @@ describe('Work-Item Submodules Comprehensive Unit Suite', () => {
 
     it('LabelRepository.findProjectLabels should apply hierarchy type filter when type is provided', async () => {
       const mockPrisma = {
-        workItemLabel: {
+        spaceLabel: {
           findMany: jest.fn().mockResolvedValue([]),
         },
       };
       const repo = new LabelRepository(mockPrisma as any);
 
       await repo.findProjectLabels('proj-1', 'root');
-      expect(mockPrisma.workItemLabel.findMany).toHaveBeenCalledWith(
+      expect(mockPrisma.spaceLabel.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { projectId: 'proj-1', parentId: null },
+          where: { spaceId: 'proj-1', parentId: null },
         }),
       );
 
       await repo.findProjectLabels('proj-1', 'sub');
-      expect(mockPrisma.workItemLabel.findMany).toHaveBeenCalledWith(
+      expect(mockPrisma.spaceLabel.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { projectId: 'proj-1', parentId: { not: null } },
+          where: { spaceId: 'proj-1', parentId: { not: null } },
         }),
       );
     });

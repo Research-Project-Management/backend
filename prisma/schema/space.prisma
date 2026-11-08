@@ -16,21 +16,21 @@ model Space {
   projectId   String?   @unique(map: "uq_spaces_project_id") @map("project_id") @db.Uuid
   project     Project?  @relation("ProjectSpace", fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_spaces_project_id")
 
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // Pages Domain Relations
-  pages                Page[]
-  pageDocs             PageDoc[]
-  pageNodes            PageNode[]
-  pageFiles            PageFile[]
-  pageSnapshots        PageSnapshot[]
-  pageSnapshotLabels   PageSnapshotLabel[]
-  pageTrackChanges     PageTrackChange[]
-  pageComments         PageCommentThread[]
-  customWords          CustomDictionaryWord[]
-  pageNotifications    PageNotification[]
-  pageDocReviews       PageDocReview[]
+  pages              Page[]
+  pageDocs           PageDoc[]
+  pageNodes          PageNode[]
+  pageFiles          PageFile[]
+  pageSnapshots      PageSnapshot[]
+  pageSnapshotLabels PageSnapshotLabel[]
+  pageTrackChanges   PageTrackChange[]
+  pageComments       PageCommentThread[]
+  customWords        CustomDictionaryWord[]
+  pageNotifications  PageNotification[]
+  pageDocReviews     PageDocReview[]
 
   // Library Domain Relations
   libraryItems         LibraryItem[]
@@ -49,17 +49,17 @@ model Space {
   outboxEvents         OutboxEvent[]
 
   // Storage & Labs Domain Relations
-  storageFiles         StorageFile[]
-  uploadSessions       UploadSession[]
-  storageQuota         StorageQuota?
+  storageFiles   StorageFile[]
+  uploadSessions UploadSession[]
+  storageQuota   StorageQuota?
 
   // AI & Intelligence Domain Relations
-  aiChats              AiChat[]
+  aiChats AiChat[]
 
   // Work-Item Drafts & Labels Relations
-  workItemDrafts       WorkItemDraft[]
-  spaceLabels          SpaceLabel[]
-  activityEvents       ActivityEvent[]
+  workItemDrafts WorkItemDraft[]
+  spaceLabels    SpaceLabel[]
+  activityEvents ActivityEvent[]
 
   @@index([type], map: "idx_spaces_type")
   @@map("spaces")

@@ -21,6 +21,7 @@ export const AUDIT_ACTIONS = {
   AUTH_EMAIL_VERIFICATION_REQUESTED: 'auth.email_verification_requested',
   AUTH_EMAIL_VERIFIED: 'auth.email_verified',
   AUTH_ACCOUNT_DEACTIVATED: 'auth.account_deactivated',
+  AUTH_ACCOUNT_LOCKED: 'auth.account_locked',
 
   // Project Governance & Sensitive Access Operations
   PROJECT_OWNERSHIP_TRANSFERRED: 'project.ownership_transferred',

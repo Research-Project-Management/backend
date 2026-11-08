@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './infrastructure/database/prisma.module';
 import { CacheModule } from './infrastructure/redis/cache.module';
 import { LoggerModule } from './logger/logger.module';
@@ -23,6 +24,10 @@ import { UserRateLimitGuard } from './http/rate-limit/user-rate-limit.guard';
     TransformInterceptor,
     RateLimitConfigService,
     UserRateLimitGuard,
+    {
+      provide: APP_GUARD,
+      useClass: UserRateLimitGuard,
+    },
   ],
   exports: [
     PrismaModule,

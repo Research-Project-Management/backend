@@ -7,7 +7,7 @@ import {
   IAccessRepository,
   MemberAccessContext,
 } from './types/access.type';
-import { computeEffectivePermissions } from './constants/permission.constant';
+import { computeEffectivePermissions, PermissionBitmaskUtil } from './constants/permission.constant';
 
 @Injectable()
 export class AccessRepository implements IAccessRepository {
@@ -75,6 +75,9 @@ export class AccessRepository implements IAccessRepository {
 
     const role = member.role as Role;
     const effectivePermissions = computeEffectivePermissions(role);
+    const permissionBitmask = PermissionBitmaskUtil.toHex(
+      PermissionBitmaskUtil.computeEffectiveBitmask(role),
+    );
 
     return {
       projectId: member.projectId,
@@ -82,6 +85,7 @@ export class AccessRepository implements IAccessRepository {
       role,
       permissionOverrides: {},
       effectivePermissions,
+      permissionBitmask,
       joinedAt: member.joinedAt,
       user: member.user
         ? {

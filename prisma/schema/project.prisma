@@ -63,7 +63,7 @@ model Project {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   // Space 1:1 Relation
-  space            Space?                   @relation("ProjectSpace")
+  space Space? @relation("ProjectSpace")
 
   // Project-Scoped Relations
   members          ProjectMember[]
@@ -72,18 +72,17 @@ model Project {
   favorites        ProjectFavorite[]
   states           WorkItemState[]
   workItems        WorkItem[]
-  views            WorkItemView[]
   activityEvents   ActivityEvent[]
   updates          ProjectUpdate[]
   integrationLinks ProjectIntegrationLink[]
   channels         Conversation[]           @relation("ProjectChannels")
 
+  @@unique([createdById, identifier], map: "uq_projects_creator_identifier")
   @@index([createdById], map: "idx_projects_created_by_id")
   @@index([identifier], map: "idx_projects_identifier")
   @@index([stateId], map: "idx_projects_state_id")
   @@index([priority], map: "idx_projects_priority")
   @@index([isActive, isArchived, deletedAt], map: "idx_projects_operational_status")
-  @@unique([createdById, identifier], map: "uq_projects_creator_identifier")
   @@map("projects")
 }
 

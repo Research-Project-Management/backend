@@ -4,6 +4,7 @@ export * from './decorators/user.decorator';
 export * from './decorators/public.decorator';
 export * from './decorators/require-verified-email.decorator';
 export * from './auth.controller';
+export * from './auth.service';
 export * from './auth.module';
 export * from './types/auth.type';
 export * from './dto/login.dto';

@@ -284,15 +284,14 @@ describe('Project Module Security & SSOT Suite', () => {
   });
 
   describe('CoreService - Module Whitelist & Input Sanitization', () => {
-    it('should permit the 5 valid project feature modules: overview, work_items, cycles, views, pages', () => {
+    it('should permit the valid project feature modules: overview, work-items, pages, chat and disallow cycles', () => {
       expect(ALLOWED_PROJECT_MODULES.has('overview')).toBe(true);
-      expect(ALLOWED_PROJECT_MODULES.has('work_items')).toBe(true);
       expect(ALLOWED_PROJECT_MODULES.has('work-items')).toBe(true);
-      expect(ALLOWED_PROJECT_MODULES.has('cycles')).toBe(true);
-      expect(ALLOWED_PROJECT_MODULES.has('views')).toBe(true);
       expect(ALLOWED_PROJECT_MODULES.has('pages')).toBe(true);
+      expect(ALLOWED_PROJECT_MODULES.has('chat')).toBe(true);
 
-      // Verify removed / out-of-scope modules are disallowed
+      // Verify removed / out-of-scope modules including cycles are disallowed
+      expect(ALLOWED_PROJECT_MODULES.has('cycles')).toBe(false);
       expect(ALLOWED_PROJECT_MODULES.has('stickies')).toBe(false);
       expect(ALLOWED_PROJECT_MODULES.has('storage')).toBe(false);
       expect(ALLOWED_PROJECT_MODULES.has('analytics')).toBe(false);
@@ -311,7 +310,7 @@ describe('Project Module Security & SSOT Suite', () => {
       ];
       const sanitized = sanitizeModules(untrustedClientInput);
 
-      expect(sanitized).toEqual(['overview', 'work_items', 'cycles']);
+      expect(sanitized).toEqual(['overview', 'work-items']);
     });
 
     it('should correctly derive project prefix from name or acronym', () => {

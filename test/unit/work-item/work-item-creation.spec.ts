@@ -1,4 +1,4 @@
-import { CoreRepository } from '@/modules/work-item/core/core.repository';
+import { CoreRepository } from '@/modules/project/work-item/core/core.repository';
 import { PrismaService } from '@/core';
 
 describe('WorkItem Creation & State Connect Type Safety', () => {
@@ -23,7 +23,7 @@ describe('WorkItem Creation & State Connect Type Safety', () => {
         findMany: jest.fn(),
         count: jest.fn(),
       },
-      workItemLabel: {
+      spaceLabel: {
         findMany: jest.fn().mockResolvedValue([]),
       },
     };
@@ -71,7 +71,7 @@ describe('WorkItem Creation & State Connect Type Safety', () => {
       expect(mockPrisma.workItem.create).toHaveBeenCalledTimes(1);
       const callArgs = mockPrisma.workItem.create.mock.calls[0][0];
 
-      expect(callArgs.data.columnId).toBe(
+      expect(callArgs.data.stateId).toBe(
         '326b4b76-cc73-4788-894d-aea0e0301507',
       );
       expect(callArgs.data.state).toBeUndefined();
@@ -106,10 +106,10 @@ describe('WorkItem Creation & State Connect Type Safety', () => {
         'Optimization',
       ]);
 
-      expect(mockPrisma.workItemLabel.findMany).toHaveBeenCalledTimes(1);
-      const callArgs = mockPrisma.workItemLabel.findMany.mock.calls[0][0];
+      expect(mockPrisma.spaceLabel.findMany).toHaveBeenCalledTimes(1);
+      const callArgs = mockPrisma.spaceLabel.findMany.mock.calls[0][0];
 
-      expect(callArgs.where.AND[0]).toEqual({ projectId });
+      expect(callArgs.where.AND[0]).toEqual({ spaceId: projectId });
       expect(callArgs.where.AND[1]).toEqual({
         name: { in: ['Deep Learning', 'Optimization'] },
       });
@@ -120,10 +120,10 @@ describe('WorkItem Creation & State Connect Type Safety', () => {
       const uuid2 = '88e686b9-1226-4b65-abbf-5cd319ba61b2';
       await repository.findLabelsByIds(projectId, [uuid1, uuid2]);
 
-      expect(mockPrisma.workItemLabel.findMany).toHaveBeenCalledTimes(1);
-      const callArgs = mockPrisma.workItemLabel.findMany.mock.calls[0][0];
+      expect(mockPrisma.spaceLabel.findMany).toHaveBeenCalledTimes(1);
+      const callArgs = mockPrisma.spaceLabel.findMany.mock.calls[0][0];
 
-      expect(callArgs.where.AND[0]).toEqual({ projectId });
+      expect(callArgs.where.AND[0]).toEqual({ spaceId: projectId });
       expect(callArgs.where.AND[1]).toEqual({ id: { in: [uuid1, uuid2] } });
     });
 
@@ -134,10 +134,10 @@ describe('WorkItem Creation & State Connect Type Safety', () => {
         'GPU Cluster & HPC',
       ]);
 
-      expect(mockPrisma.workItemLabel.findMany).toHaveBeenCalledTimes(1);
-      const callArgs = mockPrisma.workItemLabel.findMany.mock.calls[0][0];
+      expect(mockPrisma.spaceLabel.findMany).toHaveBeenCalledTimes(1);
+      const callArgs = mockPrisma.spaceLabel.findMany.mock.calls[0][0];
 
-      expect(callArgs.where.AND[0]).toEqual({ projectId });
+      expect(callArgs.where.AND[0]).toEqual({ spaceId: projectId });
       expect(callArgs.where.AND[1]).toEqual({
         OR: [
           { id: { in: [validUuid] } },
@@ -149,7 +149,7 @@ describe('WorkItem Creation & State Connect Type Safety', () => {
     it('should return empty array without database call when labelIds is empty', async () => {
       const result = await repository.findLabelsByIds(projectId, []);
       expect(result).toEqual([]);
-      expect(mockPrisma.workItemLabel.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.spaceLabel.findMany).not.toHaveBeenCalled();
     });
   });
 });

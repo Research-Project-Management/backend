@@ -1,177 +1,111 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ProjectAnalyticsRepository } from './analytics.repository';
-import { ProjectPortfolioOverviewDto } from './dto/project-analytics.dto';
+import { Injectable } from '@nestjs/common';
+import { AnalyticsRepository } from './analytics.repository';
+import { RedisCacheService } from '@/core';
+import {
+  ProjectWorkItemDistributionDto,
+  ProjectOverviewDto,
+  UserOverviewDto,
+} from './dto/analytics.dto';
+import {
+  aggregateLabelDistribution,
+  aggregateProjectDistributions,
+  buildWorkItemTimeSeries,
+} from './domain/analytics.domain';
+import { LabelDistributionItem, TimeSeriesPoint } from './types/analytics.types';
 
 @Injectable()
-export class ProjectAnalyticsService {
-  constructor(private readonly analyticsRepo: ProjectAnalyticsRepository) {}
+export class AnalyticsService {
+  constructor(
+    private readonly analyticsRepo: AnalyticsRepository,
+    private readonly cache: RedisCacheService,
+  ) {}
 
+  /**
+   * Project Dimensional Analytics (KPIs, State Columns, State Groups, Priority, Member Workload, Labels)
+   */
+  async getProjectAnalytics(
+    projectId: string,
+  ): Promise<ProjectWorkItemDistributionDto> {
+    const cacheKey = `flux:analytics:proj:${projectId}:insights`;
+
+    return this.cache.wrap(
+      cacheKey,
+      async () => {
+        const [items, states] = await Promise.all([
+          this.analyticsRepo.findProjectWorkItemsWithAssignees(projectId),
+          this.analyticsRepo.findProjectStates(projectId),
+        ]);
+        return aggregateProjectDistributions(items, states);
+      },
+      300,
+    );
+  }
+
+  /**
+   * Project Dimensional Overview counts (members, workItems, pages, files, stickies, papers)
+   */
   async getProjectOverview(
     projectId: string,
-  ): Promise<ProjectPortfolioOverviewDto> {
-    const project = await this.analyticsRepo.getProjectWithMetadata(projectId);
-    if (!project) {
-      throw new NotFoundException(`Project with ID "${projectId}" not found`);
-    }
+  ): Promise<{ stats: ProjectOverviewDto }> {
+    const cacheKey = `flux:analytics:proj:${projectId}:overview`;
 
-    const stateCounts =
-      await this.analyticsRepo.getWorkItemsCountsByStateGroup(projectId);
-
-    const backlog = stateCounts.backlog || 0;
-    const unstarted = stateCounts.unstarted || 0;
-    const started = stateCounts.started || 0;
-    const completed = stateCounts.completed || 0;
-    const cancelled = stateCounts.cancelled || 0;
-
-    const totalWorkItems =
-      backlog + unstarted + started + completed + cancelled;
-    const actionableTotal = totalWorkItems - cancelled;
-    const completionPercentage =
-      actionableTotal > 0
-        ? Number(((completed / actionableTotal) * 100).toFixed(1))
-        : 0;
-
-    let daysRemaining: number | null = null;
-    let isOverdue = false;
-
-    if (project.targetDate) {
-      const now = new Date();
-      const target = new Date(project.targetDate);
-      const diffMs = target.getTime() - now.getTime();
-      daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      const terminalStates = [
-        'completed',
-        'completed & archived',
-        'cancelled',
-        'suspended',
-      ];
-      isOverdue =
-        daysRemaining < 0 &&
-        Boolean(
-          project.state &&
-          !terminalStates.includes(project.state.name?.toLowerCase()),
-        );
-    }
-
-    return {
-      projectId: project.id,
-      name: project.name,
-      state: project.state,
-      priority: project.priority,
-      startDate: project.startDate,
-      targetDate: project.targetDate,
-      daysRemaining,
-      isOverdue,
-      totalWorkItems,
-      completedWorkItems: completed,
-      inProgressWorkItems: started,
-      backlogWorkItems: backlog + unstarted,
-      completionPercentage,
-      totalMembers: project._count.members,
-    };
+    return this.cache.wrap(
+      cacheKey,
+      async () => {
+        const stats = await this.analyticsRepo.countProjectStats(projectId);
+        return { stats };
+      },
+      300,
+    );
   }
 
-  async getProjectDetailedBreakdown(projectId: string) {
-    const items = await this.analyticsRepo.getWorkItemsDetailed(projectId);
+  /**
+   * User Personal Aggregation Overview
+   */
+  async getUserOverview(userId: string): Promise<{ stats: UserOverviewDto }> {
+    const cacheKey = `flux:analytics:user:${userId}:overview`;
 
-    const byPriority: Record<string, number> = {};
-    const byStateGroup: Record<string, number> = {};
-    const byState: Record<
-      string,
-      { id: string; name: string; color: string; count: number }
-    > = {};
-    const byAssignee: Record<string, number> = {};
-
-    for (const item of items) {
-      const p = item.priority || 'none';
-      byPriority[p] = (byPriority[p] || 0) + 1;
-
-      const grp = item.state?.group || 'backlog';
-      byStateGroup[grp] = (byStateGroup[grp] || 0) + 1;
-
-      if (item.state) {
-        if (!byState[item.state.id]) {
-          byState[item.state.id] = {
-            id: item.state.id,
-            name: item.state.name,
-            color: item.state.color,
-            count: 0,
-          };
-        }
-        byState[item.state.id].count += 1;
-      }
-
-      const a = item.assigneeId || 'unassigned';
-      byAssignee[a] = (byAssignee[a] || 0) + 1;
-    }
-
-    return {
-      totalItems: items.length,
-      byPriority,
-      byStateGroup,
-      byState: Object.values(byState),
-      byAssignee,
-    };
+    return this.cache.wrap(
+      cacheKey,
+      async () => {
+        const stats = await this.analyticsRepo.countUserStats(userId);
+        return { stats };
+      },
+      300,
+    );
   }
 
+  /** Label distribution: { id?, label, color?, count }[] for a project */
+  async getLabelDistribution(
+    projectId: string,
+  ): Promise<{ labels: LabelDistributionItem[] }> {
+    const items =
+      await this.analyticsRepo.findProjectWorkItemsByLabel(projectId);
+    const labels = aggregateLabelDistribution(items);
+    return { labels };
+  }
+
+  /**
+   * Time-series: work items created and completed per day.
+   */
   async getTimeSeries(
     projectId: string,
-    fromDate: string,
-    toDate: string,
-  ): Promise<{ date: string; created: number; completed: number }[]> {
-    const from = new Date(fromDate);
-    const to = new Date(toDate);
-    to.setHours(23, 59, 59, 999);
+    from: string,
+    to: string,
+  ): Promise<{
+    series: TimeSeriesPoint[];
+  }> {
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    toDate.setHours(23, 59, 59, 999);
 
     const items = await this.analyticsRepo.findProjectWorkItemsTimeSeries(
       projectId,
-      from,
-      to,
+      fromDate,
+      toDate,
     );
 
-    const dayMap: Record<string, { created: number; completed: number }> = {};
-    const cur = new Date(from);
-    while (cur <= to) {
-      const key = cur.toISOString().slice(0, 10);
-      dayMap[key] = { created: 0, completed: 0 };
-      cur.setDate(cur.getDate() + 1);
-    }
-
-    for (const item of items) {
-      const cDate = item.createdAt.toISOString().slice(0, 10);
-      if (dayMap[cDate]) dayMap[cDate].created++;
-      if (item.completed) {
-        const uDate = item.updatedAt.toISOString().slice(0, 10);
-        if (dayMap[uDate]) dayMap[uDate].completed++;
-      }
-    }
-
-    return Object.entries(dayMap).map(([date, counts]) => ({
-      date,
-      ...counts,
-    }));
-  }
-
-  async getLabelDistribution(
-    projectId: string,
-  ): Promise<{ labels: { label: string; count: number }[] }> {
-    const items =
-      await this.analyticsRepo.findProjectWorkItemsByLabel(projectId);
-    const labelCount: Record<string, number> = {};
-    for (const item of items) {
-      const relationalLabels = Array.isArray(item.labelAssignments)
-        ? item.labelAssignments
-            .map((a) => a.label?.name)
-            .filter((name): name is string => Boolean(name))
-        : [];
-      const uniqueLabels = new Set(relationalLabels.filter(Boolean));
-      for (const label of uniqueLabels) {
-        labelCount[label] = (labelCount[label] || 0) + 1;
-      }
-    }
-    const labels = Object.entries(labelCount)
-      .map(([label, count]) => ({ label, count }))
-      .sort((a, b) => b.count - a.count);
-    return { labels };
+    const series = buildWorkItemTimeSeries(items, fromDate, toDate);
+    return { series };
   }
 }
