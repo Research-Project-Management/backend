@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { CircuitBreaker, CircuitBreakerOptions } from './circuit-breaker';
 import { TokenBucketRateLimiter, RateLimiterOptions } from './circuit-breaker';
+import { RedisCacheService } from '@/core';
 
 interface ResilienceExecuteOptions<T> {
   fallback?: (err: Error) => Promise<T>;
@@ -63,7 +64,7 @@ export class ResilienceRegistryService {
   private readonly limiters = new Map<string, TokenBucketRateLimiter>();
   private readonly dynamicHostLastUsed = new Map<string, number>();
 
-  constructor() {
+  constructor(@Optional() private readonly redis?: RedisCacheService) {
     this.registerDefaults();
   }
 
@@ -208,6 +209,7 @@ export class ResilienceRegistryService {
         name,
         capacity: options?.capacity ?? 10,
         refillRatePerSec: options?.refillRatePerSec ?? 5,
+        redis: this.redis,
       });
       this.limiters.set(name, limiter);
       this.logger.log(`Initialized RateLimiter for "${name}"`);
@@ -293,6 +295,7 @@ export class ResilienceRegistryService {
         name: 'doi-org',
         capacity: 5,
         refillRatePerSec: 5,
+        redis: this.redis,
       }),
     );
 
@@ -311,6 +314,7 @@ export class ResilienceRegistryService {
         name: 'arxiv',
         capacity: 1,
         refillRatePerSec: 0.33,
+        redis: this.redis,
       }),
     );
 
@@ -329,6 +333,7 @@ export class ResilienceRegistryService {
         name: 'crossref',
         capacity: 10,
         refillRatePerSec: 10,
+        redis: this.redis,
       }),
     );
 
@@ -347,6 +352,7 @@ export class ResilienceRegistryService {
         name: 'pubmed',
         capacity: 3,
         refillRatePerSec: 3,
+        redis: this.redis,
       }),
     );
 
@@ -410,6 +416,7 @@ export class ResilienceRegistryService {
           name: p.name,
           capacity: p.capacity,
           refillRatePerSec: p.refillRatePerSec,
+          redis: this.redis,
         }),
       );
     }

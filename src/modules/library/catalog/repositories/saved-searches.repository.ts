@@ -562,7 +562,6 @@ export class StateRepository {
           create: {
             userId,
             attachmentId: resolvedAttachmentId,
-            itemId,
             ...(currentPage !== undefined ? { currentPage } : {}),
             ...(scrollOffsetX !== undefined ? { scrollOffsetX } : {}),
             ...(scrollOffsetY !== undefined ? { scrollOffsetY } : {}),
@@ -716,12 +715,6 @@ export class StateRepository {
           },
         });
       }),
-      typeof client.attachmentReadingState?.updateMany === 'function'
-        ? client.attachmentReadingState.updateMany({
-            where: { itemId: { in: cleanSourceIds } },
-            data: { itemId: targetItemId },
-          })
-        : undefined,
       client.libraryItemState.deleteMany({
         where: { itemId: { in: cleanSourceIds } },
       }),

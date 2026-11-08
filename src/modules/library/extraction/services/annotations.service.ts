@@ -28,6 +28,8 @@ import {
   UNIT_OF_WORK,
   IUnitOfWork,
   LIBRARY_EVENT_TYPES,
+  LIBRARY_REDIS_KEYS,
+  libraryConfig,
   isUuid,
   SingleFlightCoalescer,
 } from '@/modules/library/core';
@@ -58,6 +60,10 @@ export class AnnotationsService {
     userId?: string,
     projectId?: string,
   ): Promise<void> {
+    const annotationKey = LIBRARY_REDIS_KEYS.attachmentAnnotations
+      ? LIBRARY_REDIS_KEYS.attachmentAnnotations(attachmentId)
+      : `library:attachment:${attachmentId}:annotations`;
+
     await executeStandardLibraryCacheInvalidation(
       this.cacheCoordinator ?? this.catalogGateway,
       this.cache,
@@ -65,7 +71,7 @@ export class AnnotationsService {
         userId,
         projectId,
         itemIds: itemId ? [itemId] : undefined,
-        extraKeys: [`library:attachment:${attachmentId}:annotations`],
+        extraKeys: [annotationKey],
         preserveContentCaches: true,
       },
     );
@@ -87,7 +93,11 @@ export class AnnotationsService {
       projectId,
     );
 
-    const cacheKey = `library:attachment:${attachmentId}:annotations`;
+    const cacheKey = LIBRARY_REDIS_KEYS.attachmentAnnotations
+      ? LIBRARY_REDIS_KEYS.attachmentAnnotations(attachmentId)
+      : `library:attachment:${attachmentId}:annotations`;
+
+    // 1. Check L1 memory / L2 Redis cache
     if (this.cache) {
       try {
         const cached = await this.cache.get<AnnotationEntity[]>(cacheKey);
@@ -103,21 +113,27 @@ export class AnnotationsService {
       }
     }
 
-    if (pageIndex === undefined && type === undefined) {
-      return this.singleFlight.execute(cacheKey, async () => {
-        const all = await this.annotationsRepo.findByAttachment(attachmentId);
-        if (this.cache) {
-          try {
-            await this.cache.set(cacheKey, all, 300);
-          } catch {
-            // Ignore cache write errors
-          }
+    // 2. Cache miss: Fetch all annotations for this attachment with Single-Flight Promise Coalescing
+    const all = await this.singleFlight.execute(cacheKey, async () => {
+      const fetched = await this.annotationsRepo.findByAttachment(attachmentId);
+      if (this.cache) {
+        try {
+          const jitterTtl = libraryConfig().app.isTest
+            ? 300
+            : Math.max(60, Math.floor(300 * (0.9 + Math.random() * 0.2)));
+          await this.cache.set(cacheKey, fetched, jitterTtl);
+        } catch {
+          // Ignore cache write errors
         }
-        return all;
-      });
-    }
+      }
+      return fetched;
+    });
 
-    return this.annotationsRepo.findByAttachment(attachmentId, pageIndex, type);
+    return (all || []).filter(
+      (a) =>
+        (pageIndex === undefined || a.pageIndex === pageIndex) &&
+        (type === undefined || a.type === type),
+    );
   }
 
   async getAnnotation(userId: string, id: string, projectId?: string) {

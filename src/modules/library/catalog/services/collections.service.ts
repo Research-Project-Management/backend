@@ -39,6 +39,17 @@ export class CollectionsService {
     const normalized = normalizeProjectScopeId(projectId);
     return isProjectScopeId(normalized) && isUUID(normalized) ? normalized : undefined;
   }
+  private async getScopeVersion(scopeId: string): Promise<number> {
+    if (!this.cache) return 0;
+    try {
+      const ver = await this.cache.get<number | string>(
+        LIBRARY_REDIS_KEYS.scopeVersion(scopeId),
+      );
+      return ver !== null && ver !== undefined ? Number(ver) : 0;
+    } catch {
+      return 0;
+    }
+  }
   private async invalidateCollectionsCache(
     userId: string,
     projectId?: string,
@@ -100,7 +111,8 @@ export class CollectionsService {
       };
     };
     const scopeId = effectiveProjectId ? effectiveProjectId : `u:${userId}`;
-    const cacheKey = LIBRARY_REDIS_KEYS.collections(scopeId);
+    const version = await this.getScopeVersion(scopeId);
+    const cacheKey = LIBRARY_REDIS_KEYS.collections(scopeId, version);
     return this.singleFlight.execute(cacheKey, () =>
       this.cache
         ? this.cache.wrap(cacheKey, fetchCollections, this.applyJitter(300))
@@ -117,7 +129,8 @@ export class CollectionsService {
       return { tree: this.tree.buildTree(collections) };
     };
     const scopeId = effectiveProjectId ? effectiveProjectId : `u:${userId}`;
-    const cacheKey = LIBRARY_REDIS_KEYS.collectionTree(scopeId);
+    const version = await this.getScopeVersion(scopeId);
+    const cacheKey = LIBRARY_REDIS_KEYS.collectionTree(scopeId, version);
     return this.singleFlight.execute(cacheKey, () =>
       this.cache
         ? this.cache.wrap(cacheKey, fetchTree, this.applyJitter(300))

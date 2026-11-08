@@ -34,23 +34,21 @@ model LibraryItemState {
 }
 
 model AttachmentReadingState {
-  userId        String      @map("user_id") @db.Uuid
-  attachmentId  String      @map("attachment_id") @db.Uuid
-  attachment    Attachment  @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_att_reading_states_attachment_id")
-  itemId        String      @map("item_id") @db.Uuid
-  item          LibraryItem @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_att_reading_states_item_id")
-  currentPage   Int         @default(1) @map("current_page")
-  scrollOffsetX Float       @default(0) @map("scroll_offset_x") @db.Real
-  scrollOffsetY Float       @default(0) @map("scroll_offset_y") @db.Real
-  zoomScale     Float       @default(1.0) @map("zoom_scale") @db.Real
-  rotation      Int         @default(0) @map("rotation") @db.SmallInt
-  viewMode      String      @default("continuous") @map("view_mode") @db.VarChar(32)
-  bookmarks     Json        @default("[]") @db.JsonB
-  version       Int         @default(1)
-  updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  userId        String     @map("user_id") @db.Uuid
+  attachmentId  String     @map("attachment_id") @db.Uuid
+  attachment    Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_att_reading_states_attachment_id")
+  currentPage   Int        @default(1) @map("current_page")
+  scrollOffsetX Float      @default(0) @map("scroll_offset_x") @db.Real
+  scrollOffsetY Float      @default(0) @map("scroll_offset_y") @db.Real
+  zoomScale     Float      @default(1.0) @map("zoom_scale") @db.Real
+  rotation      Int        @default(0) @map("rotation") @db.SmallInt
+  viewMode      String     @default("continuous") @map("view_mode") @db.VarChar(32)
+  bookmarks     Json       @default("[]") @db.JsonB
+  version       Int        @default(1)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@id([userId, attachmentId])
-  @@index([userId, itemId])
+  @@index([attachmentId])
   @@map("attachment_reading_states")
 }
 

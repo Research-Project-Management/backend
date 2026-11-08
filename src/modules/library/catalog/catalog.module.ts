@@ -29,10 +29,12 @@ import { TagsService } from './services/tags.service';
 import { TypesService } from './services/schema-validator.service';
 import { LibraryBootstrapService } from './services/library-bootstrap.service';
 import { ReaderBootstrapService } from './services/reader-bootstrap.service';
+import { ReaderWriteBehindService } from './services/reader-write-behind.service';
 import { StateService } from './services/state.service';
 import { SavedSearchesService } from './services/saved-searches.service';
 import { SchemaValidatorService } from './services/schema-validator.service';
 import { NotesService } from './services/notes.service';
+import { TrashMaintenanceService } from './services/trash-maintenance.service';
 
 // Engines & Mappers
 import { TreeEngine } from './domain/state.domain';
@@ -99,8 +101,10 @@ import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core';
     SavedSearchesService,
     SchemaValidatorService,
     NotesService,
+    TrashMaintenanceService,
     LibraryBootstrapService,
     ReaderBootstrapService,
+    ReaderWriteBehindService,
 
     // Engines & Mappers
     TreeEngine,
@@ -119,6 +123,12 @@ import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core';
     SavedSearchesRepository,
     NotesRepository,
   ],
-  exports: [CATALOG_FACADE, CatalogFacade, ITEM_CACHE_INVALIDATOR],
+  exports: [
+    CATALOG_FACADE,
+    CatalogFacade,
+    ITEM_CACHE_INVALIDATOR,
+    ReaderWriteBehindService,
+    TrashMaintenanceService,
+  ],
 })
 export class CatalogModule {}

@@ -43,6 +43,18 @@ export class TagsService {
     @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 
+  private async getScopeVersion(scopeId: string): Promise<number> {
+    if (!this.cache) return 0;
+    try {
+      const ver = await this.cache.get<number | string>(
+        LIBRARY_REDIS_KEYS.scopeVersion(scopeId),
+      );
+      return ver !== null && ver !== undefined ? Number(ver) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
   async invalidateTagsCache(
     userId: UserId | string,
     projectId?: ProjectId | string,
@@ -69,10 +81,12 @@ export class TagsService {
     options?: { includeInactive?: boolean; projectId?: ProjectId | string },
   ) {
     const validProjectId = normalizeProjectScopeId(options?.projectId);
-    const scopeKey = validProjectId ? `proj:${validProjectId}` : userId;
+    const scopeKey = validProjectId ? `proj:${validProjectId}` : String(userId);
+    const version = await this.getScopeVersion(scopeKey);
+    const baseKey = LIBRARY_REDIS_KEYS.tags(scopeKey, version);
     const cacheKey = options?.includeInactive
-      ? `${LIBRARY_REDIS_KEYS.tags(scopeKey)}:all`
-      : LIBRARY_REDIS_KEYS.tags(scopeKey);
+      ? `${baseKey}:all`
+      : baseKey;
     return this.singleFlight.execute(cacheKey, () =>
       this.cache
         ? this.cache.wrap(

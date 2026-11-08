@@ -676,19 +676,6 @@ export class SearchRepository implements OnModuleInit {
     itemId?: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      let resolvedItemId = itemId || pages[0]?.itemId;
-      if (!resolvedItemId && typeof tx.attachment?.findUnique === 'function') {
-        try {
-          const att = await tx.attachment.findUnique({
-            where: { id: attachmentId },
-            select: { itemId: true },
-          });
-          resolvedItemId = att?.itemId;
-        } catch {
-          // Ignore lookup failure in unit test mocks
-        }
-      }
-
       await tx.fullTextIndex.deleteMany({ where: { attachmentId } });
       if (pages.length > 0) {
         for (let i = 0; i < pages.length; i += 100) {
@@ -696,7 +683,6 @@ export class SearchRepository implements OnModuleInit {
           await tx.fullTextIndex.createMany({
             data: chunk.map((page) => ({
               attachmentId,
-              ...(resolvedItemId ? { itemId: resolvedItemId } : {}),
               pageIndex: page.pageIndex,
               textContent: (page.textContent || '').replace(/\0/g, ''),
               charOffset: page.charOffset ?? 0,

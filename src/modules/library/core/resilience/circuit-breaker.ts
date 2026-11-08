@@ -236,38 +236,120 @@ export class CircuitBreaker {
   }
 }
 
+export interface IRateLimitRedisClient {
+  eval(
+    script: string,
+    numKeys: number,
+    ...args: (string | number)[]
+  ): Promise<unknown>;
+}
+
+export interface IRateLimitStore {
+  isReady?: () => boolean;
+  getClient?: () => IRateLimitRedisClient | null;
+}
+
 export interface RateLimiterOptions {
   name?: string;
   capacity: number;
   refillRatePerSec: number;
+  redis?: IRateLimitStore;
 }
 
 /**
- * Token Bucket Rate Limiter.
+ * Enterprise Token Bucket Rate Limiter.
  *
  * Enforces polite rate limits for academic external APIs (e.g. arXiv 1 req/3s, CrossRef 10 req/s, PubMed 3 req/s).
- * Supports bursts up to `capacity` while smoothly replenishing tokens at `refillRatePerSec`.
+ * - Multi-Pod Atomic Coordination: Employs Redis Lua script for distributed token reservation with virtual deficit queues.
+ * - Single-Process Fallback: Operates seamlessly in-memory when Redis is unconfigured, unreachable, or in unit tests.
+ * - Staggered Queueing: Distributes concurrent bursts with deterministic millisecond spacing instead of thundering herd stampedes.
  */
 export class TokenBucketRateLimiter {
   private readonly logger = new Logger(TokenBucketRateLimiter.name);
   public readonly name: string;
   public readonly capacity: number;
   public readonly refillRatePerSec: number;
+  private readonly redisStore?: IRateLimitStore;
 
   private tokens: number;
   private lastRefillTimestamp: number;
+
+  private static readonly ACQUIRE_LUA_SCRIPT = `
+    local key = KEYS[1]
+    local capacity = tonumber(ARGV[1])
+    local refill_rate = tonumber(ARGV[2])
+    local now = tonumber(ARGV[3])
+    local requested = tonumber(ARGV[4])
+
+    local data = redis.call('HMGET', key, 'tokens', 'last_refill')
+    local tokens = tonumber(data[1])
+    local last_refill = tonumber(data[2])
+
+    if not tokens or not last_refill then
+      tokens = capacity
+      last_refill = now
+    else
+      local elapsed_sec = math.max(0, (now - last_refill) / 1000)
+      tokens = math.min(capacity, tokens + (elapsed_sec * refill_rate))
+      last_refill = now
+    end
+
+    local wait_ms = 0
+    if tokens >= requested then
+      tokens = tokens - requested
+    else
+      tokens = tokens - requested
+      local deficit = -tokens
+      wait_ms = math.max(10, math.ceil((deficit / refill_rate) * 1000))
+    end
+
+    redis.call('HMSET', key, 'tokens', tostring(tokens), 'last_refill', tostring(last_refill))
+    local ttl = math.max(3600, math.ceil(capacity / refill_rate) * 2)
+    redis.call('EXPIRE', key, ttl)
+
+    return { wait_ms, tostring(tokens) }
+  `;
+
+  private static readonly REFUND_LUA_SCRIPT = `
+    local key = KEYS[1]
+    local count = tonumber(ARGV[1])
+    local capacity = tonumber(ARGV[2])
+
+    local data = redis.call('HGET', key, 'tokens')
+    local tokens = tonumber(data)
+    if tokens then
+      tokens = math.min(capacity, tokens + count)
+      redis.call('HSET', key, 'tokens', tostring(tokens))
+    end
+    return tostring(tokens or capacity)
+  `;
+
+  private static readonly RESET_LUA_SCRIPT = `
+    local key = KEYS[1]
+    local capacity = tonumber(ARGV[1])
+    local now = tonumber(ARGV[2])
+    redis.call('HMSET', key, 'tokens', tostring(capacity), 'last_refill', tostring(now))
+    return 1
+  `;
 
   constructor(options: RateLimiterOptions) {
     this.name = options.name || 'default';
     this.capacity = Math.max(1, options.capacity);
     this.refillRatePerSec = Math.max(0.001, options.refillRatePerSec);
+    this.redisStore = options.redis;
     this.tokens = this.capacity;
     this.lastRefillTimestamp = Date.now();
   }
 
+  private getRedisClient(): IRateLimitRedisClient | null {
+    if (this.redisStore && typeof this.redisStore.isReady === 'function') {
+      if (!this.redisStore.isReady()) return null;
+    }
+    return this.redisStore?.getClient?.() ?? null;
+  }
 
   /**
-   * Attempts to acquire `count` tokens non-blockingly.
+   * Synchronous non-blocking token check (local memory cache).
    * Returns true if tokens were acquired, false otherwise.
    */
   public tryAcquire(count = 1): boolean {
@@ -281,8 +363,8 @@ export class TokenBucketRateLimiter {
 
   /**
    * Acquires `count` tokens, waiting asynchronously if tokens are exhausted.
-   * Reserves virtual token deficit atomically so concurrent callers queue fairly without burst stampedes.
-   * Can be cancelled cooperatively via `signal`.
+   * Multi-pod aware: atomically reserves virtual token deficit in Redis so concurrent callers queue fairly.
+   * Falls back to in-memory virtual queue if Redis is unconfigured or unreachable.
    */
   public async acquire(count = 1, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) {
@@ -291,6 +373,84 @@ export class TokenBucketRateLimiter {
       );
     }
 
+    const client = this.getRedisClient();
+    if (client) {
+      try {
+        const redisKey = `flux:ratelimit:${this.name}`;
+        const res = (await client.eval(
+          TokenBucketRateLimiter.ACQUIRE_LUA_SCRIPT,
+          1,
+          redisKey,
+          this.capacity,
+          this.refillRatePerSec,
+          Date.now(),
+          count,
+        )) as [number, string];
+
+        const waitMs = Number(res[0]);
+
+        if (waitMs <= 0) {
+          return;
+        }
+
+        this.logger.debug(
+          `[RateLimiter:${this.name}] Distributed rate limit reached. Waiting ${waitMs}ms for ${count} token(s).`,
+        );
+
+        await new Promise<void>((resolve, reject) => {
+          let timer: NodeJS.Timeout | null = null;
+
+          const onAbort = () => {
+            if (timer) clearTimeout(timer);
+            // Cooperative refund in Redis
+            void client
+              .eval(
+                TokenBucketRateLimiter.REFUND_LUA_SCRIPT,
+                1,
+                redisKey,
+                count,
+                this.capacity,
+              )
+              .catch(() => {});
+
+            const reason =
+              signal?.reason instanceof Error
+                ? signal.reason
+                : new Error(
+                    signal?.reason
+                      ? String(signal.reason)
+                      : `Aborted while waiting for rate limit token on "${this.name}"`,
+                  );
+            reject(reason);
+          };
+
+          if (signal) {
+            signal.addEventListener('abort', onAbort, { once: true });
+          }
+
+          timer = setTimeout(() => {
+            if (signal) {
+              signal.removeEventListener('abort', onAbort);
+            }
+            resolve();
+          }, waitMs);
+        });
+
+        return;
+      } catch (err: unknown) {
+        if (signal?.aborted) {
+          throw (
+            signal.reason ||
+            new Error('Aborted while waiting for rate limit token')
+          );
+        }
+        this.logger.warn(
+          `[RateLimiter:${this.name}] Redis distributed acquire failed: ${err instanceof Error ? err.message : String(err)}. Falling back to in-memory limiter.`,
+        );
+      }
+    }
+
+    // In-memory fallback
     if (this.tryAcquire(count)) {
       return;
     }
@@ -345,6 +505,18 @@ export class TokenBucketRateLimiter {
   public reset(): void {
     this.tokens = this.capacity;
     this.lastRefillTimestamp = Date.now();
+    const client = this.getRedisClient();
+    if (client) {
+      client
+        .eval(
+          TokenBucketRateLimiter.RESET_LUA_SCRIPT,
+          1,
+          `flux:ratelimit:${this.name}`,
+          this.capacity,
+          Date.now(),
+        )
+        .catch(() => {});
+    }
   }
 
   private refill(): void {

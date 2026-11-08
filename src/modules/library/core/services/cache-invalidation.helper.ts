@@ -5,6 +5,8 @@ import { normalizeProjectScopeId } from '../domain/specification.domain';
 export interface IRawLibraryCache {
   del(key: string): Promise<unknown>;
   delPattern?(pattern: string): Promise<unknown>;
+  incr?(key: string): Promise<number>;
+  get?<T>(key: string): Promise<T | null>;
 }
 
 export interface StandardLibraryCacheInvalidationParams {
@@ -102,6 +104,7 @@ export async function invalidateLibraryScopeCaches(
   if (!skipScopeInvalidation) {
     if (userId) {
       const userSyncScope = `user:${userId}`;
+      const userScopeKey = `u:${userId}`;
       tasks.push(
         rawCache.del(LIBRARY_REDIS_KEYS.savedSearches(userId)),
         rawCache.del(LIBRARY_REDIS_KEYS.searchVersion(userId)),
@@ -110,14 +113,24 @@ export async function invalidateLibraryScopeCaches(
         rawCache.del(LIBRARY_REDIS_KEYS.syncSequence(userSyncScope)),
         rawCache.del(LIBRARY_REDIS_KEYS.minRetainedSequence(userSyncScope)),
       );
-      if (hasDelPattern) {
+      if (typeof rawCache.incr === 'function') {
+        // Atomic O(1) version invalidation: invalidates collections, tree, tags, and itemsList without scanning keyspace
         tasks.push(
-          rawCache.delPattern!(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+          rawCache.incr(LIBRARY_REDIS_KEYS.scopeVersion(userId)),
+          rawCache.incr(LIBRARY_REDIS_KEYS.scopeVersion(userScopeKey)),
+        );
+      } else if (hasDelPattern) {
+        tasks.push(
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.tagsPattern(userId)),
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.collectionsPattern(userId)),
           rawCache.delPattern!(
-            LIBRARY_REDIS_KEYS.collectionsPattern(`u:${userId}`),
+            LIBRARY_REDIS_KEYS.collectionsPattern(userScopeKey),
           ),
+        );
+      }
+      if (hasDelPattern) {
+        tasks.push(
+          rawCache.delPattern!(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.countsPattern(userId)),
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
@@ -150,16 +163,26 @@ export async function invalidateLibraryScopeCaches(
         rawCache.del(LIBRARY_REDIS_KEYS.syncSequence(projScope)),
         rawCache.del(LIBRARY_REDIS_KEYS.minRetainedSequence(projScope)),
       );
-      if (hasDelPattern) {
+      if (typeof rawCache.incr === 'function') {
+        // Atomic O(1) version invalidation for project scope
         tasks.push(
-          rawCache.delPattern!(LIBRARY_REDIS_KEYS.itemsPattern(validProjectId)),
-          rawCache.delPattern!(LIBRARY_REDIS_KEYS.itemsPattern(projScope)),
+          rawCache.incr(LIBRARY_REDIS_KEYS.scopeVersion(validProjectId)),
+          rawCache.incr(LIBRARY_REDIS_KEYS.scopeVersion(projScope)),
+        );
+      } else if (hasDelPattern) {
+        tasks.push(
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.tagsPattern(validProjectId)),
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.tagsPattern(projScope)),
           rawCache.delPattern!(
             LIBRARY_REDIS_KEYS.collectionsPattern(validProjectId),
           ),
           rawCache.delPattern!(LIBRARY_REDIS_KEYS.collectionsPattern(projScope)),
+        );
+      }
+      if (hasDelPattern) {
+        tasks.push(
+          rawCache.delPattern!(LIBRARY_REDIS_KEYS.itemsPattern(validProjectId)),
+          rawCache.delPattern!(LIBRARY_REDIS_KEYS.itemsPattern(projScope)),
           rawCache.delPattern!(
             LIBRARY_REDIS_KEYS.countsPattern(validProjectId),
           ),

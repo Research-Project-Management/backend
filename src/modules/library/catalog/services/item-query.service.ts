@@ -484,12 +484,19 @@ export class ItemQueryService {
       .filter(Boolean)
       .join(':');
     const baseCacheSuffix = `${options.view || 'all'}:${options.collectionId || ''}:${options.tagId || ''}:${limit}`;
+    const version = (canCache && this.cache)
+      ? await this.cache
+          .get<number | string>(LIBRARY_REDIS_KEYS.scopeVersion(scopeKey))
+          .then((v) => (v !== null && v !== undefined ? Number(v) : 0))
+          .catch(() => 0)
+      : 0;
     const cacheKey = canCache
       ? LIBRARY_REDIS_KEYS.itemsList(
           scopeKey,
           extraCacheParts
             ? `${baseCacheSuffix}:${extraCacheParts}`
             : baseCacheSuffix,
+          version,
         )
       : null;
 

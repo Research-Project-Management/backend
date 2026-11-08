@@ -202,15 +202,20 @@ export function escapeRedisGlob(segment: string): string {
  * Colon-separated hierarchical structure with user/project scope isolation.
  */
 export const LIBRARY_REDIS_KEYS = {
-  // Collections
-  collections: (projectId: string) => `library:${projectId}:collections`,
-  collectionTree: (projectId: string) =>
-    `library:${projectId}:collections:tree`,
+  // Scope Versioning (O(1) atomic invalidation)
+  scopeVersion: (scopeKey: string) => `library:ver:scope:${scopeKey}`,
+
+  // Collections (supports versioned key)
+  collections: (scopeId: string, version: number | string = 0) =>
+    `library:${scopeId}:collections:v${version}`,
+  collectionTree: (scopeId: string, version: number | string = 0) =>
+    `library:${scopeId}:collections:tree:v${version}`,
   collectionsPattern: (projectId: string) =>
     `library:${escapeRedisGlob(projectId)}:collections*`,
 
-  // Tags
-  tags: (projectId: string) => `library:${projectId}:tags`,
+  // Tags (supports versioned key)
+  tags: (scopeId: string, version: number | string = 0) =>
+    `library:${scopeId}:tags:v${version}`,
   tagsPattern: (projectId: string) =>
     `library:${escapeRedisGlob(projectId)}:tags*`,
 
@@ -232,11 +237,16 @@ export const LIBRARY_REDIS_KEYS = {
   itemDetails: (itemId: string) => `library:item:${itemId}:details`,
   itemFulltext: (itemId: string) => `library:item:${itemId}:fulltext`,
   itemAttachments: (itemId: string) => `library:item:${itemId}:attachments`,
+  attachmentAnnotations: (attachmentId: string) =>
+    `library:attachment:${attachmentId}:annotations`,
   itemNotes: (itemId: string) => `library:item:${itemId}:notes`,
   itemUserOverlay: (itemId: string, userId: string) =>
     `library:item:${itemId}:u:${userId}`,
-  itemsList: (scopeKey: string, optionsHash: string) =>
-    `library:${scopeKey}:items:list:${optionsHash}`,
+  itemsList: (
+    scopeKey: string,
+    optionsHash: string,
+    version: number | string = 0,
+  ) => `library:${scopeKey}:items:list:v${version}:${optionsHash}`,
   itemsPattern: (scopeKey: string) =>
     `library:${escapeRedisGlob(scopeKey)}:items*`,
   itemPattern: (itemId: string) => `library:item:${escapeRedisGlob(itemId)}*`,
@@ -259,6 +269,10 @@ export const LIBRARY_REDIS_KEYS = {
   searchItemsPattern: (scopeId: string) =>
     `library:search:items:*${escapeRedisGlob(scopeId)}*`,
   searchVersion: (scopeKey: string) => `library:search:version:${scopeKey}`,
+
+  // Reader Write-Behind Buffer (High-Frequency Coalescing)
+  readerProgress: (userId: string) => `library:reader:progress:${userId}`,
+  readerDirtyUsers: () => 'library:reader:dirty_users',
 
   // Sync Sequence & Retention Checkpoints (High-Concurrency CDC Polling)
   syncSequence: (scopeKey: string) => `library:sync:seq:${scopeKey}`,

@@ -31,6 +31,7 @@ import {
   METADATA_PORT,
   MetadataPort,
 } from '@/modules/library/ingestion/types/metadata.types';
+import { RedisCacheService } from '@/core';
 import {
   MetadataResolverService,
   ReResolveMetadataOptions,
@@ -66,6 +67,8 @@ export class IngestionService {
     metadataResolver?: MetadataResolverService,
     @Optional()
     runReporter?: IngestionRunReporterService,
+    @Optional()
+    private readonly redis?: RedisCacheService,
   ) {
     this.metadataResolver =
       metadataResolver ??
@@ -162,7 +165,32 @@ export class IngestionService {
 
     const idempotencyKey = envelope.idempotencyKey?.trim();
     if (idempotencyKey) {
-      const lockKey = `${envelope.userId}::${envelope.projectId ?? 'personal'}::${idempotencyKey}`;
+      const lockKey = `flux:lock:ingest:${envelope.userId}:${envelope.projectId ?? 'personal'}:${idempotencyKey}`;
+
+      if (this.redis?.isReady()) {
+        const lockToken = await this.redis.acquireLock(lockKey, 30000);
+        if (!lockToken) {
+          // Lock held by concurrent pod/process: wait briefly for existing run to be committed
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          const existingRun = await this.repo.findRunByIdempotencyKey(
+            { userId: envelope.userId, projectId: envelope.projectId ?? null },
+            idempotencyKey,
+          );
+          if (existingRun) {
+            return this.verifyAndMapExistingRun(
+              existingRun,
+              this.computeRequestHash(envelope),
+            );
+          }
+        } else {
+          try {
+            return await this.executeSubmit(envelope, idempotencyKey, options);
+          } finally {
+            await this.redis.releaseLock(lockKey, lockToken);
+          }
+        }
+      }
+
       const inFlight = this.inFlightIdempotencyLocks.get(lockKey);
       if (inFlight) {
         return inFlight;

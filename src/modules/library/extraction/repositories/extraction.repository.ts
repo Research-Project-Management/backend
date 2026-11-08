@@ -310,18 +310,6 @@ export class ExtractionRepository {
     if (!pages || pages.length === 0) return;
     const execute = async (client: Prisma.TransactionClient | PrismaService) => {
       if (!client.fullTextIndex?.deleteMany) return;
-      let resolvedItemId = itemId || pages[0]?.itemId;
-      if (!resolvedItemId && typeof client.attachment?.findUnique === 'function') {
-        try {
-          const att = await client.attachment.findUnique({
-            where: { id: attachmentId },
-            select: { itemId: true },
-          });
-          resolvedItemId = att?.itemId;
-        } catch {
-          // Ignore lookup failure in unit test mocks
-        }
-      }
       await client.fullTextIndex.deleteMany({
         where: { attachmentId },
       });
@@ -332,7 +320,6 @@ export class ExtractionRepository {
         await client.fullTextIndex.createMany({
           data: chunk.map((page, idx) => ({
             attachmentId,
-            ...(resolvedItemId ? { itemId: resolvedItemId } : {}),
             pageIndex: page.pageIndex ?? i + idx,
             textContent: (page.textContent || '').replace(/\0/g, ''),
             charOffset: page.charOffset ?? 0,

@@ -19,30 +19,30 @@ enum RelationType {
 }
 
 model LibraryItem {
-  id                  String      @id @default(uuid(7)) @db.Uuid
-  spaceId             String      @map("space_id") @db.Uuid
-  space               Space       @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_library_items_space_id")
-  title               String
-  itemType            String      @default("journalArticle") @map("type")
-  year                Int?
-  citationKey         String?     @map("citation_key")
-  doi                 String?
-  isbn                String?
-  issn                String?
-  pmid                String?
-  pmcid               String?
-  arxivId             String?     @map("arxiv_id")
-  publicationTitle    String?     @map("publication_title")
-  abstract            String?
-  url                 String?
-  metadata            Json        @default("{}") @db.JsonB
-  createdById         String      @map("created_by_id") @db.Uuid
-  updatedById         String?     @map("updated_by_id") @db.Uuid
-  deletedById         String?     @map("deleted_by_id") @db.Uuid
-  version             Int         @default(1)
-  deletedAt           DateTime?   @map("deleted_at") @db.Timestamptz(6)
-  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id               String    @id @default(uuid(7)) @db.Uuid
+  spaceId          String    @map("space_id") @db.Uuid
+  space            Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_library_items_space_id")
+  title            String
+  itemType         String    @default("journalArticle") @map("type")
+  year             Int?
+  citationKey      String?   @map("citation_key")
+  doi              String?
+  isbn             String?
+  issn             String?
+  pmid             String?
+  pmcid            String?
+  arxivId          String?   @map("arxiv_id")
+  publicationTitle String?   @map("publication_title")
+  abstract         String?
+  url              String?
+  metadata         Json      @default("{}") @db.JsonB
+  createdById      String    @map("created_by_id") @db.Uuid
+  updatedById      String?   @map("updated_by_id") @db.Uuid
+  deletedById      String?   @map("deleted_by_id") @db.Uuid
+  version          Int       @default(1)
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // Fast-Display Denormalized Fields & Counter Caches
   hasFile             Boolean                  @default(false) @map("has_file")
@@ -54,20 +54,18 @@ model LibraryItem {
   searchVector        Unsupported("tsvector")? @map("search_vector")
 
   // Canonical Relations across Library Sub-Domains
-  attachments             Attachment[]
-  contributors            Contributor[]
-  identifiers             ItemIdentifier[]
-  collectionItems         LibraryCollectionItem[]
-  itemTags                LibraryItemTag[]
-  notesList               LibraryNote[]
-  outgoingRel             ItemRelation[]           @relation("SourceItem")
-  incomingRel             ItemRelation[]           @relation("TargetItem")
-  states                  LibraryItemState[]
-  attachmentReadingStates AttachmentReadingState[]
-  attachmentStructures    AttachmentStructure[]
-  ingestionRuns           IngestionRun[]
-  itemMetadata            ItemMetadata[]
-  publications            UserPublication[]
+  attachments     Attachment[]
+  contributors    Contributor[]
+  identifiers     ItemIdentifier[]
+  collectionItems LibraryCollectionItem[]
+  itemTags        LibraryItemTag[]
+  notesList       LibraryNote[]
+  outgoingRel     ItemRelation[]          @relation("SourceItem")
+  incomingRel     ItemRelation[]          @relation("TargetItem")
+  states          LibraryItemState[]
+  ingestionRuns   IngestionRun[]
+  itemMetadata    ItemMetadata[]
+  publications    UserPublication[]
 
   @@index([spaceId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@index([spaceId, deletedAt, updatedAt(sort: Desc), id(sort: Desc)])
@@ -143,22 +141,22 @@ model ItemMetadata {
 }
 
 model Retraction {
-  id               String    @id @default(uuid(7)) @db.Uuid
-  doi              String    @unique @db.VarChar(255)
-  pmid             String?   @db.VarChar(32)
-  title            String?   @db.Text
-  isRetracted      Boolean   @default(true) @map("is_retracted")
-  nature           String    @default("retraction") @db.VarChar(32)
-  retractionDate   DateTime? @map("retraction_date") @db.Timestamptz(6)
-  noticeType       String?   @map("notice_type") @db.VarChar(64)
-  noticeUrl        String?   @map("notice_url") @db.Text
-  reason           String?   @db.Text
-  journal          String?   @db.VarChar(512)
-  source           String    @default("crossref") @db.VarChar(64)
-  rawMetadata      Json?     @map("raw_metadata") @db.JsonB
-  checkedAt        DateTime  @default(now()) @map("checked_at") @db.Timestamptz(6)
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id             String    @id @default(uuid(7)) @db.Uuid
+  doi            String    @unique @db.VarChar(255)
+  pmid           String?   @db.VarChar(32)
+  title          String?   @db.Text
+  isRetracted    Boolean   @default(true) @map("is_retracted")
+  nature         String    @default("retraction") @db.VarChar(32)
+  retractionDate DateTime? @map("retraction_date") @db.Timestamptz(6)
+  noticeType     String?   @map("notice_type") @db.VarChar(64)
+  noticeUrl      String?   @map("notice_url") @db.Text
+  reason         String?   @db.Text
+  journal        String?   @db.VarChar(512)
+  source         String    @default("crossref") @db.VarChar(64)
+  rawMetadata    Json?     @map("raw_metadata") @db.JsonB
+  checkedAt      DateTime  @default(now()) @map("checked_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([pmid])
   @@index([isRetracted, nature])

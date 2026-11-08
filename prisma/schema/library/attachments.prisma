@@ -71,11 +71,11 @@ model Attachment {
   updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt             DateTime?                  @map("deleted_at") @db.Timestamptz(6)
 
-  revisions             AttachmentRevision[]
-  annotations           Annotation[]
-  fullTextIndexes       FullTextIndex[]
-  structure             AttachmentStructure?
-  readingStates         AttachmentReadingState[]
+  revisions       AttachmentRevision[]
+  annotations     Annotation[]
+  fullTextIndexes FullTextIndex[]
+  structure       AttachmentStructure?
+  readingStates   AttachmentReadingState[]
 
   @@index([itemId, deletedAt, attachmentType])
   @@index([itemId, deletedAt, fileId])
@@ -136,7 +136,6 @@ model Annotation {
 model FullTextIndex {
   attachmentId String                   @map("attachment_id") @db.Uuid
   attachment   Attachment               @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_full_text_indexes_attachment_id")
-  itemId       String?                  @map("item_id") @db.Uuid
   pageIndex    Int                      @map("page_index")
   textContent  String                   @map("text_content")
   charOffset   Int                      @default(0) @map("char_offset")
@@ -144,31 +143,27 @@ model FullTextIndex {
   createdAt    DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@id([attachmentId, pageIndex])
-  @@index([itemId, attachmentId])
   @@index([searchVector], type: Gin)
   @@map("full_text_indexes")
 }
 
 model AttachmentStructure {
-  attachmentId      String      @id @map("attachment_id") @db.Uuid
-  attachment        Attachment  @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_attachment_structures_attachment_id")
-  itemId            String      @map("item_id") @db.Uuid
-  item              LibraryItem @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_attachment_structures_item_id")
-  isScanned         Boolean     @default(false) @map("is_scanned")
-  ocrStatus         String?     @map("ocr_status") @db.VarChar(32)
-  qualityScore      Float?      @map("quality_score") @db.Real
-  engineUsed        String?     @map("engine_used") @db.VarChar(64)
-  pageCount         Int         @default(0) @map("page_count")
-  sections          Json        @default("[]") @db.JsonB
-  figures           Json        @default("[]") @db.JsonB
-  tables            Json        @default("[]") @db.JsonB
-  formulas          Json        @default("[]") @db.JsonB
-  references        Json        @default("[]") @db.JsonB
-  fulltextFileId    String?     @map("fulltext_file_id") @db.Uuid
-  fulltextByteSize  Int?        @map("fulltext_byte_size")
-  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  attachmentId     String     @id @map("attachment_id") @db.Uuid
+  attachment       Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_attachment_structures_attachment_id")
+  isScanned        Boolean    @default(false) @map("is_scanned")
+  ocrStatus        String?    @map("ocr_status") @db.VarChar(32)
+  qualityScore     Float?     @map("quality_score") @db.Real
+  engineUsed       String?    @map("engine_used") @db.VarChar(64)
+  pageCount        Int        @default(0) @map("page_count")
+  sections         Json       @default("[]") @db.JsonB
+  figures          Json       @default("[]") @db.JsonB
+  tables           Json       @default("[]") @db.JsonB
+  formulas         Json       @default("[]") @db.JsonB
+  references       Json       @default("[]") @db.JsonB
+  fulltextFileId   String?    @map("fulltext_file_id") @db.Uuid
+  fulltextByteSize Int?       @map("fulltext_byte_size")
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([itemId])
   @@map("attachment_structures")
 }

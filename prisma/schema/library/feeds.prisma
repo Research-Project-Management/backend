@@ -4,49 +4,49 @@
 // ============================================================================
 
 model Feed {
-  id               String             @id @default(uuid(7)) @db.Uuid
-  url              String             @unique @map("url")
-  title            String
-  siteUrl          String?            @map("site_url")
-  description      String?
-  etag             String?            @map("etag")
-  lastModified     String?            @map("last_modified")
-  lastFetchedAt    DateTime?          @map("last_fetched_at") @db.Timestamptz(6)
-  lastStatus       Int?               @map("last_status")
-  errorCount       Int                @default(0) @map("error_count")
-  refreshInterval  Int                @default(7200) @map("refresh_interval") // seconds
+  id              String    @id @default(uuid(7)) @db.Uuid
+  url             String    @unique @map("url")
+  title           String
+  siteUrl         String?   @map("site_url")
+  description     String?
+  etag            String?   @map("etag")
+  lastModified    String?   @map("last_modified")
+  lastFetchedAt   DateTime? @map("last_fetched_at") @db.Timestamptz(6)
+  lastStatus      Int?      @map("last_status")
+  errorCount      Int       @default(0) @map("error_count")
+  refreshInterval Int       @default(7200) @map("refresh_interval") // seconds
 
-  items            FeedItem[]
-  subscriptions    FeedSubscription[]
+  items         FeedItem[]
+  subscriptions FeedSubscription[]
 
-  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([errorCount, lastFetchedAt])
   @@map("feeds")
 }
 
 model FeedItem {
-  id               String              @id @default(uuid(7)) @db.Uuid
-  feedId           String              @db.Uuid @map("feed_id")
-  feed             Feed                @relation(fields: [feedId], references: [id], onDelete: Cascade, map: "fk_feed_items_feed_id")
+  id     String @id @default(uuid(7)) @db.Uuid
+  feedId String @map("feed_id") @db.Uuid
+  feed   Feed   @relation(fields: [feedId], references: [id], onDelete: Cascade, map: "fk_feed_items_feed_id")
 
-  guid             String              @map("guid") // Unique key per feed (DOI / arXiv ID / URL)
-  title            String
-  url              String
-  pdfUrl           String?             @map("pdf_url")
-  doi              String?             @map("doi")
-  arxivId          String?             @map("arxiv_id")
-  primaryCategory  String?             @map("primary_category")
-  authors          Json                @default("[]") @db.JsonB
-  abstract         String?             @db.Text
-  license          String?             @map("license")
-  comments         String?             @map("comments")
-  metadata         Json?               @default("{}") @db.JsonB
-  publishedAt      DateTime            @map("published_at") @db.Timestamptz(6)
-  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  guid            String   @map("guid") // Unique key per feed (DOI / arXiv ID / URL)
+  title           String
+  url             String
+  pdfUrl          String?  @map("pdf_url")
+  doi             String?  @map("doi")
+  arxivId         String?  @map("arxiv_id")
+  primaryCategory String?  @map("primary_category")
+  authors         Json     @default("[]") @db.JsonB
+  abstract        String?  @db.Text
+  license         String?  @map("license")
+  comments        String?  @map("comments")
+  metadata        Json?    @default("{}") @db.JsonB
+  publishedAt     DateTime @map("published_at") @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  readStates       FeedItemReadState[]
+  readStates FeedItemReadState[]
 
   @@unique([feedId, guid])
   @@index([feedId, publishedAt(sort: Desc), id(sort: Desc)])
@@ -59,19 +59,19 @@ model FeedItem {
 }
 
 model FeedSubscription {
-  id                 String    @id @default(uuid(7)) @db.Uuid
-  spaceId            String    @db.Uuid @map("space_id")
-  space              Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_feed_subscriptions_space_id")
-  createdById        String    @db.Uuid @map("created_by_id")
-  feedId             String    @db.Uuid @map("feed_id")
-  feed               Feed      @relation(fields: [feedId], references: [id], onDelete: Cascade, map: "fk_feed_subscriptions_feed_id")
+  id          String @id @default(uuid(7)) @db.Uuid
+  spaceId     String @map("space_id") @db.Uuid
+  space       Space  @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_feed_subscriptions_space_id")
+  createdById String @map("created_by_id") @db.Uuid
+  feedId      String @map("feed_id") @db.Uuid
+  feed        Feed   @relation(fields: [feedId], references: [id], onDelete: Cascade, map: "fk_feed_subscriptions_feed_id")
 
-  customTitle        String?   @map("custom_title")
-  cleanupReadAfter   Int       @default(30) @map("cleanup_read_after")   // Days to keep read items (Zotero standard)
-  cleanupUnreadAfter Int       @default(30) @map("cleanup_unread_after") // Days to keep unread items
+  customTitle        String? @map("custom_title")
+  cleanupReadAfter   Int     @default(30) @map("cleanup_read_after") // Days to keep read items (Zotero standard)
+  cleanupUnreadAfter Int     @default(30) @map("cleanup_unread_after") // Days to keep unread items
 
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([spaceId, feedId])
   @@index([spaceId, createdAt(sort: Desc)])
@@ -80,13 +80,13 @@ model FeedSubscription {
 }
 
 model FeedItemReadState {
-  id               String    @id @default(uuid(7)) @db.Uuid
-  userId           String    @db.Uuid @map("user_id")
-  itemId           String    @db.Uuid @map("item_id")
-  item             FeedItem  @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_feed_item_read_states_item_id")
-  isRead           Boolean   @default(true) @map("is_read")
-  savedItemId      String?   @db.Uuid @map("saved_item_id")
-  readAt           DateTime  @default(now()) @map("read_at") @db.Timestamptz(6)
+  id          String   @id @default(uuid(7)) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  itemId      String   @map("item_id") @db.Uuid
+  item        FeedItem @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "fk_feed_item_read_states_item_id")
+  isRead      Boolean  @default(true) @map("is_read")
+  savedItemId String?  @map("saved_item_id") @db.Uuid
+  readAt      DateTime @default(now()) @map("read_at") @db.Timestamptz(6)
 
   @@unique([userId, itemId])
   @@index([itemId, userId, readAt])

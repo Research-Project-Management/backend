@@ -34,6 +34,7 @@ import {
 import { RedisCacheService } from '@/core';
 import { AccessService, Permission } from '@/modules/project/access';
 import { ItemCacheCoordinator } from './schema-validator.service';
+import { ReaderWriteBehindService } from './reader-write-behind.service';
 
 export { pickPreferredMergedState };
 
@@ -52,6 +53,9 @@ export class StateService {
     @Optional()
     @Inject(ItemCacheCoordinator)
     cacheCoordinator?: ItemCacheCoordinator,
+    @Optional()
+    @Inject(ReaderWriteBehindService)
+    private readonly writeBehind?: ReaderWriteBehindService,
     @Optional()
     private readonly accessService?: AccessService & {
       verifyProjectAccess?: (
@@ -93,7 +97,27 @@ export class StateService {
   ): Promise<StateData> {
     await this.assertItemExists(userId, itemId, projectId);
 
-    const state = await this.stateRepository.findState(userId, itemId);
+    let state = await this.stateRepository.findState(userId, itemId);
+
+    if (this.writeBehind) {
+      const buffered = await this.writeBehind.getBufferedProgress(userId, itemId);
+      if (buffered) {
+        state = {
+          userId,
+          itemId,
+          readStatus: state?.readStatus ?? ReadingStatus.UNREAD,
+          isStarred: state?.isStarred ?? false,
+          rating: state?.rating ?? null,
+          currentPage: buffered.currentPage ?? state?.currentPage ?? 1,
+          scrollPosition: buffered.scrollPosition ?? state?.scrollPosition ?? null,
+          lastActiveAttachmentId: buffered.attachmentId ?? state?.lastActiveAttachmentId ?? null,
+          lastOpenedAt: buffered.lastOpenedAt ? new Date(buffered.lastOpenedAt) : (state?.lastOpenedAt ?? new Date()),
+          lastReadAt: buffered.lastReadAt ? new Date(buffered.lastReadAt) : (state?.lastReadAt ?? null),
+          createdAt: state?.createdAt ?? new Date(),
+          updatedAt: new Date(),
+        };
+      }
+    }
 
     return this.toResponse(state);
   }
@@ -121,6 +145,75 @@ export class StateService {
       throw new BadRequestException(
         'scrollPosition payload exceeds maximum allowed size of 16KB or is invalid',
       );
+    }
+
+    // Write-Behind Fast Path: High-frequency reading progress (page scrolling, offset, zoom)
+    // Coalesces rapid heartbeats into Redis buffer, bypassing heavy DB transactions and locks.
+    const isPureProgressPayload =
+      dto.isStarred === undefined &&
+      dto.rating === undefined &&
+      dto.readStatus === undefined;
+
+    if (isPureProgressPayload && this.writeBehind) {
+      const existing = await this.stateRepository.findState(userId, itemId);
+      const currentStatus =
+        (existing?.readStatus as ReadingStatus) ?? ReadingStatus.UNREAD;
+      const shouldAdvance = shouldAutoAdvanceToReading(
+        currentStatus,
+        dto.currentPage,
+        dto.scrollPosition,
+      );
+
+      // If status transition from UNREAD to READING is not triggered (or already reading), fast-path buffer
+      if (!shouldAdvance || currentStatus === ReadingStatus.READING) {
+        const now = new Date();
+        const resolvedAttachmentId =
+          dto.attachmentId?.trim() ||
+          (dto.scrollPosition &&
+          typeof dto.scrollPosition === 'object' &&
+          !Array.isArray(dto.scrollPosition) &&
+          typeof (dto.scrollPosition as Record<string, unknown>).attachmentId ===
+            'string'
+            ? (
+                (dto.scrollPosition as Record<string, unknown>)
+                  .attachmentId as string
+              ).trim()
+            : undefined);
+
+        const mergedScrollPosition =
+          dto.scrollPosition !== undefined
+            ? mergeScrollPosition(
+                existing?.scrollPosition,
+                dto.scrollPosition,
+                resolvedAttachmentId,
+              )
+            : undefined;
+
+        await this.writeBehind.bufferProgress(userId, itemId, {
+          currentPage: dto.currentPage,
+          scrollPosition: mergedScrollPosition,
+          attachmentId: resolvedAttachmentId,
+          lastOpenedAt: now,
+          lastReadAt: now,
+        });
+
+        const optimisticEntity: StateEntity = {
+          userId,
+          itemId,
+          readStatus: currentStatus,
+          isStarred: existing?.isStarred ?? false,
+          rating: existing?.rating ?? null,
+          currentPage: dto.currentPage ?? existing?.currentPage ?? 1,
+          scrollPosition: mergedScrollPosition ?? existing?.scrollPosition ?? null,
+          lastActiveAttachmentId: resolvedAttachmentId ?? existing?.lastActiveAttachmentId ?? null,
+          lastOpenedAt: now,
+          lastReadAt: now,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        };
+
+        return this.toResponse(optimisticEntity);
+      }
     }
 
     const effectiveProjectId =

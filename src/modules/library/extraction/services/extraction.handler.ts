@@ -125,31 +125,49 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       return;
     }
 
-    if (this.idempotentConsumer) {
-      const execResult = await this.idempotentConsumer.executeIdempotent({
-        consumer: 'ExtractionHandler',
-        eventId: event.id,
-        handler: async () => {
-          await this.processExtraction(event, attachmentId, payload, signal);
-        },
-      });
-
-      if (execResult.skipped) {
-        if (execResult.reason === 'IN_FLIGHT') {
-          throw new ExtractionProcessException(
-            `Extraction in-flight for event ${event.id}; retrying later`,
-            { eventId: event.id, attachmentId },
-          );
-        }
+    const lockKey = `flux:lock:extraction:${attachmentId}`;
+    let lockToken: string | null = null;
+    if (this.cache?.isReady()) {
+      lockToken = await this.cache.acquireLock(lockKey, 120000); // 2 min distributed lease
+      if (!lockToken) {
         this.logger.debug(
-          `[AttachmentExtraction] Skipping already completed extraction for event ${event.id} (${execResult.reason})`,
+          `[AttachmentExtraction] Attachment ${attachmentId} is already locked by another worker. Skipping redundant extraction.`,
         );
         return;
       }
-      return;
     }
 
-    await this.processExtraction(event, attachmentId, payload, signal);
+    try {
+      if (this.idempotentConsumer) {
+        const execResult = await this.idempotentConsumer.executeIdempotent({
+          consumer: 'ExtractionHandler',
+          eventId: event.id,
+          handler: async () => {
+            await this.processExtraction(event, attachmentId, payload, signal);
+          },
+        });
+
+        if (execResult.skipped) {
+          if (execResult.reason === 'IN_FLIGHT') {
+            throw new ExtractionProcessException(
+              `Extraction in-flight for event ${event.id}; retrying later`,
+              { eventId: event.id, attachmentId },
+            );
+          }
+          this.logger.debug(
+            `[AttachmentExtraction] Skipping already completed extraction for event ${event.id} (${execResult.reason})`,
+          );
+          return;
+        }
+        return;
+      }
+
+      await this.processExtraction(event, attachmentId, payload, signal);
+    } finally {
+      if (lockToken && this.cache) {
+        await this.cache.releaseLock(lockKey, lockToken);
+      }
+    }
   }
 
   private async processExtraction(

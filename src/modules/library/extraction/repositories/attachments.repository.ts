@@ -331,7 +331,7 @@ export class AttachmentsRepository {
           consolidationWrites.push(
             Promise.resolve(client.fullTextIndex.updateMany({
               where: { attachmentId: att.id },
-              data: { attachmentId: existingSurvivor.id, itemId: targetItemId },
+              data: { attachmentId: existingSurvivor.id },
             })).catch(() => undefined),
           );
         }
@@ -339,7 +339,7 @@ export class AttachmentsRepository {
           consolidationWrites.push(
             Promise.resolve(client.attachmentStructure.updateMany({
               where: { attachmentId: att.id },
-              data: { attachmentId: existingSurvivor.id, itemId: targetItemId },
+              data: { attachmentId: existingSurvivor.id },
             })).catch(() => undefined),
           );
         }
@@ -359,7 +359,7 @@ export class AttachmentsRepository {
             await Promise.all(
               dupReadingStates.map(async (rs, idx) => {
                 if (existingChecks[idx]) return;
-                const data = { attachmentId: existingSurvivor.id, itemId: targetItemId };
+                const data = { attachmentId: existingSurvivor.id };
                 if (typeof client.attachmentReadingState.update === 'function') {
                   await client.attachmentReadingState.update({
                     where: { userId_attachmentId: { userId: rs.userId, attachmentId: rs.attachmentId } },
@@ -434,18 +434,6 @@ export class AttachmentsRepository {
         if (isMovingItem) {
           await Promise.all([
             client.annotation?.updateMany?.({
-              where: { attachmentId: att.id },
-              data: { itemId: targetItemId },
-            }),
-            client.fullTextIndex?.updateMany?.({
-              where: { attachmentId: att.id },
-              data: { itemId: targetItemId },
-            }),
-            client.attachmentStructure?.updateMany?.({
-              where: { attachmentId: att.id },
-              data: { itemId: targetItemId },
-            }),
-            client.attachmentReadingState?.updateMany?.({
               where: { attachmentId: att.id },
               data: { itemId: targetItemId },
             }),

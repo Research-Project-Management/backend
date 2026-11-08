@@ -137,3 +137,185 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uq_attachments_one_primary_per_item"
 CREATE INDEX IF NOT EXISTS "annotations_active_item_sort_idx"
   ON "annotations" ("item_id", "page_index", "annotation_sort_index")
   WHERE "deleted_at" IS NULL;
+
+-- =============================================================================
+-- 5. Relational Normalization & Consistency Integrity Constraints
+-- =============================================================================
+-- 5.1 Intra-table consistency: attachment_count <=> has_file and non-negative counters
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_library_items_attachment_consistency'
+  ) THEN
+    ALTER TABLE "library_items"
+      ADD CONSTRAINT "chk_library_items_attachment_consistency"
+      CHECK (
+        ("attachment_count" = 0 AND "has_file" = false)
+        OR
+        ("attachment_count" > 0 AND "has_file" = true)
+      );
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_library_items_counters_positive'
+  ) THEN
+    ALTER TABLE "library_items"
+      ADD CONSTRAINT "chk_library_items_counters_positive"
+      CHECK ("attachment_count" >= 0 AND "note_count" >= 0);
+  END IF;
+END $$;
+
+-- 5.2 Protect annotations.item_id from transitive update anomaly (BCNF/3NF safeguard)
+CREATE OR REPLACE FUNCTION ensure_annotation_item_id_trigger()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_item_id uuid;
+BEGIN
+  SELECT item_id INTO v_item_id FROM "attachments" WHERE id = NEW.attachment_id;
+  IF v_item_id IS NOT NULL THEN
+    NEW.item_id := v_item_id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_annotations_ensure_item_id ON "annotations";
+CREATE TRIGGER trg_annotations_ensure_item_id
+  BEFORE INSERT OR UPDATE OF attachment_id, item_id
+  ON "annotations"
+  FOR EACH ROW
+  EXECUTE FUNCTION ensure_annotation_item_id_trigger();
+
+-- 5.3 Protect user_publications.contributor_id BCNF consistency
+CREATE OR REPLACE FUNCTION ensure_user_publication_contributor_trigger()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.contributor_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM "contributors" c WHERE c.id = NEW.contributor_id AND c.item_id = NEW.item_id
+    ) THEN
+      RAISE EXCEPTION 'Constraint violation: contributor_id % does not belong to item_id %', NEW.contributor_id, NEW.item_id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_user_publications_contributor_integrity ON "user_publications";
+CREATE TRIGGER trg_user_publications_contributor_integrity
+  BEFORE INSERT OR UPDATE OF contributor_id, item_id
+  ON "user_publications"
+  FOR EACH ROW
+  EXECUTE FUNCTION ensure_user_publication_contributor_trigger();
+
+-- 5.4 Protect library_item_states.last_active_attachment_id BCNF consistency
+CREATE OR REPLACE FUNCTION ensure_item_state_attachment_trigger()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.last_active_attachment_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM "attachments" a WHERE a.id = NEW.last_active_attachment_id AND a.item_id = NEW.item_id
+    ) THEN
+      RAISE EXCEPTION 'Constraint violation: last_active_attachment_id % does not belong to item_id %', NEW.last_active_attachment_id, NEW.item_id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_item_states_attachment_integrity ON "library_item_states";
+CREATE TRIGGER trg_item_states_attachment_integrity
+  BEFORE INSERT OR UPDATE OF last_active_attachment_id, item_id
+  ON "library_item_states"
+  FOR EACH ROW
+  EXECUTE FUNCTION ensure_item_state_attachment_trigger();
+
+-- 5.5 Auto-maintain full_text_indexes.search_vector for PDF Full-Text Search
+CREATE OR REPLACE FUNCTION full_text_indexes_search_vector_trigger()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.search_vector := to_tsvector('english', COALESCE(NEW.text_content, ''));
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_full_text_indexes_search_vector ON "full_text_indexes";
+CREATE TRIGGER trg_full_text_indexes_search_vector
+  BEFORE INSERT OR UPDATE OF text_content
+  ON "full_text_indexes"
+  FOR EACH ROW
+  EXECUTE FUNCTION full_text_indexes_search_vector_trigger();
+
+-- Backfill full_text_indexes where search_vector is NULL
+UPDATE "full_text_indexes"
+SET "search_vector" = to_tsvector('english', COALESCE("text_content", ''))
+WHERE "search_vector" IS NULL;
+
+-- 5.6 Prevent cyclic self-parenting in collections
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_library_collections_no_self_parent'
+  ) THEN
+    ALTER TABLE "library_collections"
+      ADD CONSTRAINT "chk_library_collections_no_self_parent"
+      CHECK ("parent_id" IS NULL OR "id" <> "parent_id");
+  END IF;
+END $$;
+
+-- 5.7 Prevent reflexive self-relations (e.g. item citing itself)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_item_relations_no_self_relation'
+  ) THEN
+    ALTER TABLE "item_relations"
+      ADD CONSTRAINT "chk_item_relations_no_self_relation"
+      CHECK ("source_item_id" <> "target_item_id");
+  END IF;
+END $$;
+
+-- 5.8 Ensure non-negative sync sequence values
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_sync_sequences_positive'
+  ) THEN
+    ALTER TABLE "sync_sequences"
+      ADD CONSTRAINT "chk_sync_sequences_positive"
+      CHECK ("current_sequence" >= 0);
+  END IF;
+END $$;
+
+-- 5.9 Align library_notes space_id with parent library_items when item_id IS NOT NULL
+CREATE OR REPLACE FUNCTION ensure_library_note_space_trigger()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_space_id uuid;
+BEGIN
+  IF NEW.item_id IS NOT NULL THEN
+    SELECT space_id INTO v_space_id FROM "library_items" WHERE id = NEW.item_id;
+    IF v_space_id IS NOT NULL THEN
+      NEW.space_id := v_space_id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_library_notes_ensure_space ON "library_notes";
+CREATE TRIGGER trg_library_notes_ensure_space
+  BEFORE INSERT OR UPDATE OF item_id, space_id
+  ON "library_notes"
+  FOR EACH ROW
+  EXECUTE FUNCTION ensure_library_note_space_trigger();

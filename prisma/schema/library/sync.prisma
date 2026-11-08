@@ -11,18 +11,18 @@ enum OutboxStatus {
 }
 
 model IdempotencyRecord {
-  id             String    @id @default(uuid(7)) @db.Uuid
-  spaceId        String    @map("space_id") @db.Uuid
-  space          Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_idempotency_records_space_id")
-  actorId        String    @map("actor_id") @db.Uuid
-  idempotencyKey String    @map("idempotency_key")
-  requestHash    String?   @map("request_hash")
-  statusCode     Int?      @map("status_code")
-  responseBody   Json?     @map("response_body") @db.JsonB
-  status         String    @default("in_progress")
-  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id             String   @id @default(uuid(7)) @db.Uuid
+  spaceId        String   @map("space_id") @db.Uuid
+  space          Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_idempotency_records_space_id")
+  actorId        String   @map("actor_id") @db.Uuid
+  idempotencyKey String   @map("idempotency_key")
+  requestHash    String?  @map("request_hash")
+  statusCode     Int?     @map("status_code")
+  responseBody   Json?    @map("response_body") @db.JsonB
+  status         String   @default("in_progress")
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([spaceId, idempotencyKey])
   @@index([actorId, idempotencyKey])
@@ -58,17 +58,17 @@ model SyncSequence {
 }
 
 model LibraryChange {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  spaceId     String   @map("space_id") @db.Uuid
-  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_library_changes_space_id")
-  seq         BigInt
-  actorId     String?  @map("actor_id") @db.Uuid
-  entityType  String   @map("entity_type")
-  entityId    String   @map("entity_id")
-  action      String
-  version     Int
-  data        Json?    @db.JsonB
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id         String   @id @default(uuid(7)) @db.Uuid
+  spaceId    String   @map("space_id") @db.Uuid
+  space      Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_library_changes_space_id")
+  seq        BigInt
+  actorId    String?  @map("actor_id") @db.Uuid
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  action     String
+  version    Int
+  data       Json?    @db.JsonB
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([spaceId, seq])
   @@index([spaceId, entityType, entityId, seq(sort: Desc)])
@@ -77,14 +77,14 @@ model LibraryChange {
 }
 
 model Tombstone {
-  id          String    @id @default(uuid(7)) @db.Uuid
-  spaceId     String    @map("space_id") @db.Uuid
-  space       Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_tombstones_space_id")
-  entityType  String    @map("entity_type")
-  entityId    String    @map("entity_id")
+  id          String   @id @default(uuid(7)) @db.Uuid
+  spaceId     String   @map("space_id") @db.Uuid
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_tombstones_space_id")
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
   seq         BigInt
-  deletedById String?   @map("deleted_by_id") @db.Uuid
-  deletedAt   DateTime  @default(now()) @map("deleted_at") @db.Timestamptz(6)
+  deletedById String?  @map("deleted_by_id") @db.Uuid
+  deletedAt   DateTime @default(now()) @map("deleted_at") @db.Timestamptz(6)
 
   @@unique([spaceId, entityType, entityId])
   @@index([spaceId, seq])
