@@ -205,6 +205,34 @@ export class LatexmkEngine extends BaseLatexEngine {
 
     const durationMs = Date.now() - startTime;
 
+    const mainRelDir = path.posix.dirname(safeMainFile);
+    if (mainRelDir && mainRelDir !== '.') {
+      const mainDir = path.join(options.cwd, mainRelDir);
+      const artifactsToPromote = [
+        'output.pdf',
+        'output.log',
+        'output.synctex.gz',
+        'output.synctex',
+        'output.bbl',
+        'output.fls',
+        'output.aux',
+        'output.out',
+        'output.toc',
+      ];
+      await Promise.all(
+        artifactsToPromote.map(async (artifactName) => {
+          const rootTarget = path.join(options.cwd, artifactName);
+          const nestedSource = path.join(mainDir, artifactName);
+          if (
+            !(await this.fileExists(rootTarget)) &&
+            (await this.fileExists(nestedSource))
+          ) {
+            await fs.copyFile(nestedSource, rootTarget).catch(() => {});
+          }
+        }),
+      );
+    }
+
     const pdfPath = path.join(options.cwd, 'output.pdf');
     const mainBase = path.parse(safeMainFile).name;
     const altPdfPath = path.join(options.cwd, `${mainBase}.pdf`);

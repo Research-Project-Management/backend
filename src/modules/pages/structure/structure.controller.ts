@@ -40,10 +40,7 @@ import {
   ReorderNodeDto,
   TreeNodeDto,
 } from './dto/node.dto';
-import {
-  NodeNotFoundError,
-  StructureError,
-} from './domain';
+import { NodeNotFoundError, StructureError } from './domain';
 
 @ApiTags('Manuscripts - Project Structure & File Tree')
 @ApiBearerAuth('JWT-auth')
@@ -75,25 +72,46 @@ export class StructureController {
     throw error;
   }
 
-  private resolveScope(
+  private resolveCoordinates(
     paramProjectId: string,
     resolvedProject?: string | { id?: string } | null,
-  ): string {
+    queryPageId?: string,
+  ): { spaceId: string; pageId?: string } {
     const authorized =
       typeof resolvedProject === 'string'
         ? resolvedProject
         : resolvedProject?.id;
-    return authorized || paramProjectId;
+    const spaceId = authorized || paramProjectId;
+    const cleanQueryPageId = queryPageId?.trim() || undefined;
+    const pageId =
+      cleanQueryPageId && cleanQueryPageId !== spaceId
+        ? cleanQueryPageId
+        : authorized && paramProjectId && paramProjectId !== authorized
+          ? paramProjectId
+          : undefined;
+    return { spaceId, pageId };
+  }
+
+  private resolveScope(
+    paramProjectId: string,
+    resolvedProject?: string | { id?: string } | null,
+  ): string {
+    return this.resolveCoordinates(paramProjectId, resolvedProject).spaceId;
   }
 
   private async execute<T>(
     projectId: string,
     resolvedProject: string | { id?: string } | null | undefined,
-    fn: (targetId: string) => Promise<T>,
+    fn: (targetId: string, pageId?: string) => Promise<T>,
+    queryPageId?: string,
   ): Promise<T> {
     try {
-      const targetId = this.resolveScope(projectId, resolvedProject);
-      return await fn(targetId);
+      const { spaceId, pageId } = this.resolveCoordinates(
+        projectId,
+        resolvedProject,
+        queryPageId,
+      );
+      return await fn(spaceId, pageId);
     } catch (err) {
       this.handleError(err);
     }
@@ -106,10 +124,14 @@ export class StructureController {
   @ApiResponse({ status: 200, type: [TreeNodeDto] })
   async getFileTree(
     @Param('projectId') projectId: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    return this.execute(projectId, resolvedProject, (targetId) =>
-      this.structureService.getFileTree(targetId),
+    return this.execute(
+      projectId,
+      resolvedProject,
+      (targetId, pageId) => this.structureService.getFileTree(targetId, pageId),
+      queryPageId,
     );
   }
 
@@ -120,10 +142,15 @@ export class StructureController {
   })
   async getProjectSymbols(
     @Param('projectId') projectId: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    return this.execute(projectId, resolvedProject, (targetId) =>
-      this.structureService.getProjectSymbols(targetId),
+    return this.execute(
+      projectId,
+      resolvedProject,
+      (targetId, pageId) =>
+        this.structureService.getProjectSymbols(targetId, pageId),
+      queryPageId,
     );
   }
 
@@ -136,10 +163,19 @@ export class StructureController {
     @Param('projectId') projectId: string,
     @Query('filePath') filePath?: string,
     @Query('docId') docId?: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    return this.execute(projectId, resolvedProject, (targetId) =>
-      this.structureService.getProjectOutline(targetId, { filePath, docId }),
+    return this.execute(
+      projectId,
+      resolvedProject,
+      (targetId, pageId) =>
+        this.structureService.getProjectOutline(
+          targetId,
+          { filePath, docId },
+          pageId,
+        ),
+      queryPageId,
     );
   }
 
@@ -151,11 +187,22 @@ export class StructureController {
   })
   async extractOutline(
     @Param('projectId') projectId: string,
-    @Body() body: { content?: string; filePath?: string; docId?: string },
+    @Body()
+    body: {
+      content?: string;
+      filePath?: string;
+      docId?: string;
+      pageId?: string;
+    },
+    @Query('pageId') queryPageId?: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    return this.execute(projectId, resolvedProject, (targetId) =>
-      this.structureService.getProjectOutline(targetId, body),
+    return this.execute(
+      projectId,
+      resolvedProject,
+      (targetId, pageId) =>
+        this.structureService.getProjectOutline(targetId, body, pageId),
+      body?.pageId || queryPageId,
     );
   }
 
@@ -165,13 +212,23 @@ export class StructureController {
     @Param('projectId') projectId: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
     @Query('parentId') parentId?: string,
+    @Query('pageId') queryPageId?: string,
   ) {
-    return this.execute(projectId, resolvedProject, async (targetId) => {
-      const nodes = parentId
-        ? await this.structureService.getAllNodes(targetId, parentId)
-        : await this.structureService.getAllNodes(targetId);
-      return nodes.map((n) => n.toJSON());
-    });
+    return this.execute(
+      projectId,
+      resolvedProject,
+      async (targetId, pageId) => {
+        const nodes = parentId
+          ? await this.structureService.getAllNodes(targetId, parentId, pageId)
+          : await this.structureService.getAllNodes(
+              targetId,
+              undefined,
+              pageId,
+            );
+        return nodes.map((n) => n.toJSON());
+      },
+      queryPageId,
+    );
   }
 
   @Get('nodes/:nodeId')
@@ -198,12 +255,22 @@ export class StructureController {
   async createNode(
     @Param('projectId') projectId: string,
     @Body() dto: CreateNodeDto,
+    @Query('pageId') queryPageId?: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    return this.execute(projectId, resolvedProject, async (targetId) => {
-      const node = await this.structureService.createNode(targetId, dto);
-      return node.toJSON();
-    });
+    return this.execute(
+      projectId,
+      resolvedProject,
+      async (targetId, pageId) => {
+        const node = await this.structureService.createNode(
+          targetId,
+          dto,
+          pageId,
+        );
+        return node.toJSON();
+      },
+      dto?.pageId || queryPageId,
+    );
   }
 
   @Patch('nodes/:nodeId/move')
@@ -267,12 +334,21 @@ export class StructureController {
   @ApiOperation({ summary: 'Get current root compilation document (main.tex)' })
   async getRootDoc(
     @Param('projectId') projectId: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedProject() resolvedProject?: string | { id?: string },
   ) {
-    return this.execute(projectId, resolvedProject, async (targetId) => {
-      const rootDoc = await this.structureService.getRootDoc(targetId);
-      return rootDoc ? rootDoc.toJSON() : null;
-    });
+    return this.execute(
+      projectId,
+      resolvedProject,
+      async (targetId, pageId) => {
+        const rootDoc = await this.structureService.getRootDoc(
+          targetId,
+          pageId,
+        );
+        return rootDoc ? rootDoc.toJSON() : null;
+      },
+      queryPageId,
+    );
   }
 
   @Post('root-doc/:nodeId')

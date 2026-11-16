@@ -26,6 +26,7 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import {
   ProjectAccessGuard,
   RequireRole,
+  ResolvedProject,
   Role,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
@@ -44,13 +45,35 @@ import { FilestoreService } from './filestore.service';
 @Controller([
   'api/v1/pages/projects/:projectId/files',
   'api/v1/pages/projects/:projectId/filestore',
+  'api/v1/pages/pages/:projectId/files',
   'api/v1/manuscripts/projects/:projectId/files',
   'api/v1/manuscripts/projects/:projectId/filestore',
+  'api/v1/manuscripts/pages/:projectId/files',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class FilestoreController {
   constructor(private readonly filestoreService: FilestoreService) {}
+
+  private resolveCoordinates(
+    paramProjectId: string,
+    resolvedProject?: string | { id?: string } | null,
+    queryPageId?: string,
+  ): { spaceId: string; pageId?: string } {
+    const authorized =
+      typeof resolvedProject === 'string'
+        ? resolvedProject
+        : resolvedProject?.id;
+    const spaceId = authorized || paramProjectId;
+    const cleanQueryPageId = queryPageId?.trim() || undefined;
+    const pageId =
+      cleanQueryPageId && cleanQueryPageId !== spaceId
+        ? cleanQueryPageId
+        : authorized && paramProjectId && paramProjectId !== authorized
+          ? paramProjectId
+          : undefined;
+    return { spaceId, pageId };
+  }
 
   @Post()
   @UseGuards(UserRateLimitGuard)
@@ -61,6 +84,8 @@ export class FilestoreController {
     @Param('projectId') projectId: string,
     @Req() req: FastifyRequest,
     @Query('name') queryName?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedProject() resolvedProject?: string | { id?: string },
   ): Promise<ManuscriptFileResponseDto> {
     let filename = queryName || 'unnamed.bin';
     let mimeType = 'application/octet-stream';
@@ -93,11 +118,19 @@ export class FilestoreController {
       }
     }
 
-    const savedFile = await this.filestoreService.uploadFileFromStream(
+    const { spaceId, pageId } = this.resolveCoordinates(
       projectId,
+      resolvedProject,
+      queryPageId,
+    );
+
+    const savedFile = await this.filestoreService.uploadFileFromStream(
+      spaceId,
       filename,
       dataStream,
       mimeType,
+      'manuscript-files',
+      { pageId },
     );
 
     return ManuscriptFileResponseDto.fromEntity(savedFile);
@@ -108,10 +141,12 @@ export class FilestoreController {
     @Param('projectId') projectId: string,
     @Param('fileId') fileId: string,
     @Res() res: FastifyReply,
+    @ResolvedProject() resolvedProject?: string | { id?: string },
   ): Promise<void> {
     try {
+      const { spaceId } = this.resolveCoordinates(projectId, resolvedProject);
       const { file } = await this.filestoreService.getFileHead(
-        projectId,
+        spaceId,
         fileId,
       );
 
@@ -134,8 +169,15 @@ export class FilestoreController {
   @Get()
   public async listFiles(
     @Param('projectId') projectId: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedProject() resolvedProject?: string | { id?: string },
   ): Promise<ManuscriptFileResponseDto[]> {
-    const files = await this.filestoreService.listFiles(projectId);
+    const { spaceId, pageId } = this.resolveCoordinates(
+      projectId,
+      resolvedProject,
+      queryPageId,
+    );
+    const files = await this.filestoreService.listFiles(spaceId, false, pageId);
     return files.map((f) => ManuscriptFileResponseDto.fromEntity(f));
   }
 
@@ -147,6 +189,8 @@ export class FilestoreController {
     @Headers('range') rangeHeader: string | undefined,
     @Headers('user-agent') userAgent: string | undefined,
     @Res() res: FastifyReply,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedProject() resolvedProject?: string | { id?: string },
   ): Promise<void> {
     const rawPath = queryPath || queryName;
     if (!rawPath) {
@@ -154,17 +198,30 @@ export class FilestoreController {
         'Query parameter "path" or "name" is required.',
       );
     }
-    const file = await this.filestoreService.findFileByPathFlexible(
+    const { spaceId, pageId } = this.resolveCoordinates(
       projectId,
+      resolvedProject,
+      queryPageId,
+    );
+    const file = await this.filestoreService.findFileByPathFlexible(
+      spaceId,
       rawPath,
+      pageId,
     );
     if (!file) {
       throw new NotFoundException(
-        `File asset "${rawPath}" not found in project ${projectId}.`,
+        `File asset "${rawPath}" not found in project ${spaceId}.`,
       );
     }
 
-    return this.streamFile(projectId, file.id, rangeHeader, userAgent, res);
+    return this.streamFile(
+      spaceId,
+      file.id,
+      rangeHeader,
+      userAgent,
+      res,
+      resolvedProject,
+    );
   }
 
   @Get(':fileId')
@@ -174,10 +231,12 @@ export class FilestoreController {
     @Headers('range') rangeHeader: string | undefined,
     @Headers('user-agent') userAgent: string | undefined,
     @Res() res: FastifyReply,
+    @ResolvedProject() resolvedProject?: string | { id?: string },
   ): Promise<void> {
     try {
+      const { spaceId } = this.resolveCoordinates(projectId, resolvedProject);
       const result = await this.filestoreService.streamFile(
-        projectId,
+        spaceId,
         fileId,
         rangeHeader,
       );
@@ -236,9 +295,11 @@ export class FilestoreController {
   public async deleteFile(
     @Param('projectId') projectId: string,
     @Param('fileId') fileId: string,
+    @ResolvedProject() resolvedProject?: string | { id?: string },
   ): Promise<void> {
     try {
-      await this.filestoreService.deleteFile(projectId, fileId, true);
+      const { spaceId } = this.resolveCoordinates(projectId, resolvedProject);
+      await this.filestoreService.deleteFile(spaceId, fileId, true);
     } catch (err) {
       if (err instanceof FileNotFoundException) {
         throw new NotFoundException(err.message);
@@ -252,11 +313,13 @@ export class FilestoreController {
     @Param('projectId') projectId: string,
     @Param('fileId') fileId: string,
     @Query('expiresIn') expiresIn?: string,
+    @ResolvedProject() resolvedProject?: string | { id?: string },
   ): Promise<{ signedUrl: string | null }> {
     try {
+      const { spaceId } = this.resolveCoordinates(projectId, resolvedProject);
       const ttl = expiresIn ? parseInt(expiresIn, 10) : 3600;
       const signedUrl = await this.filestoreService.getSignedUrl(
-        projectId,
+        spaceId,
         fileId,
         ttl,
       );

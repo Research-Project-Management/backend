@@ -8,6 +8,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
+import { isUuid } from '@/core';
 import { STORAGE_QUOTA_REPOSITORY } from '@/modules/storage/storage.tokens';
 import {
   BlobService,
@@ -100,7 +101,7 @@ export class FilestoreService {
     name: string,
     buffer: Buffer,
     mimeType?: string,
-    options?: { syncStructureNode?: boolean },
+    options?: { syncStructureNode?: boolean; pageId?: string | null },
   ): Promise<ManuscriptFile> {
     const stream = Readable.from(buffer);
     return await this.uploadFileFromStream(
@@ -109,7 +110,10 @@ export class FilestoreService {
       stream,
       mimeType,
       'manuscript-files',
-      { syncStructureNode: options?.syncStructureNode ?? true },
+      {
+        syncStructureNode: options?.syncStructureNode ?? true,
+        pageId: options?.pageId,
+      },
     );
   }
 
@@ -122,10 +126,27 @@ export class FilestoreService {
     stream: Readable,
     mimeType?: string,
     bucketName = 'manuscript-files',
-    options?: { syncStructureNode?: boolean },
+    options?: { syncStructureNode?: boolean; pageId?: string | null },
   ): Promise<ManuscriptFile> {
     // Validate filename BEFORE spooling stream or writing to S3/disk storage
     const sanitizedName = ManuscriptFile.sanitizeFilename(name);
+
+    const candidatePageId = options?.pageId?.trim() || undefined;
+    let effectivePageId =
+      candidatePageId &&
+      isUuid(candidatePageId) &&
+      candidatePageId !== projectId
+        ? candidatePageId
+        : undefined;
+    if (
+      effectivePageId &&
+      typeof this.repository.resolvePageId === 'function'
+    ) {
+      effectivePageId = await this.repository.resolvePageId(
+        projectId,
+        effectivePageId,
+      );
+    }
 
     const { contentHash, sha256Hex, sizeBytes, dataStream } =
       await this.repository.hashStream(stream);
@@ -138,6 +159,7 @@ export class FilestoreService {
     const existing = await this.repository.findByProjectAndName(
       projectId,
       sanitizedName,
+      effectivePageId,
     );
 
     // Enforce unified platform Space StorageQuota before writing physical object
@@ -192,9 +214,11 @@ export class FilestoreService {
       }
     }
 
+    const targetPageId = effectivePageId ?? existing?.pageId ?? null;
     const fileEntity = ManuscriptFile.reconstitute({
       id: existing?.id ?? ManuscriptFile.create({
         projectId,
+        pageId: targetPageId,
         name: sanitizedName,
         mimeType: mimeType || 'application/octet-stream',
         sizeBytes,
@@ -203,6 +227,7 @@ export class FilestoreService {
         bucketName,
       }).id,
       projectId,
+      pageId: targetPageId,
       name: sanitizedName,
       mimeType: mimeType || 'application/octet-stream',
       sizeBytes,
@@ -219,7 +244,7 @@ export class FilestoreService {
     const saved = await (
       this.repository.save as (
         f: ManuscriptFile,
-        opts?: { syncStructureNode?: boolean },
+        opts?: { syncStructureNode?: boolean; pageId?: string | null },
       ) => Promise<ManuscriptFile>
     )(fileEntity, options);
 
@@ -235,6 +260,7 @@ export class FilestoreService {
           node: {
             id: saved.id,
             fileId: saved.id,
+            ...(saved.pageId ? { pageId: saved.pageId } : {}),
             name: parsedPath.leafName,
             path: parsedPath.normalizedPath,
           },
@@ -287,8 +313,13 @@ export class FilestoreService {
   public async listFiles(
     projectId: string,
     includeDeleted = false,
+    pageId?: string | null,
   ): Promise<ManuscriptFile[]> {
-    return await this.repository.listByProject(projectId, includeDeleted);
+    return await this.repository.listByProject(
+      projectId,
+      includeDeleted,
+      pageId,
+    );
   }
 
   /**
@@ -297,8 +328,9 @@ export class FilestoreService {
   public async findByProjectAndName(
     projectId: string,
     name: string,
+    pageId?: string | null,
   ): Promise<ManuscriptFile | null> {
-    return await this.repository.findByProjectAndName(projectId, name);
+    return await this.repository.findByProjectAndName(projectId, name, pageId);
   }
 
   /**
@@ -307,8 +339,13 @@ export class FilestoreService {
   public async findFileByPathFlexible(
     projectId: string,
     rawPath: string,
+    pageId?: string | null,
   ): Promise<ManuscriptFile | null> {
-    return await this.repository.findFileByPathFlexible(projectId, rawPath);
+    return await this.repository.findFileByPathFlexible(
+      projectId,
+      rawPath,
+      pageId,
+    );
   }
 
   /**

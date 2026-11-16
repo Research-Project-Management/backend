@@ -33,6 +33,7 @@ import {
 } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import {
+  CompilerDiagnostic,
   SyncPoint,
   ReverseSyncPoint,
   WordCountStats,
@@ -79,6 +80,14 @@ import {
 } from './sandbox/sandbox-config';
 
 export type ClsiCompileResult = CompilePipelineResult;
+
+export interface EditorLastBuildSummary {
+  status: 'ready' | 'error' | 'uncompiled';
+  pdfArtifactUrl: string | null;
+  synctexAvailable: boolean;
+  lastCompiledAt: string | null;
+  diagnostics: CompilerDiagnostic[];
+}
 
 @Injectable()
 export class ClsiService implements OnModuleDestroy {
@@ -261,33 +270,36 @@ export class ClsiService implements OnModuleDestroy {
       throw new Error('CLSI compile queue is not initialized');
     }
 
-    const projectId = authorizedProjectId || dto.projectId || 'default';
+    const spaceId = authorizedProjectId || dto.projectId || 'default';
+    const queueScopeId = dto.pageId || spaceId;
     const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
 
     // Pre-compile Yjs flush in the API process before dispatching to external BullMQ worker
-    if (this.realtimeService && projectId && projectId !== 'default') {
+    if (this.realtimeService && spaceId && spaceId !== 'default') {
       try {
-        await this.realtimeService.flushProjectBeforeCompile(projectId);
+        await this.realtimeService.flushProjectBeforeCompile(spaceId);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Pre-queue Yjs flush encountered an error for project ${projectId}: ${msg}`,
+          `Pre-queue Yjs flush encountered an error for project ${spaceId}: ${msg}`,
         );
       }
     }
 
-    // Cancel any previous queued BullMQ job for this project
-    const existingJobId = this.activeQueueJobIds.get(projectId);
+    // Cancel any previous queued BullMQ job for this manuscript page/space
+    const existingJobId = this.activeQueueJobIds.get(queueScopeId);
     if (existingJobId) {
       try {
         const oldJob = await this.compileQueue.getJob(existingJobId);
         if (oldJob) {
           await oldJob.remove().catch(() => {});
         }
-      } catch {}
+      } catch {
+        /* ignore stale job removal */
+      }
     }
 
-    const jobId = `clsi-${projectId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const jobId = `clsi-${queueScopeId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const job = await this.compileQueue.add(
       'clsi-compile',
       {
@@ -301,13 +313,13 @@ export class ClsiService implements OnModuleDestroy {
         removeOnFail: { age: 300, count: 25 },
       },
     );
-    this.activeQueueJobIds.set(projectId, jobId);
+    this.activeQueueJobIds.set(queueScopeId, jobId);
 
     const startTime = Date.now();
     const pollIntervalMs = 200;
     try {
       while (Date.now() - startTime < effectiveTimeoutMs) {
-        if (this.activeQueueJobIds.get(projectId) !== jobId) {
+        if (this.activeQueueJobIds.get(queueScopeId) !== jobId) {
           throw new HttpException('Compilation superseded or cancelled', 409);
         }
         const state = await job.getState();
@@ -334,8 +346,8 @@ export class ClsiService implements OnModuleDestroy {
       timeoutErr.isWorkerExecutionError = true;
       throw timeoutErr;
     } finally {
-      if (this.activeQueueJobIds.get(projectId) === jobId) {
-        this.activeQueueJobIds.delete(projectId);
+      if (this.activeQueueJobIds.get(queueScopeId) === jobId) {
+        this.activeQueueJobIds.delete(queueScopeId);
       }
     }
   }
@@ -393,61 +405,52 @@ export class ClsiService implements OnModuleDestroy {
   ): Promise<ClsiCompileResult> {
     const requestedEngine = dto.engine;
     const texLiveVersion = dto.texLiveVersion || '2025';
-    const explicitDtoProjectId = dto.projectId;
-    const resolvedFromDto = await this.workspacePlanner.resolveProjectId(dto);
-
-    if (authorizedProjectId) {
-      if (
-        (explicitDtoProjectId &&
-          explicitDtoProjectId !== authorizedProjectId) ||
-        (resolvedFromDto &&
-          resolvedFromDto !== 'default' &&
-          resolvedFromDto !== authorizedProjectId)
-      ) {
-        throw new ForbiddenException({
-          statusCode: 403,
-          code: 'PROJECT_CONTEXT_MISMATCH',
-          message: 'Authorized project context does not match compile payload',
-        });
-      }
-    }
-    const rawProjectId = authorizedProjectId || resolvedFromDto;
-    const projectId =
-      rawProjectId && rawProjectId !== 'default'
-        ? rawProjectId
+    const { spaceId: resolvedSpaceId, pageId: manuscriptPageId } =
+      await this.workspacePlanner.resolveManuscriptContext(
+        dto,
+        authorizedProjectId,
+      );
+    const effectiveSpaceId =
+      resolvedSpaceId && resolvedSpaceId !== 'default'
+        ? resolvedSpaceId
         : _userId
           ? `adhoc-${_userId}`
           : `adhoc-${crypto.randomUUID()}`;
+    const scratchWorkspaceId = manuscriptPageId || effectiveSpaceId;
     const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
     const metricEngine = requestedEngine || 'pdflatex';
 
     return await this.fairQueue.schedule(
-      projectId,
+      scratchWorkspaceId,
       _userId,
       this.realtimeService,
       async (signal, onLogChunk) => {
         if (
           this.realtimeService &&
-          projectId &&
-          !projectId.startsWith('adhoc-')
+          effectiveSpaceId &&
+          !effectiveSpaceId.startsWith('adhoc-')
         ) {
           try {
-            await this.realtimeService.flushProjectBeforeCompile(projectId);
+            await this.realtimeService.flushProjectBeforeCompile(
+              effectiveSpaceId,
+            );
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             this.logger.warn(
-              `Pre-compile flush barrier encountered an error for project ${projectId}: ${msg}`,
+              `Pre-compile flush barrier encountered an error for space ${effectiveSpaceId}: ${msg}`,
             );
           }
         }
 
         const plan = await this.workspacePlanner.planFiles(
-          projectId.startsWith('adhoc-') ? 'default' : projectId,
+          effectiveSpaceId.startsWith('adhoc-') ? 'default' : effectiveSpaceId,
           dto,
+          manuscriptPageId,
         );
         const cacheKey = `flux:clsi:compile:${this.hashSource(
           [
-            projectId,
+            effectiveSpaceId,
+            scratchWorkspaceId,
             plan.fingerprint,
             plan.mainFile,
             requestedEngine || 'auto',
@@ -463,7 +466,7 @@ export class ClsiService implements OnModuleDestroy {
           const cacheLookupStart = Date.now();
           const cached = await this.cache.get<ClsiCompileResult>(cacheKey);
           if (cached && cached.success) {
-            await this.syncCachedArtifactsToScratch(projectId, cached);
+            await this.syncCachedArtifactsToScratch(scratchWorkspaceId, cached);
             this.metrics.record({
               engine: metricEngine,
               durationMs: Math.max(1, Date.now() - cacheLookupStart),
@@ -479,7 +482,7 @@ export class ClsiService implements OnModuleDestroy {
         }
 
         return await this.runScheduledCompile(
-          projectId,
+          effectiveSpaceId,
           plan,
           dto,
           requestedEngine,
@@ -490,6 +493,7 @@ export class ClsiService implements OnModuleDestroy {
           signal,
           onLogChunk,
           _userId,
+          scratchWorkspaceId,
         );
       },
     );
@@ -547,12 +551,14 @@ export class ClsiService implements OnModuleDestroy {
     signal: AbortSignal,
     onLogChunk: (chunk: string) => void,
     _userId?: string,
+    scratchWorkspaceId: string = projectId,
   ): Promise<ClsiCompileResult> {
     const mainFile = plan.mainFile;
     const dbProjectId = projectId.startsWith('adhoc-') ? 'default' : projectId;
     const mergedFiles = await this.workspacePlanner.hydrateFiles(
       dbProjectId,
       plan,
+      scratchWorkspaceId,
     );
     const rawMain = mergedFiles[mainFile] ?? dto.source ?? '';
     const source = Buffer.isBuffer(rawMain)
@@ -561,14 +567,14 @@ export class ClsiService implements OnModuleDestroy {
 
     if (dto.forceClean) {
       await this.pipeline.runWithProjectLock(
-        projectId,
-        () => this.workspace.cleanScratch(projectId),
+        scratchWorkspaceId,
+        () => this.workspace.cleanScratch(scratchWorkspaceId),
         signal,
       );
     }
 
     const remoteResult = await this.remoteClient.tryRemoteClsiCompile({
-      projectId,
+      projectId: scratchWorkspaceId,
       mainFile,
       source,
       mergedFiles,
@@ -579,13 +585,13 @@ export class ClsiService implements OnModuleDestroy {
     });
 
     if (remoteResult) {
-      await this.syncCachedArtifactsToScratch(projectId, remoteResult);
+      await this.syncCachedArtifactsToScratch(scratchWorkspaceId, remoteResult);
     }
 
     const pipelineResult: CompilePipelineResult =
       remoteResult ??
       (await this.pipeline.execute({
-        projectId,
+        projectId: scratchWorkspaceId,
         mainFile,
         engine,
         texLiveVersion,
@@ -710,36 +716,20 @@ export class ClsiService implements OnModuleDestroy {
     result?: SyncPoint;
     error?: string;
   }> {
-    const explicitDtoProjectId = dto.projectId;
-    const resolvedFromDto = await this.workspacePlanner.resolveProjectId({
-      projectId: dto.projectId,
-      pageId: dto.pageId,
-    });
-
-    if (authorizedProjectId) {
-      if (
-        (explicitDtoProjectId &&
-          explicitDtoProjectId !== authorizedProjectId) ||
-        (resolvedFromDto &&
-          resolvedFromDto !== 'default' &&
-          resolvedFromDto !== authorizedProjectId)
-      ) {
-        throw new ForbiddenException({
-          statusCode: 403,
-          code: 'PROJECT_CONTEXT_MISMATCH',
-          message: 'Authorized project context does not match synctex payload',
-        });
-      }
-    }
-    const projectId = authorizedProjectId || resolvedFromDto;
+    const { spaceId, pageId } =
+      await this.workspacePlanner.resolveManuscriptContext(
+        dto,
+        authorizedProjectId,
+      );
+    const scratchId = pageId || spaceId;
 
     const remoteRes = await this.remoteClient.tryRemoteForwardSync(dto);
     if (remoteRes) return remoteRes;
 
-    const synctexContent = await this.loadSynctexContent(
-      projectId,
-      dto.synctex,
-    );
+    let synctexContent = await this.loadSynctexContent(scratchId, dto.synctex);
+    if (!synctexContent && pageId && spaceId && pageId !== spaceId) {
+      synctexContent = await this.loadSynctexContent(spaceId);
+    }
     if (!synctexContent) {
       return {
         success: false,
@@ -773,36 +763,20 @@ export class ClsiService implements OnModuleDestroy {
     result?: ReverseSyncPoint;
     error?: string;
   }> {
-    const explicitDtoProjectId = dto.projectId;
-    const resolvedFromDto = await this.workspacePlanner.resolveProjectId({
-      projectId: dto.projectId,
-      pageId: dto.pageId,
-    });
-
-    if (authorizedProjectId) {
-      if (
-        (explicitDtoProjectId &&
-          explicitDtoProjectId !== authorizedProjectId) ||
-        (resolvedFromDto &&
-          resolvedFromDto !== 'default' &&
-          resolvedFromDto !== authorizedProjectId)
-      ) {
-        throw new ForbiddenException({
-          statusCode: 403,
-          code: 'PROJECT_CONTEXT_MISMATCH',
-          message: 'Authorized project context does not match synctex payload',
-        });
-      }
-    }
-    const projectId = authorizedProjectId || resolvedFromDto;
+    const { spaceId, pageId } =
+      await this.workspacePlanner.resolveManuscriptContext(
+        dto,
+        authorizedProjectId,
+      );
+    const scratchId = pageId || spaceId;
 
     const remoteRes = await this.remoteClient.tryRemoteReverseSync(dto);
     if (remoteRes) return remoteRes;
 
-    const synctexContent = await this.loadSynctexContent(
-      projectId,
-      dto.synctex,
-    );
+    let synctexContent = await this.loadSynctexContent(scratchId, dto.synctex);
+    if (!synctexContent && pageId && spaceId && pageId !== spaceId) {
+      synctexContent = await this.loadSynctexContent(spaceId);
+    }
     if (!synctexContent) {
       return {
         success: false,
@@ -973,8 +947,9 @@ export class ClsiService implements OnModuleDestroy {
     };
   }
 
-  public async listAuxFiles(projectId: string) {
-    const files = await this.workspace.listAuxFiles(projectId);
+  public async listAuxFiles(projectId: string, pageId?: string) {
+    const scratchId = pageId || projectId;
+    const files = await this.workspace.listAuxFiles(scratchId);
     return { files };
   }
 
@@ -982,8 +957,10 @@ export class ClsiService implements OnModuleDestroy {
     projectId: string,
     filename: string,
     res: FastifyReply,
+    pageId?: string,
   ) {
-    const buffer = await this.workspace.readAuxFile(projectId, filename);
+    const scratchId = pageId || projectId;
+    const buffer = await this.workspace.readAuxFile(scratchId, filename);
     if (!buffer) {
       throw new NotFoundException(`Artifact file ${filename} not found`);
     }
@@ -1020,8 +997,83 @@ export class ClsiService implements OnModuleDestroy {
   public async readAuxFileBuffer(
     projectId: string,
     filename: string,
+    pageId?: string,
   ): Promise<Buffer | null> {
-    return await this.workspace.readAuxFile(projectId, filename);
+    const scratchId = pageId || projectId;
+    return await this.workspace.readAuxFile(scratchId, filename);
+  }
+
+  public async getLastBuildSummary(
+    projectId: string,
+    defaultMainFile = 'main.tex',
+    pageId?: string,
+  ): Promise<EditorLastBuildSummary> {
+    const scratchId = pageId || projectId;
+    const scratchDir = this.workspace.getScratchDir(scratchId);
+    const statSafe = (filename: string) =>
+      fs.lstat(path.join(scratchDir, filename)).catch(() => null);
+
+    const [pdfStat, logStat, synctexGzStat, synctexStat] = await Promise.all([
+      statSafe('output.pdf'),
+      statSafe('output.log'),
+      statSafe('output.synctex.gz'),
+      statSafe('output.synctex'),
+    ]);
+
+    const isRegularNonEmptyFile = (
+      stat: Awaited<ReturnType<typeof fs.lstat>> | null,
+    ): boolean =>
+      Boolean(stat && !stat.isSymbolicLink() && stat.isFile() && stat.size > 0);
+
+    const hasPdf = isRegularNonEmptyFile(pdfStat);
+    const hasLog = isRegularNonEmptyFile(logStat);
+
+    if (!hasPdf && !hasLog) {
+      return {
+        status: 'uncompiled',
+        pdfArtifactUrl: null,
+        synctexAvailable: false,
+        lastCompiledAt: null,
+        diagnostics: [],
+      };
+    }
+
+    const synctexAvailable =
+      isRegularNonEmptyFile(synctexGzStat) ||
+      isRegularNonEmptyFile(synctexStat);
+    const lastCompiledAt =
+      (pdfStat?.mtime ?? logStat?.mtime)?.toISOString() ?? null;
+
+    let diagnostics: CompilerDiagnostic[] = [];
+    if (hasLog) {
+      const logBuffer = await this.workspace
+        .readAuxFile(scratchId, 'output.log')
+        .catch(() => null);
+      if (logBuffer && logBuffer.length > 0) {
+        const maxBytes = 512 * 1024;
+        const bounded =
+          logBuffer.length > maxBytes
+            ? logBuffer.subarray(logBuffer.length - maxBytes)
+            : logBuffer;
+        diagnostics = this.logParser
+          .parse(bounded.toString('utf8'), defaultMainFile)
+          .slice(0, 50);
+      }
+    }
+
+    const pdfArtifactUrl = hasPdf
+      ? pageId
+        ? `/api/v1/manuscripts/pages/${encodeURIComponent(pageId)}/artifacts/output.pdf`
+        : `/api/v1/manuscripts/projects/${encodeURIComponent(projectId)}/artifacts/output.pdf`
+      : null;
+
+    return {
+      status: hasPdf ? 'ready' : 'error',
+      pdfArtifactUrl,
+      synctexAvailable,
+      lastCompiledAt,
+      diagnostics,
+    };
   }
 
   public async getHealthReport() {
@@ -1052,18 +1104,22 @@ export class ClsiService implements OnModuleDestroy {
 
   public async cleanProjectScratch(
     projectId: string,
+    pageId?: string,
   ): Promise<{ success: boolean; projectId: string }> {
-    await this.pipeline.runWithProjectLock(projectId, () =>
-      this.workspace.cleanScratch(projectId),
+    const scratchId = pageId || projectId;
+    await this.pipeline.runWithProjectLock(scratchId, () =>
+      this.workspace.cleanScratch(scratchId),
     );
-    return { success: true, projectId };
+    return { success: true, projectId: scratchId };
   }
 
   public async downloadAllArtifactsZip(
     projectId: string,
     res: FastifyReply,
+    pageId?: string,
   ): Promise<void> {
-    const scratchDir = this.workspace.getScratchDir(projectId);
+    const scratchId = pageId || projectId;
+    const scratchDir = this.workspace.getScratchDir(scratchId);
     const diskEntries: ZipDiskEntry[] = [];
 
     const walk = async (currentDir: string, relDir: string) => {
@@ -1156,9 +1212,7 @@ export class ClsiService implements OnModuleDestroy {
         });
         const rawAiText = (aiRes?.text || '').trim();
         if (rawAiText.length > 0) {
-          suggestedResult = unmask(
-            rawAiText.replace(/^"""\s*|\s*"""$/g, ''),
-          );
+          suggestedResult = unmask(rawAiText.replace(/^"""\s*|\s*"""$/g, ''));
           explanation = `Applied ${action.replace('-', ' ')} via AI Copilot.`;
         }
       } catch {

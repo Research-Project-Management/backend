@@ -155,7 +155,7 @@ export class RemoteClsiClientAdapter {
     const filesPayload: Record<string, string> = {};
     for (const [filePath, val] of Object.entries(mergedFiles)) {
       filesPayload[filePath] = Buffer.isBuffer(val)
-        ? val.toString('base64')
+        ? `base64:${val.toString('base64')}`
         : String(val);
     }
 

@@ -26,6 +26,11 @@ import { CitationsService } from './citations/citations.service';
 import { ExportImportService } from './export-import/export-import.service';
 import { WorkspaceCollectorService } from './core/services/workspace-collector.service';
 import { ManuscriptDomainEventBus } from './core/events/event-bus.service';
+import {
+  EditorBootstrapService,
+  type BootstrapEditorParams,
+  type EditorBootstrapResponseDto,
+} from './bootstrap';
 
 import { CreateNodeDto, MoveNodeDto, RenameNodeDto } from './structure/dto/node.dto';
 import { CompileManuscriptDto, ClsiWordCountDto } from './clsi/dto/clsi.dto';
@@ -46,7 +51,17 @@ export class PagesFacade {
     public readonly exportImport: ExportImportService,
     public readonly workspaceCollector: WorkspaceCollectorService,
     public readonly domainEvents: ManuscriptDomainEventBus,
+    @Optional() public readonly editorBootstrap?: EditorBootstrapService,
   ) {}
+
+  public async bootstrapEditor(
+    params: BootstrapEditorParams,
+  ): Promise<EditorBootstrapResponseDto> {
+    if (!this.editorBootstrap) {
+      throw new Error('EditorBootstrapService is not available');
+    }
+    return this.editorBootstrap.bootstrapEditor(params);
+  }
 
   // ==========================================================================
   // Pillar 1: Virtual File System & Document Content

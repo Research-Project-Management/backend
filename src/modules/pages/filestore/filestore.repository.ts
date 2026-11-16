@@ -6,7 +6,11 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { PageFile as PrismaPageFile } from '@prisma/client';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
+import {
+  filterRecordsByPageScope,
+  resolveCanonicalManuscriptPageId,
+} from '@/modules/pages/docstore/controllers/doc.helpers';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
 import {
@@ -255,6 +259,10 @@ export class FilestoreRepository extends IManuscriptFileRepository {
           data: {
             sizeBytes: data.sizeBytes,
             hash: data.hash,
+            ...(data.pageId &&
+            !(existingByFileId as { pageId?: string | null }).pageId
+              ? { pageId: data.pageId }
+              : {}),
             ...(pathChanged
               ? {
                   name: parsed.leafName,
@@ -289,7 +297,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         (await this.prisma.pageNode.findFirst?.({
           where: {
             spaceId: data.spaceId,
-            ...(data.pageId ? { pageId: data.pageId } : {}),
+            ...(data.pageId ? { pageId: data.pageId } : { pageId: null }),
             path: parsed.normalizedPath,
           },
         }));
@@ -333,6 +341,50 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     }
   }
 
+  public async resolvePageId(
+    projectId: string,
+    candidatePageId?: string | null,
+  ): Promise<string | undefined> {
+    if (
+      !candidatePageId ||
+      candidatePageId === projectId ||
+      !isUuid(candidatePageId)
+    ) {
+      return undefined;
+    }
+
+    if (this.prisma.page?.findUnique) {
+      const page = await Promise.resolve(
+        this.prisma.page.findUnique({
+          where: { id: candidatePageId },
+          select: { id: true, spaceId: true },
+        }),
+      ).catch(() => null);
+      if (page?.id) {
+        return page.spaceId === projectId ? page.id : undefined;
+      }
+    }
+
+    if (this.prisma.pageDoc?.findFirst) {
+      const doc = await Promise.resolve(
+        this.prisma.pageDoc.findFirst({
+          where: { id: candidatePageId, spaceId: projectId },
+          select: { id: true, pageId: true },
+        }),
+      ).catch(() => null);
+      if (doc) {
+        return (doc as { pageId?: string | null }).pageId ?? undefined;
+      }
+    }
+
+    const canonical = await resolveCanonicalManuscriptPageId(
+      this.prisma,
+      projectId,
+      candidatePageId,
+    ).catch(() => undefined);
+    return canonical || candidatePageId;
+  }
+
   public async findById(id: string): Promise<ManuscriptFile | null> {
     const record = await this.prisma.pageFile.findUnique({
       where: { id },
@@ -356,10 +408,17 @@ export class FilestoreRepository extends IManuscriptFileRepository {
   public async findByProjectAndName(
     projectId: string,
     name: string,
+    pageId?: string | null,
   ): Promise<ManuscriptFile | null> {
+    const hasCustomPageScope = Boolean(pageId && pageId !== projectId);
     const record = await this.prisma.pageFile.findFirst({
       where: {
         spaceId: projectId,
+        ...(hasCustomPageScope
+          ? { pageId }
+          : pageId === null
+            ? { pageId: null }
+            : {}),
         name,
         deletedAt: null,
       },
@@ -370,6 +429,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
   public async findFileByPathFlexible(
     projectId: string,
     rawPath: string,
+    pageId?: string | null,
   ): Promise<ManuscriptFile | null> {
     const cleanPath = rawPath.replace(/^\//, '').trim();
     const leafName = cleanPath.split('/').pop() || cleanPath;
@@ -394,18 +454,23 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       },
     });
 
-    if (records.length === 0) {
+    const scopedRecords =
+      pageId && pageId !== projectId
+        ? filterRecordsByPageScope(records, pageId, projectId)
+        : records;
+
+    if (scopedRecords.length === 0) {
       return null;
     }
 
     for (const candidate of candidates) {
-      const match = records.find((r) => r.name === candidate);
+      const match = scopedRecords.find((r) => r.name === candidate);
       if (match) {
         return ManuscriptFileMapper.toDomain(match);
       }
     }
 
-    return ManuscriptFileMapper.toDomain(records[0]);
+    return ManuscriptFileMapper.toDomain(scopedRecords[0]);
   }
 
   public async findByHash(hash: string): Promise<ManuscriptFile[]> {
@@ -421,6 +486,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
   public async listByProject(
     projectId: string,
     includeDeleted = false,
+    pageId?: string | null,
   ): Promise<ManuscriptFile[]> {
     const records = await this.prisma.pageFile.findMany({
       where: {
@@ -429,7 +495,11 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       },
       orderBy: { createdAt: 'desc' },
     });
-    return records.map(ManuscriptFileMapper.toDomain);
+    const scopedRecords =
+      pageId && pageId !== projectId
+        ? filterRecordsByPageScope(records, pageId, projectId)
+        : records;
+    return scopedRecords.map(ManuscriptFileMapper.toDomain);
   }
 
   public async delete(id: string): Promise<void> {

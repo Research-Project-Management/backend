@@ -123,9 +123,7 @@ export class DocstoreService {
     const shouldCompress =
       process.env.DOCSTORE_ARCHIVE_GZIP !== 'false' &&
       rawBuffer.byteLength >= 4096;
-    const finalBuffer = shouldCompress
-      ? await gzipAsync(rawBuffer)
-      : rawBuffer;
+    const finalBuffer = shouldCompress ? await gzipAsync(rawBuffer) : rawBuffer;
     const sourceMd5 = crypto
       .createHash('md5')
       .update(finalBuffer)
@@ -184,9 +182,8 @@ export class DocstoreService {
           `Hydrating cold-tier document ${docId} from key ${storageKey}`,
         );
         const stream = await this.docPersistor.getObjectStream(storageKey);
-        const expectedMd5 = await this.docPersistor.getObjectMd5Hash(
-          storageKey,
-        );
+        const expectedMd5 =
+          await this.docPersistor.getObjectMd5Hash(storageKey);
 
         const chunks: Buffer[] = [];
         for await (const chunk of stream) {
@@ -199,11 +196,14 @@ export class DocstoreService {
           .digest('hex');
 
         if (expectedMd5 && actualMd5 !== expectedMd5) {
-          throw new Md5MismatchError('MD5 mismatch during document unarchival', {
-            key: storageKey,
-            sourceMd5: expectedMd5,
-            actualMd5,
-          });
+          throw new Md5MismatchError(
+            'MD5 mismatch during document unarchival',
+            {
+              key: storageKey,
+              sourceMd5: expectedMd5,
+              actualMd5,
+            },
+          );
         }
 
         const decoded = await this.decodeArchivedPayload(rawBuffer);
@@ -218,9 +218,9 @@ export class DocstoreService {
         );
 
         if (this.docPersistor?.deleteObject) {
-          await Promise.resolve(this.docPersistor.deleteObject(storageKey)).catch(
-            () => undefined,
-          );
+          await Promise.resolve(
+            this.docPersistor.deleteObject(storageKey),
+          ).catch(() => undefined);
         }
 
         return unarchived;
@@ -237,8 +237,11 @@ export class DocstoreService {
     return doc;
   }
 
-  private async getAllDocEntities(projectId: string): Promise<TextDoc[]> {
-    const docs = await this.docRepository.getAllDocs(projectId);
+  private async getAllDocEntities(
+    projectId: string,
+    pageId?: string,
+  ): Promise<TextDoc[]> {
+    const docs = await this.docRepository.getAllDocs(projectId, pageId);
     return await mapWithConcurrency<TextDoc, TextDoc>(
       docs,
       COLD_HYDRATION_CONCURRENCY,
@@ -322,8 +325,11 @@ export class DocstoreService {
     return doc.toRawText();
   }
 
-  public async getAllDocs(projectId: string): Promise<DocResponseDto[]> {
-    const docs = await this.getAllDocEntities(projectId);
+  public async getAllDocs(
+    projectId: string,
+    pageId?: string,
+  ): Promise<DocResponseDto[]> {
+    const docs = await this.getAllDocEntities(projectId, pageId);
     return docs.map((d) => this.mapToDto(d));
   }
 
@@ -471,7 +477,11 @@ export class DocstoreService {
         .getDoc(projectId, docId)
         .catch(() => null);
       await this.docRepository.destroyDoc(projectId, docId);
-      if (existing?.inStorage && existing.storageKey && this.docPersistor?.deleteObject) {
+      if (
+        existing?.inStorage &&
+        existing.storageKey &&
+        this.docPersistor?.deleteObject
+      ) {
         await Promise.resolve(
           this.docPersistor.deleteObject(existing.storageKey),
         ).catch(() => undefined);

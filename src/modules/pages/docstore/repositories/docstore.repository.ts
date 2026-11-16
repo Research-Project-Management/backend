@@ -10,6 +10,7 @@ import { Prisma, PageDoc } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
+import { filterRecordsByPageScope } from '../controllers/doc.helpers';
 import {
   TextDoc,
   DocModifiedError,
@@ -112,16 +113,27 @@ export class DocstoreRepository {
     return this.mapToEntity(record);
   }
 
-  public async getAllDocs(projectId: string): Promise<TextDoc[]> {
-    const records = await this.prisma.pageDoc.findMany({
+  public async getAllDocs(
+    projectId: string,
+    pageId?: string,
+  ): Promise<TextDoc[]> {
+    const hasCustomPageScope = Boolean(
+      pageId && pageId !== projectId && isUuid(pageId),
+    );
+    const rawRecords = await this.prisma.pageDoc.findMany({
       where: {
         spaceId: projectId,
         deletedAt: null,
+        ...(hasCustomPageScope ? { OR: [{ pageId }, { pageId: null }] } : {}),
       },
       orderBy: {
         path: 'asc',
       },
     });
+
+    const records = hasCustomPageScope
+      ? filterRecordsByPageScope(rawRecords, pageId, projectId)
+      : rawRecords;
 
     DocstoreMetrics.recordRead();
     return records.map((r) => this.mapToEntity(r));

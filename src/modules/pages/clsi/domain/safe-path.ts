@@ -53,6 +53,12 @@ export class SafePath {
       );
     }
 
+    if (normalized === '.' || normalized === '') {
+      throw new UnsafePathException(
+        `Security Violation: Invalid relative file path (${filePath})`,
+      );
+    }
+
     return normalized;
   }
 
@@ -69,7 +75,7 @@ export class SafePath {
       ? resolvedBase
       : resolvedBase + path.sep;
 
-    if (resolved !== resolvedBase && !resolved.startsWith(baseWithSep)) {
+    if (!resolved.startsWith(baseWithSep)) {
       throw new UnsafePathException(
         `Security Violation: Target path is outside base directory (${relativePath})`,
       );
@@ -104,13 +110,19 @@ export class SafePath {
     // Check if the target itself exists and is a symlink or resolves outside
     try {
       const realTarget = await fs.realpath(resolvedTarget);
-      if (realTarget !== realBase && !realTarget.startsWith(realBaseWithSep)) {
+      if (!realTarget.startsWith(realBaseWithSep)) {
         throw new UnsafePathException(
           `Security Violation: Symlink points outside workspace (${relativePath})`,
         );
       }
     } catch (err: unknown) {
       if (err instanceof UnsafePathException) throw err;
+      const lstat = await fs.lstat(resolvedTarget).catch(() => null);
+      if (lstat?.isSymbolicLink()) {
+        throw new UnsafePathException(
+          `Security Violation: Dangling symlink detected (${relativePath})`,
+        );
+      }
       // Target does not exist yet, check deepest existing ancestor
       let currentDir = path.dirname(resolvedTarget);
       while (currentDir.length >= resolvedBase.length) {
@@ -125,7 +137,14 @@ export class SafePath {
             );
           }
           break;
-        } catch {
+        } catch (ancestorErr: unknown) {
+          if (ancestorErr instanceof UnsafePathException) throw ancestorErr;
+          const ancestorLstat = await fs.lstat(currentDir).catch(() => null);
+          if (ancestorLstat?.isSymbolicLink()) {
+            throw new UnsafePathException(
+              `Security Violation: Dangling directory symlink detected (${relativePath})`,
+            );
+          }
           const parent = path.dirname(currentDir);
           if (parent === currentDir) break;
           currentDir = parent;

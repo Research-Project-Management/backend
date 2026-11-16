@@ -35,6 +35,7 @@ import { CitationsModule } from './citations/citations.module';
 import { TemplatesModule } from './templates/templates.module';
 import { ExportImportModule } from './export-import/export-import.module';
 import { GitBridgeModule } from './git-bridge/git-bridge.module';
+import { EditorBootstrapModule } from './bootstrap/editor-bootstrap.module';
 
 import { PagesFacade } from './pages.facade';
 
@@ -62,11 +63,15 @@ import { PagesFacade } from './pages.facade';
     TemplatesModule,
     ExportImportModule,
     GitBridgeModule,
+
+    // Unified Editor Bootstrap BFF
+    EditorBootstrapModule,
   ],
   providers: [PagesFacade],
   exports: [
     PagesFacade,
     ManuscriptsCoreModule,
+    EditorBootstrapModule,
 
     // Subsystem 1: VFS & Storage
     FilestoreModule,

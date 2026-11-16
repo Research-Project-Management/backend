@@ -33,6 +33,7 @@ import {
 import {
   PageDocRanges,
   resolveActiveProjectId,
+  resolveCanonicalManuscriptPageId,
   resolveProjectIdByEntityId,
   hydratePageDocLines,
   findPageRecordWithNode,
@@ -94,8 +95,7 @@ export class PageService {
     @Optional() pageScopeRepo?: ScopeRepository,
     @Optional() domainEventBus?: ManuscriptDomainEventBus,
   ) {
-    this.pageScopeRepo =
-      pageScopeRepo || new ScopeRepository(prisma);
+    this.pageScopeRepo = pageScopeRepo || new ScopeRepository(prisma);
     this.liveCollab =
       liveCollabOrLegacyRef &&
       typeof (liveCollabOrLegacyRef as LiveCollaborationPort)
@@ -550,9 +550,34 @@ export class PageService {
       );
     }
 
+    const [existingPage, parentDoc] = await Promise.all([
+      this.prisma.page?.findUnique
+        ? Promise.resolve(
+            this.prisma.page.findUnique({
+              where: { id: parentDocId },
+              select: { id: true, spaceId: true },
+            }),
+          ).catch(() => null)
+        : Promise.resolve(null),
+      this.prisma.pageDoc
+        .findFirst({
+          where: { id: parentDocId, spaceId: projectId },
+          select: { pageId: true },
+        })
+        .catch(() => null),
+    ]);
+    const persistedPageId =
+      (existingPage && existingPage.spaceId === projectId
+        ? existingPage.id
+        : undefined) ||
+      (parentDoc as { pageId?: string | null } | null)?.pageId ||
+      undefined;
+
     const parsed = NodePathVo.parse(fileName, 'untitled.tex');
 
-    let createdDocResult: Awaited<ReturnType<typeof this.docstoreService.createDoc>>;
+    let createdDocResult: Awaited<
+      ReturnType<typeof this.docstoreService.createDoc>
+    >;
     let createdNodeResult: { id: string };
 
     try {
@@ -561,18 +586,21 @@ export class PageService {
           tx,
           projectId,
           parsed.folderChain,
+          persistedPageId,
         );
 
         const doc = await this.docstoreService.createDoc(projectId, {
           path: parsed.relativePath,
           text: content,
           version: 1,
+          ...(persistedPageId ? { pageId: persistedPageId } : {}),
           tx,
         });
 
         const node = await tx.pageNode.create({
           data: {
             spaceId: projectId,
+            ...(persistedPageId ? { pageId: persistedPageId } : {}),
             parentId,
             name: parsed.leafName,
             path: parsed.normalizedPath,
@@ -676,7 +704,11 @@ export class PageService {
               this.prisma.page?.updateMany?.({
                 where: {
                   spaceId: docProjectId,
-                  OR: [{ id: pageId }, { rootDocId: doc.id }, { rootDocId: pageId }],
+                  OR: [
+                    { id: pageId },
+                    { rootDocId: doc.id },
+                    { rootDocId: pageId },
+                  ],
                 },
                 data: {
                   deletedAt: new Date(),
@@ -686,9 +718,14 @@ export class PageService {
           ]);
 
           if (deletedRootDoc) {
+            const docPageId = (doc as { pageId?: string | null }).pageId;
             await this.prisma.pageNode
               ?.updateMany?.({
-                where: { spaceId: docProjectId, isRootDoc: true },
+                where: {
+                  spaceId: docProjectId,
+                  ...(docPageId ? { pageId: docPageId } : {}),
+                  isRootDoc: true,
+                },
                 data: { isRootDoc: false },
               })
               ?.catch(() => null);
@@ -696,6 +733,7 @@ export class PageService {
               .findFirst({
                 where: {
                   spaceId: docProjectId,
+                  ...(docPageId ? { pageId: docPageId } : {}),
                   type: 'DOC',
                   name: { endsWith: '.tex' },
                 },
@@ -751,9 +789,19 @@ export class PageService {
       return { files: [] };
     }
 
+    const canonicalPageId = await resolveCanonicalManuscriptPageId(
+      this.prisma,
+      projectId,
+      pageId,
+    );
+
     const [deletedDocs, deletedFiles] = await Promise.all([
       this.prisma.pageDoc.findMany({
-        where: { spaceId: projectId, deletedAt: { not: null } },
+        where: {
+          spaceId: projectId,
+          ...(canonicalPageId ? { pageId: canonicalPageId } : {}),
+          deletedAt: { not: null },
+        },
         select: {
           id: true,
           path: true,
@@ -764,7 +812,11 @@ export class PageService {
         take: 200,
       }),
       this.prisma.pageFile.findMany({
-        where: { spaceId: projectId, deletedAt: { not: null } },
+        where: {
+          spaceId: projectId,
+          ...(canonicalPageId ? { pageId: canonicalPageId } : {}),
+          deletedAt: { not: null },
+        },
         select: {
           id: true,
           name: true,
@@ -1007,7 +1059,10 @@ export class PageService {
         this.prisma,
         body.sourceProjectId,
       );
-      if (altSourceProjectId && altSourceProjectId !== resolvedSourceProjectId) {
+      if (
+        altSourceProjectId &&
+        altSourceProjectId !== resolvedSourceProjectId
+      ) {
         throw new ForbiddenException(
           'Source file does not belong to specified sourceProjectId',
         );
@@ -1024,10 +1079,7 @@ export class PageService {
         .findFirst({
           where: {
             id: resolvedSourceProjectId,
-            OR: [
-              { createdById: userId },
-              { members: { some: { userId } } },
-            ],
+            OR: [{ createdById: userId }, { members: { some: { userId } } }],
           },
           select: { id: true },
         })
@@ -1043,7 +1095,9 @@ export class PageService {
       const sourceDocProjectId = this.getRecordSpaceId(sourceDoc);
       const live = this.getLiveCollaboration();
       if (live && sourceDocProjectId) {
-        await live.flushDocs(sourceDocProjectId, [sourceDoc.id]).catch(() => []);
+        await live
+          .flushDocs(sourceDocProjectId, [sourceDoc.id])
+          .catch(() => []);
       }
       const lines = await this.getHydratedDocLines(sourceDoc);
       const content = lines.join('\n');

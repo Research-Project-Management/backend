@@ -5,7 +5,8 @@
 
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PageNode, Prisma } from '@prisma/client';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
+import { filterRecordsByPageScope } from '@/modules/pages/docstore/controllers/doc.helpers';
 import {
   IStructureRepository,
   CreateNodeParams,
@@ -13,6 +14,8 @@ import {
   NodePathVo,
   ParsedFolderSegment,
   DuplicateNodePathError,
+  InvalidNodeNameError,
+  MAX_VIRTUAL_TREE_DEPTH,
   StructureError,
 } from './domain';
 
@@ -29,7 +32,10 @@ function isPrismaUniqueError(err: unknown): boolean {
  * optional-chaining (`findUnique?.`) for lightweight unit test mocks.
  */
 export async function ensurePrismaFolderChain(
-  db: { pageNode?: Partial<Prisma.TransactionClient['pageNode']> } | null | undefined,
+  db:
+    | { pageNode?: Partial<Prisma.TransactionClient['pageNode']> }
+    | null
+    | undefined,
   projectId: string,
   folderChain: readonly ParsedFolderSegment[],
   pageId?: string | null,
@@ -38,16 +44,16 @@ export async function ensurePrismaFolderChain(
     return null;
   }
 
-  let preFetchedByPath: Map<string, { id?: string; type?: string } | null> | null =
-    null;
-  if (
-    folderChain.length > 1 &&
-    typeof db.pageNode.findMany === 'function'
-  ) {
+  let preFetchedByPath: Map<
+    string,
+    { id?: string; type?: string } | null
+  > | null = null;
+  if (folderChain.length > 1 && typeof db.pageNode.findMany === 'function') {
     try {
       const existingNodes = await db.pageNode.findMany({
         where: {
           spaceId: projectId,
+          ...(pageId ? { pageId } : { pageId: null }),
           path: { in: folderChain.map((f) => f.path) },
         },
       });
@@ -80,7 +86,7 @@ export async function ensurePrismaFolderChain(
       (await db.pageNode.findFirst?.({
         where: {
           spaceId: projectId,
-          ...(pageId ? { pageId } : {}),
+          ...(pageId ? { pageId } : { pageId: null }),
           path: folder.path,
         },
       }));
@@ -116,7 +122,7 @@ export async function ensurePrismaFolderChain(
             (await db.pageNode.findFirst?.({
               where: {
                 spaceId: projectId,
-                ...(pageId ? { pageId } : {}),
+                ...(pageId ? { pageId } : { pageId: null }),
                 path: folder.path,
               },
             })) ??
@@ -166,7 +172,12 @@ export class StructureRepository extends IStructureRepository {
       }
       return await ensurePrismaFolderChain(tx, projectId, chain, pageId);
     }
-    return await ensurePrismaFolderChain(tx, projectId, folderPathOrChain, pageId);
+    return await ensurePrismaFolderChain(
+      tx,
+      projectId,
+      folderPathOrChain,
+      pageId,
+    );
   }
 
   private async syncBackingAssetPath(
@@ -174,6 +185,7 @@ export class StructureRepository extends IStructureRepository {
     projectId: string,
     node: { docId?: string | null; fileId?: string | null } | null | undefined,
     virtualPath: string,
+    promotedPageId?: string | null,
   ): Promise<void> {
     if (!node) return;
     const relativePath = NodePathVo.toRelative(virtualPath);
@@ -186,7 +198,10 @@ export class StructureRepository extends IStructureRepository {
     if (node.fileId) {
       await db.pageFile?.updateMany({
         where: { id: node.fileId, spaceId: projectId },
-        data: { name: relativePath },
+        data: {
+          name: relativePath,
+          ...(promotedPageId ? { pageId: promotedPageId } : {}),
+        },
       });
     }
   }
@@ -214,14 +229,44 @@ export class StructureRepository extends IStructureRepository {
     });
   }
 
+  private async resolveValidFkPageId(
+    spaceId: string,
+    candidatePageId?: string | null,
+  ): Promise<string | undefined> {
+    if (
+      !candidatePageId ||
+      candidatePageId === spaceId ||
+      !isUuid(candidatePageId)
+    ) {
+      return undefined;
+    }
+    if (!this.prisma.page?.findUnique) {
+      return candidatePageId;
+    }
+    const pageRow = await Promise.resolve(
+      this.prisma.page.findUnique({
+        where: { id: candidatePageId },
+        select: { id: true, spaceId: true },
+      }),
+    ).catch(() => null);
+    if (pageRow && pageRow.spaceId === spaceId) {
+      return pageRow.id;
+    }
+    return undefined;
+  }
+
   public async createNode(
     params: CreateNodeParams,
   ): Promise<ManuscriptNodeEntity> {
     const depth = NodePathVo.depth(params.path);
+    const validFkPageId = await this.resolveValidFkPageId(
+      params.projectId,
+      params.pageId,
+    );
     const created = await this.prisma.pageNode.create({
       data: {
         spaceId: params.projectId,
-        ...(params.pageId ? { pageId: params.pageId } : {}),
+        ...(validFkPageId ? { pageId: validFkPageId } : {}),
         parentId: params.parentId || null,
         type: params.type,
         name: params.name,
@@ -265,8 +310,29 @@ export class StructureRepository extends IStructureRepository {
   public async findByPath(
     projectId: string,
     path: string,
+    pageId?: string | null,
   ): Promise<ManuscriptNodeEntity | null> {
     const normalized = NodePathVo.normalize(path);
+    const hasCustomPageScope = Boolean(pageId && pageId !== projectId);
+    if (hasCustomPageScope) {
+      const scoped = await this.prisma.pageNode.findFirst({
+        where: { spaceId: projectId, pageId, path: normalized },
+      });
+      if (scoped) return this.mapToEntity(scoped);
+      const pageHasOwnNodes = await this.prisma.pageNode
+        .findFirst({
+          where: { spaceId: projectId, pageId },
+          select: { id: true },
+        })
+        .catch(() => null);
+      if (!pageHasOwnNodes) {
+        const legacy = await this.prisma.pageNode.findFirst({
+          where: { spaceId: projectId, pageId: null, path: normalized },
+        });
+        return legacy ? this.mapToEntity(legacy) : null;
+      }
+      return null;
+    }
     const raw = await this.prisma.pageNode.findFirst({
       where: {
         OR: [
@@ -288,19 +354,54 @@ export class StructureRepository extends IStructureRepository {
     return raw ? this.mapToEntity(raw) : null;
   }
 
-  public async getAllNodes(projectId: string): Promise<ManuscriptNodeEntity[]> {
+  public async getAllNodes(
+    projectId: string,
+    pageId?: string | null,
+  ): Promise<ManuscriptNodeEntity[]> {
+    const hasCustomPageScope = Boolean(pageId && pageId !== projectId);
     const nodes = await this.prisma.pageNode.findMany({
-      where: { spaceId: projectId },
+      where: hasCustomPageScope
+        ? { spaceId: projectId, OR: [{ pageId }, { pageId: null }] }
+        : pageId === null
+          ? { spaceId: projectId, pageId: null }
+          : { spaceId: projectId },
       orderBy: [{ depth: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
     });
-    return nodes.map((n) => this.mapToEntity(n));
+    const scoped = hasCustomPageScope
+      ? filterRecordsByPageScope(nodes, pageId, projectId)
+      : nodes;
+    return scoped.map((n) => this.mapToEntity(n));
   }
 
   public async getRootDoc(
     projectId: string,
+    pageId?: string | null,
   ): Promise<ManuscriptNodeEntity | null> {
+    const hasCustomPageScope = Boolean(pageId && pageId !== projectId);
+    if (hasCustomPageScope) {
+      const scoped = await this.prisma.pageNode.findFirst({
+        where: { spaceId: projectId, pageId, isRootDoc: true },
+      });
+      if (scoped) return this.mapToEntity(scoped);
+      const pageHasOwnNodes = await this.prisma.pageNode
+        .findFirst({
+          where: { spaceId: projectId, pageId },
+          select: { id: true },
+        })
+        .catch(() => null);
+      if (!pageHasOwnNodes) {
+        const legacy = await this.prisma.pageNode.findFirst({
+          where: { spaceId: projectId, pageId: null, isRootDoc: true },
+        });
+        return legacy ? this.mapToEntity(legacy) : null;
+      }
+      return null;
+    }
     const raw = await this.prisma.pageNode.findFirst({
-      where: { spaceId: projectId, isRootDoc: true },
+      where:
+        pageId === null
+          ? { spaceId: projectId, pageId: null, isRootDoc: true }
+          : { spaceId: projectId, isRootDoc: true },
     });
     return raw ? this.mapToEntity(raw) : null;
   }
@@ -338,11 +439,7 @@ export class StructureRepository extends IStructureRepository {
       }),
     ]);
 
-    if (
-      targetPageId &&
-      targetNode.docId &&
-      this.prisma.page?.updateMany
-    ) {
+    if (targetPageId && targetNode.docId && this.prisma.page?.updateMany) {
       await Promise.resolve(
         this.prisma.page.updateMany({
           where: { id: targetPageId, spaceId: projectId },
@@ -352,9 +449,21 @@ export class StructureRepository extends IStructureRepository {
     }
   }
 
-  public async unsetRootDoc(projectId: string): Promise<void> {
+  public async unsetRootDoc(
+    projectId: string,
+    pageId?: string | null,
+  ): Promise<void> {
+    const hasCustomPageScope = Boolean(pageId && pageId !== projectId);
     await this.prisma.pageNode.updateMany({
-      where: { spaceId: projectId, isRootDoc: true },
+      where: {
+        spaceId: projectId,
+        ...(hasCustomPageScope
+          ? { pageId }
+          : pageId === null
+            ? { pageId: null }
+            : {}),
+        isRootDoc: true,
+      },
       data: { isRootDoc: false },
     });
   }
@@ -364,6 +473,7 @@ export class StructureRepository extends IStructureRepository {
     sourcePath: string,
     destPath: string,
     newParentId: string | null,
+    options?: { nodeId?: string; pageId?: string | null },
   ): Promise<void> {
     const normSource = NodePathVo.normalize(sourcePath);
     const normDest = NodePathVo.normalize(destPath);
@@ -371,17 +481,31 @@ export class StructureRepository extends IStructureRepository {
     const sourceDepth = NodePathVo.depth(normSource);
     const destDepth = NodePathVo.depth(normDest);
     const depthDelta = destDepth - sourceDepth;
+    const optionPageId =
+      options?.pageId === projectId ? null : options?.pageId;
 
     try {
       await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-        const targetRoot = await tx.pageNode.findFirst?.({
-          where: {
-            OR: [
-              { spaceId: projectId, path: normSource },
-              { pageId: projectId, path: normSource },
-            ],
-          },
-        });
+        const targetRoot = options?.nodeId
+          ? await tx.pageNode.findFirst?.({
+              where: { id: options.nodeId, spaceId: projectId },
+            })
+          : optionPageId !== undefined
+            ? await tx.pageNode.findFirst?.({
+                where: {
+                  spaceId: projectId,
+                  pageId: optionPageId,
+                  path: normSource,
+                },
+              })
+            : await tx.pageNode.findFirst?.({
+                where: {
+                  OR: [
+                    { spaceId: projectId, path: normSource },
+                    { pageId: projectId, path: normSource },
+                  ],
+                },
+              });
         if (!targetRoot) {
           throw new NotFoundException({
             statusCode: 404,
@@ -389,6 +513,12 @@ export class StructureRepository extends IStructureRepository {
             message: `Node at '${normSource}' not found`,
           });
         }
+
+        const targetRawPageId =
+          (targetRoot as { pageId?: string | null }).pageId ?? null;
+        const promotedPageId =
+          optionPageId && targetRawPageId == null ? optionPageId : undefined;
+
         const movedRoot = await tx.pageNode.update({
           where: { id: targetRoot.id },
           data: {
@@ -396,22 +526,63 @@ export class StructureRepository extends IStructureRepository {
             name: NodePathVo.basename(normDest),
             parentId: newParentId,
             depth: destDepth,
+            ...(promotedPageId ? { pageId: promotedPageId } : {}),
           },
         });
 
-        await this.syncBackingAssetPath(tx, projectId, movedRoot, normDest);
+        await this.syncBackingAssetPath(
+          tx,
+          projectId,
+          movedRoot,
+          normDest,
+          promotedPageId,
+        );
+
+        const movedRootRawPageId =
+          (movedRoot as { pageId?: string | null })?.pageId ?? null;
+        const normalizedRootPageId =
+          movedRootRawPageId === projectId ? null : movedRootRawPageId;
+        const movedPageId =
+          optionPageId !== undefined ? optionPageId : normalizedRootPageId;
 
         const canUseBulkSql =
           typeof (tx as { $executeRaw?: unknown }).$executeRaw === 'function' &&
-          !(tx.pageNode?.findMany as { _isMockFunction?: boolean } | undefined)?._isMockFunction &&
-          !(tx.pageNode?.update as { _isMockFunction?: boolean } | undefined)?._isMockFunction;
+          !(tx.pageNode?.findMany as { _isMockFunction?: boolean } | undefined)
+            ?._isMockFunction &&
+          !(tx.pageNode?.update as { _isMockFunction?: boolean } | undefined)
+            ?._isMockFunction;
 
         if (canUseBulkSql) {
+          if (
+            depthDelta > 0 &&
+            typeof tx.pageNode?.aggregate === 'function' &&
+            !(
+              tx.pageNode.aggregate as { _isMockFunction?: boolean } | undefined
+            )?._isMockFunction
+          ) {
+            const agg = await tx.pageNode.aggregate({
+              where: {
+                spaceId: projectId,
+                ...(movedPageId ? { pageId: movedPageId } : { pageId: null }),
+                path: { startsWith: sourcePrefix },
+              },
+              _max: { depth: true },
+            });
+            if (
+              agg?._max?.depth &&
+              agg._max.depth + depthDelta > MAX_VIRTUAL_TREE_DEPTH
+            ) {
+              throw new InvalidNodeNameError(
+                normDest,
+                `Path exceeds maximum folder depth (${MAX_VIRTUAL_TREE_DEPTH})`,
+              );
+            }
+          }
+
           const substringStart = normSource.length + 1;
           const prefixLen = sourcePrefix.length;
           const destPrefix = `${normDest}/`;
           const destPrefixLen = destPrefix.length;
-          const movedPageId = (movedRoot as { pageId?: string | null })?.pageId;
 
           if (movedPageId) {
             await tx.$executeRaw`
@@ -420,7 +591,7 @@ export class StructureRepository extends IStructureRepository {
                   depth = depth + ${depthDelta}::int,
                   updated_at = NOW()
               WHERE space_id = ${projectId}::uuid
-                AND (page_id = ${movedPageId}::uuid OR page_id IS NULL)
+                AND page_id = ${movedPageId}::uuid
                 AND LEFT(path, ${prefixLen}::int) = ${sourcePrefix}
             `;
 
@@ -431,7 +602,7 @@ export class StructureRepository extends IStructureRepository {
               FROM page_nodes n
               WHERE n.doc_id = d.id
                 AND n.space_id = ${projectId}::uuid
-                AND (n.page_id = ${movedPageId}::uuid OR n.page_id IS NULL)
+                AND n.page_id = ${movedPageId}::uuid
                 AND LEFT(n.path, ${destPrefixLen}::int) = ${destPrefix}
             `;
 
@@ -442,7 +613,7 @@ export class StructureRepository extends IStructureRepository {
               FROM page_nodes n
               WHERE n.file_id = f.id
                 AND n.space_id = ${projectId}::uuid
-                AND (n.page_id = ${movedPageId}::uuid OR n.page_id IS NULL)
+                AND n.page_id = ${movedPageId}::uuid
                 AND LEFT(n.path, ${destPrefixLen}::int) = ${destPrefix}
             `;
           } else {
@@ -452,6 +623,7 @@ export class StructureRepository extends IStructureRepository {
                   depth = depth + ${depthDelta}::int,
                   updated_at = NOW()
               WHERE space_id = ${projectId}::uuid
+                AND page_id IS NULL
                 AND LEFT(path, ${prefixLen}::int) = ${sourcePrefix}
             `;
 
@@ -462,6 +634,7 @@ export class StructureRepository extends IStructureRepository {
               FROM page_nodes n
               WHERE n.doc_id = d.id
                 AND n.space_id = ${projectId}::uuid
+                AND n.page_id IS NULL
                 AND LEFT(n.path, ${destPrefixLen}::int) = ${destPrefix}
             `;
 
@@ -472,6 +645,7 @@ export class StructureRepository extends IStructureRepository {
               FROM page_nodes n
               WHERE n.file_id = f.id
                 AND n.space_id = ${projectId}::uuid
+                AND n.page_id IS NULL
                 AND LEFT(n.path, ${destPrefixLen}::int) = ${destPrefix}
             `;
           }
@@ -481,6 +655,7 @@ export class StructureRepository extends IStructureRepository {
         const descendants = await tx.pageNode.findMany({
           where: {
             spaceId: projectId,
+            ...(movedPageId ? { pageId: movedPageId } : { pageId: null }),
             path: { startsWith: sourcePrefix },
           },
         });
@@ -534,10 +709,7 @@ export class StructureRepository extends IStructureRepository {
   ): Promise<ManuscriptNodeEntity> {
     const depth = NodePathVo.depth(newPath);
     const executeRename = async (
-      db: Pick<
-        Prisma.TransactionClient,
-        'pageNode' | 'pageDoc' | 'pageFile'
-      >,
+      db: Pick<Prisma.TransactionClient, 'pageNode' | 'pageDoc' | 'pageFile'>,
     ): Promise<PageNode> => {
       const result = await db.pageNode.updateMany({
         where: { id: nodeId, spaceId: projectId },
@@ -581,16 +753,56 @@ export class StructureRepository extends IStructureRepository {
   public async deleteSubtree(
     projectId: string,
     path: string,
+    pageId?: string | null,
   ): Promise<ManuscriptNodeEntity[]> {
     const normalized = NodePathVo.normalize(path);
     const prefix = normalized + '/';
 
-    const targets = await this.prisma.pageNode.findMany({
-      where: {
-        spaceId: projectId,
-        OR: [{ path: normalized }, { path: { startsWith: prefix } }],
-      },
-    });
+    const hasCustomPageScope = Boolean(pageId && pageId !== projectId);
+    let targets: PageNode[];
+    if (hasCustomPageScope) {
+      targets = await this.prisma.pageNode.findMany({
+        where: {
+          spaceId: projectId,
+          pageId,
+          OR: [{ path: normalized }, { path: { startsWith: prefix } }],
+        },
+      });
+      if (targets.length === 0) {
+        const pageHasOwnNodes = this.prisma.pageNode.findFirst
+          ? await Promise.resolve(
+              this.prisma.pageNode.findFirst({
+                where: { spaceId: projectId, pageId },
+                select: { id: true },
+              }),
+            ).catch(() => null)
+          : null;
+        if (!pageHasOwnNodes) {
+          targets = await this.prisma.pageNode.findMany({
+            where: {
+              spaceId: projectId,
+              pageId: null,
+              OR: [{ path: normalized }, { path: { startsWith: prefix } }],
+            },
+          });
+        }
+      }
+    } else if (pageId === null) {
+      targets = await this.prisma.pageNode.findMany({
+        where: {
+          spaceId: projectId,
+          pageId: null,
+          OR: [{ path: normalized }, { path: { startsWith: prefix } }],
+        },
+      });
+    } else {
+      targets = await this.prisma.pageNode.findMany({
+        where: {
+          spaceId: projectId,
+          OR: [{ path: normalized }, { path: { startsWith: prefix } }],
+        },
+      });
+    }
 
     const targetIds = targets.map((t) => t.id);
     const docIds = Array.from(
@@ -614,10 +826,7 @@ export class StructureRepository extends IStructureRepository {
 
     const now = new Date();
     const runCleanup = async (
-      db: Pick<
-        PrismaService,
-        'pageNode' | 'pageDoc' | 'pageFile'
-      >,
+      db: Pick<PrismaService, 'pageNode' | 'pageDoc' | 'pageFile'>,
     ) => {
       const ops: Promise<unknown>[] = [];
       if (targetIds.length > 0) {
@@ -653,8 +862,10 @@ export class StructureRepository extends IStructureRepository {
 
     if (
       targetIds.length > 0 ||
-      (docIds.length > 0 && typeof this.prisma.pageDoc?.updateMany === 'function') ||
-      (fileIds.length > 0 && typeof this.prisma.pageFile?.updateMany === 'function')
+      (docIds.length > 0 &&
+        typeof this.prisma.pageDoc?.updateMany === 'function') ||
+      (fileIds.length > 0 &&
+        typeof this.prisma.pageFile?.updateMany === 'function')
     ) {
       if (typeof this.prisma.$transaction === 'function') {
         await this.prisma.$transaction(async (tx) => {
@@ -715,7 +926,20 @@ export class StructureRepository extends IStructureRepository {
     return this.mapToEntity(updated!);
   }
 
-  public async countNodes(projectId: string): Promise<number> {
+  public async countNodes(
+    projectId: string,
+    pageId?: string | null,
+  ): Promise<number> {
+    const hasCustomPageScope = Boolean(pageId && pageId !== projectId);
+    if (hasCustomPageScope) {
+      const scopedCount = await this.prisma.pageNode.count({
+        where: { spaceId: projectId, pageId },
+      });
+      if (scopedCount > 0) return scopedCount;
+      return await this.prisma.pageNode.count({
+        where: { spaceId: projectId, pageId: null },
+      });
+    }
     return await this.prisma.pageNode.count({
       where: { spaceId: projectId },
     });

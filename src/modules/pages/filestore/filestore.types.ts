@@ -348,6 +348,11 @@ export class ManuscriptFile {
         'Filename must be a valid non-empty string.',
       );
     }
+    if (raw.includes('\u0000')) {
+      throw new FilestoreValidationException(
+        'Filename cannot contain null bytes.',
+      );
+    }
     const trimmed = raw.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
     if (trimmed.length === 0 || trimmed === '.' || trimmed === '..') {
       throw new FilestoreValidationException(`Invalid filename: '${raw}'`);
@@ -355,10 +360,10 @@ export class ManuscriptFile {
     // If path contains traversal segments ('..') or empty double-slashes, sanitize slashes to '_'
     const segments = trimmed.split('/');
     const hasTraversalOrInvalidSegment = segments.some(
-      (seg) => !seg || seg === '.' || seg === '..' || seg.includes('\u0000') || seg.length > 255,
+      (seg) => !seg || seg === '.' || seg === '..' || seg.length > 255,
     );
     if (hasTraversalOrInvalidSegment) {
-      const flat = trimmed.replace(/[/\\]/g, '_');
+      const flat = trimmed.replace(/[/\\]/g, '_').slice(0, 255).trim();
       if (flat.length === 0 || flat === '.' || flat === '..') {
         throw new FilestoreValidationException(`Invalid filename: '${raw}'`);
       }
@@ -503,7 +508,10 @@ export abstract class IBinaryStoragePort {
 }
 
 export abstract class IManuscriptFileRepository {
-  abstract save(file: ManuscriptFile): Promise<ManuscriptFile>;
+  abstract save(
+    file: ManuscriptFile,
+    options?: { syncStructureNode?: boolean },
+  ): Promise<ManuscriptFile>;
   abstract findById(id: string): Promise<ManuscriptFile | null>;
   abstract findByProjectAndId(
     projectId: string,
@@ -512,11 +520,13 @@ export abstract class IManuscriptFileRepository {
   abstract findByProjectAndName(
     projectId: string,
     name: string,
+    pageId?: string | null,
   ): Promise<ManuscriptFile | null>;
   abstract findByHash(hash: string): Promise<ManuscriptFile[]>;
   abstract listByProject(
     projectId: string,
     includeDeleted?: boolean,
+    pageId?: string | null,
   ): Promise<ManuscriptFile[]>;
   abstract delete(id: string): Promise<void>;
   abstract countReferencesByHash(hash: string): Promise<number>;

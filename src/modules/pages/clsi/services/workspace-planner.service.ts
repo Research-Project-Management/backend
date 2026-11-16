@@ -5,12 +5,18 @@
  * and Filestore binary asset streaming), and post-compile snapshot checkpointing.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Prisma } from '@prisma/client';
-import { PrismaService, mapWithConcurrency } from '@/core';
+import { PrismaService, isUuid, mapWithConcurrency } from '@/core';
+import { filterRecordsByPageScope } from '@/modules/pages/docstore/controllers/doc.helpers';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
@@ -41,54 +47,169 @@ export class WorkspacePlannerService {
   ) {}
 
   /**
+   * Resolve the owning space and canonical manuscript pageId when compiling or syncing.
+   * Rejects cross-tenant payload tampering if `authorizedSpaceId` does not own the resource.
+   */
+  public async resolveManuscriptContext(
+    dto: {
+      projectId?: string;
+      pageId?: string;
+    },
+    authorizedSpaceId?: string,
+  ): Promise<{ spaceId: string; pageId?: string }> {
+    let resolvedSpaceId: string | undefined;
+    let resolvedPageId: string | undefined;
+
+    const inspectIdentifier = async (
+      candidate?: string,
+    ): Promise<{ spaceId?: string; pageId?: string } | null> => {
+      if (
+        !candidate ||
+        candidate === 'default' ||
+        !this.prisma ||
+        !isUuid(candidate)
+      ) {
+        return null;
+      }
+      const page = await Promise.resolve(
+        this.prisma.page?.findUnique?.({
+          where: { id: candidate },
+          select: { id: true, spaceId: true },
+        }),
+      ).catch(() => null);
+      if (page?.id) {
+        return { spaceId: page.spaceId, pageId: page.id };
+      }
+
+      const pageDoc = await Promise.resolve(
+        this.prisma.pageDoc?.findUnique?.({
+          where: { id: candidate },
+          select: { id: true, spaceId: true, pageId: true },
+        }),
+      ).catch(() => null);
+      if (pageDoc) {
+        const sId =
+          pageDoc.spaceId ??
+          (pageDoc as { projectId?: string } | null)?.projectId;
+        const pId =
+          (pageDoc as { pageId?: string | null }).pageId || pageDoc.id;
+        return { spaceId: sId, pageId: pId };
+      }
+
+      const node = await Promise.resolve(
+        this.prisma.pageNode?.findUnique?.({
+          where: { id: candidate },
+          select: { spaceId: true, pageId: true, docId: true },
+        }),
+      ).catch(() => null);
+      if (node) {
+        return {
+          spaceId: node.spaceId,
+          pageId:
+            (node as { pageId?: string | null }).pageId ||
+            node.docId ||
+            undefined,
+        };
+      }
+
+      return null;
+    };
+
+    const pageInfo = await inspectIdentifier(dto.pageId);
+    if (pageInfo?.spaceId) {
+      resolvedSpaceId = pageInfo.spaceId;
+      resolvedPageId = pageInfo.pageId;
+    }
+
+    if (dto.projectId && dto.projectId !== 'default') {
+      const projAsEntityInfo = await inspectIdentifier(dto.projectId);
+      if (projAsEntityInfo?.spaceId) {
+        if (
+          authorizedSpaceId &&
+          projAsEntityInfo.spaceId !== authorizedSpaceId
+        ) {
+          throw new ForbiddenException({
+            statusCode: 403,
+            code: 'PROJECT_CONTEXT_MISMATCH',
+            message: 'Authorized space context does not match compile payload',
+          });
+        }
+        if (!resolvedSpaceId) resolvedSpaceId = projAsEntityInfo.spaceId;
+        if (!resolvedPageId) resolvedPageId = projAsEntityInfo.pageId;
+      } else if (
+        authorizedSpaceId &&
+        dto.projectId !== authorizedSpaceId &&
+        dto.projectId !== resolvedPageId
+      ) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'PROJECT_CONTEXT_MISMATCH',
+          message: 'Authorized space context does not match compile payload',
+        });
+      }
+    }
+
+    if (
+      authorizedSpaceId &&
+      resolvedSpaceId &&
+      resolvedSpaceId !== 'default' &&
+      resolvedSpaceId !== authorizedSpaceId
+    ) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'PROJECT_CONTEXT_MISMATCH',
+        message: 'Authorized space context does not match compile payload',
+      });
+    }
+
+    const spaceId =
+      authorizedSpaceId ||
+      resolvedSpaceId ||
+      (dto.projectId && dto.projectId !== 'default'
+        ? dto.projectId
+        : 'default');
+
+    if (resolvedPageId && resolvedPageId === spaceId) {
+      resolvedPageId = undefined;
+    }
+
+    return { spaceId, pageId: resolvedPageId };
+  }
+
+  /**
    * Resolve the owning project when only a page/doc id was supplied.
    */
   public async resolveProjectId(dto: {
     projectId?: string;
     pageId?: string;
   }): Promise<string> {
-    const pageId = dto.pageId;
-    if (pageId && this.prisma) {
-      try {
-        const pageDoc = await this.prisma.pageDoc.findUnique({
-          where: { id: pageId },
-          select: { spaceId: true },
-        });
-        const resolved =
-          pageDoc?.spaceId ??
-          (pageDoc as { projectId?: string } | null)?.projectId;
-        if (resolved) return resolved;
-      } catch {
-        /* fall through */
-      }
-    }
-
-    const projectId = dto.projectId || '';
-    if (projectId) return projectId;
-
-    return 'default';
+    const { spaceId } = await this.resolveManuscriptContext(dto);
+    return spaceId;
   }
 
   /**
    * Plans the compile file set from lightweight metadata (no document bodies are read),
-   * so the cache can be consulted before any heavy I/O happens.
+   * isolated by `(spaceId, pageId)` so multiple Pages in the same Space never merge trees.
    */
   public async planFiles(
     projectId: string,
     dto: CompileManuscriptDto,
+    manuscriptPageId?: string,
   ): Promise<PlannedFileSet> {
     const incomingFiles = { ...(dto.files || {}) };
     const mainFile = dto.mainFile || undefined;
     const source = dto.source || '';
+    const effectiveScopePageId = manuscriptPageId || dto.pageId;
 
     if (this.prisma && projectId !== 'default') {
       try {
-        const [nodes, docs, binaryFiles] = await Promise.all([
+        const [rawNodes, rawDocs, rawBinaryFiles] = await Promise.all([
           this.prisma.pageNode.findMany({
             where: { spaceId: projectId },
             orderBy: { sortOrder: 'asc' },
             select: {
               id: true,
+              pageId: true,
               docId: true,
               fileId: true,
               path: true,
@@ -101,6 +222,7 @@ export class WorkspacePlannerService {
             where: { spaceId: projectId, deletedAt: null },
             select: {
               id: true,
+              pageId: true,
               path: true,
               rev: true,
               sizeBytes: true,
@@ -114,6 +236,7 @@ export class WorkspacePlannerService {
                   where: { spaceId: projectId, deletedAt: null },
                   select: {
                     id: true,
+                    pageId: true,
                     name: true,
                     sizeBytes: true,
                     hash: true,
@@ -123,6 +246,21 @@ export class WorkspacePlannerService {
                 .catch(() => [])
             : Promise.resolve([]),
         ]);
+        const nodes = filterRecordsByPageScope(
+          rawNodes,
+          effectiveScopePageId,
+          projectId,
+        );
+        const docs = filterRecordsByPageScope(
+          rawDocs,
+          effectiveScopePageId,
+          projectId,
+        );
+        const binaryFiles = filterRecordsByPageScope(
+          rawBinaryFiles,
+          effectiveScopePageId,
+          projectId,
+        );
         return planDbFileSet({
           nodes,
           docs,
@@ -150,6 +288,7 @@ export class WorkspacePlannerService {
   public async hydrateFiles(
     projectId: string,
     plan: PlannedFileSet,
+    scratchWorkspaceId: string = projectId,
   ): Promise<Record<string, string | Buffer>> {
     const dbIds: string[] = [];
     for (const s of plan.files.values()) {
@@ -201,22 +340,53 @@ export class WorkspacePlannerService {
 
     if (this.prisma && this.filestoreService && projectId !== 'default') {
       try {
-        const [binaryFiles, fileNodes] =
+        const [rawBinaryFiles, rawFileNodes] =
           plan.binaryFiles && plan.nodes
-            ? [
-                plan.binaryFiles,
-                plan.nodes.filter((n) => n.type === 'FILE'),
-              ]
+            ? [plan.binaryFiles, plan.nodes.filter((n) => n.type === 'FILE')]
             : await Promise.all([
                 this.prisma.pageFile.findMany({
                   where: { spaceId: projectId, deletedAt: null },
-                  select: { id: true, name: true, sizeBytes: true, hash: true },
+                  select: {
+                    id: true,
+                    pageId: true,
+                    name: true,
+                    sizeBytes: true,
+                    hash: true,
+                  },
                 }),
                 this.prisma.pageNode.findMany({
                   where: { spaceId: projectId, type: 'FILE' },
-                  select: { fileId: true, path: true, name: true },
+                  select: {
+                    id: true,
+                    pageId: true,
+                    fileId: true,
+                    path: true,
+                    name: true,
+                  },
                 }),
               ]);
+
+        const [binaryFiles, fileNodes] =
+          scratchWorkspaceId !== projectId && !(plan.binaryFiles && plan.nodes)
+            ? [
+                filterRecordsByPageScope(
+                  rawBinaryFiles as Array<{
+                    pageId?: string | null;
+                    id?: string;
+                  }>,
+                  scratchWorkspaceId,
+                  projectId,
+                ),
+                filterRecordsByPageScope(
+                  rawFileNodes as Array<{
+                    pageId?: string | null;
+                    id?: string;
+                  }>,
+                  scratchWorkspaceId,
+                  projectId,
+                ),
+              ]
+            : [rawBinaryFiles, rawFileNodes];
 
         const pathByFileId = new Map<string, string>();
         for (const n of fileNodes) {
@@ -230,7 +400,7 @@ export class WorkspacePlannerService {
           }
         }
 
-        const scratchDir = this.workspace?.getScratchDir(projectId);
+        const scratchDir = this.workspace?.getScratchDir(scratchWorkspaceId);
 
         let manifestFiles: Record<string, string> = {};
         if (scratchDir) {
@@ -267,8 +437,12 @@ export class WorkspacePlannerService {
                 relPath,
               );
               const stat = await fs.lstat(localAssetPath);
+              const manifestHash = manifestFiles[relPath];
               const hashMatches =
-                !bf.hash || manifestFiles[relPath] === bf.hash;
+                !bf.hash ||
+                (manifestHash?.length === bf.hash.length
+                  ? manifestHash === bf.hash
+                  : Boolean(manifestHash));
               if (
                 !stat.isSymbolicLink() &&
                 stat.isFile() &&
@@ -443,12 +617,11 @@ export class WorkspacePlannerService {
         } catch (err: unknown) {
           const code = (err as { code?: string })?.code;
           if (code === 'P2002' && attempt < maxAttempts - 1) {
-            const currentLatest =
-              await this.prisma.pageSnapshot.findFirst({
-                where: { spaceId: projectId },
-                orderBy: { version: 'desc' },
-                select: { version: true },
-              });
+            const currentLatest = await this.prisma.pageSnapshot.findFirst({
+              where: { spaceId: projectId },
+              orderBy: { version: 'desc' },
+              select: { version: true },
+            });
             candidateVersion = Math.max(
               candidateVersion + 1,
               (currentLatest?.version ?? 0) + 1,

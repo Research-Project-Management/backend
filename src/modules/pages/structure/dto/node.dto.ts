@@ -61,6 +61,14 @@ export class CreateNodeDto {
   isRootDoc?: boolean;
 
   @ApiPropertyOptional({
+    description:
+      'Optional parent Manuscript Page UUID isolating VFS tree within a Space',
+  })
+  @IsUUID()
+  @IsOptional()
+  pageId?: string | null;
+
+  @ApiPropertyOptional({
     description: 'Initial text content when creating a DOC node',
   })
   @IsString()

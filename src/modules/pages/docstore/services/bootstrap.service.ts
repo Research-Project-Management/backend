@@ -215,6 +215,7 @@ export class BootstrapService {
       const existing = await this.prisma.pageNode.findFirst({
         where: {
           spaceId: projectId,
+          ...(pageId && this.prisma.page ? { pageId } : {}),
           path: bibPath,
         },
       });
@@ -295,13 +296,13 @@ export class BootstrapService {
     }
 
     // Mirror Overleaf Project Initialization:
-    if (body?.templateType === 'example') {
+    const isExampleTemplate = body?.templateType === 'example';
+    if (isExampleTemplate) {
       content = await this.buildExampleProjectTemplate(
         projectId,
         pageTitle,
         userId,
       );
-      await this.ensureExampleReferencesBib(projectId);
     } else if (!content.trim()) {
       content = await this.buildBlankProjectTemplate(
         projectId,
@@ -312,6 +313,7 @@ export class BootstrapService {
 
     // Ensure project settings are configured with Overleaf standard defaults and
     // determine whether a root document already exists for this project in parallel
+    const hasPageAggregateModel = Boolean(this.prisma.page);
     const [proj, fetchedExistingNodes] = await Promise.all([
       Promise.resolve(
         this.prisma.project?.findUnique?.({
@@ -319,12 +321,14 @@ export class BootstrapService {
           select: { settings: true },
         }),
       ).catch(() => null),
-      Promise.resolve(
-        this.prisma.pageNode?.findMany?.({
-          where: { spaceId: projectId, type: 'DOC' },
-          select: { path: true, isRootDoc: true },
-        }),
-      ).catch(() => []),
+      hasPageAggregateModel
+        ? Promise.resolve([])
+        : Promise.resolve(
+            this.prisma.pageNode?.findMany?.({
+              where: { spaceId: projectId, type: 'DOC' },
+              select: { path: true, isRootDoc: true },
+            }),
+          ).catch(() => []),
     ]);
 
     try {
@@ -352,13 +356,17 @@ export class BootstrapService {
     const existingNodes = Array.isArray(fetchedExistingNodes)
       ? fetchedExistingNodes
       : [];
-    const hasExistingRoot = existingNodes.some((n) => n.isRootDoc);
+    const hasExistingRoot = hasPageAggregateModel
+      ? false
+      : existingNodes.some((n) => n.isRootDoc);
     const existingPaths = new Set(
-      existingNodes.map((n) => (n.path || '').toLowerCase()),
+      hasPageAggregateModel
+        ? []
+        : existingNodes.map((n) => (n.path || '').toLowerCase()),
     );
 
     let targetName = 'main.tex';
-    if (existingPaths.has('/main.tex')) {
+    if (!hasPageAggregateModel && existingPaths.has('/main.tex')) {
       const cleanBase =
         pageTitle
           .trim()
@@ -381,24 +389,8 @@ export class BootstrapService {
       ranges: { title: pageTitle, labelIds, labels: attachedLabels },
     });
 
-    const createdNode = await this.prisma.pageNode.create({
-      data: {
-        spaceId: projectId,
-        ...(this.prisma.page ? { pageId: doc._id } : {}),
-        name: targetName,
-        path: targetPath,
-        depth: 1,
-        type: 'DOC',
-        docId: doc._id,
-        isRootDoc,
-        sizeBytes: Buffer.byteLength(content, 'utf8'),
-      },
-    });
-
-    if (
-      this.prisma.page?.upsert ||
-      this.prisma.page?.create
-    ) {
+    // Persist Page Aggregate Root BEFORE creating pageNode or linking pageDoc so FK constraints are satisfied
+    if (this.prisma.page?.upsert || this.prisma.page?.create) {
       const pagePayload = {
         id: doc._id,
         spaceId: projectId,
@@ -440,12 +432,30 @@ export class BootstrapService {
       }
     }
 
+    const createdNode = await this.prisma.pageNode.create({
+      data: {
+        spaceId: projectId,
+        ...(hasPageAggregateModel ? { pageId: doc._id } : {}),
+        name: targetName,
+        path: targetPath,
+        depth: 1,
+        type: 'DOC',
+        docId: doc._id,
+        isRootDoc,
+        sizeBytes: Buffer.byteLength(content, 'utf8'),
+      },
+    });
+
+    if (isExampleTemplate) {
+      await this.ensureExampleReferencesBib(projectId, doc._id);
+    }
+
     if (isRootDoc && createdNode?.id && this.prisma.pageNode?.updateMany) {
       await Promise.resolve(
         this.prisma.pageNode.updateMany({
           where: {
             spaceId: projectId,
-            ...(this.prisma.page ? { pageId: doc._id } : {}),
+            ...(hasPageAggregateModel ? { pageId: doc._id } : {}),
             isRootDoc: true,
             id: { not: createdNode.id },
           },

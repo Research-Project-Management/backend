@@ -32,6 +32,7 @@ import {
 } from '@/modules/pages/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
+import { filterRecordsByPageScope } from '@/modules/pages/docstore/controllers/doc.helpers';
 import { BibtexParser } from '@/modules/pages/citations/domain';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { StructureRepository } from './structure.repository';
@@ -158,16 +159,20 @@ export class StructureService {
       resolvedBus ?? new ManuscriptDomainEventBus(this.injectedLiveCollab);
   }
 
-  public async getFileTree(projectId: string): Promise<TreeNodeDto[]> {
-    const nodes = await this.repository.getAllNodes(projectId);
+  public async getFileTree(
+    projectId: string,
+    pageId?: string,
+  ): Promise<TreeNodeDto[]> {
+    const nodes = await this.repository.getAllNodes(projectId, pageId);
     return FileTreeBuilder.buildTreeHierarchy(nodes);
   }
 
   public async getAllNodes(
     projectId: string,
     parentId?: string,
+    pageId?: string,
   ): Promise<ManuscriptNodeEntity[]> {
-    const nodes = await this.repository.getAllNodes(projectId);
+    const nodes = await this.repository.getAllNodes(projectId, pageId);
     const trimmedParentId = parentId?.trim();
     if (!trimmedParentId) {
       return nodes;
@@ -205,8 +210,12 @@ export class StructureService {
       explicitPath?: string;
       leafName: string;
       parentRoleLabel?: string;
+      pageId?: string;
     },
-  ): Promise<{ parentNode: ManuscriptNodeEntity | null; computedPath: string }> {
+  ): Promise<{
+    parentNode: ManuscriptNodeEntity | null;
+    computedPath: string;
+  }> {
     const roleLabel = options.parentRoleLabel || 'Parent node';
     if (options.parentId) {
       const parentNode = await this.repository.findById(
@@ -231,6 +240,7 @@ export class StructureService {
       const existingParent = await this.repository.findByPath(
         projectId,
         parsed.parentPath,
+        options.pageId,
       );
       if (existingParent) {
         existingParent.assertCanContainChildren(roleLabel);
@@ -242,6 +252,7 @@ export class StructureService {
       const createdParent = await this.mkdirpInternal(
         projectId,
         parsed.parentPath,
+        options.pageId,
       );
       return {
         parentNode: createdParent,
@@ -258,16 +269,24 @@ export class StructureService {
   public async createNode(
     projectId: string,
     dto: CreateNodeDto,
+    pageId?: string,
   ): Promise<ManuscriptNodeEntity> {
-    const rawTarget =
-      dto.path && dto.path.trim() !== '' ? dto.path : dto.name;
+    const rawTarget = dto.path && dto.path.trim() !== '' ? dto.path : dto.name;
     const parsedTarget = NodePathVo.parse(rawTarget);
     const leafName =
-      parsedTarget.leafName ||
-      NodePathVo.parse(dto.name).leafName;
+      parsedTarget.leafName || NodePathVo.parse(dto.name).leafName;
     NodePathVo.validateFilename(leafName);
 
-    const currentCount = await this.repository.countNodes(projectId);
+    const candidatePageId = pageId || dto.pageId || undefined;
+    const resolvedInputPageId =
+      candidatePageId && candidatePageId !== projectId
+        ? candidatePageId
+        : undefined;
+
+    const currentCount = await this.repository.countNodes(
+      projectId,
+      resolvedInputPageId,
+    );
     FileTreeBuilder.validateProjectFileLimit(currentCount);
 
     const explicitPath =
@@ -283,9 +302,20 @@ export class StructureService {
         explicitPath,
         leafName,
         parentRoleLabel: 'Parent node',
+        pageId: resolvedInputPageId,
       });
 
-    const existing = await this.repository.findByPath(projectId, computedPath);
+    const parentScopedPageId =
+      parentNode?.pageId && parentNode.pageId !== projectId
+        ? parentNode.pageId
+        : undefined;
+    const effectivePageId = resolvedInputPageId || parentScopedPageId;
+
+    const existing = await this.repository.findByPath(
+      projectId,
+      computedPath,
+      effectivePageId,
+    );
     if (existing) {
       if (dto.type === 'FILE' && dto.fileId && existing.fileId === dto.fileId) {
         this.realtimeService?.broadcastFileTreeChange(projectId, {
@@ -298,13 +328,17 @@ export class StructureService {
     }
 
     if (dto.type === 'FILE' && dto.fileId && this.repository.findByFileId) {
-      const preSyncedNode = await this.repository.findByFileId(projectId, dto.fileId);
+      const preSyncedNode = await this.repository.findByFileId(
+        projectId,
+        dto.fileId,
+      );
       if (preSyncedNode) {
         await this.repository.moveSubtree(
           projectId,
           preSyncedNode.path,
           computedPath,
           parentNode ? parentNode.id : null,
+          { nodeId: preSyncedNode.id, pageId: effectivePageId },
         );
         const movedNode =
           (await this.repository.findById(projectId, preSyncedNode.id)) ??
@@ -339,6 +373,7 @@ export class StructureService {
           ? dto.content.split(/\r?\n/)
           : [''];
       const createdDoc = await this.docstoreService.createDoc(projectId, {
+        ...(effectivePageId ? { pageId: effectivePageId } : {}),
         path: NodePathVo.toRelative(computedPath),
         lines: initialLines,
       });
@@ -348,7 +383,10 @@ export class StructureService {
     }
 
     if (dto.fileId && this.repository.fileExistsInProject) {
-      const exists = await this.repository.fileExistsInProject(projectId, dto.fileId);
+      const exists = await this.repository.fileExistsInProject(
+        projectId,
+        dto.fileId,
+      );
       if (!exists) {
         throw new NotFoundException({
           statusCode: 404,
@@ -360,8 +398,9 @@ export class StructureService {
 
     try {
       const shouldSetRootDoc = Boolean(dto.isRootDoc && dto.type === 'DOC');
-      let node = await this.repository.createNode({
+      const node = await this.repository.createNode({
         projectId,
+        ...(effectivePageId ? { pageId: effectivePageId } : {}),
         parentId: parentNode ? parentNode.id : null,
         type: dto.type,
         name: leafName,
@@ -423,6 +462,7 @@ export class StructureService {
   private async mkdirpInternal(
     projectId: string,
     dirPath: string,
+    pageId?: string,
   ): Promise<ManuscriptNodeEntity> {
     const parsed = NodePathVo.parse(dirPath);
     if (parsed.normalizedPath === '/') {
@@ -438,7 +478,7 @@ export class StructureService {
 
     const existingNodes = await Promise.all(
       segmentEntries.map((entry) =>
-        this.repository.findByPath(projectId, entry.path),
+        this.repository.findByPath(projectId, entry.path, pageId),
       ),
     );
 
@@ -456,6 +496,7 @@ export class StructureService {
         try {
           found = await this.repository.createNode({
             projectId,
+            ...(pageId && pageId !== projectId ? { pageId } : {}),
             parentId: parentNode ? parentNode.id : null,
             type: 'FOLDER',
             name: segment,
@@ -468,7 +509,11 @@ export class StructureService {
             errObj?.message?.includes('P2002') ||
             err instanceof DuplicateNodePathError
           ) {
-            found = await this.repository.findByPath(projectId, currentPath);
+            found = await this.repository.findByPath(
+              projectId,
+              currentPath,
+              pageId,
+            );
             if (!found || !found.isFolder()) {
               throw new DuplicateNodePathError(currentPath);
             }
@@ -507,6 +552,11 @@ export class StructureService {
     }
     targetNode.assertMutableTarget();
 
+    const nodePageId =
+      targetNode.pageId && targetNode.pageId !== projectId
+        ? targetNode.pageId
+        : undefined;
+
     const targetParentId =
       dto.destParentId !== undefined ? dto.destParentId : dto.parentId;
     const { parentNode: destParent, computedPath: destPath } =
@@ -515,18 +565,29 @@ export class StructureService {
         explicitPath: targetParentId ? undefined : dto.destPath,
         leafName: targetNode.name,
         parentRoleLabel: 'Destination parent',
+        pageId: nodePageId,
       });
     const newParentId = destParent ? destParent.id : null;
 
     targetNode.validateMoveTo(destPath);
 
-    const existing = await this.repository.findByPath(projectId, destPath);
+    const existing = await this.repository.findByPath(
+      projectId,
+      destPath,
+      nodePageId,
+    );
     if (existing && existing.id !== targetNode.id) {
       throw new DuplicateNodePathError(destPath);
     }
 
     const oldPath = targetNode.path;
-    await this.repository.moveSubtree(projectId, oldPath, destPath, newParentId);
+    await this.repository.moveSubtree(
+      projectId,
+      oldPath,
+      destPath,
+      newParentId,
+      { nodeId: targetNode.id, pageId: nodePageId ?? null },
+    );
 
     const node = (await this.repository.findById(projectId, targetNode.id))!;
 
@@ -548,6 +609,11 @@ export class StructureService {
     }
     existingNode.assertMutableTarget();
 
+    const nodePageId =
+      existingNode.pageId && existingNode.pageId !== projectId
+        ? existingNode.pageId
+        : undefined;
+
     // If caller passes a relative or absolute path (e.g. "sections/new_name.tex" or "/new_name.tex"),
     // extract the leaf name when the parent folder is unchanged, or delegate to move+rename when the parent folder changes.
     const rawInput = (dto.name || '').trim();
@@ -560,9 +626,14 @@ export class StructureService {
             explicitPath: parsed.normalizedPath,
             leafName: parsed.leafName,
             parentRoleLabel: 'Destination parent',
+            pageId: nodePageId,
           });
         existingNode.validateMoveTo(destPath);
-        const conflict = await this.repository.findByPath(projectId, destPath);
+        const conflict = await this.repository.findByPath(
+          projectId,
+          destPath,
+          nodePageId,
+        );
         if (conflict && conflict.id !== existingNode.id) {
           throw new DuplicateNodePathError(destPath);
         }
@@ -571,6 +642,7 @@ export class StructureService {
           existingNode.path,
           destPath,
           destParent ? destParent.id : null,
+          { nodeId: existingNode.id, pageId: nodePageId ?? null },
         );
         const movedAndRenamed = (await this.repository.findById(
           projectId,
@@ -594,7 +666,11 @@ export class StructureService {
     } else {
       const { oldPath, newPath } = existingNode.renameTo(newName);
 
-      const conflict = await this.repository.findByPath(projectId, newPath);
+      const conflict = await this.repository.findByPath(
+        projectId,
+        newPath,
+        nodePageId,
+      );
       if (conflict && conflict.id !== existingNode.id) {
         throw new DuplicateNodePathError(newPath);
       }
@@ -605,6 +681,7 @@ export class StructureService {
           oldPath,
           newPath,
           existingNode.parentId,
+          { nodeId: existingNode.id, pageId: nodePageId ?? null },
         );
         node = (await this.repository.findById(projectId, existingNode.id))!;
       } else {
@@ -634,7 +711,14 @@ export class StructureService {
     }
     node.assertMutableTarget();
 
-    const deletedNodes = await this.repository.deleteSubtree(projectId, node.path);
+    const nodePageId =
+      node.pageId && node.pageId !== projectId ? node.pageId : undefined;
+
+    const deletedNodes = await this.repository.deleteSubtree(
+      projectId,
+      node.path,
+      nodePageId ?? null,
+    );
 
     const docIds = Array.from(
       new Set(
@@ -657,7 +741,10 @@ export class StructureService {
     const hadRootDoc = deletedNodes.some((n) => n.isRootDoc);
 
     // Reclaim Space StorageQuota and release StorageBlob CAS references for deleted binary files
-    if (fileIds.length > 0 && this.filestoreService?.reclaimDeletedFilesQuotaAndBlobs) {
+    if (
+      fileIds.length > 0 &&
+      this.filestoreService?.reclaimDeletedFilesQuotaAndBlobs
+    ) {
       await this.filestoreService
         .reclaimDeletedFilesQuotaAndBlobs(projectId, fileIds, deletedNodes)
         .catch((err: unknown) => {
@@ -677,11 +764,14 @@ export class StructureService {
     });
 
     if (hadRootDoc) {
-      await this.repository.unsetRootDoc(projectId);
+      await this.repository.unsetRootDoc(projectId, nodePageId ?? null);
       const docContentsMap = new Map<string, string[]>();
       if (this.docstoreService) {
         try {
-          const allDocs = await this.docstoreService.getAllDocs(projectId);
+          const allDocs = await this.docstoreService.getAllDocs(
+            projectId,
+            nodePageId,
+          );
           for (const d of allDocs) {
             const dId = d.id || d._id;
             if (dId && Array.isArray(d.lines)) {
@@ -692,7 +782,12 @@ export class StructureService {
           // non-blocking fallback to filename-based root detection
         }
       }
-      await this.autoDetectRootDoc(projectId, docContentsMap).catch(() => null);
+      await this.autoDetectRootDoc(
+        projectId,
+        docContentsMap,
+        undefined,
+        nodePageId ?? null,
+      ).catch(() => null);
     }
 
     this.realtimeService?.broadcastFileTreeChange(projectId, {
@@ -704,8 +799,9 @@ export class StructureService {
 
   public async getRootDoc(
     projectId: string,
+    pageId?: string,
   ): Promise<ManuscriptNodeEntity | null> {
-    return await this.repository.getRootDoc(projectId);
+    return await this.repository.getRootDoc(projectId, pageId);
   }
 
   public async setRootDoc(
@@ -720,8 +816,7 @@ export class StructureService {
 
     await this.repository.setRootDoc(projectId, found.id);
     found.markAsRootDoc(true);
-    const node =
-      (await this.repository.findById(projectId, found.id)) ?? found;
+    const node = (await this.repository.findById(projectId, found.id)) ?? found;
 
     this.realtimeService?.broadcastFileTreeChange(projectId, {
       action: 'set-root',
@@ -734,15 +829,17 @@ export class StructureService {
     projectId: string,
     docContents: Map<string, string[]>,
     existingNodes?: ManuscriptNodeEntity[],
+    pageId?: string | null,
   ): Promise<ManuscriptNodeEntity | null> {
     const existing = existingNodes
       ? (existingNodes.find((n) => n.isRootDoc) ?? null)
-      : await this.repository.getRootDoc(projectId);
+      : await this.repository.getRootDoc(projectId, pageId);
     if (existing) {
       return existing;
     }
 
-    const allNodes = existingNodes ?? (await this.repository.getAllNodes(projectId));
+    const allNodes =
+      existingNodes ?? (await this.repository.getAllNodes(projectId, pageId));
     const detected = FileTreeBuilder.detectRootDoc(allNodes, docContents);
 
     if (detected) {
@@ -751,7 +848,9 @@ export class StructureService {
         `Auto-detected root document '${detected.path}' for project ${projectId}`,
       );
 
-      return (await this.repository.findById(projectId, detected.id)) ?? detected;
+      return (
+        (await this.repository.findById(projectId, detected.id)) ?? detected
+      );
     }
 
     return null;
@@ -1133,9 +1232,11 @@ export class StructureService {
 
   public async getProjectSymbols(
     projectId: string,
+    pageId?: string,
+    preloadedNodes?: ManuscriptNodeEntity[],
   ): Promise<ProjectSymbolsResponseDto> {
-    const { nodes, docsToScan, docHashByPath, rootDocPath } =
-      await this.loadProjectDocsContext(projectId);
+    const { nodes, docsToScan, docHashByPath, docIdByPath, rootDocPath } =
+      await this.loadProjectDocsContext(projectId, pageId, preloadedNodes);
 
     const labelsMap = new Map<string, ProjectSymbolLabelDto>();
     const citationsMap = new Map<string, ProjectSymbolCitationDto>();
@@ -1169,7 +1270,8 @@ export class StructureService {
       const docHash =
         docHashByPath.get(filePath) ||
         `${lines.length}:${lines[0]?.length ?? 0}:${lines[lines.length - 1] ?? ''}`;
-      const cacheKey = `${filePath}:${docHash}`;
+      const docIdTag = docIdByPath.get(filePath) || filePath;
+      const cacheKey = `${docIdTag}:${docHash}`;
       let cached = this.docSymbolsCache.get(cacheKey);
       if (!cached) {
         cached = this.extractSingleDocSymbols(filePath, lines, bibParser);
@@ -1196,7 +1298,11 @@ export class StructureService {
         }
       }
       for (const cmd of cached.customCommands) {
-        if (cmd.signature === cmd.name && !cmd.expansion && commandsMap.has(cmd.name)) {
+        if (
+          cmd.signature === cmd.name &&
+          !cmd.expansion &&
+          commandsMap.has(cmd.name)
+        ) {
           continue;
         }
         commandsMap.set(cmd.name, cmd);
@@ -1235,23 +1341,35 @@ export class StructureService {
     };
   }
 
-  private async loadProjectDocsContext(projectId: string): Promise<{
+  private async loadProjectDocsContext(
+    projectId: string,
+    pageId?: string,
+    preloadedNodes?: ManuscriptNodeEntity[],
+  ): Promise<{
     nodes: ManuscriptNodeEntity[];
     allDocs: Awaited<ReturnType<DocstoreService['getAllDocs']>>;
     docContentsMap: Map<string, string[]>;
     docsToScan: Map<string, string[]>;
     docHashByPath: Map<string, string>;
+    docIdByPath: Map<string, string>;
     rootDocPath: string | null;
   }> {
-    const [nodes, allDocs] = await Promise.all([
-      this.repository.getAllNodes(projectId),
+    const [nodes, rawDocs] = await Promise.all([
+      preloadedNodes
+        ? Promise.resolve(preloadedNodes)
+        : this.repository.getAllNodes(projectId, pageId),
       this.docstoreService
-        ? this.docstoreService.getAllDocs(projectId).catch(() => [])
+        ? this.docstoreService.getAllDocs(projectId, pageId).catch(() => [])
         : Promise.resolve([]),
     ]);
+    const allDocs =
+      pageId && pageId !== projectId
+        ? filterRecordsByPageScope(rawDocs, pageId, projectId)
+        : rawDocs;
 
     const docContentsMap = new Map<string, string[]>();
     const docHashByIdOrPath = new Map<string, string>();
+    const docIdByPath = new Map<string, string>();
     for (const d of allDocs) {
       const dId = d.id || d._id;
       const hashTag = d.hash ? `${d.hash}:${d.rev ?? 0}` : '';
@@ -1267,6 +1385,9 @@ export class StructureService {
         if (hashTag && !docHashByIdOrPath.has(cleanPath)) {
           docHashByIdOrPath.set(cleanPath, hashTag);
         }
+        if (dId && !docIdByPath.has(cleanPath)) {
+          docIdByPath.set(cleanPath, dId);
+        }
       }
     }
 
@@ -1276,6 +1397,7 @@ export class StructureService {
         projectId,
         docContentsMap,
         nodes,
+        pageId,
       ).catch(() => null);
     }
     const rootDocPath = rootNode
@@ -1293,6 +1415,9 @@ export class StructureService {
         docContentsMap.get(relPath);
       if (lines) {
         docsToScan.set(relPath, lines);
+        if (node.docId) {
+          docIdByPath.set(relPath, node.docId);
+        }
         const h =
           (node.docId ? docHashByIdOrPath.get(node.docId) : undefined) ||
           docHashByIdOrPath.get(node.id) ||
@@ -1317,6 +1442,7 @@ export class StructureService {
       docContentsMap,
       docsToScan,
       docHashByPath,
+      docIdByPath,
       rootDocPath,
     };
   }
@@ -1324,6 +1450,7 @@ export class StructureService {
   public async getProjectOutline(
     projectId: string,
     options?: { filePath?: string; docId?: string; content?: string },
+    pageId?: string,
   ): Promise<{
     rootDocPath: string | null;
     entries: LatexOutlineEntryDto[];
@@ -1343,7 +1470,7 @@ export class StructureService {
     }
 
     const { nodes, docContentsMap, docsToScan, rootDocPath } =
-      await this.loadProjectDocsContext(projectId);
+      await this.loadProjectDocsContext(projectId, pageId);
 
     if (options?.docId) {
       const lines = docContentsMap.get(options.docId);

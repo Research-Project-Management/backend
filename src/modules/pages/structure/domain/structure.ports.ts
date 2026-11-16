@@ -3,10 +3,7 @@
  * Port interfaces for Manuscript File Tree nodes, root doc detection, and tree mutation broadcasts.
  */
 
-import {
-  ManuscriptNodeEntity,
-  ManuscriptNodeType,
-} from './node.entity';
+import { ManuscriptNodeEntity, ManuscriptNodeType } from './node.entity';
 
 export interface CreateNodeParams {
   projectId: string;
@@ -32,20 +29,31 @@ export abstract class IStructureRepository {
   abstract findByPath(
     projectId: string,
     path: string,
+    pageId?: string | null,
   ): Promise<ManuscriptNodeEntity | null>;
   abstract findByFileId?(
     projectId: string,
     fileId: string,
   ): Promise<ManuscriptNodeEntity | null>;
-  abstract getAllNodes(projectId: string): Promise<ManuscriptNodeEntity[]>;
-  abstract getRootDoc(projectId: string): Promise<ManuscriptNodeEntity | null>;
+  abstract getAllNodes(
+    projectId: string,
+    pageId?: string | null,
+  ): Promise<ManuscriptNodeEntity[]>;
+  abstract getRootDoc(
+    projectId: string,
+    pageId?: string | null,
+  ): Promise<ManuscriptNodeEntity | null>;
   abstract setRootDoc(projectId: string, nodeId: string): Promise<void>;
-  abstract unsetRootDoc(projectId: string): Promise<void>;
+  abstract unsetRootDoc(
+    projectId: string,
+    pageId?: string | null,
+  ): Promise<void>;
   abstract moveSubtree(
     projectId: string,
     sourcePath: string,
     destPath: string,
     newParentId: string | null,
+    options?: { nodeId?: string; pageId?: string | null },
   ): Promise<void>;
   abstract renameNode(
     projectId: string,
@@ -56,6 +64,7 @@ export abstract class IStructureRepository {
   abstract deleteSubtree(
     projectId: string,
     path: string,
+    pageId?: string | null,
   ): Promise<ManuscriptNodeEntity[]>;
   abstract updateSortOrder(
     projectId: string,
@@ -69,7 +78,10 @@ export abstract class IStructureRepository {
     sizeBytes?: number,
     hash?: string | null,
   ): Promise<ManuscriptNodeEntity>;
-  abstract countNodes(projectId: string): Promise<number>;
+  abstract countNodes(
+    projectId: string,
+    pageId?: string | null,
+  ): Promise<number>;
   abstract docExistsInProject?(
     projectId: string,
     docId: string,

@@ -43,7 +43,7 @@ export abstract class IDocRepository {
     projectId: string,
     path: string,
   ): Promise<TextDoc | null>;
-  abstract getAllDocs(projectId: string): Promise<TextDoc[]>;
+  abstract getAllDocs(projectId: string, pageId?: string): Promise<TextDoc[]>;
   abstract getAllDeletedDocs(projectId: string): Promise<TextDoc[]>;
   abstract createDoc(data: CreateDocData): Promise<TextDoc>;
   abstract updateDoc(
