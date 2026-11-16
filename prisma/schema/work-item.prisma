@@ -161,6 +161,7 @@ model SpaceLabel {
   name                String                    @db.VarChar(100)
   color               String                    @default("#3b82f6") @db.VarChar(30)
   description         String?                   @db.VarChar(500)
+  type                String                    @default("work_item") @db.VarChar(50)
   sortOrder           Float                     @default(65535) @map("sort_order")
   parentId            String?                   @map("parent_id") @db.Uuid
   parent              SpaceLabel?               @relation("SpaceLabelHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
@@ -170,7 +171,8 @@ model SpaceLabel {
   createdAt           DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([spaceId, parentId, name], map: "uq_space_labels_space_parent_name")
+  @@unique([spaceId, type, parentId, name], map: "uq_space_labels_space_type_parent_name")
+  @@index([spaceId, type, sortOrder])
   @@index([spaceId, sortOrder])
   @@index([spaceId, parentId])
   @@index([createdById])

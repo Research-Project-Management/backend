@@ -72,6 +72,15 @@ export class CreateProjectLabelDto {
   @IsNumber()
   @IsOptional()
   sortOrder?: number;
+
+  @ApiPropertyOptional({
+    description: 'Label subsystem scope (e.g. work_item, library, page)',
+    example: 'work_item',
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  type?: string;
 }
 
 export class UpdateProjectLabelDto {
@@ -83,6 +92,15 @@ export class UpdateProjectLabelDto {
   @IsOptional()
   @MaxLength(255)
   name?: string;
+
+  @ApiPropertyOptional({
+    description: 'Updated label subsystem scope (e.g. work_item, library, page)',
+    example: 'work_item',
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  type?: string;
 
   @ApiPropertyOptional({
     description: 'Updated hex color code',

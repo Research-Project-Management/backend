@@ -69,6 +69,22 @@ describe('StateService (Dynamic Project State)', () => {
         expect(s.sequence).toBe(idx);
       });
     });
+
+    it('should assign each state to an academic lifecycle group', () => {
+      const template = service.getDefaultStatesTemplate();
+      const validGroups = ['conception', 'execution', 'review', 'completed', 'suspended'];
+      template.forEach((s) => {
+        expect(validGroups).toContain(s.group);
+      });
+      expect(template.find((s) => s.name === 'Ideation')?.group).toBe('conception');
+      expect(template.find((s) => s.name === 'Planning')?.group).toBe('conception');
+      expect(template.find((s) => s.name === 'Experimentation')?.group).toBe('execution');
+      expect(template.find((s) => s.name === 'Drafting')?.group).toBe('execution');
+      expect(template.find((s) => s.name === 'Review')?.group).toBe('review');
+      expect(template.find((s) => s.name === 'Published')?.group).toBe('completed');
+      expect(template.find((s) => s.name === 'Paused')?.group).toBe('suspended');
+      expect(template.find((s) => s.name === 'Cancelled')?.group).toBe('suspended');
+    });
   });
 
   // ── 2. Current State Retrieval ───────────────────────────────────────────────

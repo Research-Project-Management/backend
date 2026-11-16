@@ -1,7 +1,7 @@
 import { StateService } from '@/modules/project/state/state.service';
 import { StateRepository } from '@/modules/project/state/state.repository';
-import { LabelService } from '@/modules/project/label/label.service';
-import { LabelRepository } from '@/modules/project/label/label.repository';
+import { LabelService } from '@/modules/project/work-item/label/label.service';
+import { LabelRepository } from '@/modules/project/work-item/label/label.repository';
 import { FavoriteService } from '@/modules/project/favorite/favorite.service';
 import { FavoriteRepository } from '@/modules/project/favorite/favorite.repository';
 import { ArchiveService } from '@/modules/project/archive/archive.service';
@@ -82,57 +82,64 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
     });
   });
 
-  // ─── 2. Label Module ───────────────────────────────────────────────────────
+  // ─── 2. Unified Taxonomy Label Module ──────────────────────────────────────
   describe('LabelService', () => {
     let labelService: LabelService;
     let mockLabelRepo: any;
 
     beforeEach(() => {
       mockLabelRepo = {
-        findLabelsByUser: jest.fn(),
-        findLabelByName: jest.fn(),
-        createLabel: jest.fn(),
+        findProject: jest.fn().mockResolvedValue({ id: 'proj-1' }),
+        findByNameInProject: jest.fn().mockResolvedValue(null),
+        getLastSortOrder: jest.fn().mockResolvedValue(10000),
+        create: jest.fn(),
         findProjectLabels: jest.fn(),
-        assignLabelsToProject: jest.fn(),
-        removeLabelFromProject: jest.fn(),
+        findById: jest.fn(),
+        update: jest.fn(),
+        delete: jest.fn(),
       };
       labelService = new LabelService(mockLabelRepo as LabelRepository);
     });
 
-    it('should create user-level project label with hex color', async () => {
-      mockLabelRepo.findLabelByName.mockResolvedValue(null);
-      mockLabelRepo.createLabel.mockResolvedValue({
+    it('should create project taxonomy label with color and description', async () => {
+      mockLabelRepo.create.mockResolvedValue({
         id: 'label-1',
-        userId: 'user-1',
-        name: 'Infrastructure',
+        name: 'Deep Learning',
         color: '#3B82F6',
+        description: 'Neural operator models',
+        sortOrder: 20000,
+        spaceId: 'proj-1',
       });
 
-      const result = await labelService.createLabel('user-1', {
-        name: 'Infrastructure',
+      const result = await labelService.createProjectLabel('proj-1', 'user-1', {
+        name: 'Deep Learning',
         color: '#3B82F6',
+        description: 'Neural operator models',
       });
 
-      expect(result.name).toBe('Infrastructure');
-      expect(mockLabelRepo.createLabel).toHaveBeenCalledWith('user-1', {
-        name: 'Infrastructure',
-        color: '#3B82F6',
-      });
+      expect(result.label.name).toBe('Deep Learning');
+      expect(result.label.color).toBe('#3B82F6');
+      expect(mockLabelRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Deep Learning',
+          color: '#3B82F6',
+          description: 'Neural operator models',
+        }),
+      );
     });
 
-    it('should assign multiple project labels and return assigned list', async () => {
-      mockLabelRepo.assignLabelsToProject.mockResolvedValue(undefined);
+    it('should retrieve project labels tree', async () => {
       mockLabelRepo.findProjectLabels.mockResolvedValue([
-        { label: { id: 'label-1', name: 'Infra', color: '#3B82F6' } },
-        { label: { id: 'label-2', name: 'AI/ML', color: '#8B5CF6' } },
+        { id: 'label-1', name: 'Deep Learning', color: '#3B82F6' },
+        { id: 'label-2', name: 'Benchmark', color: '#6366F1' },
       ]);
 
-      const result = await labelService.assignLabelsToProject('proj-1', [
-        'label-1',
-        'label-2',
+      const result = await labelService.getProjectLabels('proj-1');
+      expect(result.labels).toHaveLength(2);
+      expect(result.labels.map((l: any) => l.name)).toEqual([
+        'Deep Learning',
+        'Benchmark',
       ]);
-      expect(result).toHaveLength(2);
-      expect(result.map((l) => l.name)).toEqual(['Infra', 'AI/ML']);
     });
   });
 

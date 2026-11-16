@@ -158,13 +158,16 @@ export class LabelService {
       throw new NotFoundException(`Project not found: ${projectId}`);
     }
 
+    const labelType = (dto.type || 'work_item').trim().toLowerCase();
+
     const existing = await this.labelRepository.findByNameInProject(
       projectId,
       dto.name,
+      labelType,
     );
     if (existing) {
       throw new ConflictException(
-        `A label with name "${dto.name}" already exists in this project`,
+        `A label with name "${dto.name}" already exists in this project under ${labelType}`,
       );
     }
 
@@ -177,6 +180,7 @@ export class LabelService {
       const lastSortOrder = await this.labelRepository.getLastSortOrder(
         projectId,
         dto.parentId,
+        labelType,
       );
       sortOrder = lastSortOrder !== null ? lastSortOrder + 10000 : 10000;
     }
@@ -187,6 +191,7 @@ export class LabelService {
       name: dto.name.trim(),
       color,
       description: dto.description?.trim() || null,
+      type: labelType,
       sortOrder,
       parentId: dto.parentId || null,
       spaceId: projectId,
@@ -204,6 +209,7 @@ export class LabelService {
     dto: UpdateProjectLabelDto,
   ) {
     const existing = await this.requireProjectLabel(projectId, labelId);
+    const targetType = (dto.type || existing.type || 'work_item').trim().toLowerCase();
 
     if (
       dto.name &&
@@ -212,11 +218,12 @@ export class LabelService {
       const duplicate = await this.labelRepository.findByNameInProject(
         projectId,
         dto.name,
+        targetType,
         labelId,
       );
       if (duplicate) {
         throw new ConflictException(
-          `A label with name "${dto.name}" already exists in this project`,
+          `A label with name "${dto.name}" already exists in this project under ${targetType}`,
         );
       }
     }
@@ -240,6 +247,9 @@ export class LabelService {
       ...(dto.color !== undefined && { color: dto.color.trim() }),
       ...(dto.description !== undefined && {
         description: dto.description?.trim() || null,
+      }),
+      ...(dto.type !== undefined && {
+        type: dto.type.trim().toLowerCase(),
       }),
       ...(dto.parentId !== undefined && { parentId: dto.parentId }),
       ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
@@ -319,10 +329,12 @@ export class LabelService {
       return this.createProjectLabel(rawProjectId, userId, dto);
     }
 
+    const labelType = (dto.type || 'work_item').trim().toLowerCase();
     const existing = await this.labelRepository.findDuplicate?.({
       createdById: userId,
       projectId: null,
       name: dto.name,
+      type: labelType,
       parentId: dto.parentId,
     });
     if (existing) {
@@ -336,6 +348,7 @@ export class LabelService {
       name: dto.name.trim(),
       color,
       description: dto.description || null,
+      type: labelType,
       parentId: dto.parentId || null,
       spaceId: userId,
       projectId: null,
@@ -360,6 +373,8 @@ export class LabelService {
       );
     }
 
+    const targetType = (dto.type || existing.type || 'work_item').trim().toLowerCase();
+
     if (
       dto.name &&
       dto.name.trim().toLowerCase() !== existing.name.toLowerCase()
@@ -368,6 +383,7 @@ export class LabelService {
         createdById: userId,
         projectId: null,
         name: dto.name,
+        type: targetType,
         excludeId: labelId,
       });
       if (duplicate) {
@@ -381,6 +397,7 @@ export class LabelService {
       ...(dto.name !== undefined && { name: dto.name.trim() }),
       ...(dto.color !== undefined && { color: dto.color }),
       ...(dto.description !== undefined && { description: dto.description }),
+      ...(dto.type !== undefined && { type: targetType }),
       ...(dto.parentId !== undefined && { parentId: dto.parentId }),
       ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
     });

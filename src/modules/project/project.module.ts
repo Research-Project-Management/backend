@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from './core/core.module';
 import { StateModule } from './state/state.module';
-import { LabelModule } from './label/label.module';
 import { MemberModule } from './member/member.module';
 import { InvitationModule } from './invitation/invitation.module';
 import { StatusUpdateModule } from './status-update/status-update.module';
@@ -19,7 +18,6 @@ import { YourWorkModule } from './your-work/your-work.module';
     AccessModule,
     CoreModule,
     StateModule,
-    LabelModule,
     MemberModule,
     InvitationModule,
     StatusUpdateModule,
@@ -35,7 +33,6 @@ import { YourWorkModule } from './your-work/your-work.module';
     AccessModule,
     CoreModule,
     StateModule,
-    LabelModule,
     MemberModule,
     InvitationModule,
     StatusUpdateModule,

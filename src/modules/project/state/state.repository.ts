@@ -53,6 +53,7 @@ export class StateRepository {
           name: tpl.name,
           description: tpl.description,
           color: tpl.color,
+          group: tpl.group,
           sequence: tpl.sequence,
           isDefault: tpl.isDefault,
         },
@@ -91,6 +92,7 @@ export class StateRepository {
           name: tpl.name,
           description: tpl.description,
           color: tpl.color,
+          group: tpl.group,
           sequence: tpl.sequence,
           isDefault: tpl.isDefault,
         },
@@ -165,6 +167,7 @@ export class StateRepository {
         name: dto.name.trim(),
         description: dto.description?.trim() || '',
         color: dto.color || '#0284c7',
+        group: dto.group || 'execution',
         sequence,
         isDefault: dto.isDefault ?? false,
       },
@@ -210,6 +213,7 @@ export class StateRepository {
             description: dto.description.trim(),
           }),
           ...(dto.color !== undefined && { color: dto.color }),
+          ...(dto.group !== undefined && { group: dto.group }),
           ...(dto.sequence !== undefined && { sequence: dto.sequence }),
           ...(dto.isDefault !== undefined && { isDefault: dto.isDefault }),
         },
@@ -228,7 +232,10 @@ export class StateRepository {
       items.map((item) =>
         this.prisma.projectState.updateMany({
           where: { id: item.id, projectId },
-          data: { sequence: item.sequence },
+          data: {
+            sequence: item.sequence,
+            ...(item.group !== undefined && { group: item.group }),
+          },
         }),
       ),
     );

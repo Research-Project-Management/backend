@@ -26,6 +26,15 @@ function mapLabelWithChildren(
   };
 }
 
+function normalizeLabelSubsystemType(type?: string): string | undefined {
+  if (!type) return undefined;
+  const t = type.trim().toLowerCase();
+  if (t === 'work-item' || t === 'work_item' || t === 'workitems' || t === 'work-items') return 'work_item';
+  if (t === 'page' || t === 'pages') return 'page';
+  if (t === 'library' || t === 'libraries' || t === 'tag' || t === 'tags') return 'library';
+  return t;
+}
+
 @Injectable()
 export class LabelRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -34,14 +43,23 @@ export class LabelRepository {
     projectId: string,
     type?: string,
   ): Promise<LabelWithChildren[]> {
-    const normalizedType = type?.trim().toLowerCase();
+    const rawType = type?.trim().toLowerCase();
+    const isHierarchyFilter =
+      rawType === 'root' ||
+      rawType === 'parent' ||
+      rawType === 'sub' ||
+      rawType === 'child';
+    const normalizedType = isHierarchyFilter ? rawType : normalizeLabelSubsystemType(type);
+
     const labels = await this.prisma.spaceLabel.findMany({
       where: {
         spaceId: projectId,
-        ...(normalizedType === 'root' || normalizedType === 'parent'
-          ? { parentId: null }
-          : normalizedType === 'sub' || normalizedType === 'child'
-            ? { parentId: { not: null } }
+        ...(isHierarchyFilter
+          ? normalizedType === 'root' || normalizedType === 'parent'
+            ? { parentId: null }
+            : { parentId: { not: null } }
+          : normalizedType
+            ? { type: normalizedType }
             : {}),
       },
       include: {
@@ -59,7 +77,14 @@ export class LabelRepository {
     type?: string,
     projectId?: string | null,
   ): Promise<Label[]> {
-    const normalizedType = type?.trim().toLowerCase();
+    const rawType = type?.trim().toLowerCase();
+    const isHierarchyFilter =
+      rawType === 'root' ||
+      rawType === 'parent' ||
+      rawType === 'sub' ||
+      rawType === 'child';
+    const normalizedType = isHierarchyFilter ? rawType : normalizeLabelSubsystemType(type);
+
     const effectiveSpaceId =
       projectId &&
       !['personal', 'me', 'user', 'null', 'undefined', 'default', ''].includes(
@@ -74,10 +99,12 @@ export class LabelRepository {
       where: {
         createdById: userId,
         ...spaceFilter,
-        ...(normalizedType === 'root' || normalizedType === 'parent'
-          ? { parentId: null }
-          : normalizedType === 'sub' || normalizedType === 'child'
-            ? { parentId: { not: null } }
+        ...(isHierarchyFilter
+          ? normalizedType === 'root' || normalizedType === 'parent'
+            ? { parentId: null }
+            : { parentId: { not: null } }
+          : normalizedType
+            ? { type: normalizedType }
             : {}),
       },
       include: {
@@ -106,11 +133,13 @@ export class LabelRepository {
   async findByNameInProject(
     projectId: string,
     name: string,
+    type?: string,
     excludeId?: string,
   ): Promise<Label | null> {
     const label = await this.prisma.spaceLabel.findFirst({
       where: {
         spaceId: projectId,
+        ...(type ? { type: type.trim().toLowerCase() } : {}),
         name: { equals: name.trim(), mode: 'insensitive' },
         ...(excludeId && { id: { not: excludeId } }),
       },
@@ -129,11 +158,13 @@ export class LabelRepository {
   async getLastSortOrder(
     projectId: string,
     parentId?: string | null,
+    type?: string,
   ): Promise<number | null> {
     const lastLabel = await this.prisma.spaceLabel.findFirst({
       where: {
         spaceId: projectId,
         parentId: parentId || null,
+        ...(type ? { type: type.trim().toLowerCase() } : {}),
       },
       orderBy: { sortOrder: 'desc' },
       select: { sortOrder: true },
@@ -144,6 +175,7 @@ export class LabelRepository {
   async findDuplicate(params: {
     projectId: string | null;
     name: string;
+    type?: string;
     parentId?: string | null;
     excludeId?: string;
     createdById?: string;
@@ -154,6 +186,7 @@ export class LabelRepository {
         ...(params.excludeId && { id: { not: params.excludeId } }),
         ...(params.createdById && { createdById: params.createdById }),
         ...(spaceId && { spaceId }),
+        ...(params.type ? { type: params.type.trim().toLowerCase() } : {}),
         name: { equals: params.name.trim(), mode: 'insensitive' },
         parentId: params.parentId ?? null,
       },
@@ -165,27 +198,88 @@ export class LabelRepository {
     data: Omit<Prisma.SpaceLabelUncheckedCreateInput, 'spaceId'> & {
       spaceId?: string;
       projectId?: string | null;
+      type?: string;
     },
   ): Promise<Label> {
-    const { projectId, spaceId, ...rest } = data;
+    const { projectId, spaceId, type, ...rest } = data;
     const effectiveSpaceId = spaceId || projectId || rest.createdById;
     const created = await this.prisma.spaceLabel.create({
       data: {
         ...rest,
         spaceId: effectiveSpaceId,
+        type: normalizeLabelSubsystemType(type) || 'work_item',
       },
     });
+
+    if (created.type === 'library' && this.prisma.libraryTag) {
+      try {
+        const normalized = created.name.trim().toLowerCase();
+        await this.prisma.libraryTag.upsert({
+          where: {
+            spaceId_normalizedName: {
+              spaceId: created.spaceId,
+              normalizedName: normalized,
+            },
+          },
+          update: {
+            name: created.name,
+            color: created.color,
+          },
+          create: {
+            spaceId: created.spaceId,
+            name: created.name,
+            normalizedName: normalized,
+            color: created.color,
+            createdById: created.createdById,
+            type: 'manual',
+          },
+        });
+      } catch {
+        // Non-blocking sync to library_tags
+      }
+    }
+
     return mapLabel(created);
   }
 
   async update(
     labelId: string,
-    data: Prisma.SpaceLabelUncheckedUpdateInput,
+    data: Prisma.SpaceLabelUncheckedUpdateInput & { type?: string },
   ): Promise<Label> {
+    const updateData = { ...data };
+    if (typeof updateData.type === 'string') {
+      updateData.type =
+        normalizeLabelSubsystemType(updateData.type) || updateData.type;
+    }
     const updated = await this.prisma.spaceLabel.update({
       where: { id: labelId },
-      data,
+      data: updateData,
     });
+
+    if (updated.type === 'library' && this.prisma.libraryTag) {
+      try {
+        const normalized = updated.name.trim().toLowerCase();
+        const existing = await this.prisma.libraryTag.findFirst({
+          where: {
+            spaceId: updated.spaceId,
+            name: { equals: updated.name, mode: 'insensitive' },
+          },
+        });
+        if (existing) {
+          await this.prisma.libraryTag.update({
+            where: { id: existing.id },
+            data: {
+              name: updated.name,
+              normalizedName: normalized,
+              color: updated.color,
+            },
+          });
+        }
+      } catch {
+        // Non-blocking sync to library_tags
+      }
+    }
+
     return mapLabel(updated);
   }
 
@@ -193,6 +287,22 @@ export class LabelRepository {
     const deleted = await this.prisma.spaceLabel.delete({
       where: { id: labelId },
     });
+
+    if (deleted.type === 'library' && this.prisma.libraryTag) {
+      try {
+        const normalized = deleted.name.trim().toLowerCase();
+        await this.prisma.libraryTag.deleteMany({
+          where: {
+            spaceId: deleted.spaceId,
+            normalizedName: normalized,
+            itemTags: { none: {} },
+          },
+        });
+      } catch {
+        // Non-blocking sync to library_tags
+      }
+    }
+
     return mapLabel(deleted);
   }
 

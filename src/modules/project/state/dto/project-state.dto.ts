@@ -41,6 +41,16 @@ export class CreateProjectStateDto {
   color?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Academic lifecycle group: conception, execution, review, completed, suspended',
+    example: 'execution',
+    default: 'execution',
+  })
+  @IsString()
+  @IsOptional()
+  group?: string;
+
+  @ApiPropertyOptional({
     description: 'Order sequence for drag and drop reordering',
     example: 3,
     default: 0,
@@ -86,6 +96,14 @@ export class UpdateProjectStateItemDto {
   color?: string;
 
   @ApiPropertyOptional({
+    description: 'Updated academic lifecycle group',
+    example: 'review',
+  })
+  @IsString()
+  @IsOptional()
+  group?: string;
+
+  @ApiPropertyOptional({
     description: 'Updated sequence position',
   })
   @IsNumber()
@@ -126,6 +144,14 @@ export class ReorderProjectStateItemDto {
   })
   @IsNumber()
   sequence!: number;
+
+  @ApiPropertyOptional({
+    description: 'Target group if reordered across groups',
+    example: 'review',
+  })
+  @IsString()
+  @IsOptional()
+  group?: string;
 }
 
 export class ReorderProjectStatesDto {

@@ -22,7 +22,6 @@ import {
 } from './types/project.type';
 import { calculateProjectPermissions } from './utils/permission.util';
 import { FavoriteService } from '../favorite/favorite.service';
-import { LabelService } from '../label/label.service';
 import { ArchiveService } from '../archive/archive.service';
 import { deriveProjectPrefix } from './utils/identifier.util';
 
@@ -57,7 +56,6 @@ export class CoreService {
   constructor(
     private readonly projectRepo: CoreRepository,
     private readonly favoriteService: FavoriteService,
-    private readonly labelService: LabelService,
     @Optional() private readonly archiveService?: ArchiveService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
@@ -317,15 +315,6 @@ export class CoreService {
 
     const coverVal = dto.coverImage !== undefined ? dto.coverImage : dto.cover;
 
-    // Handle label assignments replacement if provided
-    if (dto.labelIds !== undefined) {
-      await this.labelService.replaceProjectLabels(
-        projectId,
-        dto.labelIds,
-        actorId,
-      );
-    }
-
     const project = await this.projectRepo.updateProject(projectId, {
       ...(dto.name !== undefined && { name: dto.name.trim() }),
       ...(dto.identifier !== undefined && { identifier: dto.identifier }),
@@ -333,6 +322,7 @@ export class CoreService {
       ...(coverVal !== undefined && { coverImage: coverVal }),
       ...(dto.description !== undefined && { description: dto.description }),
       ...(dto.priority !== undefined && { priority: dto.priority }),
+      ...(dto.stateId !== undefined && { stateId: dto.stateId }),
       ...(dto.startDate !== undefined && {
         startDate: dto.startDate ? new Date(dto.startDate) : null,
       }),
