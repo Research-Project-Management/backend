@@ -25,13 +25,16 @@ export function normalizeProjectId(value: unknown): string | undefined {
   return trimmed;
 }
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Validates and normalizes project ID as UUID, ignoring personal scope keywords like 'me', 'personal'.
  */
 export function toValidProjectId(value: unknown): string | undefined {
   const normalized = normalizeProjectId(value);
   if (!normalized) return undefined;
-  return isUUID(normalized) ? normalized : undefined;
+  return UUID_REGEX.test(normalized) ? normalized : undefined;
 }
 
 /**

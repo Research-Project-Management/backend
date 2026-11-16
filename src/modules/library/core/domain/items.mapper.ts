@@ -566,8 +566,8 @@ function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
     if (it.metadata && typeof it.metadata === 'object' && !Array.isArray(it.metadata)) {
       const syncedMeta = { ...(it.metadata as Record<string, unknown>) };
       syncedMeta.tags = it.tags;
+      syncedMeta.labels = it.tags;
       syncedMeta.keywords = it.keywords;
-      delete syncedMeta.labels;
       delete syncedMeta.keywordsList;
       delete syncedMeta.zoteroTags;
       it.metadata = syncedMeta;
@@ -613,7 +613,7 @@ function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
       return { rawName, isAuto };
     });
   }
-  delete it.labels;
+  it.labels = it.tags;
   delete it.keywordsList;
 
   if (Array.isArray(it.collectionItems) && it.collectionItems.length > 0) {

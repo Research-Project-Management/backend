@@ -576,3 +576,79 @@ export async function resolveCreateItemRelations(
   }
   return built;
 }
+
+export async function syncSpaceLabelsToLibraryTags(
+  client: Prisma.TransactionClient | PrismaService,
+  spaceId: string,
+  userId: string,
+): Promise<void> {
+  const db = client as unknown as {
+    spaceLabel?: {
+      findMany: (args: unknown) => Promise<
+        Array<{ name: string; color?: string | null; createdById?: string | null }>
+      >;
+    };
+    libraryTag?: { upsert: (args: unknown) => Promise<unknown> };
+  };
+  if (!db.spaceLabel?.findMany || !db.libraryTag?.upsert) return;
+  try {
+    const spaceLabels = await db.spaceLabel.findMany({
+      where: { spaceId, type: 'library' },
+    });
+    for (const sl of spaceLabels) {
+      const norm = sl.name.trim().toLowerCase();
+      await db.libraryTag.upsert({
+        where: { spaceId_normalizedName: { spaceId, normalizedName: norm } },
+        update: {},
+        create: {
+          spaceId,
+          createdById: sl.createdById || userId,
+          name: sl.name,
+          normalizedName: norm,
+          color: sl.color || '#3b82f6',
+          type: TagType.manual,
+        },
+      });
+    }
+  } catch {
+    // Non-blocking sync
+  }
+}
+
+export async function syncLibraryTagToSpaceLabel(
+  client: Prisma.TransactionClient | PrismaService,
+  spaceId: string,
+  userId: string,
+  name: string,
+  color?: string | null,
+): Promise<void> {
+  const db = client as unknown as {
+    spaceLabel?: {
+      findFirst: (args: unknown) => Promise<{ id: string } | null>;
+      create: (args: unknown) => Promise<unknown>;
+    };
+  };
+  if (!db.spaceLabel?.create) return;
+  try {
+    const existing = await db.spaceLabel.findFirst({
+      where: {
+        spaceId,
+        type: 'library',
+        name: { equals: name.trim(), mode: 'insensitive' },
+      },
+    });
+    if (!existing) {
+      await db.spaceLabel.create({
+        data: {
+          spaceId,
+          createdById: userId,
+          name: name.trim(),
+          color: color || '#3b82f6',
+          type: 'library',
+        },
+      });
+    }
+  } catch {
+    // Non-blocking sync
+  }
+}

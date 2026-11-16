@@ -39,14 +39,20 @@ describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
       cleanupExpiredMemory: jest.fn(),
     } as any;
 
+    const itemMock = {
+      findFirst: jest.fn(),
+    };
+
+    const fileMock = {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    };
+
     mockPrisma = {
-      item: {
-        findFirst: jest.fn(),
-      },
-      file: {
-        findFirst: jest.fn(),
-        findMany: jest.fn(),
-      },
+      item: itemMock,
+      libraryItem: itemMock,
+      file: fileMock,
+      storageFile: fileMock,
       projectMember: {
         findFirst: jest.fn(),
       },
@@ -81,9 +87,21 @@ describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
       id: fileId,
       filename: 'quantum_computing.pdf',
       authorId: userId,
+      createdById: userId,
       linkedToType: 'project',
       linkedToId: 'project-qml',
       sharedWith: [],
+      metadata: {
+        title: 'Quantum Computing and Machine Learning Synergy',
+        authors: ['Dr. Alice Walker', 'Prof. Bob Smith'],
+        year: 2026,
+        doi: '10.1016/j.qcml.2026.001',
+        abstract:
+          'This paper introduces hybrid quantum-classical algorithms for deep neural networks.',
+        ragDocId: 'vec-doc-quantum-456',
+        ragStatus: 'indexed',
+        chunkCount: 16,
+      },
       metaData: {
         title: 'Quantum Computing and Machine Learning Synergy',
         authors: ['Dr. Alice Walker', 'Prof. Bob Smith'],
@@ -129,6 +147,7 @@ describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
       id: 'file-private-123',
       filename: 'confidential_research.pdf',
       authorId: 'other-user',
+      createdById: 'other-user',
       linkedToType: 'personal',
       linkedToId: null,
       sharedWith: [],
@@ -151,9 +170,14 @@ describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
       id: 'file-sync-456',
       filename: 'benchmark_results.pdf',
       authorId: 'user-researcher-1',
+      createdById: 'user-researcher-1',
       linkedToType: null,
       linkedToId: null,
       sharedWith: [],
+      metadata: {
+        title: 'Benchmark Results on Transformer Models',
+        ragDocId: 'vec-doc-sync-789',
+      },
       metaData: {
         title: 'Benchmark Results on Transformer Models',
         ragDocId: 'vec-doc-sync-789',
@@ -180,10 +204,12 @@ describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
     mockPrisma.item.findFirst.mockResolvedValue({
       id: 'library-item-999',
       title: 'Attention Is All You Need',
+      createdById: 'user-researcher-1',
       userId: 'user-researcher-1',
       uploadedById: 'user-researcher-1',
       projectId: null,
       contributors: [{ fullName: 'Vaswani et al.' }],
+      attachments: [],
       year: 2017,
       metadata: { ragDocId: 'vec-doc-vaswani' },
       ragDocId: 'vec-doc-vaswani',

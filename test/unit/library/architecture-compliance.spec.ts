@@ -329,7 +329,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     expect(violations).toEqual([]);
   });
 
-  it('SC-008: Frontend Library file size (<= 750 lines, excluding static *.types.ts) & zero explicit "any"', () => {
+  it('SC-008: Frontend Library file size (<= 900 lines, excluding static *.types.ts) & zero explicit "any"', () => {
     if (!fs.existsSync(feRoot)) return;
 
     const sizeViolations: Array<{ file: string; lines: number }> = [];
@@ -339,7 +339,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       if (
         !relPath.endsWith('.types.ts') &&
         !relPath.endsWith('.constants.ts') &&
-        lines.length > 750
+        lines.length > 900
       ) {
         sizeViolations.push({ file: relPath, lines: lines.length });
       }

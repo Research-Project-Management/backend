@@ -17,11 +17,14 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
   let chunkingService: ScientificChunkingService;
 
   beforeEach(() => {
+    const fileMock = {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    };
+
     mockPrisma = {
-      file: {
-        findUnique: jest.fn(),
-        update: jest.fn(),
-      },
+      file: fileMock,
+      storageFile: fileMock,
     };
 
     mockStoragePort = {
@@ -85,7 +88,8 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
 
     mockPrisma.file.findUnique.mockResolvedValue({
       id: fileId,
-      trashedAt: null,
+      deletedAt: null,
+      metadata: {},
       metaData: {},
     });
 
@@ -153,7 +157,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
       expect.objectContaining({
         where: { id: fileId },
         data: expect.objectContaining({
-          metaData: expect.objectContaining({
+          metadata: expect.objectContaining({
             ragStatus: 'indexed',
             ragDocId: 'rag-vector-doc-999',
             title: 'Quantum Advantage in Scientific Simulation',
@@ -178,8 +182,8 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
 
     mockPrisma.file.findUnique.mockResolvedValue({
       id: fileId,
-      trashedAt: null,
-      metaData: {
+      deletedAt: null,
+      metadata: {
         ragStatus: 'indexed',
         ragDocId: 'existing-rag-id',
       },
@@ -205,7 +209,8 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
 
     mockPrisma.file.findUnique.mockResolvedValue({
       id: fileId,
-      trashedAt: null,
+      deletedAt: null,
+      metadata: {},
       metaData: {},
     });
 
@@ -246,7 +251,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
       expect.objectContaining({
         where: { id: fileId },
         data: expect.objectContaining({
-          metaData: expect.objectContaining({
+          metadata: expect.objectContaining({
             ragStatus: 'failed',
             title: 'Offline Scientific Paper',
           }),

@@ -3,7 +3,11 @@ import { PrismaService } from '@/core';
 import { Prisma, TagType } from '@prisma/client';
 import { normalizeProjectScopeId, resolveSpaceId } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
-import { resolveOrCreateTags } from '@/modules/library/catalog/repositories/command-relations.operations';
+import {
+  resolveOrCreateTags,
+  syncSpaceLabelsToLibraryTags,
+  syncLibraryTagToSpaceLabel,
+} from '@/modules/library/catalog/repositories/command-relations.operations';
 
 @Injectable()
 export class TagsRepository {
@@ -20,6 +24,10 @@ export class TagsRepository {
   ) {
     const client = this.getClient(tx);
     const validProjectId = normalizeProjectScopeId(options?.projectId);
+    const spaceId = resolveSpaceId({ userId, projectId: validProjectId });
+
+    await syncSpaceLabelsToLibraryTags(client, spaceId, userId);
+
     const activeFilter: Prisma.LibraryTagWhereInput = options?.includeInactive
       ? {}
       : {
@@ -35,7 +43,7 @@ export class TagsRepository {
           ],
         };
     const where: Prisma.LibraryTagWhereInput = {
-      spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+      spaceId,
       ...activeFilter,
     };
 
@@ -107,31 +115,38 @@ export class TagsRepository {
       ...(shortcut !== undefined ? { shortcut } : {}),
     };
 
+    let createdTag: Prisma.LibraryTagGetPayload<{}>;
     if (client.libraryTag?.upsert) {
-      return client.libraryTag.upsert({
+      createdTag = await client.libraryTag.upsert({
         where: { spaceId_normalizedName: { spaceId, normalizedName } },
         update: {},
         create: tagData,
       });
+    } else {
+      try {
+        createdTag = await client.libraryTag.create({ data: tagData });
+      } catch (err: unknown) {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          const raceTag = await client.libraryTag.findFirst({
+            where: {
+              ...scopeWhere,
+              name: { equals: name, mode: 'insensitive' },
+            },
+          });
+          if (raceTag) createdTag = raceTag;
+          else throw err;
+        } else {
+          throw err;
+        }
+      }
     }
 
-    try {
-      return await client.libraryTag.create({ data: tagData });
-    } catch (err: unknown) {
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === 'P2002'
-      ) {
-        const raceTag = await client.libraryTag.findFirst({
-          where: {
-            ...scopeWhere,
-            name: { equals: name, mode: 'insensitive' },
-          },
-        });
-        if (raceTag) return raceTag;
-      }
-      throw err;
-    }
+    void syncLibraryTagToSpaceLabel(client, spaceId, userId, name, defaultColor);
+
+    return createdTag;
   }
 
   async update(
