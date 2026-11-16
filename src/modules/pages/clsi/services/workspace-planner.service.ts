@@ -25,6 +25,7 @@ import {
   planDbFileSet,
   planInlineFileSet,
   linesToText,
+  ManifestFile,
   PlannedFileSet,
 } from '../domain/fileset.planner';
 import { FileSnapshotVo } from '@/modules/pages/project-history/domain/file-snapshot';
@@ -340,53 +341,55 @@ export class WorkspacePlannerService {
 
     if (this.prisma && this.filestoreService && projectId !== 'default') {
       try {
-        const [rawBinaryFiles, rawFileNodes] =
-          plan.binaryFiles && plan.nodes
-            ? [plan.binaryFiles, plan.nodes.filter((n) => n.type === 'FILE')]
-            : await Promise.all([
-                this.prisma.pageFile.findMany({
-                  where: { spaceId: projectId, deletedAt: null },
-                  select: {
-                    id: true,
-                    pageId: true,
-                    name: true,
-                    sizeBytes: true,
-                    hash: true,
-                  },
-                }),
-                this.prisma.pageNode.findMany({
-                  where: { spaceId: projectId, type: 'FILE' },
-                  select: {
-                    id: true,
-                    pageId: true,
-                    fileId: true,
-                    path: true,
-                    name: true,
-                  },
-                }),
-              ]);
-
-        const [binaryFiles, fileNodes] =
-          scratchWorkspaceId !== projectId && !(plan.binaryFiles && plan.nodes)
-            ? [
-                filterRecordsByPageScope(
-                  rawBinaryFiles as Array<{
-                    pageId?: string | null;
-                    id?: string;
-                  }>,
+        let binaryFiles: ManifestFile[];
+        let fileNodes: Array<{
+          fileId?: string | null;
+          path?: string | null;
+          name?: string | null;
+        }>;
+        if (plan.binaryFiles && plan.nodes) {
+          binaryFiles = plan.binaryFiles;
+          fileNodes = plan.nodes.filter((n) => n.type === 'FILE');
+        } else {
+          const [rawBinaryFiles, rawFileNodes] = await Promise.all([
+            this.prisma.pageFile.findMany({
+              where: { spaceId: projectId, deletedAt: null },
+              select: {
+                id: true,
+                pageId: true,
+                name: true,
+                sizeBytes: true,
+                hash: true,
+              },
+            }),
+            this.prisma.pageNode.findMany({
+              where: { spaceId: projectId, type: 'FILE' },
+              select: {
+                id: true,
+                pageId: true,
+                fileId: true,
+                path: true,
+                name: true,
+              },
+            }),
+          ]);
+          binaryFiles =
+            scratchWorkspaceId !== projectId
+              ? filterRecordsByPageScope(
+                  rawBinaryFiles,
                   scratchWorkspaceId,
                   projectId,
-                ),
-                filterRecordsByPageScope(
-                  rawFileNodes as Array<{
-                    pageId?: string | null;
-                    id?: string;
-                  }>,
+                )
+              : rawBinaryFiles;
+          fileNodes =
+            scratchWorkspaceId !== projectId
+              ? filterRecordsByPageScope(
+                  rawFileNodes,
                   scratchWorkspaceId,
                   projectId,
-                ),
-              ]
-            : [rawBinaryFiles, rawFileNodes];
+                )
+              : rawFileNodes;
+        }
 
         const pathByFileId = new Map<string, string>();
         for (const n of fileNodes) {
