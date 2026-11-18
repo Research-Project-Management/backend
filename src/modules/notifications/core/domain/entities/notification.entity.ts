@@ -6,6 +6,7 @@ export interface NotificationProps {
   key?: string | null;
   templateKey: string;
   type?: NotificationTypeString;
+  spaceId?: string | null;
   projectId?: string | null;
   docId?: string | null;
   actorId?: string | null;
@@ -23,6 +24,7 @@ export interface NotificationPlain {
   key: string | null;
   templateKey: string;
   type: NotificationTypeString;
+  spaceId: string | null;
   projectId: string | null;
   docId: string | null;
   actorId: string | null;
@@ -54,7 +56,7 @@ export class NotificationEntity {
     this.key = props.key ?? null;
     this.templateKey = props.templateKey;
     this.type = props.type ?? 'mention';
-    this.projectId = props.projectId ?? null;
+    this.projectId = props.projectId ?? props.spaceId ?? null;
     this.docId = props.docId ?? null;
     this.actorId = props.actorId ?? null;
     this.messageOpts = props.messageOpts ?? {};
@@ -96,6 +98,7 @@ export class NotificationEntity {
       key: this.key,
       templateKey: this.templateKey,
       type: this.type,
+      spaceId: this.projectId,
       projectId: this.projectId,
       docId: this.docId,
       actorId: this.actorId,

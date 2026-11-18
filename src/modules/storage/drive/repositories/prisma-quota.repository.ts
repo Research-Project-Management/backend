@@ -49,7 +49,11 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
   private resolveCanonicalScope(
     userId?: string | null,
     projectId?: string | null,
-  ): { spaceId: string | null; userId: string | null; projectId: string | null } {
+  ): {
+    spaceId: string | null;
+    userId: string | null;
+    projectId: string | null;
+  } {
     const validProjectId = cleanUuid(projectId);
     if (validProjectId) {
       return {

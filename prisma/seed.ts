@@ -35,7 +35,12 @@ async function main() {
     await prisma.workItemDraft.deleteMany();
     await prisma.workItem.deleteMany();
     await prisma.workItemState.deleteMany();
+    await prisma.pageSnapshotLabel.deleteMany();
+    await prisma.pageSnapshot.deleteMany();
+    await prisma.pageTrackChange.deleteMany();
+    await prisma.pageCommentThread.deleteMany();
     await prisma.pageNode.deleteMany();
+    await prisma.pageFile.deleteMany();
     await prisma.pageDoc.deleteMany();
     await prisma.page.deleteMany();
     await prisma.libraryCollectionItem.deleteMany();
@@ -1782,6 +1787,17 @@ async function main() {
   );
 
   // Create folder nodes in hierarchy
+  const projectPage = await prisma.page.upsert({
+    where: { id: project.id },
+    create: {
+      id: project.id,
+      spaceId: project.id,
+      title: 'flux',
+      status: 'published',
+    },
+    update: {},
+  });
+
   const folderNames = [
     'sections',
     'appendices',
@@ -1798,10 +1814,11 @@ async function main() {
     const node = await prisma.pageNode.create({
       data: {
         spaceId: project.id,
+        pageId: projectPage.id,
         name: fName,
         path: `/${fName}`,
         type: 'FOLDER',
-        depth: 0,
+        depth: 1,
         sortOrder: i + 1,
       },
     });
@@ -1858,7 +1875,8 @@ Deep learning operators solve PDEs orders of magnitude faster than classical sol
     const doc = await prisma.pageDoc.create({
       data: {
         spaceId: project.id,
-        path: f.path,
+        pageId: projectPage.id,
+        lastKnownPath: f.path.replace(/^\/+/, ''),
         lines: f.content.split('\n'),
         sizeBytes: f.size,
         rev: 1,
@@ -1877,17 +1895,22 @@ Deep learning operators solve PDEs orders of magnitude faster than classical sol
     await prisma.pageNode.create({
       data: {
         spaceId: project.id,
-        name: isRoot ? 'flux' : fileName,
+        pageId: projectPage.id,
+        name: fileName,
         path: f.path,
         type: 'DOC',
         docId: doc.id,
         parentId: parentId || null,
-        depth: isInSubfolder ? 1 : 0,
-        isRootDoc: isRoot,
-        sizeBytes: f.size,
+        depth: segments.length,
         sortOrder: idx,
       },
     });
+    if (isRoot) {
+      await prisma.page.update({
+        where: { id: projectPage.id },
+        data: { rootDocId: doc.id },
+      });
+    }
   }
   console.log(
     `   ✅ Seeded ${demoFiles.length} LaTeX files into project "${project.name}" (across 7 folders).`,
@@ -1904,26 +1927,40 @@ Deep learning operators solve PDEs orders of magnitude faster than classical sol
 \\section{Personal Scratchpad}
 Private notes and personal LaTeX drafts in Personal Space.
 \\end{document}`;
+  const personalPage = await prisma.page.upsert({
+    where: { id: userThanh.id },
+    create: {
+      id: userThanh.id,
+      spaceId: userThanh.id,
+      title: 'Personal Research Notes',
+      status: 'draft',
+    },
+    update: {},
+  });
   const personalDoc = await prisma.pageDoc.create({
     data: {
       spaceId: userThanh.id,
-      path: '/personal-notes.tex',
+      pageId: personalPage.id,
+      lastKnownPath: 'personal-notes.tex',
       lines: personalRootContent.split('\n'),
       sizeBytes: Buffer.byteLength(personalRootContent, 'utf8'),
       rev: 1,
       version: 1,
     },
   });
+  await prisma.page.update({
+    where: { id: personalPage.id },
+    data: { rootDocId: personalDoc.id },
+  });
   await prisma.pageNode.create({
     data: {
       spaceId: userThanh.id,
-      name: 'Personal Research Notes',
+      pageId: personalPage.id,
+      name: 'personal-notes.tex',
       path: '/personal-notes.tex',
       type: 'DOC',
       docId: personalDoc.id,
-      depth: 0,
-      isRootDoc: true,
-      sizeBytes: Buffer.byteLength(personalRootContent, 'utf8'),
+      depth: 1,
       sortOrder: 0,
     },
   });

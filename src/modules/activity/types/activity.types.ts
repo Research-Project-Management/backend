@@ -19,6 +19,7 @@ export type PageVerb = 'created' | 'updated' | 'deleted' | 'published';
 export interface BaseActivityEvent {
   entityId: string;
   actorId: string;
+  spaceId?: string | null;
   projectId?: string | null;
   timestamp?: Date;
 }

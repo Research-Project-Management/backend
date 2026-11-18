@@ -1,7 +1,4 @@
-import {
-  ExecutionContext,
-  ForbiddenException,
-} from '@nestjs/common';
+import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ProjectAccessGuard } from '@/modules/project/access/guards/project-access.guard';
 import { Role } from '@/modules/project/access/enums/role.enum';
@@ -217,9 +214,9 @@ describe('ProjectAccessGuard & SEC-01 Characterization', () => {
 
       await expect(
         realResolver.resolveAuthoritativeProjectId({
-          url: `/api/v1/projects/${projectBId}/library/items/${pageAId}`,
-          params: { projectId: projectBId, itemId: pageAId },
-          headers: { 'x-project-id': projectBId },
+          url: `/api/v1/spaces/${projectBId}/library/items/${pageAId}`,
+          params: { spaceId: projectBId, itemId: pageAId },
+          headers: { 'x-space-id': projectBId },
           query: {},
           body: {},
         }),

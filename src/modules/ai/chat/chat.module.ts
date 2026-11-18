@@ -11,4 +11,3 @@ import { EngineModule } from '../engine/engine.module';
   exports: [ChatService, ChatRepository],
 })
 export class ChatModule {}
-

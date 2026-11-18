@@ -28,6 +28,10 @@ export class CreateNotificationDto {
 
   @IsString()
   @IsOptional()
+  spaceId?: string;
+
+  @IsString()
+  @IsOptional()
   projectId?: string;
 
   @IsString()
@@ -86,6 +90,10 @@ export class ParseMentionsDto {
   @IsString()
   @IsOptional()
   actorName?: string;
+
+  @IsString()
+  @IsOptional()
+  spaceId?: string;
 
   @IsString()
   @IsNotEmpty()

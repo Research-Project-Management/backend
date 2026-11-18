@@ -152,6 +152,7 @@ export class ActivityListener {
 
   @OnEvent('manuscripts.*', { async: true })
   async handleManuscriptEvents(payload: {
+    spaceId?: string;
     projectId?: string;
     event?: string;
     eventName?: string;
@@ -160,12 +161,15 @@ export class ActivityListener {
     docId?: string;
     actorId?: string;
   }) {
-    const projectId = payload?.projectId;
-    if (!projectId) return;
+    const rawSpaceId = payload?.spaceId || payload?.projectId;
+    if (!rawSpaceId) return;
 
     const eventName = payload.event || payload.eventName || '';
-    const data = (payload.payload || payload.data || {}) as Record<string, unknown>;
-    const actorId = (data.userId || data.actorId || payload.actorId || '') as string;
+    const data = payload.payload || payload.data || {};
+    const actorId = (data.userId ||
+      data.actorId ||
+      payload.actorId ||
+      '') as string;
     const docId = (data.docId || payload.docId || '') as string;
 
     let verb = 'updated';
@@ -188,11 +192,15 @@ export class ActivityListener {
       verb = 'file_tree_updated';
     }
 
+    const projectId =
+      actorId && rawSpaceId === actorId ? undefined : rawSpaceId;
+
     const activityEvent = new DomainActivityEvent({
       entityType,
-      entityId: docId || projectId,
+      entityId: docId || rawSpaceId,
       verb,
       actorId,
+      spaceId: rawSpaceId,
       projectId,
       field: eventName || 'manuscript',
       newValue:

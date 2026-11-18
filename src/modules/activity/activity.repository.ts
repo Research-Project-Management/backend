@@ -39,6 +39,14 @@ export class ActivityRepository implements IActivityRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(event: DomainActivityEvent): Promise<ActivityEvent> {
+    const effectiveSpaceId = event.spaceId ?? event.projectId ?? undefined;
+    const isPersonalActorSpace = Boolean(
+      effectiveSpaceId && event.actorId && effectiveSpaceId === event.actorId,
+    );
+    const effectiveProjectId = isPersonalActorSpace
+      ? undefined
+      : event.projectId;
+
     return this.prisma.activityEvent.create({
       data: {
         entityType: event.entityType,
@@ -50,7 +58,8 @@ export class ActivityRepository implements IActivityRepository {
         oldIdentifier: event.oldIdentifier,
         newIdentifier: event.newIdentifier,
         actorId: event.actorId,
-        projectId: event.projectId,
+        ...(effectiveSpaceId ? { spaceId: effectiveSpaceId } : {}),
+        projectId: effectiveProjectId,
       },
     });
   }
@@ -176,7 +185,10 @@ export class ActivityRepository implements IActivityRepository {
     projectIds: string[] = [],
   ): Promise<{
     titleMap: Map<string, string>;
-    projectMap: Map<string, { id: string; name: string; identifier: string | null }>;
+    projectMap: Map<
+      string,
+      { id: string; name: string; identifier: string | null }
+    >;
   }> {
     const validWorkItemIds = workItemIds.filter((id) => isUUID(id));
     const validPaperIds = paperIds.filter((id) => isUUID(id));
@@ -200,7 +212,11 @@ export class ActivityRepository implements IActivityRepository {
       validPageIds.length
         ? this.prisma.pageDoc.findMany({
             where: { id: { in: validPageIds }, deletedAt: null },
-            select: { id: true, path: true },
+            select: {
+              id: true,
+              lastKnownPath: true,
+              node: { select: { path: true } },
+            },
           })
         : [],
       validFileIds.length
@@ -222,11 +238,19 @@ export class ActivityRepository implements IActivityRepository {
       titleMap.set(`work_item:${t.id}`, t.title);
     });
     papers.forEach((p) => titleMap.set(`paper:${p.id}`, p.title));
-    pages.forEach((pg) => titleMap.set(`page:${pg.id}`, pg.path || 'Manuscript'));
+    pages.forEach((pg) =>
+      titleMap.set(
+        `page:${pg.id}`,
+        pg.node?.path || pg.lastKnownPath || 'Manuscript',
+      ),
+    );
     files.forEach((f) => titleMap.set(`file:${f.id}`, f.filename));
     projects.forEach((prj) => titleMap.set(`project:${prj.id}`, prj.name));
 
-    const projectMap = new Map<string, { id: string; name: string; identifier: string | null }>();
+    const projectMap = new Map<
+      string,
+      { id: string; name: string; identifier: string | null }
+    >();
     projects.forEach((prj) => projectMap.set(prj.id, prj));
 
     return { titleMap, projectMap };

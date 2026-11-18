@@ -96,7 +96,7 @@ describe('AiService (Server-Authoritative Chat & Streaming)', () => {
       await expect(
         service.stream(
           mockUserId,
-          { projectId: mockProjectId, query: 'Valid query' },
+          { spaceId: mockProjectId, query: 'Valid query' },
           mockReply,
         ),
       ).rejects.toThrow(ForbiddenException);

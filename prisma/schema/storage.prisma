@@ -108,8 +108,9 @@ model StorageBlob {
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   tombstoneAt   DateTime?  @map("tombstone_at") @db.Timestamptz(6)
 
-  files    StorageFile[]
-  versions StorageFileVersion[]
+  files     StorageFile[]
+  versions  StorageFileVersion[]
+  pageFiles PageFile[]
 
   @@unique([contentHash], map: "uq_blobs_content_hash")
   @@index([refCount, tombstoneAt], map: "idx_blobs_orphan_gc")

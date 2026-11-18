@@ -41,6 +41,16 @@ export class AccessService {
     userId: string,
   ): Promise<MemberAccessContext | null> {
     if (!projectId || !userId) return null;
+    if (projectId.trim().toLowerCase() === userId.trim().toLowerCase()) {
+      return {
+        projectId: userId,
+        userId,
+        role: Role.OWNER,
+        permissionOverrides: {},
+        effectivePermissions: this.getRolePermissions(Role.OWNER),
+        permissionBitmask: PermissionBitmaskUtil.toHex(ALL_PERMISSIONS_MASK),
+      };
+    }
 
     const cacheKey = PROJECT_ACCESS_REDIS_KEYS.context(projectId, userId);
 

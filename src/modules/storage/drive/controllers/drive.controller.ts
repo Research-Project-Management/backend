@@ -115,6 +115,7 @@ export function mapStorageNodeToDto(node: StorageNode) {
     isFolder: node.isFolder,
     starred: node.starred,
     parentId: node.parentId,
+    spaceId: node.projectId || node.author?.id || node.authorId || null,
     projectId: node.projectId,
     url: getFileContentPath(node.id),
     thumbnail:
@@ -172,11 +173,13 @@ export class DriveController {
   }
 
   @Get('my-files')
-  @ApiOperation({ summary: 'Get current user personal or project files and folders' })
+  @ApiOperation({
+    summary: 'Get current user personal or project files and folders',
+  })
   async getMyFiles(
     @CurrentUser('id') userId: string,
     @Query('parentId') parentId?: string,
-    @Query('projectId') projectId?: string,
+    @Query('spaceId') spaceId?: string,
     @Query('search') search?: string,
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: 'asc' | 'desc',
@@ -189,10 +192,8 @@ export class DriveController {
     const pagination = parsePagination(limit, offset, page);
     const parsedTypes = parseTypesQuery(types, type);
     const normalizedParentId =
-      !parentId || parentId === 'null' || parentId === 'root'
-        ? null
-        : parentId;
-    const normalizedProjectId = normalizeStorageProjectId(projectId, userId);
+      !parentId || parentId === 'null' || parentId === 'root' ? null : parentId;
+    const normalizedProjectId = normalizeStorageProjectId(spaceId, userId);
 
     if (normalizedProjectId && userId) {
       await this.accessPolicy.assertCanAccessProject(
@@ -285,13 +286,13 @@ export class DriveController {
   async getPageFiles(
     @Param('pageId') pageId: string,
     @CurrentUser('id') userId?: string,
-    @Query('projectId') projectId?: string,
+    @Query('spaceId') spaceId?: string,
     @Query('parentId') parentId?: string,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
     @Query('page') page?: number,
   ) {
-    const normalizedProjectId = normalizeStorageProjectId(projectId, userId);
+    const normalizedProjectId = normalizeStorageProjectId(spaceId, userId);
     if (normalizedProjectId && userId) {
       await this.accessPolicy.assertCanAccessProject(
         userId,
@@ -316,7 +317,7 @@ export class DriveController {
   @ApiOperation({ summary: 'Get starred files' })
   async getStarredFiles(
     @CurrentUser('id') userId: string,
-    @Query('projectId') projectId?: string,
+    @Query('spaceId') spaceId?: string,
     @Query('search') search?: string,
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: 'asc' | 'desc',
@@ -328,7 +329,7 @@ export class DriveController {
   ) {
     const pagination = parsePagination(limit, offset, page);
     const parsedTypes = parseTypesQuery(types, type);
-    const normalizedProjectId = normalizeStorageProjectId(projectId, userId);
+    const normalizedProjectId = normalizeStorageProjectId(spaceId, userId);
 
     if (normalizedProjectId && userId) {
       await this.accessPolicy.assertCanAccessProject(
@@ -409,10 +410,7 @@ export class DriveController {
     @CurrentUser('id') userId: string,
     @Body() dto: CreateFolderDto,
   ) {
-    const normalizedProjectId = normalizeStorageProjectId(
-      dto.projectId,
-      userId,
-    );
+    const normalizedProjectId = normalizeStorageProjectId(dto.spaceId, userId);
     if (userId) {
       await this.accessPolicy.assertCanWriteScope(userId, {
         projectId: normalizedProjectId || null,
@@ -430,17 +428,17 @@ export class DriveController {
     return this.mapNodeToDto(created);
   }
 
-  @Post(['pages/:pageId/folder', 'projects/:projectId/folder'])
+  @Post(['pages/:pageId/folder', 'spaces/:spaceId/folder'])
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a new folder in page or project scope' })
+  @ApiOperation({ summary: 'Create a new folder in page or space scope' })
   async createScopedFolder(
     @CurrentUser('id') userId: string,
     @Body() dto: CreateFolderDto,
     @Param('pageId') pageId?: string,
-    @Param('projectId') projectId?: string,
+    @Param('spaceId') spaceId?: string,
   ) {
     const normalizedProjectId = normalizeStorageProjectId(
-      projectId ?? dto.projectId,
+      spaceId ?? dto.spaceId,
       userId,
     );
     if (userId) {
@@ -614,7 +612,7 @@ export class TrashController {
   @ApiOperation({ summary: 'List files and folders currently in trash' })
   async getTrash(
     @CurrentUser('id') userId: string,
-    @Query('projectId') projectId?: string,
+    @Query('spaceId') spaceId?: string,
     @Query('search') search?: string,
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: 'asc' | 'desc',
@@ -626,7 +624,7 @@ export class TrashController {
   ) {
     const pagination = parsePagination(limit, offset, page);
     const parsedTypes = parseTypesQuery(types, type);
-    const normalizedProjectId = normalizeStorageProjectId(projectId, userId);
+    const normalizedProjectId = normalizeStorageProjectId(spaceId, userId);
 
     if (normalizedProjectId && userId) {
       await this.accessPolicy.assertCanAccessProject(
@@ -726,9 +724,9 @@ export class QuotaController {
   })
   async getUsage(
     @CurrentUser('id') userId: string,
-    @Query('projectId') projectId?: string,
+    @Query('spaceId') spaceId?: string,
   ) {
-    const normalizedProjectId = normalizeStorageProjectId(projectId, userId);
+    const normalizedProjectId = normalizeStorageProjectId(spaceId, userId);
     const quota = await this.quotaRepo.findByScope(userId, normalizedProjectId);
     const usedBigInt = quota ? quota.usedBytes : 0n;
     const maxBigInt = quota ? quota.maxBytes : DEFAULT_STORAGE_QUOTA_BYTES;

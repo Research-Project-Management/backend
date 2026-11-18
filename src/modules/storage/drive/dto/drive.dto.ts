@@ -15,7 +15,7 @@ export class CreateFolderDto {
 
   @IsString()
   @IsOptional()
-  projectId?: string;
+  spaceId?: string;
 
   @IsString()
   @IsOptional()

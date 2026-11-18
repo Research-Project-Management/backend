@@ -19,7 +19,10 @@ import { NO_PROJECT_CONTEXT_KEY } from '../decorators/no-project-context.decorat
 import { REQUIRE_OPERATOR_KEY } from '../decorators/require-operator.decorator';
 import { Role, RoleHierarchy } from '../enums/role.enum';
 import { Permission } from '../enums/permission.enum';
-import { PermissionBitmaskUtil, ALL_PERMISSIONS_MASK } from '../utils/permission-bitmask.util';
+import {
+  PermissionBitmaskUtil,
+  ALL_PERMISSIONS_MASK,
+} from '../utils/permission-bitmask.util';
 import { AccessService } from '../access.service';
 import { ProjectResourceResolver } from '../resolvers/project-resource.resolver';
 import { AccessConfigService } from '../config/access.config';
@@ -129,7 +132,6 @@ export class ProjectAccessGuard implements CanActivate {
       // Check if dual-context library route in personal scope
       const url = request.url || request.raw?.url || '';
       const isLibraryOrAttachmentRoute =
-        !url.includes('/manuscripts/') &&
         !url.includes('/pages/') &&
         (url.includes('/library') ||
           url.includes('/attachments') ||
@@ -137,7 +139,8 @@ export class ProjectAccessGuard implements CanActivate {
       const isDualContextLibraryRoute =
         isLibraryOrAttachmentRoute &&
         !url.includes('/projects/') &&
-        !url.includes('/project/');
+        !url.includes('/project/') &&
+        !url.includes('/spaces/');
 
       if (
         isDualContextLibraryRoute ||
@@ -158,14 +161,18 @@ export class ProjectAccessGuard implements CanActivate {
     }
 
     const projectId = resolvedResult.projectId;
-    request.resolvedProjectId = projectId;
-    request.projectId = projectId;
-
-    // 7. Verify Personal Space vs Project Space membership
+    const spaceId = resolvedResult.spaceId || resolvedResult.projectId;
     const isPersonalSpace =
       resolvedResult.isPersonalSpace ||
       projectId.toLowerCase() === String(userId).toLowerCase();
 
+    request.resolvedProjectId = projectId;
+    request.projectId = projectId;
+    request.resolvedSpaceId = spaceId;
+    request.spaceId = spaceId;
+    request.isPersonalSpace = isPersonalSpace;
+
+    // 7. Verify Personal Space vs Project Space membership
     let accessContext = isPersonalSpace
       ? {
           projectId: userId,
@@ -216,6 +223,14 @@ export class ProjectAccessGuard implements CanActivate {
           ),
           permissionBitmask: PermissionBitmaskUtil.toHex(ALL_PERMISSIONS_MASK),
         };
+      } else if (
+        page?.spaceId &&
+        page.spaceId.toLowerCase() !== projectId.toLowerCase()
+      ) {
+        accessContext = await this.accessService.getMemberAccessContext(
+          page.spaceId,
+          userId,
+        );
       }
     }
 

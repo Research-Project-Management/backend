@@ -39,7 +39,7 @@ interface PageUploadBody {
   mimeType?: string;
   fileBase64?: string;
   parentId?: string;
-  projectId?: string;
+  spaceId?: string;
 }
 
 interface UploadUser {
@@ -150,10 +150,7 @@ export class UploadController {
     const requestedSize = dto.size ?? dto.sizeBytes ?? 10 * 1024 * 1024;
     this.assertVerifiedUploadLimit(user, requestedSize);
 
-    const normalizedProjectId = normalizeStorageProjectId(
-      dto.projectId,
-      userId,
-    );
+    const normalizedProjectId = normalizeStorageProjectId(dto.spaceId, userId);
 
     await this.accessPolicy.assertCanWriteScope(userId, {
       projectId: normalizedProjectId || null,
@@ -189,10 +186,7 @@ export class UploadController {
     const reportedSize = dto.size ?? dto.sizeBytes ?? 0;
     this.assertVerifiedUploadLimit(user, reportedSize);
 
-    const normalizedProjectId = normalizeStorageProjectId(
-      dto.projectId,
-      userId,
-    );
+    const normalizedProjectId = normalizeStorageProjectId(dto.spaceId, userId);
 
     await this.accessPolicy.assertCanWriteScope(userId, {
       projectId: normalizedProjectId || null,
@@ -236,7 +230,7 @@ export class UploadController {
     if (!isMultipart) {
       if (body && (body.filename || body.name)) {
         const rawProjectId = normalizeStorageProjectId(
-          body.projectId as string | undefined,
+          body.spaceId as string | undefined,
           userId,
         );
         const parentId = cleanUuid(body.parentId as string | undefined);
@@ -284,7 +278,7 @@ export class UploadController {
     this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
 
     const rawProjectId = normalizeStorageProjectId(
-      fields.projectId?.value,
+      fields.spaceId?.value,
       userId,
     );
     const pageId = cleanUuid(fields.pageId?.value) ?? undefined;
@@ -332,10 +326,9 @@ export class UploadController {
       const { buffer, filename, mimeType, fields } =
         await this.extractMultipartPayload(uploadReq);
       this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
-      const rawProjectId = normalizeStorageProjectId(
-        fields.projectId?.value,
-        userId,
-      );
+      const rawProjectId =
+        normalizeStorageProjectId(fields.spaceId?.value, userId) ??
+        (await this.accessPolicy.resolvePageSpaceId?.(pageId, userId));
       const parentId = cleanUuid(fields.parentId?.value) ?? null;
 
       if (userId) {
@@ -373,7 +366,9 @@ export class UploadController {
 
     this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
 
-    const rawProjectId = normalizeStorageProjectId(body?.projectId, userId);
+    const rawProjectId =
+      normalizeStorageProjectId(body?.spaceId, userId) ??
+      (await this.accessPolicy.resolvePageSpaceId?.(pageId, userId));
     const parentId = cleanUuid(body?.parentId) ?? null;
 
     if (userId) {
@@ -422,10 +417,7 @@ export class UploadController {
       );
     }
     this.assertVerifiedUploadLimit(user, totalSize);
-    const normalizedProjectId = normalizeStorageProjectId(
-      dto.projectId,
-      userId,
-    );
+    const normalizedProjectId = normalizeStorageProjectId(dto.spaceId, userId);
     await this.accessPolicy.assertCanWriteScope(userId, {
       projectId: normalizedProjectId || null,
       parentId: dto.parentId || null,

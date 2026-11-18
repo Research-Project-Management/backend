@@ -35,11 +35,11 @@ export class AiQueryDto {
 
   @IsString()
   @IsOptional()
-  project_id?: string;
+  space_id?: string;
 
   @IsString()
   @IsOptional()
-  projectId?: string;
+  spaceId?: string;
 
   @IsString()
   @IsOptional()
@@ -179,6 +179,5 @@ export class GetDocumentsBulkDto {
 
   @IsString()
   @IsOptional()
-  projectId?: string;
+  spaceId?: string;
 }
-

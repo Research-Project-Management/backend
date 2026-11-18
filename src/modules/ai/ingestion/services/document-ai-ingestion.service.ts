@@ -77,8 +77,9 @@ export class DocumentAiIngestionService {
       }
 
       // 3. Extract text and academic metadata via LibraryFacade
-      const extractedDoc =
-        await this.libraryFacade.extractDocumentFromBuffer(storageFile.buffer);
+      const extractedDoc = await this.libraryFacade.extractDocumentFromBuffer(
+        storageFile.buffer,
+      );
 
       // 4. Perform scientific semantic chunking
       const chunks = this.chunkingService.chunkPdfDocument(extractedDoc, {

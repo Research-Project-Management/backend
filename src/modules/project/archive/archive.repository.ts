@@ -213,29 +213,51 @@ export class ArchiveRepository {
       new Set([canonicalId, ...(space?.id ? [space.id] : [])]),
     );
 
-    const rootNodes = await this.prisma.pageNode
-      .findMany({
-        where: {
-          spaceId: { in: spaceIds },
-          isRootDoc: true,
-          OR: [{ docId: null }, { doc: { deletedAt: null } }],
-        },
-        include: {
-          doc: {
-            select: {
-              id: true,
-              path: true,
-              ranges: true,
-              version: true,
-              rev: true,
-              createdAt: true,
-              updatedAt: true,
+    const rootDocIds = this.prisma.page?.findMany
+      ? await this.prisma.page
+          .findMany({
+            where: {
+              spaceId: { in: spaceIds },
+              deletedAt: null,
+              rootDocId: { not: null },
             },
-          },
-        },
-        orderBy: { updatedAt: 'desc' },
-      })
-      .catch(() => []);
+            select: { rootDocId: true },
+          })
+          .then((pages) =>
+            pages
+              .map((p) => p.rootDocId)
+              .filter((id): id is string => typeof id === 'string'),
+          )
+          .catch(() => [] as string[])
+      : [];
+
+    const rootNodes =
+      rootDocIds.length > 0
+        ? await this.prisma.pageNode
+            .findMany({
+              where: {
+                spaceId: { in: spaceIds },
+                type: 'DOC',
+                docId: { in: rootDocIds },
+                doc: { deletedAt: null },
+              },
+              include: {
+                doc: {
+                  select: {
+                    id: true,
+                    lastKnownPath: true,
+                    ranges: true,
+                    version: true,
+                    rev: true,
+                    createdAt: true,
+                    updatedAt: true,
+                  },
+                },
+              },
+              orderBy: { updatedAt: 'desc' },
+            })
+            .catch(() => [])
+        : [];
 
     return extractArchivedPagesFromNodes(canonicalId, rootNodes, search);
   }

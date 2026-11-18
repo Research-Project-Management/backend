@@ -117,7 +117,8 @@ export function extractArchivedPagesFromNodes(
     updatedAt: Date;
     doc: {
       id: string;
-      path: string;
+      lastKnownPath?: string;
+      path?: string;
       ranges: unknown;
       version: number;
       rev: number;
@@ -134,6 +135,7 @@ export function extractArchivedPagesFromNodes(
     const doc = node.doc;
     if (!doc) continue;
 
+    const docPath = doc.lastKnownPath ?? doc.path ?? node.path ?? '';
     const ranges =
       doc.ranges && typeof doc.ranges === 'object'
         ? (doc.ranges as Record<string, unknown>)
@@ -145,7 +147,7 @@ export function extractArchivedPagesFromNodes(
     const title =
       typeof ranges.title === 'string' && ranges.title.trim()
         ? ranges.title.trim()
-        : node.name || doc.path.replace(/^\//, '') || 'Untitled Page';
+        : node.name || docPath.replace(/^\//, '') || 'Untitled Page';
     const description =
       typeof ranges.description === 'string' ? ranges.description : '';
 
@@ -162,7 +164,7 @@ export function extractArchivedPagesFromNodes(
       title,
       description,
       status: 'archived',
-      path: node.path || doc.path,
+      path: node.path || docPath,
       projectId,
       version: doc.version ?? 1,
       rev: doc.rev ?? 1,

@@ -213,6 +213,50 @@ export class ProjectResourceResolver {
         }
       }
 
+      // 4b. Resolve from Track Change / Suggestion ID
+      const changeId =
+        (typeof request.params?.changeId === 'string' &&
+          request.params.changeId) ||
+        (typeof request.params?.suggestionId === 'string' &&
+          request.params.suggestionId) ||
+        (typeof request.body?.changeId === 'string' && request.body.changeId) ||
+        (typeof request.body?.suggestionId === 'string' &&
+          request.body.suggestionId);
+      if (changeId && isUUID(changeId)) {
+        const change = await (this.prisma as any).pageTrackChange
+          ?.findUnique?.({
+            where: { id: changeId },
+            select: { spaceId: true, docId: true },
+          })
+          .catch(() => null);
+        if (change?.spaceId) {
+          resolvedResourceSpaces.set(`trackChange:${changeId}`, change.spaceId);
+          if (!authoritativePageId && change.docId) {
+            authoritativePageId = change.docId;
+          }
+        }
+      }
+
+      // 4c. Resolve from Comment Reply ID
+      const replyId =
+        (typeof request.params?.replyId === 'string' &&
+          request.params.replyId) ||
+        (typeof request.body?.replyId === 'string' && request.body.replyId);
+      if (replyId && isUUID(replyId)) {
+        const reply = await (this.prisma as any).pageCommentReply
+          ?.findUnique?.({
+            where: { id: replyId },
+            select: { thread: { select: { spaceId: true, docId: true } } },
+          })
+          .catch(() => null);
+        if (reply?.thread?.spaceId) {
+          resolvedResourceSpaces.set(
+            `commentReply:${replyId}`,
+            reply.thread.spaceId,
+          );
+        }
+      }
+
       // 5. Resolve from Snapshot / Version ID
       const versionId =
         (typeof request.params?.versionId === 'string' &&
@@ -230,6 +274,35 @@ export class ProjectResourceResolver {
         });
         if (snapshot?.spaceId) {
           resolvedResourceSpaces.set(`snapshot:${versionId}`, snapshot.spaceId);
+        }
+      }
+
+      // 5b. Resolve from Snapshot Label ID (when URL targets /history/labels/:labelId)
+      const labelIdParam =
+        typeof request.params?.labelId === 'string'
+          ? request.params.labelId
+          : undefined;
+      if (
+        labelIdParam &&
+        isUUID(labelIdParam) &&
+        String(request.url || request.raw?.url || '')
+          .toLowerCase()
+          .includes('label')
+      ) {
+        const labelRow = await (this.prisma as any).pageSnapshotLabel
+          ?.findUnique?.({
+            where: { id: labelIdParam },
+            select: { spaceId: true, pageId: true },
+          })
+          .catch(() => null);
+        if (labelRow?.spaceId) {
+          resolvedResourceSpaces.set(
+            `snapshotLabel:${labelIdParam}`,
+            labelRow.spaceId,
+          );
+          if (!authoritativePageId && labelRow.pageId) {
+            authoritativePageId = labelRow.pageId;
+          }
         }
       }
 
@@ -571,6 +644,7 @@ export class ProjectResourceResolver {
         ['body:project_id', request.body?.project_id],
       ];
 
+      let hasPersonalClientHint = false;
       const resolvedHints: Array<{
         source: string;
         spaceId: string;
@@ -578,7 +652,9 @@ export class ProjectResourceResolver {
       }> = [];
       for (const [source, rawVal] of hintSources) {
         const res = await resolveSingleHint(rawVal);
-        if (res.provided && res.spaceId && !res.isPersonal) {
+        if (res.provided && res.isPersonal) {
+          hasPersonalClientHint = true;
+        } else if (res.provided && res.spaceId && !res.isPersonal) {
           resolvedHints.push({
             source,
             spaceId: res.spaceId,
@@ -592,9 +668,9 @@ export class ProjectResourceResolver {
       );
       if (distinctHintIds.length > 1) {
         this.logger.warn(
-          `Space context mismatch across client hints: ${resolvedHints
+          `Space context mismatch: client hints disagree (${resolvedHints
             .map((h) => `${h.source}=${h.spaceId}`)
-            .join(', ')}`,
+            .join(', ')})`,
         );
         throw new ForbiddenException({
           statusCode: 403,
@@ -620,38 +696,46 @@ export class ProjectResourceResolver {
           } else if (pageId && isUUID(pageId)) {
             request.resolvedPageId = pageId;
           }
-          if (request.query && 'projectId' in request.query) {
-            request.query.projectId = finalSpaceId;
-          }
-          if (request.query && 'spaceId' in request.query) {
-            request.query.spaceId = finalSpaceId;
+          if (
+            request.query &&
+            typeof request.query === 'object' &&
+            ('projectId' in request.query || 'spaceId' in request.query)
+          ) {
+            if ('projectId' in request.query) {
+              request.query.projectId = finalSpaceId;
+            }
+            if ('spaceId' in request.query) {
+              request.query.spaceId = finalSpaceId;
+            }
           }
           if (
             request.body &&
             typeof request.body === 'object' &&
-            'projectId' in request.body
+            ('projectId' in request.body ||
+              'spaceId' in request.body ||
+              'project_id' in request.body)
           ) {
-            request.body.projectId = finalSpaceId;
+            if ('projectId' in request.body) {
+              request.body.projectId = finalSpaceId;
+            }
+            if ('spaceId' in request.body) {
+              request.body.spaceId = finalSpaceId;
+            }
+            if ('project_id' in request.body) {
+              request.body.project_id = finalSpaceId;
+            }
           }
           if (
-            request.body &&
-            typeof request.body === 'object' &&
-            'spaceId' in request.body
+            request.params &&
+            typeof request.params === 'object' &&
+            ('projectId' in request.params || 'spaceId' in request.params)
           ) {
-            request.body.spaceId = finalSpaceId;
-          }
-          if (
-            request.body &&
-            typeof request.body === 'object' &&
-            'project_id' in request.body
-          ) {
-            request.body.project_id = finalSpaceId;
-          }
-          if (request.params && 'projectId' in request.params) {
-            request.params.projectId = finalSpaceId;
-          }
-          if (request.params && 'spaceId' in request.params) {
-            request.params.spaceId = finalSpaceId;
+            if ('projectId' in request.params) {
+              request.params.projectId = finalSpaceId;
+            }
+            if ('spaceId' in request.params) {
+              request.params.spaceId = finalSpaceId;
+            }
           }
         } else {
           if (currentUserId) {
@@ -772,21 +856,32 @@ export class ProjectResourceResolver {
 
       if (paramRes.provided && paramRes.isPersonal && currentUserId) {
         const url = request.url || request.raw?.url || '';
-        const isPagesRoute =
-          url.includes('/manuscripts') || url.includes('/pages');
+        const isPagesRoute = url.includes('/pages');
         if (isPagesRoute) {
           synchronizeRequestScope(currentUserId, true);
           if (request.params && typeof request.params === 'object') {
-            request.params.projectId = currentUserId;
+            if ('projectId' in request.params) {
+              request.params.projectId = currentUserId;
+            }
             if ('spaceId' in request.params) {
               request.params.spaceId = currentUserId;
             }
           }
           if (request.query && typeof request.query === 'object') {
-            request.query.projectId = currentUserId;
+            if ('projectId' in request.query) {
+              request.query.projectId = currentUserId;
+            }
+            if ('spaceId' in request.query) {
+              request.query.spaceId = currentUserId;
+            }
           }
           if (request.body && typeof request.body === 'object') {
-            request.body.projectId = currentUserId;
+            if ('projectId' in request.body) {
+              request.body.projectId = currentUserId;
+            }
+            if ('spaceId' in request.body) {
+              request.body.spaceId = currentUserId;
+            }
           }
           return {
             projectId: currentUserId,
@@ -817,6 +912,74 @@ export class ProjectResourceResolver {
               'Resource does not belong to the requested project context',
           });
         }
+
+        // If `:projectId` actually holds a multi-page `Page.id` or `PageDoc.id`
+        // (and not an actual Project/Space ID), resolve its owning `spaceId`
+        // and preserve `authoritativePageId` for downstream controllers.
+        const [matchedProject, matchedSpace] = await Promise.all([
+          this.prisma.project?.findUnique
+            ? Promise.resolve(
+                this.prisma.project.findUnique({
+                  where: { id: normalizedParamSpace },
+                  select: { id: true },
+                }),
+              ).catch(() => null)
+            : Promise.resolve(null),
+          this.prisma.space?.findUnique
+            ? Promise.resolve(
+                this.prisma.space.findUnique({
+                  where: { id: normalizedParamSpace },
+                  select: { id: true },
+                }),
+              ).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+
+        if (!matchedProject && !matchedSpace) {
+          const matchedPage = this.prisma.page?.findUnique
+            ? await Promise.resolve(
+                this.prisma.page.findUnique({
+                  where: { id: normalizedParamSpace },
+                  select: { id: true, spaceId: true },
+                }),
+              ).catch(() => null)
+            : null;
+          if (matchedPage?.spaceId) {
+            if (!authoritativePageId) {
+              authoritativePageId = matchedPage.id;
+            }
+            const isPersonal = isUserPersonalSpaceId(matchedPage.spaceId);
+            synchronizeRequestScope(matchedPage.spaceId, isPersonal);
+            return {
+              projectId: matchedPage.spaceId,
+              spaceId: matchedPage.spaceId,
+              isPersonalSpace: isPersonal,
+              source: 'resource',
+            };
+          }
+          const matchedDoc = this.prisma.pageDoc?.findUnique
+            ? await Promise.resolve(
+                this.prisma.pageDoc.findUnique({
+                  where: { id: normalizedParamSpace },
+                  select: { id: true, spaceId: true },
+                }),
+              ).catch(() => null)
+            : null;
+          if (matchedDoc?.spaceId) {
+            if (!authoritativePageId) {
+              authoritativePageId = matchedDoc.id;
+            }
+            const isPersonal = isUserPersonalSpaceId(matchedDoc.spaceId);
+            synchronizeRequestScope(matchedDoc.spaceId, isPersonal);
+            return {
+              projectId: matchedDoc.spaceId,
+              spaceId: matchedDoc.spaceId,
+              isPersonalSpace: isPersonal,
+              source: 'resource',
+            };
+          }
+        }
+
         synchronizeRequestScope(normalizedParamSpace, false);
         return {
           projectId: normalizedParamSpace,
@@ -835,6 +998,20 @@ export class ProjectResourceResolver {
           isPersonalSpace: false,
           source: 'hint',
         };
+      }
+
+      if (hasPersonalClientHint && currentUserId) {
+        const url = request.url || request.raw?.url || '';
+        const isPagesRoute = url.includes('/pages');
+        if (isPagesRoute) {
+          synchronizeRequestScope(currentUserId, true);
+          return {
+            projectId: currentUserId,
+            spaceId: currentUserId,
+            isPersonalSpace: true,
+            source: 'hint',
+          };
+        }
       }
 
       synchronizeRequestScope(null, true);

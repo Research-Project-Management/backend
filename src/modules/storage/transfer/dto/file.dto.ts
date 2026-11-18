@@ -24,7 +24,7 @@ export class PresignDto {
 
   @IsString()
   @IsOptional()
-  projectId?: string;
+  spaceId?: string;
 
   @IsString()
   @IsOptional()
@@ -78,7 +78,7 @@ export class CompletePresignedDto {
 
   @IsString()
   @IsOptional()
-  projectId?: string;
+  spaceId?: string;
 
   @IsString()
   @IsOptional()
@@ -124,7 +124,7 @@ export class InitiateMultipartDto {
 
   @IsString()
   @IsOptional()
-  projectId?: string;
+  spaceId?: string;
 
   @IsString()
   @IsOptional()

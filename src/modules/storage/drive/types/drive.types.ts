@@ -198,9 +198,7 @@ export class StorageNode {
     const obj = (raw || {}) as Record<string, unknown>;
     const rawSize = obj.size ?? obj._size ?? 0;
     const size =
-      typeof rawSize === 'bigint'
-        ? rawSize
-        : BigInt(String(rawSize || '0'));
+      typeof rawSize === 'bigint' ? rawSize : BigInt(String(rawSize || '0'));
     const rawTrashedAt = obj.trashedAt ?? obj._trashedAt;
     const rawCreatedAt = obj.createdAt;
     const rawUpdatedAt = obj.updatedAt ?? obj._updatedAt;
@@ -217,7 +215,8 @@ export class StorageNode {
       blobId: (obj.blobId ?? obj._blobId ?? null) as string | null,
       scope: (obj.scope ?? obj._scope) as FileScope | string | undefined,
       starred: Boolean(obj.starred ?? obj._starred ?? false),
-      metadata: ((obj.metadata ?? obj._metadata) as Record<string, unknown>) || {},
+      metadata:
+        ((obj.metadata ?? obj._metadata) as Record<string, unknown>) || {},
       authorId: String(obj.authorId || ''),
       author: (obj.author as StorageNodeAuthor | null) ?? null,
       trashedAt: rawTrashedAt ? new Date(String(rawTrashedAt)) : null,
@@ -226,10 +225,7 @@ export class StorageNode {
     });
   }
 
-  public setScope(
-    scope: FileScope | string,
-    linkedToId?: string | null,
-  ): void {
+  public setScope(scope: FileScope | string, linkedToId?: string | null): void {
     const normalized = normalizeFileScope(scope, Boolean(linkedToId));
     this._scope = normalized;
     this._linkedToId = linkedToId ?? null;

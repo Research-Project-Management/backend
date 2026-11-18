@@ -8,10 +8,7 @@ import {
   STORAGE_NODE_REPOSITORY,
   UPLOAD_SESSION_REPOSITORY,
 } from '@/modules/storage/storage.tokens';
-import {
-  IStorageNodeRepository,
-  TrashService,
-} from '@/modules/storage/drive';
+import { IStorageNodeRepository, TrashService } from '@/modules/storage/drive';
 import { IUploadSessionRepository } from '@/modules/storage/transfer';
 import {
   BlobService,

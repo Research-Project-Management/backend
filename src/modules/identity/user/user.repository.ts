@@ -495,19 +495,23 @@ export class UserRepository implements IUserRepository {
         where: {
           deletedAt: null,
           spaceId: { in: projectIds },
-          path: { contains: query, mode: 'insensitive' },
+          OR: [
+            { lastKnownPath: { contains: query, mode: 'insensitive' } },
+            { node: { path: { contains: query, mode: 'insensitive' } } },
+          ],
         },
         select: {
           id: true,
-          path: true,
+          lastKnownPath: true,
           spaceId: true,
           updatedAt: true,
+          node: { select: { path: true } },
         },
         take: 10,
       });
       return docs.map((doc) => ({
         id: doc.id,
-        title: doc.path,
+        title: doc.node?.path || doc.lastKnownPath,
         projectId: doc.spaceId,
         project: projectMap.has(doc.spaceId)
           ? { name: projectMap.get(doc.spaceId)! }

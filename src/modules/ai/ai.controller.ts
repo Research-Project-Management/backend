@@ -168,8 +168,8 @@ export class AiController {
       throw new BadRequestException('File is required');
     }
 
-    const projectId = normalizeProjectId(fields.projectId || fields.project_id);
-    const scopeId = normalizeProjectId(fields.scopeId) || projectId || userId;
+    const spaceId = normalizeProjectId(fields.spaceId || fields.space_id);
+    const scopeId = normalizeProjectId(fields.scopeId) || spaceId || userId;
 
     const title = fields.title;
     const tags = fields.tags;
@@ -177,7 +177,7 @@ export class AiController {
 
     return this.aiService.uploadDocument(userId, buffer, mimeType, filename, {
       scopeId,
-      projectId,
+      projectId: spaceId,
       chatId: chatId ? String(chatId) : undefined,
       title: title ? String(title) : undefined,
       tags: tags ? String(tags) : undefined,
@@ -194,7 +194,7 @@ export class AiController {
     return this.aiService.getDocumentsBulk(
       userId,
       body.ids || [],
-      body.projectId,
+      body.spaceId,
     );
   }
 
@@ -207,8 +207,8 @@ export class AiController {
     @Req() req: FastifyRequest,
   ) {
     const query = req.query as Record<string, string>;
-    const projectId = query?.projectId || query?.project_id;
-    return this.aiService.getDocuments(userId, projectId);
+    const spaceId = query?.spaceId || query?.space_id;
+    return this.aiService.getDocuments(userId, spaceId);
   }
 
   @Get(['documents/:docId', 'documents/:docId/content'])
@@ -221,8 +221,8 @@ export class AiController {
     @Req() req: FastifyRequest,
   ) {
     const query = req.query as Record<string, string>;
-    const projectId = query?.projectId || query?.project_id;
-    return this.aiService.getDocument(userId, docId, projectId);
+    const spaceId = query?.spaceId || query?.space_id;
+    return this.aiService.getDocument(userId, docId, spaceId);
   }
 
   @Delete('documents/:docId')
@@ -235,7 +235,7 @@ export class AiController {
     @Req() req: FastifyRequest,
   ) {
     const query = req.query as Record<string, string>;
-    const projectId = query?.projectId || query?.project_id;
-    return this.aiService.deleteDocument(userId, docId, projectId);
+    const spaceId = query?.spaceId || query?.space_id;
+    return this.aiService.deleteDocument(userId, docId, spaceId);
   }
 }

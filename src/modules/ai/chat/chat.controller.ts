@@ -32,9 +32,9 @@ export class ChatController {
   @ApiOperation({ summary: 'Get all chat sessions for user' })
   async getChats(
     @CurrentUser('id') userId: string,
-    @Query('projectId') projectId?: string,
+    @Query('spaceId') spaceId?: string,
   ) {
-    const chats = await this.chatService.getChats(userId, projectId);
+    const chats = await this.chatService.getChats(userId, spaceId);
     return { chats };
   }
 
@@ -139,4 +139,3 @@ export class ChatController {
     return this.chatService.deleteChat(chatId, userId);
   }
 }
-

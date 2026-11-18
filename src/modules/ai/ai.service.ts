@@ -46,8 +46,11 @@ export class AiService {
     );
   }
 
-  private sanitizeProjectId(projectId?: string | null): string | undefined {
-    return toValidProjectId(projectId);
+  private sanitizeProjectId(
+    projectId?: string | null,
+    userId?: string | null,
+  ): string | undefined {
+    return toValidProjectId(projectId, userId);
   }
 
   private async validateAccess(
@@ -56,7 +59,7 @@ export class AiService {
     chatId?: string,
     pageId?: string,
   ): Promise<void> {
-    const cleanProjectId = this.sanitizeProjectId(projectId);
+    const cleanProjectId = this.sanitizeProjectId(projectId, userId);
     if (cleanProjectId) {
       const project = await this.prisma.project.findFirst({
         where: {
@@ -182,7 +185,7 @@ export class AiService {
     dto: AiQueryDto,
     reply: FastifyReply,
   ): Promise<void> {
-    const targetProjectId = dto.projectId || dto.project_id;
+    const targetProjectId = dto.spaceId || dto.space_id;
     const targetPageId = dto.pageId || dto.page_id;
     let targetChatId = dto.chatId || dto.chat_id;
 
@@ -222,7 +225,7 @@ export class AiService {
         payload.document_ids,
       );
       const newSession = await this.chatService.createChat(userId, {
-        projectId: targetProjectId,
+        spaceId: targetProjectId,
         title: effectiveTitle,
         documentIds: payload.document_ids,
       });
@@ -296,7 +299,7 @@ export class AiService {
    * Synchronous AI execution fallback handler
    */
   async execute(userId: string, dto: AiQueryDto) {
-    const targetProjectId = dto.projectId || dto.project_id;
+    const targetProjectId = dto.spaceId || dto.space_id;
     const targetPageId = dto.pageId || dto.page_id;
     let targetChatId = dto.chatId || dto.chat_id;
 
@@ -336,7 +339,7 @@ export class AiService {
         payload.document_ids,
       );
       const newSession = await this.chatService.createChat(userId, {
-        projectId: targetProjectId,
+        spaceId: targetProjectId,
         title: effectiveTitle,
         documentIds: payload.document_ids,
       });
@@ -694,14 +697,17 @@ export class AiService {
       tags?: string;
     },
   ) {
-    const cleanProjectId = this.sanitizeProjectId(options?.projectId);
+    const cleanProjectId = this.sanitizeProjectId(
+      (options as { spaceId?: string }).spaceId ?? options?.projectId,
+      userId,
+    );
     const cleanChatId =
       options?.chatId && this.isValidUuid(options.chatId)
         ? options.chatId
         : undefined;
 
     const scopeId =
-      normalizeProjectId(options?.scopeId) || cleanProjectId || userId;
+      normalizeProjectId(options?.scopeId, userId) || cleanProjectId || userId;
 
     await this.validateAccess(userId, cleanProjectId, cleanChatId);
     return this.engineService.uploadDocument(
@@ -720,7 +726,7 @@ export class AiService {
   }
 
   async getDocumentsBulk(userId: string, ids: string[], projectId?: string) {
-    const cleanProjectId = this.sanitizeProjectId(projectId);
+    const cleanProjectId = this.sanitizeProjectId(projectId, userId);
     await this.validateAccess(userId, cleanProjectId);
     const scopeId = cleanProjectId || userId;
     return this.engineService.getDocumentsBulk(ids, {
@@ -731,7 +737,7 @@ export class AiService {
   }
 
   async getDocument(userId: string, docId: string, projectId?: string) {
-    const cleanProjectId = this.sanitizeProjectId(projectId);
+    const cleanProjectId = this.sanitizeProjectId(projectId, userId);
     await this.validateAccess(userId, cleanProjectId);
     const scopeId = cleanProjectId || userId;
     return this.engineService.getDocument(docId, {
@@ -742,7 +748,7 @@ export class AiService {
   }
 
   async getDocuments(userId: string, projectId?: string) {
-    const cleanProjectId = this.sanitizeProjectId(projectId);
+    const cleanProjectId = this.sanitizeProjectId(projectId, userId);
     await this.validateAccess(userId, cleanProjectId);
     const scopeId = cleanProjectId || userId;
     return this.engineService.getDocuments({
@@ -753,7 +759,7 @@ export class AiService {
   }
 
   async deleteDocument(userId: string, docId: string, projectId?: string) {
-    const cleanProjectId = this.sanitizeProjectId(projectId);
+    const cleanProjectId = this.sanitizeProjectId(projectId, userId);
     await this.validateAccess(userId, cleanProjectId);
     const scopeId = cleanProjectId || userId;
     return this.engineService.deleteDocument(docId, {

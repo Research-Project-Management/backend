@@ -16,10 +16,20 @@ const NON_PROJECT_KEYWORDS = new Set([
 /**
  * Normalizes a project/scope ID, returning undefined for personal/non-project keywords.
  */
-export function normalizeProjectId(value: unknown): string | undefined {
+export function normalizeProjectId(
+  value: unknown,
+  userId?: string | null,
+): string | undefined {
   if (!value || typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   if (!trimmed || NON_PROJECT_KEYWORDS.has(trimmed.toLowerCase())) {
+    return undefined;
+  }
+  if (
+    userId &&
+    typeof userId === 'string' &&
+    trimmed.toLowerCase() === userId.trim().toLowerCase()
+  ) {
     return undefined;
   }
   return trimmed;
@@ -31,8 +41,11 @@ const UUID_REGEX =
 /**
  * Validates and normalizes project ID as UUID, ignoring personal scope keywords like 'me', 'personal'.
  */
-export function toValidProjectId(value: unknown): string | undefined {
-  const normalized = normalizeProjectId(value);
+export function toValidProjectId(
+  value: unknown,
+  userId?: string | null,
+): string | undefined {
+  const normalized = normalizeProjectId(value, userId);
   if (!normalized) return undefined;
   return UUID_REGEX.test(normalized) ? normalized : undefined;
 }
@@ -115,7 +128,7 @@ export function buildAiPayload(
 ): AiEnginePayload {
   const messages = normalizeMessages(dto);
   const documentIds = extractDocIds(dto);
-  const validProjectId = toValidProjectId(dto.project_id || dto.projectId);
+  const validProjectId = toValidProjectId(dto.space_id || dto.spaceId, userId);
   const scopeId = validProjectId || userId;
   const projectId = validProjectId || '';
   const chatId = dto.chat_id || dto.chatId || '';

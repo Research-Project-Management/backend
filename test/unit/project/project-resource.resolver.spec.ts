@@ -98,10 +98,8 @@ describe('ProjectResourceResolver', () => {
 
   it('should throw PROJECT_CONTEXT_MISMATCH if multiple referenced resources belong to different projects', async () => {
     mockPrisma.pageDoc.findUnique.mockImplementation(({ where }: any) => {
-      if (where.id === pageAId)
-        return Promise.resolve({ spaceId: projectAId });
-      if (where.id === docBId)
-        return Promise.resolve({ spaceId: projectBId });
+      if (where.id === pageAId) return Promise.resolve({ spaceId: projectAId });
+      if (where.id === docBId) return Promise.resolve({ spaceId: projectBId });
       return Promise.resolve(null);
     });
 
@@ -198,5 +196,82 @@ describe('ProjectResourceResolver', () => {
     await expect(resolver.resolveAuthoritativeProjectId(req)).rejects.toThrow(
       ForbiddenException,
     );
+  });
+
+  it('should synchronize request.query and request.body two-way when only spaceId is provided', async () => {
+    const queryReq: Record<string, any> = {
+      url: '/api/v1/library/items',
+      params: {},
+      headers: {},
+      query: { spaceId: projectAId },
+      body: {},
+    };
+
+    const queryResult = await resolver.resolveAuthoritativeProjectId(queryReq);
+    expect(queryResult).toEqual({
+      projectId: projectAId,
+      spaceId: projectAId,
+      isPersonalSpace: false,
+      source: 'hint',
+    });
+    expect(queryReq.query.spaceId).toBe(projectAId);
+    expect(queryReq.query.projectId).toBeUndefined();
+
+    const bodyReq: Record<string, any> = {
+      url: '/api/v1/pages/compile',
+      params: {},
+      headers: {},
+      query: {},
+      body: { spaceId: projectBId },
+    };
+
+    const bodyResult = await resolver.resolveAuthoritativeProjectId(bodyReq);
+    expect(bodyResult).toEqual({
+      projectId: projectBId,
+      spaceId: projectBId,
+      isPersonalSpace: false,
+      source: 'hint',
+    });
+    expect(bodyReq.body.spaceId).toBe(projectBId);
+    expect(bodyReq.body.projectId).toBeUndefined();
+  });
+
+  it('should resolve Personal Space client hint (spaceId=userId or personal) on /api/v1/pages/compile', async () => {
+    const personalUserId = 'e0000000-0000-4000-8000-000000000009';
+    const reqByUserId: Record<string, any> = {
+      url: '/api/v1/pages/compile',
+      user: { sub: personalUserId },
+      params: {},
+      headers: {},
+      query: {},
+      body: { spaceId: personalUserId },
+    };
+
+    const res1 = await resolver.resolveAuthoritativeProjectId(reqByUserId);
+    expect(res1).toEqual({
+      projectId: personalUserId,
+      spaceId: personalUserId,
+      isPersonalSpace: true,
+      source: 'hint',
+    });
+    expect(reqByUserId.body.spaceId).toBe(personalUserId);
+    expect(reqByUserId.body.projectId).toBeUndefined();
+
+    const reqByAlias: Record<string, any> = {
+      url: '/api/v1/pages/compile',
+      user: { id: personalUserId },
+      params: {},
+      headers: {},
+      query: {},
+      body: { spaceId: 'personal' },
+    };
+
+    const res2 = await resolver.resolveAuthoritativeProjectId(reqByAlias);
+    expect(res2).toEqual({
+      projectId: personalUserId,
+      spaceId: personalUserId,
+      isPersonalSpace: true,
+      source: 'hint',
+    });
   });
 });

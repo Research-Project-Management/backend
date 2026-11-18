@@ -109,7 +109,9 @@ export class BlobService {
     }
   }
 
-  private async computeStreamSha256Hex(storageKey: string): Promise<string | null> {
+  private async computeStreamSha256Hex(
+    storageKey: string,
+  ): Promise<string | null> {
     try {
       const res = await this.driver.getStream(storageKey);
       if (!res?.stream) return null;
@@ -155,7 +157,28 @@ export class BlobService {
     };
 
     const existingBlob = await this.blobRepo.findByHash(contentHash);
-    if (existingBlob && existingBlob.isReady()) {
+    if (existingBlob) {
+      if (
+        !existingBlob.isReady() &&
+        input.storageKey !== existingBlob.s3Key.value()
+      ) {
+        const physicalExists = await this.driver
+          .stat(existingBlob.s3Key.value())
+          .then(() => true)
+          .catch(() => false);
+        if (!physicalExists) {
+          const { stream, contentLength } = await this.driver.getStream(
+            input.storageKey,
+          );
+          const readable =
+            stream instanceof Readable
+              ? stream
+              : Readable.from(stream as AsyncIterable<Uint8Array>);
+          await this.driver.put(existingBlob.s3Key.value(), readable, {
+            size: contentLength,
+          });
+        }
+      }
       const updated = await this.incrementExistingBlob(existingBlob);
       cleanupRedundantUpload(existingBlob.s3Key.value());
       return { blob: updated, isDeduplicated: true };
@@ -184,6 +207,10 @@ export class BlobService {
       }
       throw err;
     }
+  }
+
+  async acquireBlob(blobId: string): Promise<StorageBlob | null> {
+    return this.blobRepo.incrementRefCount(blobId);
   }
 
   async releaseBlob(blobId: string): Promise<void> {

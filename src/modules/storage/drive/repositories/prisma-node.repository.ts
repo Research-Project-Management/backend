@@ -244,7 +244,10 @@ export class StorageNodeMapper {
   public static toDomain(record: PrismaFileWithAuthor): StorageNode {
     const isProjectSpace =
       record.spaceId && record.spaceId !== record.createdById;
-    const scope = normalizeFileScope(record.linkedToType, Boolean(isProjectSpace));
+    const scope = normalizeFileScope(
+      record.linkedToType,
+      Boolean(isProjectSpace),
+    );
     const metadata = (record.metadata as Record<string, unknown>) || {};
     const projectId =
       (typeof metadata.projectId === 'string' ? metadata.projectId : null) ??

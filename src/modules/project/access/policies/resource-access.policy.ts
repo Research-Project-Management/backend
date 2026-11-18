@@ -208,8 +208,7 @@ export class ResourceAccessPolicy {
       });
     }
 
-    const isAuthor =
-      document.authorId && document.authorId === subject.userId;
+    const isAuthor = document.authorId && document.authorId === subject.userId;
 
     if (action === 'delete') {
       if (subject.role === Role.COORDINATOR || isAuthor) {
@@ -219,8 +218,7 @@ export class ResourceAccessPolicy {
       throw new ForbiddenException({
         statusCode: 403,
         code: 'FORBIDDEN_DOCUMENT_DELETE',
-        message:
-          'Access denied: You can only delete manuscripts you authored.',
+        message: 'Access denied: You can only delete manuscripts you authored.',
       });
     }
   }

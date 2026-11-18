@@ -80,4 +80,3 @@ export interface IChatRepository {
   ): Promise<ChatWithMessages | null>;
   updateChatTitle(chatId: string, title: string): Promise<ChatWithMessages>;
 }
-

@@ -7,7 +7,10 @@ import {
   IAccessRepository,
   MemberAccessContext,
 } from './types/access.type';
-import { computeEffectivePermissions, PermissionBitmaskUtil } from './constants/permission.constant';
+import {
+  computeEffectivePermissions,
+  PermissionBitmaskUtil,
+} from './constants/permission.constant';
 
 @Injectable()
 export class AccessRepository implements IAccessRepository {

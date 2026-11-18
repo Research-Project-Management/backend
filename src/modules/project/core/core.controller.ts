@@ -76,11 +76,13 @@ export class CoreController {
 
   @Get('check-identifier')
   @ApiOperation({
-    summary: 'Check if a project identifier is available and get a suggested alternative if taken',
+    summary:
+      'Check if a project identifier is available and get a suggested alternative if taken',
   })
   @ApiResponse({
     status: 200,
-    description: 'Identifier availability check and suggested available identifier',
+    description:
+      'Identifier availability check and suggested available identifier',
   })
   async checkIdentifier(
     @CurrentUser('id') userId: string,
@@ -95,7 +97,9 @@ export class CoreController {
   }
 
   @Get('trash')
-  @ApiOperation({ summary: 'List all soft-deleted projects in trash for current user' })
+  @ApiOperation({
+    summary: 'List all soft-deleted projects in trash for current user',
+  })
   @ApiResponse({
     status: 200,
     description: 'List of trashed projects',
@@ -164,20 +168,6 @@ export class CoreController {
     @CurrentUser('id') userId: string,
   ) {
     return this.projectService.restoreProject(projectId, userId);
-  }
-
-  @Post([':projectId/duplicate', ':projectId/clone'])
-  @UseGuards(ProjectAccessGuard)
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({
-    summary: 'Duplicate a project with all its pages and structure',
-  })
-  async duplicateProject(
-    @Param('projectId') projectId: string,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.projectService.duplicateProject(projectId, userId);
   }
 
   @Delete(':projectId/permanent')

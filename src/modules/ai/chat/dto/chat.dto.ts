@@ -13,10 +13,6 @@ export interface IncomingChatMessage {
 export class CreateChatDto {
   @IsString()
   @IsOptional()
-  projectId?: string;
-
-  @IsString()
-  @IsOptional()
   spaceId?: string;
 
   @IsString()
@@ -47,7 +43,7 @@ export class AppendMessagesDto {
 
   @IsString()
   @IsOptional()
-  projectId?: string;
+  spaceId?: string;
 }
 
 export class RenameChatDto {
@@ -57,5 +53,5 @@ export class RenameChatDto {
 
   @IsString()
   @IsOptional()
-  projectId?: string;
+  spaceId?: string;
 }

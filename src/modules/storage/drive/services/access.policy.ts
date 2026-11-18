@@ -150,7 +150,9 @@ export class StorageAccessPolicy {
     action: StorageAction,
   ): Promise<void> {
     if (!userId) {
-      throw new ForbiddenException('Authentication required for project access');
+      throw new ForbiddenException(
+        'Authentication required for project access',
+      );
     }
     if (
       !projectId ||
@@ -227,7 +229,11 @@ export class StorageAccessPolicy {
       parentId?: string | null;
     },
   ): Promise<void> {
-    if (options.parentId && options.parentId !== 'null' && options.parentId !== 'root') {
+    if (
+      options.parentId &&
+      options.parentId !== 'null' &&
+      options.parentId !== 'root'
+    ) {
       await this.assertCanAccess(userId, options.parentId, 'write');
     }
     const normalizedProjectId = normalizeStorageProjectId(
@@ -237,5 +243,39 @@ export class StorageAccessPolicy {
     if (normalizedProjectId) {
       await this.assertCanAccessProject(userId, normalizedProjectId, 'write');
     }
+  }
+
+  /**
+   * Resolves the canonical workspace spaceId for a page or pageDoc when uploading page assets.
+   */
+  async resolvePageSpaceId(
+    pageId?: string | null,
+    userId?: string,
+  ): Promise<string | undefined> {
+    const cleanId = typeof pageId === 'string' ? pageId.trim() : '';
+    if (!cleanId || !isUuid(cleanId)) return undefined;
+
+    const [page, pageDoc] = await Promise.all([
+      this.prisma.page?.findUnique
+        ? Promise.resolve(
+            this.prisma.page.findUnique({
+              where: { id: cleanId },
+              select: { spaceId: true },
+            }),
+          ).catch(() => null)
+        : Promise.resolve(null),
+      this.prisma.pageDoc?.findUnique
+        ? Promise.resolve(
+            this.prisma.pageDoc.findUnique({
+              where: { id: cleanId },
+              select: { spaceId: true },
+            }),
+          ).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+
+    const resolvedSpaceId = page?.spaceId || pageDoc?.spaceId;
+    if (!resolvedSpaceId) return undefined;
+    return normalizeStorageProjectId(resolvedSpaceId, userId);
   }
 }

@@ -11,6 +11,7 @@ export class DomainActivityEvent {
   oldIdentifier?: string;
   newIdentifier?: string;
   actorId!: string;
+  spaceId?: string;
   projectId?: string;
   timestamp?: Date;
 

@@ -14,7 +14,12 @@ import {
   SyncChatResponse,
   StreamChatOptions,
 } from './types/engine.types';
-import { getErrorMessage, isOriginAllowed, tryCatch, CircuitBreaker } from '@/core';
+import {
+  getErrorMessage,
+  isOriginAllowed,
+  tryCatch,
+  CircuitBreaker,
+} from '@/core';
 
 @Injectable()
 export class EngineService {
@@ -172,7 +177,9 @@ export class EngineService {
       const errMsg =
         'AI Engine is temporarily unavailable (circuit breaker is open). Please try again shortly.';
       this.logger.warn(`Fast-failing AI streamChat: ${errMsg}`);
-      rawRes.write(`event: error\ndata: ${JSON.stringify({ error: errMsg })}\n\n`);
+      rawRes.write(
+        `event: error\ndata: ${JSON.stringify({ error: errMsg })}\n\n`,
+      );
       rawRes.end();
       return;
     }
@@ -192,7 +199,9 @@ export class EngineService {
       this.logger.warn(`AI Engine streaming error: ${errMsg}`);
       this.circuitBreaker.recordFailure(errMsg);
 
-      rawRes.write(`event: error\ndata: ${JSON.stringify({ error: errMsg })}\n\n`);
+      rawRes.write(
+        `event: error\ndata: ${JSON.stringify({ error: errMsg })}\n\n`,
+      );
       rawRes.end();
       return;
     }
@@ -548,4 +557,3 @@ export class EngineService {
     }
   }
 }
-

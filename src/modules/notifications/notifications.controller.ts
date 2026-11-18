@@ -27,7 +27,6 @@ import { NotificationTypeString } from './core/domain/value-objects/notification
 @Controller([
   'notifications',
   'api/notifications',
-  'manuscripts/notifications',
   'api/documents/notifications',
   'documents/notifications',
 ])
@@ -53,11 +52,11 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Flush pending review notifications into a digest' })
   async flushBundle(
     @CurrentUser('id') userId: string,
-    @Body() body: { scopeId?: string; projectId?: string },
+    @Body() body: { scopeId?: string; spaceId?: string },
   ) {
     const digest = await this.bundling.flush(
       userId,
-      body?.projectId || body?.scopeId || undefined,
+      body?.spaceId || body?.scopeId || undefined,
     );
     return { digest };
   }

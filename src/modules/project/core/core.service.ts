@@ -48,7 +48,9 @@ export function sanitizeModules(modules?: string[]): string[] {
         .filter((m) => ALLOWED_PROJECT_MODULES.has(m)),
     ),
   );
-  return filtered.length > 0 ? filtered : ['overview', 'work-items', 'pages', 'chat'];
+  return filtered.length > 0
+    ? filtered
+    : ['overview', 'work-items', 'pages', 'chat'];
 }
 
 @Injectable()
@@ -232,15 +234,14 @@ export class CoreService {
     }
 
     const rawIdentifier = dto.identifier?.trim().toUpperCase();
-    const desiredIdentifier = (
-      rawIdentifier || deriveProjectPrefix(null, dto.name)
-    )
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/đ/g, 'd')
-      .replace(/Đ/g, 'D')
-      .replace(/[^A-Z0-9_-]/g, '')
-      .slice(0, 10) || 'PROJ';
+    const desiredIdentifier =
+      (rawIdentifier || deriveProjectPrefix(null, dto.name))
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .replace(/[^A-Z0-9_-]/g, '')
+        .slice(0, 10) || 'PROJ';
 
     const isTaken = await this.projectRepo.isIdentifierTaken(
       desiredIdentifier,
@@ -300,11 +301,10 @@ export class CoreService {
 
     if (dto.identifier !== undefined && dto.identifier) {
       const identifier = dto.identifier.trim().toUpperCase();
-      const duplicate =
-        await this.projectRepo.findProjectByIdentifier(
-          identifier,
-          existing.createdById,
-        );
+      const duplicate = await this.projectRepo.findProjectByIdentifier(
+        identifier,
+        existing.createdById,
+      );
       if (duplicate && duplicate.id !== projectId) {
         throw new BadRequestException(
           `Project with identifier "${identifier}" already exists`,
@@ -455,37 +455,6 @@ export class CoreService {
     return deriveProjectPrefix(project.identifier, project.name);
   }
 
-  async duplicateProject(
-    projectId: string,
-    userId: string,
-  ): Promise<{
-    project: EnrichedProject;
-    yourRole: Role;
-    permissions: ProjectPermissions;
-  }> {
-    const source = await this.projectRepo.findProjectForDuplication(projectId);
-    if (!source) throw new NotFoundException(`Project ${projectId} not found`);
-
-    // 1. Generate unique identifier scoped to this user
-    const baseIdentifier = deriveProjectPrefix(null, `${source.name} Copy`);
-    const identifier = await this.projectRepo.findAvailableIdentifier(baseIdentifier, userId);
-
-    // 2. Clone project atomically in repository
-    const newProject = await this.projectRepo.duplicateProject(
-      source,
-      userId,
-      identifier,
-    );
-
-    await this.invalidateProjectCache(newProject.id, [userId]);
-
-    // Return enriched project
-    const result = await this.findById(newProject.id, userId);
-    if (!result?.project)
-      throw new NotFoundException('Duplicated project not found');
-    return result;
-  }
-
   async permanentDeleteProject(
     projectId: string,
     userId: string,
@@ -569,7 +538,8 @@ export class CoreService {
     const yourRole =
       restored.createdById === userId
         ? Role.owner
-        : restored.members?.find((m) => m.userId === userId)?.role || Role.reviewer;
+        : restored.members?.find((m) => m.userId === userId)?.role ||
+          Role.reviewer;
 
     const enriched: EnrichedProject = {
       ...restored,

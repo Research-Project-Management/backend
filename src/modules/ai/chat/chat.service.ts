@@ -93,15 +93,18 @@ export class ChatService {
     });
   }
 
-  private sanitizeProjectId(projectId?: string | null): string | null {
-    return normalizeProjectId(projectId) ?? null;
+  private sanitizeProjectId(
+    projectId?: string | null,
+    userId?: string | null,
+  ): string | null {
+    return normalizeProjectId(projectId, userId) ?? null;
   }
 
   async getChats(
     userId: string,
     projectId?: string | null,
   ): Promise<FormattedChatSession[]> {
-    const cleanProjectId = this.sanitizeProjectId(projectId);
+    const cleanProjectId = this.sanitizeProjectId(projectId, userId);
     if (cleanProjectId) {
       const project = await this.prisma.project.findFirst({
         where: {
@@ -169,10 +172,14 @@ export class ChatService {
 
     const doc = await this.prisma.pageDoc.findUnique({
       where: { id: pageId },
-      select: { path: true, spaceId: true },
+      select: {
+        lastKnownPath: true,
+        spaceId: true,
+        node: { select: { path: true } },
+      },
     });
 
-    const docTitle = doc?.path;
+    const docTitle = doc?.node?.path || doc?.lastKnownPath;
     const title = docTitle
       ? `${sanitizeChatTitle(docTitle)} Discussion`
       : 'Manuscript Chat';
@@ -215,7 +222,7 @@ export class ChatService {
     userId: string,
     dto: CreateChatDto,
   ): Promise<FormattedChatSession> {
-    let cleanProjectId = this.sanitizeProjectId(dto.projectId);
+    let cleanProjectId = this.sanitizeProjectId(dto.spaceId, userId);
     // Verify project access if specified
     if (cleanProjectId) {
       const isUuid =
@@ -289,12 +296,10 @@ export class ChatService {
         role: validateAndSanitizeRole(m.role),
         content: sanitizeChatMessageContent(m.content),
         sources: (m.attachments || m.sources) as
-          | Prisma.InputJsonValue
-          | undefined,
+          Prisma.InputJsonValue | undefined,
         widgets: m.widgets as Prisma.InputJsonValue | undefined,
         selectionContext: m.selectionContext as
-          | Prisma.InputJsonValue
-          | undefined,
+          Prisma.InputJsonValue | undefined,
       }));
       const updated = await this.chatRepo.createMessages(
         created.id,
@@ -332,8 +337,7 @@ export class ChatService {
       role: validateAndSanitizeRole(m.role),
       content: sanitizeChatMessageContent(m.content),
       sources: (m.attachments || m.sources) as
-        | Prisma.InputJsonValue
-        | undefined,
+        Prisma.InputJsonValue | undefined,
       widgets: m.widgets as Prisma.InputJsonValue | undefined,
       selectionContext: m.selectionContext as Prisma.InputJsonValue | undefined,
     }));
