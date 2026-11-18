@@ -1,12 +1,37 @@
-import { Injectable, NotFoundException, Logger, Optional, Inject, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  Logger,
+  Optional,
+  Inject,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { RedisCacheService, shouldRunWorkerConsumers } from '@/core';
-import { CATALOG_FACADE, ICatalogFacade, ITEM_CACHE_INVALIDATOR, IItemCacheInvalidator, normalizeProjectScopeId } from '@/modules/library/core';
+import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+  ITEM_CACHE_INVALIDATOR,
+  IItemCacheInvalidator,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
 import { invalidateIngestionItemCache } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/base-metadata.provider';
-import { RetractionDatabaseService, RetractionDatabaseStats } from './retraction-database.service';
-import { FlagRetractionDto, BatchCheckRetractionDto } from '@/modules/library/ingestion/dto/ingestion.dto';
-import { RetractionCheckResult, RetractionStats, RetractionDetails, RetractionNature } from '@/modules/library/ingestion/types/ingestion.types';
+import {
+  RetractionDatabaseService,
+  RetractionDatabaseStats,
+} from './retraction-database.service';
+import {
+  FlagRetractionDto,
+  BatchCheckRetractionDto,
+} from '@/modules/library/ingestion/dto/ingestion.dto';
+import {
+  RetractionCheckResult,
+  RetractionStats,
+  RetractionDetails,
+  RetractionNature,
+} from '@/modules/library/ingestion/types/ingestion.types';
 import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { RetractionSeederService } from '@/modules/library/ingestion/services/retraction-seeder.service';
 
@@ -214,9 +239,15 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
           if (!item.isRetracted && item.doi) {
             const lookupRes = await this.scanner.lookup(item.doi);
             if (lookupRes.status === 'retracted') {
-              const isActuallyRetracted = isRetractedNoticeNature(lookupRes.details.nature);
+              const isActuallyRetracted = isRetractedNoticeNature(
+                lookupRes.details.nature,
+              );
               await this.repo.updateItemRetraction(
-                item.id, isActuallyRetracted, lookupRes.details.nature, lookupRes.details, now,
+                item.id,
+                isActuallyRetracted,
+                lookupRes.details.nature,
+                lookupRes.details,
+                now,
               );
               if (isActuallyRetracted) updatedCount++;
               updatedDeltaItems.push({
@@ -252,9 +283,14 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
       await Promise.all(
         Array.from(groupedByScope.values()).map((group) =>
           invalidateIngestionItemCache({
-            itemIds: group.itemIds, userId: group.userId, projectId: group.projectId,
-            cacheCoordinator: this.cacheCoordinator, catalogGateway: this.catalogGateway,
-            cache: this.cache, logger: this.logger, contextLabel: 'delta retraction sync',
+            itemIds: group.itemIds,
+            userId: group.userId,
+            projectId: group.projectId,
+            cacheCoordinator: this.cacheCoordinator,
+            catalogGateway: this.catalogGateway,
+            cache: this.cache,
+            logger: this.logger,
+            contextLabel: 'delta retraction sync',
           }),
         ),
       );
@@ -275,7 +311,10 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     const concurrency = this.resolveConcurrency(options);
 
     const staleBefore = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000);
-    const items = await this.repo.findGlobalStaleItemsForSync(staleBefore, limit);
+    const items = await this.repo.findGlobalStaleItemsForSync(
+      staleBefore,
+      limit,
+    );
     return this.processItems(items, concurrency, startTime);
   }
 
@@ -290,7 +329,12 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     const concurrency = this.resolveConcurrency(options);
 
     const staleBefore = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000);
-    const items = await this.repo.findStaleItemsForSync(userId, staleBefore, projectId, limit);
+    const items = await this.repo.findStaleItemsForSync(
+      userId,
+      staleBefore,
+      projectId,
+      limit,
+    );
 
     this.logger.log(
       `Starting retraction delta sync: found ${items.length} eligible stale item(s) (stale threshold: ${maxDays} days, concurrency: ${concurrency})`,
@@ -508,8 +552,16 @@ export class RetractionService {
           : null;
     const lookup = await this.scanner.lookup(item.doi, pmid);
     const now = new Date();
-    const itemRec = item as { projectId?: string | null; spaceId?: string; createdById?: string };
-    const itemProjectId = itemRec.projectId ?? (itemRec.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
+    const itemRec = item as {
+      projectId?: string | null;
+      spaceId?: string;
+      createdById?: string;
+    };
+    const itemProjectId =
+      itemRec.projectId ??
+      (itemRec.spaceId && itemRec.spaceId !== itemRec.createdById
+        ? itemRec.spaceId
+        : undefined);
     const effectiveProjectId = projectId || itemProjectId || undefined;
 
     if (lookup.status === 'retracted') {
@@ -675,8 +727,16 @@ export class RetractionService {
       new Date(),
     );
 
-    const itemRec = item as { projectId?: string | null; spaceId?: string; createdById?: string };
-    const itemProjectId = itemRec.projectId ?? (itemRec.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
+    const itemRec = item as {
+      projectId?: string | null;
+      spaceId?: string;
+      createdById?: string;
+    };
+    const itemProjectId =
+      itemRec.projectId ??
+      (itemRec.spaceId && itemRec.spaceId !== itemRec.createdById
+        ? itemRec.spaceId
+        : undefined);
     await this.invalidateRetractionCache(
       [itemId],
       userId,
@@ -700,8 +760,16 @@ export class RetractionService {
       new Date(),
     );
 
-    const itemRec = item as { projectId?: string | null; spaceId?: string; createdById?: string };
-    const itemProjectId = itemRec.projectId ?? (itemRec.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
+    const itemRec = item as {
+      projectId?: string | null;
+      spaceId?: string;
+      createdById?: string;
+    };
+    const itemProjectId =
+      itemRec.projectId ??
+      (itemRec.spaceId && itemRec.spaceId !== itemRec.createdById
+        ? itemRec.spaceId
+        : undefined);
     await this.invalidateRetractionCache(
       [itemId],
       userId,

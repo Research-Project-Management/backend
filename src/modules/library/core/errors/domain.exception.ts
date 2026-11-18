@@ -293,4 +293,3 @@ export class AttachmentStorageException extends BaseDomainException {
     super(message, details);
   }
 }
-

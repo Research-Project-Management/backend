@@ -1,9 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { MirrorBibliographicMetadata } from '@/modules/library/ingestion/types/metadata.types';
-import {
-  HttpClient,
-  cleanAbstractText,
-} from '@/modules/library/core';
+import { HttpClient, cleanAbstractText } from '@/modules/library/core';
 import { CrossRefProvider } from '@/modules/library/ingestion/providers/crossref.provider';
 import { ArxivProvider } from '@/modules/library/ingestion/providers/arxiv.provider';
 import { OpenAlexProvider } from '@/modules/library/ingestion/providers/openalex.provider';
@@ -45,20 +42,19 @@ interface EuropePmcRecord {
   fullTextUrlList?: { fullTextUrl?: EuropePmcFullTextUrl[] };
 }
 
-type EnrichedMirrorBibliographicMetadata =
-  MirrorBibliographicMetadata & {
-    volume?: string;
-    issue?: string;
-    pages?: string;
-    publisher?: string;
-    isbn?: string;
-    issn?: string;
-    arxivId?: string;
-    publicationDate?: string;
-    itemType?: string;
-    keywords?: string[];
-    creators?: unknown[];
-  };
+type EnrichedMirrorBibliographicMetadata = MirrorBibliographicMetadata & {
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  publisher?: string;
+  isbn?: string;
+  issn?: string;
+  arxivId?: string;
+  publicationDate?: string;
+  itemType?: string;
+  keywords?: string[];
+  creators?: unknown[];
+};
 
 interface EuropePmcResponse {
   resultList?: { result?: EuropePmcRecord[] };

@@ -14,8 +14,29 @@ import type {
   RetractionCheckResult,
   QualityAuditReport,
 } from '../types/schema.types';
-import type { ItemDetail, ItemSummary, CreateItemData, UpdateItemData, QualityAuditCandidateItem, DuplicateCandidateItem, CreateNoteData, NoteEntity } from '../types/bibliographic.types';
-import type { ExtractedPdfDocument, ExtractedPdfMetadata, PdfMetadataExtractionResult, AttachmentEntity, CreateAttachmentInput, AnnotationEntity, CreateAnnotationData, UpdateAnnotationData, BatchAnnotationsData, BatchAnnotationsResult, AnnotationType } from '../types/extraction.types';
+import type {
+  ItemDetail,
+  ItemSummary,
+  CreateItemData,
+  UpdateItemData,
+  QualityAuditCandidateItem,
+  DuplicateCandidateItem,
+  CreateNoteData,
+  NoteEntity,
+} from '../types/bibliographic.types';
+import type {
+  ExtractedPdfDocument,
+  ExtractedPdfMetadata,
+  PdfMetadataExtractionResult,
+  AttachmentEntity,
+  CreateAttachmentInput,
+  AnnotationEntity,
+  CreateAnnotationData,
+  UpdateAnnotationData,
+  BatchAnnotationsData,
+  BatchAnnotationsResult,
+  AnnotationType,
+} from '../types/extraction.types';
 
 export type {
   AppendChangeEntry,
@@ -359,7 +380,8 @@ export interface ICatalogImportExportPort {
 }
 
 export interface ICatalogFacade
-  extends ICatalogReaderPort,
+  extends
+    ICatalogReaderPort,
     ICatalogWriterPort,
     ICatalogCollectionPort,
     ICatalogTrashPort,
@@ -402,10 +424,7 @@ export interface ICitationFacade<
     foundKeys: string[];
     missingKeys: string[];
   }>;
-  exportLibrary(
-    userId: string,
-    options?: TExportDto,
-  ): Promise<TExportResult>;
+  exportLibrary(userId: string, options?: TExportDto): Promise<TExportResult>;
 }
 
 export const EXTRACTION_FACADE = 'EXTRACTION_FACADE';

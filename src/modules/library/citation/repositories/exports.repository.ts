@@ -19,14 +19,21 @@ export type { ExportItemRecord };
 export class ExportsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  private normalizeScopeToSpaceId(scopeKey: string, userId?: string, projectId?: string): string {
+  private normalizeScopeToSpaceId(
+    scopeKey: string,
+    userId?: string,
+    projectId?: string,
+  ): string {
     const rawProjectId =
-      projectId ||
-      (scopeKey.startsWith('proj:') ? scopeKey.slice(5) : null);
+      projectId || (scopeKey.startsWith('proj:') ? scopeKey.slice(5) : null);
     if (rawProjectId && isUuid(rawProjectId)) return rawProjectId;
     const rawUserId =
       userId ||
-      (scopeKey.startsWith('user:') ? scopeKey.slice(5) : !scopeKey.startsWith('proj:') && isUuid(scopeKey) ? scopeKey : null);
+      (scopeKey.startsWith('user:')
+        ? scopeKey.slice(5)
+        : !scopeKey.startsWith('proj:') && isUuid(scopeKey)
+          ? scopeKey
+          : null);
     if (rawUserId && isUuid(rawUserId)) return rawUserId;
     return scopeKey;
   }
@@ -50,10 +57,18 @@ export class ExportsRepository {
   }) {
     if (!this.prisma?.citationStyle?.upsert) return null;
     const { scopeKey, slug, title, xmlContent, sha256 } = params;
-    const spaceId = this.normalizeScopeToSpaceId(scopeKey, params.userId, params.projectId);
+    const spaceId = this.normalizeScopeToSpaceId(
+      scopeKey,
+      params.userId,
+      params.projectId,
+    );
     const rawUserId =
       params.userId ||
-      (scopeKey.startsWith('user:') ? scopeKey.slice(5) : !scopeKey.startsWith('proj:') && isUuid(scopeKey) ? scopeKey : null);
+      (scopeKey.startsWith('user:')
+        ? scopeKey.slice(5)
+        : !scopeKey.startsWith('proj:') && isUuid(scopeKey)
+          ? scopeKey
+          : null);
     const safeUserId =
       rawUserId && isUuid(rawUserId)
         ? rawUserId
@@ -177,7 +192,6 @@ export class ExportsRepository {
     });
   }
 
-
   async findItemById(userId: string, itemId: string, projectId?: string) {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
@@ -234,13 +248,15 @@ export class ExportsRepository {
     for (let i = 0; i < missingKeys.length; i += CHUNK_SIZE) {
       if (collectedById.size >= MAX_RESULTS) break;
       const chunkKeys = missingKeys.slice(i, i + CHUNK_SIZE);
-      const aliasClauses: Prisma.LibraryItemWhereInput[] = chunkKeys.flatMap((key) => [
-        { metadata: { path: ['mergedCitationKeys'], array_contains: key } },
-        { metadata: { path: ['citationKey'], equals: key } },
-        { metadata: { path: ['citation-key'], equals: key } },
-        { metadata: { path: ['tex.ids'], string_contains: key } },
-        { metadata: { path: ['extra'], string_contains: key } },
-      ]);
+      const aliasClauses: Prisma.LibraryItemWhereInput[] = chunkKeys.flatMap(
+        (key) => [
+          { metadata: { path: ['mergedCitationKeys'], array_contains: key } },
+          { metadata: { path: ['citationKey'], equals: key } },
+          { metadata: { path: ['citation-key'], equals: key } },
+          { metadata: { path: ['tex.ids'], string_contains: key } },
+          { metadata: { path: ['extra'], string_contains: key } },
+        ],
+      );
 
       const batchItems = await this.prisma.libraryItem.findMany({
         where: {

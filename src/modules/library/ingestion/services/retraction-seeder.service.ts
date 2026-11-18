@@ -2,15 +2,29 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { normalizeDoi, normalizePmid, ExternalProviderException, EntityNotFoundException, LIBRARY_EVENT_TYPES, ReconcileExtractedCandidatePayload, HttpClient } from '@/modules/library/core';
+import {
+  normalizeDoi,
+  normalizePmid,
+  ExternalProviderException,
+  EntityNotFoundException,
+  LIBRARY_EVENT_TYPES,
+  ReconcileExtractedCandidatePayload,
+  HttpClient,
+} from '@/modules/library/core';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
 import { OnEvent } from '@nestjs/event-emitter';
-import { RETRACTION_SERVICE_PORT, IRetractionCheckPort } from '@/modules/library/ingestion/types/ingestion.types';
+import {
+  RETRACTION_SERVICE_PORT,
+  IRetractionCheckPort,
+} from '@/modules/library/ingestion/types/ingestion.types';
 import { MetadataResolverService } from '@/modules/library/ingestion/services/metadata-resolver.service';
 import { createHash } from 'crypto';
 import { RedisCacheService } from '@/core';
-import { QueryType, ResolvedMetadata } from '@/modules/library/ingestion/types/metadata.types';
+import {
+  QueryType,
+  ResolvedMetadata,
+} from '@/modules/library/ingestion/types/metadata.types';
 import { METADATA_POLICY_VERSION } from '@/modules/library/ingestion/domain/metadata.policy';
 
 interface RetractionSeedResult {
@@ -378,9 +392,15 @@ export class RetractionItemEventsSubscriber {
   ): Promise<void> {
     if (!this.metadataResolver) return;
     const rawPayload = (event as Record<string, unknown>)?.payload ?? event;
-    const effectivePayload = (rawPayload && typeof rawPayload === 'object' ? rawPayload : event) as Record<string, unknown>;
-    const itemId = (effectivePayload.itemId || (event as Record<string, unknown>)?.aggregateId) as string | undefined;
-    const userId = (effectivePayload.userId || (event as Record<string, unknown>)?.userId || (event as { scope?: { userId?: string } })?.scope?.userId) as string | undefined;
+    const effectivePayload = (
+      rawPayload && typeof rawPayload === 'object' ? rawPayload : event
+    ) as Record<string, unknown>;
+    const itemId = (effectivePayload.itemId ||
+      (event as Record<string, unknown>)?.aggregateId) as string | undefined;
+    const userId = (effectivePayload.userId ||
+      (event as Record<string, unknown>)?.userId ||
+      (event as { scope?: { userId?: string } })?.scope?.userId) as
+      string | undefined;
     if (!itemId || !userId) return;
 
     try {
@@ -404,11 +424,21 @@ export class RetractionItemEventsSubscriber {
     itemId?: string;
     userId?: string | null;
     projectId?: string | null;
-    payload?: { updatedFields?: string[]; userId?: string; projectId?: string; itemId?: string; doi?: string; pmid?: string; source?: string; metadata?: { doi?: string; pmid?: string } };
+    payload?: {
+      updatedFields?: string[];
+      userId?: string;
+      projectId?: string;
+      itemId?: string;
+      doi?: string;
+      pmid?: string;
+      source?: string;
+      metadata?: { doi?: string; pmid?: string };
+    };
   }): Promise<void> {
     if (!this.retraction) return;
 
-    const itemId = event?.aggregateId || event?.itemId || event?.payload?.itemId;
+    const itemId =
+      event?.aggregateId || event?.itemId || event?.payload?.itemId;
     const userId = event?.userId ?? event?.payload?.userId ?? undefined;
     if (!itemId || !userId) return;
 
@@ -435,9 +465,9 @@ export class RetractionItemEventsSubscriber {
     }
     const hasExplicitIdentifierInPayload = Boolean(
       payload?.doi ||
-        payload?.pmid ||
-        payload?.metadata?.doi ||
-        payload?.metadata?.pmid,
+      payload?.pmid ||
+      payload?.metadata?.doi ||
+      payload?.metadata?.pmid,
     );
     const effectiveFieldGroups =
       source === 'extraction.metadata_sync'

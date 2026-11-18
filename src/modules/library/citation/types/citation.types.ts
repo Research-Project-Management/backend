@@ -203,12 +203,7 @@ export type ExportItemRecord = Partial<
 };
 
 export type ExportFormatType =
-  | 'bibtex'
-  | 'ris'
-  | 'csl-json'
-  | 'csl_json'
-  | 'csv'
-  | 'markdown';
+  'bibtex' | 'ris' | 'csl-json' | 'csl_json' | 'csv' | 'markdown';
 
 export interface BurnableAnnotation {
   pageIndex: number;
@@ -217,13 +212,15 @@ export interface BurnableAnnotation {
   color?: string;
   quoteText?: string;
   comment?: string;
-  rectCoords?: {
-    x?: number;
-    y?: number;
-    width?: number;
-    height?: number;
-    rects?: Array<{ x: number; y: number; width: number; height: number }>;
-  } | unknown;
+  rectCoords?:
+    | {
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+        rects?: Array<{ x: number; y: number; width: number; height: number }>;
+      }
+    | unknown;
 }
 
 export interface CsvExportItem {
@@ -342,41 +339,106 @@ export interface CslItemData {
 }
 
 export const BIBTEX_ITEM_TYPE_MAP: Record<string, string> = {
-  journalArticle: 'article', magazineArticle: 'article', newspaperArticle: 'article',
-  book: 'book', bookSection: 'incollection', dictionaryEntry: 'incollection',
-  encyclopediaArticle: 'incollection', conferencePaper: 'inproceedings',
-  report: 'techreport', patent: 'patent', dataset: 'dataset',
-  computerProgram: 'software', standard: 'standard', webpage: 'online',
-  blogPost: 'online', forumPost: 'online', preprint: 'unpublished',
-  manuscript: 'unpublished', case: 'jurisdiction', statute: 'legislation', bill: 'legislation',
+  journalArticle: 'article',
+  magazineArticle: 'article',
+  newspaperArticle: 'article',
+  book: 'book',
+  bookSection: 'incollection',
+  dictionaryEntry: 'incollection',
+  encyclopediaArticle: 'incollection',
+  conferencePaper: 'inproceedings',
+  report: 'techreport',
+  patent: 'patent',
+  dataset: 'dataset',
+  computerProgram: 'software',
+  standard: 'standard',
+  webpage: 'online',
+  blogPost: 'online',
+  forumPost: 'online',
+  preprint: 'unpublished',
+  manuscript: 'unpublished',
+  case: 'jurisdiction',
+  statute: 'legislation',
+  bill: 'legislation',
 };
 
 export const BIBTEX_CSL_TYPE_MAP: Record<string, string> = {
-  'article-journal': 'article', 'article-magazine': 'article', 'article-newspaper': 'article',
-  'paper-conference': 'inproceedings', book: 'book', chapter: 'incollection',
-  'entry-dictionary': 'incollection', 'entry-encyclopedia': 'incollection',
-  report: 'techreport', thesis: 'phdthesis', patent: 'patent', dataset: 'dataset',
-  software: 'software', standard: 'standard', webpage: 'online', 'post-weblog': 'online',
-  post: 'online', manuscript: 'unpublished', article: 'unpublished',
-  legal_case: 'jurisdiction', legislation: 'legislation', bill: 'legislation',
+  'article-journal': 'article',
+  'article-magazine': 'article',
+  'article-newspaper': 'article',
+  'paper-conference': 'inproceedings',
+  book: 'book',
+  chapter: 'incollection',
+  'entry-dictionary': 'incollection',
+  'entry-encyclopedia': 'incollection',
+  report: 'techreport',
+  thesis: 'phdthesis',
+  patent: 'patent',
+  dataset: 'dataset',
+  software: 'software',
+  standard: 'standard',
+  webpage: 'online',
+  'post-weblog': 'online',
+  post: 'online',
+  manuscript: 'unpublished',
+  article: 'unpublished',
+  legal_case: 'jurisdiction',
+  legislation: 'legislation',
+  bill: 'legislation',
 };
 
 export const RIS_ITEM_TYPE_MAP: Record<string, string> = {
-  journalArticle: 'JOUR', magazineArticle: 'MGZN', newspaperArticle: 'NEWS',
-  book: 'BOOK', bookSection: 'CHAP', dictionaryEntry: 'DICT',
-  encyclopediaArticle: 'ENCYC', conferencePaper: 'CONF', thesis: 'THES',
-  report: 'RPRT', patent: 'PAT', dataset: 'DATA', computerProgram: 'COMP',
-  standard: 'STAND', webpage: 'ELEC', blogPost: 'BLOG', forumPost: 'ELEC',
-  preprint: 'UNPB', manuscript: 'UNPB', case: 'CASE', statute: 'STAT',
-  bill: 'BILL', hearing: 'HEAR', letter: 'PCOMM', interview: 'INTV',
-  film: 'MPCT', videoRecording: 'VIDEO', audioRecording: 'SOUND',
-  artwork: 'ART', map: 'MAP', presentation: 'SLIDE',
+  journalArticle: 'JOUR',
+  magazineArticle: 'MGZN',
+  newspaperArticle: 'NEWS',
+  book: 'BOOK',
+  bookSection: 'CHAP',
+  dictionaryEntry: 'DICT',
+  encyclopediaArticle: 'ENCYC',
+  conferencePaper: 'CONF',
+  thesis: 'THES',
+  report: 'RPRT',
+  patent: 'PAT',
+  dataset: 'DATA',
+  computerProgram: 'COMP',
+  standard: 'STAND',
+  webpage: 'ELEC',
+  blogPost: 'BLOG',
+  forumPost: 'ELEC',
+  preprint: 'UNPB',
+  manuscript: 'UNPB',
+  case: 'CASE',
+  statute: 'STAT',
+  bill: 'BILL',
+  hearing: 'HEAR',
+  letter: 'PCOMM',
+  interview: 'INTV',
+  film: 'MPCT',
+  videoRecording: 'VIDEO',
+  audioRecording: 'SOUND',
+  artwork: 'ART',
+  map: 'MAP',
+  presentation: 'SLIDE',
 };
 
 export const RIS_CSL_TYPE_MAP: Record<string, string> = {
-  'article-journal': 'JOUR', 'article-magazine': 'MGZN', 'article-newspaper': 'NEWS',
-  'paper-conference': 'CONF', book: 'BOOK', chapter: 'CHAP', report: 'RPRT',
-  thesis: 'THES', patent: 'PAT', dataset: 'DATA', software: 'COMP',
-  standard: 'STAND', webpage: 'ELEC', 'post-weblog': 'BLOG', post: 'ELEC',
-  manuscript: 'UNPB', legal_case: 'CASE', legislation: 'STAT', bill: 'BILL',
+  'article-journal': 'JOUR',
+  'article-magazine': 'MGZN',
+  'article-newspaper': 'NEWS',
+  'paper-conference': 'CONF',
+  book: 'BOOK',
+  chapter: 'CHAP',
+  report: 'RPRT',
+  thesis: 'THES',
+  patent: 'PAT',
+  dataset: 'DATA',
+  software: 'COMP',
+  standard: 'STAND',
+  webpage: 'ELEC',
+  'post-weblog': 'BLOG',
+  post: 'ELEC',
+  manuscript: 'UNPB',
+  legal_case: 'CASE',
+  legislation: 'STAT',
+  bill: 'BILL',
 };

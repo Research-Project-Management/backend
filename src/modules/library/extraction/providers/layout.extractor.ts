@@ -173,7 +173,9 @@ export class LayoutExtractor {
       let pageWidthHint: number | undefined;
       try {
         textContent = await page.getTextContent();
-        if (typeof (page as { getViewport?: unknown }).getViewport === 'function') {
+        if (
+          typeof (page as { getViewport?: unknown }).getViewport === 'function'
+        ) {
           try {
             const vp = page.getViewport({ scale: 1 });
             if (vp && typeof vp.width === 'number' && vp.width > 100) {
@@ -341,10 +343,7 @@ export class LayoutExtractor {
 
       let matchedBucket: LineBucket | null = null;
       for (const bucket of lineBuckets) {
-        if (
-          bucket.column === column &&
-          Math.abs(bucket.y - y) <= Y_TOLERANCE
-        ) {
+        if (bucket.column === column && Math.abs(bucket.y - y) <= Y_TOLERANCE) {
           matchedBucket = bucket;
           break;
         }

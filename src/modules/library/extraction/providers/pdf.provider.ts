@@ -1,8 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { getDocumentProxy, getMeta } from 'unpdf';
-import {
-  DocumentSection,
-} from '@/modules/library/core/types/bibliographic.types';
+import { DocumentSection } from '@/modules/library/core/types/bibliographic.types';
 import {
   cleanAbstractText,
   libraryConfig,
@@ -18,10 +16,7 @@ import {
   extractPdfOutlineSections,
 } from './pdf-text-metadata.extractor';
 
-export type {
-  ExtractedPdfMetadata,
-  ExtractedPdfDocument,
-};
+export type { ExtractedPdfMetadata, ExtractedPdfDocument };
 
 @Injectable()
 export class PdfProvider {
@@ -208,7 +203,7 @@ export class PdfProvider {
         const cachedFrontPageTexts = Array.isArray(
           trustedResult?.provenance?.rawMatches?.frontPageTexts,
         )
-          ? (trustedResult.provenance.rawMatches.frontPageTexts as string[])
+          ? trustedResult.provenance.rawMatches.frontPageTexts
           : undefined;
 
         let startPageNum = 1;

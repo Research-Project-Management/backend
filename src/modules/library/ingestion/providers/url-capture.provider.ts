@@ -284,7 +284,8 @@ export class UrlCaptureProvider {
                 issue: rm.issue != null ? String(rm.issue) : captured.issue,
                 pages: rm.pages || captured.pages,
                 conferenceName: rm.conferenceName || captured.conferenceName,
-                proceedingsTitle: rm.proceedingsTitle || captured.proceedingsTitle,
+                proceedingsTitle:
+                  rm.proceedingsTitle || captured.proceedingsTitle,
                 bookTitle: rm.bookTitle || captured.bookTitle,
                 series: rm.series || captured.series,
               };
@@ -294,7 +295,9 @@ export class UrlCaptureProvider {
             title: rm.title || captured.title,
             shortTitle: rm.shortTitle || captured.shortTitle,
             abstract: rm.abstract || captured.abstract,
-            itemType: isArxivPreprint ? 'preprint' : rm.itemType || captured.itemType,
+            itemType: isArxivPreprint
+              ? 'preprint'
+              : rm.itemType || captured.itemType,
             authors: rm.authors?.length ? rm.authors : captured.authors,
             creators: rm.creators?.length
               ? rm.creators.map((c) => ({
@@ -306,7 +309,8 @@ export class UrlCaptureProvider {
                 }))
               : captured.creators,
             year: rm.year ?? captured.year,
-            publicationDate: rm.publicationDate || rm.date || captured.publicationDate,
+            publicationDate:
+              rm.publicationDate || rm.date || captured.publicationDate,
             doi:
               isArxivPreprint && cleanArxiv
                 ? `10.48550/arXiv.${cleanArxiv}`
@@ -317,7 +321,9 @@ export class UrlCaptureProvider {
             publicationTitle: isArxivPreprint
               ? 'arXiv'
               : rm.publicationTitle || rm.journal || captured.publicationTitle,
-            publisher: isArxivPreprint ? 'arXiv' : rm.publisher || captured.publisher,
+            publisher: isArxivPreprint
+              ? 'arXiv'
+              : rm.publisher || captured.publisher,
             language: rm.language || captured.language,
             rights: rm.rights || captured.rights,
             license: rm.license || captured.license,
@@ -326,7 +332,9 @@ export class UrlCaptureProvider {
             extra: rm.extra || captured.extra,
             keywords: regTags.length > 0 ? regTags : captured.keywords,
             openAccessPdfUrl:
-              rm.openAccessPdfUrl || captured.openAccessPdfUrl || captured.pdfUrl,
+              rm.openAccessPdfUrl ||
+              captured.openAccessPdfUrl ||
+              captured.pdfUrl,
             extraFields: {
               ...(captured.extraFields || {}),
               ...(rm.extraFields || {}),

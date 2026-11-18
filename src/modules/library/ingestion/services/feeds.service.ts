@@ -1,9 +1,27 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, Optional, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  Optional,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { RedisCacheService, shouldRunWorkerConsumers } from '@/core';
-import { LIBRARY_REDIS_KEYS, CircuitBreaker, ResilienceRegistryService } from '@/modules/library/core';
-import { FeedRetrievalService, redactFeedUrl } from '@/modules/library/ingestion/services/feed-retrieval.service';
+import {
+  LIBRARY_REDIS_KEYS,
+  CircuitBreaker,
+  ResilienceRegistryService,
+} from '@/modules/library/core';
+import {
+  FeedRetrievalService,
+  redactFeedUrl,
+} from '@/modules/library/ingestion/services/feed-retrieval.service';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
-import { FeedsRepository, type FeedSubscriptionRecord } from '@/modules/library/ingestion/repositories/feeds.repository';
+import {
+  FeedsRepository,
+  type FeedSubscriptionRecord,
+} from '@/modules/library/ingestion/repositories/feeds.repository';
 import { libraryConfig } from '@/modules/library/core/config/library.config';
 
 type FeedSubscriptionDto = FeedSubscriptionRecord;
@@ -54,11 +72,15 @@ export class FeedsService {
       const resolvedCustomTitle = customTitle?.trim();
       if (resolvedCustomTitle && resolvedCustomTitle !== cleanUrl) {
         // Fast-path: Client-Side Protocol Virtualizer already resolved the feed title
-        feed = await this.feedsRepo.createFeed({ url: cleanUrl, title: resolvedCustomTitle, siteUrl: cleanUrl, description: null });
+        feed = await this.feedsRepo.createFeed({
+          url: cleanUrl,
+          title: resolvedCustomTitle,
+          siteUrl: cleanUrl,
+          description: null,
+        });
       } else {
         try {
-          const fetched =
-            await this.feedFetcher.fetchAcademicFeed(cleanUrl);
+          const fetched = await this.feedFetcher.fetchAcademicFeed(cleanUrl);
           feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
           if (!feed) {
             feed = await this.feedsRepo.createFeed({
@@ -120,7 +142,12 @@ export class FeedsService {
       if (!feed) {
         const resolvedCustomTitle = data.customTitle?.trim();
         if (resolvedCustomTitle && resolvedCustomTitle !== cleanUrl) {
-          feed = await this.feedsRepo.createFeed({ url: cleanUrl, title: resolvedCustomTitle, siteUrl: cleanUrl, description: null });
+          feed = await this.feedsRepo.createFeed({
+            url: cleanUrl,
+            title: resolvedCustomTitle,
+            siteUrl: cleanUrl,
+            description: null,
+          });
         } else {
           try {
             const fetched = await this.feedFetcher.fetchAcademicFeed(
@@ -203,11 +230,19 @@ export class FeedsService {
     const queryLower = options?.search?.trim().toLowerCase() || '';
     const filteredItems = queryLower
       ? items.filter((it) => {
-          const titleMatch = (it.title || '').toLowerCase().includes(queryLower);
-          const abstractMatch = (it.abstract || '').toLowerCase().includes(queryLower);
+          const titleMatch = (it.title || '')
+            .toLowerCase()
+            .includes(queryLower);
+          const abstractMatch = (it.abstract || '')
+            .toLowerCase()
+            .includes(queryLower);
           const doiMatch = (it.doi || '').toLowerCase().includes(queryLower);
-          const arxivMatch = (it.arxivId || '').toLowerCase().includes(queryLower);
-          const categoryMatch = (it.primaryCategory || '').toLowerCase().includes(queryLower);
+          const arxivMatch = (it.arxivId || '')
+            .toLowerCase()
+            .includes(queryLower);
+          const categoryMatch = (it.primaryCategory || '')
+            .toLowerCase()
+            .includes(queryLower);
           const authorsMatch = Array.isArray(it.authors)
             ? (
                 it.authors as Array<
@@ -338,7 +373,9 @@ export class FeedsService {
           s.customTitle || s.feed?.title || s.feed?.url || 'Academic Feed',
         );
         const xmlUrl = escapeXml(s.feed?.url || '');
-        const htmlUrl = s.feed?.siteUrl ? ` htmlUrl="${escapeXml(s.feed.siteUrl)}"` : '';
+        const htmlUrl = s.feed?.siteUrl
+          ? ` htmlUrl="${escapeXml(s.feed.siteUrl)}"`
+          : '';
         return xmlUrl
           ? `      <outline type="rss" text="${title}" title="${title}" xmlUrl="${xmlUrl}"${htmlUrl}/>`
           : '';
@@ -373,7 +410,9 @@ export class FeedsService {
       throw new BadRequestException('OPML XML content exceeds the 1MB limit');
     }
     if (/<!(?:doctype|entity)\b/i.test(opmlXml)) {
-      throw new BadRequestException('OPML XML must not contain DOCTYPE or ENTITY declarations');
+      throw new BadRequestException(
+        'OPML XML must not contain DOCTYPE or ENTITY declarations',
+      );
     }
     const outlineRegex = /<outline\b([^>]*?)\/?>/gi;
     const attrRegex = /([a-zA-Z0-9_:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
@@ -390,11 +429,15 @@ export class FeedsService {
     let match: RegExpExecArray | null;
     while ((match = outlineRegex.exec(opmlXml)) !== null) {
       const attrsRaw = match[1] || '';
-      const attrs: Record<string, string> = Object.create(null) as Record<string, string>;
+      const attrs: Record<string, string> = Object.create(null) as Record<
+        string,
+        string
+      >;
       let attrMatch: RegExpExecArray | null;
       while ((attrMatch = attrRegex.exec(attrsRaw)) !== null) {
         const k = attrMatch[1].toLowerCase();
-        if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype')
+          continue;
         const v = decodeXml(attrMatch[2] ?? attrMatch[3] ?? '').trim();
         attrs[k] = v;
       }
@@ -411,7 +454,11 @@ export class FeedsService {
     const subscriptions: FeedSubscriptionDto[] = [];
     for (const candidate of candidates.slice(0, 50)) {
       try {
-        const sub = await this.subscribe(userId, candidate.url, candidate.title);
+        const sub = await this.subscribe(
+          userId,
+          candidate.url,
+          candidate.title,
+        );
         subscriptions.push(sub);
       } catch (err: unknown) {
         this.logger.warn(
@@ -706,8 +753,16 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
         }
 
         const subscriberUserIds = feed.subscriptions
-          .map((s) => (s as { userId?: string; createdById?: string; spaceId?: string }).userId ?? (s as { createdById?: string }).createdById ?? (s as { spaceId?: string }).spaceId)
-          .filter((uid): uid is string => typeof uid === 'string' && Boolean(uid));
+          .map(
+            (s) =>
+              (s as { userId?: string; createdById?: string; spaceId?: string })
+                .userId ??
+              (s as { createdById?: string }).createdById ??
+              (s as { spaceId?: string }).spaceId,
+          )
+          .filter(
+            (uid): uid is string => typeof uid === 'string' && Boolean(uid),
+          );
 
         const readCutoffDate = new Date(
           now - readRetentionDays * 24 * 60 * 60 * 1000,

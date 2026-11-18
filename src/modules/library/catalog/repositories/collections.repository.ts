@@ -1,19 +1,32 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
-import { normalizeProjectScopeId, resolveSpaceId, sortLockKeys } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  resolveSpaceId,
+  sortLockKeys,
+} from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/catalog.types';
 import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 
 interface CreateCollectionInput {
-  name: string; description?: string; color?: string; icon?: string;
-  parentId?: string | null; createdById?: string; projectId?: string | null;
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  parentId?: string | null;
+  createdById?: string;
+  projectId?: string | null;
 }
 
 interface UpdateCollectionInput {
-  name?: string; description?: string; color?: string; icon?: string;
-  parentId?: string | null; version?: number;
+  name?: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  parentId?: string | null;
+  version?: number;
 }
 
 @Injectable()
@@ -32,37 +45,58 @@ export class CollectionsRepository {
     return normalized && isUuid(normalized) ? normalized : undefined;
   }
 
-  private buildScopeWhere(userId: string, projectId?: string | null): Prisma.LibraryCollectionWhereInput {
+  private buildScopeWhere(
+    userId: string,
+    projectId?: string | null,
+  ): Prisma.LibraryCollectionWhereInput {
     const validProjectId = this.resolveProjectScopeId(projectId);
     return { spaceId: resolveSpaceId({ userId, projectId: validProjectId }) };
   }
 
-  async findById(userId: string, id: string, tx?: Prisma.TransactionClient, projectId?: string) {
+  async findById(
+    userId: string,
+    id: string,
+    tx?: Prisma.TransactionClient,
+    projectId?: string,
+  ) {
     const client = this.getClient(tx);
     const scopeWhere = this.buildScopeWhere(userId, projectId);
     return client.libraryCollection.findFirst({
       where: { id, deletedAt: null, ...scopeWhere },
       include: {
         children: { where: { deletedAt: null } },
-        _count: { select: { collectionItems: { where: { item: { deletedAt: null } } } } },
+        _count: {
+          select: { collectionItems: { where: { item: { deletedAt: null } } } },
+        },
       },
     });
   }
 
-  async findAll(userId: string, projectId?: string, tx?: Prisma.TransactionClient) {
+  async findAll(
+    userId: string,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ) {
     const client = this.getClient(tx);
     return client.libraryCollection.findMany({
       where: { ...this.buildScopeWhere(userId, projectId), deletedAt: null },
       include: {
-        collectionItems: { where: { item: { deletedAt: null } }, select: { itemId: true } },
-        _count: { select: { collectionItems: { where: { item: { deletedAt: null } } } } },
+        collectionItems: {
+          where: { item: { deletedAt: null } },
+          select: { itemId: true },
+        },
+        _count: {
+          select: { collectionItems: { where: { item: { deletedAt: null } } } },
+        },
       },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
   }
 
   async findAllHierarchyNodes(
-    userId: string, projectId?: string, tx?: Prisma.TransactionClient,
+    userId: string,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
   ): Promise<Array<{ id: string; parentId: string | null }>> {
     const client = this.getClient(tx);
     return client.libraryCollection.findMany({
@@ -72,24 +106,39 @@ export class CollectionsRepository {
     });
   }
 
-  async create(userId: string, input: CreateCollectionInput, tx?: Prisma.TransactionClient) {
-    const effectiveProjectId = this.resolveProjectScopeId(input.projectId) ?? null;
+  async create(
+    userId: string,
+    input: CreateCollectionInput,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const effectiveProjectId =
+      this.resolveProjectScopeId(input.projectId) ?? null;
     const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
     const client = this.getClient(tx);
-    if (input.parentId && typeof client.libraryCollection?.findFirst === 'function') {
+    if (
+      input.parentId &&
+      typeof client.libraryCollection?.findFirst === 'function'
+    ) {
       const scopeWhere = { spaceId };
       const parent = await client.libraryCollection.findFirst({
         where: { id: input.parentId, ...scopeWhere, deletedAt: null },
         select: { id: true },
       });
-      if (!parent) throw new NotFoundException(`Parent collection ${input.parentId} not found in scope`);
+      if (!parent)
+        throw new NotFoundException(
+          `Parent collection ${input.parentId} not found in scope`,
+        );
     }
     return client.libraryCollection.create({
       data: {
-        spaceId, name: input.name,
-        description: input.description ?? '', color: input.color ?? '#3370ff',
-        icon: input.icon ?? '', parentId: input.parentId ?? null,
-        createdById: input.createdById || userId, version: 1,
+        spaceId,
+        name: input.name,
+        description: input.description ?? '',
+        color: input.color ?? '#3370ff',
+        icon: input.icon ?? '',
+        parentId: input.parentId ?? null,
+        createdById: input.createdById || userId,
+        version: 1,
       },
     });
   }
@@ -336,12 +385,19 @@ export class CollectionsRepository {
           ...scopeWhere,
           deletedAt: null,
         },
-        data: { deletedAt: now, deletedById: userId, version: { increment: 1 } },
+        data: {
+          deletedAt: now,
+          deletedById: userId,
+          version: { increment: 1 },
+        },
       });
       return result.count > 0;
     } else {
       let nextParentId: string | null = null;
-      if (strategy === 'move-to-parent' && typeof client.libraryCollection?.findFirst === 'function') {
+      if (
+        strategy === 'move-to-parent' &&
+        typeof client.libraryCollection?.findFirst === 'function'
+      ) {
         const existing = await client.libraryCollection.findFirst({
           where: { id, ...scopeWhere, deletedAt: null },
           select: { parentId: true },
@@ -354,7 +410,11 @@ export class CollectionsRepository {
         }),
         client.libraryCollection.updateMany({
           where: { ...scopeWhere, parentId: id, deletedAt: null },
-          data: { parentId: nextParentId, updatedById: userId, version: { increment: 1 } },
+          data: {
+            parentId: nextParentId,
+            updatedById: userId,
+            version: { increment: 1 },
+          },
         }),
       ]);
     }
@@ -509,7 +569,9 @@ export class CollectionsRepository {
       const detachWhere: Prisma.LibraryCollectionItemWhereInput = {
         itemId: { in: itemIds },
         collection: collectionScope,
-        ...(targetCollectionId ? { collectionId: { not: targetCollectionId } } : {}),
+        ...(targetCollectionId
+          ? { collectionId: { not: targetCollectionId } }
+          : {}),
       };
       if (typeof client.libraryCollectionItem?.findMany === 'function') {
         const existing = await client.libraryCollectionItem.findMany({

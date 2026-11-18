@@ -563,4 +563,3 @@ export function parseFeedXml(xml: string): ParsedFeed {
     entries,
   };
 }
-

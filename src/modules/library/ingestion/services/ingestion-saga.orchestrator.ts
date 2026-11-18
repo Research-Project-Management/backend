@@ -1,8 +1,24 @@
-import { Injectable, Inject, Optional, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  Optional,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { IngestionStage, IngestionStatus, Prisma } from '@prisma/client';
-import { IngestionRunAggregate, IngestionStageName } from '@/modules/library/ingestion/domain/ingestion-run.domain';
+import {
+  IngestionRunAggregate,
+  IngestionStageName,
+} from '@/modules/library/ingestion/domain/ingestion-run.domain';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { IngestionSubmissionEnvelope, IngestionRunSnapshot, INGESTION_QUEUE_PORT, IIngestionQueuePort } from '@/modules/library/ingestion/types/ingestion.types';
+import {
+  IngestionSubmissionEnvelope,
+  IngestionRunSnapshot,
+  INGESTION_QUEUE_PORT,
+  IIngestionQueuePort,
+} from '@/modules/library/ingestion/types/ingestion.types';
 import { isUUID } from 'class-validator';
 
 interface ExecuteStepOptions<T> {
@@ -199,7 +215,9 @@ export class IngestionSagaOrchestrator {
       IngestionSagaOrchestrator.transitionedRunIds.size >=
       IngestionSagaOrchestrator.MAX_TRANSITIONED_RUN_CACHE
     ) {
-      const oldest = IngestionSagaOrchestrator.transitionedRunIds.values().next().value;
+      const oldest = IngestionSagaOrchestrator.transitionedRunIds
+        .values()
+        .next().value;
       if (oldest !== undefined) {
         IngestionSagaOrchestrator.transitionedRunIds.delete(oldest);
       }
@@ -208,7 +226,9 @@ export class IngestionSagaOrchestrator {
   }
 
   static hasTransitioned(runId: string): boolean {
-    return Boolean(runId && IngestionSagaOrchestrator.transitionedRunIds.has(runId));
+    return Boolean(
+      runId && IngestionSagaOrchestrator.transitionedRunIds.has(runId),
+    );
   }
 
   static consumeRunTransition(runId: string): boolean {
@@ -309,7 +329,8 @@ export async function transitionRunToFailedIfActive(params: {
     return false;
   }
   const effectiveCompletedAt =
-    completedAt ?? (status === IngestionStatus.FAILED_FINAL ? new Date() : undefined);
+    completedAt ??
+    (status === IngestionStatus.FAILED_FINAL ? new Date() : undefined);
   await repo
     .updateRunStatus(scopeId, runId, status, {
       lastError,
@@ -458,7 +479,8 @@ export class IngestionRunReporterService {
     }
 
     const log = this.parseExecutionLog(run.executionLog);
-    const firstLogItem = Array.isArray(log.items) && log.items.length > 0 ? log.items[0] : null;
+    const firstLogItem =
+      Array.isArray(log.items) && log.items.length > 0 ? log.items[0] : null;
     const logItem =
       log.item ||
       (firstLogItem
@@ -478,14 +500,10 @@ export class IngestionRunReporterService {
       log.item?.title ||
       null;
     const itemId =
-      run.itemId ||
-      resolvedItem?.id ||
-      firstLogItem?.itemId ||
-      null;
+      run.itemId || resolvedItem?.id || firstLogItem?.itemId || null;
 
     const isBlocked =
-      log.status === 'BLOCKED' ||
-      log.ingestionStatus === 'BLOCKED';
+      log.status === 'BLOCKED' || log.ingestionStatus === 'BLOCKED';
     const effectiveLastError =
       run.lastError ||
       (typeof log.message === 'string' && isBlocked ? log.message : null) ||
@@ -531,8 +549,7 @@ export class IngestionRunReporterService {
     const log = this.parseExecutionLog(run.executionLog);
     const total = Number(log.total) || 1;
     const isBlocked =
-      log.status === 'BLOCKED' ||
-      log.ingestionStatus === 'BLOCKED';
+      log.status === 'BLOCKED' || log.ingestionStatus === 'BLOCKED';
     const isCompleted = run.status === IngestionStatus.COMPLETED;
     const processed = Number(log.processed) || (isCompleted ? total : 0);
     const succeeded =
@@ -555,7 +572,8 @@ export class IngestionRunReporterService {
 
     const runItem = run.item as
       { id?: string; title?: string } | null | undefined;
-    const firstLogItem = Array.isArray(log.items) && log.items.length > 0 ? log.items[0] : null;
+    const firstLogItem =
+      Array.isArray(log.items) && log.items.length > 0 ? log.items[0] : null;
     const title =
       runItem?.title ||
       firstLogItem?.itemName ||
@@ -596,8 +614,9 @@ export class IngestionRunReporterService {
                     ? 'SUCCEEDED'
                     : 'FAILED',
                 itemId: run.itemId || undefined,
-                ...(run.lastError || (typeof log.message === 'string' ? log.message : undefined)
-                  ? { error: run.lastError || (log.message as string) }
+                ...(run.lastError ||
+                (typeof log.message === 'string' ? log.message : undefined)
+                  ? { error: run.lastError || log.message }
                   : {}),
               },
             ]
@@ -703,9 +722,7 @@ export class IngestionRunReporterService {
         );
       } catch (enqueueErr: unknown) {
         const errMsg =
-          enqueueErr instanceof Error
-            ? enqueueErr.message
-            : String(enqueueErr);
+          enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);
         this.logger.error(
           `Failed to enqueue retried ingestion run ${runId}: ${errMsg}`,
         );

@@ -1,15 +1,27 @@
 import { getDocumentProxy } from 'unpdf';
-import { splitAuthorString, cleanAuthorName, normalizeDoi, normalizeArxivId } from '@/modules/library/core';
-import type { DocumentSection, BibliographicReference } from '@/modules/library/core/types/bibliographic.types';
+import {
+  splitAuthorString,
+  cleanAuthorName,
+  normalizeDoi,
+  normalizeArxivId,
+} from '@/modules/library/core';
+import type {
+  DocumentSection,
+  BibliographicReference,
+} from '@/modules/library/core/types/bibliographic.types';
 import { Logger } from '@nestjs/common';
 import { inflateSync, inflateRawSync } from 'zlib';
 import { decodeHtmlEntities } from '@/modules/library/core/domain/text.domain';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { RawXmpMetadata } from '@/modules/library/core/types/extraction.types';
 
-export type ExtractedPdfBibliographyReference = BibliographicReference & { rawText: string };
+export type ExtractedPdfBibliographyReference = BibliographicReference & {
+  rawText: string;
+};
 
-export function extractPdfBibliographyReferences(fullText: string): ExtractedPdfBibliographyReference[] {
+export function extractPdfBibliographyReferences(
+  fullText: string,
+): ExtractedPdfBibliographyReference[] {
   if (!fullText || fullText.trim().length < 20) return [];
   const normalizedText = fullText.normalize('NFKC');
   const headingPattern =
@@ -21,8 +33,16 @@ export function extractPdfBibliographyReferences(fullText: string): ExtractedPdf
     const trailing = (match[1] || '').trim();
     if (trailing !== '' && trailing !== ':') continue;
     const afterHeadingIdx = idx + match[0].length;
-    const previewAfter = normalizedText.slice(afterHeadingIdx, afterHeadingIdx + 80);
-    if (/^(?:\r?\n)?\s*(?:[.\u2026·]{2,}\s*\d+|\d{1,4}\s*(?:\r?\n|$))/.test(previewAfter)) continue;
+    const previewAfter = normalizedText.slice(
+      afterHeadingIdx,
+      afterHeadingIdx + 80,
+    );
+    if (
+      /^(?:\r?\n)?\s*(?:[.\u2026·]{2,}\s*\d+|\d{1,4}\s*(?:\r?\n|$))/.test(
+        previewAfter,
+      )
+    )
+      continue;
     refBodyStart = afterHeadingIdx;
   }
   if (refBodyStart === -1) return [];
@@ -56,17 +76,25 @@ export function extractPdfBibliographyReferences(fullText: string): ExtractedPdf
     }
     if (hasNumberedEntries) {
       if (numberedStartRe.test(line)) {
-        if (currentEntry.trim().length > 12) rawEntries.push(currentEntry.trim());
+        if (currentEntry.trim().length > 12)
+          rawEntries.push(currentEntry.trim());
         currentEntry = line;
       } else if (currentEntry) {
-        currentEntry = currentEntry.endsWith('-') ? `${currentEntry.slice(0, -1)}${line}` : `${currentEntry} ${line}`;
+        currentEntry = currentEntry.endsWith('-')
+          ? `${currentEntry.slice(0, -1)}${line}`
+          : `${currentEntry} ${line}`;
       }
-    } else if (authorYearStartRe.test(line) && currentEntry.trim().length > 25) {
+    } else if (
+      authorYearStartRe.test(line) &&
+      currentEntry.trim().length > 25
+    ) {
       rawEntries.push(currentEntry.trim());
       currentEntry = line;
     } else {
       currentEntry = currentEntry
-        ? currentEntry.endsWith('-') ? `${currentEntry.slice(0, -1)}${line}` : `${currentEntry} ${line}`
+        ? currentEntry.endsWith('-')
+          ? `${currentEntry.slice(0, -1)}${line}`
+          : `${currentEntry} ${line}`
         : line;
     }
   }
@@ -94,9 +122,7 @@ export function extractPdfBibliographyReferences(fullText: string): ExtractedPdf
       ? normalizeArxivId(arxivMatch[1])
       : undefined;
 
-    const yearMatch = bodyWithoutMarker.match(
-      /\b(19\d{2}|20[0-2]\d)[a-z]?\b/,
-    );
+    const yearMatch = bodyWithoutMarker.match(/\b(19\d{2}|20[0-2]\d)[a-z]?\b/);
     const year = yearMatch?.[1] ? parseInt(yearMatch[1], 10) : undefined;
 
     let title: string | undefined;
@@ -181,9 +207,11 @@ export async function extractPdfOutlineSections(
 ): Promise<DocumentSection[]> {
   const sections: DocumentSection[] = [];
   const docProxy = document as unknown as {
-    getOutline?: () => Promise<
-      Array<{ title?: string; dest?: unknown; items?: unknown[] }> | null
-    >;
+    getOutline?: () => Promise<Array<{
+      title?: string;
+      dest?: unknown;
+      items?: unknown[];
+    }> | null>;
     getDestination?: (dest: string) => Promise<unknown[] | null>;
     getPageIndex?: (ref: unknown) => Promise<number>;
   };
@@ -333,12 +361,19 @@ export async function extractPdfOutlineSections(
         if (wordCount > 10) continue;
 
         const lowerTitle = title.toLowerCase();
-        if (falseSentenceStarters.some((prefix) => lowerTitle.startsWith(prefix))) {
+        if (
+          falseSentenceStarters.some((prefix) => lowerTitle.startsWith(prefix))
+        ) {
           continue;
         }
 
-        const isRef = /^(?:references|bibliography|tài liệu tham khảo)$/i.test(title);
-        const isPostRefAppendix = /^(?:appendix|appendices|supplementary material|phụ lục)$/i.test(title);
+        const isRef = /^(?:references|bibliography|tài liệu tham khảo)$/i.test(
+          title,
+        );
+        const isPostRefAppendix =
+          /^(?:appendix|appendices|supplementary material|phụ lục)$/i.test(
+            title,
+          );
 
         if (isInsideReferences && !isPostRefAppendix) {
           continue;
@@ -382,12 +417,21 @@ export class XmpParser {
   private static readonly logger = new Logger(XmpParser.name);
 
   private static readonly XMP_OPEN_BYTES = Buffer.from('<x:xmpmeta', 'utf-8');
-  private static readonly XMP_CLOSE_BYTES = Buffer.from('</x:xmpmeta>', 'utf-8');
+  private static readonly XMP_CLOSE_BYTES = Buffer.from(
+    '</x:xmpmeta>',
+    'utf-8',
+  );
   private static readonly RDF_OPEN_BYTES = Buffer.from('<rdf:RDF', 'utf-8');
   private static readonly RDF_CLOSE_BYTES = Buffer.from('</rdf:RDF>', 'utf-8');
-  private static readonly METADATA_TYPE_BYTES = Buffer.from('/Metadata', 'latin1');
+  private static readonly METADATA_TYPE_BYTES = Buffer.from(
+    '/Metadata',
+    'latin1',
+  );
   private static readonly STREAM_OPEN_BYTES = Buffer.from('stream', 'latin1');
-  private static readonly STREAM_CLOSE_BYTES = Buffer.from('endstream', 'latin1');
+  private static readonly STREAM_CLOSE_BYTES = Buffer.from(
+    'endstream',
+    'latin1',
+  );
 
   private static decodeXmlEntities(str: string): string {
     return decodeHtmlEntities(str).trim();
@@ -427,7 +471,9 @@ export class XmpParser {
 
       // Inspect dictionary window around `/Metadata` (up to 512 bytes forward)
       const dictWindowEnd = Math.min(buffer.length, metaIdx + 512);
-      const dictWindow = buffer.subarray(metaIdx, dictWindowEnd).toString('latin1');
+      const dictWindow = buffer
+        .subarray(metaIdx, dictWindowEnd)
+        .toString('latin1');
       if (!/\/Subtype\s*\/XML\b|\/Type\s*\/Metadata\b/i.test(dictWindow)) {
         continue;
       }
@@ -459,7 +505,10 @@ export class XmpParser {
         (compressedSlice[compressedSlice.length - 1] === 0x0a ||
           compressedSlice[compressedSlice.length - 1] === 0x0d)
       ) {
-        compressedSlice = compressedSlice.subarray(0, compressedSlice.length - 1);
+        compressedSlice = compressedSlice.subarray(
+          0,
+          compressedSlice.length - 1,
+        );
       }
 
       try {
@@ -555,8 +604,7 @@ export class XmpParser {
       const dcTitleFlat =
         (!dcTitleLi && dcTitleContainer && !dcTitleContainer.includes('<')
           ? dcTitleContainer
-          : undefined) ||
-        rawPacket.match(/\bdc:title=["']([^"']+)["']/i)?.[1];
+          : undefined) || rawPacket.match(/\bdc:title=["']([^"']+)["']/i)?.[1];
       const rawTitle = dcTitleLi || dcTitleFlat;
       if (rawTitle && rawTitle.trim().length > 3) {
         metadata.title = this.decodeXmlEntities(rawTitle.trim());
@@ -595,8 +643,7 @@ export class XmpParser {
       const dcDateFlat =
         (!dcDateLi && dcDateContainer && !dcDateContainer.includes('<')
           ? dcDateContainer
-          : undefined) ||
-        rawPacket.match(/\bdc:date=["']([^"']+)["']/i)?.[1];
+          : undefined) || rawPacket.match(/\bdc:date=["']([^"']+)["']/i)?.[1];
       const dcDate = dcDateLi || dcDateFlat;
 
       const chosenDate = prismDate || prismCoverDate || dcDate;

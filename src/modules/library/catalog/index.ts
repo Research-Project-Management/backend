@@ -51,4 +51,3 @@ export * from './domain/type-conversion.policy';
 export * from './dto/items.dto';
 export * from './dto/collections.dto';
 export * from './types/catalog.types';
-

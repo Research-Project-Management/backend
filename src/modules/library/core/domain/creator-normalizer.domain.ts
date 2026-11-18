@@ -1,8 +1,20 @@
 import { CreatorCreditInput } from '@/modules/library/core/types/bibliographic.types';
-import { resolveCanonicalCreatorRole, getPrimaryCreatorRoleForType } from './field-harmonizer.domain';
-import { cleanAuthorName, isNoiseAuthorName, isInstitutionName, splitAuthorString, parseCreatorString } from './author.domain';
+import {
+  resolveCanonicalCreatorRole,
+  getPrimaryCreatorRoleForType,
+} from './field-harmonizer.domain';
+import {
+  cleanAuthorName,
+  isNoiseAuthorName,
+  isInstitutionName,
+  splitAuthorString,
+  parseCreatorString,
+} from './author.domain';
 import { SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
-import { ITEM_TYPE_ALIASES, CSL_TYPE_TO_ITEM_TYPE } from '@/modules/library/core/domain/text.lexicon';
+import {
+  ITEM_TYPE_ALIASES,
+  CSL_TYPE_TO_ITEM_TYPE,
+} from '@/modules/library/core/domain/text.lexicon';
 
 function extractCreatorString(input: unknown): string {
   if (!input) return '';
@@ -271,7 +283,9 @@ export function deriveFirstAuthor(data: {
     return (count > 1 ? `${trimmed} et al.` : trimmed).slice(0, 255);
   };
 
-  const primaryRoleLower = getPrimaryCreatorRoleForType(data.itemType).toLowerCase();
+  const primaryRoleLower = getPrimaryCreatorRoleForType(
+    data.itemType,
+  ).toLowerCase();
   const structured =
     data.contributors && data.contributors.length > 0
       ? data.contributors
@@ -280,16 +294,32 @@ export function deriveFirstAuthor(data: {
         : null;
   if (structured) {
     const isAuthorRole = (c: Record<string, unknown>) => {
-      const role = String(c.creatorType || c.role || 'author').trim().toLowerCase();
-      return role === 'author' || role === primaryRoleLower || role === 'creator' || role === '';
+      const role = String(c.creatorType || c.role || 'author')
+        .trim()
+        .toLowerCase();
+      return (
+        role === 'author' ||
+        role === primaryRoleLower ||
+        role === 'creator' ||
+        role === ''
+      );
     };
     const isNonEditorRole = (c: Record<string, unknown>) => {
-      const role = String(c.creatorType || c.role || 'author').trim().toLowerCase();
+      const role = String(c.creatorType || c.role || 'author')
+        .trim()
+        .toLowerCase();
       return role !== 'editor' && role !== 'serieseditor';
     };
 
-    const preferredPool = structured.filter((c) => isAuthorRole(c as Record<string, unknown>));
-    const nonEditorPool = preferredPool.length > 0 ? preferredPool : structured.filter((c) => isNonEditorRole(c as Record<string, unknown>));
+    const preferredPool = structured.filter((c) =>
+      isAuthorRole(c as Record<string, unknown>),
+    );
+    const nonEditorPool =
+      preferredPool.length > 0
+        ? preferredPool
+        : structured.filter((c) =>
+            isNonEditorRole(c as Record<string, unknown>),
+          );
     const effectivePool = nonEditorPool.length > 0 ? nonEditorPool : structured;
 
     const c0 = effectivePool[0] as Record<string, unknown>;
@@ -312,9 +342,17 @@ export function deriveFirstAuthor(data: {
           ? data.editors
           : null;
   if (authorList && authorList.length > 0) {
-    const firstAuthor = authorList[0] as string | { name?: string; fullName?: string; lastName?: string } | undefined;
+    const firstAuthor = authorList[0] as
+      | string
+      | { name?: string; fullName?: string; lastName?: string }
+      | undefined;
     const authorStr: string =
-      typeof firstAuthor === 'string' ? firstAuthor : firstAuthor?.name || firstAuthor?.fullName || firstAuthor?.lastName || '';
+      typeof firstAuthor === 'string'
+        ? firstAuthor
+        : firstAuthor?.name ||
+          firstAuthor?.fullName ||
+          firstAuthor?.lastName ||
+          '';
     const parsed0 = parseCreatorString(authorStr, 0);
     const authorName = parsed0.lastName || parsed0.fullName;
     if (!authorName) return null;

@@ -10,7 +10,9 @@ import {
   UnifiedIngestionInput,
 } from '@/modules/library/ingestion/types/ingestion.types';
 
-type SubmissionPayloadBuilder = (dto: IngestionSubmissionInput) => SubmissionPayload;
+type SubmissionPayloadBuilder = (
+  dto: IngestionSubmissionInput,
+) => SubmissionPayload;
 
 const RECORD_FORMAT_ALIASES: Readonly<Record<string, RecordFormat>> = {
   RDF: 'ZOTERO_RDF',
@@ -54,8 +56,7 @@ const SUBMISSION_DTO_PAYLOAD_STRATEGIES: Readonly<
       dto.recordFormat ||
       (dto.ris && !dto.bibtex ? 'RIS' : 'BIBTEX')
     ).toUpperCase();
-    const normalizedFormat = (RECORD_FORMAT_ALIASES[rawFormat] ??
-      rawFormat) as RecordFormat;
+    const normalizedFormat = RECORD_FORMAT_ALIASES[rawFormat] ?? rawFormat;
     return {
       kind: 'RECORD',
       format: normalizedFormat,
@@ -236,10 +237,7 @@ const UNIFIED_SOURCE_COMMAND_STRATEGIES: Readonly<
 
 type CommandPayloadBuilder = (command: IngestionCommand) => SubmissionPayload;
 
-function extractCommandString(
-  command: IngestionCommand,
-  key: string,
-): string {
+function extractCommandString(command: IngestionCommand, key: string): string {
   const rec = command as Record<string, unknown>;
   const val = rec[key];
   return typeof val === 'string' ? val : '';
@@ -256,7 +254,9 @@ function createIdentifierPayloadBuilder(
   });
 }
 
-function createRecordPayloadBuilder(format: RecordFormat): CommandPayloadBuilder {
+function createRecordPayloadBuilder(
+  format: RecordFormat,
+): CommandPayloadBuilder {
   return (command) => ({
     kind: 'RECORD',
     format,
@@ -392,9 +392,7 @@ export class SubmissionEnvelopeFactory {
     command: IngestionCommand,
   ): IngestionSubmissionEnvelope {
     const sourceKey =
-      typeof command.source === 'string'
-        ? command.source.toLowerCase()
-        : '';
+      typeof command.source === 'string' ? command.source.toLowerCase() : '';
     const strategy = COMMAND_PAYLOAD_STRATEGIES[sourceKey];
     if (!strategy) {
       throw new BadRequestException(

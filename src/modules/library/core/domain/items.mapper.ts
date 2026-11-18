@@ -4,10 +4,7 @@ import {
   TYPE_SPECIFIC_EXTRA_FIELDS,
   type ItemDetail,
 } from '../types/bibliographic.types';
-import {
-  cleanCommentText,
-  convertHtmlToMarkdown,
-} from './text.domain';
+import { cleanCommentText, convertHtmlToMarkdown } from './text.domain';
 import { normalizeTags, cleanSingleTag } from './tag.domain';
 import {
   MutableItemPayload,
@@ -36,14 +33,40 @@ const NON_COLUMN_LOWER_SET = new Set(
 );
 
 const IGNORED_EXTRA_FIELD_PROMOTION_KEYS = new Set([
-  'comment', 'comments', 'notes', 'provenance', '_rawExtra', 'DOI', 'ISBN',
-  'ISSN', 'PMID', 'PMCID', 'archiveID', 'journalAbbr', 'accessedAt',
-  'citeKey', 'labels', 'keywordsList', 'tags', 'keywords', 'zoteroTags',
+  'comment',
+  'comments',
+  'notes',
+  'provenance',
+  '_rawExtra',
+  'DOI',
+  'ISBN',
+  'ISSN',
+  'PMID',
+  'PMCID',
+  'archiveID',
+  'journalAbbr',
+  'accessedAt',
+  'citeKey',
+  'labels',
+  'keywordsList',
+  'tags',
+  'keywords',
+  'zoteroTags',
 ]);
 
 const FORBIDDEN_PROMOTION_KEYS = new Set([
-  '__proto__', 'constructor', 'prototype', 'deletedAt', 'deletedById',
-  'projectId', 'userId', 'id', 'version', 'createdAt', 'updatedAt', 'scopeKey',
+  '__proto__',
+  'constructor',
+  'prototype',
+  'deletedAt',
+  'deletedById',
+  'projectId',
+  'userId',
+  'id',
+  'version',
+  'createdAt',
+  'updatedAt',
+  'scopeKey',
 ]);
 
 function escapeHtmlText(str: string): string {
@@ -60,20 +83,38 @@ function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
   const hasRelationalItemTags = Array.isArray(it.itemTags);
   const hasRelationalPublications = Array.isArray(it.publications);
   const rawMetaExtraFields =
-    metaObj && metaObj.extraFields && typeof metaObj.extraFields === 'object' && !Array.isArray(metaObj.extraFields)
+    metaObj &&
+    metaObj.extraFields &&
+    typeof metaObj.extraFields === 'object' &&
+    !Array.isArray(metaObj.extraFields)
       ? (metaObj.extraFields as Record<string, unknown>)
       : null;
   if (metaObj) {
     for (const [key, value] of Object.entries(metaObj)) {
-      if (key === 'extraFields' || key === 'metadata' || key.startsWith('__') || FORBIDDEN_PROMOTION_KEYS.has(key)) continue;
+      if (
+        key === 'extraFields' ||
+        key === 'metadata' ||
+        key.startsWith('__') ||
+        FORBIDDEN_PROMOTION_KEYS.has(key)
+      )
+        continue;
       if (hasRelationalPublications && key === 'isMyPublication') continue;
       if (
         hasRelationalItemTags &&
-        (key === 'tags' || key === 'keywords' || key === 'zoteroTags' || key === 'labels' || key === 'keywordsList')
+        (key === 'tags' ||
+          key === 'keywords' ||
+          key === 'zoteroTags' ||
+          key === 'labels' ||
+          key === 'keywordsList')
       ) {
         continue;
       }
-      if (value !== undefined && value !== null && value !== '' && (it[key] === undefined || it[key] === null || it[key] === '')) {
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== '' &&
+        (it[key] === undefined || it[key] === null || it[key] === '')
+      ) {
         it[key] = value;
       }
     }
@@ -103,7 +144,9 @@ function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
   collectUnmappedKeys(metaObj);
   collectUnmappedKeys(rawMetaExtraFields);
   collectUnmappedKeys(
-    it.extraFields && typeof it.extraFields === 'object' ? it.extraFields : null,
+    it.extraFields && typeof it.extraFields === 'object'
+      ? it.extraFields
+      : null,
   );
 
   if (it.extraFields && typeof it.extraFields === 'object') {
@@ -198,13 +241,22 @@ function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
 }
 
 function inferViewerFormat(
-  att?: { attachmentType?: string | null; mimeType?: string | null; filename?: string | null } | null,
+  att?: {
+    attachmentType?: string | null;
+    mimeType?: string | null;
+    filename?: string | null;
+  } | null,
 ): 'pdf' | 'epub' | 'snapshot' {
   const mime = (att?.mimeType || '').toLowerCase();
   const filename = (att?.filename || '').toLowerCase();
   const attType = (att?.attachmentType || '').toLowerCase();
   if (mime.includes('epub') || filename.endsWith('.epub')) return 'epub';
-  if (attType === 'snapshot' || mime.includes('html') || filename.endsWith('.html') || filename.endsWith('.htm')) {
+  if (
+    attType === 'snapshot' ||
+    mime.includes('html') ||
+    filename.endsWith('.html') ||
+    filename.endsWith('.htm')
+  ) {
     return 'snapshot';
   }
   return 'pdf';
@@ -324,7 +376,7 @@ function finalizePrimaryFilePartial(
       filename: it.filename || primaryPdf.filename || '',
       title:
         primaryPdf.title ||
-        (primaryPdf.metadata?.title as string | undefined) ||
+        primaryPdf.metadata?.title ||
         it.filename ||
         primaryPdf.filename ||
         '',
@@ -353,9 +405,14 @@ function finalizePrimaryFilePartial(
 }
 
 const PRISMA_TO_DTO_RELATION: Record<string, string> = {
-  CITES: 'cites', CITED_BY: 'isCitedBy', SUPPLEMENT_TO: 'supplementTo',
-  SUPPLEMENTED_BY: 'isSupplementedBy', RELATED: 'related', CONTINUES: 'continues',
-  CONTINUED_BY: 'isContinuedBy', PART_OF: 'partOf',
+  CITES: 'cites',
+  CITED_BY: 'isCitedBy',
+  SUPPLEMENT_TO: 'supplementTo',
+  SUPPLEMENTED_BY: 'isSupplementedBy',
+  RELATED: 'related',
+  CONTINUES: 'continues',
+  CONTINUED_BY: 'isContinuedBy',
+  PART_OF: 'partOf',
 };
 
 function mapPublicationsAndRelationsPartial(
@@ -375,7 +432,8 @@ function mapPublicationsAndRelationsPartial(
   if (Array.isArray(it.outgoingRel)) {
     for (const rel of it.outgoingRel) {
       const peer = rel.targetItem ?? rel.toItem;
-      const rawRelType = typeof rel.relationType === 'string' ? rel.relationType : 'related';
+      const rawRelType =
+        typeof rel.relationType === 'string' ? rel.relationType : 'related';
       combinedRelations.push({
         id: rel.id,
         targetItemId: rel.targetItemId ?? rel.toItemId,
@@ -390,7 +448,8 @@ function mapPublicationsAndRelationsPartial(
   if (Array.isArray(it.incomingRel)) {
     for (const rel of it.incomingRel) {
       const peer = rel.sourceItem ?? rel.fromItem;
-      const rawRelType = typeof rel.relationType === 'string' ? rel.relationType : 'related';
+      const rawRelType =
+        typeof rel.relationType === 'string' ? rel.relationType : 'related';
       combinedRelations.push({
         id: rel.id,
         targetItemId: rel.sourceItemId ?? rel.fromItemId,
@@ -463,11 +522,20 @@ function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
     if (it.rating === undefined && typeof active?.rating === 'number') {
       it.rating = active.rating;
     }
-    if (it.currentPage === undefined) it.currentPage = typeof active?.currentPage === 'number' ? active.currentPage : null;
-    if (it.lastReadPage === undefined) it.lastReadPage = typeof active?.currentPage === 'number' ? active.currentPage : null;
-    if (it.scrollPosition === undefined) it.scrollPosition = active?.scrollPosition ?? null;
+    if (it.currentPage === undefined)
+      it.currentPage =
+        typeof active?.currentPage === 'number' ? active.currentPage : null;
+    if (it.lastReadPage === undefined)
+      it.lastReadPage =
+        typeof active?.currentPage === 'number' ? active.currentPage : null;
+    if (it.scrollPosition === undefined)
+      it.scrollPosition = active?.scrollPosition ?? null;
     if (it.lastOpenedAt === undefined) {
-      it.lastOpenedAt = active?.lastOpenedAt ? (active.lastOpenedAt instanceof Date ? active.lastOpenedAt.toISOString() : String(active.lastOpenedAt)) : null;
+      it.lastOpenedAt = active?.lastOpenedAt
+        ? active.lastOpenedAt instanceof Date
+          ? active.lastOpenedAt.toISOString()
+          : String(active.lastOpenedAt)
+        : null;
     }
     if (!it.lastReadAt) {
       const stateWithReadAt = it.states.find((u) => u?.lastReadAt);
@@ -563,8 +631,12 @@ function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
       it.keywords = [];
       it.zoteroTags = [];
     }
-    if (it.metadata && typeof it.metadata === 'object' && !Array.isArray(it.metadata)) {
-      const syncedMeta = { ...(it.metadata as Record<string, unknown>) };
+    if (
+      it.metadata &&
+      typeof it.metadata === 'object' &&
+      !Array.isArray(it.metadata)
+    ) {
+      const syncedMeta = { ...it.metadata };
       syncedMeta.tags = it.tags;
       syncedMeta.labels = it.tags;
       syncedMeta.keywords = it.keywords;
@@ -686,13 +758,22 @@ function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
   } else if (it.extraFields && typeof it.extraFields.comment === 'string') {
     const commentVal = cleanCommentText(it.extraFields.comment);
     if (commentVal) {
-      const formatted = commentVal.toLowerCase().startsWith('comment:') ? commentVal : `Comment: ${commentVal}`;
+      const formatted = commentVal.toLowerCase().startsWith('comment:')
+        ? commentVal
+        : `Comment: ${commentVal}`;
       const ts = it.createdAt || new Date().toISOString();
-      it.notes = [{
-        id: `comment-${it.id}`, content: formatted, contentMd: formatted,
-        note: `<p>${escapeHtmlText(formatted)}</p>`, itemType: 'note', source: 'arXiv',
-        createdAt: ts, updatedAt: it.updatedAt || ts,
-      }];
+      it.notes = [
+        {
+          id: `comment-${it.id}`,
+          content: formatted,
+          contentMd: formatted,
+          note: `<p>${escapeHtmlText(formatted)}</p>`,
+          itemType: 'note',
+          source: 'arXiv',
+          createdAt: ts,
+          updatedAt: it.updatedAt || ts,
+        },
+      ];
     } else {
       it.notes = [];
     }
@@ -701,7 +782,8 @@ function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
   }
 
   delete it.notesList;
-  if (it.extraFields && 'comment' in it.extraFields) delete it.extraFields.comment;
+  if (it.extraFields && 'comment' in it.extraFields)
+    delete it.extraFields.comment;
 }
 
 export class ItemsMapper {
@@ -710,19 +792,30 @@ export class ItemsMapper {
     visitedOrUserId: WeakSet<object> | string = new WeakSet(),
   ): T & Partial<ItemDetail> {
     if (!raw || typeof raw !== 'object') return raw as T & Partial<ItemDetail>;
-    const visited = visitedOrUserId instanceof WeakSet ? visitedOrUserId : new WeakSet<object>();
-    const userId = typeof visitedOrUserId === 'string' && visitedOrUserId ? visitedOrUserId : undefined;
-    if (visited.has(raw as object)) {
-      return { ...(raw as Record<string, unknown>) } as unknown as T & Partial<ItemDetail>;
+    const visited =
+      visitedOrUserId instanceof WeakSet
+        ? visitedOrUserId
+        : new WeakSet<object>();
+    const userId =
+      typeof visitedOrUserId === 'string' && visitedOrUserId
+        ? visitedOrUserId
+        : undefined;
+    if (visited.has(raw)) {
+      return { ...(raw as Record<string, unknown>) } as unknown as T &
+        Partial<ItemDetail>;
     }
-    visited.add(raw as object);
+    visited.add(raw);
     const it = { ...(raw as Record<string, unknown>) } as MutableItemPayload;
     if (typeof it.spaceId === 'string' && it.spaceId) {
-      if (it.userId === undefined && typeof it.createdById === 'string') it.userId = it.createdById;
-      if (it.projectId === undefined) it.projectId = it.spaceId !== it.createdById ? it.spaceId : null;
+      if (it.userId === undefined && typeof it.createdById === 'string')
+        it.userId = it.createdById;
+      if (it.projectId === undefined)
+        it.projectId = it.spaceId !== it.createdById ? it.spaceId : null;
     }
     if (Array.isArray(it.states)) {
-      const matchedState = userId ? it.states.find((s) => s?.userId === userId) : undefined;
+      const matchedState = userId
+        ? it.states.find((s) => s?.userId === userId)
+        : undefined;
       it.states = matchedState ? [matchedState] : [];
     }
     unpackMetadataAndExtraPartial(it);
@@ -731,19 +824,33 @@ export class ItemsMapper {
     mapTagsCollectionsNotesPartial(it);
     harmonizeDomainMetadataAndIdentifiersPartial(it);
     finalizePrimaryFilePartial(it, primaryPdf);
-    mapPublicationsAndRelationsPartial(it, (target) => ItemsMapper.toDomain(target, visited));
+    mapPublicationsAndRelationsPartial(it, (target) =>
+      ItemsMapper.toDomain(target, visited),
+    );
     return it as unknown as T & Partial<ItemDetail>;
   }
 
-  static toDomainList<T = Record<string, unknown>>(items: T[], userId?: string): Array<T & Partial<ItemDetail>> {
-    return Array.isArray(items) ? items.map((item) => this.toDomain(item, userId)) : [];
+  static toDomainList<T = Record<string, unknown>>(
+    items: T[],
+    userId?: string,
+  ): Array<T & Partial<ItemDetail>> {
+    return Array.isArray(items)
+      ? items.map((item) => this.toDomain(item, userId))
+      : [];
   }
 
   static mapFlattenedState<T extends Record<string, unknown>>(
     item: T | null | undefined,
     userId?: string,
-  ): (T & { readStatus: string; rating: number; lastReadAt: string | null }) | null {
-    return mapFlattenedStateHelper(item, (it) => ItemsMapper.toDomain(it, userId), userId);
+  ):
+    | (T & { readStatus: string; rating: number; lastReadAt: string | null })
+    | null {
+    return mapFlattenedStateHelper(
+      item,
+      (it) => ItemsMapper.toDomain(it, userId),
+      userId,
+    );
   }
-  static stripPersonalOverlayForSharedScope = stripPersonalOverlayForSharedScope;
+  static stripPersonalOverlayForSharedScope =
+    stripPersonalOverlayForSharedScope;
 }

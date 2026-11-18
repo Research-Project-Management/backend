@@ -22,7 +22,9 @@ describe('TrashMaintenanceService (Zotero Parity Auto-Purge)', () => {
       }),
     };
 
-    service = new TrashMaintenanceService(mockItemService as ItemService);
+    service = new TrashMaintenanceService(
+      mockItemService as unknown as ItemService,
+    );
   });
 
   afterEach(() => {

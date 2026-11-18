@@ -141,26 +141,66 @@ export class CslEngineService implements OnModuleInit {
     const translatorSig = formatNamesSig(cslItem.translator);
     const rec = cslItem as Record<string, unknown>;
     const extendedCreatorSigs = (
-      ['director', 'composer', 'interviewer', 'recipient', 'reviewed-author', 'collection-editor', 'container-author', 'contributor'] as const
-    ).map((role) => formatNamesSig(rec[role] as CslName[] | undefined)).join('|');
+      [
+        'director',
+        'composer',
+        'interviewer',
+        'recipient',
+        'reviewed-author',
+        'collection-editor',
+        'container-author',
+        'contributor',
+      ] as const
+    )
+      .map((role) => formatNamesSig(rec[role] as CslName[] | undefined))
+      .join('|');
     const contentFingerprint = [
-      cslItem.type || '', cslItem.title || '', cslItem['title-short'] || '',
-      authorSig, editorSig, translatorSig, extendedCreatorSigs,
-      cslItem['container-title'] || '', cslItem['container-title-short'] || '',
-      cslItem['collection-title'] || '', cslItem['collection-number'] ?? '',
-      cslItem.volume ?? '', cslItem['number-of-volumes'] ?? '', cslItem.issue ?? '',
-      cslItem.number ?? '', cslItem.edition ?? '', cslItem.page || '',
-      cslItem['number-of-pages'] ?? '', cslItem.section || '',
+      cslItem.type || '',
+      cslItem.title || '',
+      cslItem['title-short'] || '',
+      authorSig,
+      editorSig,
+      translatorSig,
+      extendedCreatorSigs,
+      cslItem['container-title'] || '',
+      cslItem['container-title-short'] || '',
+      cslItem['collection-title'] || '',
+      cslItem['collection-number'] ?? '',
+      cslItem.volume ?? '',
+      cslItem['number-of-volumes'] ?? '',
+      cslItem.issue ?? '',
+      cslItem.number ?? '',
+      cslItem.edition ?? '',
+      cslItem.page || '',
+      cslItem['number-of-pages'] ?? '',
+      cslItem.section || '',
       String(rec['chapter-number'] ?? rec.chapter ?? ''),
-      cslItem.DOI || '', cslItem.ISBN || '', cslItem.ISSN || '', cslItem.URL || '',
-      accessed, submitted, cslItem.publisher || '', cslItem['publisher-place'] || '',
-      cslItem.genre || '', cslItem.medium || String(rec.medium ?? ''),
-      cslItem.status || '', cslItem.version || '', cslItem.language || '',
-      cslItem.abstract || '', cslItem.keyword || '', cslItem.note || '',
-      cslItem.annote || '', cslItem.PMID || '', cslItem.PMCID || '',
-      cslItem['event-title'] || '', cslItem['event-place'] || '', cslItem.authority || '',
-      cslItem.archive || '', cslItem['archive-location'] || cslItem.archive_location || '',
-      cslItem['call-number'] || '', cslItem.rights || '',
+      cslItem.DOI || '',
+      cslItem.ISBN || '',
+      cslItem.ISSN || '',
+      cslItem.URL || '',
+      accessed,
+      submitted,
+      cslItem.publisher || '',
+      cslItem['publisher-place'] || '',
+      cslItem.genre || '',
+      cslItem.medium || String(rec.medium ?? ''),
+      cslItem.status || '',
+      cslItem.version || '',
+      cslItem.language || '',
+      cslItem.abstract || '',
+      cslItem.keyword || '',
+      cslItem.note || '',
+      cslItem.annote || '',
+      cslItem.PMID || '',
+      cslItem.PMCID || '',
+      cslItem['event-title'] || '',
+      cslItem['event-place'] || '',
+      cslItem.authority || '',
+      cslItem.archive || '',
+      cslItem['archive-location'] || cslItem.archive_location || '',
+      cslItem['call-number'] || '',
+      cslItem.rights || '',
     ].join('|');
 
     const fullDigest = `${date}::${ver}::${updated}::${contentFingerprint}`;
@@ -260,7 +300,6 @@ export class CslEngineService implements OnModuleInit {
   public normalizeStyle(styleId: string): string {
     return this.loader.normalizeStyle(styleId);
   }
-
 
   public async formatBatchAsync(
     cslItems: CslItemData[],
@@ -373,7 +412,9 @@ export class CslEngineService implements OnModuleInit {
       );
       if (context?.locator) {
         const locPrefix =
-          !context.label || context.label === 'page' ? 'tr. ' : `${context.label} `;
+          !context.label || context.label === 'page'
+            ? 'tr. '
+            : `${context.label} `;
         tcvnRes.inText = tcvnRes.inText.replace(
           /([)\]])$/,
           `, ${locPrefix}${context.locator.trim()}$1`,
@@ -520,18 +561,31 @@ export class CslEngineService implements OnModuleInit {
       );
     }
 
-    const isNumericStyle = NUMERIC_STYLE_TOKENS.some((s) => baseStyle.includes(s));
+    const isNumericStyle = NUMERIC_STYLE_TOKENS.some((s) =>
+      baseStyle.includes(s),
+    );
     const applyBatchYearDisambiguation = (
-      list: Array<{ id: string; inText: string; bibliography: string; bibliographyHtml?: string }>,
+      list: Array<{
+        id: string;
+        inText: string;
+        bibliography: string;
+        bibliographyHtml?: string;
+      }>,
     ) => {
       if (isNumericStyle || cslItems.length < 2) return list;
       const groups = new Map<string, number[]>();
       list.forEach((entry, idx) => {
         const item = cslItems[idx];
         const yearRaw = item?.issued?.['date-parts']?.[0]?.[0];
-        const yearStr = yearRaw !== undefined && yearRaw !== null ? String(yearRaw).trim() : '';
+        const yearStr =
+          yearRaw !== undefined && yearRaw !== null
+            ? String(yearRaw).trim()
+            : '';
         if (!/^\d{4}$/.test(yearStr)) return;
-        const normalizedInText = (entry.inText || '').replace(/^\(|\)$/g, '').trim().toLowerCase();
+        const normalizedInText = (entry.inText || '')
+          .replace(/^\(|\)$/g, '')
+          .trim()
+          .toLowerCase();
         if (!normalizedInText) return;
         const key = `${normalizedInText}::${yearStr}`;
         const arr = groups.get(key) ?? [];
@@ -550,12 +604,18 @@ export class CslEngineService implements OnModuleInit {
           if (!entry) return;
           const alreadyHasSuffixRe = new RegExp(`\\b${yearStr}[a-z]\\b`);
           if (!alreadyHasSuffixRe.test(entry.inText)) {
-            entry.inText = entry.inText.replace(new RegExp(`\\b${yearStr}\\b`), suffixedYear);
+            entry.inText = entry.inText.replace(
+              new RegExp(`\\b${yearStr}\\b`),
+              suffixedYear,
+            );
           }
           if (!alreadyHasSuffixRe.test(entry.bibliography)) {
             const parenYearRe = new RegExp(`(\\(\\s*${yearStr})(\\s*[,)])`);
             if (parenYearRe.test(entry.bibliography)) {
-              entry.bibliography = entry.bibliography.replace(parenYearRe, `$1${suffix}$2`);
+              entry.bibliography = entry.bibliography.replace(
+                parenYearRe,
+                `$1${suffix}$2`,
+              );
             } else {
               entry.bibliography = entry.bibliography.replace(
                 new RegExp(`(\\b${yearStr})\\b`),
@@ -563,7 +623,10 @@ export class CslEngineService implements OnModuleInit {
               );
             }
           }
-          if (entry.bibliographyHtml && !alreadyHasSuffixRe.test(entry.bibliographyHtml)) {
+          if (
+            entry.bibliographyHtml &&
+            !alreadyHasSuffixRe.test(entry.bibliographyHtml)
+          ) {
             const parenYearRe = new RegExp(`(\\(\\s*${yearStr})(\\s*[,)])`);
             if (parenYearRe.test(entry.bibliographyHtml)) {
               entry.bibliographyHtml = entry.bibliographyHtml.replace(
@@ -638,7 +701,9 @@ export class CslEngineService implements OnModuleInit {
           })
           .trim();
         let itemBib =
-          baseStyle === 'ieee' ? rawBib.replace(/[\u201C\u201D]/g, '"') : rawBib;
+          baseStyle === 'ieee'
+            ? rawBib.replace(/[\u201C\u201D]/g, '"')
+            : rawBib;
         let itemBibHtml = bibHtml;
         let cit = rawCit;
         if (isNumericStyle && idx > 0) {

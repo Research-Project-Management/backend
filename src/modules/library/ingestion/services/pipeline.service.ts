@@ -229,14 +229,20 @@ export class PipelineService {
           ? this.cleanupOffloadedPayload(options.envelope)
           : Promise.resolve(false),
         this.urlCapture?.cleanupExpiredPreviews
-          ? this.urlCapture.cleanupExpiredPreviews(retentionDays).catch((err: unknown) => {
-              this.logger.warn(`[PipelineGC] Failed to cleanup expired previews: ${err instanceof Error ? err.message : String(err)}`);
-              return 0;
-            })
+          ? this.urlCapture
+              .cleanupExpiredPreviews(retentionDays)
+              .catch((err: unknown) => {
+                this.logger.warn(
+                  `[PipelineGC] Failed to cleanup expired previews: ${err instanceof Error ? err.message : String(err)}`,
+                );
+                return 0;
+              })
           : Promise.resolve(0),
         typeof this.repo?.purgeOldRuns === 'function'
           ? this.repo.purgeOldRuns(retentionDays).catch((err: unknown) => {
-              this.logger.warn(`[PipelineGC] Failed to purge old runs: ${err instanceof Error ? err.message : String(err)}`);
+              this.logger.warn(
+                `[PipelineGC] Failed to purge old runs: ${err instanceof Error ? err.message : String(err)}`,
+              );
               return 0;
             })
           : Promise.resolve(0),
@@ -372,7 +378,8 @@ export class PipelineService {
           matchType: 'NO_MATCH',
           confidence: 0,
         };
-        const rawNormMeta = (normalizedCandidates[0]?.normalizedMetadata || {}) as Record<string, unknown>;
+        const rawNormMeta = (normalizedCandidates[0]?.normalizedMetadata ||
+          {}) as Record<string, unknown>;
         if (
           isSingleCandidate &&
           normalizedCandidates[0]?.normalizedMetadata &&
@@ -383,9 +390,12 @@ export class PipelineService {
             proposedItem: normalizedCandidates[0].normalizedMetadata,
           });
 
-          const rawCandExtra = (rawNormMeta.extraFields && typeof rawNormMeta.extraFields === 'object'
-            ? rawNormMeta.extraFields
-            : {}) as Record<string, unknown>;
+          const rawCandExtra = (
+            rawNormMeta.extraFields &&
+            typeof rawNormMeta.extraFields === 'object'
+              ? rawNormMeta.extraFields
+              : {}
+          ) as Record<string, unknown>;
           const hasCredibleLocalTitle =
             typeof rawNormMeta.title === 'string' &&
             rawNormMeta.title.trim().length > 5 &&
@@ -394,7 +404,11 @@ export class PipelineService {
           const deferFileEarlyMatch =
             envelope.payload.kind === 'FILE' && !hasCredibleLocalTitle;
 
-          if (earlyMatch.matchType === 'EXACT' && earlyMatch.targetItemId && !deferFileEarlyMatch) {
+          if (
+            earlyMatch.matchType === 'EXACT' &&
+            earlyMatch.targetItemId &&
+            !deferFileEarlyMatch
+          ) {
             return {
               isDuplicate: true,
               isBatch: false,
@@ -432,10 +446,14 @@ export class PipelineService {
               );
               enriched.push(fallbackCandidate);
               // If HTML scrape discovered a new identifier not in the original URL, enrich it through ResolveStage
-              const fbMeta = (fallbackCandidate.normalizedMetadata || {}) as Record<string, unknown>;
-              const fbExtra = (fbMeta.extraFields || {}) as Record<string, unknown>;
-              const foundNewId = ['doi', 'arxivId', 'pmid', 'isbn'].some(
-                (k) => Boolean(fbMeta[k] && fbMeta[k] !== rawNormMeta[k]),
+              const fbMeta = (fallbackCandidate.normalizedMetadata ||
+                {}) as Record<string, unknown>;
+              const fbExtra = (fbMeta.extraFields || {}) as Record<
+                string,
+                unknown
+              >;
+              const foundNewId = ['doi', 'arxivId', 'pmid', 'isbn'].some((k) =>
+                Boolean(fbMeta[k] && fbMeta[k] !== rawNormMeta[k]),
               );
               if (foundNewId && !fbExtra.alreadyResolvedByMirror) {
                 const fbEnriched = await this.resolve.execute({
@@ -472,17 +490,26 @@ export class PipelineService {
             : MetadataCoalescePolicy.coalesceCandidates(enriched);
 
         // 5. Secondary Match check if identifier was discovered or stripped during enrich/reconcile
-        const propRec = (decision.proposedItem || {}) as Record<string, unknown>;
-        const propExtra = (propRec.extraFields && typeof propRec.extraFields === 'object'
-          ? propRec.extraFields
-          : {}) as Record<string, unknown>;
+        const propRec = (decision.proposedItem || {}) as Record<
+          string,
+          unknown
+        >;
+        const propExtra = (
+          propRec.extraFields && typeof propRec.extraFields === 'object'
+            ? propRec.extraFields
+            : {}
+        ) as Record<string, unknown>;
         const citationTrapTriggered = Boolean(propExtra.rejectedCitedDoi);
         let finalMatch: DuplicateMatchResult = citationTrapTriggered
           ? { matchType: 'NO_MATCH', confidence: 0 }
           : earlyMatch;
-        const discoveredNewId = ['doi', 'arxivId', 'pmid', 'pmcid', 'isbn'].some(
-          (k) => Boolean(propRec[k] && !rawNormMeta[k]),
-        );
+        const discoveredNewId = [
+          'doi',
+          'arxivId',
+          'pmid',
+          'pmcid',
+          'isbn',
+        ].some((k) => Boolean(propRec[k] && !rawNormMeta[k]));
         if (
           finalMatch.matchType !== 'EXACT' &&
           (discoveredNewId || citationTrapTriggered) &&
@@ -696,7 +723,8 @@ export class PipelineService {
             payloadSize,
             existingRecord: createdItem,
             assignCollections:
-              wasPreExistingMatch && !this.catalogGateway?.assignItemsToCollection,
+              wasPreExistingMatch &&
+              !this.catalogGateway?.assignItemsToCollection,
             skipNotes: wasPreExistingMatch,
           },
         );

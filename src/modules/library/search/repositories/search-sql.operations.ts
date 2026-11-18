@@ -187,9 +187,9 @@ export function buildSearchFacetCacheKey(
     : `user:${userId}`;
   const hasPerUserFilter = Boolean(
     sanitized.view === 'starred' ||
-      sanitized.view === 'my-publications' ||
-      sanitized.onlyFlagged ||
-      sanitized.readStatus,
+    sanitized.view === 'my-publications' ||
+    sanitized.onlyFlagged ||
+    sanitized.readStatus,
   );
   const filterHash = createHash('sha256')
     .update(

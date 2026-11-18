@@ -96,7 +96,9 @@ export class RegexExtractor {
    * academic tags. Heals single-line column wraps before splitting when explicit delimiters
    * (`,`, `;`, `•`, `·`, `|`, `—`) are present, and filters out accidental prose sentences.
    */
-  public static extractCleanKeywordsFromBlock(rawBlock?: string | null): string[] {
+  public static extractCleanKeywordsFromBlock(
+    rawBlock?: string | null,
+  ): string[] {
     if (!rawBlock || typeof rawBlock !== 'string') return [];
     const bounded = rawBlock.slice(0, 800).trim();
     if (!bounded) return [];

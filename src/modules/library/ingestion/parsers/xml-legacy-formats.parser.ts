@@ -1,13 +1,26 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ItemMetadata, CreatorInput } from '@/modules/library/ingestion/types/metadata.types';
 import {
-  cleanAbstractText, decodeHtmlEntities, extractYearFromDate,
-  normalizeDoi, normalizePmid, normalizeIsbn, normalizeIssn, parseCreatorString,
+  ItemMetadata,
+  CreatorInput,
+} from '@/modules/library/ingestion/types/metadata.types';
+import {
+  cleanAbstractText,
+  decodeHtmlEntities,
+  extractYearFromDate,
+  normalizeDoi,
+  normalizePmid,
+  normalizeIsbn,
+  normalizeIssn,
+  parseCreatorString,
 } from '@/modules/library/core';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
-import { parseMedlineNbibRecords, parseCsvBibliographyRecords } from './csl.parser';
+import {
+  parseMedlineNbibRecords,
+  parseCsvBibliographyRecords,
+} from './csl.parser';
 
-type LegacyRecordFormat = 'ENDNOTE_XML' | 'MODS' | 'ZOTERO_RDF' | 'MEDLINE' | 'CSV';
+type LegacyRecordFormat =
+  'ENDNOTE_XML' | 'MODS' | 'ZOTERO_RDF' | 'MEDLINE' | 'CSV';
 
 function decodeXmlEntities(raw: string): string {
   if (!raw) return '';
@@ -18,7 +31,10 @@ function decodeXmlEntities(raw: string): string {
   return decodeHtmlEntities(stripped).replace(/\s+/g, ' ').trim();
 }
 
-function extractFirstXmlBlock(xml: string, tagPattern: string): string | undefined {
+function extractFirstXmlBlock(
+  xml: string,
+  tagPattern: string,
+): string | undefined {
   const re = new RegExp(
     `<(?:[a-zA-Z0-9_-]+:)?(?:${tagPattern})(?:\\s+[^>]*)?>([\\s\\S]*?)<\\/(?:[a-zA-Z0-9_-]+:)?(?:${tagPattern})>`,
     'i',
@@ -31,7 +47,10 @@ function extractBalancedXmlTag(
   tagName: string,
   attrPredicate?: (openTagAttrs: string) => boolean,
 ): { fullMatch: string; innerXml: string } | undefined {
-  const tokenRe = new RegExp(`<(\\/?)(?:[a-zA-Z0-9_-]+:)?${tagName}\\b([^>]*?)(\\/?)>`, 'gi');
+  const tokenRe = new RegExp(
+    `<(\\/?)(?:[a-zA-Z0-9_-]+:)?${tagName}\\b([^>]*?)(\\/?)>`,
+    'gi',
+  );
   let match: RegExpExecArray | null;
   while ((match = tokenRe.exec(xml)) !== null) {
     const isClosing = match[1] === '/';
@@ -66,7 +85,10 @@ function extractBalancedXmlTag(
   return undefined;
 }
 
-function extractFirstTagText(xml: string, tagPattern: string): string | undefined {
+function extractFirstTagText(
+  xml: string,
+  tagPattern: string,
+): string | undefined {
   const re = new RegExp(
     `<(?:[a-zA-Z0-9_-]+:)?(?:${tagPattern})(?:\\s+[^>]*)?>([\\s\\S]*?)<\\/(?:[a-zA-Z0-9_-]+:)?(?:${tagPattern})>`,
     'i',
@@ -94,17 +116,33 @@ function mapEndnoteRefType(rawName?: string, rawNum?: string): string {
   const name = (rawName || '').toLowerCase().trim();
   const num = Number(rawNum || 0);
   if (name.includes('book section') || num === 5) return 'bookSection';
-  if (name.includes('edited book') || name === 'book' || num === 6 || num === 28) return 'book';
-  if (name.includes('conference') || name.includes('proceeding') || num === 10 || num === 47) return 'conferencePaper';
-  if (name.includes('thesis') || name.includes('dissertation') || num === 32) return 'thesis';
+  if (
+    name.includes('edited book') ||
+    name === 'book' ||
+    num === 6 ||
+    num === 28
+  )
+    return 'book';
+  if (
+    name.includes('conference') ||
+    name.includes('proceeding') ||
+    num === 10 ||
+    num === 47
+  )
+    return 'conferencePaper';
+  if (name.includes('thesis') || name.includes('dissertation') || num === 32)
+    return 'thesis';
   if (name.includes('report') || num === 27) return 'report';
-  if (name.includes('web') || name.includes('blog') || num === 12) return 'webpage';
+  if (name.includes('web') || name.includes('blog') || num === 12)
+    return 'webpage';
   if (name.includes('patent') || num === 25) return 'patent';
   if (name.includes('newspaper') || num === 23) return 'newspaperArticle';
   if (name.includes('magazine') || num === 19) return 'magazineArticle';
-  if (name.includes('computer') || name.includes('software') || num === 9) return 'computerProgram';
+  if (name.includes('computer') || name.includes('software') || num === 9)
+    return 'computerProgram';
   if (name.includes('dataset') || num === 59) return 'dataset';
-  if (name.includes('preprint') || name.includes('unpublished') || num === 34) return 'preprint';
+  if (name.includes('preprint') || name.includes('unpublished') || num === 34)
+    return 'preprint';
   return 'journalArticle';
 }
 
@@ -112,7 +150,10 @@ function mapEndnoteRefType(rawName?: string, rawNum?: string): string {
 export class XmlLegacyFormatsParser {
   private readonly logger = new Logger(XmlLegacyFormatsParser.name);
 
-  detectFormat(content: string, hintFormat?: string): LegacyRecordFormat | null {
+  detectFormat(
+    content: string,
+    hintFormat?: string,
+  ): LegacyRecordFormat | null {
     const trimmed = (content || '').trim();
     const upperHint = (hintFormat || '').toUpperCase().trim();
     if (upperHint === 'ENDNOTE_XML') {
@@ -125,11 +166,18 @@ export class XmlLegacyFormatsParser {
     if (upperHint === 'MEDLINE' || upperHint === 'NBIB') return 'MEDLINE';
     if (upperHint === 'CSV') return 'CSV';
 
-    if (/<records[\s>]/i.test(trimmed) || /<ref-type[\s>]/i.test(trimmed)) return 'ENDNOTE_XML';
+    if (/<records[\s>]/i.test(trimmed) || /<ref-type[\s>]/i.test(trimmed))
+      return 'ENDNOTE_XML';
     if (/<(?:mods:)?mods(?:Collection)?[\s>]/i.test(trimmed)) return 'MODS';
-    if (/<rdf:RDF[\s>]/i.test(trimmed) || /xmlns:bib=/i.test(trimmed)) return 'ZOTERO_RDF';
-    if (/^(?:PMID|TI|AU|FAU|DP|JT|LID|SO)\s*-\s+/m.test(trimmed)) return 'MEDLINE';
-    if (/^"?(?:Item Type|Title|Author|Authors|Publication Title|DOI|Year|Publication Year)"?\s*,/i.test(trimmed)) {
+    if (/<rdf:RDF[\s>]/i.test(trimmed) || /xmlns:bib=/i.test(trimmed))
+      return 'ZOTERO_RDF';
+    if (/^(?:PMID|TI|AU|FAU|DP|JT|LID|SO)\s*-\s+/m.test(trimmed))
+      return 'MEDLINE';
+    if (
+      /^"?(?:Item Type|Title|Author|Authors|Publication Title|DOI|Year|Publication Year)"?\s*,/i.test(
+        trimmed,
+      )
+    ) {
       return 'CSV';
     }
     return null;
@@ -137,14 +185,22 @@ export class XmlLegacyFormatsParser {
 
   parse(content: string, formatHint?: string): ItemMetadata[] {
     if (!content || typeof content !== 'string' || !content.trim()) return [];
-    const detected = this.detectFormat(content, formatHint) || ((formatHint || '').toUpperCase() as LegacyRecordFormat);
+    const detected =
+      this.detectFormat(content, formatHint) ||
+      ((formatHint || '').toUpperCase() as LegacyRecordFormat);
     switch (detected) {
-      case 'ENDNOTE_XML': return this.parseEndnoteXml(content);
-      case 'MODS': return this.parseModsXml(content);
-      case 'ZOTERO_RDF': return this.parseZoteroRdf(content);
-      case 'MEDLINE': return this.parseMedlineNbib(content);
-      case 'CSV': return this.parseCsvBibliography(content);
-      default: return [];
+      case 'ENDNOTE_XML':
+        return this.parseEndnoteXml(content);
+      case 'MODS':
+        return this.parseModsXml(content);
+      case 'ZOTERO_RDF':
+        return this.parseZoteroRdf(content);
+      case 'MEDLINE':
+        return this.parseMedlineNbib(content);
+      case 'CSV':
+        return this.parseCsvBibliography(content);
+      default:
+        return [];
     }
   }
 
@@ -499,8 +555,7 @@ export class XmlLegacyFormatsParser {
         ),
       );
       if (!roleBlockMatch?.[1]) return;
-      const personRe =
-        /<foaf:Person(?:\s+[^>]*)?>([\s\S]*?)<\/foaf:Person>/gi;
+      const personRe = /<foaf:Person(?:\s+[^>]*)?>([\s\S]*?)<\/foaf:Person>/gi;
       let pMatch: RegExpExecArray | null;
       while ((pMatch = personRe.exec(roleBlockMatch[1])) !== null) {
         const pXml = pMatch[1] || '';

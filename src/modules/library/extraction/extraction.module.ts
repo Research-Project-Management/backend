@@ -13,7 +13,10 @@ import { AnnotationsController } from './controllers/annotations.controller';
 import { ExtractionTelemetryController } from './controllers/attachments.controller';
 
 // Facades
-import { ExtractionFacade, EXTRACTION_FACADE } from './services/extraction.facade';
+import {
+  ExtractionFacade,
+  EXTRACTION_FACADE,
+} from './services/extraction.facade';
 
 // Services
 import { AttachmentsService } from './services/attachments.service';

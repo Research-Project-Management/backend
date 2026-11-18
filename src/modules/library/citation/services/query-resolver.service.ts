@@ -117,9 +117,7 @@ export class QueryResolverService {
       }
 
       const json = (await res.json()) as {
-        message?: Parameters<
-          QueryResolverService['mapCrossRefMessage']
-        >[0];
+        message?: Parameters<QueryResolverService['mapCrossRefMessage']>[0];
       } | null;
       const message = json?.message ?? {};
       return this.mapCrossRefMessage(message);

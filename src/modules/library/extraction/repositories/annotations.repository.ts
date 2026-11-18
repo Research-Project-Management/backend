@@ -278,7 +278,7 @@ export class AnnotationsRepository {
       return this.mapEntity({
         ...current,
         ...updatePayload,
-        rectCoords: (nextRects ?? null) as Prisma.JsonValue,
+        rectCoords: nextRects ?? null,
         version: current.version + 1,
         updatedAt: now,
       });
@@ -464,7 +464,7 @@ export class AnnotationsRepository {
             this.mapEntity({
               ...current,
               ...updatePayload,
-              rectCoords: (nextRects ?? null) as Prisma.JsonValue,
+              rectCoords: nextRects ?? null,
               version: current.version + 1,
               updatedAt: now,
             }),
@@ -533,9 +533,7 @@ export class AnnotationsRepository {
             comment,
             tags,
             rectCoords:
-              item.rectCoords != null
-                ? (item.rectCoords as Prisma.InputJsonValue)
-                : Prisma.JsonNull,
+              item.rectCoords != null ? item.rectCoords : Prisma.JsonNull,
             createdById: authorId,
             version: 1,
             createdAt: now,
@@ -555,7 +553,7 @@ export class AnnotationsRepository {
               quoteText,
               comment,
               tags,
-              rectCoords: (item.rectCoords ?? null) as Prisma.JsonValue,
+              rectCoords: item.rectCoords ?? null,
               authorId,
               version: 1,
               deletedAt: null,

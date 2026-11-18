@@ -231,10 +231,18 @@ export function isLiteratureNoteCandidate(
 }
 
 function resolveAnnotationPageIndex(ann: NoteAnnotationSource): number {
-  if (typeof ann.pageIndex === 'number' && Number.isFinite(ann.pageIndex) && ann.pageIndex >= 0) {
+  if (
+    typeof ann.pageIndex === 'number' &&
+    Number.isFinite(ann.pageIndex) &&
+    ann.pageIndex >= 0
+  ) {
     return ann.pageIndex;
   }
-  if (typeof ann.pageNumber === 'number' && Number.isFinite(ann.pageNumber) && ann.pageNumber >= 1) {
+  if (
+    typeof ann.pageNumber === 'number' &&
+    Number.isFinite(ann.pageNumber) &&
+    ann.pageNumber >= 1
+  ) {
     return ann.pageNumber - 1;
   }
   return 0;
@@ -380,7 +388,9 @@ function formatAnnotationBlocksMarkdown(
       ? `attachmentId=${ann.attachmentId}&`
       : '';
     const projectPrefix =
-      options?.projectId && options.projectId !== 'user' && options.projectId !== 'default'
+      options?.projectId &&
+      options.projectId !== 'user' &&
+      options.projectId !== 'default'
         ? `/projects/${encodeURIComponent(options.projectId)}`
         : '';
     let backlinkUrl = '';
@@ -487,7 +497,9 @@ export function appendAnnotationsToLiteratureNoteMarkdown(
   ).trim();
 
   return {
-    markdown: deltaBlocks ? `${trimmedExisting}\n\n${deltaBlocks}` : trimmedExisting,
+    markdown: deltaBlocks
+      ? `${trimmedExisting}\n\n${deltaBlocks}`
+      : trimmedExisting,
     addedCount: unreferencedAnnotations.length,
   };
 }

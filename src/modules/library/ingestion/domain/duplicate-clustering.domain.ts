@@ -68,8 +68,13 @@ export function getEffectiveItemField(
   const meta = metaOverride || asMetaObject(rec.metadata);
   const lowerField = field.trim().toLowerCase();
   const isIdentifierLookup =
-    lowerField === 'doi' || lowerField === 'isbn' || lowerField === 'issn' ||
-    lowerField === 'pmid' || lowerField === 'pmcid' || lowerField === 'arxivid' || lowerField === 'arxiv';
+    lowerField === 'doi' ||
+    lowerField === 'isbn' ||
+    lowerField === 'issn' ||
+    lowerField === 'pmid' ||
+    lowerField === 'pmcid' ||
+    lowerField === 'arxivid' ||
+    lowerField === 'arxiv';
   const rejectedCitedDoi = meta.rejectedCitedDoi ?? rec.rejectedCitedDoi;
   const isBlockedIdentifier = (val: unknown): boolean =>
     isIdentifierLookup &&
@@ -94,7 +99,10 @@ export function getEffectiveItemField(
     ]),
   ).filter((alias) => {
     if (excludeGenerics) {
-      if ((field === 'date' || field === 'publicationDate') && alias === 'year') {
+      if (
+        (field === 'date' || field === 'publicationDate') &&
+        alias === 'year'
+      ) {
         return false;
       }
       if (
@@ -127,7 +135,11 @@ export function getEffectiveItemField(
         .trim()
         .toLowerCase();
       const normType = rawType === 'arxivid' ? 'arxiv' : rawType;
-      if (normType === targetIdType && isNonEmptyFieldValue(ident.value) && !isBlockedIdentifier(ident.value)) {
+      if (
+        normType === targetIdType &&
+        isNonEmptyFieldValue(ident.value) &&
+        !isBlockedIdentifier(ident.value)
+      ) {
         return ident.value;
       }
     }

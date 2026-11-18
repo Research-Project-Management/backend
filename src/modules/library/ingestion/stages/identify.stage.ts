@@ -199,8 +199,7 @@ const IDENTIFIER_CANDIDATE_APPLIERS: Readonly<
   ARXIV: (rawValue) => ({
     fieldKey: 'arxivId',
     cleanValue:
-      normalizeArxivId(rawValue) ||
-      rawValue.replace(/^arxiv:\s*/i, '').trim(),
+      normalizeArxivId(rawValue) || rawValue.replace(/^arxiv:\s*/i, '').trim(),
   }),
   PMID: (rawValue) => ({
     fieldKey: 'pmid',
@@ -322,8 +321,7 @@ export class IdentifyStage implements IWorkflowStage<
     };
 
     const strategy = IDENTIFY_PAYLOAD_STRATEGIES[payload.kind] as
-      | IdentifyPayloadStrategy
-      | undefined;
+      IdentifyPayloadStrategy | undefined;
     if (!strategy) return [];
     return strategy(this, payload, context);
   }

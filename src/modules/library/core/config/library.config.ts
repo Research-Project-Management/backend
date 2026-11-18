@@ -276,8 +276,7 @@ export const LIBRARY_REDIS_KEYS = {
 
   // Sync Sequence & Retention Checkpoints (High-Concurrency CDC Polling)
   syncSequence: (scopeKey: string) => `library:sync:seq:${scopeKey}`,
-  minRetainedSequence: (scopeKey: string) =>
-    `library:sync:min-seq:${scopeKey}`,
+  minRetainedSequence: (scopeKey: string) => `library:sync:min-seq:${scopeKey}`,
 
   // Citation & CSL Styles Cache
   doiNegotiation: (format: string, doi: string) =>

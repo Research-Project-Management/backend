@@ -1,5 +1,13 @@
 import type { AttachmentExtractionStatus as PrismaExtractionStatus } from '@prisma/client';
-import type { BibliographicReference, DocumentSection, DocumentFigure, DocumentTable, DocumentFormula, ItemCreator, ItemMetadata } from './bibliographic.types';
+import type {
+  BibliographicReference,
+  DocumentSection,
+  DocumentFigure,
+  DocumentTable,
+  DocumentFormula,
+  ItemCreator,
+  ItemMetadata,
+} from './bibliographic.types';
 
 export type LinkMode =
   'imported_file' | 'imported_url' | 'linked_url' | 'linked_file';
@@ -244,11 +252,7 @@ export interface QualityScoreBreakdown {
 /**
  * Extraction engine tags indicating which local tier produced the metadata.
  */
-export type ExtractionEngineKind =
-  | 'XMP'
-  | 'REGEX'
-  | 'LAYOUT'
-  | 'HYBRID';
+export type ExtractionEngineKind = 'XMP' | 'REGEX' | 'LAYOUT' | 'HYBRID';
 
 /**
  * Full provenance audit for local-first trusted extraction.
@@ -405,4 +409,3 @@ export interface FullTextOffloadResult {
   qualityScore?: number;
   engineUsed?: string;
 }
-

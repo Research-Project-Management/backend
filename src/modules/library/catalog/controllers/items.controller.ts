@@ -19,7 +19,14 @@ import { isUUID } from 'class-validator';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { normalizeProjectScopeId } from '@/modules/library/core';
-import { CreateItemDto, UpdateItemDto, BulkPurgeItemsDto, BulkTrashItemsDto, BulkRestoreItemsDto, ImportItemIdsDto } from '@/modules/library/catalog/dto/items.dto';
+import {
+  CreateItemDto,
+  UpdateItemDto,
+  BulkPurgeItemsDto,
+  BulkTrashItemsDto,
+  BulkRestoreItemsDto,
+  ImportItemIdsDto,
+} from '@/modules/library/catalog/dto/items.dto';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
@@ -41,10 +48,7 @@ export {
 
 @ApiTags('Library Items')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/library/items',
-  'api/v1/projects/:projectId/library/items',
-])
+@Controller(['api/v1/library/items', 'api/v1/spaces/:spaceId/library/items'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class ItemsController {
   constructor(
@@ -63,11 +67,11 @@ export class ItemsController {
   async listItems(
     @CurrentUser('id') userId: string,
     @Query() query?: ItemsListQuery,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(
-      paramProjectId || queryProjectId || query?.projectId,
+      paramProjectId || queryProjectId || query?.spaceId,
     );
 
     const listOptions = buildGetItemsOptions(query, projectId);
@@ -81,9 +85,9 @@ export class ItemsController {
   @ApiOperation({ summary: 'Get summary item counts' })
   async getCounts(
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
     @Req() req?: RequestWithAccessHint,
-    @Param('projectId') paramProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     return this.queryService.getCounts(
@@ -98,9 +102,9 @@ export class ItemsController {
   @ApiOperation({ summary: 'Import items from user library into project' })
   async importItems(
     @CurrentUser('id') userId: string,
-    @Param('projectId') paramProjectId: string,
+    @Param('spaceId') paramProjectId: string,
     @Body() body: ImportItemIdsDto,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     if (!projectId) {
@@ -130,8 +134,8 @@ export class ItemsController {
   async getItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found in library`);
@@ -150,8 +154,8 @@ export class ItemsController {
   async getItemCollections(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     const item = await this.itemService.getItem(userId, id, projectId);
@@ -179,8 +183,8 @@ export class ItemsController {
   async getMetadataSources(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found in library`);
@@ -194,14 +198,14 @@ export class ItemsController {
   @ApiOperation({ summary: 'Create a new library item' })
   async createItem(
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId: string | undefined,
+    @Query('spaceId') queryProjectId: string | undefined,
     @Body() body: CreateItemDto,
     @Headers('x-idempotency-key') idempotencyKey?: string,
     @Headers('x-correlation-id') correlationId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(
-      paramProjectId || queryProjectId || body?.projectId,
+      paramProjectId || queryProjectId || body?.spaceId,
     );
     return this.itemService.createItem(
       userId,
@@ -224,8 +228,8 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateItemDto | undefined,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
 
@@ -263,8 +267,8 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateItemDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     return this.updateItem(
       id,
@@ -281,8 +285,8 @@ export class ItemsController {
   @ApiOperation({ summary: 'Permanently empty all trashed items in scope' })
   async emptyTrash(
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     return this.itemService.emptyTrash(userId, projectId);
@@ -295,8 +299,8 @@ export class ItemsController {
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch?: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     if (!isUUID(id)) {
       throw new NotFoundException('Invalid item ID format');
@@ -330,8 +334,8 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     if (!isUUID(id)) {
       throw new NotFoundException(`Trashed item ${id} not found`);
@@ -365,8 +369,8 @@ export class ItemsController {
   async purgeItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found`);
@@ -384,8 +388,8 @@ export class ItemsController {
   async bulkPurgeItems(
     @CurrentUser('id') userId: string,
     @Body() body: BulkPurgeItemsDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     return this.itemService.bulkPurge(userId, body?.itemIds || [], projectId);
@@ -397,8 +401,8 @@ export class ItemsController {
   async bulkTrashItems(
     @CurrentUser('id') userId: string,
     @Body() body: BulkTrashItemsDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     return this.itemService.bulkTrash(userId, body?.itemIds || [], projectId);
@@ -412,8 +416,8 @@ export class ItemsController {
   async bulkRestoreItems(
     @CurrentUser('id') userId: string,
     @Body() body: BulkRestoreItemsDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     return this.itemService.bulkRestore(userId, body?.itemIds || [], projectId);

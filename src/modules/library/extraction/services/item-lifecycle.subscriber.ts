@@ -1,6 +1,10 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { LIBRARY_EVENT_TYPES, DomainEventEnvelope, extractFileIdFromUrl } from '@/modules/library/core';
+import {
+  LIBRARY_EVENT_TYPES,
+  DomainEventEnvelope,
+  extractFileIdFromUrl,
+} from '@/modules/library/core';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
@@ -69,7 +73,10 @@ export class ItemLifecycleSubscriber {
 
     try {
       const candidateFileIdsToDelete = new Set<string>(payloadFilePaths);
-      if (this.storagePort?.deleteFile && this.attachmentsRepository?.findMany) {
+      if (
+        this.storagePort?.deleteFile &&
+        this.attachmentsRepository?.findMany
+      ) {
         const attachments = await this.attachmentsRepository.findMany(
           { itemId },
           { revisions: true },
@@ -145,15 +152,23 @@ export class ItemLifecycleSubscriber {
   async handleItemDeleted(
     event:
       | DomainEventEnvelope
-      | { aggregateId?: string; cascadedInTx?: boolean; payload?: { itemId?: string; cascadedInTx?: boolean } },
+      | {
+          aggregateId?: string;
+          cascadedInTx?: boolean;
+          payload?: { itemId?: string; cascadedInTx?: boolean };
+        },
   ): Promise<void> {
-    const rawPayload = (event as { payload?: { itemId?: string; cascadedInTx?: boolean } } | undefined)?.payload;
-    if ((event as { cascadedInTx?: boolean } | undefined)?.cascadedInTx || rawPayload?.cascadedInTx) {
+    const rawPayload = (
+      event as
+        { payload?: { itemId?: string; cascadedInTx?: boolean } } | undefined
+    )?.payload;
+    if (
+      (event as { cascadedInTx?: boolean } | undefined)?.cascadedInTx ||
+      rawPayload?.cascadedInTx
+    ) {
       return;
     }
-    const itemId =
-      event?.aggregateId ||
-      rawPayload?.itemId;
+    const itemId = event?.aggregateId || rawPayload?.itemId;
     if (!itemId) return;
 
     this.logger.log(
@@ -187,7 +202,11 @@ export class ItemLifecycleSubscriber {
   async handleItemRestored(
     event:
       | DomainEventEnvelope
-      | { aggregateId?: string; cascadedInTx?: boolean; payload?: { itemId?: string; id?: string; cascadedInTx?: boolean } },
+      | {
+          aggregateId?: string;
+          cascadedInTx?: boolean;
+          payload?: { itemId?: string; id?: string; cascadedInTx?: boolean };
+        },
   ): Promise<void> {
     const rawPayload = event && 'payload' in event ? event.payload : undefined;
     if (

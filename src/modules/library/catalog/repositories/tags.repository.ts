@@ -1,7 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { Prisma, TagType } from '@prisma/client';
-import { normalizeProjectScopeId, resolveSpaceId } from '@/modules/library/core';
+import { LibraryTag, Prisma, TagType } from '@prisma/client';
+import {
+  normalizeProjectScopeId,
+  resolveSpaceId,
+} from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import {
   resolveOrCreateTags,
@@ -115,7 +118,7 @@ export class TagsRepository {
       ...(shortcut !== undefined ? { shortcut } : {}),
     };
 
-    let createdTag: Prisma.LibraryTagGetPayload<{}>;
+    let createdTag: LibraryTag;
     if (client.libraryTag?.upsert) {
       createdTag = await client.libraryTag.upsert({
         where: { spaceId_normalizedName: { spaceId, normalizedName } },
@@ -144,7 +147,13 @@ export class TagsRepository {
       }
     }
 
-    void syncLibraryTagToSpaceLabel(client, spaceId, userId, name, defaultColor);
+    void syncLibraryTagToSpaceLabel(
+      client,
+      spaceId,
+      userId,
+      name,
+      defaultColor,
+    );
 
     return createdTag;
   }
@@ -252,7 +261,9 @@ export class TagsRepository {
             data: {
               ...(data.color !== undefined ? { color: data.color } : {}),
               ...(data.type !== undefined ? { type: data.type } : {}),
-              ...(data.shortcut !== undefined ? { shortcut: data.shortcut } : {}),
+              ...(data.shortcut !== undefined
+                ? { shortcut: data.shortcut }
+                : {}),
               version: { increment: 1 },
             },
           }),
@@ -626,7 +637,8 @@ export class TagsRepository {
       }
     }
 
-    const newEntries: Array<{ itemId: string; tagId: string; type: TagType }> = [];
+    const newEntries: Array<{ itemId: string; tagId: string; type: TagType }> =
+      [];
     const upgradeTagIds: string[] = [];
 
     for (const [tagId, dupType] of dupTagTypeMap.entries()) {
@@ -645,14 +657,20 @@ export class TagsRepository {
       }
     }
 
-    newEntries.sort((a, b) => (a.tagId < b.tagId ? -1 : a.tagId > b.tagId ? 1 : 0));
+    newEntries.sort((a, b) =>
+      a.tagId < b.tagId ? -1 : a.tagId > b.tagId ? 1 : 0,
+    );
     upgradeTagIds.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
     await Promise.all([
       newEntries.length > 0
-        ? client.libraryItemTag.createMany({ data: newEntries, skipDuplicates: true })
+        ? client.libraryItemTag.createMany({
+            data: newEntries,
+            skipDuplicates: true,
+          })
         : Promise.resolve(),
-      upgradeTagIds.length > 0 && typeof client.libraryItemTag.updateMany === 'function'
+      upgradeTagIds.length > 0 &&
+      typeof client.libraryItemTag.updateMany === 'function'
         ? client.libraryItemTag.updateMany({
             where: {
               itemId: targetItemId,
@@ -687,7 +705,9 @@ export class TagsRepository {
       where: { tagId: sourceTag.id, item: { deletedAt: null } },
       select: { itemId: true, type: true },
     });
-    const affectedItemIds = Array.from(new Set(sourceLinks.map((l) => l.itemId)));
+    const affectedItemIds = Array.from(
+      new Set(sourceLinks.map((l) => l.itemId)),
+    );
 
     const firstTag = await this.update(
       userId,
@@ -725,7 +745,8 @@ export class TagsRepository {
     return {
       tags: resultTags,
       affectedItemIds,
-      mergedFromTagId: (firstTag as { _mergedFromTagId?: string } | null)?._mergedFromTagId,
+      mergedFromTagId: (firstTag as { _mergedFromTagId?: string } | null)
+        ?._mergedFromTagId,
     };
   }
 }

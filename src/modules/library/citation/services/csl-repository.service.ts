@@ -164,7 +164,8 @@ export class CslRepositoryService implements OnModuleInit {
   ): Promise<string | null> {
     if (depth > 2) return null;
     const rawNormalized = styleId.trim().toLowerCase();
-    const normalized = REMOTE_STYLE_SLUG_ALIASES[rawNormalized] ?? rawNormalized;
+    const normalized =
+      REMOTE_STYLE_SLUG_ALIASES[rawNormalized] ?? rawNormalized;
     if (!/^[a-z0-9][a-z0-9._-]{0,100}$/.test(normalized)) {
       return null;
     }
@@ -173,20 +174,37 @@ export class CslRepositoryService implements OnModuleInit {
     // 1. Built-in bundled high-performance styles
     if (normalized === 'ieee') return IEEE_CSL;
     if (normalized === 'nature') return NATURE_CSL;
-    if (normalized === 'chicago' || normalized === 'chicago-author-date') return CHICAGO_CSL;
-    if (normalized === 'mla' || normalized === 'mla-9th' || normalized === 'modern-language-association') return MLA_CSL;
+    if (normalized === 'chicago' || normalized === 'chicago-author-date')
+      return CHICAGO_CSL;
+    if (
+      normalized === 'mla' ||
+      normalized === 'mla-9th' ||
+      normalized === 'modern-language-association'
+    )
+      return MLA_CSL;
 
     // 2. Cache & DB lookup (scoped custom style lookup first, then global official cache)
     const scopeKey = scopeId?.trim() || 'global';
     if (this.redisCache) {
-      const scoped = await this.redisCache.get<string>(LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey));
-      if (scoped && typeof scoped === 'string' && scoped.includes('<style')) return scoped;
+      const scoped = await this.redisCache.get<string>(
+        LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey),
+      );
+      if (scoped && typeof scoped === 'string' && scoped.includes('<style'))
+        return scoped;
       if (!scopeId) {
-        const legacyCustom = await this.redisCache.get<string>(LIBRARY_REDIS_KEYS.cslStyleXml(normalized, 'custom'));
-        if (legacyCustom && typeof legacyCustom === 'string' && legacyCustom.includes('<style')) return legacyCustom;
+        const legacyCustom = await this.redisCache.get<string>(
+          LIBRARY_REDIS_KEYS.cslStyleXml(normalized, 'custom'),
+        );
+        if (
+          legacyCustom &&
+          typeof legacyCustom === 'string' &&
+          legacyCustom.includes('<style')
+        )
+          return legacyCustom;
       }
       const cached = await this.redisCache.get<string>(cacheKey);
-      if (cached && typeof cached === 'string' && cached.includes('<style')) return cached;
+      if (cached && typeof cached === 'string' && cached.includes('<style'))
+        return cached;
     }
 
     if (this.exportsRepo) {
@@ -201,7 +219,11 @@ export class CslRepositoryService implements OnModuleInit {
             : null);
         if (dbRow?.xmlContent && dbRow.xmlContent.includes('<style')) {
           if (this.redisCache) {
-            await this.redisCache.set(LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey), dbRow.xmlContent, 86400 * 365);
+            await this.redisCache.set(
+              LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey),
+              dbRow.xmlContent,
+              86400 * 365,
+            );
           }
           return dbRow.xmlContent;
         }
@@ -210,64 +232,97 @@ export class CslRepositoryService implements OnModuleInit {
       }
     }
 
-    const resolveOrValidateFetchedXml = async (xml: string): Promise<string | null> => {
+    const resolveOrValidateFetchedXml = async (
+      xml: string,
+    ): Promise<string | null> => {
       if (this.isValidCslXml(xml)) {
-        if (this.redisCache) await this.redisCache.set(cacheKey, xml, 86400 * 30);
+        if (this.redisCache)
+          await this.redisCache.set(cacheKey, xml, 86400 * 30);
         return xml;
       }
       const parentSlug = this.extractDependentParentSlug(xml);
       if (parentSlug && parentSlug !== normalized) {
-        const parentXml = await this.fetchCslXml(parentSlug, scopeId, depth + 1);
+        const parentXml = await this.fetchCslXml(
+          parentSlug,
+          scopeId,
+          depth + 1,
+        );
         if (parentXml && this.isValidCslXml(parentXml)) {
-          if (this.redisCache) await this.redisCache.set(cacheKey, parentXml, 86400 * 30);
+          if (this.redisCache)
+            await this.redisCache.set(cacheKey, parentXml, 86400 * 30);
           return parentXml;
         }
       }
       return null;
     };
 
-    return this.singleFlight.execute(`xml:${scopeKey}:${normalized}:${depth}`, async () => {
-      // 3. Remote Fetch from Zotero Style Repository
-      try {
-        const zoteroUrl = `${CslRepositoryService.ZOTERO_STYLE_XML_BASE}${encodeURIComponent(normalized)}`;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 6000);
-        const headers = { Accept: 'application/vnd.citationstyles.style+xml, application/xml, text/xml' };
-        const res = this.httpClient
-          ? (await this.httpClient.request(zoteroUrl, { headers, signal: controller.signal, timeoutMs: 6000 })).response
-          : await fetch(zoteroUrl, { headers, signal: controller.signal });
-        clearTimeout(timeout);
-        if (res.ok) {
-          const resolved = await resolveOrValidateFetchedXml(await res.text());
-          if (resolved) return resolved;
-        } else {
-          await res.body?.cancel().catch(() => {});
+    return this.singleFlight.execute(
+      `xml:${scopeKey}:${normalized}:${depth}`,
+      async () => {
+        // 3. Remote Fetch from Zotero Style Repository
+        try {
+          const zoteroUrl = `${CslRepositoryService.ZOTERO_STYLE_XML_BASE}${encodeURIComponent(normalized)}`;
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 6000);
+          const headers = {
+            Accept:
+              'application/vnd.citationstyles.style+xml, application/xml, text/xml',
+          };
+          const res = this.httpClient
+            ? (
+                await this.httpClient.request(zoteroUrl, {
+                  headers,
+                  signal: controller.signal,
+                  timeoutMs: 6000,
+                })
+              ).response
+            : await fetch(zoteroUrl, { headers, signal: controller.signal });
+          clearTimeout(timeout);
+          if (res.ok) {
+            const resolved = await resolveOrValidateFetchedXml(
+              await res.text(),
+            );
+            if (resolved) return resolved;
+          } else {
+            await res.body?.cancel().catch(() => {});
+          }
+        } catch (err: unknown) {
+          this.logger.debug(
+            `Zotero style fetch for "${normalized}" failed: ${err instanceof Error ? err.message : String(err)}. Trying GitHub raw...`,
+          );
         }
-      } catch (err: unknown) {
-        this.logger.debug(`Zotero style fetch for "${normalized}" failed: ${err instanceof Error ? err.message : String(err)}. Trying GitHub raw...`);
-      }
 
-      // 4. Remote Fetch Fallback from GitHub CSL Repository
-      try {
-        const githubUrl = `${CslRepositoryService.GITHUB_RAW_CSL_BASE}${encodeURIComponent(normalized)}.csl`;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 6000);
-        const res = this.httpClient
-          ? (await this.httpClient.request(githubUrl, { signal: controller.signal, timeoutMs: 6000 })).response
-          : await fetch(githubUrl, { signal: controller.signal });
-        clearTimeout(timeout);
-        if (res.ok) {
-          const resolved = await resolveOrValidateFetchedXml(await res.text());
-          if (resolved) return resolved;
-        } else {
-          await res.body?.cancel().catch(() => {});
+        // 4. Remote Fetch Fallback from GitHub CSL Repository
+        try {
+          const githubUrl = `${CslRepositoryService.GITHUB_RAW_CSL_BASE}${encodeURIComponent(normalized)}.csl`;
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 6000);
+          const res = this.httpClient
+            ? (
+                await this.httpClient.request(githubUrl, {
+                  signal: controller.signal,
+                  timeoutMs: 6000,
+                })
+              ).response
+            : await fetch(githubUrl, { signal: controller.signal });
+          clearTimeout(timeout);
+          if (res.ok) {
+            const resolved = await resolveOrValidateFetchedXml(
+              await res.text(),
+            );
+            if (resolved) return resolved;
+          } else {
+            await res.body?.cancel().catch(() => {});
+          }
+        } catch (err: unknown) {
+          this.logger.warn(
+            `GitHub CSL fetch for "${normalized}" failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
-      } catch (err: unknown) {
-        this.logger.warn(`GitHub CSL fetch for "${normalized}" failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
 
-      return null;
-    });
+        return null;
+      },
+    );
   }
 
   /**
@@ -293,26 +348,72 @@ export class CslRepositoryService implements OnModuleInit {
 
     const titleMatch = cslXml.match(/<title>([^<]+)<\/title>/i);
     const idMatch = cslXml.match(/<id>([^<]+)<\/id>/i);
-    const rawTitle = customTitle || titleMatch?.[1]?.trim() || 'Custom CSL Style';
-    const title = rawTitle.replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, 200) || 'Custom CSL Style';
+    const rawTitle =
+      customTitle || titleMatch?.[1]?.trim() || 'Custom CSL Style';
+    const title =
+      rawTitle
+        .replace(/<[^>]*>/g, '')
+        .replace(/[<>]/g, '')
+        .trim()
+        .slice(0, 200) || 'Custom CSL Style';
     const rawId = idMatch?.[1]?.trim() || `custom-${Date.now()}`;
-    const slug = rawId.replace(/^https?:\/\/www\.zotero\.org\/styles\//i, '').replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+    const slug = rawId
+      .replace(/^https?:\/\/www\.zotero\.org\/styles\//i, '')
+      .replace(/[^a-zA-Z0-9_-]/g, '-')
+      .toLowerCase();
 
     const RESERVED_OFFICIAL_STYLES = new Set([
-      'ieee', 'nature', 'science', 'chicago', 'chicago-author-date', 'mla', 'mla-9th',
-      'apa', 'apa-7th', 'vancouver', 'harvard', 'harvard1', 'harvard-cite-them-right',
-      'bibtex', 'ris', 'cell', 'the-lancet', 'plos', 'plos-one', 'pnas', 'frontiers',
-      'springer', 'elsevier', 'tcvn', 'tcvn-author-date', 'tcvn-numeric',
-      'bo-giao-duc', 'vietnam', 'auto', 'auto-numeric',
+      'ieee',
+      'nature',
+      'science',
+      'chicago',
+      'chicago-author-date',
+      'mla',
+      'mla-9th',
+      'apa',
+      'apa-7th',
+      'vancouver',
+      'harvard',
+      'harvard1',
+      'harvard-cite-them-right',
+      'bibtex',
+      'ris',
+      'cell',
+      'the-lancet',
+      'plos',
+      'plos-one',
+      'pnas',
+      'frontiers',
+      'springer',
+      'elsevier',
+      'tcvn',
+      'tcvn-author-date',
+      'tcvn-numeric',
+      'bo-giao-duc',
+      'vietnam',
+      'auto',
+      'auto-numeric',
     ]);
     const normalizedEngineId = normalizeEngineStyleId(slug);
-    if (RESERVED_OFFICIAL_STYLES.has(slug) || RESERVED_OFFICIAL_STYLES.has(normalizedEngineId)) {
-      throw new ExtractionProcessException(`Cannot overwrite official built-in or standard CSL style ID: '${slug}'`);
+    if (
+      RESERVED_OFFICIAL_STYLES.has(slug) ||
+      RESERVED_OFFICIAL_STYLES.has(normalizedEngineId)
+    ) {
+      throw new ExtractionProcessException(
+        `Cannot overwrite official built-in or standard CSL style ID: '${slug}'`,
+      );
     }
 
     const formatMatch = cslXml.match(/citation-format="([^"]+)"/i);
     const category = parseCslCategory(formatMatch?.[1]);
-    const meta: CslStyleMetadata = { id: slug, name: slug, title, category, isCustom: true, updated: new Date().toISOString() };
+    const meta: CslStyleMetadata = {
+      id: slug,
+      name: slug,
+      title,
+      category,
+      isCustom: true,
+      updated: new Date().toISOString(),
+    };
     const scopeKey = scopeId?.trim() || 'global';
     const sha256 = createHash('sha256').update(cslXml).digest('hex');
 
@@ -325,10 +426,14 @@ export class CslRepositoryService implements OnModuleInit {
           xmlContent: cslXml,
           sha256,
           userId: actorUserId,
-          projectId: scopeKey.startsWith('proj:') ? scopeKey.slice(5) : undefined,
+          projectId: scopeKey.startsWith('proj:')
+            ? scopeKey.slice(5)
+            : undefined,
         });
       } catch (dbErr: unknown) {
-        this.logger.warn(`Could not persist custom CSL style "${slug}" to DB: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+        this.logger.warn(
+          `Could not persist custom CSL style "${slug}" to DB: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`,
+        );
       }
     }
 
@@ -339,7 +444,10 @@ export class CslRepositoryService implements OnModuleInit {
         this.redisCache.set(xmlKey, cslXml, 86400 * 365),
         this.getCustomStyles(scopeKey),
       ]);
-      const updated = [meta, ...existing.filter((s) => s.id !== slug)].slice(0, CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE);
+      const updated = [meta, ...existing.filter((s) => s.id !== slug)].slice(
+        0,
+        CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE,
+      );
       await this.redisCache.set(listKey, updated, 86400 * 365);
     }
 
@@ -356,7 +464,10 @@ export class CslRepositoryService implements OnModuleInit {
         const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey);
         const styles = await this.redisCache.get<CslStyleMetadata[]>(listKey);
         if (Array.isArray(styles) && styles.length > 0) {
-          return styles.slice(0, CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE);
+          return styles.slice(
+            0,
+            CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE,
+          );
         }
       } catch {
         // Fallback to DB
@@ -364,7 +475,10 @@ export class CslRepositoryService implements OnModuleInit {
     }
     if (this.exportsRepo) {
       try {
-        const rows = await this.exportsRepo.findCustomStylesByScope(scopeKey, CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE);
+        const rows = await this.exportsRepo.findCustomStylesByScope(
+          scopeKey,
+          CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE,
+        );
         const mapped: CslStyleMetadata[] = rows.map((r) => {
           const formatMatch =
             typeof r.xmlContent === 'string'
@@ -380,7 +494,11 @@ export class CslRepositoryService implements OnModuleInit {
           };
         });
         if (mapped.length > 0 && this.redisCache) {
-          await this.redisCache.set(LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey), mapped, 86400 * 365);
+          await this.redisCache.set(
+            LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey),
+            mapped,
+            86400 * 365,
+          );
         }
         return mapped;
       } catch {
@@ -587,7 +705,9 @@ interface CitationJsPlugins {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { plugins } = require('@citation-js/core') as { plugins: CitationJsPlugins };
+const { plugins } = require('@citation-js/core') as {
+  plugins: CitationJsPlugins;
+};
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 require('@citation-js/plugin-csl');
 
@@ -596,8 +716,18 @@ export class CslLocaleLoaderService {
   private readonly logger = new Logger(CslLocaleLoaderService.name);
   private templatesInitialized = false;
   private readonly staticTemplateIds = new Set<string>([
-    'apa', 'vancouver', 'harvard1', 'ieee', 'nature', 'chicago',
-    'chicago-author-date', 'mla', 'mla-9th', 'tcvn', 'tcvn-author-date', 'tcvn-numeric',
+    'apa',
+    'vancouver',
+    'harvard1',
+    'ieee',
+    'nature',
+    'chicago',
+    'chicago-author-date',
+    'mla',
+    'mla-9th',
+    'tcvn',
+    'tcvn-author-date',
+    'tcvn-numeric',
   ]);
   private readonly dynamicTemplateIds = new Set<string>();
   private readonly templateDigestMap = new Map<string, string>();
@@ -612,7 +742,10 @@ export class CslLocaleLoaderService {
     return this.templateDigestMap.get(scopedStyleId) || '';
   }
 
-  private evictTemplateFromStore(templates: CitationJsTemplateStore, id: string): void {
+  private evictTemplateFromStore(
+    templates: CitationJsTemplateStore,
+    id: string,
+  ): void {
     if (typeof templates.remove === 'function') {
       templates.remove(id);
     } else if (typeof templates.delete === 'function') {
@@ -656,7 +789,10 @@ export class CslLocaleLoaderService {
 
   public getScopedStyleId(styleId: string, scopeId?: string): string {
     const normalized = this.normalizeStyle(styleId);
-    if (this.staticTemplateIds.has(normalized) || BUILTIN_SPECIAL_STYLES.has(normalized)) {
+    if (
+      this.staticTemplateIds.has(normalized) ||
+      BUILTIN_SPECIAL_STYLES.has(normalized)
+    ) {
       return normalized;
     }
     const scopeKey = scopeId?.trim() || 'global';
@@ -677,10 +813,18 @@ export class CslLocaleLoaderService {
     }
   }
 
-  public async ensureTemplate(styleId: string, scopeId?: string, rawXml?: string): Promise<boolean> {
+  public async ensureTemplate(
+    styleId: string,
+    scopeId?: string,
+    rawXml?: string,
+  ): Promise<boolean> {
     this.initTemplates();
     const normalized = this.normalizeStyle(styleId);
-    if (BUILTIN_SPECIAL_STYLES.has(normalized) || this.staticTemplateIds.has(normalized)) return true;
+    if (
+      BUILTIN_SPECIAL_STYLES.has(normalized) ||
+      this.staticTemplateIds.has(normalized)
+    )
+      return true;
     const scopedId = this.getScopedStyleId(normalized, scopeId);
     try {
       const csl = plugins.config.get('@csl');
@@ -689,7 +833,11 @@ export class CslLocaleLoaderService {
         this.dynamicTemplateIds.add(scopedId);
         return true;
       }
-      const xml = rawXml || (this.cslRepo ? await this.cslRepo.fetchCslXml(normalized, scopeId) : null);
+      const xml =
+        rawXml ||
+        (this.cslRepo
+          ? await this.cslRepo.fetchCslXml(normalized, scopeId)
+          : null);
       if (!xml) return false;
       if (csl?.templates) {
         if (this.dynamicTemplateIds.size >= MAX_DYNAMIC_CSL_STYLES) {
@@ -705,12 +853,16 @@ export class CslLocaleLoaderService {
           scopedId,
           createHash('sha256').update(xml).digest('hex').slice(0, 12),
         );
-        this.logger.log(`Dynamically registered on-demand scoped CSL template: "${scopedId}"`);
+        this.logger.log(
+          `Dynamically registered on-demand scoped CSL template: "${scopedId}"`,
+        );
         return true;
       }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Could not dynamically load CSL template for "${scopedId}": ${errMsg}`);
+      this.logger.warn(
+        `Could not dynamically load CSL template for "${scopedId}": ${errMsg}`,
+      );
     }
     return false;
   }

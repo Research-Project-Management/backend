@@ -104,7 +104,10 @@ export class RisParser {
 
       const rawRecordBlocks = this.splitRawRecordBlocks(content);
 
-      if (rawRecordBlocks.length > 1 && data.length !== rawRecordBlocks.length) {
+      if (
+        rawRecordBlocks.length > 1 &&
+        data.length !== rawRecordBlocks.length
+      ) {
         // citation-js either dropped or merged records. Parse each block independently
         // so every record gets its correct citation-js Csl data + raw block pair.
         const parsedItems: RisItem[] = [];
@@ -277,8 +280,7 @@ export class RisParser {
       const given = e.given?.trim() || '';
       const literal = e.literal?.trim() || '';
       const fullName =
-        literal ||
-        (family && given ? `${given} ${family}` : family || given);
+        literal || (family && given ? `${given} ${family}` : family || given);
 
       if (fullName) {
         registerEditor(
@@ -294,11 +296,7 @@ export class RisParser {
     for (const edStr of rawRec?.rawEditors || []) {
       const cleanEdStr = edStr?.trim();
       if (!cleanEdStr) continue;
-      const parsed = parseCreatorString(
-        cleanEdStr,
-        creators.length,
-        'editor',
-      );
+      const parsed = parseCreatorString(cleanEdStr, creators.length, 'editor');
       registerEditor(
         parsed.firstName || undefined,
         parsed.lastName || undefined,
@@ -312,9 +310,7 @@ export class RisParser {
     if (csl.keyword) {
       if (Array.isArray(csl.keyword)) {
         rawKeywords.push(
-          ...csl.keyword
-            .map((k: string) => String(k).trim())
-            .filter(Boolean),
+          ...csl.keyword.map((k: string) => String(k).trim()).filter(Boolean),
         );
       } else if (typeof csl.keyword === 'string') {
         rawKeywords.push(csl.keyword.trim());
@@ -366,8 +362,7 @@ export class RisParser {
       itemType = rawRisType;
     }
 
-    const consolidatedNotes: Array<{ content: string; source?: string }> =
-      [];
+    const consolidatedNotes: Array<{ content: string; source?: string }> = [];
     const seenNotes = new Set<string>();
     const addNote = (text?: string | null, source: string = 'ris') => {
       if (!text || typeof text !== 'string') return;
@@ -382,13 +377,11 @@ export class RisParser {
     }
     const rawNote = csl.note || csl.annote || csl.comment;
     addNote(typeof rawNote === 'string' ? rawNote : undefined, 'ris');
-    const notes =
-      consolidatedNotes.length > 0 ? consolidatedNotes : undefined;
+    const notes = consolidatedNotes.length > 0 ? consolidatedNotes : undefined;
 
     const sp = rawRec?.startPage;
     const ep = rawRec?.endPage;
-    const combinedRawPages =
-      sp && ep && sp !== ep ? `${sp}-${ep}` : sp || ep;
+    const combinedRawPages = sp && ep && sp !== ep ? `${sp}-${ep}` : sp || ep;
     const cslPages = csl.page ? String(csl.page).trim() : undefined;
     const pages =
       !cslPages || (!cslPages.includes('-') && sp && ep && sp !== ep)
@@ -435,9 +428,8 @@ export class RisParser {
       itemType,
       title: (csl.title || rawRec?.title || 'Untitled Reference').trim(),
       shortTitle:
-        (csl['title-short']
-          ? String(csl['title-short']).trim()
-          : undefined) || rawRec?.shortTitle,
+        (csl['title-short'] ? String(csl['title-short']).trim() : undefined) ||
+        rawRec?.shortTitle,
       authors: rawAuthors,
       creators,
       editors: rawEditors.length > 0 ? rawEditors : undefined,
@@ -453,8 +445,7 @@ export class RisParser {
       ...typeSpecific,
       place: csl['publisher-place'] || rawRec?.place || undefined,
       volume: csl.volume ? String(csl.volume) : rawRec?.volume,
-      issue:
-        itemType === 'report' || itemType === 'patent' ? undefined : rawIs,
+      issue: itemType === 'report' || itemType === 'patent' ? undefined : rawIs,
       pages,
       doi,
       pmid: rawRec?.pmid,

@@ -168,12 +168,13 @@ export class AnnotationsService {
         );
         resolvedItemId = attachment?.itemId;
         const itemProjectId =
-          (attachment?.item as { projectId?: string | null } | undefined)?.projectId ??
-          (attachment?.item?.spaceId && attachment.item.spaceId !== attachment.item.createdById
+          (attachment?.item as { projectId?: string | null } | undefined)
+            ?.projectId ??
+          (attachment?.item?.spaceId &&
+          attachment.item.spaceId !== attachment.item.createdById
             ? attachment.item.spaceId
             : undefined);
-        const effectiveProjectId =
-          projectId || itemProjectId || undefined;
+        const effectiveProjectId = projectId || itemProjectId || undefined;
         resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
 
@@ -256,12 +257,13 @@ export class AnnotationsService {
         );
         resolvedItemId = attachment?.itemId;
         const itemProjectId =
-          (attachment?.item as { projectId?: string | null } | undefined)?.projectId ??
-          (attachment?.item?.spaceId && attachment.item.spaceId !== attachment.item.createdById
+          (attachment?.item as { projectId?: string | null } | undefined)
+            ?.projectId ??
+          (attachment?.item?.spaceId &&
+          attachment.item.spaceId !== attachment.item.createdById
             ? attachment.item.spaceId
             : undefined);
-        const effectiveProjectId =
-          projectId || itemProjectId || undefined;
+        const effectiveProjectId = projectId || itemProjectId || undefined;
         resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
 
@@ -355,12 +357,13 @@ export class AnnotationsService {
         );
         resolvedItemId = attachment?.itemId;
         const itemProjectId =
-          (attachment?.item as { projectId?: string | null } | undefined)?.projectId ??
-          (attachment?.item?.spaceId && attachment.item.spaceId !== attachment.item.createdById
+          (attachment?.item as { projectId?: string | null } | undefined)
+            ?.projectId ??
+          (attachment?.item?.spaceId &&
+          attachment.item.spaceId !== attachment.item.createdById
             ? attachment.item.spaceId
             : undefined);
-        const effectiveProjectId =
-          projectId || itemProjectId || undefined;
+        const effectiveProjectId = projectId || itemProjectId || undefined;
         resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
 
@@ -463,12 +466,13 @@ export class AnnotationsService {
         );
         resolvedItemId = attachment?.itemId;
         const itemProjectId =
-          (attachment?.item as { projectId?: string | null } | undefined)?.projectId ??
-          (attachment?.item?.spaceId && attachment.item.spaceId !== attachment.item.createdById
+          (attachment?.item as { projectId?: string | null } | undefined)
+            ?.projectId ??
+          (attachment?.item?.spaceId &&
+          attachment.item.spaceId !== attachment.item.createdById
             ? attachment.item.spaceId
             : undefined);
-        const effectiveProjectId =
-          projectId || itemProjectId || undefined;
+        const effectiveProjectId = projectId || itemProjectId || undefined;
         resolvedProjectId = effectiveProjectId;
         const eventScope = { userId, projectId: effectiveProjectId };
 

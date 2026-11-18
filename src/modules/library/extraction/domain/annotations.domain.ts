@@ -73,9 +73,7 @@ export function extractTopLeftAnchor(
 /**
  * Normalizes a single rect item (4-number tuple or object) into a canonical NormalizedRectBox.
  */
-function normalizeSingleRectBox(
-  item: unknown,
-): NormalizedRectBox | null {
+function normalizeSingleRectBox(item: unknown): NormalizedRectBox | null {
   if (
     Array.isArray(item) &&
     item.length === 4 &&
@@ -129,7 +127,10 @@ function normalizeSingleRectBox(
       if (Array.isArray(r.paths)) {
         extra.paths = r.paths as Array<number[][] | string>;
       }
-      if (typeof r.imageDataUrl === 'string' && r.imageDataUrl.length <= 500_000) {
+      if (
+        typeof r.imageDataUrl === 'string' &&
+        r.imageDataUrl.length <= 500_000
+      ) {
         extra.imageDataUrl = r.imageDataUrl;
       }
       return {
@@ -149,9 +150,7 @@ function normalizeSingleRectBox(
 /**
  * Normalizes arbitrary rectCoords JSON into an array of NormalizedRectBox objects.
  */
-export function normalizeRectCoordsToBoxes(
-  rc: unknown,
-): NormalizedRectBox[] {
+export function normalizeRectCoordsToBoxes(rc: unknown): NormalizedRectBox[] {
   const rects: NormalizedRectBox[] = [];
   if (Array.isArray(rc)) {
     if (rc.length === 4 && rc.every((n) => typeof n === 'number')) {
@@ -431,8 +430,14 @@ export class AnnotationNormalizer {
 
   normalizePageLabel(pageLabel?: string | null): string {
     if (!pageLabel || typeof pageLabel !== 'string') return '';
-    // eslint-disable-next-line no-control-regex
-    return pageLabel.replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, 64);
+
+    return (
+      pageLabel
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\x00-\x1F\x7F]/g, '')
+        .trim()
+        .slice(0, 64)
+    );
   }
 
   /**

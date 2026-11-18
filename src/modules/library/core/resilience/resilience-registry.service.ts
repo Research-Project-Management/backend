@@ -100,8 +100,12 @@ export class ResilienceRegistryService {
       get: (_target, prop) => {
         const snapshot = buildSnapshot();
         if (prop === 'size') return snapshot.size;
-        if (prop === 'get') return (key: string) => this.breakers.get(this.normalizeKey(`${prefix}${key}`));
-        if (prop === 'has') return (key: string) => this.breakers.has(this.normalizeKey(`${prefix}${key}`));
+        if (prop === 'get')
+          return (key: string) =>
+            this.breakers.get(this.normalizeKey(`${prefix}${key}`));
+        if (prop === 'has')
+          return (key: string) =>
+            this.breakers.has(this.normalizeKey(`${prefix}${key}`));
         const val = Reflect.get(snapshot, prop, snapshot);
         return typeof val === 'function' ? val.bind(snapshot) : val;
       },

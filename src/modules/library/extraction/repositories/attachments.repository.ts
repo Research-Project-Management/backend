@@ -11,14 +11,18 @@ export class AttachmentsRepository {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Optional() @Inject(STORAGE_PORT) private readonly storagePort?: IStoragePort,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
   ) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
   }
 
-  async findUnique<I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude>(
+  async findUnique<
+    I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude,
+  >(
     id: string,
     includeOptions?: Prisma.Subset<I, Prisma.AttachmentInclude>,
     tx?: Prisma.TransactionClient,
@@ -27,18 +31,25 @@ export class AttachmentsRepository {
     return client.attachment.findUnique({
       where: { id },
       include: includeOptions,
-    }) as unknown as Promise<Prisma.AttachmentGetPayload<{ include: I }> | null>;
+    }) as unknown as Promise<Prisma.AttachmentGetPayload<{
+      include: I;
+    }> | null>;
   }
 
-  async findFirst<I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude>(
+  async findFirst<
+    I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude,
+  >(
     where: Prisma.AttachmentWhereInput,
     include?: Prisma.Subset<I, Prisma.AttachmentInclude>,
     tx?: Prisma.TransactionClient,
   ): Promise<Prisma.AttachmentGetPayload<{ include: I }> | null> {
     const client = this.getClient(tx);
-    return client.attachment.findFirst({ where, include }) as unknown as Promise<
-      Prisma.AttachmentGetPayload<{ include: I }> | null
-    >;
+    return client.attachment.findFirst({
+      where,
+      include,
+    }) as unknown as Promise<Prisma.AttachmentGetPayload<{
+      include: I;
+    }> | null>;
   }
 
   async findManyByItemId(itemId: string, tx?: Prisma.TransactionClient) {
@@ -49,9 +60,14 @@ export class AttachmentsRepository {
     });
   }
 
-  async syncItemAttachmentCounts(itemId: string, tx?: Prisma.TransactionClient): Promise<void> {
+  async syncItemAttachmentCounts(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
     if (!itemId) return;
-    await syncItemDenormalizedCountsInClient(this.getClient(tx), itemId, { attachments: true });
+    await syncItemDenormalizedCountsInClient(this.getClient(tx), itemId, {
+      attachments: true,
+    });
   }
 
   async create<I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude>(
@@ -62,47 +78,86 @@ export class AttachmentsRepository {
     const client = this.getClient(tx);
     const sanitizedData = { ...data } as Record<string, unknown>;
     if (sanitizedData.itemId && typeof sanitizedData.itemId === 'string') {
-      if (!sanitizedData.item) sanitizedData.item = { connect: { id: sanitizedData.itemId } };
+      if (!sanitizedData.item)
+        sanitizedData.item = { connect: { id: sanitizedData.itemId } };
       delete sanitizedData.itemId;
     }
-    const targetItemId = (sanitizedData.item as { connect?: { id?: string } })?.connect?.id;
-    const targetFileId = typeof sanitizedData.fileId === 'string' ? sanitizedData.fileId : undefined;
+    const targetItemId = (sanitizedData.item as { connect?: { id?: string } })
+      ?.connect?.id;
+    const targetFileId =
+      typeof sanitizedData.fileId === 'string'
+        ? sanitizedData.fileId
+        : undefined;
     const isPrimaryPdf =
       sanitizedData.attachmentType === 'primary_pdf' ||
-      (!sanitizedData.attachmentType && sanitizedData.mimeType === 'application/pdf');
+      (!sanitizedData.attachmentType &&
+        sanitizedData.mimeType === 'application/pdf');
 
-    if (targetItemId && targetFileId && client.attachment?.findFirst && client.attachment?.update) {
+    if (
+      targetItemId &&
+      targetFileId &&
+      client.attachment?.findFirst &&
+      client.attachment?.update
+    ) {
       const existingSameFile = await client.attachment.findFirst({
         where: { itemId: targetItemId, fileId: targetFileId, deletedAt: null },
       });
       if (existingSameFile) {
         if (isPrimaryPdf && client.attachment?.updateMany) {
           await client.attachment.updateMany({
-            where: { itemId: targetItemId, id: { not: existingSameFile.id }, attachmentType: 'primary_pdf', deletedAt: null },
+            where: {
+              itemId: targetItemId,
+              id: { not: existingSameFile.id },
+              attachmentType: 'primary_pdf',
+              deletedAt: null,
+            },
             data: { attachmentType: 'supplementary' },
           });
         }
         const updatePayload: Record<string, unknown> = {};
-        for (const strKey of ['filename', 'title', 'url', 'mimeType', 'attachmentType', 'fileHash'] as const) {
-          if (typeof sanitizedData[strKey] === 'string' && sanitizedData[strKey]) {
+        for (const strKey of [
+          'filename',
+          'title',
+          'url',
+          'mimeType',
+          'attachmentType',
+          'fileHash',
+        ] as const) {
+          if (
+            typeof sanitizedData[strKey] === 'string' &&
+            sanitizedData[strKey]
+          ) {
             updatePayload[strKey] = sanitizedData[strKey];
           }
         }
-        if (typeof sanitizedData.size === 'number' || typeof sanitizedData.size === 'bigint') {
+        if (
+          typeof sanitizedData.size === 'number' ||
+          typeof sanitizedData.size === 'bigint'
+        ) {
           updatePayload.size = sanitizedData.size;
         }
-        if (sanitizedData.metadata && typeof sanitizedData.metadata === 'object') {
+        if (
+          sanitizedData.metadata &&
+          typeof sanitizedData.metadata === 'object'
+        ) {
           const existingMeta =
-            existingSameFile.metadata && typeof existingSameFile.metadata === 'object' && !Array.isArray(existingSameFile.metadata)
+            existingSameFile.metadata &&
+            typeof existingSameFile.metadata === 'object' &&
+            !Array.isArray(existingSameFile.metadata)
               ? (existingSameFile.metadata as Record<string, unknown>)
               : {};
-          updatePayload.metadata = { ...existingMeta, ...(sanitizedData.metadata as Record<string, unknown>) };
+          updatePayload.metadata = {
+            ...existingMeta,
+            ...(sanitizedData.metadata as Record<string, unknown>),
+          };
         }
         const updated = (await client.attachment.update({
           where: { id: existingSameFile.id },
           data: updatePayload,
           include,
-        })) as Prisma.AttachmentGetPayload<{ include: I }> & { itemId?: string };
+        })) as Prisma.AttachmentGetPayload<{ include: I }> & {
+          itemId?: string;
+        };
         await this.syncItemAttachmentCounts(targetItemId, tx);
         return updated;
       }
@@ -110,7 +165,11 @@ export class AttachmentsRepository {
 
     if (targetItemId && isPrimaryPdf && client.attachment?.updateMany) {
       await client.attachment.updateMany({
-        where: { itemId: targetItemId, attachmentType: 'primary_pdf', deletedAt: null },
+        where: {
+          itemId: targetItemId,
+          attachmentType: 'primary_pdf',
+          deletedAt: null,
+        },
         data: { attachmentType: 'supplementary' },
       });
     }
@@ -118,14 +177,20 @@ export class AttachmentsRepository {
       data: sanitizedData as Prisma.AttachmentCreateInput,
       include,
     })) as Prisma.AttachmentGetPayload<{ include: I }> & { itemId?: string };
-    if (created?.itemId) await this.syncItemAttachmentCounts(created.itemId, tx);
+    if (created?.itemId)
+      await this.syncItemAttachmentCounts(created.itemId, tx);
     return created;
   }
 
-  async update(id: string, data: Prisma.AttachmentUpdateInput, tx?: Prisma.TransactionClient) {
+  async update(
+    id: string,
+    data: Prisma.AttachmentUpdateInput,
+    tx?: Prisma.TransactionClient,
+  ) {
     const client = this.getClient(tx);
     const updated = await client.attachment.update({ where: { id }, data });
-    if (updated?.itemId) await this.syncItemAttachmentCounts(updated.itemId, tx);
+    if (updated?.itemId)
+      await this.syncItemAttachmentCounts(updated.itemId, tx);
     return updated;
   }
 
@@ -140,7 +205,8 @@ export class AttachmentsRepository {
     if (itemId && (!existing || !existing.deletedAt)) {
       if (
         (existing?.attachmentType === 'primary_pdf' ||
-          (deleted as { attachmentType?: string } | undefined)?.attachmentType === 'primary_pdf') &&
+          (deleted as { attachmentType?: string } | undefined)
+            ?.attachmentType === 'primary_pdf') &&
         client.attachment?.findFirst &&
         client.attachment?.update
       ) {
@@ -153,7 +219,10 @@ export class AttachmentsRepository {
           orderBy: { createdAt: 'asc' },
           select: { id: true, attachmentType: true },
         });
-        if (nextPrimaryCandidate && nextPrimaryCandidate.attachmentType !== 'primary_pdf') {
+        if (
+          nextPrimaryCandidate &&
+          nextPrimaryCandidate.attachmentType !== 'primary_pdf'
+        ) {
           await client.attachment.update({
             where: { id: nextPrimaryCandidate.id },
             data: { attachmentType: 'primary_pdf' },
@@ -178,7 +247,9 @@ export class AttachmentsRepository {
         ? client.attachment.count({
             where: {
               fileId,
-              ...(excludeAttachmentId ? { id: { not: excludeAttachmentId } } : {}),
+              ...(excludeAttachmentId
+                ? { id: { not: excludeAttachmentId } }
+                : {}),
               ...(excludeItemId ? { itemId: { not: excludeItemId } } : {}),
             },
           })
@@ -187,8 +258,12 @@ export class AttachmentsRepository {
         ? client.attachmentRevision.count({
             where: {
               fileId,
-              ...(excludeAttachmentId ? { attachmentId: { not: excludeAttachmentId } } : {}),
-              ...(excludeItemId ? { attachment: { itemId: { not: excludeItemId } } } : {}),
+              ...(excludeAttachmentId
+                ? { attachmentId: { not: excludeAttachmentId } }
+                : {}),
+              ...(excludeItemId
+                ? { attachment: { itemId: { not: excludeItemId } } }
+                : {}),
             },
           })
         : Promise.resolve(0),
@@ -276,22 +351,46 @@ export class AttachmentsRepository {
 
       if (existingSurvivor && existingSurvivor.id !== att.id) {
         // Consolidate annotations, structure, FTS, and reading states from duplicate attachment onto existingSurvivor
-        const [survivorAnnots, dupAnnots, survivorFtsCount, survivorStruct, dupReadingStates] = await Promise.all([
-          client.annotation?.findMany?.({ where: { attachmentId: existingSurvivor.id, deletedAt: null } }) ?? Promise.resolve([]),
-          client.annotation?.findMany?.({ where: { attachmentId: att.id, deletedAt: null } }) ?? Promise.resolve([]),
-          typeof client.fullTextIndex?.updateMany === 'function' && typeof client.fullTextIndex?.count === 'function'
-            ? client.fullTextIndex.count({ where: { attachmentId: existingSurvivor.id } }).catch(() => 0) : Promise.resolve(0),
-          typeof client.attachmentStructure?.updateMany === 'function' && typeof client.attachmentStructure?.findUnique === 'function'
-            ? client.attachmentStructure.findUnique({ where: { attachmentId: existingSurvivor.id } }).catch(() => null) : Promise.resolve(null),
+        const [
+          survivorAnnots,
+          dupAnnots,
+          survivorFtsCount,
+          survivorStruct,
+          dupReadingStates,
+        ] = await Promise.all([
+          client.annotation?.findMany?.({
+            where: { attachmentId: existingSurvivor.id, deletedAt: null },
+          }) ?? Promise.resolve([]),
+          client.annotation?.findMany?.({
+            where: { attachmentId: att.id, deletedAt: null },
+          }) ?? Promise.resolve([]),
+          typeof client.fullTextIndex?.updateMany === 'function' &&
+          typeof client.fullTextIndex?.count === 'function'
+            ? client.fullTextIndex
+                .count({ where: { attachmentId: existingSurvivor.id } })
+                .catch(() => 0)
+            : Promise.resolve(0),
+          typeof client.attachmentStructure?.updateMany === 'function' &&
+          typeof client.attachmentStructure?.findUnique === 'function'
+            ? client.attachmentStructure
+                .findUnique({ where: { attachmentId: existingSurvivor.id } })
+                .catch(() => null)
+            : Promise.resolve(null),
           typeof client.attachmentReadingState?.findMany === 'function'
-            ? client.attachmentReadingState.findMany({ where: { attachmentId: att.id } }).catch(() => []) : Promise.resolve([]),
+            ? client.attachmentReadingState
+                .findMany({ where: { attachmentId: att.id } })
+                .catch(() => [])
+            : Promise.resolve([]),
         ]);
 
         const duplicateAnnotIdsToDelete: string[] = [];
         const annotIdsToMove: string[] = [];
-        const extractQuote = (a: { quoteText?: string | null; textSelection?: string | null }) =>
-          (a.quoteText ?? a.textSelection ?? '').trim().toLowerCase();
-        const extractComment = (a: { comment?: string | null }) => (a.comment ?? '').trim();
+        const extractQuote = (a: {
+          quoteText?: string | null;
+          textSelection?: string | null;
+        }) => (a.quoteText ?? a.textSelection ?? '').trim().toLowerCase();
+        const extractComment = (a: { comment?: string | null }) =>
+          (a.comment ?? '').trim();
 
         for (const dupAnn of dupAnnots) {
           const dupQuote = extractQuote(dupAnn);
@@ -316,42 +415,64 @@ export class AttachmentsRepository {
 
         const consolidationWrites: Promise<unknown>[] = [];
         if (duplicateAnnotIdsToDelete.length > 0) {
-          consolidationWrites.push(client.annotation.updateMany({
-            where: { id: { in: duplicateAnnotIdsToDelete } },
-            data: { deletedAt: new Date(), version: { increment: 1 } },
-          }));
+          consolidationWrites.push(
+            client.annotation.updateMany({
+              where: { id: { in: duplicateAnnotIdsToDelete } },
+              data: { deletedAt: new Date(), version: { increment: 1 } },
+            }),
+          );
         }
         if (annotIdsToMove.length > 0) {
-          consolidationWrites.push(client.annotation.updateMany({
-            where: { id: { in: annotIdsToMove } },
-            data: { attachmentId: existingSurvivor.id, itemId: targetItemId, version: { increment: 1 } },
-          }));
+          consolidationWrites.push(
+            client.annotation.updateMany({
+              where: { id: { in: annotIdsToMove } },
+              data: {
+                attachmentId: existingSurvivor.id,
+                itemId: targetItemId,
+                version: { increment: 1 },
+              },
+            }),
+          );
         }
         if (client.fullTextIndex?.updateMany && survivorFtsCount === 0) {
           consolidationWrites.push(
-            Promise.resolve(client.fullTextIndex.updateMany({
-              where: { attachmentId: att.id },
-              data: { attachmentId: existingSurvivor.id },
-            })).catch(() => undefined),
+            Promise.resolve(
+              client.fullTextIndex.updateMany({
+                where: { attachmentId: att.id },
+                data: { attachmentId: existingSurvivor.id },
+              }),
+            ).catch(() => undefined),
           );
         }
         if (client.attachmentStructure?.updateMany && !survivorStruct) {
           consolidationWrites.push(
-            Promise.resolve(client.attachmentStructure.updateMany({
-              where: { attachmentId: att.id },
-              data: { attachmentId: existingSurvivor.id },
-            })).catch(() => undefined),
+            Promise.resolve(
+              client.attachmentStructure.updateMany({
+                where: { attachmentId: att.id },
+                data: { attachmentId: existingSurvivor.id },
+              }),
+            ).catch(() => undefined),
           );
         }
-        if (consolidationWrites.length > 0) await Promise.all(consolidationWrites);
+        if (consolidationWrites.length > 0)
+          await Promise.all(consolidationWrites);
 
-        if (typeof client.attachmentReadingState?.findMany === 'function' && Array.isArray(dupReadingStates) && dupReadingStates.length > 0) {
+        if (
+          typeof client.attachmentReadingState?.findMany === 'function' &&
+          Array.isArray(dupReadingStates) &&
+          dupReadingStates.length > 0
+        ) {
           try {
             const existingChecks = await Promise.all(
               dupReadingStates.map((rs) =>
                 typeof client.attachmentReadingState.findUnique === 'function'
                   ? client.attachmentReadingState.findUnique({
-                      where: { userId_attachmentId: { userId: rs.userId, attachmentId: existingSurvivor.id } },
+                      where: {
+                        userId_attachmentId: {
+                          userId: rs.userId,
+                          attachmentId: existingSurvivor.id,
+                        },
+                      },
                     })
                   : Promise.resolve(null),
               ),
@@ -360,12 +481,21 @@ export class AttachmentsRepository {
               dupReadingStates.map(async (rs, idx) => {
                 if (existingChecks[idx]) return;
                 const data = { attachmentId: existingSurvivor.id };
-                if (typeof client.attachmentReadingState.update === 'function') {
+                if (
+                  typeof client.attachmentReadingState.update === 'function'
+                ) {
                   await client.attachmentReadingState.update({
-                    where: { userId_attachmentId: { userId: rs.userId, attachmentId: rs.attachmentId } },
+                    where: {
+                      userId_attachmentId: {
+                        userId: rs.userId,
+                        attachmentId: rs.attachmentId,
+                      },
+                    },
                     data,
                   });
-                } else if (typeof client.attachmentReadingState.updateMany === 'function') {
+                } else if (
+                  typeof client.attachmentReadingState.updateMany === 'function'
+                ) {
                   await client.attachmentReadingState.updateMany({
                     where: { userId: rs.userId, attachmentId: rs.attachmentId },
                     data,
@@ -529,7 +659,11 @@ export class AttachmentsRepository {
         attachmentId,
         client,
       );
-      if (otherRefs > 0 && client.storageFile?.findUnique && client.storageFile?.create) {
+      if (
+        otherRefs > 0 &&
+        client.storageFile?.findUnique &&
+        client.storageFile?.create
+      ) {
         const existingFile = await client.storageFile.findUnique({
           where: { id: fileId },
         });
@@ -609,7 +743,9 @@ export class AttachmentsRepository {
           where: { id: attachmentId },
           data: {
             fileId: cloned.clonedFileId,
-            ...(typeof cloned.nextUrl === 'string' ? { url: cloned.nextUrl } : {}),
+            ...(typeof cloned.nextUrl === 'string'
+              ? { url: cloned.nextUrl }
+              : {}),
           },
         });
       }
@@ -629,7 +765,12 @@ export class AttachmentsRepository {
     fileId?: string,
     tx?: Prisma.TransactionClient,
   ) {
-    return this.applyAttachmentFilenameAndFileRename(attachmentId, newFilename, fileId, this.getClient(tx));
+    return this.applyAttachmentFilenameAndFileRename(
+      attachmentId,
+      newFilename,
+      fileId,
+      this.getClient(tx),
+    );
   }
 
   async batchRename(
@@ -656,14 +797,21 @@ export class AttachmentsRepository {
     else await this.prisma.$transaction(run);
   }
 
-  async deleteManyByItemId(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
+  async deleteManyByItemId(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
     const client = this.getClient(tx);
-    const count = (await client.attachment.deleteMany({ where: { itemId } })).count;
+    const count = (await client.attachment.deleteMany({ where: { itemId } }))
+      .count;
     await this.syncItemAttachmentCounts(itemId, client);
     return count;
   }
 
-  async softDeleteByItemId(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
+  async softDeleteByItemId(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
     const count = (
       await this.getClient(tx).attachment.updateMany({
         where: { itemId, deletedAt: null },
@@ -673,5 +821,4 @@ export class AttachmentsRepository {
     await this.syncItemAttachmentCounts(itemId, tx);
     return count;
   }
-
 }

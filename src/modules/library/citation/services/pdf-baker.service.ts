@@ -196,7 +196,11 @@ export class PdfBakerService {
       const page = pages[targetPageIndex];
       const { width: pageWidth, height: pageHeight } = page.getSize();
       const rgbChannels = this.parseColorRgbArray(ann.color);
-      const highlightColor = rgb(rgbChannels[0], rgbChannels[1], rgbChannels[2]);
+      const highlightColor = rgb(
+        rgbChannels[0],
+        rgbChannels[1],
+        rgbChannels[2],
+      );
       const annotType = (ann.type || 'highlight').toLowerCase();
 
       // 1. Draw Bounding Rectangles / Highlights / Underlines / Strikes / Ink
@@ -245,7 +249,8 @@ export class PdfBakerService {
 
               if (typeof stroke === 'string') {
                 // Parse SVG path string "M rx ry L rx ry ..." where rx, ry are in [0, 100] relative to entry bounding box
-                const cmdRegex = /[ML]\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/gi;
+                const cmdRegex =
+                  /[ML]\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/gi;
                 let match: RegExpExecArray | null;
                 while ((match = cmdRegex.exec(stroke)) !== null) {
                   const pctX = Number(match[1]);
@@ -492,5 +497,4 @@ export class PdfBakerService {
     if (clean === 'orange') return [0.95, 0.6, 0.22];
     return [1, 0.83, 0];
   }
-
 }

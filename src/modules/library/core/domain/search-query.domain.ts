@@ -256,8 +256,6 @@ export class SearchQueryEngine {
       .trim();
   }
 
-
-
   /**
    * Builds Prisma `OR` metadata JSONB + relational `ItemIdentifier` clauses for normalized identifiers.
    */
@@ -424,13 +422,24 @@ export class SearchQueryEngine {
         identifiers: { some: { value: ci(term) } },
       })),
       ...this.buildMetadataIdentifierOrClauses(ids),
-      { metadata: { path: ['isbn'], string_contains: ids.cleanIsbn || trimmed } },
+      {
+        metadata: { path: ['isbn'], string_contains: ids.cleanIsbn || trimmed },
+      },
       ...(ids.cleanIsbn && ids.cleanIsbn !== trimmed
         ? [{ metadata: { path: ['isbn'], string_contains: trimmed } }]
         : []),
-      { metadata: { path: ['issn'], string_contains: ids.cleanIssn || trimmed } },
-      { metadata: { path: ['pmid'], string_contains: ids.cleanPmid || trimmed } },
-      { metadata: { path: ['pmcid'], string_contains: ids.cleanPmcid || trimmed } },
+      {
+        metadata: { path: ['issn'], string_contains: ids.cleanIssn || trimmed },
+      },
+      {
+        metadata: { path: ['pmid'], string_contains: ids.cleanPmid || trimmed },
+      },
+      {
+        metadata: {
+          path: ['pmcid'],
+          string_contains: ids.cleanPmcid || trimmed,
+        },
+      },
       { metadata: { path: ['arxivId'], string_contains: arxivVal || trimmed } },
       { metadata: { path: ['publisher'], string_contains: trimmed } },
       ...(options?.includeExtraMetadata
@@ -522,13 +531,17 @@ export class SearchQueryEngine {
       return true;
     }
     if (ids.cleanIsbn && typeof item.isbn === 'string') {
-      const norm = normalizeIsbn(item.isbn) || item.isbn.replace(/[-\s]/g, '').toUpperCase();
+      const norm =
+        normalizeIsbn(item.isbn) ||
+        item.isbn.replace(/[-\s]/g, '').toUpperCase();
       if (norm.includes(ids.cleanIsbn.toUpperCase())) return true;
     }
     if (
       (ids.cleanArxivBase || ids.cleanArxiv) &&
       typeof item.arxivId === 'string' &&
-      item.arxivId.toLowerCase().includes((ids.cleanArxivBase || ids.cleanArxiv)!.toLowerCase())
+      item.arxivId
+        .toLowerCase()
+        .includes((ids.cleanArxivBase || ids.cleanArxiv)!.toLowerCase())
     ) {
       return true;
     }

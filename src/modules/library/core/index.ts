@@ -44,5 +44,3 @@ export * from './types/bibliographic.types';
 export * from './types/schema.constants';
 export * from './types/schema.types';
 export * from './types/extraction.types';
-
-

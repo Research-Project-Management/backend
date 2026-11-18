@@ -1,12 +1,45 @@
-import { Controller, Get, Post, Patch, Delete, Param, Query, Body, UseGuards, NotFoundException, HttpStatus, HttpCode, Res, Optional, ParseUUIDPipe, Req, BadRequestException, PayloadTooLargeException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Query,
+  Body,
+  UseGuards,
+  NotFoundException,
+  HttpStatus,
+  HttpCode,
+  Res,
+  Optional,
+  ParseUUIDPipe,
+  Req,
+  BadRequestException,
+  PayloadTooLargeException,
+} from '@nestjs/common';
 import { type FastifyReply, FastifyRequest } from 'fastify';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiBody } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectAccessGuard, ProjectRoles, ProjectRole } from '@/modules/project/access';
-import { CreateAttachmentDto, RenameAttachmentDto, BatchRenameAttachmentsDto, CaptureSnapshotDto, BenchmarkPayloadDto } from '@/modules/library/extraction/dto/annotations.dto';
+import {
+  ProjectAccessGuard,
+  ProjectRoles,
+  ProjectRole,
+} from '@/modules/project/access';
+import {
+  CreateAttachmentDto,
+  RenameAttachmentDto,
+  BatchRenameAttachmentsDto,
+  CaptureSnapshotDto,
+  BenchmarkPayloadDto,
+} from '@/modules/library/extraction/dto/annotations.dto';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { WebSnapshotService } from '@/modules/library/extraction/services/web-snapshot.service';
-import { normalizeProjectScopeId, EXTRACTION_FACADE, IExtractionFacade } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  EXTRACTION_FACADE,
+  IExtractionFacade,
+} from '@/modules/library/core';
 import { Inject } from '@nestjs/common';
 
 // Services
@@ -17,7 +50,7 @@ import { Inject } from '@nestjs/common';
  */
 @ApiTags('Library Attachments')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/library', 'api/v1/projects/:projectId/library'])
+@Controller(['api/v1/library', 'api/v1/spaces/:spaceId/library'])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class AttachmentController {
   constructor(
@@ -33,9 +66,9 @@ export class AttachmentController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
     @Res() res: FastifyReply,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const projectId = paramProjectId || queryProjectId;
     const thumbnail = await this.attachmentsService.getThumbnail(
@@ -56,9 +89,9 @@ export class AttachmentController {
   async getItemAttachments(
     @CurrentUser('id') userId: string,
     @Param('itemId', new ParseUUIDPipe()) itemId: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     return this.attachmentsService.getItemAttachments(
       userId,
@@ -74,8 +107,8 @@ export class AttachmentController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
     @Param('itemId', new ParseUUIDPipe({ optional: true })) itemId?: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
   ) {
     return this.attachmentsService.getItemAttachment(
@@ -92,10 +125,11 @@ export class AttachmentController {
   @ApiOperation({ summary: 'Create and associate a new attachment' })
   async createAttachment(
     @CurrentUser('id') userId: string,
-    @Param('itemId', new ParseUUIDPipe({ optional: true })) paramItemId: string | undefined,
+    @Param('itemId', new ParseUUIDPipe({ optional: true }))
+    paramItemId: string | undefined,
     @Body() dto: CreateAttachmentDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
   ) {
     const itemId = paramItemId || dto.itemId;
@@ -122,9 +156,9 @@ export class AttachmentController {
   async reExtractAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     return this.attachmentsService.reExtractAttachment(
       userId,
@@ -139,9 +173,9 @@ export class AttachmentController {
   async deleteAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     return this.attachmentsService.deleteAttachment(
       userId,
@@ -160,10 +194,11 @@ export class AttachmentController {
   async setPrimaryAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
-    @Param('itemId', new ParseUUIDPipe({ optional: true })) paramItemId?: string,
+    @Param('itemId', new ParseUUIDPipe({ optional: true }))
+    paramItemId?: string,
     @Query('itemId') queryItemId?: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
@@ -191,8 +226,8 @@ export class AttachmentController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
     @Body() dto: RenameAttachmentDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
   ) {
     return this.attachmentsService.renameAttachment(
@@ -209,8 +244,8 @@ export class AttachmentController {
   async batchRenameAttachments(
     @CurrentUser('id') userId: string,
     @Body() dto: BatchRenameAttachmentsDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
   ) {
     return this.attachmentsService.batchRenameAttachments(
@@ -229,8 +264,8 @@ export class AttachmentController {
     @CurrentUser('id') userId: string,
     @Param('itemId', new ParseUUIDPipe()) itemId: string,
     @Body() body: CaptureSnapshotDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
   ) {
     if (!this.webSnapshotService) {
@@ -270,7 +305,7 @@ const MAX_BENCHMARK_PDF_BYTES = 50 * 1024 * 1024; // 50 MB
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @Controller([
   'api/v1/library/extraction',
-  'api/v1/projects/:projectId/library/extraction',
+  'api/v1/spaces/:spaceId/library/extraction',
 ])
 export class ExtractionTelemetryController {
   constructor(
@@ -295,7 +330,7 @@ export class ExtractionTelemetryController {
   })
   async getTelemetry(
     @CurrentUser('id') userId?: string,
-    @Param('projectId') projectId?: string,
+    @Param('spaceId') projectId?: string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
     const attachmentStatusCounts = this.attachmentsService
@@ -408,7 +443,10 @@ export class ExtractionTelemetryController {
     }
 
     const start = performance.now();
-    const result = await this.extractionFacade.extractTrustedMetadata(buffer, filename);
+    const result = await this.extractionFacade.extractTrustedMetadata(
+      buffer,
+      filename,
+    );
     const latencyMs = performance.now() - start;
 
     return {

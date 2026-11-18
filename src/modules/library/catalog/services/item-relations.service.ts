@@ -1,11 +1,31 @@
-import { Injectable, Inject, Logger, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { RedisCacheService } from '@/core';
-import { QueryRepository, hydrateOffloadedMetadataPayload } from '@/modules/library/catalog/repositories/query.repository';
+import {
+  QueryRepository,
+  hydrateOffloadedMetadataPayload,
+} from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
-import { LIBRARY_EVENT_TYPES, TransactionHelpers, UNIT_OF_WORK, IUnitOfWork, normalizeProjectScopeId, executeStandardLibraryCacheInvalidation, libraryConfig, SingleFlightCoalescer, sortLockKeys } from '@/modules/library/core';
+import {
+  LIBRARY_EVENT_TYPES,
+  TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  normalizeProjectScopeId,
+  executeStandardLibraryCacheInvalidation,
+  libraryConfig,
+  SingleFlightCoalescer,
+  sortLockKeys,
+} from '@/modules/library/core';
 import { ItemCacheCoordinator } from './schema-validator.service';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
@@ -185,7 +205,11 @@ export class ItemRelationsService {
           ranPostCommitHook = Boolean(helpers?.onAfterCommit);
           await Promise.all(
             resolvedTargets.map(async ({ targetItem, relation }) => {
-              const persisted = await this.command.putRelation(sourceItemId, relation, tx);
+              const persisted = await this.command.putRelation(
+                sourceItemId,
+                relation,
+                tx,
+              );
               if (!persisted?.id) {
                 throw new BadRequestException(
                   `Cannot link item ${sourceItemId} to target item ${relation.targetItemId}: scope mismatch or item unavailable`,
@@ -228,7 +252,10 @@ export class ItemRelationsService {
     } else {
       await Promise.all(
         resolvedTargets.map(async ({ targetItem, relation }) => {
-          const persisted = await this.command.putRelation(sourceItemId, relation);
+          const persisted = await this.command.putRelation(
+            sourceItemId,
+            relation,
+          );
           if (persisted === null) {
             throw new BadRequestException(
               `Cannot link item ${sourceItemId} to target item ${relation.targetItemId}: scope mismatch or item unavailable`,
@@ -415,12 +442,7 @@ export class ItemFulltextService {
       const matchedRecord = trimmedAttachmentId
         ? await this.query.findItemMetadataByProviders(
             id,
-            [
-              'pdf_fulltext',
-              'trusted_extraction',
-              'ocr',
-              'pdf_metadata',
-            ],
+            ['pdf_fulltext', 'trusted_extraction', 'ocr', 'pdf_metadata'],
             undefined,
             {
               userId: item.userId,
@@ -430,12 +452,7 @@ export class ItemFulltextService {
           )
         : await this.query.findItemMetadataByProviders(
             id,
-            [
-              'pdf_fulltext',
-              'trusted_extraction',
-              'ocr',
-              'pdf_metadata',
-            ],
+            ['pdf_fulltext', 'trusted_extraction', 'ocr', 'pdf_metadata'],
             undefined,
             {
               userId: item.userId,

@@ -15,7 +15,10 @@ export interface ISpecification<T = unknown, TWhere = QueryCriteria> {
   not(): ISpecification<T, TWhere>;
 }
 
-export abstract class CompositeSpecification<T = unknown, TWhere = QueryCriteria> implements ISpecification<T, TWhere> {
+export abstract class CompositeSpecification<
+  T = unknown,
+  TWhere = QueryCriteria,
+> implements ISpecification<T, TWhere> {
   abstract toPrismaWhere(): TWhere;
   abstract isSatisfiedBy(item: T): boolean;
 
@@ -31,14 +34,26 @@ export abstract class CompositeSpecification<T = unknown, TWhere = QueryCriteria
 }
 
 function isEmptyWhereObject(where: unknown): boolean {
-  return !where || (typeof where === 'object' && !Array.isArray(where) && Object.keys(where).length === 0);
+  return (
+    !where ||
+    (typeof where === 'object' &&
+      !Array.isArray(where) &&
+      Object.keys(where).length === 0)
+  );
 }
 
-function extractCombinatorClauses(where: unknown, operator: 'AND' | 'OR'): unknown[] {
+function extractCombinatorClauses(
+  where: unknown,
+  operator: 'AND' | 'OR',
+): unknown[] {
   if (where && typeof where === 'object' && !Array.isArray(where)) {
     const rec = where as Record<string, unknown>;
     const keys = Object.keys(rec);
-    if (keys.length === 1 && keys[0] === operator && Array.isArray(rec[operator])) {
+    if (
+      keys.length === 1 &&
+      keys[0] === operator &&
+      Array.isArray(rec[operator])
+    ) {
       return rec[operator] as unknown[];
     }
   }
@@ -167,27 +182,53 @@ export class NotSpecification<
  * (Catalog, Search, Sync, Ingestion, Extraction, Citation) to distinguish
  * collaborative project scope from personal user library scope.
  */
-const PERSONAL_SCOPE_ALIASES = new Set(['user', 'me', 'personal', 'none', 'undefined', 'null']);
+const PERSONAL_SCOPE_ALIASES = new Set([
+  'user',
+  'me',
+  'personal',
+  'none',
+  'undefined',
+  'null',
+]);
 
-export function isProjectScopeId(projectId?: string | null): projectId is string {
+export function isProjectScopeId(
+  projectId?: string | null,
+  userId?: string | null,
+): projectId is string {
   if (!projectId || typeof projectId !== 'string') return false;
   const trimmed = projectId.trim();
-  return trimmed.length > 0 && !PERSONAL_SCOPE_ALIASES.has(trimmed.toLowerCase());
+  if (!trimmed || PERSONAL_SCOPE_ALIASES.has(trimmed.toLowerCase())) {
+    return false;
+  }
+  if (
+    userId &&
+    typeof userId === 'string' &&
+    trimmed.toLowerCase() === userId.trim().toLowerCase()
+  ) {
+    return false;
+  }
+  return true;
 }
 
-export function normalizeProjectScopeId(projectId?: string | null): string | undefined {
-  return isProjectScopeId(projectId) ? projectId.trim() : undefined;
+export function normalizeProjectScopeId(
+  projectId?: string | null,
+  userId?: string | null,
+): string | undefined {
+  return isProjectScopeId(projectId, userId) ? projectId.trim() : undefined;
 }
 
 export function resolveCanonicalScopeKey(scope: {
   userId?: string | null;
   projectId?: string | null;
 }): string {
-  const validProjectId = normalizeProjectScopeId(scope.projectId);
+  const validProjectId = normalizeProjectScopeId(scope.projectId, scope.userId);
   if (validProjectId) return `proj:${validProjectId}`;
-  const cleanUserId = typeof scope.userId === 'string' ? scope.userId.trim() : '';
+  const cleanUserId =
+    typeof scope.userId === 'string' ? scope.userId.trim() : '';
   if (!cleanUserId) {
-    throw new ConfigurationException('Scope resolution requires either a valid projectId or userId');
+    throw new ConfigurationException(
+      'Scope resolution requires either a valid projectId or userId',
+    );
   }
   return `user:${cleanUserId}`;
 }
@@ -198,11 +239,14 @@ export function resolveSpaceId(scope: {
   spaceId?: string | null;
 }): string {
   if (scope.spaceId && scope.spaceId.trim()) return scope.spaceId.trim();
-  const validProjectId = normalizeProjectScopeId(scope.projectId);
+  const validProjectId = normalizeProjectScopeId(scope.projectId, scope.userId);
   if (validProjectId) return validProjectId;
-  const cleanUserId = typeof scope.userId === 'string' ? scope.userId.trim() : '';
+  const cleanUserId =
+    typeof scope.userId === 'string' ? scope.userId.trim() : '';
   if (!cleanUserId) {
-    throw new ConfigurationException('Scope resolution requires either a valid projectId or userId');
+    throw new ConfigurationException(
+      'Scope resolution requires either a valid projectId or userId',
+    );
   }
   return cleanUserId;
 }
@@ -275,13 +319,21 @@ export class ScopeSpecification extends CompositeSpecification<
   }
 
   toPrismaWhere(): QueryCriteria {
-    return { spaceId: resolveSpaceId({ userId: this.userId, projectId: this.projectId }) };
+    return {
+      spaceId: resolveSpaceId({
+        userId: this.userId,
+        projectId: this.projectId,
+      }),
+    };
   }
 
   isSatisfiedBy(item: unknown): boolean {
     if (!item || typeof item !== 'object') return false;
     const rec = item as Record<string, unknown>;
-    const expectedSpaceId = resolveSpaceId({ userId: this.userId, projectId: this.projectId });
+    const expectedSpaceId = resolveSpaceId({
+      userId: this.userId,
+      projectId: this.projectId,
+    });
     if (typeof rec.spaceId === 'string') {
       return rec.spaceId === expectedSpaceId;
     }
@@ -603,21 +655,39 @@ export class CustomCriteriaSpecification extends CompositeSpecification {
 
 interface ItemDenormalizedCountClient {
   attachment?: {
-    count?: (args: { where: { itemId: string; deletedAt: null } }) => Promise<number>;
+    count?: (args: {
+      where: { itemId: string; deletedAt: null };
+    }) => Promise<number>;
   };
   libraryNote?: {
-    count?: (args: { where: { itemId: string; deletedAt: null } }) => Promise<number>;
+    count?: (args: {
+      where: { itemId: string; deletedAt: null };
+    }) => Promise<number>;
   };
   note?: {
-    count?: (args: { where: { itemId: string; deletedAt: null } }) => Promise<number>;
+    count?: (args: {
+      where: { itemId: string; deletedAt: null };
+    }) => Promise<number>;
   };
   libraryItem?: {
-    updateMany?: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
-    update?: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+    updateMany?: (args: {
+      where: { id: string };
+      data: Record<string, unknown>;
+    }) => Promise<unknown>;
+    update?: (args: {
+      where: { id: string };
+      data: Record<string, unknown>;
+    }) => Promise<unknown>;
   };
   item?: {
-    updateMany?: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
-    update?: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+    updateMany?: (args: {
+      where: { id: string };
+      data: Record<string, unknown>;
+    }) => Promise<unknown>;
+    update?: (args: {
+      where: { id: string };
+      data: Record<string, unknown>;
+    }) => Promise<unknown>;
   };
 }
 
@@ -680,7 +750,10 @@ export async function syncItemDenormalizedCountsInClient(
  */
 export async function executeWithPostCommit<T>(
   uow: IUnitOfWork,
-  work: (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => Promise<T>,
+  work: (
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+  ) => Promise<T>,
   afterCommit: (result: T) => Promise<void> | void,
 ): Promise<T> {
   let registered = false;
@@ -705,14 +778,48 @@ export async function executeWithPostCommit<T>(
  * Follows BibTeX / BetterBibTeX convention: vaswani2017attention -> vaswani2017attentiona -> vaswani2017attentionb.
  */
 export async function disambiguateCitationKey(
-  db: Prisma.TransactionClient | { libraryItem?: { findMany?: Prisma.TransactionClient['libraryItem']['findMany'] }; item?: { findMany?: Prisma.TransactionClient['libraryItem']['findMany'] } } | null | undefined,
+  db:
+    | Prisma.TransactionClient
+    | {
+        libraryItem?: {
+          findMany?: Prisma.TransactionClient['libraryItem']['findMany'];
+        };
+        item?: {
+          findMany?: Prisma.TransactionClient['libraryItem']['findMany'];
+        };
+      }
+    | null
+    | undefined,
   baseKey: string | null | undefined,
   scope: { userId: string; projectId?: string | null },
   excludeItemId?: string,
 ): Promise<string | null> {
   if (!baseKey || !baseKey.trim()) return null;
   const cleanKey = baseKey.trim();
-  const itemDelegate = (db as { libraryItem?: { findMany?: Prisma.TransactionClient['libraryItem']['findMany'] }; item?: { findMany?: Prisma.TransactionClient['libraryItem']['findMany'] } } | null | undefined)?.libraryItem ?? (db as { item?: { findMany?: Prisma.TransactionClient['libraryItem']['findMany'] } } | null | undefined)?.item;
+  const itemDelegate =
+    (
+      db as
+        | {
+            libraryItem?: {
+              findMany?: Prisma.TransactionClient['libraryItem']['findMany'];
+            };
+            item?: {
+              findMany?: Prisma.TransactionClient['libraryItem']['findMany'];
+            };
+          }
+        | null
+        | undefined
+    )?.libraryItem ??
+    (
+      db as
+        | {
+            item?: {
+              findMany?: Prisma.TransactionClient['libraryItem']['findMany'];
+            };
+          }
+        | null
+        | undefined
+    )?.item;
   if (typeof itemDelegate?.findMany !== 'function') return cleanKey;
   const scopeWhere: Prisma.LibraryItemWhereInput = {
     spaceId: resolveSpaceId(scope),
@@ -729,7 +836,9 @@ export async function disambiguateCitationKey(
   });
   const existingKeys = new Set(
     (Array.isArray(rows) ? rows : [])
-      .map((item: { citationKey?: string | null }) => item.citationKey?.toLowerCase())
+      .map((item: { citationKey?: string | null }) =>
+        item.citationKey?.toLowerCase(),
+      )
       .filter((k: string | undefined): k is string => Boolean(k)),
   );
   if (!existingKeys.has(cleanKey.toLowerCase())) return cleanKey;

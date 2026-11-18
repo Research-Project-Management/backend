@@ -35,12 +35,20 @@ export const EXTRACTION_EVENT_TYPES = {
   PAGES_EXTRACTED: 'library.attachment.pages.extracted',
 } as const;
 
-type ExtractedPdfDocument = Awaited<ReturnType<PdfProvider['extractDocumentFromBuffer']>>;
+type ExtractedPdfDocument = Awaited<
+  ReturnType<PdfProvider['extractDocumentFromBuffer']>
+>;
 type ExtractionResultWithPages = Omit<ExtractedPdfDocument, 'pages'> & {
   markdown?: string;
   text?: string;
   pageCount?: number;
-  pages?: Array<{ pageIndex?: number; pageNumber?: number; textContent?: string; text?: string; charOffset?: number }>;
+  pages?: Array<{
+    pageIndex?: number;
+    pageNumber?: number;
+    textContent?: string;
+    text?: string;
+    charOffset?: number;
+  }>;
 };
 interface PostExtractionPipelineContext {
   event: OutboxEvent | OutboxEventRecord;
@@ -70,7 +78,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     private readonly extractionRepo: ExtractionRepository,
     private readonly pdf: PdfProvider,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
-    @Optional() @Inject(IDEMPOTENT_CONSUMER)
+    @Optional()
+    @Inject(IDEMPOTENT_CONSUMER)
     private readonly idempotentConsumer?: IIdempotentConsumer,
     @Optional()
     private readonly cache?: RedisCacheService,
@@ -104,7 +113,10 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       );
   }
 
-  async handle(event: OutboxEvent | OutboxEventRecord, signal?: AbortSignal): Promise<void> {
+  async handle(
+    event: OutboxEvent | OutboxEventRecord,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (signal?.aborted) {
       throw new ExtractionProcessException(
         `Extraction aborted for outbox event ${event.id}`,
@@ -269,9 +281,21 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       }
 
       // 2. Backfill fileId (if missing) & storage-first reading in parallel
-      const itemRec = attachment.item as { spaceId?: string; createdById?: string; userId?: string; projectId?: string | null } | null | undefined;
+      const itemRec = attachment.item as
+        | {
+            spaceId?: string;
+            createdById?: string;
+            userId?: string;
+            projectId?: string | null;
+          }
+        | null
+        | undefined;
       const resolvedItemUserId = itemRec?.userId ?? itemRec?.createdById;
-      const resolvedItemProjectId = itemRec?.projectId ?? (itemRec?.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
+      const resolvedItemProjectId =
+        itemRec?.projectId ??
+        (itemRec?.spaceId && itemRec.spaceId !== itemRec.createdById
+          ? itemRec.spaceId
+          : undefined);
       const [, storageFile] = await Promise.all([
         !attachment.fileId
           ? this.extractionRepo
@@ -325,7 +349,9 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         'system';
       const effectiveProjectId = normalizeProjectScopeId(
         resolvedItemProjectId ||
-          (typeof payload.projectId === 'string' ? payload.projectId : undefined),
+          (typeof payload.projectId === 'string'
+            ? payload.projectId
+            : undefined),
       );
       const scopeId = effectiveProjectId || effectiveUserId;
 
@@ -360,9 +386,17 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       const isFinal = currentAttempts >= this.maxAttempts;
       const nextStatus = isFinal ? 'FAILED_FINAL' : 'FAILED_RETRYABLE';
       const message = err instanceof Error ? err.message : String(err);
-      const sanitizedError = String(message || 'Extraction error').slice(0, 500);
+      const sanitizedError = String(message || 'Extraction error').slice(
+        0,
+        500,
+      );
 
-      await this.extractionRepo.markFailed(attachment.id, nextStatus, sanitizedError, isFinal);
+      await this.extractionRepo.markFailed(
+        attachment.id,
+        nextStatus,
+        sanitizedError,
+        isFinal,
+      );
       this.logger.error(
         JSON.stringify({
           event: 'library.extraction.failed',
@@ -392,8 +426,16 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     if (!this.extractionRepo?.findScopePapers) return;
     const matcher =
       this.referenceMatcher ?? new ReferenceMatcherService(this.extractionRepo);
-    const res = await matcher.linkCitationsInLibrary(scope, sourceItemId, references);
-    if (res?.matches && res.matches.length > 0 && this.libraryTx?.executeInTransaction) {
+    const res = await matcher.linkCitationsInLibrary(
+      scope,
+      sourceItemId,
+      references,
+    );
+    if (
+      res?.matches &&
+      res.matches.length > 0 &&
+      this.libraryTx?.executeInTransaction
+    ) {
       const eventScope =
         typeof scope === 'string'
           ? { userId: scope, projectId: null }
@@ -430,7 +472,9 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     }
   }
 
-  private async runPostExtractionPipeline(ctx: PostExtractionPipelineContext): Promise<void> {
+  private async runPostExtractionPipeline(
+    ctx: PostExtractionPipelineContext,
+  ): Promise<void> {
     await this.indexExtractedPagesStep(ctx);
     await this.linkCitationsStep(ctx);
     await this.markReadyAndSyncMetadataStep(ctx);
@@ -452,9 +496,15 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     }
   }
 
-  private async indexExtractedPagesStep(ctx: PostExtractionPipelineContext): Promise<void> {
+  private async indexExtractedPagesStep(
+    ctx: PostExtractionPipelineContext,
+  ): Promise<void> {
     const { attachment, extractionResult } = ctx;
-    if (!Array.isArray(extractionResult?.pages) || extractionResult.pages.length === 0) return;
+    if (
+      !Array.isArray(extractionResult?.pages) ||
+      extractionResult.pages.length === 0
+    )
+      return;
 
     const normalizedPages = extractionResult.pages.map((p, idx) => ({
       pageIndex:
@@ -464,16 +514,24 @@ export class ExtractionHandler implements OutboxDispatchHandler {
             ? Math.max(0, p.pageNumber - 1)
             : idx,
       pageNumber:
-        p.pageNumber ?? (typeof p.pageIndex === 'number' ? p.pageIndex + 1 : idx + 1),
+        p.pageNumber ??
+        (typeof p.pageIndex === 'number' ? p.pageIndex + 1 : idx + 1),
       textContent: p.text ?? p.textContent ?? '',
       charOffset: p.charOffset ?? 0,
     }));
 
     try {
-      await this.dispatchExtractedPagesIndexing(attachment.id, attachment.itemId, normalizedPages);
+      await this.dispatchExtractedPagesIndexing(
+        attachment.id,
+        attachment.itemId,
+        normalizedPages,
+      );
     } catch (indexErr: unknown) {
-      const msg = indexErr instanceof Error ? indexErr.message : String(indexErr);
-      this.logger.error(`Failed to index extracted pages for attachment ${attachment.id}: ${msg}`);
+      const msg =
+        indexErr instanceof Error ? indexErr.message : String(indexErr);
+      this.logger.error(
+        `Failed to index extracted pages for attachment ${attachment.id}: ${msg}`,
+      );
       throw indexErr;
     }
   }
@@ -481,7 +539,12 @@ export class ExtractionHandler implements OutboxDispatchHandler {
   private async dispatchExtractedPagesIndexing(
     attachmentId: string,
     itemId: string,
-    normalizedPages: Array<{ pageIndex: number; pageNumber: number; textContent: string; charOffset: number }>,
+    normalizedPages: Array<{
+      pageIndex: number;
+      pageNumber: number;
+      textContent: string;
+      charOffset: number;
+    }>,
   ): Promise<void> {
     if (this.searchGateway?.indexAttachmentPages) {
       await this.searchGateway.indexAttachmentPages(
@@ -509,12 +572,28 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       return;
     }
     if (this.extractionRepo.indexAttachmentPages) {
-      await this.extractionRepo.indexAttachmentPages(attachmentId, normalizedPages, undefined, itemId);
+      await this.extractionRepo.indexAttachmentPages(
+        attachmentId,
+        normalizedPages,
+        undefined,
+        itemId,
+      );
     }
   }
 
-  private async linkCitationsStep(ctx: PostExtractionPipelineContext): Promise<void> {
-    const { event, attachmentId, attachment, doc, effectiveUserId, effectiveProjectId, scopeId, signal } = ctx;
+  private async linkCitationsStep(
+    ctx: PostExtractionPipelineContext,
+  ): Promise<void> {
+    const {
+      event,
+      attachmentId,
+      attachment,
+      doc,
+      effectiveUserId,
+      effectiveProjectId,
+      scopeId,
+      signal,
+    } = ctx;
     if (signal?.aborted) {
       throw new ExtractionProcessException(
         `Extraction aborted due to lost lease before metadata sync for attachment ${attachmentId}`,
@@ -524,7 +603,12 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     const hasValidScope = Boolean(
       effectiveProjectId || (effectiveUserId && effectiveUserId !== 'system'),
     );
-    if (doc?.references && doc.references.length > 0 && scopeId && hasValidScope) {
+    if (
+      doc?.references &&
+      doc.references.length > 0 &&
+      scopeId &&
+      hasValidScope
+    ) {
       try {
         await this.linkInLibraryCitations(
           { userId: effectiveUserId, projectId: effectiveProjectId },
@@ -532,13 +616,16 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           doc.references,
         );
       } catch (linkErr: unknown) {
-        const message = linkErr instanceof Error ? linkErr.message : String(linkErr);
+        const message =
+          linkErr instanceof Error ? linkErr.message : String(linkErr);
         this.logger.warn(`In-library citation linking warning: ${message}`);
       }
     }
   }
 
-  private async markReadyAndSyncMetadataStep(ctx: PostExtractionPipelineContext): Promise<void> {
+  private async markReadyAndSyncMetadataStep(
+    ctx: PostExtractionPipelineContext,
+  ): Promise<void> {
     const { attachment, doc, extractionResult } = ctx;
     ctx.syncRes = await this.metadataSync.offloadFullTextAndSyncMetadata(
       attachment,
@@ -549,17 +636,18 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     await this.extractionRepo.markReady(attachment.id);
   }
 
-  private async invalidateExtractionCachesStep(ctx: PostExtractionPipelineContext): Promise<void> {
+  private async invalidateExtractionCachesStep(
+    ctx: PostExtractionPipelineContext,
+  ): Promise<void> {
     if (ctx.syncRes?.cacheInvalidated) {
       return;
     }
     const { attachment, effectiveUserId, effectiveProjectId } = ctx;
-    const cacheInvalidator =
-      this.cacheCoordinator?.invalidateForWrite
-        ? this.cacheCoordinator
-        : this.catalogGateway?.invalidateForWrite
-          ? this.catalogGateway
-          : undefined;
+    const cacheInvalidator = this.cacheCoordinator?.invalidateForWrite
+      ? this.cacheCoordinator
+      : this.catalogGateway?.invalidateForWrite
+        ? this.catalogGateway
+        : undefined;
 
     await executeStandardLibraryCacheInvalidation(
       cacheInvalidator,
@@ -576,8 +664,18 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     );
   }
 
-  private async publishPostExtractionEventsStep(ctx: PostExtractionPipelineContext): Promise<void> {
-    const { event, attachment, doc, effectiveUserId, effectiveProjectId, scopeId, syncRes } = ctx;
+  private async publishPostExtractionEventsStep(
+    ctx: PostExtractionPipelineContext,
+  ): Promise<void> {
+    const {
+      event,
+      attachment,
+      doc,
+      effectiveUserId,
+      effectiveProjectId,
+      scopeId,
+      syncRes,
+    } = ctx;
     const itemUpdatedPayload = {
       itemId: attachment.itemId,
       userId: effectiveUserId,
@@ -597,19 +695,23 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         .toLowerCase() === 'supplementary';
     const rejectedCitedId = existingMetaObj.rejectedCitedDoi;
     const safeDoi =
-      doc?.metadata?.doi && !isRejectedCitedIdentifier(doc.metadata.doi, rejectedCitedId)
+      doc?.metadata?.doi &&
+      !isRejectedCitedIdentifier(doc.metadata.doi, rejectedCitedId)
         ? doc.metadata.doi
         : undefined;
     const safeArxiv =
-      doc?.metadata?.arxivId && !isRejectedCitedIdentifier(doc.metadata.arxivId, rejectedCitedId)
+      doc?.metadata?.arxivId &&
+      !isRejectedCitedIdentifier(doc.metadata.arxivId, rejectedCitedId)
         ? doc.metadata.arxivId
         : undefined;
     const safePmid =
-      doc?.metadata?.pmid && !isRejectedCitedIdentifier(doc.metadata.pmid, rejectedCitedId)
+      doc?.metadata?.pmid &&
+      !isRejectedCitedIdentifier(doc.metadata.pmid, rejectedCitedId)
         ? doc.metadata.pmid
         : undefined;
     const safeIsbn =
-      doc?.metadata?.isbn && !isRejectedCitedIdentifier(doc.metadata.isbn, rejectedCitedId)
+      doc?.metadata?.isbn &&
+      !isRejectedCitedIdentifier(doc.metadata.isbn, rejectedCitedId)
         ? doc.metadata.isbn
         : undefined;
 
@@ -617,9 +719,9 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       !isSupplementary &&
       Boolean(
         (safeDoi && !attachment.item?.doi && !existingMetaObj.doi) ||
-          (safeArxiv && !itemRecord.arxivId && !existingMetaObj.arxivId) ||
-          (safePmid && !itemRecord.pmid && !existingMetaObj.pmid) ||
-          (safeIsbn && !itemRecord.isbn && !existingMetaObj.isbn),
+        (safeArxiv && !itemRecord.arxivId && !existingMetaObj.arxivId) ||
+        (safePmid && !itemRecord.pmid && !existingMetaObj.pmid) ||
+        (safeIsbn && !itemRecord.isbn && !existingMetaObj.isbn),
       );
 
     if (syncRes?.itemMutated && !syncRes?.outboxPublished) {
@@ -636,12 +738,19 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       });
     }
 
-    const hasExtractedIdentifier = !isSupplementary && Boolean(safeDoi || safeArxiv || safePmid || safeIsbn);
-    const existingEngine = typeof existingMetaObj.engineUsed === 'string' ? existingMetaObj.engineUsed.trim() : '';
+    const hasExtractedIdentifier =
+      !isSupplementary && Boolean(safeDoi || safeArxiv || safePmid || safeIsbn);
+    const existingEngine =
+      typeof existingMetaObj.engineUsed === 'string'
+        ? existingMetaObj.engineUsed.trim()
+        : '';
     const alreadyResolvedByRegistry = Boolean(
       existingMetaObj.isVerified ||
-        existingMetaObj.resolvedAt ||
-        (existingEngine.length > 0 && !['StagedPdf', 'LocalPDFExtraction', 'pdf_metadata'].includes(existingEngine)),
+      existingMetaObj.resolvedAt ||
+      (existingEngine.length > 0 &&
+        !['StagedPdf', 'LocalPDFExtraction', 'pdf_metadata'].includes(
+          existingEngine,
+        )),
     );
 
     if (
@@ -652,27 +761,30 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           Boolean(doc?.metadata?.title) &&
           !alreadyResolvedByRegistry))
     ) {
-      await this.emitEventDurable(LIBRARY_EVENT_TYPES.ATTACHMENT_METADATA_EXTRACTED, {
-        userId: effectiveUserId,
-        projectId: effectiveProjectId,
-        itemId: attachment.itemId,
-        attachmentId: attachment.id,
-        extractedMetadata: {
-          title: doc?.metadata?.title,
-          doi: safeDoi,
-          arxivId: safeArxiv,
-          pmid: safePmid,
-          isbn: safeIsbn,
-          issn: doc?.metadata?.issn,
-          abstract: doc?.metadata?.abstract,
-          year: doc?.metadata?.year,
-          publicationTitle:
-            (doc?.metadata as Record<string, unknown> | null)?.publicationTitle ||
-            doc?.metadata?.journal,
-          authors: doc?.metadata?.authors,
-          creators: doc?.metadata?.creators,
+      await this.emitEventDurable(
+        LIBRARY_EVENT_TYPES.ATTACHMENT_METADATA_EXTRACTED,
+        {
+          userId: effectiveUserId,
+          projectId: effectiveProjectId,
+          itemId: attachment.itemId,
+          attachmentId: attachment.id,
+          extractedMetadata: {
+            title: doc?.metadata?.title,
+            doi: safeDoi,
+            arxivId: safeArxiv,
+            pmid: safePmid,
+            isbn: safeIsbn,
+            issn: doc?.metadata?.issn,
+            abstract: doc?.metadata?.abstract,
+            year: doc?.metadata?.year,
+            publicationTitle:
+              (doc?.metadata as Record<string, unknown> | null)
+                ?.publicationTitle || doc?.metadata?.journal,
+            authors: doc?.metadata?.authors,
+            creators: doc?.metadata?.creators,
+          },
         },
-      });
+      );
     }
   }
 
@@ -701,7 +813,16 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         await this.searchGateway
           .indexAttachmentPages(
             (payload as { attachmentId: string }).attachmentId,
-            (payload as { pages: Array<{ pageIndex: number; pageNumber: number; textContent: string; charOffset: number }> }).pages,
+            (
+              payload as {
+                pages: Array<{
+                  pageIndex: number;
+                  pageNumber: number;
+                  textContent: string;
+                  charOffset: number;
+                }>;
+              }
+            ).pages,
           )
           .catch(() => {});
       }

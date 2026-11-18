@@ -29,11 +29,7 @@ import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
 } from '@/modules/library/extraction/dto/annotations.dto';
-import {
-  UserId,
-  AttachmentId,
-  ProjectId,
-} from '@/modules/library/core';
+import { UserId, AttachmentId, ProjectId } from '@/modules/library/core';
 
 @Injectable()
 export class AttachmentRenamerService {
@@ -64,7 +60,9 @@ export class AttachmentRenamerService {
       this.cache,
       { userId, projectId, itemIds: [itemId] },
       (msg) =>
-        this.logger.warn(`Failed to invalidate attachment rename cache: ${msg}`),
+        this.logger.warn(
+          `Failed to invalidate attachment rename cache: ${msg}`,
+        ),
     );
   }
 

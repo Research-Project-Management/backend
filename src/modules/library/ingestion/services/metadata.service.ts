@@ -241,7 +241,6 @@ export class MetadataService implements MetadataPort {
     wantsReferences: boolean,
     startedAt: number,
   ): Promise<ResolvedMetadata | null> {
-
     // 5. Routing tiers (Zotero-style: single-hit authoritative unless citations/graph explicitly requested)
     const tiers = MetadataRoutingPolicy.getTiers(classified.type, {
       includeCitations: wantsCitations,
@@ -305,7 +304,11 @@ export class MetadataService implements MetadataPort {
           isPaperLevelKeywordSource(primaryResult.provider) &&
           Array.isArray(primaryMeta?.keywords) &&
           primaryMeta.keywords.length > 0;
-        if (!hasFullAbstract || !primaryMeta?.openAccessPdfUrl || !hasPaperLevelKeywords) {
+        if (
+          !hasFullAbstract ||
+          !primaryMeta?.openAccessPdfUrl ||
+          !hasPaperLevelKeywords
+        ) {
           effectiveEnrichmentIds.push('OpenAlex');
         }
       }
@@ -595,8 +598,7 @@ export class MetadataService implements MetadataPort {
           (coalescedRecord.provenance as Provenance | undefined)?.isOpenAccess,
         ),
         openAccessPdfUrl: coalescedRecord.openAccessPdfUrl as
-          | string
-          | undefined,
+          string | undefined,
       },
     };
 

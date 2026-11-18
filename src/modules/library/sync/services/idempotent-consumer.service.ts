@@ -193,9 +193,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        this.logger.debug(
-          `Error checking Inbox record for ${key}: ${errMsg}`,
-        );
+        this.logger.debug(`Error checking Inbox record for ${key}: ${errMsg}`);
       }
     }
 
@@ -219,7 +217,9 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
             }
           } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
-            this.logger.warn(`Failed to reset Redis inbox key ${key}: ${errMsg}`);
+            this.logger.warn(
+              `Failed to reset Redis inbox key ${key}: ${errMsg}`,
+            );
           }
         }
       })(),

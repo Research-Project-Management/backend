@@ -74,10 +74,7 @@ export class ReaderWriteBehindService implements OnModuleInit, OnModuleDestroy {
         await this.stateRepository.upsertState(userId, itemId, {
           currentPage: data.currentPage,
           scrollPosition: data.scrollPosition as
-            | Record<string, unknown>
-            | unknown[]
-            | null
-            | undefined,
+            Record<string, unknown> | unknown[] | null | undefined,
           attachmentId: data.attachmentId,
           lastReadAt: data.lastReadAt,
           lastOpenedAt: data.lastOpenedAt,
@@ -94,8 +91,12 @@ export class ReaderWriteBehindService implements OnModuleInit, OnModuleDestroy {
         currentPage: data.currentPage,
         scrollPosition: data.scrollPosition,
         attachmentId: data.attachmentId,
-        lastReadAt: data.lastReadAt ? data.lastReadAt.toISOString() : new Date().toISOString(),
-        lastOpenedAt: data.lastOpenedAt ? data.lastOpenedAt.toISOString() : undefined,
+        lastReadAt: data.lastReadAt
+          ? data.lastReadAt.toISOString()
+          : new Date().toISOString(),
+        lastOpenedAt: data.lastOpenedAt
+          ? data.lastOpenedAt.toISOString()
+          : undefined,
       };
 
       const pipeline = client.pipeline();
@@ -112,10 +113,7 @@ export class ReaderWriteBehindService implements OnModuleInit, OnModuleDestroy {
         await this.stateRepository.upsertState(userId, itemId, {
           currentPage: data.currentPage,
           scrollPosition: data.scrollPosition as
-            | Record<string, unknown>
-            | unknown[]
-            | null
-            | undefined,
+            Record<string, unknown> | unknown[] | null | undefined,
           attachmentId: data.attachmentId,
           lastReadAt: data.lastReadAt,
           lastOpenedAt: data.lastOpenedAt,
@@ -176,13 +174,14 @@ export class ReaderWriteBehindService implements OnModuleInit, OnModuleDestroy {
             await this.stateRepository.upsertState(uId, itId, {
               currentPage: data.currentPage,
               scrollPosition: data.scrollPosition as
-                | Record<string, unknown>
-                | unknown[]
-                | null
-                | undefined,
+                Record<string, unknown> | unknown[] | null | undefined,
               attachmentId: data.attachmentId,
-              lastReadAt: data.lastReadAt ? new Date(data.lastReadAt) : undefined,
-              lastOpenedAt: data.lastOpenedAt ? new Date(data.lastOpenedAt) : undefined,
+              lastReadAt: data.lastReadAt
+                ? new Date(data.lastReadAt)
+                : undefined,
+              lastOpenedAt: data.lastOpenedAt
+                ? new Date(data.lastOpenedAt)
+                : undefined,
             });
             flushedItemIds.push(itId);
             flushedCount++;
@@ -198,7 +197,9 @@ export class ReaderWriteBehindService implements OnModuleInit, OnModuleDestroy {
         }
       }
     } catch (flushErr) {
-      this.logger.warn(`Error during write-behind flush cycle: ${(flushErr as Error).message}`);
+      this.logger.warn(
+        `Error during write-behind flush cycle: ${(flushErr as Error).message}`,
+      );
     } finally {
       this.isFlushing = false;
     }

@@ -253,9 +253,7 @@ function decodeLatexOutsideMath(segment: string): string {
       },
     );
   }
-  s = s
-    .replace(/\b([Nn]guy)ẽn\b/gu, '$1ễn')
-    .replace(/\b([Tt]r)àn\b/gu, '$1ần');
+  s = s.replace(/\b([Nn]guy)ẽn\b/gu, '$1ễn').replace(/\b([Tt]r)àn\b/gu, '$1ần');
   // Strip LaTeX text-formatting command names before removing braces
   s = s.replace(
     /\\(?:textbf|textit|emph|textsc|textsf|texttt|textrm|text|mathrm|mathbf|mathit|bf|it|rm|sc)\b\s*/g,

@@ -21,4 +21,3 @@ export * from './services/outbox.worker';
 // Repositories
 export * from './repositories/changelog.repository';
 export * from './repositories/outbox.repository';
-

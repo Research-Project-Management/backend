@@ -82,7 +82,9 @@ export async function invalidateLibraryScopeCaches(
         rawCache.del(LIBRARY_REDIS_KEYS.itemNotes(id)),
       );
       if (userId) {
-        tasks.push(rawCache.del(LIBRARY_REDIS_KEYS.itemUserOverlay(id, userId)));
+        tasks.push(
+          rawCache.del(LIBRARY_REDIS_KEYS.itemUserOverlay(id, userId)),
+        );
       }
     } else {
       tasks.push(
@@ -93,7 +95,9 @@ export async function invalidateLibraryScopeCaches(
         rawCache.del(LIBRARY_REDIS_KEYS.itemNotes(id)),
       );
       if (userId) {
-        tasks.push(rawCache.del(LIBRARY_REDIS_KEYS.itemUserOverlay(id, userId)));
+        tasks.push(
+          rawCache.del(LIBRARY_REDIS_KEYS.itemUserOverlay(id, userId)),
+        );
       }
       if (hasDelPattern) {
         tasks.push(rawCache.delPattern!(LIBRARY_REDIS_KEYS.itemPattern(id)));
@@ -176,7 +180,9 @@ export async function invalidateLibraryScopeCaches(
           rawCache.delPattern!(
             LIBRARY_REDIS_KEYS.collectionsPattern(validProjectId),
           ),
-          rawCache.delPattern!(LIBRARY_REDIS_KEYS.collectionsPattern(projScope)),
+          rawCache.delPattern!(
+            LIBRARY_REDIS_KEYS.collectionsPattern(projScope),
+          ),
         );
       }
       if (hasDelPattern) {

@@ -138,7 +138,10 @@ export class PipelineBatchExecutor {
           }
         | null
         | undefined;
-      if (existingLog?.committedKeys && typeof existingLog.committedKeys === 'object') {
+      if (
+        existingLog?.committedKeys &&
+        typeof existingLog.committedKeys === 'object'
+      ) {
         for (const [key, entry] of Object.entries(existingLog.committedKeys)) {
           if (
             key &&
@@ -314,7 +317,10 @@ export class PipelineBatchExecutor {
             status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
           }) => void)
         | undefined;
-      if (!alreadyCommitted && !inFlightRecordCommitPromises.has(candidateKey)) {
+      if (
+        !alreadyCommitted &&
+        !inFlightRecordCommitPromises.has(candidateKey)
+      ) {
         inFlightRecordCommitPromises.set(
           candidateKey,
           new Promise((resolve) => {
@@ -570,33 +576,28 @@ export class PipelineBatchExecutor {
         const finalStatus = isAllFailed
           ? IngestionStatus.FAILED_FINAL
           : IngestionStatus.COMPLETED;
-        await this.repo.updateRunStatus(
-          scopeId,
-          runId,
-          finalStatus,
-          {
-            itemId: createdItemIds[0],
-            completedAt: new Date(),
-            ...(isAllFailed
-              ? {
-                  lastError:
-                    progressItems.find((i) => i.error)?.error ||
-                    'All records in batch failed',
-                }
-              : {}),
-            executionLog: {
-              total,
-              processed,
-              succeeded,
-              duplicates,
-              failed,
-              percentage: 100,
-              status: isAllFailed ? 'FAILED_FINAL' : 'COMPLETED',
-              committedKeys: Object.fromEntries(committedRecordKeys),
-              items: progressItems.slice(-50),
-            } as unknown as Prisma.InputJsonValue,
-          },
-        );
+        await this.repo.updateRunStatus(scopeId, runId, finalStatus, {
+          itemId: createdItemIds[0],
+          completedAt: new Date(),
+          ...(isAllFailed
+            ? {
+                lastError:
+                  progressItems.find((i) => i.error)?.error ||
+                  'All records in batch failed',
+              }
+            : {}),
+          executionLog: {
+            total,
+            processed,
+            succeeded,
+            duplicates,
+            failed,
+            percentage: 100,
+            status: isAllFailed ? 'FAILED_FINAL' : 'COMPLETED',
+            committedKeys: Object.fromEntries(committedRecordKeys),
+            items: progressItems.slice(-50),
+          } as unknown as Prisma.InputJsonValue,
+        });
 
         aggregate.recordProgress(succeeded, failed);
         aggregate.complete();

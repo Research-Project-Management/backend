@@ -15,7 +15,15 @@ import {
   BibliographicReference,
 } from '@/modules/library/core/types/bibliographic.types';
 import { Prisma } from '@prisma/client';
-import { LIBRARY_EVENT_TYPES, LIBRARY_REDIS_KEYS, UNIT_OF_WORK, IUnitOfWork, buildItemCreatedOutboxPayload, normalizeProjectScopeId, ItemsMapper } from '@/modules/library/core';
+import {
+  LIBRARY_EVENT_TYPES,
+  LIBRARY_REDIS_KEYS,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  buildItemCreatedOutboxPayload,
+  normalizeProjectScopeId,
+  ItemsMapper,
+} from '@/modules/library/core';
 import {
   ImportSourceItem,
   buildImportItemPayload,
@@ -405,17 +413,27 @@ export class ItemCurationService {
    * and match; an unknown owner is treated as out-of-scope (never as in-scope).
    */
   private isOwnedWithinScope(
-    owner: { spaceId?: string | null; createdById?: string | null; userId?: string | null; projectId?: string | null } | null | undefined,
+    owner:
+      | {
+          spaceId?: string | null;
+          createdById?: string | null;
+          userId?: string | null;
+          projectId?: string | null;
+        }
+      | null
+      | undefined,
     scope?: { userId?: string; projectId?: string },
   ): boolean {
     if (!scope || (!scope.userId && !scope.projectId)) return false;
     if (!owner) return false;
     if (scope.projectId) {
-      if (owner.projectId !== undefined) return owner.projectId === scope.projectId;
+      if (owner.projectId !== undefined)
+        return owner.projectId === scope.projectId;
       return owner.spaceId === scope.projectId;
     }
     if (scope.userId) {
-      if (owner.userId !== undefined) return owner.userId === scope.userId && !owner.projectId;
+      if (owner.userId !== undefined)
+        return owner.userId === scope.userId && !owner.projectId;
       return owner.spaceId === scope.userId;
     }
     return false;
@@ -427,7 +445,11 @@ export class ItemCurationService {
   ): Promise<{ id: string; itemId: string; metadata?: unknown } | null> {
     if (!fileId) return null;
     if (!scope || (!scope.userId && !scope.projectId)) return null;
-    const result = await this.query.findAttachmentByFileId(fileId, undefined, scope);
+    const result = await this.query.findAttachmentByFileId(
+      fileId,
+      undefined,
+      scope,
+    );
     if (!result) return null;
     if (!this.isOwnedWithinScope(result.item, scope)) return null;
     return { id: result.id, itemId: result.itemId, metadata: result.metadata };
@@ -442,7 +464,12 @@ export class ItemCurationService {
     if (!attachmentId) return;
     const existing = await this.query.findAttachmentById(attachmentId);
     if (!existing) return;
-    if (scope && (scope.userId || scope.projectId) && !this.isOwnedWithinScope(existing.item, scope)) return;
+    if (
+      scope &&
+      (scope.userId || scope.projectId) &&
+      !this.isOwnedWithinScope(existing.item, scope)
+    )
+      return;
 
     const currentMeta =
       existing.metadata &&
@@ -480,7 +507,12 @@ export class ItemCurationService {
     if (!itemId) return;
     const existing = await this.query.findItemForAiMetadata(itemId);
     if (!existing) return;
-    if (scope && (scope.userId || scope.projectId) && !this.isOwnedWithinScope(existing, scope)) return;
+    if (
+      scope &&
+      (scope.userId || scope.projectId) &&
+      !this.isOwnedWithinScope(existing, scope)
+    )
+      return;
 
     const currentMeta =
       existing.metadata &&
@@ -493,7 +525,9 @@ export class ItemCurationService {
       (existing as { projectId?: string | null }).projectId ??
       (existing.spaceId !== existing.createdById ? existing.spaceId : null);
     const existingUserId =
-      (existing as { userId?: string }).userId ?? existing.createdById ?? existing.spaceId;
+      (existing as { userId?: string }).userId ??
+      existing.createdById ??
+      existing.spaceId;
     const validProjectId = normalizeProjectScopeId(existingProjectId);
     const mergedMetadata = {
       ...currentMeta,

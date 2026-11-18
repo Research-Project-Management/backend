@@ -1,8 +1,32 @@
 import { Logger, Injectable, Inject, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { ItemMetadata, MetadataProvider, MetadataRequest, Provenance, ProviderCapability, ProviderFetchError, ProviderName, ProviderResult, QueryType } from '@/modules/library/ingestion/types/metadata.types';
-import { HttpClient, TITLE_MATCH_THRESHOLD, titleSimilarity, extractNormalizedAuthorSurnames, normalizeDoi, normalizePmid, getContactEmail, getUserAgent } from '@/modules/library/core';
-import { RetractionDetails, RetractionLookupResult, RETRACTION_DATABASE_PORT, IRetractionDatabasePort } from '@/modules/library/ingestion/types/ingestion.types';
+import {
+  ItemMetadata,
+  MetadataProvider,
+  MetadataRequest,
+  Provenance,
+  ProviderCapability,
+  ProviderFetchError,
+  ProviderName,
+  ProviderResult,
+  QueryType,
+} from '@/modules/library/ingestion/types/metadata.types';
+import {
+  HttpClient,
+  TITLE_MATCH_THRESHOLD,
+  titleSimilarity,
+  extractNormalizedAuthorSurnames,
+  normalizeDoi,
+  normalizePmid,
+  getContactEmail,
+  getUserAgent,
+} from '@/modules/library/core';
+import {
+  RetractionDetails,
+  RetractionLookupResult,
+  RETRACTION_DATABASE_PORT,
+  IRetractionDatabasePort,
+} from '@/modules/library/ingestion/types/ingestion.types';
 
 type ProviderQueryInput =
   QueryType | MetadataRequest | { type?: QueryType; queryType?: QueryType };

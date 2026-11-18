@@ -152,9 +152,7 @@ export class NormalizationPolicy {
     if (rawTitleVal) {
       const cleanTitle = this.cleanString(rawTitleVal);
       if (cleanTitle) {
-        const formattedTitle = normalizeTitleCase(
-          stripLatexBraces(cleanTitle),
-        );
+        const formattedTitle = normalizeTitleCase(stripLatexBraces(cleanTitle));
         result.title = formattedTitle;
         if (mappedTitleKey) {
           (result as Record<string, unknown>)[mappedTitleKey] =
@@ -168,9 +166,7 @@ export class NormalizationPolicy {
         raw.shortTitle ?? getRawVal('shortTitle'),
       );
       if (cleanShort) {
-        result.shortTitle = normalizeTitleCase(
-          stripLatexBraces(cleanShort),
-        );
+        result.shortTitle = normalizeTitleCase(stripLatexBraces(cleanShort));
       }
     }
 

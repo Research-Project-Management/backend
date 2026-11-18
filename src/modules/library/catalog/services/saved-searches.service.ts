@@ -65,18 +65,23 @@ export class SavedSearchesService {
     projectId?: string,
     precomputedDescendantMap?: Map<string, string[]>,
   ): Promise<Prisma.LibraryItemWhereInput> {
-    const referencedColIds = this.evaluator.extractReferencedCollectionIds(group);
+    const referencedColIds =
+      this.evaluator.extractReferencedCollectionIds(group);
     const descendantMap =
       precomputedDescendantMap ??
       (referencedColIds.length > 0 && this.repo.findCollectionDescendantsMap
-        ? await this.repo.findCollectionDescendantsMap(userId, projectId, referencedColIds)
+        ? await this.repo.findCollectionDescendantsMap(
+            userId,
+            projectId,
+            referencedColIds,
+          )
         : new Map<string, string[]>());
     return this.evaluator.compile(userId, group, projectId, descendantMap);
   }
 
   async create(userId: string, dto: CreateSavedSearchDto, projectId?: string) {
     const effectiveProjectId = normalizeProjectScopeId(
-      projectId || dto.projectId,
+      projectId || dto.spaceId,
     );
     if (
       !dto.conditions ||
@@ -129,7 +134,8 @@ export class SavedSearchesService {
           );
           if (
             typeof initialCount === 'number' &&
-            (createdRecord.cachedCount == null || createdRecord.cachedCount === 0)
+            (createdRecord.cachedCount == null ||
+              createdRecord.cachedCount === 0)
           ) {
             createdRecord.cachedCount = initialCount;
             createdRecord.lastEvaluatedAt = new Date();
@@ -285,7 +291,9 @@ export class SavedSearchesService {
     const existing = await this.findById(userId, id, projectId);
     const existingProjectId =
       (existing as { projectId?: string | null }).projectId ??
-      (existing.spaceId !== existing.createdById ? existing.spaceId : undefined);
+      (existing.spaceId !== existing.createdById
+        ? existing.spaceId
+        : undefined);
     const effectiveProjectId = normalizeProjectScopeId(
       projectId || existingProjectId,
     );
@@ -395,7 +403,9 @@ export class SavedSearchesService {
     const existing = await this.findById(userId, id, projectId);
     const existingProjectId =
       (existing as { projectId?: string | null }).projectId ??
-      (existing.spaceId !== existing.createdById ? existing.spaceId : undefined);
+      (existing.spaceId !== existing.createdById
+        ? existing.spaceId
+        : undefined);
     const effectiveProjectId = normalizeProjectScopeId(
       projectId || existingProjectId,
     );
@@ -464,7 +474,7 @@ export class SavedSearchesService {
     }
 
     const effectiveProjectId = normalizeProjectScopeId(
-      projectId || dto.projectId,
+      projectId || dto.spaceId,
     );
     const where = await this.compileConditions(
       userId,
@@ -504,7 +514,7 @@ export class SavedSearchesService {
     projectId?: string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(
-      projectId || dto.projectId,
+      projectId || dto.spaceId,
     );
     const savedSearch = await this.findById(userId, id, effectiveProjectId);
     const conditions =
@@ -512,7 +522,9 @@ export class SavedSearchesService {
 
     const savedSearchProjectId =
       (savedSearch as { projectId?: string | null }).projectId ??
-      (savedSearch.spaceId !== savedSearch.createdById ? savedSearch.spaceId : undefined);
+      (savedSearch.spaceId !== savedSearch.createdById
+        ? savedSearch.spaceId
+        : undefined);
     const queryProjectId = normalizeProjectScopeId(
       effectiveProjectId || savedSearchProjectId,
     );

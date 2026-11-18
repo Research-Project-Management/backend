@@ -1,79 +1,179 @@
 import { Logger } from '@nestjs/common';
 import {
-  SCHEMA_V42_DATA, CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, FIELD_ALIASES,
-  getPrimaryCreatorRoleForType, harmonizeBibliographicFields, isPaperLevelKeywordSource,
-  isPlaceholderItemTitle, isPreprintVenue, isRejectedCitedIdentifier, LibraryItemSource,
-  mergeExtraTextWithStatus, parseCreatorString, resolveCanonicalCreatorRole,
-  resolveProviderFieldWeight, synchronizeVenueBaseFields, ItemProvenancePolicy,
-  FieldProvenanceRecord, ICatalogFacade,
+  SCHEMA_V42_DATA,
+  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
+  FIELD_ALIASES,
+  getPrimaryCreatorRoleForType,
+  harmonizeBibliographicFields,
+  isPaperLevelKeywordSource,
+  isPlaceholderItemTitle,
+  isPreprintVenue,
+  isRejectedCitedIdentifier,
+  LibraryItemSource,
+  mergeExtraTextWithStatus,
+  parseCreatorString,
+  resolveCanonicalCreatorRole,
+  resolveProviderFieldWeight,
+  synchronizeVenueBaseFields,
+  ItemProvenancePolicy,
+  FieldProvenanceRecord,
+  ICatalogFacade,
 } from '@/modules/library/core';
 
 const REJECTABLE_IDENTIFIER_FIELDS = new Set([
-  'doi', 'DOI', 'arxivId', 'archiveId', 'archiveID', 'pmid', 'PMID', 'isbn', 'ISBN',
+  'doi',
+  'DOI',
+  'arxivId',
+  'archiveId',
+  'archiveID',
+  'pmid',
+  'PMID',
+  'isbn',
+  'ISBN',
 ]);
 
 const SYSTEM_RESERVED_KEYS = new Set([
-  'id', 'userId', 'projectId', 'deletedAt', 'createdAt', 'updatedAt', 'version',
-  'citationCount', 'referenceCount', 'crossrefEnriched', 'retractionStatus', 'isRetracted',
+  'id',
+  'userId',
+  'projectId',
+  'deletedAt',
+  'createdAt',
+  'updatedAt',
+  'version',
+  'citationCount',
+  'referenceCount',
+  'crossrefEnriched',
+  'retractionStatus',
+  'isRetracted',
 ]);
 
 const TELEMETRY_ONLY_EXTRA_KEYS = new Set([
-  'fieldProvenance', 'lockedFields', 'ingestionStatus', 'verificationScore', 'isVerified',
-  'isFilenameTitle', 'qualityScore', 'engineUsed', 'matchedSignals', 'missingFields',
-  'isSelfSufficient', 'disambiguationWarning', 'rejectedCitedDoi', 'promptUploadPdf',
-  'sourceProvider', 'source', 'sources', 'originProvider', 'canonicalId', 'canonicalUrl',
-  'resolvedAt', 'warnings', 'sourceUrl', 'pdfFileId', 'dismissedDuplicateIds', 'mergedFromIds',
+  'fieldProvenance',
+  'lockedFields',
+  'ingestionStatus',
+  'verificationScore',
+  'isVerified',
+  'isFilenameTitle',
+  'qualityScore',
+  'engineUsed',
+  'matchedSignals',
+  'missingFields',
+  'isSelfSufficient',
+  'disambiguationWarning',
+  'rejectedCitedDoi',
+  'promptUploadPdf',
+  'sourceProvider',
+  'source',
+  'sources',
+  'originProvider',
+  'canonicalId',
+  'canonicalUrl',
+  'resolvedAt',
+  'warnings',
+  'sourceUrl',
+  'pdfFileId',
+  'dismissedDuplicateIds',
+  'mergedFromIds',
 ]);
 
 const NON_SCALAR_ENRICH_KEYS = new Set([
-  ...SYSTEM_RESERVED_KEYS, 'title', 'authors', 'editors', 'creators', 'contributors',
-  'keywords', 'labels', 'tags', 'notes', 'extraFields',
+  ...SYSTEM_RESERVED_KEYS,
+  'title',
+  'authors',
+  'editors',
+  'creators',
+  'contributors',
+  'keywords',
+  'labels',
+  'tags',
+  'notes',
+  'extraFields',
 ]);
 
 const SCALAR_METADATA_FIELDS: string[] = Array.from(
   new Set([
-    ...SCHEMA_V42_DATA.distinctFieldKeys, ...CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
-    ...Object.keys(FIELD_ALIASES), ...Object.values(FIELD_ALIASES),
+    ...SCHEMA_V42_DATA.distinctFieldKeys,
+    ...CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
+    ...Object.keys(FIELD_ALIASES),
+    ...Object.values(FIELD_ALIASES),
   ]),
 ).filter((key) => !NON_SCALAR_ENRICH_KEYS.has(key));
 
 const CONTROL_ONLY_OVERRIDE_KEYS = new Set(['attachOaPdf', 'saveSnapshot']);
 
-export function sanitizeOverrides(overrides?: Record<string, unknown>): Record<string, unknown> {
+export function sanitizeOverrides(
+  overrides?: Record<string, unknown>,
+): Record<string, unknown> {
   if (!overrides || typeof overrides !== 'object') return {};
   const clean: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(overrides)) {
-    if (!SYSTEM_RESERVED_KEYS.has(key) && !CONTROL_ONLY_OVERRIDE_KEYS.has(key)) clean[key] = val;
+    if (!SYSTEM_RESERVED_KEYS.has(key) && !CONTROL_ONLY_OVERRIDE_KEYS.has(key))
+      clean[key] = val;
   }
   return clean;
 }
 
 type CreatorLike = {
-  creatorType?: string; role?: string; firstName?: string; lastName?: string; fullName?: string; name?: string; fieldMode?: number;
-  contributor?: { creatorType?: string; firstName?: string; lastName?: string; fullName?: string; name?: string; fieldMode?: number };
+  creatorType?: string;
+  role?: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  name?: string;
+  fieldMode?: number;
+  contributor?: {
+    creatorType?: string;
+    firstName?: string;
+    lastName?: string;
+    fullName?: string;
+    name?: string;
+    fieldMode?: number;
+  };
 };
 
-function mergePreservedSecondaryContributors(incomingCreators: unknown[], existingCreatorList: unknown[], itemType: string): unknown[] {
-  if (!incomingCreators.length || !existingCreatorList.length) return incomingCreators;
+function mergePreservedSecondaryContributors(
+  incomingCreators: unknown[],
+  existingCreatorList: unknown[],
+  itemType: string,
+): unknown[] {
+  if (!incomingCreators.length || !existingCreatorList.length)
+    return incomingCreators;
   const primaryRole = getPrimaryCreatorRoleForType(itemType);
-  const preservedSecondary = (existingCreatorList as CreatorLike[]).filter((c) => {
-    const role = c?.creatorType || c?.role || c?.contributor?.creatorType || 'author';
-    return role !== 'author' && role !== primaryRole;
-  });
+  const preservedSecondary = (existingCreatorList as CreatorLike[]).filter(
+    (c) => {
+      const role =
+        c?.creatorType || c?.role || c?.contributor?.creatorType || 'author';
+      return role !== 'author' && role !== primaryRole;
+    },
+  );
   if (!preservedSecondary.length) return incomingCreators;
   const result = [...incomingCreators];
   const seenKeys = new Set(
     (incomingCreators as CreatorLike[]).map((c) => {
-      const role = resolveCanonicalCreatorRole(c?.creatorType || c?.role || 'author', { itemType });
-      const full = c?.fullName || c?.name || [c?.firstName, c?.lastName].filter(Boolean).join(' ');
+      const role = resolveCanonicalCreatorRole(
+        c?.creatorType || c?.role || 'author',
+        { itemType },
+      );
+      const full =
+        c?.fullName ||
+        c?.name ||
+        [c?.firstName, c?.lastName].filter(Boolean).join(' ');
       return `${role}:${String(full || '').toLowerCase()}`;
     }),
   );
   for (const sec of preservedSecondary) {
-    const role = resolveCanonicalCreatorRole(sec.creatorType || sec.role || sec.contributor?.creatorType || 'author', { itemType });
+    const role = resolveCanonicalCreatorRole(
+      sec.creatorType || sec.role || sec.contributor?.creatorType || 'author',
+      { itemType },
+    );
     let firstName = sec.firstName || sec.contributor?.firstName || '';
     let lastName = sec.lastName || sec.contributor?.lastName || '';
-    const full = sec.fullName || sec.name || sec.contributor?.fullName || sec.contributor?.name || [firstName, lastName].filter(Boolean).join(' ');
+    const full =
+      sec.fullName ||
+      sec.name ||
+      sec.contributor?.fullName ||
+      sec.contributor?.name ||
+      [firstName, lastName].filter(Boolean).join(' ');
     if (!firstName && !lastName && full) {
       const parsed = parseCreatorString(full, 0, role);
       firstName = parsed.firstName || '';
@@ -83,14 +183,23 @@ function mergePreservedSecondaryContributors(incomingCreators: unknown[], existi
     if (full && !seenKeys.has(dedupKey)) {
       seenKeys.add(dedupKey);
       const fieldMode = sec.fieldMode ?? sec.contributor?.fieldMode;
-      result.push({ orderIndex: result.length, creatorType: role, firstName, lastName, fullName: full, ...(fieldMode !== undefined ? { fieldMode } : {}) });
+      result.push({
+        orderIndex: result.length,
+        creatorType: role,
+        firstName,
+        lastName,
+        fullName: full,
+        ...(fieldMode !== undefined ? { fieldMode } : {}),
+      });
     }
   }
   return result;
 }
 
 function asObj(val: unknown): Record<string, unknown> {
-  return val && typeof val === 'object' && !Array.isArray(val) ? (val as Record<string, unknown>) : {};
+  return val && typeof val === 'object' && !Array.isArray(val)
+    ? (val as Record<string, unknown>)
+    : {};
 }
 
 function pickFirstString(...vals: unknown[]): string | undefined {
@@ -103,7 +212,11 @@ function resolveExistingExtraText(
   existingExtraObj: Record<string, unknown>,
   existingMetaObj: Record<string, unknown>,
 ): string {
-  for (const cand of [existingRec?.extra, existingExtraObj.extra, existingMetaObj.extra]) {
+  for (const cand of [
+    existingRec?.extra,
+    existingExtraObj.extra,
+    existingMetaObj.extra,
+  ]) {
     if (typeof cand === 'string' && cand.trim()) return cand;
   }
   return '';
@@ -113,7 +226,10 @@ function extractTagStr(entry: unknown): string {
   if (typeof entry === 'string') return entry.trim();
   if (entry && typeof entry === 'object') {
     const obj = entry as { tag?: unknown; name?: unknown; label?: unknown };
-    const nested = obj.tag && typeof obj.tag === 'object' ? (obj.tag as { name?: unknown }).name : obj.tag;
+    const nested =
+      obj.tag && typeof obj.tag === 'object'
+        ? (obj.tag as { name?: unknown }).name
+        : obj.tag;
     const raw = nested ?? obj.name ?? obj.label;
     if (typeof raw === 'string') return raw.trim();
   }
@@ -165,16 +281,21 @@ function buildPatchProvenanceContext(
 ) {
   const existingMetaObj = asObj(existingRec?.metadata);
   const existingExtraObj = asObj(existingRec?.extraFields);
-  const metaState = ItemProvenancePolicy.extractProvenanceState(existingMetaObj);
-  const extraState = ItemProvenancePolicy.extractProvenanceState(existingExtraObj);
+  const metaState =
+    ItemProvenancePolicy.extractProvenanceState(existingMetaObj);
+  const extraState =
+    ItemProvenancePolicy.extractProvenanceState(existingExtraObj);
   const topState = ItemProvenancePolicy.extractProvenanceState(
     existingRec && typeof existingRec === 'object' ? existingRec : {},
   );
   const lockedSet = new Set<string>([
     ...(Array.isArray(extraLockedFields) ? extraLockedFields : []),
-    ...(Array.isArray(existingRec?.lockedFields) ? (existingRec.lockedFields as string[]) : []),
+    ...(Array.isArray(existingRec?.lockedFields)
+      ? (existingRec.lockedFields as string[])
+      : []),
     ...topState.lockedSet,
-    ...metaState.lockedSet, ...extraState.lockedSet,
+    ...metaState.lockedSet,
+    ...extraState.lockedSet,
   ]);
   const existingProvMap: Record<string, FieldProvenanceRecord> = {
     ...topState.provenanceMap,
@@ -185,39 +306,79 @@ function buildPatchProvenanceContext(
       : {}),
   };
   const incomingProvMap = {
-    ...(asObj(incomingExtraObj.fieldProvenance) as Record<string, FieldProvenanceRecord>),
-    ...(asObj(incomingExtraObj.provenance) as Record<string, FieldProvenanceRecord>),
+    ...(asObj(incomingExtraObj.fieldProvenance) as Record<
+      string,
+      FieldProvenanceRecord
+    >),
+    ...(asObj(incomingExtraObj.provenance) as Record<
+      string,
+      FieldProvenanceRecord
+    >),
   };
-  const isFilenameTitle = existingExtraObj.isFilenameTitle === true || existingMetaObj.isFilenameTitle === true;
+  const isFilenameTitle =
+    existingExtraObj.isFilenameTitle === true ||
+    existingMetaObj.isFilenameTitle === true;
 
-  const findProv = (map: Record<string, FieldProvenanceRecord>, fieldKey: string): FieldProvenanceRecord | undefined => {
+  const findProv = (
+    map: Record<string, FieldProvenanceRecord>,
+    fieldKey: string,
+  ): FieldProvenanceRecord | undefined => {
     const coupled = ItemProvenancePolicy.getCoupledFieldAliases(fieldKey);
     return map[fieldKey] ?? coupled.map((alias) => map[alias]).find(Boolean);
   };
 
   const isFieldLocked = (fieldKey: string): boolean => {
     const coupled = ItemProvenancePolicy.getCoupledFieldAliases(fieldKey);
-    if (lockedSet.has(fieldKey) || coupled.some((alias) => lockedSet.has(alias))) return true;
+    if (
+      lockedSet.has(fieldKey) ||
+      coupled.some((alias) => lockedSet.has(alias))
+    )
+      return true;
     const prov = findProv(existingProvMap, fieldKey);
-    return Boolean(prov?.isUserOverride || prov?.source === 'UserOverride' || prov?.source === 'manual');
+    return Boolean(
+      prov?.isUserOverride ||
+      prov?.source === 'UserOverride' ||
+      prov?.source === 'manual',
+    );
   };
 
-  return { existingMetaObj, existingExtraObj, lockedSet, existingProvMap, incomingProvMap, isFilenameTitle, findProv, isFieldLocked };
+  return {
+    existingMetaObj,
+    existingExtraObj,
+    lockedSet,
+    existingProvMap,
+    incomingProvMap,
+    isFilenameTitle,
+    findProv,
+    isFieldLocked,
+  };
 }
 
 export function buildEnrichmentPatch(
   existingRec: Record<string, unknown> | null | undefined,
   rawProposed: Record<string, unknown>,
 ): Record<string, unknown> {
-  const resolvedType = pickFirstString(rawProposed.itemType, existingRec?.itemType) || 'journalArticle';
+  const resolvedType =
+    pickFirstString(rawProposed.itemType, existingRec?.itemType) ||
+    'journalArticle';
   const p = synchronizeVenueBaseFields(
-    harmonizeBibliographicFields(rawProposed, { itemType: resolvedType, syncExtraFields: true }),
+    harmonizeBibliographicFields(rawProposed, {
+      itemType: resolvedType,
+      syncExtraFields: true,
+    }),
     resolvedType,
   );
   const enrichPatch: Record<string, unknown> = {};
   const pExtraObj = asObj(p.extraFields);
-  const { existingMetaObj, existingExtraObj, existingProvMap, incomingProvMap, isFilenameTitle, findProv, isFieldLocked } =
-    buildPatchProvenanceContext(existingRec, pExtraObj);
+  const {
+    existingMetaObj,
+    existingExtraObj,
+    existingProvMap,
+    incomingProvMap,
+    isFilenameTitle,
+    findProv,
+    isFieldLocked,
+  } = buildPatchProvenanceContext(existingRec, pExtraObj);
 
   const getExistingFieldAuthority = (fieldKey: string): number => {
     if (isFieldLocked(fieldKey)) return 1.0;
@@ -225,50 +386,119 @@ export function buildEnrichmentPatch(
     if (!prov) {
       if (fieldKey === 'title' && isFilenameTitle) return 0.25;
       const fallbackEngine = pickFirstString(
-        existingExtraObj.engineUsed, existingMetaObj.engineUsed, existingExtraObj.sourceProvider,
-        existingMetaObj.sourceProvider, existingExtraObj.source, existingMetaObj.source, existingRec?.source,
+        existingExtraObj.engineUsed,
+        existingMetaObj.engineUsed,
+        existingExtraObj.sourceProvider,
+        existingMetaObj.sourceProvider,
+        existingExtraObj.source,
+        existingMetaObj.source,
+        existingRec?.source,
       );
-      return fallbackEngine ? resolveProviderFieldWeight(fallbackEngine, fieldKey) * 0.9 : 0.5;
+      return fallbackEngine
+        ? resolveProviderFieldWeight(fallbackEngine, fieldKey) * 0.9
+        : 0.5;
     }
-    if (prov.isUserOverride || prov.source === 'UserOverride' || prov.source === 'manual') return 1.0;
-    return resolveProviderFieldWeight(prov.sourceProvider || prov.source, fieldKey) * (typeof prov.confidence === 'number' ? prov.confidence : 0.9);
+    if (
+      prov.isUserOverride ||
+      prov.source === 'UserOverride' ||
+      prov.source === 'manual'
+    )
+      return 1.0;
+    return (
+      resolveProviderFieldWeight(prov.sourceProvider || prov.source, fieldKey) *
+      (typeof prov.confidence === 'number' ? prov.confidence : 0.9)
+    );
   };
 
   const getIncomingFieldAuthority = (fieldKey: string): number => {
     const prov = findProv(incomingProvMap, fieldKey);
-    if (prov) return resolveProviderFieldWeight(prov.sourceProvider || prov.source, fieldKey) * (typeof prov.confidence === 'number' ? prov.confidence : 0.9);
-    const candidateSource = pickFirstString(pExtraObj.engineUsed, rawProposed.sourceProvider, pExtraObj.sourceProvider, rawProposed.source);
-    return candidateSource ? resolveProviderFieldWeight(candidateSource, fieldKey) * 0.9 : 0.5;
+    if (prov)
+      return (
+        resolveProviderFieldWeight(
+          prov.sourceProvider || prov.source,
+          fieldKey,
+        ) * (typeof prov.confidence === 'number' ? prov.confidence : 0.9)
+      );
+    const candidateSource = pickFirstString(
+      pExtraObj.engineUsed,
+      rawProposed.sourceProvider,
+      pExtraObj.sourceProvider,
+      rawProposed.source,
+    );
+    return candidateSource
+      ? resolveProviderFieldWeight(candidateSource, fieldKey) * 0.9
+      : 0.5;
   };
 
   const canUpgradeExistingField = (fieldKey: string): boolean => {
     if (isFieldLocked(fieldKey)) return false;
     const existingAuth = getExistingFieldAuthority(fieldKey);
-    return existingAuth < 0.95 && getIncomingFieldAuthority(fieldKey) > existingAuth + 0.02;
+    return (
+      existingAuth < 0.95 &&
+      getIncomingFieldAuthority(fieldKey) > existingAuth + 0.02
+    );
   };
 
-  const rejectedCitedDoi = pickFirstString(existingExtraObj.rejectedCitedDoi, existingMetaObj.rejectedCitedDoi, existingRec?.rejectedCitedDoi);
+  const rejectedCitedDoi = pickFirstString(
+    existingExtraObj.rejectedCitedDoi,
+    existingMetaObj.rejectedCitedDoi,
+    existingRec?.rejectedCitedDoi,
+  );
   const maybeEnrich = (field: string, val: unknown) => {
     if (val == null || val === '' || isFieldLocked(field)) return;
-    if (REJECTABLE_IDENTIFIER_FIELDS.has(field) && Boolean(rejectedCitedDoi) && isRejectedCitedIdentifier(val, rejectedCitedDoi)) return;
-    const current = existingRec?.[field] !== undefined ? existingRec[field] : existingExtraObj[field] !== undefined ? existingExtraObj[field] : existingMetaObj[field];
-    const isEmpty = current == null || current === '' || (Array.isArray(current) && current.length === 0);
-    if (isEmpty || (current !== val && canUpgradeExistingField(field))) enrichPatch[field] = val;
+    if (
+      REJECTABLE_IDENTIFIER_FIELDS.has(field) &&
+      Boolean(rejectedCitedDoi) &&
+      isRejectedCitedIdentifier(val, rejectedCitedDoi)
+    )
+      return;
+    const current =
+      existingRec?.[field] !== undefined
+        ? existingRec[field]
+        : existingExtraObj[field] !== undefined
+          ? existingExtraObj[field]
+          : existingMetaObj[field];
+    const isEmpty =
+      current == null ||
+      current === '' ||
+      (Array.isArray(current) && current.length === 0);
+    if (isEmpty || (current !== val && canUpgradeExistingField(field)))
+      enrichPatch[field] = val;
   };
 
   if (p.title && !isPlaceholderItemTitle(p.title) && !isFieldLocked('title')) {
     const rawCurrentTitle = existingRec?.title;
-    const currentTitle = (typeof rawCurrentTitle === 'string' || typeof rawCurrentTitle === 'number' ? String(rawCurrentTitle) : '').trim();
-    if (isPlaceholderItemTitle(currentTitle) || isFilenameTitle || (currentTitle !== String(p.title).trim() && canUpgradeExistingField('title'))) {
+    const currentTitle = (
+      typeof rawCurrentTitle === 'string' || typeof rawCurrentTitle === 'number'
+        ? String(rawCurrentTitle)
+        : ''
+    ).trim();
+    if (
+      isPlaceholderItemTitle(currentTitle) ||
+      isFilenameTitle ||
+      (currentTitle !== String(p.title).trim() &&
+        canUpgradeExistingField('title'))
+    ) {
       enrichPatch['title'] = p.title;
     }
   }
 
   for (const field of SCALAR_METADATA_FIELDS) {
     if (field === 'extra') {
-      const existingExtraText = resolveExistingExtraText(existingRec, existingExtraObj, existingMetaObj);
-      if (existingExtraText.length > 0 && typeof p.extra === 'string' && p.extra.trim().length > 0) {
-        const { merged, addedNewLine } = mergeExtraTextWithStatus(existingExtraText, p.extra);
+      const existingExtraText = resolveExistingExtraText(
+        existingRec,
+        existingExtraObj,
+        existingMetaObj,
+      );
+      if (
+        existingExtraText.length > 0 &&
+        typeof p.extra === 'string' &&
+        p.extra.trim().length > 0
+      ) {
+        const { merged, addedNewLine } = mergeExtraTextWithStatus(
+          existingExtraText,
+          p.extra,
+        );
         if (addedNewLine) enrichPatch['extra'] = merged;
         continue;
       }
@@ -277,11 +507,25 @@ export function buildEnrichmentPatch(
   }
 
   if (Object.keys(pExtraObj).length > 0) {
-    const mergedExtra: Record<string, unknown> = { ...existingMetaObj, ...existingExtraObj };
+    const mergedExtra: Record<string, unknown> = {
+      ...existingMetaObj,
+      ...existingExtraObj,
+    };
     let extraChanged = false;
     for (const [efKey, efVal] of Object.entries(pExtraObj)) {
-      if (efVal == null || efVal === '' || efKey === 'fieldProvenance' || efKey === 'lockedFields' || isFieldLocked(efKey)) continue;
-      if (mergedExtra[efKey] == null || mergedExtra[efKey] === '' || (mergedExtra[efKey] !== efVal && canUpgradeExistingField(efKey))) {
+      if (
+        efVal == null ||
+        efVal === '' ||
+        efKey === 'fieldProvenance' ||
+        efKey === 'lockedFields' ||
+        isFieldLocked(efKey)
+      )
+        continue;
+      if (
+        mergedExtra[efKey] == null ||
+        mergedExtra[efKey] === '' ||
+        (mergedExtra[efKey] !== efVal && canUpgradeExistingField(efKey))
+      ) {
         mergedExtra[efKey] = efVal;
         extraChanged = true;
       }
@@ -290,10 +534,15 @@ export function buildEnrichmentPatch(
     if (extraChanged) enrichPatch['extraFields'] = mergedExtra;
   }
 
-  const existingCreators = (existingRec?.creators || existingRec?.contributors) as unknown[] | undefined;
-  const existingAuthors = (existingRec?.authors || existingCreators) as unknown[] | undefined;
+  const existingCreators = (existingRec?.creators ||
+    existingRec?.contributors) as unknown[] | undefined;
+  const existingAuthors = (existingRec?.authors || existingCreators) as
+    unknown[] | undefined;
   const existingEditors = existingRec?.editors as unknown[] | undefined;
-  const existingKeywords = (existingRec?.keywords || existingRec?.labels || existingRec?.tags || existingRec?.itemTags) as unknown[] | undefined;
+  const existingKeywords = (existingRec?.keywords ||
+    existingRec?.labels ||
+    existingRec?.tags ||
+    existingRec?.itemTags) as unknown[] | undefined;
   const pAuthors = p.authors as unknown[] | undefined;
   const pEditors = p.editors as unknown[] | undefined;
   const pCreators = p.creators as unknown[] | undefined;
@@ -303,7 +552,8 @@ export function buildEnrichmentPatch(
     pAuthors?.length &&
     !isFieldLocked('authors') &&
     (!existingAuthors?.length ||
-      (canUpgradeExistingField('authors') && pAuthors.length >= existingAuthors.length))
+      (canUpgradeExistingField('authors') &&
+        pAuthors.length >= existingAuthors.length))
   ) {
     enrichPatch['authors'] = pAuthors;
   }
@@ -311,7 +561,8 @@ export function buildEnrichmentPatch(
     pEditors?.length &&
     !isFieldLocked('editors') &&
     (!existingEditors?.length ||
-      (canUpgradeExistingField('editors') && pEditors.length >= existingEditors.length))
+      (canUpgradeExistingField('editors') &&
+        pEditors.length >= existingEditors.length))
   ) {
     enrichPatch['editors'] = pEditors;
   }
@@ -319,34 +570,60 @@ export function buildEnrichmentPatch(
     pCreators?.length &&
     !isFieldLocked('creators') &&
     (!existingCreators?.length ||
-      (canUpgradeExistingField('creators') && pCreators.length >= existingCreators.length))
+      (canUpgradeExistingField('creators') &&
+        pCreators.length >= existingCreators.length))
   ) {
-    const existingCreatorList = [...(Array.isArray(existingRec?.creators) ? existingRec.creators : []), ...(Array.isArray(existingRec?.contributors) ? existingRec.contributors : [])];
-    enrichPatch['creators'] = mergePreservedSecondaryContributors(pCreators, existingCreatorList, resolvedType);
+    const existingCreatorList = [
+      ...(Array.isArray(existingRec?.creators) ? existingRec.creators : []),
+      ...(Array.isArray(existingRec?.contributors)
+        ? existingRec.contributors
+        : []),
+    ];
+    enrichPatch['creators'] = mergePreservedSecondaryContributors(
+      pCreators,
+      existingCreatorList,
+      resolvedType,
+    );
   }
   if (pKeywords?.length && !isFieldLocked('tags')) {
-    const existingTagProv = findProv(existingProvMap, 'tags') ?? findProv(existingProvMap, 'keywords');
-    const rawProposedProv = asObj(rawProposed.provenance) as Record<string, FieldProvenanceRecord>;
+    const existingTagProv =
+      findProv(existingProvMap, 'tags') ??
+      findProv(existingProvMap, 'keywords');
+    const rawProposedProv = asObj(rawProposed.provenance) as Record<
+      string,
+      FieldProvenanceRecord
+    >;
     const incomingTagProv =
       findProv(incomingProvMap, 'tags') ??
       findProv(incomingProvMap, 'keywords') ??
       findProv(rawProposedProv, 'tags') ??
       findProv(rawProposedProv, 'keywords');
-    const existingTagSource = existingTagProv?.sourceProvider || existingTagProv?.source;
+    const existingTagSource =
+      existingTagProv?.sourceProvider || existingTagProv?.source;
     const incomingTagSource =
       incomingTagProv?.sourceProvider ||
       incomingTagProv?.source ||
-      pickFirstString(pExtraObj.engineUsed, rawProposed.sourceProvider, pExtraObj.sourceProvider, rawProposed.source);
+      pickFirstString(
+        pExtraObj.engineUsed,
+        rawProposed.sourceProvider,
+        pExtraObj.sourceProvider,
+        rawProposed.source,
+      );
     const shouldReplaceJournalSubjectTags =
-      Boolean(existingTagSource && !isPaperLevelKeywordSource(existingTagSource)) &&
-      Boolean(incomingTagSource && isPaperLevelKeywordSource(incomingTagSource));
+      Boolean(
+        existingTagSource && !isPaperLevelKeywordSource(existingTagSource),
+      ) &&
+      Boolean(
+        incomingTagSource && isPaperLevelKeywordSource(incomingTagSource),
+      );
     const existingTagStrings = shouldReplaceJournalSubjectTags
       ? extractPreservedManualTagStrings(existingRec)
       : (existingKeywords ?? []).map(extractTagStr).filter(Boolean);
     const incomingTagStrings = pKeywords.map(extractTagStr).filter(Boolean);
     const seenLower = new Set(existingTagStrings.map((t) => t.toLowerCase()));
     const mergedKeywords = [...existingTagStrings];
-    let addedNewKeyword = shouldReplaceJournalSubjectTags && incomingTagStrings.length > 0;
+    let addedNewKeyword =
+      shouldReplaceJournalSubjectTags && incomingTagStrings.length > 0;
     for (const kw of incomingTagStrings) {
       const lower = kw.toLowerCase();
       if (!seenLower.has(lower)) {
@@ -355,14 +632,20 @@ export function buildEnrichmentPatch(
         addedNewKeyword = true;
       }
     }
-    if (addedNewKeyword || (!existingTagStrings.length && mergedKeywords.length > 0)) {
+    if (
+      addedNewKeyword ||
+      (!existingTagStrings.length && mergedKeywords.length > 0)
+    ) {
       const cappedKeywords = mergedKeywords.slice(0, 25);
       enrichPatch['keywords'] = cappedKeywords;
       enrichPatch['labels'] = cappedKeywords;
       enrichPatch['tags'] = cappedKeywords;
     }
   }
-  if (typeof rawProposed.isRetracted === 'boolean' && !isFieldLocked('isRetracted')) {
+  if (
+    typeof rawProposed.isRetracted === 'boolean' &&
+    !isFieldLocked('isRetracted')
+  ) {
     if (rawProposed.isRetracted === true || existingRec?.isRetracted == null) {
       enrichPatch['isRetracted'] = rawProposed.isRetracted;
       if (rawProposed.retractionCheckedAt !== undefined) {
@@ -382,38 +665,76 @@ export function buildEnrichmentPatch(
   ) {
     enrichPatch['retractionCheckedAt'] = rawProposed.retractionCheckedAt;
   }
-  if (typeof rawProposed.citationCount === 'number' && !isFieldLocked('citationCount')) {
-    if (existingRec?.citationCount == null || rawProposed.citationCount > Number(existingRec.citationCount)) enrichPatch['citationCount'] = rawProposed.citationCount;
+  if (
+    typeof rawProposed.citationCount === 'number' &&
+    !isFieldLocked('citationCount')
+  ) {
+    if (
+      existingRec?.citationCount == null ||
+      rawProposed.citationCount > Number(existingRec.citationCount)
+    )
+      enrichPatch['citationCount'] = rawProposed.citationCount;
   }
-  if (typeof rawProposed.referenceCount === 'number' && !isFieldLocked('referenceCount')) {
-    if (existingRec?.referenceCount == null || rawProposed.referenceCount > Number(existingRec.referenceCount)) enrichPatch['referenceCount'] = rawProposed.referenceCount;
+  if (
+    typeof rawProposed.referenceCount === 'number' &&
+    !isFieldLocked('referenceCount')
+  ) {
+    if (
+      existingRec?.referenceCount == null ||
+      rawProposed.referenceCount > Number(existingRec.referenceCount)
+    )
+      enrichPatch['referenceCount'] = rawProposed.referenceCount;
   }
 
-  const enrichedFieldKeys = Object.keys(enrichPatch).filter((k) => k !== 'extraFields' && !k.startsWith('__'));
-  if (enrichedFieldKeys.length > 0 || enrichPatch['extraFields'] !== undefined) {
-    const candidateSource = pickFirstString(pExtraObj.engineUsed, rawProposed.sourceProvider);
-    const nextProvMap: Record<string, FieldProvenanceRecord> = { ...existingProvMap };
+  const enrichedFieldKeys = Object.keys(enrichPatch).filter(
+    (k) => k !== 'extraFields' && !k.startsWith('__'),
+  );
+  if (
+    enrichedFieldKeys.length > 0 ||
+    enrichPatch['extraFields'] !== undefined
+  ) {
+    const candidateSource = pickFirstString(
+      pExtraObj.engineUsed,
+      rawProposed.sourceProvider,
+    );
+    const nextProvMap: Record<string, FieldProvenanceRecord> = {
+      ...existingProvMap,
+    };
     let provUpdated = false;
     for (const fKey of enrichedFieldKeys) {
       if (isFieldLocked(fKey)) continue;
       const coupledAliases = ItemProvenancePolicy.getCoupledFieldAliases(fKey);
       const incomingProv = findProv(incomingProvMap, fKey);
       const stampedProv: FieldProvenanceRecord | undefined = incomingProv
-        ? { ...incomingProv, ...(fKey === 'title' ? { isFilenameTitle: false } : {}) }
+        ? {
+            ...incomingProv,
+            ...(fKey === 'title' ? { isFilenameTitle: false } : {}),
+          }
         : candidateSource
-          ? { source: candidateSource, sourceProvider: candidateSource, confidence: 0.9, verified: Boolean(pExtraObj.isVerified ?? true), ...(fKey === 'title' ? { isFilenameTitle: false } : {}) }
+          ? {
+              source: candidateSource,
+              sourceProvider: candidateSource,
+              confidence: 0.9,
+              verified: Boolean(pExtraObj.isVerified ?? true),
+              ...(fKey === 'title' ? { isFilenameTitle: false } : {}),
+            }
           : undefined;
       if (stampedProv) {
         nextProvMap[fKey] = stampedProv;
-        for (const alias of coupledAliases) if (!isFieldLocked(alias)) nextProvMap[alias] = stampedProv;
+        for (const alias of coupledAliases)
+          if (!isFieldLocked(alias)) nextProvMap[alias] = stampedProv;
         provUpdated = true;
       }
     }
     if (provUpdated || enrichPatch['title'] !== undefined) {
-      const targetExtra = enrichPatch['extraFields'] && typeof enrichPatch['extraFields'] === 'object'
-        ? (enrichPatch['extraFields'] as Record<string, unknown>) : { ...existingMetaObj, ...existingExtraObj };
+      const targetExtra =
+        enrichPatch['extraFields'] &&
+        typeof enrichPatch['extraFields'] === 'object'
+          ? (enrichPatch['extraFields'] as Record<string, unknown>)
+          : { ...existingMetaObj, ...existingExtraObj };
       if (provUpdated) targetExtra.fieldProvenance = nextProvMap;
-      if (enrichPatch['title'] !== undefined) targetExtra.isFilenameTitle = false;
+      if (enrichPatch['title'] !== undefined)
+        targetExtra.isFilenameTitle = false;
       enrichPatch['extraFields'] = targetExtra;
     }
     enrichPatch.__isSystemUpdate = true;
@@ -427,10 +748,18 @@ export function buildReResolvePatch(
   resolvedMetadata: Record<string, unknown>,
   options?: { fields?: string[]; lockedFields?: string[] },
 ): { updateData: Record<string, unknown>; updatedFields: string[] } {
-  const effectiveItemType = pickFirstString(resolvedMetadata.itemType, existingRec.itemType, existingRec.type) || 'journalArticle';
+  const effectiveItemType =
+    pickFirstString(
+      resolvedMetadata.itemType,
+      existingRec.itemType,
+      existingRec.type,
+    ) || 'journalArticle';
   const m: Record<string, unknown> = synchronizeVenueBaseFields(
     harmonizeBibliographicFields(
-      { ...resolvedMetadata, extraFields: { ...asObj(resolvedMetadata.extraFields) } },
+      {
+        ...resolvedMetadata,
+        extraFields: { ...asObj(resolvedMetadata.extraFields) },
+      },
       { itemType: effectiveItemType, syncExtraFields: true },
     ),
     effectiveItemType,
@@ -438,17 +767,49 @@ export function buildReResolvePatch(
 
   const updateData: Record<string, unknown> = {};
   const updatedFields: string[] = [];
-  const allowedFieldSet = Array.isArray(options?.fields) && options.fields.length > 0 ? new Set(options.fields) : null;
+  const allowedFieldSet =
+    Array.isArray(options?.fields) && options.fields.length > 0
+      ? new Set(options.fields)
+      : null;
   const mExtraObj = asObj(m.extraFields);
-  const resolvedSource = pickFirstString(mExtraObj.engineUsed, resolvedMetadata.sourceProvider, resolvedMetadata.source) || 'CrossRef';
-  const { existingMetaObj, existingExtraObj, lockedSet, existingProvMap, incomingProvMap, isFilenameTitle, findProv } =
-    buildPatchProvenanceContext(existingRec, mExtraObj, options?.lockedFields);
+  const resolvedSource =
+    pickFirstString(
+      mExtraObj.engineUsed,
+      resolvedMetadata.sourceProvider,
+      resolvedMetadata.source,
+    ) || 'CrossRef';
+  const {
+    existingMetaObj,
+    existingExtraObj,
+    lockedSet,
+    existingProvMap,
+    incomingProvMap,
+    isFilenameTitle,
+    findProv,
+  } = buildPatchProvenanceContext(
+    existingRec,
+    mExtraObj,
+    options?.lockedFields,
+  );
 
   const getExistingValue = (fieldName: string): unknown => {
-    for (const k of [fieldName, ...ItemProvenancePolicy.getCoupledFieldAliases(fieldName)]) {
-      for (const container of [existingRec, existingExtraObj, existingMetaObj]) {
+    for (const k of [
+      fieldName,
+      ...ItemProvenancePolicy.getCoupledFieldAliases(fieldName),
+    ]) {
+      for (const container of [
+        existingRec,
+        existingExtraObj,
+        existingMetaObj,
+      ]) {
         const v = container[k];
-        if (v !== undefined && v !== null && v !== '' && (!Array.isArray(v) || v.length > 0)) return v;
+        if (
+          v !== undefined &&
+          v !== null &&
+          v !== '' &&
+          (!Array.isArray(v) || v.length > 0)
+        )
+          return v;
       }
     }
     return undefined;
@@ -458,31 +819,59 @@ export function buildReResolvePatch(
     if (fieldKey === 'title' && isFilenameTitle) return 0.25;
     const prov = findProv(existingProvMap, fieldKey);
     const src = prov?.sourceProvider || prov?.source;
-    return prov && src ? resolveProviderFieldWeight(src, fieldKey) * (typeof prov.confidence === 'number' ? prov.confidence : 0.9) : 0;
+    return prov && src
+      ? resolveProviderFieldWeight(src, fieldKey) *
+          (typeof prov.confidence === 'number' ? prov.confidence : 0.9)
+      : 0;
   };
 
   const getIncomingProvAuthority = (fieldKey: string): number => {
     const prov = findProv(incomingProvMap, fieldKey);
     const src = prov?.sourceProvider || prov?.source || resolvedSource;
-    return resolveProviderFieldWeight(src, fieldKey) * (prov && typeof prov.confidence === 'number' ? prov.confidence : 0.95);
+    return (
+      resolveProviderFieldWeight(src, fieldKey) *
+      (prov && typeof prov.confidence === 'number' ? prov.confidence : 0.95)
+    );
   };
 
-  const rejectedCitedDoi = pickFirstString(existingExtraObj.rejectedCitedDoi, existingMetaObj.rejectedCitedDoi, existingRec.rejectedCitedDoi);
+  const rejectedCitedDoi = pickFirstString(
+    existingExtraObj.rejectedCitedDoi,
+    existingMetaObj.rejectedCitedDoi,
+    existingRec.rejectedCitedDoi,
+  );
   const applyField = (fieldName: string, value: unknown) => {
     const coupled = ItemProvenancePolicy.getCoupledFieldAliases(fieldName);
-    if (lockedSet.has(fieldName) || coupled.some((alias) => lockedSet.has(alias))) return;
+    if (
+      lockedSet.has(fieldName) ||
+      coupled.some((alias) => lockedSet.has(alias))
+    )
+      return;
     if (allowedFieldSet && !allowedFieldSet.has(fieldName)) return;
-    if (REJECTABLE_IDENTIFIER_FIELDS.has(fieldName) && Boolean(rejectedCitedDoi) && isRejectedCitedIdentifier(value, rejectedCitedDoi)) return;
+    if (
+      REJECTABLE_IDENTIFIER_FIELDS.has(fieldName) &&
+      Boolean(rejectedCitedDoi) &&
+      isRejectedCitedIdentifier(value, rejectedCitedDoi)
+    )
+      return;
     if (!allowedFieldSet) {
       const existingVal = getExistingValue(fieldName);
       if (existingVal !== undefined) {
         if (
-          (fieldName === 'publicationTitle' || fieldName === 'journal' || fieldName === 'venue') &&
-          typeof existingVal === 'string' && !isPreprintVenue(existingVal) &&
-          typeof value === 'string' && isPreprintVenue(value)
-        ) return;
+          (fieldName === 'publicationTitle' ||
+            fieldName === 'journal' ||
+            fieldName === 'venue') &&
+          typeof existingVal === 'string' &&
+          !isPreprintVenue(existingVal) &&
+          typeof value === 'string' &&
+          isPreprintVenue(value)
+        )
+          return;
         const existingAuth = getExistingProvAuthority(fieldName);
-        if (existingAuth > 0 && getIncomingProvAuthority(fieldName) + 0.05 < existingAuth) return;
+        if (
+          existingAuth > 0 &&
+          getIncomingProvAuthority(fieldName) + 0.05 < existingAuth
+        )
+          return;
       }
     }
     if (value !== undefined && value !== null && value !== '') {
@@ -491,31 +880,72 @@ export function buildReResolvePatch(
     }
   };
 
-  if (m.title && !isPlaceholderItemTitle(String(m.title)) && m.title !== existingRec.title) applyField('title', m.title);
+  if (
+    m.title &&
+    !isPlaceholderItemTitle(String(m.title)) &&
+    m.title !== existingRec.title
+  )
+    applyField('title', m.title);
 
   const primaryRole = getPrimaryCreatorRoleForType(effectiveItemType);
-  let resolvedCreators: Array<{ orderIndex: number; creatorType: string; firstName: string; lastName: string; fullName: string; fieldMode?: number }> | undefined;
+  let resolvedCreators:
+    | Array<{
+        orderIndex: number;
+        creatorType: string;
+        firstName: string;
+        lastName: string;
+        fullName: string;
+        fieldMode?: number;
+      }>
+    | undefined;
 
   if (Array.isArray(m.creators) && m.creators.length > 0) {
     resolvedCreators = (m.creators as Array<CreatorLike>).map((c, index) => ({
-      orderIndex: index, creatorType: resolveCanonicalCreatorRole(c.creatorType, { itemType: effectiveItemType }),
-      firstName: c.firstName || '', lastName: c.lastName || '',
-      fullName: c.fullName || c.name || [c.firstName, c.lastName].filter(Boolean).join(' '),
+      orderIndex: index,
+      creatorType: resolveCanonicalCreatorRole(c.creatorType, {
+        itemType: effectiveItemType,
+      }),
+      firstName: c.firstName || '',
+      lastName: c.lastName || '',
+      fullName:
+        c.fullName ||
+        c.name ||
+        [c.firstName, c.lastName].filter(Boolean).join(' '),
       ...(c.fieldMode !== undefined ? { fieldMode: c.fieldMode } : {}),
     }));
   } else if (Array.isArray(m.authors) && m.authors.length > 0) {
-    resolvedCreators = (m.authors as string[]).map((authorStr: string, index: number) => {
-      const parsed = parseCreatorString(authorStr, index, primaryRole);
-      return {
-        orderIndex: index, creatorType: primaryRole, firstName: parsed.firstName || '', lastName: parsed.lastName || '',
-        fullName: parsed.fullName || authorStr, ...(parsed.fieldMode !== undefined ? { fieldMode: parsed.fieldMode } : {}),
-      };
-    });
+    resolvedCreators = (m.authors as string[]).map(
+      (authorStr: string, index: number) => {
+        const parsed = parseCreatorString(authorStr, index, primaryRole);
+        return {
+          orderIndex: index,
+          creatorType: primaryRole,
+          firstName: parsed.firstName || '',
+          lastName: parsed.lastName || '',
+          fullName: parsed.fullName || authorStr,
+          ...(parsed.fieldMode !== undefined
+            ? { fieldMode: parsed.fieldMode }
+            : {}),
+        };
+      },
+    );
   }
 
   if (resolvedCreators && resolvedCreators.length > 0) {
-    const existingCreatorList = [...(Array.isArray(existingRec.creators) ? existingRec.creators : []), ...(Array.isArray(existingRec.contributors) ? existingRec.contributors : [])];
-    applyField('creators', mergePreservedSecondaryContributors(resolvedCreators, existingCreatorList, effectiveItemType));
+    const existingCreatorList = [
+      ...(Array.isArray(existingRec.creators) ? existingRec.creators : []),
+      ...(Array.isArray(existingRec.contributors)
+        ? existingRec.contributors
+        : []),
+    ];
+    applyField(
+      'creators',
+      mergePreservedSecondaryContributors(
+        resolvedCreators,
+        existingCreatorList,
+        effectiveItemType,
+      ),
+    );
   }
 
   if (m.publicationDate) {
@@ -525,27 +955,44 @@ export function buildReResolvePatch(
     applyField('date', String(m.year));
   }
   if (m.year) applyField('year', m.year);
-  if (m.journal || m.publicationTitle) applyField('publicationTitle', m.journal || m.publicationTitle);
+  if (m.journal || m.publicationTitle)
+    applyField('publicationTitle', m.journal || m.publicationTitle);
   if (m.abstract || m.abstractNote) {
     applyField('abstractNote', m.abstract || m.abstractNote);
     applyField('abstract', m.abstract || m.abstractNote);
   }
 
-  const existingTags = (existingRec.tags || existingRec.keywords || existingRec.labels || existingRec.itemTags) as unknown[] | undefined;
-  const resolvedTags = (m.tags || m.keywords || m.labels) as unknown[] | undefined;
-  const existingTagProv = findProv(existingProvMap, 'tags') ?? findProv(existingProvMap, 'keywords');
-  const existingTagSource = existingTagProv?.sourceProvider || existingTagProv?.source;
-  const incomingTagProv = findProv(incomingProvMap, 'tags') ?? findProv(incomingProvMap, 'keywords');
-  const incomingTagSource = incomingTagProv?.sourceProvider || incomingTagProv?.source || resolvedSource;
+  const existingTags = (existingRec.tags ||
+    existingRec.keywords ||
+    existingRec.labels ||
+    existingRec.itemTags) as unknown[] | undefined;
+  const resolvedTags = (m.tags || m.keywords || m.labels) as
+    unknown[] | undefined;
+  const existingTagProv =
+    findProv(existingProvMap, 'tags') ?? findProv(existingProvMap, 'keywords');
+  const existingTagSource =
+    existingTagProv?.sourceProvider || existingTagProv?.source;
+  const incomingTagProv =
+    findProv(incomingProvMap, 'tags') ?? findProv(incomingProvMap, 'keywords');
+  const incomingTagSource =
+    incomingTagProv?.sourceProvider ||
+    incomingTagProv?.source ||
+    resolvedSource;
   const canUpgradeSubjectTags =
-    Boolean(existingTagSource && !isPaperLevelKeywordSource(existingTagSource)) &&
+    Boolean(
+      existingTagSource && !isPaperLevelKeywordSource(existingTagSource),
+    ) &&
     Boolean(incomingTagSource && isPaperLevelKeywordSource(incomingTagSource));
   if (
     Array.isArray(resolvedTags) &&
     resolvedTags.length > 0 &&
-    (!Array.isArray(existingTags) || existingTags.length === 0 || canUpgradeSubjectTags)
+    (!Array.isArray(existingTags) ||
+      existingTags.length === 0 ||
+      canUpgradeSubjectTags)
   ) {
-    const preservedManual = canUpgradeSubjectTags ? extractPreservedManualTagStrings(existingRec) : [];
+    const preservedManual = canUpgradeSubjectTags
+      ? extractPreservedManualTagStrings(existingRec)
+      : [];
     const seenLower = new Set(preservedManual.map((t) => t.toLowerCase()));
     const mergedResolved: unknown[] = [...preservedManual];
     for (const rt of resolvedTags) {
@@ -561,18 +1008,48 @@ export function buildReResolvePatch(
   }
 
   const handledKeys = new Set([
-    'title', 'creators', 'authors', 'editors', 'contributors', 'publicationDate', 'date', 'year',
-    'publicationTitle', 'journal', 'abstract', 'abstractNote', 'tags', 'keywords', 'labels',
-    'itemTags', 'zoteroTags', 'extraFields', 'notes', 'provenance',
+    'title',
+    'creators',
+    'authors',
+    'editors',
+    'contributors',
+    'publicationDate',
+    'date',
+    'year',
+    'publicationTitle',
+    'journal',
+    'abstract',
+    'abstractNote',
+    'tags',
+    'keywords',
+    'labels',
+    'itemTags',
+    'zoteroTags',
+    'extraFields',
+    'notes',
+    'provenance',
   ]);
 
   for (const [key, val] of Object.entries(m)) {
     if (handledKeys.has(key) || TELEMETRY_ONLY_EXTRA_KEYS.has(key)) continue;
-    if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) continue;
+    if (
+      val === undefined ||
+      val === null ||
+      val === '' ||
+      (Array.isArray(val) && val.length === 0)
+    )
+      continue;
     if (key === 'extra' && typeof val === 'string') {
-      const existingExtraText = resolveExistingExtraText(existingRec, existingExtraObj, existingMetaObj);
+      const existingExtraText = resolveExistingExtraText(
+        existingRec,
+        existingExtraObj,
+        existingMetaObj,
+      );
       if (existingExtraText.length > 0) {
-        applyField('extra', mergeExtraTextWithStatus(existingExtraText, val).merged);
+        applyField(
+          'extra',
+          mergeExtraTextWithStatus(existingExtraText, val).merged,
+        );
         continue;
       }
     }
@@ -580,7 +1057,10 @@ export function buildReResolvePatch(
   }
 
   const mExtra = Object.keys(mExtraObj).length > 0 ? mExtraObj : undefined;
-  const mergedExtraFields: Record<string, unknown> = { ...existingMetaObj, ...existingExtraObj };
+  const mergedExtraFields: Record<string, unknown> = {
+    ...existingMetaObj,
+    ...existingExtraObj,
+  };
   let extraModified = false;
   if (mExtra) {
     for (const [efKey, efVal] of Object.entries(mExtra)) {
@@ -594,18 +1074,25 @@ export function buildReResolvePatch(
   }
 
   if (updatedFields.length > 0) {
-    const nextProvMap: Record<string, FieldProvenanceRecord> = { ...existingProvMap, ...incomingProvMap };
+    const nextProvMap: Record<string, FieldProvenanceRecord> = {
+      ...existingProvMap,
+      ...incomingProvMap,
+    };
     for (const fKey of updatedFields) {
       if (lockedSet.has(fKey) || TELEMETRY_ONLY_EXTRA_KEYS.has(fKey)) continue;
       if (!incomingProvMap[fKey]) {
         nextProvMap[fKey] = {
-          source: resolvedSource, sourceProvider: resolvedSource, confidence: 0.95, verified: true,
+          source: resolvedSource,
+          sourceProvider: resolvedSource,
+          confidence: 0.95,
+          verified: true,
           ...(fKey === 'title' ? { isFilenameTitle: false } : {}),
         };
       }
     }
     mergedExtraFields.fieldProvenance = nextProvMap;
-    if (updatedFields.includes('title')) mergedExtraFields.isFilenameTitle = false;
+    if (updatedFields.includes('title'))
+      mergedExtraFields.isFilenameTitle = false;
     updateData.extraFields = mergedExtraFields;
     updateData.__isSystemUpdate = true;
     updateData.__updateSource = 'ingestion.re_resolve';
@@ -617,7 +1104,11 @@ export function buildReResolvePatch(
 }
 
 export function mapPayloadToSource(kind: string): LibraryItemSource {
-  return ({ IDENTIFIER: 'doi', RECORD: 'bibtex', URL: 'url', FILE: 'pdf' } as const)[kind] ?? 'manual';
+  return (
+    ({ IDENTIFIER: 'doi', RECORD: 'bibtex', URL: 'url', FILE: 'pdf' } as const)[
+      kind
+    ] ?? 'manual'
+  );
 }
 
 export async function materializeDeduplicatedNotes(params: {
@@ -629,15 +1120,34 @@ export async function materializeDeduplicatedNotes(params: {
   createdItem?: Record<string, unknown> | null;
   logger?: Logger;
 }): Promise<void> {
-  const { catalogGateway, userId, projectId, itemId, notes, createdItem, logger } = params;
-  if (!Array.isArray(notes) || notes.length === 0 || !catalogGateway?.createNote) return;
+  const {
+    catalogGateway,
+    userId,
+    projectId,
+    itemId,
+    notes,
+    createdItem,
+    logger,
+  } = params;
+  if (
+    !Array.isArray(notes) ||
+    notes.length === 0 ||
+    !catalogGateway?.createNote
+  )
+    return;
 
   const existingNotes = Array.isArray(createdItem?.notes)
     ? createdItem.notes
-    : Array.isArray(createdItem?.notesList) ? createdItem.notesList : [];
+    : Array.isArray(createdItem?.notesList)
+      ? createdItem.notesList
+      : [];
   if (
-    (existingNotes.length === 0 && typeof createdItem?.noteCount === 'number' && createdItem.noteCount > 0) ||
-    (existingNotes.length >= notes.length && typeof createdItem?.noteCount === 'number' && createdItem.noteCount >= notes.length)
+    (existingNotes.length === 0 &&
+      typeof createdItem?.noteCount === 'number' &&
+      createdItem.noteCount > 0) ||
+    (existingNotes.length >= notes.length &&
+      typeof createdItem?.noteCount === 'number' &&
+      createdItem.noteCount >= notes.length)
   ) {
     return;
   }
@@ -649,32 +1159,54 @@ export async function materializeDeduplicatedNotes(params: {
     } else if (existingNote && typeof existingNote === 'object') {
       const rec = existingNote as Record<string, unknown>;
       const txt = rec.contentMd ?? rec.content ?? rec.note;
-      if (typeof txt === 'string' && txt.trim()) seenContents.add(txt.trim().toLowerCase());
+      if (typeof txt === 'string' && txt.trim())
+        seenContents.add(txt.trim().toLowerCase());
     }
   }
 
   for (const noteItem of notes) {
-    const noteObj = typeof noteItem === 'object' && noteItem !== null ? (noteItem as Record<string, unknown>) : undefined;
+    const noteObj =
+      typeof noteItem === 'object' && noteItem !== null
+        ? (noteItem as Record<string, unknown>)
+        : undefined;
     const rawContent = noteObj?.content;
     const rawNoteSource = noteObj?.source;
-    const noteSource = typeof rawNoteSource === 'string' || typeof rawNoteSource === 'number' ? String(rawNoteSource) : '';
-    const noteContent = typeof noteItem === 'string' ? noteItem : typeof rawContent === 'string' ? rawContent : '';
+    const noteSource =
+      typeof rawNoteSource === 'string' || typeof rawNoteSource === 'number'
+        ? String(rawNoteSource)
+        : '';
+    const noteContent =
+      typeof noteItem === 'string'
+        ? noteItem
+        : typeof rawContent === 'string'
+          ? rawContent
+          : '';
     const trimmed = noteContent.trim();
     if (!trimmed || seenContents.has(trimmed.toLowerCase())) continue;
     seenContents.add(trimmed.toLowerCase());
 
     try {
       await catalogGateway.createNote(userId, {
-        itemId, contentMd: trimmed, title: noteSource || 'Imported Note', projectId, createdById: userId,
+        itemId,
+        contentMd: trimmed,
+        title: noteSource || 'Imported Note',
+        projectId,
+        createdById: userId,
       });
-      logger?.log(`[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`);
+      logger?.log(
+        `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
+      );
     } catch (err: unknown) {
-      logger?.warn(`[NOTE] Failed to create note for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`);
+      logger?.warn(
+        `[NOTE] Failed to create note for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 }
 
-export async function executeDuplicateItemEnrichment<TItem extends { id: string }>(params: {
+export async function executeDuplicateItemEnrichment<
+  TItem extends { id: string },
+>(params: {
   catalogGateway?: ICatalogFacade;
   userId: string;
   projectId?: string;
@@ -682,7 +1214,10 @@ export async function executeDuplicateItemEnrichment<TItem extends { id: string 
   candidateData: Record<string, unknown>;
   collectionIds?: string[];
   sideEffects?: {
-    saveItemMetadataSnapshot?: (itemId: string, metadata: Record<string, unknown>) => Promise<unknown>;
+    saveItemMetadataSnapshot?: (
+      itemId: string,
+      metadata: Record<string, unknown>,
+    ) => Promise<unknown>;
     syncRelationsForCommittedItem?: (
       itemId: string,
       metadata: Record<string, unknown>,
@@ -697,47 +1232,99 @@ export async function executeDuplicateItemEnrichment<TItem extends { id: string 
     ) => Promise<unknown>;
   };
   logger?: Logger;
-}): Promise<{ item: TItem & { wasPreExistingMatch: true }; patchedFields: string[] }> {
-  const { catalogGateway, userId, projectId, existingItem, candidateData, collectionIds, sideEffects, logger } = params;
+}): Promise<{
+  item: TItem & { wasPreExistingMatch: true };
+  patchedFields: string[];
+}> {
+  const {
+    catalogGateway,
+    userId,
+    projectId,
+    existingItem,
+    candidateData,
+    collectionIds,
+    sideEffects,
+    logger,
+  } = params;
   let resultItem: TItem = existingItem;
   let patchedFields: string[] = [];
 
   if (catalogGateway?.updateItem) {
     try {
-      const patch = buildEnrichmentPatch(existingItem as unknown as Record<string, unknown>, candidateData);
+      const patch = buildEnrichmentPatch(existingItem, candidateData);
       patchedFields = Object.keys(patch);
       if (patchedFields.length > 0) {
-        const updated = await catalogGateway.updateItem(userId, existingItem.id, patch, { projectId });
+        const updated = await catalogGateway.updateItem(
+          userId,
+          existingItem.id,
+          patch,
+          { projectId },
+        );
         if (updated) resultItem = updated as unknown as TItem;
       }
     } catch (enrichErr: unknown) {
-      logger?.warn(`Failed to enrich pre-matched item ${existingItem.id}: ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`);
+      logger?.warn(
+        `Failed to enrich pre-matched item ${existingItem.id}: ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`,
+      );
     }
   }
 
   const existingRec = existingItem as unknown as Record<string, unknown>;
-  const rawNotes = Array.isArray(candidateData.notes) ? candidateData.notes : undefined;
-  const rawColIds = collectionIds ?? (Array.isArray(candidateData.collectionIds) ? (candidateData.collectionIds as string[]) : undefined);
+  const rawNotes = Array.isArray(candidateData.notes)
+    ? candidateData.notes
+    : undefined;
+  const rawColIds =
+    collectionIds ??
+    (Array.isArray(candidateData.collectionIds)
+      ? (candidateData.collectionIds as string[])
+      : undefined);
   const uniqueCollectionIds =
-    Array.isArray(rawColIds) && rawColIds.length > 0 && catalogGateway?.assignItemsToCollection
+    Array.isArray(rawColIds) &&
+    rawColIds.length > 0 &&
+    catalogGateway?.assignItemsToCollection
       ? Array.from(new Set(rawColIds.filter(Boolean)))
       : [];
 
   try {
     await Promise.all([
       sideEffects?.saveItemMetadataSnapshot?.(existingItem.id, candidateData),
-      sideEffects?.syncRelationsForCommittedItem?.(existingItem.id, candidateData, { userId, projectId }),
+      sideEffects?.syncRelationsForCommittedItem?.(
+        existingItem.id,
+        candidateData,
+        { userId, projectId },
+      ),
       rawNotes && rawNotes.length > 0
         ? sideEffects?.materializeNotes
-          ? sideEffects.materializeNotes(userId, projectId, existingItem.id, rawNotes, existingRec)
-          : materializeDeduplicatedNotes({ catalogGateway, userId, projectId, itemId: existingItem.id, notes: rawNotes, createdItem: existingRec, logger })
+          ? sideEffects.materializeNotes(
+              userId,
+              projectId,
+              existingItem.id,
+              rawNotes,
+              existingRec,
+            )
+          : materializeDeduplicatedNotes({
+              catalogGateway,
+              userId,
+              projectId,
+              itemId: existingItem.id,
+              notes: rawNotes,
+              createdItem: existingRec,
+              logger,
+            })
         : undefined,
       ...uniqueCollectionIds.map((colId) =>
-        catalogGateway!.assignItemsToCollection!(userId, colId, [existingItem.id], projectId),
+        catalogGateway!.assignItemsToCollection!(
+          userId,
+          colId,
+          [existingItem.id],
+          projectId,
+        ),
       ),
     ]);
   } catch (sideEffectErr: unknown) {
-    logger?.warn(`Side-effects failed for matched item ${existingItem.id}: ${sideEffectErr instanceof Error ? sideEffectErr.message : String(sideEffectErr)}`);
+    logger?.warn(
+      `Side-effects failed for matched item ${existingItem.id}: ${sideEffectErr instanceof Error ? sideEffectErr.message : String(sideEffectErr)}`,
+    );
   }
 
   return { item: { ...resultItem, wasPreExistingMatch: true }, patchedFields };

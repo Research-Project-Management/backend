@@ -69,7 +69,11 @@ export function compactLibraryChanges<T extends CompactableChange>(
       if (prevAction === 'CREATE') {
         const prevData =
           existing.data && typeof existing.data === 'object'
-            ? (existing.data as { restored?: unknown; isRestored?: unknown; title?: unknown })
+            ? (existing.data as {
+                restored?: unknown;
+                isRestored?: unknown;
+                title?: unknown;
+              })
             : undefined;
         const isRestoredLifecycle =
           prevData?.restored === true ||

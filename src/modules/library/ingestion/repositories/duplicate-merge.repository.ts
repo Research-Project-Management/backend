@@ -3,62 +3,142 @@ import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
 import { asMetaObject } from '@/modules/library/ingestion/domain/duplicate-clustering.domain';
 import {
-  normalizeProjectScopeId, ItemProvenancePolicy, deriveFirstAuthor,
-  executeStandardLibraryCacheInvalidation, ICatalogFacade, IItemCacheInvalidator,
-  LIBRARY_REDIS_KEYS, TransactionHelpers,
+  normalizeProjectScopeId,
+  ItemProvenancePolicy,
+  deriveFirstAuthor,
+  executeStandardLibraryCacheInvalidation,
+  ICatalogFacade,
+  IItemCacheInvalidator,
+  LIBRARY_REDIS_KEYS,
+  TransactionHelpers,
 } from '@/modules/library/core';
 import {
-  ContributorShape, IDENTIFIER_META_KEYS, RETRACTION_SURVIVAL_KEYS,
-  SYSTEM_RESERVED_MERGE_KEYS, TOP_LEVEL_ITEM_COLUMNS, VENUE_ALIAS_MERGE_KEYS,
-  buildMergeAuditTrail, planMergedItemRelations, mapContributorInputForPrimary,
-  syncContributorsToMeta, extractItemContributors, selectBestDonorContributors,
-  shouldUpgradePrimaryContributors, computeClearedCanonicalIdentifierTypes,
-  computeDesiredMergedIdentifierRecords, applyMetadataAndProvenanceBackfill,
+  ContributorShape,
+  IDENTIFIER_META_KEYS,
+  RETRACTION_SURVIVAL_KEYS,
+  SYSTEM_RESERVED_MERGE_KEYS,
+  TOP_LEVEL_ITEM_COLUMNS,
+  VENUE_ALIAS_MERGE_KEYS,
+  buildMergeAuditTrail,
+  planMergedItemRelations,
+  mapContributorInputForPrimary,
+  syncContributorsToMeta,
+  extractItemContributors,
+  selectBestDonorContributors,
+  shouldUpgradePrimaryContributors,
+  computeClearedCanonicalIdentifierTypes,
+  computeDesiredMergedIdentifierRecords,
+  applyMetadataAndProvenanceBackfill,
   computeMergedTopLevelAndPrimaryMeta,
 } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
 
 export type { ContributorShape };
 export {
-  IDENTIFIER_META_KEYS, RETRACTION_SURVIVAL_KEYS, SYSTEM_RESERVED_MERGE_KEYS,
-  TOP_LEVEL_ITEM_COLUMNS, VENUE_ALIAS_MERGE_KEYS, buildMergeAuditTrail,
+  IDENTIFIER_META_KEYS,
+  RETRACTION_SURVIVAL_KEYS,
+  SYSTEM_RESERVED_MERGE_KEYS,
+  TOP_LEVEL_ITEM_COLUMNS,
+  VENUE_ALIAS_MERGE_KEYS,
+  buildMergeAuditTrail,
 };
 
 interface IngestionItemCacheInvalidationParams {
-  itemIds: string[]; userId?: string | null; projectId?: string | null;
-  cacheCoordinator?: IItemCacheInvalidator; catalogGateway?: ICatalogFacade;
-  cache?: RedisCacheService; logger?: Logger; includeExtendedRelations?: boolean; contextLabel?: string;
+  itemIds: string[];
+  userId?: string | null;
+  projectId?: string | null;
+  cacheCoordinator?: IItemCacheInvalidator;
+  catalogGateway?: ICatalogFacade;
+  cache?: RedisCacheService;
+  logger?: Logger;
+  includeExtendedRelations?: boolean;
+  contextLabel?: string;
 }
 
-export async function invalidateIngestionItemCache(params: IngestionItemCacheInvalidationParams): Promise<void> {
-  const { itemIds, userId, projectId, cacheCoordinator, catalogGateway, cache, logger, includeExtendedRelations, contextLabel } = params;
+export async function invalidateIngestionItemCache(
+  params: IngestionItemCacheInvalidationParams,
+): Promise<void> {
+  const {
+    itemIds,
+    userId,
+    projectId,
+    cacheCoordinator,
+    catalogGateway,
+    cache,
+    logger,
+    includeExtendedRelations,
+    contextLabel,
+  } = params;
   if (!itemIds || itemIds.length === 0) return;
   const validProjectId = normalizeProjectScopeId(projectId);
-  const invalidator = cacheCoordinator?.invalidateForWrite ? cacheCoordinator : catalogGateway?.invalidateForWrite ? catalogGateway : undefined;
+  const invalidator = cacheCoordinator?.invalidateForWrite
+    ? cacheCoordinator
+    : catalogGateway?.invalidateForWrite
+      ? catalogGateway
+      : undefined;
   const extraKeys: string[] = [];
-  if (includeExtendedRelations && !(invalidator?.invalidateForWrite && userId)) {
+  if (
+    includeExtendedRelations &&
+    !(invalidator?.invalidateForWrite && userId)
+  ) {
     const scopeKeys = new Set<string>();
     const scopeId = validProjectId || userId || undefined;
     if (scopeId) scopeKeys.add(scopeId);
     if (validProjectId) scopeKeys.add(`proj:${validProjectId}`);
     if (userId) scopeKeys.add(userId);
-    for (const key of scopeKeys) extraKeys.push(LIBRARY_REDIS_KEYS.collections(key), LIBRARY_REDIS_KEYS.collectionTree(key));
-    if (userId) extraKeys.push(LIBRARY_REDIS_KEYS.counts(userId, validProjectId));
+    for (const key of scopeKeys)
+      extraKeys.push(
+        LIBRARY_REDIS_KEYS.collections(key),
+        LIBRARY_REDIS_KEYS.collectionTree(key),
+      );
+    if (userId)
+      extraKeys.push(LIBRARY_REDIS_KEYS.counts(userId, validProjectId));
   }
   await executeStandardLibraryCacheInvalidation(
-    invalidator, cache,
-    { userId: userId ?? undefined, projectId: validProjectId, itemIds, extraKeys: extraKeys.length > 0 ? extraKeys : undefined },
-    (msg) => logger?.warn(`Failed to invalidate Redis caches${contextLabel ? ` (${contextLabel})` : ''}: ${msg}`),
+    invalidator,
+    cache,
+    {
+      userId: userId ?? undefined,
+      projectId: validProjectId,
+      itemIds,
+      extraKeys: extraKeys.length > 0 ? extraKeys : undefined,
+    },
+    (msg) =>
+      logger?.warn(
+        `Failed to invalidate Redis caches${contextLabel ? ` (${contextLabel})` : ''}: ${msg}`,
+      ),
   );
 }
 
 export async function invalidateMergedItemsCache(params: {
-  cache?: RedisCacheService; cacheCoordinator?: IItemCacheInvalidator; catalogGateway?: ICatalogFacade;
-  logger: Logger; primaryId: string; uniqueDupIds: string[]; userId: string; effectiveProjectId?: string;
+  cache?: RedisCacheService;
+  cacheCoordinator?: IItemCacheInvalidator;
+  catalogGateway?: ICatalogFacade;
+  logger: Logger;
+  primaryId: string;
+  uniqueDupIds: string[];
+  userId: string;
+  effectiveProjectId?: string;
 }): Promise<void> {
-  const { cache, cacheCoordinator, catalogGateway, logger, primaryId, uniqueDupIds, userId, effectiveProjectId } = params;
+  const {
+    cache,
+    cacheCoordinator,
+    catalogGateway,
+    logger,
+    primaryId,
+    uniqueDupIds,
+    userId,
+    effectiveProjectId,
+  } = params;
   await invalidateIngestionItemCache({
-    itemIds: [primaryId, ...uniqueDupIds], userId, projectId: effectiveProjectId,
-    cacheCoordinator, catalogGateway, cache, logger, includeExtendedRelations: true, contextLabel: `after merging items into ${primaryId}`,
+    itemIds: [primaryId, ...uniqueDupIds],
+    userId,
+    projectId: effectiveProjectId,
+    cacheCoordinator,
+    catalogGateway,
+    cache,
+    logger,
+    includeExtendedRelations: true,
+    contextLabel: `after merging items into ${primaryId}`,
   });
 }
 
@@ -67,10 +147,14 @@ async function syncMergedContributors(
   primaryId: string,
   chosenContributors: ContributorShape[] | string[] | undefined,
   duplicates: Array<{ contributors?: unknown; metadata?: unknown }>,
-  primary?: Record<string, unknown> & { contributors?: unknown; metadata?: unknown },
+  primary?: Record<string, unknown> & {
+    contributors?: unknown;
+    metadata?: unknown;
+  },
   primaryMeta?: Record<string, unknown>,
 ): Promise<Array<Record<string, unknown>>> {
-  const mapInput = (c: ContributorShape | string, idx: number) => mapContributorInputForPrimary(primaryId, c, idx);
+  const mapInput = (c: ContributorShape | string, idx: number) =>
+    mapContributorInputForPrimary(primaryId, c, idx);
   if (Array.isArray(chosenContributors)) {
     await tx.contributor.deleteMany({ where: { itemId: primaryId } });
     if (chosenContributors.length === 0) {
@@ -83,11 +167,17 @@ async function syncMergedContributors(
     return data;
   }
   const effectivePrimaryMeta = primaryMeta ?? asMetaObject(primary?.metadata);
-  const isPrimaryCreatorsLocked = ItemProvenancePolicy.isFieldLocked(effectivePrimaryMeta, 'creators', ['authors', 'contributors']);
+  const isPrimaryCreatorsLocked = ItemProvenancePolicy.isFieldLocked(
+    effectivePrimaryMeta,
+    'creators',
+    ['authors', 'contributors'],
+  );
   if (!isPrimaryCreatorsLocked) {
     for (const dup of duplicates) {
       const dupMeta = asMetaObject(dup.metadata);
-      const locked = ItemProvenancePolicy.inspectFieldUserLock(dupMeta, 'creators').locked || ItemProvenancePolicy.inspectFieldUserLock(dupMeta, 'authors').locked;
+      const locked =
+        ItemProvenancePolicy.inspectFieldUserLock(dupMeta, 'creators').locked ||
+        ItemProvenancePolicy.inspectFieldUserLock(dupMeta, 'authors').locked;
       if (locked) {
         const dupContribs = extractItemContributors(dup);
         if (dupContribs.length > 0) {
@@ -96,8 +186,12 @@ async function syncMergedContributors(
           await tx.contributor.createMany({ data });
           syncContributorsToMeta(primaryMeta, data);
           if (primaryMeta) {
-            const existingLocked = Array.isArray(primaryMeta.lockedFields) ? (primaryMeta.lockedFields as string[]) : [];
-            primaryMeta.lockedFields = Array.from(new Set([...existingLocked, 'creators', 'authors']));
+            const existingLocked = Array.isArray(primaryMeta.lockedFields)
+              ? (primaryMeta.lockedFields as string[])
+              : [];
+            primaryMeta.lockedFields = Array.from(
+              new Set([...existingLocked, 'creators', 'authors']),
+            );
           }
           return data;
         }
@@ -106,7 +200,9 @@ async function syncMergedContributors(
   }
 
   const primaryContribCount =
-    typeof tx.contributor?.count === 'function' ? await tx.contributor.count({ where: { itemId: primaryId } }) : 0;
+    typeof tx.contributor?.count === 'function'
+      ? await tx.contributor.count({ where: { itemId: primaryId } })
+      : 0;
   const primaryContribs = extractItemContributors(primary);
   const bestDonor = selectBestDonorContributors(duplicates);
   if (!bestDonor) return [];
@@ -121,7 +217,12 @@ async function syncMergedContributors(
   if (
     !isPrimaryCreatorsLocked &&
     primaryContribs.length > 0 &&
-    shouldUpgradePrimaryContributors(primary, effectivePrimaryMeta, primaryContribs, bestDonor)
+    shouldUpgradePrimaryContributors(
+      primary,
+      effectivePrimaryMeta,
+      primaryContribs,
+      bestDonor,
+    )
   ) {
     await tx.contributor.deleteMany({ where: { itemId: primaryId } });
     const data = bestDonor.list.map(mapInput);
@@ -142,42 +243,76 @@ export async function syncMergedIdentifiersInTx(params: {
   primaryDoi?: string | null;
   explicitlyClearedFields?: ReadonlySet<string>;
 }): Promise<void> {
-  const { tx, primaryId, uniqueDupIds, primaryMeta, topLevelData, primaryDoi, explicitlyClearedFields } = params;
+  const {
+    tx,
+    primaryId,
+    uniqueDupIds,
+    primaryMeta,
+    topLevelData,
+    primaryDoi,
+    explicitlyClearedFields,
+  } = params;
   const identTx = tx as unknown as {
     itemIdentifier?: {
       findMany?: (args: { where: { itemId: { in: string[] } } }) => Promise<
-        Array<{ itemId: string; type: string; value: string; canonicalUri?: string | null }>
+        Array<{
+          itemId: string;
+          type: string;
+          value: string;
+          canonicalUri?: string | null;
+        }>
       >;
       upsert?: (args: {
         where: { itemId_type: { itemId: string; type: string } };
         update: { value: string; canonicalUri: string };
-        create: { itemId: string; type: string; value: string; canonicalUri: string };
+        create: {
+          itemId: string;
+          type: string;
+          value: string;
+          canonicalUri: string;
+        };
       }) => Promise<unknown>;
-      deleteMany?: (args: { where: Record<string, unknown> }) => Promise<unknown>;
+      deleteMany?: (args: {
+        where: Record<string, unknown>;
+      }) => Promise<unknown>;
     };
   };
 
   const clearedCanonicalTypes = computeClearedCanonicalIdentifierTypes(
-    topLevelData, primaryMeta, explicitlyClearedFields,
+    topLevelData,
+    primaryMeta,
+    explicitlyClearedFields,
   );
   if (!identTx.itemIdentifier) return;
 
   const existingIdRecords = identTx.itemIdentifier.findMany
-    ? await identTx.itemIdentifier.findMany({ where: { itemId: { in: [primaryId, ...uniqueDupIds] } } })
+    ? await identTx.itemIdentifier.findMany({
+        where: { itemId: { in: [primaryId, ...uniqueDupIds] } },
+      })
     : [];
 
   const desiredByType = computeDesiredMergedIdentifierRecords({
-    primaryId, existingIdRecords, clearedCanonicalTypes, topLevelData, primaryMeta, primaryDoi,
+    primaryId,
+    existingIdRecords,
+    clearedCanonicalTypes,
+    topLevelData,
+    primaryMeta,
+    primaryDoi,
   });
 
   if (identTx.itemIdentifier.deleteMany) {
     await Promise.all([
       uniqueDupIds.length > 0
-        ? identTx.itemIdentifier.deleteMany({ where: { itemId: { in: uniqueDupIds } } })
+        ? identTx.itemIdentifier.deleteMany({
+            where: { itemId: { in: uniqueDupIds } },
+          })
         : Promise.resolve(),
       clearedCanonicalTypes.size > 0
         ? identTx.itemIdentifier.deleteMany({
-            where: { itemId: primaryId, type: { in: Array.from(clearedCanonicalTypes) } },
+            where: {
+              itemId: primaryId,
+              type: { in: Array.from(clearedCanonicalTypes) },
+            },
           })
         : Promise.resolve(),
     ]);
@@ -194,11 +329,16 @@ export async function syncMergedIdentifiersInTx(params: {
     );
   }
 
-  if (desiredByType.has('arxiv') && topLevelData.arxivId === undefined) topLevelData.arxivId = desiredByType.get('arxiv')!.value;
-  if (desiredByType.has('pmid') && topLevelData.pmid === undefined) topLevelData.pmid = desiredByType.get('pmid')!.value;
-  if (desiredByType.has('pmcid') && topLevelData.pmcid === undefined) topLevelData.pmcid = desiredByType.get('pmcid')!.value;
-  if (desiredByType.has('isbn') && topLevelData.isbn === undefined) topLevelData.isbn = desiredByType.get('isbn')!.value;
-  if (desiredByType.has('issn') && topLevelData.issn === undefined) topLevelData.issn = desiredByType.get('issn')!.value;
+  if (desiredByType.has('arxiv') && topLevelData.arxivId === undefined)
+    topLevelData.arxivId = desiredByType.get('arxiv')!.value;
+  if (desiredByType.has('pmid') && topLevelData.pmid === undefined)
+    topLevelData.pmid = desiredByType.get('pmid')!.value;
+  if (desiredByType.has('pmcid') && topLevelData.pmcid === undefined)
+    topLevelData.pmcid = desiredByType.get('pmcid')!.value;
+  if (desiredByType.has('isbn') && topLevelData.isbn === undefined)
+    topLevelData.isbn = desiredByType.get('isbn')!.value;
+  if (desiredByType.has('issn') && topLevelData.issn === undefined)
+    topLevelData.issn = desiredByType.get('issn')!.value;
 }
 
 export async function rewireMergedItemRelations(
@@ -216,19 +356,32 @@ export async function rewireMergedItemRelations(
       },
     })) ?? [];
 
-  const { relationIdsToDelete, relationUpdates } = planMergedItemRelations(existingRelations, primaryId, uniqueDupIds);
+  const { relationIdsToDelete, relationUpdates } = planMergedItemRelations(
+    existingRelations,
+    primaryId,
+    uniqueDupIds,
+  );
 
   await Promise.all([
     ...relationUpdates.map((upd) =>
       tx.itemRelation.update({
         where: { id: upd.id },
-        data: { sourceItemId: upd.sourceItemId, targetItemId: upd.targetItemId },
+        data: {
+          sourceItemId: upd.sourceItemId,
+          targetItemId: upd.targetItemId,
+        },
       }),
     ),
     ...(relationIdsToDelete.length > 0
       ? tx.itemRelation.deleteMany
-        ? [tx.itemRelation.deleteMany({ where: { id: { in: relationIdsToDelete } } })]
-        : relationIdsToDelete.map((relId) => tx.itemRelation.delete({ where: { id: relId } }))
+        ? [
+            tx.itemRelation.deleteMany({
+              where: { id: { in: relationIdsToDelete } },
+            }),
+          ]
+        : relationIdsToDelete.map((relId) =>
+            tx.itemRelation.delete({ where: { id: relId } }),
+          )
       : []),
   ]);
   return existingRelations;
@@ -238,27 +391,42 @@ export async function consolidateUserPublications(
   tx: Prisma.TransactionClient,
   primaryId: string,
   uniqueDupIds: string[],
-): Promise<{ dupPublications: Array<Record<string, unknown>>; primaryPublications: Array<Record<string, unknown>> }> {
-  const dupPublications = (await tx.userPublication?.findMany?.({ where: { itemId: { in: uniqueDupIds } } })) ?? [];
-  if (dupPublications.length === 0) return { dupPublications: [], primaryPublications: [] };
+): Promise<{
+  dupPublications: Array<Record<string, unknown>>;
+  primaryPublications: Array<Record<string, unknown>>;
+}> {
+  const dupPublications =
+    (await tx.userPublication?.findMany?.({
+      where: { itemId: { in: uniqueDupIds } },
+    })) ?? [];
+  if (dupPublications.length === 0)
+    return { dupPublications: [], primaryPublications: [] };
 
   const primaryPubByUser = new Map<string, (typeof dupPublications)[number]>();
   const initialPrimaryPubs: Array<Record<string, unknown>> = [];
 
   if (typeof tx.userPublication?.findMany === 'function') {
-    const existingPrimaryPubs = (await tx.userPublication.findMany({ where: { itemId: primaryId } })) ?? [];
+    const existingPrimaryPubs =
+      (await tx.userPublication.findMany({ where: { itemId: primaryId } })) ??
+      [];
     for (const p of existingPrimaryPubs) {
       if (!p.itemId || p.itemId === primaryId) {
         primaryPubByUser.set(p.userId, p);
-        initialPrimaryPubs.push({ ...(p as unknown as Record<string, unknown>) });
+        initialPrimaryPubs.push({
+          ...(p as unknown as Record<string, unknown>),
+        });
       }
     }
   } else if (typeof tx.userPublication?.findUnique === 'function') {
     for (const uid of new Set(dupPublications.map((p) => p.userId))) {
-      const existing = await tx.userPublication.findUnique({ where: { userId_itemId: { userId: uid, itemId: primaryId } } });
+      const existing = await tx.userPublication.findUnique({
+        where: { userId_itemId: { userId: uid, itemId: primaryId } },
+      });
       if (existing) {
         primaryPubByUser.set(uid, existing);
-        initialPrimaryPubs.push({ ...(existing as unknown as Record<string, unknown>) });
+        initialPrimaryPubs.push({
+          ...(existing as unknown as Record<string, unknown>),
+        });
       }
     }
   }
@@ -277,31 +445,44 @@ export async function consolidateUserPublications(
           addedAt: pub.addedAt,
         },
       });
-      primaryPubByUser.set(pub.userId, created ?? { ...pub, itemId: primaryId });
+      primaryPubByUser.set(
+        pub.userId,
+        created ?? { ...pub, itemId: primaryId },
+      );
     } else {
       const updatedData = {
         isPublic: existingPrimaryPub.isPublic || pub.isPublic,
-        openAccessLicense: existingPrimaryPub.openAccessLicense || pub.openAccessLicense,
+        openAccessLicense:
+          existingPrimaryPub.openAccessLicense || pub.openAccessLicense,
         contributorId: existingPrimaryPub.contributorId || pub.contributorId,
       };
       await tx.userPublication.update({
         where: { userId_itemId: { userId: pub.userId, itemId: primaryId } },
         data: updatedData,
       });
-      primaryPubByUser.set(pub.userId, { ...existingPrimaryPub, ...updatedData });
+      primaryPubByUser.set(pub.userId, {
+        ...existingPrimaryPub,
+        ...updatedData,
+      });
     }
   }
 
   if (tx.userPublication.deleteMany) {
-    await tx.userPublication.deleteMany({ where: { itemId: { in: uniqueDupIds } } });
+    await tx.userPublication.deleteMany({
+      where: { itemId: { in: uniqueDupIds } },
+    });
   } else {
     for (const pub of dupPublications) {
-      await tx.userPublication.delete({ where: { userId_itemId: { userId: pub.userId, itemId: pub.itemId } } });
+      await tx.userPublication.delete({
+        where: { userId_itemId: { userId: pub.userId, itemId: pub.itemId } },
+      });
     }
   }
 
   return {
-    dupPublications: dupPublications as unknown as Array<Record<string, unknown>>,
+    dupPublications: dupPublications as unknown as Array<
+      Record<string, unknown>
+    >,
     primaryPublications: initialPrimaryPubs,
   };
 }
@@ -322,17 +503,31 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
   const { tx, duplicates } = params;
   const topLevelData = computeMergedTopLevelAndPrimaryMeta(params);
 
-  if (typeof topLevelData.citationKey === 'string' && topLevelData.citationKey.trim()) {
+  if (
+    typeof topLevelData.citationKey === 'string' &&
+    topLevelData.citationKey.trim()
+  ) {
     const targetCitKey = topLevelData.citationKey.trim().toLowerCase();
     const collidingDupIds = duplicates
-      .filter((dup) => typeof dup.citationKey === 'string' && dup.citationKey.trim().toLowerCase() === targetCitKey && typeof dup.id === 'string')
+      .filter(
+        (dup) =>
+          typeof dup.citationKey === 'string' &&
+          dup.citationKey.trim().toLowerCase() === targetCitKey &&
+          typeof dup.id === 'string',
+      )
       .map((dup) => dup.id as string);
     if (collidingDupIds.length > 0) {
       if (typeof tx.libraryItem?.updateMany === 'function') {
-        await tx.libraryItem.updateMany({ where: { id: { in: collidingDupIds } }, data: { citationKey: null } });
+        await tx.libraryItem.updateMany({
+          where: { id: { in: collidingDupIds } },
+          data: { citationKey: null },
+        });
       } else if (typeof tx.libraryItem?.update === 'function') {
         for (const dupId of collidingDupIds) {
-          await tx.libraryItem.update({ where: { id: dupId }, data: { citationKey: null } });
+          await tx.libraryItem.update({
+            where: { id: dupId },
+            data: { citationKey: null },
+          });
         }
       }
     }
@@ -343,7 +538,11 @@ export async function applyMergedUpdatesAndClearDuplicateCitationKeyCollision(pa
 
 export interface DuplicateMergeStepContext {
   tx: Prisma.TransactionClient;
-  primary: Record<string, unknown> & { id: string; citationKey?: string | null; metadata?: unknown };
+  primary: Record<string, unknown> & {
+    id: string;
+    citationKey?: string | null;
+    metadata?: unknown;
+  };
   duplicates: Array<
     Record<string, unknown> & {
       id: string;
@@ -363,9 +562,13 @@ export interface DuplicateMergeStepContext {
   now: Date;
 }
 
-type DuplicateMergeStepFn = (context: DuplicateMergeStepContext) => Promise<void> | void;
+type DuplicateMergeStepFn = (
+  context: DuplicateMergeStepContext,
+) => Promise<void> | void;
 
-async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext): Promise<void> {
+async function consolidateItemMetadataStep(
+  ctx: DuplicateMergeStepContext,
+): Promise<void> {
   const { tx, primary, uniqueDupIds } = ctx;
   const [primaryMetaRows, dupMetas] = await Promise.all([
     tx.itemMetadata?.findMany
@@ -374,7 +577,9 @@ async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext): Prom
           select: { sourceProvider: true },
         })
       : (async () => {
-          const first = await tx.itemMetadata?.findFirst?.({ where: { itemId: primary.id } });
+          const first = await tx.itemMetadata?.findFirst?.({
+            where: { itemId: primary.id },
+          });
           return first ? [first] : [];
         })(),
     tx.itemMetadata?.findMany
@@ -385,13 +590,17 @@ async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext): Prom
       : Promise.resolve([]),
   ]);
 
-  const resolvedPrimaryMetas = Array.isArray(primaryMetaRows) ? primaryMetaRows : [];
+  const resolvedPrimaryMetas = Array.isArray(primaryMetaRows)
+    ? primaryMetaRows
+    : [];
   const resolvedDupMetas =
     dupMetas.length > 0
       ? dupMetas
       : tx.itemMetadata?.findFirst
         ? await (async () => {
-            const firstDup = await tx.itemMetadata.findFirst({ where: { itemId: { in: uniqueDupIds } } });
+            const firstDup = await tx.itemMetadata.findFirst({
+              where: { itemId: { in: uniqueDupIds } },
+            });
             return firstDup ? [firstDup] : [];
           })()
         : [];
@@ -400,7 +609,7 @@ async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext): Prom
     resolvedPrimaryMetas
       .map((m) =>
         typeof (m as { sourceProvider?: unknown }).sourceProvider === 'string'
-          ? (m as { sourceProvider: string }).sourceProvider.trim().toLowerCase()
+          ? m.sourceProvider.trim().toLowerCase()
           : '',
       )
       .filter(Boolean),
@@ -408,14 +617,20 @@ async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext): Prom
 
   const idsToReassign: string[] = [];
   for (const dm of resolvedDupMetas) {
-    const dmRec = dm as { id?: string; itemId?: string; sourceProvider?: string };
+    const dmRec = dm as {
+      id?: string;
+      itemId?: string;
+      sourceProvider?: string;
+    };
     if (!dmRec.id) continue;
     const providerKey =
       typeof dmRec.sourceProvider === 'string' && dmRec.sourceProvider.trim()
         ? dmRec.sourceProvider.trim().toLowerCase()
         : '';
     const shouldReassign =
-      providerKey.length > 0 ? !coveredProviders.has(providerKey) : resolvedPrimaryMetas.length === 0;
+      providerKey.length > 0
+        ? !coveredProviders.has(providerKey)
+        : resolvedPrimaryMetas.length === 0;
 
     if (shouldReassign) {
       if (providerKey) coveredProviders.add(providerKey);
@@ -424,46 +639,78 @@ async function consolidateItemMetadataStep(ctx: DuplicateMergeStepContext): Prom
   }
   if (idsToReassign.length > 0) {
     if (typeof tx.itemMetadata?.updateMany === 'function') {
-      await tx.itemMetadata.updateMany({ where: { id: { in: idsToReassign } }, data: { itemId: primary.id } });
+      await tx.itemMetadata.updateMany({
+        where: { id: { in: idsToReassign } },
+        data: { itemId: primary.id },
+      });
     } else if (typeof tx.itemMetadata?.update === 'function') {
       for (const id of idsToReassign) {
-        await tx.itemMetadata.update({ where: { id }, data: { itemId: primary.id } });
+        await tx.itemMetadata.update({
+          where: { id },
+          data: { itemId: primary.id },
+        });
       }
     }
   }
 }
 
-async function backfillMetadataAndCreatorsStep(ctx: DuplicateMergeStepContext): Promise<void> {
-  const { tx, primary, duplicates, rawSelections, scalarSelections, primaryMeta, backfillFields } = ctx;
+async function backfillMetadataAndCreatorsStep(
+  ctx: DuplicateMergeStepContext,
+): Promise<void> {
+  const {
+    tx,
+    primary,
+    duplicates,
+    rawSelections,
+    scalarSelections,
+    primaryMeta,
+    backfillFields,
+  } = ctx;
 
   const extraIsObject =
-    primaryMeta.extra !== null && typeof primaryMeta.extra === 'object' && !Array.isArray(primaryMeta.extra);
+    primaryMeta.extra !== null &&
+    typeof primaryMeta.extra === 'object' &&
+    !Array.isArray(primaryMeta.extra);
   const extraObj: Record<string, unknown> | undefined = extraIsObject
     ? { ...(primaryMeta.extra as Record<string, unknown>) }
     : undefined;
 
   const existingAliases: string[] = [
-    ...(Array.isArray(primaryMeta.mergedCitationKeys) ? (primaryMeta.mergedCitationKeys as string[]) : []),
-    ...(extraObj && Array.isArray(extraObj.mergedCitationKeys) ? (extraObj.mergedCitationKeys as string[]) : []),
+    ...(Array.isArray(primaryMeta.mergedCitationKeys)
+      ? (primaryMeta.mergedCitationKeys as string[])
+      : []),
+    ...(extraObj && Array.isArray(extraObj.mergedCitationKeys)
+      ? (extraObj.mergedCitationKeys as string[])
+      : []),
   ];
   const dupCitationKeys = duplicates
     .flatMap((d) => {
       const dMeta = asMetaObject(d.metadata);
-      const dAliases = Array.isArray(dMeta.mergedCitationKeys) ? (dMeta.mergedCitationKeys as string[]) : [];
+      const dAliases = Array.isArray(dMeta.mergedCitationKeys)
+        ? (dMeta.mergedCitationKeys as string[])
+        : [];
       return [d.citationKey, ...dAliases];
     })
-    .filter((k): k is string => Boolean(k?.trim() && k !== primary.citationKey));
-  const mergedAliases = Array.from(new Set([...existingAliases, ...dupCitationKeys]));
+    .filter((k): k is string =>
+      Boolean(k?.trim() && k !== primary.citationKey),
+    );
+  const mergedAliases = Array.from(
+    new Set([...existingAliases, ...dupCitationKeys]),
+  );
   primaryMeta.mergedCitationKeys = mergedAliases;
   if (extraObj) extraObj.mergedCitationKeys = mergedAliases;
 
-  const chosenContributors = (rawSelections.contributors ?? rawSelections.authors ?? rawSelections.creators) as
-    | ContributorShape[]
-    | string[]
-    | undefined;
+  const chosenContributors = (rawSelections.contributors ??
+    rawSelections.authors ??
+    rawSelections.creators) as ContributorShape[] | string[] | undefined;
 
   const syncedContributors = await syncMergedContributors(
-    tx, primary.id, chosenContributors, duplicates, primary, primaryMeta,
+    tx,
+    primary.id,
+    chosenContributors,
+    duplicates,
+    primary,
+    primaryMeta,
   );
   if (Array.isArray(chosenContributors) && chosenContributors.length === 0) {
     ctx.syncedContributors = [];
@@ -472,31 +719,53 @@ async function backfillMetadataAndCreatorsStep(ctx: DuplicateMergeStepContext): 
     ctx.syncedContributors = syncedContributors;
     const derivedAuthor = deriveFirstAuthor({
       contributors: syncedContributors,
-      itemType: String(scalarSelections.itemType || primary.itemType || primary.type || ''),
+      itemType: String(
+        scalarSelections.itemType || primary.itemType || primary.type || '',
+      ),
     });
     if (derivedAuthor) backfillFields.firstAuthor = derivedAuthor;
   }
 
   applyMetadataAndProvenanceBackfill({
-    primary, duplicates, scalarSelections, primaryMeta, backfillFields, extraObj,
+    primary,
+    duplicates,
+    scalarSelections,
+    primaryMeta,
+    backfillFields,
+    extraObj,
   });
 }
 
 function applyRetractionSurvivalStep(ctx: DuplicateMergeStepContext): void {
-  const { primary, duplicates, uniqueDupIds, primaryMeta, backfillFields, now } = ctx;
+  const {
+    primary,
+    duplicates,
+    uniqueDupIds,
+    primaryMeta,
+    backfillFields,
+    now,
+  } = ctx;
 
   for (const dup of duplicates) {
     const dupMeta = asMetaObject(dup.metadata);
     if (dupMeta.isMyPublication === true) {
       primaryMeta.isMyPublication = true;
-      for (const pubKey of ['publicationConfirmedAt', 'openAccessLicense', 'isPublicPublication'] as const) {
-        if (primaryMeta[pubKey] === undefined && dupMeta[pubKey] !== undefined) {
+      for (const pubKey of [
+        'publicationConfirmedAt',
+        'openAccessLicense',
+        'isPublicPublication',
+      ] as const) {
+        if (
+          primaryMeta[pubKey] === undefined &&
+          dupMeta[pubKey] !== undefined
+        ) {
           primaryMeta[pubKey] = dupMeta[pubKey];
         }
       }
     }
 
-    const dupCheckedAt = (dup as { retractionCheckedAt?: Date | string | null }).retractionCheckedAt;
+    const dupCheckedAt = (dup as { retractionCheckedAt?: Date | string | null })
+      .retractionCheckedAt;
     if (
       (dup as { isRetracted?: boolean }).isRetracted ||
       dupMeta.isRetracted ||
@@ -512,24 +781,41 @@ function applyRetractionSurvivalStep(ctx: DuplicateMergeStepContext): void {
       }
       if (!primaryMeta.retractionCheckedAt && dupCheckedAt) {
         primaryMeta.retractionCheckedAt =
-          dupCheckedAt instanceof Date ? dupCheckedAt.toISOString() : String(dupCheckedAt);
+          dupCheckedAt instanceof Date
+            ? dupCheckedAt.toISOString()
+            : String(dupCheckedAt);
       }
-    } else if (!primaryMeta.retractionCheckedAt && (dupMeta.retractionCheckedAt || dupCheckedAt)) {
+    } else if (
+      !primaryMeta.retractionCheckedAt &&
+      (dupMeta.retractionCheckedAt || dupCheckedAt)
+    ) {
       primaryMeta.retractionCheckedAt =
         dupMeta.retractionCheckedAt ??
-        (dupCheckedAt instanceof Date ? dupCheckedAt.toISOString() : String(dupCheckedAt));
+        (dupCheckedAt instanceof Date
+          ? dupCheckedAt.toISOString()
+          : String(dupCheckedAt));
     }
   }
-  const primaryCheckedAt = (primary as { retractionCheckedAt?: Date | string | null }).retractionCheckedAt;
+  const primaryCheckedAt = (
+    primary as { retractionCheckedAt?: Date | string | null }
+  ).retractionCheckedAt;
   if (!primaryMeta.retractionCheckedAt && primaryCheckedAt) {
     primaryMeta.retractionCheckedAt =
-      primaryCheckedAt instanceof Date ? primaryCheckedAt.toISOString() : String(primaryCheckedAt);
+      primaryCheckedAt instanceof Date
+        ? primaryCheckedAt.toISOString()
+        : String(primaryCheckedAt);
   }
 
-  const currentHistory = Array.isArray(primaryMeta.mergeHistory) ? (primaryMeta.mergeHistory as unknown[]) : [];
+  const currentHistory = Array.isArray(primaryMeta.mergeHistory)
+    ? (primaryMeta.mergeHistory as unknown[])
+    : [];
   primaryMeta.mergeHistory = [
     ...currentHistory,
-    { mergedAt: now.toISOString(), duplicateItemIds: uniqueDupIds, backfilledFields: Object.keys(backfillFields) },
+    {
+      mergedAt: now.toISOString(),
+      duplicateItemIds: uniqueDupIds,
+      backfilledFields: Object.keys(backfillFields),
+    },
   ];
 }
 
@@ -553,19 +839,29 @@ export async function recordMergedAssetSyncEventsInTx(params: {
   helpers: TransactionHelpers;
   eventScope: { userId: string; projectId?: string };
   initialNotes: Array<{ id: string; itemId: string }>;
-  initialAttachments: Array<{ id: string; itemId: string; attachmentType?: string | null }>;
+  initialAttachments: Array<{
+    id: string;
+    itemId: string;
+    attachmentType?: string | null;
+  }>;
 }): Promise<void> {
   const { tx, helpers, eventScope, initialNotes, initialAttachments } = params;
 
   const [survivingNotes, survivingAttachments] = await Promise.all([
     initialNotes.length > 0
-      ? tx.libraryNote?.findMany?.({ where: { id: { in: initialNotes.map((n) => n.id) } } }) ?? Promise.resolve([])
+      ? (tx.libraryNote?.findMany?.({
+          where: { id: { in: initialNotes.map((n) => n.id) } },
+        }) ?? Promise.resolve([]))
       : Promise.resolve([]),
     initialAttachments.length > 0
-      ? tx.attachment?.findMany?.({ where: { id: { in: initialAttachments.map((a) => a.id) } } }) ?? Promise.resolve([])
+      ? (tx.attachment?.findMany?.({
+          where: { id: { in: initialAttachments.map((a) => a.id) } },
+        }) ?? Promise.resolve([]))
       : Promise.resolve([]),
   ]);
-  const survivingNoteMap = new Map((survivingNotes || []).map((n) => [n.id, n]));
+  const survivingNoteMap = new Map(
+    (survivingNotes || []).map((n) => [n.id, n]),
+  );
 
   const assetChangeEntries: Array<{
     entityType: 'Note' | 'Attachment';
@@ -574,12 +870,21 @@ export async function recordMergedAssetSyncEventsInTx(params: {
     version: number;
     data?: unknown;
   }> = [];
-  const assetTombstones: Array<{ entityType: 'Note' | 'Attachment'; entityId: string }> = [];
+  const assetTombstones: Array<{
+    entityType: 'Note' | 'Attachment';
+    entityId: string;
+  }> = [];
 
   for (const initNote of initialNotes) {
     const survivor = survivingNoteMap.get(initNote.id);
     if (survivor && !survivor.deletedAt) {
-      assetChangeEntries.push({ entityType: 'Note', entityId: survivor.id, action: 'update', version: 1, data: survivor });
+      assetChangeEntries.push({
+        entityType: 'Note',
+        entityId: survivor.id,
+        action: 'update',
+        version: 1,
+        data: survivor,
+      });
     } else {
       assetTombstones.push({ entityType: 'Note', entityId: initNote.id });
       assetChangeEntries.push({
@@ -592,7 +897,9 @@ export async function recordMergedAssetSyncEventsInTx(params: {
     }
   }
 
-  const survivingAttachmentMap = new Map((survivingAttachments || []).map((a) => [a.id, a]));
+  const survivingAttachmentMap = new Map(
+    (survivingAttachments || []).map((a) => [a.id, a]),
+  );
 
   for (const initAtt of initialAttachments) {
     const survivor = survivingAttachmentMap.get(initAtt.id);
@@ -617,22 +924,35 @@ export async function recordMergedAssetSyncEventsInTx(params: {
   }
 
   if (assetTombstones.length > 0) {
-    if (helpers.recordTombstonesBatch) await helpers.recordTombstonesBatch(eventScope, assetTombstones);
-    else for (const t of assetTombstones) await helpers.recordTombstone(eventScope, t);
+    if (helpers.recordTombstonesBatch)
+      await helpers.recordTombstonesBatch(eventScope, assetTombstones);
+    else
+      for (const t of assetTombstones)
+        await helpers.recordTombstone(eventScope, t);
   }
   if (assetChangeEntries.length > 0) {
-    if (helpers.appendChangesBatch) await helpers.appendChangesBatch(eventScope, assetChangeEntries);
-    else for (const c of assetChangeEntries) await helpers.appendChange(eventScope, c);
+    if (helpers.appendChangesBatch)
+      await helpers.appendChangesBatch(eventScope, assetChangeEntries);
+    else
+      for (const c of assetChangeEntries)
+        await helpers.appendChange(eventScope, c);
   }
 }
 
-async function loadFinalRelationsForPrimary(client: Prisma.TransactionClient, primaryId: string) {
+async function loadFinalRelationsForPrimary(
+  client: Prisma.TransactionClient,
+  primaryId: string,
+) {
   const [attachments, notes] = await Promise.all([
     client.attachment?.findMany
-      ? client.attachment.findMany({ where: { itemId: primaryId, deletedAt: null } })
+      ? client.attachment.findMany({
+          where: { itemId: primaryId, deletedAt: null },
+        })
       : Promise.resolve([]),
     client.libraryNote?.findMany
-      ? client.libraryNote.findMany({ where: { itemId: primaryId, deletedAt: null } })
+      ? client.libraryNote.findMany({
+          where: { itemId: primaryId, deletedAt: null },
+        })
       : Promise.resolve([]),
   ]);
   const attachmentCount = Array.isArray(attachments) ? attachments.length : 0;
@@ -640,18 +960,27 @@ async function loadFinalRelationsForPrimary(client: Prisma.TransactionClient, pr
   return {
     attachments: Array.isArray(attachments) ? attachments : [],
     notes: Array.isArray(notes) ? notes : [],
-    attachmentCount, hasFile: attachmentCount > 0, noteCount,
+    attachmentCount,
+    hasFile: attachmentCount > 0,
+    noteCount,
   };
 }
 
 export async function updateAndReloadMergedPrimaryInTx(params: {
-  tx: Prisma.TransactionClient; primaryId: string; userId: string;
-  topLevelData: Record<string, unknown>; primaryMeta: Record<string, unknown>;
+  tx: Prisma.TransactionClient;
+  primaryId: string;
+  userId: string;
+  topLevelData: Record<string, unknown>;
+  primaryMeta: Record<string, unknown>;
 }) {
   const { tx, primaryId, userId, topLevelData, primaryMeta } = params;
   const updatedPrimary = await tx.libraryItem.update({
     where: { id: primaryId },
-    data: { ...topLevelData, metadata: primaryMeta as Prisma.InputJsonValue, version: { increment: 1 } },
+    data: {
+      ...topLevelData,
+      metadata: primaryMeta as Prisma.InputJsonValue,
+      version: { increment: 1 },
+    },
   });
   const reloadedPrimary = await tx.libraryItem.findUnique({
     where: { id: primaryId },
@@ -669,12 +998,25 @@ export async function updateAndReloadMergedPrimaryInTx(params: {
 }
 
 export async function softDeleteDuplicatesAndRecordOutboxInTx(params: {
-  tx: Prisma.TransactionClient; helpers: TransactionHelpers;
-  eventScope: { userId: string; projectId?: string }; primaryId: string;
-  duplicates: Array<{ id: string; metadata?: unknown }>; userId: string;
-  effectiveProjectId?: string; now: Date;
+  tx: Prisma.TransactionClient;
+  helpers: TransactionHelpers;
+  eventScope: { userId: string; projectId?: string };
+  primaryId: string;
+  duplicates: Array<{ id: string; metadata?: unknown }>;
+  userId: string;
+  effectiveProjectId?: string;
+  now: Date;
 }): Promise<void> {
-  const { tx, helpers, eventScope, primaryId, duplicates, userId, effectiveProjectId, now } = params;
+  const {
+    tx,
+    helpers,
+    eventScope,
+    primaryId,
+    duplicates,
+    userId,
+    effectiveProjectId,
+    now,
+  } = params;
   const orderedDuplicates = [...duplicates].sort((a, b) =>
     a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
   );
@@ -682,10 +1024,16 @@ export async function softDeleteDuplicatesAndRecordOutboxInTx(params: {
   const softDeletedDuplicates = await Promise.all(
     orderedDuplicates.map((dup) => {
       const baseMeta =
-        dup.metadata && typeof dup.metadata === 'object' && !Array.isArray(dup.metadata)
+        dup.metadata &&
+        typeof dup.metadata === 'object' &&
+        !Array.isArray(dup.metadata)
           ? (dup.metadata as Record<string, unknown>)
           : {};
-      const dupMeta = { ...baseMeta, mergedIntoId: primaryId, mergedAt: now.toISOString() };
+      const dupMeta = {
+        ...baseMeta,
+        mergedIntoId: primaryId,
+        mergedAt: now.toISOString(),
+      };
       return tx.libraryItem.update({
         where: { id: dup.id },
         data: { deletedAt: now, metadata: dupMeta, version: { increment: 1 } },
@@ -693,30 +1041,50 @@ export async function softDeleteDuplicatesAndRecordOutboxInTx(params: {
     }),
   );
 
-  const dupTombstones = orderedDuplicates.map((dup) => ({ entityType: 'Item' as const, entityId: dup.id }));
+  const dupTombstones = orderedDuplicates.map((dup) => ({
+    entityType: 'Item' as const,
+    entityId: dup.id,
+  }));
   const dupChangeEntries = orderedDuplicates.map((dup, idx) => ({
-    entityType: 'Item' as const, entityId: dup.id, action: 'delete' as const,
-    version: softDeletedDuplicates[idx].version, data: softDeletedDuplicates[idx],
+    entityType: 'Item' as const,
+    entityId: dup.id,
+    action: 'delete' as const,
+    version: softDeletedDuplicates[idx].version,
+    data: softDeletedDuplicates[idx],
   }));
   const dupOutboxEvents = orderedDuplicates.map((dup) => ({
     aggregateId: dup.id,
     eventType: 'library.item.merged_into',
     payload: {
-      duplicateId: dup.id, primaryId, mergedIntoId: primaryId,
-      reason: 'merged_into', userId, projectId: effectiveProjectId,
+      duplicateId: dup.id,
+      primaryId,
+      mergedIntoId: primaryId,
+      reason: 'merged_into',
+      userId,
+      projectId: effectiveProjectId,
     },
   }));
 
-  if (helpers.recordTombstonesBatch) await helpers.recordTombstonesBatch(eventScope, dupTombstones);
-  else for (const t of dupTombstones) await helpers.recordTombstone(eventScope, t);
+  if (helpers.recordTombstonesBatch)
+    await helpers.recordTombstonesBatch(eventScope, dupTombstones);
+  else
+    for (const t of dupTombstones) await helpers.recordTombstone(eventScope, t);
 
-  if (helpers.appendChangesBatch) await helpers.appendChangesBatch(eventScope, dupChangeEntries);
-  else for (const c of dupChangeEntries) await helpers.appendChange(eventScope, c);
+  if (helpers.appendChangesBatch)
+    await helpers.appendChangesBatch(eventScope, dupChangeEntries);
+  else
+    for (const c of dupChangeEntries) await helpers.appendChange(eventScope, c);
 
-  if (helpers.publishOutboxBatch) await helpers.publishOutboxBatch(eventScope, dupOutboxEvents);
+  if (helpers.publishOutboxBatch)
+    await helpers.publishOutboxBatch(eventScope, dupOutboxEvents);
   else {
     for (const ev of dupOutboxEvents) {
-      await helpers.publishOutbox(eventScope, ev.aggregateId, ev.eventType, ev.payload);
+      await helpers.publishOutbox(
+        eventScope,
+        ev.aggregateId,
+        ev.eventType,
+        ev.payload,
+      );
     }
   }
 }
@@ -736,7 +1104,8 @@ export class DuplicateMergeRepository {
   readonly recordMergedAssetSyncEventsInTx = recordMergedAssetSyncEventsInTx;
   readonly loadFinalRelationsForPrimary = loadFinalRelationsForPrimary;
   readonly updateAndReloadMergedPrimaryInTx = updateAndReloadMergedPrimaryInTx;
-  readonly softDeleteDuplicatesAndRecordOutboxInTx = softDeleteDuplicatesAndRecordOutboxInTx;
+  readonly softDeleteDuplicatesAndRecordOutboxInTx =
+    softDeleteDuplicatesAndRecordOutboxInTx;
   readonly invalidateIngestionItemCache = invalidateIngestionItemCache;
   readonly invalidateMergedItemsCache = invalidateMergedItemsCache;
 }

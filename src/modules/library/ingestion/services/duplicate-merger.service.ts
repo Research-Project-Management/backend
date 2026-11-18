@@ -8,7 +8,21 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
-import { TransactionHelpers, LIBRARY_EVENT_TYPES, CATALOG_FACADE, ICatalogFacade, ITEM_CACHE_INVALIDATOR, IItemCacheInvalidator, EXTRACTION_FACADE, IExtractionFacade, normalizeProjectScopeId, deriveFirstAuthor, UNIT_OF_WORK, IUnitOfWork, ItemsMapper } from '@/modules/library/core';
+import {
+  TransactionHelpers,
+  LIBRARY_EVENT_TYPES,
+  CATALOG_FACADE,
+  ICatalogFacade,
+  ITEM_CACHE_INVALIDATOR,
+  IItemCacheInvalidator,
+  EXTRACTION_FACADE,
+  IExtractionFacade,
+  normalizeProjectScopeId,
+  deriveFirstAuthor,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  ItemsMapper,
+} from '@/modules/library/core';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/ingestion.dto';
 import { PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/ingestion.types';
@@ -114,7 +128,7 @@ export class DuplicateMergerService {
     }
 
     const effectiveProjectId = normalizeProjectScopeId(
-      projectId || dto.projectId,
+      projectId || dto.spaceId,
     );
     const allItemIds = [dto.primaryItemId, ...uniqueDupIds];
     const items = this.catalogGateway
@@ -553,7 +567,9 @@ export class DuplicateMergerService {
     projectId?: ProjectId | string,
   ) {
     if (!Array.isArray(merges) || merges.length === 0) {
-      throw new BadRequestException('merges must contain at least one merge group');
+      throw new BadRequestException(
+        'merges must contain at least one merge group',
+      );
     }
     const results: Array<{
       primaryItem: unknown;

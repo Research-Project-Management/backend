@@ -1,11 +1,34 @@
 import { Prisma, ReadStatus, Annotation } from '@prisma/client';
 import { isUuid, PrismaService } from '@/core';
-import { normalizeProjectScopeId, resolveSpaceId, SearchQueryEngine, ScopeSpecification, ActiveItemsSpecification, TrashItemsSpecification, ItemTypeSpecification, YearRangeSpecification, CollectionSpecification, TagSpecification, TagNamesSpecification, CompositeSpecification, AndSpecification, OrSpecification, NotSpecification, syncItemDenormalizedCountsInClient } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  resolveSpaceId,
+  SearchQueryEngine,
+  ScopeSpecification,
+  ActiveItemsSpecification,
+  TrashItemsSpecification,
+  ItemTypeSpecification,
+  YearRangeSpecification,
+  CollectionSpecification,
+  TagSpecification,
+  TagNamesSpecification,
+  CompositeSpecification,
+  AndSpecification,
+  OrSpecification,
+  NotSpecification,
+  syncItemDenormalizedCountsInClient,
+} from '@/modules/library/core';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
-import { buildTipTapDocFromText, extractPlainTextFromTipTap } from '@/modules/library/core/domain/renamer.domain';
-import { CreateNoteData, UpdateNoteData } from '@/modules/library/catalog/types/catalog.types';
+import {
+  buildTipTapDocFromText,
+  extractPlainTextFromTipTap,
+} from '@/modules/library/core/domain/renamer.domain';
+import {
+  CreateNoteData,
+  UpdateNoteData,
+} from '@/modules/library/catalog/types/catalog.types';
 
 export {
   ScopeSpecification,
@@ -73,7 +96,7 @@ export function buildItemSearchCondition(
   return SearchQueryEngine.buildComprehensiveItemSearchClauses(
     search,
     effectiveMode,
-  ) as Prisma.LibraryItemWhereInput[];
+  );
 }
 
 class ItemWhereSpecification extends CompositeSpecification<
@@ -104,7 +127,10 @@ function composeAndSpecifications(
   const combined = specs
     .slice(1)
     .reduce<
-      CompositeSpecification<Record<string, unknown>, Prisma.LibraryItemWhereInput>
+      CompositeSpecification<
+        Record<string, unknown>,
+        Prisma.LibraryItemWhereInput
+      >
     >((acc, spec) => acc.and(spec), specs[0])
     .toPrismaWhere();
   if (combined && Array.isArray(combined.AND)) {
@@ -234,27 +260,29 @@ export function buildItemWhereClause(
   if (targetCollectionIds && targetCollectionIds.length > 0) {
     where.collectionItems = new CollectionSpecification(
       targetCollectionIds,
-    ).toPrismaWhere().collectionItems as Prisma.LibraryCollectionItemListRelationFilter;
+    ).toPrismaWhere()
+      .collectionItems as Prisma.LibraryCollectionItemListRelationFilter;
   } else if (options.collectionId) {
     where.collectionItems = new CollectionSpecification(
       options.collectionId,
-    ).toPrismaWhere().collectionItems as Prisma.LibraryCollectionItemListRelationFilter;
+    ).toPrismaWhere()
+      .collectionItems as Prisma.LibraryCollectionItemListRelationFilter;
   }
 
   if (options.tagId) {
     tagSpecs.push(
       new ItemWhereSpecification(
-        new TagSpecification(options.tagId).toPrismaWhere() as Prisma.LibraryItemWhereInput,
+        new TagSpecification(options.tagId).toPrismaWhere(),
       ),
     );
   }
 
   if (options.tag) {
-    const tagNamesWhere = new TagNamesSpecification(options.tag).toPrismaWhere();
+    const tagNamesWhere = new TagNamesSpecification(
+      options.tag,
+    ).toPrismaWhere();
     if (tagNamesWhere.itemTags) {
-      tagSpecs.push(
-        new ItemWhereSpecification(tagNamesWhere as Prisma.LibraryItemWhereInput),
-      );
+      tagSpecs.push(new ItemWhereSpecification(tagNamesWhere));
     }
   }
 
@@ -356,7 +384,8 @@ export class NotesRepository {
     return {
       spaceId: resolveSpaceId({
         userId,
-        projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+        projectId:
+          validProjectId && isUuid(validProjectId) ? validProjectId : null,
       }),
     };
   }
@@ -411,8 +440,11 @@ export class NotesRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    let effectiveProjectId = normalizeProjectScopeId(data.projectId) ?? null;
-    let resolvedSpaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
+    const effectiveProjectId = normalizeProjectScopeId(data.projectId) ?? null;
+    let resolvedSpaceId = resolveSpaceId({
+      userId,
+      projectId: effectiveProjectId,
+    });
 
     if (data.itemId) {
       const parentItem = await client.libraryItem.findFirst({
@@ -442,7 +474,9 @@ export class NotesRepository {
         contentJson:
           data.contentJson !== undefined && data.contentJson !== null
             ? (data.contentJson as Prisma.InputJsonValue)
-            : (buildTipTapDocFromText(effectiveContentMd) as Prisma.InputJsonValue),
+            : (buildTipTapDocFromText(
+                effectiveContentMd,
+              ) as Prisma.InputJsonValue),
         contentMd: effectiveContentMd,
         tags: data.tags
           ? normalizeTags(data.tags, { allowManualAcademicTerms: true })
@@ -628,8 +662,14 @@ export class NotesRepository {
     const client = this.getClient(tx);
 
     const effectiveProjectId = normalizeProjectScopeId(projectId) ?? null;
-    let resolvedSpaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
-    if (!effectiveProjectId && typeof client.libraryItem?.findFirst === 'function') {
+    let resolvedSpaceId = resolveSpaceId({
+      userId,
+      projectId: effectiveProjectId,
+    });
+    if (
+      !effectiveProjectId &&
+      typeof client.libraryItem?.findFirst === 'function'
+    ) {
       const parentItem = await client.libraryItem.findFirst({
         where: { id: itemId, deletedAt: null },
         select: { spaceId: true },
@@ -676,7 +716,9 @@ export class NotesRepository {
   ): Promise<Annotation[]> {
     const client = this.getClient(tx);
     const cleanAnnotationIds = Array.isArray(opts?.annotationIds)
-      ? opts.annotationIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
+      ? opts.annotationIds.filter(
+          (id) => typeof id === 'string' && id.trim().length > 0,
+        )
       : [];
     const itemScopeWhere = opts?.userId
       ? this.buildScopeWhere(opts.userId, opts.projectId)

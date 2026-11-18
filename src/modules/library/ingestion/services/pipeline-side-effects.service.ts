@@ -13,9 +13,7 @@ import {
 } from '@/modules/library/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
-import {
-  IngestionSubmissionEnvelope,
-} from '@/modules/library/ingestion/types/ingestion.types';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
 import {
   DuplicateMatchResult,
   ReconciliationDecision,
@@ -340,13 +338,25 @@ export class PipelineSideEffectsService {
 
             // In-house Semantic Extraction: If PDF has extracted keywords not already on proposedItem, synchronize them into item tags
             const existingKeywordsLower = new Set(
-              (Array.isArray(proposedItem?.keywords) ? proposedItem.keywords : Array.isArray(proposedItem?.tags) ? proposedItem.tags : [])
-                .map((k) => (typeof k === 'string' ? k.trim().toLowerCase() : ''))
+              (Array.isArray(proposedItem?.keywords)
+                ? proposedItem.keywords
+                : Array.isArray(proposedItem?.tags)
+                  ? proposedItem.tags
+                  : []
+              )
+                .map((k) =>
+                  typeof k === 'string' ? k.trim().toLowerCase() : '',
+                )
                 .filter(Boolean),
             );
             const hasNewScrapedKeywords =
               Array.isArray(scraped.keywords) &&
-              scraped.keywords.some((k) => typeof k === 'string' && k.trim() && !existingKeywordsLower.has(k.trim().toLowerCase()));
+              scraped.keywords.some(
+                (k) =>
+                  typeof k === 'string' &&
+                  k.trim() &&
+                  !existingKeywordsLower.has(k.trim().toLowerCase()),
+              );
             if (
               hasNewScrapedKeywords &&
               Array.isArray(scraped.keywords) &&
@@ -589,21 +599,38 @@ export class PipelineSideEffectsService {
     projectId?: string;
     targetItemId: string;
     candidateItem?: Record<string, unknown>;
-  }): Promise<{ existingRecord?: Record<string, unknown> | null; patchedFields: string[] }> {
+  }): Promise<{
+    existingRecord?: Record<string, unknown> | null;
+    patchedFields: string[];
+  }> {
     const { userId, projectId, targetItemId, candidateItem } = params;
     await this.scanRetraction(candidateItem, { localOnly: true });
     if (!this.catalogGateway?.getItem) return { patchedFields: [] };
 
-    const existing = await this.catalogGateway.getItem(userId, targetItemId, projectId);
-    const existingRecord = existing as Record<string, unknown> | null | undefined;
-    const enrichPatch = buildEnrichmentPatch(existingRecord, candidateItem || {});
+    const existing = await this.catalogGateway.getItem(
+      userId,
+      targetItemId,
+      projectId,
+    );
+    const existingRecord = existing as
+      Record<string, unknown> | null | undefined;
+    const enrichPatch = buildEnrichmentPatch(
+      existingRecord,
+      candidateItem || {},
+    );
     const patchedFields = Object.keys(enrichPatch);
 
     if (patchedFields.length > 0 && this.catalogGateway.updateItem) {
-      await this.catalogGateway.updateItem(userId, targetItemId, enrichPatch, { projectId });
-      this.logger.log(`[EXACT_MERGE] Enriched item ${targetItemId} with ${patchedFields.join(', ')}`);
+      await this.catalogGateway.updateItem(userId, targetItemId, enrichPatch, {
+        projectId,
+      });
+      this.logger.log(
+        `[EXACT_MERGE] Enriched item ${targetItemId} with ${patchedFields.join(', ')}`,
+      );
     } else {
-      this.logger.log(`[EXACT_MERGE] Item ${targetItemId} already fully populated — no patch needed`);
+      this.logger.log(
+        `[EXACT_MERGE] Item ${targetItemId} already fully populated — no patch needed`,
+      );
     }
     return { existingRecord, patchedFields };
   }
@@ -622,27 +649,62 @@ export class PipelineSideEffectsService {
     filename?: string;
     payloadSize?: number;
     mode?: 'single' | 'batch';
-  }): Promise<{ existingRecord?: Record<string, unknown> | null; patchedFields: string[] }> {
-    const { userId, projectId, targetItemId, candidateItem = {}, envelope, fileId, filename, payloadSize, mode = 'single' } = params;
+  }): Promise<{
+    existingRecord?: Record<string, unknown> | null;
+    patchedFields: string[];
+  }> {
+    const {
+      userId,
+      projectId,
+      targetItemId,
+      candidateItem = {},
+      envelope,
+      fileId,
+      filename,
+      payloadSize,
+      mode = 'single',
+    } = params;
     let existingRecord: Record<string, unknown> | null | undefined;
     let patchedFields: string[] = [];
 
     if (mode === 'batch') {
       try {
-        const res = await this.enrichExistingMatchedItem({ userId, projectId, targetItemId, candidateItem });
+        const res = await this.enrichExistingMatchedItem({
+          userId,
+          projectId,
+          targetItemId,
+          candidateItem,
+        });
         existingRecord = res.existingRecord;
         patchedFields = res.patchedFields;
-        await this.materializeNotes(userId, projectId, targetItemId, candidateItem?.notes as unknown[] | undefined, existingRecord);
+        await this.materializeNotes(
+          userId,
+          projectId,
+          targetItemId,
+          candidateItem?.notes as unknown[] | undefined,
+          existingRecord,
+        );
       } catch (enrichErr: unknown) {
-        this.logger.warn(`Additive enrichment on duplicate item ${targetItemId} failed: ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`);
+        this.logger.warn(
+          `Additive enrichment on duplicate item ${targetItemId} failed: ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`,
+        );
       }
       if (envelope.collectionIds && envelope.collectionIds.length > 0) {
-        await Promise.all(envelope.collectionIds.map((colId) => this.assignItemToCollection(userId, colId, targetItemId, projectId)));
+        await Promise.all(
+          envelope.collectionIds.map((colId) =>
+            this.assignItemToCollection(userId, colId, targetItemId, projectId),
+          ),
+        );
       }
       return { existingRecord, patchedFields };
     }
 
-    const res = await this.enrichExistingMatchedItem({ userId, projectId, targetItemId, candidateItem });
+    const res = await this.enrichExistingMatchedItem({
+      userId,
+      projectId,
+      targetItemId,
+      candidateItem,
+    });
     existingRecord = res.existingRecord;
     patchedFields = res.patchedFields;
     if (this.catalogGateway?.getItem) {
@@ -650,7 +712,13 @@ export class PipelineSideEffectsService {
         targetItemId,
         { userId, projectId, envelope },
         candidateItem,
-        { fileId, filename, payloadSize, existingRecord, assignCollections: true },
+        {
+          fileId,
+          filename,
+          payloadSize,
+          existingRecord,
+          assignCollections: true,
+        },
       );
     }
     return { existingRecord, patchedFields };
@@ -666,8 +734,10 @@ export class PipelineSideEffectsService {
     proposedMetadata?: Record<string, unknown>;
     createdItemId?: string;
   }): Promise<void> {
-    const { scope, runId, matchResult, proposedMetadata, createdItemId } = params;
-    if (matchResult?.matchType !== 'PROBABLE' || !matchResult.targetItemId) return;
+    const { scope, runId, matchResult, proposedMetadata, createdItemId } =
+      params;
+    if (matchResult?.matchType !== 'PROBABLE' || !matchResult.targetItemId)
+      return;
 
     await this.repo
       .createReviewCase(scope, runId, {
@@ -679,11 +749,15 @@ export class PipelineSideEffectsService {
           details: matchResult.evidence,
           ...(createdItemId ? { createdItemId } : {}),
         } as unknown as Prisma.InputJsonValue,
-        options: { proposedMetadata: proposedMetadata || {} } as unknown as Prisma.InputJsonValue,
+        options: {
+          proposedMetadata: proposedMetadata || {},
+        } as unknown as Prisma.InputJsonValue,
         assignedToId: scope.userId,
       })
       .catch((rcErr: unknown) => {
-        this.logger.warn(`Failed to create review case for run ${runId}: ${rcErr instanceof Error ? rcErr.message : String(rcErr)}`);
+        this.logger.warn(
+          `Failed to create review case for run ${runId}: ${rcErr instanceof Error ? rcErr.message : String(rcErr)}`,
+        );
       });
   }
 }

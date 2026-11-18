@@ -1,24 +1,75 @@
-import { Controller, Get, Post, Patch, Delete, Param, Query, Body, Headers, UseGuards, HttpCode, HttpStatus, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Query,
+  Body,
+  Headers,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  BadRequestException,
+  ForbiddenException,
+  Optional,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+} from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectAccessGuard, ProjectRoles, RequireOperator } from '@/modules/project/access';
 import {
-  IngestionSubmissionDto, UnifiedIngestionDto, CaptureUrlDto, ConfirmCapturedUrlDto, FetchAcademicFeedDto,
-  MergeDuplicatesDto, BatchMergeDuplicatesDto, DismissDuplicatesDto, UpdateReviewCaseStatusDto,
-  FlagRetractionDto, BatchCheckRetractionDto, SyncRetractionDto, SubscribeFeedDto, UpdateFeedSubDto,
-  MarkItemReadDto, MarkAllReadDto, ImportOpmlDto,
+  ProjectAccessGuard,
+  ProjectRoles,
+  RequireOperator,
+} from '@/modules/project/access';
+import {
+  IngestionSubmissionDto,
+  UnifiedIngestionDto,
+  CaptureUrlDto,
+  ConfirmCapturedUrlDto,
+  FetchAcademicFeedDto,
+  MergeDuplicatesDto,
+  BatchMergeDuplicatesDto,
+  DismissDuplicatesDto,
+  UpdateReviewCaseStatusDto,
+  FlagRetractionDto,
+  BatchCheckRetractionDto,
+  SyncRetractionDto,
+  SubscribeFeedDto,
+  UpdateFeedSubDto,
+  MarkItemReadDto,
+  MarkAllReadDto,
+  ImportOpmlDto,
 } from '@/modules/library/ingestion/dto/ingestion.dto';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
 import { FeedRetrievalService } from '@/modules/library/ingestion/services/feed-retrieval.service';
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
-import { QualityService, IngestionFacade, INGESTION_FACADE, type IIngestionFacade } from '@/modules/library/ingestion/services/ingestion-verifier.service';
+import {
+  QualityService,
+  IngestionFacade,
+  INGESTION_FACADE,
+  type IIngestionFacade,
+} from '@/modules/library/ingestion/services/ingestion-verifier.service';
 import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
 import { FeedsService } from '@/modules/library/ingestion/services/feeds.service';
 
-export { IngestionFacade, INGESTION_FACADE, SubscribeFeedDto, UpdateFeedSubDto, MarkItemReadDto, MarkAllReadDto, ImportOpmlDto };
+export {
+  IngestionFacade,
+  INGESTION_FACADE,
+  SubscribeFeedDto,
+  UpdateFeedSubDto,
+  MarkItemReadDto,
+  MarkAllReadDto,
+  ImportOpmlDto,
+};
 export type { IIngestionFacade };
 
 /**
@@ -29,7 +80,7 @@ export type { IIngestionFacade };
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/library/ingestion',
-  'api/v1/projects/:projectId/library/ingestion',
+  'api/v1/spaces/:spaceId/library/ingestion',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class IngestionController {
@@ -51,19 +102,24 @@ export class IngestionController {
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ summary: 'Submit item ingestion into library' })
-  @ApiParam({ name: 'projectId', required: false, type: 'string', format: 'uuid' })
+  @ApiParam({
+    name: 'spaceId',
+    required: false,
+    type: 'string',
+    format: 'uuid',
+  })
   async submit(
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: IngestionSubmissionDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
     const effectiveProjectId =
       this.validateProjectId(paramProjectId) ||
       this.validateProjectId(queryProjectId) ||
-      this.validateProjectId(dto.projectId);
+      this.validateProjectId(dto.spaceId);
 
     return this.ingestionService.submitFromDto({
       dto,
@@ -79,8 +135,8 @@ export class IngestionController {
   async getStatus(
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!isUUID(runId)) {
       throw new BadRequestException('Invalid run ID');
@@ -98,8 +154,8 @@ export class IngestionController {
   async getProgress(
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!isUUID(runId)) {
       throw new BadRequestException('Invalid run ID');
@@ -118,8 +174,8 @@ export class IngestionController {
   async retry(
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!isUUID(runId)) {
       throw new BadRequestException('Invalid run ID');
@@ -139,14 +195,14 @@ export class IngestionController {
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: UnifiedIngestionDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
     const effectiveProjectId =
       this.validateProjectId(paramProjectId) ||
       this.validateProjectId(queryProjectId) ||
-      this.validateProjectId(dto.projectId);
+      this.validateProjectId(dto.spaceId);
 
     return this.ingestionService.ingestUnifiedDto({
       dto,
@@ -158,12 +214,14 @@ export class IngestionController {
 
   @Post('capture-url')
   @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Capture and extract metadata from URL for library' })
+  @ApiOperation({
+    summary: 'Capture and extract metadata from URL for library',
+  })
   async captureUrl(
     @CurrentUser('id') userId: string,
     @Body() dto: CaptureUrlDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     return this.urlCaptureService.captureUrl(dto.url, {
       projectId:
@@ -179,13 +237,13 @@ export class IngestionController {
   async confirmUrl(
     @CurrentUser('id') userId: string,
     @Body() dto: ConfirmCapturedUrlDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const effectiveScopeId =
       this.validateProjectId(paramProjectId) ||
       this.validateProjectId(queryProjectId) ||
-      this.validateProjectId(dto.projectId) ||
+      this.validateProjectId(dto.spaceId) ||
       undefined;
 
     return this.urlCaptureService.confirmCapturedUrl(
@@ -201,8 +259,8 @@ export class IngestionController {
   async getExplain(
     @CurrentUser('id') userId: string,
     @Param('id') runId: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!isUUID(runId)) {
       throw new BadRequestException('Invalid run ID');
@@ -217,7 +275,8 @@ export class IngestionController {
   @Post('fetch-feed')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
-    summary: 'Fetch and parse an external RSS/Atom journal or arXiv feed with DB caching & ETag support',
+    summary:
+      'Fetch and parse an external RSS/Atom journal or arXiv feed with DB caching & ETag support',
   })
   async fetchFeed(
     @Body() dto: FetchAcademicFeedDto,
@@ -243,7 +302,7 @@ export class IngestionController {
 @ApiBearerAuth()
 @Controller([
   'api/v1/library/curation',
-  'api/v1/projects/:projectId/library/curation',
+  'api/v1/spaces/:spaceId/library/curation',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class CurationController {
@@ -258,8 +317,8 @@ export class CurationController {
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getDuplicates(
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.duplicateDetector.detectDuplicates(userId, effectiveProjectId);
@@ -270,11 +329,10 @@ export class CurationController {
   async mergeDuplicates(
     @CurrentUser('id') userId: string,
     @Body() dto: MergeDuplicatesDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || dto.projectId;
+    const effectiveProjectId = paramProjectId || queryProjectId || dto.spaceId;
     return this.duplicateMerger.mergeDuplicates(
       userId,
       dto,
@@ -287,11 +345,10 @@ export class CurationController {
   async mergeDuplicatesBatch(
     @CurrentUser('id') userId: string,
     @Body() dto: BatchMergeDuplicatesDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || dto?.projectId;
+    const effectiveProjectId = paramProjectId || queryProjectId || dto?.spaceId;
     return this.duplicateMerger.mergeDuplicatesBatch(
       userId,
       dto?.merges || [],
@@ -304,11 +361,10 @@ export class CurationController {
   async dismissDuplicates(
     @CurrentUser('id') userId: string,
     @Body() dto: DismissDuplicatesDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || dto?.projectId;
+    const effectiveProjectId = paramProjectId || queryProjectId || dto?.spaceId;
     return this.duplicateDetector.dismissDuplicates(
       userId,
       dto.itemIds,
@@ -320,8 +376,8 @@ export class CurationController {
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getQualityAudit(
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.qualityService.getQualityAudit(userId, effectiveProjectId);
@@ -333,8 +389,8 @@ export class CurationController {
     @CurrentUser('id') userId: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     if (!this.ingestionService) {
       return [];
@@ -356,14 +412,13 @@ export class CurationController {
     @CurrentUser('id') userId: string,
     @Param('id') id: string,
     @Body() dto: UpdateReviewCaseStatusDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     if (!this.ingestionService) {
       return null;
     }
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || dto?.projectId;
+    const effectiveProjectId = paramProjectId || queryProjectId || dto?.spaceId;
     return this.ingestionService.updateReviewCaseStatus(
       { userId, projectId: effectiveProjectId },
       id,
@@ -376,7 +431,7 @@ export class CurationController {
 @ApiBearerAuth()
 @Controller([
   'api/v1/library/retraction',
-  'api/v1/projects/:projectId/library/retraction',
+  'api/v1/spaces/:spaceId/library/retraction',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class RetractionController {
@@ -419,8 +474,8 @@ export class RetractionController {
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getRetractedItems(
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.service.getRetractedItems(userId, effectiveProjectId);
@@ -430,8 +485,8 @@ export class RetractionController {
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getStats(
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.service.getStats(userId, effectiveProjectId);
@@ -442,8 +497,8 @@ export class RetractionController {
   async checkLibrary(
     @CurrentUser('id') userId: string,
     @Body() dto: BatchCheckRetractionDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.service.checkLibrary(userId, dto, effectiveProjectId);
@@ -454,8 +509,8 @@ export class RetractionController {
   async syncLibrary(
     @CurrentUser('id') userId: string,
     @Body() dto?: SyncRetractionDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.service.syncLibrary(userId, effectiveProjectId, {
@@ -469,8 +524,8 @@ export class RetractionController {
   async checkItem(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.service.checkItem(userId, itemId, effectiveProjectId);
@@ -482,8 +537,8 @@ export class RetractionController {
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
     @Body() dto: FlagRetractionDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.service.setManualFlag(userId, itemId, dto, effectiveProjectId);
@@ -494,8 +549,8 @@ export class RetractionController {
   async removeManualFlag(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.service.removeManualFlag(userId, itemId, effectiveProjectId);
@@ -510,7 +565,9 @@ export class FeedsController {
   constructor(private readonly feedsService: FeedsService) {}
 
   @Get('subscriptions')
-  @ApiOperation({ summary: 'Get current user subscribed academic RSS/Atom feeds' })
+  @ApiOperation({
+    summary: 'Get current user subscribed academic RSS/Atom feeds',
+  })
   async getSubscriptions(@CurrentUser('id') userId: string) {
     const subscriptions = await this.feedsService.getSubscriptions(userId);
     return { data: subscriptions };

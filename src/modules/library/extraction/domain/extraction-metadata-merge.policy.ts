@@ -1,9 +1,22 @@
 import { Prisma } from '@prisma/client';
 import {
-  normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn,
-  generateCitationKey, getPrimaryCreatorRoleForType, isPlaceholderItemTitle, sanitizeItemTitle,
-  cleanAbstractText, harmonizeBibliographicFields, ItemProvenancePolicy, inferItemTypeFromPdfSignals,
-  resolveProviderFieldWeight, buildCanonicalIdentifierUri, disambiguateCitationKey,
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+  normalizePmcid,
+  normalizeIsbn,
+  normalizeIssn,
+  generateCitationKey,
+  getPrimaryCreatorRoleForType,
+  isPlaceholderItemTitle,
+  sanitizeItemTitle,
+  cleanAbstractText,
+  harmonizeBibliographicFields,
+  ItemProvenancePolicy,
+  inferItemTypeFromPdfSignals,
+  resolveProviderFieldWeight,
+  buildCanonicalIdentifierUri,
+  disambiguateCitationKey,
   resolveOrCreateAutomaticTagsInClient as resolveOrCreateTags,
   isRejectedCitedIdentifier,
 } from '@/modules/library/core';
@@ -12,14 +25,31 @@ import type {
   ExtractionSyncDocumentInput,
 } from '../types/pdf-extraction.types';
 
-export { disambiguateCitationKey, resolveOrCreateTags, isRejectedCitedIdentifier };
+export {
+  disambiguateCitationKey,
+  resolveOrCreateTags,
+  isRejectedCitedIdentifier,
+};
 export type { ExtractionSyncAttachmentInput, ExtractionSyncDocumentInput };
 
 interface FreshItemExtractionTarget {
-  userId?: string; spaceId?: string; createdById?: string; projectId?: string | null; citationKey?: string | null; title?: string | null;
-  doi?: string | null; arxivId?: string | null; pmid?: string | null; pmcid?: string | null;
-  isbn?: string | null; issn?: string | null; abstract?: string | null; year?: number | null;
-  publicationTitle?: string | null; itemType?: string | null; metadata?: unknown;
+  userId?: string;
+  spaceId?: string;
+  createdById?: string;
+  projectId?: string | null;
+  citationKey?: string | null;
+  title?: string | null;
+  doi?: string | null;
+  arxivId?: string | null;
+  pmid?: string | null;
+  pmcid?: string | null;
+  isbn?: string | null;
+  issn?: string | null;
+  abstract?: string | null;
+  year?: number | null;
+  publicationTitle?: string | null;
+  itemType?: string | null;
+  metadata?: unknown;
 }
 
 function asMetaRecord(raw: unknown): Record<string, unknown> {
@@ -29,37 +59,54 @@ function asMetaRecord(raw: unknown): Record<string, unknown> {
 }
 
 function canExtractionOverwriteItemType(
-  item: { itemType?: string | null; publicationTitle?: string | null } | null | undefined,
+  item:
+    | { itemType?: string | null; publicationTitle?: string | null }
+    | null
+    | undefined,
   meta: Record<string, unknown>,
   lockedSet: ReadonlySet<string>,
   fieldProvenance: Record<string, unknown>,
 ): boolean {
   if (lockedSet.has('itemType')) return false;
-  const existingEngine = String(meta.engineUsed || meta.sourceProvider || meta.source || '').trim();
+  const existingEngine = String(
+    meta.engineUsed || meta.sourceProvider || meta.source || '',
+  ).trim();
   const hasAuthoritativeJournalItemType = Boolean(
     item?.itemType === 'journalArticle' &&
-      (item?.publicationTitle ||
-        meta.publicationTitle ||
-        meta.journal ||
-        (existingEngine && resolveProviderFieldWeight(existingEngine, 'itemType') >= 0.85)),
+    (item?.publicationTitle ||
+      meta.publicationTitle ||
+      meta.journal ||
+      (existingEngine &&
+        resolveProviderFieldWeight(existingEngine, 'itemType') >= 0.85)),
   );
   if (hasAuthoritativeJournalItemType) return false;
   if (!fieldProvenance.itemType) return true;
-  return ItemProvenancePolicy.canOverwriteField(meta, 'itemType', 'LocalPDFExtraction', {
-    hasNonEmptyExisting: Boolean(item?.itemType),
-  });
+  return ItemProvenancePolicy.canOverwriteField(
+    meta,
+    'itemType',
+    'LocalPDFExtraction',
+    {
+      hasNonEmptyExisting: Boolean(item?.itemType),
+    },
+  );
 }
 
 export function buildExtractedMetadataSyncPlan(
   attachment: ExtractionSyncAttachmentInput,
   doc: ExtractionSyncDocumentInput,
 ) {
-  const attachmentType = String(attachment.attachmentType || '').trim().toLowerCase();
+  const attachmentType = String(attachment.attachmentType || '')
+    .trim()
+    .toLowerCase();
   if (attachmentType === 'supplementary') {
     return {
       itemPatch: {} as Prisma.LibraryItemUpdateInput,
       metaPatch: {} as Record<string, unknown>,
-      extractedIdentifiers: [] as Array<{ type: string; value: string; canonicalUri: string }>,
+      extractedIdentifiers: [] as Array<{
+        type: string;
+        value: string;
+        canonicalUri: string;
+      }>,
       creatorsToSync: [],
       primaryRole: 'author' as const,
       tagsToSync: [] as string[],
@@ -72,30 +119,43 @@ export function buildExtractedMetadataSyncPlan(
     ? sanitizeItemTitle(doc.metadata.title) || doc.metadata.title.trim()
     : undefined;
   const cleanedExtractedAbstract = doc.metadata?.abstract
-    ? cleanAbstractText(doc.metadata.abstract) ?? doc.metadata.abstract.trim()
+    ? (cleanAbstractText(doc.metadata.abstract) ?? doc.metadata.abstract.trim())
     : undefined;
 
   const existingMeta = asMetaRecord(attachment.item?.metadata);
   const rejectedCitedDoi = existingMeta.rejectedCitedDoi;
   const { provenanceMap: existingFieldProv } =
-    ItemProvenancePolicy.extractProvenanceState(attachment.item ?? existingMeta);
-  const lockedSet = ItemProvenancePolicy.expandLockedFieldSet(attachment.item ?? existingMeta);
+    ItemProvenancePolicy.extractProvenanceState(
+      attachment.item ?? existingMeta,
+    );
+  const lockedSet = ItemProvenancePolicy.expandLockedFieldSet(
+    attachment.item ?? existingMeta,
+  );
   const isLocked = (fieldKey: string) =>
     lockedSet.has(fieldKey) ||
-    ItemProvenancePolicy.isFieldLocked(attachment.item ?? existingMeta, fieldKey);
+    ItemProvenancePolicy.isFieldLocked(
+      attachment.item ?? existingMeta,
+      fieldKey,
+    );
   const isCurrentFilenameTitle = Boolean(
     existingMeta.isFilenameTitle === true ||
-      (attachment.item as Record<string, unknown> | undefined)?.isFilenameTitle === true ||
-      (existingFieldProv.title as Record<string, unknown> | undefined)?.isFilenameTitle === true,
+    (attachment.item as Record<string, unknown> | undefined)
+      ?.isFilenameTitle === true ||
+    (existingFieldProv.title as Record<string, unknown> | undefined)
+      ?.isFilenameTitle === true,
   );
   const shouldUpdateTitle = Boolean(
-    cleanedExtractedTitle && (isPlaceholderItemTitle(currentTitle) || isCurrentFilenameTitle),
+    cleanedExtractedTitle &&
+    (isPlaceholderItemTitle(currentTitle) || isCurrentFilenameTitle),
   );
 
   const metaPatch: Record<string, unknown> = {};
   if (doc.references && doc.references.length > 0) {
     const existingRefCount = Number(existingMeta.referenceCount || 0);
-    if (!Number.isFinite(existingRefCount) || doc.references.length >= existingRefCount) {
+    if (
+      !Number.isFinite(existingRefCount) ||
+      doc.references.length >= existingRefCount
+    ) {
       metaPatch.referenceCount = doc.references.length;
     }
   }
@@ -109,8 +169,20 @@ export function buildExtractedMetadataSyncPlan(
   }
 
   const backfillKeys = [
-    'isbn', 'issn', 'pmid', 'pmcid', 'volume', 'issue', 'pages', 'publisher',
-    'place', 'conferenceName', 'bookTitle', 'publicationDate', 'numberOfPages', 'primaryCategory',
+    'isbn',
+    'issn',
+    'pmid',
+    'pmcid',
+    'volume',
+    'issue',
+    'pages',
+    'publisher',
+    'place',
+    'conferenceName',
+    'bookTitle',
+    'publicationDate',
+    'numberOfPages',
+    'primaryCategory',
   ] as const;
   for (const key of backfillKeys) {
     const val = doc.metadata?.[key];
@@ -119,8 +191,13 @@ export function buildExtractedMetadataSyncPlan(
       val !== undefined &&
       val !== null &&
       val !== '' &&
-      !(['isbn', 'issn', 'pmid', 'pmcid'].includes(key) && isRejectedCitedIdentifier(val, rejectedCitedDoi)) &&
-      (existingMeta[key] === undefined || existingMeta[key] === null || existingMeta[key] === '')
+      !(
+        ['isbn', 'issn', 'pmid', 'pmcid'].includes(key) &&
+        isRejectedCitedIdentifier(val, rejectedCitedDoi)
+      ) &&
+      (existingMeta[key] === undefined ||
+        existingMeta[key] === null ||
+        existingMeta[key] === '')
     ) {
       metaPatch[key] = val;
     }
@@ -140,8 +217,12 @@ export function buildExtractedMetadataSyncPlan(
     lockedSet,
     existingFieldProv,
   );
-  const existingDoi = String(attachment.item?.doi || existingMeta.doi || '').trim();
-  const hasNonArxivPublisherDoi = Boolean(existingDoi && !/^10\.48550\/arxiv\./i.test(existingDoi));
+  const existingDoi = String(
+    attachment.item?.doi || existingMeta.doi || '',
+  ).trim();
+  const hasNonArxivPublisherDoi = Boolean(
+    existingDoi && !/^10\.48550\/arxiv\./i.test(existingDoi),
+  );
   const shouldInferItemType =
     canOverwriteItemType &&
     (!attachment.item?.itemType ||
@@ -149,9 +230,13 @@ export function buildExtractedMetadataSyncPlan(
       attachment.item?.itemType === 'document');
   const pdfSignalInference = shouldInferItemType
     ? inferItemTypeFromPdfSignals({
-        title: cleanedExtractedTitle || doc.metadata?.title || attachment.item?.title,
+        title:
+          cleanedExtractedTitle ||
+          doc.metadata?.title ||
+          attachment.item?.title,
         notes: doc.metadata?.notes,
-        conferenceName: doc.metadata?.conferenceName || doc.metadata?.proceedingsTitle,
+        conferenceName:
+          doc.metadata?.conferenceName || doc.metadata?.proceedingsTitle,
         bookTitle: doc.metadata?.bookTitle,
         isbn: doc.metadata?.isbn,
         publisher: doc.metadata?.publisher,
@@ -161,11 +246,15 @@ export function buildExtractedMetadataSyncPlan(
   const rawInferredItemType =
     doc.metadata?.proceedingsTitle || doc.metadata?.conferenceName
       ? 'conferencePaper'
-      : doc.metadata?.arxivId && !doc.metadata?.journal && !doc.metadata?.proceedingsTitle
+      : doc.metadata?.arxivId &&
+          !doc.metadata?.journal &&
+          !doc.metadata?.proceedingsTitle
         ? 'preprint'
         : pdfSignalInference?.itemType;
   const inferredItemType =
-    rawInferredItemType === 'preprint' && hasNonArxivPublisherDoi ? undefined : rawInferredItemType;
+    rawInferredItemType === 'preprint' && hasNonArxivPublisherDoi
+      ? undefined
+      : rawInferredItemType;
   const effectiveItemType =
     shouldInferItemType && inferredItemType
       ? inferredItemType
@@ -175,14 +264,19 @@ export function buildExtractedMetadataSyncPlan(
     metaPatch.itemType = inferredItemType;
     if (inferredItemType === 'preprint' && !isLocked('repository')) {
       metaPatch.repository =
-        doc.metadata?.publicationTitle || doc.metadata?.journal || existingMeta.repository || 'arXiv';
+        doc.metadata?.publicationTitle ||
+        doc.metadata?.journal ||
+        existingMeta.repository ||
+        'arXiv';
     } else if (
       inferredItemType === 'conferencePaper' &&
       !existingMeta.proceedingsTitle &&
       !isLocked('proceedingsTitle')
     ) {
       metaPatch.proceedingsTitle =
-        doc.metadata?.proceedingsTitle || doc.metadata?.conferenceName || fallbackPubTitle;
+        doc.metadata?.proceedingsTitle ||
+        doc.metadata?.conferenceName ||
+        fallbackPubTitle;
     }
   }
 
@@ -196,7 +290,11 @@ export function buildExtractedMetadataSyncPlan(
     isbn: normalizeIsbn,
     issn: normalizeIssn,
   } as const;
-  const extractedIdentifiers: Array<{ type: string; value: string; canonicalUri: string }> = [];
+  const extractedIdentifiers: Array<{
+    type: string;
+    value: string;
+    canonicalUri: string;
+  }> = [];
   const rawCleanedDoi = doc.metadata?.doi
     ? normalizeDoi(doc.metadata.doi) || doc.metadata.doi
     : undefined;
@@ -238,7 +336,8 @@ export function buildExtractedMetadataSyncPlan(
         type: idType,
         value: normVal,
         canonicalUri:
-          buildCanonicalIdentifierUri(idType, normVal) ?? `urn:${idType}:${normVal}`,
+          buildCanonicalIdentifierUri(idType, normVal) ??
+          `urn:${idType}:${normVal}`,
       });
     }
   }
@@ -265,7 +364,8 @@ export function buildExtractedMetadataSyncPlan(
       !existingItemMeta.proceedingsTitle &&
       !isLocked('proceedingsTitle')
     ) {
-      metaPatch.proceedingsTitle = doc.metadata?.proceedingsTitle || fallbackPubTitle;
+      metaPatch.proceedingsTitle =
+        doc.metadata?.proceedingsTitle || fallbackPubTitle;
     }
     hasBackfilledFields = true;
   }
@@ -278,7 +378,8 @@ export function buildExtractedMetadataSyncPlan(
     !existingItemMeta.date &&
     !existingItemMeta.publicationDate
   ) {
-    const resolvedDate = doc.metadata.publicationDate || String(doc.metadata.year);
+    const resolvedDate =
+      doc.metadata.publicationDate || String(doc.metadata.year);
     metaPatch.date = resolvedDate;
     metaPatch.publicationDate = resolvedDate;
     hasBackfilledFields = true;
@@ -294,13 +395,19 @@ export function buildExtractedMetadataSyncPlan(
           ? doc.metadata.authors.map((name: string) => ({ fullName: name }))
           : [];
   const tagsToSync =
-    !isLocked('tags') && Array.isArray(doc.metadata?.keywords) ? doc.metadata.keywords : [];
-  const notesToSync = Array.isArray(doc.metadata?.notes) ? doc.metadata.notes : [];
+    !isLocked('tags') && Array.isArray(doc.metadata?.keywords)
+      ? doc.metadata.keywords
+      : [];
+  const notesToSync = Array.isArray(doc.metadata?.notes)
+    ? doc.metadata.notes
+    : [];
 
   const docFieldProv = doc.metadata?.fieldProvenance;
   const resolveTierProv = (fieldKey: string) => {
     const coupled = ItemProvenancePolicy.getCoupledFieldAliases(fieldKey);
-    const tier = docFieldProv?.[fieldKey] ?? coupled.map((a) => docFieldProv?.[a]).find(Boolean);
+    const tier =
+      docFieldProv?.[fieldKey] ??
+      coupled.map((a) => docFieldProv?.[a]).find(Boolean);
     const src = tier?.source || 'LocalPDFExtraction';
     const conf = typeof tier?.confidence === 'number' ? tier.confidence : 0.82;
     return {
@@ -315,9 +422,13 @@ export function buildExtractedMetadataSyncPlan(
 
   const existingCitKey = String(existingItemRecord.citationKey || '').trim();
   const needsCitationKeyRegen =
-    !isLocked('citationKey') && (!existingCitKey || /^anon/i.test(existingCitKey));
-  const resolvedTitle = effectiveUpdateTitle ? cleanedExtractedTitle : currentTitle;
-  const resolvedYear = (attachment.item?.year as number | undefined) || doc.metadata?.year;
+    !isLocked('citationKey') &&
+    (!existingCitKey || /^anon/i.test(existingCitKey));
+  const resolvedTitle = effectiveUpdateTitle
+    ? cleanedExtractedTitle
+    : currentTitle;
+  const resolvedYear =
+    (attachment.item?.year as number | undefined) || doc.metadata?.year;
   const firstCreatorCandidate = creatorsToSync[0];
   const cand = firstCreatorCandidate as Record<string, unknown> | undefined;
   const firstCreatorRaw = cand
@@ -327,7 +438,8 @@ export function buildExtractedMetadataSyncPlan(
       ''
     : '';
   const regeneratedCitKey =
-    needsCitationKeyRegen && (effectiveUpdateTitle || firstCreatorRaw || resolvedYear)
+    needsCitationKeyRegen &&
+    (effectiveUpdateTitle || firstCreatorRaw || resolvedYear)
       ? generateCitationKey({
           authors: firstCreatorRaw ? [firstCreatorRaw] : undefined,
           year: resolvedYear ?? null,
@@ -339,28 +451,50 @@ export function buildExtractedMetadataSyncPlan(
     hasBackfilledFields = true;
   }
 
-  if (hasBackfilledFields || creatorsToSync.length > 0 || tagsToSync.length > 0) {
+  if (
+    hasBackfilledFields ||
+    creatorsToSync.length > 0 ||
+    tagsToSync.length > 0
+  ) {
     if (hasBackfilledFields) {
       const harmonizedDelta = harmonizeBibliographicFields(
         { ...metaPatch, itemType: effectiveItemType },
-        { itemType: effectiveItemType, syncExtraFields: false, syncLegacyAliases: false },
+        {
+          itemType: effectiveItemType,
+          syncExtraFields: false,
+          syncLegacyAliases: false,
+        },
       );
       for (const [k, v] of Object.entries(harmonizedDelta)) {
         if (isLocked(k)) continue;
         if (k === 'itemType' && metaPatch.itemType === undefined) continue;
-        if (k === 'abstract' && metaPatch.abstractNote !== undefined && metaPatch.abstract === undefined) {
+        if (
+          k === 'abstract' &&
+          metaPatch.abstractNote !== undefined &&
+          metaPatch.abstract === undefined
+        ) {
           continue;
         }
-        if (k === 'numPages' && metaPatch.numberOfPages !== undefined && metaPatch.numPages === undefined) {
+        if (
+          k === 'numPages' &&
+          metaPatch.numberOfPages !== undefined &&
+          metaPatch.numPages === undefined
+        ) {
           continue;
         }
-        if (k === 'archiveId' && metaPatch.arxivId !== undefined && metaPatch.archiveId === undefined) {
+        if (
+          k === 'archiveId' &&
+          metaPatch.arxivId !== undefined &&
+          metaPatch.archiveId === undefined
+        ) {
           continue;
         }
         if (
           v !== undefined &&
           metaPatch[k] === undefined &&
-          (existingItemMeta[k] === undefined || existingItemMeta[k] === null || existingItemMeta[k] === '')
+          (existingItemMeta[k] === undefined ||
+            existingItemMeta[k] === null ||
+            existingItemMeta[k] === '')
         ) {
           metaPatch[k] = v;
         }
@@ -376,7 +510,10 @@ export function buildExtractedMetadataSyncPlan(
       ) {
         continue;
       }
-      if (!nextProv[patchedKey] || (patchedKey === 'title' && effectiveUpdateTitle)) {
+      if (
+        !nextProv[patchedKey] ||
+        (patchedKey === 'title' && effectiveUpdateTitle)
+      ) {
         nextProv[patchedKey] = resolveTierProv(patchedKey);
       }
     }
@@ -392,12 +529,18 @@ export function buildExtractedMetadataSyncPlan(
     hasBackfilledFields = true;
   }
 
-  const { tags: _omitTags, keywords: _omitKeywords, ...existingItemMetaWithoutTags } = existingItemMeta;
+  const {
+    tags: _omitTags,
+    keywords: _omitKeywords,
+    ...existingItemMetaWithoutTags
+  } = existingItemMeta;
   const findExtractedIdent = (type: string) =>
     extractedIdentifiers.find((i) => i.type?.toLowerCase() === type)?.value;
   const safeDocId = (key: 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'issn') => {
-    const raw = (doc.metadata as Record<string, unknown> | undefined)?.[key];
-    return raw && !isRejectedCitedIdentifier(raw, rejectedCitedDoi) ? raw : undefined;
+    const raw = doc.metadata?.[key];
+    return raw && !isRejectedCitedIdentifier(raw, rejectedCitedDoi)
+      ? raw
+      : undefined;
   };
   const cleanArxiv = findExtractedIdent('arxiv') || safeDocId('arxivId');
   const cleanPmid = findExtractedIdent('pmid') || safeDocId('pmid');
@@ -406,26 +549,63 @@ export function buildExtractedMetadataSyncPlan(
   const cleanIssn = findExtractedIdent('issn') || safeDocId('issn');
 
   const itemPatch: Prisma.LibraryItemUpdateInput = {
-    ...(shouldInferItemType && inferredItemType ? { itemType: inferredItemType } : {}),
+    ...(shouldInferItemType && inferredItemType
+      ? { itemType: inferredItemType }
+      : {}),
     ...(effectiveUpdateTitle ? { title: cleanedExtractedTitle } : {}),
-    ...(regeneratedCitKey && !/^anon/i.test(regeneratedCitKey) ? { citationKey: regeneratedCitKey } : {}),
-    ...(!isLocked('doi') && !attachment.item?.doi && cleanExtractedDoi ? { doi: cleanExtractedDoi } : {}),
-    ...(!isLocked('arxivId') && !attachment.item?.arxivId && cleanArxiv ? { arxivId: String(cleanArxiv) } : {}),
-    ...(!isLocked('pmid') && !attachment.item?.pmid && cleanPmid ? { pmid: String(cleanPmid) } : {}),
-    ...(!isLocked('pmcid') && !(attachment.item as { pmcid?: string | null })?.pmcid && cleanPmcid ? { pmcid: String(cleanPmcid) } : {}),
-    ...(!isLocked('isbn') && !(attachment.item as { isbn?: string | null })?.isbn && cleanIsbn ? { isbn: String(cleanIsbn) } : {}),
-    ...(!isLocked('issn') && !(attachment.item as { issn?: string | null })?.issn && cleanIssn ? { issn: String(cleanIssn) } : {}),
-    ...(!isLocked('abstract') && !isLocked('abstractNote') && !attachment.item?.abstract && cleanedExtractedAbstract
+    ...(regeneratedCitKey && !/^anon/i.test(regeneratedCitKey)
+      ? { citationKey: regeneratedCitKey }
+      : {}),
+    ...(!isLocked('doi') && !attachment.item?.doi && cleanExtractedDoi
+      ? { doi: cleanExtractedDoi }
+      : {}),
+    ...(!isLocked('arxivId') && !attachment.item?.arxivId && cleanArxiv
+      ? { arxivId: String(cleanArxiv) }
+      : {}),
+    ...(!isLocked('pmid') && !attachment.item?.pmid && cleanPmid
+      ? { pmid: String(cleanPmid) }
+      : {}),
+    ...(!isLocked('pmcid') &&
+    !(attachment.item as { pmcid?: string | null })?.pmcid &&
+    cleanPmcid
+      ? { pmcid: String(cleanPmcid) }
+      : {}),
+    ...(!isLocked('isbn') &&
+    !(attachment.item as { isbn?: string | null })?.isbn &&
+    cleanIsbn
+      ? { isbn: String(cleanIsbn) }
+      : {}),
+    ...(!isLocked('issn') &&
+    !(attachment.item as { issn?: string | null })?.issn &&
+    cleanIssn
+      ? { issn: String(cleanIssn) }
+      : {}),
+    ...(!isLocked('abstract') &&
+    !isLocked('abstractNote') &&
+    !attachment.item?.abstract &&
+    cleanedExtractedAbstract
       ? { abstract: cleanedExtractedAbstract }
       : {}),
-    ...(!isLocked('year') && !isLocked('date') && !isLocked('publicationDate') && !attachment.item?.year && doc.metadata?.year
+    ...(!isLocked('year') &&
+    !isLocked('date') &&
+    !isLocked('publicationDate') &&
+    !attachment.item?.year &&
+    doc.metadata?.year
       ? { year: doc.metadata.year }
       : {}),
-    ...(!isLocked('publicationTitle') && !isLocked('journal') && !attachment.item?.publicationTitle && fallbackPubTitle
+    ...(!isLocked('publicationTitle') &&
+    !isLocked('journal') &&
+    !attachment.item?.publicationTitle &&
+    fallbackPubTitle
       ? { publicationTitle: fallbackPubTitle }
       : {}),
     ...(hasBackfilledFields
-      ? { metadata: { ...existingItemMetaWithoutTags, ...metaPatch } as unknown as Prisma.InputJsonValue }
+      ? {
+          metadata: {
+            ...existingItemMetaWithoutTags,
+            ...metaPatch,
+          } as unknown as Prisma.InputJsonValue,
+        }
       : {}),
   };
 
@@ -446,7 +626,8 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
   resolveCitationKey?: (candidateKey: string) => Promise<string | null>;
 }): Promise<{
   sanitizedData: Prisma.LibraryItemUpdateInput;
-  mergedMetadata: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined;
+  mergedMetadata:
+    Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined;
 }> {
   const { data, freshItem, resolveCitationKey } = params;
   const sanitizedData: Prisma.LibraryItemUpdateInput = { ...data };
@@ -455,7 +636,8 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
   const freshestMeta = asMetaRecord(freshItem?.metadata);
   const { provenanceMap: freshFieldProv } =
     ItemProvenancePolicy.extractProvenanceState(freshestMeta);
-  const freshLockedSet = ItemProvenancePolicy.expandLockedFieldSet(freshestMeta);
+  const freshLockedSet =
+    ItemProvenancePolicy.expandLockedFieldSet(freshestMeta);
 
   const cannotOverwriteItemType = !canExtractionOverwriteItemType(
     freshItem,
@@ -465,18 +647,25 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
   );
   const isFreshFilenameTitle = Boolean(
     freshestMeta.isFilenameTitle === true ||
-      (freshFieldProv.title as Record<string, unknown> | undefined)?.isFilenameTitle === true,
+    (freshFieldProv.title as Record<string, unknown> | undefined)
+      ?.isFilenameTitle === true,
   );
 
   if (freshItem) {
     const freshRejected = freshestMeta.rejectedCitedDoi;
-    const isFreshPlaceholder = isPlaceholderItemTitle(freshItem.title) || isFreshFilenameTitle;
-    if (sanitizedData.title !== undefined && (!isFreshPlaceholder || freshLockedSet.has('title'))) {
+    const isFreshPlaceholder =
+      isPlaceholderItemTitle(freshItem.title) || isFreshFilenameTitle;
+    if (
+      sanitizedData.title !== undefined &&
+      (!isFreshPlaceholder || freshLockedSet.has('title'))
+    ) {
       delete sanitizedData.title;
     }
     if (
       sanitizedData.doi !== undefined &&
-      (freshItem.doi || freshLockedSet.has('doi') || isRejectedCitedIdentifier(sanitizedData.doi, freshRejected))
+      (freshItem.doi ||
+        freshLockedSet.has('doi') ||
+        isRejectedCitedIdentifier(sanitizedData.doi, freshRejected))
     ) {
       delete sanitizedData.doi;
     }
@@ -494,11 +683,16 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
     }
     if (
       sanitizedData.abstract !== undefined &&
-      (freshItem.abstract || freshLockedSet.has('abstract') || freshLockedSet.has('abstractNote'))
+      (freshItem.abstract ||
+        freshLockedSet.has('abstract') ||
+        freshLockedSet.has('abstractNote'))
     ) {
       delete sanitizedData.abstract;
     }
-    if (sanitizedData.year !== undefined && (freshItem.year || freshLockedSet.has('year'))) {
+    if (
+      sanitizedData.year !== undefined &&
+      (freshItem.year || freshLockedSet.has('year'))
+    ) {
       delete sanitizedData.year;
     }
     if (
@@ -512,9 +706,15 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
     }
     const freshCitKey = String(freshItem.citationKey || '').trim();
     if (sanitizedData.citationKey !== undefined) {
-      if (freshLockedSet.has('citationKey') || (freshCitKey && !/^anon/i.test(freshCitKey))) {
+      if (
+        freshLockedSet.has('citationKey') ||
+        (freshCitKey && !/^anon/i.test(freshCitKey))
+      ) {
         delete sanitizedData.citationKey;
-      } else if (typeof sanitizedData.citationKey === 'string' && sanitizedData.citationKey.trim()) {
+      } else if (
+        typeof sanitizedData.citationKey === 'string' &&
+        sanitizedData.citationKey.trim()
+      ) {
         const candidateKey = sanitizedData.citationKey.trim();
         disambiguatedCitKey = resolveCitationKey
           ? ((await resolveCitationKey(candidateKey)) ?? undefined)
@@ -534,7 +734,9 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
       isPlaceholderItemTitle(freshestMeta.title) ||
       isPlaceholderItemTitle(freshItem?.title) ||
       isFreshFilenameTitle;
-    const incomingMeta = { ...(sanitizedData.metadata as Record<string, unknown>) };
+    const incomingMeta = {
+      ...(sanitizedData.metadata as Record<string, unknown>),
+    };
     const incomingFieldProv =
       incomingMeta.fieldProvenance &&
       typeof incomingMeta.fieldProvenance === 'object' &&
@@ -543,20 +745,36 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
         : undefined;
     delete incomingMeta.fieldProvenance;
 
-    const acceptedKeys = new Set<string>(['creators', 'authors', 'tags', 'keywords']);
+    const acceptedKeys = new Set<string>([
+      'creators',
+      'authors',
+      'tags',
+      'keywords',
+    ]);
     if (sanitizedData.title !== undefined) acceptedKeys.add('title');
     if (sanitizedData.itemType !== undefined) acceptedKeys.add('itemType');
 
     const freshCitKey = String(freshItem?.citationKey || '').trim();
-    if (freshLockedSet.has('citationKey') || (freshCitKey && !/^anon/i.test(freshCitKey))) {
+    if (
+      freshLockedSet.has('citationKey') ||
+      (freshCitKey && !/^anon/i.test(freshCitKey))
+    ) {
       delete incomingMeta.citationKey;
     } else if (disambiguatedCitKey) {
       incomingMeta.citationKey = disambiguatedCitKey;
-      if (freshCitKey && /^anon/i.test(freshCitKey) && freshCitKey.toLowerCase() !== disambiguatedCitKey.toLowerCase()) {
+      if (
+        freshCitKey &&
+        /^anon/i.test(freshCitKey) &&
+        freshCitKey.toLowerCase() !== disambiguatedCitKey.toLowerCase()
+      ) {
         const prevMerged = Array.isArray(freshestMeta.mergedCitationKeys)
-          ? (freshestMeta.mergedCitationKeys as unknown[]).map((k) => String(k).trim()).filter(Boolean)
+          ? (freshestMeta.mergedCitationKeys as unknown[])
+              .map((k) => String(k).trim())
+              .filter(Boolean)
           : [];
-        if (!prevMerged.some((k) => k.toLowerCase() === freshCitKey.toLowerCase())) {
+        if (
+          !prevMerged.some((k) => k.toLowerCase() === freshCitKey.toLowerCase())
+        ) {
           incomingMeta.mergedCitationKeys = [...prevMerged, freshCitKey];
           acceptedKeys.add('mergedCitationKeys');
         }
@@ -579,16 +797,21 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
       hasNonEmptyCol(freshestMeta.publicationTitle) ||
       hasNonEmptyCol(freshestMeta.journal);
     const freshItemRec = (freshItem || {}) as Record<string, unknown>;
-    const hasFreshDoi = hasNonEmptyCol(freshItem?.doi) || hasNonEmptyCol(freshestMeta.doi);
+    const hasFreshDoi =
+      hasNonEmptyCol(freshItem?.doi) || hasNonEmptyCol(freshestMeta.doi);
 
     for (const [k, v] of Object.entries(incomingMeta)) {
       const hasFreshVal =
         (freshestMeta[k] !== undefined &&
           freshestMeta[k] !== null &&
           freshestMeta[k] !== '' &&
-          !(Array.isArray(freshestMeta[k]) && (freshestMeta[k] as unknown[]).length === 0)) ||
+          !(
+            Array.isArray(freshestMeta[k]) &&
+            (freshestMeta[k] as unknown[]).length === 0
+          )) ||
         ((k === 'abstract' || k === 'abstractNote') && hasFreshAbstract) ||
-        ((k === 'year' || k === 'date' || k === 'publicationDate') && hasFreshYearOrDate) ||
+        ((k === 'year' || k === 'date' || k === 'publicationDate') &&
+          hasFreshYearOrDate) ||
         ((k === 'publicationTitle' || k === 'journal') && hasFreshPubTitle) ||
         (k === 'doi' && hasFreshDoi) ||
         (['arxivId', 'pmid', 'pmcid', 'isbn', 'issn'].includes(k) &&
@@ -596,12 +819,23 @@ export async function sanitizeExtractedItemUpdateAgainstFreshState(params: {
 
       const isAllowedTitleOverride =
         (k === 'title' && isFreshMetaTitlePlaceholder) ||
-        (k === 'isFilenameTitle' && isFreshMetaTitlePlaceholder && !freshLockedSet.has('title'));
+        (k === 'isFilenameTitle' &&
+          isFreshMetaTitlePlaceholder &&
+          !freshLockedSet.has('title'));
       const isAllowedAnonCitationKeyOverride =
         k === 'citationKey' &&
-        (!freshestMeta.citationKey || /^anon/i.test(String(freshestMeta.citationKey)));
+        (!freshestMeta.citationKey ||
+          /^anon/i.test(String(freshestMeta.citationKey)));
       const isRejectedIdMeta =
-        ['doi', 'arxivId', 'archiveId', 'pmid', 'pmcid', 'isbn', 'issn'].includes(k) &&
+        [
+          'doi',
+          'arxivId',
+          'archiveId',
+          'pmid',
+          'pmcid',
+          'isbn',
+          'issn',
+        ].includes(k) &&
         isRejectedCitedIdentifier(v, freshestMeta.rejectedCitedDoi);
       const isBlockedRefCountOverwrite =
         k === 'referenceCount' &&

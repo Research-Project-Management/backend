@@ -1,4 +1,9 @@
-import { CreatorCreditInput, CreatorInput, CreatorType, ItemMetadata as CanonicalItemMetadata } from '@/modules/library/core';
+import {
+  CreatorCreditInput,
+  CreatorInput,
+  CreatorType,
+  ItemMetadata as CanonicalItemMetadata,
+} from '@/modules/library/core';
 import { BadRequestException } from '@nestjs/common';
 import { BaseDomainException } from '@/modules/library/core/errors/domain.exception';
 
@@ -7,7 +12,6 @@ import { BaseDomainException } from '@/modules/library/core/errors/domain.except
  *
  * Self-contained: defines all types, interfaces, tokens, and execution models.
  */
-
 
 export type { CreatorCreditInput, CreatorInput, CreatorType };
 
@@ -46,12 +50,7 @@ export type ItemMetadata = CanonicalItemMetadata;
 // Candidate & Reconciliation Types
 
 export type CandidateSourceKind =
-  | 'IDENTIFIER'
-  | 'RECORD'
-  | 'URL'
-  | 'FILE'
-  | 'PROVIDER'
-  | 'CONNECTOR';
+  'IDENTIFIER' | 'RECORD' | 'URL' | 'FILE' | 'PROVIDER' | 'CONNECTOR';
 
 export interface FieldEvidence {
   path?: string;
@@ -598,11 +597,7 @@ export interface PdfFingerprint {
 }
 
 export type IngestionVerificationStatus =
-  | 'COMPLETE'
-  | 'PARTIAL'
-  | 'NEEDS_REVIEW'
-  | 'BLOCKED'
-  | 'FAILED';
+  'COMPLETE' | 'PARTIAL' | 'NEEDS_REVIEW' | 'BLOCKED' | 'FAILED';
 
 export interface VerificationFieldProvenance {
   source: string;
@@ -624,7 +619,10 @@ export interface VerificationResult {
 export const INGESTION_VERIFIER_PORT = Symbol('INGESTION_VERIFIER_PORT');
 
 export interface IIngestionVerifierPort {
-  extractFingerprint(metadata: ItemMetadata, firstPageText?: string): PdfFingerprint;
+  extractFingerprint(
+    metadata: ItemMetadata,
+    firstPageText?: string,
+  ): PdfFingerprint;
   verifyWebCandidate(
     fingerprint: PdfFingerprint,
     candidate: ItemMetadata,
@@ -636,5 +634,3 @@ export interface IIngestionVerifierPort {
     qualityScore?: number,
   ): VerificationResult;
 }
-
-

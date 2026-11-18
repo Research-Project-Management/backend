@@ -1,4 +1,8 @@
-import { CitationStyleId, ReferenceData, ExportItemRecord } from '@/modules/library/citation/types/citation.types';
+import {
+  CitationStyleId,
+  ReferenceData,
+  ExportItemRecord,
+} from '@/modules/library/citation/types/citation.types';
 import { cleanBibliographicText } from '@/modules/library/core';
 import { CslJsonMapper } from './csl-json.mapper';
 import { Injectable } from '@nestjs/common';
@@ -33,9 +37,7 @@ export interface RawCslWorkInput {
  * Validates whether a given citation style identifier is a valid slug or recognized style.
  * Accepts standard names as well as 10,000+ CSL repository journal slugs.
  */
-function isSupportedCitationStyle(
-  styleId: string,
-): styleId is CitationStyleId {
+function isSupportedCitationStyle(styleId: string): styleId is CitationStyleId {
   if (!styleId || typeof styleId !== 'string') return false;
   const clean = styleId.toLowerCase().trim();
   return /^[a-z0-9_-]+$/.test(clean);
@@ -150,7 +152,9 @@ function itemMetaAsRecord(meta: unknown): Record<string, unknown> {
 export function extractItemCitationAliases(it: ExportItemRecord): string[] {
   const aliases = new Set<string>();
   const metaObj =
-    it.metadata && typeof it.metadata === 'object' && !Array.isArray(it.metadata)
+    it.metadata &&
+    typeof it.metadata === 'object' &&
+    !Array.isArray(it.metadata)
       ? itemMetaAsRecord(it.metadata)
       : {};
 

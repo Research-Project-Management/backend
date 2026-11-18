@@ -127,8 +127,7 @@ const DEFAULT_BIBTEX_STRING_MACROS: Readonly<Record<string, string>> = {
   ibmsj: 'IBM Systems Journal',
   ieeese: 'IEEE Transactions on Software Engineering',
   ieeetc: 'IEEE Transactions on Computers',
-  ieeetcad:
-    'IEEE Transactions on Computer-Aided Design of Integrated Circuits',
+  ieeetcad: 'IEEE Transactions on Computer-Aided Design of Integrated Circuits',
   ipl: 'Information Processing Letters',
   jacm: 'Journal of the ACM',
   jcss: 'Journal of Computer and System Sciences',
@@ -176,7 +175,7 @@ function extractBibtexFields(
     if (pos >= len) break;
 
     keyStickyRe.lastIndex = pos;
-    let keyMatch = keyStickyRe.exec(body);
+    const keyMatch = keyStickyRe.exec(body);
     if (!keyMatch) {
       // Advance to next line or delimiter
       while (
@@ -285,9 +284,7 @@ function extractBibtexFields(
   return fields;
 }
 
-function extractBibtexStringMacros(
-  rawBibtex: string,
-): Map<string, string> {
+function extractBibtexStringMacros(rawBibtex: string): Map<string, string> {
   const macros = new Map<string, string>(
     Object.entries(DEFAULT_BIBTEX_STRING_MACROS),
   );
@@ -313,7 +310,11 @@ function extractBibtexStringMacros(
       }
       if (ch === '%' && !inQuotes && depth <= 1) {
         // Skip comment line
-        while (pos < len && rawBibtex[pos] !== '\n' && rawBibtex[pos] !== '\r') {
+        while (
+          pos < len &&
+          rawBibtex[pos] !== '\n' &&
+          rawBibtex[pos] !== '\r'
+        ) {
           pos++;
         }
         continue;
@@ -384,7 +385,11 @@ function splitBibtexEntryBlocks(rawBibtex: string): RawBibtexBlock[] {
       }
       if (ch === '%' && !inQuotes && depth <= 1) {
         // Skip comment line
-        while (pos < len && rawBibtex[pos] !== '\n' && rawBibtex[pos] !== '\r') {
+        while (
+          pos < len &&
+          rawBibtex[pos] !== '\n' &&
+          rawBibtex[pos] !== '\r'
+        ) {
           pos++;
         }
         continue;

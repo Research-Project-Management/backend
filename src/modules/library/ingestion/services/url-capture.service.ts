@@ -263,7 +263,8 @@ export class UrlCaptureService {
           scopeId:
             boundProjectId ||
             projectId ||
-            (typeof rawCanonical.scopeId === 'string' && rawCanonical.scopeId) ||
+            (typeof rawCanonical.scopeId === 'string' &&
+              rawCanonical.scopeId) ||
             scopeId ||
             targetUserId ||
             'unassigned',
@@ -336,21 +337,41 @@ export class UrlCaptureService {
       ]);
       const passthroughFields: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(canonical)) {
-        if (!reservedPreviewKeys.has(k) && v !== undefined && v !== null && v !== '') {
+        if (
+          !reservedPreviewKeys.has(k) &&
+          v !== undefined &&
+          v !== null &&
+          v !== ''
+        ) {
           passthroughFields[k] = v;
         }
       }
 
-      const baselineHarmonized = harmonizeBibliographicFields<Record<string, unknown>>(
-        { ...canonicalExtraFields, ...passthroughFields, itemType, extraFields: canonicalExtraFields },
+      const baselineHarmonized = harmonizeBibliographicFields<
+        Record<string, unknown>
+      >(
+        {
+          ...canonicalExtraFields,
+          ...passthroughFields,
+          itemType,
+          extraFields: canonicalExtraFields,
+        },
         { itemType, syncExtraFields: false },
       );
 
       const userOverriddenRecord: Record<string, unknown> = {};
-      for (const dtoField of ['title', 'abstract', 'doi', 'year', 'publicationTitle'] as const) {
+      for (const dtoField of [
+        'title',
+        'abstract',
+        'doi',
+        'year',
+        'publicationTitle',
+      ] as const) {
         const dtoVal = dto[dtoField];
         const baselineVal =
-          baselineHarmonized[dtoField] ?? canonical[dtoField] ?? canonicalExtraFields[dtoField];
+          baselineHarmonized[dtoField] ??
+          canonical[dtoField] ??
+          canonicalExtraFields[dtoField];
         if (
           dtoVal !== undefined &&
           dtoVal !== null &&
@@ -377,7 +398,9 @@ export class UrlCaptureService {
               ? (canonical.keywords as string[])
               : [];
       const effectiveCollectionId =
-        dto.collectionId || (canonical.collectionId as string | undefined) || undefined;
+        dto.collectionId ||
+        (canonical.collectionId as string | undefined) ||
+        undefined;
 
       const baseItemData = toItemData(
         {
@@ -390,7 +413,8 @@ export class UrlCaptureService {
           ...(dto.publicationTitle
             ? { publicationTitle: dto.publicationTitle }
             : {}),
-          url: (passthroughFields.url as string | undefined) || preview.sourceUrl,
+          url:
+            (passthroughFields.url as string | undefined) || preview.sourceUrl,
           itemType,
           authors,
           creators: normalizedCreators,
@@ -398,7 +422,7 @@ export class UrlCaptureService {
           keywords: effectiveTags,
           labels: effectiveTags,
           extraFields: canonicalExtraFields,
-        } as ItemMetadata,
+        },
         {
           userId: targetUserId,
           collectionIds: effectiveCollectionId
@@ -438,10 +462,7 @@ export class UrlCaptureService {
         (typeof canonical.filename === 'string' && canonical.filename) ||
         undefined;
 
-      await this.sideEffects.scanRetraction(
-        itemData as unknown as Record<string, unknown>,
-        { localOnly: true },
-      );
+      await this.sideEffects.scanRetraction(itemData, { localOnly: true });
 
       const runPostCommitSideEffects = async (
         targetItem: ItemDetail,
@@ -449,7 +470,7 @@ export class UrlCaptureService {
       ) => {
         if (!targetItem?.id) return;
         const parentMeta = {
-          ...(canonical as Record<string, unknown>),
+          ...canonical,
           ...(itemData as unknown as Record<string, unknown>),
           ...(targetItem as unknown as Record<string, unknown>),
         };

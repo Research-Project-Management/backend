@@ -122,8 +122,14 @@ export class OutboxRepository {
           where: { dedupeKey: row.dedupeKey },
           create: row,
           update: {
-            payload: row.payload, status: OutboxStatus.PENDING, retryCount: 0, error: null,
-            claimedBy: null, claimedAt: null, leaseExpiresAt: null, processedAt: null,
+            payload: row.payload,
+            status: OutboxStatus.PENDING,
+            retryCount: 0,
+            error: null,
+            claimedBy: null,
+            claimedAt: null,
+            leaseExpiresAt: null,
+            processedAt: null,
           },
         });
         createdIds.push(upserted.id);
@@ -411,8 +417,7 @@ export class OutboxRepository {
       const legacyRow = r as { userId?: string; projectId?: string | null };
       const effectiveSpaceId =
         r.spaceId || legacyRow.projectId || legacyRow.userId || '';
-      const effectiveUserId =
-        legacyRow.userId || r.actorId || effectiveSpaceId;
+      const effectiveUserId = legacyRow.userId || r.actorId || effectiveSpaceId;
       const effectiveProjectId =
         legacyRow.projectId !== undefined
           ? legacyRow.projectId
@@ -434,9 +439,7 @@ export class OutboxRepository {
           error: r.error,
           scheduledAt: r.scheduledAt ? new Date(r.scheduledAt) : null,
           claimedAt: r.claimedAt ? new Date(r.claimedAt) : null,
-          leaseExpiresAt: r.leaseExpiresAt
-            ? new Date(r.leaseExpiresAt)
-            : null,
+          leaseExpiresAt: r.leaseExpiresAt ? new Date(r.leaseExpiresAt) : null,
           claimedBy: r.claimedBy,
           dedupeKey: r.dedupeKey,
           createdAt: new Date(r.createdAt),
@@ -501,17 +504,28 @@ export class OutboxRepository {
     };
   }
 
-  private splitInboxConsumerKey(rawKey: string): { consumer: string; eventId: string } {
+  private splitInboxConsumerKey(rawKey: string): {
+    consumer: string;
+    eventId: string;
+  } {
     const idx = rawKey.indexOf(':');
-    return idx <= 0 ? { consumer: 'default', eventId: rawKey } : { consumer: rawKey.slice(0, idx), eventId: rawKey.slice(idx + 1) };
+    return idx <= 0
+      ? { consumer: 'default', eventId: rawKey }
+      : { consumer: rawKey.slice(0, idx), eventId: rawKey.slice(idx + 1) };
   }
 
   async findInboxRecord(
     consumer: string,
     eventId: string,
-  ): Promise<{ status: string; expiresAt: Date; [key: string]: unknown } | null> {
+  ): Promise<{
+    status: string;
+    expiresAt: Date;
+    [key: string]: unknown;
+  } | null> {
     if (typeof this.prisma?.libraryInboxRecord?.findUnique === 'function') {
-      return this.prisma.libraryInboxRecord.findUnique({ where: { consumer_eventId: { consumer, eventId } } });
+      return this.prisma.libraryInboxRecord.findUnique({
+        where: { consumer_eventId: { consumer, eventId } },
+      });
     }
     return this.findIdempotencyRecord(`${consumer}:${eventId}`);
   }
@@ -522,7 +536,11 @@ export class OutboxRepository {
     status: string,
     expiresAt: Date,
     ownerToken?: string,
-  ): Promise<{ status: string; expiresAt: Date; [key: string]: unknown } | null> {
+  ): Promise<{
+    status: string;
+    expiresAt: Date;
+    [key: string]: unknown;
+  } | null> {
     if (typeof this.prisma?.libraryInboxRecord?.upsert === 'function') {
       const now = new Date();
       const fields = {
@@ -538,13 +556,25 @@ export class OutboxRepository {
         update: fields,
       });
     }
-    return this.upsertIdempotencyRecord(`${consumer}:${eventId}`, status, expiresAt);
+    return this.upsertIdempotencyRecord(
+      `${consumer}:${eventId}`,
+      status,
+      expiresAt,
+    );
   }
 
-  async deleteInboxRecord(consumer: string, eventId: string, statuses?: string[]): Promise<void> {
+  async deleteInboxRecord(
+    consumer: string,
+    eventId: string,
+    statuses?: string[],
+  ): Promise<void> {
     if (typeof this.prisma?.libraryInboxRecord?.deleteMany === 'function') {
       await this.prisma.libraryInboxRecord.deleteMany({
-        where: { consumer, eventId, ...(statuses?.length ? { status: { in: statuses } } : {}) },
+        where: {
+          consumer,
+          eventId,
+          ...(statuses?.length ? { status: { in: statuses } } : {}),
+        },
       });
       return;
     }
@@ -555,18 +585,32 @@ export class OutboxRepository {
     idempotencyKey: string,
     userId = 'system',
     projectId: string | null = null,
-  ): Promise<{ status: string; expiresAt: Date; [key: string]: unknown } | null> {
-    if (typeof this.prisma?.libraryInboxRecord?.findUnique === 'function' && userId === 'system' && !projectId) {
+  ): Promise<{
+    status: string;
+    expiresAt: Date;
+    [key: string]: unknown;
+  } | null> {
+    if (
+      typeof this.prisma?.libraryInboxRecord?.findUnique === 'function' &&
+      userId === 'system' &&
+      !projectId
+    ) {
       const { consumer, eventId } = this.splitInboxConsumerKey(idempotencyKey);
-      return this.prisma.libraryInboxRecord.findUnique({ where: { consumer_eventId: { consumer, eventId } } });
+      return this.prisma.libraryInboxRecord.findUnique({
+        where: { consumer_eventId: { consumer, eventId } },
+      });
     }
     if (!this.prisma?.idempotencyRecord) return null;
     const spaceId = projectId || userId;
     if (typeof this.prisma.idempotencyRecord.findUnique === 'function') {
-      return this.prisma.idempotencyRecord.findUnique({ where: { spaceId_idempotencyKey: { spaceId, idempotencyKey } } });
+      return this.prisma.idempotencyRecord.findUnique({
+        where: { spaceId_idempotencyKey: { spaceId, idempotencyKey } },
+      });
     }
     if (typeof this.prisma.idempotencyRecord.findFirst === 'function') {
-      return this.prisma.idempotencyRecord.findFirst({ where: { spaceId, idempotencyKey } });
+      return this.prisma.idempotencyRecord.findFirst({
+        where: { spaceId, idempotencyKey },
+      });
     }
     return null;
   }
@@ -577,20 +621,37 @@ export class OutboxRepository {
     expiresAt: Date,
     userId = 'system',
     projectId: string | null = null,
-  ): Promise<{ status: string; expiresAt: Date; [key: string]: unknown } | null> {
-    if (typeof this.prisma?.libraryInboxRecord?.upsert === 'function' && userId === 'system' && !projectId) {
+  ): Promise<{
+    status: string;
+    expiresAt: Date;
+    [key: string]: unknown;
+  } | null> {
+    if (
+      typeof this.prisma?.libraryInboxRecord?.upsert === 'function' &&
+      userId === 'system' &&
+      !projectId
+    ) {
       const { consumer, eventId } = this.splitInboxConsumerKey(idempotencyKey);
       return this.upsertInboxRecord(consumer, eventId, status, expiresAt);
     }
     if (!this.prisma?.idempotencyRecord) return null;
-    const safeUserId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)
-      ? userId
-      : '00000000-0000-0000-0000-000000000000';
+    const safeUserId =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        userId,
+      )
+        ? userId
+        : '00000000-0000-0000-0000-000000000000';
     const spaceId = projectId || safeUserId;
     if (typeof this.prisma.idempotencyRecord.upsert === 'function') {
       return this.prisma.idempotencyRecord.upsert({
         where: { spaceId_idempotencyKey: { spaceId, idempotencyKey } },
-        create: { spaceId, actorId: safeUserId, idempotencyKey, status, expiresAt },
+        create: {
+          spaceId,
+          actorId: safeUserId,
+          idempotencyKey,
+          status,
+          expiresAt,
+        },
         update: { status, expiresAt },
       });
     }
@@ -603,25 +664,44 @@ export class OutboxRepository {
     userId = 'system',
     projectId: string | null = null,
   ): Promise<void> {
-    if (typeof this.prisma?.libraryInboxRecord?.deleteMany === 'function' && userId === 'system' && !projectId) {
+    if (
+      typeof this.prisma?.libraryInboxRecord?.deleteMany === 'function' &&
+      userId === 'system' &&
+      !projectId
+    ) {
       const { consumer, eventId } = this.splitInboxConsumerKey(idempotencyKey);
       await this.deleteInboxRecord(consumer, eventId, statuses);
       return;
     }
-    if (typeof this.prisma?.idempotencyRecord?.deleteMany !== 'function') return;
+    if (typeof this.prisma?.idempotencyRecord?.deleteMany !== 'function')
+      return;
     const spaceId = projectId || userId;
     await this.prisma.idempotencyRecord.deleteMany({
-      where: { spaceId, idempotencyKey, ...(statuses?.length ? { status: { in: statuses } } : {}) },
+      where: {
+        spaceId,
+        idempotencyKey,
+        ...(statuses?.length ? { status: { in: statuses } } : {}),
+      },
     });
   }
 
-  async purgeExpiredIdempotencyRecords(now: Date = new Date()): Promise<number> {
+  async purgeExpiredIdempotencyRecords(
+    now: Date = new Date(),
+  ): Promise<number> {
     let count = 0;
     if (this.prisma?.libraryInboxRecord?.deleteMany) {
-      count += (await this.prisma.libraryInboxRecord.deleteMany({ where: { expiresAt: { lt: now } } })).count;
+      count += (
+        await this.prisma.libraryInboxRecord.deleteMany({
+          where: { expiresAt: { lt: now } },
+        })
+      ).count;
     }
     if (this.prisma?.idempotencyRecord?.deleteMany) {
-      count += (await this.prisma.idempotencyRecord.deleteMany({ where: { expiresAt: { lt: now } } })).count;
+      count += (
+        await this.prisma.idempotencyRecord.deleteMany({
+          where: { expiresAt: { lt: now } },
+        })
+      ).count;
     }
     return count;
   }
@@ -641,17 +721,46 @@ async function transitionRetryOrDeadLetter(params: {
   retryLogFormatter: (newRetryCount: number, delaySec: number) => string;
   dlqLogFormatter: () => string;
 }): Promise<'deadLettered' | 'retried'> {
-  const { event, maxRetries, workerId, repo, logger, metricsService, counterName, baseSec, maxSec, reasonMessage, retryLogFormatter, dlqLogFormatter } = params;
+  const {
+    event,
+    maxRetries,
+    workerId,
+    repo,
+    logger,
+    metricsService,
+    counterName,
+    baseSec,
+    maxSec,
+    reasonMessage,
+    retryLogFormatter,
+    dlqLogFormatter,
+  } = params;
   metricsService?.incrementCounter(counterName);
-  const decision = evaluateOutboxFailureDecision(event.retryCount, maxRetries, baseSec, maxSec);
+  const decision = evaluateOutboxFailureDecision(
+    event.retryCount,
+    maxRetries,
+    baseSec,
+    maxSec,
+  );
   if (decision.isDeadLetter) {
     logger.error(dlqLogFormatter());
     metricsService?.incrementCounter('outbox_dlq_total');
-    await repo.markDeadLetter(event.id, decision.nextRetryCount, reasonMessage || 'Exceeded maximum retry attempts', workerId);
+    await repo.markDeadLetter(
+      event.id,
+      decision.nextRetryCount,
+      reasonMessage || 'Exceeded maximum retry attempts',
+      workerId,
+    );
     return 'deadLettered';
   }
   logger.warn(retryLogFormatter(decision.nextRetryCount, decision.delaySec!));
-  await repo.scheduleRetry(event.id, decision.nextRetryCount, decision.nextRetryAt!, reasonMessage, workerId);
+  await repo.scheduleRetry(
+    event.id,
+    decision.nextRetryCount,
+    decision.nextRetryAt!,
+    reasonMessage,
+    workerId,
+  );
   return 'retried';
 }
 
@@ -671,8 +780,10 @@ export async function handleMissingOutboxHandler(params: {
     baseSec: 10,
     maxSec: 600,
     reasonMessage: reason,
-    retryLogFormatter: (attempt, delaySec) => `${reason} on event ${event.id}. Retrying in ${delaySec}s (attempt ${attempt}/${maxRetries})`,
-    dlqLogFormatter: () => `Unrecognized event type "${event.eventType}" on event ${event.id} reached max retries (${maxRetries}). Moving to DLQ.`,
+    retryLogFormatter: (attempt, delaySec) =>
+      `${reason} on event ${event.id}. Retrying in ${delaySec}s (attempt ${attempt}/${maxRetries})`,
+    dlqLogFormatter: () =>
+      `Unrecognized event type "${event.eventType}" on event ${event.id} reached max retries (${maxRetries}). Moving to DLQ.`,
   });
 }
 
@@ -693,8 +804,10 @@ export async function handleOutboxDispatchFailure(params: {
     baseSec: 1,
     maxSec: 300,
     reasonMessage: errMsg,
-    retryLogFormatter: (attempt, delaySec) => `Event ${event.id} (${event.eventType}) failed (attempt ${attempt}/${maxRetries}). Retrying in ${delaySec}s: ${errMsg}`,
-    dlqLogFormatter: () => `Event ${event.id} (${event.eventType}) reached max retries (${maxRetries}). Moving to FAILED / DLQ: ${errMsg}`,
+    retryLogFormatter: (attempt, delaySec) =>
+      `Event ${event.id} (${event.eventType}) failed (attempt ${attempt}/${maxRetries}). Retrying in ${delaySec}s: ${errMsg}`,
+    dlqLogFormatter: () =>
+      `Event ${event.id} (${event.eventType}) reached max retries (${maxRetries}). Moving to FAILED / DLQ: ${errMsg}`,
   });
 }
 
@@ -702,15 +815,27 @@ export async function executeOutboxGarbageCollection(params: {
   repo: OutboxRepository;
   changeLogRepo?: ChangeLogRepository;
   logger: Logger;
-}): Promise<{ purgedPublished: number; purgedFailed: number; purgedChanges: number; purgedTombstones: number }> {
+}): Promise<{
+  purgedPublished: number;
+  purgedFailed: number;
+  purgedChanges: number;
+  purgedTombstones: number;
+}> {
   const { repo, changeLogRepo, logger } = params;
-  let purgedPublished = 0, purgedFailed = 0, purgedChanges = 0, purgedTombstones = 0;
+  let purgedPublished = 0,
+    purgedFailed = 0,
+    purgedChanges = 0,
+    purgedTombstones = 0;
   try {
     const now = new Date();
     const [outboxRes, , changeLogRes] = await Promise.all([
       repo.purgeProcessedOutboxEvents(3, 30, 1000),
-      typeof repo.purgeExpiredIdempotencyRecords === 'function' ? repo.purgeExpiredIdempotencyRecords(now) : Promise.resolve(0),
-      changeLogRepo ? changeLogRepo.compactAndPurgeChangeLog(30, 1000) : Promise.resolve(undefined),
+      typeof repo.purgeExpiredIdempotencyRecords === 'function'
+        ? repo.purgeExpiredIdempotencyRecords(now)
+        : Promise.resolve(0),
+      changeLogRepo
+        ? changeLogRepo.compactAndPurgeChangeLog(30, 1000)
+        : Promise.resolve(undefined),
     ]);
     purgedPublished = outboxRes.purgedPublished;
     purgedFailed = outboxRes.purgedFailed;
@@ -718,11 +843,20 @@ export async function executeOutboxGarbageCollection(params: {
       purgedChanges = changeLogRes.purgedChanges;
       purgedTombstones = changeLogRes.purgedTombstones;
     }
-    if (purgedPublished > 0 || purgedFailed > 0 || purgedChanges > 0 || purgedTombstones > 0) {
-      logger.log(`[OutboxGC] Purged ${purgedPublished} published outbox events, ${purgedFailed} failed outbox events, ${purgedChanges} change log entries, and ${purgedTombstones} tombstones.`);
+    if (
+      purgedPublished > 0 ||
+      purgedFailed > 0 ||
+      purgedChanges > 0 ||
+      purgedTombstones > 0
+    ) {
+      logger.log(
+        `[OutboxGC] Purged ${purgedPublished} published outbox events, ${purgedFailed} failed outbox events, ${purgedChanges} change log entries, and ${purgedTombstones} tombstones.`,
+      );
     }
   } catch (err: unknown) {
-    logger.warn(`Outbox database GC sweep encountered error: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn(
+      `Outbox database GC sweep encountered error: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
   return { purgedPublished, purgedFailed, purgedChanges, purgedTombstones };
 }
@@ -735,11 +869,30 @@ export async function buildOutboxDiagnosticSummary(params: {
   repo: OutboxRepository;
   metricsService?: OutboxMetricsRecorder;
 }): Promise<OutboxDiagnosticSummary> {
-  const { workerId, registeredHandlers, hasHandler, hasDefaultHandler, repo, metricsService } = params;
-  const { groupedPending, oldestPendingCreatedAt, processingCount } = await repo.getDiagnosticData();
-  const summary = computeOutboxDiagnostics({ workerId, registeredHandlers, hasHandler, hasDefaultHandler, groupedPending, oldestPendingCreatedAt, processingCount });
+  const {
+    workerId,
+    registeredHandlers,
+    hasHandler,
+    hasDefaultHandler,
+    repo,
+    metricsService,
+  } = params;
+  const { groupedPending, oldestPendingCreatedAt, processingCount } =
+    await repo.getDiagnosticData();
+  const summary = computeOutboxDiagnostics({
+    workerId,
+    registeredHandlers,
+    hasHandler,
+    hasDefaultHandler,
+    groupedPending,
+    oldestPendingCreatedAt,
+    processingCount,
+  });
   metricsService?.setGauge('outbox_pending_total', summary.totalPending);
   metricsService?.setGauge('outbox_processing_total', summary.totalProcessing);
-  metricsService?.setGauge('outbox_oldest_pending_age_seconds', summary.oldestPendingAgeSeconds);
+  metricsService?.setGauge(
+    'outbox_oldest_pending_age_seconds',
+    summary.oldestPendingAgeSeconds,
+  );
   return summary;
 }

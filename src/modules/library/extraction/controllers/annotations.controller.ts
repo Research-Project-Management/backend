@@ -44,7 +44,7 @@ import { AnnotationsService } from '@/modules/library/extraction/services/annota
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/library/attachments/:attachmentId/annotations',
-  'api/v1/projects/:projectId/library/attachments/:attachmentId/annotations',
+  'api/v1/spaces/:spaceId/library/attachments/:attachmentId/annotations',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class AnnotationsController {
@@ -72,8 +72,8 @@ export class AnnotationsController {
     @Param('attachmentId') attachmentId: string,
     @Query('pageIndex') pageIndexRaw?: string,
     @Query('type') type?: AnnotationType,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     let pageIndex: number | undefined;
     if (pageIndexRaw !== undefined) {
@@ -131,8 +131,8 @@ export class AnnotationsController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Body() body: CreateAnnotationDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!userId) {
       throw new UnauthorizedException(
@@ -193,8 +193,8 @@ export class AnnotationsController {
     @Param('id') id: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateAnnotationDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const rawVersion =
       body.expectedVersion ??
@@ -255,8 +255,8 @@ export class AnnotationsController {
     @Param('id') id: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     let expectedVersion: number | undefined;
     if (expectedVersionQuery !== undefined) {
@@ -304,8 +304,8 @@ export class AnnotationsController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Body() body: BatchAnnotationsDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!userId) {
       throw new UnauthorizedException('Authentication required');
@@ -317,7 +317,9 @@ export class AnnotationsController {
       ...u,
       quoteText: u.quoteText ?? u.text,
       rectCoords:
-        u.rectCoords ?? u.rects ?? (u.boundingRect ? [u.boundingRect] : undefined),
+        u.rectCoords ??
+        u.rects ??
+        (u.boundingRect ? [u.boundingRect] : undefined),
     }));
 
     if (projectId !== undefined) {
@@ -351,8 +353,8 @@ export class AnnotationsController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Body() body: BatchAnnotationsDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     return this.batchUpsertAnnotations(
       userId,
@@ -378,8 +380,8 @@ export class AnnotationsController {
   async importExternalAnnotations(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!userId) {
       throw new UnauthorizedException('Authentication required');

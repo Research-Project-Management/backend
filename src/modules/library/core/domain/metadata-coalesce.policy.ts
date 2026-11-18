@@ -9,7 +9,10 @@ export async function resolveOrCreateAutomaticTagsInClient(
   db: Prisma.TransactionClient,
   userId: string,
   rawTagList: ReadonlyArray<
-    string | { tag?: string; name?: string; type?: number | string } | null | undefined
+    | string
+    | { tag?: string; name?: string; type?: number | string }
+    | null
+    | undefined
   >,
   defaultTagType: TagType = TagType.automatic,
   projectId?: string | null,
@@ -40,7 +43,10 @@ export async function resolveOrCreateAutomaticTagsInClient(
   const scopeWhere: Prisma.LibraryTagWhereInput = { spaceId };
   const tagTypeMap = options?.tagTypeMap ?? new Map<string, TagType>();
   const existingItemTagTypeMap = new Map<string, TagType>();
-  const preloadedTagMap = new Map<string, { id: string; name: string; type?: TagType }>();
+  const preloadedTagMap = new Map<
+    string,
+    { id: string; name: string; type?: TagType }
+  >();
   if (Array.isArray(options?.existingItemTags)) {
     for (const eit of options.existingItemTags) {
       if (!eit) continue;
@@ -49,12 +55,15 @@ export async function resolveOrCreateAutomaticTagsInClient(
       if (!lowerName) continue;
       const rawType = eit.type ?? eit.tag?.type;
       const resolvedExistingType =
-        rawType === TagType.automatic || rawType === 'automatic' || rawType === 1
+        rawType === TagType.automatic ||
+        rawType === 'automatic' ||
+        rawType === 1
           ? TagType.automatic
           : rawType === TagType.manual || rawType === 'manual' || rawType === 0
             ? TagType.manual
             : undefined;
-      if (resolvedExistingType) existingItemTagTypeMap.set(lowerName, resolvedExistingType);
+      if (resolvedExistingType)
+        existingItemTagTypeMap.set(lowerName, resolvedExistingType);
       const existingTagId = eit.tag?.id || eit.tagId;
       if (existingTagId && !preloadedTagMap.has(lowerName)) {
         preloadedTagMap.set(lowerName, {
@@ -92,7 +101,8 @@ export async function resolveOrCreateAutomaticTagsInClient(
   const seenMissingLower = new Set<string>();
   const missingTagNames = normalizedTagNames.filter((name) => {
     const lower = name.trim().toLowerCase();
-    if (existingLowerNames.has(lower) || seenMissingLower.has(lower)) return false;
+    if (existingLowerNames.has(lower) || seenMissingLower.has(lower))
+      return false;
     seenMissingLower.add(lower);
     return true;
   });
@@ -106,7 +116,10 @@ export async function resolveOrCreateAutomaticTagsInClient(
             createdById: userId,
             name,
             normalizedName: lower,
-            type: tagTypeMap.get(lower) || existingItemTagTypeMap.get(lower) || defaultTagType,
+            type:
+              tagTypeMap.get(lower) ||
+              existingItemTagTypeMap.get(lower) ||
+              defaultTagType,
           };
         }),
         skipDuplicates: true,
@@ -121,7 +134,10 @@ export async function resolveOrCreateAutomaticTagsInClient(
               createdById: userId,
               name,
               normalizedName: lower,
-              type: tagTypeMap.get(lower) || existingItemTagTypeMap.get(lower) || defaultTagType,
+              type:
+                tagTypeMap.get(lower) ||
+                existingItemTagTypeMap.get(lower) ||
+                defaultTagType,
             },
           });
         } catch {
@@ -151,8 +167,8 @@ export async function resolveOrCreateAutomaticTagsInClient(
       typeof t.normalizedName === 'string' && t.normalizedName
         ? t.normalizedName.trim().toLowerCase()
         : typeof t.name === 'string'
-            ? t.name.trim().toLowerCase()
-            : t.id;
+          ? t.name.trim().toLowerCase()
+          : t.id;
     if (!dedupedByLower.has(key)) {
       dedupedByLower.set(key, {
         id: t.id,
@@ -166,8 +182,13 @@ export async function resolveOrCreateAutomaticTagsInClient(
     }
   }
   const resolvedList = Array.from(dedupedByLower.values());
-  const manualTagIds = resolvedList.filter((rt) => rt.type === TagType.manual).map((rt) => rt.id);
-  if (manualTagIds.length > 0 && typeof db.libraryTag?.updateMany === 'function') {
+  const manualTagIds = resolvedList
+    .filter((rt) => rt.type === TagType.manual)
+    .map((rt) => rt.id);
+  if (
+    manualTagIds.length > 0 &&
+    typeof db.libraryTag?.updateMany === 'function'
+  ) {
     await db.libraryTag.updateMany({
       where: { id: { in: manualTagIds }, type: TagType.automatic },
       data: { type: TagType.manual },

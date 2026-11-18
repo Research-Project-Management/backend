@@ -175,8 +175,13 @@ export class DoiContentNegotiationService {
           return null;
         }
 
-        const contentType = (response.headers.get('content-type') || '').toLowerCase();
-        if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
+        const contentType = (
+          response.headers.get('content-type') || ''
+        ).toLowerCase();
+        if (
+          contentType.includes('text/html') ||
+          contentType.includes('application/xhtml')
+        ) {
           await response.body?.cancel().catch(() => {});
           return null;
         }
@@ -221,15 +226,19 @@ export class DoiContentNegotiationService {
     return this.singleFlight.execute(`cite:${cacheKey}`, async () => {
       try {
         if (this.resilienceRegistry) {
-          return await this.resilienceRegistry.execute('doi-org', executeFetch, {
-            fallback: (err: unknown) => {
-              const errMsg = err instanceof Error ? err.message : String(err);
-              this.logger.debug(
-                `DOI Content Negotiation fallback for ${doi} (${normalizedStyle}): ${errMsg}`,
-              );
-              return Promise.resolve(null);
+          return await this.resilienceRegistry.execute(
+            'doi-org',
+            executeFetch,
+            {
+              fallback: (err: unknown) => {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                this.logger.debug(
+                  `DOI Content Negotiation fallback for ${doi} (${normalizedStyle}): ${errMsg}`,
+                );
+                return Promise.resolve(null);
+              },
             },
-          });
+          );
         }
 
         return await executeFetch();
@@ -379,15 +388,19 @@ export class DoiContentNegotiationService {
     return this.singleFlight.execute(`meta:${doi}`, async () => {
       try {
         if (this.resilienceRegistry) {
-          return await this.resilienceRegistry.execute('doi-org', executeFetch, {
-            fallback: (err: unknown) => {
-              const errMsg = err instanceof Error ? err.message : String(err);
-              this.logger.debug(
-                `DOI Content Negotiation metadata fallback for ${doi}: ${errMsg}`,
-              );
-              return Promise.resolve(null);
+          return await this.resilienceRegistry.execute(
+            'doi-org',
+            executeFetch,
+            {
+              fallback: (err: unknown) => {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                this.logger.debug(
+                  `DOI Content Negotiation metadata fallback for ${doi}: ${errMsg}`,
+                );
+                return Promise.resolve(null);
+              },
             },
-          });
+          );
         }
 
         return await executeFetch();

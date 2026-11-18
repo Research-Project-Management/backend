@@ -1,6 +1,25 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { MetadataRequest, ProviderCapability, ProviderName, ProviderResult } from '@/modules/library/ingestion/types/metadata.types';
-import { normalizeArxivId, normalizeDoi, cleanBibliographicText, cleanAbstractText, cleanCommentText, decodeHtmlEntities, normalizeTags, parseCreatorString, HttpClient, LibraryConfigService, libraryConfig, getUserAgent, normalizePageRange } from '@/modules/library/core';
+import {
+  MetadataRequest,
+  ProviderCapability,
+  ProviderName,
+  ProviderResult,
+} from '@/modules/library/ingestion/types/metadata.types';
+import {
+  normalizeArxivId,
+  normalizeDoi,
+  cleanBibliographicText,
+  cleanAbstractText,
+  cleanCommentText,
+  decodeHtmlEntities,
+  normalizeTags,
+  parseCreatorString,
+  HttpClient,
+  LibraryConfigService,
+  libraryConfig,
+  getUserAgent,
+  normalizePageRange,
+} from '@/modules/library/core';
 import { BaseMetadataProvider } from './base-metadata.provider';
 
 @Injectable()

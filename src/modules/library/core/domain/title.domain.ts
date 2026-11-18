@@ -410,7 +410,9 @@ export function cleanPdfTitle(
   return 'Uploaded Document';
 }
 
-export function extractNormalizedAuthorSurnames(authorsOrCreators: unknown): Set<string> {
+export function extractNormalizedAuthorSurnames(
+  authorsOrCreators: unknown,
+): Set<string> {
   const out = new Set<string>();
   const addRaw = (rawName: string) => {
     const trimmed = rawName.trim();
@@ -453,7 +455,10 @@ export function extractNormalizedAuthorSurnames(authorsOrCreators: unknown): Set
   } else if (authorsOrCreators && typeof authorsOrCreators === 'object') {
     const rec = authorsOrCreators as Record<string, unknown>;
     for (const listKey of ['creators', 'contributors', 'authors'] as const) {
-      if (Array.isArray(rec[listKey]) && (rec[listKey] as unknown[]).length > 0) {
+      if (
+        Array.isArray(rec[listKey]) &&
+        (rec[listKey] as unknown[]).length > 0
+      ) {
         processArray(rec[listKey] as unknown[]);
         if (out.size > 0) break;
       }

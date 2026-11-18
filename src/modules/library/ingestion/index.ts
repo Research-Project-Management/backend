@@ -83,4 +83,3 @@ export * from './providers/base-metadata.provider';
 export * from './dto/ingestion.dto';
 export * from './types/metadata.types';
 export * from './types/ingestion.types';
-

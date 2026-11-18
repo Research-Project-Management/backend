@@ -100,7 +100,10 @@ export class StateService {
     let state = await this.stateRepository.findState(userId, itemId);
 
     if (this.writeBehind) {
-      const buffered = await this.writeBehind.getBufferedProgress(userId, itemId);
+      const buffered = await this.writeBehind.getBufferedProgress(
+        userId,
+        itemId,
+      );
       if (buffered) {
         state = {
           userId,
@@ -109,10 +112,16 @@ export class StateService {
           isStarred: state?.isStarred ?? false,
           rating: state?.rating ?? null,
           currentPage: buffered.currentPage ?? state?.currentPage ?? 1,
-          scrollPosition: buffered.scrollPosition ?? state?.scrollPosition ?? null,
-          lastActiveAttachmentId: buffered.attachmentId ?? state?.lastActiveAttachmentId ?? null,
-          lastOpenedAt: buffered.lastOpenedAt ? new Date(buffered.lastOpenedAt) : (state?.lastOpenedAt ?? new Date()),
-          lastReadAt: buffered.lastReadAt ? new Date(buffered.lastReadAt) : (state?.lastReadAt ?? null),
+          scrollPosition:
+            buffered.scrollPosition ?? state?.scrollPosition ?? null,
+          lastActiveAttachmentId:
+            buffered.attachmentId ?? state?.lastActiveAttachmentId ?? null,
+          lastOpenedAt: buffered.lastOpenedAt
+            ? new Date(buffered.lastOpenedAt)
+            : (state?.lastOpenedAt ?? new Date()),
+          lastReadAt: buffered.lastReadAt
+            ? new Date(buffered.lastReadAt)
+            : (state?.lastReadAt ?? null),
           createdAt: state?.createdAt ?? new Date(),
           updatedAt: new Date(),
         };
@@ -172,8 +181,8 @@ export class StateService {
           (dto.scrollPosition &&
           typeof dto.scrollPosition === 'object' &&
           !Array.isArray(dto.scrollPosition) &&
-          typeof (dto.scrollPosition as Record<string, unknown>).attachmentId ===
-            'string'
+          typeof (dto.scrollPosition as Record<string, unknown>)
+            .attachmentId === 'string'
             ? (
                 (dto.scrollPosition as Record<string, unknown>)
                   .attachmentId as string
@@ -204,8 +213,10 @@ export class StateService {
           isStarred: existing?.isStarred ?? false,
           rating: existing?.rating ?? null,
           currentPage: dto.currentPage ?? existing?.currentPage ?? 1,
-          scrollPosition: mergedScrollPosition ?? existing?.scrollPosition ?? null,
-          lastActiveAttachmentId: resolvedAttachmentId ?? existing?.lastActiveAttachmentId ?? null,
+          scrollPosition:
+            mergedScrollPosition ?? existing?.scrollPosition ?? null,
+          lastActiveAttachmentId:
+            resolvedAttachmentId ?? existing?.lastActiveAttachmentId ?? null,
           lastOpenedAt: now,
           lastReadAt: now,
           createdAt: existing?.createdAt ?? now,

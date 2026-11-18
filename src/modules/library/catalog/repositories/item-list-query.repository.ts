@@ -1,16 +1,16 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import { normalizeProjectScopeId, resolveSpaceId } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  resolveSpaceId,
+} from '@/modules/library/core';
 import {
   ItemDetail,
   ItemSummary,
 } from '@/modules/library/core/types/bibliographic.types';
 import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
-import {
-  ItemFilterOptions,
-  buildItemWhereClause,
-} from './notes.repository';
+import { ItemFilterOptions, buildItemWhereClause } from './notes.repository';
 
 export type PrismaClientOrTx = Prisma.TransactionClient | PrismaService;
 
@@ -379,7 +379,8 @@ export class ItemListQueryRepository {
     const where: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,
-        projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+        projectId:
+          validProjectId && isUuid(validProjectId) ? validProjectId : null,
       }),
       deletedAt: null,
     };
@@ -457,7 +458,10 @@ export class ItemListQueryRepository {
     if (!item) return null;
     return {
       id: item.id,
-      userId: (item as { userId?: string }).userId ?? item.createdById ?? item.spaceId,
+      userId:
+        (item as { userId?: string }).userId ??
+        item.createdById ??
+        item.spaceId,
       title: item.title,
       itemType: item.itemType || undefined,
       year: item.year,
@@ -488,7 +492,8 @@ export class ItemListQueryRepository {
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,
-        projectId: validProjectId && isUuid(validProjectId) ? validProjectId : null,
+        projectId:
+          validProjectId && isUuid(validProjectId) ? validProjectId : null,
       }),
     };
 
@@ -515,7 +520,10 @@ export class ItemListQueryRepository {
 
     return items.map((item) => ({
       id: item.id,
-      userId: (item as { userId?: string }).userId ?? item.createdById ?? item.spaceId,
+      userId:
+        (item as { userId?: string }).userId ??
+        item.createdById ??
+        item.spaceId,
       title: item.title,
       itemType: item.itemType || undefined,
       year: item.year,

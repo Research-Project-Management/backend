@@ -5,7 +5,17 @@ import {
   FieldEvidence,
   ParsedBibtexEntry,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn, normalizeTags, ItemProvenancePolicy, evaluateCitationTrap } from '@/modules/library/core';
+import {
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+  normalizePmcid,
+  normalizeIsbn,
+  normalizeIssn,
+  normalizeTags,
+  ItemProvenancePolicy,
+  evaluateCitationTrap,
+} from '@/modules/library/core';
 import { randomUUID } from 'crypto';
 import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
 
@@ -76,101 +86,100 @@ interface IBibliographicQualityRule {
   isSatisfied(item: Record<string, unknown>): boolean;
 }
 
-const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] =
-  [
-    {
-      id: 'title',
-      bit: QUALITY_RULE_BIT.title,
-      fieldKey: 'title',
-      issueCode: 'missing_title',
-      weight: 25,
-      isSatisfied(item: Record<string, unknown>): boolean {
-        return typeof item.title === 'string' && item.title.trim().length > 3;
-      },
+const BIBLIOGRAPHIC_QUALITY_RULES: readonly IBibliographicQualityRule[] = [
+  {
+    id: 'title',
+    bit: QUALITY_RULE_BIT.title,
+    fieldKey: 'title',
+    issueCode: 'missing_title',
+    weight: 25,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return typeof item.title === 'string' && item.title.trim().length > 3;
     },
-    {
-      id: 'authors',
-      bit: QUALITY_RULE_BIT.authors,
-      fieldKey: 'authors',
-      issueCode: 'missing_authors',
-      weight: 25,
-      isSatisfied(item: Record<string, unknown>): boolean {
-        return Boolean(
-          (Array.isArray(item.creators) && item.creators.length > 0) ||
-          (Array.isArray(item.authors) && item.authors.length > 0) ||
-          (Array.isArray(item.contributors) && item.contributors.length > 0),
-        );
-      },
+  },
+  {
+    id: 'authors',
+    bit: QUALITY_RULE_BIT.authors,
+    fieldKey: 'authors',
+    issueCode: 'missing_authors',
+    weight: 25,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return Boolean(
+        (Array.isArray(item.creators) && item.creators.length > 0) ||
+        (Array.isArray(item.authors) && item.authors.length > 0) ||
+        (Array.isArray(item.contributors) && item.contributors.length > 0),
+      );
     },
-    {
-      id: 'year',
-      bit: QUALITY_RULE_BIT.year,
-      fieldKey: 'year',
-      issueCode: 'missing_year',
-      weight: 15,
-      isSatisfied(item: Record<string, unknown>): boolean {
-        if (typeof item.year === 'number') {
-          return item.year > 1900;
-        }
-        if (typeof item.year === 'string' && item.year.trim().length > 0) {
-          const parsed = parseInt(item.year.trim(), 10);
-          return !Number.isNaN(parsed) && parsed > 1900;
-        }
-        return Boolean(item.publicationDate || item.date);
-      },
+  },
+  {
+    id: 'year',
+    bit: QUALITY_RULE_BIT.year,
+    fieldKey: 'year',
+    issueCode: 'missing_year',
+    weight: 15,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      if (typeof item.year === 'number') {
+        return item.year > 1900;
+      }
+      if (typeof item.year === 'string' && item.year.trim().length > 0) {
+        const parsed = parseInt(item.year.trim(), 10);
+        return !Number.isNaN(parsed) && parsed > 1900;
+      }
+      return Boolean(item.publicationDate || item.date);
     },
-    {
-      id: 'identifier',
-      bit: QUALITY_RULE_BIT.identifier,
-      fieldKey: 'identifier',
-      weight: 15,
-      isSatisfied(item: Record<string, unknown>): boolean {
-        return Boolean(
-          item.doi ||
-          item.isbn ||
-          item.issn ||
-          item.arxivId ||
-          item.pmid ||
-          item.pmcid ||
-          item.url,
-        );
-      },
+  },
+  {
+    id: 'identifier',
+    bit: QUALITY_RULE_BIT.identifier,
+    fieldKey: 'identifier',
+    weight: 15,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return Boolean(
+        item.doi ||
+        item.isbn ||
+        item.issn ||
+        item.arxivId ||
+        item.pmid ||
+        item.pmcid ||
+        item.url,
+      );
     },
-    {
-      id: 'doi',
-      bit: QUALITY_RULE_BIT.doi,
-      issueCode: 'missing_doi',
-      weight: 0,
-      isSatisfied(item: Record<string, unknown>): boolean {
-        return Boolean(item.doi && String(item.doi).trim().length > 0);
-      },
+  },
+  {
+    id: 'doi',
+    bit: QUALITY_RULE_BIT.doi,
+    issueCode: 'missing_doi',
+    weight: 0,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return Boolean(item.doi && String(item.doi).trim().length > 0);
     },
-    {
-      id: 'context',
-      bit: QUALITY_RULE_BIT.context,
-      weight: 10,
-      isSatisfied(item: Record<string, unknown>): boolean {
-        return Boolean(
-          item.publicationTitle ||
-          item.journal ||
-          item.publisher ||
-          item.bookTitle ||
-          item.proceedingsTitle ||
-          item.conferenceName,
-        );
-      },
+  },
+  {
+    id: 'context',
+    bit: QUALITY_RULE_BIT.context,
+    weight: 10,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return Boolean(
+        item.publicationTitle ||
+        item.journal ||
+        item.publisher ||
+        item.bookTitle ||
+        item.proceedingsTitle ||
+        item.conferenceName,
+      );
     },
-    {
-      id: 'abstract',
-      bit: QUALITY_RULE_BIT.abstract,
-      fieldKey: 'abstract',
-      issueCode: 'missing_abstract',
-      weight: 10,
-      isSatisfied(item: Record<string, unknown>): boolean {
-        return Boolean(item.abstract || item.abstractNote);
-      },
+  },
+  {
+    id: 'abstract',
+    bit: QUALITY_RULE_BIT.abstract,
+    fieldKey: 'abstract',
+    issueCode: 'missing_abstract',
+    weight: 10,
+    isSatisfied(item: Record<string, unknown>): boolean {
+      return Boolean(item.abstract || item.abstractNote);
     },
-  ];
+  },
+];
 
 interface MetadataQualityEvaluation {
   score: number; // 0 - 100
@@ -403,7 +412,8 @@ export function applyUserOverridesToCandidate(
   const coupledOverrideKeys = new Set<string>();
 
   for (const [key, rawVal] of Object.entries(overrides)) {
-    if (rawVal === undefined || rawVal === null || key.startsWith('_')) continue;
+    if (rawVal === undefined || rawVal === null || key.startsWith('_'))
+      continue;
     explicitOverrideKeys.add(key);
     for (const alias of ItemProvenancePolicy.getCoupledFieldAliases(key)) {
       if (!(alias in overrides)) {

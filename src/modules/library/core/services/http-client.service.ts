@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
-import { LibraryConfigService, libraryConfig } from '@/modules/library/core/config/library.config';
+import {
+  LibraryConfigService,
+  libraryConfig,
+} from '@/modules/library/core/config/library.config';
 import { ExternalProviderException } from '@/modules/library/core/errors/domain.exception';
 import {
   readSafeResponseBuffer,

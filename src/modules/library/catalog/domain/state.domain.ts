@@ -1,4 +1,9 @@
-import { StateData, ReadingStatus, VALID_READING_TRANSITIONS, CollectionTreeNode } from '@/modules/library/catalog/types/catalog.types';
+import {
+  StateData,
+  ReadingStatus,
+  VALID_READING_TRANSITIONS,
+  CollectionTreeNode,
+} from '@/modules/library/catalog/types/catalog.types';
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { collectDescendantCollectionIds } from '@/modules/library/core';
 
@@ -95,13 +100,19 @@ export function mergeScrollPosition(
         existingObj.byAttachment &&
         typeof existingObj.byAttachment === 'object' &&
         !Array.isArray(existingObj.byAttachment)
-          ? (existingObj.byAttachment as Record<string, Record<string, unknown>>)
+          ? (existingObj.byAttachment as Record<
+              string,
+              Record<string, unknown>
+            >)
           : {};
       const incomingByAtt =
         incomingObj.byAttachment &&
         typeof incomingObj.byAttachment === 'object' &&
         !Array.isArray(incomingObj.byAttachment)
-          ? (incomingObj.byAttachment as Record<string, Record<string, unknown>>)
+          ? (incomingObj.byAttachment as Record<
+              string,
+              Record<string, unknown>
+            >)
           : {};
       const { byAttachment: _ignoreByAtt, ...perAttFields } = incomingObj;
       merged.byAttachment = {

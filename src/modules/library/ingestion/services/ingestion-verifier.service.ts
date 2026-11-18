@@ -12,7 +12,11 @@ import {
   DuplicateClusterResult,
   RetractionCheckResult,
 } from '@/modules/library/ingestion/types/ingestion.types';
-import { calculateMetadataQualityScore, diagnoseBibliographicQualityIssues, QUALITY_RULE_BIT } from '@/modules/library/ingestion/domain/metadata-validation.policy';
+import {
+  calculateMetadataQualityScore,
+  diagnoseBibliographicQualityIssues,
+  QUALITY_RULE_BIT,
+} from '@/modules/library/ingestion/domain/metadata-validation.policy';
 import {
   titleSimilarity,
   TITLE_MATCH_THRESHOLD,
@@ -27,7 +31,10 @@ import {
   BulkheadSemaphore,
   normalizeProjectScopeId,
 } from '@/modules/library/core';
-import { BOT_CHALLENGE_TITLE_RE, BOT_CHALLENGE_HTML_RE } from '@/modules/library/core/domain/text.lexicon';
+import {
+  BOT_CHALLENGE_TITLE_RE,
+  BOT_CHALLENGE_HTML_RE,
+} from '@/modules/library/core/domain/text.lexicon';
 import { IngestionService } from './ingestion.service';
 import { DuplicateDetectorService } from './duplicate-detector.service';
 import { RetractionService } from './retraction.service';
@@ -510,7 +517,8 @@ export class QualityService {
       if (issueMask & QUALITY_RULE_BIT.abstract) missingAbstract += 1;
       if (
         itRec.hasFile === false &&
-        (typeof itRec.attachmentCount !== 'number' || itRec.attachmentCount === 0)
+        (typeof itRec.attachmentCount !== 'number' ||
+          itRec.attachmentCount === 0)
       ) {
         missingPdf += 1;
       }
@@ -614,7 +622,12 @@ export class IngestionFacade implements IIngestionFacade {
     },
     projectId?: string,
   ): Promise<Awaited<ReturnType<IngestionService['reResolveMetadata']>>> {
-    return this.ingestionService.reResolveMetadata(userId, itemId, options, projectId);
+    return this.ingestionService.reResolveMetadata(
+      userId,
+      itemId,
+      options,
+      projectId,
+    );
   }
 
   async reconcileExtractedCandidate(

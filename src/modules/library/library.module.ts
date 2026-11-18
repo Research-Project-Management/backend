@@ -250,7 +250,11 @@ export class LibraryFacade implements ILibraryFacade {
     aiMetadataPatch: Record<string, unknown>,
     scope?: { userId?: string; projectId?: string },
   ): Promise<void> {
-    await this.catalogFacade.updateItemAiMetadata(itemId, aiMetadataPatch, scope);
+    await this.catalogFacade.updateItemAiMetadata(
+      itemId,
+      aiMetadataPatch,
+      scope,
+    );
   }
 }
 

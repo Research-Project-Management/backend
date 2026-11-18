@@ -58,7 +58,9 @@ export class ItemTransformer implements IItemTransformerPort {
     options: { retainUnmappedInExtra?: boolean } = {},
   ): TypeConversionPreview {
     const item = ItemsMapper.toDomain(rawItem) as Record<string, unknown>;
-    const sourceType = (item.itemType || item.type || 'journalArticle') as string;
+    const sourceType = (item.itemType ||
+      item.type ||
+      'journalArticle') as string;
 
     if (!this.typesService.isValidItemType(targetType)) {
       throw new BadRequestException(`Invalid target itemType: ${targetType}`);
@@ -76,6 +78,11 @@ export class ItemTransformer implements IItemTransformerPort {
       );
     }
 
-    return previewItemTypeConversion(item, targetType, options, this.typesService);
+    return previewItemTypeConversion(
+      item,
+      targetType,
+      options,
+      this.typesService,
+    );
   }
 }

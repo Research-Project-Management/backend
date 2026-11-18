@@ -39,7 +39,7 @@ import { MAX_SAFE_HTTP_PAYLOAD_BYTES } from '@/modules/library/core';
  */
 @ApiTags('Library Attachments - Storage Gateway')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/library', 'api/v1/projects/:projectId/library'])
+@Controller(['api/v1/library', 'api/v1/spaces/:spaceId/library'])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class AttachmentStorageController {
   constructor(
@@ -57,9 +57,9 @@ export class AttachmentStorageController {
   async uploadLibraryFile(
     @CurrentUser('id') userId: string,
     @Req() req: FastifyRequest,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const projectId = paramProjectId || queryProjectId;
     if (!this.storagePort?.uploadFile) {
@@ -84,7 +84,10 @@ export class AttachmentStorageController {
       if (part.type === 'file') {
         filename = part.filename || filename;
         mimeType = part.mimetype || mimeType;
-        if (part.file && typeof part.file[Symbol.asyncIterator] === 'function') {
+        if (
+          part.file &&
+          typeof part.file[Symbol.asyncIterator] === 'function'
+        ) {
           const chunks: Buffer[] = [];
           let totalBytes = 0;
           for await (const chunk of part.file) {
@@ -119,7 +122,9 @@ export class AttachmentStorageController {
       mimeType.toLowerCase().includes('application/pdf') ||
       filename.toLowerCase().endsWith('.pdf');
     if (isPdfDeclared && buffer.length >= 5) {
-      const headerWindow = buffer.subarray(0, Math.min(1024, buffer.length)).toString('latin1');
+      const headerWindow = buffer
+        .subarray(0, Math.min(1024, buffer.length))
+        .toString('latin1');
       if (!headerWindow.includes('%PDF-')) {
         throw new BadRequestException(
           'Uploaded file does not have a valid %PDF- magic header',
@@ -149,9 +154,9 @@ export class AttachmentStorageController {
   async presignUpload(
     @CurrentUser('id') userId: string,
     @Body() dto: PresignUploadDto,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.getPresignedUploadUrl) {
       throw new BadRequestException('Direct presigned upload unavailable');
@@ -175,9 +180,9 @@ export class AttachmentStorageController {
   async completePresignedUpload(
     @CurrentUser('id') userId: string,
     @Body() dto: CompletePresignDto,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.completePresignedUpload) {
       throw new NotImplementedException(
@@ -203,9 +208,9 @@ export class AttachmentStorageController {
   async initiateMultipart(
     @CurrentUser('id') userId: string,
     @Body() dto: InitiateMultipartDto,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.initiateMultipartUpload) {
       throw new BadRequestException('Multipart upload unavailable');
@@ -231,9 +236,9 @@ export class AttachmentStorageController {
     @CurrentUser('id') userId: string,
     @Param('sessionId') sessionId: string,
     @Query('partNumber') partNumberStr: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.getMultipartPartUrl) {
       throw new BadRequestException('Multipart part URL unavailable');
@@ -259,9 +264,9 @@ export class AttachmentStorageController {
   async completeMultipart(
     @CurrentUser('id') userId: string,
     @Body() dto: CompleteMultipartDto,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.completeMultipartUpload) {
       throw new BadRequestException('Multipart completion unavailable');
@@ -280,9 +285,9 @@ export class AttachmentStorageController {
   async abortMultipart(
     @CurrentUser('id') userId: string,
     @Param('sessionId') sessionId: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.abortMultipartUpload) {
       throw new NotImplementedException(
@@ -324,9 +329,9 @@ export class AttachmentStorageController {
     @CurrentUser('id') userId: string,
     @Param('fileId') fileId: string,
     @Res() res: FastifyReply,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
     @Req() req?: FastifyRequest,
   ) {
     const projectId = paramProjectId || queryProjectId;
@@ -341,9 +346,7 @@ export class AttachmentStorageController {
         fileId,
         userId,
         projectId,
-        ...(range
-          ? { range: range as { start: number; end: number } }
-          : {}),
+        ...(range ? { range: range as { start: number; end: number } } : {}),
       })) as {
         stream: NodeJS.ReadableStream;
         mimeType: string;
@@ -359,8 +362,7 @@ export class AttachmentStorageController {
         size: fileRecord.size,
         mimeType: fileRecord.mimeType,
         contentRange: fileRecord.contentRange,
-        isPartial:
-          fileRecord.isPartial ?? Boolean(fileRecord.contentRange),
+        isPartial: fileRecord.isPartial ?? Boolean(fileRecord.contentRange),
       });
     }
 
@@ -410,9 +412,9 @@ export class AttachmentStorageController {
   async getAttachmentPresignedUrl(
     @CurrentUser('id') userId: string,
     @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const projectId = paramProjectId || queryProjectId;
     const { attachment } = await this.attachmentsService.getItemAttachment(
@@ -437,8 +439,11 @@ export class AttachmentStorageController {
       return {
         url: presignedUrl,
         expiresIn: 3600,
-        filename: attachment.filename || (isHtml ? 'snapshot.html' : 'attachment.pdf'),
-        mimeType: isHtml ? 'application/octet-stream' : attachment.mimeType || 'application/pdf',
+        filename:
+          attachment.filename || (isHtml ? 'snapshot.html' : 'attachment.pdf'),
+        mimeType: isHtml
+          ? 'application/octet-stream'
+          : attachment.mimeType || 'application/pdf',
       };
     }
 
@@ -475,9 +480,9 @@ export class AttachmentStorageController {
     @Param('attachmentId', new ParseUUIDPipe()) attachmentId: string,
     @Req() req: FastifyRequest,
     @Res() res: FastifyReply,
-    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const projectId = paramProjectId || queryProjectId;
     const { attachment } = await this.attachmentsService.getItemAttachment(
@@ -502,9 +507,7 @@ export class AttachmentStorageController {
           fileId: attachment.fileId,
           userId,
           projectId,
-          ...(range
-            ? { range: range as { start: number; end: number } }
-            : {}),
+          ...(range ? { range: range as { start: number; end: number } } : {}),
         })) as {
           stream: NodeJS.ReadableStream;
           mimeType: string;
@@ -521,8 +524,7 @@ export class AttachmentStorageController {
           size: fileRecord.size,
           mimeType: fileRecord.mimeType || defaultMimeType,
           contentRange: fileRecord.contentRange,
-          isPartial:
-            fileRecord.isPartial ?? Boolean(fileRecord.contentRange),
+          isPartial: fileRecord.isPartial ?? Boolean(fileRecord.contentRange),
         });
       }
 

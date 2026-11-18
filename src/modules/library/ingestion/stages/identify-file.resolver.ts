@@ -70,13 +70,17 @@ function mergeExtractedPdfMetadata(
 
   const merged: Record<string, unknown> = { ...primary };
   const primaryRec = primary as Record<string, unknown>;
-  const fallbackProv = (fallback.fieldProvenance || {}) as Record<string, unknown>;
+  const fallbackProv = (fallback.fieldProvenance || {}) as Record<
+    string,
+    unknown
+  >;
   const mergedProv: Record<string, unknown> = {
     ...((primaryRec.fieldProvenance as Record<string, unknown>) || {}),
   };
 
   for (const [k, v] of Object.entries(fallback)) {
-    if (k === 'fieldProvenance' || v === undefined || v === null || v === '') continue;
+    if (k === 'fieldProvenance' || v === undefined || v === null || v === '')
+      continue;
     if (Array.isArray(v) && v.length === 0) continue;
     const cur = primaryRec[k];
     const isCurEmpty =
@@ -95,7 +99,7 @@ function mergeExtractedPdfMetadata(
   if (Object.keys(mergedProv).length > 0) {
     merged.fieldProvenance = mergedProv;
   }
-  return merged as unknown as ExtractedPdfMetadata;
+  return merged;
 }
 
 const PDF_CONTENT_CACHE_MAX_ENTRIES = 500;
@@ -277,8 +281,7 @@ export class IdentifyFileResolver {
       unknown
     >;
     const inlineExtracted = rawPayloadAny.extractedMetadata as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (inlineExtracted && typeof inlineExtracted === 'object') {
       extractedMetadata = { ...extractedMetadata, ...inlineExtracted };
     }
@@ -467,9 +470,7 @@ export class IdentifyFileResolver {
     };
 
     const isSelfSufficient = extractedMetadata.isSelfSufficient === true;
-    const candidateSourceName = isSelfSufficient
-      ? 'TrustedPaper'
-      : 'StagedPdf';
+    const candidateSourceName = isSelfSufficient ? 'TrustedPaper' : 'StagedPdf';
 
     const candidateConfidence = isSelfSufficient
       ? extractedMetadata.qualityScore || 0.85

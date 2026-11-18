@@ -257,7 +257,10 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
       it.itemType === 'preprint' ||
       !it.doi ||
       /^10\.48550\/arxiv\./i.test(String(it.doi));
-    if (isPreprintOrArxivPrimary && !existingExtra.toLowerCase().includes('arxiv:')) {
+    if (
+      isPreprintOrArxivPrimary &&
+      !existingExtra.toLowerCase().includes('arxiv:')
+    ) {
       const arxivLine = catStr
         ? `arXiv: ${canonicalCleanId} [${catStr}]`
         : `arXiv: ${canonicalCleanId}`;
@@ -414,18 +417,42 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
   const rejectedCitedDoi = extraFields.rejectedCitedDoi ?? it.rejectedCitedDoi;
   if (Array.isArray(it.identifiers)) {
     const idTypeToField: Record<string, keyof MutableItemPayload> = {
-      arxiv: 'arxivId', arxivid: 'arxivId', doi: 'doi', pmid: 'pmid', pmcid: 'pmcid', isbn: 'isbn', issn: 'issn',
+      arxiv: 'arxivId',
+      arxivid: 'arxivId',
+      doi: 'doi',
+      pmid: 'pmid',
+      pmcid: 'pmcid',
+      isbn: 'isbn',
+      issn: 'issn',
     };
     for (const ident of it.identifiers) {
-      const type = (ident.type || ident.identifierType || '').trim().toLowerCase();
+      const type = (ident.type || ident.identifierType || '')
+        .trim()
+        .toLowerCase();
       const targetKey = idTypeToField[type];
-      const cleanVal = typeof ident.value === 'string' ? ident.value.trim() : '';
-      if (targetKey && cleanVal && Boolean(rejectedCitedDoi) && isRejectedCitedIdentifier(cleanVal, rejectedCitedDoi) && !ItemProvenancePolicy.inspectFieldUserLock(extraFields, String(targetKey)).locked) {
+      const cleanVal =
+        typeof ident.value === 'string' ? ident.value.trim() : '';
+      if (
+        targetKey &&
+        cleanVal &&
+        Boolean(rejectedCitedDoi) &&
+        isRejectedCitedIdentifier(cleanVal, rejectedCitedDoi) &&
+        !ItemProvenancePolicy.inspectFieldUserLock(
+          extraFields,
+          String(targetKey),
+        ).locked
+      ) {
         continue;
       }
-      const currentVal = targetKey && typeof it[targetKey] === 'string' ? (it[targetKey] as string).trim() : '';
+      const currentVal =
+        targetKey && typeof it[targetKey] === 'string'
+          ? it[targetKey].trim()
+          : '';
       const isArxivDoiOverwritingPublishedDoi =
-        targetKey === 'doi' && Boolean(currentVal) && !/^10\.48550\/arxiv\./i.test(currentVal) && /^10\.48550\/arxiv\./i.test(cleanVal);
+        targetKey === 'doi' &&
+        Boolean(currentVal) &&
+        !/^10\.48550\/arxiv\./i.test(currentVal) &&
+        /^10\.48550\/arxiv\./i.test(cleanVal);
       if (targetKey && cleanVal && !isArxivDoiOverwritingPublishedDoi) {
         it[targetKey] = cleanVal;
       }
@@ -520,18 +547,35 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     uri: (v: string) => string;
   }> = [
     { type: 'doi', val: it.doi, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.doi },
-    { type: 'arxiv', val: it.arxivId, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.arxiv },
+    {
+      type: 'arxiv',
+      val: it.arxivId,
+      uri: CANONICAL_IDENTIFIER_URI_BUILDERS.arxiv,
+    },
     { type: 'pmid', val: it.pmid, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmid },
-    { type: 'pmcid', val: it.pmcid, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmcid },
+    {
+      type: 'pmcid',
+      val: it.pmcid,
+      uri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmcid,
+    },
     { type: 'isbn', val: it.isbn, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.isbn },
     { type: 'issn', val: it.issn, uri: CANONICAL_IDENTIFIER_URI_BUILDERS.issn },
   ];
   const existingIdents = Array.isArray(it.identifiers)
     ? it.identifiers.filter((ident) => {
         const val = typeof ident?.value === 'string' ? ident.value.trim() : '';
-        const type = (ident?.type || ident?.identifierType || '').trim().toLowerCase();
-        const lockField = type === 'arxiv' || type === 'arxivid' ? 'arxivId' : type || 'doi';
-        return !(val && Boolean(rejectedCitedDoi) && isRejectedCitedIdentifier(val, rejectedCitedDoi) && !ItemProvenancePolicy.inspectFieldUserLock(extraFields, lockField).locked);
+        const type = (ident?.type || ident?.identifierType || '')
+          .trim()
+          .toLowerCase();
+        const lockField =
+          type === 'arxiv' || type === 'arxivid' ? 'arxivId' : type || 'doi';
+        return !(
+          val &&
+          Boolean(rejectedCitedDoi) &&
+          isRejectedCitedIdentifier(val, rejectedCitedDoi) &&
+          !ItemProvenancePolicy.inspectFieldUserLock(extraFields, lockField)
+            .locked
+        );
       })
     : [];
   const existingTypes = new Set(
@@ -558,7 +602,9 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
   item: T | null | undefined,
   toDomainFn: <U>(it: U) => U,
   userId?: string,
-): (T & { readStatus: string; rating: number; lastReadAt: string | null }) | null {
+):
+  | (T & { readStatus: string; rating: number; lastReadAt: string | null })
+  | null {
   if (!item) return null;
   interface StateRecordLike {
     userId?: string;
@@ -572,9 +618,10 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
     Array.isArray(normalized.states) && normalized.states.length > 0
       ? (normalized.states as StateRecordLike[])
       : null;
-  const userState = statesArr && userId
-    ? statesArr.find((s) => s.userId === userId)
-    : undefined;
+  const userState =
+    statesArr && userId
+      ? statesArr.find((s) => s.userId === userId)
+      : undefined;
   const { states: _states, ...rest } = normalized;
   return {
     ...rest,
@@ -586,7 +633,9 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
     rating: userState?.rating ?? 0,
     currentPage: (userState?.currentPage as number | null | undefined) ?? null,
     lastReadPage: (userState?.currentPage as number | null | undefined) ?? null,
-    scrollPosition: (userState?.scrollPosition as Record<string, unknown> | number | null | undefined) ?? null,
+    scrollPosition:
+      (userState?.scrollPosition as
+        Record<string, unknown> | number | null | undefined) ?? null,
     lastOpenedAt: userState?.lastOpenedAt
       ? userState.lastOpenedAt instanceof Date
         ? userState.lastOpenedAt.toISOString()
@@ -597,7 +646,11 @@ export function mapFlattenedStateHelper<T extends Record<string, unknown>>(
         ? userState.lastReadAt.toISOString()
         : String(userState.lastReadAt)
       : null,
-  } as unknown as T & { readStatus: string; rating: number; lastReadAt: string | null };
+  } as unknown as T & {
+    readStatus: string;
+    rating: number;
+    lastReadAt: string | null;
+  };
 }
 
 export function stripPersonalOverlayForSharedScope<T>(
@@ -607,8 +660,19 @@ export function stripPersonalOverlayForSharedScope<T>(
   if (!projectId || !item || typeof item !== 'object') return item;
   const clone = { ...(item as unknown as Record<string, unknown>) };
   for (const k of [
-    'isStarred', 'starred', 'isRead', 'readStatus', 'rating', 'currentPage',
-    'lastReadPage', 'scrollPosition', 'lastOpenedAt', 'lastReadAt', 'isMyPublication', 'states', 'publications',
+    'isStarred',
+    'starred',
+    'isRead',
+    'readStatus',
+    'rating',
+    'currentPage',
+    'lastReadPage',
+    'scrollPosition',
+    'lastOpenedAt',
+    'lastReadAt',
+    'isMyPublication',
+    'states',
+    'publications',
   ]) {
     delete clone[k];
   }

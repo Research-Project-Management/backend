@@ -342,7 +342,6 @@ export class IngestionRunAggregate {
     }
   }
 
-
   public recordProgress(processedDelta: number, failedDelta: number = 0): void {
     this._processedItems += processedDelta;
     this._failedItems += failedDelta;

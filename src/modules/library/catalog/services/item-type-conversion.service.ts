@@ -1,4 +1,9 @@
-import { Injectable, Inject, NotFoundException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';

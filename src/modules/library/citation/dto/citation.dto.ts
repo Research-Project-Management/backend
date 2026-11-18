@@ -37,12 +37,16 @@ export class FormatCitationDto {
   @IsNumber()
   index?: number;
 
-  @ApiPropertyOptional({ description: 'Pinpoint locator (e.g. page number "42")' })
+  @ApiPropertyOptional({
+    description: 'Pinpoint locator (e.g. page number "42")',
+  })
   @IsOptional()
   @IsString()
   locator?: string;
 
-  @ApiPropertyOptional({ description: 'Locator label (e.g. "page", "chapter", "section")' })
+  @ApiPropertyOptional({
+    description: 'Locator label (e.g. "page", "chapter", "section")',
+  })
   @IsOptional()
   @IsString()
   label?: string;
@@ -103,7 +107,7 @@ export class ExportLibraryDto {
 
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 
   @IsOptional()
   @IsNumber()
@@ -119,10 +123,12 @@ export class ExportByKeysDto {
   @IsString({ each: true })
   keys!: string[];
 
-  @ApiPropertyOptional({ description: 'Project scope ID if exporting from a project' })
+  @ApiPropertyOptional({
+    description: 'Space scope ID if exporting from a project space',
+  })
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 
   @ApiPropertyOptional({ description: 'Export format', example: 'bibtex' })
   @IsOptional()

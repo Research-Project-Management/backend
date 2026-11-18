@@ -1,17 +1,37 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, NotFoundException, BadRequestException, Header } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  NotFoundException,
+  BadRequestException,
+  Header,
+} from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { CitationService } from '@/modules/library/citation/services/citation.service';
-import { FormatCitationDto, FormatBatchCitationDto, ExportLibraryDto, ExportByKeysDto } from '@/modules/library/citation/dto/citation.dto';
+import {
+  FormatCitationDto,
+  FormatBatchCitationDto,
+  ExportLibraryDto,
+  ExportByKeysDto,
+} from '@/modules/library/citation/dto/citation.dto';
 import { ExportFormatType } from '@/modules/library/citation/types/citation.types';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ProjectAccessGuard, ProjectRoles, ProjectRole } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  ProjectRoles,
+  ProjectRole,
+} from '@/modules/project/access';
 import { ExportsService } from '@/modules/library/citation/services/exports.service';
 
 @ApiTags('Library Citation')
 @ApiBearerAuth()
 @Controller([
-  'api/v1/projects/:projectId/library/citation',
+  'api/v1/spaces/:spaceId/library/citation',
   'api/v1/library/citation',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
@@ -44,7 +64,7 @@ export class CitationController {
     @CurrentUser('id') userId: string,
     @Query('q') query?: string,
     @Query('limit') limit?: string,
-    @Param('projectId') projectId?: string,
+    @Param('spaceId') projectId?: string,
   ) {
     const parsedLimit = limit ? parseInt(limit, 10) : 30;
     const numLimit =
@@ -77,7 +97,7 @@ export class CitationController {
     @CurrentUser('id') userId: string,
     @Body('xml') xml: string,
     @Body('title') title?: string,
-    @Param('projectId') projectId?: string,
+    @Param('spaceId') projectId?: string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
     const scopeId = effectiveProjectId ? `proj:${effectiveProjectId}` : userId;
@@ -103,10 +123,10 @@ export class CitationController {
   format(@Body() dto: FormatCitationDto) {
     const hasContext = Boolean(
       dto.locator ||
-        dto.label ||
-        dto.prefix ||
-        dto.suffix ||
-        dto.suppressAuthor,
+      dto.label ||
+      dto.prefix ||
+      dto.suffix ||
+      dto.suppressAuthor,
     );
     return this.citationService.formatItemAsync(
       dto.item,
@@ -245,8 +265,8 @@ export class CitationController {
     @Query('prefix') prefix?: string,
     @Query('suffix') suffix?: string,
     @Query('suppressAuthor') suppressAuthor?: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') routeProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
   ) {
     const parsedIndex = index ? parseInt(index, 10) : 1;
     const numIndex =
@@ -297,9 +317,9 @@ export class CitationController {
     @CurrentUser('id') userId: string,
     @Body('itemIds') itemIds?: string[],
     @Body('style') style?: string,
-    @Body('projectId') bodyProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') routeProjectId?: string,
+    @Body('spaceId') bodyProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
   ) {
     const rawIds = Array.isArray(itemIds) ? itemIds : [];
     // Safety guard: Deduplicate and cap batch at 100 items to protect Node.js event loop
@@ -308,12 +328,7 @@ export class CitationController {
       normalizeProjectScopeId(bodyProjectId) ||
       normalizeProjectScopeId(queryProjectId) ||
       normalizeProjectScopeId(routeProjectId);
-    return this.citationService.formatItemBatch(
-      userId,
-      ids,
-      style,
-      projectId,
-    );
+    return this.citationService.formatItemBatch(userId, ids, style, projectId);
   }
 }
 
@@ -321,7 +336,7 @@ export class CitationController {
 @ApiBearerAuth()
 @Controller([
   'api/v1/library/exports',
-  'api/v1/projects/:projectId/library/exports',
+  'api/v1/spaces/:spaceId/library/exports',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ExportsController {
@@ -332,8 +347,8 @@ export class ExportsController {
   async exportAnnotatedPdf(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    @Param('projectId') routeProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
     @Query('attachmentId') attachmentId?: string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(
@@ -353,10 +368,10 @@ export class ExportsController {
   async exportLibrary(
     @CurrentUser('id') userId: string,
     @Body() dto: ExportLibraryDto,
-    @Param('projectId') routeProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
   ) {
-    if (routeProjectId && !dto.projectId) {
-      dto.projectId = routeProjectId;
+    if (routeProjectId && !dto.spaceId) {
+      dto.spaceId = routeProjectId;
     }
     return this.exportsService.exportLibrary(userId, dto);
   }
@@ -366,11 +381,11 @@ export class ExportsController {
   async exportCitationsBibtex(
     @CurrentUser('id') userId: string,
     @Body() body: ExportByKeysDto,
-    @Param('projectId') routeProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(
-      routeProjectId || body.projectId || queryProjectId,
+      routeProjectId || body.spaceId || queryProjectId,
     );
     const result = await this.exportsService.exportByCitationKeys(
       userId,
@@ -390,11 +405,11 @@ export class ExportsController {
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async exportLibraryGet(
     @CurrentUser('id') userId: string,
-    @Param('projectId') routeProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
     @Query('format') format?: ExportFormatType,
     @Query('collectionId') collectionIdQuery?: string,
     @Query('tagId') tagId?: string,
-    @Query('projectId') projectIdQuery?: string,
+    @Query('spaceId') projectIdQuery?: string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(
       routeProjectId || projectIdQuery,
@@ -404,7 +419,7 @@ export class ExportsController {
       format: effectiveFormat,
       collectionId: collectionIdQuery,
       tagId,
-      projectId: effectiveProjectId,
+      spaceId: effectiveProjectId,
     };
 
     const result = await this.exportsService.exportLibrary(userId, queryDto);
@@ -422,8 +437,8 @@ export class ExportsController {
   async getCollectionBundle(
     @CurrentUser('id') userId: string,
     @Param('collectionId') collectionId: string,
-    @Param('projectId') routeProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     return this.exportsService.exportBundle(
       userId,

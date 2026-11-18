@@ -3,7 +3,13 @@ import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/renamer.domain';
-import { normalizeProjectScopeId, resolveSpaceId, ItemProvenancePolicy, deriveFirstAuthor, syncItemDenormalizedCountsInClient } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  resolveSpaceId,
+  ItemProvenancePolicy,
+  deriveFirstAuthor,
+  syncItemDenormalizedCountsInClient,
+} from '@/modules/library/core';
 import {
   sanitizeExtractedItemUpdateAgainstFreshState,
   isRejectedCitedIdentifier,
@@ -20,25 +26,34 @@ export class ExtractionRepository {
   }
 
   async getExtractionStatusBreakdown(
-    scopeOrTx?: { userId?: string; projectId?: string | null } | Prisma.TransactionClient,
+    scopeOrTx?:
+      { userId?: string; projectId?: string | null } | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ): Promise<Record<string, number>> {
     const isScopeObj =
-      scopeOrTx && typeof scopeOrTx === 'object' && !('attachment' in scopeOrTx) &&
+      scopeOrTx &&
+      typeof scopeOrTx === 'object' &&
+      !('attachment' in scopeOrTx) &&
       ('userId' in scopeOrTx || 'projectId' in scopeOrTx);
-    const scope = isScopeObj ? (scopeOrTx as { userId?: string; projectId?: string | null }) : undefined;
-    const effectiveTx = isScopeObj ? tx : (scopeOrTx as Prisma.TransactionClient | undefined);
+    const scope = isScopeObj ? scopeOrTx : undefined;
+    const effectiveTx = isScopeObj
+      ? tx
+      : (scopeOrTx as Prisma.TransactionClient | undefined);
     const client = this.getClient(effectiveTx);
     if (typeof client.attachment?.groupBy !== 'function') return {};
     const validProjectId = normalizeProjectScopeId(scope?.projectId);
-    const itemScopeWhere: Prisma.LibraryItemWhereInput | undefined = validProjectId
-      ? { spaceId: validProjectId, deletedAt: null }
-      : scope?.userId
-        ? { spaceId: scope.userId, deletedAt: null }
-        : undefined;
+    const itemScopeWhere: Prisma.LibraryItemWhereInput | undefined =
+      validProjectId
+        ? { spaceId: validProjectId, deletedAt: null }
+        : scope?.userId
+          ? { spaceId: scope.userId, deletedAt: null }
+          : undefined;
     const groups = await client.attachment.groupBy({
       by: ['extractionStatus'],
-      where: { deletedAt: null, ...(itemScopeWhere ? { item: itemScopeWhere } : {}) },
+      where: {
+        deletedAt: null,
+        ...(itemScopeWhere ? { item: itemScopeWhere } : {}),
+      },
       _count: { _all: true },
     });
     const breakdown: Record<string, number> = {};
@@ -49,44 +64,72 @@ export class ExtractionRepository {
     return breakdown;
   }
 
-  async claimPendingOrRetryable(attachmentId: string, tx?: Prisma.TransactionClient) {
-    const client = this.getClient(tx);
-    return client.attachment.updateMany({
-      where: { id: attachmentId, extractionStatus: { in: ['PENDING', 'FAILED_RETRYABLE'] } },
-      data: {
-        extractionStatus: 'PROCESSING',
-        extractionAttempts: { increment: 1 },
-        extractionStartedAt: new Date(),
-      },
-    });
-  }
-
-  async claimStaleProcessing(attachmentId: string, staleCutoff: Date, tx?: Prisma.TransactionClient) {
-    const client = this.getClient(tx);
-    return client.attachment.updateMany({
-      where: { id: attachmentId, extractionStatus: 'PROCESSING', extractionStartedAt: { lt: staleCutoff } },
-      data: {
-        extractionStatus: 'PROCESSING',
-        extractionAttempts: { increment: 1 },
-        extractionStartedAt: new Date(),
-      },
-    });
-  }
-
-  async findUniqueAttachment<I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude>(
+  async claimPendingOrRetryable(
     attachmentId: string,
-    options?: { select?: Prisma.AttachmentSelect; include?: Prisma.Subset<I, Prisma.AttachmentInclude> },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
+    return client.attachment.updateMany({
+      where: {
+        id: attachmentId,
+        extractionStatus: { in: ['PENDING', 'FAILED_RETRYABLE'] },
+      },
+      data: {
+        extractionStatus: 'PROCESSING',
+        extractionAttempts: { increment: 1 },
+        extractionStartedAt: new Date(),
+      },
+    });
+  }
+
+  async claimStaleProcessing(
+    attachmentId: string,
+    staleCutoff: Date,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
+    return client.attachment.updateMany({
+      where: {
+        id: attachmentId,
+        extractionStatus: 'PROCESSING',
+        extractionStartedAt: { lt: staleCutoff },
+      },
+      data: {
+        extractionStatus: 'PROCESSING',
+        extractionAttempts: { increment: 1 },
+        extractionStartedAt: new Date(),
+      },
+    });
+  }
+
+  async findUniqueAttachment<
+    I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude,
+  >(
+    attachmentId: string,
+    options?: {
+      select?: Prisma.AttachmentSelect;
+      include?: Prisma.Subset<I, Prisma.AttachmentInclude>;
+    },
     tx?: Prisma.TransactionClient,
   ): Promise<Prisma.AttachmentGetPayload<{ include: I }> | null> {
     const client = this.getClient(tx);
     return client.attachment.findUnique({
       where: { id: attachmentId },
       ...options,
-    }) as unknown as Promise<Prisma.AttachmentGetPayload<{ include: I }> | null>;
+    }) as unknown as Promise<Prisma.AttachmentGetPayload<{
+      include: I;
+    }> | null>;
   }
 
-  async updateAttachmentFileId(attachmentId: string, fileId: string, tx?: Prisma.TransactionClient) {
-    return this.getClient(tx).attachment.update({ where: { id: attachmentId }, data: { fileId } });
+  async updateAttachmentFileId(
+    attachmentId: string,
+    fileId: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    return this.getClient(tx).attachment.update({
+      where: { id: attachmentId },
+      data: { fileId },
+    });
   }
 
   async saveMetadataSourceRecord(
@@ -102,7 +145,9 @@ export class ExtractionRepository {
       typeof rawPayload === 'object' &&
       !Array.isArray(rawPayload) &&
       typeof (rawPayload as Record<string, unknown>).attachmentId === 'string'
-        ? ((rawPayload as Record<string, unknown>).attachmentId as string).trim()
+        ? (
+            (rawPayload as Record<string, unknown>).attachmentId as string
+          ).trim()
         : undefined);
 
     const execute = async (
@@ -271,7 +316,10 @@ export class ExtractionRepository {
                 candidateKey,
                 {
                   userId: freshItem.createdById,
-                  projectId: freshItem.spaceId !== freshItem.createdById ? freshItem.spaceId : null,
+                  projectId:
+                    freshItem.spaceId !== freshItem.createdById
+                      ? freshItem.spaceId
+                      : null,
                 },
                 itemId,
               )
@@ -282,13 +330,18 @@ export class ExtractionRepository {
       where: { id: itemId },
       data: {
         ...sanitizedData,
-        ...(mergedMetadata !== undefined ? { metadata: mergedMetadata as Prisma.InputJsonValue } : {}),
+        ...(mergedMetadata !== undefined
+          ? { metadata: mergedMetadata as Prisma.InputJsonValue }
+          : {}),
         version: { increment: 1 },
       },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
         itemTags: { include: { tag: true } },
-        attachments: { where: { deletedAt: null }, include: { revisions: true } },
+        attachments: {
+          where: { deletedAt: null },
+          include: { revisions: true },
+        },
         notesList: { where: { deletedAt: null } },
         collectionItems: { include: { collection: true } },
         identifiers: true,
@@ -308,7 +361,9 @@ export class ExtractionRepository {
     itemId?: string,
   ): Promise<void> {
     if (!pages || pages.length === 0) return;
-    const execute = async (client: Prisma.TransactionClient | PrismaService) => {
+    const execute = async (
+      client: Prisma.TransactionClient | PrismaService,
+    ) => {
       if (!client.fullTextIndex?.deleteMany) return;
       await client.fullTextIndex.deleteMany({
         where: { attachmentId },
@@ -358,14 +413,16 @@ export class ExtractionRepository {
     const itemId = data[0]?.itemId;
     if (itemId && data.length > 0) {
       const firstAuthor = deriveFirstAuthor({
-        contributors: data as unknown as Array<Record<string, unknown>>,
+        contributors: data,
       });
       if (firstAuthor) {
         await client.libraryItem.update({
           where: { id: itemId },
           data: {
             firstAuthor,
-            ...(options?.skipVersionIncrement ? {} : { version: { increment: 1 } }),
+            ...(options?.skipVersionIncrement
+              ? {}
+              : { version: { increment: 1 } }),
           },
         });
       }
@@ -375,11 +432,16 @@ export class ExtractionRepository {
 
   async markReady(attachmentId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
-    if (typeof client.attachment?.updateMany === 'function' && typeof client.attachment?.findUnique === 'function') {
+    if (
+      typeof client.attachment?.updateMany === 'function' &&
+      typeof client.attachment?.findUnique === 'function'
+    ) {
       await client.attachment.updateMany({
         where: {
           id: attachmentId,
-          extractionStatus: { in: ['PROCESSING', 'PENDING', 'FAILED_RETRYABLE'] },
+          extractionStatus: {
+            in: ['PROCESSING', 'PENDING', 'FAILED_RETRYABLE'],
+          },
         },
         data: {
           extractionStatus: 'READY',
@@ -407,7 +469,10 @@ export class ExtractionRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    if (typeof client.attachment?.updateMany === 'function' && typeof client.attachment?.findUnique === 'function') {
+    if (
+      typeof client.attachment?.updateMany === 'function' &&
+      typeof client.attachment?.findUnique === 'function'
+    ) {
       await client.attachment.updateMany({
         where: {
           id: attachmentId,
@@ -444,9 +509,7 @@ export class ExtractionRepository {
       typeof hintsOrTx === 'object' &&
       !('item' in hintsOrTx) &&
       ('dois' in hintsOrTx || 'years' in hintsOrTx || 'limit' in hintsOrTx);
-    const hints = isHintsObj
-      ? (hintsOrTx as { dois?: string[]; years?: number[]; limit?: number })
-      : undefined;
+    const hints = isHintsObj ? hintsOrTx : undefined;
     const effectiveTx = isHintsObj
       ? tx
       : (hintsOrTx as Prisma.TransactionClient | undefined);
@@ -468,7 +531,11 @@ export class ExtractionRepository {
       } else {
         return [];
       }
-    } else if (typeof scope === 'string' && scope.trim().length > 0 && scope !== 'system') {
+    } else if (
+      typeof scope === 'string' &&
+      scope.trim().length > 0 &&
+      scope !== 'system'
+    ) {
       const cleanScope = scope.trim();
       scopeWhere = { spaceId: cleanScope };
     } else {
@@ -548,7 +615,10 @@ export class ExtractionRepository {
     return relation;
   }
 
-  async countItemTags(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
+  async countItemTags(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
     return this.getClient(tx).libraryItemTag.count({ where: { itemId } });
   }
 
@@ -577,7 +647,11 @@ export class ExtractionRepository {
     if (resolvedTags.length > 0) {
       if (typeof client.libraryItemTag?.createMany === 'function') {
         await client.libraryItemTag.createMany({
-          data: resolvedTags.map((t) => ({ itemId: params.itemId, tagId: t.id, type: 'automatic' })),
+          data: resolvedTags.map((t) => ({
+            itemId: params.itemId,
+            tagId: t.id,
+            type: 'automatic',
+          })),
           skipDuplicates: true,
         });
       } else if (typeof client.libraryItemTag?.upsert === 'function') {
@@ -595,12 +669,16 @@ export class ExtractionRepository {
         select: { metadata: true },
       });
       const meta = (existingItem?.metadata as Record<string, unknown>) || {};
-      const existingTags = Array.isArray(meta.tags) ? (meta.tags as string[]) : [];
+      const existingTags = Array.isArray(meta.tags)
+        ? (meta.tags as string[])
+        : [];
       const existingKeywords = Array.isArray(meta.keywords)
         ? (meta.keywords as string[])
         : existingTags;
       const mergedTags = Array.from(new Set([...existingTags, ...normalized]));
-      const mergedKeywords = Array.from(new Set([...existingKeywords, ...normalized]));
+      const mergedKeywords = Array.from(
+        new Set([...existingKeywords, ...normalized]),
+      );
 
       await client.libraryItem.update({
         where: { id: params.itemId },
@@ -614,8 +692,13 @@ export class ExtractionRepository {
     return normalized;
   }
 
-  async countItemNotes(itemId: string, tx?: Prisma.TransactionClient): Promise<number> {
-    return this.getClient(tx).libraryNote.count({ where: { itemId, deletedAt: null } });
+  async countItemNotes(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    return this.getClient(tx).libraryNote.count({
+      where: { itemId, deletedAt: null },
+    });
   }
 
   async createItemNotes(
@@ -637,12 +720,17 @@ export class ExtractionRepository {
     });
     const existingContents = new Set(existing.map((n) => n.contentMd.trim()));
 
-    const spaceId = resolveSpaceId({ userId: params.userId, projectId: params.projectId });
+    const spaceId = resolveSpaceId({
+      userId: params.userId,
+      projectId: params.projectId,
+    });
     const toCreate: Prisma.LibraryNoteCreateManyInput[] = [];
     for (const n of params.notes) {
       const cleanContent = n.content.trim();
       if (!cleanContent || existingContents.has(cleanContent)) continue;
-      const title = n.type ? `Extracted Note (${n.type})` : 'Extracted Document Note';
+      const title = n.type
+        ? `Extracted Note (${n.type})`
+        : 'Extracted Document Note';
       const contentJson = buildTipTapDocFromText(cleanContent);
       toCreate.push({
         spaceId,
@@ -670,7 +758,10 @@ export class ExtractionRepository {
         await syncItemDenormalizedCountsInClient(client, params.itemId, {
           notes: true,
         });
-        if (!params.skipVersionIncrement && typeof client.libraryItem?.update === 'function') {
+        if (
+          !params.skipVersionIncrement &&
+          typeof client.libraryItem?.update === 'function'
+        ) {
           await client.libraryItem.update({
             where: { id: params.itemId },
             data: { version: { increment: 1 } },
@@ -681,7 +772,9 @@ export class ExtractionRepository {
           where: { id: params.itemId },
           data: {
             noteCount: { increment: createdCount },
-            ...(params.skipVersionIncrement ? {} : { version: { increment: 1 } }),
+            ...(params.skipVersionIncrement
+              ? {}
+              : { version: { increment: 1 } }),
           },
         });
       }
@@ -700,32 +793,63 @@ export class ExtractionRepository {
     const freshItem = rawClient.libraryItem?.findUnique
       ? await rawClient.libraryItem.findUnique({
           where: { id: itemId },
-          select: { doi: true, arxivId: true, pmid: true, pmcid: true, isbn: true, issn: true, metadata: true },
+          select: {
+            doi: true,
+            arxivId: true,
+            pmid: true,
+            pmcid: true,
+            isbn: true,
+            issn: true,
+            metadata: true,
+          },
         })
       : null;
-    const freshMeta = freshItem?.metadata && typeof freshItem.metadata === 'object' && !Array.isArray(freshItem.metadata)
-      ? (freshItem.metadata as Record<string, unknown>) : {};
+    const freshMeta =
+      freshItem?.metadata &&
+      typeof freshItem.metadata === 'object' &&
+      !Array.isArray(freshItem.metadata)
+        ? (freshItem.metadata as Record<string, unknown>)
+        : {};
     const freshItemRec = (freshItem || {}) as Record<string, unknown>;
     const filtered = identifiers.filter((idObj) => {
-      if (isRejectedCitedIdentifier(idObj.value, freshMeta.rejectedCitedDoi)) return false;
+      if (isRejectedCitedIdentifier(idObj.value, freshMeta.rejectedCitedDoi))
+        return false;
       const lower = idObj.type.trim().toLowerCase();
       const t = lower === 'arxivid' || lower === 'arxiv' ? 'arxiv' : lower;
       const metaKey = t === 'arxiv' ? 'arxivId' : t;
-      if (freshItem && (ItemProvenancePolicy.isFieldLocked(freshMeta, metaKey) || ItemProvenancePolicy.isFieldLocked(freshMeta, t))) {
+      if (
+        freshItem &&
+        (ItemProvenancePolicy.isFieldLocked(freshMeta, metaKey) ||
+          ItemProvenancePolicy.isFieldLocked(freshMeta, t))
+      ) {
         return false;
       }
-      const existingVal = t === 'doi' ? freshItem?.doi || freshMeta.doi : freshItemRec[metaKey] || freshMeta[metaKey] || freshMeta[t];
-      return !(existingVal && String(existingVal).trim() && String(existingVal).trim().toLowerCase() !== idObj.value.trim().toLowerCase());
+      const existingVal =
+        t === 'doi'
+          ? freshItem?.doi || freshMeta.doi
+          : freshItemRec[metaKey] || freshMeta[metaKey] || freshMeta[t];
+      return !(
+        existingVal &&
+        String(existingVal).trim() &&
+        String(existingVal).trim().toLowerCase() !==
+          idObj.value.trim().toLowerCase()
+      );
     });
     if (filtered.length === 0 || !rawClient.itemIdentifier?.upsert) return;
     await Promise.all(
       filtered.map((idObj) => {
         const lower = idObj.type.trim().toLowerCase();
-        const canonicalType = lower === 'arxivid' || lower === 'arxiv' ? 'arxiv' : lower;
+        const canonicalType =
+          lower === 'arxivid' || lower === 'arxiv' ? 'arxiv' : lower;
         return rawClient.itemIdentifier.upsert({
           where: { itemId_type: { itemId, type: canonicalType } },
           update: { value: idObj.value, canonicalUri: idObj.canonicalUri },
-          create: { itemId, type: canonicalType, value: idObj.value, canonicalUri: idObj.canonicalUri },
+          create: {
+            itemId,
+            type: canonicalType,
+            value: idObj.value,
+            canonicalUri: idObj.canonicalUri,
+          },
         });
       }),
     );

@@ -1,4 +1,11 @@
-import { Injectable, Logger, Optional, Inject, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  Inject,
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   IngestionSubmissionEnvelope,
   IngestionAcceptedResult,
@@ -128,7 +135,10 @@ export class IngestionService {
     };
   }
 
-  private readonly inFlightIdempotencyLocks = new Map<string, Promise<IngestionAcceptedResult>>();
+  private readonly inFlightIdempotencyLocks = new Map<
+    string,
+    Promise<IngestionAcceptedResult>
+  >();
 
   async submitFromDto(params: {
     dto: IngestionSubmissionDto;
@@ -339,9 +349,7 @@ export class IngestionService {
         await this.queue.enqueue(runId, projectId, envelopeToPersist);
       } catch (enqueueErr: unknown) {
         const errMsg =
-          enqueueErr instanceof Error
-            ? enqueueErr.message
-            : String(enqueueErr);
+          enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);
         this.logger.error(
           `Failed to enqueue ingestion run ${runId}: ${errMsg}`,
         );
@@ -488,7 +496,10 @@ export class IngestionService {
 
     try {
       this.runReporter.clearRunTracking(runId);
-      if (this.queue && typeof this.queue.runWithConcurrencySlot === 'function') {
+      if (
+        this.queue &&
+        typeof this.queue.runWithConcurrencySlot === 'function'
+      ) {
         await this.queue.runWithConcurrencySlot(runId, () =>
           this.pipeline.executePipeline(runId, projectId, envelope),
         );
@@ -615,10 +626,17 @@ export class IngestionService {
     options?: ReResolveMetadataOptions,
     projectId?: string,
   ): Promise<ReResolveMetadataResult> {
-    return this.metadataResolver.reResolveMetadata(userId, itemId, options, projectId);
+    return this.metadataResolver.reResolveMetadata(
+      userId,
+      itemId,
+      options,
+      projectId,
+    );
   }
 
-  async reconcileExtractedCandidate(payload: ReconcileExtractedCandidatePayload) {
+  async reconcileExtractedCandidate(
+    payload: ReconcileExtractedCandidatePayload,
+  ) {
     return this.metadataResolver.reconcileExtractedCandidate(payload);
   }
 
@@ -632,7 +650,8 @@ export class IngestionService {
   async updateReviewCaseStatus(
     scope: { userId?: string; projectId?: string | null } | string,
     id: string,
-    status: 'OPEN' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISMISSED' | 'RESOLVED',
+    status:
+      'OPEN' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISMISSED' | 'RESOLVED',
   ) {
     return this.repo.updateReviewCaseStatus(scope, id, status);
   }

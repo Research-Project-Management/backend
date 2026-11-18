@@ -23,10 +23,7 @@ export type { ISearchFacade, SearchOptions, FacetResult };
 
 @ApiTags('Library Search')
 @ApiBearerAuth()
-@Controller([
-  'api/v1/library/search',
-  'api/v1/projects/:projectId/library/search',
-])
+@Controller(['api/v1/library/search', 'api/v1/spaces/:spaceId/library/search'])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
@@ -36,10 +33,10 @@ export class SearchController {
   async searchItems(
     @CurrentUser('id') userId: string,
     @Query() dto: SearchItemsQueryDto,
-    @Param('projectId') routeProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
   ) {
-    if (routeProjectId && !dto.projectId) {
-      dto.projectId = routeProjectId;
+    if (routeProjectId && !dto.spaceId) {
+      dto.spaceId = routeProjectId;
     }
     return this.searchService.search(userId, dto);
   }
@@ -51,8 +48,8 @@ export class SearchController {
     @Param('attachmentId') attachmentId: string,
     @Query() queryOrTerm?: SearchPageAnchorsQueryDto | string,
     @Query('pageIndex') rawPageIndex?: string | number,
-    @Param('projectId') routeProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const isDtoObject =
       queryOrTerm !== null &&
@@ -77,7 +74,7 @@ export class SearchController {
           : undefined;
     const effectiveProjectId =
       routeProjectId ||
-      (isDtoObject ? queryOrTerm.projectId : undefined) ||
+      (isDtoObject ? queryOrTerm.spaceId : undefined) ||
       queryProjectId;
 
     return this.searchService.searchPageAnchors(

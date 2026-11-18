@@ -259,19 +259,23 @@ export class ExtractionMetadataSynchronizer {
           Array.isArray(savedFulltextRecord.supersededFileIds) &&
           this.storagePort?.deleteFile
         ) {
-          const deleteFileFn = this.storagePort.deleteFile.bind(this.storagePort);
+          const deleteFileFn = this.storagePort.deleteFile.bind(
+            this.storagePort,
+          );
           await Promise.all(
-            savedFulltextRecord.supersededFileIds.map(async (oldFileId: string) => {
-              try {
-                await deleteFileFn(oldFileId);
-              } catch (delErr: unknown) {
-                const msg =
-                  delErr instanceof Error ? delErr.message : String(delErr);
-                this.logger.warn(
-                  `Failed to delete superseded pdf_fulltext blob ${oldFileId}: ${msg}`,
-                );
-              }
-            }),
+            savedFulltextRecord.supersededFileIds.map(
+              async (oldFileId: string) => {
+                try {
+                  await deleteFileFn(oldFileId);
+                } catch (delErr: unknown) {
+                  const msg =
+                    delErr instanceof Error ? delErr.message : String(delErr);
+                  this.logger.warn(
+                    `Failed to delete superseded pdf_fulltext blob ${oldFileId}: ${msg}`,
+                  );
+                }
+              },
+            ),
           );
         }
 
@@ -296,18 +300,21 @@ export class ExtractionMetadataSynchronizer {
             );
           }
 
-          const [existingContributorsCount, existingTagsCount, existingNotesCount] =
-            await Promise.all([
-              creatorsToSync.length > 0
-                ? this.extractionRepo.countContributors(attachment.itemId, tx)
-                : Promise.resolve(0),
-              tagsToSync.length > 0
-                ? this.extractionRepo.countItemTags(attachment.itemId, tx)
-                : Promise.resolve(0),
-              notesToSync.length > 0
-                ? this.extractionRepo.countItemNotes(attachment.itemId, tx)
-                : Promise.resolve(0),
-            ]);
+          const [
+            existingContributorsCount,
+            existingTagsCount,
+            existingNotesCount,
+          ] = await Promise.all([
+            creatorsToSync.length > 0
+              ? this.extractionRepo.countContributors(attachment.itemId, tx)
+              : Promise.resolve(0),
+            tagsToSync.length > 0
+              ? this.extractionRepo.countItemTags(attachment.itemId, tx)
+              : Promise.resolve(0),
+            notesToSync.length > 0
+              ? this.extractionRepo.countItemNotes(attachment.itemId, tx)
+              : Promise.resolve(0),
+          ]);
 
           if (creatorsToSync.length > 0 && existingContributorsCount === 0) {
             const validContributors = creatorsToSync
@@ -330,11 +337,7 @@ export class ExtractionMetadataSynchronizer {
                   idx,
                   itemCreatorType,
                 );
-                const first = (
-                  cand.firstName ||
-                  parsed.firstName ||
-                  ''
-                ).trim();
+                const first = (cand.firstName || parsed.firstName || '').trim();
                 const last = (cand.lastName || parsed.lastName || '').trim();
                 const full =
                   (cand.firstName || cand.lastName
@@ -385,9 +388,7 @@ export class ExtractionMetadataSynchronizer {
                   Math.max(1, 25 - existingTagsCount),
                 ),
                 projectId: attachment.item?.projectId,
-                ...(skipVersionIncrement
-                  ? { skipVersionIncrement: true }
-                  : {}),
+                ...(skipVersionIncrement ? { skipVersionIncrement: true } : {}),
               },
               tx,
             );
@@ -401,9 +402,7 @@ export class ExtractionMetadataSynchronizer {
                 itemId: attachment.itemId,
                 notes: notesToSync,
                 projectId: attachment.item?.projectId,
-                ...(skipVersionIncrement
-                  ? { skipVersionIncrement: true }
-                  : {}),
+                ...(skipVersionIncrement ? { skipVersionIncrement: true } : {}),
               },
               tx,
             );
@@ -456,13 +455,14 @@ export class ExtractionMetadataSynchronizer {
                   itemPatch,
                   tx,
                 );
-                const domainSnapshot = ItemsMapper.stripPersonalOverlayForSharedScope(
-                  ItemsMapper.toDomain({
-                    ...(attachment.item || {}),
-                    ...updatedItem,
-                  }),
-                  ownerProjectId,
-                );
+                const domainSnapshot =
+                  ItemsMapper.stripPersonalOverlayForSharedScope(
+                    ItemsMapper.toDomain({
+                      ...(attachment.item || {}),
+                      ...updatedItem,
+                    }),
+                    ownerProjectId,
+                  );
                 await helpers.appendChange(eventScope, {
                   entityType: 'Item',
                   entityId: updatedItem.id,

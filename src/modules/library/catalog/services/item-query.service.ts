@@ -1,4 +1,9 @@
-import { Injectable, Logger, Optional, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  ForbiddenException,
+} from '@nestjs/common';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
 import {
@@ -17,9 +22,15 @@ import {
 import { AccessService, Permission } from '@/modules/project/access';
 
 export interface LibraryPermissionsContract {
-  canRead: boolean; canCreateItem: boolean; canEditItem: boolean; canDeleteItem: boolean;
-  canPurgeItem: boolean; canManageCollections: boolean; canImport: boolean;
-  canExport: boolean; canAnnotate: boolean;
+  canRead: boolean;
+  canCreateItem: boolean;
+  canEditItem: boolean;
+  canDeleteItem: boolean;
+  canPurgeItem: boolean;
+  canManageCollections: boolean;
+  canImport: boolean;
+  canExport: boolean;
+  canAnnotate: boolean;
 }
 
 export interface LibraryScopeAccessContract {
@@ -29,8 +40,15 @@ export interface LibraryScopeAccessContract {
 }
 
 const PERSONAL_LIBRARY_PERMISSIONS: LibraryPermissionsContract = {
-  canRead: true, canCreateItem: true, canEditItem: true, canDeleteItem: true,
-  canPurgeItem: true, canManageCollections: true, canImport: true, canExport: true, canAnnotate: true,
+  canRead: true,
+  canCreateItem: true,
+  canEditItem: true,
+  canDeleteItem: true,
+  canPurgeItem: true,
+  canManageCollections: true,
+  canImport: true,
+  canExport: true,
+  canAnnotate: true,
 };
 
 const PERM_BIT: Readonly<Record<string, number>> = {
@@ -42,17 +60,33 @@ const PERM_BIT: Readonly<Record<string, number>> = {
   [Permission.LIBRARY_ANNOTATE]: 1 << 5,
 };
 
-const ROLE_PERM_MASK: Readonly<Record<'owner' | 'coordinator' | 'contributor' | 'reviewer', number>> = {
-  reviewer: PERM_BIT[Permission.LIBRARY_READ] | PERM_BIT[Permission.LIBRARY_EXPORT] | PERM_BIT[Permission.LIBRARY_ANNOTATE],
+const ROLE_PERM_MASK: Readonly<
+  Record<'owner' | 'coordinator' | 'contributor' | 'reviewer', number>
+> = {
+  reviewer:
+    PERM_BIT[Permission.LIBRARY_READ] |
+    PERM_BIT[Permission.LIBRARY_EXPORT] |
+    PERM_BIT[Permission.LIBRARY_ANNOTATE],
   contributor:
-    PERM_BIT[Permission.LIBRARY_READ] | PERM_BIT[Permission.LIBRARY_UPLOAD] | PERM_BIT[Permission.LIBRARY_UPDATE] |
-    PERM_BIT[Permission.LIBRARY_EXPORT] | PERM_BIT[Permission.LIBRARY_ANNOTATE],
+    PERM_BIT[Permission.LIBRARY_READ] |
+    PERM_BIT[Permission.LIBRARY_UPLOAD] |
+    PERM_BIT[Permission.LIBRARY_UPDATE] |
+    PERM_BIT[Permission.LIBRARY_EXPORT] |
+    PERM_BIT[Permission.LIBRARY_ANNOTATE],
   coordinator:
-    PERM_BIT[Permission.LIBRARY_READ] | PERM_BIT[Permission.LIBRARY_UPLOAD] | PERM_BIT[Permission.LIBRARY_UPDATE] |
-    PERM_BIT[Permission.LIBRARY_DELETE] | PERM_BIT[Permission.LIBRARY_EXPORT] | PERM_BIT[Permission.LIBRARY_ANNOTATE],
+    PERM_BIT[Permission.LIBRARY_READ] |
+    PERM_BIT[Permission.LIBRARY_UPLOAD] |
+    PERM_BIT[Permission.LIBRARY_UPDATE] |
+    PERM_BIT[Permission.LIBRARY_DELETE] |
+    PERM_BIT[Permission.LIBRARY_EXPORT] |
+    PERM_BIT[Permission.LIBRARY_ANNOTATE],
   owner:
-    PERM_BIT[Permission.LIBRARY_READ] | PERM_BIT[Permission.LIBRARY_UPLOAD] | PERM_BIT[Permission.LIBRARY_UPDATE] |
-    PERM_BIT[Permission.LIBRARY_DELETE] | PERM_BIT[Permission.LIBRARY_EXPORT] | PERM_BIT[Permission.LIBRARY_ANNOTATE],
+    PERM_BIT[Permission.LIBRARY_READ] |
+    PERM_BIT[Permission.LIBRARY_UPLOAD] |
+    PERM_BIT[Permission.LIBRARY_UPDATE] |
+    PERM_BIT[Permission.LIBRARY_DELETE] |
+    PERM_BIT[Permission.LIBRARY_EXPORT] |
+    PERM_BIT[Permission.LIBRARY_ANNOTATE],
 };
 
 const applyJitter = (ttl: number): number =>
@@ -96,7 +130,7 @@ export class ItemQueryService {
       effectivePermissions?: readonly string[];
     },
   ): Promise<LibraryScopeAccessContract> {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectScopeId(projectId, userId);
 
     if (!validProjectId) {
       return {
@@ -253,7 +287,7 @@ export class ItemQueryService {
     role: 'owner' | 'coordinator' | 'contributor' | 'reviewer';
     permissions: LibraryPermissionsContract;
   }> {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectScopeId(projectId, userId);
     const cacheKey = LIBRARY_REDIS_KEYS.counts(userId, projectId);
 
     const fetchProjectSharedCounts = async () => {
@@ -319,7 +353,7 @@ export class ItemQueryService {
   }
 
   async getItem(userId: string, id: string, projectId?: string) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectScopeId(projectId, userId);
     const cacheKey = validProjectId
       ? `${LIBRARY_REDIS_KEYS.item(id)}:u:${userId}`
       : LIBRARY_REDIS_KEYS.item(id);
@@ -340,8 +374,8 @@ export class ItemQueryService {
             : cached.userId === userId && !cached.projectId;
           const isProjectMatch = Boolean(
             validProjectId &&
-              (cachedSpaceId === validProjectId ||
-                cached.projectId === validProjectId),
+            (cachedSpaceId === validProjectId ||
+              cached.projectId === validProjectId),
           );
           if (isOwner || isProjectMatch) {
             const cachedStates = Array.isArray(
@@ -468,9 +502,7 @@ export class ItemQueryService {
       options.collectionIds?.length
         ? `cids=${options.collectionIds.join(',')}`
         : '',
-      options.ids?.length
-        ? `ids=${[...options.ids].sort().join(',')}`
-        : '',
+      options.ids?.length ? `ids=${[...options.ids].sort().join(',')}` : '',
       options.includeSubcollections !== undefined
         ? `sub=${options.includeSubcollections}`
         : '',
@@ -484,12 +516,13 @@ export class ItemQueryService {
       .filter(Boolean)
       .join(':');
     const baseCacheSuffix = `${options.view || 'all'}:${options.collectionId || ''}:${options.tagId || ''}:${limit}`;
-    const version = (canCache && this.cache)
-      ? await this.cache
-          .get<number | string>(LIBRARY_REDIS_KEYS.scopeVersion(scopeKey))
-          .then((v) => (v !== null && v !== undefined ? Number(v) : 0))
-          .catch(() => 0)
-      : 0;
+    const version =
+      canCache && this.cache
+        ? await this.cache
+            .get<number | string>(LIBRARY_REDIS_KEYS.scopeVersion(scopeKey))
+            .then((v) => (v !== null && v !== undefined ? Number(v) : 0))
+            .catch(() => 0)
+        : 0;
     const cacheKey = canCache
       ? LIBRARY_REDIS_KEYS.itemsList(
           scopeKey,
@@ -652,20 +685,36 @@ export class ItemQueryService {
     return this.query.getItemSnapshot(userId, itemId, undefined, projectId);
   }
 
-  async getItemSnapshots(userId: string, itemIds: string[], projectId?: string | null) {
+  async getItemSnapshots(
+    userId: string,
+    itemIds: string[],
+    projectId?: string | null,
+  ) {
     return this.query.getItemSnapshots(userId, itemIds, undefined, projectId);
   }
 
   // IItemExistencePort Implementation
-  async exists(userId: string, itemId: string, projectId?: string): Promise<boolean> {
+  async exists(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<boolean> {
     return this.query.exists(userId, itemId, undefined, projectId);
   }
 
-  async assertExists(userId: string, itemId: string, projectId?: string): Promise<void> {
+  async assertExists(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<void> {
     return this.query.assertExists(userId, itemId, undefined, projectId);
   }
 
-  async existMany(userId: string, itemIds: string[], projectId?: string): Promise<Map<string, boolean>> {
+  async existMany(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<Map<string, boolean>> {
     return this.query.existMany(userId, itemIds, undefined, projectId);
   }
 
@@ -674,9 +723,20 @@ export class ItemQueryService {
     return this.query.findById(userId, itemId, projectId);
   }
 
-  async findByIds(userId: string, itemIds: string[], projectId?: string, options?: { includeContent?: boolean }) {
+  async findByIds(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+    options?: { includeContent?: boolean },
+  ) {
     return options?.includeContent !== undefined
-      ? this.query.findByIds(userId, itemIds, projectId, undefined, options.includeContent)
+      ? this.query.findByIds(
+          userId,
+          itemIds,
+          projectId,
+          undefined,
+          options.includeContent,
+        )
       : this.query.findByIds(userId, itemIds, projectId);
   }
 
@@ -688,31 +748,61 @@ export class ItemQueryService {
     return this.query.findSummaryById(userId, itemId, undefined, projectId);
   }
 
-  async findSummariesByIds(userId: string, itemIds: string[], projectId?: string) {
+  async findSummariesByIds(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+  ) {
     return projectId !== undefined
       ? this.query.findSummariesByIds(userId, itemIds, projectId)
       : this.query.findSummariesByIds(userId, itemIds);
   }
 
-  async findQualityAuditItems(userId?: string, limit?: number, projectId?: string): Promise<QualityAuditCandidateItem[]> {
-    return (await this.query.findQualityAuditItems(userId, limit, projectId)) as unknown as QualityAuditCandidateItem[];
+  async findQualityAuditItems(
+    userId?: string,
+    limit?: number,
+    projectId?: string,
+  ): Promise<QualityAuditCandidateItem[]> {
+    return await this.query.findQualityAuditItems(userId, limit, projectId);
   }
 
-  async findDuplicateCandidateItems(userId?: string, limit?: number, projectId?: string): Promise<DuplicateCandidateItem[]> {
-    return (await this.query.findDuplicateCandidateItems(userId, limit, projectId)) as unknown as DuplicateCandidateItem[];
+  async findDuplicateCandidateItems(
+    userId?: string,
+    limit?: number,
+    projectId?: string,
+  ): Promise<DuplicateCandidateItem[]> {
+    return (await this.query.findDuplicateCandidateItems(
+      userId,
+      limit,
+      projectId,
+    )) as unknown as DuplicateCandidateItem[];
   }
 
-  async count(userId: string, options?: Record<string, unknown>): Promise<number> {
+  async count(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<number> {
     return this.query.count(userId, options || { view: 'all' });
   }
 
-  async findMany(userId: string, options?: Record<string, unknown>): Promise<ItemDetail[]> {
+  async findMany(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<ItemDetail[]> {
     return await this.query.findMany(userId, options || {});
   }
 
   async findMatchCandidates(
     scope: { userId?: string; projectId?: string | null },
-    criteria: { doi?: string | null; arxivId?: string | null; pmid?: string | null; isbn?: string | null; year?: number | null; titleWords?: string[]; titlePrefix?: string },
+    criteria: {
+      doi?: string | null;
+      arxivId?: string | null;
+      pmid?: string | null;
+      isbn?: string | null;
+      year?: number | null;
+      titleWords?: string[];
+      titlePrefix?: string;
+    },
   ) {
     return this.query.findMatchCandidates(scope, criteria);
   }

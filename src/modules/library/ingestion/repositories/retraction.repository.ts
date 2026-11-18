@@ -135,7 +135,9 @@ export class RetractionRepository {
     return {
       id: item.id,
       ...(resolvedUserId !== undefined ? { userId: resolvedUserId } : {}),
-      ...(resolvedProjectId !== undefined ? { projectId: resolvedProjectId } : {}),
+      ...(resolvedProjectId !== undefined
+        ? { projectId: resolvedProjectId }
+        : {}),
       title: item.title,
       doi: item.doi ?? findIdentVal(item.identifiers, 'doi'),
       pmid:
@@ -276,9 +278,29 @@ export class RetractionRepository {
             }
           : {}),
       });
-      const existingRec = existing as { userId?: string; createdById?: string; projectId?: string | null; spaceId?: string } | null | undefined;
-      const updatedRec = updated as { userId?: string; createdById?: string; projectId?: string | null; spaceId?: string } | null | undefined;
-      const effectiveUserId = existingRec?.userId ?? existingRec?.createdById ?? updatedRec?.userId ?? updatedRec?.createdById;
+      const existingRec = existing as
+        | {
+            userId?: string;
+            createdById?: string;
+            projectId?: string | null;
+            spaceId?: string;
+          }
+        | null
+        | undefined;
+      const updatedRec = updated as
+        | {
+            userId?: string;
+            createdById?: string;
+            projectId?: string | null;
+            spaceId?: string;
+          }
+        | null
+        | undefined;
+      const effectiveUserId =
+        existingRec?.userId ??
+        existingRec?.createdById ??
+        updatedRec?.userId ??
+        updatedRec?.createdById;
       const rawProjectId =
         existingRec?.projectId ??
         updatedRec?.projectId ??
@@ -342,7 +364,7 @@ export class RetractionRepository {
         return domainUpdated as unknown as Item;
       }
 
-      return (domainUpdated ?? updated) as unknown as Item;
+      return domainUpdated ?? updated;
     };
 
     if (this.libraryTx) {
@@ -416,7 +438,9 @@ export class RetractionRepository {
           },
         })
         .catch(() => null),
-      this.prisma.libraryItem.count({ where: retractedBaseWhere }).catch(() => 0),
+      this.prisma.libraryItem
+        .count({ where: retractedBaseWhere })
+        .catch(() => 0),
       this.prisma.libraryItem
         .count({
           where: {
@@ -495,9 +519,19 @@ export class RetractionRepository {
     return items
       .map((item) => {
         const mapped = this.mapRetractionRow(item);
-        const itemRec = item as { userId?: string; createdById?: string; projectId?: string | null; spaceId?: string };
+        const itemRec = item as {
+          userId?: string;
+          createdById?: string;
+          projectId?: string | null;
+          spaceId?: string;
+        };
         const userId = itemRec.userId ?? itemRec.createdById ?? '';
-        const projectId = itemRec.projectId !== undefined ? itemRec.projectId : itemRec.spaceId && itemRec.spaceId !== userId ? itemRec.spaceId : null;
+        const projectId =
+          itemRec.projectId !== undefined
+            ? itemRec.projectId
+            : itemRec.spaceId && itemRec.spaceId !== userId
+              ? itemRec.spaceId
+              : null;
         return Object.assign(mapped, { userId, projectId });
       })
       .filter((item) => Boolean(item.doi?.trim() || item.pmid?.trim()))
@@ -618,9 +652,20 @@ export class RetractionRepository {
     });
     return items.map((it) => {
       const meta = parseItemMetadata(it.metadata);
-      const itRec = it as { userId?: string; createdById?: string; projectId?: string | null; spaceId?: string; isRetracted?: boolean };
+      const itRec = it as {
+        userId?: string;
+        createdById?: string;
+        projectId?: string | null;
+        spaceId?: string;
+        isRetracted?: boolean;
+      };
       const userId = itRec.userId ?? itRec.createdById ?? '';
-      const projectId = itRec.projectId !== undefined ? itRec.projectId : itRec.spaceId && itRec.spaceId !== userId ? itRec.spaceId : null;
+      const projectId =
+        itRec.projectId !== undefined
+          ? itRec.projectId
+          : itRec.spaceId && itRec.spaceId !== userId
+            ? itRec.spaceId
+            : null;
       return {
         id: it.id,
         userId,

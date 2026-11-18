@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { libraryConfig } from '@/modules/library/core/config/library.config';
@@ -90,8 +95,12 @@ export class SsrfGuardService {
           throw err;
         }
         const errMsg = err instanceof Error ? err.message : String(err);
-        this.logger.debug(`DNS resolution failed for ${rawHostname}: ${errMsg}`);
-        throw new BadRequestException(`Unable to resolve host '${rawHostname}'.`);
+        this.logger.debug(
+          `DNS resolution failed for ${rawHostname}: ${errMsg}`,
+        );
+        throw new BadRequestException(
+          `Unable to resolve host '${rawHostname}'.`,
+        );
       }
 
       // Bounded LRU cache insertion
@@ -224,7 +233,9 @@ export class SsrfGuardService {
     const maxRedirects = options.maxRedirects ?? 5;
     let currentUrl = startUrl;
     let lastResolvedIps: string[] | undefined;
-    let currentHeaders = init.headers ? new Headers(init.headers as HeadersInit) : new Headers();
+    const currentHeaders = init.headers
+      ? new Headers(init.headers)
+      : new Headers();
     let currentMethod = init.method || 'GET';
     let currentBody = init.body;
 
@@ -607,4 +618,3 @@ export class SsrfGuardService {
     return false;
   }
 }
-

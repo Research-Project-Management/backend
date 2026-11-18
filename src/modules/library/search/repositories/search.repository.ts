@@ -8,8 +8,24 @@ import {
   TextSearchSpecification,
   sanitizeSearchQuery,
 } from '@/modules/library/search/domain/item-search.policy';
-import { isProjectScopeId, LIBRARY_REDIS_KEYS, SingleFlightCoalescer, SearchQueryEngine } from '@/modules/library/core';
-import { isValidUuid, sanitizeUuidSearchOptions, resolveSearchCollectionOptions, buildSearchItemsCacheKey, buildSearchFacetCacheKey, aggregateFacetGroups, buildSearchFtsMatchingIdsSql, buildSearchFtsSqlQuery, buildSearchTrgmFallbackSqlQuery, escapeLikePattern } from './search-sql.operations';
+import {
+  isProjectScopeId,
+  LIBRARY_REDIS_KEYS,
+  SingleFlightCoalescer,
+  SearchQueryEngine,
+} from '@/modules/library/core';
+import {
+  isValidUuid,
+  sanitizeUuidSearchOptions,
+  resolveSearchCollectionOptions,
+  buildSearchItemsCacheKey,
+  buildSearchFacetCacheKey,
+  aggregateFacetGroups,
+  buildSearchFtsMatchingIdsSql,
+  buildSearchFtsSqlQuery,
+  buildSearchTrgmFallbackSqlQuery,
+  escapeLikePattern,
+} from './search-sql.operations';
 
 export type { SearchOptions, FacetResult };
 
@@ -39,7 +55,9 @@ export class SearchRepository implements OnModuleInit {
   }
 
   private resolveScopeId(userId: string, options?: SearchOptions): string {
-    return isProjectScopeId(options?.projectId) ? options.projectId.trim() : userId;
+    return isProjectScopeId(options?.projectId)
+      ? options.projectId.trim()
+      : userId;
   }
 
   private setLocalScopeVersion(scopeId: string, version: string): void {
@@ -60,14 +78,18 @@ export class SearchRepository implements OnModuleInit {
       try {
         const versionKey = LIBRARY_REDIS_KEYS.searchVersion(normalizedScope);
         const redisVer = await this.cache.get<string>(versionKey);
-        if ((typeof redisVer === 'string' || typeof redisVer === 'number') && String(redisVer).trim().length > 0) {
+        if (
+          (typeof redisVer === 'string' || typeof redisVer === 'number') &&
+          String(redisVer).trim().length > 0
+        ) {
           const resolved = String(redisVer).trim();
           this.setLocalScopeVersion(normalizedScope, resolved);
           return resolved;
         }
         if (redisVer === null || redisVer === undefined) {
           const hadLocal = this.scopeVersions.has(normalizedScope);
-          const prevVer = parseInt(this.scopeVersions.get(normalizedScope) || '1', 10) || 1;
+          const prevVer =
+            parseInt(this.scopeVersions.get(normalizedScope) || '1', 10) || 1;
           const nextVer = hadLocal ? String(prevVer + 1) : '1';
           this.setLocalScopeVersion(normalizedScope, nextVer);
           await this.cache.set?.(versionKey, nextVer, 86400);
@@ -84,11 +106,20 @@ export class SearchRepository implements OnModuleInit {
     return fallbackVer;
   }
 
-  private buildBaseWhere(userId: string, options: SearchOptions): Prisma.LibraryItemWhereInput {
-    return SearchSpecificationBuilder.baseFromOptions(userId, sanitizeUuidSearchOptions(options)).toPrismaWhere() as Prisma.LibraryItemWhereInput;
+  private buildBaseWhere(
+    userId: string,
+    options: SearchOptions,
+  ): Prisma.LibraryItemWhereInput {
+    return SearchSpecificationBuilder.baseFromOptions(
+      userId,
+      sanitizeUuidSearchOptions(options),
+    ).toPrismaWhere();
   }
-  private buildTextWhereIlike(queryText: string, searchMode?: string): Prisma.LibraryItemWhereInput {
-    return new TextSearchSpecification(queryText, searchMode).toPrismaWhere() as Prisma.LibraryItemWhereInput;
+  private buildTextWhereIlike(
+    queryText: string,
+    searchMode?: string,
+  ): Prisma.LibraryItemWhereInput {
+    return new TextSearchSpecification(queryText, searchMode).toPrismaWhere();
   }
 
   private static readonly ITEM_SEARCH_INCLUDE = (userId: string) => ({
@@ -109,10 +140,10 @@ export class SearchRepository implements OnModuleInit {
   ): boolean {
     return Boolean(
       (options.collectionId && !isValidUuid(options.collectionId)) ||
-        (options.tagId && !isValidUuid(options.tagId)) ||
-        (isProjectScopeId(options.projectId) &&
-          !isValidUuid(options.projectId.trim())) ||
-        (checkCursor && options.cursor && !isValidUuid(options.cursor)),
+      (options.tagId && !isValidUuid(options.tagId)) ||
+      (isProjectScopeId(options.projectId) &&
+        !isValidUuid(options.projectId.trim())) ||
+      (checkCursor && options.cursor && !isValidUuid(options.cursor)),
     );
   }
 
@@ -191,7 +222,11 @@ export class SearchRepository implements OnModuleInit {
     return resolveSearchCollectionOptions(this.getClient(tx), userId, options);
   }
 
-  async searchItems(userId: string, options: SearchOptions, tx?: Prisma.TransactionClient) {
+  async searchItems(
+    userId: string,
+    options: SearchOptions,
+    tx?: Prisma.TransactionClient,
+  ) {
     if (this.hasInvalidUuidFilter(options, true)) {
       return { items: [], nextCursor: undefined, hasNextPage: false };
     }
@@ -202,13 +237,20 @@ export class SearchRepository implements OnModuleInit {
     if (!tx && this.cache) {
       const scopeId = this.resolveScopeId(userId, options);
       const version = await this.resolveScopeVersion(scopeId);
-      const cacheKey = buildSearchItemsCacheKey(userId, options, queryText, limit, version);
+      const cacheKey = buildSearchItemsCacheKey(
+        userId,
+        options,
+        queryText,
+        limit,
+        version,
+      );
 
       if (typeof this.cache.wrap === 'function') {
         return this.singleFlight.execute(cacheKey, () =>
           this.cache!.wrap(
             cacheKey,
-            () => this.executeSearchItems(userId, options, queryText, limit, tx),
+            () =>
+              this.executeSearchItems(userId, options, queryText, limit, tx),
             this.applyJitter(60),
           ),
         );
@@ -218,7 +260,13 @@ export class SearchRepository implements OnModuleInit {
         if (cached && typeof cached === 'object' && 'items' in cached) {
           return cached as Awaited<ReturnType<typeof this.executeSearchItems>>;
         }
-        const fresh = await this.executeSearchItems(userId, options, queryText, limit, tx);
+        const fresh = await this.executeSearchItems(
+          userId,
+          options,
+          queryText,
+          limit,
+          tx,
+        );
         await this.cache!.set?.(cacheKey, fresh, this.applyJitter(60));
         return fresh;
       });
@@ -234,11 +282,21 @@ export class SearchRepository implements OnModuleInit {
     limit: number,
     tx?: Prisma.TransactionClient,
   ) {
-    const options = await resolveSearchCollectionOptions(this.getClient(tx), userId, rawOptions);
+    const options = await resolveSearchCollectionOptions(
+      this.getClient(tx),
+      userId,
+      rawOptions,
+    );
     const ftsSanitized = sanitizeSearchQuery(queryText);
     if (queryText && ftsSanitized && this.hasFtsColumn()) {
       try {
-        return await this.searchItemsFts(userId, options, ftsSanitized, limit, tx);
+        return await this.searchItemsFts(
+          userId,
+          options,
+          ftsSanitized,
+          limit,
+          tx,
+        );
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`FTS query failed, falling back to ILIKE: ${errMsg}`);
@@ -258,8 +316,12 @@ export class SearchRepository implements OnModuleInit {
     if (!built) return { items: [], nextCursor: undefined, hasNextPage: false };
 
     const client = this.getClient(tx);
-    const rawRunner = typeof client.$queryRawUnsafe === 'function' ? client : this.prisma;
-    let rows = await rawRunner.$queryRawUnsafe<Array<{ id: string }>>(built.sql, ...built.params);
+    const rawRunner =
+      typeof client.$queryRawUnsafe === 'function' ? client : this.prisma;
+    let rows = await rawRunner.$queryRawUnsafe<Array<{ id: string }>>(
+      built.sql,
+      ...built.params,
+    );
 
     if (rows.length === 0 && !options.cursor && queryText.trim().length >= 3) {
       const trgmBuilt = buildSearchTrgmFallbackSqlQuery({
@@ -290,7 +352,8 @@ export class SearchRepository implements OnModuleInit {
       nextCursor = ids[ids.length - 1];
     }
 
-    if (ids.length === 0) return { items: [], nextCursor: undefined, hasNextPage: false };
+    if (ids.length === 0)
+      return { items: [], nextCursor: undefined, hasNextPage: false };
 
     const items = await client.libraryItem.findMany({
       where: {
@@ -301,7 +364,9 @@ export class SearchRepository implements OnModuleInit {
     });
 
     const orderMap = new Map(ids.map((id, idx) => [id, idx]));
-    items.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+    items.sort(
+      (a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999),
+    );
 
     return { items, nextCursor, hasNextPage };
   }
@@ -412,12 +477,19 @@ export class SearchRepository implements OnModuleInit {
 
     const client = this.getClient(tx);
     if (!client.libraryItem?.count) return 0;
-    const where = await this.resolveMatchingSearchWhere(client, userId, options);
+    const where = await this.resolveMatchingSearchWhere(
+      client,
+      userId,
+      options,
+    );
     return client.libraryItem.count({ where });
   }
 
-
-  async computeFacets(userId: string, options: SearchOptions, tx?: Prisma.TransactionClient): Promise<FacetResult> {
+  async computeFacets(
+    userId: string,
+    options: SearchOptions,
+    tx?: Prisma.TransactionClient,
+  ): Promise<FacetResult> {
     const scopeId = this.resolveScopeId(userId, options);
     const version = await this.resolveScopeVersion(scopeId);
     const cacheKey = buildSearchFacetCacheKey(userId, options, version);
@@ -426,7 +498,8 @@ export class SearchRepository implements OnModuleInit {
       if (this.cache) {
         try {
           const cached = await this.cache.get<FacetResult>(cacheKey);
-          if (cached && typeof cached === 'object' && 'itemTypes' in cached) return cached;
+          if (cached && typeof cached === 'object' && 'itemTypes' in cached)
+            return cached;
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
           this.logger.debug(`Facet cache lookup error: ${errMsg}`);
@@ -445,12 +518,28 @@ export class SearchRepository implements OnModuleInit {
       );
 
       const [typeGroups, yearGroups, tagItems] = await Promise.all([
-        client.libraryItem.groupBy({ by: ['itemType'], where, _count: { _all: true } }),
-        client.libraryItem.groupBy({ by: ['year'], where, _count: { _all: true } }),
-        client.libraryItemTag.findMany({ where: { item: where }, take: 1000, select: { tag: { select: { name: true } } } }),
+        client.libraryItem.groupBy({
+          by: ['itemType'],
+          where,
+          _count: { _all: true },
+        }),
+        client.libraryItem.groupBy({
+          by: ['year'],
+          where,
+          _count: { _all: true },
+        }),
+        client.libraryItemTag.findMany({
+          where: { item: where },
+          take: 1000,
+          select: { tag: { select: { name: true } } },
+        }),
       ]);
 
-      const facetResult: FacetResult = aggregateFacetGroups({ typeGroups, yearGroups, tagItems });
+      const facetResult: FacetResult = aggregateFacetGroups({
+        typeGroups,
+        yearGroups,
+        tagItems,
+      });
 
       if (this.cache) {
         try {
@@ -464,7 +553,9 @@ export class SearchRepository implements OnModuleInit {
       return facetResult;
     };
 
-    return tx ? computeFreshFacets() : this.singleFlight.execute(cacheKey, computeFreshFacets);
+    return tx
+      ? computeFreshFacets()
+      : this.singleFlight.execute(cacheKey, computeFreshFacets);
   }
 
   async invalidateFacets(scopeId: string): Promise<void> {
@@ -473,9 +564,12 @@ export class SearchRepository implements OnModuleInit {
     let baseVer = Number(this.scopeVersions.get(normalizedScope) || '1') || 1;
     if (this.cache?.get) {
       try {
-        const redisVer = await this.cache.get<string>(LIBRARY_REDIS_KEYS.searchVersion(normalizedScope));
+        const redisVer = await this.cache.get<string>(
+          LIBRARY_REDIS_KEYS.searchVersion(normalizedScope),
+        );
         const parsedRedis = Number(redisVer);
-        if (Number.isFinite(parsedRedis) && parsedRedis > baseVer) baseVer = parsedRedis;
+        if (Number.isFinite(parsedRedis) && parsedRedis > baseVer)
+          baseVer = parsedRedis;
       } catch {
         // Non-fatal fallback to local version
       }
@@ -499,8 +593,12 @@ export class SearchRepository implements OnModuleInit {
       }
       this.setLocalScopeVersion(normalizedScope, nextVer);
       await Promise.all([
-        this.cache.delPattern?.(LIBRARY_REDIS_KEYS.searchFacetsPattern(normalizedScope)),
-        this.cache.delPattern?.(LIBRARY_REDIS_KEYS.searchItemsPattern(normalizedScope)),
+        this.cache.delPattern?.(
+          LIBRARY_REDIS_KEYS.searchFacetsPattern(normalizedScope),
+        ),
+        this.cache.delPattern?.(
+          LIBRARY_REDIS_KEYS.searchItemsPattern(normalizedScope),
+        ),
         typeof cacheWithIncr.incr !== 'function'
           ? this.cache.set?.(versionKey, nextVer, 86400)
           : Promise.resolve(),
@@ -599,17 +697,40 @@ export class SearchRepository implements OnModuleInit {
         }
         return { indexed: false, scopeId: resolvedScope };
       }
-      const rawItem = item as { spaceId?: string; createdById?: string; projectId?: string | null; userId?: string };
-      resolvedScope = resolvedScope || rawItem.spaceId || rawItem.projectId || rawItem.userId || rawItem.createdById;
+      const rawItem = item as {
+        spaceId?: string;
+        createdById?: string;
+        projectId?: string | null;
+        userId?: string;
+      };
+      resolvedScope =
+        resolvedScope ||
+        rawItem.spaceId ||
+        rawItem.projectId ||
+        rawItem.userId ||
+        rawItem.createdById;
 
-      if (this.hasFtsColumn() && typeof this.prisma.$executeRaw === 'function') {
+      if (
+        this.hasFtsColumn() &&
+        typeof this.prisma.$executeRaw === 'function'
+      ) {
         try {
           const itemRec = item as Record<string, unknown>;
-          const rawTitle = typeof itemRec.title === 'string' ? itemRec.title : '';
-          const rawAbstract = typeof itemRec.abstract === 'string' ? itemRec.abstract : '';
-          const rawPub = typeof itemRec.publicationTitle === 'string' ? itemRec.publicationTitle : '';
+          const rawTitle =
+            typeof itemRec.title === 'string' ? itemRec.title : '';
+          const rawAbstract =
+            typeof itemRec.abstract === 'string' ? itemRec.abstract : '';
+          const rawPub =
+            typeof itemRec.publicationTitle === 'string'
+              ? itemRec.publicationTitle
+              : '';
           const rawContributors = Array.isArray(itemRec.contributors)
-            ? (itemRec.contributors as Array<{ fullName?: string | null; lastName?: string | null }>)
+            ? (
+                itemRec.contributors as Array<{
+                  fullName?: string | null;
+                  lastName?: string | null;
+                }>
+              )
                 .map((c) => `${c.fullName || ''} ${c.lastName || ''}`)
                 .join(' ')
             : '';
@@ -663,7 +784,9 @@ export class SearchRepository implements OnModuleInit {
   }
 
   async deleteFullTextIndexByItemId(itemId: string): Promise<void> {
-    await this.prisma.fullTextIndex.deleteMany({ where: { attachment: { itemId } } });
+    await this.prisma.fullTextIndex.deleteMany({
+      where: { attachment: { itemId } },
+    });
   }
 
   async deleteFullTextIndexByAttachmentId(attachmentId: string): Promise<void> {
@@ -672,7 +795,12 @@ export class SearchRepository implements OnModuleInit {
 
   async replaceAttachmentPageIndex(
     attachmentId: string,
-    pages: Array<{ pageIndex: number; textContent: string; charOffset?: number; itemId?: string }>,
+    pages: Array<{
+      pageIndex: number;
+      textContent: string;
+      charOffset?: number;
+      itemId?: string;
+    }>,
     itemId?: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
@@ -697,21 +825,35 @@ export class SearchRepository implements OnModuleInit {
     attachmentId: string,
     pageIndexOrSearchTerm?: number | string,
     searchTerm?: string,
-  ): Promise<Array<{ pageIndex: number; textContent: string; charOffset: number }>> {
-    const resolvedPageIndex = typeof pageIndexOrSearchTerm === 'number' ? pageIndexOrSearchTerm : undefined;
-    const resolvedSearchTerm = typeof pageIndexOrSearchTerm === 'string' ? pageIndexOrSearchTerm : searchTerm;
+  ): Promise<
+    Array<{ pageIndex: number; textContent: string; charOffset: number }>
+  > {
+    const resolvedPageIndex =
+      typeof pageIndexOrSearchTerm === 'number'
+        ? pageIndexOrSearchTerm
+        : undefined;
+    const resolvedSearchTerm =
+      typeof pageIndexOrSearchTerm === 'string'
+        ? pageIndexOrSearchTerm
+        : searchTerm;
     const trimmedTerm = resolvedSearchTerm?.trim();
-    const escapedTerm = trimmedTerm ? escapeLikePattern(trimmedTerm) : undefined;
+    const escapedTerm = trimmedTerm
+      ? escapeLikePattern(trimmedTerm)
+      : undefined;
     const baseWhere: Prisma.FullTextIndexWhereInput = {
       attachmentId,
       attachment: { deletedAt: null, item: { deletedAt: null } },
-      ...(resolvedPageIndex !== undefined ? { pageIndex: resolvedPageIndex } : {}),
+      ...(resolvedPageIndex !== undefined
+        ? { pageIndex: resolvedPageIndex }
+        : {}),
     };
 
     const dbPages = await this.prisma.fullTextIndex.findMany({
       where: {
         ...baseWhere,
-        ...(trimmedTerm ? { textContent: { contains: trimmedTerm, mode: 'insensitive' } } : {}),
+        ...(trimmedTerm
+          ? { textContent: { contains: trimmedTerm, mode: 'insensitive' } }
+          : {}),
       },
       orderBy: { pageIndex: 'asc' },
       take: trimmedTerm ? 200 : 1000,
@@ -725,10 +867,18 @@ export class SearchRepository implements OnModuleInit {
           orderBy: { pageIndex: 'asc' },
           take: 500,
         });
-        return allPages.map((p) => ({ pageIndex: p.pageIndex, textContent: p.textContent || '', charOffset: p.charOffset ?? 0 }));
+        return allPages.map((p) => ({
+          pageIndex: p.pageIndex,
+          textContent: p.textContent || '',
+          charOffset: p.charOffset ?? 0,
+        }));
       }
     }
 
-    return dbPages.map((p) => ({ pageIndex: p.pageIndex, textContent: p.textContent || '', charOffset: p.charOffset ?? 0 }));
+    return dbPages.map((p) => ({
+      pageIndex: p.pageIndex,
+      textContent: p.textContent || '',
+      charOffset: p.charOffset ?? 0,
+    }));
   }
 }

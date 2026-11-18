@@ -1,22 +1,44 @@
 import {
-  Injectable, Logger, NotFoundException, BadRequestException, InternalServerErrorException, Inject, Optional,
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  InternalServerErrorException,
+  Inject,
+  Optional,
 } from '@nestjs/common';
 import { Prisma, AttachmentType } from '@prisma/client';
 import { RedisCacheService } from '@/core';
 import {
-  TransactionHelpers, CATALOG_FACADE, ICatalogFacade, IItemCacheInvalidator,
-  ITEM_CACHE_INVALIDATOR, normalizeProjectScopeId, extractFileIdFromUrl,
-  executeStandardLibraryCacheInvalidation, UNIT_OF_WORK, IUnitOfWork,
-  LIBRARY_EVENT_TYPES, UserId, ItemId, AttachmentId, ProjectId,
+  TransactionHelpers,
+  CATALOG_FACADE,
+  ICatalogFacade,
+  IItemCacheInvalidator,
+  ITEM_CACHE_INVALIDATOR,
+  normalizeProjectScopeId,
+  extractFileIdFromUrl,
+  executeStandardLibraryCacheInvalidation,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  LIBRARY_EVENT_TYPES,
+  UserId,
+  ItemId,
+  AttachmentId,
+  ProjectId,
 } from '@/modules/library/core';
 import { CreateAttachmentInput } from '@/modules/library/core/types/extraction.types';
 import {
-  validateAttachmentInvariants, inferAttachmentTypeFromFilename, isValidFileHash,
+  validateAttachmentInvariants,
+  inferAttachmentTypeFromFilename,
+  isValidFileHash,
 } from '@/modules/library/extraction/domain/attachments.domain';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import type { RenameAttachmentDto, BatchRenameAttachmentsDto } from '@/modules/library/extraction/dto/annotations.dto';
+import type {
+  RenameAttachmentDto,
+  BatchRenameAttachmentsDto,
+} from '@/modules/library/extraction/dto/annotations.dto';
 import { AttachmentRenamerService } from './attachment-renamer.service';
 
 export type { CreateAttachmentInput };
@@ -28,19 +50,35 @@ export class AttachmentsService {
   constructor(
     private readonly repo: AttachmentsRepository,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
-    @Optional() @Inject(CATALOG_FACADE) private readonly catalogGateway?: ICatalogFacade,
-    @Optional() @Inject(STORAGE_PORT) private readonly storagePort?: IStoragePort,
+    @Optional()
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
     @Optional() private readonly renamerService?: AttachmentRenamerService,
     @Optional() private readonly cache?: RedisCacheService,
-    @Optional() @Inject(ITEM_CACHE_INVALIDATOR) private readonly cacheCoordinator?: IItemCacheInvalidator,
+    @Optional()
+    @Inject(ITEM_CACHE_INVALIDATOR)
+    private readonly cacheCoordinator?: IItemCacheInvalidator,
     @Optional() private readonly extractionRepo?: ExtractionRepository,
   ) {}
 
-  public async assertItemExists(userId: string, itemId: string, projectId?: string): Promise<void> {
+  public async assertItemExists(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<void> {
     if (!this.catalogGateway) {
-      throw new InternalServerErrorException('Catalog gateway is unavailable for item authorization');
+      throw new InternalServerErrorException(
+        'Catalog gateway is unavailable for item authorization',
+      );
     }
-    const exists = await this.catalogGateway.itemExists(userId, itemId, projectId);
+    const exists = await this.catalogGateway.itemExists(
+      userId,
+      itemId,
+      projectId,
+    );
     if (!exists) throw new NotFoundException(`Item ${itemId} not found`);
   }
 
@@ -151,140 +189,142 @@ export class AttachmentsService {
             : AttachmentType.primary_pdf);
 
     let postCommitRegistered = false;
-    return this.libraryTx.executeInTransaction(
-      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
-        const resolvedMimeType =
-          input.mimeType ??
-          (resolvedLinkMode === 'linked_url'
-            ? 'text/uri-list'
-            : 'application/pdf');
-        const isExtractablePdf =
-          resolvedMimeType === 'application/pdf' ||
-          input.filename?.toLowerCase().endsWith('.pdf');
-        const validCreatorId =
-          userId &&
-          userId !== 'system' &&
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-            userId,
-          )
-            ? userId
-            : undefined;
-        const createData: Prisma.AttachmentCreateInput = {
-          item: { connect: { id: targetItemId } },
-          ...(validCreatorId ? { createdById: validCreatorId } : {}),
-          linkMode: resolvedLinkMode,
-          attachmentType: resolvedAttachmentType,
-          filename: input.filename,
-          url: effectiveUrl,
-          storageKey: storageKey ?? undefined,
-          mimeType: resolvedMimeType,
-          ...(!isExtractablePdf
-            ? {
-                extractionStatus: 'READY',
-                extractionCompletedAt: new Date(),
-              }
-            : {}),
-          size: sizeBigInt,
-          fileHash: input.fileHash ?? '',
-          fileId: resolvedFileId,
-          ...(input.metadata && Object.keys(input.metadata).length > 0
-            ? { metadata: input.metadata as Prisma.InputJsonValue }
-            : {}),
-          revisions: {
-            create: {
-              ...(validCreatorId ? { createdById: validCreatorId } : {}),
-              revisionNumber: 1,
-              url: effectiveUrl,
-              fileHash: input.fileHash ?? '',
-              fileId: resolvedFileId,
-              sizeBytes: sizeBigInt,
-              comment:
-                resolvedLinkMode === 'linked_url'
-                  ? 'Linked URI'
-                  : 'Initial file upload',
+    return this.libraryTx
+      .executeInTransaction(
+        async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          const resolvedMimeType =
+            input.mimeType ??
+            (resolvedLinkMode === 'linked_url'
+              ? 'text/uri-list'
+              : 'application/pdf');
+          const isExtractablePdf =
+            resolvedMimeType === 'application/pdf' ||
+            input.filename?.toLowerCase().endsWith('.pdf');
+          const validCreatorId =
+            userId &&
+            userId !== 'system' &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+              userId,
+            )
+              ? userId
+              : undefined;
+          const createData: Prisma.AttachmentCreateInput = {
+            item: { connect: { id: targetItemId } },
+            ...(validCreatorId ? { createdById: validCreatorId } : {}),
+            linkMode: resolvedLinkMode,
+            attachmentType: resolvedAttachmentType,
+            filename: input.filename,
+            url: effectiveUrl,
+            storageKey: storageKey ?? undefined,
+            mimeType: resolvedMimeType,
+            ...(!isExtractablePdf
+              ? {
+                  extractionStatus: 'READY',
+                  extractionCompletedAt: new Date(),
+                }
+              : {}),
+            size: sizeBigInt,
+            fileHash: input.fileHash ?? '',
+            fileId: resolvedFileId,
+            ...(input.metadata && Object.keys(input.metadata).length > 0
+              ? { metadata: input.metadata as Prisma.InputJsonValue }
+              : {}),
+            revisions: {
+              create: {
+                ...(validCreatorId ? { createdById: validCreatorId } : {}),
+                revisionNumber: 1,
+                url: effectiveUrl,
+                fileHash: input.fileHash ?? '',
+                fileId: resolvedFileId,
+                sizeBytes: sizeBigInt,
+                comment:
+                  resolvedLinkMode === 'linked_url'
+                    ? 'Linked URI'
+                    : 'Initial file upload',
+              },
             },
-          },
-        };
-        const includeOpts = {
-          revisions: {
-            orderBy: { revisionNumber: 'desc' as const },
-          },
-        };
-        const attachment = await this.repo.create(
-          createData,
-          includeOpts,
-          tx,
-        );
+          };
+          const includeOpts = {
+            revisions: {
+              orderBy: { revisionNumber: 'desc' as const },
+            },
+          };
+          const attachment = await this.repo.create(
+            createData,
+            includeOpts,
+            tx,
+          );
 
-        const eventScope = { userId, projectId: effectiveProjectId };
+          const eventScope = { userId, projectId: effectiveProjectId };
 
-        const serializedAttachment = {
-          ...attachment,
-          size: Number(attachment.size),
-          fileSize: Number(attachment.size),
-          revisions: attachment.revisions?.map((rev) => ({
-            ...rev,
-            sizeBytes: Number(rev.sizeBytes),
-          })),
-        };
+          const serializedAttachment = {
+            ...attachment,
+            size: Number(attachment.size),
+            fileSize: Number(attachment.size),
+            revisions: attachment.revisions?.map((rev) => ({
+              ...rev,
+              sizeBytes: Number(rev.sizeBytes),
+            })),
+          };
 
-        await helpers.appendChange(eventScope, {
-          entityType: 'Attachment',
-          entityId: attachment.id,
-          action: 'create',
-          version: 1,
-          data: serializedAttachment,
-        });
+          await helpers.appendChange(eventScope, {
+            entityType: 'Attachment',
+            entityId: attachment.id,
+            action: 'create',
+            version: 1,
+            data: serializedAttachment,
+          });
 
-        await helpers.publishOutbox(
-          eventScope,
-          attachment.id,
-          LIBRARY_EVENT_TYPES.ATTACHMENT_CREATED,
-          serializedAttachment,
-        );
-
-        if (isExtractablePdf && resolvedLinkMode !== 'linked_url') {
           await helpers.publishOutbox(
             eventScope,
             attachment.id,
-            LIBRARY_EVENT_TYPES.ATTACHMENT_EXTRACTION_REQUESTED,
-            {
-              attachmentId: attachment.id,
-              itemId: attachment.itemId,
-              userId,
-              projectId: effectiveProjectId,
-            },
+            LIBRARY_EVENT_TYPES.ATTACHMENT_CREATED,
+            serializedAttachment,
+          );
+
+          if (isExtractablePdf && resolvedLinkMode !== 'linked_url') {
+            await helpers.publishOutbox(
+              eventScope,
+              attachment.id,
+              LIBRARY_EVENT_TYPES.ATTACHMENT_EXTRACTION_REQUESTED,
+              {
+                attachmentId: attachment.id,
+                itemId: attachment.itemId,
+                userId,
+                projectId: effectiveProjectId,
+              },
+            );
+          }
+
+          if (helpers?.onAfterCommit) {
+            postCommitRegistered = true;
+            helpers.onAfterCommit(async () => {
+              if (resolvedFileId && !deduplicated) {
+                await this.repo.updateLinkedFile(resolvedFileId, targetItemId);
+              }
+              await this.invalidateAttachmentItemCache(
+                targetItemId,
+                userId,
+                effectiveProjectId,
+              );
+            });
+          } else if (resolvedFileId && !deduplicated) {
+            await this.repo.updateLinkedFile(resolvedFileId, targetItemId, tx);
+          }
+
+          return serializedAttachment;
+        },
+      )
+      .then(async (attachment) => {
+        if (!postCommitRegistered) {
+          await this.invalidateAttachmentItemCache(
+            targetItemId,
+            userId,
+            effectiveProjectId,
           );
         }
-
-        if (helpers?.onAfterCommit) {
-          postCommitRegistered = true;
-          helpers.onAfterCommit(async () => {
-            if (resolvedFileId && !deduplicated) {
-              await this.repo.updateLinkedFile(resolvedFileId, targetItemId);
-            }
-            await this.invalidateAttachmentItemCache(
-              targetItemId,
-              userId,
-              effectiveProjectId,
-            );
-          });
-        } else if (resolvedFileId && !deduplicated) {
-          await this.repo.updateLinkedFile(resolvedFileId, targetItemId, tx);
-        }
-
-        return serializedAttachment;
-      },
-    ).then(async (attachment) => {
-      if (!postCommitRegistered) {
-        await this.invalidateAttachmentItemCache(
-          targetItemId,
-          userId,
-          effectiveProjectId,
-        );
-      }
-      return attachment;
-    });
+        return attachment;
+      });
   }
 
   private async invalidateAttachmentItemCache(
@@ -332,7 +372,10 @@ export class AttachmentsService {
     projectId?: ProjectId | string,
   ) {
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeItemWhere = { spaceId: validProjectId || userId, deletedAt: null };
+    const scopeItemWhere = {
+      spaceId: validProjectId || userId,
+      deletedAt: null,
+    };
     const where: Prisma.AttachmentWhereInput = {
       id: attachmentId,
       deletedAt: null,
@@ -342,7 +385,9 @@ export class AttachmentsService {
     const raw = await this.repo.findFirst(where, {
       revisions: { orderBy: { revisionNumber: 'desc' } },
     });
-    const rawItem = (raw as { item?: { deletedAt?: Date | null } | null } | null)?.item;
+    const rawItem = (
+      raw as { item?: { deletedAt?: Date | null } | null } | null
+    )?.item;
     if (!raw || raw.deletedAt || rawItem?.deletedAt) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
@@ -363,16 +408,22 @@ export class AttachmentsService {
     attachmentId: AttachmentId | string,
     projectId?: ProjectId | string,
   ) {
-    if (!attachmentId) throw new BadRequestException('Attachment ID is required');
+    if (!attachmentId)
+      throw new BadRequestException('Attachment ID is required');
     const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeItemWhere = { spaceId: validProjectId || userId, deletedAt: null };
+    const scopeItemWhere = {
+      spaceId: validProjectId || userId,
+      deletedAt: null,
+    };
     const attachment = await this.repo.findFirst(
       { id: attachmentId, deletedAt: null, item: scopeItemWhere },
       { item: true, revisions: true },
     );
-    if (!attachment) throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    if (!attachment)
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
     const fileIdsToDelete = new Set<string>();
-    const mainFileId = attachment.fileId || extractFileIdFromUrl(attachment.url);
+    const mainFileId =
+      attachment.fileId || extractFileIdFromUrl(attachment.url);
     if (mainFileId) fileIdsToDelete.add(mainFileId);
     if (Array.isArray(attachment.revisions)) {
       for (const rev of attachment.revisions) {
@@ -380,8 +431,15 @@ export class AttachmentsService {
         if (revFileId) fileIdsToDelete.add(revFileId);
       }
     }
-    const itemRec = attachment.item as { projectId?: string | null; spaceId?: string; createdById?: string } | null | undefined;
-    const itemProjectId = itemRec?.projectId ?? (itemRec?.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
+    const itemRec = attachment.item as
+      | { projectId?: string | null; spaceId?: string; createdById?: string }
+      | null
+      | undefined;
+    const itemProjectId =
+      itemRec?.projectId ??
+      (itemRec?.spaceId && itemRec.spaceId !== itemRec.createdById
+        ? itemRec.spaceId
+        : undefined);
     const effectiveProjectId =
       validProjectId || normalizeProjectScopeId(itemProjectId) || undefined;
     let postCommitRegistered = false;
@@ -404,7 +462,11 @@ export class AttachmentsService {
           eventScope,
           attachment.id,
           LIBRARY_EVENT_TYPES.ATTACHMENT_DELETED,
-          { attachmentId: attachment.id, itemId: attachment.itemId, projectId: effectiveProjectId },
+          {
+            attachmentId: attachment.id,
+            itemId: attachment.itemId,
+            projectId: effectiveProjectId,
+          },
         );
         if (attachment.itemId && helpers?.onAfterCommit) {
           postCommitRegistered = true;
@@ -512,12 +574,21 @@ export class AttachmentsService {
       { item: true },
       tx,
     );
-    if (!attachment || attachment.deletedAt || (attachment.item && attachment.item.deletedAt)) {
+    if (
+      !attachment ||
+      attachment.deletedAt ||
+      (attachment.item && attachment.item.deletedAt)
+    ) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
     if (attachment.item) {
-      const item = attachment.item as { spaceId?: string; createdById?: string; projectId?: string | null; userId?: string };
+      const item = attachment.item as {
+        spaceId?: string;
+        createdById?: string;
+        projectId?: string | null;
+        userId?: string;
+      };
       const validProjectId = normalizeProjectScopeId(projectId);
       if (item.spaceId) {
         const expectedSpaceId = validProjectId || userId;
@@ -545,14 +616,21 @@ export class AttachmentsService {
     projectId?: ProjectId | string,
   ) {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const scopeItemWhere = { spaceId: effectiveProjectId || userId, deletedAt: null };
+    const scopeItemWhere = {
+      spaceId: effectiveProjectId || userId,
+      deletedAt: null,
+    };
     const attachment = await this.repo.findFirst({
       id: attachmentId,
       itemId,
       deletedAt: null,
       item: scopeItemWhere,
     });
-    if (!attachment || attachment.deletedAt || (attachment.item && attachment.item.deletedAt)) {
+    if (
+      !attachment ||
+      attachment.deletedAt ||
+      (attachment.item && attachment.item.deletedAt)
+    ) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
@@ -582,14 +660,22 @@ export class AttachmentsService {
         if (helpers?.onAfterCommit) {
           postCommitRegistered = true;
           helpers.onAfterCommit(() =>
-            this.invalidateAttachmentItemCache(itemId, userId, effectiveProjectId),
+            this.invalidateAttachmentItemCache(
+              itemId,
+              userId,
+              effectiveProjectId,
+            ),
           );
         }
       },
     );
 
     if (!postCommitRegistered) {
-      await this.invalidateAttachmentItemCache(itemId, userId, effectiveProjectId);
+      await this.invalidateAttachmentItemCache(
+        itemId,
+        userId,
+        effectiveProjectId,
+      );
     }
 
     return { success: true };
@@ -600,10 +686,18 @@ export class AttachmentsService {
     attachmentId: string,
     projectId?: string,
   ): Promise<{ buffer: Buffer; mimeType: string }> {
-    const { attachment } = await this.getItemAttachment(userId, undefined, attachmentId, projectId);
-    if (!attachment) throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    const { attachment } = await this.getItemAttachment(
+      userId,
+      undefined,
+      attachmentId,
+      projectId,
+    );
+    if (!attachment)
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
     if (!attachment.fileId || !this.storagePort) {
-      throw new NotFoundException(`No PDF binary available for attachment ${attachmentId}`);
+      throw new NotFoundException(
+        `No PDF binary available for attachment ${attachmentId}`,
+      );
     }
     const thumbBuffer = await this.storagePort.ensurePdfThumbnail({
       fileId: attachment.fileId,
@@ -611,7 +705,9 @@ export class AttachmentsService {
       projectId,
     });
     if (!thumbBuffer) {
-      throw new NotFoundException(`Failed to generate thumbnail for attachment ${attachmentId}`);
+      throw new NotFoundException(
+        `Failed to generate thumbnail for attachment ${attachmentId}`,
+      );
     }
     return { buffer: thumbBuffer, mimeType: 'image/webp' };
   }
@@ -635,7 +731,12 @@ export class AttachmentsService {
     dto: RenameAttachmentDto,
     projectId?: ProjectId | string,
   ) {
-    return this.getRenamerService().renameAttachment(userId, attachmentId, dto, projectId);
+    return this.getRenamerService().renameAttachment(
+      userId,
+      attachmentId,
+      dto,
+      projectId,
+    );
   }
 
   async batchRenameAttachments(
@@ -644,9 +745,18 @@ export class AttachmentsService {
     projectId?: string,
   ): Promise<{
     renamedCount: number;
-    results: Array<{ attachmentId: string; itemId: string; oldFilename: string; newFilename: string }>;
+    results: Array<{
+      attachmentId: string;
+      itemId: string;
+      oldFilename: string;
+      newFilename: string;
+    }>;
   }> {
-    return this.getRenamerService().batchRenameAttachments(userId, dto, projectId);
+    return this.getRenamerService().batchRenameAttachments(
+      userId,
+      dto,
+      projectId,
+    );
   }
 
   async resolveItemUrl(
@@ -654,20 +764,33 @@ export class AttachmentsService {
     userId: UserId | string,
     projectId?: ProjectId | string,
   ): Promise<string> {
-    const item = this.catalogGateway ? await this.catalogGateway.getItem(userId, itemId, projectId) : null;
+    const item = this.catalogGateway
+      ? await this.catalogGateway.getItem(userId, itemId, projectId)
+      : null;
     if (!item) throw new NotFoundException(`Item ${itemId} not found`);
     const directUrl = typeof item.url === 'string' ? item.url : undefined;
     const fieldsUrl =
-      item.fields && typeof item.fields === 'object' && 'url' in item.fields && typeof item.fields.url === 'string'
+      item.fields &&
+      typeof item.fields === 'object' &&
+      'url' in item.fields &&
+      typeof item.fields.url === 'string'
         ? item.fields.url
         : undefined;
     const itemUrl = directUrl || fieldsUrl;
-    if (!itemUrl) throw new BadRequestException('No URL found on this item to capture a snapshot.');
+    if (!itemUrl)
+      throw new BadRequestException(
+        'No URL found on this item to capture a snapshot.',
+      );
     return itemUrl;
   }
 
-  async getExtractionStatusBreakdown(scope?: { userId?: string; projectId?: string | null }): Promise<Record<string, number>> {
-    return this.extractionRepo?.getExtractionStatusBreakdown ? this.extractionRepo.getExtractionStatusBreakdown(scope) : {};
+  async getExtractionStatusBreakdown(scope?: {
+    userId?: string;
+    projectId?: string | null;
+  }): Promise<Record<string, number>> {
+    return this.extractionRepo?.getExtractionStatusBreakdown
+      ? this.extractionRepo.getExtractionStatusBreakdown(scope)
+      : {};
   }
 
   async reExtractAttachment(
@@ -677,22 +800,39 @@ export class AttachmentsService {
   ): Promise<{ status: string; attachmentId: string; message: string }> {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
     const attachment = await this.repo.findUnique(attachmentId, { item: true });
-    const itemRec = attachment?.item as { spaceId?: string; createdById?: string; projectId?: string | null; userId?: string; deletedAt?: Date | null } | null | undefined;
+    const itemRec = attachment?.item as
+      | {
+          spaceId?: string;
+          createdById?: string;
+          projectId?: string | null;
+          userId?: string;
+          deletedAt?: Date | null;
+        }
+      | null
+      | undefined;
     const isAuthorized =
-      attachment && !attachment.deletedAt && itemRec && !itemRec.deletedAt &&
+      attachment &&
+      !attachment.deletedAt &&
+      itemRec &&
+      !itemRec.deletedAt &&
       (itemRec.spaceId
         ? itemRec.spaceId === (effectiveProjectId || userId)
         : effectiveProjectId
           ? itemRec.projectId === effectiveProjectId
           : itemRec.userId === userId && !itemRec.projectId);
-    if (!isAuthorized) throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    if (!isAuthorized)
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
     if (
       attachment.mimeType !== 'application/pdf' &&
       !attachment.filename?.toLowerCase().endsWith('.pdf')
     ) {
-      throw new BadRequestException(`Attachment ${attachmentId} is not a PDF file`);
+      throw new BadRequestException(
+        `Attachment ${attachmentId} is not a PDF file`,
+      );
     }
-    const eventScope = effectiveProjectId ? { projectId: effectiveProjectId, userId } : { userId };
+    const eventScope = effectiveProjectId
+      ? { projectId: effectiveProjectId, userId }
+      : { userId };
 
     return this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {

@@ -96,7 +96,10 @@ export class TrashMaintenanceService
       }
     }, delayMs);
 
-    if (typeof this.maintenanceTimer === 'object' && 'unref' in this.maintenanceTimer) {
+    if (
+      typeof this.maintenanceTimer === 'object' &&
+      'unref' in this.maintenanceTimer
+    ) {
       this.maintenanceTimer.unref();
     }
   }
@@ -109,8 +112,15 @@ export class TrashMaintenanceService
     limit: number = TrashMaintenanceService.DEFAULT_BATCH_LIMIT,
   ): Promise<TrashMaintenanceResult> {
     if (this.isRunning) {
-      this.logger.debug('Maintenance cycle already in progress, skipping overlap');
-      return { purgedItems: 0, purgedNotes: 0, purgedCollections: 0, storagePaths: [] };
+      this.logger.debug(
+        'Maintenance cycle already in progress, skipping overlap',
+      );
+      return {
+        purgedItems: 0,
+        purgedNotes: 0,
+        purgedCollections: 0,
+        storagePaths: [],
+      };
     }
 
     this.isRunning = true;
@@ -121,7 +131,10 @@ export class TrashMaintenanceService
         `Starting automated trash retention scan (retentionDays: ${retentionDays}, limit: ${limit})...`,
       );
 
-      const result = await this.itemService.purgeExpiredTrash(retentionDays, limit);
+      const result = await this.itemService.purgeExpiredTrash(
+        retentionDays,
+        limit,
+      );
       const elapsedMs = Date.now() - startTime;
 
       if (
@@ -148,8 +161,16 @@ export class TrashMaintenanceService
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Automated trash retention cycle encountered an error: ${message}`, (err as Error)?.stack);
-      return { purgedItems: 0, purgedNotes: 0, purgedCollections: 0, storagePaths: [] };
+      this.logger.error(
+        `Automated trash retention cycle encountered an error: ${message}`,
+        (err as Error)?.stack,
+      );
+      return {
+        purgedItems: 0,
+        purgedNotes: 0,
+        purgedCollections: 0,
+        storagePaths: [],
+      };
     } finally {
       this.isRunning = false;
     }

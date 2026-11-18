@@ -86,9 +86,7 @@ const TRACKED_MANUAL_LOCK_KEYS = [
   'labels',
 ] as const;
 
-const COUPLED_METADATA_ALIASES: Readonly<
-  Record<string, readonly string[]>
-> = {
+const COUPLED_METADATA_ALIASES: Readonly<Record<string, readonly string[]>> = {
   publicationTitle: ['journal', 'venue'],
   journal: ['publicationTitle', 'venue'],
   venue: ['publicationTitle', 'journal'],
@@ -296,7 +294,10 @@ export class ItemProvenancePolicy {
     aliases: string[] = [],
   ): boolean {
     const expandedLocks = this.expandLockedFieldSet(itemOrMeta);
-    return expandedLocks.has(fieldKey) || aliases.some((alias) => expandedLocks.has(alias));
+    return (
+      expandedLocks.has(fieldKey) ||
+      aliases.some((alias) => expandedLocks.has(alias))
+    );
   }
 
   /**
@@ -381,7 +382,10 @@ export class ItemProvenancePolicy {
     const itemSource = String(
       meta.engineUsed || meta.sourceProvider || meta.source || 'Unknown',
     );
-    return Math.min(0.99, resolveProviderFieldWeight(itemSource, fieldKey) * 0.85);
+    return Math.min(
+      0.99,
+      resolveProviderFieldWeight(itemSource, fieldKey) * 0.85,
+    );
   }
 
   /**

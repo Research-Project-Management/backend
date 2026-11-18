@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import {
   SearchItemsQueryDto,
@@ -10,7 +15,20 @@ import type {
   PageTextExtraction,
   PageAnchorMatch,
 } from '@/modules/library/search/types/search.types';
-import { isProjectScopeId, isSafeSearchRegex, parseSafeSearchRegex, SearchQueryEngine, ItemsMapper, SubsystemUnavailableException, LIBRARY_EVENT_TYPES, DomainEventEnvelope, CatalogItemSummary, SEARCH_FACADE, ISearchFacade, type SearchPageTextInput } from '@/modules/library/core';
+import {
+  isProjectScopeId,
+  isSafeSearchRegex,
+  parseSafeSearchRegex,
+  SearchQueryEngine,
+  ItemsMapper,
+  SubsystemUnavailableException,
+  LIBRARY_EVENT_TYPES,
+  DomainEventEnvelope,
+  CatalogItemSummary,
+  SEARCH_FACADE,
+  ISearchFacade,
+  type SearchPageTextInput,
+} from '@/modules/library/core';
 import { OnEvent } from '@nestjs/event-emitter';
 
 export {
@@ -225,7 +243,7 @@ export class SearchService {
       tagId: dto.tagId,
       limit: dto.limit,
       cursor: dto.cursor,
-      projectId: dto.projectId,
+      projectId: dto.spaceId,
       ...(dto.searchMode !== undefined ? { searchMode: dto.searchMode } : {}),
       ...(dto.view !== undefined ? { view: dto.view } : {}),
       ...(dto.includeSubcollections !== undefined
@@ -315,15 +333,20 @@ export class SearchService {
 
     const attachment = await this.repo.findAttachmentWithItem(attachmentId);
     const ownerItem = attachment?.item as
-      | { spaceId?: string; createdById?: string; userId?: string; projectId?: string | null }
+      | {
+          spaceId?: string;
+          createdById?: string;
+          userId?: string;
+          projectId?: string | null;
+        }
       | undefined;
     const isAuthorized = Boolean(
       ownerItem &&
-        (isProjectScopeId(projectId)
-          ? (ownerItem.projectId ?? ownerItem.spaceId) === projectId.trim()
-          : ownerItem.spaceId
-            ? ownerItem.spaceId === userId
-            : ownerItem.userId === userId && !ownerItem.projectId),
+      (isProjectScopeId(projectId)
+        ? (ownerItem.projectId ?? ownerItem.spaceId) === projectId.trim()
+        : ownerItem.spaceId
+          ? ownerItem.spaceId === userId
+          : ownerItem.userId === userId && !ownerItem.projectId),
     );
     if (!isAuthorized) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
@@ -437,8 +460,7 @@ export class SearchEventsSubscriber {
       }
     }
 
-    const resolvedItemId =
-      payload?.itemId || payload?.id || event?.aggregateId;
+    const resolvedItemId = payload?.itemId || payload?.id || event?.aggregateId;
     const scopeId = this.resolveScopeId(event);
     let cacheAlreadyInvalidated = false;
 
@@ -600,7 +622,9 @@ export class SearchEventsSubscriber {
       `[SearchEvents] Cleaning up FTS index for deleted attachment ${attachmentId}`,
     );
     try {
-      if (typeof this.searchService?.deleteAttachmentSearchIndex === 'function') {
+      if (
+        typeof this.searchService?.deleteAttachmentSearchIndex === 'function'
+      ) {
         await this.searchService.deleteAttachmentSearchIndex(attachmentId);
       } else if (this.searchRepo?.deleteFullTextIndexByAttachmentId) {
         await this.searchRepo.deleteFullTextIndexByAttachmentId(attachmentId);

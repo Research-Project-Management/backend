@@ -14,7 +14,9 @@ export { parseMedlineNbibRecords, parseCsvBibliographyRecords };
 
 const MAX_IDENTIFIER_LIST_ITEMS = 200;
 
-function parsePlainTextIdentifierList(content: string): Record<string, unknown>[] {
+function parsePlainTextIdentifierList(
+  content: string,
+): Record<string, unknown>[] {
   const lines = (content || '')
     .split(/[\r\n,;]+/)
     .map((l) => l.trim())
@@ -36,19 +38,28 @@ function parsePlainTextIdentifierList(content: string): Record<string, unknown>[
       const key = `arxiv:${classified.clean.toLowerCase()}`;
       if (!seen.has(key)) {
         seen.add(key);
-        records.push({ arxivId: classified.clean, citationKey: `arXiv:${classified.clean}` });
+        records.push({
+          arxivId: classified.clean,
+          citationKey: `arXiv:${classified.clean}`,
+        });
       }
     } else if (classified.type === 'PMID') {
       const key = `pmid:${classified.clean.toLowerCase()}`;
       if (!seen.has(key)) {
         seen.add(key);
-        records.push({ pmid: classified.clean, citationKey: `PMID:${classified.clean}` });
+        records.push({
+          pmid: classified.clean,
+          citationKey: `PMID:${classified.clean}`,
+        });
       }
     } else if (classified.type === 'ISBN') {
       const key = `isbn:${classified.clean.toLowerCase()}`;
       if (!seen.has(key)) {
         seen.add(key);
-        records.push({ isbn: classified.clean, citationKey: `ISBN:${classified.clean}` });
+        records.push({
+          isbn: classified.clean,
+          citationKey: `ISBN:${classified.clean}`,
+        });
       }
     } else if (classified.type === 'URL') {
       const key = `url:${classified.clean}`;
@@ -321,7 +332,6 @@ export class BibliographyFormatRegistry {
       }
     }
   }
-
 
   getStrategy(formatHint?: string): IBibliographyFormatStrategy | undefined {
     if (!formatHint) return undefined;

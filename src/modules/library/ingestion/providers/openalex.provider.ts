@@ -176,9 +176,8 @@ export class OpenAlexProvider extends BaseMetadataProvider {
       results?: Array<Record<string, unknown>>;
       [key: string]: unknown;
     } | null;
-    const item = (
-      Array.isArray(data?.results) ? data.results[0] : data
-    ) as Record<string, unknown> | null | undefined;
+    const item = (Array.isArray(data?.results) ? data.results[0] : data) as
+      Record<string, unknown> | null | undefined;
     if (
       !item ||
       (typeof item.title !== 'string' && typeof item.display_name !== 'string')
@@ -685,7 +684,9 @@ export class OpenAlexProvider extends BaseMetadataProvider {
         keywords: keywords.length ? keywords : undefined,
         tags: keywords.length ? keywords : undefined,
         openAccessPdfUrl,
-        ...(typeof item.is_retracted === 'boolean' ? { isRetracted: item.is_retracted } : {}),
+        ...(typeof item.is_retracted === 'boolean'
+          ? { isRetracted: item.is_retracted }
+          : {}),
         libraryCatalog: 'OpenAlex',
       },
     });

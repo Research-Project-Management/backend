@@ -70,7 +70,7 @@ export class ExportsService {
       deletedAt: null,
     };
 
-    const effectiveProjectId = normalizeProjectScopeId(dto.projectId);
+    const effectiveProjectId = normalizeProjectScopeId(dto.spaceId);
     if (effectiveProjectId) {
       const member = await this.exportsRepo.findProjectMember(
         effectiveProjectId,
@@ -88,8 +88,13 @@ export class ExportsService {
         );
         const colProjectId =
           (collection as { projectId?: string | null } | null)?.projectId ??
-          (collection && collection.spaceId !== collection.createdById ? collection.spaceId : null);
-        if (!collection || (colProjectId ?? collection.spaceId) !== effectiveProjectId) {
+          (collection && collection.spaceId !== collection.createdById
+            ? collection.spaceId
+            : null);
+        if (
+          !collection ||
+          (colProjectId ?? collection.spaceId) !== effectiveProjectId
+        ) {
           throw new NotFoundException(
             `Collection ${dto.collectionId} not found or access denied`,
           );
@@ -106,11 +111,15 @@ export class ExportsService {
       }
       const colProjectId =
         (collection as { projectId?: string | null }).projectId ??
-        (collection.spaceId && collection.spaceId !== collection.createdById && collection.spaceId !== userId
+        (collection.spaceId &&
+        collection.spaceId !== collection.createdById &&
+        collection.spaceId !== userId
           ? collection.spaceId
           : null);
       const colUserId =
-        (collection as { userId?: string }).userId ?? collection.createdById ?? collection.spaceId;
+        (collection as { userId?: string }).userId ??
+        collection.createdById ??
+        collection.spaceId;
       if (colProjectId) {
         const member = await this.exportsRepo.findProjectMember(
           colProjectId,
@@ -197,13 +206,17 @@ export class ExportsService {
 
     const colProjectId =
       (collection as { projectId?: string | null }).projectId ??
-      (collection.spaceId && collection.spaceId !== collection.createdById && collection.spaceId !== userId
+      (collection.spaceId &&
+      collection.spaceId !== collection.createdById &&
+      collection.spaceId !== userId
         ? collection.spaceId
         : normalizedProjectId && collection.spaceId === normalizedProjectId
           ? collection.spaceId
           : null);
     const colUserId =
-      (collection as { userId?: string }).userId ?? collection.createdById ?? collection.spaceId;
+      (collection as { userId?: string }).userId ??
+      collection.createdById ??
+      collection.spaceId;
 
     if (colProjectId) {
       if (normalizedProjectId && colProjectId !== normalizedProjectId) {
@@ -455,9 +468,7 @@ export class ExportsService {
     const trimmedKeys = Array.from(
       new Set(
         safeKeys
-          .map((k) =>
-            typeof k === 'string' ? k.trim().slice(0, 256) : '',
-          )
+          .map((k) => (typeof k === 'string' ? k.trim().slice(0, 256) : ''))
           .filter(Boolean),
       ),
     ).slice(0, 500);

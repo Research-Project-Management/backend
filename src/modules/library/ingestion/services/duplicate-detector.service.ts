@@ -7,13 +7,41 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { CATALOG_FACADE, ICatalogFacade, IItemCacheInvalidator, ITEM_CACHE_INVALIDATOR, DuplicateCandidateItem, normalizeProjectScopeId, LIBRARY_EVENT_TYPES, TransactionHelpers, UNIT_OF_WORK, IUnitOfWork, ItemsMapper, SingleFlightCoalescer, BulkheadSemaphore, sortLockKeys } from '@/modules/library/core';
+import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+  IItemCacheInvalidator,
+  ITEM_CACHE_INVALIDATOR,
+  DuplicateCandidateItem,
+  normalizeProjectScopeId,
+  LIBRARY_EVENT_TYPES,
+  TransactionHelpers,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  ItemsMapper,
+  SingleFlightCoalescer,
+  BulkheadSemaphore,
+  sortLockKeys,
+} from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { DuplicateClusterResult } from '@/modules/library/ingestion/types/ingestion.types';
 import { UserId, ProjectId } from '@/modules/library/core';
-import { normalizeTitleForDedupe, tokenizeTitleWords, extractContributorAuthors, calculateTitleSimilarity, hasConflictingPartOrSupplementMarkers, isGenericBoilerplateTitle } from '@/modules/library/ingestion/domain/deduplication.domain';
-import { normalizeDoi, normalizeArxivId, normalizePmid, normalizeIsbn, isPlaceholderItemTitle } from '@/modules/library/core';
+import {
+  normalizeTitleForDedupe,
+  tokenizeTitleWords,
+  extractContributorAuthors,
+  calculateTitleSimilarity,
+  hasConflictingPartOrSupplementMarkers,
+  isGenericBoilerplateTitle,
+} from '@/modules/library/ingestion/domain/deduplication.domain';
+import {
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+  normalizeIsbn,
+  isPlaceholderItemTitle,
+} from '@/modules/library/core';
 import {
   RawDuplicateCluster,
   mapCandidateToClusterItem,
@@ -111,7 +139,8 @@ export class DuplicateDetectorService {
     idType: string,
   ): boolean {
     if (this.isDismissedPair(itemA, itemB)) return false;
-    if (hasConflictingPartOrSupplementMarkers(itemA.title, itemB.title)) return false;
+    if (hasConflictingPartOrSupplementMarkers(itemA.title, itemB.title))
+      return false;
     const metaA = asMetaObject(itemA.metadata);
     const metaB = asMetaObject(itemB.metadata);
     const typeA = this.resolveItemType(itemA);
@@ -120,8 +149,12 @@ export class DuplicateDetectorService {
       typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
 
     if (idType === 'isbn') {
-      const doiA = normalizeDoi(toStr(getEffectiveItemField(itemA, 'doi', metaA)));
-      const doiB = normalizeDoi(toStr(getEffectiveItemField(itemB, 'doi', metaB)));
+      const doiA = normalizeDoi(
+        toStr(getEffectiveItemField(itemA, 'doi', metaA)),
+      );
+      const doiB = normalizeDoi(
+        toStr(getEffectiveItemField(itemB, 'doi', metaB)),
+      );
       if (doiA && doiB && doiA !== doiB) return false;
 
       const involvesBookChapter =
@@ -136,7 +169,8 @@ export class DuplicateDetectorService {
         if (titleSim < 0.78) return false;
         const pagesA = toStr(metaA.pages).toLowerCase();
         const pagesB = toStr(metaB.pages).toLowerCase();
-        if (pagesA && pagesB && pagesA !== pagesB && titleSim < 0.92) return false;
+        if (pagesA && pagesB && pagesA !== pagesB && titleSim < 0.92)
+          return false;
       }
       for (const locatorKey of ['volume', 'edition'] as const) {
         const valA = normalizeNumericLocatorToken(toStr(metaA[locatorKey]));
@@ -146,8 +180,10 @@ export class DuplicateDetectorService {
       const normA = normalizeTitleForDedupe(itemA.title);
       const normB = normalizeTitleForDedupe(itemB.title);
       if (
-        normA && normB &&
-        !normA.includes(normB) && !normB.includes(normA) &&
+        normA &&
+        normB &&
+        !normA.includes(normB) &&
+        !normB.includes(normA) &&
         calculateTitleSimilarity(itemA.title, itemB.title) < 0.5
       ) {
         return false;
@@ -160,7 +196,10 @@ export class DuplicateDetectorService {
     itemA: DuplicateCandidateItem,
     itemB: DuplicateCandidateItem,
   ): boolean {
-    if (isGenericBoilerplateTitle(itemA.title) || isGenericBoilerplateTitle(itemB.title)) {
+    if (
+      isGenericBoilerplateTitle(itemA.title) ||
+      isGenericBoilerplateTitle(itemB.title)
+    ) {
       return true;
     }
     const toStr = (v: unknown) =>
@@ -173,12 +212,20 @@ export class DuplicateDetectorService {
     const effDoiB = toStr(getEffectiveItemField(itemB, 'doi', metaB));
     const rawArxivA =
       toStr(getEffectiveItemField(itemA, 'arxivId', metaA)) ||
-      (this.isPreprintDoi(effDoiA) && /arxiv\./i.test(effDoiA) ? effDoiA.replace(/^.*arxiv\./i, '') : '');
+      (this.isPreprintDoi(effDoiA) && /arxiv\./i.test(effDoiA)
+        ? effDoiA.replace(/^.*arxiv\./i, '')
+        : '');
     const rawArxivB =
       toStr(getEffectiveItemField(itemB, 'arxivId', metaB)) ||
-      (this.isPreprintDoi(effDoiB) && /arxiv\./i.test(effDoiB) ? effDoiB.replace(/^.*arxiv\./i, '') : '');
-    const normArxivA = rawArxivA ? normalizeArxivId(rawArxivA, { stripVersion: true }) : undefined;
-    const normArxivB = rawArxivB ? normalizeArxivId(rawArxivB, { stripVersion: true }) : undefined;
+      (this.isPreprintDoi(effDoiB) && /arxiv\./i.test(effDoiB)
+        ? effDoiB.replace(/^.*arxiv\./i, '')
+        : '');
+    const normArxivA = rawArxivA
+      ? normalizeArxivId(rawArxivA, { stripVersion: true })
+      : undefined;
+    const normArxivB = rawArxivB
+      ? normalizeArxivId(rawArxivB, { stripVersion: true })
+      : undefined;
     if (normArxivA && normArxivB && normArxivA !== normArxivB) return true;
 
     const rawPmidA = toStr(getEffectiveItemField(itemA, 'pmid', metaA));
@@ -190,22 +237,43 @@ export class DuplicateDetectorService {
     const normDoiA = normalizeDoi(effDoiA);
     const normDoiB = normalizeDoi(effDoiB);
     const isPreprintA = Boolean(
-      normArxivA || this.isPreprintDoi(effDoiA) || typeA === 'preprint' || isPreprintCandidateItem(itemA),
+      normArxivA ||
+      this.isPreprintDoi(effDoiA) ||
+      typeA === 'preprint' ||
+      isPreprintCandidateItem(itemA),
     );
     const isPreprintB = Boolean(
-      normArxivB || this.isPreprintDoi(effDoiB) || typeB === 'preprint' || isPreprintCandidateItem(itemB),
+      normArxivB ||
+      this.isPreprintDoi(effDoiB) ||
+      typeB === 'preprint' ||
+      isPreprintCandidateItem(itemB),
     );
-    if (normDoiA && normDoiB && normDoiA !== normDoiB && !isPreprintA && !isPreprintB) {
+    if (
+      normDoiA &&
+      normDoiB &&
+      normDoiA !== normDoiB &&
+      !isPreprintA &&
+      !isPreprintB
+    ) {
       return true;
     }
     if (isPreprintA || isPreprintB) return false;
 
     const pagesA = toStr(metaA.pages);
     const pagesB = toStr(metaB.pages);
-    if (pagesA && pagesB && !isLocalOrElectronicPageRange(pagesA) && !isLocalOrElectronicPageRange(pagesB)) {
+    if (
+      pagesA &&
+      pagesB &&
+      !isLocalOrElectronicPageRange(pagesA) &&
+      !isLocalOrElectronicPageRange(pagesB)
+    ) {
       const startPageA = pagesA.match(/\d+/)?.[0];
       const startPageB = pagesB.match(/\d+/)?.[0];
-      if (startPageA && startPageB && parseInt(startPageA, 10) !== parseInt(startPageB, 10)) {
+      if (
+        startPageA &&
+        startPageB &&
+        parseInt(startPageA, 10) !== parseInt(startPageB, 10)
+      ) {
         return true;
       }
     }
@@ -255,8 +323,8 @@ export class DuplicateDetectorService {
           : 0;
     const hasIdentifier = Boolean(
       getEffectiveItemField(item, 'arxivId', meta) ||
-        getEffectiveItemField(item, 'pmid', meta) ||
-        getEffectiveItemField(item, 'isbn', meta),
+      getEffectiveItemField(item, 'pmid', meta) ||
+      getEffectiveItemField(item, 'isbn', meta),
     );
     const isPlaceholderOrFilename =
       isPlaceholderItemTitle(item.title) || meta.isFilenameTitle === true;
@@ -348,7 +416,9 @@ export class DuplicateDetectorService {
           const updatedResults = await Promise.all(
             items.map(async (item) => {
               const meta = { ...asMetaObject(item.metadata) };
-              const existingDismissed = Array.isArray(meta.dismissedDuplicateIds)
+              const existingDismissed = Array.isArray(
+                meta.dismissedDuplicateIds,
+              )
                 ? (meta.dismissedDuplicateIds as string[])
                 : [];
               const peerIds = uniqueIds.filter((id) => id !== item.id);
@@ -373,7 +443,11 @@ export class DuplicateDetectorService {
                 },
               });
 
-              return { item, updated, dismissedDuplicateIds: meta.dismissedDuplicateIds };
+              return {
+                item,
+                updated,
+                dismissedDuplicateIds: meta.dismissedDuplicateIds,
+              };
             }),
           );
 
@@ -581,7 +655,10 @@ export class DuplicateDetectorService {
           m,
           (it) =>
             this.resolveItemType(
-              it as { itemType?: string | null; metadata?: Record<string, unknown> | null },
+              it as {
+                itemType?: string | null;
+                metadata?: Record<string, unknown> | null;
+              },
             ),
           hydratedRawById.get(m.id),
         ),
@@ -609,19 +686,33 @@ export class DuplicateDetectorService {
     if (!this.catalogGateway?.findMatchCandidates) {
       return { matchType: 'NO_MATCH', exactMatch: null, candidateItems: [] };
     }
-    const cleanDoi = candidate.doi ? normalizeDoi(candidate.doi) || candidate.doi.trim() : undefined;
-    const cleanArxiv = candidate.arxivId ? normalizeArxivId(candidate.arxivId) || candidate.arxivId.trim() : undefined;
-    const cleanPmid = candidate.pmid ? normalizePmid(candidate.pmid) || candidate.pmid.trim() : undefined;
-    const cleanIsbn = candidate.isbn ? normalizeIsbn(candidate.isbn) || candidate.isbn.trim() : undefined;
+    const cleanDoi = candidate.doi
+      ? normalizeDoi(candidate.doi) || candidate.doi.trim()
+      : undefined;
+    const cleanArxiv = candidate.arxivId
+      ? normalizeArxivId(candidate.arxivId) || candidate.arxivId.trim()
+      : undefined;
+    const cleanPmid = candidate.pmid
+      ? normalizePmid(candidate.pmid) || candidate.pmid.trim()
+      : undefined;
+    const cleanIsbn = candidate.isbn
+      ? normalizeIsbn(candidate.isbn) || candidate.isbn.trim()
+      : undefined;
     const proposedTitle = candidate.title?.trim();
     const significantWords =
       proposedTitle && proposedTitle.length > 5
-        ? tokenizeTitleWords(proposedTitle).filter((w) => w.length >= 3).slice(0, 3)
+        ? tokenizeTitleWords(proposedTitle)
+            .filter((w) => w.length >= 3)
+            .slice(0, 3)
         : [];
 
     return this.catalogGateway.findMatchCandidates(scope, {
-      doi: cleanDoi, arxivId: cleanArxiv, pmid: cleanPmid, isbn: cleanIsbn,
-      titleWords: significantWords, titlePrefix: proposedTitle,
+      doi: cleanDoi,
+      arxivId: cleanArxiv,
+      pmid: cleanPmid,
+      isbn: cleanIsbn,
+      titleWords: significantWords,
+      titlePrefix: proposedTitle,
     });
   }
 }

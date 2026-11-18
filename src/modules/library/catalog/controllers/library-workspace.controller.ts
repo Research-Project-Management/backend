@@ -1,7 +1,27 @@
-import { Controller, Get, Param, Query, Req, UseGuards, Post, Body, NotFoundException, Header, Put, Patch, HttpCode, HttpStatus, Optional } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  Req,
+  UseGuards,
+  Post,
+  Body,
+  NotFoundException,
+  Header,
+  Put,
+  Patch,
+  HttpCode,
+  HttpStatus,
+  Optional,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser, Public } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles, ProjectAccessGuard } from '@/modules/project/access';
+import {
+  ProjectRoleGuard,
+  ProjectRoles,
+  ProjectAccessGuard,
+} from '@/modules/project/access';
 import { normalizeProjectScopeId, isUuid } from '@/modules/library/core';
 import { CursorPaginationQueryDto } from '@/modules/library/catalog/dto/items.dto';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
@@ -10,7 +30,11 @@ import { ReaderBootstrapService } from '@/modules/library/catalog/services/reade
 import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
 import { SchemaValidatorService } from '@/modules/library/catalog/services/schema-validator.service';
 import { StateService } from '@/modules/library/catalog/services/state.service';
-import { UpdateStateDto, GetBatchStatesDto, ValidateItemPayloadDto } from '@/modules/library/catalog/dto/collections.dto';
+import {
+  UpdateStateDto,
+  GetBatchStatesDto,
+  ValidateItemPayloadDto,
+} from '@/modules/library/catalog/dto/collections.dto';
 
 export interface RequestWithAccessHint {
   role?: string;
@@ -44,7 +68,7 @@ export function buildGetItemsOptions(
   projectId?: string | null,
 ) {
   const effectiveProjectId = normalizeProjectScopeId(
-    projectId ?? query?.projectId,
+    projectId ?? query?.spaceId,
   );
   const effectiveOrderBy = query?.orderBy ?? query?.sortBy;
   const effectiveOrderDirection = query?.orderDirection ?? query?.sortOrder;
@@ -115,13 +139,14 @@ export function buildGetItemsOptions(
 
 @ApiTags('Library Workspace')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/library', 'api/v1/projects/:projectId/library'])
+@Controller(['api/v1/library', 'api/v1/spaces/:spaceId/library'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class LibraryWorkspaceController {
   constructor(
     private readonly queryService: ItemQueryService,
     @Optional() private readonly bootstrapService?: LibraryBootstrapService,
-    @Optional() private readonly readerBootstrapService?: ReaderBootstrapService,
+    @Optional()
+    private readonly readerBootstrapService?: ReaderBootstrapService,
   ) {}
 
   private extractAccessHint(req?: RequestWithAccessHint) {
@@ -137,12 +162,12 @@ export class LibraryWorkspaceController {
   async getLibraryBootstrap(
     @CurrentUser('id') userId: string,
     @Query() query?: ItemsListQuery & { includeItems?: string | boolean },
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
     @Req() req?: RequestWithAccessHint,
   ) {
     const projectId = normalizeProjectScopeId(
-      paramProjectId || queryProjectId || query?.projectId,
+      paramProjectId || queryProjectId || query?.spaceId,
     );
     const includeItems =
       query?.includeItems !== 'false' && query?.includeItems !== false;
@@ -168,8 +193,8 @@ export class LibraryWorkspaceController {
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Query('attachmentId') attachmentId?: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
     @Req() req?: RequestWithAccessHint,
   ) {
     if (!isUuid(id)) {
@@ -196,8 +221,8 @@ export class LibraryWorkspaceController {
   })
   async getLibraryPermissions(
     @CurrentUser('id') userId: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
     @Req() req?: RequestWithAccessHint,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
@@ -291,7 +316,7 @@ export class TypeController {
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/library/items/:itemId/state',
-  'api/v1/projects/:projectId/library/items/:itemId/state',
+  'api/v1/spaces/:spaceId/library/items/:itemId/state',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class StateController {
@@ -303,8 +328,8 @@ export class StateController {
   async getState(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     return this.stateService.getState(userId, itemId, projectId);
@@ -317,8 +342,8 @@ export class StateController {
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateStateDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     return this.stateService.updateState(userId, itemId, dto, projectId);
@@ -331,8 +356,8 @@ export class StateController {
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateStateDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     return this.updateState(
       userId,
@@ -350,8 +375,8 @@ export class StateController {
   async markAsRead(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     return this.stateService.markAsRead(userId, itemId, projectId);
@@ -362,9 +387,9 @@ export class StateController {
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/library/state',
-  'api/v1/projects/:projectId/library/state',
+  'api/v1/spaces/:spaceId/library/state',
   'api/v1/library/items/state',
-  'api/v1/projects/:projectId/library/items/state',
+  'api/v1/spaces/:spaceId/library/items/state',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class StateBatchController {
@@ -377,8 +402,8 @@ export class StateBatchController {
   async getBatchStates(
     @CurrentUser('id') userId: string,
     @Body() dto?: GetBatchStatesDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
     return this.stateService.getBatchStates(

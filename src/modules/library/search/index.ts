@@ -16,4 +16,3 @@ export * from './repositories/search-sql.operations';
 
 // Domain
 export * from './domain/item-search.policy';
-

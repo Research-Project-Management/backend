@@ -1,7 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, ReadStatus } from '@prisma/client';
-import { normalizeProjectScopeId, resolveSpaceId, VersionMismatchException, collectDescendantCollectionIds } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  resolveSpaceId,
+  VersionMismatchException,
+  collectDescendantCollectionIds,
+} from '@/modules/library/core';
 import {
   ExecuteSavedSearchOptions,
   StateEntity,
@@ -21,7 +26,8 @@ export class SavedSearchesRepository {
     rootCollectionIds: string[],
   ): Promise<Map<string, string[]>> {
     const descendantMap = new Map<string, string[]>();
-    if (!rootCollectionIds.length || !this.prisma?.libraryCollection?.findMany) return descendantMap;
+    if (!rootCollectionIds.length || !this.prisma?.libraryCollection?.findMany)
+      return descendantMap;
     const effectiveProjectId = this.normalizeProjectId(projectId);
     const scopeWhere: Prisma.LibraryCollectionWhereInput = {
       spaceId: resolveSpaceId({ userId, projectId: effectiveProjectId }),
@@ -33,7 +39,10 @@ export class SavedSearchesRepository {
         select: { id: true, parentId: true },
       });
       for (const colId of rootCollectionIds) {
-        const descendants = collectDescendantCollectionIds(allCollections, colId);
+        const descendants = collectDescendantCollectionIds(
+          allCollections,
+          colId,
+        );
         descendantMap.set(colId, [colId, ...descendants]);
       }
     } catch {
@@ -59,7 +68,9 @@ export class SavedSearchesRepository {
   ) {
     const client = this.getClient(tx);
     const effectiveProjectId =
-      this.normalizeProjectId(projectId || dto.projectId) || null;
+      this.normalizeProjectId(
+        projectId || (dto as { spaceId?: string }).spaceId || dto.projectId,
+      ) || null;
     const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
     return client.librarySavedSearch.create({
       data: {
@@ -235,7 +246,9 @@ export class SavedSearchesRepository {
     return res;
   }
 
-  async countMatchingItems(where: Prisma.LibraryItemWhereInput): Promise<number> {
+  async countMatchingItems(
+    where: Prisma.LibraryItemWhereInput,
+  ): Promise<number> {
     return this.prisma.libraryItem.count({ where });
   }
 
@@ -468,7 +481,7 @@ export class StateRepository {
       data.scrollPosition &&
       typeof data.scrollPosition === 'object' &&
       !Array.isArray(data.scrollPosition)
-        ? (data.scrollPosition as Record<string, unknown>)
+        ? data.scrollPosition
         : null;
     const resolvedAttachmentId =
       data.attachmentId?.trim() ||
@@ -664,12 +677,14 @@ export class StateRepository {
       ...userStateEntries.map(([userId, states]) => {
         const merged = pickPreferredMergedState(states);
         const targetState = states.find((s) => s.itemId === targetItemId) as
-          | { lastActiveAttachmentId?: string | null }
-          | undefined;
+          { lastActiveAttachmentId?: string | null } | undefined;
         const bestSource = states.find(
           (s) =>
             s.itemId !== targetItemId &&
-            Boolean((s as { lastActiveAttachmentId?: string | null }).lastActiveAttachmentId),
+            Boolean(
+              (s as { lastActiveAttachmentId?: string | null })
+                .lastActiveAttachmentId,
+            ),
         ) as { lastActiveAttachmentId?: string | null } | undefined;
         const lastActiveAttachmentId =
           targetState?.lastActiveAttachmentId ??
@@ -692,19 +707,17 @@ export class StateRepository {
             itemId: targetItemId,
             isStarred: merged.isStarred,
             rating: merged.maxRating,
-            readStatus: merged.readStatus as Prisma.LibraryItemStateUncheckedCreateInput['readStatus'],
+            readStatus: merged.readStatus,
             currentPage: merged.maxCurrentPage,
             scrollPosition: scrollJson ?? Prisma.JsonNull,
-            ...(lastActiveAttachmentId
-              ? { lastActiveAttachmentId }
-              : {}),
+            ...(lastActiveAttachmentId ? { lastActiveAttachmentId } : {}),
             lastOpenedAt: merged.latestOpenedAt,
             lastReadAt: merged.latestReadAt,
           },
           update: {
             isStarred: merged.isStarred,
             rating: merged.maxRating,
-            readStatus: merged.readStatus as Prisma.LibraryItemStateUncheckedUpdateInput['readStatus'],
+            readStatus: merged.readStatus,
             currentPage: merged.maxCurrentPage,
             scrollPosition: scrollJson,
             ...(lastActiveAttachmentId !== null

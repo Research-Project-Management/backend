@@ -1,4 +1,20 @@
-import { IsEnum, IsInt, IsOptional, IsString, IsNumber, Min, Max, MaxLength, Matches, IsArray, IsUUID, ValidateNested, ArrayMaxSize, ArrayMinSize, IsBoolean } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsNumber,
+  Min,
+  Max,
+  MaxLength,
+  Matches,
+  IsArray,
+  IsUUID,
+  ValidateNested,
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsBoolean,
+} from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { AnnotationType, LinkMode, AttachmentType } from '@prisma/client';
 
@@ -32,8 +48,7 @@ export function normalizeAnnotationType(
 ): AnnotationType | undefined {
   if (typeof value !== 'string') return value as AnnotationType | undefined;
   const lower = value.trim().toLowerCase();
-  if (lower === 'box' || lower === 'area')
-    return AnnotationType.rect;
+  if (lower === 'box' || lower === 'area') return AnnotationType.rect;
   if (lower === 'image') return AnnotationType.image;
   if (lower === 'strikethrough' || lower === 'strikeout')
     return AnnotationType.strike;

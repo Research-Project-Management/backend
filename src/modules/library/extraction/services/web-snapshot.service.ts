@@ -26,9 +26,7 @@ function escapeSnapshotHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
-function buildStandaloneSnapshotHtml(
-  params: SnapshotTemplateParams,
-): string {
+function buildStandaloneSnapshotHtml(params: SnapshotTemplateParams): string {
   const {
     canonicalUrl,
     capturedAtIso,

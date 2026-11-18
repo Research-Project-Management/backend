@@ -1,15 +1,33 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma, RelationType, TagType } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import { normalizeProjectScopeId, resolveSpaceId, disambiguateCitationKey, normalizeTags, resolveOrCreateAutomaticTagsInClient, sortLockKeys } from '@/modules/library/core';
-import { CreateItemData, UpdateItemData, ItemDetail } from '@/modules/library/core/types/bibliographic.types';
+import {
+  normalizeProjectScopeId,
+  resolveSpaceId,
+  disambiguateCitationKey,
+  normalizeTags,
+  resolveOrCreateAutomaticTagsInClient,
+  sortLockKeys,
+} from '@/modules/library/core';
+import {
+  CreateItemData,
+  UpdateItemData,
+  ItemDetail,
+} from '@/modules/library/core/types/bibliographic.types';
 import { TagInput } from '@/modules/library/catalog/types/catalog.types';
 import {
-  buildMyPublicationMetadata, calculateIdentifierChanges, normalizeItemIdentifiers,
+  buildMyPublicationMetadata,
+  calculateIdentifierChanges,
+  normalizeItemIdentifiers,
 } from '@/modules/library/catalog/domain/identifier-change.domain';
-import { ResolvedTag, buildTagTypeMap } from '@/modules/library/catalog/domain/creator-tag.mapper';
 import {
-  buildCommandCreateInput, extractUniqueCreateCollectionIds, resolveCreateDefaultTagType,
+  ResolvedTag,
+  buildTagTypeMap,
+} from '@/modules/library/catalog/domain/creator-tag.mapper';
+import {
+  buildCommandCreateInput,
+  extractUniqueCreateCollectionIds,
+  resolveCreateDefaultTagType,
 } from '@/modules/library/catalog/domain/item-command.mapper';
 
 export { buildTagTypeMap };
@@ -83,7 +101,9 @@ export async function syncTagsForCatalogItem(
       if (tid) {
         existingTypeByTagId.set(
           tid,
-          rawType === 'automatic' || rawType === 1 || rawType === TagType.automatic
+          rawType === 'automatic' ||
+            rawType === 1 ||
+            rawType === TagType.automatic
             ? TagType.automatic
             : TagType.manual,
         );
@@ -114,7 +134,11 @@ export async function syncTagsForCatalogItem(
     a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
   );
   await client.libraryItemTag.createMany({
-    data: orderedResolvedTags.map((t) => ({ tagId: t.id, itemId, type: t.type })),
+    data: orderedResolvedTags.map((t) => ({
+      tagId: t.id,
+      itemId,
+      type: t.type,
+    })),
     skipDuplicates: true,
   });
 }
@@ -136,8 +160,7 @@ export async function syncCreatedIdentifiers(
   if (!client.itemIdentifier || identifiers.length === 0) return;
   const validIdentifiers = identifiers.filter((ident) => Boolean(ident.value));
   const upsertFn = client.itemIdentifier.upsert as
-    | ((args: Record<string, unknown>) => Promise<unknown>)
-    | undefined;
+    ((args: Record<string, unknown>) => Promise<unknown>) | undefined;
   if (!upsertFn) return;
   await Promise.all(
     validIdentifiers.map((ident) =>
@@ -181,11 +204,9 @@ export async function syncUpdatedIdentifiers(
 ): Promise<void> {
   if (!client.itemIdentifier) return;
   const deleteManyFn = client.itemIdentifier.deleteMany as
-    | ((args: Record<string, unknown>) => Promise<unknown>)
-    | undefined;
+    ((args: Record<string, unknown>) => Promise<unknown>) | undefined;
   const upsertFn = client.itemIdentifier.upsert as
-    | ((args: Record<string, unknown>) => Promise<unknown>)
-    | undefined;
+    ((args: Record<string, unknown>) => Promise<unknown>) | undefined;
   const changes = calculateIdentifierChanges(
     cleanIds,
     existing,
@@ -505,18 +526,20 @@ export async function setMyPublicationInClient(
       'includeNotesInMyPublications',
       'authorshipConfirmed',
     ].some((k) => k in existingMetaObj);
-    if (!hasStaleSharedPubKeys && typeof client.libraryItem?.findUnique === 'function') {
+    if (
+      !hasStaleSharedPubKeys &&
+      typeof client.libraryItem?.findUnique === 'function'
+    ) {
       const reloaded = await client.libraryItem.findUnique({
         where: { id },
         include: buildCommandMutationInclude(userId),
       });
       if (reloaded) return reloaded;
     }
-    const strippedMeta = buildMyPublicationMetadata(
-      existing.metadata,
-      false,
-      { ...options, stripSharedFlag: true },
-    );
+    const strippedMeta = buildMyPublicationMetadata(existing.metadata, false, {
+      ...options,
+      stripSharedFlag: true,
+    });
     return client.libraryItem.update({
       where: { id },
       data: {
@@ -549,17 +572,33 @@ export async function resolveCreateItemRelations(
   projectId?: string,
 ) {
   const effectiveProjectId =
-    (projectId && projectId !== 'user' && isUuid(projectId) ? projectId : undefined) ||
+    (projectId && projectId !== 'user' && isUuid(projectId)
+      ? projectId
+      : undefined) ||
     (data.projectId && isUuid(data.projectId) ? data.projectId : null);
-  const rawTagList = [...(data.tags || []), ...(data.keywords || []), ...(data.labels || [])];
+  const rawTagList = [
+    ...(data.tags || []),
+    ...(data.keywords || []),
+    ...(data.labels || []),
+  ];
   const defaultTagType = resolveCreateDefaultTagType(data);
   const rawUniqueCollectionIds = extractUniqueCreateCollectionIds(data);
   const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
   const [resolvedTags, validCollections] = await Promise.all([
-    resolveOrCreateTags(client, userId, rawTagList, defaultTagType, effectiveProjectId),
+    resolveOrCreateTags(
+      client,
+      userId,
+      rawTagList,
+      defaultTagType,
+      effectiveProjectId,
+    ),
     rawUniqueCollectionIds.length > 0 && client.libraryCollection
       ? client.libraryCollection.findMany({
-          where: { id: { in: rawUniqueCollectionIds }, spaceId, deletedAt: null },
+          where: {
+            id: { in: rawUniqueCollectionIds },
+            spaceId,
+            deletedAt: null,
+          },
           select: { id: true },
         })
       : Promise.resolve(undefined),
@@ -567,12 +606,21 @@ export async function resolveCreateItemRelations(
   const validCollectionIds = Array.isArray(validCollections)
     ? new Set(validCollections.map((c) => c.id))
     : undefined;
-  const built = buildCommandCreateInput(userId, data, { resolvedTags, validCollectionIds }, projectId);
+  const built = buildCommandCreateInput(
+    userId,
+    data,
+    { resolvedTags, validCollectionIds },
+    projectId,
+  );
   if (built.rawCitationKey) {
-    built.createData.citationKey = await disambiguateCitationKey(client, built.rawCitationKey, {
-      userId,
-      projectId: effectiveProjectId,
-    });
+    built.createData.citationKey = await disambiguateCitationKey(
+      client,
+      built.rawCitationKey,
+      {
+        userId,
+        projectId: effectiveProjectId,
+      },
+    );
   }
   return built;
 }
@@ -585,7 +633,11 @@ export async function syncSpaceLabelsToLibraryTags(
   const db = client as unknown as {
     spaceLabel?: {
       findMany: (args: unknown) => Promise<
-        Array<{ name: string; color?: string | null; createdById?: string | null }>
+        Array<{
+          name: string;
+          color?: string | null;
+          createdById?: string | null;
+        }>
       >;
     };
     libraryTag?: { upsert: (args: unknown) => Promise<unknown> };

@@ -299,9 +299,9 @@ export function normalizeTags(
     const isExplicitManualItem =
       typeof item === 'object' &&
       item !== null &&
-      ('type' in item &&
-        ((item as { type?: unknown }).type === 0 ||
-          (item as { type?: unknown }).type === 'manual'));
+      'type' in item &&
+      ((item as { type?: unknown }).type === 0 ||
+        (item as { type?: unknown }).type === 'manual');
     const effectiveOptions =
       options?.allowManualAcademicTerms || isExplicitManualItem
         ? { ...options, allowManualAcademicTerms: true }
@@ -449,4 +449,3 @@ export function resolveCanonicalArxivCategory(
 
   return undefined;
 }
-

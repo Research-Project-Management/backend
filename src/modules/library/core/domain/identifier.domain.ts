@@ -66,16 +66,25 @@ export function stripSurroundingPunctuation(raw: string): string {
     const closeParens = countChar(clean, ')');
     const openBrackets = countChar(clean, '[');
     const closeBrackets = countChar(clean, ']');
-    if (clean.endsWith(')') && closeParens > openParens) clean = clean.slice(0, -1).trim();
-    if (clean.endsWith(']') && closeBrackets > openBrackets) clean = clean.slice(0, -1).trim();
-    if (clean.startsWith('(') && openParens > closeParens) clean = clean.slice(1).trim();
-    if (clean.startsWith('[') && openBrackets > closeBrackets) clean = clean.slice(1).trim();
+    if (clean.endsWith(')') && closeParens > openParens)
+      clean = clean.slice(0, -1).trim();
+    if (clean.endsWith(']') && closeBrackets > openBrackets)
+      clean = clean.slice(0, -1).trim();
+    if (clean.startsWith('(') && openParens > closeParens)
+      clean = clean.slice(1).trim();
+    if (clean.startsWith('[') && openBrackets > closeBrackets)
+      clean = clean.slice(1).trim();
   }
   return clean;
 }
 
 export function normalizeDoi(doi?: string | null): string | undefined {
-  if (!doi || typeof doi !== 'string' || doi.length > MAX_IDENTIFIER_INPUT_LENGTH) return undefined;
+  if (
+    !doi ||
+    typeof doi !== 'string' ||
+    doi.length > MAX_IDENTIFIER_INPUT_LENGTH
+  )
+    return undefined;
   let clean = stripSurroundingPunctuation(doi);
 
   // Nature article URL: nature.com/articles/<slug>
@@ -590,27 +599,63 @@ export function extractFileIdFromUrl(url?: string | null): string | null {
 }
 
 const CITATION_KEY_STOPWORDS = new Set([
-  'a', 'an', 'the', 'on', 'in', 'of', 'for', 'and', 'to', 'with',
-  'by', 'from', 'at', 'as', 'into', 'towards', 'toward', 'via', 'using',
+  'a',
+  'an',
+  'the',
+  'on',
+  'in',
+  'of',
+  'for',
+  'and',
+  'to',
+  'with',
+  'by',
+  'from',
+  'at',
+  'as',
+  'into',
+  'towards',
+  'toward',
+  'via',
+  'using',
 ]);
 
 export function generateCitationKey(metadata: {
   citationKey?: string | null;
   creators?: Array<{
-    lastName?: string | null; family?: string | null; fullName?: string | null;
-    name?: string | null; fieldMode?: number | string | null;
+    lastName?: string | null;
+    family?: string | null;
+    fullName?: string | null;
+    name?: string | null;
+    fieldMode?: number | string | null;
   }> | null;
   authors?: Array<
-    string | { lastName?: string | null; family?: string | null; fullName?: string | null; name?: string | null }
+    | string
+    | {
+        lastName?: string | null;
+        family?: string | null;
+        fullName?: string | null;
+        name?: string | null;
+      }
   > | null;
-  year?: number | string | null; publicationDate?: string | null; date?: string | null; title?: string | null;
+  year?: number | string | null;
+  publicationDate?: string | null;
+  date?: string | null;
+  title?: string | null;
 }): string {
-  if (metadata.citationKey && metadata.citationKey.trim()) return metadata.citationKey.trim();
+  if (metadata.citationKey && metadata.citationKey.trim())
+    return metadata.citationKey.trim();
 
   const extractFirstNonStopwordToken = (str: string): string => {
-    const normalized = str.replace(/[đĐ]/g, 'd').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const normalized = str
+      .replace(/[đĐ]/g, 'd')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
     const tokens = normalized.match(/[a-z0-9]+/g) || [];
-    return tokens.find((t) => !CITATION_KEY_STOPWORDS.has(t)) || tokens[0] || 'anon';
+    return (
+      tokens.find((t) => !CITATION_KEY_STOPWORDS.has(t)) || tokens[0] || 'anon'
+    );
   };
 
   const resolveFamilyFromRawString = (raw: string): string => {
@@ -618,7 +663,9 @@ export function generateCitationKey(metadata: {
     if (!trimmed) return 'anon';
     const parsed = parseCreatorString(trimmed);
     if (parsed.fieldMode === 1) {
-      return extractFirstNonStopwordToken(parsed.lastName || parsed.fullName || trimmed);
+      return extractFirstNonStopwordToken(
+        parsed.lastName || parsed.fullName || trimmed,
+      );
     }
     return parsed.lastName || 'anon';
   };
@@ -629,48 +676,77 @@ export function generateCitationKey(metadata: {
 
   if (firstCreator?.fieldMode === 1) {
     const rawSingle = (
-      firstCreator.lastName || firstCreator.family || firstCreator.fullName || firstCreator.name || ''
+      firstCreator.lastName ||
+      firstCreator.family ||
+      firstCreator.fullName ||
+      firstCreator.name ||
+      ''
     ).trim();
     family = extractFirstNonStopwordToken(rawSingle);
   } else if (firstCreator?.lastName || firstCreator?.family) {
     family = (firstCreator.lastName || firstCreator.family || '').trim();
   } else if (firstCreator?.fullName || firstCreator?.name) {
-    family = resolveFamilyFromRawString((firstCreator.fullName || firstCreator.name || '').trim());
+    family = resolveFamilyFromRawString(
+      (firstCreator.fullName || firstCreator.name || '').trim(),
+    );
   } else if (
-    firstAuthor && typeof firstAuthor === 'object' &&
-    (firstAuthor.lastName || firstAuthor.family || firstAuthor.fullName || firstAuthor.name)
+    firstAuthor &&
+    typeof firstAuthor === 'object' &&
+    (firstAuthor.lastName ||
+      firstAuthor.family ||
+      firstAuthor.fullName ||
+      firstAuthor.name)
   ) {
     if ((firstAuthor as { fieldMode?: number | null }).fieldMode === 1) {
       const rawSingle = (
-        firstAuthor.lastName || firstAuthor.family || firstAuthor.fullName || firstAuthor.name || ''
+        firstAuthor.lastName ||
+        firstAuthor.family ||
+        firstAuthor.fullName ||
+        firstAuthor.name ||
+        ''
       ).trim();
       family = extractFirstNonStopwordToken(rawSingle);
     } else if (firstAuthor.lastName || firstAuthor.family) {
       family = (firstAuthor.lastName || firstAuthor.family || '').trim();
     } else {
-      family = resolveFamilyFromRawString((firstAuthor.fullName || firstAuthor.name || '').trim());
+      family = resolveFamilyFromRawString(
+        (firstAuthor.fullName || firstAuthor.name || '').trim(),
+      );
     }
   } else if (typeof firstAuthor === 'string' && firstAuthor.trim()) {
     family = resolveFamilyFromRawString(firstAuthor);
   }
 
   const cleanFamily =
-    family.replace(/[đĐ]/g, 'd').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '') ||
-    'anon';
+    family
+      .replace(/[đĐ]/g, 'd')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '') || 'anon';
 
   const yearStr = metadata.year
     ? String(metadata.year)
-    : (metadata.publicationDate || metadata.date)?.match(/\b(\d{4})\b/)?.[1] || 'nd';
+    : (metadata.publicationDate || metadata.date)?.match(/\b(\d{4})\b/)?.[1] ||
+      'nd';
 
-  const rawTitle = (metadata.title || '').replace(/[đĐ]/g, 'd').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const rawTitle = (metadata.title || '')
+    .replace(/[đĐ]/g, 'd')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
   const words = rawTitle.match(/[a-z0-9]{3,}/g) || [];
-  const titleWord = words.find((w) => !CITATION_KEY_STOPWORDS.has(w)) || words[0] || 'work';
+  const titleWord =
+    words.find((w) => !CITATION_KEY_STOPWORDS.has(w)) || words[0] || 'work';
 
   return `${cleanFamily}${yearStr}${titleWord}`;
 }
 
 export const CANONICAL_IDENTIFIER_URI_BUILDERS: Readonly<
-  Record<'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'issn', (val: string) => string>
+  Record<
+    'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'issn',
+    (val: string) => string
+  >
 > = {
   doi: (v) => `https://doi.org/${v}`,
   arxiv: (v) => `https://arxiv.org/abs/${v}`,
@@ -688,8 +764,9 @@ export function buildCanonicalIdentifierUri(
   const trimmedVal = value.trim();
   if (!trimmedVal) return null;
   const normType = type.trim().toLowerCase();
-  const key = (normType === 'arxivid' ? 'arxiv' : normType) as keyof typeof CANONICAL_IDENTIFIER_URI_BUILDERS;
+  const key = (
+    normType === 'arxivid' ? 'arxiv' : normType
+  ) as keyof typeof CANONICAL_IDENTIFIER_URI_BUILDERS;
   const builder = CANONICAL_IDENTIFIER_URI_BUILDERS[key];
   return builder ? builder(trimmedVal) : null;
 }
-

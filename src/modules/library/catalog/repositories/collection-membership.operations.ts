@@ -88,7 +88,9 @@ export async function executeAssignItemsToCollection(
   const validateInClient = async (tx?: Prisma.TransactionClient) => {
     const [collection, validItemIds] = await Promise.all([
       repo.findById(userId, collectionId, tx, projectId),
-      ids.length > 0 ? repo.findValidItemIds(ids, scopeWhere, tx) : Promise.resolve([]),
+      ids.length > 0
+        ? repo.findValidItemIds(ids, scopeWhere, tx)
+        : Promise.resolve([]),
     ]);
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
@@ -227,7 +229,8 @@ export async function executeDeleteCollectionWithCascade(
         projectId ??
           (typeof existingRec.projectId === 'string'
             ? existingRec.projectId
-            : typeof existingRec.spaceId === 'string' && existingRec.spaceId !== userId
+            : typeof existingRec.spaceId === 'string' &&
+                existingRec.spaceId !== userId
               ? existingRec.spaceId
               : undefined),
       ) ?? undefined;
@@ -322,7 +325,8 @@ export async function executeDeleteCollectionWithCascade(
           deletedItemIds,
           preResolvedDelete,
         } = await resolveCascadeTargets(tx);
-        let reparentedChildCollections: Array<{ id: string; version: number }> = [];
+        let reparentedChildCollections: Array<{ id: string; version: number }> =
+          [];
         if (
           (strategy === 'orphan' || strategy === 'move-to-parent') &&
           tx?.libraryCollection?.findMany
@@ -703,7 +707,9 @@ export async function executeCopyCollectionSubtree(
 
       const children = childrenByParent.get(source.id) ?? [];
       if (children.length > 0) {
-        await Promise.all(children.map((child) => cloneNode(child, created.id, false)));
+        await Promise.all(
+          children.map((child) => cloneNode(child, created.id, false)),
+        );
       }
 
       return created;

@@ -1,20 +1,46 @@
 import {
-  Injectable, Inject, Logger, NotFoundException, UnprocessableEntityException, Optional,
+  Injectable,
+  Inject,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import {
-  CreateItemData, UpdateItemData, ItemDetail, ItemTransactionContext,
+  CreateItemData,
+  UpdateItemData,
+  ItemDetail,
+  ItemTransactionContext,
 } from '@/modules/library/core/types/bibliographic.types';
 import {
-  sanitizeItemTitle, normalizeProjectScopeId, TransactionHelpers, executeWithPostCommit, UNIT_OF_WORK,
-  IUnitOfWork, LIBRARY_EVENT_TYPES, buildItemCreatedOutboxPayload, LibraryItemSource, ItemsMapper,
-  SEARCH_FACADE, ISearchFacade,
+  sanitizeItemTitle,
+  normalizeProjectScopeId,
+  TransactionHelpers,
+  executeWithPostCommit,
+  UNIT_OF_WORK,
+  IUnitOfWork,
+  LIBRARY_EVENT_TYPES,
+  buildItemCreatedOutboxPayload,
+  LibraryItemSource,
+  ItemsMapper,
+  SEARCH_FACADE,
+  ISearchFacade,
 } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
-import { SchemaValidatorService, ItemCacheCoordinator } from './schema-validator.service';
-import { executeBulkSoftDeleteInTx, executeBulkRestoreInTx, executeBulkPurgeInTx, executeEmptyTrashInTx, executePurgeExpiredTrashInTx } from '../repositories/command-bulk.operations';
+import {
+  SchemaValidatorService,
+  ItemCacheCoordinator,
+} from './schema-validator.service';
+import {
+  executeBulkSoftDeleteInTx,
+  executeBulkRestoreInTx,
+  executeBulkPurgeInTx,
+  executeEmptyTrashInTx,
+  executePurgeExpiredTrashInTx,
+} from '../repositories/command-bulk.operations';
 export type { ItemTransactionContext };
 @Injectable()
 export class ItemService {
@@ -28,16 +54,32 @@ export class ItemService {
     @Optional() private readonly validator?: SchemaValidatorService,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() cacheCoordinator?: ItemCacheCoordinator,
-    @Optional() @Inject(SEARCH_FACADE) private readonly searchGateway?: ISearchFacade,
+    @Optional()
+    @Inject(SEARCH_FACADE)
+    private readonly searchGateway?: ISearchFacade,
   ) {
     this.cacheCoordinator = cacheCoordinator ?? new ItemCacheCoordinator(cache);
   }
-  private stripPersonalOverlayForSharedScope<T>(item: T, projectId?: string | null): T {
+  private stripPersonalOverlayForSharedScope<T>(
+    item: T,
+    projectId?: string | null,
+  ): T {
     if (!projectId || !item || typeof item !== 'object') return item;
     const clone = { ...(item as unknown as Record<string, unknown>) };
     for (const k of [
-      'isStarred', 'starred', 'isRead', 'readStatus', 'rating', 'currentPage',
-      'lastReadPage', 'scrollPosition', 'lastOpenedAt', 'lastReadAt', 'isMyPublication', 'states', 'publications',
+      'isStarred',
+      'starred',
+      'isRead',
+      'readStatus',
+      'rating',
+      'currentPage',
+      'lastReadPage',
+      'scrollPosition',
+      'lastOpenedAt',
+      'lastReadAt',
+      'isMyPublication',
+      'states',
+      'publications',
     ]) {
       delete clone[k];
     }
@@ -45,12 +87,23 @@ export class ItemService {
   }
 
   async invalidateItemCache(
-    id: string, userId?: string, projectId?: string, options?: { skipScopeInvalidation?: boolean },
+    id: string,
+    userId?: string,
+    projectId?: string,
+    options?: { skipScopeInvalidation?: boolean },
   ): Promise<void> {
-    return this.cacheCoordinator.invalidateItemCache(id, userId, projectId, options);
+    return this.cacheCoordinator.invalidateItemCache(
+      id,
+      userId,
+      projectId,
+      options,
+    );
   }
 
-  async invalidateScopeListCache(userId: string, projectId?: string): Promise<void> {
+  async invalidateScopeListCache(
+    userId: string,
+    projectId?: string,
+  ): Promise<void> {
     return this.cacheCoordinator.invalidateScopeListCache(userId, projectId);
   }
 
@@ -60,7 +113,12 @@ export class ItemService {
     projectId?: string,
     additionalProjectIds?: Array<string | null | undefined>,
   ): Promise<void> {
-    return this.cacheCoordinator.invalidateBulkItemsCache(itemIds, userId, projectId, additionalProjectIds);
+    return this.cacheCoordinator.invalidateBulkItemsCache(
+      itemIds,
+      userId,
+      projectId,
+      additionalProjectIds,
+    );
   }
 
   // ===========================================================================
@@ -69,7 +127,10 @@ export class ItemService {
 
   async getItem(userId: string, id: string, projectId?: string) {
     const item = await this.query.findById(userId, id, projectId);
-    return item ? (ItemsMapper.mapFlattenedState(item, userId) ?? ItemsMapper.toDomain(item)) : null;
+    return item
+      ? (ItemsMapper.mapFlattenedState(item, userId) ??
+          ItemsMapper.toDomain(item))
+      : null;
   }
 
   // ===========================================================================
@@ -80,20 +141,33 @@ export class ItemService {
     userId: string,
     data: CreateItemData,
     context?: Partial<ItemTransactionContext> & {
-      projectId?: string; source?: LibraryItemSource; idempotencyKey?: string; correlationId?: string;
+      projectId?: string;
+      source?: LibraryItemSource;
+      idempotencyKey?: string;
+      correlationId?: string;
     },
     projectId?: string,
   ): Promise<ItemDetail> {
     const dataRec = data as Record<string, unknown>;
-    const dataEf = data.extraFields && typeof data.extraFields === 'object' ? data.extraFields : {};
+    const dataEf =
+      data.extraFields && typeof data.extraFields === 'object'
+        ? data.extraFields
+        : {};
     const fallbackTitle =
-      data.title ?? (dataRec.caseName as string | undefined) ?? (dataRec.nameOfAct as string | undefined) ??
-      (dataRec.subject as string | undefined) ?? (dataEf.caseName as string | undefined) ??
-      (dataEf.nameOfAct as string | undefined) ?? (dataEf.subject as string | undefined);
+      data.title ??
+      (dataRec.caseName as string | undefined) ??
+      (dataRec.nameOfAct as string | undefined) ??
+      (dataRec.subject as string | undefined) ??
+      (dataEf.caseName as string | undefined) ??
+      (dataEf.nameOfAct as string | undefined) ??
+      (dataEf.subject as string | undefined);
     const cleanTitle = sanitizeItemTitle(fallbackTitle);
-    if (!cleanTitle) throw new UnprocessableEntityException('Item title cannot be empty');
+    if (!cleanTitle)
+      throw new UnprocessableEntityException('Item title cannot be empty');
     data.title = cleanTitle;
-    const isPreNormalized = Boolean((data as { isPreNormalized?: boolean }).isPreNormalized);
+    const isPreNormalized = Boolean(
+      (data as { isPreNormalized?: boolean }).isPreNormalized,
+    );
     const valRes = this.validator?.validateAndSanitizeItem
       ? this.validator.validateAndSanitizeItem(data.itemType, data)
       : { sanitizedItem: data, warnings: [] };
@@ -105,40 +179,96 @@ export class ItemService {
         configurable: true,
       });
     }
-    const effectiveProjectId = normalizeProjectScopeId(projectId || context?.projectId || itemPayload.projectId);
-    const execute = async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
-      const item = await this.command.create(userId, itemPayload, tx, effectiveProjectId);
-      const domainCreated = (ItemsMapper.mapFlattenedState(item, userId) ?? ItemsMapper.toDomain(item)) as ItemDetail;
-      const sharedCreatedData = this.stripPersonalOverlayForSharedScope(domainCreated, effectiveProjectId);
+    const effectiveProjectId = normalizeProjectScopeId(
+      projectId || context?.projectId || itemPayload.projectId,
+    );
+    const execute = async (
+      tx: Prisma.TransactionClient,
+      helpers: TransactionHelpers,
+    ) => {
+      const item = await this.command.create(
+        userId,
+        itemPayload,
+        tx,
+        effectiveProjectId,
+      );
+      const domainCreated = (ItemsMapper.mapFlattenedState(item, userId) ??
+        ItemsMapper.toDomain(item)) as ItemDetail;
+      const sharedCreatedData = this.stripPersonalOverlayForSharedScope(
+        domainCreated,
+        effectiveProjectId,
+      );
       await helpers.appendChange(
         { userId, projectId: effectiveProjectId },
-        { entityType: 'Item', entityId: item.id, action: 'create', version: item.version, data: sharedCreatedData },
+        {
+          entityType: 'Item',
+          entityId: item.id,
+          action: 'create',
+          version: item.version,
+          data: sharedCreatedData,
+        },
       );
       const payload = buildItemCreatedOutboxPayload({
-        itemId: item.id, userId, projectId: effectiveProjectId, title: item.title,
-        source: context?.source ?? 'manual', doi: item.doi,
+        itemId: item.id,
+        userId,
+        projectId: effectiveProjectId,
+        title: item.title,
+        source: context?.source ?? 'manual',
+        doi: item.doi,
       });
       await helpers.publishOutbox(
-        { userId, projectId: effectiveProjectId }, item.id, LIBRARY_EVENT_TYPES.ITEM_CREATED, payload,
+        { userId, projectId: effectiveProjectId },
+        item.id,
+        LIBRARY_EVENT_TYPES.ITEM_CREATED,
+        payload,
       );
-      const createdItemAttachments = Array.isArray((item as { attachments?: unknown[] }).attachments)
-        ? ((item as {
-            attachments: Array<{
-              id?: string; fileId?: string | null; url?: string | null; mimeType?: string | null;
-              filename?: string | null; linkMode?: string | null; extractionStatus?: string | null;
-            }>;
-          }).attachments)
+      const createdItemAttachments = Array.isArray(
+        (item as { attachments?: unknown[] }).attachments,
+      )
+        ? (
+            item as {
+              attachments: Array<{
+                id?: string;
+                fileId?: string | null;
+                url?: string | null;
+                mimeType?: string | null;
+                filename?: string | null;
+                linkMode?: string | null;
+                extractionStatus?: string | null;
+              }>;
+            }
+          ).attachments
         : [];
       for (const att of createdItemAttachments) {
         if (!att?.id) continue;
-        const attRec = att as { size?: number | bigint | null; storageKey?: string | null };
-        const isPdf = att.mimeType === 'application/pdf' || Boolean(att.filename && att.filename.toLowerCase().endsWith('.pdf'));
-        const hasRealSizeOrKey = Number(attRec.size ?? 0) > 0 || Boolean(attRec.storageKey);
-        const hasStoredBinary = att.linkMode !== 'linked_url' && hasRealSizeOrKey && Boolean(att.fileId || (att.url && !att.url.startsWith('http')));
-        if (isPdf && hasStoredBinary && (!att.extractionStatus || att.extractionStatus === 'PENDING')) {
+        const attRec = att as {
+          size?: number | bigint | null;
+          storageKey?: string | null;
+        };
+        const isPdf =
+          att.mimeType === 'application/pdf' ||
+          Boolean(att.filename && att.filename.toLowerCase().endsWith('.pdf'));
+        const hasRealSizeOrKey =
+          Number(attRec.size ?? 0) > 0 || Boolean(attRec.storageKey);
+        const hasStoredBinary =
+          att.linkMode !== 'linked_url' &&
+          hasRealSizeOrKey &&
+          Boolean(att.fileId || (att.url && !att.url.startsWith('http')));
+        if (
+          isPdf &&
+          hasStoredBinary &&
+          (!att.extractionStatus || att.extractionStatus === 'PENDING')
+        ) {
           await helpers.publishOutbox(
-            { userId, projectId: effectiveProjectId }, att.id, LIBRARY_EVENT_TYPES.ATTACHMENT_EXTRACTION_REQUESTED,
-            { attachmentId: att.id, itemId: item.id, userId, projectId: effectiveProjectId },
+            { userId, projectId: effectiveProjectId },
+            att.id,
+            LIBRARY_EVENT_TYPES.ATTACHMENT_EXTRACTION_REQUESTED,
+            {
+              attachmentId: att.id,
+              itemId: item.id,
+              userId,
+              projectId: effectiveProjectId,
+            },
           );
         }
       }
@@ -146,7 +276,9 @@ export class ItemService {
     };
     if (context?.tx && context?.helpers) {
       if (context.helpers.onAfterCommit) {
-        context.helpers.onAfterCommit(() => this.invalidateScopeListCache(userId, effectiveProjectId));
+        context.helpers.onAfterCommit(() =>
+          this.invalidateScopeListCache(userId, effectiveProjectId),
+        );
         return execute(context.tx, context.helpers);
       }
       const res = await execute(context.tx, context.helpers);
@@ -406,7 +538,9 @@ export class ItemService {
           data: { id, deletedAt: deletedAt.toISOString() },
         });
         await helpers.publishOutbox(
-          eventScope, id, LIBRARY_EVENT_TYPES.ITEM_DELETED,
+          eventScope,
+          id,
+          LIBRARY_EVENT_TYPES.ITEM_DELETED,
           { id, deletedAt, projectId: validProjectId, cascadedInTx: true },
         );
       }
@@ -487,8 +621,16 @@ export class ItemService {
         });
         await helpers.removeTombstone(eventScope, 'Item', id);
         await helpers.publishOutbox(
-          eventScope, id, LIBRARY_EVENT_TYPES.ITEM_RESTORED,
-          { itemId: id, userId, projectId: effectiveProjectId, restoredAt: new Date().toISOString(), cascadedInTx: true },
+          eventScope,
+          id,
+          LIBRARY_EVENT_TYPES.ITEM_RESTORED,
+          {
+            itemId: id,
+            userId,
+            projectId: effectiveProjectId,
+            restoredAt: new Date().toISOString(),
+            cascadedInTx: true,
+          },
         );
         return domainItem;
       },
@@ -536,11 +678,18 @@ export class ItemService {
             version: 0,
           });
           await helpers.publishOutbox(
-            eventScope, id, LIBRARY_EVENT_TYPES.ITEM_PURGED,
+            eventScope,
+            id,
+            LIBRARY_EVENT_TYPES.ITEM_PURGED,
             {
-              itemId: id, itemIds: [id], userId, projectId: validProjectId,
-              filePaths: purgeRes.storagePaths, purgedAt: new Date().toISOString(),
-              cascadedInTx: true, storageDeletedInTx: false,
+              itemId: id,
+              itemIds: [id],
+              userId,
+              projectId: validProjectId,
+              filePaths: purgeRes.storagePaths,
+              purgedAt: new Date().toISOString(),
+              cascadedInTx: true,
+              storageDeletedInTx: false,
             },
           );
         }
@@ -682,15 +831,34 @@ export class ItemService {
   }
   async emptyTrash(userId: string, projectId?: string) {
     const validProjectId = normalizeProjectScopeId(projectId);
-    const { succeededIds, failedIds, fileIdsToDelete } = await executeWithPostCommit(
-      this.libraryTx,
-      (tx, helpers) => executeEmptyTrashInTx({ command: this.command, userId, tx, helpers, validProjectId }),
-      async (res) => {
-        if (res.succeededIds.length > 0) await this.invalidateBulkItemsCache(res.succeededIds, userId, validProjectId);
-      },
-    );
-    if (fileIdsToDelete.length > 0) await this.command.deleteStorageFilesBatch(fileIdsToDelete);
-    return { success: true, purgedCount: succeededIds.length, succeededIds, failedIds };
+    const { succeededIds, failedIds, fileIdsToDelete } =
+      await executeWithPostCommit(
+        this.libraryTx,
+        (tx, helpers) =>
+          executeEmptyTrashInTx({
+            command: this.command,
+            userId,
+            tx,
+            helpers,
+            validProjectId,
+          }),
+        async (res) => {
+          if (res.succeededIds.length > 0)
+            await this.invalidateBulkItemsCache(
+              res.succeededIds,
+              userId,
+              validProjectId,
+            );
+        },
+      );
+    if (fileIdsToDelete.length > 0)
+      await this.command.deleteStorageFilesBatch(fileIdsToDelete);
+    return {
+      success: true,
+      purgedCount: succeededIds.length,
+      succeededIds,
+      failedIds,
+    };
   }
   async purgeExpiredTrash(retentionDays: number = 30, limit: number = 200) {
     let storagePathsToDelete: string[] = [];

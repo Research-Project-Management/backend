@@ -4,7 +4,10 @@ import {
   parseCreatorString,
 } from '@/modules/library/core';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
-import { CreatorInput, RisItem } from '@/modules/library/ingestion/types/metadata.types';
+import {
+  CreatorInput,
+  RisItem,
+} from '@/modules/library/ingestion/types/metadata.types';
 
 const RIS_TYPE_MAP: Record<string, string> = {
   JOUR: 'journalArticle',
@@ -365,29 +368,28 @@ type RisDirectFieldKey =
   | 'callNumber'
   | 'archive';
 
-const RIS_DIRECT_FIELD_MAP: Readonly<Record<string, RisDirectFieldKey>> =
-  {
-    J2: 'journalAbbr',
-    JA: 'journalAbbr',
-    VL: 'volume',
-    IS: 'issue',
-    SP: 'startPage',
-    EP: 'endPage',
-    DO: 'doi',
-    PB: 'publisher',
-    INST: 'publisher',
-    CY: 'place',
-    AD: 'place',
-    LA: 'language',
-    M1: 'rawM1',
-    U1: 'rawU1',
-    C3: 'rawC3',
-    ET: 'edition',
-    CN: 'callNumber',
-    CA: 'callNumber',
-    C1: 'callNumber',
-    L4: 'archive',
-  };
+const RIS_DIRECT_FIELD_MAP: Readonly<Record<string, RisDirectFieldKey>> = {
+  J2: 'journalAbbr',
+  JA: 'journalAbbr',
+  VL: 'volume',
+  IS: 'issue',
+  SP: 'startPage',
+  EP: 'endPage',
+  DO: 'doi',
+  PB: 'publisher',
+  INST: 'publisher',
+  CY: 'place',
+  AD: 'place',
+  LA: 'language',
+  M1: 'rawM1',
+  U1: 'rawU1',
+  C3: 'rawC3',
+  ET: 'edition',
+  CN: 'callNumber',
+  CA: 'callNumber',
+  C1: 'callNumber',
+  L4: 'archive',
+};
 
 type RisTagHandler = (
   record: FallbackRisRecord,

@@ -293,11 +293,7 @@ export interface IngestionRunSnapshot {
 // ============================================================================
 
 export type SubmissionKind =
-  | 'IDENTIFIER'
-  | 'RECORD'
-  | 'URL'
-  | 'FILE'
-  | 'CONNECTOR';
+  'IDENTIFIER' | 'RECORD' | 'URL' | 'FILE' | 'CONNECTOR';
 
 export type IdentifierType = 'DOI' | 'PMID' | 'ARXIV' | 'ISBN';
 export type RecordFormat =
@@ -502,10 +498,7 @@ export type RetractionNature =
   | 'manual';
 
 export type RetractionSource =
-  | 'crossref'
-  | 'openalex'
-  | 'retraction_watch'
-  | 'manual';
+  'crossref' | 'openalex' | 'retraction_watch' | 'manual';
 
 export interface RetractionDetails {
   nature: RetractionNature;

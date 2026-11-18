@@ -87,12 +87,19 @@ export class NotesService {
 
   async createNote(userId: string, data: CreateNoteData) {
     if (data.contentJson !== undefined && data.contentJson !== null) {
-      if (typeof data.contentJson !== 'object' || Array.isArray(data.contentJson)) {
-        throw new BadRequestException('contentJson must be a valid JSON object');
+      if (
+        typeof data.contentJson !== 'object' ||
+        Array.isArray(data.contentJson)
+      ) {
+        throw new BadRequestException(
+          'contentJson must be a valid JSON object',
+        );
       }
       const serialized = JSON.stringify(data.contentJson);
       if (serialized.length > 2_000_000) {
-        throw new BadRequestException('contentJson exceeds maximum size of 2MB');
+        throw new BadRequestException(
+          'contentJson exceeds maximum size of 2MB',
+        );
       }
     }
     if (data.itemId && this.itemQuery) {
@@ -139,9 +146,7 @@ export class NotesService {
         );
 
         const noteRec = note as
-          | { projectId?: string | null; spaceId?: string }
-          | null
-          | undefined;
+          { projectId?: string | null; spaceId?: string } | null | undefined;
         const noteProjectId =
           noteRec?.projectId ??
           (noteRec?.spaceId && noteRec.spaceId !== userId
@@ -161,9 +166,7 @@ export class NotesService {
 
     if (!ranPostCommitHook) {
       const createdNoteRec = createdNote as
-        | { projectId?: string | null; spaceId?: string }
-        | null
-        | undefined;
+        { projectId?: string | null; spaceId?: string } | null | undefined;
       await this.invalidateNoteItemCaches(
         userId,
         createdNoteRec?.projectId ??
@@ -183,12 +186,19 @@ export class NotesService {
     projectId?: string,
   ) {
     if (data.contentJson !== undefined && data.contentJson !== null) {
-      if (typeof data.contentJson !== 'object' || Array.isArray(data.contentJson)) {
-        throw new BadRequestException('contentJson must be a valid JSON object');
+      if (
+        typeof data.contentJson !== 'object' ||
+        Array.isArray(data.contentJson)
+      ) {
+        throw new BadRequestException(
+          'contentJson must be a valid JSON object',
+        );
       }
       const serialized = JSON.stringify(data.contentJson);
       if (serialized.length > 2_000_000) {
-        throw new BadRequestException('contentJson exceeds maximum size of 2MB');
+        throw new BadRequestException(
+          'contentJson exceeds maximum size of 2MB',
+        );
       }
     }
     const resolvedVersion = data?.expectedVersion;
@@ -244,11 +254,7 @@ export class NotesService {
         );
 
         helpers?.onAfterCommit?.(() =>
-          this.invalidateNoteItemCaches(
-            userId,
-            noteProjectId,
-            updated?.itemId,
-          ),
+          this.invalidateNoteItemCaches(userId, noteProjectId, updated?.itemId),
         );
 
         return updated;
@@ -257,9 +263,7 @@ export class NotesService {
 
     if (!ranPostCommitHook) {
       const updatedNoteRec = updatedNote as
-        | { projectId?: string | null; spaceId?: string }
-        | null
-        | undefined;
+        { projectId?: string | null; spaceId?: string } | null | undefined;
       await this.invalidateNoteItemCaches(
         userId,
         updatedNoteRec?.projectId ??
@@ -293,9 +297,7 @@ export class NotesService {
           validProjectId,
         );
         const existingRec = existing as
-          | { projectId?: string | null; spaceId?: string }
-          | null
-          | undefined;
+          { projectId?: string | null; spaceId?: string } | null | undefined;
         deletedItemId = existing?.itemId;
         deletedProjectId =
           validProjectId ||
@@ -496,11 +498,9 @@ export class NotesService {
                 ? preloadedCandidate.version
                 : undefined,
           }
-        : await this.getNote(
-            userId,
-            candidateNoteId,
-            effectiveProjectId,
-          ).catch(() => null);
+        : await this.getNote(userId, candidateNoteId, effectiveProjectId).catch(
+            () => null,
+          );
       if (existingNote) {
         const mergedTags = normalizeTags(
           [
@@ -566,5 +566,4 @@ export class NotesService {
       literatureNote: note,
     } as ExtractLiteratureNoteResult;
   }
-
 }

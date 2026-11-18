@@ -33,10 +33,7 @@ import { SubsystemUnavailableException } from '@/modules/library/core/errors/dom
 import { shouldRunWorkerConsumers } from '@/core';
 import { OutboxMetrics } from './outbox-metrics.service';
 import { OutboxDispatcher } from './outbox-dispatcher.service';
-import {
-  OutboxQueueConsumer,
-  OutboxBullProcessor,
-} from './outbox.processor';
+import { OutboxQueueConsumer, OutboxBullProcessor } from './outbox.processor';
 
 export type { OutboxDispatchHandler };
 export {

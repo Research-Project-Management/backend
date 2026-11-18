@@ -56,7 +56,15 @@ export class PdfAnnotationImporterService {
     }
 
     const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const itemRec = attachment.item as { spaceId?: string; createdById?: string; projectId?: string | null; userId?: string } | null | undefined;
+    const itemRec = attachment.item as
+      | {
+          spaceId?: string;
+          createdById?: string;
+          projectId?: string | null;
+          userId?: string;
+        }
+      | null
+      | undefined;
     if (itemRec) {
       if (itemRec.spaceId) {
         if (itemRec.spaceId !== (effectiveProjectId || userId)) {
@@ -81,10 +89,13 @@ export class PdfAnnotationImporterService {
       );
     }
 
-    const itemProjectId = itemRec?.projectId ?? (itemRec?.spaceId && itemRec.spaceId !== itemRec.createdById ? itemRec.spaceId : undefined);
+    const itemProjectId =
+      itemRec?.projectId ??
+      (itemRec?.spaceId && itemRec.spaceId !== itemRec.createdById
+        ? itemRec.spaceId
+        : undefined);
     const resolvedProjectId =
-      effectiveProjectId ||
-      normalizeProjectScopeId(itemProjectId ?? undefined);
+      effectiveProjectId || normalizeProjectScopeId(itemProjectId ?? undefined);
     const existingAnnotationsPromise =
       this.annotationsRepo.findExistingForImport(attachmentId);
     const storageFile = await this.storagePort.readOwnedFile({
@@ -122,7 +133,12 @@ export class PdfAnnotationImporterService {
       const numPages = documentProxy.numPages || 0;
       if (numPages === 0) {
         void existingAnnotationsPromise.catch(() => undefined);
-        return { imported: 0, importedCount: 0, totalFound: 0, pagesScanned: 0 };
+        return {
+          imported: 0,
+          importedCount: 0,
+          totalFound: 0,
+          pagesScanned: 0,
+        };
       }
 
       const existingAnnotations = await existingAnnotationsPromise;
@@ -308,8 +324,7 @@ export class PdfAnnotationImporterService {
               authorId: userId,
             });
 
-            const updatedAnchors =
-              existingAnchorsByPageAndType.get(dedupKey);
+            const updatedAnchors = existingAnchorsByPageAndType.get(dedupKey);
             if (updatedAnchors) {
               updatedAnchors.push({ x1: normX1, y1: normY1 });
             } else {
@@ -414,7 +429,10 @@ export class PdfAnnotationImporterService {
 
       const normX1 = Math.max(0, Math.min(1, (minX - originX) / pageWidth));
       const normY1 = Math.max(0, Math.min(1, (originY - maxY) / pageHeight));
-      const normW = Math.min(1 - normX1, Math.max(0, (maxX - minX) / pageWidth));
+      const normW = Math.min(
+        1 - normX1,
+        Math.max(0, (maxX - minX) / pageWidth),
+      );
       const normH = Math.min(
         1 - normY1,
         Math.max(0, (maxY - minY) / pageHeight),
@@ -524,7 +542,10 @@ export class PdfAnnotationImporterService {
       const ix1 = Math.max(0, pdfX / pageWidth);
       const ix2 = Math.min(1, (pdfX + itemWidth) / pageWidth);
       const iy1 = Math.max(0, (pageHeight - (pdfY + fontHeight)) / pageHeight);
-      const iy2 = Math.min(1, (pageHeight - pdfY + fontHeight * 0.25) / pageHeight);
+      const iy2 = Math.min(
+        1,
+        (pageHeight - pdfY + fontHeight * 0.25) / pageHeight,
+      );
 
       const intersects = normalizedRects.some((r) => {
         const overlapX = Math.min(ix2, r.x2) - Math.max(ix1, r.x1);

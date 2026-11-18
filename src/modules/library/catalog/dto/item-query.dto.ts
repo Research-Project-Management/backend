@@ -1,4 +1,17 @@
-import { IsString, IsOptional, IsArray, IsNumber, IsBoolean, Min, Max, IsUUID, ArrayMaxSize, ArrayNotEmpty, MaxLength, IsObject } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsArray,
+  IsNumber,
+  IsBoolean,
+  Min,
+  Max,
+  IsUUID,
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  MaxLength,
+  IsObject,
+} from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -94,7 +107,7 @@ export class CursorPaginationQueryDto {
 
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 
   @IsOptional()
   @IsString()
@@ -436,7 +449,10 @@ export class ImportItemIdsDto {
   @IsArray()
   @ArrayNotEmpty({ message: 'itemIds must be a non-empty array' })
   @ArrayMaxSize(100, { message: 'itemIds must contain at most 100 IDs' })
-  @IsUUID(undefined, { each: true, message: 'Each item ID must be a valid UUID' })
+  @IsUUID(undefined, {
+    each: true,
+    message: 'Each item ID must be a valid UUID',
+  })
   itemIds!: string[];
 }
 
@@ -489,7 +505,7 @@ export class ReResolveMetadataDto {
 
   @IsOptional()
   @IsUUID()
-  projectId?: string;
+  spaceId?: string;
 }
 
 export class LinkItemsDto {
@@ -541,5 +557,5 @@ export class MarkMyPublicationDto {
 
   @IsOptional()
   @IsUUID()
-  projectId?: string;
+  spaceId?: string;
 }

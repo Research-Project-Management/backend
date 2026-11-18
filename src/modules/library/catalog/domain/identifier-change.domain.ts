@@ -1,13 +1,29 @@
 import { Prisma } from '@prisma/client';
-import { normalizeDoi, normalizeArxivId, normalizePmid, normalizePmcid, normalizeIsbn, normalizeIssn, CANONICAL_IDENTIFIER_URI_BUILDERS, buildCanonicalIdentifierUri, cleanBannedString, extractExtraKeyValues, isPlaceholderItemTitle } from '@/modules/library/core';
+import {
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+  normalizePmcid,
+  normalizeIsbn,
+  normalizeIssn,
+  CANONICAL_IDENTIFIER_URI_BUILDERS,
+  buildCanonicalIdentifierUri,
+  cleanBannedString,
+  extractExtraKeyValues,
+  isPlaceholderItemTitle,
+} from '@/modules/library/core';
 import { ITEM_COLUMN_METADATA_FIELDS } from '@/modules/library/catalog/types/catalog.types';
 import { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 
 export { extractExtraKeyValues, ITEM_COLUMN_METADATA_FIELDS };
 
 const SAFE_PROVENANCE_AND_TELEMETRY_KEYS = [
-  'isFilenameTitle', 'disambiguationWarning', 'rejectedCitedDoi',
-  'promptUploadPdf', 'dismissedDuplicateIds', 'mergedFromIds',
+  'isFilenameTitle',
+  'disambiguationWarning',
+  'rejectedCitedDoi',
+  'promptUploadPdf',
+  'dismissedDuplicateIds',
+  'mergedFromIds',
 ] as const;
 
 export function applyMetadataProvenanceAndTelemetry(
@@ -17,15 +33,21 @@ export function applyMetadataProvenanceAndTelemetry(
   options: { isCreate: boolean; rawTitle: string | undefined },
 ): void {
   for (const key of SAFE_PROVENANCE_AND_TELEMETRY_KEYS) {
-    const val = dataRecord[key] !== undefined ? dataRecord[key] : dataExtra[key];
+    const val =
+      dataRecord[key] !== undefined ? dataRecord[key] : dataExtra[key];
     if (val === null) delete result[key];
     else if (val !== undefined) result[key] = val;
   }
   const asPlainObj = (v: unknown): Record<string, unknown> =>
-    v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? (v as Record<string, unknown>)
+      : {};
   const incomingProvTop = asPlainObj(dataRecord.fieldProvenance);
   const incomingProvExtra = asPlainObj(dataExtra.fieldProvenance);
-  if (Object.keys(incomingProvTop).length > 0 || Object.keys(incomingProvExtra).length > 0) {
+  if (
+    Object.keys(incomingProvTop).length > 0 ||
+    Object.keys(incomingProvExtra).length > 0
+  ) {
     result.fieldProvenance = {
       ...asPlainObj(result.fieldProvenance),
       ...incomingProvTop,
@@ -38,23 +60,36 @@ export function applyMetadataProvenanceAndTelemetry(
     Array.isArray(dataExtra.lockedFields) || dataExtra.lockedFields === null;
   if (hasExplicitLocksTop || hasExplicitLocksExtra) {
     const rawExplicitLocks = hasExplicitLocksTop
-      ? Array.isArray(dataRecord.lockedFields) ? (dataRecord.lockedFields as unknown[]) : []
-      : Array.isArray(dataExtra.lockedFields) ? (dataExtra.lockedFields as unknown[]) : [];
+      ? Array.isArray(dataRecord.lockedFields)
+        ? (dataRecord.lockedFields as unknown[])
+        : []
+      : Array.isArray(dataExtra.lockedFields)
+        ? (dataExtra.lockedFields as unknown[])
+        : [];
     const cleanedExplicitLocks = Array.from(
       new Set(
-        rawExplicitLocks.filter((f): f is string => typeof f === 'string' && f.trim().length > 0),
+        rawExplicitLocks.filter(
+          (f): f is string => typeof f === 'string' && f.trim().length > 0,
+        ),
       ),
     );
     const prevLocks = Array.isArray(result.lockedFields)
-      ? (result.lockedFields as unknown[]).filter((f): f is string => typeof f === 'string')
+      ? (result.lockedFields as unknown[]).filter(
+          (f): f is string => typeof f === 'string',
+        )
       : [];
     const newLockSet = new Set(cleanedExplicitLocks);
     const unlockedFields = prevLocks.filter((f) => !newLockSet.has(f));
-    if (unlockedFields.length > 0 && result.fieldProvenance && typeof result.fieldProvenance === 'object') {
+    if (
+      unlockedFields.length > 0 &&
+      result.fieldProvenance &&
+      typeof result.fieldProvenance === 'object'
+    ) {
       const nextProv = { ...asPlainObj(result.fieldProvenance) };
       for (const uf of unlockedFields) {
         const entry = asPlainObj(nextProv[uf]);
-        if (entry.isUserOverride === true || entry.source === 'UserOverride') delete nextProv[uf];
+        if (entry.isUserOverride === true || entry.source === 'UserOverride')
+          delete nextProv[uf];
       }
       result.fieldProvenance = nextProv;
     }
@@ -73,7 +108,10 @@ export function applyMetadataProvenanceAndTelemetry(
     if (provMap.title && typeof provMap.title === 'object') {
       result.fieldProvenance = {
         ...provMap,
-        title: { ...(provMap.title as Record<string, unknown>), isFilenameTitle: false },
+        title: {
+          ...(provMap.title as Record<string, unknown>),
+          isFilenameTitle: false,
+        },
       };
     }
   }
@@ -110,17 +148,29 @@ export function normalizeItemIdentifiers(
     ISSN?: string | null;
     extra?: string | null;
     extraFields?: Record<string, unknown> | null;
-    identifiers?: ReadonlyArray<{ type: string; value: string; canonicalUri?: string | null }> | null;
+    identifiers?: ReadonlyArray<{
+      type: string;
+      value: string;
+      canonicalUri?: string | null;
+    }> | null;
   },
   options?: { preserveOnInvalid?: boolean },
 ) {
   const rec = data as Record<string, unknown>;
-  const ef = data.extraFields && typeof data.extraFields === 'object' ? data.extraFields : {};
+  const ef =
+    data.extraFields && typeof data.extraFields === 'object'
+      ? data.extraFields
+      : {};
   const extraKv = extractExtraKeyValues(data.extra);
   const explicitByType: Record<string, string> = {};
   if (Array.isArray(data.identifiers)) {
     for (const ident of data.identifiers) {
-      if (ident && typeof ident.type === 'string' && typeof ident.value === 'string' && ident.value.trim()) {
+      if (
+        ident &&
+        typeof ident.type === 'string' &&
+        typeof ident.value === 'string' &&
+        ident.value.trim()
+      ) {
         const t = ident.type.trim().toLowerCase();
         if (!explicitByType[t]) explicitByType[t] = ident.value.trim();
       }
@@ -128,15 +178,23 @@ export function normalizeItemIdentifiers(
   }
   const isStaleExtraEcho = (val: string, extraKvKeys: string[]): boolean => {
     const trimmed = val.trim();
-    return extraKvKeys.some((ek) => extraKv[ek] !== undefined && extraKv[ek].trim() === trimmed);
+    return extraKvKeys.some(
+      (ek) => extraKv[ek] !== undefined && extraKv[ek].trim() === trimmed,
+    );
   };
-  const pickFirst = (keys: string[], extraKvKeys: string[]): string | null | undefined => {
+  const pickFirst = (
+    keys: string[],
+    extraKvKeys: string[],
+  ): string | null | undefined => {
     let sawTopNull = false;
     let sawTopEmpty = false;
     for (const k of keys) {
       const v = rec[k];
       if (v === undefined) continue;
-      if (v === null) { sawTopNull = true; continue; }
+      if (v === null) {
+        sawTopNull = true;
+        continue;
+      }
       if (typeof v === 'string') {
         if (v.trim() !== '') return v;
         sawTopEmpty = true;
@@ -151,10 +209,14 @@ export function normalizeItemIdentifiers(
     for (const k of keys) {
       const v = ef[k];
       if (v === undefined) continue;
-      if (v === null) { sawEfNull = true; continue; }
+      if (v === null) {
+        sawEfNull = true;
+        continue;
+      }
       if (typeof v === 'string') {
         if (v.trim() !== '') {
-          if ((sawTopEmpty || sawTopNull) && isStaleExtraEcho(v, extraKvKeys)) continue;
+          if ((sawTopEmpty || sawTopNull) && isStaleExtraEcho(v, extraKvKeys))
+            continue;
           return v;
         }
         sawEfEmpty = true;
@@ -175,18 +237,47 @@ export function normalizeItemIdentifiers(
     if (sawEfEmpty) return '';
 
     for (const ek of extraKvKeys) {
-      if (extraKv[ek] !== undefined && extraKv[ek].trim() !== '') return extraKv[ek];
-      if (explicitByType[ek] !== undefined && explicitByType[ek].trim() !== '') return explicitByType[ek];
+      if (extraKv[ek] !== undefined && extraKv[ek].trim() !== '')
+        return extraKv[ek];
+      if (explicitByType[ek] !== undefined && explicitByType[ek].trim() !== '')
+        return explicitByType[ek];
     }
     return undefined;
   };
   return {
-    doi: cleanSingleIdentifier(pickFirst(['doi', 'DOI'], ['doi']), normalizeDoi, options),
-    arxivId: cleanSingleIdentifier(pickFirst(['arxivId', 'archiveID', 'archiveId'], ['arxiv', 'arxivid', 'arxiv-id']), normalizeArxivId, options),
-    pmid: cleanSingleIdentifier(pickFirst(['pmid', 'PMID'], ['pmid']), normalizePmid, options),
-    pmcid: cleanSingleIdentifier(pickFirst(['pmcid', 'PMCID'], ['pmcid', 'pmc']), normalizePmcid, options),
-    isbn: cleanSingleIdentifier(pickFirst(['isbn', 'ISBN'], ['isbn']), normalizeIsbn, options),
-    issn: cleanSingleIdentifier(pickFirst(['issn', 'ISSN'], ['issn']), normalizeIssn, options),
+    doi: cleanSingleIdentifier(
+      pickFirst(['doi', 'DOI'], ['doi']),
+      normalizeDoi,
+      options,
+    ),
+    arxivId: cleanSingleIdentifier(
+      pickFirst(
+        ['arxivId', 'archiveID', 'archiveId'],
+        ['arxiv', 'arxivid', 'arxiv-id'],
+      ),
+      normalizeArxivId,
+      options,
+    ),
+    pmid: cleanSingleIdentifier(
+      pickFirst(['pmid', 'PMID'], ['pmid']),
+      normalizePmid,
+      options,
+    ),
+    pmcid: cleanSingleIdentifier(
+      pickFirst(['pmcid', 'PMCID'], ['pmcid', 'pmc']),
+      normalizePmcid,
+      options,
+    ),
+    isbn: cleanSingleIdentifier(
+      pickFirst(['isbn', 'ISBN'], ['isbn']),
+      normalizeIsbn,
+      options,
+    ),
+    issn: cleanSingleIdentifier(
+      pickFirst(['issn', 'ISSN'], ['issn']),
+      normalizeIssn,
+      options,
+    ),
   };
 }
 
@@ -196,20 +287,48 @@ export const IDENTIFIER_URI_BUILDERS: ReadonlyArray<{
   buildUri: (val: string) => string;
 }> = [
   { type: 'doi', key: 'doi', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.doi },
-  { type: 'arxiv', key: 'arxivId', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.arxiv },
-  { type: 'pmid', key: 'pmid', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmid },
-  { type: 'pmcid', key: 'pmcid', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmcid },
-  { type: 'isbn', key: 'isbn', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.isbn },
-  { type: 'issn', key: 'issn', buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.issn },
+  {
+    type: 'arxiv',
+    key: 'arxivId',
+    buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.arxiv,
+  },
+  {
+    type: 'pmid',
+    key: 'pmid',
+    buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmid,
+  },
+  {
+    type: 'pmcid',
+    key: 'pmcid',
+    buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.pmcid,
+  },
+  {
+    type: 'isbn',
+    key: 'isbn',
+    buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.isbn,
+  },
+  {
+    type: 'issn',
+    key: 'issn',
+    buildUri: CANONICAL_IDENTIFIER_URI_BUILDERS.issn,
+  },
 ];
 
 export function buildDeduplicatedIdentifiers(
   cleanIds: ReturnType<typeof normalizeItemIdentifiers>,
-  explicitIdentifiers?: ReadonlyArray<{ type: string; value: string; canonicalUri?: string | null }> | null,
+  explicitIdentifiers?: ReadonlyArray<{
+    type: string;
+    value: string;
+    canonicalUri?: string | null;
+  }> | null,
 ): Array<{ type: string; value: string; canonicalUri: string | null }> {
   const seenTypes = new Set<string>();
   const seenPairs = new Set<string>();
-  const result: Array<{ type: string; value: string; canonicalUri: string | null }> = [];
+  const result: Array<{
+    type: string;
+    value: string;
+    canonicalUri: string | null;
+  }> = [];
 
   for (const { type, key, buildUri } of IDENTIFIER_URI_BUILDERS) {
     const val = cleanIds[key];
@@ -222,7 +341,12 @@ export function buildDeduplicatedIdentifiers(
   }
   if (Array.isArray(explicitIdentifiers)) {
     for (const ident of explicitIdentifiers) {
-      if (!ident || typeof ident.type !== 'string' || typeof ident.value !== 'string') continue;
+      if (
+        !ident ||
+        typeof ident.type !== 'string' ||
+        typeof ident.value !== 'string'
+      )
+        continue;
       const type = ident.type.trim().toLowerCase();
       const value = ident.value.trim();
       if (!type || !value) continue;
@@ -230,26 +354,47 @@ export function buildDeduplicatedIdentifiers(
       if (seenTypes.has(type) || seenPairs.has(pairKey)) continue;
       seenTypes.add(type);
       seenPairs.add(pairKey);
-      result.push({ type, value, canonicalUri: ident.canonicalUri ?? buildCanonicalIdentifierUri(type, value) });
+      result.push({
+        type,
+        value,
+        canonicalUri:
+          ident.canonicalUri ?? buildCanonicalIdentifierUri(type, value),
+      });
     }
   }
   return result;
 }
 
 export function calculateIdentifierChanges(
-  cleanIds: Partial<Record<keyof ReturnType<typeof normalizeItemIdentifiers>, string | null | undefined>>,
+  cleanIds: Partial<
+    Record<
+      keyof ReturnType<typeof normalizeItemIdentifiers>,
+      string | null | undefined
+    >
+  >,
   existing: ItemDetail | Record<string, unknown>,
-  explicitIdentifiers?: ReadonlyArray<{ type: string; value: string | null; canonicalUri?: string | null }> | null,
+  explicitIdentifiers?: ReadonlyArray<{
+    type: string;
+    value: string | null;
+    canonicalUri?: string | null;
+  }> | null,
 ): Array<{ type: string; value: string; canonicalUri: string }> {
   const existingIdentifiers = Array.isArray(existing.identifiers)
-    ? (existing.identifiers as Array<{ type?: string; value?: string; canonicalUri?: string | null }>)
+    ? (existing.identifiers as Array<{
+        type?: string;
+        value?: string;
+        canonicalUri?: string | null;
+      }>)
     : undefined;
   const existingMeta =
-    existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)
+    existing.metadata &&
+    typeof existing.metadata === 'object' &&
+    !Array.isArray(existing.metadata)
       ? (existing.metadata as Record<string, unknown>)
       : {};
 
-  const changes: Array<{ type: string; value: string; canonicalUri: string }> = [];
+  const changes: Array<{ type: string; value: string; canonicalUri: string }> =
+    [];
   const handledTypes = new Set<string>();
   for (const { type, key, buildUri } of IDENTIFIER_URI_BUILDERS) {
     handledTypes.add(type);
@@ -258,19 +403,28 @@ export function calculateIdentifierChanges(
     if (rawNewVal === undefined) continue;
     const newVal = rawNewVal === null ? '' : rawNewVal;
 
-    const fromRelation = existingIdentifiers?.find((item) => (item.type || '').toLowerCase() === type)?.value;
+    const fromRelation = existingIdentifiers?.find(
+      (item) => (item.type || '').toLowerCase() === type,
+    )?.value;
     const fromTop =
-      typeof existing[key] === 'string' && (existing[key] as string).trim() ? (existing[key] as string).trim() : undefined;
+      typeof existing[key] === 'string' && existing[key].trim()
+        ? existing[key].trim()
+        : undefined;
     const fromMeta =
-      typeof existingMeta[key] === 'string' && (existingMeta[key] as string).trim()
-        ? (existingMeta[key] as string).trim()
-        : type === 'arxiv' && typeof existingMeta.archiveID === 'string' && existingMeta.archiveID.trim()
+      typeof existingMeta[key] === 'string' && existingMeta[key].trim()
+        ? existingMeta[key].trim()
+        : type === 'arxiv' &&
+            typeof existingMeta.archiveID === 'string' &&
+            existingMeta.archiveID.trim()
           ? existingMeta.archiveID.replace(/^arxiv:\s*/i, '').trim()
           : undefined;
     const currentVal = fromRelation ?? fromTop ?? fromMeta;
 
     if (newVal === '') {
-      if ((currentVal !== undefined && currentVal !== '') || existingIdentifiers === undefined) {
+      if (
+        (currentVal !== undefined && currentVal !== '') ||
+        existingIdentifiers === undefined
+      ) {
         changes.push({ type, value: '', canonicalUri: '' });
       }
     } else if (newVal !== currentVal) {
@@ -281,20 +435,28 @@ export function calculateIdentifierChanges(
   if (Array.isArray(explicitIdentifiers)) {
     const seenExplicitTypes = new Set<string>();
     for (const ident of explicitIdentifiers) {
-      if (!ident || typeof ident.type !== 'string' || (typeof ident.value !== 'string' && ident.value !== null)) {
+      if (
+        !ident ||
+        typeof ident.type !== 'string' ||
+        (typeof ident.value !== 'string' && ident.value !== null)
+      ) {
         continue;
       }
       const type = ident.type.trim().toLowerCase();
-      if (!type || handledTypes.has(type) || seenExplicitTypes.has(type)) continue;
+      if (!type || handledTypes.has(type) || seenExplicitTypes.has(type))
+        continue;
       seenExplicitTypes.add(type);
       const value = ident.value === null ? '' : ident.value.trim();
-      const existingEntry = existingIdentifiers?.find((item) => (item.type || '').trim().toLowerCase() === type);
+      const existingEntry = existingIdentifiers?.find(
+        (item) => (item.type || '').trim().toLowerCase() === type,
+      );
       const currentVal = existingEntry?.value?.trim();
       const currentUri = existingEntry?.canonicalUri ?? '';
       const nextUri = ident.canonicalUri?.trim() || '';
 
       if (!value) {
-        if (currentVal || existingIdentifiers === undefined) changes.push({ type, value: '', canonicalUri: '' });
+        if (currentVal || existingIdentifiers === undefined)
+          changes.push({ type, value: '', canonicalUri: '' });
       } else if (value !== currentVal || (nextUri && nextUri !== currentUri)) {
         changes.push({ type, value, canonicalUri: nextUri });
       }
@@ -317,12 +479,20 @@ export function buildMyPublicationMetadata(
   },
 ): Record<string, unknown> {
   const metadataObj: Record<string, unknown> =
-    typeof existingMetadata === 'object' && existingMetadata !== null && !Array.isArray(existingMetadata)
+    typeof existingMetadata === 'object' &&
+    existingMetadata !== null &&
+    !Array.isArray(existingMetadata)
       ? { ...(existingMetadata as Record<string, unknown>) }
       : {};
   const clearKeys = [
-    'myPublicationDetails', 'publicationConfirmedAt', 'openAccessLicense', 'isPublicPublication',
-    'publicationContributorId', 'includeAttachmentsInMyPublications', 'includeNotesInMyPublications', 'authorshipConfirmed',
+    'myPublicationDetails',
+    'publicationConfirmedAt',
+    'openAccessLicense',
+    'isPublicPublication',
+    'publicationContributorId',
+    'includeAttachmentsInMyPublications',
+    'includeNotesInMyPublications',
+    'authorshipConfirmed',
   ];
   if (options?.stripSharedFlag) {
     delete metadataObj.isMyPublication;
@@ -332,12 +502,19 @@ export function buildMyPublicationMetadata(
   metadataObj.isMyPublication = isMyPublication;
   if (isMyPublication) {
     metadataObj.publicationConfirmedAt = new Date().toISOString();
-    if (options?.openAccessLicense !== undefined) metadataObj.openAccessLicense = options.openAccessLicense;
-    if (options?.isPublic !== undefined) metadataObj.isPublicPublication = options.isPublic;
-    if (options?.contributorId !== undefined) metadataObj.publicationContributorId = options.contributorId;
-    if (options?.includeAttachments !== undefined) metadataObj.includeAttachmentsInMyPublications = options.includeAttachments;
-    if (options?.includeNotes !== undefined) metadataObj.includeNotesInMyPublications = options.includeNotes;
-    if (options?.authorshipConfirmed !== undefined) metadataObj.authorshipConfirmed = options.authorshipConfirmed;
+    if (options?.openAccessLicense !== undefined)
+      metadataObj.openAccessLicense = options.openAccessLicense;
+    if (options?.isPublic !== undefined)
+      metadataObj.isPublicPublication = options.isPublic;
+    if (options?.contributorId !== undefined)
+      metadataObj.publicationContributorId = options.contributorId;
+    if (options?.includeAttachments !== undefined)
+      metadataObj.includeAttachmentsInMyPublications =
+        options.includeAttachments;
+    if (options?.includeNotes !== undefined)
+      metadataObj.includeNotesInMyPublications = options.includeNotes;
+    if (options?.authorshipConfirmed !== undefined)
+      metadataObj.authorshipConfirmed = options.authorshipConfirmed;
   } else {
     metadataObj.isMyPublication = false;
     for (const k of clearKeys) delete metadataObj[k];
@@ -350,18 +527,38 @@ export function buildCollectionItemsUpdatePatch(data: {
   collections?: string[] | null;
   collectionId?: string | null;
 }): Prisma.LibraryCollectionItemUpdateManyWithoutItemNestedInput | undefined {
-  const effectiveArray = data.collectionIds !== undefined ? data.collectionIds : data.collections;
+  const effectiveArray =
+    data.collectionIds !== undefined ? data.collectionIds : data.collections;
   if (effectiveArray !== undefined) {
     const unique = Array.from(
-      new Set((Array.isArray(effectiveArray) ? effectiveArray : []).filter((cid): cid is string => typeof cid === 'string' && cid.trim().length > 0)),
+      new Set(
+        (Array.isArray(effectiveArray) ? effectiveArray : []).filter(
+          (cid): cid is string =>
+            typeof cid === 'string' && cid.trim().length > 0,
+        ),
+      ),
     );
     return unique.length > 0
-      ? { deleteMany: {}, create: unique.map((cid, idx) => ({ collection: { connect: { id: cid } }, sortOrder: idx })) }
+      ? {
+          deleteMany: {},
+          create: unique.map((cid, idx) => ({
+            collection: { connect: { id: cid } },
+            sortOrder: idx,
+          })),
+        }
       : { deleteMany: {} };
   }
   if (data.collectionId !== undefined) {
-    return data.collectionId && typeof data.collectionId === 'string' && data.collectionId.trim().length > 0
-      ? { deleteMany: {}, create: { collection: { connect: { id: data.collectionId.trim() } }, sortOrder: 0 } }
+    return data.collectionId &&
+      typeof data.collectionId === 'string' &&
+      data.collectionId.trim().length > 0
+      ? {
+          deleteMany: {},
+          create: {
+            collection: { connect: { id: data.collectionId.trim() } },
+            sortOrder: 0,
+          },
+        }
       : { deleteMany: {} };
   }
   return undefined;
@@ -376,8 +573,16 @@ const IDENTIFIER_EXTRA_CLEANUP_RULES: ReadonlyArray<{
   { key: 'isbn', lineRe: /^\s*isbn\s*:/i, braceRe: /\{\s*:ISBN:\s*[^}]*\}/gi },
   { key: 'issn', lineRe: /^\s*issn\s*:/i, braceRe: /\{\s*:ISSN:\s*[^}]*\}/gi },
   { key: 'pmid', lineRe: /^\s*pmid\s*:/i, braceRe: /\{\s*:PMID:\s*[^}]*\}/gi },
-  { key: 'pmcid', lineRe: /^\s*(?:pmcid|pmc)\s*:/i, braceRe: /\{\s*:PMCID:\s*[^}]*\}/gi },
-  { key: 'arxivId', lineRe: /^\s*(?:arxiv|arxivid|arxiv-id|archiveid)\s*:/i, braceRe: /\{\s*:(?:arxiv|archiveid)\s*:\s*[^}]*\}/gi },
+  {
+    key: 'pmcid',
+    lineRe: /^\s*(?:pmcid|pmc)\s*:/i,
+    braceRe: /\{\s*:PMCID:\s*[^}]*\}/gi,
+  },
+  {
+    key: 'arxivId',
+    lineRe: /^\s*(?:arxiv|arxivid|arxiv-id|archiveid)\s*:/i,
+    braceRe: /\{\s*:(?:arxiv|archiveid)\s*:\s*[^}]*\}/gi,
+  },
 ];
 
 export function cleanExtraFromClearedIds(
@@ -385,7 +590,8 @@ export function cleanExtraFromClearedIds(
   clearedIds: ReadonlySet<string>,
   options?: { clearCitationKey?: boolean },
 ): string {
-  if (!extra || (clearedIds.size === 0 && !options?.clearCitationKey)) return extra;
+  if (!extra || (clearedIds.size === 0 && !options?.clearCitationKey))
+    return extra;
   const clearedLinePatterns: RegExp[] = [];
   const clearedBracePatterns: RegExp[] = [];
   for (const rule of IDENTIFIER_EXTRA_CLEANUP_RULES) {
@@ -395,11 +601,15 @@ export function cleanExtraFromClearedIds(
     }
   }
   if (options?.clearCitationKey) {
-    clearedLinePatterns.push(/^\s*(?:citation[\s_-]*key|cite[\s_-]*key|bibtex)\s*:/i);
+    clearedLinePatterns.push(
+      /^\s*(?:citation[\s_-]*key|cite[\s_-]*key|bibtex)\s*:/i,
+    );
   }
-  if (clearedLinePatterns.length === 0 && clearedBracePatterns.length === 0) return extra;
+  if (clearedLinePatterns.length === 0 && clearedBracePatterns.length === 0)
+    return extra;
   let cleanedExtra = extra;
-  for (const braceRe of clearedBracePatterns) cleanedExtra = cleanedExtra.replace(braceRe, '');
+  for (const braceRe of clearedBracePatterns)
+    cleanedExtra = cleanedExtra.replace(braceRe, '');
   return cleanedExtra
     .split(/\r?\n/)
     .filter((line) => !clearedLinePatterns.some((re) => re.test(line)))
@@ -431,8 +641,13 @@ export function syncMetadataIdentifierAliases(
   },
 ): void {
   const isCreate = Boolean(options?.isCreate);
-  for (const upperKey of ['DOI', 'ISBN', 'ISSN', 'PMID', 'ARXIV', 'PMCID']) delete result[upperKey];
-  const syncKey = (val: string | null | undefined, primary: string, aliases: string[]) => {
+  for (const upperKey of ['DOI', 'ISBN', 'ISSN', 'PMID', 'ARXIV', 'PMCID'])
+    delete result[upperKey];
+  const syncKey = (
+    val: string | null | undefined,
+    primary: string,
+    aliases: string[],
+  ) => {
     if (val === undefined) return;
     result[primary] = val === null || val === '' ? (isCreate ? '' : null) : val;
     for (const a of aliases) delete result[a];
@@ -456,8 +671,15 @@ export function syncMetadataIdentifierAliases(
     });
   }
   if (!isCreate) {
-    const clearMappedField = (baseField: string, rawVal: unknown, extraAliases: string[] = []) => {
-      if (rawVal === null || (typeof rawVal === 'string' && rawVal.trim() === '')) {
+    const clearMappedField = (
+      baseField: string,
+      rawVal: unknown,
+      extraAliases: string[] = [],
+    ) => {
+      if (
+        rawVal === null ||
+        (typeof rawVal === 'string' && rawVal.trim() === '')
+      ) {
         result[baseField] = null;
         const mapped = options?.baseMap?.[baseField];
         if (mapped && mapped !== baseField) delete result[mapped];
@@ -467,9 +689,16 @@ export function syncMetadataIdentifierAliases(
     clearMappedField('publisher', options?.rawPublisher);
     clearMappedField('place', options?.rawPlace);
     clearMappedField('volume', options?.rawVolume);
-    clearMappedField('issue', options?.rawIssue, ['number', ...(options?.baseMap?.number ? [options.baseMap.number] : [])]);
+    clearMappedField('issue', options?.rawIssue, [
+      'number',
+      ...(options?.baseMap?.number ? [options.baseMap.number] : []),
+    ]);
     clearMappedField('pages', options?.rawPages);
-    if (options?.rawPubDate === null || (typeof options?.rawPubDate === 'string' && options.rawPubDate.trim() === '')) {
+    if (
+      options?.rawPubDate === null ||
+      (typeof options?.rawPubDate === 'string' &&
+        options.rawPubDate.trim() === '')
+    ) {
       result.date = null;
       result.publicationDate = null;
       if (options?.baseMap?.date) delete result[options.baseMap.date];
@@ -478,32 +707,50 @@ export function syncMetadataIdentifierAliases(
       if (options.rawPubTitle === null || options.rawPubTitle.trim() === '') {
         result.publicationTitle = null;
         for (const alias of [
-          'journal', 'proceedingsTitle', 'bookTitle', 'websiteTitle',
-          'blogTitle', 'forumTitle', 'dictionaryTitle', 'encyclopediaTitle', 'programTitle',
-          'reporter', 'code', 'repository', 'venue', 'sessionTitle',
+          'journal',
+          'proceedingsTitle',
+          'bookTitle',
+          'websiteTitle',
+          'blogTitle',
+          'forumTitle',
+          'dictionaryTitle',
+          'encyclopediaTitle',
+          'programTitle',
+          'reporter',
+          'code',
+          'repository',
+          'venue',
+          'sessionTitle',
         ]) {
           delete result[alias];
         }
       } else {
         const trimmedPub = options.rawPubTitle.trim();
         const mappedPubKey = options.baseMap?.publicationTitle;
-        if (mappedPubKey && options.dataRecord?.[mappedPubKey] === undefined) result[mappedPubKey] = trimmedPub;
+        if (mappedPubKey && options.dataRecord?.[mappedPubKey] === undefined)
+          result[mappedPubKey] = trimmedPub;
         if (options.itemType === 'journalArticle') result.journal = trimmedPub;
         else delete result.journal;
         delete result.venue;
       }
     }
     if (options?.rawAbstract !== undefined) {
-      if (options.rawAbstract === null || options.rawAbstract.trim() === '') result.abstractNote = null;
+      if (options.rawAbstract === null || options.rawAbstract.trim() === '')
+        result.abstractNote = null;
       delete result.abstract;
     }
     if (options?.rawUrl !== undefined) {
-      if (options.rawUrl === null || options.rawUrl.trim() === '') delete result.url;
+      if (options.rawUrl === null || options.rawUrl.trim() === '')
+        delete result.url;
       else result.url = options.rawUrl.trim();
       delete result.URL;
     }
     if (options?.suppliedCitationKey !== undefined) {
-      if (options.suppliedCitationKey === null || options.suppliedCitationKey.trim() === '') delete result.citationKey;
+      if (
+        options.suppliedCitationKey === null ||
+        options.suppliedCitationKey.trim() === ''
+      )
+        delete result.citationKey;
       else result.citationKey = options.suppliedCitationKey.trim();
       delete result.citeKey;
     }
@@ -515,12 +762,17 @@ export function syncMetadataIdentifierAliases(
         if (mappedDateKey) delete result[mappedDateKey];
       } else {
         const yearStr = String(options.year).trim();
-        const existingDate = String(result.date ?? result.publicationDate ?? '').trim();
+        const existingDate = String(
+          result.date ?? result.publicationDate ?? '',
+        ).trim();
         if (!existingDate || /^\d{4}$/.test(existingDate)) {
           result.date = yearStr;
           result.publicationDate = yearStr;
           if (mappedDateKey) result[mappedDateKey] = yearStr;
-        } else if (/^\d{4}$/.test(yearStr) && /(?:^|[^\d])(1\d{3}|20\d{2})(?:[^\d]|$)/.test(existingDate)) {
+        } else if (
+          /^\d{4}$/.test(yearStr) &&
+          /(?:^|[^\d])(1\d{3}|20\d{2})(?:[^\d]|$)/.test(existingDate)
+        ) {
           const updatedDate = existingDate.replace(/(1\d{3}|20\d{2})/, yearStr);
           result.date = updatedDate;
           result.publicationDate = updatedDate;
@@ -531,7 +783,11 @@ export function syncMetadataIdentifierAliases(
     if (options?.rawTypeField === null) {
       result.type = null;
       if (options.mappedTypeKey) delete result[options.mappedTypeKey];
-    } else if (typeof options?.rawTypeField === 'string' && options.rawTypeField.trim() && options.mappedTypeKey) {
+    } else if (
+      typeof options?.rawTypeField === 'string' &&
+      options.rawTypeField.trim() &&
+      options.mappedTypeKey
+    ) {
       result[options.mappedTypeKey] = options.rawTypeField.trim();
     }
   }

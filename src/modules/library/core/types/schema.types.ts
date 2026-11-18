@@ -1,4 +1,9 @@
-import type { Prisma, LibraryChange, Tombstone, OutboxEvent } from '@prisma/client';
+import type {
+  Prisma,
+  LibraryChange,
+  Tombstone,
+  OutboxEvent,
+} from '@prisma/client';
 
 /**
  * Canonical Branded ID & Nominal Types for Flux Library.

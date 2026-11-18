@@ -1,12 +1,41 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, Optional, Inject } from '@nestjs/common';
-import { CslStyleRegistry, BUILTIN_SPECIAL_STYLES, NUMERIC_STYLE_TOKENS, MAX_DYNAMIC_CSL_STYLES, normalizeCitationStyleId } from '@/modules/library/citation/domain/citation.domain';
-import { CitationStyleId, CitationItemInput, CitationContextOptions, FormattedCitationResult, ReferenceData, CatalogItemRecord } from '@/modules/library/citation/types/citation.types';
-import { CATALOG_FACADE, METADATA_PORT, ICatalogFacade, HttpClient, normalizeProjectScopeId } from '@/modules/library/core';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+  Optional,
+  Inject,
+} from '@nestjs/common';
+import {
+  CslStyleRegistry,
+  BUILTIN_SPECIAL_STYLES,
+  NUMERIC_STYLE_TOKENS,
+  MAX_DYNAMIC_CSL_STYLES,
+  normalizeCitationStyleId,
+} from '@/modules/library/citation/domain/citation.domain';
+import {
+  CitationStyleId,
+  CitationItemInput,
+  CitationContextOptions,
+  FormattedCitationResult,
+  ReferenceData,
+  CatalogItemRecord,
+} from '@/modules/library/citation/types/citation.types';
+import {
+  CATALOG_FACADE,
+  METADATA_PORT,
+  ICatalogFacade,
+  HttpClient,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
 import { DoiContentNegotiationService } from './doi-content-negotiation.service';
 import { CslEngineService } from './csl-engine.service';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslRepositoryService } from './csl-repository.service';
-import { QueryResolverService, MetadataPortResolveResult } from './query-resolver.service';
+import {
+  QueryResolverService,
+  MetadataPortResolveResult,
+} from './query-resolver.service';
 
 export type { ReferenceData };
 export { QueryResolverService };
@@ -341,7 +370,11 @@ export class CitationService {
         bibliographyHtml: '',
         citations: itemIds.map((id) => ({
           itemId: id,
-          citation: { styleId: normalizedStyleId, inText: '', bibliography: '' },
+          citation: {
+            styleId: normalizedStyleId,
+            inText: '',
+            bibliography: '',
+          },
         })),
       };
     }

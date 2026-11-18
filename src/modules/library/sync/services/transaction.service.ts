@@ -1,11 +1,33 @@
-import { Injectable, Logger, Optional, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService, RedisCacheService } from '@/core';
 import { Prisma, LibraryChange, Tombstone, OutboxStatus } from '@prisma/client';
-import { uuidv7, IUnitOfWork, TransactionHelpers, AppendChangeEntry, AppendChangeInput, RecordTombstoneEntry, RecordTombstoneInput, normalizeProjectScopeId, LIBRARY_REDIS_KEYS, SingleFlightCoalescer, LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB } from '@/modules/library/core';
+import {
+  uuidv7,
+  IUnitOfWork,
+  TransactionHelpers,
+  AppendChangeEntry,
+  AppendChangeInput,
+  RecordTombstoneEntry,
+  RecordTombstoneInput,
+  normalizeProjectScopeId,
+  LIBRARY_REDIS_KEYS,
+  SingleFlightCoalescer,
+  LIBRARY_OUTBOX_QUEUE,
+  LIBRARY_OUTBOX_JOB,
+} from '@/modules/library/core';
 import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
-import { OutboxRepository, PublishOutboxInput, OutboxPublishInput } from '@/modules/library/sync/repositories/outbox.repository';
+import {
+  OutboxRepository,
+  PublishOutboxInput,
+  OutboxPublishInput,
+} from '@/modules/library/sync/repositories/outbox.repository';
 import { OutboxWorker } from './outbox.worker';
 
 export { LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB };
@@ -103,7 +125,10 @@ export class TransactionService implements IUnitOfWork {
     const postCommitCallbacks: Array<() => Promise<void> | void> = [];
     const touchedSyncScopes = new Set<string>();
 
-    const trackScope = (scope: { userId?: string; projectId?: string | null }) => {
+    const trackScope = (scope: {
+      userId?: string;
+      projectId?: string | null;
+    }) => {
       const key = this.resolveSyncScopeCacheKey(scope);
       if (key) touchedSyncScopes.add(key);
     };

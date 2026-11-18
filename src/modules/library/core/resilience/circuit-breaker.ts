@@ -591,7 +591,9 @@ export class SingleFlightCoalescer {
 export function sortLockKeys(ids: readonly string[]): string[] {
   if (!ids || ids.length === 0) return [];
   const unique = Array.from(
-    new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0)),
+    new Set(
+      ids.filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
   );
   return unique.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
@@ -676,4 +678,3 @@ export class BulkheadSemaphore {
     };
   }
 }
-

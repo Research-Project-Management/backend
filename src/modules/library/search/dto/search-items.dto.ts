@@ -1,7 +1,18 @@
-import { IsString, IsOptional, IsInt, Min, Max, IsBoolean } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsInt,
+  Min,
+  Max,
+  IsBoolean,
+} from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
-const parseOptionalBoolean = ({ value }: { value: unknown }): boolean | undefined => {
+const parseOptionalBoolean = ({
+  value,
+}: {
+  value: unknown;
+}): boolean | undefined => {
   if (value === undefined || value === null || value === '') return undefined;
   if (typeof value === 'boolean') return value;
   const str = String(value).trim().toLowerCase();
@@ -63,7 +74,7 @@ export class SearchItemsQueryDto {
 
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 
   @IsOptional()
   @IsString()
@@ -149,7 +160,8 @@ export class SearchPageAnchorsQueryDto {
   @IsOptional()
   @Transform(({ value }) => {
     if (value === undefined || value === null || value === '') return undefined;
-    const parsed = typeof value === 'number' ? value : parseInt(String(value), 10);
+    const parsed =
+      typeof value === 'number' ? value : parseInt(String(value), 10);
     return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
   })
   @IsInt()
@@ -158,5 +170,5 @@ export class SearchPageAnchorsQueryDto {
 
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 }

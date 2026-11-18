@@ -227,9 +227,7 @@ export class MetadataExecutorService {
       }
 
       bucket.items.push({ key: itemKey, rawQuery, resolve, reject });
-      if (
-        bucket.items.length >= MetadataExecutorService.MICRO_BATCH_MAX_SIZE
-      ) {
+      if (bucket.items.length >= MetadataExecutorService.MICRO_BATCH_MAX_SIZE) {
         clearTimeout(bucket.timer);
         void this.flushMicroBatch(batchKey, provider);
       } else if (callerSignal?.aborted) {
@@ -269,7 +267,7 @@ export class MetadataExecutorService {
         }
 
         if (items.length === 1) {
-          const singleItem = items[0]!;
+          const singleItem = items[0];
           const singleRes = await provider.resolve(
             {
               query: singleItem.rawQuery,
@@ -446,7 +444,8 @@ export class MetadataExecutorService {
               return {
                 provider: provider.id,
                 status: 'rate_limited',
-                error: 'arXiv GCRA queue saturated (>3.5s wait); fast-failover to high-throughput mirror',
+                error:
+                  'arXiv GCRA queue saturated (>3.5s wait); fast-failover to high-throughput mirror',
                 durationMs: Date.now() - startTime,
               };
             }

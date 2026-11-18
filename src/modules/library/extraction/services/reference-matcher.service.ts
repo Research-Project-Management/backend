@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
-import { normalizeDoi, normalizeArxivId } from '@/modules/library/core/domain/identifier.domain';
+import {
+  normalizeDoi,
+  normalizeArxivId,
+} from '@/modules/library/core/domain/identifier.domain';
 import { normalizeTitle } from '@/modules/library/core/domain/title.domain';
 import { sortLockKeys } from '@/modules/library/core';
 import type {
@@ -12,7 +15,11 @@ import { ExtractionFacade, EXTRACTION_FACADE } from './extraction.facade';
 import type { IExtractionFacade } from './extraction.facade';
 import { ItemLifecycleSubscriber } from './item-lifecycle.subscriber';
 
-export type { ExtractedReferenceCandidate, ReferenceMatchResult, ScopePaperRecord };
+export type {
+  ExtractedReferenceCandidate,
+  ReferenceMatchResult,
+  ScopePaperRecord,
+};
 export { ExtractionFacade, EXTRACTION_FACADE, ItemLifecycleSubscriber };
 export type { IExtractionFacade };
 
@@ -204,9 +211,7 @@ export class ReferenceMatcherService {
       return { matchedCount: 0, matches: [] };
     }
 
-    const sortedTargetIds = sortLockKeys(
-      matches.map((m) => m.targetItemId),
-    );
+    const sortedTargetIds = sortLockKeys(matches.map((m) => m.targetItemId));
     const matchByTarget = new Map(matches.map((m) => [m.targetItemId, m]));
 
     await Promise.all(

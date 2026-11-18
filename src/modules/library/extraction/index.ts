@@ -36,4 +36,3 @@ export * from './providers/layout.extractor';
 // DTOs & Types
 export * from './dto/annotations.dto';
 export * from './types/pdf-extraction.types';
-

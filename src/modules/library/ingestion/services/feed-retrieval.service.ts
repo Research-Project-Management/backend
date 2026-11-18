@@ -1,7 +1,26 @@
-import { Injectable, Logger, Optional, BadRequestException, ForbiddenException } from '@nestjs/common';
-import { SsrfGuardService, ExternalProviderException, readSafeResponseText, parseCreatorString, getUserAgent, HttpClient } from '@/modules/library/core';
-import { parseFeedXml, ParsedFeed } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
-import { FeedsRepository, type CachedFeedWithItems } from '@/modules/library/ingestion/repositories/feeds.repository';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
+import {
+  SsrfGuardService,
+  ExternalProviderException,
+  readSafeResponseText,
+  parseCreatorString,
+  getUserAgent,
+  HttpClient,
+} from '@/modules/library/core';
+import {
+  parseFeedXml,
+  ParsedFeed,
+} from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
+import {
+  FeedsRepository,
+  type CachedFeedWithItems,
+} from '@/modules/library/ingestion/repositories/feeds.repository';
 import { CrossRefProvider } from '@/modules/library/ingestion/providers/crossref.provider';
 import { RedisCacheService } from '@/core';
 
@@ -294,9 +313,7 @@ export class FeedRetrievalService {
     return parsedFeed;
   }
 
-  private async fallbackSearchFeed(
-    feedUrl: string,
-  ): Promise<ParsedFeed> {
+  private async fallbackSearchFeed(feedUrl: string): Promise<ParsedFeed> {
     const redactedUrl = redactFeedUrl(feedUrl);
     try {
       let filter = '';
@@ -609,12 +626,7 @@ export class DomainRateLimiterService {
               waitMs = distWait;
               this.setLastExecution(normalizedDomain, now + waitMs);
             }
-            await client.set(
-              redisKey,
-              (now + waitMs).toString(),
-              'PX',
-              ttlMs,
-            );
+            await client.set(redisKey, (now + waitMs).toString(), 'PX', ttlMs);
           }
         }
       } catch (redisErr) {

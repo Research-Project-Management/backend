@@ -1,7 +1,30 @@
-import { IsString, IsOptional, IsIn, IsObject, IsBoolean, IsUUID, IsArray, ArrayNotEmpty, IsNumber, ArrayMaxSize, MaxLength, ValidateNested, IsUrl, IsNotEmpty } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsIn,
+  IsObject,
+  IsBoolean,
+  IsUUID,
+  IsArray,
+  ArrayNotEmpty,
+  IsNumber,
+  ArrayMaxSize,
+  MaxLength,
+  ValidateNested,
+  IsUrl,
+  IsNotEmpty,
+} from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { RetractionNature, SubmissionKind, IdentifierType, RecordFormat } from '@/modules/library/ingestion/types/ingestion.types';
-import { SCHEMA_V42_DATA, ALL_CREATOR_ROLES } from '@/modules/library/core/types/schema.constants';
+import {
+  RetractionNature,
+  SubmissionKind,
+  IdentifierType,
+  RecordFormat,
+} from '@/modules/library/ingestion/types/ingestion.types';
+import {
+  SCHEMA_V42_DATA,
+  ALL_CREATOR_ROLES,
+} from '@/modules/library/core/types/schema.constants';
 
 export class UnifiedIngestionDto {
   @IsString()
@@ -112,7 +135,7 @@ export class UnifiedIngestionDto {
 
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 }
 
 // ============================================================================
@@ -122,16 +145,11 @@ export class UnifiedIngestionDto {
 export class UpdateReviewCaseStatusDto {
   @IsIn(['OPEN', 'PENDING', 'APPROVED', 'REJECTED', 'DISMISSED', 'RESOLVED'])
   status!:
-    | 'OPEN'
-    | 'PENDING'
-    | 'APPROVED'
-    | 'REJECTED'
-    | 'DISMISSED'
-    | 'RESOLVED';
+    'OPEN' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISMISSED' | 'RESOLVED';
 
   @IsOptional()
-  @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
-  projectId?: string;
+  @IsUUID(undefined, { message: 'spaceId must be a valid UUID' })
+  spaceId?: string;
 }
 
 export class MergeDuplicatesDto {
@@ -151,8 +169,8 @@ export class MergeDuplicatesDto {
   fieldSelections?: Record<string, unknown>;
 
   @IsOptional()
-  @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
-  projectId?: string;
+  @IsUUID(undefined, { message: 'spaceId must be a valid UUID' })
+  spaceId?: string;
 }
 
 export class DismissDuplicatesDto {
@@ -165,8 +183,8 @@ export class DismissDuplicatesDto {
   itemIds!: string[];
 
   @IsOptional()
-  @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
-  projectId?: string;
+  @IsUUID(undefined, { message: 'spaceId must be a valid UUID' })
+  spaceId?: string;
 }
 
 // ============================================================================
@@ -247,8 +265,8 @@ export class BatchMergeDuplicatesDto {
   merges!: MergeDuplicatesDto[];
 
   @IsOptional()
-  @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
-  projectId?: string;
+  @IsUUID(undefined, { message: 'spaceId must be a valid UUID' })
+  spaceId?: string;
 }
 
 // ============================================================================
@@ -527,7 +545,7 @@ export class IngestionSubmissionDto {
 
   @IsOptional()
   @IsUUID()
-  projectId?: string;
+  spaceId?: string;
 }
 
 const VALID_CREATOR_ROLES = Object.keys(ALL_CREATOR_ROLES);
@@ -654,7 +672,7 @@ export class ConfirmCapturedUrlDto {
 
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 
   @IsOptional()
   @IsString()

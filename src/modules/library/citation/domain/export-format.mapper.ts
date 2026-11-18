@@ -188,7 +188,8 @@ export function formatItemsAsBibtex(
   citationKeyMap?: Map<string, string>,
 ): string {
   const entries = items.map((it) => {
-    const overrideKey = citationKeyMap?.get(it.id) || it.citationKey || undefined;
+    const overrideKey =
+      citationKeyMap?.get(it.id) || it.citationKey || undefined;
     const res = citationFormatter.formatItem(
       toCitationItemInput(it, overrideKey),
       'bibtex',
@@ -211,10 +212,9 @@ class BibtexExportStrategy implements IExportFormatStrategy {
       items,
       timestamp: options.timestamp ?? new Date().toISOString().split('T')[0],
       truncated: options.truncated,
-      citationFormatter:
-        options.citationFormatter ?? {
-          formatItem: () => ({ bibliography: '' }),
-        },
+      citationFormatter: options.citationFormatter ?? {
+        formatItem: () => ({ bibliography: '' }),
+      },
       citationKeyMap: options.citationKeyMap,
     });
   }
@@ -252,10 +252,9 @@ class RisExportStrategy implements IExportFormatStrategy {
       items,
       timestamp: options.timestamp ?? new Date().toISOString().split('T')[0],
       truncated: options.truncated,
-      citationFormatter:
-        options.citationFormatter ?? {
-          formatItem: () => ({ bibliography: '' }),
-        },
+      citationFormatter: options.citationFormatter ?? {
+        formatItem: () => ({ bibliography: '' }),
+      },
       citationKeyMap: options.citationKeyMap,
     });
   }
@@ -317,7 +316,9 @@ class CslJsonExportStrategy implements IExportFormatStrategy {
     const { items, timestamp, truncated, citationKeyMap } = params;
     const cslList = items.map((it) => {
       const overrideKey = citationKeyMap?.get(it.id);
-      const itemWithKey = overrideKey ? { ...it, citationKey: overrideKey } : it;
+      const itemWithKey = overrideKey
+        ? { ...it, citationKey: overrideKey }
+        : it;
       const rawCsl = { ...CslJsonMapper.toCsl(itemWithKey) };
       const arxivId =
         typeof rawCsl._arxivId === 'string' ? rawCsl._arxivId.trim() : '';

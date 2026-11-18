@@ -1,11 +1,24 @@
 import { Injectable, Optional } from '@nestjs/common';
 import {
-  MetadataRequest, ProviderCapability, ProviderName, ProviderResult, ProviderFetchError,
+  MetadataRequest,
+  ProviderCapability,
+  ProviderName,
+  ProviderResult,
+  ProviderFetchError,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
-  normalizeDoi, normalizeIsbn, normalizeIssn, cleanBibliographicText,
-  cleanAbstractText, TITLE_MATCH_THRESHOLD, HttpClient, LibraryConfigService,
-  libraryConfig, CSL_TYPE_TO_ITEM_TYPE, normalizePageRange, getContactEmail,
+  normalizeDoi,
+  normalizeIsbn,
+  normalizeIssn,
+  cleanBibliographicText,
+  cleanAbstractText,
+  TITLE_MATCH_THRESHOLD,
+  HttpClient,
+  LibraryConfigService,
+  libraryConfig,
+  CSL_TYPE_TO_ITEM_TYPE,
+  normalizePageRange,
+  getContactEmail,
 } from '@/modules/library/core';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { BaseMetadataProvider } from './base-metadata.provider';
@@ -35,7 +48,10 @@ export class CrossRefProvider extends BaseMetadataProvider {
     );
   }
 
-  private async executeFetch(url: string, signal?: AbortSignal): Promise<Response> {
+  private async executeFetch(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<Response> {
     const headers = {
       'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
       Accept: 'application/json',
@@ -43,9 +59,16 @@ export class CrossRefProvider extends BaseMetadataProvider {
     return this.executeHttpFetch(url, signal, headers);
   }
 
-  async resolve(request: MetadataRequest, signal?: AbortSignal): Promise<ProviderResult | null> {
+  async resolve(
+    request: MetadataRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderResult | null> {
     const { query } = request;
-    if (/^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.48550\/arxiv\./i.test(query.trim())) {
+    if (
+      /^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.48550\/arxiv\./i.test(
+        query.trim(),
+      )
+    ) {
       return null;
     }
     const cleanDoi = normalizeDoi(query);
@@ -185,22 +208,18 @@ export class CrossRefProvider extends BaseMetadataProvider {
           const dp =
             (
               candidate['published-print'] as
-                | { 'date-parts'?: number[][] }
-                | undefined
+                { 'date-parts'?: number[][] } | undefined
             )?.['date-parts']?.[0] ??
             (
-              candidate.published as
-                | { 'date-parts'?: number[][] }
-                | undefined
+              candidate.published as { 'date-parts'?: number[][] } | undefined
             )?.['date-parts']?.[0] ??
             (
               candidate['published-online'] as
-                | { 'date-parts'?: number[][] }
-                | undefined
+                { 'date-parts'?: number[][] } | undefined
             )?.['date-parts']?.[0] ??
-            (
-              candidate.issued as { 'date-parts'?: number[][] } | undefined
-            )?.['date-parts']?.[0];
+            (candidate.issued as { 'date-parts'?: number[][] } | undefined)?.[
+              'date-parts'
+            ]?.[0];
           return dp?.[0];
         },
       },
@@ -320,18 +339,14 @@ export class CrossRefProvider extends BaseMetadataProvider {
     let year: number | null = null;
     let publicationDate: string | undefined = undefined;
     const pubPrint = message['published-print'] as
-      | { 'date-parts'?: number[][] }
-      | undefined;
+      { 'date-parts'?: number[][] } | undefined;
     const published = message.published as
-      | { 'date-parts'?: number[][] }
-      | undefined;
+      { 'date-parts'?: number[][] } | undefined;
     const pubOnline = message['published-online'] as
-      | { 'date-parts'?: number[][] }
-      | undefined;
+      { 'date-parts'?: number[][] } | undefined;
     const issued = message.issued as { 'date-parts'?: number[][] } | undefined;
     const created = message.created as
-      | { 'date-parts'?: number[][] }
-      | undefined;
+      { 'date-parts'?: number[][] } | undefined;
 
     // Zotero academic priority: published-print -> published -> published-online -> issued -> created.
     // Once the canonical publication year is anchored by the highest-priority date source,

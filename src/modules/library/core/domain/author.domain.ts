@@ -1,4 +1,8 @@
-import { CreatorType, CreatorInput, ParsedCreator } from '@/modules/library/core/types/bibliographic.types';
+import {
+  CreatorType,
+  CreatorInput,
+  ParsedCreator,
+} from '@/modules/library/core/types/bibliographic.types';
 
 import {
   stripXmlAndHtmlTags,
@@ -679,7 +683,9 @@ export function isPlausibleAuthorName(name?: string | null): boolean {
   return tokens.every(
     (t) =>
       /^\p{Lu}/u.test(t) ||
-      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(t) ||
+      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
+        t,
+      ) ||
       PREFIX_PARTICLES.has(t.toLowerCase()) ||
       !/\p{L}/u.test(t),
   );
@@ -717,18 +723,51 @@ export function splitConcatenatedAuthors(raw: string, minTokens = 6): string[] {
 }
 
 export function formatAuthors(item: {
-  contributors?: Array<{ fullName?: string | null; firstName?: string | null; lastName?: string | null; name?: string | null; creatorType?: string | null }> | null;
-  creators?: Array<{ fullName?: string | null; firstName?: string | null; lastName?: string | null; name?: string | null; creatorType?: string | null }> | null;
+  contributors?: Array<{
+    fullName?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    name?: string | null;
+    creatorType?: string | null;
+  }> | null;
+  creators?: Array<{
+    fullName?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    name?: string | null;
+    creatorType?: string | null;
+  }> | null;
   authors?: string[] | null;
 }): string[] {
-  const fmt = (c: { fullName?: string | null; firstName?: string | null; lastName?: string | null; name?: string | null }) =>
-    c.fullName?.trim() || `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.name || 'Anonymous';
-  const list = Array.isArray(item.contributors) && item.contributors.length > 0 ? item.contributors : Array.isArray(item.creators) && item.creators.length > 0 ? item.creators : null;
+  const fmt = (c: {
+    fullName?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    name?: string | null;
+  }) =>
+    c.fullName?.trim() ||
+    `${c.firstName || ''} ${c.lastName || ''}`.trim() ||
+    c.name ||
+    'Anonymous';
+  const list =
+    Array.isArray(item.contributors) && item.contributors.length > 0
+      ? item.contributors
+      : Array.isArray(item.creators) && item.creators.length > 0
+        ? item.creators
+        : null;
   if (list) {
-    const authors = list.filter((c) => (c.creatorType || 'author').toLowerCase() === 'author').map(fmt).filter(Boolean);
+    const authors = list
+      .filter((c) => (c.creatorType || 'author').toLowerCase() === 'author')
+      .map(fmt)
+      .filter(Boolean);
     if (authors.length > 0) return authors;
-    const editors = list.filter((c) => (c.creatorType || '').toLowerCase() === 'editor').map(fmt).filter(Boolean);
+    const editors = list
+      .filter((c) => (c.creatorType || '').toLowerCase() === 'editor')
+      .map(fmt)
+      .filter(Boolean);
     return editors.length > 0 ? editors : list.map(fmt).filter(Boolean);
   }
-  return Array.isArray(item.authors) ? item.authors.map((a) => String(a).trim()).filter(Boolean) : [];
+  return Array.isArray(item.authors)
+    ? item.authors.map((a) => String(a).trim()).filter(Boolean)
+    : [];
 }

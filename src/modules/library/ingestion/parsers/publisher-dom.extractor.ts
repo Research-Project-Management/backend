@@ -579,7 +579,9 @@ export class PublisherDomExtractor {
                     .trim();
                 if (name) {
                   authors.push(name);
-                  creators.push(this.toCreator(name, creators.length, 'author'));
+                  creators.push(
+                    this.toCreator(name, creators.length, 'author'),
+                  );
                 }
               }
             }
@@ -619,17 +621,15 @@ export class PublisherDomExtractor {
           string,
           unknown
         >;
-        const pageProps = (
-          (nextObj.props as Record<string, unknown> | undefined)?.pageProps ??
-          {}
-        ) as Record<string, unknown>;
+        const pageProps = ((
+          nextObj.props as Record<string, unknown> | undefined
+        )?.pageProps ?? {}) as Record<string, unknown>;
         const forumNote = (pageProps.forumNote ??
           pageProps.note ??
           pageProps.submission ??
           pageProps.article) as Record<string, unknown> | undefined;
         const content = (forumNote?.content ?? forumNote) as
-          | Record<string, unknown>
-          | undefined;
+          Record<string, unknown> | undefined;
 
         const unwrapVal = (v: unknown): unknown =>
           v && typeof v === 'object' && !Array.isArray(v) && 'value' in v

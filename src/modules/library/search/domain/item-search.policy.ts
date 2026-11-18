@@ -25,12 +25,7 @@ import type {
   PageAnchorMatch,
 } from '../types/search.types';
 
-export type {
-  SearchOptions,
-  FacetResult,
-  PageTextExtraction,
-  PageAnchorMatch,
-};
+export type { SearchOptions, FacetResult, PageTextExtraction, PageAnchorMatch };
 
 export {
   CompositeSpecification,
@@ -63,7 +58,8 @@ export function sanitizeSearchQuery(query?: string): string {
  */
 export class TextSearchSpecification extends CompositeSpecification {
   public readonly query: string;
-  public readonly searchMode: 'title_creator_year' | 'fields_tags' | 'everything';
+  public readonly searchMode:
+    'title_creator_year' | 'fields_tags' | 'everything';
 
   constructor(query: string, searchMode?: string) {
     super();
@@ -97,7 +93,7 @@ export class TextSearchSpecification extends CompositeSpecification {
       if (str.toLowerCase().includes(q)) return true;
       return Boolean(
         foldedQ &&
-          SearchQueryEngine.stripDiacritics(str).toLowerCase().includes(foldedQ),
+        SearchQueryEngine.stripDiacritics(str).toLowerCase().includes(foldedQ),
       );
     };
     const ids = extractSearchQueryIdentifiers(this.query);
@@ -107,8 +103,7 @@ export class TextSearchSpecification extends CompositeSpecification {
     if (matchesText(rec.publicationTitle)) return true;
     if (matchesText(rec.doi)) return true;
     if (matchesText(rec.citationKey)) return true;
-    if (SearchQueryEngine.matchesItemIdentifiersInMemory(rec, ids))
-      return true;
+    if (SearchQueryEngine.matchesItemIdentifiersInMemory(rec, ids)) return true;
     if (Array.isArray(rec.identifiers)) {
       const identifiers = rec.identifiers as Array<{ value?: unknown } | null>;
       if (identifiers.some((ident) => matchesText(ident?.value))) {

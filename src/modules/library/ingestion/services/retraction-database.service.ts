@@ -535,5 +535,4 @@ export class RetractionDatabaseService implements OnModuleInit {
   addRetractionToBloom(key: string): void {
     this.bloomFilter.add(key);
   }
-
 }

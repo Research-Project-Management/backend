@@ -41,7 +41,9 @@ interface MatchedCandidateRow {
 interface IExactMatchSpecification {
   readonly reason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
   isApplicable(input: ExactMatchCandidateInput): boolean;
-  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.LibraryItemWhereInput[];
+  toPrismaOrClauses(
+    input: ExactMatchCandidateInput,
+  ): Prisma.LibraryItemWhereInput[];
   evaluateMatchedItem(
     input: ExactMatchCandidateInput,
     match: MatchedCandidateRow,
@@ -123,7 +125,9 @@ class DoiExactMatchSpecification implements IExactMatchSpecification {
     return Boolean(input.cleanDoi && input.cleanDoi.trim().length > 0);
   }
 
-  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.LibraryItemWhereInput[] {
+  toPrismaOrClauses(
+    input: ExactMatchCandidateInput,
+  ): Prisma.LibraryItemWhereInput[] {
     if (!this.isApplicable(input) || !input.cleanDoi) return [];
     const cleanDoi = input.cleanDoi.trim().toLowerCase();
     return [
@@ -184,7 +188,9 @@ class ArxivExactMatchSpecification implements IExactMatchSpecification {
     return Boolean(input.cleanArxiv && input.cleanArxiv.trim().length > 0);
   }
 
-  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.LibraryItemWhereInput[] {
+  toPrismaOrClauses(
+    input: ExactMatchCandidateInput,
+  ): Prisma.LibraryItemWhereInput[] {
     if (!this.isApplicable(input) || !input.cleanArxiv) return [];
     const cleanArxiv = input.cleanArxiv.trim();
     const baseArxiv = stripArxivVersion(cleanArxiv);
@@ -274,7 +280,9 @@ class PmidExactMatchSpecification implements IExactMatchSpecification {
     return Boolean(input.cleanPmid && input.cleanPmid.trim().length > 0);
   }
 
-  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.LibraryItemWhereInput[] {
+  toPrismaOrClauses(
+    input: ExactMatchCandidateInput,
+  ): Prisma.LibraryItemWhereInput[] {
     if (!this.isApplicable(input) || !input.cleanPmid) return [];
     const cleanPmid = input.cleanPmid.trim();
     return [
@@ -333,7 +341,9 @@ class IsbnExactMatchSpecification implements IExactMatchSpecification {
     return Boolean(input.cleanIsbn && input.cleanIsbn.trim().length > 0);
   }
 
-  toPrismaOrClauses(input: ExactMatchCandidateInput): Prisma.LibraryItemWhereInput[] {
+  toPrismaOrClauses(
+    input: ExactMatchCandidateInput,
+  ): Prisma.LibraryItemWhereInput[] {
     if (!this.isApplicable(input) || !input.cleanIsbn) return [];
     const cleanIsbn = input.cleanIsbn.replace(/[-\s]/g, '').trim();
     return [

@@ -1,4 +1,22 @@
-import { ArrayMaxSize, IsArray, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateIf, ValidateNested, IsBoolean, IsIn, MinLength, IsEnum, Max } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsInt,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+  ValidateIf,
+  ValidateNested,
+  IsBoolean,
+  IsIn,
+  MinLength,
+  IsEnum,
+  Max,
+} from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { TagType } from '@prisma/client';
 import {
@@ -43,7 +61,7 @@ export class CreateCollectionDto {
 
   @IsOptional()
   @IsUUID()
-  projectId?: string | null;
+  spaceId?: string | null;
 }
 
 export class UpdateCollectionDto {
@@ -166,7 +184,7 @@ export class CopyCollectionDto {
 
   @IsOptional()
   @IsUUID()
-  projectId?: string | null;
+  spaceId?: string | null;
 }
 
 export class CreateNoteDto {
@@ -196,7 +214,7 @@ export class CreateNoteDto {
 
   @IsOptional()
   @IsUUID()
-  projectId?: string | null;
+  spaceId?: string | null;
 }
 
 export class UpdateNoteDto {
@@ -274,7 +292,7 @@ export class ExtractNotesFromAnnotationsDto {
 
   @IsOptional()
   @IsUUID()
-  projectId?: string;
+  spaceId?: string;
 }
 
 export class CreateTagDto {
@@ -302,7 +320,7 @@ export class CreateTagDto {
 
   @IsOptional()
   @IsUUID()
-  projectId?: string;
+  spaceId?: string;
 
   @IsOptional()
   @IsInt()
@@ -335,7 +353,7 @@ export class UpdateTagDto {
 
   @IsOptional()
   @IsUUID()
-  projectId?: string;
+  spaceId?: string;
 
   @IsOptional()
   @IsInt()
@@ -350,7 +368,7 @@ export class SplitTagDto {
 
   @IsOptional()
   @IsUUID()
-  projectId?: string;
+  spaceId?: string;
 }
 
 class ReaderBookmarkItemDto {
@@ -407,10 +425,7 @@ export class UpdateStateDto {
 
   @IsOptional()
   scrollPosition?:
-    | ReaderScrollPositionDto
-    | Record<string, unknown>
-    | Array<unknown>
-    | null;
+    ReaderScrollPositionDto | Record<string, unknown> | Array<unknown> | null;
 }
 
 export class GetBatchStatesDto {
@@ -476,7 +491,7 @@ export class CreateSavedSearchDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  projectId?: string;
+  spaceId?: string;
 
   @IsOptional()
   @IsString()
@@ -586,7 +601,7 @@ export class PreviewSavedSearchDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  projectId?: string;
+  spaceId?: string;
 }
 
 export class ExecuteSavedSearchQueryDto {
@@ -620,5 +635,5 @@ export class ExecuteSavedSearchQueryDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  projectId?: string;
+  spaceId?: string;
 }

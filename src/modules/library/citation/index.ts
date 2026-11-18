@@ -24,4 +24,3 @@ export * from './domain/official-styles.lexicon';
 // DTOs & Types
 export * from './dto/citation.dto';
 export * from './types/citation.types';
-

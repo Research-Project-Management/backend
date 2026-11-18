@@ -4,7 +4,14 @@ import {
   CslDate,
 } from '@/modules/library/citation/types/citation.types';
 import { isUuid } from '@/core';
-import { CSL_TYPE_MAP, CSL_CREATOR_MAP, SCHEMA_V42_DATA, harmonizeBibliographicFields, normalizeTags, generateCitationKey } from '@/modules/library/core';
+import {
+  CSL_TYPE_MAP,
+  CSL_CREATOR_MAP,
+  SCHEMA_V42_DATA,
+  harmonizeBibliographicFields,
+  normalizeTags,
+  generateCitationKey,
+} from '@/modules/library/core';
 import {
   ContributorLike,
   EXTRA_DIRECT_CSL_STRING_KEYS,
@@ -628,7 +635,10 @@ export class CslJsonMapper {
         });
         if (synthesizedKey && synthesizedKey !== 'anonndwork') {
           csl['citation-key'] = synthesizedKey;
-          if (!item.citationKey && (!csl.id || isUuid(csl.id) || csl.id.startsWith('item_'))) {
+          if (
+            !item.citationKey &&
+            (!csl.id || isUuid(csl.id) || csl.id.startsWith('item_'))
+          ) {
             csl.id = synthesizedKey;
           }
         }

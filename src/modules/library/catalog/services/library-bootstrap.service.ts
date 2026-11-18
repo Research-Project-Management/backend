@@ -33,21 +33,60 @@ import { ItemQueryService } from '@/modules/library/catalog/services/item-query.
 import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
 import { CollectionsService } from '@/modules/library/catalog/services/collections.service';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
-import { TypesService, ItemCacheCoordinator } from '@/modules/library/catalog/services/schema-validator.service';
+import {
+  TypesService,
+  ItemCacheCoordinator,
+} from '@/modules/library/catalog/services/schema-validator.service';
 import { StateService } from '@/modules/library/catalog/services/state.service';
 import { NotesService } from '@/modules/library/catalog/services/notes.service';
-import { ItemDetail, DuplicateCandidateItem, QualityAuditCandidateItem, CreateItemData, UpdateItemData } from '@/modules/library/core/types/bibliographic.types';
-import { NoteEntity, CreateNoteData } from '@/modules/library/catalog/types/catalog.types';
+import {
+  ItemDetail,
+  DuplicateCandidateItem,
+  QualityAuditCandidateItem,
+  CreateItemData,
+  UpdateItemData,
+} from '@/modules/library/core/types/bibliographic.types';
+import {
+  NoteEntity,
+  CreateNoteData,
+} from '@/modules/library/catalog/types/catalog.types';
 import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';
 
 interface LibraryBootstrapOptions {
-  projectId?: string; includeItems?: boolean;
-  view?: 'all' | 'recent' | 'unfiled' | 'trash' | 'my-publications' | 'publications' | 'starred' | 'retracted';
-  collectionId?: string; collectionIds?: string[]; includeSubcollections?: boolean; recursive?: boolean;
-  tagId?: string; tag?: string; search?: string; searchMode?: 'title_creator_year' | 'fields_tags' | 'everything' | string;
-  limit?: number; cursor?: string; page?: number; orderBy?: string; orderDirection?: 'asc' | 'desc';
-  itemType?: string; type?: string; fromYear?: number; toYear?: number; readStatus?: string;
-  hasFile?: boolean; hasNotes?: boolean; fields?: string; onlyFlagged?: boolean; isRetracted?: boolean;
+  projectId?: string;
+  includeItems?: boolean;
+  view?:
+    | 'all'
+    | 'recent'
+    | 'unfiled'
+    | 'trash'
+    | 'my-publications'
+    | 'publications'
+    | 'starred'
+    | 'retracted';
+  collectionId?: string;
+  collectionIds?: string[];
+  includeSubcollections?: boolean;
+  recursive?: boolean;
+  tagId?: string;
+  tag?: string;
+  search?: string;
+  searchMode?: 'title_creator_year' | 'fields_tags' | 'everything' | string;
+  limit?: number;
+  cursor?: string;
+  page?: number;
+  orderBy?: string;
+  orderDirection?: 'asc' | 'desc';
+  itemType?: string;
+  type?: string;
+  fromYear?: number;
+  toYear?: number;
+  readStatus?: string;
+  hasFile?: boolean;
+  hasNotes?: boolean;
+  fields?: string;
+  onlyFlagged?: boolean;
+  isRetracted?: boolean;
 }
 
 /**
@@ -66,17 +105,19 @@ export class LibraryBootstrapService {
   private withBranchDeadline<T>(promise: Promise<T>): Promise<T | undefined> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<undefined>((resolve) => {
-      timer = setTimeout(() => resolve(undefined), LibraryBootstrapService.BRANCH_DEADLINE_MS);
+      timer = setTimeout(
+        () => resolve(undefined),
+        LibraryBootstrapService.BRANCH_DEADLINE_MS,
+      );
       if (typeof timer === 'object' && 'unref' in timer) {
         timer.unref();
       }
     });
-    return Promise.race([
-      promise.catch(() => undefined),
-      timeout,
-    ]).finally(() => {
-      if (timer) clearTimeout(timer);
-    });
+    return Promise.race([promise.catch(() => undefined), timeout]).finally(
+      () => {
+        if (timer) clearTimeout(timer);
+      },
+    );
   }
 
   constructor(
@@ -115,7 +156,10 @@ export class LibraryBootstrapService {
       effectivePermissions?: readonly string[];
     },
   ) {
-    const validProjectId = normalizeProjectScopeId(options.projectId);
+    const validProjectId = normalizeProjectScopeId(
+      (options as { spaceId?: string }).spaceId ?? options.projectId,
+      userId,
+    );
     const shouldIncludeItems = options.includeItems !== false;
     const syncScope = validProjectId
       ? { projectId: validProjectId }
@@ -162,9 +206,7 @@ export class LibraryBootstrapService {
           : Promise.resolve(0n),
         validProjectId
           ? Promise.resolve([])
-          : this.withBranchDeadline(
-              this.getFeedSubscriptionsCached(userId),
-            ),
+          : this.withBranchDeadline(this.getFeedSubscriptionsCached(userId)),
         shouldIncludeItems
           ? this.itemQueryService.listItems(userId, {
               ...options,
@@ -175,9 +217,11 @@ export class LibraryBootstrapService {
 
       const degradedBranches: string[] = [];
       if (counts === undefined) degradedBranches.push('counts');
-      if (collectionsResult?.collections === undefined) degradedBranches.push('collections');
+      if (collectionsResult?.collections === undefined)
+        degradedBranches.push('collections');
       if (savedSearches === undefined) degradedBranches.push('savedSearches');
-      if (this.tagsService?.getTags && tags === undefined) degradedBranches.push('tags');
+      if (this.tagsService?.getTags && tags === undefined)
+        degradedBranches.push('tags');
       if (this.libraryTx?.getLatestSequence && latestSeq === undefined) {
         degradedBranches.push('syncVersion');
       }
@@ -191,6 +235,8 @@ export class LibraryBootstrapService {
       return {
         scope: validProjectId ? 'project' : 'user',
         scopeId: validProjectId ?? userId,
+        spaceId: validProjectId ?? userId,
+        projectId: validProjectId ?? null,
         ...(degradedBranches.length > 0
           ? { degraded: true, degradedBranches }
           : {}),
@@ -282,10 +328,16 @@ export class CatalogFacade implements ICatalogFacade {
     projectId?: string,
   ): Promise<T | null> {
     if (typeof this.queryService.getItem === 'function') {
-      return (await this.queryService.getItem(userId, itemId, projectId)) as unknown as T | null;
+      return (await this.queryService.getItem(
+        userId,
+        itemId,
+        projectId,
+      )) as unknown as T | null;
     }
     const raw = await this.queryService.findById(userId, itemId, projectId);
-    return raw ? (ItemsMapper.mapFlattenedState(raw, userId) as unknown as T) : null;
+    return raw
+      ? (ItemsMapper.mapFlattenedState(raw, userId) as unknown as T)
+      : null;
   }
 
   async getItemSummary<T = CatalogItemSummary>(
@@ -554,7 +606,11 @@ export class CatalogFacade implements ICatalogFacade {
     scope?: { userId?: string; projectId?: string },
   ): Promise<void> {
     if (!this.curationService) return;
-    await this.curationService.updateItemAiMetadata(itemId, aiMetadataPatch, scope);
+    await this.curationService.updateItemAiMetadata(
+      itemId,
+      aiMetadataPatch,
+      scope,
+    );
   }
 
   async invalidateForWrite(params: {
@@ -618,7 +674,10 @@ export class CatalogFacade implements ICatalogFacade {
     return this.itemService.emptyTrash(userId, projectId);
   }
 
-  async purgeOldTrash(retentionDays?: number, limit?: number): Promise<unknown> {
+  async purgeOldTrash(
+    retentionDays?: number,
+    limit?: number,
+  ): Promise<unknown> {
     return this.itemService.purgeExpiredTrash(retentionDays, limit);
   }
 }

@@ -481,7 +481,11 @@ function parseInlineMarkdownNodes(rawText: string): TipTapInlineNode[] {
         text: linkMatch[1],
         marks: [{ type: 'link', attrs: { href: linkMatch[2] } }],
       });
-    } else if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+    } else if (
+      part.startsWith('**') &&
+      part.endsWith('**') &&
+      part.length > 4
+    ) {
       nodes.push({
         type: 'text',
         text: part.slice(2, -2),
@@ -645,7 +649,9 @@ export function extractPlainTextFromTipTap(doc: unknown): string {
         n.content.forEach((li, idx) => {
           const text = renderInline(li).trim();
           if (text) {
-            items.push(type === 'orderedList' ? `${idx + 1}. ${text}` : `- ${text}`);
+            items.push(
+              type === 'orderedList' ? `${idx + 1}. ${text}` : `- ${text}`,
+            );
           }
         });
         if (items.length > 0) {

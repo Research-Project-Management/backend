@@ -1,8 +1,24 @@
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { Controller, HttpException, HttpStatus, Get, Query, Param, UseGuards, Optional } from '@nestjs/common';
+import {
+  Controller,
+  HttpException,
+  HttpStatus,
+  Get,
+  Query,
+  Param,
+  UseGuards,
+  Optional,
+} from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectAccessGuard, ProjectRoles, RequireOperator } from '@/modules/project/access';
-import { TransactionService, compactLibraryChanges } from '@/modules/library/sync/services/transaction.service';
+import {
+  ProjectAccessGuard,
+  ProjectRoles,
+  RequireOperator,
+} from '@/modules/project/access';
+import {
+  TransactionService,
+  compactLibraryChanges,
+} from '@/modules/library/sync/services/transaction.service';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
 import { OutboxWorker } from '@/modules/library/sync/services/outbox.worker';
 import { OutboxMetrics } from '@/modules/library/sync/services/outbox-metrics.service';
@@ -62,7 +78,7 @@ function parseSafeBigInt(val?: string): bigint | undefined {
 
 @ApiTags('Library Sync')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/library/sync', 'api/v1/projects/:projectId/library/sync'])
+@Controller(['api/v1/library/sync', 'api/v1/spaces/:spaceId/library/sync'])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class SyncController {
   constructor(
@@ -91,8 +107,8 @@ export class SyncController {
   })
   async getSyncVersion(
     @CurrentUser('id') userId: string,
-    @Param('projectId') routeProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId } : { userId };
@@ -115,8 +131,8 @@ export class SyncController {
   async getChanges(
     @CurrentUser('id') userId: string,
     @Query() query: SyncQueryDto,
-    @Param('projectId') routeProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId, userId } : { userId };
@@ -164,9 +180,7 @@ export class SyncController {
         ? windowChanges[windowChanges.length - 1].seq
         : sinceSeq;
     const pagedChanges =
-      query.compact !== false
-        ? compactLibraryChanges(rawPaged)
-        : rawPaged;
+      query.compact !== false ? compactLibraryChanges(rawPaged) : rawPaged;
 
     return {
       since: sinceSeq.toString(),
@@ -220,8 +234,8 @@ export class SyncController {
   async getTombstones(
     @CurrentUser('id') userId: string,
     @Query() query: SyncQueryDto,
-    @Param('projectId') routeProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
   ) {
     const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId, userId } : { userId };

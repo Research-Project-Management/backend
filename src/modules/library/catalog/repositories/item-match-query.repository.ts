@@ -230,7 +230,10 @@ export class ItemMatchQueryRepository {
         contributors: { orderBy: { orderIndex: 'asc' } },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
-        attachments: { where: { deletedAt: null }, include: { revisions: true } },
+        attachments: {
+          where: { deletedAt: null },
+          include: { revisions: true },
+        },
         notesList: { where: { deletedAt: null } },
         identifiers: {
           select: { type: true, value: true, canonicalUri: true },
@@ -264,7 +267,10 @@ export class ItemMatchQueryRepository {
         contributors: { orderBy: { orderIndex: 'asc' } },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
-        attachments: { where: { deletedAt: null }, include: { revisions: true } },
+        attachments: {
+          where: { deletedAt: null },
+          include: { revisions: true },
+        },
         notesList: { where: { deletedAt: null } },
         identifiers: {
           select: { type: true, value: true, canonicalUri: true },
@@ -507,17 +513,23 @@ export class ItemMatchQueryRepository {
       const direction = isOutgoing ? 'outgoing' : 'incoming';
       const rawType = r.relationType as string;
       const dedupKey = `${peerItem?.id ?? ''}:${rawType}:${direction}`;
-      if (!peerItem || peerItem.id === itemId || seenRelationKeys.has(dedupKey)) {
+      if (
+        !peerItem ||
+        peerItem.id === itemId ||
+        seenRelationKeys.has(dedupKey)
+      ) {
         continue;
       }
       if (anchorItem) {
         const anchorSpaceId =
           anchorItem.spaceId ??
-          (anchorItem as { projectId?: string | null; userId?: string }).projectId ??
+          (anchorItem as { projectId?: string | null; userId?: string })
+            .projectId ??
           (anchorItem as { userId?: string }).userId;
         const peerSpaceId =
           peerItem.spaceId ??
-          (peerItem as { projectId?: string | null; userId?: string }).projectId ??
+          (peerItem as { projectId?: string | null; userId?: string })
+            .projectId ??
           (peerItem as { userId?: string }).userId;
         const sameScope = anchorSpaceId === peerSpaceId;
         if (!sameScope) continue;
@@ -535,8 +547,7 @@ export class ItemMatchQueryRepository {
             fullName: string | null;
             firstName: string | null;
             lastName: string | null;
-          }) =>
-            c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+          }) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
         )
         .filter(Boolean);
 

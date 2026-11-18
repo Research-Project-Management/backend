@@ -306,7 +306,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         0,
       );
       if (existingTenantJobs === 0 && this.queue.length >= 4) {
-        let seenPerTenant = new Map<string, number>();
+        const seenPerTenant = new Map<string, number>();
         let fairInsertIdx = -1;
         for (let i = 0; i < this.queue.length; i++) {
           const item = this.queue[i];

@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 import {
   SchemaValidationResult,
@@ -68,7 +73,9 @@ export function normalizeSchemaTypeKey(
   if (!key) return key;
   if (snapshot.itemTypes[key]) return key;
   const lower = key.toLowerCase();
-  const found = Object.keys(snapshot.itemTypes).find((k) => k.toLowerCase() === lower);
+  const found = Object.keys(snapshot.itemTypes).find(
+    (k) => k.toLowerCase() === lower,
+  );
   return found || key;
 }
 
@@ -141,7 +148,9 @@ export function validateAndHarmonizeSchemaCreators(
       ? new Map(
           serviceCreatorTypes.flatMap((c: CreatorTypeDefinition) => {
             const lower = c.creatorType.toLowerCase();
-            const snake = c.creatorType.replace(/([A-Z])/g, '_$1').toLowerCase();
+            const snake = c.creatorType
+              .replace(/([A-Z])/g, '_$1')
+              .toLowerCase();
             return [
               [lower, c.creatorType] as const,
               [snake, c.creatorType] as const,
@@ -163,7 +172,10 @@ export function validateAndHarmonizeSchemaCreators(
 
     const canonicalRole =
       validCreatorMap.get(lowerRole) ?? validCreatorMap.get(effectiveRole);
-    if (canonicalRole && (canonicalRole === rawRole || lowerRole === effectiveRole)) {
+    if (
+      canonicalRole &&
+      (canonicalRole === rawRole || lowerRole === effectiveRole)
+    ) {
       return { ...c, creatorType: canonicalRole };
     }
 
@@ -216,8 +228,11 @@ export function validateAndSanitizeSchemaFields(
   demotedToExtra: Record<string, unknown>;
   warnings: string[];
 } {
-  const orderedFields = options?.orderedFields ?? getSchemaOrderedFields(itemType);
-  const validFields = new Set(orderedFields.map((f: ItemFieldDefinition) => f.key));
+  const orderedFields =
+    options?.orderedFields ?? getSchemaOrderedFields(itemType);
+  const validFields = new Set(
+    orderedFields.map((f: ItemFieldDefinition) => f.key),
+  );
   const typeBaseMap = getEffectiveBaseFieldMap(itemType);
   const typeReverseBaseMap = getEffectiveReverseBaseFieldMap(itemType);
   const mappedMediumField = typeBaseMap.medium;
@@ -259,10 +274,14 @@ export function validateAndSanitizeSchemaFields(
         : undefined);
 
     const isValidDirect = validFields.has(key);
-    const isValidAlias = Boolean(canonicalAlias && validFields.has(canonicalAlias));
+    const isValidAlias = Boolean(
+      canonicalAlias && validFields.has(canonicalAlias),
+    );
     const isValidMappedBase = Boolean(
       (mappedBase && validFields.has(mappedBase)) ||
-        (key === 'type' && mappedMediumField && validFields.has(mappedMediumField)),
+      (key === 'type' &&
+        mappedMediumField &&
+        validFields.has(mappedMediumField)),
     );
 
     if (isValidDirect || isValidAlias || isValidMappedBase) {
@@ -277,11 +296,15 @@ export function validateAndSanitizeSchemaFields(
 
     if (
       !SYSTEM_AND_TELEMETRY_KEYS.has(key) &&
-      (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+      (typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean')
     ) {
       const line = `${key}: ${value}`;
-      if (!extraLines.some((l) => l.startsWith(`${key}:`))) extraLines.push(line);
-      if (!demotedExtraLines.some((l) => l.startsWith(`${key}:`))) demotedExtraLines.push(line);
+      if (!extraLines.some((l) => l.startsWith(`${key}:`)))
+        extraLines.push(line);
+      if (!demotedExtraLines.some((l) => l.startsWith(`${key}:`)))
+        demotedExtraLines.push(line);
     }
   }
 
@@ -290,7 +313,9 @@ export function validateAndSanitizeSchemaFields(
     typeof cleanFields.extraFields === 'object' &&
     !Array.isArray(cleanFields.extraFields)
   ) {
-    const sanitizedExtraFields = { ...(cleanFields.extraFields as Record<string, unknown>) };
+    const sanitizedExtraFields = {
+      ...(cleanFields.extraFields as Record<string, unknown>),
+    };
     for (const pk of PRIVILEGED_INTERNAL_KEYS) delete sanitizedExtraFields[pk];
     cleanFields.extraFields = sanitizedExtraFields;
   }
@@ -311,7 +336,8 @@ export function validateAndSanitizeSchemaFields(
   }
 
   if (data.extra !== undefined) {
-    cleanFields.extra = data.extra === null || data.extra === '' ? '' : extraLines.join('\n');
+    cleanFields.extra =
+      data.extra === null || data.extra === '' ? '' : extraLines.join('\n');
   } else if (extraLines.length > 0) {
     cleanFields.extra = extraLines.join('\n');
   }
@@ -327,7 +353,8 @@ export function validateAndSanitizeSchemaItem(
   const itemType = validateSchemaItemType(
     rawType ||
       (rawData.itemType as string | undefined) ||
-      (typeof rawData.type === 'string' && isSchemaValidItemType(rawData.type.trim(), snapshot)
+      (typeof rawData.type === 'string' &&
+      isSchemaValidItemType(rawData.type.trim(), snapshot)
         ? rawData.type.trim()
         : undefined),
     snapshot,
@@ -348,7 +375,9 @@ export function validateAndSanitizeSchemaItem(
     changes = harm.changes;
   }
 
-  const hasExplicitItemType = Boolean(rawType || typeof rawData.itemType === 'string');
+  const hasExplicitItemType = Boolean(
+    rawType || typeof rawData.itemType === 'string',
+  );
   let resolvedTypeVal: string | null | undefined = itemType;
   if (rawData.type === null) {
     resolvedTypeVal = null;
@@ -371,11 +400,10 @@ export function validateAndSanitizeSchemaItem(
     ...(rawData.creators !== undefined ? { creators } : {}),
   };
 
-  const { cleanFields, demotedToExtra, warnings } = validateAndSanitizeSchemaFields(
-    itemType,
-    dataWithCreators,
-    { orderedFields: getSchemaOrderedFields(itemType, snapshot) },
-  );
+  const { cleanFields, demotedToExtra, warnings } =
+    validateAndSanitizeSchemaFields(itemType, dataWithCreators, {
+      orderedFields: getSchemaOrderedFields(itemType, snapshot),
+    });
 
   if (rawData.creators === undefined) delete cleanFields.creators;
 
@@ -399,7 +427,9 @@ export class TypesService {
 
   getAllItemTypes(includeSpecial = false): ItemTypeDefinition[] {
     const types = Object.values(this.snapshot.itemTypes);
-    return includeSpecial ? types : types.filter((t: ItemTypeDefinition) => t.isBibliographic);
+    return includeSpecial
+      ? types
+      : types.filter((t: ItemTypeDefinition) => t.isBibliographic);
   }
 
   getItemType(itemType: string): ItemTypeDefinition | undefined {
@@ -425,7 +455,9 @@ export class TypesService {
 
   isValidFieldForType(itemType: string, fieldKey: string): boolean {
     const def = this.getItemType(itemType);
-    return def ? def.fields.some((f: ItemFieldDefinition) => f.key === fieldKey) : false;
+    return def
+      ? def.fields.some((f: ItemFieldDefinition) => f.key === fieldKey)
+      : false;
   }
 
   getValidCreatorTypes(itemType: string): CreatorTypeDefinition[] {
@@ -457,7 +489,10 @@ export class TypesService {
     return reverse[fieldKey] || fieldKey;
   }
 
-  getTypeSpecificFieldFor(itemType: string, baseField: string): string | undefined {
+  getTypeSpecificFieldFor(
+    itemType: string,
+    baseField: string,
+  ): string | undefined {
     const mapping = this.getBaseFieldMapping(itemType);
     return mapping[baseField] || baseField;
   }
@@ -551,7 +586,9 @@ export class SchemaValidatorService {
       changes = harm.changes;
     }
 
-    const hasExplicitItemType = Boolean(rawType || typeof rawData.itemType === 'string');
+    const hasExplicitItemType = Boolean(
+      rawType || typeof rawData.itemType === 'string',
+    );
     let resolvedTypeVal: string | null | undefined = itemType;
     if (rawData.type === null) {
       resolvedTypeVal = null;
@@ -574,10 +611,8 @@ export class SchemaValidatorService {
       ...(rawData.creators !== undefined ? { creators } : {}),
     };
 
-    const { cleanFields, demotedToExtra, warnings } = this.validateAndSanitizeFields(
-      itemType,
-      dataWithCreators,
-    );
+    const { cleanFields, demotedToExtra, warnings } =
+      this.validateAndSanitizeFields(itemType, dataWithCreators);
 
     if (rawData.creators === undefined) delete cleanFields.creators;
 
@@ -619,7 +654,8 @@ export class ItemCacheCoordinator {
         userId,
         projectId,
         itemIds: [id],
-        skipScopeInvalidation: options?.skipScopeInvalidation === true || !userId,
+        skipScopeInvalidation:
+          options?.skipScopeInvalidation === true || !userId,
         onlyUserStateOverlay: options?.onlyUserStateOverlay,
         preserveContentCaches: options?.preserveContentCaches,
       });
@@ -629,7 +665,10 @@ export class ItemCacheCoordinator {
     }
   }
 
-  async invalidateScopeListCache(userId: string, projectId?: string): Promise<void> {
+  async invalidateScopeListCache(
+    userId: string,
+    projectId?: string,
+  ): Promise<void> {
     if (!this.cache) return;
     try {
       await invalidateLibraryScopeCaches(this.cache, { userId, projectId });
@@ -678,7 +717,9 @@ export class ItemCacheCoordinator {
     onlyUserStateOverlay?: boolean;
     preserveContentCaches?: boolean;
   }): Promise<void> {
-    const validProjectId = normalizeProjectScopeId(params.projectId ?? undefined);
+    const validProjectId = normalizeProjectScopeId(
+      params.projectId ?? undefined,
+    );
     if (params.itemIds && params.itemIds.length > 0) {
       await this.invalidateBulkItemsCache(
         params.itemIds,

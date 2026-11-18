@@ -6,7 +6,24 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
-import { CATALOG_FACADE, ICatalogFacade, CreateItemData, ItemDetail, INTERNAL_SYSTEM_AND_TELEMETRY_KEYS, mergeCanonicalCreators, cleanAbstractText, cleanCommentText, normalizeTags, getEffectiveBaseFieldMap, buildBibliographicMutationPayload, harmonizeBibliographicFields, generateCitationKey, isPlaceholderItemTitle, CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS, normalizeProjectScopeId } from '@/modules/library/core';
+import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+  CreateItemData,
+  ItemDetail,
+  INTERNAL_SYSTEM_AND_TELEMETRY_KEYS,
+  mergeCanonicalCreators,
+  cleanAbstractText,
+  cleanCommentText,
+  normalizeTags,
+  getEffectiveBaseFieldMap,
+  buildBibliographicMutationPayload,
+  harmonizeBibliographicFields,
+  generateCitationKey,
+  isPlaceholderItemTitle,
+  CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
 import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/deduplication.domain';
 import {
   IWorkflowStage,
@@ -116,7 +133,8 @@ export function toItemData(
     { ...metadata, extraFields },
     { itemType: effectiveType },
   );
-  const harmonized = mutationPayload.harmonized as ItemMetadata & Record<string, unknown>;
+  const harmonized = mutationPayload.harmonized as ItemMetadata &
+    Record<string, unknown>;
   const syncedExtraFields =
     harmonized.extraFields && typeof harmonized.extraFields === 'object'
       ? { ...harmonized.extraFields }
@@ -400,7 +418,10 @@ export class CommitStage implements IWorkflowStage<
 
     if (
       !actualOptions?.skipPreMatch &&
-      (createData.doi || createData.arxivId || createData.pmid || createData.isbn) &&
+      (createData.doi ||
+        createData.arxivId ||
+        createData.pmid ||
+        createData.isbn) &&
       this.catalogGateway?.findMatchCandidates
     ) {
       try {
@@ -508,7 +529,7 @@ export class CommitStage implements IWorkflowStage<
       userId,
       projectId,
       existingItem,
-      candidateData: createData as unknown as Record<string, unknown>,
+      candidateData: createData,
       collectionIds: createData.collectionIds ?? undefined,
       sideEffects: this.sideEffects,
       logger: this.logger,

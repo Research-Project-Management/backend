@@ -2,7 +2,11 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, LibraryChange, Tombstone } from '@prisma/client';
 import {
-  AppendChangeEntry, AppendChangeInput, RecordTombstoneEntry, RecordTombstoneInput, normalizeProjectScopeId,
+  AppendChangeEntry,
+  AppendChangeInput,
+  RecordTombstoneEntry,
+  RecordTombstoneInput,
+  normalizeProjectScopeId,
 } from '@/modules/library/core';
 
 export type { AppendChangeInput, RecordTombstoneInput };
@@ -17,27 +21,63 @@ export class ChangeLogRepository {
 
   private resolveScope(
     scope: { userId?: string; projectId?: string | null } | string,
-  ): { userId?: string; projectId?: string; spaceId: string; scopeKey: string } {
+  ): {
+    userId?: string;
+    projectId?: string;
+    spaceId: string;
+    scopeKey: string;
+  } {
     if (typeof scope === 'string') {
       const trimmed = scope.trim();
       if (trimmed.startsWith('proj:')) {
         const projectId = trimmed.slice(5).trim();
-        if (!projectId) throw new BadRequestException('Invalid project sync scope');
-        return { userId: undefined, projectId, spaceId: projectId, scopeKey: `proj:${projectId}` };
+        if (!projectId)
+          throw new BadRequestException('Invalid project sync scope');
+        return {
+          userId: undefined,
+          projectId,
+          spaceId: projectId,
+          scopeKey: `proj:${projectId}`,
+        };
       }
       if (trimmed.startsWith('user:')) {
         const userId = trimmed.slice(5).trim();
         if (!userId) throw new BadRequestException('Invalid user sync scope');
-        return { userId, projectId: undefined, spaceId: userId, scopeKey: `user:${userId}` };
+        return {
+          userId,
+          projectId: undefined,
+          spaceId: userId,
+          scopeKey: `user:${userId}`,
+        };
       }
-      if (!trimmed) throw new BadRequestException('Sync scope must not be empty');
-      return { userId: trimmed, projectId: undefined, spaceId: trimmed, scopeKey: `user:${trimmed}` };
+      if (!trimmed)
+        throw new BadRequestException('Sync scope must not be empty');
+      return {
+        userId: trimmed,
+        projectId: undefined,
+        spaceId: trimmed,
+        scopeKey: `user:${trimmed}`,
+      };
     }
     const projectId = normalizeProjectScopeId(scope.projectId);
     const userId = scope.userId?.trim() || undefined;
-    if (projectId) return { userId, projectId, spaceId: projectId, scopeKey: `proj:${projectId}` };
-    if (userId) return { userId, projectId: undefined, spaceId: userId, scopeKey: `user:${userId}` };
-    throw new BadRequestException('Sync scope must include either a valid userId or projectId');
+    if (projectId)
+      return {
+        userId,
+        projectId,
+        spaceId: projectId,
+        scopeKey: `proj:${projectId}`,
+      };
+    if (userId)
+      return {
+        userId,
+        projectId: undefined,
+        spaceId: userId,
+        scopeKey: `user:${userId}`,
+      };
+    throw new BadRequestException(
+      'Sync scope must include either a valid userId or projectId',
+    );
   }
 
   private buildScopeWhere(
@@ -369,9 +409,7 @@ export class ChangeLogRepository {
           where: {
             ...scopeWhere,
             entityType:
-              entityTypes.length === 1
-                ? entityTypes[0]
-                : { in: entityTypes },
+              entityTypes.length === 1 ? entityTypes[0] : { in: entityTypes },
             entityId: { in: entityIds },
           },
         });
@@ -383,9 +421,7 @@ export class ChangeLogRepository {
           where: {
             ...scopeWhere,
             entityType:
-              entityTypes.length === 1
-                ? entityTypes[0]
-                : { in: entityTypes },
+              entityTypes.length === 1 ? entityTypes[0] : { in: entityTypes },
             entityId: { in: entityIds },
           },
           orderBy: { seq: 'desc' },
@@ -623,9 +659,10 @@ export class ChangeLogRepository {
     });
   }
 
-  async getMinRetainedSequence(
-    scope: { userId?: string; projectId?: string | null },
-  ): Promise<bigint | null> {
+  async getMinRetainedSequence(scope: {
+    userId?: string;
+    projectId?: string | null;
+  }): Promise<bigint | null> {
     const { spaceId } = this.resolveScope(scope);
     const scopeWhere = { spaceId };
     const [firstChange, firstTombstone] = await Promise.all([
@@ -664,9 +701,10 @@ export class ChangeLogRepository {
     return null;
   }
 
-  async getLatestSequence(
-    scope: { userId?: string; projectId?: string | null },
-  ): Promise<bigint> {
+  async getLatestSequence(scope: {
+    userId?: string;
+    projectId?: string | null;
+  }): Promise<bigint> {
     const { spaceId } = this.resolveScope(scope);
     const scopeWhere = { spaceId };
     const [seqRecord, latestChange, latestTombstone] = await Promise.all([

@@ -1,4 +1,13 @@
-import { IsString, IsOptional, IsArray, ArrayMaxSize, IsNumber, IsBoolean, MaxLength, ValidateNested } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsArray,
+  ArrayMaxSize,
+  IsNumber,
+  IsBoolean,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { PartialType } from '@nestjs/swagger';
 
@@ -52,7 +61,7 @@ export class CreateItemDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  projectId?: string;
+  spaceId?: string;
 
   @IsString()
   @MaxLength(2000)

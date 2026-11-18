@@ -124,10 +124,13 @@ export class CslStyleFormatterService {
   }
 
   public resolveBibtexEntryType(cslItem: CslItemData): string {
-    const rawItemType = typeof cslItem._itemType === 'string' ? cslItem._itemType : '';
+    const rawItemType =
+      typeof cslItem._itemType === 'string' ? cslItem._itemType : '';
     const genre = typeof cslItem.genre === 'string' ? cslItem.genre : '';
     if (rawItemType === 'thesis' || cslItem.type === 'thesis') {
-      return /\b(?:master|m\.?s\.?|m\.?a\.?|m\.?eng|m\.?sc|thạc\s*sĩ)\b/i.test(genre)
+      return /\b(?:master|m\.?s\.?|m\.?a\.?|m\.?eng|m\.?sc|thạc\s*sĩ)\b/i.test(
+        genre,
+      )
         ? 'mastersthesis'
         : 'phdthesis';
     }
@@ -138,7 +141,8 @@ export class CslStyleFormatterService {
   }
 
   public resolveRisType(cslItem: CslItemData): string {
-    const rawItemType = typeof cslItem._itemType === 'string' ? cslItem._itemType : '';
+    const rawItemType =
+      typeof cslItem._itemType === 'string' ? cslItem._itemType : '';
     if (rawItemType && RIS_ITEM_TYPE_MAP[rawItemType]) {
       return RIS_ITEM_TYPE_MAP[rawItemType];
     }
@@ -250,7 +254,8 @@ export class CslStyleFormatterService {
     if (arxivId) {
       pushIf('eprint', arxivId);
       pushIf('archiveprefix', 'arXiv');
-      const primaryClass = (cslItem as Record<string, unknown>)._arxivPrimaryClass;
+      const primaryClass = (cslItem as Record<string, unknown>)
+        ._arxivPrimaryClass;
       if (typeof primaryClass === 'string' && primaryClass.trim()) {
         pushIf('primaryclass', primaryClass.trim());
       }
@@ -262,10 +267,13 @@ export class CslStyleFormatterService {
   public collectRisSupplementTags(
     cslItem: CslItemData,
   ): Array<{ tag: string; checkRegex: RegExp; value: string }> {
-    const entries: Array<{ tag: string; checkRegex: RegExp; value: string }> = [];
+    const entries: Array<{ tag: string; checkRegex: RegExp; value: string }> =
+      [];
     const pushTag = (tag: string, val: unknown, customCheck?: RegExp) => {
       if (typeof val === 'string' || typeof val === 'number') {
-        const strVal = String(val).replace(/\r?\n+/g, ' ').trim();
+        const strVal = String(val)
+          .replace(/\r?\n+/g, ' ')
+          .trim();
         if (strVal !== '') {
           entries.push({
             tag,
@@ -297,7 +305,9 @@ export class CslStyleFormatterService {
     pushTag('IS', cslItem.issue ?? cslItem.number);
 
     if (cslItem.page) {
-      const pageMatch = String(cslItem.page).trim().match(/^(\S+?)\s*[-–—]\s*(\S+)$/);
+      const pageMatch = String(cslItem.page)
+        .trim()
+        .match(/^(\S+?)\s*[-–—]\s*(\S+)$/);
       if (pageMatch) {
         pushTag('SP', pageMatch[1]);
         pushTag('EP', pageMatch[2]);
@@ -322,27 +332,43 @@ export class CslStyleFormatterService {
           pushTag(
             'KW',
             kw.trim(),
-            new RegExp(`^KW\\s+-\\s+${kw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'),
+            new RegExp(
+              `^KW\\s+-\\s+${kw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+              'm',
+            ),
           );
         }
       }
     }
-    const annoteStr = typeof cslItem.annote === 'string' ? cslItem.annote.trim() : '';
+    const annoteStr =
+      typeof cslItem.annote === 'string' ? cslItem.annote.trim() : '';
     if (annoteStr) {
-      const annoteFirstLine = annoteStr.split(/\r?\n/)[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      pushTag('N1', annoteStr, new RegExp(`^N1\\s+-\\s+${annoteFirstLine}`, 'm'));
+      const annoteFirstLine = annoteStr
+        .split(/\r?\n/)[0]
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      pushTag(
+        'N1',
+        annoteStr,
+        new RegExp(`^N1\\s+-\\s+${annoteFirstLine}`, 'm'),
+      );
     }
     const noteStr = typeof cslItem.note === 'string' ? cslItem.note.trim() : '';
     if (noteStr && noteStr !== annoteStr) {
-      const noteFirstLine = noteStr.split(/\r?\n/)[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const noteFirstLine = noteStr
+        .split(/\r?\n/)[0]
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       pushTag('N1', noteStr, new RegExp(`^N1\\s+-\\s+${noteFirstLine}`, 'm'));
     }
-    const arxivId = typeof cslItem._arxivId === 'string' ? cslItem._arxivId.trim() : '';
+    const arxivId =
+      typeof cslItem._arxivId === 'string' ? cslItem._arxivId.trim() : '';
     if (arxivId) {
       pushTag(
         'N1',
         `arXiv:${arxivId}`,
-        new RegExp(`^N1\\s+-\\s+arXiv:${arxivId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'),
+        new RegExp(
+          `^N1\\s+-\\s+arXiv:${arxivId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+          'm',
+        ),
       );
     }
     pushTag('AB', cslItem.abstract);
@@ -415,7 +441,11 @@ export class CslStyleFormatterService {
           const formatted = this.formatBibtexCreatorList(list);
           if (formatted) {
             const escaped = this.escapeBibtexValue(formatted);
-            const replaced = this.replaceBibtexFieldBalanced(raw, role, escaped);
+            const replaced = this.replaceBibtexFieldBalanced(
+              raw,
+              role,
+              escaped,
+            );
             raw =
               replaced !== null
                 ? replaced
@@ -484,7 +514,10 @@ export class CslStyleFormatterService {
 
     const authors = this.formatBibtexCreatorList(cslItem.author);
     const escapedTitle = this.escapeBibtexValue(cslItem.title || '', 'title');
-    const lines = [`@${targetType}{${safeKey},`, `  title = {${escapedTitle}},`];
+    const lines = [
+      `@${targetType}{${safeKey},`,
+      `  title = {${escapedTitle}},`,
+    ];
     if (authors) lines.push(`  author = {${this.escapeBibtexValue(authors)}},`);
     if (targetType === 'article' && cslItem['container-title']) {
       lines.push(
@@ -534,10 +567,7 @@ export class CslStyleFormatterService {
         .replace(/^TY\s+-\s+\S+/m, () => `TY  - ${targetRisType}`)
         .replace(/^KW\s+-\s+/gm, 'KW  - ')
         .replace(/^(N1\s+-\s+arXiv:)\s+/gm, '$1')
-        .replace(
-          /^SP\s+-\s+(\S+?)\s*[-–—]\s*(\S+)\s*$/m,
-          'SP  - $1\nEP  - $2',
-        );
+        .replace(/^SP\s+-\s+(\S+?)\s*[-–—]\s*(\S+)\s*$/m, 'SP  - $1\nEP  - $2');
 
       if (Array.isArray(cslItem._keywords) && cslItem._keywords.length > 0) {
         raw = raw.replace(/^KW\s+-\s+.*\r?\n?/gm, '');
@@ -549,7 +579,9 @@ export class CslStyleFormatterService {
       )) {
         if (!checkRegex.test(raw)) {
           extraRisLines.push(
-            `${tag}  - ${String(value).replace(/\r?\n+/g, ' ').trim()}`,
+            `${tag}  - ${String(value)
+              .replace(/\r?\n+/g, ' ')
+              .trim()}`,
           );
         }
       }
@@ -575,10 +607,18 @@ export class CslStyleFormatterService {
     }
     const year = cslItem.issued?.['date-parts']?.[0]?.[0];
     if (year) {
-      lines.push(`PY  - ${String(year).replace(/\r?\n+/g, ' ').trim()}`);
+      lines.push(
+        `PY  - ${String(year)
+          .replace(/\r?\n+/g, ' ')
+          .trim()}`,
+      );
     }
     for (const { tag, value } of this.collectRisSupplementTags(cslItem)) {
-      lines.push(`${tag}  - ${String(value).replace(/\r?\n+/g, ' ').trim()}`);
+      lines.push(
+        `${tag}  - ${String(value)
+          .replace(/\r?\n+/g, ' ')
+          .trim()}`,
+      );
     }
     lines.push('ER  - ');
     return lines.join('\n');

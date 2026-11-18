@@ -42,12 +42,11 @@ export class ReaderBootstrapService {
         timer.unref();
       }
     });
-    return Promise.race([
-      promise.catch(() => undefined),
-      timeout,
-    ]).finally(() => {
-      if (timer) clearTimeout(timer);
-    });
+    return Promise.race([promise.catch(() => undefined), timeout]).finally(
+      () => {
+        if (timer) clearTimeout(timer);
+      },
+    );
   }
 
   private normalizeReaderRects(rawRects: unknown) {
@@ -238,7 +237,9 @@ export class ReaderBootstrapService {
 
       const readingState = {
         readStatus:
-          typeof itemRec.readStatus === 'string' ? itemRec.readStatus : 'unread',
+          typeof itemRec.readStatus === 'string'
+            ? itemRec.readStatus
+            : 'unread',
         isStarred: Boolean(itemRec.isStarred),
         rating: typeof itemRec.rating === 'number' ? itemRec.rating : 0,
         currentPage:
@@ -253,7 +254,9 @@ export class ReaderBootstrapService {
         lastReadAt:
           typeof itemRec.lastReadAt === 'string' ? itemRec.lastReadAt : null,
         lastOpenedAt:
-          typeof itemRec.lastOpenedAt === 'string' ? itemRec.lastOpenedAt : null,
+          typeof itemRec.lastOpenedAt === 'string'
+            ? itemRec.lastOpenedAt
+            : null,
       };
       itemRec.readingState = readingState;
 

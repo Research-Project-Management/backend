@@ -56,7 +56,10 @@ import { SavedSearchesRepository } from './repositories/saved-searches.repositor
 import { NotesRepository } from './repositories/notes.repository';
 
 // Facade
-import { CatalogFacade, CATALOG_FACADE } from './services/library-bootstrap.service';
+import {
+  CatalogFacade,
+  CATALOG_FACADE,
+} from './services/library-bootstrap.service';
 import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core';
 
 @Global()

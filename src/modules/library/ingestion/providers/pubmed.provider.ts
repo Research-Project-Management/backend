@@ -27,20 +27,34 @@ function parseMedlineDate(raw: string): string | undefined {
   const str = raw.trim();
   if (!str) return undefined;
   const MONTHS: Record<string, string> = {
-    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+    jan: '01',
+    feb: '02',
+    mar: '03',
+    apr: '04',
+    may: '05',
+    jun: '06',
+    jul: '07',
+    aug: '08',
+    sep: '09',
+    oct: '10',
+    nov: '11',
+    dec: '12',
   };
   const iso = str.match(/^(\d{4})[/-](\d{1,2})(?:[/-](\d{1,2}))?/);
   if (iso) {
     const m = iso[2].padStart(2, '0');
-    return iso[3] ? `${iso[1]}-${m}-${iso[3].padStart(2, '0')}` : `${iso[1]}-${m}`;
+    return iso[3]
+      ? `${iso[1]}-${m}-${iso[3].padStart(2, '0')}`
+      : `${iso[1]}-${m}`;
   }
   const med = str.match(/^(\d{4})(?:\s+([A-Za-z]{3})[a-z]*(?:\s+(\d{1,2}))?)?/);
   if (!med) return str;
   const year = med[1];
   const month = med[2] ? MONTHS[med[2].toLowerCase()] : undefined;
   if (!month) return med[2] ? str : year;
-  return med[3] ? `${year}-${month}-${med[3].padStart(2, '0')}` : `${year}-${month}`;
+  return med[3]
+    ? `${year}-${month}-${med[3].padStart(2, '0')}`
+    : `${year}-${month}`;
 }
 
 async function enrichFromEuropePmc(
@@ -347,12 +361,14 @@ export class PubMedProvider extends BaseMetadataProvider {
     let year: number | null = null;
     let publicationDate: string | undefined;
     const dateParts = [
-      (data.issued as { 'date-parts'?: Array<Array<string | number>> } | undefined)?.[
-        'date-parts'
-      ]?.[0],
-      (data['epub-date'] as { 'date-parts'?: Array<Array<string | number>> } | undefined)?.[
-        'date-parts'
-      ]?.[0],
+      (
+        data.issued as
+          { 'date-parts'?: Array<Array<string | number>> } | undefined
+      )?.['date-parts']?.[0],
+      (
+        data['epub-date'] as
+          { 'date-parts'?: Array<Array<string | number>> } | undefined
+      )?.['date-parts']?.[0],
     ].find((parts) => Array.isArray(parts) && Boolean(parts[0]));
     if (dateParts && dateParts[0] != null) {
       year = Number(dateParts[0]);
@@ -403,7 +419,8 @@ export class PubMedProvider extends BaseMetadataProvider {
         ? data.publisher.trim()
         : undefined;
     const place =
-      typeof data['publisher-place'] === 'string' && data['publisher-place'].trim()
+      typeof data['publisher-place'] === 'string' &&
+      data['publisher-place'].trim()
         ? data['publisher-place'].trim()
         : undefined;
     const volume =
@@ -566,12 +583,16 @@ export class PubMedProvider extends BaseMetadataProvider {
 
     const canonicalUrl = `https://pubmed.ncbi.nlm.nih.gov/${cleanPmid}/`;
     const fullJournalName =
-      typeof item.fulljournalname === 'string' ? item.fulljournalname : undefined;
+      typeof item.fulljournalname === 'string'
+        ? item.fulljournalname
+        : undefined;
     const sourceStr = typeof item.source === 'string' ? item.source : undefined;
     const volumeStr = typeof item.volume === 'string' ? item.volume : undefined;
     const issueStr = typeof item.issue === 'string' ? item.issue : undefined;
     const pagesStr =
-      typeof item.pages === 'string' ? normalizePageRange(item.pages) : undefined;
+      typeof item.pages === 'string'
+        ? normalizePageRange(item.pages)
+        : undefined;
     const issnStr = typeof item.issn === 'string' ? item.issn : undefined;
 
     const rawAbstract =

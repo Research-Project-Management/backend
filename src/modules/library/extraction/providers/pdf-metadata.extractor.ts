@@ -344,9 +344,7 @@ export class PdfMetadataExtractor implements IPdfMetadataExtractorPort {
           if (pageChunks.length > 0) {
             ctx.pageTexts = pageChunks;
             const stripped =
-              LayoutExtractor.stripRunningHeadersAndFootersFromText(
-                pageChunks,
-              );
+              LayoutExtractor.stripRunningHeadersAndFootersFromText(pageChunks);
             ctx.runningHeaderFooters = stripped.signatures;
             docText = stripped.cleanedText;
           }
@@ -381,9 +379,7 @@ export class PdfMetadataExtractor implements IPdfMetadataExtractorPort {
         const firstThree = pages.slice(0, 3);
         ctx.pageTexts = firstThree;
         const stripped =
-          LayoutExtractor.stripRunningHeadersAndFootersFromText(
-            firstThree,
-          );
+          LayoutExtractor.stripRunningHeadersAndFootersFromText(firstThree);
         ctx.runningHeaderFooters = stripped.signatures;
         ctx.pageText = stripped.cleanedText;
       }
@@ -411,9 +407,7 @@ export class PdfMetadataExtractor implements IPdfMetadataExtractorPort {
         0.85,
       );
     }
-    if (
-      ctx.mergeFieldIfEmpty('pmid', regexResults.pmid, 'REGEX', 0.9)
-    ) {
+    if (ctx.mergeFieldIfEmpty('pmid', regexResults.pmid, 'REGEX', 0.9)) {
       ctx.rawMatches.detectedPmid = regexResults.pmid;
     }
 
@@ -467,9 +461,7 @@ export class PdfMetadataExtractor implements IPdfMetadataExtractorPort {
           ctx.pageText &&
           ctx.pageText.trim().length > 20
         ) {
-          layoutResults = LayoutExtractor.extractFromPlainText(
-            ctx.pageText,
-          );
+          layoutResults = LayoutExtractor.extractFromPlainText(ctx.pageText);
         }
 
         ctx.mergeTierFields(
