@@ -16,6 +16,11 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid, mapWithConcurrency } from '@/core';
+import {
+  ensureCanonicalPageId,
+  resolveSpaceRootDocIds,
+  type PageScopeDbClient,
+} from '@/modules/pages/core/page-scope.helper';
 import { filterRecordsByPageScope } from '@/modules/pages/docstore/controllers/doc.helpers';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
@@ -53,7 +58,7 @@ export class WorkspacePlannerService {
    */
   public async resolveManuscriptContext(
     dto: {
-      projectId?: string;
+      spaceId?: string;
       pageId?: string;
     },
     authorizedSpaceId?: string,
@@ -122,8 +127,8 @@ export class WorkspacePlannerService {
       resolvedPageId = pageInfo.pageId;
     }
 
-    if (dto.projectId && dto.projectId !== 'default') {
-      const projAsEntityInfo = await inspectIdentifier(dto.projectId);
+    if (dto.spaceId && dto.spaceId !== 'default') {
+      const projAsEntityInfo = await inspectIdentifier(dto.spaceId);
       if (projAsEntityInfo?.spaceId) {
         if (
           authorizedSpaceId &&
@@ -139,8 +144,8 @@ export class WorkspacePlannerService {
         if (!resolvedPageId) resolvedPageId = projAsEntityInfo.pageId;
       } else if (
         authorizedSpaceId &&
-        dto.projectId !== authorizedSpaceId &&
-        dto.projectId !== resolvedPageId
+        dto.spaceId !== authorizedSpaceId &&
+        dto.spaceId !== resolvedPageId
       ) {
         throw new ForbiddenException({
           statusCode: 403,
@@ -166,9 +171,7 @@ export class WorkspacePlannerService {
     const spaceId =
       authorizedSpaceId ||
       resolvedSpaceId ||
-      (dto.projectId && dto.projectId !== 'default'
-        ? dto.projectId
-        : 'default');
+      (dto.spaceId && dto.spaceId !== 'default' ? dto.spaceId : 'default');
 
     if (resolvedPageId && resolvedPageId === spaceId) {
       resolvedPageId = undefined;
@@ -181,7 +184,7 @@ export class WorkspacePlannerService {
    * Resolve the owning project when only a page/doc id was supplied.
    */
   public async resolveProjectId(dto: {
-    projectId?: string;
+    spaceId?: string;
     pageId?: string;
   }): Promise<string> {
     const { spaceId } = await this.resolveManuscriptContext(dto);
@@ -204,61 +207,108 @@ export class WorkspacePlannerService {
 
     if (this.prisma && projectId !== 'default') {
       try {
-        const [rawNodes, rawDocs, rawBinaryFiles] = await Promise.all([
-          this.prisma.pageNode.findMany({
-            where: { spaceId: projectId },
-            orderBy: { sortOrder: 'asc' },
-            select: {
-              id: true,
-              pageId: true,
-              docId: true,
-              fileId: true,
-              path: true,
-              name: true,
-              type: true,
-              isRootDoc: true,
-            },
-          }),
-          this.prisma.pageDoc.findMany({
-            where: { spaceId: projectId, deletedAt: null },
-            select: {
-              id: true,
-              pageId: true,
-              path: true,
-              rev: true,
-              sizeBytes: true,
-              updatedAt: true,
-              inStorage: true,
-            },
-          }),
-          this.prisma.pageFile?.findMany
-            ? this.prisma.pageFile
-                .findMany({
-                  where: { spaceId: projectId, deletedAt: null },
-                  select: {
-                    id: true,
-                    pageId: true,
-                    name: true,
-                    sizeBytes: true,
-                    hash: true,
-                    updatedAt: true,
-                  },
-                })
-                .catch(() => [])
-            : Promise.resolve([]),
-        ]);
+        const [rawNodes, rawDocs, rawBinaryFiles, rootDocIds] =
+          await Promise.all([
+            this.prisma.pageNode.findMany({
+              where: { spaceId: projectId },
+              orderBy: { sortOrder: 'asc' },
+              select: {
+                id: true,
+                pageId: true,
+                docId: true,
+                fileId: true,
+                path: true,
+                name: true,
+                type: true,
+                page: { select: { rootDocId: true } },
+              },
+            }),
+            this.prisma.pageDoc.findMany({
+              where: { spaceId: projectId, deletedAt: null },
+              select: {
+                id: true,
+                pageId: true,
+                lastKnownPath: true,
+                rev: true,
+                sizeBytes: true,
+                updatedAt: true,
+                inStorage: true,
+              },
+            }),
+            this.prisma.pageFile?.findMany
+              ? this.prisma.pageFile
+                  .findMany({
+                    where: { spaceId: projectId, deletedAt: null },
+                    select: {
+                      id: true,
+                      pageId: true,
+                      lastKnownPath: true,
+                      sizeBytes: true,
+                      hash: true,
+                      updatedAt: true,
+                    },
+                  })
+                  .catch(() => [])
+              : Promise.resolve([]),
+            resolveSpaceRootDocIds(
+              this.prisma as unknown as PageScopeDbClient,
+              projectId,
+              effectiveScopePageId,
+            ),
+          ]);
+        const mappedNodes = rawNodes.map((n) => {
+          const nCompat = n as {
+            page?: { rootDocId?: string | null } | null;
+            isRootDoc?: boolean;
+          };
+          return {
+            id: n.id,
+            pageId: n.pageId,
+            docId: n.docId,
+            fileId: n.fileId,
+            path: n.path,
+            name: n.name,
+            type: n.type,
+            isRootDoc: Boolean(
+              nCompat.page?.rootDocId !== undefined
+                ? n.docId && n.docId === nCompat.page.rootDocId
+                : (n.docId && rootDocIds.has(n.docId)) || nCompat.isRootDoc,
+            ),
+          };
+        });
+        const mappedDocs = rawDocs.map((d) => ({
+          id: d.id,
+          pageId: d.pageId,
+          path:
+            d.lastKnownPath ??
+            (d as { path?: string | null }).path ??
+            'main.tex',
+          rev: d.rev,
+          sizeBytes: d.sizeBytes,
+          updatedAt: d.updatedAt,
+          inStorage: d.inStorage,
+        }));
+        const mappedBinaryFiles = rawBinaryFiles.map((bf) => ({
+          id: bf.id,
+          pageId: bf.pageId,
+          name:
+            bf.lastKnownPath ?? (bf as { name?: string }).name ?? 'unnamed.bin',
+          sizeBytes: bf.sizeBytes,
+          hash: bf.hash,
+          updatedAt: bf.updatedAt,
+        }));
         const nodes = filterRecordsByPageScope(
-          rawNodes,
+          mappedNodes,
           effectiveScopePageId,
           projectId,
         );
         const docs = filterRecordsByPageScope(
-          rawDocs,
+          mappedDocs,
           effectiveScopePageId,
           projectId,
         );
         const binaryFiles = filterRecordsByPageScope(
-          rawBinaryFiles,
+          mappedBinaryFiles,
           effectiveScopePageId,
           projectId,
         );
@@ -351,13 +401,13 @@ export class WorkspacePlannerService {
           binaryFiles = plan.binaryFiles;
           fileNodes = plan.nodes.filter((n) => n.type === 'FILE');
         } else {
-          const [rawBinaryFiles, rawFileNodes] = await Promise.all([
+          const [rawBinaryFilesFromDb, rawFileNodes] = await Promise.all([
             this.prisma.pageFile.findMany({
               where: { spaceId: projectId, deletedAt: null },
               select: {
                 id: true,
                 pageId: true,
-                name: true,
+                lastKnownPath: true,
                 sizeBytes: true,
                 hash: true,
               },
@@ -373,6 +423,16 @@ export class WorkspacePlannerService {
               },
             }),
           ]);
+          const rawBinaryFiles = rawBinaryFilesFromDb.map((bf) => ({
+            id: bf.id,
+            pageId: bf.pageId,
+            name:
+              bf.lastKnownPath ??
+              (bf as { name?: string }).name ??
+              'unnamed.bin',
+            sizeBytes: bf.sizeBytes,
+            hash: bf.hash,
+          }));
           binaryFiles =
             scratchWorkspaceId !== projectId
               ? filterRecordsByPageScope(
@@ -509,46 +569,85 @@ export class WorkspacePlannerService {
     metricEngine: string,
     userId?: string,
     plan?: PlannedFileSet,
+    manuscriptPageId?: string,
   ): Promise<void> {
     if (!this.prisma || !projectId || projectId === 'default') return;
 
-    const lastTime = this.lastAutoSnapshotTimes.get(projectId) || 0;
-    if (Date.now() - lastTime < 30000) return;
+    const preResolveKey = manuscriptPageId
+      ? `${projectId}:${manuscriptPageId}`
+      : projectId;
+    const preLastTime = this.lastAutoSnapshotTimes.get(preResolveKey) || 0;
+    if (Date.now() - preLastTime < 30000) return;
 
     try {
-      const [latest, projectDocs, projectNodes] = await Promise.all([
-        this.prisma.pageSnapshot.findFirst({
-          where: { spaceId: projectId },
-          orderBy: { version: 'desc' },
-          select: { version: true },
-        }),
-        plan?.docs
-          ? Promise.resolve(plan.docs)
-          : this.prisma.pageDoc?.findMany
-            ? this.prisma.pageDoc
-                .findMany({
-                  where: { spaceId: projectId, deletedAt: null },
-                  select: { id: true, path: true },
-                })
-                .catch(() => [])
-            : Promise.resolve([]),
-        plan?.nodes
-          ? Promise.resolve(plan.nodes)
-          : this.prisma.pageNode?.findMany
-            ? this.prisma.pageNode
-                .findMany({
-                  where: { spaceId: projectId },
-                  select: { docId: true, path: true, isRootDoc: true },
-                })
-                .catch(() => [])
-            : Promise.resolve([]),
-      ]);
+      const canonicalPageId = await ensureCanonicalPageId(
+        this.prisma,
+        projectId,
+        manuscriptPageId,
+      );
+      const snapshotScopeKey = `${projectId}:${canonicalPageId}`;
+      const lastTime = this.lastAutoSnapshotTimes.get(snapshotScopeKey) || 0;
+      if (Date.now() - lastTime < 30000) return;
+
+      const [latest, projectDocs, projectNodes, fallbackRootDocIds] =
+        await Promise.all([
+          this.prisma.pageSnapshot.findFirst({
+            where: { spaceId: projectId, pageId: canonicalPageId },
+            orderBy: { version: 'desc' },
+            select: { version: true },
+          }),
+          plan?.docs
+            ? Promise.resolve(plan.docs)
+            : this.prisma.pageDoc?.findMany
+              ? this.prisma.pageDoc
+                  .findMany({
+                    where: {
+                      spaceId: projectId,
+                      pageId: canonicalPageId,
+                      deletedAt: null,
+                    },
+                    select: { id: true, lastKnownPath: true },
+                  })
+                  .then((rows) =>
+                    rows.map((r) => ({
+                      id: r.id,
+                      path:
+                        r.lastKnownPath ??
+                        (r as { path?: string | null }).path ??
+                        '',
+                    })),
+                  )
+                  .catch(() => [])
+              : Promise.resolve([]),
+          plan?.nodes
+            ? Promise.resolve(plan.nodes)
+            : this.prisma.pageNode?.findMany
+              ? this.prisma.pageNode
+                  .findMany({
+                    where: { spaceId: projectId, pageId: canonicalPageId },
+                    select: {
+                      docId: true,
+                      path: true,
+                      page: { select: { rootDocId: true } },
+                    },
+                  })
+                  .catch(() => [])
+              : Promise.resolve([]),
+          resolveSpaceRootDocIds(
+            this.prisma as unknown as PageScopeDbClient,
+            projectId,
+            canonicalPageId,
+          ),
+        ]);
 
       const docIdByNormalizedPath = new Map<string, string>();
       const rootDocPaths = new Set<string>();
       for (const d of projectDocs || []) {
-        if (d.path && d.id) {
-          const norm = d.path.startsWith('/') ? d.path : `/${d.path}`;
+        const docPath =
+          (d as { path?: string | null; lastKnownPath?: string }).path ??
+          (d as { lastKnownPath?: string }).lastKnownPath;
+        if (docPath && d.id) {
+          const norm = docPath.startsWith('/') ? docPath : `/${docPath}`;
           docIdByNormalizedPath.set(norm, d.id);
         }
       }
@@ -558,7 +657,16 @@ export class WorkspacePlannerService {
           if (n.docId) {
             docIdByNormalizedPath.set(norm, n.docId);
           }
-          if (n.isRootDoc) {
+          const nCompat = n as {
+            isRootDoc?: boolean;
+            page?: { rootDocId?: string | null } | null;
+          };
+          const isRoot = Boolean(
+            nCompat.isRootDoc ||
+            (nCompat.page?.rootDocId && n.docId === nCompat.page.rootDocId) ||
+            (n.docId && fallbackRootDocIds.has(n.docId)),
+          );
+          if (isRoot) {
             rootDocPaths.add(norm);
           }
         }
@@ -590,9 +698,11 @@ export class WorkspacePlannerService {
       if (Object.keys(filesJson).length === 0) return;
 
       const projectContentHash = hashAccumulator.digest('hex');
-      if (this.lastSnapshotHashes.get(projectId) === projectContentHash) {
+      if (
+        this.lastSnapshotHashes.get(snapshotScopeKey) === projectContentHash
+      ) {
         // Content did not change since last snapshot; update timestamp to prevent thrashing
-        this.lastAutoSnapshotTimes.set(projectId, Date.now());
+        this.lastAutoSnapshotTimes.set(snapshotScopeKey, Date.now());
         return;
       }
 
@@ -607,6 +717,7 @@ export class WorkspacePlannerService {
           await this.prisma.pageSnapshot.create({
             data: {
               spaceId: projectId,
+              pageId: canonicalPageId,
               version: candidateVersion,
               summary: `Compilation milestone (${metricEngine})`,
               createdById: userId || null,
@@ -621,7 +732,7 @@ export class WorkspacePlannerService {
           const code = (err as { code?: string })?.code;
           if (code === 'P2002' && attempt < maxAttempts - 1) {
             const currentLatest = await this.prisma.pageSnapshot.findFirst({
-              where: { spaceId: projectId },
+              where: { spaceId: projectId, pageId: canonicalPageId },
               orderBy: { version: 'desc' },
               select: { version: true },
             });
@@ -646,8 +757,8 @@ export class WorkspacePlannerService {
           this.lastSnapshotHashes.delete(oldestKey);
         }
       }
-      this.lastAutoSnapshotTimes.set(projectId, Date.now());
-      this.lastSnapshotHashes.set(projectId, projectContentHash);
+      this.lastAutoSnapshotTimes.set(snapshotScopeKey, Date.now());
+      this.lastSnapshotHashes.set(snapshotScopeKey, projectContentHash);
       this.realtimeService?.broadcastSnapshotCreated(projectId, {
         version: savedVersion,
         summary: `Compilation milestone (${metricEngine})`,

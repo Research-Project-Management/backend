@@ -24,9 +24,7 @@ export class WorkspaceCollectorService {
     injectedLiveCollab?: LiveCollaborationPort,
   ) {
     this.liveCollab =
-      injectedLiveCollab &&
-      typeof (injectedLiveCollab as LiveCollaborationPort).flushDocs ===
-        'function'
+      injectedLiveCollab && typeof injectedLiveCollab.flushDocs === 'function'
         ? injectedLiveCollab
         : NOOP_LIVE_COLLABORATION;
   }

@@ -162,9 +162,7 @@ export class LatexOutlineExtractor {
         if (labelMatch && labelMatch[1]) {
           currentFloat.label = labelMatch[1].trim();
         }
-        if (
-          new RegExp(`\\\\end\\{${currentFloat.type}\\*?\\}`).test(trimmed)
-        ) {
+        if (new RegExp(`\\\\end\\{${currentFloat.type}\\*?\\}`).test(trimmed)) {
           entries.push({
             level: currentFloat.type,
             title:
@@ -223,8 +221,7 @@ export class LatexOutlineExtractor {
         const shortTitle = secMatch[3]
           ? this.cleanLatexTitle(secMatch[3])
           : undefined;
-        const openBraceIdx =
-          secMatch.index + secMatch[0].lastIndexOf('{');
+        const openBraceIdx = secMatch.index + secMatch[0].lastIndexOf('{');
         const extracted = this.extractBalancedBraces(cleanLine, openBraceIdx);
         const rawTitle = extracted
           ? extracted.content
@@ -281,10 +278,7 @@ export class LatexOutlineExtractor {
         continue;
       }
 
-      while (
-        stack.length > 0 &&
-        stack[stack.length - 1].priority >= priority
-      ) {
+      while (stack.length > 0 && stack[stack.length - 1].priority >= priority) {
         stack.pop();
       }
 

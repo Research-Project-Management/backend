@@ -506,7 +506,7 @@ export class CompileLogAnalyzer implements ILogParser {
     /(?:Overfull|Underfull)\s+\\(?:hbox|vbox)\s*\([^)]*\)\s*(?:in paragraph\s*)?at lines?\s+(\d+)(?:--\d+)?/i;
 
   private static readonly FILE_LINE_ERROR_REGEX =
-    /^(\.{0,2}\/?[^\s:!()]+\.(?:tex|bib|sty|cls|dtx|ins)):(\d+):\s*(.+)/i;
+    /^((?:[a-zA-Z]:[\\/])?(?:\.{0,2}[\\/])?[^\s:!()]+\.(?:tex|bib|sty|cls|dtx|ins)):(\d+):\s*(.+)/i;
 
   private static readonly FILE_EXTENSION_REGEX =
     /\.(tex|sty|cls|bib|bbl|aux|toc|lof|lot|out|def|ldf|fd|cfg|dtx|ins)\b/i;
@@ -631,7 +631,9 @@ export class CompileLogAnalyzer implements ILogParser {
       }
     }
 
-    const envUndefMatch = combined.match(/environment\s+[`']?([^`'\s}]+)[`']?\s+undefined/i);
+    const envUndefMatch = combined.match(
+      /environment\s+[`']?([^`'\s}]+)[`']?\s+undefined/i,
+    );
     if (envUndefMatch && envUndefMatch[1]) {
       const envName = envUndefMatch[1].trim();
       const pkg = ENV_PKG_LOOKUP[envName];
@@ -741,11 +743,15 @@ export class CompileLogAnalyzer implements ILogParser {
         const ch = text[idx];
         if (ch === '(') {
           const rest = text.slice(idx + 1);
-          const m = rest.match(
-            /^(?:\.{0,2}\/|\/|[a-zA-Z]:|[a-zA-Z0-9_-]+\/)?([^()\s"]+\.(?:tex|sty|cls|bib|bbl|aux|toc|lof|lot|out|def|ldf|fd|cfg|dtx|ins))\b/i,
-          );
+          const m =
+            rest.match(
+              /^"((?:\.{0,2}[\\/]|\/|[a-zA-Z]:[\\/]?|[a-zA-Z0-9_-]+[\\/])?[^()"]+\.(?:tex|sty|cls|bib|bbl|aux|toc|lof|lot|out|def|ldf|fd|cfg|dtx|ins))"(?=\s|\)|$)/i,
+            ) ??
+            rest.match(
+              /^((?:\.{0,2}[\\/]|\/|[a-zA-Z]:[\\/]?|[a-zA-Z0-9_-]+[\\/])?[^()\s"]+\.(?:tex|sty|cls|bib|bbl|aux|toc|lof|lot|out|def|ldf|fd|cfg|dtx|ins))(?=\s|\)|$)/i,
+            );
           if (m) {
-            const candidatePath = m[0].trim();
+            const candidatePath = (m[1] || m[0]).trim().replace(/^"+|"+$/g, '');
             const cleanPath = this.normalizeFilePath(
               candidatePath,
               defaultFile,
@@ -883,7 +889,8 @@ export class CompileLogAnalyzer implements ILogParser {
         while (
           j < lines.length &&
           lines[j] &&
-          (/^\s{2,}/.test(lines[j]) || /^\([a-zA-Z0-9_-]+\)\s/.test(lines[j])) &&
+          (/^\s{2,}/.test(lines[j]) ||
+            /^\([a-zA-Z0-9_-]+\)\s/.test(lines[j])) &&
           !lines[j].startsWith('!') &&
           !lines[j].match(CompileLogAnalyzer.LATEX_WARNING_REGEX) &&
           !lines[j].match(CompileLogAnalyzer.BADBOX_REGEX) &&

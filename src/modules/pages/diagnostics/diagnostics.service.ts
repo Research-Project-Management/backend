@@ -49,8 +49,7 @@ export class DiagnosticsService {
     this.knowledgeBase = knowledgeBase ?? new ErrorKnowledgeBase();
     this.logAnalyzer =
       logAnalyzer ?? new CompileLogAnalyzer(this.knowledgeBase);
-    this.syntaxLinter =
-      syntaxLinter ?? new SyntaxLinter(this.knowledgeBase);
+    this.syntaxLinter = syntaxLinter ?? new SyntaxLinter(this.knowledgeBase);
   }
 
   /**
@@ -150,7 +149,9 @@ export class DiagnosticsService {
   public async lintProjectDocument(
     projectId: string,
     dto: LintDocumentDto,
+    pageId?: string,
   ): Promise<DiagnosticReportDto> {
+    const effectivePageId = pageId ?? dto.pageId;
     const knownBibKeys = new Set<string>(
       (dto.knownBibKeys || []).flatMap((k) => [k, k.toLowerCase()]),
     );
@@ -167,7 +168,10 @@ export class DiagnosticsService {
 
     if (this.docstoreService) {
       try {
-        const docs = await this.docstoreService.getAllDocs(projectId);
+        const docs = await this.docstoreService.getAllDocs(
+          projectId,
+          effectivePageId,
+        );
         if (dto.docId && sourceText === undefined) {
           const targetDoc = docs.find((d) => d._id === dto.docId);
           if (targetDoc) {
@@ -203,7 +207,10 @@ export class DiagnosticsService {
    * Gathers all .bib citation keys and statically checks all .tex files
    * for unclosed environments, unmatched braces, unescaped characters, and missing citations.
    */
-  public async lintProject(projectId: string): Promise<DiagnosticReportDto> {
+  public async lintProject(
+    projectId: string,
+    pageId?: string,
+  ): Promise<DiagnosticReportDto> {
     const allItems: DiagnosticItem[] = [];
     const knownBibKeys = new Set<string>();
     const knownLabels = new Set<string>();
@@ -216,7 +223,7 @@ export class DiagnosticsService {
 
     if (this.docstoreService) {
       try {
-        const docs = await this.docstoreService.getAllDocs(projectId);
+        const docs = await this.docstoreService.getAllDocs(projectId, pageId);
         this.collectProjectKnownSymbols(docs, knownBibKeys, knownLabels);
 
         for (const doc of docs) {

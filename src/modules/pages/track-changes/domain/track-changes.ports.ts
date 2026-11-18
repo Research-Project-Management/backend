@@ -33,6 +33,28 @@ export abstract class ITrackChangesRepositoryPort {
     docId?: string,
   ): Promise<void>;
 
+  claimPendingChanges?(
+    projectId: string,
+    docId: string,
+    changeIds: string[],
+    nextStatus: 'accepted' | 'rejected',
+    resolvedById?: string | null,
+    resolvedAt?: Date,
+  ): Promise<string[]>;
+
+  revertClaimedChangesStatus?(
+    projectId: string,
+    docId: string,
+    changeIds: string[],
+    expectedCurrentStatus: 'accepted' | 'rejected',
+  ): Promise<void>;
+
+  updateCommentReply?(
+    threadId: string,
+    replyId: string,
+    content: string,
+  ): Promise<CommentReply | null>;
+
   abstract saveCommentThread(thread: CommentThread): Promise<CommentThread>;
   abstract findThreadById(threadId: string): Promise<CommentThread | null>;
   abstract listThreadsByDoc(

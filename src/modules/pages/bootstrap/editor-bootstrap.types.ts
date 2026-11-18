@@ -24,9 +24,9 @@ export interface EditorBootstrapPermissionsDto {
 
 export interface EditorBootstrapWorkspaceDto {
   spaceId: string;
+  spaceType?: 'personal' | 'project';
   pageId: string;
   rootDocId: string;
-  projectId: string | null;
   projectName: string | null;
   title: string;
   mainFilePath: string;
@@ -36,6 +36,7 @@ export interface EditorBootstrapWorkspaceDto {
 
 export interface EditorBootstrapTreeNodeDto {
   id: string;
+  spaceId?: string;
   projectId: string;
   pageId: string | null;
   parentId: string | null;
@@ -63,6 +64,8 @@ export interface EditorBootstrapActiveDocDto {
     content: string;
     path?: string;
     status: string;
+    spaceId?: string;
+    pageId?: string;
     projectId: string;
     mainFile: { id: string; title: string };
     mainFileId: string;

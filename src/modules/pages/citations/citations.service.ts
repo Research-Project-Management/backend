@@ -3,7 +3,12 @@
  * Deep Service orchestrating Citations, BibTeX, DOI/arXiv resolution & Library sync.
  */
 
-import { Injectable, Optional, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Optional,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { CitationsRepository } from './citations.repository';
 import {
   IdentifierVo,
@@ -46,8 +51,7 @@ export class CitationsService {
     @Optional() identifierResolver?: IdentifierResolver,
   ) {
     this.bibParser = bibParser ?? new BibtexParser();
-    this.identifierResolver =
-      identifierResolver ?? new IdentifierResolver();
+    this.identifierResolver = identifierResolver ?? new IdentifierResolver();
   }
 
   /**
@@ -56,8 +60,12 @@ export class CitationsService {
   public async searchCitationKeys(
     projectId: string,
     queryDto: CitationQueryDto,
+    pageId?: string,
   ): Promise<BibEntryDto[]> {
-    const bibFiles = await this.repository.collectBibFiles(projectId);
+    const bibFiles = await this.repository.collectBibFiles(
+      projectId,
+      pageId ?? queryDto.pageId,
+    );
     const limit = queryDto.limit && queryDto.limit > 0 ? queryDto.limit : 50;
 
     const allMatches: BibEntry[] = [];
@@ -89,6 +97,7 @@ export class CitationsService {
   public async resolveIdentifier(
     projectId: string,
     dto: ResolveIdentifierDto,
+    pageId?: string,
   ): Promise<{ entry: BibEntryDto; filePath: string; identifierType: string }> {
     const idVo = IdentifierVo.parse(dto.identifier);
     if (idVo.type === 'unknown') {
@@ -105,6 +114,7 @@ export class CitationsService {
       projectId,
       resolvedEntry,
       targetFile,
+      pageId ?? dto.pageId,
     );
 
     return {
@@ -119,8 +129,9 @@ export class CitationsService {
    */
   public async validateProjectBibtex(
     projectId: string,
+    pageId?: string,
   ): Promise<CitationValidationDto> {
-    const bibFiles = await this.repository.collectBibFiles(projectId);
+    const bibFiles = await this.repository.collectBibFiles(projectId, pageId);
 
     const allKeysMap = new Map<string, string[]>();
     const warnings: string[] = [];
@@ -190,6 +201,7 @@ export class CitationsService {
     projectId: string,
     userId: string,
     dto: SyncLibraryDto,
+    pageId?: string,
   ): Promise<SyncLibraryResultDto> {
     const rawBibtex = await this.repository.fetchCollectionBibtex(
       userId,
@@ -205,14 +217,16 @@ export class CitationsService {
       projectId,
       entries,
       targetFile,
+      pageId ?? dto.pageId,
     );
 
     const filePath =
       typeof syncResult === 'string' ? syncResult : syncResult?.filePath;
-    const conflicts =
-      Array.isArray((syncResult as { conflicts?: string[] })?.conflicts)
-        ? (syncResult as { conflicts: string[] }).conflicts
-        : [];
+    const conflicts = Array.isArray(
+      (syncResult as { conflicts?: string[] })?.conflicts,
+    )
+      ? (syncResult as { conflicts: string[] }).conflicts
+      : [];
 
     if (conflicts.length > 0) {
       this.logger.warn(
@@ -247,8 +261,11 @@ export class CitationsService {
    * Virtual .bib Projection (Editor ↔ Library Bridge):
    * Streams aggregated project references directly without intermediate disk mutations.
    */
-  public async getVirtualProjectBibtex(projectId: string): Promise<string> {
-    const bibFiles = await this.repository.collectBibFiles(projectId);
+  public async getVirtualProjectBibtex(
+    projectId: string,
+    pageId?: string,
+  ): Promise<string> {
+    const bibFiles = await this.repository.collectBibFiles(projectId, pageId);
     if (!bibFiles.length) {
       return '';
     }
@@ -263,6 +280,7 @@ export class CitationsService {
   public async refactorCitationKey(
     projectId: string,
     dto: RefactorCitationKeyDto,
+    pageId?: string,
   ): Promise<RefactorCitationKeyResultDto> {
     const oldKey = (dto.oldKey || '').trim();
     const newKey = (dto.newKey || '').trim();
@@ -274,7 +292,12 @@ export class CitationsService {
     }
 
     const { affectedFiles, totalReplacements } =
-      await this.repository.refactorCitationKey(projectId, oldKey, newKey);
+      await this.repository.refactorCitationKey(
+        projectId,
+        oldKey,
+        newKey,
+        pageId ?? dto.pageId,
+      );
 
     return {
       oldKey,
@@ -290,6 +313,7 @@ export class CitationsService {
   public async upsertEntries(
     projectId: string,
     dto: UpsertCitationEntriesDto,
+    pageId?: string,
   ): Promise<UpsertCitationEntriesResultDto> {
     const targetFile =
       dto.targetBibFile || dto.targetFilename || 'references.bib';
@@ -320,6 +344,7 @@ export class CitationsService {
       projectId,
       domainEntries,
       targetFile,
+      pageId ?? dto.pageId,
     );
 
     const filePath =

@@ -4,9 +4,29 @@
  */
 
 export class ChangeNotFoundException extends Error {
+  public readonly statusCode = 404;
+  public readonly code = 'TRACK_CHANGE_NOT_FOUND';
+
   constructor(public readonly changeId: string) {
     super(`Track change '${changeId}' was not found.`);
     this.name = 'ChangeNotFoundException';
+  }
+}
+
+/**
+ * track-changes/core/domain/exceptions/stale-anchor.exception.ts
+ * Thrown when a track change's target text no longer matches its recorded line/column coordinates.
+ */
+
+export class StaleTrackChangeAnchorException extends Error {
+  public readonly statusCode = 409;
+  public readonly code = 'STALE_TRACK_CHANGE_ANCHOR';
+
+  constructor(public readonly changeId: string) {
+    super(
+      `Track change '${changeId}' can no longer be applied cleanly because the surrounding text was modified.`,
+    );
+    this.name = 'StaleTrackChangeAnchorException';
   }
 }
 
@@ -16,6 +36,9 @@ export class ChangeNotFoundException extends Error {
  */
 
 export class ResolvedThreadException extends Error {
+  public readonly statusCode = 409;
+  public readonly code = 'COMMENT_THREAD_RESOLVED';
+
   constructor(public readonly threadId: string) {
     super(
       `Cannot reply or mutate comment thread '${threadId}' because it has already been resolved.`,
@@ -30,6 +53,9 @@ export class ResolvedThreadException extends Error {
  */
 
 export class ThreadNotFoundException extends Error {
+  public readonly statusCode = 404;
+  public readonly code = 'COMMENT_THREAD_NOT_FOUND';
+
   constructor(public readonly threadId: string) {
     super(`Comment thread '${threadId}' was not found.`);
     this.name = 'ThreadNotFoundException';

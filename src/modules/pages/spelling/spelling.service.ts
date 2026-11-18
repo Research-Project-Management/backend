@@ -32,6 +32,7 @@ import {
 export interface CheckSpellingQuery {
   text?: string;
   projectId?: string;
+  pageId?: string;
   docId?: string;
   language?: string;
   userId?: string;
@@ -120,9 +121,10 @@ export class SpellingService {
   ): Promise<SpellingReportDto> {
     const report = await this.checkSpelling({
       projectId,
+      pageId: dto.pageId,
       userId,
       text: dto.text,
-      docId: dto.docId,
+      docId: dto.docId ?? dto.pageId,
       language: dto.language,
     });
     return report.toJSON();

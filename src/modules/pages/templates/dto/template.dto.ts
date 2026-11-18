@@ -122,4 +122,8 @@ export class CreateTemplateDto {
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @IsString()
+  pageId?: string;
 }

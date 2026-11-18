@@ -1,13 +1,14 @@
 /**
- * modules/manuscripts/docstore/repositories/docstore.repository.ts
+ * modules/pages/docstore/repositories/docstore.repository.ts
  * Direct PostgreSQL repository via Prisma with Optimistic Concurrency Control (OCC).
  * Eliminates unnecessary single-adapter Symbol port indirection while preserving
  * backward-compatible types and aliases.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Prisma, PageDoc } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
+import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
 import { filterRecordsByPageScope } from '../controllers/doc.helpers';
@@ -30,7 +31,9 @@ export class DocstoreRepository {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private mapToEntity(record: PageDoc): TextDoc {
+  private mapToEntity(
+    record: PageDoc & { node?: { path?: string | null } | null; path?: string },
+  ): TextDoc {
     const rawLines = Array.isArray(record.lines)
       ? (record.lines as string[])
       : typeof record.lines === 'string'
@@ -38,12 +41,17 @@ export class DocstoreRepository {
         : [];
     const projectId =
       record.spaceId ?? (record as { projectId?: string }).projectId ?? '';
+    const resolvedPath =
+      record.node?.path ||
+      record.lastKnownPath ||
+      record.path ||
+      'document.tex';
 
     return new TextDoc({
       id: record.id,
       projectId,
-      pageId: (record as { pageId?: string | null }).pageId ?? projectId,
-      path: record.path,
+      pageId: record.pageId ?? projectId,
+      path: resolvedPath,
       lines: rawLines,
       rev: record.rev,
       version: record.version,
@@ -103,8 +111,12 @@ export class DocstoreRepository {
     const record = await this.prisma.pageDoc.findFirst({
       where: {
         spaceId: projectId,
-        path: cleanPath,
         deletedAt: null,
+        OR: [
+          { node: { path: `/${cleanPath}` } },
+          { lastKnownPath: cleanPath },
+          { lastKnownPath: `/${cleanPath}` },
+        ],
       },
     });
 
@@ -124,10 +136,10 @@ export class DocstoreRepository {
       where: {
         spaceId: projectId,
         deletedAt: null,
-        ...(hasCustomPageScope ? { OR: [{ pageId }, { pageId: null }] } : {}),
+        ...(hasCustomPageScope ? { pageId } : {}),
       },
       orderBy: {
-        path: 'asc',
+        lastKnownPath: 'asc',
       },
     });
 
@@ -139,11 +151,21 @@ export class DocstoreRepository {
     return records.map((r) => this.mapToEntity(r));
   }
 
-  public async getAllDeletedDocs(projectId: string): Promise<TextDoc[]> {
+  public async getAllDeletedDocs(
+    projectId: string,
+    pageId?: string,
+  ): Promise<TextDoc[]> {
+    const hasScopedPage =
+      typeof pageId === 'string' &&
+      pageId !== projectId &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        pageId,
+      );
     const records = await this.prisma.pageDoc.findMany({
       where: {
         spaceId: projectId,
         deletedAt: { not: null },
+        ...(hasScopedPage ? { pageId } : {}),
       },
       orderBy: {
         deletedAt: 'desc',
@@ -163,11 +185,18 @@ export class DocstoreRepository {
     const sizeBytes = bytes + Math.max(0, data.lines.length - 1);
 
     const client = data.tx ?? this.prisma;
+    const effectivePageId = await ensureCanonicalPageId(
+      client,
+      data.projectId,
+      data.pageId,
+      { preferredPageId: data.id },
+    );
     const record = await client.pageDoc.create({
       data: {
+        ...(data.id ? { id: data.id } : {}),
         spaceId: data.projectId,
-        ...(data.pageId ? { pageId: data.pageId } : {}),
-        path: cleanPath,
+        pageId: effectivePageId,
+        lastKnownPath: cleanPath,
         lines: data.lines,
         rev: 1,
         version: data.version ?? 0,
@@ -273,6 +302,7 @@ export class DocstoreRepository {
       const updatedDoc = new TextDoc({
         id: baseDoc.id,
         projectId: baseDoc.projectId,
+        pageId: baseDoc.pageId,
         path: baseDoc.path,
         lines: data.lines,
         rev: data.expectedRev + 1,
@@ -287,18 +317,6 @@ export class DocstoreRepository {
         createdAt: baseDoc.createdAt,
         updatedAt: new Date(),
       });
-
-      if (this.prisma.pageNode?.updateMany) {
-        await this.prisma.pageNode
-          .updateMany({
-            where: { spaceId: projectId, docId },
-            data: {
-              sizeBytes,
-              ...(resolvedHash ? { hash: resolvedHash } : {}),
-            },
-          })
-          .catch(() => undefined);
-      }
 
       DocstoreMetrics.recordWrite(sizeBytes);
       return { doc: updatedDoc, modified: true };
@@ -323,18 +341,6 @@ export class DocstoreRepository {
           rev: { increment: 1 },
         },
       });
-
-      if (this.prisma.pageNode?.updateMany) {
-        await this.prisma.pageNode
-          .updateMany({
-            where: { spaceId: projectId, docId },
-            data: {
-              sizeBytes,
-              ...(data.hash ? { hash: data.hash } : {}),
-            },
-          })
-          .catch(() => undefined);
-      }
 
       DocstoreMetrics.recordWrite(sizeBytes);
       return { doc: this.mapToEntity(updated), modified: true };
@@ -364,6 +370,7 @@ export class DocstoreRepository {
     }
 
     const updateData: Prisma.PageDocUpdateInput = {};
+    let nextLastKnownPath: string | undefined;
     if (patch.deleted !== undefined) {
       updateData.deletedAt = patch.deleted
         ? patch.deletedAt || new Date()
@@ -374,7 +381,8 @@ export class DocstoreRepository {
         patch.name || 'document.tex',
         'document.tex',
       );
-      updateData.path = parsedName.relativePath;
+      nextLastKnownPath = parsedName.relativePath;
+      updateData.lastKnownPath = nextLastKnownPath;
     }
     if (patch.ranges !== undefined) {
       const existingRanges = (current.ranges as DocRanges) || {};
@@ -387,32 +395,32 @@ export class DocstoreRepository {
       } as unknown as Prisma.InputJsonValue;
     }
 
-    const updated = await this.prisma.pageDoc.update({
-      where: { id: docId },
-      data: updateData,
-    });
+    const runPatch = async (
+      db: Pick<PrismaService, 'pageDoc' | 'pageNode'>,
+    ) => {
+      const docRecord = await db.pageDoc.update({
+        where: { id: docId },
+        data: updateData,
+      });
 
-    if (patch.deleted === true) {
-      await this.prisma.pageNode
-        ?.deleteMany({
-          where: {
-            spaceId: projectId,
-            OR: [{ docId }, { id: docId }],
-          },
-        })
-        ?.catch(() => undefined);
-    } else if (patch.name !== undefined && updateData.path) {
-      const parsed = NodePathVo.parse(
-        String(updateData.path),
-        String(updateData.path),
-      );
-      const parentId = await ensurePrismaFolderChain(
-        this.prisma,
-        projectId,
-        parsed.folderChain,
-      ).catch(() => null);
-      await this.prisma.pageNode
-        ?.updateMany({
+      if (patch.deleted === true) {
+        await db.pageNode
+          ?.deleteMany({
+            where: {
+              spaceId: projectId,
+              OR: [{ docId }, { id: docId }],
+            },
+          })
+          ?.catch(() => undefined);
+      } else if (patch.name !== undefined && nextLastKnownPath) {
+        const parsed = NodePathVo.parse(nextLastKnownPath, nextLastKnownPath);
+        const parentId = await ensurePrismaFolderChain(
+          db,
+          projectId,
+          parsed.folderChain,
+          current.pageId,
+        );
+        await db.pageNode?.updateMany({
           where: {
             spaceId: projectId,
             OR: [{ docId }, { id: docId }],
@@ -423,11 +431,31 @@ export class DocstoreRepository {
             depth: parsed.depth,
             parentId: parentId ?? null,
           },
-        })
-        ?.catch(() => undefined);
-    }
+        });
+      }
 
-    return this.mapToEntity(updated);
+      return docRecord;
+    };
+
+    try {
+      const updated =
+        typeof this.prisma.$transaction === 'function'
+          ? await this.prisma.$transaction(async (tx) => {
+              const client = tx?.pageDoc ? tx : this.prisma;
+              return await runPatch(client);
+            })
+          : await runPatch(this.prisma);
+
+      return this.mapToEntity(updated);
+    } catch (err: unknown) {
+      const errObj = err as { code?: string; message?: string } | null;
+      if (errObj?.code === 'P2002' || errObj?.message?.includes('P2002')) {
+        throw new ConflictException(
+          `File path already exists: ${nextLastKnownPath ?? patch.name ?? docId}`,
+        );
+      }
+      throw err;
+    }
   }
 
   public async markAsArchived(
@@ -464,13 +492,32 @@ export class DocstoreRepository {
     );
     const sizeBytes = bytes + Math.max(0, lines.length - 1);
 
+    const existing =
+      typeof this.prisma.pageDoc.findFirst === 'function'
+        ? await this.prisma.pageDoc.findFirst({
+            where: { id: docId, spaceId: projectId },
+            select: { ranges: true },
+          })
+        : null;
+    const existingRanges =
+      existing?.ranges &&
+      typeof existing.ranges === 'object' &&
+      !Array.isArray(existing.ranges)
+        ? (existing.ranges as Record<string, unknown>)
+        : {};
+    const incomingRanges =
+      ranges && typeof ranges === 'object' && !Array.isArray(ranges)
+        ? (ranges as Record<string, unknown>)
+        : {};
+    const mergedRanges = { ...existingRanges, ...incomingRanges };
+
     await this.prisma.pageDoc.updateMany({
       where: { id: docId, spaceId: projectId, inStorage: true },
       data: {
         inStorage: false,
         storageKey: null,
         lines: lines,
-        ranges: (ranges || {}) as unknown as Prisma.InputJsonValue,
+        ranges: mergedRanges as unknown as Prisma.InputJsonValue,
         sizeBytes,
       },
     });

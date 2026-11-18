@@ -44,18 +44,40 @@ export interface HeartbeatBody {
   [key: string]: unknown;
 }
 
+const COLOR_HEX_REGEX = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+function sanitizePresenceColor(color?: string | null): string {
+  if (!color || typeof color !== 'string') return '#2563EB';
+  const trimmed = color.trim();
+  return COLOR_HEX_REGEX.test(trimmed) ? trimmed : '#2563EB';
+}
+
+function sanitizeCursorPayload(
+  cursor?: Record<string, unknown> | null,
+): Record<string, unknown> | null | undefined {
+  if (!cursor || typeof cursor !== 'object') return cursor;
+  const out: Record<string, unknown> = {};
+  for (const key of ['line', 'column', 'ch', 'head', 'anchor', 'from', 'to']) {
+    const val = cursor[key];
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      out[key] = Math.max(0, Math.min(1_000_000, Math.floor(val)));
+    }
+  }
+  return out;
+}
+
 @Injectable()
 export class PresenceService implements OnModuleDestroy {
   private readonly logger = new Logger(PresenceService.name);
   private static readonly HTTP_PRESENCE_TTL_MS = 60_000;
   private static readonly MAX_HTTP_PRESENCE_ENTRIES = 5000;
-  private static readonly httpPresence = new Map<string, ActivePresenceUser>();
-  private static readonly projectIdCache = new Map<
+  private static readonly PROJECT_ID_CACHE_TTL_MS = 300_000; // 5 minutes
+  private static readonly PRESENCE_CACHE_TTL_MS = 1_000; // 1 second single-flight + short TTL cache
+  private readonly httpPresence = new Map<string, ActivePresenceUser>();
+  private readonly projectIdCache = new Map<
     string,
     { projectId: string | null; expiresAt: number }
   >();
-  private static readonly PROJECT_ID_CACHE_TTL_MS = 300_000; // 5 minutes
-  private static readonly PRESENCE_CACHE_TTL_MS = 1_000; // 1 second single-flight + short TTL cache
   private readonly presenceCache = new Map<
     string,
     {
@@ -91,6 +113,8 @@ export class PresenceService implements OnModuleDestroy {
     }
     this.activeSseCleanups.clear();
     this.presenceCache.clear();
+    this.httpPresence.clear();
+    this.projectIdCache.clear();
     this.liveCollab = undefined;
   }
 
@@ -101,7 +125,7 @@ export class PresenceService implements OnModuleDestroy {
   private async resolveProjectId(id: string): Promise<string | null> {
     if (!isUuid(id)) return null;
 
-    const cached = PresenceService.projectIdCache.get(id);
+    const cached = this.projectIdCache.get(id);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.projectId;
     }
@@ -123,23 +147,21 @@ export class PresenceService implements OnModuleDestroy {
         null;
     }
 
-    if (PresenceService.projectIdCache.size > 2000) {
+    if (this.projectIdCache.size > 2000) {
       const now = Date.now();
-      for (const [k, v] of PresenceService.projectIdCache) {
+      for (const [k, v] of this.projectIdCache) {
         if (v.expiresAt <= now) {
-          PresenceService.projectIdCache.delete(k);
+          this.projectIdCache.delete(k);
         }
       }
-      if (PresenceService.projectIdCache.size > 2000) {
-        const oldestKey = PresenceService.projectIdCache
-          .keys()
-          .next().value;
+      if (this.projectIdCache.size > 2000) {
+        const oldestKey = this.projectIdCache.keys().next().value;
         if (oldestKey !== undefined) {
-          PresenceService.projectIdCache.delete(oldestKey);
+          this.projectIdCache.delete(oldestKey);
         }
       }
     }
-    PresenceService.projectIdCache.set(id, {
+    this.projectIdCache.set(id, {
       projectId: resolved,
       expiresAt: Date.now() + PresenceService.PROJECT_ID_CACHE_TTL_MS,
     });
@@ -225,12 +247,9 @@ export class PresenceService implements OnModuleDestroy {
     const now = Date.now();
     const byUser = new Map<string, LivePresenceUser | ActivePresenceUser>();
 
-    for (const [key, user] of PresenceService.httpPresence) {
-      if (
-        now - user.lastSeen >
-        PresenceService.HTTP_PRESENCE_TTL_MS
-      ) {
-        PresenceService.httpPresence.delete(key);
+    for (const [key, user] of this.httpPresence) {
+      if (now - user.lastSeen > PresenceService.HTTP_PRESENCE_TTL_MS) {
+        this.httpPresence.delete(key);
       } else if (
         user.fileId === pageId &&
         (!authorizedProjectId ||
@@ -281,39 +300,31 @@ export class PresenceService implements OnModuleDestroy {
     if (authorizedProjectId) {
       await this.verifyPageInProject(pageId, authorizedProjectId);
     }
-    if (
-      PresenceService.httpPresence.size >=
-      PresenceService.MAX_HTTP_PRESENCE_ENTRIES
-    ) {
+    if (this.httpPresence.size >= PresenceService.MAX_HTTP_PRESENCE_ENTRIES) {
       // Evict expired entries first, then evict the oldest entry (FIFO/LRU)
       const now = Date.now();
-      for (const [k, v] of PresenceService.httpPresence) {
+      for (const [k, v] of this.httpPresence) {
         if (now - v.lastSeen > PresenceService.HTTP_PRESENCE_TTL_MS) {
-          PresenceService.httpPresence.delete(k);
+          this.httpPresence.delete(k);
         }
       }
-      if (
-        PresenceService.httpPresence.size >=
-        PresenceService.MAX_HTTP_PRESENCE_ENTRIES
-      ) {
-        const oldestKey = PresenceService.httpPresence
-          .keys()
-          .next().value;
+      if (this.httpPresence.size >= PresenceService.MAX_HTTP_PRESENCE_ENTRIES) {
+        const oldestKey = this.httpPresence.keys().next().value;
         if (oldestKey !== undefined) {
-          PresenceService.httpPresence.delete(oldestKey);
+          this.httpPresence.delete(oldestKey);
         }
       }
     }
     const presenceKey = authorizedProjectId
       ? `${authorizedProjectId}:${pageId}:${userId}`
       : `${pageId}:${userId}`;
-    PresenceService.httpPresence.set(presenceKey, {
+    this.httpPresence.set(presenceKey, {
       id: userId,
-      name: userName,
-      color: body?.color || '#2563EB',
+      name: String(userName || 'Collaborator').slice(0, 120),
+      color: sanitizePresenceColor(body?.color),
       fileId: pageId,
       projectId: authorizedProjectId ?? null,
-      cursor: body?.cursor,
+      cursor: sanitizeCursorPayload(body?.cursor),
       lastSeen: Date.now(),
     });
     this.presenceCache.delete(pageId);
@@ -332,11 +343,9 @@ export class PresenceService implements OnModuleDestroy {
       await this.verifyPageInProject(pageId, authorizedProjectId);
     }
     if (userId) {
-      PresenceService.httpPresence.delete(`${pageId}:${userId}`);
+      this.httpPresence.delete(`${pageId}:${userId}`);
       if (authorizedProjectId) {
-        PresenceService.httpPresence.delete(
-          `${authorizedProjectId}:${pageId}:${userId}`,
-        );
+        this.httpPresence.delete(`${authorizedProjectId}:${pageId}:${userId}`);
       }
     }
     this.presenceCache.delete(pageId);
@@ -429,11 +438,13 @@ export class PresenceService implements OnModuleDestroy {
 
     await tick();
     const poll = setInterval(() => void tick(), 3000);
+    poll.unref?.();
     const keepalive = setInterval(() => {
       if (!reply.raw.writableEnded && !reply.raw.destroyed) {
         reply.raw.write(': keepalive\n\n');
       }
     }, 15000);
+    keepalive.unref?.();
 
     const cleanup = () => {
       if (closed) return;

@@ -11,6 +11,7 @@ import {
   PageCommentReply as PrismaCommentReply,
 } from '@prisma/client';
 import { PrismaService } from '@/core';
+import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
 import {
   ITrackChangesRepositoryPort,
   TrackChange,
@@ -29,6 +30,8 @@ export class TrackChangesMapper {
     return TrackChange.create({
       id: prisma.id,
       projectId: prisma.spaceId,
+      spaceId: prisma.spaceId,
+      pageId: prisma.pageId,
       docId: prisma.docId,
       type: prisma.type,
       status: prisma.status,
@@ -66,6 +69,8 @@ export class TrackChangesMapper {
     return CommentThread.create({
       id: prisma.id,
       projectId: prisma.spaceId,
+      spaceId: prisma.spaceId,
+      pageId: prisma.pageId,
       docId: prisma.docId,
       quote: prisma.quote,
       range: TextRangeVo.create({
@@ -91,13 +96,33 @@ export class TrackChangesRepository extends ITrackChangesRepositoryPort {
     super();
   }
 
+  private async resolveDocPageId(
+    projectId: string,
+    docId: string,
+  ): Promise<string> {
+    if (this.prisma.pageDoc?.findUnique) {
+      const doc = await Promise.resolve(
+        this.prisma.pageDoc.findUnique({
+          where: { id: docId },
+          select: { pageId: true },
+        }),
+      ).catch(() => null);
+      if (doc?.pageId) {
+        return doc.pageId;
+      }
+    }
+    return ensureCanonicalPageId(this.prisma, projectId, docId);
+  }
+
   public async saveChange(change: TrackChange): Promise<TrackChange> {
     const range = change.range;
+    const pageId = await this.resolveDocPageId(change.projectId, change.docId);
     const record = await this.prisma.pageTrackChange.upsert({
       where: { id: change.id },
       create: {
         id: change.id,
         spaceId: change.projectId,
+        pageId,
         docId: change.docId,
         type: change.type,
         status: change.status,
@@ -147,6 +172,75 @@ export class TrackChangesRepository extends ITrackChangesRepositoryPort {
     });
   }
 
+  public async claimPendingChanges(
+    projectId: string,
+    docId: string,
+    changeIds: string[],
+    nextStatus: 'accepted' | 'rejected',
+    resolvedById?: string | null,
+    resolvedAt: Date = new Date(),
+  ): Promise<string[]> {
+    const uniqueIds = Array.from(new Set(changeIds)).filter(Boolean);
+    if (uniqueIds.length === 0) return [];
+
+    const runClaim = async (
+      db: Pick<PrismaService, 'pageTrackChange'>,
+    ): Promise<string[]> => {
+      const claimed: string[] = [];
+      for (const id of uniqueIds) {
+        const res = await db.pageTrackChange.updateMany({
+          where: {
+            id,
+            spaceId: projectId,
+            docId,
+            status: 'pending',
+          },
+          data: {
+            status: nextStatus,
+            resolvedById: resolvedById ?? null,
+            resolvedAt,
+            updatedAt: resolvedAt,
+          },
+        });
+        if (res.count === 1) {
+          claimed.push(id);
+        }
+      }
+      return claimed;
+    };
+
+    if (typeof this.prisma.$transaction === 'function') {
+      return this.prisma.$transaction(async (tx) => {
+        const client = tx?.pageTrackChange ? tx : this.prisma;
+        return runClaim(client);
+      });
+    }
+    return runClaim(this.prisma);
+  }
+
+  public async revertClaimedChangesStatus(
+    projectId: string,
+    docId: string,
+    changeIds: string[],
+    expectedCurrentStatus: 'accepted' | 'rejected',
+  ): Promise<void> {
+    if (changeIds.length === 0) return;
+    await this.prisma.pageTrackChange.updateMany({
+      where: {
+        id: { in: changeIds },
+        spaceId: projectId,
+        docId,
+        status: expectedCurrentStatus,
+      },
+      data: {
+        status: 'pending',
+        resolvedById: null,
+        resolvedAt: null,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
   public async findChangeById(changeId: string): Promise<TrackChange | null> {
     const record = await this.prisma.pageTrackChange.findUnique({
       where: { id: changeId },
@@ -160,7 +254,10 @@ export class TrackChangesRepository extends ITrackChangesRepositoryPort {
     docId: string,
     status?: ChangeStatus,
   ): Promise<TrackChange[]> {
-    const where: Prisma.PageTrackChangeWhereInput = { spaceId: projectId, docId };
+    const where: Prisma.PageTrackChangeWhereInput = {
+      spaceId: projectId,
+      docId,
+    };
     if (status) {
       where.status = status;
     }
@@ -178,11 +275,13 @@ export class TrackChangesRepository extends ITrackChangesRepositoryPort {
     thread: CommentThread,
   ): Promise<CommentThread> {
     const range = thread.range;
+    const pageId = await this.resolveDocPageId(thread.projectId, thread.docId);
     const record = await this.prisma.pageCommentThread.upsert({
       where: { id: thread.id },
       create: {
         id: thread.id,
         spaceId: thread.projectId,
+        pageId,
         docId: thread.docId,
         quote: thread.quote,
         startLine: range.startLine,
@@ -283,5 +382,24 @@ export class TrackChangesRepository extends ITrackChangesRepositoryPort {
     });
 
     return TrackChangesMapper.toDomainReply(record);
+  }
+
+  public async updateCommentReply(
+    threadId: string,
+    replyId: string,
+    content: string,
+  ): Promise<CommentReply | null> {
+    const existing = await this.prisma.pageCommentReply.findFirst({
+      where: { id: replyId, threadId },
+    });
+    if (!existing) return null;
+    const updated = await this.prisma.pageCommentReply.update({
+      where: { id: replyId },
+      data: {
+        content: content.trim(),
+        updatedAt: new Date(),
+      },
+    });
+    return TrackChangesMapper.toDomainReply(updated);
   }
 }

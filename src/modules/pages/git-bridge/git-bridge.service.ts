@@ -277,16 +277,35 @@ export class GitBridgeService {
     return this.domainEventBus;
   }
 
+  private async resolveRepoTarget(
+    repoId: string,
+  ): Promise<{ spaceId: string; pageId?: string }> {
+    const resolver = (
+      this.repository as {
+        resolveRepositoryContext?: (
+          id: string,
+        ) => Promise<{ spaceId: string; pageId?: string }>;
+      }
+    )?.resolveRepositoryContext;
+    if (typeof resolver === 'function') {
+      return resolver.call(this.repository, repoId);
+    }
+    return { spaceId: repoId };
+  }
+
   /** Commits the current project state to `main`; returns tip sha. Caller holds lock. */
   async materialize(projectId: string): Promise<string> {
     await this.gitCli.ensureRepo(projectId);
-    const nodes = await this.structure.getAllNodes(projectId);
+    const { spaceId, pageId } = await this.resolveRepoTarget(projectId);
+    const nodes = pageId
+      ? await this.structure.getAllNodes(spaceId, undefined, pageId)
+      : await this.structure.getAllNodes(spaceId);
 
     const live = this.live();
     if (live) {
       const docIds = nodes.filter((n) => n.docId).map((n) => n.docId as string);
       await live
-        .flushDocs(projectId, docIds)
+        .flushDocs(spaceId, docIds)
         .catch((e) =>
           this.logger.warn(
             `Live flush before git snapshot failed: ${e?.message}`,
@@ -302,7 +321,7 @@ export class GitBridgeService {
         const repoPath = toRepoPath(node.path);
         if (node.docId) {
           try {
-            const doc = await this.docstore.getDoc(projectId, node.docId);
+            const doc = await this.docstore.getDoc(spaceId, node.docId);
             if (doc.deleted) return null;
             return {
               path: repoPath,
@@ -316,7 +335,7 @@ export class GitBridgeService {
         } else if (node.fileId) {
           try {
             const { stream } = await this.filestore.openReadStream(
-              projectId,
+              spaceId,
               node.fileId,
             );
             return {
@@ -405,17 +424,22 @@ export class GitBridgeService {
       });
     }
 
+    const { spaceId, pageId } = await this.resolveRepoTarget(projectId);
+
     // 2. Flush active live Yjs docs before capturing Memento / applying push mutations
     const live = this.live();
     if (live && typeof this.structure.getAllNodes === 'function') {
-      const allNodes = await this.structure
-        .getAllNodes(projectId)
-        .catch(() => []);
-      const activeDocIds = allNodes
+      const allNodes = (
+        pageId
+          ? this.structure.getAllNodes(spaceId, undefined, pageId)
+          : this.structure.getAllNodes(spaceId)
+      ).catch(() => []);
+      const resolvedNodes = await allNodes;
+      const activeDocIds = resolvedNodes
         .filter((n) => n.docId)
         .map((n) => n.docId as string);
       if (activeDocIds.length > 0) {
-        await live.flushDocs(projectId, activeDocIds).catch(() => []);
+        await live.flushDocs(spaceId, activeDocIds).catch(() => []);
       }
     }
 
@@ -424,7 +448,9 @@ export class GitBridgeService {
       new Set(stagedChanges.map((item) => item.projectPath)),
     );
     const capturedMementos = await Promise.all(
-      uniqueProjectPaths.map((p) => this.captureEntryMemento(projectId, p)),
+      uniqueProjectPaths.map((p) =>
+        this.captureEntryMemento(spaceId, p, pageId),
+      ),
     );
     const mementos = new Map<string, NodeEntryMemento>(
       uniqueProjectPaths.map((p, idx) => [p, capturedMementos[idx]]),
@@ -443,20 +469,21 @@ export class GitBridgeService {
           `applyPush:${item.status}:${item.projectPath}`,
           async () => {
             if (item.status === 'D') {
-              if (await this.removeEntry(projectId, item.projectPath)) {
+              if (await this.removeEntry(spaceId, item.projectPath, pageId)) {
                 result.deleted.push(item.projectPath);
               }
               return;
             }
             const outcome = await this.upsertEntry(
-              projectId,
+              spaceId,
               item.projectPath,
               item.content!,
+              pageId,
             );
             result[outcome].push(item.projectPath);
           },
           async () => {
-            await this.restoreEntryMemento(projectId, memento);
+            await this.restoreEntryMemento(spaceId, memento, pageId);
           },
         );
       }
@@ -473,10 +500,13 @@ export class GitBridgeService {
   private async captureEntryMemento(
     projectId: string,
     projectPath: string,
+    pageId?: string,
   ): Promise<NodeEntryMemento> {
-    const existing = await this.structure
-      .getNodeByPath(projectId, projectPath)
-      .catch(() => null);
+    const existing = await (
+      pageId
+        ? this.structure.getNodeByPath(projectId, projectPath, pageId)
+        : this.structure.getNodeByPath(projectId, projectPath)
+    ).catch(() => null);
     if (!existing) {
       return {
         projectPath,
@@ -517,14 +547,17 @@ export class GitBridgeService {
   private async restoreEntryMemento(
     projectId: string,
     snap: NodeEntryMemento,
+    pageId?: string,
   ): Promise<void> {
-    let current = await this.structure
-      .getNodeByPath(projectId, snap.projectPath)
-      .catch(() => null);
+    let current = await (
+      pageId
+        ? this.structure.getNodeByPath(projectId, snap.projectPath, pageId)
+        : this.structure.getNodeByPath(projectId, snap.projectPath)
+    ).catch(() => null);
 
     if (!snap.existed) {
       if (current) {
-        await this.removeEntry(projectId, snap.projectPath).catch(
+        await this.removeEntry(projectId, snap.projectPath, pageId).catch(
           () => undefined,
         );
       }
@@ -539,7 +572,7 @@ export class GitBridgeService {
         (current.docId ?? null) !== (snap.docId ?? null) ||
         (current.fileId ?? null) !== (snap.fileId ?? null))
     ) {
-      await this.removeEntry(projectId, snap.projectPath).catch(
+      await this.removeEntry(projectId, snap.projectPath, pageId).catch(
         () => undefined,
       );
       current = null;
@@ -575,28 +608,28 @@ export class GitBridgeService {
           });
         } else {
           await this.live()
-            .applyExternalText(
-              projectId,
-              snap.docId,
-              snap.docLines.join('\n'),
-            )
+            .applyExternalText(projectId, snap.docId, snap.docLines.join('\n'))
             .catch(() => false);
         }
       }
     }
 
     if (!current && snap.name && snap.type && snap.type !== 'FOLDER') {
-      const recreated = await this.structure
-        .createNode(projectId, {
-          name: snap.name,
-          path: snap.projectPath,
-          parentId: snap.parentId ?? null,
-          type: snap.type,
-          docId: snap.docId ?? undefined,
-          fileId: snap.fileId ?? undefined,
-          isRootDoc: snap.isRootDoc,
-        })
-        .catch(() => null);
+      const recreateDto = {
+        name: snap.name,
+        path: snap.projectPath,
+        parentId: snap.parentId ?? null,
+        type: snap.type,
+        docId: snap.docId ?? undefined,
+        fileId: snap.fileId ?? undefined,
+        isRootDoc: snap.isRootDoc,
+        ...(pageId ? { pageId } : {}),
+      };
+      const recreated = await (
+        pageId
+          ? this.structure.createNode(projectId, recreateDto, pageId)
+          : this.structure.createNode(projectId, recreateDto)
+      ).catch(() => null);
       if (recreated && snap.isRootDoc) {
         await this.structure
           .setRootDoc(projectId, recreated.id)
@@ -608,8 +641,11 @@ export class GitBridgeService {
   private async removeEntry(
     projectId: string,
     projectPath: string,
+    pageId?: string,
   ): Promise<boolean> {
-    const node = await this.structure.getNodeByPath(projectId, projectPath);
+    const node = pageId
+      ? await this.structure.getNodeByPath(projectId, projectPath, pageId)
+      : await this.structure.getNodeByPath(projectId, projectPath);
     if (!node) return false;
     if (node.docId) {
       await this.docstore.patchDoc(projectId, node.docId, { deleted: true });
@@ -625,9 +661,12 @@ export class GitBridgeService {
     projectId: string,
     projectPath: string,
     content: Buffer,
+    pageId?: string,
   ): Promise<'created' | 'updated'> {
     const asText = isTextPath(projectPath, content);
-    const existing = await this.structure.getNodeByPath(projectId, projectPath);
+    const existing = pageId
+      ? await this.structure.getNodeByPath(projectId, projectPath, pageId)
+      : await this.structure.getNodeByPath(projectId, projectPath);
 
     if (existing?.docId && asText) {
       const lines = splitLines(content.toString('utf8'));
@@ -657,7 +696,7 @@ export class GitBridgeService {
 
     let outcome: 'created' | 'updated' = 'created';
     if (existing) {
-      await this.removeEntry(projectId, projectPath);
+      await this.removeEntry(projectId, projectPath, pageId);
       outcome = 'updated';
     }
 
@@ -665,21 +704,40 @@ export class GitBridgeService {
     const dir =
       projectPath.slice(0, projectPath.length - name.length - 1) || '/';
     const parent =
-      dir === '/' ? null : await this.structure.mkdirp(projectId, dir);
+      dir === '/'
+        ? null
+        : pageId
+          ? await this.structure.mkdirp(projectId, dir, pageId)
+          : await this.structure.mkdirp(projectId, dir);
 
     if (asText) {
       const lines = splitLines(content.toString('utf8'));
       const doc = await this.docstore.createDoc(projectId, {
         path: projectPath,
         lines,
+        ...(pageId ? { pageId } : {}),
       });
       const createdDocId = doc.id ?? doc._id;
-      await this.structure.createNode(projectId, {
-        name,
-        parentId: parent?.id ?? null,
-        type: 'DOC',
-        docId: createdDocId,
-      });
+      if (pageId) {
+        await this.structure.createNode(
+          projectId,
+          {
+            name,
+            parentId: parent?.id ?? null,
+            type: 'DOC',
+            docId: createdDocId,
+            pageId,
+          },
+          pageId,
+        );
+      } else {
+        await this.structure.createNode(projectId, {
+          name,
+          parentId: parent?.id ?? null,
+          type: 'DOC',
+          docId: createdDocId,
+        });
+      }
       const bus = this.domainBus();
       if (bus && createdDocId) {
         await bus.publish({
@@ -694,17 +752,39 @@ export class GitBridgeService {
       }
     } else {
       const relativeFilePath = projectPath.replace(/^\/+/, '') || name;
-      const file = await this.filestore.uploadFileFromBuffer(
-        projectId,
-        relativeFilePath,
-        content,
-      );
-      await this.structure.createNode(projectId, {
-        name,
-        parentId: parent?.id ?? null,
-        type: 'FILE',
-        fileId: file.id,
-      });
+      const file = pageId
+        ? await this.filestore.uploadFileFromBuffer(
+            projectId,
+            relativeFilePath,
+            content,
+            undefined,
+            { pageId },
+          )
+        : await this.filestore.uploadFileFromBuffer(
+            projectId,
+            relativeFilePath,
+            content,
+          );
+      if (pageId) {
+        await this.structure.createNode(
+          projectId,
+          {
+            name,
+            parentId: parent?.id ?? null,
+            type: 'FILE',
+            fileId: file.id,
+            pageId,
+          },
+          pageId,
+        );
+      } else {
+        await this.structure.createNode(projectId, {
+          name,
+          parentId: parent?.id ?? null,
+          type: 'FILE',
+          fileId: file.id,
+        });
+      }
     }
     return outcome;
   }

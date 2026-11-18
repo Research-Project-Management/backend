@@ -78,20 +78,19 @@ export class CitationsRepository
     const isParser = (obj: unknown): obj is IBibtexParserPort =>
       Boolean(
         obj &&
-          typeof (obj as IBibtexParserPort).parse === 'function' &&
-          typeof (obj as IBibtexParserPort).format === 'function',
+        typeof (obj as IBibtexParserPort).parse === 'function' &&
+        typeof (obj as IBibtexParserPort).format === 'function',
       );
     const isEventBus = (obj: unknown): obj is ManuscriptDomainEventBus =>
       Boolean(
-        obj &&
-          typeof (obj as ManuscriptDomainEventBus).publish === 'function',
+        obj && typeof (obj as ManuscriptDomainEventBus).publish === 'function',
       );
     const isLiveCollab = (obj: unknown): obj is LiveCollaborationPort =>
       Boolean(
         obj &&
-          (typeof (obj as LiveCollaborationPort).flushDocs === 'function' ||
-            typeof (obj as LiveCollaborationPort).applyExternalText ===
-              'function'),
+        (typeof (obj as LiveCollaborationPort).flushDocs === 'function' ||
+          typeof (obj as LiveCollaborationPort).applyExternalText ===
+            'function'),
       );
 
     this.bibParser = isParser(bibParser)
@@ -138,14 +137,21 @@ export class CitationsRepository
     }
   }
 
-  public async collectBibFiles(projectId: string): Promise<BibliographyFile[]> {
+  public async collectBibFiles(
+    projectId: string,
+    pageId?: string,
+  ): Promise<BibliographyFile[]> {
     const bibFiles: BibliographyFile[] = [];
     if (!this.structureService || !this.docstoreService) {
       return bibFiles;
     }
 
     try {
-      const nodes = await this.structureService.getAllNodes(projectId);
+      const nodes = await this.structureService.getAllNodes(
+        projectId,
+        undefined,
+        pageId,
+      );
       const bibNodes = nodes.filter(
         (n: ManuscriptNodeEntity) =>
           n.isDoc() && n.name.toLowerCase().endsWith('.bib'),
@@ -200,8 +206,14 @@ export class CitationsRepository
     projectId: string,
     entry: BibEntry,
     targetFilename = 'references.bib',
+    pageId?: string,
   ): Promise<string> {
-    const res = await this.appendEntriesToBib(projectId, [entry], targetFilename);
+    const res = await this.appendEntriesToBib(
+      projectId,
+      [entry],
+      targetFilename,
+      pageId,
+    );
     return res.filePath;
   }
 
@@ -209,6 +221,7 @@ export class CitationsRepository
     projectId: string,
     entries: BibEntry[],
     targetFilename = 'references.bib',
+    pageId?: string,
   ): Promise<{ filePath: string; docId?: string; conflicts: string[] }> {
     const cleanFilename = NodePathVo.toRelative(
       targetFilename.replace(/^(\.\/)+/, ''),
@@ -224,7 +237,11 @@ export class CitationsRepository
       return { filePath: cleanPath, conflicts };
     }
 
-    const nodes = await this.structureService.getAllNodes(projectId);
+    const nodes = await this.structureService.getAllNodes(
+      projectId,
+      undefined,
+      pageId,
+    );
     const targetNode = nodes.find(
       (n: ManuscriptNodeEntity) =>
         n.path === cleanPath || n.name === cleanFilename,
@@ -243,8 +260,7 @@ export class CitationsRepository
 
       const entryKeyRegex = /@([a-zA-Z]+)\s*\{\s*([^,\s]+)\s*,/g;
       const existingKeys = new Set<string>();
-      const maskedText =
-        BibtexParser.maskCommentsPreserveLength(currentText);
+      const maskedText = BibtexParser.maskCommentsPreserveLength(currentText);
       let m: RegExpExecArray | null;
       while ((m = entryKeyRegex.exec(maskedText)) !== null) {
         existingKeys.add(m[2].trim().toLowerCase());
@@ -293,6 +309,7 @@ export class CitationsRepository
     const createdDoc = await this.docstoreService.createDoc(projectId, {
       path: cleanPath,
       lines: entryLines,
+      ...(pageId ? { pageId } : {}),
     });
     const createdDocId =
       (createdDoc as { _id?: string; id?: string })._id ||
@@ -300,13 +317,18 @@ export class CitationsRepository
 
     let newNode: ManuscriptNodeEntity;
     try {
-      newNode = await this.structureService.createNode(projectId, {
-        path: cleanPath,
-        name: NodePathVo.basename(cleanPath) || cleanFilename,
-        type: 'DOC',
-        docId: createdDocId,
-        parentId: null,
-      });
+      newNode = await this.structureService.createNode(
+        projectId,
+        {
+          path: cleanPath,
+          name: NodePathVo.basename(cleanPath) || cleanFilename,
+          type: 'DOC',
+          docId: createdDocId,
+          parentId: null,
+          ...(pageId ? { pageId } : {}),
+        },
+        pageId,
+      );
     } catch (err) {
       if (createdDocId) {
         if (typeof this.docstoreService.deleteDoc === 'function') {
@@ -341,6 +363,7 @@ export class CitationsRepository
     projectId: string,
     oldKey: string,
     newKey: string,
+    pageId?: string,
   ): Promise<{
     affectedFiles: Array<{
       docId: string;
@@ -365,7 +388,11 @@ export class CitationsRepository
     const nodePathByDocId = new Map<string, string>();
     if (this.structureService) {
       try {
-        const nodes = await this.structureService.getAllNodes(projectId);
+        const nodes = await this.structureService.getAllNodes(
+          projectId,
+          undefined,
+          pageId,
+        );
         for (const n of nodes) {
           if (n.isDoc() && n.docId) {
             nodePathByDocId.set(n.docId, n.path || n.name);
@@ -377,7 +404,8 @@ export class CitationsRepository
     }
 
     if (this.liveCollab) {
-      const collabWithFlushProject = this.liveCollab as LiveCollaborationPort & {
+      const collabWithFlushProject = this
+        .liveCollab as LiveCollaborationPort & {
         flushProject?: (projectId: string) => Promise<void>;
       };
       if (typeof collabWithFlushProject.flushProject === 'function') {
@@ -392,7 +420,7 @@ export class CitationsRepository
       }
     }
 
-    const docs = await this.docstoreService.getAllDocs(projectId);
+    const docs = await this.docstoreService.getAllDocs(projectId, pageId);
     const pendingMutations: Array<{
       docId: string;
       filePath: string;
@@ -613,7 +641,7 @@ export class CitationsRepository
         const exportRes = await this.libraryFacade.exportLibrary(userId, {
           format: 'bibtex',
           collectionId,
-          projectId,
+          spaceId: projectId,
         });
         if (exportRes?.content !== undefined) {
           return exportRes.content;

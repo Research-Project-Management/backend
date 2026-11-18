@@ -53,7 +53,8 @@ export class SafePath {
       );
     }
 
-    if (normalized === '.' || normalized === '') {
+    const trimmedNormalized = normalized.replace(/\/+$/, '');
+    if (trimmedNormalized === '.' || trimmedNormalized === '') {
       throw new UnsafePathException(
         `Security Violation: Invalid relative file path (${filePath})`,
       );

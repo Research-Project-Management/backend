@@ -72,7 +72,7 @@ export class PagesService {
   }
 
   public async joinProject(input: {
-    projectId: string;
+    spaceId: string;
     userId: string;
     socketId: string;
     name?: string | null;
@@ -84,19 +84,19 @@ export class PagesService {
     access: ProjectAccess;
   }> {
     const { userId, socketId, name, color, avatar } = input;
-    const projectId = this.resolveProjectId(input.projectId, userId);
+    const spaceId = this.resolveProjectId(input.spaceId, userId);
 
-    const access = await this.verifyAccess(userId, projectId);
+    const access = await this.verifyAccess(userId, spaceId);
     if (!access.canRead) {
       throw new ForbiddenException(
-        `User ${userId} lacks permission to access project ${projectId}`,
+        `User ${userId} lacks permission to access space ${spaceId}`,
       );
     }
 
     const session: UserPresence = {
       userId,
       socketId,
-      projectId,
+      spaceId,
       name: name ?? 'Collaborator',
       color: color ?? this.roomStore.getDeterministicColor(userId),
       avatar: avatar ?? null,
@@ -106,7 +106,7 @@ export class PagesService {
     };
 
     await this.roomStore.addProjectSession(session);
-    const projectPresence = await this.roomStore.getProjectSessions(projectId);
+    const projectPresence = await this.roomStore.getProjectSessions(spaceId);
 
     return { session, projectPresence, access };
   }
@@ -164,11 +164,11 @@ export class PagesService {
     dto: SendUpdateDto,
     userId: string,
   ): Promise<DocUpdateResult> {
-    dto.projectId = this.resolveProjectId(dto.projectId, userId);
-    const access = await this.verifyAccess(userId, dto.projectId);
+    dto.spaceId = this.resolveProjectId(dto.spaceId, userId);
+    const access = await this.verifyAccess(userId, dto.spaceId);
     if (!access.canWrite) {
       throw new ForbiddenException(
-        `User ${userId} lacks write permission for project ${dto.projectId}`,
+        `User ${userId} lacks write permission for space ${dto.spaceId}`,
       );
     }
 
@@ -180,11 +180,11 @@ export class PagesService {
     if (this.docstoreService && (dto.lines || dto.splice)) {
       if (this.yjsService) {
         await this.yjsService
-          .flushDoc(dto.projectId, dto.docId)
+          .flushDoc(dto.spaceId, dto.docId)
           .catch(() => false);
       }
       const existing = await this.docstoreService.getDoc(
-        dto.projectId,
+        dto.spaceId,
         dto.docId,
       );
       if (!nextLines && dto.splice) {
@@ -199,7 +199,7 @@ export class PagesService {
 
       if (nextLines) {
         const updated = await this.docstoreService.updateDoc(
-          dto.projectId,
+          dto.spaceId,
           dto.docId,
           {
             lines: nextLines,
@@ -214,7 +214,7 @@ export class PagesService {
 
     if (nextLines && this.yjsService) {
       const { frame } = await this.yjsService.applyExternalTextAndSyncRedis(
-        dto.projectId,
+        dto.spaceId,
         dto.docId,
         nextLines.join('\n'),
       );

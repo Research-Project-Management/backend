@@ -32,9 +32,10 @@ import {
   RequireRole,
   Role,
   NoProjectContext,
-  ResolvedProject,
+  ResolvedSpace,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
 import { CitationsService } from './citations.service';
 import {
   CitationQueryDto,
@@ -60,8 +61,9 @@ interface RequestWithUser {
 @ApiTags('Manuscripts - Citations & Bibliography')
 @ApiBearerAuth('JWT-auth')
 @Controller([
-  'api/v1/pages/projects/:projectId/citations',
-  'api/v1/manuscripts/projects/:projectId/citations',
+  'api/v1/pages/spaces/:spaceId/citations',
+  'api/v1/pages/:pageId/citations',
+  'api/v1/pages/pages/:pageId/citations',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
@@ -85,17 +87,29 @@ export class CitationsController {
   })
   @ApiResponse({ status: 200, type: [BibEntryDto] })
   async listProjectCitations(
-    @Param('projectId') routeProjectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Query() queryDto: CitationQueryDto,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @Req() req?: RequestWithUser,
   ): Promise<BibEntryDto[]> {
     try {
-      const targetProjectId =
-        (typeof project === 'string' ? project : project?.id) || routeProjectId;
-      return await this.citationsService.searchCitationKeys(targetProjectId, {
-        query: queryDto.query,
-        limit: queryDto.limit ?? 500,
-      });
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        resolvedSpace,
+        queryPageId ?? queryDto?.pageId,
+        req,
+      );
+      return await this.citationsService.searchCitationKeys(
+        spaceId,
+        {
+          query: queryDto.query,
+          limit: queryDto.limit ?? 500,
+          pageId,
+        },
+        pageId,
+      );
     } catch (err) {
       this.handleError(err);
     }
@@ -109,16 +123,24 @@ export class CitationsController {
   })
   @ApiResponse({ status: 200, type: [BibEntryDto] })
   async searchCitationKeys(
-    @Param('projectId') routeProjectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Query() queryDto: CitationQueryDto,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @Req() req?: RequestWithUser,
   ): Promise<BibEntryDto[]> {
     try {
-      const targetProjectId =
-        (typeof project === 'string' ? project : project?.id) || routeProjectId;
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        resolvedSpace,
+        queryPageId ?? queryDto?.pageId,
+        req,
+      );
       return await this.citationsService.searchCitationKeys(
-        targetProjectId,
+        spaceId,
         queryDto,
+        pageId,
       );
     } catch (err) {
       this.handleError(err);
@@ -143,16 +165,24 @@ export class CitationsController {
     description: 'Academic identifier not found or unsupported',
   })
   async resolveIdentifier(
-    @Param('projectId') routeProjectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Body() dto: ResolveIdentifierDto,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @Req() req?: RequestWithUser,
   ) {
     try {
-      const targetProjectId =
-        (typeof project === 'string' ? project : project?.id) || routeProjectId;
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        resolvedSpace,
+        queryPageId ?? dto?.pageId,
+        req,
+      );
       return await this.citationsService.resolveIdentifier(
-        targetProjectId,
+        spaceId,
         dto,
+        pageId,
       );
     } catch (err) {
       this.handleError(err);
@@ -167,13 +197,20 @@ export class CitationsController {
   })
   @ApiResponse({ status: 200, type: CitationValidationDto })
   async validateBibtex(
-    @Param('projectId') routeProjectId: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @Req() req?: RequestWithUser,
   ): Promise<CitationValidationDto> {
     try {
-      const targetProjectId =
-        (typeof project === 'string' ? project : project?.id) || routeProjectId;
-      return await this.citationsService.validateProjectBibtex(targetProjectId);
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        resolvedSpace,
+        queryPageId,
+        req,
+      );
+      return await this.citationsService.validateProjectBibtex(spaceId, pageId);
     } catch (err) {
       this.handleError(err);
     }
@@ -189,22 +226,29 @@ export class CitationsController {
   })
   @ApiResponse({ status: 200, type: SyncLibraryResultDto })
   async syncLibrary(
-    @Param('projectId') routeProjectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Body() dto: SyncLibraryDto,
     @Req() req: RequestWithUser,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
   ): Promise<SyncLibraryResultDto> {
     try {
       const userId = req?.user?.id || req?.user?.sub;
       if (!userId) {
         throw new UnauthorizedException('Authentication required');
       }
-      const targetProjectId =
-        (typeof project === 'string' ? project : project?.id) || routeProjectId;
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        resolvedSpace,
+        queryPageId ?? dto?.pageId,
+        req,
+      );
       return await this.citationsService.syncLibraryCollection(
-        targetProjectId,
+        spaceId,
         userId,
         dto,
+        pageId,
       );
     } catch (err) {
       this.handleError(err);
@@ -217,12 +261,19 @@ export class CitationsController {
     summary: 'Virtual .bib stream projection for live editor compilation',
   })
   async getVirtualProjectBibtex(
-    @Param('projectId') routeProjectId: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @Req() req?: RequestWithUser,
   ): Promise<string> {
-    const targetProjectId =
-      (typeof project === 'string' ? project : project?.id) || routeProjectId;
-    return this.citationsService.getVirtualProjectBibtex(targetProjectId);
+    const { spaceId, pageId } = resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId, pageId: routePageId },
+      resolvedSpace,
+      queryPageId,
+      req,
+    );
+    return this.citationsService.getVirtualProjectBibtex(spaceId, pageId);
   }
 
   @Post('refactor')
@@ -236,16 +287,24 @@ export class CitationsController {
   })
   @ApiResponse({ status: 200, type: RefactorCitationKeyResultDto })
   async refactorCitationKey(
-    @Param('projectId') routeProjectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Body() dto: RefactorCitationKeyDto,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @Req() req?: RequestWithUser,
   ): Promise<RefactorCitationKeyResultDto> {
     try {
-      const targetProjectId =
-        (typeof project === 'string' ? project : project?.id) || routeProjectId;
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        resolvedSpace,
+        queryPageId ?? dto?.pageId,
+        req,
+      );
       return await this.citationsService.refactorCitationKey(
-        targetProjectId,
+        spaceId,
         dto,
+        pageId,
       );
     } catch (err) {
       this.handleError(err);
@@ -263,14 +322,21 @@ export class CitationsController {
   })
   @ApiResponse({ status: 200, type: UpsertCitationEntriesResultDto })
   async upsertEntries(
-    @Param('projectId') routeProjectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Body() dto: UpsertCitationEntriesDto,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @Req() req?: RequestWithUser,
   ): Promise<UpsertCitationEntriesResultDto> {
     try {
-      const targetProjectId =
-        (typeof project === 'string' ? project : project?.id) || routeProjectId;
-      return await this.citationsService.upsertEntries(targetProjectId, dto);
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        resolvedSpace,
+        queryPageId ?? dto?.pageId,
+        req,
+      );
+      return await this.citationsService.upsertEntries(spaceId, dto, pageId);
     } catch (err) {
       this.handleError(err);
     }
@@ -286,17 +352,21 @@ export class CitationsController {
       'Generate and inject a formatted bibliography section (\\bibitem or Markdown) into a manuscript document',
   })
   async injectBibliography(
-    @Param('projectId') routeProjectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Body() dto: InjectBibliographyDto,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @Req() req?: RequestWithUser,
   ) {
     try {
-      const targetProjectId =
-        (typeof project === 'string' ? project : project?.id) || routeProjectId;
-      return await this.citationsService.injectBibliography(
-        targetProjectId,
-        dto,
+      const { spaceId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        resolvedSpace,
+        queryPageId ?? dto?.pageId,
+        req,
       );
+      return await this.citationsService.injectBibliography(spaceId, dto);
     } catch (err) {
       this.handleError(err);
     }
@@ -305,7 +375,7 @@ export class CitationsController {
 
 @ApiTags('Manuscripts - Citations & Bibliography')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/pages/citations', 'api/v1/manuscripts/citations'])
+@Controller('api/v1/pages/citations')
 @UseGuards(JwtAuthGuard)
 @NoProjectContext()
 export class CitationsUtilityController {
@@ -318,13 +388,13 @@ export class CitationsUtilityController {
   })
   async listLibraryCollections(
     @Req() req: RequestWithUser,
-    @Query('projectId') projectId?: string,
+    @Query('spaceId') spaceId?: string,
   ) {
     const userId = req?.user?.id || req?.user?.sub;
     if (!userId) {
       throw new UnauthorizedException('Authentication required');
     }
-    return this.citationsService.listUserLibraryCollections(userId, projectId);
+    return this.citationsService.listUserLibraryCollections(userId, spaceId);
   }
 
   @Post('parse-raw')

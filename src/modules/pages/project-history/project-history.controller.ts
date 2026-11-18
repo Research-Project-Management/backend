@@ -32,8 +32,10 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import {
   ProjectAccessGuard,
   RequireRole,
+  ResolvedSpace,
   Role,
 } from '@/modules/project/access';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
 import { ProjectHistoryService } from './project-history.service';
 import {
   CreateSnapshotDto,
@@ -51,14 +53,16 @@ import {
   VersionNotFoundException,
   DuplicateLabelException,
   EmptyProjectException,
+  InvalidVersionLabelException,
 } from './domain';
 import { AuthenticatedRequest } from '@/core';
 
-@ApiTags('Manuscripts - Project History & Snapshots')
+@ApiTags('Pages - Project History & Snapshots')
 @ApiBearerAuth('JWT-auth')
 @Controller([
-  'api/v1/pages/projects/:projectId/history',
-  'api/v1/manuscripts/projects/:projectId/history',
+  'api/v1/pages/spaces/:spaceId/history',
+  'api/v1/pages/pages/:pageId/history',
+  'api/v1/pages/docs/:docId/history',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
@@ -72,19 +76,53 @@ export class ProjectHistoryController {
     if (error instanceof DuplicateLabelException) {
       throw new ConflictException(error.message);
     }
-    if (error instanceof EmptyProjectException) {
+    if (
+      error instanceof EmptyProjectException ||
+      error instanceof InvalidVersionLabelException
+    ) {
       throw new BadRequestException(error.message);
     }
     throw error;
+  }
+
+  private resolveCoordinates(
+    routeSpaceId: string | undefined,
+    paramPageId: string | undefined,
+    paramDocId: string | undefined,
+    queryPageId: string | undefined,
+    resolvedSpace: string | { id?: string } | null | undefined,
+    req: unknown,
+  ): { spaceId: string; pageId?: string } {
+    return resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
+      queryPageId,
+      req,
+    );
   }
 
   @Get('')
   @ApiOperation({
     summary: 'Get project history events and versions overview',
   })
-  async getProjectHistory(@Param('projectId') projectId: string) {
+  async getProjectHistory(
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
+  ) {
     try {
-      const versions = await this.historyService.listVersions(projectId);
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
+        paramPageId,
+        paramDocId,
+        queryPageId,
+        resolvedSpace,
+        req,
+      );
+      const versions = await this.historyService.listVersions(spaceId, pageId);
       const events = versions.map((v) => ({
         id: v.id,
         version: v.version,
@@ -105,10 +143,23 @@ export class ProjectHistoryController {
   })
   @ApiResponse({ status: 200, type: [VersionListItemDto] })
   async listVersions(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<VersionListItemDto[]> {
     try {
-      return await this.historyService.listVersions(projectId);
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
+        paramPageId,
+        paramDocId,
+        queryPageId,
+        resolvedSpace,
+        req,
+      );
+      return await this.historyService.listVersions(spaceId, pageId);
     } catch (err) {
       this.handleError(err);
     }
@@ -121,14 +172,31 @@ export class ProjectHistoryController {
   })
   @ApiResponse({ status: 201, type: SnapshotDetailDto })
   async createSnapshot(
-    @Param('projectId') projectId: string,
     @Body() dto: CreateSnapshotDto,
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<SnapshotDetailDto> {
     try {
       const userId =
         req?.user?.sub || req?.user?.id || req?.user?.userId || null;
-      return await this.historyService.createSnapshot(projectId, dto, userId);
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
+        paramPageId,
+        paramDocId,
+        queryPageId ?? dto?.pageId,
+        resolvedSpace,
+        req,
+      );
+      return await this.historyService.createSnapshot(
+        spaceId,
+        dto,
+        userId,
+        pageId,
+      );
     } catch (err) {
       this.handleError(err);
     }
@@ -141,11 +209,24 @@ export class ProjectHistoryController {
   })
   @ApiResponse({ status: 200, type: SnapshotDetailDto })
   async getSnapshot(
-    @Param('projectId') projectId: string,
     @Param('version', ParseIntPipe) version: number,
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<SnapshotDetailDto> {
     try {
-      return await this.historyService.getSnapshot(projectId, version);
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
+        paramPageId,
+        paramDocId,
+        queryPageId,
+        resolvedSpace,
+        req,
+      );
+      return await this.historyService.getSnapshot(spaceId, version, pageId);
     } catch (err) {
       this.handleError(err);
     }
@@ -158,14 +239,28 @@ export class ProjectHistoryController {
   })
   @ApiResponse({ status: 200, type: DiffResponseDto })
   async compareVersions(
-    @Param('projectId') projectId: string,
     @Query() query: DiffQueryDto,
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<DiffResponseDto> {
     try {
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
+        paramPageId,
+        paramDocId,
+        queryPageId,
+        resolvedSpace,
+        req,
+      );
       return await this.historyService.compareVersions(
-        projectId,
+        spaceId,
         query.baseVersion,
         query.targetVersion,
+        pageId,
       );
     } catch (err) {
       this.handleError(err);
@@ -180,19 +275,32 @@ export class ProjectHistoryController {
   })
   @ApiResponse({ status: 201, type: VersionLabelDto })
   async labelVersion(
-    @Param('projectId') projectId: string,
     @Param('version', ParseIntPipe) version: number,
     @Body() dto: LabelVersionDto,
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<VersionLabelDto> {
     try {
       const userId =
         req?.user?.sub || req?.user?.id || req?.user?.userId || null;
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
+        paramPageId,
+        paramDocId,
+        queryPageId ?? dto?.pageId,
+        resolvedSpace,
+        req,
+      );
       return await this.historyService.labelVersion(
-        projectId,
+        spaceId,
         version,
         dto.label,
         userId,
+        pageId,
       );
     } catch (err) {
       this.handleError(err);
@@ -205,11 +313,24 @@ export class ProjectHistoryController {
   @ApiOperation({ summary: 'Remove a named label from project history' })
   @ApiResponse({ status: 204 })
   async deleteLabel(
-    @Param('projectId') projectId: string,
     @Param('labelId') labelId: string,
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<void> {
     try {
-      await this.historyService.deleteLabel(projectId, labelId);
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
+        paramPageId,
+        paramDocId,
+        queryPageId,
+        resolvedSpace,
+        req,
+      );
+      await this.historyService.deleteLabel(spaceId, labelId, pageId);
     } catch (err) {
       this.handleError(err);
     }
@@ -223,17 +344,30 @@ export class ProjectHistoryController {
   })
   @ApiResponse({ status: 200 })
   async restoreVersion(
-    @Param('projectId') projectId: string,
     @Body() dto: RestoreVersionDto,
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ) {
     try {
       const userId =
         req?.user?.sub || req?.user?.id || req?.user?.userId || null;
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
+        paramPageId,
+        paramDocId,
+        queryPageId ?? dto?.pageId,
+        resolvedSpace,
+        req,
+      );
       return await this.historyService.restoreVersion(
-        projectId,
+        spaceId,
         dto.targetVersion,
         userId,
+        pageId,
       );
     } catch (err) {
       this.handleError(err);
@@ -249,19 +383,32 @@ export class ProjectHistoryController {
   })
   @ApiResponse({ status: 200, type: RestoreSingleFileResponseDto })
   async restoreSingleFile(
-    @Param('projectId') projectId: string,
     @Param('version', ParseIntPipe) version: number,
     @Body() dto: RestoreSingleFileDto,
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<RestoreSingleFileResponseDto> {
     try {
       const userId =
         req?.user?.sub || req?.user?.id || req?.user?.userId || null;
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
+        paramPageId,
+        paramDocId,
+        queryPageId ?? dto?.pageId,
+        resolvedSpace,
+        req,
+      );
       return await this.historyService.restoreSingleFile(
-        projectId,
+        spaceId,
         version,
         dto,
         userId,
+        pageId,
       );
     } catch (err) {
       this.handleError(err);
@@ -271,20 +418,33 @@ export class ProjectHistoryController {
   @Get('versions/:version/export-zip')
   @RequireRole(Role.REVIEWER)
   @ApiOperation({
-    summary:
-      'Export historical version snapshot as a streaming PKZIP archive',
+    summary: 'Export historical version snapshot as a streaming PKZIP archive',
   })
   async exportVersionZip(
-    @Param('projectId') projectId: string,
     @Param('version', ParseIntPipe) version: number,
     @Query('projectName') projectName: string | undefined,
     @Res() res: FastifyReply,
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<void> {
     try {
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
+        paramPageId,
+        paramDocId,
+        queryPageId,
+        resolvedSpace,
+        req,
+      );
       const result = await this.historyService.exportVersionZipStream(
-        projectId,
+        spaceId,
         version,
         projectName,
+        pageId,
       );
 
       res.header('Content-Type', 'application/zip');

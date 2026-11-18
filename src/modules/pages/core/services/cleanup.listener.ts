@@ -10,11 +10,23 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService, RedisCacheService } from '@/core';
 import { WorkspaceCollectorService } from './workspace-collector.service';
 import { FilestoreRepository } from '../../filestore/filestore.repository';
+import { FilestoreService } from '../../filestore/filestore.service';
 import { IDocPersistor } from '../../docstore/domain';
 
 interface ProjectDeletedEvent {
   projectId?: string;
   entityId?: string;
+}
+
+interface PageDeletedEvent {
+  projectId: string;
+  pageId: string;
+  deletedFiles?: Array<{
+    id: string;
+    sizeBytes?: number;
+    blobId?: string | null;
+    hash?: string | null;
+  }>;
 }
 
 @Injectable()
@@ -53,6 +65,41 @@ export class CleanupListener {
     }
   }
 
+  private resolveFilestoreService(): FilestoreService | undefined {
+    try {
+      return this.moduleRef?.get(FilestoreService, { strict: false });
+    } catch {
+      return undefined;
+    }
+  }
+
+  @OnEvent('manuscripts.page.deleted', { async: true })
+  public async handlePageDeleted(event: PageDeletedEvent): Promise<void> {
+    if (!event?.projectId || !event?.deletedFiles?.length) return;
+    try {
+      const filestoreService = this.resolveFilestoreService();
+      if (filestoreService?.reclaimDeletedFilesQuotaAndBlobs) {
+        const fileIds = event.deletedFiles.map((f) => f.id);
+        const deletedNodes = event.deletedFiles.map((f) => ({
+          fileId: f.id,
+          blobId: f.blobId,
+          sizeBytes: f.sizeBytes,
+          hash: f.hash,
+        }));
+        await filestoreService.reclaimDeletedFilesQuotaAndBlobs(
+          event.projectId,
+          fileIds,
+          deletedNodes,
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to reclaim blobs/quota for deleted page ${event.pageId}: ${msg}`,
+      );
+    }
+  }
+
   @OnEvent('project.deleted', { async: true })
   public async handleProjectDeleted(event: ProjectDeletedEvent): Promise<void> {
     const projectId = event?.projectId || event?.entityId;
@@ -66,8 +113,17 @@ export class CleanupListener {
       const filestoreRepo = this.resolveFilestoreRepository();
       const docPersistor = this.resolveDocPersistor();
 
-      let projectDocs: Array<{ id: string; inStorage?: boolean; storageKey?: string | null }> = [];
-      let projectFiles: Array<{ id: string; hash: string; storageKey: string; bucketName: string }> = [];
+      let projectDocs: Array<{
+        id: string;
+        inStorage?: boolean;
+        storageKey?: string | null;
+      }> = [];
+      let projectFiles: Array<{
+        id: string;
+        hash: string;
+        storageKey: string;
+        bucketName: string;
+      }> = [];
 
       const [fetchedDocs, fetchedFiles] = await Promise.all([
         this.prisma.pageDoc?.findMany
@@ -99,24 +155,36 @@ export class CleanupListener {
       if (this.workspaceCollector && projectDocs.length > 0) {
         await Promise.all(
           projectDocs.map((d) =>
-            this.workspaceCollector!
-              .evictDoc(projectId, d.id)
-              .catch(() => undefined),
+            this.workspaceCollector!.evictDoc(projectId, d.id).catch(
+              () => undefined,
+            ),
           ),
         );
       }
 
       const operations = [
-        this.prisma.pageTrackChange.deleteMany({ where: { spaceId: projectId } }),
-        this.prisma.pageCommentThread.deleteMany({ where: { spaceId: projectId } }),
+        this.prisma.pageTrackChange.deleteMany({
+          where: { spaceId: projectId },
+        }),
+        this.prisma.pageCommentThread.deleteMany({
+          where: { spaceId: projectId },
+        }),
         ...(this.prisma.pageDocReview
-          ? [this.prisma.pageDocReview.deleteMany({ where: { spaceId: projectId } })]
+          ? [
+              this.prisma.pageDocReview.deleteMany({
+                where: { spaceId: projectId },
+              }),
+            ]
           : []),
         this.prisma.pageNode.deleteMany({ where: { spaceId: projectId } }),
         this.prisma.pageFile.deleteMany({ where: { spaceId: projectId } }),
         this.prisma.pageSnapshot.deleteMany({ where: { spaceId: projectId } }),
-        this.prisma.pageNotification.deleteMany({ where: { spaceId: projectId } }),
-        this.prisma.customDictionaryWord.deleteMany({ where: { spaceId: projectId } }),
+        this.prisma.pageNotification.deleteMany({
+          where: { spaceId: projectId },
+        }),
+        this.prisma.customDictionaryWord.deleteMany({
+          where: { spaceId: projectId },
+        }),
         this.prisma.pageDoc.deleteMany({ where: { spaceId: projectId } }),
         ...(this.prisma.page
           ? [this.prisma.page.deleteMany({ where: { spaceId: projectId } })]

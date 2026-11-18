@@ -63,10 +63,10 @@ export class RoomStore {
     }
     this.sessions.set(session.socketId, session);
 
-    let room = this.projectRooms.get(session.projectId);
+    let room = this.projectRooms.get(session.spaceId);
     if (!room) {
       room = new Set();
-      this.projectRooms.set(session.projectId, room);
+      this.projectRooms.set(session.spaceId, room);
     }
     room.add(session.socketId);
 
@@ -81,7 +81,7 @@ export class RoomStore {
             86400,
           ),
           client.sadd(
-            REDIS_KEYS.projectRoom(session.projectId),
+            REDIS_KEYS.projectRoom(session.spaceId),
             session.socketId,
           ),
         ]);

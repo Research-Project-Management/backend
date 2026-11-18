@@ -22,7 +22,7 @@ import {
   ProjectAccessGuard,
   RequireRole,
   Role,
-  ResolvedProject,
+  ResolvedSpace,
   NoProjectContext,
   RequireOperator,
   OperatorGuard,
@@ -39,14 +39,14 @@ import {
 } from './dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 
-@ApiTags('Manuscripts - CLSI')
+@ApiTags('Pages - CLSI')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/pages', 'api/v1/manuscripts'])
+@Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard)
 export class ClsiController {
   constructor(private readonly clsiService: ClsiService) {}
 
-  @Post(['compile', 'projects/:projectId/compile'])
+  @Post(['compile', 'spaces/:spaceId/compile', 'pages/:pageId/compile'])
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('compile')
@@ -57,18 +57,23 @@ export class ClsiController {
   async compile(
     @Body() dto: CompileManuscriptDto,
     @CurrentUser('id') userId: string,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedProjectId =
-      (typeof project === 'string' ? project : project?.id) || routeProjectId;
-    if (authorizedProjectId && !dto.projectId) {
-      dto.projectId = authorizedProjectId;
+    const authorizedSpaceId =
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId;
+    if (authorizedSpaceId && !dto.spaceId) {
+      dto.spaceId = authorizedSpaceId;
     }
-    return this.clsiService.compile(dto, userId, authorizedProjectId);
+    if (routePageId && !dto.pageId) {
+      dto.pageId = routePageId;
+    }
+    return this.clsiService.compile(dto, userId, authorizedSpaceId);
   }
 
-  @Post(['projects/:projectId/compile/cancel', 'pages/:pageId/compile/cancel'])
+  @Post(['spaces/:spaceId/compile/cancel', 'pages/:pageId/compile/cancel'])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
@@ -76,13 +81,13 @@ export class ClsiController {
     summary: 'Cancel an ongoing compilation for a manuscript page or project',
   })
   cancelCompile(
-    @Param('projectId') routeProjectId?: string,
+    @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
     const spaceId =
-      (typeof project === 'string' ? project : project?.id) ||
-      routeProjectId ||
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId ||
       routePageId ||
       '';
     const targetId = routePageId || spaceId;
@@ -90,7 +95,11 @@ export class ClsiController {
     return { success: true, cancelled };
   }
 
-  @Post(['word-count', 'projects/:projectId/word-count'])
+  @Post([
+    'word-count',
+    'spaces/:spaceId/word-count',
+    'pages/:pageId/word-count',
+  ])
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.REVIEWER)
   @UserRateLimit('compile')
@@ -100,18 +109,29 @@ export class ClsiController {
   })
   async wordCount(
     @Body() dto: ClsiWordCountDto,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedProjectId =
-      (typeof project === 'string' ? project : project?.id) || routeProjectId;
-    if (authorizedProjectId && !dto.projectId) {
-      dto.projectId = authorizedProjectId;
+    const authorizedSpaceId =
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId;
+    if (authorizedSpaceId && !dto.spaceId) {
+      dto.spaceId = authorizedSpaceId;
     }
-    return this.clsiService.getWordCount(dto, authorizedProjectId);
+    if (routePageId && !dto.pageId) {
+      dto.pageId = routePageId;
+    }
+    return this.clsiService.getWordCount(dto, authorizedSpaceId);
   }
 
-  @Post(['synctex/forward', 'projects/:projectId/clsi/synctex/forward'])
+  @Post([
+    'synctex/forward',
+    'spaces/:spaceId/clsi/synctex/forward',
+    'spaces/:spaceId/synctex/forward',
+    'pages/:pageId/clsi/synctex/forward',
+    'pages/:pageId/synctex/forward',
+  ])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
@@ -120,18 +140,29 @@ export class ClsiController {
   })
   async forwardSync(
     @Body() dto: ForwardSyncDto,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedProjectId =
-      (typeof project === 'string' ? project : project?.id) || routeProjectId;
-    if (authorizedProjectId && !dto.projectId) {
-      dto.projectId = authorizedProjectId;
+    const authorizedSpaceId =
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId;
+    if (authorizedSpaceId && !dto.spaceId) {
+      dto.spaceId = authorizedSpaceId;
     }
-    return this.clsiService.forwardSync(dto, authorizedProjectId);
+    if (routePageId && !dto.pageId) {
+      dto.pageId = routePageId;
+    }
+    return this.clsiService.forwardSync(dto, authorizedSpaceId);
   }
 
-  @Post(['synctex/reverse', 'projects/:projectId/clsi/synctex/reverse'])
+  @Post([
+    'synctex/reverse',
+    'spaces/:spaceId/clsi/synctex/reverse',
+    'spaces/:spaceId/synctex/reverse',
+    'pages/:pageId/clsi/synctex/reverse',
+    'pages/:pageId/synctex/reverse',
+  ])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
@@ -141,38 +172,43 @@ export class ClsiController {
   })
   async reverseSync(
     @Body() dto: ReverseSyncDto,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedProjectId =
-      (typeof project === 'string' ? project : project?.id) || routeProjectId;
-    if (authorizedProjectId && !dto.projectId) {
-      dto.projectId = authorizedProjectId;
+    const authorizedSpaceId =
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId;
+    if (authorizedSpaceId && !dto.spaceId) {
+      dto.spaceId = authorizedSpaceId;
     }
-    return this.clsiService.reverseSync(dto, authorizedProjectId);
+    if (routePageId && !dto.pageId) {
+      dto.pageId = routePageId;
+    }
+    return this.clsiService.reverseSync(dto, authorizedSpaceId);
   }
 
-  @Get(['projects/:projectId/artifacts', 'pages/:pageId/artifacts'])
+  @Get(['spaces/:spaceId/artifacts', 'pages/:pageId/artifacts'])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @ApiOperation({
     summary: 'List auxiliary files generated by CLSI compilation',
   })
   async listAuxFiles(
-    @Param('projectId') routeProjectId?: string,
+    @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const projectId =
-      (typeof project === 'string' ? project : project?.id) ||
-      routeProjectId ||
+    const spaceId =
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId ||
       routePageId ||
       '';
-    return this.clsiService.listAuxFiles(projectId, routePageId);
+    return this.clsiService.listAuxFiles(spaceId, routePageId);
   }
 
   @Get([
-    'projects/:projectId/artifacts/:filename',
+    'spaces/:spaceId/artifacts/:filename',
     'pages/:pageId/artifacts/:filename',
   ])
   @UseGuards(ProjectAccessGuard)
@@ -181,24 +217,24 @@ export class ClsiController {
   async downloadAuxFile(
     @Param('filename') filename: string,
     @Res() res: FastifyReply,
-    @Param('projectId') routeProjectId?: string,
+    @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const projectId =
-      (typeof project === 'string' ? project : project?.id) ||
-      routeProjectId ||
+    const spaceId =
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId ||
       routePageId ||
       '';
     return this.clsiService.downloadAuxFile(
-      projectId,
+      spaceId,
       filename,
       res,
       routePageId,
     );
   }
 
-  @Get(['projects/:projectId/artifacts-zip', 'pages/:pageId/artifacts-zip'])
+  @Get(['spaces/:spaceId/artifacts-zip', 'pages/:pageId/artifacts-zip'])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @ApiOperation({
@@ -206,24 +242,20 @@ export class ClsiController {
   })
   async downloadAllArtifactsZip(
     @Res() res: FastifyReply,
-    @Param('projectId') routeProjectId?: string,
+    @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const projectId =
-      (typeof project === 'string' ? project : project?.id) ||
-      routeProjectId ||
+    const spaceId =
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId ||
       routePageId ||
       '';
-    return this.clsiService.downloadAllArtifactsZip(
-      projectId,
-      res,
-      routePageId,
-    );
+    return this.clsiService.downloadAllArtifactsZip(spaceId, res, routePageId);
   }
 
-  @Post(['projects/:projectId/clean-aux', 'pages/:pageId/clean-aux'])
-  @Delete(['projects/:projectId/artifacts', 'pages/:pageId/artifacts'])
+  @Post(['spaces/:spaceId/clean-aux', 'pages/:pageId/clean-aux'])
+  @Delete(['spaces/:spaceId/artifacts', 'pages/:pageId/artifacts'])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
@@ -232,16 +264,16 @@ export class ClsiController {
       'Clear cached auxiliary files and compile scratch workspace for a manuscript page or project',
   })
   async cleanAuxFiles(
-    @Param('projectId') routeProjectId?: string,
+    @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const projectId =
-      (typeof project === 'string' ? project : project?.id) ||
-      routeProjectId ||
+    const spaceId =
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId ||
       routePageId ||
       '';
-    return this.clsiService.cleanProjectScratch(projectId, routePageId);
+    return this.clsiService.cleanProjectScratch(spaceId, routePageId);
   }
 
   @Get('clsi/status')

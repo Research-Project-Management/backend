@@ -4,6 +4,8 @@
  */
 
 export class InvalidWordException extends Error {
+  public readonly statusCode = 400;
+
   constructor(word: string, reason?: string) {
     super(
       `Invalid word '${word}'${reason ? `: ${reason}` : ''}. Words must be non-empty alphabetic strings.`,
@@ -18,6 +20,8 @@ export class InvalidWordException extends Error {
  */
 
 export class UnsupportedLanguageException extends Error {
+  public readonly statusCode = 400;
+
   constructor(language: string) {
     super(
       `Unsupported spelling language code '${language}'. Supported: en, en-US, en-GB, vi, vi-VN, fr, de, es.`,

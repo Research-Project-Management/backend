@@ -12,10 +12,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
-import {
-  createZipStream,
-  ZipEntry,
-} from '../../core/utils/zip-builder';
+import { createZipStream, ZipEntry } from '../../core/utils/zip-builder';
 import { IOutputFileFinder, DiscoveredOutputFile } from '../domain';
 
 // ─────────────────────────────────────────────────────────────────
@@ -125,6 +122,8 @@ export class ProjectLockManager {
 }
 
 export class ProjectLockTimeoutError extends Error {
+  public readonly statusCode = 409;
+
   constructor(projectId: string, maxWait: number) {
     super(
       `Project compilation lock timed out after ${maxWait}ms for project "${projectId}". Another compilation is currently in progress.`,

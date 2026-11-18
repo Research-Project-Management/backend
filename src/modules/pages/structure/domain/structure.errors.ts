@@ -1,15 +1,17 @@
 /**
- * modules/manuscripts/structure/core/domain/structure.errors.ts
- * Domain errors for Project File Tree & Structure.
+ * modules/pages/structure/domain/structure.errors.ts
+ * Domain errors for Page Virtual Tree & Structure.
  */
 
 export class StructureError extends Error {
   public readonly httpStatus: number;
+  public readonly statusCode: number;
 
   constructor(message: string, httpStatus = 400) {
     super(message);
     this.name = this.constructor.name;
     this.httpStatus = httpStatus;
+    this.statusCode = httpStatus;
   }
 }
 

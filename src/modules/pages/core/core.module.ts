@@ -25,12 +25,7 @@ import { CleanupListener } from './services/cleanup.listener';
 
 @Global()
 @Module({
-  imports: [
-    PrismaModule,
-    IdentityModule,
-    NotificationsModule,
-    RealtimeModule,
-  ],
+  imports: [PrismaModule, IdentityModule, NotificationsModule, RealtimeModule],
   providers: [
     ManuscriptsConfigService,
     WorkspaceCollectorService,

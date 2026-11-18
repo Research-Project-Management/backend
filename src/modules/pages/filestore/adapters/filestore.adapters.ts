@@ -239,7 +239,7 @@ export class PlatformBinaryStorageAdapter extends IBinaryStoragePort {
           `Empty stream returned from platform storage for key '${physicalKey}'`,
         );
       }
-      return result.stream as Readable;
+      return result.stream;
     } catch (err) {
       if (err instanceof FilestoreValidationException) {
         throw err;

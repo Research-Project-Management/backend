@@ -18,13 +18,13 @@ import { Type } from 'class-transformer';
 export class JoinProjectDto {
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  spaceId!: string;
 }
 
 export class JoinDocDto {
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  spaceId!: string;
 
   @IsUUID()
   @IsNotEmpty()
@@ -34,7 +34,7 @@ export class JoinDocDto {
 export class LeaveDocDto {
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  spaceId!: string;
 
   @IsUUID()
   @IsNotEmpty()
@@ -60,7 +60,7 @@ export class LineSpliceDto {
 export class SendUpdateDto {
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  spaceId!: string;
 
   @IsUUID()
   @IsNotEmpty()
@@ -127,7 +127,7 @@ export class CursorPayloadDto {
 export class CursorUpdateDto {
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  spaceId!: string;
 
   @IsUUID()
   @IsNotEmpty()
@@ -141,7 +141,7 @@ export class CursorUpdateDto {
 export class DocSyncDto {
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  spaceId!: string;
 
   @IsUUID()
   @IsNotEmpty()
@@ -157,7 +157,7 @@ export class DocSyncDto {
 export class ProjectChatSendDto {
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  spaceId!: string;
 
   @IsString()
   @IsNotEmpty()
@@ -172,7 +172,7 @@ export class ProjectChatSendDto {
 export class ProjectChatHistoryDto {
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  spaceId!: string;
 }
 
 // --- Outbound Server DTOs / Interfaces ---

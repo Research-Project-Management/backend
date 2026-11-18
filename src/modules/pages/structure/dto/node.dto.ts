@@ -119,6 +119,9 @@ export class TreeNodeDto implements TreeNode {
   projectId?: string;
 
   @ApiPropertyOptional()
+  spaceId?: string;
+
+  @ApiPropertyOptional()
   pageId?: string | null;
 
   @ApiProperty()

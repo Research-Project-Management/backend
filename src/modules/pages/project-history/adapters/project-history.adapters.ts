@@ -9,6 +9,7 @@ import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import * as pathPosix from 'node:path/posix';
 import { Prisma } from '@prisma/client';
 import { PrismaService, mapWithConcurrency } from '@/core';
+import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
 import {
   LiveCollaborationPort,
   LIVE_COLLABORATION_PORT,
@@ -31,10 +32,7 @@ import {
   FileSnapshotVo,
 } from '../domain';
 import { Readable } from 'node:stream';
-import {
-  createZipStream,
-  type ZipEntry,
-} from '@/modules/pages/core';
+import { createZipStream, type ZipEntry } from '@/modules/pages/core';
 
 const COLLECT_CONCURRENCY = 6;
 
@@ -68,8 +66,13 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
 
   public async collectCurrentState(
     projectId: string,
+    pageId?: string,
   ): Promise<Map<string, FileSnapshotVo>> {
-    const nodes = await this.structureService.getAllNodes(projectId);
+    const nodes = await this.structureService.getAllNodes(
+      projectId,
+      undefined,
+      pageId,
+    );
 
     const docIds = nodes.filter((n) => n.docId).map((n) => n.docId as string);
     await this.getLiveCollab()
@@ -219,11 +222,12 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     private readonly historyRepository?: ProjectHistoryRepository,
     @Optional()
     private readonly distributedLock?: IDistributedLockPort,
+    @Optional()
+    private readonly filestoreService?: FilestoreService,
   ) {
     super();
     this.liveCollab =
-      liveCollab &&
-      typeof (liveCollab as LiveCollaborationPort).flushDocs === 'function'
+      liveCollab && typeof liveCollab.flushDocs === 'function'
         ? liveCollab
         : NOOP_LIVE_COLLABORATION;
   }
@@ -249,7 +253,14 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     projectId: string,
     fileId?: string | null,
   ): Promise<void> {
-    if (!fileId || !this.prisma?.pageFile?.updateMany) return;
+    if (!fileId) return;
+    if (this.filestoreService?.restoreFile) {
+      const restored = await this.filestoreService
+        .restoreFile(projectId, fileId)
+        .catch(() => false);
+      if (restored) return;
+    }
+    if (!this.prisma?.pageFile?.updateMany) return;
     await this.prisma.pageFile
       .updateMany({
         where: { id: fileId, spaceId: projectId },
@@ -263,6 +274,7 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     filePath: string,
     lines: string[],
     candidateDocId?: string | null,
+    pageId?: string,
   ): Promise<{
     docId: string | null;
     rev?: number;
@@ -289,6 +301,7 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
       const createdDoc = await this.docstoreService.createDoc(projectId, {
         path: filePath,
         lines,
+        ...(pageId ? { pageId } : {}),
       });
       const createdRef = createdDoc as {
         id?: string;
@@ -307,7 +320,16 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
   public async restoreToState(
     projectId: string,
     snapshot: Snapshot,
+    pageId?: string,
   ): Promise<RestoreResult> {
+    const resolvedPageId =
+      pageId ??
+      snapshot.pageId ??
+      (this.prisma
+        ? await ensureCanonicalPageId(this.prisma, projectId).catch(
+            () => undefined,
+          )
+        : undefined);
     const lockPort =
       this.distributedLock ??
       (this.lockOrLegacyRef &&
@@ -316,11 +338,11 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
         ? (this.lockOrLegacyRef as IDistributedLockPort)
         : undefined);
     const restoreAction = async () =>
-      this.executeRestoreWorkflow(projectId, snapshot);
+      this.executeRestoreWorkflow(projectId, snapshot, resolvedPageId);
 
     if (lockPort) {
       return lockPort.withLock(
-        `manuscript:restore:${projectId}`,
+        `manuscript:restore:${projectId}:${resolvedPageId ?? 'default'}`,
         restoreAction,
         60000,
       );
@@ -331,8 +353,14 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
   private async executeRestoreWorkflow(
     projectId: string,
     snapshot: Snapshot,
+    pageId?: string,
   ): Promise<RestoreResult> {
-    const currentNodes = await this.structureService.getAllNodes(projectId);
+    const targetPageId = pageId ?? snapshot.pageId;
+    const currentNodes = await this.structureService.getAllNodes(
+      projectId,
+      undefined,
+      targetPageId,
+    );
     const activeDocIds = currentNodes
       .filter((n) => n.docId)
       .map((n) => n.docId as string);
@@ -402,10 +430,14 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
           snapshot.version;
 
         if (resolvedHistoryRepo) {
-          const latestVersion =
-            await resolvedHistoryRepo.getLatestVersion(projectId);
+          const latestVersion = await resolvedHistoryRepo.getLatestVersion(
+            projectId,
+            targetPageId,
+          );
           const safetySnapshot = Snapshot.create({
             projectId,
+            spaceId: projectId,
+            pageId: targetPageId,
             version: latestVersion + 1,
             summary: backupSummary,
             isAutomatic: true,
@@ -413,14 +445,21 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
           });
           await resolvedHistoryRepo.saveSnapshot(safetySnapshot);
         } else if (this.prisma) {
+          const snapshotPageId = await ensureCanonicalPageId(
+            this.prisma,
+            projectId,
+            targetPageId,
+          );
           const latestSnap = await this.prisma.pageSnapshot.findFirst({
-            where: { spaceId: projectId },
+            where: { spaceId: projectId, pageId: snapshotPageId },
             orderBy: { version: 'desc' },
             select: { version: true },
           });
           const backupVersion = (latestSnap?.version ?? 0) + 1;
           const safetySnapshot = Snapshot.create({
             projectId,
+            spaceId: projectId,
+            pageId: snapshotPageId,
             version: backupVersion,
             summary: backupSummary,
             isAutomatic: true,
@@ -434,6 +473,7 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
           await this.prisma.pageSnapshot.create({
             data: {
               spaceId: projectId,
+              pageId: snapshotPageId,
               version: backupVersion,
               summary: backupSummary,
               isAutomatic: true,
@@ -457,6 +497,7 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     );
     const snapshotFiles = snapshot.files;
     const restoredDocIds: string[] = [];
+    const evictedDocIds: string[] = [];
 
     const requiredFolders = new Set<string>();
     for (const filePath of snapshotFiles.keys()) {
@@ -470,6 +511,11 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     const postSnapshotFileNodes = currentNodes.filter(
       (node) => !node.isFolder() && !snapshotFiles.has(node.path),
     );
+    for (const removedNode of postSnapshotFileNodes) {
+      if (removedNode.docId) {
+        evictedDocIds.push(removedNode.docId);
+      }
+    }
     if (postSnapshotFileNodes.length > 0) {
       await Promise.all(
         postSnapshotFileNodes.map(async (node) => {
@@ -521,7 +567,11 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
         !ensuredParentDirs.has(parentDir)
       ) {
         try {
-          await this.structureService.mkdirp(projectId, parentDir);
+          await this.structureService.mkdirp(
+            projectId,
+            parentDir,
+            targetPageId,
+          );
           let cur = parentDir;
           while (cur && cur !== '.' && cur !== '/') {
             ensuredParentDirs.add(cur);
@@ -559,6 +609,9 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
           }
         } else {
           if (existingNode) {
+            if (existingNode.docId) {
+              evictedDocIds.push(existingNode.docId);
+            }
             await this.structureService.deleteNode(projectId, existingNode.id);
           }
 
@@ -567,6 +620,7 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
             filePath,
             lines,
             fileVo.docId,
+            targetPageId,
           );
           syncedRev = rev;
           syncedVersion = version;
@@ -575,13 +629,17 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
             restoredDocIds.push(docId);
           }
 
-          const newNode = await this.structureService.createNode(projectId, {
-            name: fileName,
-            path: filePath,
-            type: 'DOC',
-            docId: docId ?? undefined,
-            isRootDoc: fileVo.isRootDoc,
-          });
+          const newNode = await this.structureService.createNode(
+            projectId,
+            {
+              name: fileName,
+              path: filePath,
+              type: 'DOC',
+              docId: docId ?? undefined,
+              isRootDoc: fileVo.isRootDoc,
+            },
+            targetPageId,
+          );
 
           if (fileVo.isRootDoc) {
             await this.structureService.setRootDoc(projectId, newNode.id);
@@ -613,21 +671,32 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
             existingNode.type !== 'FILE' ||
             existingNode.fileId !== fileVo.fileId
           ) {
+            if (existingNode.docId) {
+              evictedDocIds.push(existingNode.docId);
+            }
             await this.structureService.deleteNode(projectId, existingNode.id);
-            await this.structureService.createNode(projectId, {
+            await this.structureService.createNode(
+              projectId,
+              {
+                name: fileName,
+                path: filePath,
+                type: 'FILE',
+                fileId: fileVo.fileId,
+              },
+              targetPageId,
+            );
+          }
+        } else {
+          await this.structureService.createNode(
+            projectId,
+            {
               name: fileName,
               path: filePath,
               type: 'FILE',
               fileId: fileVo.fileId,
-            });
-          }
-        } else {
-          await this.structureService.createNode(projectId, {
-            name: fileName,
-            path: filePath,
-            type: 'FILE',
-            fileId: fileVo.fileId,
-          });
+            },
+            targetPageId,
+          );
         }
       }
     }
@@ -636,11 +705,14 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
       await this.domainEventBus.publish({
         type: 'manuscript.history.restored',
         projectId,
+        pageId: targetPageId,
         version:
           typeof snapshot.version === 'number'
             ? snapshot.version
-            : ((snapshot.version as { value?: number } | undefined)?.value ?? 0),
+            : ((snapshot.version as { value?: number } | undefined)?.value ??
+              0),
         restoredDocIds,
+        evictedDocIds,
         occurredAt: Date.now(),
       });
     }
@@ -656,10 +728,10 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     snapshot: Snapshot,
     pathname: string,
     hintFileId?: string,
+    pageId?: string,
   ): Promise<RestoreSingleFileResult> {
-    const normalizedPath = pathname.startsWith('/')
-      ? pathname
-      : `/${pathname}`;
+    const targetPageId = pageId ?? snapshot.pageId;
+    const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
     const fileVo =
       snapshot.getFile(normalizedPath) ??
       Array.from(snapshot.files.values()).find(
@@ -682,13 +754,17 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
 
     if (parentDir && parentDir !== '.' && parentDir !== '/') {
       try {
-        await this.structureService.mkdirp(projectId, parentDir);
+        await this.structureService.mkdirp(projectId, parentDir, targetPageId);
       } catch (err) {
         this.logger.warn(`Could not ensure directory ${parentDir}: ${err}`);
       }
     }
 
-    const currentNodes = await this.structureService.getAllNodes(projectId);
+    const currentNodes = await this.structureService.getAllNodes(
+      projectId,
+      undefined,
+      targetPageId,
+    );
     const existingNode =
       currentNodes.find(
         (n) =>
@@ -731,25 +807,26 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
           targetPath,
           lines,
           fileVo.docId ?? hintFileId,
+          targetPageId,
         );
         docIdToSync = docId;
         syncedRev = rev;
         syncedVersion = version;
 
-        await this.structureService.createNode(projectId, {
-          name: fileName,
-          path: targetPath,
-          type: 'DOC',
-          docId: docId ?? undefined,
-          isRootDoc: fileVo.isRootDoc,
-        });
+        await this.structureService.createNode(
+          projectId,
+          {
+            name: fileName,
+            path: targetPath,
+            type: 'DOC',
+            docId: docId ?? undefined,
+            isRootDoc: fileVo.isRootDoc,
+          },
+          targetPageId,
+        );
       }
 
       if (docIdToSync) {
-        await this.getLiveCollab()
-          .applyExternalText(projectId, docIdToSync, content)
-          .catch(() => false);
-
         if (this.domainEventBus) {
           await this.domainEventBus.publish({
             type: 'manuscript.document.mutated',
@@ -761,6 +838,10 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
             source: 'history-restore',
             occurredAt: Date.now(),
           });
+        } else {
+          await this.getLiveCollab()
+            .applyExternalText(projectId, docIdToSync, content)
+            .catch(() => false);
         }
       }
 
@@ -778,20 +859,28 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
           existingNode.fileId !== fileVo.fileId
         ) {
           await this.structureService.deleteNode(projectId, existingNode.id);
-          await this.structureService.createNode(projectId, {
+          await this.structureService.createNode(
+            projectId,
+            {
+              name: fileName,
+              path: targetPath,
+              type: 'FILE',
+              fileId: fileVo.fileId,
+            },
+            targetPageId,
+          );
+        }
+      } else {
+        await this.structureService.createNode(
+          projectId,
+          {
             name: fileName,
             path: targetPath,
             type: 'FILE',
             fileId: fileVo.fileId,
-          });
-        }
-      } else {
-        await this.structureService.createNode(projectId, {
-          name: fileName,
-          path: targetPath,
-          type: 'FILE',
-          fileId: fileVo.fileId,
-        });
+          },
+          targetPageId,
+        );
       }
       return {
         path: targetPath,

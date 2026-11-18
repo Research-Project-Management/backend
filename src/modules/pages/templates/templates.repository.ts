@@ -13,11 +13,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
-import {
-  Prisma,
-  PageTemplateCategory,
-  PageTemplate,
-} from '@prisma/client';
+import { Prisma, PageTemplateCategory, PageTemplate } from '@prisma/client';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { SagaRunner } from '@/modules/pages/core/utils/saga-runner';
@@ -107,11 +103,9 @@ export class TemplatesRepository
           return this.mapToEntity(record);
         }
       } else {
-        const recordByVersion = await this.prisma.pageTemplate.findUnique(
-          {
-            where: { versionId: id },
-          },
-        );
+        const recordByVersion = await this.prisma.pageTemplate.findUnique({
+          where: { versionId: id },
+        });
         if (recordByVersion) {
           return this.mapToEntity(recordByVersion);
         }
@@ -193,9 +187,7 @@ export class TemplatesRepository
       };
     }
 
-    const dbEntities = records.map((r: PageTemplate) =>
-      this.mapToEntity(r),
-    );
+    const dbEntities = records.map((r: PageTemplate) => this.mapToEntity(r));
     const dbIdsAndSlugs = new Set<string>();
     for (const e of dbEntities) {
       dbIdsAndSlugs.add(e.id.toLowerCase());
@@ -282,9 +274,7 @@ export class TemplatesRepository
       };
     }
 
-    const dbEntities = records.map((r: PageTemplate) =>
-      this.mapToEntity(r),
-    );
+    const dbEntities = records.map((r: PageTemplate) => this.mapToEntity(r));
     const dbIdsAndSlugs = new Set<string>();
     for (const e of dbEntities) {
       dbIdsAndSlugs.add(e.id.toLowerCase());
@@ -365,6 +355,7 @@ export class TemplatesRepository
    */
   async collectProjectTemplateFiles(
     projectId: string,
+    pageId?: string,
   ): Promise<Record<string, string>> {
     const collected: Record<string, string> = {};
     if (!this.docstoreService) {
@@ -374,14 +365,18 @@ export class TemplatesRepository
     const pathByDocId = new Map<string, string>();
     const [nodesResult, docsResult] = await Promise.all([
       this.structureService
-        ? this.structureService.getAllNodes(projectId).catch(() => [])
+        ? this.structureService
+            .getAllNodes(projectId, undefined, pageId)
+            .catch(() => [])
         : Promise.resolve([]),
-      this.docstoreService.getAllDocs(projectId).catch((err: unknown) => {
-        this.logger.warn(
-          `Failed to collect project files for template from ${projectId}: ${(err as Error)?.message}`,
-        );
-        return [];
-      }),
+      this.docstoreService
+        .getAllDocs(projectId, pageId)
+        .catch((err: unknown) => {
+          this.logger.warn(
+            `Failed to collect project files for template from ${projectId}: ${(err as Error)?.message}`,
+          );
+          return [];
+        }),
     ]);
 
     for (const n of nodesResult) {
@@ -562,7 +557,10 @@ export class TemplatesRepository
                 isRootDoc,
               }),
             async (node) => {
-              if (node?.id && typeof structureService.deleteNode === 'function') {
+              if (
+                node?.id &&
+                typeof structureService.deleteNode === 'function'
+              ) {
                 await structureService.deleteNode(finalProjectId, node.id);
               }
             },

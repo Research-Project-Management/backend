@@ -14,6 +14,8 @@ import {
 export { KNOWN_TEXT_EXTENSIONS, KNOWN_BINARY_EXTENSIONS };
 
 export class ZipSlipSecurityException extends Error {
+  public readonly statusCode = 403;
+
   constructor(entryPath: string) {
     super(
       `Security Violation: Zip entry '${entryPath}' contains illegal path traversal sequences.`,
@@ -23,6 +25,8 @@ export class ZipSlipSecurityException extends Error {
 }
 
 export class ArchiveFileLimitExceededException extends Error {
+  public readonly statusCode = 400;
+
   constructor(maxFiles: number) {
     super(
       `ZIP archive exceeds the maximum project file limit of ${maxFiles.toLocaleString()} files.`,
@@ -32,6 +36,8 @@ export class ArchiveFileLimitExceededException extends Error {
 }
 
 export class InvalidZipArchiveException extends Error {
+  public readonly statusCode = 400;
+
   constructor(
     message = 'The provided archive is not a valid ZIP file or contains no usable entries.',
   ) {
@@ -41,6 +47,8 @@ export class InvalidZipArchiveException extends Error {
 }
 
 export class ArchiveSizeExceededException extends Error {
+  public readonly statusCode = 413;
+
   constructor(sizeBytes: number, maxBytes: number) {
     super(
       `Archive payload exceeds maximum allowed project uncompressed size of ${Math.round(maxBytes / (1024 * 1024))}MB. Found: ${Math.round(sizeBytes / (1024 * 1024))}MB.`,
@@ -310,12 +318,14 @@ export abstract class IManuscriptAggregatorPort {
     projectId: string,
     includePdf?: boolean,
     cleanArxiv?: boolean,
+    pageId?: string,
   ): Promise<ExportableFileEntry[]>;
 
   abstract collectLazyProjectEntries(
     projectId: string,
     includePdf?: boolean,
     cleanArxiv?: boolean,
+    pageId?: string,
   ): Promise<ExportableFileEntry[]>;
 }
 
@@ -325,6 +335,7 @@ export abstract class IManuscriptHydratorPort {
     entries: ArchiveEntryVo[],
     userId?: string | null,
     preferredRootDoc?: string,
+    pageId?: string,
   ): Promise<ImportSummaryVo>;
 }
 

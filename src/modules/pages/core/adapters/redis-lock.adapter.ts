@@ -38,9 +38,9 @@ export class RedisLockAdapter extends IDistributedLockPort {
   private isRedisUsable(): boolean {
     return Boolean(
       this.redis &&
-        typeof this.redis.isReady === 'function' &&
-        this.redis.isReady() &&
-        this.redis.getClient(),
+      typeof this.redis.isReady === 'function' &&
+      this.redis.isReady() &&
+      this.redis.getClient(),
     );
   }
 

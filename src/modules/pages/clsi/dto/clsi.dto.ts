@@ -18,12 +18,12 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CompileManuscriptDto {
   @ApiPropertyOptional({
-    description: 'Project UUID for multi-file compile',
-    example: 'project-uuid-123',
+    description: 'Workspace Space UUID (Personal or Project)',
+    example: 'space-uuid-123',
   })
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 
   @ApiPropertyOptional({
     description: 'Editor page UUID when compiling from a workspace page',
@@ -142,11 +142,20 @@ export class ClsiWordCountDto {
   source?: string;
 
   @ApiPropertyOptional({
-    description: 'Project UUID for resolving multi-file \\input / \\include',
+    description:
+      'Workspace Space UUID for resolving multi-file \\input / \\include',
   })
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Page UUID for isolating word counts inside a multi-Page Space',
+  })
+  @IsOptional()
+  @IsString()
+  pageId?: string;
 
   @ApiPropertyOptional({
     description: 'Filename for reporting (default: document.tex)',
@@ -163,7 +172,8 @@ export class ClsiWordCountDto {
   includeBib?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Optional virtual files map (filename -> content) for project word count',
+    description:
+      'Optional virtual files map (filename -> content) for project word count',
   })
   @IsOptional()
   @IsObject()
@@ -193,7 +203,9 @@ export class ClsiAiTransformDto {
   @IsString()
   selectedText!: string;
 
-  @ApiPropertyOptional({ description: 'Custom instruction when action is custom' })
+  @ApiPropertyOptional({
+    description: 'Custom instruction when action is custom',
+  })
   @IsOptional()
   @IsString()
   customPrompt?: string;
@@ -252,7 +264,7 @@ export class ClsiAiFixErrorDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 }
 
 export class ClsiAiGenerateTableDto {
@@ -260,4 +272,3 @@ export class ClsiAiGenerateTableDto {
   @IsString()
   prompt!: string;
 }
-

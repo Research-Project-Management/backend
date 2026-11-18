@@ -33,6 +33,7 @@ model Page {
   trackChanges   PageTrackChange[]
   commentThreads PageCommentThread[]
 
+  @@unique([id, spaceId], map: "uq_pages_id_space")
   @@index([spaceId, deletedAt, updatedAt(sort: Desc)], map: "idx_pages_space_updated")
   @@index([spaceId, deletedAt, title], map: "idx_pages_space_title")
   @@index([rootDocId], map: "idx_pages_root_doc_id")

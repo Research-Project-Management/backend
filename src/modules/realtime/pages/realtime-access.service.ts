@@ -283,6 +283,65 @@ export class RealtimeAccessService {
   }
 
   /**
+   * Resolves canonical `(spaceId, pageId)` from a client-supplied room/project parameter
+   * (handling personal aliases, `Page.id`, `PageDoc.id`, `Project.id`, and `Space.id`).
+   */
+  public async resolveCanonicalSpaceAndPage(
+    rawId: string,
+    userId: string,
+  ): Promise<{ spaceId: string; pageId?: string }> {
+    if (!rawId || typeof rawId !== 'string') {
+      return { spaceId: rawId };
+    }
+    const trimmed = rawId.trim();
+    if (
+      ['personal', 'me', 'user', 'default'].includes(trimmed.toLowerCase()) &&
+      userId
+    ) {
+      return { spaceId: userId };
+    }
+    if (!isUuid(trimmed)) {
+      return { spaceId: trimmed };
+    }
+    if (userId && trimmed.toLowerCase() === userId.toLowerCase()) {
+      return { spaceId: userId };
+    }
+
+    try {
+      const page = this.prisma?.page?.findUnique
+        ? await Promise.resolve(
+            this.prisma.page.findUnique({
+              where: { id: trimmed },
+              select: { id: true, spaceId: true, deletedAt: true },
+            }),
+          ).catch(() => null)
+        : null;
+      if (page?.spaceId) {
+        return { spaceId: page.spaceId, pageId: page.id };
+      }
+
+      const pageDoc = this.prisma?.pageDoc?.findUnique
+        ? await Promise.resolve(
+            this.prisma.pageDoc.findUnique({
+              where: { id: trimmed },
+              select: { id: true, spaceId: true, pageId: true },
+            }),
+          ).catch(() => null)
+        : null;
+      if (pageDoc?.spaceId) {
+        return {
+          spaceId: pageDoc.spaceId,
+          pageId: pageDoc.pageId ?? undefined,
+        };
+      }
+    } catch {
+      // Fall back to raw trimmed UUID if lookup fails transiently
+    }
+
+    return { spaceId: trimmed };
+  }
+
+  /**
    * Checks whether a user satisfies a required WsAccessLevel for a project.
    */
   public async checkAccess(
@@ -320,48 +379,55 @@ export class RealtimeAccessService {
   }
 
   /**
-   * Validates that the requested document actually belongs to the specified project.
-   * Prevents cross-project document access and IDOR (US2 / RT-04).
+   * Validates that the requested document actually belongs to the specified project (space)
+   * and optional page scope, and is not soft-deleted. Prevents cross-project/cross-page IDOR.
    */
   public async validateDocInProject(
     projectId: string,
     docId: string,
+    expectedPageId?: string,
   ): Promise<boolean> {
     if (!projectId || !docId || !isUuid(projectId) || !isUuid(docId)) {
       return false;
     }
 
-    // Root project virtual doc check
-    if (docId === projectId) {
-      return true;
-    }
-
     try {
       if (this.docstoreService) {
         const doc = await this.docstoreService.getDocById(docId);
-        if (doc && doc.projectId === projectId) {
-          return true;
-        }
-        if (
-          doc &&
-          doc.projectId &&
-          isUuid(doc.projectId) &&
-          this.prisma.page?.findUnique
-        ) {
-          const page = await Promise.resolve(
-            this.prisma.page.findUnique({
-              where: { id: doc.projectId },
-              select: { id: true, spaceId: true },
-            }),
-          ).catch(() => null);
-          if (page && (page.id === projectId || page.spaceId === projectId)) {
+        if (doc) {
+          if (doc.deleted) {
+            return false;
+          }
+          if (doc.projectId === projectId) {
+            if (expectedPageId && doc.pageId && doc.pageId !== expectedPageId) {
+              return false;
+            }
             return true;
           }
-        }
-        if (!doc && !this.prisma?.pageDoc?.findUnique) {
-          return false;
-        }
-        if (doc && !this.prisma?.pageDoc?.findUnique) {
+          if (
+            doc.projectId &&
+            isUuid(doc.projectId) &&
+            this.prisma.page?.findUnique
+          ) {
+            const page = await Promise.resolve(
+              this.prisma.page.findUnique({
+                where: { id: doc.projectId },
+                select: { id: true, spaceId: true, deletedAt: true },
+              }),
+            ).catch(() => null);
+            if (
+              page &&
+              !page.deletedAt &&
+              (page.id === projectId || page.spaceId === projectId) &&
+              (!expectedPageId || page.id === expectedPageId)
+            ) {
+              return true;
+            }
+          }
+          if (!this.prisma?.pageDoc?.findUnique) {
+            return false;
+          }
+        } else if (!this.prisma?.pageDoc?.findUnique) {
           return false;
         }
       }
@@ -372,26 +438,22 @@ export class RealtimeAccessService {
 
       const doc = await this.prisma.pageDoc.findUnique({
         where: { id: docId },
-        select: { spaceId: true, pageId: true },
+        select: { spaceId: true, pageId: true, deletedAt: true },
       });
 
-      if (!doc) {
-        if (this.prisma.page?.findUnique) {
-          const page = await Promise.resolve(
-            this.prisma.page.findUnique({
-              where: { id: docId },
-              select: { id: true, spaceId: true },
-            }),
-          ).catch(() => null);
-          if (page && (page.id === projectId || page.spaceId === projectId)) {
-            return true;
-          }
-        }
+      if (!doc || doc.deletedAt) {
         return false;
       }
 
-      if (doc.spaceId === projectId || doc.pageId === projectId) {
+      if (doc.spaceId === projectId) {
+        if (expectedPageId && doc.pageId && doc.pageId !== expectedPageId) {
+          return false;
+        }
         return true;
+      }
+
+      if (doc.pageId === projectId) {
+        return !expectedPageId || doc.pageId === expectedPageId;
       }
 
       const candidatePageId = doc.pageId || doc.spaceId;
@@ -403,10 +465,15 @@ export class RealtimeAccessService {
         const page = await Promise.resolve(
           this.prisma.page.findUnique({
             where: { id: candidatePageId },
-            select: { id: true, spaceId: true },
+            select: { id: true, spaceId: true, deletedAt: true },
           }),
         ).catch(() => null);
-        if (page && (page.id === projectId || page.spaceId === projectId)) {
+        if (
+          page &&
+          !page.deletedAt &&
+          (page.id === projectId || page.spaceId === projectId) &&
+          (!expectedPageId || page.id === expectedPageId)
+        ) {
           return true;
         }
       }

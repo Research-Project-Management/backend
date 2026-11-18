@@ -54,6 +54,11 @@ export class ExportZipQueryDto {
   @IsOptional()
   @IsString()
   projectName?: string;
+
+  @ApiPropertyOptional({ description: 'Optional Page scope ID' })
+  @IsOptional()
+  @IsString()
+  pageId?: string;
 }
 
 export class ScaffoldTemplateDto {
@@ -64,6 +69,11 @@ export class ScaffoldTemplateDto {
   @IsString()
   @IsNotEmpty()
   templateId!: string;
+
+  @ApiPropertyOptional({ description: 'Optional Page scope ID' })
+  @IsOptional()
+  @IsString()
+  pageId?: string;
 }
 
 export class ImportSummaryResponseDto {

@@ -5,6 +5,7 @@
 
 import { Injectable, ConflictException } from '@nestjs/common';
 import { PrismaService } from '@/core';
+import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
 import {
   Prisma,
   PageSnapshot as PrismaSnapshot,
@@ -29,9 +30,12 @@ export class ManuscriptHistoryMapper {
   public static toDomainLabel(
     prisma: PrismaLabel & { projectId?: string },
   ): VersionLabel {
+    const spaceId = prisma.spaceId ?? prisma.projectId ?? '';
     return VersionLabel.create({
       id: prisma.id,
-      projectId: prisma.spaceId ?? prisma.projectId ?? '',
+      projectId: spaceId,
+      spaceId,
+      pageId: prisma.pageId,
       snapshotId: prisma.snapshotId,
       version: prisma.version,
       label: prisma.label,
@@ -51,6 +55,7 @@ export class ManuscriptHistoryMapper {
     id: string;
     spaceId?: string;
     projectId?: string;
+    pageId?: string;
     version: number;
     summary: string | null;
     createdById: string | null;
@@ -78,9 +83,12 @@ export class ManuscriptHistoryMapper {
         resolvedFileCount = record.sizeBytes ?? 0;
       }
     }
+    const spaceId = record.spaceId ?? record.projectId ?? '';
     return Snapshot.create({
       id: record.id,
-      projectId: record.spaceId ?? record.projectId ?? '',
+      projectId: spaceId,
+      spaceId,
+      pageId: record.pageId,
       version: record.version,
       summary: record.summary,
       createdById: record.createdById,
@@ -99,10 +107,13 @@ export class ManuscriptHistoryMapper {
     const labels = prisma.labels
       ? prisma.labels.map((l) => this.toDomainLabel(l))
       : [];
+    const spaceId = prisma.spaceId ?? prisma.projectId ?? '';
 
     return Snapshot.create({
       id: prisma.id,
-      projectId: prisma.spaceId ?? prisma.projectId ?? '',
+      projectId: spaceId,
+      spaceId,
+      pageId: prisma.pageId,
       version: prisma.version,
       summary: prisma.summary,
       createdById: prisma.createdById,
@@ -124,12 +135,21 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
     return ManuscriptHistoryMapper.toDomain(record);
   }
 
+  private async resolveTargetPageId(
+    projectId: string,
+    pageId?: string,
+  ): Promise<string> {
+    return ensureCanonicalPageId(this.prisma, projectId, pageId);
+  }
+
   private async resolveNextVersion(
     projectId: string,
     fallbackVersion: number,
+    pageId?: string,
   ): Promise<number> {
+    const canonicalPageId = await this.resolveTargetPageId(projectId, pageId);
     const agg = await this.prisma.pageSnapshot.aggregate({
-      where: { spaceId: projectId },
+      where: { spaceId: projectId, pageId: canonicalPageId },
       _max: { version: true },
     });
     return Math.max(fallbackVersion, (agg?._max?.version ?? 0) + 1);
@@ -138,6 +158,10 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
   public async saveSnapshot(snapshot: Snapshot): Promise<Snapshot> {
     let candidateVersion = snapshot.version;
     const maxAttempts = 3;
+    const canonicalPageId = await this.resolveTargetPageId(
+      snapshot.projectId,
+      snapshot.pageId,
+    );
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
@@ -147,6 +171,7 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
           data: {
             id: snapshot.id,
             spaceId: snapshot.projectId,
+            pageId: canonicalPageId,
             version: candidateVersion,
             summary: snapshot.summary,
             createdById: snapshot.createdById,
@@ -166,6 +191,7 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
           candidateVersion = await this.resolveNextVersion(
             snapshot.projectId,
             candidateVersion + 1,
+            canonicalPageId,
           );
           continue;
         }
@@ -181,13 +207,14 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
   public async findByVersion(
     projectId: string,
     version: number,
+    pageId?: string,
   ): Promise<Snapshot | null> {
+    const canonicalPageId = await this.resolveTargetPageId(projectId, pageId);
     const found = await this.prisma.pageSnapshot.findFirst({
       where: {
-        OR: [
-          { spaceId: projectId, version },
-          { pageId: projectId, version },
-        ],
+        spaceId: projectId,
+        pageId: canonicalPageId,
+        version,
       },
       include: {
         labels: true,
@@ -198,16 +225,20 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
     return ManuscriptHistoryMapper.toDomain(found);
   }
 
-  public async getLatestVersion(projectId: string): Promise<number> {
+  public async getLatestVersion(
+    projectId: string,
+    pageId?: string,
+  ): Promise<number> {
+    const canonicalPageId = await this.resolveTargetPageId(projectId, pageId);
     const agg = await this.prisma.pageSnapshot.aggregate({
-      where: { spaceId: projectId },
+      where: { spaceId: projectId, pageId: canonicalPageId },
       _max: { version: true },
     });
     if (agg?._max?.version !== undefined) {
       return agg._max.version ?? 0;
     }
     const latest = await this.prisma.pageSnapshot.findFirst({
-      where: { spaceId: projectId },
+      where: { spaceId: projectId, pageId: canonicalPageId },
       orderBy: { version: 'desc' },
       select: { version: true },
     });
@@ -215,14 +246,19 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
     return latest ? latest.version : 0;
   }
 
-  public async listVersions(projectId: string): Promise<Snapshot[]> {
+  public async listVersions(
+    projectId: string,
+    pageId?: string,
+  ): Promise<Snapshot[]> {
+    const canonicalPageId = await this.resolveTargetPageId(projectId, pageId);
     const records = await this.prisma.pageSnapshot.findMany({
-      where: { spaceId: projectId },
+      where: { spaceId: projectId, pageId: canonicalPageId },
       orderBy: { version: 'desc' },
       take: 500,
       select: {
         id: true,
         spaceId: true,
+        pageId: true,
         version: true,
         summary: true,
         createdById: true,
@@ -240,12 +276,23 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
   }
 
   public async saveLabel(label: VersionLabel): Promise<VersionLabel> {
+    const snapRow = this.prisma.pageSnapshot?.findUnique
+      ? await Promise.resolve(
+          this.prisma.pageSnapshot.findUnique({
+            where: { id: label.snapshotId },
+            select: { pageId: true },
+          }),
+        ).catch(() => null)
+      : null;
+    const targetPageId =
+      snapRow?.pageId ||
+      (await this.resolveTargetPageId(label.projectId, label.pageId));
+
     const existing = await this.prisma.pageSnapshotLabel.findFirst?.({
       where: {
-        OR: [
-          { spaceId: label.projectId, label: label.label },
-          { pageId: label.projectId, label: label.label },
-        ],
+        spaceId: label.projectId,
+        pageId: targetPageId,
+        label: label.label,
       },
     });
 
@@ -263,6 +310,7 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
           data: {
             id: label.id,
             spaceId: label.projectId,
+            pageId: targetPageId,
             snapshotId: label.snapshotId,
             version: label.version,
             label: label.label,
@@ -275,11 +323,19 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
     return ManuscriptHistoryMapper.toDomainLabel(saved);
   }
 
-  public async deleteLabel(projectId: string, labelId: string): Promise<void> {
+  public async deleteLabel(
+    projectId: string,
+    labelId: string,
+    pageId?: string,
+  ): Promise<void> {
+    const canonicalPageId = pageId
+      ? await this.resolveTargetPageId(projectId, pageId)
+      : undefined;
     await this.prisma.pageSnapshotLabel.deleteMany({
       where: {
         id: labelId,
         spaceId: projectId,
+        ...(canonicalPageId ? { pageId: canonicalPageId } : {}),
       },
     });
   }
@@ -287,13 +343,14 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
   public async findLabelByName(
     projectId: string,
     label: string,
+    pageId?: string,
   ): Promise<VersionLabel | null> {
+    const canonicalPageId = await this.resolveTargetPageId(projectId, pageId);
     const found = await this.prisma.pageSnapshotLabel.findFirst({
       where: {
-        OR: [
-          { spaceId: projectId, label },
-          { pageId: projectId, label },
-        ],
+        spaceId: projectId,
+        pageId: canonicalPageId,
+        label,
       },
     });
 

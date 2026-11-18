@@ -105,11 +105,7 @@ export interface QuickFixVo {
 }
 
 export type DiagnosticWarningSubtype =
-  | 'font'
-  | 'package'
-  | 'citation'
-  | 'reference'
-  | 'badbox';
+  'font' | 'package' | 'citation' | 'reference' | 'badbox';
 
 export interface DiagnosticItemProps {
   id?: string;

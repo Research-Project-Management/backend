@@ -27,7 +27,7 @@ export function createWsConnectionMiddleware(
       socket.data = {
         ...socket.data,
         ...session,
-        projectId: null,
+        spaceId: null,
         activeDocId: null,
       };
 

@@ -11,6 +11,8 @@ import { EmptyProjectException } from './project-history.errors';
 export interface CreateSnapshotProps {
   id?: string;
   projectId: string;
+  spaceId?: string;
+  pageId?: string;
   version: number;
   summary?: string | null;
   createdById?: string | null;
@@ -26,6 +28,8 @@ export interface CreateSnapshotProps {
 export class Snapshot {
   private readonly _id: string;
   private readonly _projectId: string;
+  private readonly _spaceId: string;
+  private readonly _pageId: string | undefined;
   private readonly _version: number;
   private readonly _summary: string | null;
   private readonly _createdById: string | null;
@@ -37,7 +41,10 @@ export class Snapshot {
 
   private constructor(props: CreateSnapshotProps) {
     this._id = props.id ?? crypto.randomUUID();
-    this._projectId = props.projectId;
+    const resolvedSpaceId = props.spaceId ?? props.projectId;
+    this._projectId = resolvedSpaceId;
+    this._spaceId = resolvedSpaceId;
+    this._pageId = props.pageId;
     this._version = props.version;
     this._summary = props.summary ?? null;
     this._createdById = props.createdById ?? null;
@@ -78,6 +85,12 @@ export class Snapshot {
   }
   public get projectId(): string {
     return this._projectId;
+  }
+  public get spaceId(): string {
+    return this._spaceId;
+  }
+  public get pageId(): string | undefined {
+    return this._pageId;
   }
   public get version(): number {
     return this._version;

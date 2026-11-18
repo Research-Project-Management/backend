@@ -23,6 +23,22 @@ export class ScopeRepository {
   }
 
   /**
+   * Updates a comment reply conditioned strictly on threadId.
+   */
+  async updateReplyInThread(
+    threadId: string,
+    replyId: string,
+    content: string,
+  ): Promise<boolean> {
+    if (!isUUID(threadId) || !isUUID(replyId)) return false;
+    const result = await this.prisma.pageCommentReply.updateMany({
+      where: { id: replyId, threadId },
+      data: { content: content.trim(), updatedAt: new Date() },
+    });
+    return result.count > 0;
+  }
+
+  /**
    * Deletes a comment reply conditioned strictly on threadId.
    */
   async deleteReplyInThread(
@@ -79,9 +95,10 @@ export class ScopeRepository {
         spaceId: projectId,
         deletedAt: null,
         OR: [
-          { path: identifier },
-          { path: normalizedPath },
-          { path: `/${normalizedPath}` },
+          { node: { path: `/${normalizedPath}` } },
+          { lastKnownPath: identifier },
+          { lastKnownPath: normalizedPath },
+          { lastKnownPath: `/${normalizedPath}` },
         ],
       },
     });
@@ -93,9 +110,10 @@ export class ScopeRepository {
           pageId: projectId,
           deletedAt: null,
           OR: [
-            { path: identifier },
-            { path: normalizedPath },
-            { path: `/${normalizedPath}` },
+            { node: { path: `/${normalizedPath}` } },
+            { lastKnownPath: identifier },
+            { lastKnownPath: normalizedPath },
+            { lastKnownPath: `/${normalizedPath}` },
           ],
         },
       })
@@ -174,9 +192,7 @@ export class ScopeRepository {
     projectId: string,
     threadId: string,
     docId?: string,
-  ): Promise<
-    (PageCommentThread & { replies: PageCommentReply[] }) | null
-  > {
+  ): Promise<(PageCommentThread & { replies: PageCommentReply[] }) | null> {
     if (!isUUID(threadId)) return null;
 
     return this.prisma.pageCommentThread.findFirst({
@@ -256,6 +272,78 @@ export class ScopeRepository {
   }
 
   /**
+   * Atomically claims pending track changes for accept/reject resolution inside a transaction
+   * to prevent double-patch TOCTOU races across concurrent requests.
+   */
+  async claimTrackChangesPending(
+    projectId: string,
+    changeIds: string[],
+    nextStatus: 'accepted' | 'rejected',
+    resolvedById: string | null,
+    docId?: string,
+  ): Promise<string[]> {
+    const uniqueIds = Array.from(new Set(changeIds.filter((id) => isUUID(id))));
+    if (uniqueIds.length === 0) return [];
+    const resolvedAt = new Date();
+
+    const runClaim = async (db: Pick<PrismaService, 'pageTrackChange'>) => {
+      const claimed: string[] = [];
+      for (const id of uniqueIds) {
+        const res = await db.pageTrackChange.updateMany({
+          where: {
+            id,
+            spaceId: projectId,
+            status: 'pending',
+            ...(docId && isUUID(docId) ? { docId } : {}),
+          },
+          data: {
+            status: nextStatus,
+            resolvedAt,
+            resolvedById,
+            updatedAt: resolvedAt,
+          },
+        });
+        if (res.count === 1) {
+          claimed.push(id);
+        }
+      }
+      return claimed;
+    };
+
+    if (typeof this.prisma.$transaction === 'function') {
+      return this.prisma.$transaction(async (tx) => {
+        const client = tx?.pageTrackChange ? tx : this.prisma;
+        return runClaim(client);
+      });
+    }
+    return runClaim(this.prisma);
+  }
+
+  /**
+   * Reverts claimed track changes back to pending if Docstore patch fails or conflicts.
+   */
+  async revertClaimedTrackChanges(
+    projectId: string,
+    changeIds: string[],
+    expectedStatus: 'accepted' | 'rejected',
+  ): Promise<void> {
+    if (changeIds.length === 0) return;
+    await this.prisma.pageTrackChange.updateMany({
+      where: {
+        id: { in: changeIds },
+        spaceId: projectId,
+        status: expectedStatus,
+      },
+      data: {
+        status: 'pending',
+        resolvedAt: null,
+        resolvedById: null,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  /**
    * Finds a snapshot version conditioned strictly on projectId.
    */
   async findSnapshotInProject(
@@ -317,42 +405,52 @@ export class ScopeRepository {
    * Fetches all documents, structure nodes, comment threads, and track changes
    * for a project in parallel to power the project-wide review overview.
    */
-  async getProjectReviewOverviewData(projectId: string) {
+  async getProjectReviewOverviewData(
+    projectId: string,
+    explicitPageId?: string,
+  ) {
     let targetProjectId = projectId;
+    let targetPageId: string | undefined =
+      explicitPageId && isUUID(explicitPageId) ? explicitPageId : undefined;
     if (this.prisma.page?.findUnique) {
       const page = await Promise.resolve(
         this.prisma.page.findUnique({
           where: { id: projectId },
-          select: { spaceId: true },
+          select: { id: true, spaceId: true },
         }),
       ).catch(() => null);
       const resolvedSpaceId =
         page?.spaceId ?? (page as { projectId?: string } | null)?.projectId;
       if (resolvedSpaceId) {
         targetProjectId = resolvedSpaceId;
+        if (!targetPageId && page?.id) {
+          targetPageId = page.id;
+        }
       }
     }
 
+    const pageFilter = targetPageId ? { pageId: targetPageId } : {};
+
     const [docs, nodes, allThreads, allChanges] = await Promise.all([
       this.prisma.pageDoc.findMany({
-        where: { spaceId: targetProjectId, deletedAt: null },
-        select: { id: true, path: true },
+        where: { spaceId: targetProjectId, ...pageFilter, deletedAt: null },
+        select: { id: true, lastKnownPath: true },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.pageNode.findMany({
-        where: { spaceId: targetProjectId, type: 'DOC' },
+        where: { spaceId: targetProjectId, ...pageFilter, type: 'DOC' },
         select: {
           id: true,
           docId: true,
           name: true,
           path: true,
-          isRootDoc: true,
           sortOrder: true,
+          page: { select: { rootDocId: true } },
         },
-        orderBy: [{ isRootDoc: 'desc' }, { sortOrder: 'asc' }],
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       }),
       this.prisma.pageCommentThread.findMany({
-        where: { spaceId: targetProjectId },
+        where: { spaceId: targetProjectId, ...pageFilter },
         include: {
           replies: {
             orderBy: { createdAt: 'asc' },
@@ -361,7 +459,7 @@ export class ScopeRepository {
         orderBy: [{ startLine: 'asc' }, { createdAt: 'asc' }],
       }),
       this.prisma.pageTrackChange.findMany({
-        where: { spaceId: targetProjectId },
+        where: { spaceId: targetProjectId, ...pageFilter },
         orderBy: [
           { startLine: 'asc' },
           { startCol: 'asc' },

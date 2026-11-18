@@ -10,7 +10,7 @@ export interface CursorPosition {
 export interface UserPresence {
   userId: string;
   socketId: string;
-  projectId: string;
+  spaceId: string;
   name?: string | null;
   color?: string | null;
   avatar?: string | null;
@@ -24,14 +24,14 @@ export interface ClientSocketData {
   name: string;
   color?: string;
   avatar?: string;
-  projectId?: string | null;
+  spaceId?: string | null;
   activeDocId?: string | null;
   authenticated: boolean;
 }
 
 export interface ChatMessage {
   id: string;
-  projectId: string;
+  spaceId: string;
   userId: string;
   userName: string;
   userColor?: string;

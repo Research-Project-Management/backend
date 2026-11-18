@@ -125,17 +125,24 @@ export abstract class IHistoryRepositoryPort {
   abstract findByVersion(
     projectId: string,
     version: number,
+    pageId?: string,
   ): Promise<Snapshot | null>;
 
   /**
-   * Returns the highest version number recorded for this project (returns 0 if no snapshots exist).
+   * Returns the highest version number recorded for this project/page (returns 0 if no snapshots exist).
    */
-  abstract getLatestVersion(projectId: string): Promise<number>;
+  abstract getLatestVersion(
+    projectId: string,
+    pageId?: string,
+  ): Promise<number>;
 
   /**
-   * Lists all version snapshots for a project ordered by version ascending.
+   * Lists all version snapshots for a project/page ordered by version ascending.
    */
-  abstract listVersions(projectId: string): Promise<Snapshot[]>;
+  abstract listVersions(
+    projectId: string,
+    pageId?: string,
+  ): Promise<Snapshot[]>;
 
   /**
    * Saves or updates a version label.
@@ -145,14 +152,19 @@ export abstract class IHistoryRepositoryPort {
   /**
    * Deletes a version label by ID.
    */
-  abstract deleteLabel(projectId: string, labelId: string): Promise<void>;
+  abstract deleteLabel(
+    projectId: string,
+    labelId: string,
+    pageId?: string,
+  ): Promise<void>;
 
   /**
-   * Finds a label by project and label string.
+   * Finds a label by project/page and label string.
    */
   abstract findLabelByName(
     projectId: string,
     label: string,
+    pageId?: string,
   ): Promise<VersionLabel | null>;
 }
 
@@ -163,6 +175,7 @@ export abstract class IProjectCollectorPort {
    */
   abstract collectCurrentState(
     projectId: string,
+    pageId?: string,
   ): Promise<Map<string, FileSnapshotVo>>;
 }
 
@@ -181,20 +194,22 @@ export interface RestoreSingleFileResult {
 
 export abstract class IProjectRestorerPort {
   /**
-   * Applies the files and structure from an immutable snapshot onto the current project.
+   * Applies the files and structure from an immutable snapshot onto the current project/page.
    */
   abstract restoreToState(
     projectId: string,
     snapshot: Snapshot,
+    pageId?: string,
   ): Promise<RestoreResult>;
 
   /**
-   * Restores a single file from an immutable snapshot onto the current project.
+   * Restores a single file from an immutable snapshot onto the current project/page.
    */
   abstract restoreSingleFileToState?(
     projectId: string,
     snapshot: Snapshot,
     pathname: string,
     hintFileId?: string,
+    pageId?: string,
   ): Promise<RestoreSingleFileResult>;
 }

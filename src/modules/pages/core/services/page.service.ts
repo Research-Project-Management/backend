@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/core/services/page.service.ts
+ * modules/pages/core/services/page.service.ts
  * Domain Service managing ManuscriptPage aggregate lifecycle (CRUD, duplicate,
  * trash/restore, labels, thumbnail, settings), ensuring page.id === rootDoc.id on creation.
  */
@@ -11,6 +11,7 @@ import {
   Optional,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   InternalServerErrorException,
 } from '@nestjs/common';
@@ -22,9 +23,18 @@ import {
   NOOP_LIVE_COLLABORATION,
 } from '../ports/live-collaboration.port';
 import { ManuscriptDomainEventBus } from '../events/event-bus.service';
+import {
+  ensureCanonicalPageId,
+  resolveSpaceRootDocIds,
+} from '../page-scope.helper';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+import { LineArray } from '@/modules/pages/docstore/domain/line-array';
+import {
+  DocTooLargeError,
+  NullByteDetectedError,
+} from '@/modules/pages/docstore/domain/doc.errors';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
 import {
   BootstrapService,
@@ -228,16 +238,21 @@ export class PageService {
       if (live) {
         await live.flushDocs(projectId, []).catch(() => []);
       }
+      const rootDocIds = await resolveSpaceRootDocIds(this.prisma, projectId);
+      const rootDocIdList = Array.from(rootDocIds);
       const [rootNodes, space, project] = await Promise.all([
-        this.prisma.pageNode.findMany({
-          where: {
-            spaceId: projectId,
-            isRootDoc: true,
-            OR: [{ docId: null }, { doc: { deletedAt: null } }],
-          },
-          include: { doc: true },
-          orderBy: { sortOrder: 'asc' },
-        }),
+        rootDocIdList.length > 0
+          ? this.prisma.pageNode.findMany({
+              where: {
+                spaceId: projectId,
+                type: 'DOC',
+                docId: { in: rootDocIdList },
+                doc: { deletedAt: null },
+              },
+              include: { doc: true },
+              orderBy: { sortOrder: 'asc' },
+            })
+          : Promise.resolve([]),
         this.prisma.space?.findUnique
           ? Promise.resolve(
               this.prisma.space.findUnique({
@@ -322,57 +337,91 @@ export class PageService {
    * 4. UPDATE PAGE CONTENT & METADATA
    */
   public async updatePageContent(
-    pageId: string,
+    docId: string,
     body: UpdatePageContentParams,
     authorizedProjectId?: string | { id: string } | null,
   ) {
-    if (!isUuid(pageId)) {
-      throw new BadRequestException('A valid UUID is required for pageId');
+    if (!isUuid(docId)) {
+      throw new BadRequestException('A valid UUID is required for docId');
     }
 
     const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
-    const record = targetProjectId
-      ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
+    let record = targetProjectId
+      ? await this.pageScopeRepo.findDocInProject(targetProjectId, docId)
       : await this.prisma.pageDoc.findUnique({
-          where: { id: pageId },
+          where: { id: docId },
         });
 
     if (!record || this.isRecordDeleted(record)) {
       throw new NotFoundException({
         statusCode: 404,
         code: 'RESOURCE_NOT_FOUND',
-        message: `Document ${pageId} not found`,
+        message: `Document ${docId} not found`,
       });
     }
 
-    assertExpectedVersionAndRev(record, body.expectedRev, body.expectedVersion);
-
-    const recordProjectId = this.getRecordSpaceId(record);
+    const initialSpaceId = this.getRecordSpaceId(record);
     const hasNewContent =
       body.lines !== undefined || typeof body.content === 'string';
-    if (!hasNewContent && recordProjectId) {
+    if (initialSpaceId) {
       const live = this.getLiveCollaboration();
       if (live) {
-        await live.flushDocs(recordProjectId, [pageId]).catch(() => []);
+        const flushed = await live
+          .flushDocs(initialSpaceId, [docId])
+          .catch(() => []);
+        if (Array.isArray(flushed) && flushed.length > 0) {
+          const refreshed = targetProjectId
+            ? await this.pageScopeRepo.findDocInProject(targetProjectId, docId)
+            : await this.prisma.pageDoc.findUnique({ where: { id: docId } });
+          if (refreshed && !this.isRecordDeleted(refreshed)) {
+            record = refreshed;
+          }
+        }
       }
     }
-    const lines = hasNewContent
-      ? body.lines ||
-        (typeof body.content === 'string' ? body.content.split('\n') : [])
-      : await this.getHydratedDocLines(record);
+
+    const recordProjectId = this.getRecordSpaceId(record);
+
+    await assertExpectedVersionAndRev(
+      this.docstoreService,
+      record,
+      body.expectedRev,
+      body.expectedVersion,
+    );
+
+    let lines: string[];
+    if (hasNewContent) {
+      try {
+        lines = body.lines
+          ? body.lines
+          : typeof body.content === 'string'
+            ? LineArray.textToLines(body.content)
+            : [];
+      } catch (err) {
+        if (
+          err instanceof NullByteDetectedError ||
+          err instanceof DocTooLargeError
+        ) {
+          throw new BadRequestException(err.message);
+        }
+        throw err;
+      }
+    } else {
+      lines = await this.getHydratedDocLines(record);
+    }
 
     const result = await executeDocstoreUpdateWithOcc(
       this.docstoreService,
       record,
       lines,
       body.version,
-      body.expectedRev ?? record.rev,
+      body.expectedRev,
     );
 
     const { cleanTitle, existingRanges } =
       await applyPageMetadataAndTitleUpdates(
         this.prisma,
-        pageId,
+        docId,
         record,
         body,
         this.eventEmitter,
@@ -389,7 +438,7 @@ export class PageService {
           projectId: recordProjectId,
           event: 'doc:content-updated',
           payload: {
-            docId: pageId,
+            docId,
             version: result.doc.version,
             rev: result.doc.rev,
             content,
@@ -406,7 +455,7 @@ export class PageService {
       await this.domainEventBus.publish({
         type: 'manuscript.document.mutated',
         projectId: recordProjectId,
-        docId: pageId,
+        docId,
         lines: result.doc.lines || [''],
         rev: result.doc.rev,
         version: result.doc.version,
@@ -571,7 +620,7 @@ export class PageService {
         ? existingPage.id
         : undefined) ||
       (parentDoc as { pageId?: string | null } | null)?.pageId ||
-      undefined;
+      (await ensureCanonicalPageId(this.prisma, projectId, parentDocId));
 
     const parsed = NodePathVo.parse(fileName, 'untitled.tex');
 
@@ -582,32 +631,36 @@ export class PageService {
 
     try {
       const txResult = await this.prisma.$transaction(async (tx) => {
+        const txPageId = await ensureCanonicalPageId(
+          tx,
+          projectId,
+          persistedPageId,
+        );
         const parentId = await ensurePrismaFolderChain(
           tx,
           projectId,
           parsed.folderChain,
-          persistedPageId,
+          txPageId,
         );
 
         const doc = await this.docstoreService.createDoc(projectId, {
           path: parsed.relativePath,
           text: content,
           version: 1,
-          ...(persistedPageId ? { pageId: persistedPageId } : {}),
+          pageId: txPageId,
           tx,
         });
 
         const node = await tx.pageNode.create({
           data: {
             spaceId: projectId,
-            ...(persistedPageId ? { pageId: persistedPageId } : {}),
+            pageId: txPageId,
             parentId,
             name: parsed.leafName,
             path: parsed.normalizedPath,
             depth: parsed.depth,
             type: 'DOC',
             docId: doc._id,
-            sizeBytes: Buffer.byteLength(content, 'utf8'),
           },
         });
 
@@ -618,9 +671,11 @@ export class PageService {
       createdNodeResult = txResult.node;
     } catch (createErr: unknown) {
       if (isPrismaUniqueConstraintError(createErr)) {
-        throw new BadRequestException(
-          `File path already exists: ${parsed.normalizedPath}`,
-        );
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'DUPLICATE_NODE_PATH',
+          message: `File path already exists: ${parsed.normalizedPath}`,
+        });
       }
       throw createErr;
     }
@@ -669,23 +724,148 @@ export class PageService {
       try {
         const targetProjectId =
           this.resolveActiveProjectId(authorizedProjectId);
+        const pageRow = this.prisma.page?.findUnique
+          ? await Promise.resolve(
+              this.prisma.page.findUnique({
+                where: { id: pageId },
+                select: {
+                  id: true,
+                  spaceId: true,
+                  rootDocId: true,
+                  deletedAt: true,
+                },
+              }),
+            ).catch(() => null)
+          : null;
         const doc = targetProjectId
           ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
           : await this.prisma.pageDoc.findUnique({
               where: { id: pageId },
             });
+
+        // Case 1: Deleting a Page Aggregate Root (even if rootDocId changed or original doc was already removed)
+        if (
+          pageRow &&
+          (!targetProjectId ||
+            !pageRow.spaceId ||
+            pageRow.spaceId === targetProjectId)
+        ) {
+          const aggregateSpaceId = pageRow.spaceId || targetProjectId || '';
+          const [activeDocs, activeFiles] = await Promise.all([
+            this.prisma.pageDoc?.findMany
+              ? Promise.resolve(
+                  this.prisma.pageDoc.findMany({
+                    where: {
+                      pageId: pageRow.id,
+                      ...(aggregateSpaceId
+                        ? { spaceId: aggregateSpaceId }
+                        : {}),
+                      deletedAt: null,
+                    },
+                    select: { id: true },
+                  }),
+                ).catch(() => [])
+              : Promise.resolve([]),
+            this.prisma.pageFile?.findMany
+              ? Promise.resolve(
+                  this.prisma.pageFile.findMany({
+                    where: {
+                      pageId: pageRow.id,
+                      ...(aggregateSpaceId
+                        ? { spaceId: aggregateSpaceId }
+                        : {}),
+                      deletedAt: null,
+                    },
+                    select: {
+                      id: true,
+                      sizeBytes: true,
+                      blobId: true,
+                      hash: true,
+                    },
+                  }),
+                ).catch(() => [])
+              : Promise.resolve([]),
+          ]);
+          const deletedDocIds = (activeDocs || []).map((d) => d.id);
+          const deletedFileIds = (activeFiles || []).map((f) => f.id);
+
+          const deletedAt = new Date();
+          await Promise.all([
+            this.prisma.page.updateMany({
+              where: {
+                id: pageRow.id,
+                ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
+              },
+              data: { deletedAt },
+            }),
+            this.prisma.pageNode
+              .deleteMany({
+                where: {
+                  pageId: pageRow.id,
+                  ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
+                },
+              })
+              .catch(() => null),
+            this.prisma.pageDoc
+              .updateMany({
+                where: {
+                  pageId: pageRow.id,
+                  ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
+                  deletedAt: null,
+                },
+                data: { deletedAt },
+              })
+              .catch(() => null),
+            this.prisma.pageFile
+              ?.updateMany?.({
+                where: {
+                  pageId: pageRow.id,
+                  ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
+                  deletedAt: null,
+                },
+                data: { deletedAt },
+              })
+              .catch(() => null),
+          ]);
+
+          if (aggregateSpaceId && deletedDocIds.length > 0) {
+            await this.domainEventBus.publish({
+              type: 'manuscript.nodes.deleted',
+              projectId: aggregateSpaceId,
+              deletedDocIds,
+              deletedFileIds,
+              hadRootDoc: true,
+              occurredAt: Date.now(),
+            });
+          }
+
+          if (aggregateSpaceId) {
+            this.eventEmitter?.emit('manuscripts.page.deleted', {
+              projectId: aggregateSpaceId,
+              pageId: pageRow.id,
+              deletedFiles: activeFiles || [],
+            });
+            this.eventEmitter?.emit('manuscripts.file-tree.change', {
+              projectId: aggregateSpaceId,
+              pageId: pageRow.id,
+              change: {
+                action: 'delete',
+                node: { id: pageRow.id },
+              },
+            });
+          }
+          return { success: true };
+        }
+
+        // Case 2: Deleting a single PageDoc (never kills parent Page Aggregate Root if docId !== pageRow.id)
         if (doc) {
           const docProjectId = this.getRecordSpaceId(doc);
-          const existingNodes =
-            (await Promise.resolve(
-              this.prisma.pageNode.findMany({
-                where: {
-                  spaceId: docProjectId,
-                  OR: [{ docId: doc.id }, { id: pageId }],
-                },
-              }),
-            ).catch(() => [])) || [];
-          const deletedRootDoc = existingNodes.some((n) => n.isRootDoc);
+          const rootDocIds = await resolveSpaceRootDocIds(
+            this.prisma,
+            docProjectId,
+            doc.pageId,
+          );
+          const deletedRootDoc = rootDocIds.has(doc.id);
 
           await Promise.all([
             this.docstoreService.patchDoc(docProjectId, doc.id, {
@@ -700,35 +880,22 @@ export class PageService {
                 },
               })
               .catch(() => null),
-            Promise.resolve(
-              this.prisma.page?.updateMany?.({
-                where: {
-                  spaceId: docProjectId,
-                  OR: [
-                    { id: pageId },
-                    { rootDocId: doc.id },
-                    { rootDocId: pageId },
-                  ],
-                },
-                data: {
-                  deletedAt: new Date(),
-                },
-              }),
-            ).catch(() => null),
           ]);
 
           if (deletedRootDoc) {
-            const docPageId = (doc as { pageId?: string | null }).pageId;
-            await this.prisma.pageNode
-              ?.updateMany?.({
-                where: {
-                  spaceId: docProjectId,
-                  ...(docPageId ? { pageId: docPageId } : {}),
-                  isRootDoc: true,
-                },
-                data: { isRootDoc: false },
-              })
-              ?.catch(() => null);
+            const docPageId = doc.pageId;
+            if (this.prisma.page?.updateMany) {
+              await Promise.resolve(
+                this.prisma.page.updateMany({
+                  where: {
+                    spaceId: docProjectId,
+                    ...(docPageId ? { id: docPageId } : {}),
+                    rootDocId: doc.id,
+                  },
+                  data: { rootDocId: null },
+                }),
+              ).catch(() => null);
+            }
             const nextRootCandidate = await this.prisma.pageNode
               .findFirst({
                 where: {
@@ -740,13 +907,16 @@ export class PageService {
                 orderBy: [{ depth: 'asc' }, { sortOrder: 'asc' }],
               })
               .catch(() => null);
-            if (nextRootCandidate) {
-              await this.prisma.pageNode
-                .update({
-                  where: { id: nextRootCandidate.id },
-                  data: { isRootDoc: true },
-                })
-                .catch(() => null);
+            if (nextRootCandidate?.docId && this.prisma.page?.updateMany) {
+              await Promise.resolve(
+                this.prisma.page.updateMany({
+                  where: {
+                    spaceId: docProjectId,
+                    id: docPageId || nextRootCandidate.pageId,
+                  },
+                  data: { rootDocId: nextRootCandidate.docId },
+                }),
+              ).catch(() => null);
             }
           }
 
@@ -804,7 +974,7 @@ export class PageService {
         },
         select: {
           id: true,
-          path: true,
+          lastKnownPath: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -819,7 +989,7 @@ export class PageService {
         },
         select: {
           id: true,
-          name: true,
+          lastKnownPath: true,
           sizeBytes: true,
           createdAt: true,
           updatedAt: true,
@@ -833,8 +1003,8 @@ export class PageService {
       ...deletedDocs.map((d) => ({
         id: d.id,
         pageId,
-        title: d.path?.replace(/^\//, '') || 'document.tex',
-        path: d.path,
+        title: d.lastKnownPath?.replace(/^\//, '') || 'document.tex',
+        path: d.lastKnownPath,
         type: 'DOC',
         createdAt: d.createdAt,
         updatedAt: d.updatedAt,
@@ -842,8 +1012,8 @@ export class PageService {
       ...deletedFiles.map((f) => ({
         id: f.id,
         pageId,
-        title: f.name,
-        path: `/${f.name}`,
+        title: f.lastKnownPath,
+        path: `/${f.lastKnownPath}`,
         type: 'FILE',
         size: Number(f.sizeBytes || 0),
         createdAt: f.createdAt,
@@ -876,11 +1046,12 @@ export class PageService {
   }
 
   /**
-   * 11. DUPLICATE PAGE
+   * 11. DUPLICATE PAGE (Full Aggregate Root + Virtual Tree Deep Clone)
    */
   public async duplicatePage(
     pageId: string,
     authorizedProjectId?: string | { id: string } | null,
+    userId?: string | null,
   ) {
     if (!isUuid(pageId)) {
       throw new NotFoundException({
@@ -891,13 +1062,47 @@ export class PageService {
     }
 
     const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
-    const source = targetProjectId
+
+    const directPageRow = this.prisma.page?.findUnique
+      ? await Promise.resolve(
+          this.prisma.page.findUnique({
+            where: { id: pageId },
+          }),
+        ).catch(() => null)
+      : null;
+
+    const validDirectPage =
+      directPageRow &&
+      !this.isRecordDeleted(directPageRow) &&
+      (!targetProjectId ||
+        this.getRecordSpaceId(directPageRow) === targetProjectId)
+        ? directPageRow
+        : null;
+
+    let entryDoc = targetProjectId
       ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
       : await this.prisma.pageDoc.findUnique({
           where: { id: pageId },
         });
 
-    if (!source) {
+    if (
+      (!entryDoc || this.isRecordDeleted(entryDoc)) &&
+      validDirectPage?.rootDocId
+    ) {
+      entryDoc = targetProjectId
+        ? await this.pageScopeRepo.findDocInProject(
+            targetProjectId,
+            validDirectPage.rootDocId,
+          )
+        : await this.prisma.pageDoc.findUnique({
+            where: { id: validDirectPage.rootDocId },
+          });
+    }
+
+    const validEntryDoc =
+      entryDoc && !this.isRecordDeleted(entryDoc) ? entryDoc : null;
+
+    if (!validDirectPage && !validEntryDoc) {
       throw new NotFoundException({
         statusCode: 404,
         code: 'RESOURCE_NOT_FOUND',
@@ -905,25 +1110,69 @@ export class PageService {
       });
     }
 
-    const sourceProjectId = this.getRecordSpaceId(source);
-    const live = this.getLiveCollaboration();
-    if (live && sourceProjectId) {
-      await live.flushDocs(sourceProjectId, [pageId]).catch(() => []);
+    const spaceId =
+      this.getRecordSpaceId(validDirectPage) ||
+      this.getRecordSpaceId(validEntryDoc) ||
+      targetProjectId ||
+      '';
+
+    const sourcePageId =
+      validDirectPage?.id ||
+      validEntryDoc?.pageId ||
+      (await ensureCanonicalPageId(this.prisma, spaceId, pageId));
+
+    let sourcePageRow = validDirectPage;
+    if (
+      !sourcePageRow &&
+      this.prisma.page?.findUnique &&
+      isUuid(sourcePageId)
+    ) {
+      const lookedUpPage = await Promise.resolve(
+        this.prisma.page.findUnique({
+          where: { id: sourcePageId },
+        }),
+      ).catch(() => null);
+      if (
+        lookedUpPage &&
+        !this.isRecordDeleted(lookedUpPage) &&
+        this.getRecordSpaceId(lookedUpPage) === spaceId
+      ) {
+        sourcePageRow = lookedUpPage;
+      }
     }
 
-    const freshSource =
-      (sourceProjectId
-        ? await this.pageScopeRepo.findDocInProject(sourceProjectId, pageId)
-        : await this.prisma.pageDoc.findUnique({
-            where: { id: pageId },
-          })) || source;
+    const live = this.getLiveCollaboration();
+    if (live && spaceId) {
+      const pageDocsToFlush = this.prisma.pageDoc?.findMany
+        ? await Promise.resolve(
+            this.prisma.pageDoc.findMany({
+              where: { spaceId, pageId: sourcePageId, deletedAt: null },
+              select: { id: true },
+            }),
+          ).catch(() => null)
+        : null;
+      const docIdsToFlush = Array.from(
+        new Set([
+          ...(Array.isArray(pageDocsToFlush)
+            ? pageDocsToFlush.map((d) => d.id)
+            : []),
+          ...(validEntryDoc?.id ? [validEntryDoc.id] : [pageId]),
+        ]),
+      );
+      await live.flushDocs(spaceId, docIdsToFlush).catch(() => []);
+    }
 
     return duplicateSourcePageAndNode(
       this.prisma,
       this.docstoreService,
       this.eventEmitter,
-      pageId,
-      freshSource,
+      {
+        spaceId,
+        sourcePageId,
+        sourcePageRow,
+        fallbackDoc: validEntryDoc,
+        actorId: userId,
+      },
     );
   }
 
@@ -1073,7 +1322,8 @@ export class PageService {
     if (
       userId &&
       resolvedSourceProjectId &&
-      resolvedSourceProjectId !== targetProjectId
+      resolvedSourceProjectId !== targetProjectId &&
+      resolvedSourceProjectId !== userId
     ) {
       const sourceProject = await this.prisma.project
         .findFirst({
@@ -1105,7 +1355,7 @@ export class PageService {
         body.targetPath ||
         body.targetName ||
         sourceDoc.node?.path ||
-        sourceDoc.path ||
+        sourceDoc.lastKnownPath ||
         sourceDoc.node?.name ||
         'imported.tex';
 
@@ -1123,20 +1373,28 @@ export class PageService {
     // Binary file copy via CAS reference in target project
     const bin = sourceBinaryFile!;
     const rawTargetName =
-      body.targetPath || body.targetName || bin.name || 'imported.bin';
+      body.targetPath || body.targetName || bin.lastKnownPath || 'imported.bin';
     const parsed = NodePathVo.parse(rawTargetName, 'imported.bin');
 
     const createdRecord = await this.prisma.$transaction(async (tx) => {
+      const targetPageId = await ensureCanonicalPageId(
+        tx,
+        targetProjectId,
+        body.parentPageId,
+      );
       const parentId = await ensurePrismaFolderChain(
         tx,
         targetProjectId,
         parsed.folderChain,
+        targetPageId,
       );
 
       const newFile = await tx.pageFile.create({
         data: {
           spaceId: targetProjectId,
-          name: parsed.relativePath || parsed.leafName,
+          pageId: targetPageId,
+          blobId: bin.blobId ?? null,
+          lastKnownPath: parsed.relativePath || parsed.leafName,
           mimeType: bin.mimeType,
           sizeBytes: bin.sizeBytes,
           hash: bin.hash,
@@ -1149,16 +1407,48 @@ export class PageService {
       const node = await tx.pageNode.create({
         data: {
           spaceId: targetProjectId,
+          pageId: targetPageId,
           parentId,
           name: parsed.leafName,
           path: parsed.normalizedPath,
           depth: parsed.depth,
           type: 'FILE',
           fileId: newFile.id,
-          sizeBytes: bin.sizeBytes,
-          hash: bin.hash,
         },
       });
+
+      if (bin.blobId) {
+        if (typeof tx.$executeRaw === 'function') {
+          await tx.$executeRaw`
+            UPDATE storage_blobs
+            SET ref_count = ref_count + 1,
+                status = 'READY'::"BlobStatus",
+                tombstone_at = NULL
+            WHERE id = ${bin.blobId}::uuid
+          `.catch(() => undefined);
+        } else if (tx.storageBlob?.updateMany) {
+          await tx.storageBlob
+            .updateMany({
+              where: { id: bin.blobId },
+              data: {
+                refCount: { increment: 1 },
+                status: 'READY',
+                tombstoneAt: null,
+              },
+            })
+            .catch(() => undefined);
+        }
+      }
+
+      const importedBytes = Number(bin.sizeBytes ?? 0);
+      if (importedBytes > 0 && tx.storageQuota?.updateMany) {
+        await tx.storageQuota
+          .updateMany({
+            where: { spaceId: targetProjectId },
+            data: { usedBytes: { increment: BigInt(importedBytes) } },
+          })
+          .catch(() => undefined);
+      }
 
       return { newFile, node };
     });

@@ -11,8 +11,9 @@ import {
   IsBoolean,
   IsInt,
   Min,
+  MaxLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { FileDiffVo } from '../domain';
 
 export class CreateSnapshotDto {
@@ -21,6 +22,7 @@ export class CreateSnapshotDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(500)
   summary?: string;
 
   @ApiPropertyOptional({
@@ -35,16 +37,30 @@ export class CreateSnapshotDto {
   })
   @IsString()
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @MaxLength(255)
   label?: string;
+
+  @ApiPropertyOptional({ description: 'Target Page ID scope' })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 }
 
 export class LabelVersionDto {
   @ApiProperty({
     description: 'Named tag or milestone label (e.g. "v1.0-submission")',
   })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty()
+  @MaxLength(255)
   label!: string;
+
+  @ApiPropertyOptional({ description: 'Target Page ID scope' })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 }
 
 export class RestoreVersionDto {
@@ -53,6 +69,11 @@ export class RestoreVersionDto {
   @Min(1)
   @Type(() => Number)
   targetVersion!: number;
+
+  @ApiPropertyOptional({ description: 'Target Page ID scope' })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 }
 
 export class RestoreSingleFileDto {
@@ -61,6 +82,7 @@ export class RestoreSingleFileDto {
   })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(1000)
   pathname!: string;
 
   @ApiPropertyOptional({
@@ -69,6 +91,11 @@ export class RestoreSingleFileDto {
   @IsString()
   @IsOptional()
   fileId?: string;
+
+  @ApiPropertyOptional({ description: 'Target Page ID scope' })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 }
 
 export class RestoreSingleFileResponseDto {
@@ -128,6 +155,12 @@ export class VersionListItemDto {
 
   @ApiProperty()
   projectId!: string;
+
+  @ApiPropertyOptional()
+  spaceId?: string;
+
+  @ApiPropertyOptional()
+  pageId?: string;
 
   @ApiProperty()
   version!: number;

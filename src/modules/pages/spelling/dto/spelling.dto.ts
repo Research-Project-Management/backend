@@ -20,6 +20,14 @@ export class CheckSpellingDto {
   docId?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Page UUID fallback when docId is omitted on Page-scoped routes',
+  })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
+
+  @ApiPropertyOptional({
     description: 'Language code (en-US, en-GB, vi-VN, etc.)',
     default: 'en-US',
   })

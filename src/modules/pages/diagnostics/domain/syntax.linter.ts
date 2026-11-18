@@ -109,11 +109,7 @@ interface MathScanState {
  */
 export interface ILatexLineAutoFixRule {
   readonly id: string;
-  applyLine(
-    line: string,
-    lineNum: number,
-    appliedFixes: AppliedFix[],
-  ): string;
+  applyLine(line: string, lineNum: number, appliedFixes: AppliedFix[]): string;
 }
 
 export class SyntaxLinter {
@@ -282,7 +278,7 @@ export class SyntaxLinter {
     const fixedLines: string[] = [];
     const unclosedEnvs: string[] = [];
 
-    let inVerbatim = false;
+    let verbatimEnvName: string | null = null;
     let ifFalseDepth = 0;
     let inDisplayMathBracket = false;
     let inDisplayMathDollar = false;
@@ -291,13 +287,17 @@ export class SyntaxLinter {
       let line = lines[i] || '';
       const lineNum = i + 1;
 
-      if (this.isVerbatimStart(line)) {
-        inVerbatim = true;
+      if (!verbatimEnvName) {
+        const vStart = line.match(/\\begin\{([a-zA-Z0-9*]+)\}/);
+        if (vStart?.[1] && VERBATIM_ENVIRONMENTS.has(vStart[1])) {
+          verbatimEnvName = vStart[1];
+        }
       }
-      if (inVerbatim) {
+      if (verbatimEnvName) {
         fixedLines.push(line);
-        if (this.isVerbatimEnd(line)) {
-          inVerbatim = false;
+        const vEnd = line.match(/\\end\{([a-zA-Z0-9*]+)\}/);
+        if (vEnd?.[1] === verbatimEnvName) {
+          verbatimEnvName = null;
         }
         continue;
       }
@@ -368,13 +368,16 @@ export class SyntaxLinter {
 
     if (inVerbatim) {
       const endMatch = rawLine.match(/\\end\{([^}]+)\}/);
-      if (
-        endMatch &&
-        endMatch[1] &&
-        VERBATIM_ENVIRONMENTS.has(endMatch[1].trim())
-      ) {
+      if (endMatch && endMatch[1] && endMatch[1].trim() === currentEnv) {
         envStack.pop();
       }
+      return true;
+    }
+
+    const singleMatch = rawLine.match(
+      /\\begin\{([a-zA-Z0-9*]+)\}[\s\S]*?\\end\{\1\}/,
+    );
+    if (singleMatch?.[1] && VERBATIM_ENVIRONMENTS.has(singleMatch[1])) {
       return true;
     }
     return false;
@@ -1032,16 +1035,22 @@ export class SyntaxLinter {
   private stripComment(line: string): string {
     let result = '';
     for (let i = 0; i < line.length; i++) {
-      if (line[i] === '%' && (i === 0 || line[i - 1] !== '\\')) {
-        if (
-          i > 0 &&
-          /\d/.test(line[i - 1]) &&
-          /^\s*[a-zA-Z,;.)\]}]/.test(line.slice(i + 1))
-        ) {
-          result += line[i];
-          continue;
+      if (line[i] === '%') {
+        let backslashes = 0;
+        for (let j = i - 1; j >= 0 && line[j] === '\\'; j--) {
+          backslashes++;
         }
-        break;
+        if (backslashes % 2 === 0) {
+          if (
+            i > 0 &&
+            /\d/.test(line[i - 1]) &&
+            /^\s*[a-zA-Z,;.)\]}]/.test(line.slice(i + 1))
+          ) {
+            result += line[i];
+            continue;
+          }
+          break;
+        }
       }
       result += line[i];
     }

@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/structure/core/domain/node.entity.ts
- * Domain Entity representing a file, folder, or document node in the project tree.
+ * modules/pages/structure/domain/node.entity.ts
+ * Domain Entity representing a Folder, Document, or Binary Asset node in a Page's Virtual Tree.
  */
 
 import { NodePathVo } from './node-path';
@@ -15,6 +15,7 @@ export type ManuscriptNodeType = 'FOLDER' | 'DOC' | 'FILE';
 export interface SerializedTreeNode {
   id: string;
   projectId?: string;
+  spaceId?: string;
   pageId?: string | null;
   name: string;
   path: string;
@@ -32,6 +33,7 @@ export interface SerializedTreeNode {
 export interface ManuscriptNodeProps {
   id: string;
   projectId: string;
+  spaceId?: string;
   pageId?: string | null;
   parentId?: string | null;
   type: ManuscriptNodeType;
@@ -40,6 +42,7 @@ export interface ManuscriptNodeProps {
   depth?: number;
   docId?: string | null;
   fileId?: string | null;
+  blobId?: string | null;
   isRootDoc?: boolean;
   sizeBytes?: number;
   hash?: string | null;
@@ -78,7 +81,9 @@ export class ManuscriptNodeEntity {
         );
       }
       if (props.isRootDoc) {
-        throw new StructureError('FOLDER node cannot be marked as root document');
+        throw new StructureError(
+          'FOLDER node cannot be marked as root document',
+        );
       }
     } else if (props.type === 'DOC') {
       if (props.fileId) {
@@ -95,7 +100,8 @@ export class ManuscriptNodeEntity {
 
     this.props = {
       ...props,
-      pageId: props.pageId ?? props.projectId,
+      projectId: props.spaceId ?? props.projectId,
+      pageId: props.pageId ?? props.spaceId ?? props.projectId,
       path: NodePathVo.normalize(props.path),
       depth: NodePathVo.depth(props.path),
       isRootDoc: props.isRootDoc ?? false,
@@ -111,6 +117,10 @@ export class ManuscriptNodeEntity {
   }
 
   public get projectId(): string {
+    return this.props.projectId;
+  }
+
+  public get spaceId(): string {
     return this.props.projectId;
   }
 
@@ -144,6 +154,10 @@ export class ManuscriptNodeEntity {
 
   public get fileId(): string | null {
     return this.props.fileId ?? null;
+  }
+
+  public get blobId(): string | null {
+    return this.props.blobId ?? null;
   }
 
   public get isRootDoc(): boolean {
@@ -288,6 +302,7 @@ export class ManuscriptNodeEntity {
     return {
       id: this.id,
       projectId: this.projectId,
+      spaceId: this.spaceId,
       pageId: this.pageId,
       name: this.name,
       path: this.path,
@@ -307,6 +322,7 @@ export class ManuscriptNodeEntity {
     return {
       id: this.id,
       projectId: this.projectId,
+      spaceId: this.spaceId,
       pageId: this.pageId,
       parentId: this.parentId,
       type: this.type,
@@ -325,3 +341,9 @@ export class ManuscriptNodeEntity {
     };
   }
 }
+
+export {
+  ManuscriptNodeEntity as PageNodeEntity,
+  type ManuscriptNodeProps as PageNodeProps,
+  type ManuscriptNodeType as PageNodeType,
+};

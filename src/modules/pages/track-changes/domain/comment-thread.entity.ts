@@ -10,6 +10,8 @@ import { CommentReply } from './comment-reply.entity';
 export interface CreateCommentThreadProps {
   id?: string;
   projectId: string;
+  spaceId?: string;
+  pageId?: string | null;
   docId: string;
   quote?: string | null;
   range: TextRangeVo;
@@ -23,6 +25,9 @@ export interface CreateCommentThreadProps {
 }
 
 export class CommentThreadDomainException extends Error {
+  public readonly statusCode = 400;
+  public readonly code = 'INVALID_COMMENT_THREAD';
+
   constructor(message: string) {
     super(message);
     this.name = 'CommentThreadDomainException';
@@ -32,6 +37,8 @@ export class CommentThreadDomainException extends Error {
 export class CommentThread {
   private readonly _id: string;
   private readonly _projectId: string;
+  private readonly _spaceId: string;
+  private readonly _pageId: string | null;
   private readonly _docId: string;
   private readonly _quote: string | null;
   private readonly _range: TextRangeVo;
@@ -44,7 +51,8 @@ export class CommentThread {
   private _updatedAt: Date;
 
   private constructor(props: CreateCommentThreadProps) {
-    if (!props.projectId || !props.projectId.trim()) {
+    const resolvedSpaceId = props.spaceId ?? props.projectId;
+    if (!resolvedSpaceId || !resolvedSpaceId.trim()) {
       throw new CommentThreadDomainException('Project ID cannot be empty.');
     }
     if (!props.docId || !props.docId.trim()) {
@@ -52,7 +60,9 @@ export class CommentThread {
     }
 
     this._id = props.id ?? crypto.randomUUID();
-    this._projectId = props.projectId;
+    this._projectId = resolvedSpaceId;
+    this._spaceId = resolvedSpaceId;
+    this._pageId = props.pageId ?? null;
     this._docId = props.docId;
     this._quote = props.quote ?? null;
     this._range = props.range;
@@ -74,6 +84,12 @@ export class CommentThread {
   }
   public get projectId(): string {
     return this._projectId;
+  }
+  public get spaceId(): string {
+    return this._spaceId;
+  }
+  public get pageId(): string | null {
+    return this._pageId;
   }
   public get docId(): string {
     return this._docId;

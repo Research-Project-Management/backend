@@ -52,7 +52,7 @@ export class ChatService {
   ): ChatMessage {
     const message: ChatMessage = {
       id: crypto.randomUUID(),
-      projectId: dto.projectId,
+      spaceId: dto.spaceId,
       userId: user.id,
       userName: user.name,
       userColor: user.color,
@@ -63,8 +63,8 @@ export class ChatService {
     };
 
     // 1. Instant in-memory cache update
-    this.addMessageToMemoryStore(dto.projectId, message);
-    const currentHistory = this.projectChatStore.get(dto.projectId) ?? [message];
+    this.addMessageToMemoryStore(dto.spaceId, message);
+    const currentHistory = this.projectChatStore.get(dto.spaceId) ?? [message];
 
     // 2. Asynchronous cache & Prisma persistence
     void this.persistMessageAsync(dto, user, message, currentHistory);
@@ -81,11 +81,7 @@ export class ChatService {
     // Write-through to Redis cache
     if (this.redis) {
       try {
-        await this.redis.set(
-          this.cacheKey(dto.projectId),
-          currentHistory,
-          3600,
-        );
+        await this.redis.set(this.cacheKey(dto.spaceId), currentHistory, 3600);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.debug(`Redis chat cache update notice: ${msg}`);
@@ -97,7 +93,7 @@ export class ChatService {
       try {
         let conversation = await this.prisma.conversation.findFirst({
           where: {
-            projectId: dto.projectId,
+            projectId: dto.spaceId,
             type: 'project_channel',
           },
         });
@@ -116,11 +112,23 @@ export class ChatService {
           return;
         }
 
+        const projectRecord = this.prisma.project?.findUnique
+          ? await this.prisma.project
+              .findUnique({
+                where: { id: dto.spaceId },
+                select: { id: true },
+              })
+              .catch(() => null)
+          : null;
+        if (!projectRecord) {
+          return;
+        }
+
         if (!conversation) {
           conversation = await this.prisma.conversation.create({
             data: {
               type: 'project_channel',
-              projectId: dto.projectId,
+              projectId: dto.spaceId,
               name: 'general',
               topic: 'Realtime manuscript discussion channel',
               createdById: user.id,
@@ -252,7 +260,7 @@ export class ChatService {
             .reverse()
             .map((msg) => ({
               id: msg.id,
-              projectId,
+              spaceId: projectId,
               userId: msg.senderId,
               userName: msg.sender?.profile?.name || 'Collaborator',
               userAvatar: msg.sender?.profile?.avatar || undefined,

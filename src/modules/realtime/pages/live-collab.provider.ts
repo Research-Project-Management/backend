@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   LiveCollaborationPort,
   LivePresenceUser,
@@ -84,6 +80,30 @@ export class LiveCollaborationProvider extends LiveCollaborationPort {
   }
 
   async evictDoc(projectId: string, docId: string): Promise<void> {
+    if (this.gateway?.server) {
+      const room = `doc:${projectId}:${docId}`;
+      this.gateway.server.to(room).emit('doc:evicted', {
+        projectId,
+        spaceId: projectId,
+        docId,
+      });
+      if (typeof this.gateway.server.in === 'function') {
+        try {
+          const sockets = await this.gateway.server.in(room).fetchSockets();
+          for (const socket of sockets) {
+            if (socket.data?.activeDocId === docId) {
+              socket.data.activeDocId = null;
+            }
+            socket.leave(room);
+            await this.rooms
+              .leaveDocRoom(projectId, docId, socket.id)
+              .catch(() => {});
+          }
+        } catch {
+          // Best effort room kick
+        }
+      }
+    }
     await this.yjs.evictDoc(projectId, docId, { skipFlush: true });
   }
 }

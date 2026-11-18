@@ -29,6 +29,134 @@ import { RealtimeConfigService } from '../core/realtime.config';
 import { REALTIME_EVENTS } from '../core/realtime.constant';
 import { RealtimeException } from '../core/ws-errors';
 
+function mergeThreeWayText(
+  baseText: string,
+  remoteText: string,
+  localText: string,
+): string {
+  if (localText === baseText || localText === remoteText) return remoteText;
+  if (remoteText === baseText) return localText;
+
+  const baseLines = baseText.split('\n');
+  const remoteLines = remoteText.split('\n');
+  const localLines = localText.split('\n');
+
+  let prefix = 0;
+  const maxPrefix = Math.min(
+    baseLines.length,
+    remoteLines.length,
+    localLines.length,
+  );
+  while (
+    prefix < maxPrefix &&
+    baseLines[prefix] === remoteLines[prefix] &&
+    baseLines[prefix] === localLines[prefix]
+  ) {
+    prefix++;
+  }
+
+  let suffix = 0;
+  const maxSuffix =
+    Math.min(baseLines.length, remoteLines.length, localLines.length) - prefix;
+  while (
+    suffix < maxSuffix &&
+    baseLines[baseLines.length - 1 - suffix] ===
+      remoteLines[remoteLines.length - 1 - suffix] &&
+    baseLines[baseLines.length - 1 - suffix] ===
+      localLines[localLines.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+
+  const head = baseLines.slice(0, prefix);
+  const tail = suffix > 0 ? baseLines.slice(baseLines.length - suffix) : [];
+  const bMid = baseLines.slice(prefix, baseLines.length - suffix);
+  const rMid = remoteLines.slice(prefix, remoteLines.length - suffix);
+  const lMid = localLines.slice(prefix, localLines.length - suffix);
+
+  if (rMid.length === bMid.length && rMid.every((l, i) => l === bMid[i])) {
+    return [...head, ...lMid, ...tail].join('\n');
+  }
+  if (lMid.length === bMid.length && lMid.every((l, i) => l === bMid[i])) {
+    return [...head, ...rMid, ...tail].join('\n');
+  }
+
+  // Disjoint edit separation when one side edited strictly the prefix or suffix of mid
+  let rLeadSame = 0;
+  while (
+    rLeadSame < bMid.length &&
+    rLeadSame < rMid.length &&
+    bMid[rLeadSame] === rMid[rLeadSame]
+  ) {
+    rLeadSame++;
+  }
+  let lTrailSame = 0;
+  while (
+    lTrailSame < bMid.length &&
+    lTrailSame < lMid.length &&
+    bMid[bMid.length - 1 - lTrailSame] === lMid[lMid.length - 1 - lTrailSame]
+  ) {
+    lTrailSame++;
+  }
+  if (lLeadCheck(bMid, rMid, lMid, rLeadSame, lTrailSame)) {
+    const lChanged = lMid.slice(0, lMid.length - lTrailSame);
+    const bUnchangedBetween = bMid.slice(bMid.length - lTrailSame, rLeadSame);
+    const rChanged = rMid.slice(rLeadSame);
+    return [
+      ...head,
+      ...lChanged,
+      ...bUnchangedBetween,
+      ...rChanged,
+      ...tail,
+    ].join('\n');
+  }
+
+  let lLeadSame = 0;
+  while (
+    lLeadSame < bMid.length &&
+    lLeadSame < lMid.length &&
+    bMid[lLeadSame] === lMid[lLeadSame]
+  ) {
+    lLeadSame++;
+  }
+  let rTrailSame = 0;
+  while (
+    rTrailSame < bMid.length &&
+    rTrailSame < rMid.length &&
+    bMid[bMid.length - 1 - rTrailSame] === rMid[rMid.length - 1 - rTrailSame]
+  ) {
+    rTrailSame++;
+  }
+  if (lLeadCheck(bMid, lMid, rMid, lLeadSame, rTrailSame)) {
+    const rChanged = rMid.slice(0, rMid.length - rTrailSame);
+    const bUnchangedBetween = bMid.slice(bMid.length - rTrailSame, lLeadSame);
+    const lChanged = lMid.slice(lLeadSame);
+    return [
+      ...head,
+      ...rChanged,
+      ...bUnchangedBetween,
+      ...lChanged,
+      ...tail,
+    ].join('\n');
+  }
+
+  return [...head, ...rMid, ...lMid, ...tail].join('\n');
+}
+
+function lLeadCheck(
+  bMid: string[],
+  tailEditedMid: string[],
+  headEditedMid: string[],
+  tailSideUnchangedPrefix: number,
+  headSideUnchangedSuffix: number,
+): boolean {
+  return (
+    tailSideUnchangedPrefix + headSideUnchangedSuffix >= bMid.length &&
+    tailEditedMid.length >= tailSideUnchangedPrefix &&
+    headEditedMid.length >= headSideUnchangedSuffix
+  );
+}
+
 export interface ActiveDocSession {
   doc: Y.Doc;
   yText: Y.Text;
@@ -40,6 +168,7 @@ export interface ActiveDocSession {
   currentVersion?: number;
   lastFlushedRev?: number;
   lastFlushedText?: string;
+  approxEncodedBytes?: number;
 }
 
 export interface SyncMessageResult {
@@ -234,7 +363,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
           this.server
             .to(`doc:${msg.projectId}:${msg.docId}`)
             .emit(REALTIME_EVENTS.YJS_SYNC_UPDATE, {
-              projectId: msg.projectId,
+              spaceId: msg.projectId,
               docId: msg.docId,
               data: frame,
             });
@@ -366,11 +495,11 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
         Buffer.from(binarySnapshot),
         this.REDIS_SNAPSHOT_TTL_SECONDS,
       );
-      if (rev !== undefined && typeof this.redis.set === 'function') {
+      if (typeof this.redis.set === 'function') {
         await this.redis
           .set(
             this.redisMetaKey(projectId, docId),
-            { rev, updatedAt: Date.now() },
+            { rev: rev ?? -1, updatedAt: Date.now() },
             this.REDIS_SNAPSHOT_TTL_SECONDS,
           )
           .catch(() => {});
@@ -400,7 +529,11 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
         const yText = doc.getText('latex');
 
         let loadedFromRedis = false;
-        let baselineDocRecord: { lines?: string[]; rev?: number; version?: number } | null = null;
+        let baselineDocRecord: {
+          lines?: string[];
+          rev?: number;
+          version?: number;
+        } | null = null;
         if (this.redis && this.redis.isReady()) {
           try {
             const rawBuffer = await this.redis.getBuffer(
@@ -410,30 +543,32 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
               let redisIsStale = false;
               if (
                 this.docstoreService &&
-                typeof this.redis.get === 'function' &&
                 typeof this.docstoreService.getDoc === 'function'
               ) {
-                try {
-                  const meta = await this.redis.get<{ rev?: number }>(
-                    this.redisMetaKey(projectId, docId),
+                const meta =
+                  typeof this.redis.get === 'function'
+                    ? await this.redis
+                        .get<{ rev?: number }>(
+                          this.redisMetaKey(projectId, docId),
+                        )
+                        .catch(() => null)
+                    : null;
+                baselineDocRecord = await this.docstoreService.getDoc(
+                  projectId,
+                  docId,
+                );
+                if (
+                  !meta ||
+                  typeof meta.rev !== 'number' ||
+                  meta.rev < 0 ||
+                  (baselineDocRecord?.rev !== undefined &&
+                    baselineDocRecord.rev > meta.rev)
+                ) {
+                  redisIsStale = true;
+                  this.logger.warn(
+                    `Discarding stale/unversioned Redis Y.Doc snapshot for ${key} (redis rev=${meta?.rev ?? 'none'} < docstore rev=${baselineDocRecord?.rev ?? 'unknown'})`,
                   );
-                  if (meta && typeof meta.rev === 'number') {
-                    baselineDocRecord = await this.docstoreService
-                      .getDoc(projectId, docId)
-                      .catch(() => null);
-                    if (
-                      baselineDocRecord?.rev !== undefined &&
-                      baselineDocRecord.rev > meta.rev
-                    ) {
-                      redisIsStale = true;
-                      this.logger.warn(
-                        `Discarding stale Redis Y.Doc snapshot for ${key} (redis rev=${meta.rev} < docstore rev=${baselineDocRecord.rev})`,
-                      );
-                      await this.deleteRedisSnapshot(projectId, docId);
-                    }
-                  }
-                } catch {
-                  // Ignore metadata check errors
+                  await this.deleteRedisSnapshot(projectId, docId);
                 }
               }
 
@@ -446,6 +581,13 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
               }
             }
           } catch (err: unknown) {
+            if (
+              err instanceof DocNotFoundError ||
+              (err as { name?: string })?.name === 'DocNotFoundError'
+            ) {
+              await this.deleteRedisSnapshot(projectId, docId);
+              throw err;
+            }
             this.logger.warn(
               `Failed to read Y.Doc from Redis: ${(err as Error)?.message}`,
             );
@@ -453,46 +595,28 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
         }
 
         if (!loadedFromRedis && this.docstoreService) {
-          try {
-            let rawText: string | null = null;
-            if (baselineDocRecord && Array.isArray(baselineDocRecord.lines)) {
-              rawText = baselineDocRecord.lines.join('\n');
-            } else if (
-              typeof (this.docstoreService as any).getRawDoc === 'function'
-            ) {
-              rawText = await (this.docstoreService as any).getRawDoc(
-                projectId,
-                docId,
-              );
-            } else if (typeof this.docstoreService.getDoc === 'function') {
-              const res = await this.docstoreService.getDoc(projectId, docId);
-              baselineDocRecord = res;
-              rawText = Array.isArray(res?.lines) ? res.lines.join('\n') : '';
-            }
-            if (rawText && rawText.length > 0) {
-              doc.transact(() => {
-                yText.insert(0, rawText);
-              }, 'docstore-init');
-              this.logger.debug(
-                `Hydrated Y.Doc from Docstore baseline (${rawText.length} chars): ${key}`,
-              );
-            }
-          } catch (err: unknown) {
-            const isNotFound =
-              err instanceof DocNotFoundError ||
-              (err as { name?: string })?.name === 'DocNotFoundError' ||
-              (err as { message?: string })?.message?.includes('not found');
-            if (isNotFound) {
-              this.logger.debug(
-                `Docstore baseline not found for ${key}, starting with empty doc: ${(err as Error)?.message}`,
-              );
-            } else {
-              this.logger.error(
-                `Critical error hydrating Docstore baseline for ${key}: ${(err as Error)?.message}`,
-                (err as Error)?.stack,
-              );
-              throw err;
-            }
+          let rawText: string | null = null;
+          if (baselineDocRecord && Array.isArray(baselineDocRecord.lines)) {
+            rawText = baselineDocRecord.lines.join('\n');
+          } else if (typeof this.docstoreService.getDoc === 'function') {
+            const res = await this.docstoreService.getDoc(projectId, docId);
+            baselineDocRecord = res;
+            rawText = Array.isArray(res?.lines) ? res.lines.join('\n') : '';
+          } else if (
+            typeof (this.docstoreService as any).getRawDoc === 'function'
+          ) {
+            rawText = await (this.docstoreService as any).getRawDoc(
+              projectId,
+              docId,
+            );
+          }
+          if (rawText && rawText.length > 0) {
+            doc.transact(() => {
+              yText.insert(0, rawText);
+            }, 'docstore-init');
+            this.logger.debug(
+              `Hydrated Y.Doc from Docstore baseline (${rawText.length} chars): ${key}`,
+            );
           }
         }
 
@@ -553,10 +677,13 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private assertPostApplySizeBeforeMutation(
-    doc: Y.Doc,
+    session: ActiveDocSession,
     applyAction: (targetDoc: Y.Doc) => void,
+    incomingBytes: number = 0,
   ): void {
-    const maxDocSize = this.config?.getMaxDocumentSizeBytes() ?? 20 * 1024 * 1024;
+    const doc = session.doc;
+    const maxDocSize =
+      this.config?.getMaxDocumentSizeBytes() ?? 20 * 1024 * 1024;
     let approxChars = 0;
     for (const item of doc.share.values()) {
       const anyItem = item as unknown as { length?: number };
@@ -564,15 +691,20 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
         approxChars += anyItem.length;
       }
     }
+    const approxCumulative = (session.approxEncodedBytes ?? 0) + incomingBytes;
     if (
       maxDocSize <= 1024 ||
-      approxChars * 4 > maxDocSize - 64 * 1024
+      approxChars * 4 + approxCumulative > maxDocSize / 2
     ) {
       const tempDoc = new Y.Doc();
       tempDoc.getText('latex');
       Y.applyUpdate(tempDoc, Y.encodeStateAsUpdate(doc));
       applyAction(tempDoc);
-      this.validator.validatePostApplySize(tempDoc, maxDocSize);
+      this.validator.validatePostApplySize(
+        tempDoc,
+        maxDocSize,
+        approxCumulative,
+      );
       tempDoc.destroy();
     }
   }
@@ -602,11 +734,15 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
           rawBytes.byteLength,
           this.config?.getMaxDocumentSizeBytes(),
         );
-        this.assertPostApplySizeBeforeMutation(session.doc, (tempDoc) => {
-          const tempDec = decoding.createDecoder(rawBytes);
-          const tempEnc = encoding.createEncoder();
-          syncProtocol.readSyncMessage(tempDec, tempEnc, tempDoc, origin);
-        });
+        this.assertPostApplySizeBeforeMutation(
+          session,
+          (tempDoc) => {
+            const tempDec = decoding.createDecoder(rawBytes);
+            const tempEnc = encoding.createEncoder();
+            syncProtocol.readSyncMessage(tempDec, tempEnc, tempDoc, origin);
+          },
+          rawBytes.byteLength,
+        );
       }
 
       const decoder = decoding.createDecoder(rawBytes);
@@ -629,9 +765,12 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
         msgType === syncProtocol.messageYjsUpdate ||
         msgType === syncProtocol.messageYjsSyncStep2
       ) {
+        session.approxEncodedBytes =
+          (session.approxEncodedBytes ?? 0) + rawBytes.byteLength;
         this.validator.validatePostApplySize(
           session.doc,
           this.config?.getMaxDocumentSizeBytes(),
+          session.approxEncodedBytes,
         );
         const updateEncoder = encoding.createEncoder();
         const rawUpdate = this.extractRawUpdateIfPresent(rawBytes, msgType);
@@ -711,7 +850,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
         msgType === syncProtocol.messageYjsUpdate
       ) {
         const innerUpdate = decoding.readVarUint8Array(dec);
-        this.assertPostApplySizeBeforeMutation(session.doc, (tempDoc) => {
+        this.assertPostApplySizeBeforeMutation(session, (tempDoc) => {
           Y.applyUpdate(tempDoc, innerUpdate, origin);
         });
         Y.applyUpdate(session.doc, innerUpdate, origin);
@@ -729,7 +868,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      this.assertPostApplySizeBeforeMutation(session.doc, (tempDoc) => {
+      this.assertPostApplySizeBeforeMutation(session, (tempDoc) => {
         Y.applyUpdate(tempDoc, rawUpdate, origin);
       });
       Y.applyUpdate(session.doc, rawUpdate, origin);
@@ -779,7 +918,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
         // Direct update bytes
       }
 
-      this.assertPostApplySizeBeforeMutation(session.doc, (tempDoc) => {
+      this.assertPostApplySizeBeforeMutation(session, (tempDoc) => {
         try {
           Y.applyUpdate(tempDoc, updateToApply, origin);
         } catch (applyErr) {
@@ -1041,12 +1180,15 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
           () => void this.flushDoc(projectId, docId),
           this.FLUSH_DEBOUNCE_MS,
         );
+        session.flushTimeout.unref?.();
       }
       return;
     }
 
     try {
       const tasks: Promise<unknown>[] = [];
+      let convergedOnConflict = false;
+      let docWasDeleted = false;
 
       if (this.docstoreService) {
         const lines = LineArray.textToLines(flushedText);
@@ -1073,11 +1215,19 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
               session.currentVersion = res.doc?.version ?? nextVersion;
               session.lastFlushedRev = res.rev ?? res.doc?.rev;
               session.lastFlushedText = flushedText;
+              session.approxEncodedBytes = 0;
               this.logger.debug(
                 `Flushed Y.Doc to Docstore (${lines.length} lines, v${session.currentVersion}, rev${session.lastFlushedRev}): ${key}`,
               );
             })
             .catch(async (err: unknown) => {
+              if (
+                err instanceof DocNotFoundError ||
+                (err as { name?: string })?.name === 'DocNotFoundError'
+              ) {
+                docWasDeleted = true;
+                throw err;
+              }
               if (
                 err &&
                 typeof err === 'object' &&
@@ -1085,14 +1235,66 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
                 err.name === 'DocModifiedError'
               ) {
                 this.logger.warn(
-                  `OCC conflict during Y.Doc flush for ${key}. Re-fetching base rev.`,
+                  `OCC conflict during Y.Doc flush for ${key}. Rebasing against latest Docstore rev.`,
                 );
                 const fresh = await this.docstoreService
                   ?.getDoc(projectId, docId)
                   .catch(() => null);
-                if (fresh) {
-                  session.lastFlushedRev = fresh.rev;
-                  session.currentVersion = fresh.version;
+                if (!fresh || fresh.deleted) {
+                  docWasDeleted = true;
+                  throw err;
+                }
+                const freshText = Array.isArray(fresh.lines)
+                  ? fresh.lines.join('\n')
+                  : '';
+                const baseText = session.lastFlushedText ?? '';
+                const currentText = session.yText.toString();
+                const reconciledText = mergeThreeWayText(
+                  baseText,
+                  freshText,
+                  currentText,
+                );
+
+                session.lastFlushedRev = fresh.rev;
+                session.currentVersion = fresh.version;
+                session.lastFlushedText = freshText;
+                session.approxEncodedBytes = 0;
+
+                if (reconciledText !== currentText) {
+                  let captured: Uint8Array | null = null;
+                  const capture = (update: Uint8Array) => {
+                    captured = captured
+                      ? Y.mergeUpdates([captured, update])
+                      : update;
+                  };
+                  session.doc.on('update', capture);
+                  try {
+                    YjsCursorDiffEngine.applyEditsToYText(
+                      session.doc,
+                      session.yText,
+                      currentText,
+                      reconciledText,
+                      'rest-api',
+                    );
+                  } finally {
+                    session.doc.off('update', capture);
+                  }
+                  if (captured && this.server) {
+                    const enc = encoding.createEncoder();
+                    syncProtocol.writeUpdate(enc, captured);
+                    this.server
+                      .to(`doc:${projectId}:${docId}`)
+                      .emit(REALTIME_EVENTS.YJS_SYNC_UPDATE, {
+                        spaceId: projectId,
+                        docId,
+                        data: Buffer.from(encoding.toUint8Array(enc)),
+                      });
+                  }
+                }
+
+                if (reconciledText === freshText) {
+                  convergedOnConflict = true;
+                  return;
                 }
               }
               throw err;
@@ -1101,6 +1303,13 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
       }
 
       await Promise.all(tasks);
+
+      if (docWasDeleted) {
+        await this.evictDoc(projectId, docId, { skipFlush: true }).catch(
+          () => {},
+        );
+        return;
+      }
 
       if (this.redis && this.redis.isReady()) {
         await this.saveBinaryToRedis(
@@ -1111,7 +1320,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
         );
       }
 
-      if (session.yText.toString() === flushedText) {
+      if (convergedOnConflict || session.yText.toString() === flushedText) {
         session.firstUnflushedAt = undefined;
       } else {
         session.firstUnflushedAt = session.firstUnflushedAt ?? Date.now();
@@ -1120,9 +1329,27 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
             () => void this.flushDoc(projectId, docId),
             this.FLUSH_DEBOUNCE_MS,
           );
+          session.flushTimeout.unref?.();
         }
       }
     } catch (err: unknown) {
+      const isMissing =
+        err instanceof DocNotFoundError ||
+        (err as { name?: string })?.name === 'DocNotFoundError';
+      if (isMissing) {
+        this.logger.warn(
+          `Stopping flush retries for deleted/missing Y.Doc ${key}: ${(err as Error)?.message}`,
+        );
+        if (session.flushTimeout) {
+          clearTimeout(session.flushTimeout);
+          session.flushTimeout = undefined;
+        }
+        await this.deleteRedisSnapshot(projectId, docId).catch(() => {});
+        this.activeDocs.delete(key);
+        this.projectDocKeys.get(projectId)?.delete(key);
+        session.doc.destroy();
+        return;
+      }
       session.firstUnflushedAt = flushedTimestamp ?? Date.now();
       session.currentVersion = undefined;
       this.logger.error(
@@ -1134,6 +1361,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
           () => void this.flushDoc(projectId, docId),
           1500,
         );
+        session.flushTimeout.unref?.();
       }
     } finally {
       await this.releaseFlushLock(projectId, docId);
@@ -1270,6 +1498,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
         );
       });
     }, this.FLUSH_DEBOUNCE_MS);
+    session.flushTimeout.unref?.();
   }
 
   private normalizeToUint8Array(data: unknown): Uint8Array {

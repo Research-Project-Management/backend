@@ -18,7 +18,10 @@ export class ForwardSyncDto {
   @MaxLength(512)
   file!: string;
 
-  @ApiProperty({ description: '1-based line number in TeX source', example: 42 })
+  @ApiProperty({
+    description: '1-based line number in TeX source',
+    example: 42,
+  })
   @IsNumber()
   @Min(1)
   line!: number;
@@ -33,10 +36,10 @@ export class ForwardSyncDto {
   @Min(0)
   column?: number;
 
-  @ApiPropertyOptional({ description: 'Project ID for workspace lookup' })
+  @ApiPropertyOptional({ description: 'Space ID for workspace lookup' })
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 
   @ApiPropertyOptional({ description: 'Page ID fallback for workspace lookup' })
   @IsOptional()
@@ -66,10 +69,10 @@ export class ReverseSyncDto {
   @IsNumber()
   y!: number;
 
-  @ApiPropertyOptional({ description: 'Project ID for workspace lookup' })
+  @ApiPropertyOptional({ description: 'Space ID for workspace lookup' })
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 
   @ApiPropertyOptional({ description: 'Page ID fallback for workspace lookup' })
   @IsOptional()

@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/structure/structure.controller.ts
- * REST API Controller for Manuscript Project File Tree & Hierarchy.
+ * modules/pages/structure/structure.controller.ts
+ * REST API Controller for Page Virtual Tree & Hierarchy.
  */
 
 import {
@@ -12,6 +12,7 @@ import {
   Param,
   Query,
   Body,
+  Req,
   HttpStatus,
   HttpCode,
   NotFoundException,
@@ -19,6 +20,7 @@ import {
   BadRequestException,
   UseGuards,
 } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import {
   ApiTags,
   ApiOperation,
@@ -30,7 +32,7 @@ import {
   ProjectAccessGuard,
   RequireRole,
   Role,
-  ResolvedProject,
+  ResolvedSpace,
 } from '@/modules/project/access';
 import { StructureService } from './structure.service';
 import {
@@ -41,18 +43,16 @@ import {
   TreeNodeDto,
 } from './dto/node.dto';
 import { NodeNotFoundError, StructureError } from './domain';
+import { resolvePageControllerCoordinates } from '../core/page-scope.helper';
 
-@ApiTags('Manuscripts - Project Structure & File Tree')
+@ApiTags('Pages - Virtual Tree & Structure')
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/pages',
-  'api/v1/manuscripts',
-  'api/v1/pages/projects/:projectId/structure',
-  'api/v1/pages/:projectId/structure',
-  'api/v1/pages/docs/:projectId/structure',
-  'api/v1/manuscripts/projects/:projectId/structure',
-  'api/v1/manuscripts/pages/:projectId/structure',
-  'api/v1/manuscripts/docs/:projectId/structure',
+  'api/v1/pages/spaces/:spaceId/structure',
+  'api/v1/pages/pages/:pageId/structure',
+  'api/v1/pages/:spaceId/structure',
+  'api/v1/pages/docs/:docId/structure',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
@@ -73,43 +73,32 @@ export class StructureController {
   }
 
   private resolveCoordinates(
-    paramProjectId: string,
-    resolvedProject?: string | { id?: string } | null,
+    params: { spaceId?: string; pageId?: string; docId?: string },
+    resolvedSpace?: string | { id?: string } | null,
     queryPageId?: string,
+    req?: FastifyRequest,
   ): { spaceId: string; pageId?: string } {
-    const authorized =
-      typeof resolvedProject === 'string'
-        ? resolvedProject
-        : resolvedProject?.id;
-    const spaceId = authorized || paramProjectId;
-    const cleanQueryPageId = queryPageId?.trim() || undefined;
-    const pageId =
-      cleanQueryPageId && cleanQueryPageId !== spaceId
-        ? cleanQueryPageId
-        : authorized && paramProjectId && paramProjectId !== authorized
-          ? paramProjectId
-          : undefined;
-    return { spaceId, pageId };
-  }
-
-  private resolveScope(
-    paramProjectId: string,
-    resolvedProject?: string | { id?: string } | null,
-  ): string {
-    return this.resolveCoordinates(paramProjectId, resolvedProject).spaceId;
+    return resolvePageControllerCoordinates(
+      params,
+      resolvedSpace,
+      queryPageId,
+      req,
+    );
   }
 
   private async execute<T>(
-    projectId: string,
-    resolvedProject: string | { id?: string } | null | undefined,
+    params: { spaceId?: string; pageId?: string; docId?: string },
+    resolvedSpace: string | { id?: string } | null | undefined,
     fn: (targetId: string, pageId?: string) => Promise<T>,
     queryPageId?: string,
+    req?: FastifyRequest,
   ): Promise<T> {
     try {
       const { spaceId, pageId } = this.resolveCoordinates(
-        projectId,
-        resolvedProject,
+        params,
+        resolvedSpace,
         queryPageId,
+        req,
       );
       return await fn(spaceId, pageId);
     } catch (err) {
@@ -123,15 +112,19 @@ export class StructureController {
   })
   @ApiResponse({ status: 200, type: [TreeNodeDto] })
   async getFileTree(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
     @Query('pageId') queryPageId?: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
     return this.execute(
-      projectId,
-      resolvedProject,
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
       (targetId, pageId) => this.structureService.getFileTree(targetId, pageId),
       queryPageId,
+      req,
     );
   }
 
@@ -141,16 +134,20 @@ export class StructureController {
       'Get unified project symbol catalog (labels, citations, commands, environments, packages, outline, files)',
   })
   async getProjectSymbols(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
     @Query('pageId') queryPageId?: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
     return this.execute(
-      projectId,
-      resolvedProject,
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
       (targetId, pageId) =>
         this.structureService.getProjectSymbols(targetId, pageId),
       queryPageId,
+      req,
     );
   }
 
@@ -160,15 +157,18 @@ export class StructureController {
       'Get structured LaTeX document outline (sections, figures, tables, slides, appendices)',
   })
   async getProjectOutline(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
     @Query('filePath') filePath?: string,
     @Query('docId') docId?: string,
     @Query('pageId') queryPageId?: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
     return this.execute(
-      projectId,
-      resolvedProject,
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
       (targetId, pageId) =>
         this.structureService.getProjectOutline(
           targetId,
@@ -176,6 +176,7 @@ export class StructureController {
           pageId,
         ),
       queryPageId,
+      req,
     );
   }
 
@@ -186,7 +187,6 @@ export class StructureController {
       'Extract structured LaTeX document outline from live buffer or project file',
   })
   async extractOutline(
-    @Param('projectId') projectId: string,
     @Body()
     body: {
       content?: string;
@@ -194,29 +194,37 @@ export class StructureController {
       docId?: string;
       pageId?: string;
     },
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
     @Query('pageId') queryPageId?: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
     return this.execute(
-      projectId,
-      resolvedProject,
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
       (targetId, pageId) =>
         this.structureService.getProjectOutline(targetId, body, pageId),
       body?.pageId || queryPageId,
+      req,
     );
   }
 
   @Get('nodes')
   @ApiOperation({ summary: 'Get flat list of all nodes in project' })
   async getAllNodes(
-    @Param('projectId') projectId: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Query('parentId') parentId?: string,
     @Query('pageId') queryPageId?: string,
+    @Req() req?: FastifyRequest,
   ) {
     return this.execute(
-      projectId,
-      resolvedProject,
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
       async (targetId, pageId) => {
         const nodes = parentId
           ? await this.structureService.getAllNodes(targetId, parentId, pageId)
@@ -228,23 +236,33 @@ export class StructureController {
         return nodes.map((n) => n.toJSON());
       },
       queryPageId,
+      req,
     );
   }
 
   @Get('nodes/:nodeId')
   @ApiOperation({ summary: 'Get single node metadata by ID' })
   async getNodeById(
-    @Param('projectId') projectId: string,
     @Param('nodeId') nodeId: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
-    return this.execute(projectId, resolvedProject, async (targetId) => {
-      const node = await this.structureService.getNodeById(targetId, nodeId);
-      if (!node) {
-        throw new NodeNotFoundError(nodeId);
-      }
-      return node.toJSON();
-    });
+    return this.execute(
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
+      async (targetId) => {
+        const node = await this.structureService.getNodeById(targetId, nodeId);
+        if (!node) {
+          throw new NodeNotFoundError(nodeId);
+        }
+        return node.toJSON();
+      },
+      undefined,
+      req,
+    );
   }
 
   @Post('nodes')
@@ -253,14 +271,17 @@ export class StructureController {
     summary: 'Create new file, document, or folder with auto-mkdirp',
   })
   async createNode(
-    @Param('projectId') projectId: string,
     @Body() dto: CreateNodeDto,
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
     @Query('pageId') queryPageId?: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
     return this.execute(
-      projectId,
-      resolvedProject,
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
       async (targetId, pageId) => {
         const node = await this.structureService.createNode(
           targetId,
@@ -270,6 +291,7 @@ export class StructureController {
         return node.toJSON();
       },
       dto?.pageId || queryPageId,
+      req,
     );
   }
 
@@ -280,15 +302,28 @@ export class StructureController {
     summary: 'Move node to destination folder or path (with cycle detection)',
   })
   async moveNode(
-    @Param('projectId') projectId: string,
     @Param('nodeId') nodeId: string,
     @Body() dto: MoveNodeDto,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
-    return this.execute(projectId, resolvedProject, async (targetId) => {
-      const node = await this.structureService.moveNode(targetId, nodeId, dto);
-      return node.toJSON();
-    });
+    return this.execute(
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
+      async (targetId) => {
+        const node = await this.structureService.moveNode(
+          targetId,
+          nodeId,
+          dto,
+        );
+        return node.toJSON();
+      },
+      undefined,
+      req,
+    );
   }
 
   @Patch('nodes/:nodeId/rename')
@@ -298,48 +333,72 @@ export class StructureController {
     summary: 'Rename node (cascades path updates to all children if folder)',
   })
   async renameNode(
-    @Param('projectId') projectId: string,
     @Param('nodeId') nodeId: string,
     @Body() dto: RenameNodeDto,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
-    return this.execute(projectId, resolvedProject, async (targetId) => {
-      const node = await this.structureService.renameNode(
-        targetId,
-        nodeId,
-        dto,
-      );
-      return node.toJSON();
-    });
+    return this.execute(
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
+      async (targetId) => {
+        const node = await this.structureService.renameNode(
+          targetId,
+          nodeId,
+          dto,
+        );
+        return node.toJSON();
+      },
+      undefined,
+      req,
+    );
   }
 
   @Delete('nodes/:nodeId')
   @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({ summary: 'Delete node and all nested descendants' })
   async deleteNode(
-    @Param('projectId') projectId: string,
     @Param('nodeId') nodeId: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
-    return this.execute(projectId, resolvedProject, async (targetId) => {
-      const deleted = await this.structureService.deleteNode(targetId, nodeId);
-      return {
-        deletedCount: deleted.length,
-        nodes: deleted.map((n) => n.toJSON()),
-      };
-    });
+    return this.execute(
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
+      async (targetId) => {
+        const deleted = await this.structureService.deleteNode(
+          targetId,
+          nodeId,
+        );
+        return {
+          deletedCount: deleted.length,
+          nodes: deleted.map((n) => n.toJSON()),
+        };
+      },
+      undefined,
+      req,
+    );
   }
 
   @Get('root-doc')
   @ApiOperation({ summary: 'Get current root compilation document (main.tex)' })
   async getRootDoc(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
     @Query('pageId') queryPageId?: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
     return this.execute(
-      projectId,
-      resolvedProject,
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
       async (targetId, pageId) => {
         const rootDoc = await this.structureService.getRootDoc(
           targetId,
@@ -348,6 +407,7 @@ export class StructureController {
         return rootDoc ? rootDoc.toJSON() : null;
       },
       queryPageId,
+      req,
     );
   }
 
@@ -355,14 +415,26 @@ export class StructureController {
   @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({ summary: 'Explicitly set the master LaTeX entrypoint' })
   async setRootDoc(
-    @Param('projectId') projectId: string,
     @Param('nodeId') nodeId: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
-    return this.execute(projectId, resolvedProject, async (targetId) => {
-      const rootDoc = await this.structureService.setRootDoc(targetId, nodeId);
-      return rootDoc.toJSON();
-    });
+    return this.execute(
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
+      async (targetId) => {
+        const rootDoc = await this.structureService.setRootDoc(
+          targetId,
+          nodeId,
+        );
+        return rootDoc.toJSON();
+      },
+      undefined,
+      req,
+    );
   }
 
   @Post('nodes/:nodeId/reorder')
@@ -370,13 +442,26 @@ export class StructureController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Update sort order index for display' })
   async reorderNode(
-    @Param('projectId') projectId: string,
     @Param('nodeId') nodeId: string,
     @Body() dto: ReorderNodeDto,
-    @ResolvedProject() resolvedProject?: string | { id?: string },
+    @Param('spaceId') spaceId?: string,
+    @Param('pageId') paramPageId?: string,
+    @Param('docId') paramDocId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ) {
-    return this.execute(projectId, resolvedProject, async (targetId) => {
-      await this.structureService.reorderNode(targetId, nodeId, dto.sortOrder);
-    });
+    return this.execute(
+      { spaceId, pageId: paramPageId, docId: paramDocId },
+      resolvedSpace,
+      async (targetId) => {
+        await this.structureService.reorderNode(
+          targetId,
+          nodeId,
+          dto.sortOrder,
+        );
+      },
+      undefined,
+      req,
+    );
   }
 }

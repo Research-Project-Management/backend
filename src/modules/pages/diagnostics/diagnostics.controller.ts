@@ -14,6 +14,8 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -28,9 +30,14 @@ import {
   RequireRole,
   Role,
   NoProjectContext,
-  ResolvedProject,
+  ResolvedSpace,
 } from '@/modules/project/access';
-import { UserRateLimit, UserRateLimitGuard } from '@/core';
+import {
+  AuthenticatedRequest,
+  UserRateLimit,
+  UserRateLimitGuard,
+} from '@/core';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
 import { DiagnosticsService } from './diagnostics.service';
 import {
   ParseLogDto,
@@ -45,13 +52,13 @@ import {
   ExplanationNotFoundException,
 } from './domain';
 
-@ApiTags('Manuscripts Diagnostics')
+@ApiTags('Pages - Diagnostics')
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/pages/diagnostics',
-  'api/v1/pages/projects/:projectId/diagnostics',
-  'api/v1/manuscripts/diagnostics',
-  'api/v1/manuscripts/projects/:projectId/diagnostics',
+  'api/v1/pages/spaces/:spaceId/diagnostics',
+  'api/v1/pages/:pageId/diagnostics',
+  'api/v1/pages/pages/:pageId/diagnostics',
 ])
 @UseGuards(JwtAuthGuard)
 export class DiagnosticsController {
@@ -101,7 +108,12 @@ export class DiagnosticsController {
     return this.diagnosticsService.lintDocument(dto);
   }
 
-  @Post(['projects/:projectId/lint-doc', ':projectId/lint-doc'])
+  @Post([
+    'lint-doc',
+    'spaces/:spaceId/lint-doc',
+    'pages/:pageId/lint-doc',
+    ':spaceId/lint-doc',
+  ])
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.REVIEWER)
   @UserRateLimit('search-replace')
@@ -112,19 +124,27 @@ export class DiagnosticsController {
   })
   @ApiResponse({ status: 200, type: DiagnosticReportDto })
   public async lintProjectDocument(
-    @Param('projectId') routeProjectId: string,
     @Body() dto: LintDocumentDto,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() authorizedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<DiagnosticReportDto> {
-    const targetProjectId =
-      (typeof project === 'string' ? project : project?.id) || routeProjectId;
+    const { spaceId, pageId } = resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId, pageId: routePageId },
+      authorizedSpace,
+      queryPageId ?? dto?.pageId,
+      req,
+    );
     return await this.diagnosticsService.lintProjectDocument(
-      targetProjectId,
+      spaceId,
       dto,
+      pageId,
     );
   }
 
-  @Post(['projects/:projectId/lint', ':projectId/lint'])
+  @Post(['spaces/:spaceId/lint', 'pages/:pageId/lint', ':spaceId/lint'])
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.REVIEWER)
   @UserRateLimit('search-replace')
@@ -135,12 +155,19 @@ export class DiagnosticsController {
   })
   @ApiResponse({ status: 200, type: DiagnosticReportDto })
   public async lintProject(
-    @Param('projectId') routeProjectId: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() authorizedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<DiagnosticReportDto> {
-    const targetProjectId =
-      (typeof project === 'string' ? project : project?.id) || routeProjectId;
-    return await this.diagnosticsService.lintProject(targetProjectId);
+    const { spaceId, pageId } = resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId, pageId: routePageId },
+      authorizedSpace,
+      queryPageId,
+      req,
+    );
+    return await this.diagnosticsService.lintProject(spaceId, pageId);
   }
 
   @Post('autofix')

@@ -66,6 +66,14 @@ export class WsRateLimiter {
     let state = this.socketStates.get(client.id);
 
     if (!state) {
+      if (this.socketStates.size > 5000) {
+        const staleCutoff = now - 300_000;
+        for (const [k, s] of this.socketStates) {
+          if (s.lastActive < staleCutoff) {
+            this.socketStates.delete(k);
+          }
+        }
+      }
       state = {
         buckets: new Map<RealtimeEventClass, BucketState>(),
         consecutiveThrottledWindows: 0,

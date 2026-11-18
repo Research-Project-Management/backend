@@ -11,12 +11,12 @@ import {
   Optional,
 } from '@nestjs/common';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+import { ResourceAccessPolicy, Role } from '@/modules/project/access';
 import {
   LiveCollaborationPort,
   ManuscriptDomainEventBus,
 } from '@/modules/pages/core';
 import {
-  ITrackChangesRepositoryPort,
   LinePatcher,
   TrackChange,
   ChangeStatus,
@@ -85,13 +85,54 @@ export class TrackChangesService {
     );
   }
 
+  private async resolveDocContext(
+    projectId: string,
+    docId: string,
+  ): Promise<{ spaceId: string; pageId: string | null }> {
+    const resolvedSpaceId = await this.resolveProjectId(projectId, docId);
+    if (
+      this.docstoreService &&
+      typeof this.docstoreService.getDocById === 'function' &&
+      docId
+    ) {
+      const doc = await this.docstoreService
+        .getDocById(docId)
+        .catch(() => undefined);
+      if (doc === null) {
+        throw new NotFoundException(`Document '${docId}' was not found.`);
+      }
+      if (doc) {
+        if (doc.deleted) {
+          throw new NotFoundException(`Document '${docId}' has been deleted.`);
+        }
+        if (
+          doc.projectId &&
+          doc.projectId !== resolvedSpaceId &&
+          doc.pageId !== resolvedSpaceId
+        ) {
+          throw new NotFoundException(
+            `Document '${docId}' was not found in space '${resolvedSpaceId}'.`,
+          );
+        }
+        return {
+          spaceId: doc.projectId || resolvedSpaceId,
+          pageId: doc.pageId ?? null,
+        };
+      }
+    }
+    return { spaceId: resolvedSpaceId, pageId: null };
+  }
+
   public async recordChange(
     projectId: string,
     docId: string,
     dto: RecordChangeDto,
     userId?: string | null,
   ): Promise<TrackChangeResponseDto> {
-    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const { spaceId: resolvedProjId, pageId } = await this.resolveDocContext(
+      projectId,
+      docId,
+    );
     const range = dto.range || {
       startLine: dto.startLine ?? 0,
       startCol: dto.startCol ?? 0,
@@ -101,6 +142,8 @@ export class TrackChangesService {
 
     const change = TrackChange.create({
       projectId: resolvedProjId,
+      spaceId: resolvedProjId,
+      pageId,
       docId,
       type: dto.type,
       text: dto.text,
@@ -118,7 +161,10 @@ export class TrackChangesService {
     changeId: string,
     userId?: string | null,
   ): Promise<TrackChangeResponseDto> {
-    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const { spaceId: resolvedProjId } = await this.resolveDocContext(
+      projectId,
+      docId,
+    );
     const saved = await this.acceptChangeDirect(
       resolvedProjId,
       docId,
@@ -134,7 +180,10 @@ export class TrackChangesService {
     changeId: string,
     userId?: string | null,
   ): Promise<TrackChangeResponseDto> {
-    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const { spaceId: resolvedProjId } = await this.resolveDocContext(
+      projectId,
+      docId,
+    );
     const saved = await this.rejectChangeDirect(
       resolvedProjId,
       docId,
@@ -151,7 +200,10 @@ export class TrackChangesService {
     changeIds?: string[],
     userId?: string | null,
   ): Promise<{ resolvedCount: number; action: BatchAction }> {
-    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const { spaceId: resolvedProjId } = await this.resolveDocContext(
+      projectId,
+      docId,
+    );
 
     const pendingChanges = await this.repository.listChangesByDoc(
       resolvedProjId,
@@ -163,8 +215,74 @@ export class TrackChangesService {
         ? pendingChanges.filter((c) => changeIds.includes(c.id))
         : pendingChanges;
 
-    const sorted = LinePatcher.sortChangesBottomUp(filtered);
+    if (filtered.length === 0) {
+      return { resolvedCount: 0, action };
+    }
+
     const isAccept = action === 'accept_all' || action === 'accept_selected';
+    const resolvedStatus: ChangeStatus = isAccept ? 'accepted' : 'rejected';
+    const now = new Date();
+
+    if (typeof this.repository.claimPendingChanges === 'function') {
+      const candidateIds = filtered.map((c) => c.id);
+      const claimedIds = await this.repository.claimPendingChanges(
+        resolvedProjId,
+        docId,
+        candidateIds,
+        resolvedStatus,
+        userId ?? null,
+        now,
+      );
+      if (claimedIds.length === 0) {
+        return { resolvedCount: 0, action };
+      }
+
+      const claimedSet = new Set(claimedIds);
+      const sorted = LinePatcher.sortChangesBottomUp(
+        filtered.filter((c) => claimedSet.has(c.id)),
+      );
+
+      try {
+        if (sorted.length > 0 && this.docstorePatcher) {
+          await this.docstorePatcher.applyBatchChanges(
+            resolvedProjId,
+            docId,
+            sorted,
+            isAccept,
+          );
+        }
+      } catch (err) {
+        await this.repository
+          .revertClaimedChangesStatus?.(
+            resolvedProjId,
+            docId,
+            claimedIds,
+            resolvedStatus,
+          )
+          .catch(() => undefined);
+        throw err;
+      }
+
+      for (const change of sorted) {
+        if (isAccept) {
+          change.accept(userId);
+        } else {
+          change.reject(userId);
+        }
+        this.realtimeNotifier?.notifyChangeResolved(
+          resolvedProjId,
+          docId,
+          change,
+        );
+      }
+
+      return {
+        resolvedCount: sorted.length,
+        action,
+      };
+    }
+
+    const sorted = LinePatcher.sortChangesBottomUp(filtered);
 
     if (sorted.length > 0 && this.docstorePatcher) {
       await this.docstorePatcher.applyBatchChanges(
@@ -175,8 +293,6 @@ export class TrackChangesService {
       );
     }
 
-    const resolvedStatus: ChangeStatus = isAccept ? 'accepted' : 'rejected';
-    const now = new Date();
     const idsToUpdate = sorted.map((c) => c.id);
 
     for (const change of sorted) {
@@ -217,7 +333,10 @@ export class TrackChangesService {
     dto: CreateCommentThreadDto,
     userId?: string | null,
   ): Promise<CommentThreadResponseDto> {
-    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const { spaceId: resolvedProjId, pageId } = await this.resolveDocContext(
+      projectId,
+      docId,
+    );
     const range = dto.range || {
       startLine: dto.startLine ?? 0,
       startCol: dto.startCol ?? dto.fromIndex ?? 0,
@@ -227,6 +346,8 @@ export class TrackChangesService {
 
     const thread = CommentThread.create({
       projectId: resolvedProjId,
+      spaceId: resolvedProjId,
+      pageId,
       docId,
       quote: dto.quote,
       range: TextRangeVo.create(range),
@@ -254,7 +375,8 @@ export class TrackChangesService {
     dto: AddCommentReplyDto,
     userId?: string | null,
   ): Promise<CommentReplyResponseDto> {
-    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const resolved = await this.resolveDocContext(projectId, docId);
+    const resolvedProjId = resolved.spaceId;
 
     const thread = await this.repository.findThreadById(threadId);
     if (
@@ -284,6 +406,65 @@ export class TrackChangesService {
     return this.toReplyDto(saved);
   }
 
+  public async updateCommentReply(
+    projectId: string,
+    docId: string,
+    threadId: string,
+    replyId: string,
+    content: string,
+    userId?: string | null,
+    role?: Role,
+    permissionBitmask?: string,
+  ): Promise<CommentReplyResponseDto> {
+    const resolved = await this.resolveDocContext(projectId, docId);
+    const resolvedProjId = resolved.spaceId;
+
+    const thread = await this.repository.findThreadById(threadId);
+    if (
+      !thread ||
+      thread.projectId !== resolvedProjId ||
+      thread.docId !== docId
+    ) {
+      throw new ThreadNotFoundException(threadId);
+    }
+    if (thread.isResolved) {
+      throw new ResolvedThreadException(threadId);
+    }
+
+    const existingReply = thread.replies.find((r) => r.id === replyId);
+    if (!existingReply) {
+      throw new NotFoundException(`Comment reply '${replyId}' was not found.`);
+    }
+
+    if (existingReply.createdById) {
+      new ResourceAccessPolicy().assertCanModifyComment(
+        {
+          userId: userId ?? '',
+          role: role ?? Role.REVIEWER,
+          permissionBitmask,
+        },
+        { id: replyId, authorId: existingReply.createdById },
+        'update',
+      );
+    }
+
+    const validated = CommentReply.create({
+      id: replyId,
+      threadId,
+      content,
+      createdById: existingReply.createdById,
+    });
+    const updated = await this.repository.updateCommentReply?.(
+      threadId,
+      replyId,
+      validated.content,
+    );
+    if (!updated) {
+      throw new NotFoundException(`Comment reply '${replyId}' was not found.`);
+    }
+    return this.toReplyDto(updated);
+  }
+
   public async resolveCommentThread(
     projectId: string,
     docId: string,
@@ -291,7 +472,8 @@ export class TrackChangesService {
     resolve: boolean,
     userId?: string | null,
   ): Promise<CommentThreadResponseDto> {
-    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const resolved = await this.resolveDocContext(projectId, docId);
+    const resolvedProjId = resolved.spaceId;
 
     const thread = await this.repository.findThreadById(threadId);
     if (
@@ -321,7 +503,8 @@ export class TrackChangesService {
     projectId: string,
     docId: string,
   ): Promise<DocReviewsResponseDto> {
-    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const resolved = await this.resolveDocContext(projectId, docId);
+    const resolvedProjId = resolved.spaceId;
 
     const [changes, threads] = await Promise.all([
       this.repository.listChangesByDoc(resolvedProjId, docId),
@@ -346,6 +529,44 @@ export class TrackChangesService {
 
     if (change.status !== 'pending') {
       return change;
+    }
+
+    if (typeof this.repository.claimPendingChanges === 'function') {
+      const claimed = await this.repository.claimPendingChanges(
+        projectId,
+        docId,
+        [changeId],
+        'accepted',
+        userId ?? null,
+      );
+      if (claimed.length === 0) {
+        const latest = await this.repository.findChangeById(changeId);
+        if (!latest) throw new ChangeNotFoundException(changeId);
+        return latest;
+      }
+
+      change.accept(userId);
+
+      try {
+        if (this.docstorePatcher) {
+          await this.docstorePatcher.applyChange(projectId, docId, change);
+        }
+        const saved =
+          (await this.repository.findChangeById(changeId)) ?? change;
+        this.realtimeNotifier?.notifyChangeResolved(projectId, docId, saved);
+        return saved;
+      } catch (err) {
+        await this.repository
+          .revertClaimedChangesStatus?.(
+            projectId,
+            docId,
+            [changeId],
+            'accepted',
+          )
+          .catch(() => undefined);
+        change.reopen();
+        throw err;
+      }
     }
 
     change.accept(userId);
@@ -384,6 +605,44 @@ export class TrackChangesService {
       return change;
     }
 
+    if (typeof this.repository.claimPendingChanges === 'function') {
+      const claimed = await this.repository.claimPendingChanges(
+        projectId,
+        docId,
+        [changeId],
+        'rejected',
+        userId ?? null,
+      );
+      if (claimed.length === 0) {
+        const latest = await this.repository.findChangeById(changeId);
+        if (!latest) throw new ChangeNotFoundException(changeId);
+        return latest;
+      }
+
+      change.reject(userId);
+
+      try {
+        if (this.docstorePatcher) {
+          await this.docstorePatcher.revertChange(projectId, docId, change);
+        }
+        const saved =
+          (await this.repository.findChangeById(changeId)) ?? change;
+        this.realtimeNotifier?.notifyChangeResolved(projectId, docId, saved);
+        return saved;
+      } catch (err) {
+        await this.repository
+          .revertClaimedChangesStatus?.(
+            projectId,
+            docId,
+            [changeId],
+            'rejected',
+          )
+          .catch(() => undefined);
+        change.reopen();
+        throw err;
+      }
+    }
+
     change.reject(userId);
 
     if (this.docstorePatcher) {
@@ -409,6 +668,8 @@ export class TrackChangesService {
     return {
       id: change.id,
       projectId: change.projectId,
+      spaceId: change.spaceId,
+      pageId: change.pageId,
       docId: change.docId,
       type: change.type,
       status: change.status,
@@ -439,6 +700,8 @@ export class TrackChangesService {
     return {
       id: thread.id,
       projectId: thread.projectId,
+      spaceId: thread.spaceId,
+      pageId: thread.pageId,
       docId: thread.docId,
       quote: thread.quote,
       selectedText: thread.quote,

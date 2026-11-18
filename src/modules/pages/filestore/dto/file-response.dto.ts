@@ -1,5 +1,5 @@
 /**
- * filestore/dto/file-response.dto.ts
+ * modules/pages/filestore/dto/file-response.dto.ts
  */
 
 import { ManuscriptFile } from '../filestore.types';
@@ -7,6 +7,8 @@ import { ManuscriptFile } from '../filestore.types';
 export class ManuscriptFileResponseDto {
   id!: string;
   projectId!: string;
+  spaceId!: string;
+  pageId!: string | null;
   name!: string;
   filename!: string;
   mimeType!: string;
@@ -22,6 +24,8 @@ export class ManuscriptFileResponseDto {
     const dto = new ManuscriptFileResponseDto();
     dto.id = entity.id;
     dto.projectId = entity.projectId;
+    dto.spaceId = entity.projectId;
+    dto.pageId = entity.pageId ?? null;
     dto.name = entity.name;
     dto.filename = entity.name;
     dto.mimeType = entity.mimeType;
@@ -35,3 +39,5 @@ export class ManuscriptFileResponseDto {
     return dto;
   }
 }
+
+export { ManuscriptFileResponseDto as PageBinaryAssetResponseDto };

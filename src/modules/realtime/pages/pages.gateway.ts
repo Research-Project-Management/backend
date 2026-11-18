@@ -121,7 +121,7 @@ export class PagesGateway
       client.data = {
         userId: '',
         name: 'Collaborator',
-        projectId: null,
+        spaceId: null,
         activeDocId: null,
         authenticated: false,
       };
@@ -136,7 +136,7 @@ export class PagesGateway
         client.data = {
           ...client.data,
           ...session,
-          projectId: null,
+          spaceId: null,
           activeDocId: null,
         } satisfies ClientSocketData;
       }
@@ -154,11 +154,11 @@ export class PagesGateway
 
   public async handleDisconnect(client: Socket): Promise<void> {
     const clientData = this.getClientData(client);
-    const { projectId, activeDocId } = clientData;
+    const { spaceId, activeDocId } = clientData;
 
-    if (projectId && activeDocId) {
+    if (spaceId && activeDocId) {
       try {
-        await this.leaveActiveDocSession(client, projectId, activeDocId, {
+        await this.leaveActiveDocSession(client, spaceId, activeDocId, {
           leaveSocketRoom: false,
           broadcastLeave: true,
           syncYjsLifecycle: true,
@@ -170,9 +170,9 @@ export class PagesGateway
       }
     }
 
-    if (projectId) {
+    if (spaceId) {
       try {
-        await this.leaveActiveProjectSession(client, projectId, {
+        await this.leaveActiveProjectSession(client, spaceId, {
           leaveSocketRoom: false,
           broadcastLeave: true,
         });
@@ -267,8 +267,8 @@ export class PagesGateway
     if (leaveSocketRoom && typeof client.leave === 'function') {
       await client.leave(`project:${projectId}`);
     }
-    if (clientData.projectId === projectId) {
-      clientData.projectId = null;
+    if (clientData.spaceId === projectId) {
+      clientData.spaceId = null;
     }
 
     if (broadcastLeave) {
@@ -291,12 +291,12 @@ export class PagesGateway
       const clientData = this.getClientData(client);
       const userId = clientData.userId;
 
-      const prevProjectId = clientData.projectId;
+      const prevSpaceId = clientData.spaceId;
       const prevDocId = clientData.activeDocId;
-      if (prevProjectId && prevProjectId !== dto.projectId) {
+      if (prevSpaceId && prevSpaceId !== dto.spaceId) {
         if (prevDocId) {
           try {
-            await this.leaveActiveDocSession(client, prevProjectId, prevDocId, {
+            await this.leaveActiveDocSession(client, prevSpaceId, prevDocId, {
               leaveSocketRoom: true,
               broadcastLeave: true,
               syncYjsLifecycle: true,
@@ -307,7 +307,7 @@ export class PagesGateway
           clientData.activeDocId = null;
         }
         try {
-          await this.leaveActiveProjectSession(client, prevProjectId, {
+          await this.leaveActiveProjectSession(client, prevSpaceId, {
             leaveSocketRoom: true,
             broadcastLeave: true,
           });
@@ -317,7 +317,7 @@ export class PagesGateway
       }
 
       const result = await this.service.joinProject({
-        projectId: dto.projectId,
+        spaceId: dto.spaceId,
         userId,
         socketId: client.id,
         name: clientData.name,
@@ -325,12 +325,17 @@ export class PagesGateway
         avatar: clientData.avatar,
       });
 
-      clientData.projectId = dto.projectId;
-      await client.join(`project:${dto.projectId}`);
+      clientData.spaceId = dto.spaceId;
+      if ((dto as { pageId?: string }).pageId) {
+        (clientData as { spaceId?: string | null; pageId?: string }).pageId = (
+          dto as { pageId?: string }
+        ).pageId;
+      }
+      await client.join(`project:${dto.spaceId}`);
 
       // Broadcast join to peers
       this.broadcastToProject(
-        dto.projectId,
+        dto.spaceId,
         REALTIME_EVENTS.USER_JOINED_PROJECT,
         PresenceMapper.toPublicPresence(clientData, client.id),
         client.id,
@@ -359,11 +364,11 @@ export class PagesGateway
     try {
       const clientData = this.getClientData(client);
       // Unjoined sockets must NOT broadcast leave events (RT-03)
-      if (!clientData.projectId || clientData.projectId !== dto.projectId) {
+      if (!clientData.spaceId || clientData.spaceId !== dto.spaceId) {
         return { success: true };
       }
 
-      await this.leaveActiveProjectSession(client, dto.projectId, {
+      await this.leaveActiveProjectSession(client, dto.spaceId, {
         leaveSocketRoom: true,
         broadcastLeave: true,
       });
@@ -385,22 +390,22 @@ export class PagesGateway
   ) {
     try {
       const clientData = this.getClientData(client);
-      if (clientData.projectId && clientData.projectId !== dto.projectId) {
+      if (clientData.spaceId && clientData.spaceId !== dto.spaceId) {
         return {
           success: false,
-          error: 'Must join project before joining doc',
+          error: 'Must join space before joining doc',
           code: 'ACCESS_DENIED',
         };
       }
 
       const prevDocId = clientData.activeDocId;
-      const prevProjectId = clientData.projectId || dto.projectId;
+      const prevSpaceId = clientData.spaceId || dto.spaceId;
 
       if (
         prevDocId &&
-        (prevDocId !== dto.docId || prevProjectId !== dto.projectId)
+        (prevDocId !== dto.docId || prevSpaceId !== dto.spaceId)
       ) {
-        await this.leaveActiveDocSession(client, prevProjectId, prevDocId, {
+        await this.leaveActiveDocSession(client, prevSpaceId, prevDocId, {
           leaveSocketRoom: true,
           broadcastLeave: true,
           syncYjsLifecycle: true,
@@ -408,20 +413,20 @@ export class PagesGateway
       }
 
       const result = await this.service.joinDoc(
-        dto.projectId,
+        dto.spaceId,
         dto.docId,
         client.id,
       );
       clientData.activeDocId = dto.docId;
-      clientData.projectId = dto.projectId;
-      await client.join(`doc:${dto.projectId}:${dto.docId}`);
+      clientData.spaceId = dto.spaceId;
+      await client.join(`doc:${dto.spaceId}:${dto.docId}`);
 
       if (this.yjs) {
-        await this.yjs.getOrCreateDoc(dto.projectId, dto.docId);
+        await this.yjs.getOrCreateDoc(dto.spaceId, dto.docId);
       }
 
       this.broadcastToDoc(
-        dto.projectId,
+        dto.spaceId,
         dto.docId,
         REALTIME_EVENTS.USER_JOINED_DOC,
         PresenceMapper.toPublicPresence(clientData, client.id),
@@ -450,15 +455,15 @@ export class PagesGateway
       const clientData = this.getClientData(client);
       // Unjoined sockets must NOT broadcast leave events (RT-03)
       if (
-        !clientData.projectId ||
-        clientData.projectId !== dto.projectId ||
+        !clientData.spaceId ||
+        clientData.spaceId !== dto.spaceId ||
         !clientData.activeDocId ||
         clientData.activeDocId !== dto.docId
       ) {
         return { success: true };
       }
 
-      await this.leaveActiveDocSession(client, dto.projectId, dto.docId, {
+      await this.leaveActiveDocSession(client, dto.spaceId, dto.docId, {
         leaveSocketRoom: true,
         broadcastLeave: true,
         syncYjsLifecycle: true,
@@ -481,24 +486,24 @@ export class PagesGateway
   ) {
     try {
       const clientData = this.getClientData(client);
-      const projectId = dto.projectId || clientData.projectId;
+      const spaceId = dto.spaceId || clientData.spaceId;
       const docId = dto.docId || clientData.activeDocId;
-      if (!projectId || !docId) {
-        return { success: false, error: 'Missing projectId or docId' };
+      if (!spaceId || !docId) {
+        return { success: false, error: 'Missing spaceId or docId' };
       }
 
       const updateResult = await this.service.applyDocUpdate(
-        { ...dto, projectId, docId },
+        { ...dto, spaceId, docId },
         clientData.userId,
       );
 
       if (updateResult.yjsFrame) {
         this.broadcastToDoc(
-          projectId,
+          spaceId,
           docId,
           REALTIME_EVENTS.YJS_SYNC_UPDATE,
           {
-            projectId,
+            spaceId,
             docId,
             data: updateResult.yjsFrame,
           },
@@ -508,7 +513,7 @@ export class PagesGateway
 
       // Broadcast update to peers in room (exclude sender)
       this.broadcastToDoc(
-        projectId,
+        spaceId,
         docId,
         REALTIME_EVENTS.DOC_UPDATE,
         {
@@ -556,12 +561,12 @@ export class PagesGateway
   ) {
     try {
       const clientData = this.getClientData(client);
-      const projectId = dto.projectId || clientData.projectId;
+      const spaceId = dto.spaceId || clientData.spaceId;
       const docId = dto.docId || clientData.activeDocId;
-      if (!projectId || !docId) return { success: false };
+      if (!spaceId || !docId) return { success: false };
 
       const updated = await this.service.updateCursor(
-        projectId,
+        spaceId,
         docId,
         client.id,
         dto.cursor,
@@ -569,7 +574,7 @@ export class PagesGateway
 
       if (updated) {
         this.broadcastToDoc(
-          projectId,
+          spaceId,
           docId,
           REALTIME_EVENTS.DOC_CURSOR,
           {
@@ -605,7 +610,7 @@ export class PagesGateway
     if (!this.yjs) return { success: false, error: 'YjsService unavailable' };
     try {
       const reply = await this.yjs.handleSyncStep1(
-        dto.projectId,
+        dto.spaceId,
         dto.docId,
         dto.data as Uint8Array,
       );
@@ -631,7 +636,7 @@ export class PagesGateway
     if (!this.yjs) return { success: false };
     try {
       await this.yjs.handleSyncStep2(
-        dto.projectId,
+        dto.spaceId,
         dto.docId,
         dto.data as Uint8Array,
         client.id,
@@ -652,7 +657,7 @@ export class PagesGateway
     if (!this.yjs) return { success: false };
     try {
       const updateFrame = await this.yjs.handleSyncUpdate(
-        dto.projectId,
+        dto.spaceId,
         dto.docId,
         dto.data as Uint8Array,
         client.id,
@@ -660,12 +665,12 @@ export class PagesGateway
 
       if (updateFrame.length > 0) {
         const payload = {
-          projectId: dto.projectId,
+          spaceId: dto.spaceId,
           docId: dto.docId,
           data: updateFrame,
         };
         this.broadcastToDoc(
-          dto.projectId,
+          dto.spaceId,
           dto.docId,
           REALTIME_EVENTS.YJS_SYNC_UPDATE,
           payload,
@@ -695,7 +700,7 @@ export class PagesGateway
       avatar: clientData.avatar,
     });
 
-    this.broadcastToProject(dto.projectId, REALTIME_EVENTS.CHAT_NEW, message);
+    this.broadcastToProject(dto.spaceId, REALTIME_EVENTS.CHAT_NEW, message);
     return { success: true, message };
   }
 
@@ -705,7 +710,7 @@ export class PagesGateway
     @ConnectedSocket() _client: Socket,
     @MessageBody() dto: ProjectChatHistoryDto,
   ) {
-    const messages = await this.chatService.getHistoryAsync(dto.projectId);
+    const messages = await this.chatService.getHistoryAsync(dto.spaceId);
     return { success: true, messages };
   }
 

@@ -184,7 +184,7 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
       interface StoredRow {
         id: string;
         spaceId: string;
-        pageId: string | null;
+        pageId: string;
         parentId: string | null;
         type: 'FOLDER' | 'DOC' | 'FILE';
         name: string;
@@ -192,9 +192,6 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
         depth: number;
         docId: string | null;
         fileId: string | null;
-        isRootDoc: boolean;
-        sizeBytes: number;
-        hash: string | null;
         sortOrder: number;
         createdAt: Date;
         updatedAt: Date;
@@ -213,9 +210,6 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
           depth: 1,
           docId: null,
           fileId: null,
-          isRootDoc: false,
-          sizeBytes: 0,
-          hash: null,
           sortOrder: 0,
           createdAt: now,
           updatedAt: now,
@@ -231,9 +225,6 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
           depth: 2,
           docId: 'doc-id-a',
           fileId: null,
-          isRootDoc: false,
-          sizeBytes: 10,
-          hash: null,
           sortOrder: 0,
           createdAt: now,
           updatedAt: now,
@@ -249,9 +240,6 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
           depth: 1,
           docId: null,
           fileId: null,
-          isRootDoc: false,
-          sizeBytes: 0,
-          hash: null,
           sortOrder: 0,
           createdAt: now,
           updatedAt: now,
@@ -267,9 +255,6 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
           depth: 2,
           docId: 'doc-id-b',
           fileId: null,
-          isRootDoc: false,
-          sizeBytes: 10,
-          hash: null,
           sortOrder: 0,
           createdAt: now,
           updatedAt: now,
@@ -305,7 +290,9 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
             typeof where.path === 'object' &&
             where.path !== null &&
             'startsWith' in where.path &&
-            !row.path.startsWith((where.path as { startsWith: string }).startsWith)
+            !row.path.startsWith(
+              (where.path as { startsWith: string }).startsWith,
+            )
           ) {
             return false;
           }
@@ -320,11 +307,13 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
 
       const txMock = {
         pageNode: {
-          findFirst: jest.fn(async ({ where }: { where: Record<string, unknown> }) =>
-            rows.find((r) => matchesWhere(r, where)) ?? null,
+          findFirst: jest.fn(
+            async ({ where }: { where: Record<string, unknown> }) =>
+              rows.find((r) => matchesWhere(r, where)) ?? null,
           ),
-          findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) =>
-            rows.filter((r) => matchesWhere(r, where)),
+          findMany: jest.fn(
+            async ({ where }: { where: Record<string, unknown> }) =>
+              rows.filter((r) => matchesWhere(r, where)),
           ),
           update: jest.fn(
             async ({
@@ -361,8 +350,8 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
 
       const mockPrisma = {
         ...txMock,
-        $transaction: jest.fn(async (cb: (tx: typeof txMock) => Promise<unknown>) =>
-          cb(txMock),
+        $transaction: jest.fn(
+          async (cb: (tx: typeof txMock) => Promise<unknown>) => cb(txMock),
         ),
       } as unknown as PrismaService;
 
@@ -392,7 +381,7 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
       expect(deleted.map((n) => n.id)).toEqual(['folder-a', 'doc-a']);
       expect(rows.map((r) => r.id)).toEqual(['folder-b', 'doc-b']);
 
-      // ensurePrismaFolderChain with !pageId must scope findMany & findFirst with pageId: null
+      // ensurePrismaFolderChain with null pageId resolves non-null canonical pageId (SPACE_ID fallback)
       const findManyMock = jest.fn().mockResolvedValue([]);
       const findFirstMock = jest.fn().mockResolvedValue(null);
       const createMock = jest.fn(
@@ -408,7 +397,7 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
             findFirst: findFirstMock,
             create: createMock,
           },
-        } as never,
+        },
         SPACE_ID,
         [
           { name: 'a', path: '/a', depth: 1 },
@@ -416,22 +405,51 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
         ],
         null,
       );
-      expect(findManyMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            spaceId: SPACE_ID,
-            pageId: null,
-          }),
-        }),
-      );
-      expect(findFirstMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            spaceId: SPACE_ID,
-            pageId: null,
-          }),
-        }),
-      );
+      const findManyArg = (
+        findManyMock.mock.calls[0] as Array<{
+          where?: Record<string, unknown>;
+        }>
+      )[0];
+      expect(findManyArg?.where).toMatchObject({
+        spaceId: SPACE_ID,
+        pageId: SPACE_ID,
+      });
+      const findFirstArg = (
+        findFirstMock.mock.calls[0] as Array<{
+          where?: Record<string, unknown>;
+        }>
+      )[0];
+      expect(findFirstArg?.where).toMatchObject({
+        spaceId: SPACE_ID,
+        pageId: SPACE_ID,
+      });
+
+      // Promoting pre-synced FILE node from default pageId (SPACE_ID) via moveSubtree updates pageId on movedRoot and pageFile.lastKnownPath
+      const preSyncedRow: StoredRow = {
+        id: 'pre-synced-node',
+        spaceId: SPACE_ID,
+        pageId: SPACE_ID,
+        parentId: null,
+        type: 'FILE',
+        name: 'hero.png',
+        path: '/hero.png',
+        depth: 1,
+        docId: null,
+        fileId: 'file-hero',
+        sortOrder: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      rows.push(preSyncedRow);
+      await repo.moveSubtree(SPACE_ID, '/hero.png', '/assets/hero.png', null, {
+        nodeId: 'pre-synced-node',
+        pageId: PAGE_A_ID,
+      });
+      expect(preSyncedRow.pageId).toBe(PAGE_A_ID);
+      expect(txMock.pageFile.updateMany).toHaveBeenCalledWith({
+        where: { id: 'file-hero', spaceId: SPACE_ID },
+        data: { lastKnownPath: 'assets/hero.png', pageId: PAGE_A_ID },
+      });
     });
   });
 
@@ -442,14 +460,17 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
       } as unknown as ConfigService);
 
       const originalFetch = global.fetch;
-      const fetchMock = jest.fn().mockResolvedValue({
+      const fetchMock = jest.fn<
+        Promise<{ ok: boolean; json: () => Promise<unknown> }>,
+        [string, { body: string }]
+      >(async () => ({
         ok: true,
         json: async () => ({
           success: true,
           logs: '',
           durationMs: 12,
         }),
-      });
+      }));
       global.fetch = fetchMock as unknown as typeof fetch;
 
       try {
@@ -462,15 +483,13 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
             'main.tex': '\\documentclass{article}',
             'figures/logo.png': pngBytes,
           },
-          dto: {} as never,
+          dto: {},
           cacheKey: 'cache-1',
         });
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
-        const [, init] = fetchMock.mock.calls[0] as [
-          string,
-          { body: string },
-        ];
+        const call = fetchMock.mock.calls[0];
+        const init = call[1];
         const payload = JSON.parse(init.body) as {
           files: Record<string, string>;
         };
@@ -520,34 +539,29 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
           );
           createdRealSymlink = true;
         } catch {
-          createdRealSymlink = false;
+          // On Windows without SeCreateSymbolicLinkPrivilege, a directory junction
+          // whose target is then deleted produces a genuine dangling symlink.
+          const targetDir = await fs.mkdtemp(
+            path.join(os.tmpdir(), 'safepath-target-'),
+          );
+          const junctionPath = path.join(tmpBase, 'dangling-dir');
+          await fs.symlink(targetDir, junctionPath, 'junction');
+          await fs.rm(targetDir, { recursive: true, force: true });
+          await expect(
+            SafePath.assertSafeWorkspacePath(tmpBase, 'dangling-dir'),
+          ).rejects.toThrow(UnsafePathException);
+          await expect(
+            SafePath.assertSafeWorkspacePath(
+              tmpBase,
+              'dangling-dir/secret.tex',
+            ),
+          ).rejects.toThrow(UnsafePathException);
         }
 
         if (createdRealSymlink) {
           await expect(
             SafePath.assertSafeWorkspacePath(tmpBase, 'dangling.tex'),
           ).rejects.toThrow(UnsafePathException);
-        } else {
-          // Fallback on Windows environments without symlink creation privileges
-          const realpathSpy = jest
-            .spyOn(fs, 'realpath')
-            .mockImplementation(async (target) => {
-              if (String(target) === tmpBase) return tmpBase;
-              throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-            });
-          const lstatSpy = jest
-            .spyOn(fs, 'lstat')
-            .mockResolvedValue({
-              isSymbolicLink: () => true,
-            } as unknown as Awaited<ReturnType<typeof fs.lstat>>);
-          try {
-            await expect(
-              SafePath.assertSafeWorkspacePath(tmpBase, 'dangling.tex'),
-            ).rejects.toThrow(UnsafePathException);
-          } finally {
-            realpathSpy.mockRestore();
-            lstatSpy.mockRestore();
-          }
         }
       } finally {
         await fs.rm(tmpBase, { recursive: true, force: true });
@@ -561,7 +575,7 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
         id: DOC_A_MAIN_ID,
         spaceId: SPACE_ID,
         pageId: PAGE_A_ID,
-        path: '/main.tex',
+        lastKnownPath: 'main.tex',
         lines: ['\\documentclass{article}'],
         inStorage: false,
         version: 1,
@@ -651,7 +665,7 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
         id: DOC_B_MAIN_ID,
         spaceId: SPACE_ID,
         pageId: PAGE_B_ID,
-        path: '/main.tex',
+        lastKnownPath: 'main.tex',
         lines: ['\\documentclass{article}', 'Page B'],
         inStorage: false,
         version: 1,
@@ -672,7 +686,7 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
         id: unscopedLegacyDocId,
         spaceId: SPACE_ID,
         pageId: null,
-        path: '/legacy.tex',
+        lastKnownPath: 'legacy.tex',
         lines: ['Legacy secret'],
         inStorage: false,
         version: 1,
@@ -714,7 +728,11 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
         },
         pageDoc: {
           findFirst: jest.fn(
-            async ({ where }: { where: { OR?: Array<Record<string, unknown>>; id?: string } }) => {
+            async ({
+              where,
+            }: {
+              where: { OR?: Array<Record<string, unknown>>; id?: string };
+            }) => {
               if (where.id === DOC_B_MAIN_ID) return page2RootDoc;
               if (
                 where.OR?.some(
@@ -802,7 +820,9 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
           dataStream: Readable.from(Buffer.from('test')),
         })),
         findByProjectAndName: jest.fn().mockResolvedValue(null),
-        buildStorageKey: jest.fn(() => ({ getValue: () => 'blobs/aa/aa/rest' })),
+        buildStorageKey: jest.fn(() => ({
+          getValue: () => 'blobs/aa/aa/rest',
+        })),
         checkObjectExists: jest.fn().mockResolvedValue(true),
         save: jest.fn(async (file: ManuscriptFile) => file),
       };
@@ -844,7 +864,7 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
             timedOut: false,
           }),
         };
-        const engine = new LatexmkEngine(runner as never);
+        const engine = new LatexmkEngine(runner);
         const result = await engine.compile({
           cwd: tmpCwd,
           mainFile: 'paper/main.tex',
@@ -852,12 +872,12 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
 
         expect(result.pdfGenerated).toBe(true);
         expect(result.synctexGenerated).toBe(true);
-        expect(
-          await fs.readFile(path.join(tmpCwd, 'output.pdf'), 'utf8'),
-        ).toBe('%PDF-1.5');
-        expect(
-          await fs.readFile(path.join(tmpCwd, 'output.log'), 'utf8'),
-        ).toBe('log-ok');
+        expect(await fs.readFile(path.join(tmpCwd, 'output.pdf'), 'utf8')).toBe(
+          '%PDF-1.5',
+        );
+        expect(await fs.readFile(path.join(tmpCwd, 'output.log'), 'utf8')).toBe(
+          'log-ok',
+        );
       } finally {
         await fs.rm(tmpCwd, { recursive: true, force: true });
       }

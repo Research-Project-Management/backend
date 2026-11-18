@@ -69,6 +69,11 @@ export class TexWordCounter implements IWordCounter {
         onMatch(inner, cmdName, match.index);
         lastIdx = i;
         regex.lastIndex = i;
+      } else {
+        result += input.slice(lastIdx, match.index) + ' ';
+        onMatch(input.slice(openBraceIdx + 1), cmdName, match.index);
+        lastIdx = input.length;
+        break;
       }
     }
 
@@ -189,6 +194,17 @@ export class TexWordCounter implements IWordCounter {
 
     const sections = withSections ? this.extractSections(processed) : [];
 
+    // 1. Remove %TC:ignore ... %TC:endignore and \iffalse ... \fi blocks
+    processed = processed.replace(
+      /%\s*TC:ignore[\s\S]*?%\s*TC:endignore/gi,
+      '',
+    );
+    processed = processed.replace(/\\iffalse\b[\s\S]*?\\fi\b/g, '');
+
+    // 2. Remove standard LaTeX comments (% to end of line, avoiding escaped \%) BEFORE document slicing
+    processed = processed.replace(/^%.*$/gm, '');
+    processed = processed.replace(/(?<!\\)%.*$/gm, '');
+
     // Strip preamble before \begin{document} if present
     const docStartMatch = /\\begin\{document\}/.exec(processed);
     if (docStartMatch) {
@@ -200,14 +216,6 @@ export class TexWordCounter implements IWordCounter {
     if (docEndMatch) {
       processed = processed.slice(0, docEndMatch.index);
     }
-
-    // 1. Remove %TC:ignore ... %TC:endignore and \iffalse ... \fi blocks
-    processed = processed.replace(/%\s*TC:ignore[\s\S]*?%\s*TC:endignore/gi, '');
-    processed = processed.replace(/\\iffalse\b[\s\S]*?\\fi\b/g, '');
-
-    // 2. Remove standard LaTeX comments (% to end of line, avoiding escaped \%)
-    processed = processed.replace(/^%.*$/gm, '');
-    processed = processed.replace(/(?<!\\)%.*$/gm, '');
 
     // 2b. Extract bibliography / \bibitem blocks
     const bibResult = this.extractBibliographyWords(processed);
@@ -346,12 +354,7 @@ export class TexWordCounter implements IWordCounter {
     filename = 'document.tex',
     options?: { includeBib?: boolean },
   ): WordCountStats {
-    return this.countInternal(
-      source,
-      filename,
-      options?.includeBib,
-      true,
-    );
+    return this.countInternal(source, filename, options?.includeBib, true);
   }
 
   public countProject(
@@ -399,17 +402,33 @@ export class TexWordCounter implements IWordCounter {
     const allSections: WordCountSection[] = [];
     const perFileStats: WordCountFileStats[] = [];
 
+    const cleanRoot = (options?.rootFile || 'main.tex').replace(/^\/+/, '');
+    const rootEntry =
+      entries.find(([fp]) => fp.replace(/^\/+/, '') === cleanRoot) ??
+      entries.find(([fp]) => fp.toLowerCase().endsWith('.tex'));
+    const hasIncBibDirective = Boolean(
+      rootEntry?.[1]?.match(/^\s*%\s*TC:incbib\b/im) ||
+      entries.some(
+        ([fp, text]) =>
+          fp.toLowerCase().endsWith('.tex') &&
+          /^\s*%\s*TC:incbib\b/im.test(text),
+      ),
+    );
+    const effectiveIncludeBib = Boolean(
+      options?.includeBib || hasIncBibDirective,
+    );
+
     for (const [filePath, content] of entries) {
       const cleanName = filePath.replace(/^\/+/, '');
       const isBbl = cleanName.toLowerCase().endsWith('.bbl');
-      if (isBbl && !options?.includeBib) {
+      if (isBbl && !effectiveIncludeBib) {
         continue;
       }
 
       const fileStats = this.countInternal(
         content,
         cleanName,
-        options?.includeBib,
+        effectiveIncludeBib,
         true,
       );
 
@@ -450,7 +469,7 @@ export class TexWordCounter implements IWordCounter {
       totalWordsInText +
       totalWordsInHeaders +
       totalWordsInCaptions +
-      (options?.includeBib ? totalWordsInBibliography : 0);
+      (effectiveIncludeBib ? totalWordsInBibliography : 0);
     const readingTimeMinutes =
       totalWords > 0 ? Math.max(1, Math.ceil(totalWords / 200)) : 0;
 

@@ -38,6 +38,7 @@ import {
   NoProjectContext,
   ProjectAccessGuard,
   RequireRole,
+  ResolvedSpace,
   Role,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
@@ -259,31 +260,39 @@ export class GitBridgeController {
   }
 
   @Get([
-    'api/v1/pages/projects/:projectId/git',
-    'api/v1/manuscripts/projects/:projectId/git',
+    'api/v1/pages/spaces/:spaceId/git',
+    'api/v1/pages/:pageId/git',
+    'api/v1/pages/pages/:pageId/git',
   ])
   @UseGuards(JwtAuthGuard, ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @ApiBearerAuth('JWT-auth')
   async repoInfo(
-    @Param('projectId') projectId: string,
-    @CurrentUser('id') userId: string,
-    @Req() req: FastifyRequest,
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @ResolvedSpace() resolvedSpaceId?: string,
+    @CurrentUser('id') userId?: string,
+    @Req() req?: FastifyRequest,
   ) {
+    const projectId = resolvedSpaceId || routePageId || routeSpaceId || '';
+    const resolvedUserId = userId || '';
     if (!parseRepoName(projectId))
       throw new BadRequestException('Invalid project id');
-    const role = await this.gitBridgeService.resolveRole(projectId, userId);
+    const role = await this.gitBridgeService.resolveRole(
+      projectId,
+      resolvedUserId,
+    );
     if (!canRead(role)) throw new NotFoundException('Project not found');
     return {
       enabled: true,
-      cloneUrl: this.cloneUrl(req, projectId),
+      cloneUrl: this.cloneUrl(req as FastifyRequest, projectId),
       branch: GIT_DEFAULT_BRANCH,
       canPush: canWrite(role),
-      tokens: await this.gitBridgeService.listTokens(userId),
+      tokens: await this.gitBridgeService.listTokens(resolvedUserId),
     };
   }
 
-  @Get(['api/v1/pages/git/tokens', 'api/v1/manuscripts/git/tokens'])
+  @Get('api/v1/pages/git/tokens')
   @UseGuards(JwtAuthGuard)
   @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
@@ -291,7 +300,7 @@ export class GitBridgeController {
     return { tokens: await this.gitBridgeService.listTokens(userId) };
   }
 
-  @Post(['api/v1/pages/git/tokens', 'api/v1/manuscripts/git/tokens'])
+  @Post('api/v1/pages/git/tokens')
   @UseGuards(JwtAuthGuard)
   @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
@@ -312,10 +321,7 @@ export class GitBridgeController {
     }
   }
 
-  @Delete([
-    'api/v1/pages/git/tokens/:tokenId',
-    'api/v1/manuscripts/git/tokens/:tokenId',
-  ])
+  @Delete('api/v1/pages/git/tokens/:tokenId')
   @UseGuards(JwtAuthGuard)
   @NoProjectContext()
   @ApiBearerAuth('JWT-auth')

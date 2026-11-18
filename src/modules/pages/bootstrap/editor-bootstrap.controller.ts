@@ -11,15 +11,15 @@ import {
   MemberAccessContext,
   ProjectAccessGuard,
   RequireRole,
-  ResolvedProject,
+  ResolvedSpace,
   Role,
 } from '@/modules/project/access';
 import { EditorBootstrapService } from './editor-bootstrap.service';
 import type { EditorBootstrapResponseDto } from './editor-bootstrap.types';
 
-@ApiTags('Manuscripts - Editor Bootstrap BFF')
+@ApiTags('Pages - Editor Bootstrap BFF')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/pages', 'api/v1/manuscripts'])
+@Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class EditorBootstrapController {
@@ -30,7 +30,7 @@ export class EditorBootstrapController {
   @Get([
     'pages/:pageId/bootstrap',
     'docs/:pageId/bootstrap',
-    'projects/:projectId/bootstrap',
+    'spaces/:spaceId/bootstrap',
   ])
   @ApiOperation({
     summary:
@@ -38,18 +38,18 @@ export class EditorBootstrapController {
   })
   async getEditorBootstrap(
     @Param('pageId') pageId?: string,
-    @Param('projectId') projectId?: string,
+    @Param('spaceId') spaceId?: string,
     @Query('fileId') fileId?: string,
     @Query('file') fileAlias?: string,
     @CurrentUser('id') userId?: string,
-    @ResolvedProject() resolvedProject?: string | { id?: string } | null,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string } | null,
     @CurrentAccessContext() accessCtx?: MemberAccessContext | null,
   ): Promise<EditorBootstrapResponseDto> {
     return this.editorBootstrapService.bootstrapEditor({
-      pageOrProjectId: pageId || projectId || '',
+      pageOrProjectId: pageId || spaceId || '',
       userId: userId || '',
       requestedFileId: fileId || fileAlias,
-      authorizedProjectId: resolvedProject,
+      authorizedProjectId: resolvedSpace,
       role: accessCtx?.role ?? null,
     });
   }

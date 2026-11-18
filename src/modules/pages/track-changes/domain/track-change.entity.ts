@@ -12,6 +12,8 @@ export type ChangeStatus = 'pending' | 'accepted' | 'rejected';
 export interface CreateTrackChangeProps {
   id?: string;
   projectId: string;
+  spaceId?: string;
+  pageId?: string | null;
   docId: string;
   type: ChangeType;
   status?: ChangeStatus;
@@ -25,6 +27,9 @@ export interface CreateTrackChangeProps {
 }
 
 export class TrackChangeDomainException extends Error {
+  public readonly statusCode = 400;
+  public readonly code = 'INVALID_TRACK_CHANGE';
+
   constructor(message: string) {
     super(message);
     this.name = 'TrackChangeDomainException';
@@ -34,6 +39,8 @@ export class TrackChangeDomainException extends Error {
 export class TrackChange {
   private readonly _id: string;
   private readonly _projectId: string;
+  private readonly _spaceId: string;
+  private readonly _pageId: string | null;
   private readonly _docId: string;
   private readonly _type: ChangeType;
   private _status: ChangeStatus;
@@ -46,7 +53,8 @@ export class TrackChange {
   private _updatedAt: Date;
 
   public constructor(props: CreateTrackChangeProps) {
-    if (!props.projectId || !props.projectId.trim()) {
+    const resolvedSpaceId = props.spaceId ?? props.projectId;
+    if (!resolvedSpaceId || !resolvedSpaceId.trim()) {
       throw new TrackChangeDomainException('Project ID cannot be empty.');
     }
     if (!props.docId || !props.docId.trim()) {
@@ -54,7 +62,9 @@ export class TrackChange {
     }
 
     this._id = props.id ?? crypto.randomUUID();
-    this._projectId = props.projectId;
+    this._projectId = resolvedSpaceId;
+    this._spaceId = resolvedSpaceId;
+    this._pageId = props.pageId ?? null;
     this._docId = props.docId;
     this._type = props.type;
     this._status = props.status ?? 'pending';
@@ -76,6 +86,12 @@ export class TrackChange {
   }
   public get projectId(): string {
     return this._projectId;
+  }
+  public get spaceId(): string {
+    return this._spaceId;
+  }
+  public get pageId(): string | null {
+    return this._pageId;
   }
   public get docId(): string {
     return this._docId;

@@ -53,6 +53,8 @@ export class CreateDocDto {
   @IsString()
   pageId?: string | null;
 
+  id?: string;
+
   tx?: Prisma.TransactionClient;
 }
 
@@ -125,8 +127,17 @@ export class DocResponseDto {
   @ApiPropertyOptional({ description: 'Alias for _id' })
   id?: string;
 
+  @ApiPropertyOptional({ description: 'Owning workspace space identifier' })
+  spaceId?: string;
+
   @ApiPropertyOptional({ description: 'Owning project identifier' })
   projectId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Owning ManuscriptPage identifier',
+    nullable: true,
+  })
+  pageId?: string | null;
 
   @ApiProperty({ description: 'Relative file path' })
   path!: string;

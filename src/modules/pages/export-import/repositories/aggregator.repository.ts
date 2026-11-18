@@ -74,11 +74,14 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
   private async flushAndResolveCandidates(
     projectId: string,
     cleanArxiv: boolean,
+    pageId?: string,
   ): Promise<{
     nodes: ManuscriptNodeEntity[];
     candidates: Array<{ node: ManuscriptNodeEntity; relPath: string }>;
   }> {
-    const nodes = await this.structureService.getAllNodes(projectId);
+    const nodes = pageId
+      ? await this.structureService.getAllNodes(projectId, undefined, pageId)
+      : await this.structureService.getAllNodes(projectId);
     const nonFolderNodes = nodes.filter((n) => n.type !== 'FOLDER');
 
     try {
@@ -110,10 +113,12 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     projectId: string,
     includePdf = false,
     cleanArxiv = false,
+    pageId?: string,
   ): Promise<ExportableFileEntry[]> {
     const { nodes, candidates } = await this.flushAndResolveCandidates(
       projectId,
       cleanArxiv,
+      pageId,
     );
 
     const results: ExportableFileEntry[] = [];
@@ -177,8 +182,13 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
             (await this.clsiService.readAuxFileBuffer(
               projectId,
               targetBblPath,
+              pageId,
             )) ||
-            (await this.clsiService.readAuxFileBuffer(projectId, 'output.bbl'));
+            (await this.clsiService.readAuxFileBuffer(
+              projectId,
+              'output.bbl',
+              pageId,
+            ));
 
           if (bblBuffer && bblBuffer.length > 0) {
             results.push({
@@ -197,6 +207,7 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
         const buildArtifact = await this.clsiService.readAuxFileBuffer(
           projectId,
           'output.pdf',
+          pageId,
         );
         if (buildArtifact) {
           results.push({
@@ -216,10 +227,12 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     projectId: string,
     includePdf = false,
     cleanArxiv = false,
+    pageId?: string,
   ): Promise<ExportableFileEntry[]> {
     const { candidates } = await this.flushAndResolveCandidates(
       projectId,
       cleanArxiv,
+      pageId,
     );
 
     const results: ExportableFileEntry[] = [];
@@ -254,7 +267,7 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
       const hasBbl = results.some((r) => r.path.endsWith('.bbl'));
       if (!hasBbl) {
         const bblBuffer = await this.clsiService
-          .readAuxFileBuffer(projectId, 'output.bbl')
+          .readAuxFileBuffer(projectId, 'output.bbl', pageId)
           .catch(() => null);
         if (bblBuffer && bblBuffer.length > 0) {
           results.push({
@@ -267,7 +280,7 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
 
     if (includePdf && this.clsiService) {
       const pdfBuffer = await this.clsiService
-        .readAuxFileBuffer(projectId, 'output.pdf')
+        .readAuxFileBuffer(projectId, 'output.pdf', pageId)
         .catch(() => null);
       if (pdfBuffer && pdfBuffer.length > 0) {
         results.push({
@@ -314,6 +327,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     entries: ArchiveEntryVo[],
     userId?: string | null,
     preferredRootDoc?: string,
+    pageId?: string,
   ): Promise<ImportSummaryVo> {
     let totalDocs = 0;
     let totalFiles = 0;
@@ -332,7 +346,13 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     let preFetchedNodesByPath: Map<string, ManuscriptNodeEntity> | null = null;
     if (typeof this.structureService.getAllNodes === 'function') {
       try {
-        const allNodes = await this.structureService.getAllNodes(projectId);
+        const allNodes = pageId
+          ? await this.structureService.getAllNodes(
+              projectId,
+              undefined,
+              pageId,
+            )
+          : await this.structureService.getAllNodes(projectId);
         if (Array.isArray(allNodes) && allNodes.length > 0) {
           preFetchedNodesByPath = new Map();
           for (const n of allNodes) {
@@ -355,7 +375,9 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
       if (preFetchedNodesByPath && preFetchedNodesByPath.has(normalizedPath)) {
         return preFetchedNodesByPath.get(normalizedPath) ?? null;
       }
-      return this.structureService.getNodeByPath(projectId, normalizedPath);
+      return pageId
+        ? this.structureService.getNodeByPath(projectId, normalizedPath, pageId)
+        : this.structureService.getNodeByPath(projectId, normalizedPath);
     };
 
     for (const entry of entries) {
@@ -374,8 +396,16 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
 
       if (!baseName) continue;
 
-      if (parentDir !== '/' && parentDir !== '.' && !createdDirs.has(parentDir)) {
-        await this.structureService.mkdirp(projectId, parentDir);
+      if (
+        parentDir !== '/' &&
+        parentDir !== '.' &&
+        !createdDirs.has(parentDir)
+      ) {
+        if (pageId) {
+          await this.structureService.mkdirp(projectId, parentDir, pageId);
+        } else {
+          await this.structureService.mkdirp(projectId, parentDir);
+        }
         let cur = parentDir;
         while (cur && cur !== '/' && cur !== '.') {
           createdDirs.add(cur);
@@ -385,7 +415,15 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
 
       if (entry.isDirectory) {
         if (!createdDirs.has(normalizedPath)) {
-          await this.structureService.mkdirp(projectId, normalizedPath);
+          if (pageId) {
+            await this.structureService.mkdirp(
+              projectId,
+              normalizedPath,
+              pageId,
+            );
+          } else {
+            await this.structureService.mkdirp(projectId, normalizedPath);
+          }
           let cur = normalizedPath;
           while (cur && cur !== '/' && cur !== '.') {
             createdDirs.add(cur);
@@ -451,17 +489,27 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
         const doc = await this.docstoreService.createDoc(projectId, {
           path: normalizedPath,
           lines,
+          ...(pageId ? { pageId } : {}),
         });
 
-        const createdDocNode = await this.structureService.createNode(
-          projectId,
-          {
-            path: normalizedPath,
-            name: baseName,
-            type: 'DOC',
-            docId: doc._id,
-          },
-        );
+        const createdDocNode = pageId
+          ? await this.structureService.createNode(
+              projectId,
+              {
+                path: normalizedPath,
+                name: baseName,
+                type: 'DOC',
+                docId: doc._id,
+                pageId,
+              },
+              pageId,
+            )
+          : await this.structureService.createNode(projectId, {
+              path: normalizedPath,
+              name: baseName,
+              type: 'DOC',
+              docId: doc._id,
+            });
         if (createdDocNode && preFetchedNodesByPath) {
           preFetchedNodesByPath.set(normalizedPath, createdDocNode);
         }
@@ -485,12 +533,20 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
 
         if (existingNode && existingNode.type === 'FILE') {
           const previousFileId = existingNode.fileId;
-          const file = await this.filestoreService.uploadFileFromBuffer(
-            projectId,
-            cleanRelPath || baseName,
-            entry.data,
-            mimeType,
-          );
+          const file = pageId
+            ? await this.filestoreService.uploadFileFromBuffer(
+                projectId,
+                cleanRelPath || baseName,
+                entry.data,
+                mimeType,
+                { pageId },
+              )
+            : await this.filestoreService.uploadFileFromBuffer(
+                projectId,
+                cleanRelPath || baseName,
+                entry.data,
+                mimeType,
+              );
           await this.structureService
             .updateNodeFileId(
               projectId,
@@ -500,10 +556,16 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
               file.hash?.getValue() ?? String(file.hash),
             )
             .catch(async () => {
-              const recheck = await this.structureService.getNodeByPath(
-                projectId,
-                normalizedPath,
-              );
+              const recheck = pageId
+                ? await this.structureService.getNodeByPath(
+                    projectId,
+                    normalizedPath,
+                    pageId,
+                  )
+                : await this.structureService.getNodeByPath(
+                    projectId,
+                    normalizedPath,
+                  );
               if (recheck) {
                 await this.structureService.updateNodeFileId(
                   projectId,
@@ -535,34 +597,61 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
           preFetchedNodesByPath?.delete(normalizedPath);
         }
 
-        const file = await this.filestoreService.uploadFileFromBuffer(
-          projectId,
-          cleanRelPath || baseName,
-          entry.data,
-          mimeType,
-        );
+        const file = pageId
+          ? await this.filestoreService.uploadFileFromBuffer(
+              projectId,
+              cleanRelPath || baseName,
+              entry.data,
+              mimeType,
+              { pageId },
+            )
+          : await this.filestoreService.uploadFileFromBuffer(
+              projectId,
+              cleanRelPath || baseName,
+              entry.data,
+              mimeType,
+            );
 
         const alreadyCreated =
-          (await this.structureService.getNodeByPath(
-            projectId,
-            normalizedPath,
-          )) ??
+          (pageId
+            ? await this.structureService.getNodeByPath(
+                projectId,
+                normalizedPath,
+                pageId,
+              )
+            : await this.structureService.getNodeByPath(
+                projectId,
+                normalizedPath,
+              )) ??
           (file?.id
             ? await this.structureService
                 .getNodeById(projectId, file.id)
                 .catch(() => null)
             : null);
         if (!alreadyCreated) {
-          const createdFileNode = await this.structureService
-            .createNode(projectId, {
-              path: normalizedPath,
-              name: baseName,
-              type: 'FILE',
-              fileId: file.id,
-            })
-            .catch(() => undefined);
-          if (createdFileNode && preFetchedNodesByPath) {
-            preFetchedNodesByPath.set(normalizedPath, createdFileNode);
+          const createdFileNode = (
+            pageId
+              ? this.structureService.createNode(
+                  projectId,
+                  {
+                    path: normalizedPath,
+                    name: baseName,
+                    type: 'FILE',
+                    fileId: file.id,
+                    pageId,
+                  },
+                  pageId,
+                )
+              : this.structureService.createNode(projectId, {
+                  path: normalizedPath,
+                  name: baseName,
+                  type: 'FILE',
+                  fileId: file.id,
+                })
+          ).catch(() => undefined);
+          const resolvedFileNode = await createdFileNode;
+          if (resolvedFileNode && preFetchedNodesByPath) {
+            preFetchedNodesByPath.set(normalizedPath, resolvedFileNode);
           }
         } else if (preFetchedNodesByPath) {
           preFetchedNodesByPath.set(normalizedPath, alreadyCreated);
@@ -580,10 +669,13 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
         cleanPreferred = cleanPreferred.slice(wrapperPrefix.length + 1);
       }
       const preferredNorm = '/' + cleanPreferred;
-      const match = await this.structureService.getNodeByPath(
-        projectId,
-        preferredNorm,
-      );
+      const match = pageId
+        ? await this.structureService.getNodeByPath(
+            projectId,
+            preferredNorm,
+            pageId,
+          )
+        : await this.structureService.getNodeByPath(projectId, preferredNorm);
       if (match && match.type === 'DOC') {
         const updated = await this.structureService.setRootDoc(
           projectId,
@@ -595,10 +687,17 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     }
 
     if (!rootDocId) {
-      const detected = await this.structureService.autoDetectRootDoc(
-        projectId,
-        docContentsMap,
-      );
+      const detected = pageId
+        ? await this.structureService.autoDetectRootDoc(
+            projectId,
+            docContentsMap,
+            undefined,
+            pageId,
+          )
+        : await this.structureService.autoDetectRootDoc(
+            projectId,
+            docContentsMap,
+          );
 
       if (detected) {
         rootDocId = detected.docId || detected.id;

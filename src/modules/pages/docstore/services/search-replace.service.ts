@@ -13,6 +13,10 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
+import {
+  resolveSpaceRootDocIds,
+  type PageScopeDbClient,
+} from '@/modules/pages/core/page-scope.helper';
 import { DocstoreService } from '../docstore.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
@@ -30,6 +34,7 @@ export interface SearchDocumentsParams {
   useRegex?: boolean;
   fileIds?: string[];
   maxResults?: number;
+  pageId?: string;
 }
 
 export interface ReplaceDocumentsParams {
@@ -39,6 +44,7 @@ export interface ReplaceDocumentsParams {
   caseSensitive?: boolean;
   wholeWord?: boolean;
   useRegex?: boolean;
+  pageId?: string;
 }
 
 @Injectable()
@@ -54,7 +60,12 @@ export class SearchReplaceService {
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollabOrLegacyRef?:
       | LiveCollaborationPort
-      | { get?: (token: unknown, opts?: unknown) => LiveCollaborationPort | null }
+      | {
+          get?: (
+            token: unknown,
+            opts?: unknown,
+          ) => LiveCollaborationPort | null;
+        }
       | unknown,
     @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
     @Optional()
@@ -72,14 +83,20 @@ export class SearchReplaceService {
         liveCollabOrLegacyRef &&
         typeof (
           liveCollabOrLegacyRef as {
-            get?: (token: unknown, opts?: unknown) => LiveCollaborationPort | null;
+            get?: (
+              token: unknown,
+              opts?: unknown,
+            ) => LiveCollaborationPort | null;
           }
         ).get === 'function'
       ) {
         try {
           resolved = (
             liveCollabOrLegacyRef as {
-              get: (token: unknown, opts?: unknown) => LiveCollaborationPort | null;
+              get: (
+                token: unknown,
+                opts?: unknown,
+              ) => LiveCollaborationPort | null;
             }
           ).get(LiveCollaborationPort, { strict: false });
         } catch {
@@ -166,6 +183,9 @@ export class SearchReplaceService {
         spaceId: projectId,
         deletedAt: null,
       };
+      if (body?.pageId && isUuid(body.pageId)) {
+        where.pageId = body.pageId;
+      }
       if (Array.isArray(body?.fileIds) && body.fileIds.length > 0) {
         where.id = { in: body.fileIds.filter((id) => isUuid(id)) };
       }
@@ -180,22 +200,36 @@ export class SearchReplaceService {
         await live.flushDocs(projectId, targetDocIds).catch(() => []);
       }
 
-      const [docs, rootNodes] = await Promise.all([
+      const [docs, rootDocIds] = await Promise.all([
         this.prisma.pageDoc.findMany({
           where,
-          select: { id: true, path: true, lines: true, inStorage: true },
+          select: {
+            id: true,
+            lastKnownPath: true,
+            lines: true,
+            inStorage: true,
+            node: { select: { path: true } },
+          },
         }),
-        this.prisma.pageNode
-          .findMany({
-            where: { spaceId: projectId, isRootDoc: true },
-            select: { docId: true },
-          })
-          .catch(() => [] as Array<{ docId: string | null }>),
+        body?.pageId && isUuid(body.pageId) && this.prisma.page?.findMany
+          ? Promise.resolve(
+              this.prisma.page.findMany({
+                where: { id: body.pageId, spaceId: projectId, deletedAt: null },
+                select: { rootDocId: true },
+              }),
+            ).then(
+              (rows) =>
+                new Set(
+                  rows
+                    .map((r) => r.rootDocId)
+                    .filter((id): id is string => Boolean(id)),
+                ),
+            )
+          : resolveSpaceRootDocIds(
+              this.prisma as unknown as PageScopeDbClient,
+              projectId,
+            ),
       ]);
-
-      const rootDocIds = new Set(
-        rootNodes.map((n) => n.docId).filter((id): id is string => !!id),
-      );
 
       const maxResults =
         typeof body?.maxResults === 'number' && body.maxResults > 0
@@ -250,13 +284,14 @@ export class SearchReplaceService {
         }
 
         if (matches.length > 0) {
-          const cleanPath = (doc.path || '').replace(/^\//, '');
+          const docPath = doc.node?.path || doc.lastKnownPath || 'document.tex';
+          const cleanPath = docPath.replace(/^\//, '');
           results.push({
             fileId: doc.id,
-            fileName: doc.path || 'document.tex',
+            fileName: cleanPath || 'document.tex',
             isMainFile:
               rootDocIds.has(doc.id) ||
-              doc.path === 'main.tex' ||
+              docPath === 'main.tex' ||
               cleanPath === 'main.tex',
             totalMatches: matches.length,
             matches,
@@ -310,6 +345,9 @@ export class SearchReplaceService {
       spaceId: projectId,
       deletedAt: null,
     };
+    if (body?.pageId && isUuid(body.pageId)) {
+      where.pageId = body.pageId;
+    }
     if (Array.isArray(body?.fileIds) && body.fileIds.length > 0) {
       where.id = { in: body.fileIds.filter((id) => isUuid(id)) };
     }
@@ -329,7 +367,13 @@ export class SearchReplaceService {
 
     const docs = await this.prisma.pageDoc.findMany({
       where: { id: { in: candidateIds } },
-      select: { id: true, lines: true, version: true, rev: true, inStorage: true },
+      select: {
+        id: true,
+        lines: true,
+        version: true,
+        rev: true,
+        inStorage: true,
+      },
       take: 1000,
     });
 

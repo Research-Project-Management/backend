@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/domain/line-array.ts
+ * modules/pages/docstore/domain/line-array.ts
  * High-performance line-array manipulation, CRLF normalization, BOM stripping,
  * null-byte defensive guard, and splice operations.
  * Matches Overleaf DocManager and HttpController line processing.

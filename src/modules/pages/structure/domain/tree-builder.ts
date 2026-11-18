@@ -4,10 +4,7 @@
  * detecting root compilation documents (Overleaf _rootDocSort), and validating path rules.
  */
 
-import {
-  ManuscriptNodeEntity,
-  SerializedTreeNode,
-} from './node.entity';
+import { ManuscriptNodeEntity, SerializedTreeNode } from './node.entity';
 import { NodePathVo } from './node-path';
 import { MaxProjectFilesExceededError } from './structure.errors';
 
@@ -35,7 +32,10 @@ export class FileTreeBuilder {
       parentLookup.set(node.id, node.parentId ?? null);
     }
 
-    const hasParentCycle = (startId: string, candidateParentId: string): boolean => {
+    const hasParentCycle = (
+      startId: string,
+      candidateParentId: string,
+    ): boolean => {
       const visited = new Set<string>([startId]);
       let curr: string | null | undefined = candidateParentId;
       while (curr) {

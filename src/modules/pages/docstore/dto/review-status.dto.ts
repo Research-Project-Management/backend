@@ -4,7 +4,13 @@
  */
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsISO8601, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsIn,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import type { ReviewRoundInfo } from '../domain';
 
 export const REVIEW_STATUSES = [
@@ -19,21 +25,22 @@ export const REVIEW_STATUSES = [
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 
 /** Allowed next states per current state (same-state updates are idempotent). */
-export const REVIEW_TRANSITIONS: Record<ReviewStatus, readonly ReviewStatus[]> = {
-  draft: ['in_review'],
-  in_review: ['changes_requested', 'approved', 'draft'],
-  changes_requested: ['in_review', 'draft'],
-  approved: ['submitted', 'in_review', 'draft'],
-  submitted: ['locked', 'in_review', 'draft'],
-  locked: ['draft'],
-};
+export const REVIEW_TRANSITIONS: Record<ReviewStatus, readonly ReviewStatus[]> =
+  {
+    draft: ['in_review'],
+    in_review: ['changes_requested', 'approved', 'draft'],
+    changes_requested: ['in_review', 'draft'],
+    approved: ['submitted', 'in_review', 'draft'],
+    submitted: ['locked', 'in_review', 'draft'],
+    locked: ['draft'],
+  };
 
 export function isReviewTransitionAllowed(
   from: ReviewRoundInfo['status'],
   to: ReviewStatus,
 ): boolean {
   if (from === to) return true;
-  return REVIEW_TRANSITIONS[from as ReviewStatus]?.includes(to) ?? false;
+  return REVIEW_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
 export interface ReviewTransitionCandidate {
@@ -132,7 +139,7 @@ export const defaultReviewTransitionPolicy = new ReviewTransitionPolicy();
 
 export class UpdateReviewStatusDto {
   @ApiProperty({ enum: REVIEW_STATUSES })
-  @IsIn(REVIEW_STATUSES as unknown as string[])
+  @IsIn(REVIEW_STATUSES)
   status!: ReviewStatus;
 
   @ApiPropertyOptional({ maxLength: 2000 })

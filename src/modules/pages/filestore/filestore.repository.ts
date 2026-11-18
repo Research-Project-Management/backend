@@ -1,12 +1,13 @@
 /**
- * filestore/filestore.repository.ts
- * Direct @Injectable() Prisma Persistence Repository & Domain Mapper for Manuscripts Filestore.
+ * modules/pages/filestore/filestore.repository.ts
+ * Direct @Injectable() Prisma Persistence Repository & Domain Mapper for Pages Binary Filestore.
  */
 
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { PageFile as PrismaPageFile } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
+import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
 import {
   filterRecordsByPageScope,
   resolveCanonicalManuscriptPageId,
@@ -24,6 +25,7 @@ import {
   ManuscriptFile,
   ContentHash,
   StorageKey,
+  DuplicateFileException,
 } from './filestore.types';
 import {
   ContentHasherAdapter,
@@ -40,23 +42,24 @@ export {
 };
 
 export class ManuscriptFileMapper {
-  public static toDomain(row: PrismaPageFile): ManuscriptFile {
+  public static toDomain(
+    row: PrismaPageFile & { name?: string },
+  ): ManuscriptFile {
     const projectId =
       row.spaceId ?? (row as { projectId?: string }).projectId ?? '';
     return ManuscriptFile.reconstitute({
       id: row.id,
       projectId,
-      pageId: (row as { pageId?: string | null }).pageId ?? null,
-      name: row.name,
+      pageId: row.pageId ?? null,
+      blobId: row.blobId ?? null,
+      name: row.lastKnownPath ?? row.name ?? 'unnamed.bin',
       mimeType: row.mimeType,
       sizeBytes: row.sizeBytes,
       hash: ContentHash.create(row.hash),
       storageKey: StorageKey.fromRawKey(row.storageKey),
       bucketName: row.bucketName,
       rev: row.rev,
-      deleted: Boolean(
-        row.deletedAt ?? (row as { deleted?: boolean }).deleted,
-      ),
+      deleted: Boolean(row.deletedAt ?? (row as { deleted?: boolean }).deleted),
       deletedAt: row.deletedAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -68,7 +71,8 @@ export class ManuscriptFileMapper {
     spaceId: string;
     projectId: string;
     pageId?: string | null;
-    name: string;
+    blobId?: string | null;
+    lastKnownPath: string;
     mimeType: string;
     sizeBytes: number;
     hash: string;
@@ -83,7 +87,8 @@ export class ManuscriptFileMapper {
       spaceId: entity.projectId,
       projectId: entity.projectId,
       ...(entity.pageId ? { pageId: entity.pageId } : {}),
-      name: entity.name,
+      blobId: entity.blobId,
+      lastKnownPath: entity.name,
       mimeType: entity.mimeType,
       sizeBytes: entity.sizeBytes,
       hash: entity.hash.getValue(),
@@ -91,9 +96,7 @@ export class ManuscriptFileMapper {
       bucketName: entity.bucketName,
       rev: entity.rev,
       deleted: entity.deleted,
-      deletedAt: entity.deleted
-        ? (entity.deletedAt ?? new Date())
-        : null,
+      deletedAt: entity.deleted ? (entity.deletedAt ?? new Date()) : null,
     };
   }
 }
@@ -174,14 +177,20 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     options?: { syncStructureNode?: boolean },
   ): Promise<ManuscriptFile> {
     const data = ManuscriptFileMapper.toPersistence(file);
+    const effectivePageId = await ensureCanonicalPageId(
+      this.prisma,
+      data.spaceId,
+      data.pageId,
+    );
 
     const upserted = await this.prisma.pageFile.upsert({
       where: { id: data.id },
       create: {
         id: data.id,
         spaceId: data.spaceId,
-        ...(data.pageId ? { pageId: data.pageId } : {}),
-        name: data.name,
+        pageId: effectivePageId,
+        blobId: data.blobId ?? null,
+        lastKnownPath: data.lastKnownPath,
         mimeType: data.mimeType,
         sizeBytes: data.sizeBytes,
         hash: data.hash,
@@ -191,8 +200,9 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         deletedAt: data.deletedAt,
       },
       update: {
-        ...(data.pageId ? { pageId: data.pageId } : {}),
-        name: data.name,
+        pageId: effectivePageId,
+        ...(data.blobId !== undefined ? { blobId: data.blobId } : {}),
+        lastKnownPath: data.lastKnownPath,
         mimeType: data.mimeType,
         sizeBytes: data.sizeBytes,
         hash: data.hash,
@@ -204,7 +214,10 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     });
 
     if (options?.syncStructureNode !== false) {
-      await this.syncFileNode(data);
+      await this.syncFileNode({
+        ...data,
+        pageId: effectivePageId,
+      });
     }
 
     return ManuscriptFileMapper.toDomain(upserted);
@@ -214,8 +227,8 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     id: string;
     spaceId: string;
     projectId: string;
-    pageId?: string | null;
-    name: string;
+    pageId: string;
+    lastKnownPath: string;
     sizeBytes: number;
     hash: string;
     deleted: boolean;
@@ -235,7 +248,10 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         return;
       }
 
-      const parsed = NodePathVo.parse(data.name || 'unnamed.bin', 'unnamed.bin');
+      const parsed = NodePathVo.parse(
+        data.lastKnownPath || 'unnamed.bin',
+        'unnamed.bin',
+      );
 
       const existingByFileId = await this.prisma.pageNode.findFirst?.({
         where: {
@@ -257,10 +273,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         await this.prisma.pageNode.updateMany?.({
           where: { id: existingByFileId.id, spaceId: data.spaceId },
           data: {
-            sizeBytes: data.sizeBytes,
-            hash: data.hash,
-            ...(data.pageId &&
-            !(existingByFileId as { pageId?: string | null }).pageId
+            ...(data.pageId && existingByFileId.pageId !== data.pageId
               ? { pageId: data.pageId }
               : {}),
             ...(pathChanged
@@ -284,32 +297,38 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       );
 
       const existingByPath =
-        (data.pageId
-          ? await this.prisma.pageNode.findUnique?.({
-              where: {
-                pageId_path: {
-                  pageId: data.pageId,
-                  path: parsed.normalizedPath,
-                },
-              },
-            })
-          : null) ??
+        (await this.prisma.pageNode.findUnique?.({
+          where: {
+            pageId_path: {
+              pageId: data.pageId,
+              path: parsed.normalizedPath,
+            },
+          },
+        })) ??
         (await this.prisma.pageNode.findFirst?.({
           where: {
             spaceId: data.spaceId,
-            ...(data.pageId ? { pageId: data.pageId } : { pageId: null }),
+            pageId: data.pageId,
             path: parsed.normalizedPath,
           },
         }));
 
       if (existingByPath) {
         if (existingByPath.type === 'FILE') {
+          if (existingByPath.fileId && existingByPath.fileId !== data.id) {
+            await this.prisma.pageFile?.updateMany?.({
+              where: {
+                id: existingByPath.fileId,
+                spaceId: data.spaceId,
+                deletedAt: null,
+              },
+              data: { deletedAt: new Date() },
+            });
+          }
           await this.prisma.pageNode.updateMany?.({
             where: { id: existingByPath.id, spaceId: data.spaceId },
             data: {
               fileId: data.id,
-              sizeBytes: data.sizeBytes,
-              hash: data.hash,
             },
           });
         }
@@ -320,16 +339,13 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         await this.prisma.pageNode.create({
           data: {
             spaceId: data.spaceId,
-            ...(data.pageId ? { pageId: data.pageId } : {}),
+            pageId: data.pageId,
             parentId,
             type: 'FILE',
             name: parsed.leafName,
             path: parsed.normalizedPath,
             depth: parsed.depth,
             fileId: data.id,
-            isRootDoc: false,
-            sizeBytes: data.sizeBytes,
-            hash: data.hash,
             sortOrder: 0,
           },
         });
@@ -341,15 +357,53 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     }
   }
 
+  public async assertUploadPathAvailable(
+    projectId: string,
+    relativePath: string,
+    pageId?: string | null,
+  ): Promise<void> {
+    if (!this.prisma.pageNode?.findFirst) return;
+    const parsed = NodePathVo.parse(relativePath);
+    const trimmedPageId = pageId?.trim() || undefined;
+    const pageFilter = trimmedPageId ? { pageId: trimmedPageId } : {};
+
+    const existingAtTarget = await Promise.resolve(
+      this.prisma.pageNode.findFirst({
+        where: {
+          spaceId: projectId,
+          ...pageFilter,
+          path: parsed.normalizedPath,
+        },
+        select: { id: true, type: true },
+      }),
+    ).catch(() => null);
+    if (existingAtTarget && existingAtTarget.type !== 'FILE') {
+      throw new DuplicateFileException(relativePath, projectId);
+    }
+
+    if (parsed.folderChain.length > 0) {
+      const blockingAncestor = await Promise.resolve(
+        this.prisma.pageNode.findFirst({
+          where: {
+            spaceId: projectId,
+            ...pageFilter,
+            path: { in: parsed.folderChain.map((seg) => seg.path) },
+            type: { not: 'FOLDER' },
+          },
+          select: { id: true, type: true },
+        }),
+      ).catch(() => null);
+      if (blockingAncestor) {
+        throw new DuplicateFileException(relativePath, projectId);
+      }
+    }
+  }
+
   public async resolvePageId(
     projectId: string,
     candidatePageId?: string | null,
   ): Promise<string | undefined> {
-    if (
-      !candidatePageId ||
-      candidatePageId === projectId ||
-      !isUuid(candidatePageId)
-    ) {
+    if (!candidatePageId || !isUuid(candidatePageId)) {
       return undefined;
     }
 
@@ -410,16 +464,12 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     name: string,
     pageId?: string | null,
   ): Promise<ManuscriptFile | null> {
-    const hasCustomPageScope = Boolean(pageId && pageId !== projectId);
+    const trimmedPageId = pageId?.trim() || undefined;
     const record = await this.prisma.pageFile.findFirst({
       where: {
         spaceId: projectId,
-        ...(hasCustomPageScope
-          ? { pageId }
-          : pageId === null
-            ? { pageId: null }
-            : {}),
-        name,
+        ...(trimmedPageId ? { pageId: trimmedPageId } : {}),
+        lastKnownPath: name,
         deletedAt: null,
       },
     });
@@ -450,27 +500,44 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       where: {
         spaceId: projectId,
         deletedAt: null,
-        name: { in: candidates },
+        lastKnownPath: { in: candidates },
       },
     });
 
-    const scopedRecords =
-      pageId && pageId !== projectId
-        ? filterRecordsByPageScope(records, pageId, projectId)
-        : records;
+    const scopedRecords = pageId
+      ? filterRecordsByPageScope(records, pageId, projectId)
+      : records;
 
     if (scopedRecords.length === 0) {
       return null;
     }
 
     for (const candidate of candidates) {
-      const match = scopedRecords.find((r) => r.name === candidate);
+      const match = scopedRecords.find(
+        (r) => (r.lastKnownPath ?? (r as { name?: string }).name) === candidate,
+      );
       if (match) {
         return ManuscriptFileMapper.toDomain(match);
       }
     }
 
     return ManuscriptFileMapper.toDomain(scopedRecords[0]);
+  }
+
+  public async markRestoredIfDeleted(
+    projectId: string,
+    fileId: string,
+  ): Promise<boolean> {
+    if (!this.prisma?.pageFile?.updateMany) return false;
+    const result = await this.prisma.pageFile.updateMany({
+      where: {
+        id: fileId,
+        spaceId: projectId,
+        deletedAt: { not: null },
+      },
+      data: { deletedAt: null },
+    });
+    return result.count > 0;
   }
 
   public async findByHash(hash: string): Promise<ManuscriptFile[]> {
@@ -495,10 +562,9 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       },
       orderBy: { createdAt: 'desc' },
     });
-    const scopedRecords =
-      pageId && pageId !== projectId
-        ? filterRecordsByPageScope(records, pageId, projectId)
-        : records;
+    const scopedRecords = pageId
+      ? filterRecordsByPageScope(records, pageId, projectId)
+      : records;
     return scopedRecords.map(ManuscriptFileMapper.toDomain);
   }
 

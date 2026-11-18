@@ -21,17 +21,7 @@ import { LatexTokenizer, SpellEngine } from './domain';
 @Module({
   imports: [PrismaModule, DocstoreModule],
   controllers: [SpellingController, SpellingUtilityController],
-  providers: [
-    SpellingService,
-    SpellingRepository,
-    LatexTokenizer,
-    SpellEngine,
-  ],
-  exports: [
-    SpellingService,
-    SpellingRepository,
-    LatexTokenizer,
-    SpellEngine,
-  ],
+  providers: [SpellingService, SpellingRepository, LatexTokenizer, SpellEngine],
+  exports: [SpellingService, SpellingRepository, LatexTokenizer, SpellEngine],
 })
 export class SpellingModule {}

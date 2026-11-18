@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/structure/domain/structure.ports.ts
- * Port interfaces for Manuscript File Tree nodes, root doc detection, and tree mutation broadcasts.
+ * modules/pages/structure/domain/structure.ports.ts
+ * Port interfaces for Page Virtual Tree nodes, root doc detection, and tree mutation broadcasts.
  */
 
 import { ManuscriptNodeEntity, ManuscriptNodeType } from './node.entity';
@@ -34,6 +34,7 @@ export abstract class IStructureRepository {
   abstract findByFileId?(
     projectId: string,
     fileId: string,
+    pageId?: string | null,
   ): Promise<ManuscriptNodeEntity | null>;
   abstract getAllNodes(
     projectId: string,
@@ -85,9 +86,11 @@ export abstract class IStructureRepository {
   abstract docExistsInProject?(
     projectId: string,
     docId: string,
+    pageId?: string | null,
   ): Promise<boolean>;
   abstract fileExistsInProject?(
     projectId: string,
     fileId: string,
+    pageId?: string | null,
   ): Promise<boolean>;
 }

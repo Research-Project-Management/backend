@@ -244,6 +244,15 @@ export class NodePathVo {
     if (name.indexOf('\u0000') !== -1) {
       throw new InvalidNodeNameError(name, 'Name cannot contain null bytes');
     }
+    for (let i = 0; i < name.length; i += 1) {
+      const code = name.charCodeAt(i);
+      if ((code >= 1 && code <= 31) || code === 127) {
+        throw new InvalidNodeNameError(
+          name,
+          'Name cannot contain control characters',
+        );
+      }
+    }
     if (name === '.' || name === '..') {
       throw new InvalidNodeNameError(
         name,

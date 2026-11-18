@@ -62,12 +62,12 @@ const ProjectJoinAccessRule: IWsEventAccessRule = {
   name: 'ProjectJoinAccessRule',
   matches: (ctx) => ctx.event === REALTIME_EVENTS.PROJECT_JOIN,
   authorize: async (ctx) => {
-    const projectId = ctx.data?.projectId;
-    if (!projectId) {
-      throw new RealtimeAccessDeniedException('Missing projectId');
+    const spaceId = ctx.data?.spaceId;
+    if (!spaceId) {
+      throw new RealtimeAccessDeniedException('Missing spaceId');
     }
     const decision = await ctx.realtimeAccess.checkAccess(
-      projectId,
+      spaceId,
       ctx.userId,
       'member',
     );
@@ -80,30 +80,33 @@ const DocJoinAccessRule: IWsEventAccessRule = {
   name: 'DocJoinAccessRule',
   matches: (ctx) => ctx.event === REALTIME_EVENTS.DOC_JOIN,
   authorize: async (ctx) => {
-    const projectId = ctx.data?.projectId;
+    const spaceId = ctx.data?.spaceId;
     const docId = ctx.data?.docId;
-    if (!projectId || !docId) {
-      throw new RealtimeAccessDeniedException('Missing projectId or docId');
+    if (!spaceId || !docId) {
+      throw new RealtimeAccessDeniedException('Missing spaceId or docId');
     }
 
-    if (ctx.client.data?.projectId !== projectId) {
+    if (ctx.client.data?.spaceId !== spaceId) {
       throw new RealtimeAccessDeniedException(
-        'Must join project before joining document',
+        'Must join space before joining document',
       );
     }
 
     const belongs = await ctx.realtimeAccess.validateDocInProject(
-      projectId,
+      spaceId,
       docId,
+      typeof ctx.client.data?.pageId === 'string'
+        ? ctx.client.data.pageId
+        : undefined,
     );
     if (!belongs) {
       throw new RealtimeAccessDeniedException(
-        'Document does not belong to specified project',
+        'Document does not belong to specified space',
       );
     }
 
     const decision = await ctx.realtimeAccess.checkAccess(
-      projectId,
+      spaceId,
       ctx.userId,
       'read',
     );
@@ -118,19 +121,19 @@ const ProjectChatAccessRule: IWsEventAccessRule = {
     ctx.event === REALTIME_EVENTS.CHAT_SEND ||
     ctx.event === REALTIME_EVENTS.CHAT_HISTORY,
   authorize: async (ctx) => {
-    const projectId = ctx.data?.projectId;
-    if (!projectId || ctx.client.data?.projectId !== projectId) {
+    const spaceId = ctx.data?.spaceId;
+    if (!spaceId || ctx.client.data?.spaceId !== spaceId) {
       throw new RealtimeAccessDeniedException(
-        'Socket is not joined to target project',
+        'Socket is not joined to target space',
       );
     }
 
     const decision = await ctx.realtimeAccess.checkAccess(
-      projectId,
+      spaceId,
       ctx.userId,
       'member',
     );
-    assertRealtimeAccessDecision(decision, 'Access denied to project chat');
+    assertRealtimeAccessDecision(decision, 'Access denied to space chat');
     return true;
   },
 };
@@ -139,13 +142,11 @@ const ActiveDocScopedAccessRule: IWsEventAccessRule = {
   name: 'ActiveDocScopedAccessRule',
   matches: () => true,
   authorize: async (ctx) => {
-    const joinedProjectId = ctx.client.data?.projectId;
+    const joinedSpaceId = ctx.client.data?.spaceId;
     const joinedDocId = ctx.client.data?.activeDocId;
 
-    if (!joinedProjectId) {
-      throw new RealtimeAccessDeniedException(
-        'Socket has not joined a project',
-      );
+    if (!joinedSpaceId) {
+      throw new RealtimeAccessDeniedException('Socket has not joined a space');
     }
     if (!joinedDocId) {
       throw new RealtimeAccessDeniedException(
@@ -153,9 +154,9 @@ const ActiveDocScopedAccessRule: IWsEventAccessRule = {
       );
     }
 
-    if (ctx.data?.projectId && ctx.data.projectId !== joinedProjectId) {
+    if (ctx.data?.spaceId && ctx.data.spaceId !== joinedSpaceId) {
       throw new RealtimeAccessDeniedException(
-        'Event payload projectId does not match socket joined project',
+        'Event payload spaceId does not match socket joined space',
       );
     }
     if (ctx.data?.docId && ctx.data.docId !== joinedDocId) {
@@ -165,7 +166,7 @@ const ActiveDocScopedAccessRule: IWsEventAccessRule = {
     }
 
     const decision = await ctx.realtimeAccess.checkAccess(
-      joinedProjectId,
+      joinedSpaceId,
       ctx.userId,
       ctx.requiredLevel,
     );
@@ -218,29 +219,45 @@ export class WsAccessGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
+    const data = context.switchToWs().getData();
+    const userId = client.data?.userId;
+    const authenticated = client.data?.authenticated;
+
+    // Normalize `data.spaceId` -> canonical `spaceId` (handling personal aliases & Page.id)
+    // BEFORE returning early on @WsAccess('none') so `project:leave` / `doc:leave` always match!
+    if (data && typeof data === 'object' && typeof data.spaceId === 'string') {
+      if (
+        ['personal', 'me', 'user', 'default'].includes(
+          data.spaceId.trim().toLowerCase(),
+        )
+      ) {
+        if (userId) {
+          data.spaceId = userId;
+        }
+      } else if (
+        typeof this.realtimeAccess.resolveCanonicalSpaceAndPage === 'function'
+      ) {
+        const canonical =
+          await this.realtimeAccess.resolveCanonicalSpaceAndPage(
+            data.spaceId,
+            String(userId || ''),
+          );
+        if (canonical?.spaceId) {
+          if (canonical.pageId && !data.pageId) {
+            data.pageId = canonical.pageId;
+          }
+          data.spaceId = canonical.spaceId;
+        }
+      }
+    }
+
     // If unannotated or 'none', allow execution
     if (!requiredLevel || requiredLevel === 'none') {
       return true;
     }
 
-    const data = context.switchToWs().getData();
-
-    const userId = client.data?.userId;
-    const authenticated = client.data?.authenticated;
-
     if (!authenticated || !userId) {
       throw new RealtimeAuthRequiredException('Authentication required');
-    }
-
-    if (
-      data &&
-      typeof data === 'object' &&
-      typeof data.projectId === 'string' &&
-      ['personal', 'me', 'user', 'default'].includes(
-        data.projectId.trim().toLowerCase(),
-      )
-    ) {
-      data.projectId = userId;
     }
 
     const evalCtx: WsAccessEvaluationContext = {

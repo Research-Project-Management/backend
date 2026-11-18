@@ -77,6 +77,7 @@ export interface ConvertDocumentInput {
   fileName: string;
   format?: 'docx' | 'md';
   userId?: string | null;
+  pageId?: string;
 }
 
 @Injectable()
@@ -110,11 +111,13 @@ export class ExportImportService {
     projectId: string,
     includePdf = false,
     cleanArxiv = false,
+    pageId?: string,
   ) {
     return await this.aggregator.collectProjectEntries(
       projectId,
       includePdf,
       cleanArxiv,
+      pageId,
     );
   }
 
@@ -123,12 +126,14 @@ export class ExportImportService {
     entries: ArchiveEntryVo[],
     userId?: string | null,
     preferredRootDoc?: string,
+    pageId?: string,
   ): Promise<ImportSummaryVo> {
     return await this.hydrator.hydrateProjectEntries(
       projectId,
       entries,
       userId,
       preferredRootDoc,
+      pageId,
     );
   }
 
@@ -190,6 +195,7 @@ export class ExportImportService {
       projectId,
       includePdf,
       cleanArxiv,
+      query?.pageId,
     );
 
     const { files, hasPdf, resolvedName } = this.prepareExportPlan(
@@ -224,6 +230,7 @@ export class ExportImportService {
           projectId,
           Number(query.version),
           query.projectName,
+          query.pageId,
         );
       return {
         zipStream: versionResult.zipStream,
@@ -241,6 +248,7 @@ export class ExportImportService {
       projectId,
       includePdf,
       cleanArxiv,
+      query?.pageId,
     );
 
     const { files, hasPdf, resolvedName } = this.prepareExportPlan(
@@ -264,6 +272,7 @@ export class ExportImportService {
     zipBuffer: Buffer,
     userId?: string | null,
     preferredRootDoc?: string,
+    pageId?: string,
   ): Promise<ImportSummaryResponseDto> {
     const entries = validateExtractedArchiveEntries(
       this.zipEngine.extractZip(zipBuffer),
@@ -273,6 +282,7 @@ export class ExportImportService {
       entries,
       userId,
       preferredRootDoc,
+      pageId,
     );
     return summary.toJSON();
   }
@@ -281,6 +291,7 @@ export class ExportImportService {
     projectId: string,
     templateId: string,
     userId?: string | null,
+    pageId?: string,
   ): Promise<ImportSummaryResponseDto> {
     if (!this.templatesService) {
       throw new TemplateNotFoundException(templateId);
@@ -305,6 +316,7 @@ export class ExportImportService {
       entries,
       userId,
       template.mainFile || 'main.tex',
+      pageId,
     );
     return summary.toJSON();
   }
@@ -312,7 +324,7 @@ export class ExportImportService {
   public async convertDocument(
     input: ConvertDocumentInput,
   ): Promise<ImportSummaryResponseDto> {
-    const { projectId, fileBuffer, fileName, userId } = input;
+    const { projectId, fileBuffer, fileName, userId, pageId } = input;
     if (!fileBuffer || fileBuffer.length === 0) {
       throw new BadRequestException('Uploaded document payload is empty.');
     }
@@ -344,6 +356,7 @@ export class ExportImportService {
       transpileResult.entries,
       userId,
       'main.tex',
+      pageId,
     );
     return summary.toJSON();
   }

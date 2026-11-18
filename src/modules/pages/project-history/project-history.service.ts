@@ -56,9 +56,12 @@ export class ProjectHistoryService {
     projectId: string,
     dto: CreateSnapshotDto,
     userId?: string | null,
+    pageId?: string,
   ): Promise<SnapshotDetailDto> {
+    const resolvedPageId = pageId ?? dto.pageId;
     const snapshot = await this.createSnapshotDirect({
       projectId,
+      pageId: resolvedPageId,
       summary: dto.summary,
       createdById: userId,
       isAutomatic: dto.isAutomatic ?? false,
@@ -75,8 +78,11 @@ export class ProjectHistoryService {
     return this.toDetailDto(snapshot);
   }
 
-  public async listVersions(projectId: string): Promise<VersionListItemDto[]> {
-    const snapshots = await this.repository.listVersions(projectId);
+  public async listVersions(
+    projectId: string,
+    pageId?: string,
+  ): Promise<VersionListItemDto[]> {
+    const snapshots = await this.repository.listVersions(projectId, pageId);
 
     const authorMap = this.userResolver
       ? await this.userResolver.resolveUserNames(
@@ -98,8 +104,13 @@ export class ProjectHistoryService {
   public async getSnapshot(
     projectId: string,
     version: number,
+    pageId?: string,
   ): Promise<SnapshotDetailDto> {
-    const found = await this.repository.findByVersion(projectId, version);
+    const found = await this.repository.findByVersion(
+      projectId,
+      version,
+      pageId,
+    );
     if (!found) {
       throw new VersionNotFoundException(projectId, version);
     }
@@ -110,10 +121,11 @@ export class ProjectHistoryService {
     projectId: string,
     baseVersion: number,
     targetVersion: number,
+    pageId?: string,
   ): Promise<DiffResponseDto> {
     const [baseSnapshot, targetSnapshot] = await Promise.all([
-      this.repository.findByVersion(projectId, baseVersion),
-      this.repository.findByVersion(projectId, targetVersion),
+      this.repository.findByVersion(projectId, baseVersion, pageId),
+      this.repository.findByVersion(projectId, targetVersion, pageId),
     ]);
     if (!baseSnapshot) {
       throw new VersionNotFoundException(projectId, baseVersion);
@@ -148,11 +160,12 @@ export class ProjectHistoryService {
     version: number,
     label: string,
     userId?: string | null,
+    pageId?: string,
   ): Promise<VersionLabelDto> {
     const cleanLabel = label.trim();
     const [snapshot, existing] = await Promise.all([
-      this.repository.findByVersion(projectId, version),
-      this.repository.findLabelByName(projectId, cleanLabel),
+      this.repository.findByVersion(projectId, version, pageId),
+      this.repository.findLabelByName(projectId, cleanLabel, pageId),
     ]);
     if (!snapshot) {
       throw new VersionNotFoundException(projectId, version);
@@ -166,6 +179,8 @@ export class ProjectHistoryService {
       existing ??
       VersionLabel.create({
         projectId,
+        spaceId: projectId,
+        pageId: snapshot.pageId ?? pageId,
         snapshotId: snapshot.id,
         version,
         label: cleanLabel,
@@ -180,14 +195,19 @@ export class ProjectHistoryService {
     return this.toLabelDto(saved);
   }
 
-  public async deleteLabel(projectId: string, labelId: string): Promise<void> {
-    await this.repository.deleteLabel(projectId, labelId);
+  public async deleteLabel(
+    projectId: string,
+    labelId: string,
+    pageId?: string,
+  ): Promise<void> {
+    await this.repository.deleteLabel(projectId, labelId, pageId);
   }
 
   public async restoreVersion(
     projectId: string,
     targetVersion: number,
     userId?: string | null,
+    pageId?: string,
   ): Promise<{
     restoredSnapshot: SnapshotDetailDto;
     newSnapshot: SnapshotDetailDto;
@@ -196,18 +216,22 @@ export class ProjectHistoryService {
     const targetSnapshot = await this.repository.findByVersion(
       projectId,
       targetVersion,
+      pageId,
     );
     if (!targetSnapshot) {
       throw new VersionNotFoundException(projectId, targetVersion);
     }
 
+    const effectivePageId = pageId ?? targetSnapshot.pageId;
     const restoreResult = await this.restorer.restoreToState(
       projectId,
       targetSnapshot,
+      effectivePageId,
     );
 
     const newSnapshot = await this.createSnapshotDirect({
       projectId,
+      pageId: effectivePageId,
       summary: `Restored to version ${targetVersion}`,
       createdById: userId || null,
       isAutomatic: false,
@@ -231,10 +255,13 @@ export class ProjectHistoryService {
     targetVersion: number,
     dto: RestoreSingleFileDto,
     userId?: string | null,
+    pageId?: string,
   ): Promise<RestoreSingleFileResponseDto> {
+    const resolvedPageId = pageId ?? dto.pageId;
     const targetSnapshot = await this.repository.findByVersion(
       projectId,
       targetVersion,
+      resolvedPageId,
     );
     if (!targetSnapshot) {
       throw new VersionNotFoundException(projectId, targetVersion);
@@ -244,6 +271,7 @@ export class ProjectHistoryService {
       throw new NotFoundException('Single-file restore adapter not configured');
     }
 
+    const effectivePageId = resolvedPageId ?? targetSnapshot.pageId;
     let restoredFile;
     try {
       restoredFile = await this.restorer.restoreSingleFileToState(
@@ -251,6 +279,7 @@ export class ProjectHistoryService {
         targetSnapshot,
         dto.pathname,
         dto.fileId,
+        effectivePageId,
       );
     } catch (err: unknown) {
       throw new NotFoundException(
@@ -261,6 +290,7 @@ export class ProjectHistoryService {
 
     const newSnapshot = await this.createSnapshotDirect({
       projectId,
+      pageId: effectivePageId,
       summary: `Restored ${dto.pathname} from Version ${targetVersion}`,
       createdById: userId || null,
       isAutomatic: false,
@@ -287,12 +317,17 @@ export class ProjectHistoryService {
     projectId: string,
     version: number,
     projectName?: string,
+    pageId?: string,
   ): Promise<{
     zipStream: Readable;
     filename: string;
     fileCount: number;
   }> {
-    const snapshot = await this.repository.findByVersion(projectId, version);
+    const snapshot = await this.repository.findByVersion(
+      projectId,
+      version,
+      pageId,
+    );
     if (!snapshot) {
       throw new VersionNotFoundException(projectId, version);
     }
@@ -309,7 +344,10 @@ export class ProjectHistoryService {
         .replace(/\s+/g, '_') || 'manuscript';
     const labelSuffix =
       snapshot.labels && snapshot.labels.length > 0
-        ? `-${snapshot.labels[0].label.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_')}`
+        ? `-${snapshot.labels[0].label
+            .replace(/[^\w\s-]/g, '')
+            .trim()
+            .replace(/\s+/g, '_')}`
         : `-v${version}`;
     const filename = `${baseName}${labelSuffix}.zip`;
 
@@ -322,6 +360,7 @@ export class ProjectHistoryService {
 
   private async createSnapshotDirect(input: {
     projectId: string;
+    pageId?: string;
     summary?: string | null;
     createdById?: string | null;
     isAutomatic?: boolean;
@@ -329,6 +368,7 @@ export class ProjectHistoryService {
   }): Promise<Snapshot> {
     const {
       projectId,
+      pageId,
       summary,
       createdById,
       isAutomatic = false,
@@ -339,21 +379,27 @@ export class ProjectHistoryService {
       const existingLabel = await this.repository.findLabelByName(
         projectId,
         label.trim(),
+        pageId,
       );
       if (existingLabel) {
         throw new DuplicateLabelException(projectId, label.trim());
       }
     }
 
-    const files = await this.collector.collectCurrentState(projectId);
+    const files = await this.collector.collectCurrentState(projectId, pageId);
     const maxAttempts = 3;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const latestVersion = await this.repository.getLatestVersion(projectId);
+      const latestVersion = await this.repository.getLatestVersion(
+        projectId,
+        pageId,
+      );
       const nextVersion = latestVersion + 1;
 
       const snapshot = Snapshot.create({
         projectId,
+        spaceId: projectId,
+        pageId,
         version: nextVersion,
         summary: summary || null,
         createdById: createdById || null,
@@ -366,6 +412,8 @@ export class ProjectHistoryService {
         if (label && label.trim()) {
           const versionLabel = VersionLabel.create({
             projectId,
+            spaceId: projectId,
+            pageId: saved.pageId ?? pageId,
             snapshotId: saved.id,
             version: saved.version,
             label: label.trim(),
@@ -406,6 +454,8 @@ export class ProjectHistoryService {
     return {
       id: snapshot.id,
       projectId: snapshot.projectId,
+      spaceId: snapshot.spaceId,
+      pageId: snapshot.pageId,
       version: snapshot.version,
       summary: snapshot.summary,
       createdById: snapshot.createdById,

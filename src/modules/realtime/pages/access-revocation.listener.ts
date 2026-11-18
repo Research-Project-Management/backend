@@ -1,13 +1,10 @@
-import {
-  Injectable,
-  Logger,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { RealtimeAccessService } from './realtime-access.service';
 import { PagesGateway } from './pages.gateway';
 import { RoomStore } from './room.store';
 import { PresenceMapper } from './presence.mapper';
+import { YjsService } from './yjs.service';
 import { REALTIME_EVENTS } from '../core/realtime.constant';
 
 export interface MemberRemovedPayload {
@@ -37,6 +34,7 @@ export class AccessRevocationListener {
     private readonly realtimeAccess: RealtimeAccessService,
     private readonly gateway: PagesGateway,
     @Optional() private readonly roomStore?: RoomStore,
+    @Optional() private readonly yjs?: YjsService,
   ) {}
 
   @OnEvent('project.member_removed')
@@ -65,11 +63,11 @@ export class AccessRevocationListener {
       const sockets = await server.fetchSockets();
       for (const socket of sockets) {
         const clientUserId = socket.data?.userId;
-        const clientProjectId = socket.data?.projectId;
+        const clientSpaceId = socket.data?.spaceId;
 
-        if (clientUserId === userId && clientProjectId === projectId) {
+        if (clientUserId === userId && clientSpaceId === projectId) {
           // Notify client of revocation (RT-08 / SC-007)
-          socket.emit('access:revoked', { projectId });
+          socket.emit('access:revoked', { spaceId: projectId });
 
           const activeDocId = socket.data?.activeDocId;
           if (activeDocId) {
@@ -102,8 +100,19 @@ export class AccessRevocationListener {
           }
 
           // Clear joined context
-          socket.data.projectId = null;
+          socket.data.spaceId = null;
           socket.data.activeDocId = null;
+
+          if (activeDocId && this.yjs) {
+            const docRoom = server.sockets?.adapter?.rooms?.get(
+              `doc:${projectId}:${activeDocId}`,
+            );
+            if (!docRoom || docRoom.size === 0) {
+              await this.yjs.evictDoc(projectId, activeDocId).catch(() => null);
+            } else {
+              await this.yjs.flushDoc(projectId, activeDocId).catch(() => null);
+            }
+          }
 
           this.logger.log(
             `Evicted socket ${socket.id} (user ${userId}) from project ${projectId} due to membership removal`,
@@ -161,10 +170,10 @@ export class AccessRevocationListener {
       for (const socket of sockets) {
         if (
           socket.data?.userId === userId &&
-          socket.data?.projectId === projectId
+          socket.data?.spaceId === projectId
         ) {
           socket.emit('access:updated', {
-            projectId,
+            spaceId: projectId,
             userId,
             role: resolvedRole,
             canWrite: resolvedCanWrite,
@@ -174,6 +183,58 @@ export class AccessRevocationListener {
     } catch (err: unknown) {
       this.logger.warn(
         `Failed to notify sockets for updated member ${userId} in project ${projectId}: ${(err as Error)?.message}`,
+      );
+    }
+  }
+
+  @OnEvent('project.ownership_transferred')
+  public handleOwnershipTransferred(event: {
+    projectId?: string;
+    previousOwnerId?: string;
+    newOwnerId?: string;
+  }): void {
+    if (!event?.projectId) return;
+    if (event.previousOwnerId) {
+      this.realtimeAccess.evictCache(event.projectId, event.previousOwnerId);
+    }
+    if (event.newOwnerId) {
+      this.realtimeAccess.evictCache(event.projectId, event.newOwnerId);
+    }
+  }
+
+  @OnEvent('project.deleted')
+  public async handleProjectDeleted(event: {
+    projectId?: string;
+    entityId?: string;
+  }): Promise<void> {
+    const projectId = event?.projectId || event?.entityId;
+    if (!projectId) return;
+    try {
+      const server = this.gateway?.server;
+      if (server && typeof server.fetchSockets === 'function') {
+        const sockets = await server.fetchSockets();
+        for (const socket of sockets) {
+          if (socket.data?.spaceId === projectId) {
+            socket.emit('access:revoked', {
+              spaceId: projectId,
+              reason: 'project_deleted',
+            });
+            const docId = socket.data?.activeDocId;
+            socket.leave(`project:${projectId}`);
+            if (docId) {
+              socket.leave(`doc:${projectId}:${docId}`);
+            }
+            socket.data.spaceId = null;
+            socket.data.activeDocId = null;
+          }
+        }
+      }
+      if (this.yjs && typeof this.yjs.flushProjectDocs === 'function') {
+        await this.yjs.flushProjectDocs(projectId).catch(() => []);
+      }
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Failed project.deleted socket cleanup for ${projectId}: ${(err as Error)?.message}`,
       );
     }
   }

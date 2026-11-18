@@ -10,12 +10,13 @@ import {
   IsEnum,
   IsInt,
   Min,
+  MaxLength,
   IsOptional,
   IsBoolean,
   IsArray,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 export class TextRangeDto {
   @ApiProperty({ description: '0-indexed starting line number' })
@@ -49,6 +50,7 @@ export class RecordChangeDto {
   })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(50000)
   text!: string;
 
   @ApiPropertyOptional({ type: TextRangeDto })
@@ -137,15 +139,19 @@ export class CreateCommentThreadDto {
   endCol?: number;
 
   @ApiProperty({ description: 'Initial comment message content' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty()
+  @MaxLength(10000)
   content!: string;
 }
 
 export class AddCommentReplyDto {
   @ApiProperty({ description: 'Reply message content' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty()
+  @MaxLength(10000)
   content!: string;
 }
 
@@ -161,6 +167,12 @@ export class TrackChangeResponseDto {
 
   @ApiProperty()
   projectId!: string;
+
+  @ApiPropertyOptional()
+  spaceId?: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  pageId?: string | null;
 
   @ApiProperty()
   docId!: string;
@@ -225,6 +237,12 @@ export class CommentThreadResponseDto {
 
   @ApiProperty()
   projectId!: string;
+
+  @ApiPropertyOptional()
+  spaceId?: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  pageId?: string | null;
 
   @ApiProperty()
   docId!: string;

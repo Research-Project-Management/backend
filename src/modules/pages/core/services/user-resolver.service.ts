@@ -38,7 +38,10 @@ export class UserResolverService {
             if (session) {
               result.set(uid, {
                 id: uid,
-                name: session.name || session.email?.split('@')[0] || 'Collaborator',
+                name:
+                  session.name ||
+                  session.email?.split('@')[0] ||
+                  'Collaborator',
                 avatar: session.avatar || '',
               });
             }

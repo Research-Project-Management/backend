@@ -9,4 +9,3 @@ export * from './identifier';
 export * from './author-list';
 export * from './citations.errors';
 export * from './citation-operations';
-

@@ -30,9 +30,10 @@ import {
   RequireRole,
   Role,
   NoProjectContext,
-  ResolvedProject,
+  ResolvedSpace,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
 import { SpellingService } from './spelling.service';
 import {
   CheckSpellingDto,
@@ -48,11 +49,12 @@ interface RequestWithUser {
   headers?: Record<string, string | string[] | undefined>;
 }
 
-@ApiTags('Manuscripts - Spelling & Dictionaries')
+@ApiTags('Pages - Spelling & Dictionaries')
 @ApiBearerAuth('JWT-auth')
 @Controller([
-  'api/v1/pages/projects/:projectId/spelling',
-  'api/v1/manuscripts/projects/:projectId/spelling',
+  'api/v1/pages/spaces/:spaceId/spelling',
+  'api/v1/pages/:pageId/spelling',
+  'api/v1/pages/pages/:pageId/spelling',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
@@ -79,20 +81,29 @@ export class SpellingController {
   @ApiResponse({ status: 200, type: SpellingReportDto })
   @ApiResponse({ status: 400, description: 'Unsupported language' })
   async checkSpelling(
-    @Param('projectId') routeProjectId: string,
     @Body() dto: CheckSpellingDto,
     @Req() req: RequestWithUser,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ): Promise<SpellingReportDto> {
     try {
       const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
       if (!userId) {
         throw new UnauthorizedException('Authentication required');
       }
-      const targetProjectId =
-        (typeof project === 'string' ? project : project?.id) || routeProjectId;
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        resolvedSpace,
+        dto.pageId,
+        req,
+      );
+      if (!dto.pageId && pageId) {
+        dto.pageId = pageId;
+      }
+      dto.docId = dto.docId ?? dto.pageId ?? routePageId;
       return await this.spellingService.checkDocumentSpelling(
-        targetProjectId,
+        spaceId,
         userId,
         dto,
       );
@@ -105,12 +116,18 @@ export class SpellingController {
   @ApiOperation({ summary: 'List custom words learned in this project' })
   @ApiResponse({ status: 200, type: CustomDictionaryResponseDto })
   async listProjectDictionary(
-    @Param('projectId') routeProjectId: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: RequestWithUser,
   ): Promise<CustomDictionaryResponseDto> {
-    const targetProjectId =
-      (typeof project === 'string' ? project : project?.id) || routeProjectId;
-    return this.spellingService.listProjectWords(targetProjectId);
+    const { spaceId } = resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId, pageId: routePageId },
+      resolvedSpace,
+      undefined,
+      req,
+    );
+    return this.spellingService.listProjectWords(spaceId);
   }
 
   @Post('dictionary/learn')
@@ -119,14 +136,20 @@ export class SpellingController {
   @ApiOperation({ summary: 'Add a custom word to the project dictionary' })
   @ApiResponse({ status: 200, description: 'Word added to project dictionary' })
   async learnProjectWord(
-    @Param('projectId') routeProjectId: string,
     @Body() dto: LearnWordDto,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: RequestWithUser,
   ) {
     try {
-      const targetProjectId =
-        (typeof project === 'string' ? project : project?.id) || routeProjectId;
-      await this.spellingService.learnProjectWord(targetProjectId, dto.word);
+      const { spaceId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        resolvedSpace,
+        undefined,
+        req,
+      );
+      await this.spellingService.learnProjectWord(spaceId, dto.word);
       return { success: true, word: dto.word };
     } catch (err) {
       this.handleError(err);
@@ -138,23 +161,29 @@ export class SpellingController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Remove a custom word from the project dictionary' })
   async unlearnProjectWord(
-    @Param('projectId') routeProjectId: string,
     @Param('word') word: string,
-    @ResolvedProject() project?: string | { id?: string },
+    @Param('spaceId') routeSpaceId?: string,
+    @Param('pageId') routePageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: RequestWithUser,
   ) {
-    const targetProjectId =
-      (typeof project === 'string' ? project : project?.id) || routeProjectId;
+    const { spaceId } = resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId, pageId: routePageId },
+      resolvedSpace,
+      undefined,
+      req,
+    );
     const removed = await this.spellingService.unlearnProjectWord(
-      targetProjectId,
+      spaceId,
       word,
     );
     return { success: true, removed, word };
   }
 }
 
-@ApiTags('Manuscripts - Spelling & Dictionaries')
+@ApiTags('Pages - Spelling & Dictionaries')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/pages/spelling', 'api/v1/manuscripts/spelling'])
+@Controller('api/v1/pages/spelling')
 @UseGuards(JwtAuthGuard)
 @NoProjectContext()
 export class SpellingUtilityController {

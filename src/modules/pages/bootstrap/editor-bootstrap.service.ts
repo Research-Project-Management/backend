@@ -258,7 +258,7 @@ export class EditorBootstrapService {
       !isRecordDeleted(initialPageRow) &&
       initialPageRow.spaceId === spaceId
         ? initialPageRow
-        : entryPageId && entryPageId !== spaceId && isUuid(entryPageId)
+        : entryPageId && isUuid(entryPageId)
           ? await Promise.resolve(
               this.prisma.page?.findUnique?.({
                 where: { id: entryPageId },
@@ -291,13 +291,18 @@ export class EditorBootstrapService {
       manuscriptPageId,
     );
 
+    const scopedAllNodes =
+      validPageRow && allNodes.some((n) => n.pageId === validPageRow.id)
+        ? allNodes.filter((n) => n.pageId === validPageRow.id)
+        : allNodes;
+
     const deletedDocIds = new Set(
       Array.isArray(deletedDocs)
         ? deletedDocs.map((d) => d.id).filter(Boolean)
         : [],
     );
 
-    const validNodes = allNodes.filter((node) => {
+    const validNodes = scopedAllNodes.filter((node) => {
       if (node.type === 'DOC' && node.docId && deletedDocIds.has(node.docId)) {
         return false;
       }
@@ -306,8 +311,8 @@ export class EditorBootstrapService {
 
     const hasScopedPageContext = Boolean(
       validPageRow ||
-        (entryPageId && entryPageId !== spaceId) ||
-        validNodes.some((n) => Boolean(n.pageId && n.pageId !== spaceId)),
+      (entryPageId && entryPageId !== spaceId) ||
+      validNodes.some((n) => Boolean(n.pageId && n.pageId !== spaceId)),
     );
 
     const rootNode =
@@ -425,8 +430,13 @@ export class EditorBootstrapService {
       }
     }
 
+    const rootRecordPath =
+      rootRecord.node?.path ||
+      rootRecord.lastKnownPath ||
+      (rootRecord as { path?: string }).path ||
+      'main.tex';
     const mainFilePath =
-      NodePathVo.toRelative(rootNode?.path || rootRecord.path || 'main.tex') ||
+      NodePathVo.toRelative(rootNode?.path || rootRecordPath || 'main.tex') ||
       'main.tex';
     const rootRanges =
       rootRecord.ranges && typeof rootRecord.ranges === 'object'
@@ -451,14 +461,15 @@ export class EditorBootstrapService {
         : [
             {
               id: rootRecord.node?.id || rootRecord.id,
+              spaceId,
               projectId: spaceId,
               pageId: canonicalPageId,
               parentId: null,
               type: 'DOC',
               name: mainFilePath,
-              path: rootRecord.path.startsWith('/')
-                ? rootRecord.path
-                : `/${rootRecord.path}`,
+              path: rootRecordPath.startsWith('/')
+                ? rootRecordPath
+                : `/${rootRecordPath}`,
               depth: 1,
               docId: rootRecord.id,
               fileId: null,
@@ -528,12 +539,18 @@ export class EditorBootstrapService {
       }),
     ]);
 
+    const activeRecordPath =
+      activeRecord.node?.path ||
+      activeRecord.lastKnownPath ||
+      (activeRecord as { path?: string }).path;
     const activeDoc: EditorBootstrapActiveDocDto = {
       id: activeRecord.id,
       nodeId: activeRecord.node?.id ?? null,
       page: {
         ...formatted.page,
-        path: activeRecord.node?.path || activeRecord.path,
+        spaceId,
+        pageId: canonicalPageId,
+        path: activeRecordPath,
         mainFile: { id: rootRecord.id, title: mainFilePath },
         mainFileId: rootRecord.id,
         rootPageId: canonicalPageId,
@@ -563,9 +580,9 @@ export class EditorBootstrapService {
     return {
       workspace: {
         spaceId,
+        spaceType: projectRow ? 'project' : 'personal',
         pageId: canonicalPageId,
         rootDocId: rootRecord.id,
-        projectId: projectRow?.id ?? null,
         projectName: projectRow?.name ?? null,
         title: workspaceTitle,
         mainFilePath,
@@ -609,7 +626,8 @@ export class EditorBootstrapService {
       if (
         candidatePageId &&
         canonicalPageId &&
-        candidatePageId !== canonicalPageId
+        candidatePageId !== canonicalPageId &&
+        (isScopedPage || candidatePageId !== spaceId)
       ) {
         return null;
       }
@@ -626,7 +644,11 @@ export class EditorBootstrapService {
           spaceId,
           ...(canonicalPageId ? { pageId: canonicalPageId } : {}),
           deletedAt: null,
-          OR: [{ path: `/${cleanPath}` }, { path: cleanPath }],
+          OR: [
+            { node: { path: `/${cleanPath}` } },
+            { lastKnownPath: `/${cleanPath}` },
+            { lastKnownPath: cleanPath },
+          ],
         },
         include: { node: true },
       })
@@ -649,14 +671,23 @@ export class EditorBootstrapService {
         where: {
           spaceId,
           deletedAt: null,
-          OR: [{ path: `/${cleanPath}` }, { path: cleanPath }],
+          OR: [
+            { node: { path: `/${cleanPath}` } },
+            { lastKnownPath: `/${cleanPath}` },
+            { lastKnownPath: cleanPath },
+          ],
         },
         include: { node: true },
       })
       .catch(() => null);
     if (!legacyCandidate) return null;
     const legacyPageId = (legacyCandidate as { pageId?: string | null }).pageId;
-    if (legacyPageId && canonicalPageId && legacyPageId !== canonicalPageId) {
+    if (
+      legacyPageId &&
+      canonicalPageId &&
+      legacyPageId !== canonicalPageId &&
+      (isScopedPage || legacyPageId !== spaceId)
+    ) {
       return null;
     }
     if (isScopedPage && !legacyPageId && legacyCandidate.id !== rootDocId) {

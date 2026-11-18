@@ -22,6 +22,7 @@ import {
   Optional,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Logger,
   UseGuards,
@@ -30,9 +31,11 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
   ProjectAccessGuard,
+  ProjectRolePolicy,
+  ResourceAccessPolicy,
   RequireRole,
   Role,
-  ResolvedProject,
+  ResolvedSpace,
   CurrentRole,
 } from '@/modules/project/access';
 import { PageChangeType } from '@prisma/client';
@@ -55,6 +58,7 @@ import {
   CommentReply,
   TrackChange,
   TextRangeVo,
+  StaleTrackChangeAnchorException,
 } from '@/modules/pages/track-changes/domain';
 import {
   validateCommentRange,
@@ -75,13 +79,13 @@ export interface CreateSuggestionBody {
   fromColumn?: number;
   toLine?: number;
   toColumn?: number;
-  projectId?: string;
+  spaceId?: string;
   [key: string]: unknown;
 }
 
 @ApiTags('Manuscripts - Pages Review & Comments')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/pages', 'api/v1/manuscripts'])
+@Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class ReviewController {
@@ -170,7 +174,7 @@ export class ReviewController {
   private async resolveDocAndProject(
     pageId: string,
     authorizedProjectId?: string | { id: string } | null,
-  ): Promise<{ docId?: string; projectId?: string }> {
+  ): Promise<{ docId?: string; projectId?: string; pageId?: string }> {
     const activeProjectId = this.resolveActiveProjectId(authorizedProjectId);
     if (!isUuid(pageId)) {
       return { projectId: activeProjectId };
@@ -182,8 +186,30 @@ export class ReviewController {
       return {
         docId: doc.id,
         projectId: this.getRecordSpaceId(doc) || activeProjectId,
+        pageId: doc.pageId ?? undefined,
       };
     }
+
+    const prisma =
+      typeof this.pageScopeRepo.getPrisma === 'function'
+        ? this.pageScopeRepo.getPrisma()
+        : undefined;
+    if (prisma?.page?.findUnique) {
+      const page = await Promise.resolve(
+        prisma.page.findUnique({
+          where: { id: pageId },
+          select: { id: true, spaceId: true, rootDocId: true, deletedAt: true },
+        }),
+      ).catch(() => null);
+      if (page && !page.deletedAt && page.rootDocId) {
+        return {
+          docId: page.rootDocId,
+          projectId: page.spaceId || activeProjectId,
+          pageId: page.id,
+        };
+      }
+    }
+
     const resolvedProj = await this.pageService.resolveProjectId(pageId);
     return { docId: pageId, projectId: resolvedProj || activeProjectId };
   }
@@ -198,25 +224,33 @@ export class ReviewController {
   @Get([
     'pages/:pageId/comments',
     'docs/:pageId/comments',
-    'projects/:projectId/docs/:pageId/comments',
+    'spaces/:spaceId/docs/:pageId/comments',
   ])
   async getComments(
     @Param('pageId') pageId: string,
     @Query('status') status?: string,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) return { comments: [] };
     try {
+      const { docId: resolvedDocId, projectId: resolvedProj } =
+        await this.resolveDocAndProject(
+          pageId,
+          authorizedProjectId || routeProjectId,
+        );
       const targetProjectId =
-        this.resolveActiveProjectId(authorizedProjectId) || routeProjectId;
+        resolvedProj ||
+        this.resolveActiveProjectId(authorizedProjectId) ||
+        routeProjectId;
+      const targetDocId = resolvedDocId || pageId;
       if (!targetProjectId || !this.trackChangesRepo) return { comments: [] };
 
       const isResolved =
         status === 'resolved' ? true : status === 'open' ? false : undefined;
       const domainThreads = await this.trackChangesRepo.listThreadsByDoc(
         targetProjectId,
-        pageId,
+        targetDocId,
         isResolved,
       );
 
@@ -278,7 +312,7 @@ export class ReviewController {
   @Post([
     'pages/:pageId/comments',
     'docs/:pageId/comments',
-    'projects/:projectId/docs/:pageId/comments',
+    'spaces/:spaceId/docs/:pageId/comments',
   ])
   @HttpCode(HttpStatus.CREATED)
   async createComment(
@@ -288,20 +322,27 @@ export class ReviewController {
       content: string;
       line?: number;
       lineEnd?: number;
-      projectId?: string;
+      spaceId?: string;
     },
     @Req() req: AuthenticatedRequest,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
     const activeProj =
       this.resolveActiveProjectId(authorizedProjectId) || routeProjectId;
+    const {
+      docId: resolvedDocId,
+      projectId: docProjId,
+      pageId: resolvedPageId,
+    } = await this.resolveDocAndProject(pageId, activeProj || body?.spaceId);
     const resolvedProj =
+      docProjId ||
       activeProj ||
-      body?.projectId ||
+      body?.spaceId ||
       (await this.pageService.resolveProjectId(pageId));
-    if (!resolvedProj || !isUuid(resolvedProj)) {
+    const targetDocId = resolvedDocId || pageId;
+    if (!resolvedProj || !isUuid(resolvedProj) || !isUuid(targetDocId)) {
       throw new BadRequestException(
         'Valid pageId and associated project required to create a comment',
       );
@@ -322,7 +363,9 @@ export class ReviewController {
 
     const threadEntity = CommentThread.create({
       projectId: resolvedProj,
-      docId: pageId,
+      spaceId: resolvedProj,
+      pageId: resolvedPageId ?? null,
+      docId: targetDocId,
       quote: body.content,
       range: TextRangeVo.create({
         startLine,
@@ -341,9 +384,9 @@ export class ReviewController {
 
     const commentPayload = {
       id: saved.id,
-      page: pageId,
-      projectPageId: pageId,
-      docId: pageId,
+      page: targetDocId,
+      projectPageId: targetDocId,
+      docId: targetDocId,
       author: {
         id: userId || saved.createdById || 'anonymous',
         name: authorName,
@@ -358,7 +401,7 @@ export class ReviewController {
     };
 
     this.broadcastEvent(resolvedProj, 'comment:created', {
-      docId: pageId,
+      docId: targetDocId,
       comment: commentPayload,
     });
 
@@ -373,7 +416,7 @@ export class ReviewController {
   @Patch([
     'pages/:pageId/comments/:commentId',
     'docs/:pageId/comments/:commentId',
-    'projects/:projectId/docs/:pageId/comments/:commentId',
+    'spaces/:spaceId/docs/:pageId/comments/:commentId',
   ])
   async updateComment(
     @Param('pageId') pageId: string,
@@ -385,8 +428,8 @@ export class ReviewController {
       resolved?: boolean;
     },
     @Req() req: AuthenticatedRequest,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
     @CurrentRole() role?: Role,
   ) {
     if (!isUuid(commentId)) {
@@ -394,14 +437,21 @@ export class ReviewController {
     }
 
     const userId = req?.user?.id || req?.user?.sub;
+    const { docId: resolvedDocId, projectId: resolvedProj } =
+      await this.resolveDocAndProject(
+        pageId,
+        authorizedProjectId || routeProjectId,
+      );
     const targetProjectId =
-      this.resolveActiveProjectId(authorizedProjectId) || routeProjectId;
+      resolvedProj ||
+      this.resolveActiveProjectId(authorizedProjectId) ||
+      routeProjectId;
 
     const thread = targetProjectId
       ? await this.pageScopeRepo.findThreadInProject(
           targetProjectId,
           commentId,
-          isUuid(pageId) ? pageId : undefined,
+          resolvedDocId,
         )
       : null;
 
@@ -409,12 +459,43 @@ export class ReviewController {
       throw new NotFoundException(`Comment thread ${commentId} not found`);
     }
 
-    assertCanModifyReviewItem(
-      thread.createdById,
-      userId,
-      role,
-      'Only the comment author or a coordinator/owner can edit this comment',
-    );
+    const reqCtx = req as
+      { projectMember?: { permissionBitmask?: string } } | undefined;
+    const permissionBitmask = reqCtx?.projectMember?.permissionBitmask;
+
+    if (body.resolved !== undefined || body.status !== undefined) {
+      if (
+        !ProjectRolePolicy.satisfiesMinRole(
+          role ?? Role.REVIEWER,
+          Role.CONTRIBUTOR,
+        )
+      ) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'ROLE_INSUFFICIENT',
+          message: 'Only contributors or higher can resolve or reopen comments',
+        });
+      }
+    }
+
+    if (body.content !== undefined && thread.createdById) {
+      new ResourceAccessPolicy().assertCanModifyComment(
+        {
+          userId: userId ?? '',
+          role: role ?? Role.REVIEWER,
+          permissionBitmask,
+        },
+        { id: commentId, authorId: thread.createdById },
+        'update',
+      );
+    } else if (body.content !== undefined && !thread.createdById) {
+      assertCanModifyReviewItem(
+        thread.createdById,
+        userId,
+        role,
+        'Only the comment author or a coordinator/owner can edit this comment',
+      );
+    }
 
     let isResolved = thread.isResolved;
     if (body.resolved !== undefined) {
@@ -460,15 +541,15 @@ export class ReviewController {
   @Delete([
     'pages/:pageId/comments/:commentId',
     'docs/:pageId/comments/:commentId',
-    'projects/:projectId/docs/:pageId/comments/:commentId',
+    'spaces/:spaceId/docs/:pageId/comments/:commentId',
   ])
   @HttpCode(HttpStatus.OK)
   async deleteComment(
     @Param('pageId') pageId: string,
     @Param('commentId') commentId: string,
     @Req() req: AuthenticatedRequest,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
     @CurrentRole() role?: Role,
   ) {
     if (!isUuid(commentId)) {
@@ -476,14 +557,21 @@ export class ReviewController {
     }
 
     const userId = req?.user?.id || req?.user?.sub;
+    const { docId: resolvedDocId, projectId: resolvedProj } =
+      await this.resolveDocAndProject(
+        pageId,
+        authorizedProjectId || routeProjectId,
+      );
     const targetProjectId =
-      this.resolveActiveProjectId(authorizedProjectId) || routeProjectId;
+      resolvedProj ||
+      this.resolveActiveProjectId(authorizedProjectId) ||
+      routeProjectId;
 
     const existing = targetProjectId
       ? await this.pageScopeRepo.findThreadInProject(
           targetProjectId,
           commentId,
-          isUuid(pageId) ? pageId : undefined,
+          resolvedDocId,
         )
       : null;
 
@@ -491,12 +579,26 @@ export class ReviewController {
       throw new NotFoundException(`Comment thread ${commentId} not found`);
     }
 
-    assertCanModifyReviewItem(
-      existing.createdById,
-      userId,
-      role,
-      'Only the comment author or a coordinator/owner can delete this comment',
-    );
+    const reqCtx = req as
+      { projectMember?: { permissionBitmask?: string } } | undefined;
+    if (existing.createdById && role !== Role.COORDINATOR) {
+      new ResourceAccessPolicy().assertCanModifyComment(
+        {
+          userId: userId ?? '',
+          role: role ?? Role.REVIEWER,
+          permissionBitmask: reqCtx?.projectMember?.permissionBitmask,
+        },
+        { id: commentId, authorId: existing.createdById },
+        'delete',
+      );
+    } else {
+      assertCanModifyReviewItem(
+        existing.createdById,
+        userId,
+        role,
+        'Only the comment author or a coordinator/owner can delete this comment',
+      );
+    }
 
     const existingProjectId = this.getRecordSpaceId(existing);
     await this.pageScopeRepo.deleteThreadInProject(
@@ -525,8 +627,8 @@ export class ReviewController {
     'pages/:pageId/comments/:commentId/replies',
     'docs/:pageId/comments/:commentId/reply',
     'docs/:pageId/comments/:commentId/replies',
-    'projects/:projectId/docs/:pageId/comments/:commentId/reply',
-    'projects/:projectId/docs/:pageId/comments/:commentId/replies',
+    'spaces/:spaceId/docs/:pageId/comments/:commentId/reply',
+    'spaces/:spaceId/docs/:pageId/comments/:commentId/replies',
   ])
   @HttpCode(HttpStatus.CREATED)
   async addCommentReply(
@@ -534,8 +636,8 @@ export class ReviewController {
     @Param('commentId') commentId: string,
     @Body() body: { content: string },
     @Req() req: AuthenticatedRequest,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
     if (!isUuid(commentId)) {
@@ -601,21 +703,25 @@ export class ReviewController {
   }
 
   /**
-   * DELETE /api/v1/manuscripts/pages/:pageId/comments/:commentId/replies/:replyId
-   * DELETE /api/v1/manuscripts/docs/:pageId/comments/:commentId/replies/:replyId
+   * PATCH /api/v1/manuscripts/pages/:pageId/comments/:commentId/replies/:replyId
+   * PATCH /api/v1/manuscripts/docs/:pageId/comments/:commentId/replies/:replyId
+   * PATCH /api/v1/manuscripts/projects/:projectId/docs/:pageId/comments/:commentId/replies/:replyId
    */
-  @Delete([
+  @Patch([
     'pages/:pageId/comments/:commentId/replies/:replyId',
     'docs/:pageId/comments/:commentId/replies/:replyId',
+    'spaces/:spaceId/docs/:pageId/comments/:commentId/replies/:replyId',
   ])
-  @RequireRole(Role.CONTRIBUTOR)
+  @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
-  async deleteCommentReply(
+  async updateCommentReply(
     @Param('pageId') pageId: string,
     @Param('commentId') commentId: string,
     @Param('replyId') replyId: string,
+    @Body() body: { content: string },
+    @Param('spaceId') routeProjectId?: string,
     @Req() req?: AuthenticatedRequest,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
     @CurrentRole() role?: Role,
   ) {
     if (!isUuid(replyId) || !isUuid(commentId)) {
@@ -624,8 +730,19 @@ export class ReviewController {
       );
     }
 
+    const trimmed =
+      typeof body?.content === 'string' ? body.content.trim() : '';
+    if (!trimmed || trimmed.length > 10000) {
+      throw new BadRequestException(
+        'Reply content must be between 1 and 10000 characters',
+      );
+    }
+
     const { docId: resolvedDocId, projectId: targetProjectId } =
-      await this.resolveDocAndProject(pageId, authorizedProjectId);
+      await this.resolveDocAndProject(
+        pageId,
+        routeProjectId || authorizedProjectId,
+      );
     const userId = req?.user?.id || req?.user?.sub;
 
     if (!targetProjectId) {
@@ -637,27 +754,147 @@ export class ReviewController {
       commentId,
       resolvedDocId,
     );
-    const existingReply = existingThread?.replies?.find((r) => r.id === replyId);
+    const existingReply = existingThread?.replies?.find(
+      (r) => r.id === replyId,
+    );
 
     if (!existingThread || !existingReply) {
       throw new NotFoundException(`Reply ${replyId} not found`);
     }
 
+    if (existingThread.isResolved) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'COMMENT_THREAD_RESOLVED',
+        message: 'Cannot edit reply in a resolved comment thread',
+      });
+    }
+
+    const reqCtx = req as
+      { projectMember?: { permissionBitmask?: string } } | undefined;
+    if (existingReply.createdById) {
+      new ResourceAccessPolicy().assertCanModifyComment(
+        {
+          userId: userId ?? '',
+          role: role ?? Role.REVIEWER,
+          permissionBitmask: reqCtx?.projectMember?.permissionBitmask,
+        },
+        { id: replyId, authorId: existingReply.createdById },
+        'update',
+      );
+    }
+
+    if (typeof this.pageScopeRepo.updateReplyInThread === 'function') {
+      await this.pageScopeRepo.updateReplyInThread(
+        existingThread.id,
+        replyId,
+        trimmed,
+      );
+    } else if (this.trackChangesRepo?.updateCommentReply) {
+      await this.trackChangesRepo.updateCommentReply(
+        existingThread.id,
+        replyId,
+        trimmed,
+      );
+    }
+
+    const updatedThread = await this.pageScopeRepo.findThreadInProject(
+      targetProjectId,
+      commentId,
+    );
+    let commentPayload = null;
+    if (updatedThread) {
+      const userMap = await this.resolveUserNames([
+        updatedThread.createdById,
+        ...(updatedThread.replies || []).map((r) => r.createdById),
+      ]);
+      commentPayload = formatCommentThreadDto(updatedThread, userMap, {
+        includeAvatar: true,
+        includeDocId: false,
+      });
+    }
+
+    this.broadcastEvent(targetProjectId, 'comment:reply-updated', {
+      docId: existingThread.docId,
+      commentId: existingThread.id,
+      replyId,
+      comment: commentPayload,
+    });
+
+    return { comment: commentPayload };
+  }
+
+  /**
+   * DELETE /api/v1/manuscripts/pages/:pageId/comments/:commentId/replies/:replyId
+   * DELETE /api/v1/manuscripts/docs/:pageId/comments/:commentId/replies/:replyId
+   * DELETE /api/v1/manuscripts/projects/:projectId/docs/:pageId/comments/:commentId/replies/:replyId
+   */
+  @Delete([
+    'pages/:pageId/comments/:commentId/replies/:replyId',
+    'docs/:pageId/comments/:commentId/replies/:replyId',
+    'spaces/:spaceId/docs/:pageId/comments/:commentId/replies/:replyId',
+  ])
+  @RequireRole(Role.REVIEWER)
+  @HttpCode(HttpStatus.OK)
+  async deleteCommentReply(
+    @Param('pageId') pageId: string,
+    @Param('commentId') commentId: string,
+    @Param('replyId') replyId: string,
+    @Param('spaceId') routeProjectId?: string,
+    @Req() req?: AuthenticatedRequest,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
+    @CurrentRole() role?: Role,
+  ) {
+    if (!isUuid(replyId) || !isUuid(commentId)) {
+      throw new BadRequestException(
+        'Valid UUIDs are required for commentId and replyId',
+      );
+    }
+
+    const { docId: resolvedDocId, projectId: targetProjectId } =
+      await this.resolveDocAndProject(
+        pageId,
+        routeProjectId || authorizedProjectId,
+      );
+    const userId = req?.user?.id || req?.user?.sub;
+
+    if (!targetProjectId) {
+      throw new NotFoundException(`Reply ${replyId} not found`);
+    }
+
+    const existingThread = await this.pageScopeRepo.findThreadInProject(
+      targetProjectId,
+      commentId,
+      resolvedDocId,
+    );
+    const existingReply = existingThread?.replies?.find(
+      (r) => r.id === replyId,
+    );
+
+    if (!existingThread || !existingReply) {
+      throw new NotFoundException(`Reply ${replyId} not found`);
+    }
+
+    const reqCtx = req as
+      { projectMember?: { permissionBitmask?: string } } | undefined;
     if (userId || role) {
-      const isReplyAuthor = existingReply.createdById === userId;
-      const isPrivileged = role === Role.COORDINATOR || role === Role.OWNER;
-      if (
-        existingReply.createdById &&
-        userId &&
-        !isReplyAuthor &&
-        !isPrivileged
-      ) {
-        throw new ForbiddenException({
-          statusCode: 403,
-          code: 'ROLE_INSUFFICIENT',
-          message:
-            'Only the reply author or a coordinator/owner can delete this reply',
-        });
+      if (existingReply.createdById && role !== Role.COORDINATOR) {
+        new ResourceAccessPolicy().assertCanModifyComment(
+          {
+            userId: userId ?? '',
+            role: role ?? Role.REVIEWER,
+            permissionBitmask: reqCtx?.projectMember?.permissionBitmask,
+          },
+          { id: replyId, authorId: existingReply.createdById },
+          'delete',
+        );
+      } else {
+        assertCanModifyReviewItem(
+          existingReply.createdById,
+          userId,
+          role,
+          'Only the reply author or a coordinator/owner can delete this reply',
+        );
       }
     }
 
@@ -698,15 +935,15 @@ export class ReviewController {
   @Patch([
     'pages/:pageId/comments/:commentId/resolve',
     'docs/:pageId/comments/:commentId/resolve',
-    'projects/:projectId/docs/:pageId/comments/:commentId/resolve',
+    'spaces/:spaceId/docs/:pageId/comments/:commentId/resolve',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   async resolveComment(
     @Param('pageId') pageId: string,
     @Param('commentId') commentId: string,
     @Body() body: { resolved?: boolean },
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     const isResolved = body.resolved ?? true;
     if (!isUuid(commentId)) {
@@ -770,25 +1007,33 @@ export class ReviewController {
   @Get([
     'pages/:pageId/suggestions',
     'docs/:pageId/suggestions',
-    'projects/:projectId/docs/:pageId/suggestions',
+    'spaces/:spaceId/docs/:pageId/suggestions',
   ])
   async getSuggestions(
     @Param('pageId') pageId: string,
     @Query('status') status?: 'pending' | 'accepted' | 'rejected',
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) return { suggestions: [] };
     try {
+      const { docId: resolvedDocId, projectId: resolvedProj } =
+        await this.resolveDocAndProject(
+          pageId,
+          routeProjectId || authorizedProjectId,
+        );
       const targetProjectId =
-        this.resolveActiveProjectId(authorizedProjectId) || routeProjectId;
+        resolvedProj ||
+        this.resolveActiveProjectId(authorizedProjectId) ||
+        routeProjectId;
+      const targetDocId = resolvedDocId || pageId;
       if (!targetProjectId || !this.trackChangesRepo) {
         return { suggestions: [] };
       }
 
       const domainChanges = await this.trackChangesRepo.listChangesByDoc(
         targetProjectId,
-        pageId,
+        targetDocId,
         status,
       );
 
@@ -814,9 +1059,9 @@ export class ReviewController {
           originalText: s.type === 'delete' ? s.text : '',
           suggestedText: s.type === 'insert' ? s.text : '',
           text: s.text,
-          fromLine: s.range.startLine,
+          fromLine: s.range.startLine + 1,
           fromColumn: s.range.startCol,
-          toLine: s.range.endLine,
+          toLine: s.range.endLine + 1,
           toColumn: s.range.endCol,
           status: s.status,
           createdAt: s.createdAt.toISOString(),
@@ -841,33 +1086,38 @@ export class ReviewController {
   @Post([
     'pages/:pageId/suggestions',
     'docs/:pageId/suggestions',
-    'projects/:projectId/docs/:pageId/suggestions',
+    'spaces/:spaceId/docs/:pageId/suggestions',
   ])
   @HttpCode(HttpStatus.CREATED)
   async createSuggestion(
     @Param('pageId') pageId: string,
     @Body() body: CreateSuggestionBody,
     @Req() req: AuthenticatedRequest,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
     const activeProj =
       this.resolveActiveProjectId(authorizedProjectId) || routeProjectId;
+    const {
+      docId: resolvedDocId,
+      projectId: docProjId,
+      pageId: resolvedPageId,
+    } = await this.resolveDocAndProject(pageId, activeProj || body?.spaceId);
     const resolvedProj =
+      docProjId ||
       activeProj ||
-      body?.projectId ||
+      body?.spaceId ||
       (await this.pageService.resolveProjectId(pageId));
-    if (!resolvedProj || !isUuid(resolvedProj)) {
+    const targetDocId = resolvedDocId || pageId;
+    if (!resolvedProj || !isUuid(resolvedProj) || !isUuid(targetDocId)) {
       throw new BadRequestException(
         'Valid pageId and associated project required to create a suggestion',
       );
     }
 
     const type: PageChangeType =
-      body.type === 'delete'
-        ? PageChangeType.delete
-        : PageChangeType.insert;
+      body.type === 'delete' ? PageChangeType.delete : PageChangeType.insert;
     const text = body.suggestedText || body.originalText || '';
 
     const userMap = await this.resolveUserNames([userId]);
@@ -884,8 +1134,10 @@ export class ReviewController {
 
     const changeEntity = TrackChange.create({
       projectId: resolvedProj,
-      docId: pageId,
-      type: body.type === 'delete' ? 'delete' : 'insert',
+      spaceId: resolvedProj,
+      pageId: resolvedPageId ?? null,
+      docId: targetDocId,
+      type: type === PageChangeType.delete ? 'delete' : 'insert',
       text,
       range: TextRangeVo.create({
         startLine,
@@ -904,9 +1156,9 @@ export class ReviewController {
 
     const suggestionPayload = {
       id: saved.id,
-      pageId,
-      page: pageId,
-      projectPageId: pageId,
+      pageId: targetDocId,
+      page: targetDocId,
+      projectPageId: targetDocId,
       authorId: userId || saved.createdById || 'anonymous',
       author: {
         id: userId || saved.createdById || 'anonymous',
@@ -917,9 +1169,9 @@ export class ReviewController {
       originalText: saved.type === 'delete' ? saved.text : '',
       suggestedText: saved.type === 'insert' ? saved.text : '',
       text: saved.text,
-      fromLine: saved.range.startLine,
+      fromLine: saved.range.startLine + 1,
       fromColumn: saved.range.startCol,
-      toLine: saved.range.endLine,
+      toLine: saved.range.endLine + 1,
       toColumn: saved.range.endCol,
       status: saved.status,
       createdAt: saved.createdAt.toISOString(),
@@ -927,7 +1179,7 @@ export class ReviewController {
     };
 
     this.broadcastEvent(resolvedProj, 'track-changes:created', {
-      docId: pageId,
+      docId: targetDocId,
       suggestion: suggestionPayload,
     });
 
@@ -942,15 +1194,15 @@ export class ReviewController {
   @Post([
     'pages/:pageId/suggestions/:suggestionId/accept',
     'docs/:pageId/suggestions/:suggestionId/accept',
-    'projects/:projectId/docs/:pageId/suggestions/:suggestionId/accept',
+    'spaces/:spaceId/docs/:pageId/suggestions/:suggestionId/accept',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async acceptSuggestion(
     @Param('pageId') pageId: string,
     @Param('suggestionId') suggestionId: string,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
     @CurrentUser('id') userId?: string,
   ) {
     if (!isUuid(suggestionId)) {
@@ -980,20 +1232,47 @@ export class ReviewController {
     }
 
     if (existing.status !== 'pending') {
-      const userMap = await this.resolveUserNames([existing.createdById, userId]);
+      const userMap = await this.resolveUserNames([
+        existing.createdById,
+        userId,
+      ]);
       const formatted = formatSuggestionItemDto(existing, userMap);
       return { ok: true, suggestion: { ...existing, ...formatted } };
     }
 
-    await this.pageScopeRepo.updateTrackChangeInProject(
-      targetProjectId,
-      suggestionId,
-      {
-        status: 'accepted',
-        resolvedAt: new Date(),
-        resolvedById: isUuid(userId) ? userId : null,
-      },
-    );
+    const resolvedById = isUuid(userId) ? userId : null;
+    if (typeof this.pageScopeRepo.claimTrackChangesPending === 'function') {
+      const claimed = await this.pageScopeRepo.claimTrackChangesPending(
+        targetProjectId,
+        [suggestionId],
+        'accepted',
+        resolvedById,
+        resolvedDocId,
+      );
+      if (claimed.length === 0) {
+        const latest =
+          (await this.pageScopeRepo.findTrackChangeInProject(
+            targetProjectId,
+            suggestionId,
+          )) ?? existing;
+        const userMap = await this.resolveUserNames([
+          latest.createdById,
+          userId,
+        ]);
+        const formatted = formatSuggestionItemDto(latest, userMap);
+        return { ok: true, suggestion: { ...latest, ...formatted } };
+      }
+    } else {
+      await this.pageScopeRepo.updateTrackChangeInProject(
+        targetProjectId,
+        suggestionId,
+        {
+          status: 'accepted',
+          resolvedAt: new Date(),
+          resolvedById,
+        },
+      );
+    }
 
     const record = await this.pageScopeRepo.findTrackChangeInProject(
       targetProjectId,
@@ -1022,9 +1301,8 @@ export class ReviewController {
         if (doc) {
           const docProjectId = this.getRecordSpaceId(doc) || targetProjectId;
           const lines = await this.pageService.getHydratedDocLines(doc);
-          const { LinePatcher } = await import(
-            '@/modules/pages/track-changes/domain'
-          );
+          const { LinePatcher } =
+            await import('@/modules/pages/track-changes/domain');
           const changeEntity = TrackChange.create({
             id: record.id,
             projectId: docProjectId,
@@ -1032,9 +1310,9 @@ export class ReviewController {
             type: record.type === 'delete' ? 'delete' : 'insert',
             text: record.text,
             range: TextRangeVo.create({
-              startLine: Math.max(0, (record.startLine ?? 1) > 0 ? (record.startLine ?? 1) - 1 : 0),
+              startLine: Math.max(0, record.startLine ?? 0),
               startCol: Math.max(0, record.startCol ?? 0),
-              endLine: Math.max(0, (record.endLine ?? record.startLine ?? 1) > 0 ? (record.endLine ?? record.startLine ?? 1) - 1 : 0),
+              endLine: Math.max(0, record.endLine ?? record.startLine ?? 0),
               endCol: Math.max(0, record.endCol ?? 0),
             }),
             createdById: record.createdById,
@@ -1045,11 +1323,15 @@ export class ReviewController {
           let finalVersion = doc.version;
           let finalRev = doc.rev;
           if (mutated) {
-            const updateRes = await this.docstoreService.updateDoc(docProjectId, doc.id, {
-              lines: nextLines,
-              version: doc.version + 1,
-              expectedRev: doc.rev,
-            });
+            const updateRes = await this.docstoreService.updateDoc(
+              docProjectId,
+              doc.id,
+              {
+                lines: nextLines,
+                version: doc.version + 1,
+                expectedRev: doc.rev,
+              },
+            );
             finalVersion = updateRes?.doc?.version ?? doc.version + 1;
             finalRev = updateRes?.rev ?? updateRes?.doc?.rev ?? doc.rev + 1;
 
@@ -1068,18 +1350,35 @@ export class ReviewController {
             docId: doc.id,
             change: record,
             action: 'accepted',
-            resolvedById: isUuid(userId) ? userId : null,
+            resolvedById,
           });
         }
       } catch (applyErr) {
         this.logger.error(
           `Failed to apply accepted suggestion ${suggestionId} to docstore, rolling back status: ${applyErr}`,
         );
-        await this.pageScopeRepo.updateTrackChangeInProject(
-          targetProjectId,
-          suggestionId,
-          { status: 'pending', resolvedAt: null, resolvedById: null },
-        );
+        if (
+          typeof this.pageScopeRepo.revertClaimedTrackChanges === 'function'
+        ) {
+          await this.pageScopeRepo.revertClaimedTrackChanges(
+            targetProjectId,
+            [suggestionId],
+            'accepted',
+          );
+        } else {
+          await this.pageScopeRepo.updateTrackChangeInProject(
+            targetProjectId,
+            suggestionId,
+            { status: 'pending', resolvedAt: null, resolvedById: null },
+          );
+        }
+        if (applyErr instanceof StaleTrackChangeAnchorException) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: applyErr.code,
+            message: applyErr.message,
+          });
+        }
         throw applyErr;
       }
     }
@@ -1101,15 +1400,15 @@ export class ReviewController {
   @Post([
     'pages/:pageId/suggestions/:suggestionId/reject',
     'docs/:pageId/suggestions/:suggestionId/reject',
-    'projects/:projectId/docs/:pageId/suggestions/:suggestionId/reject',
+    'spaces/:spaceId/docs/:pageId/suggestions/:suggestionId/reject',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async rejectSuggestion(
     @Param('pageId') pageId: string,
     @Param('suggestionId') suggestionId: string,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
     @CurrentUser('id') userId?: string,
   ) {
     if (!isUuid(suggestionId)) {
@@ -1139,20 +1438,47 @@ export class ReviewController {
     }
 
     if (existing.status && existing.status !== 'pending') {
-      const userMap = await this.resolveUserNames([existing.createdById, userId]);
+      const userMap = await this.resolveUserNames([
+        existing.createdById,
+        userId,
+      ]);
       const formatted = formatSuggestionItemDto(existing, userMap);
       return { ok: true, suggestion: { ...existing, ...formatted } };
     }
 
-    await this.pageScopeRepo.updateTrackChangeInProject(
-      targetProjectId,
-      suggestionId,
-      {
-        status: 'rejected',
-        resolvedAt: new Date(),
-        resolvedById: isUuid(userId) ? userId : null,
-      },
-    );
+    const resolvedById = isUuid(userId) ? userId : null;
+    if (typeof this.pageScopeRepo.claimTrackChangesPending === 'function') {
+      const claimed = await this.pageScopeRepo.claimTrackChangesPending(
+        targetProjectId,
+        [suggestionId],
+        'rejected',
+        resolvedById,
+        resolvedDocId,
+      );
+      if (claimed.length === 0) {
+        const latest =
+          (await this.pageScopeRepo.findTrackChangeInProject(
+            targetProjectId,
+            suggestionId,
+          )) ?? existing;
+        const userMap = await this.resolveUserNames([
+          latest.createdById,
+          userId,
+        ]);
+        const formatted = formatSuggestionItemDto(latest, userMap);
+        return { ok: true, suggestion: { ...latest, ...formatted } };
+      }
+    } else {
+      await this.pageScopeRepo.updateTrackChangeInProject(
+        targetProjectId,
+        suggestionId,
+        {
+          status: 'rejected',
+          resolvedAt: new Date(),
+          resolvedById,
+        },
+      );
+    }
 
     const record = await this.pageScopeRepo.findTrackChangeInProject(
       targetProjectId,
@@ -1181,9 +1507,8 @@ export class ReviewController {
         if (doc) {
           const docProjectId = this.getRecordSpaceId(doc) || targetProjectId;
           const lines = await this.pageService.getHydratedDocLines(doc);
-          const { LinePatcher } = await import(
-            '@/modules/pages/track-changes/domain'
-          );
+          const { LinePatcher } =
+            await import('@/modules/pages/track-changes/domain');
           const changeEntity = TrackChange.create({
             id: record.id,
             projectId: docProjectId,
@@ -1191,9 +1516,9 @@ export class ReviewController {
             type: record.type === 'delete' ? 'delete' : 'insert',
             text: record.text,
             range: TextRangeVo.create({
-              startLine: Math.max(0, (record.startLine ?? 1) > 0 ? (record.startLine ?? 1) - 1 : 0),
+              startLine: Math.max(0, record.startLine ?? 0),
               startCol: Math.max(0, record.startCol ?? 0),
-              endLine: Math.max(0, (record.endLine ?? record.startLine ?? 1) > 0 ? (record.endLine ?? record.startLine ?? 1) - 1 : 0),
+              endLine: Math.max(0, record.endLine ?? record.startLine ?? 0),
               endCol: Math.max(0, record.endCol ?? 0),
             }),
             createdById: record.createdById,
@@ -1204,11 +1529,15 @@ export class ReviewController {
           let finalVersion = doc.version;
           let finalRev = doc.rev;
           if (mutated) {
-            const updateRes = await this.docstoreService.updateDoc(docProjectId, doc.id, {
-              lines: nextLines,
-              version: doc.version + 1,
-              expectedRev: doc.rev,
-            });
+            const updateRes = await this.docstoreService.updateDoc(
+              docProjectId,
+              doc.id,
+              {
+                lines: nextLines,
+                version: doc.version + 1,
+                expectedRev: doc.rev,
+              },
+            );
             finalVersion = updateRes?.doc?.version ?? doc.version + 1;
             finalRev = updateRes?.rev ?? updateRes?.doc?.rev ?? doc.rev + 1;
 
@@ -1227,11 +1556,28 @@ export class ReviewController {
         this.logger.error(
           `Failed to revert rejected suggestion ${suggestionId} in docstore, rolling back status: ${revertErr}`,
         );
-        await this.pageScopeRepo.updateTrackChangeInProject(
-          targetProjectId,
-          suggestionId,
-          { status: 'pending', resolvedAt: null, resolvedById: null },
-        );
+        if (
+          typeof this.pageScopeRepo.revertClaimedTrackChanges === 'function'
+        ) {
+          await this.pageScopeRepo.revertClaimedTrackChanges(
+            targetProjectId,
+            [suggestionId],
+            'rejected',
+          );
+        } else {
+          await this.pageScopeRepo.updateTrackChangeInProject(
+            targetProjectId,
+            suggestionId,
+            { status: 'pending', resolvedAt: null, resolvedById: null },
+          );
+        }
+        if (revertErr instanceof StaleTrackChangeAnchorException) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: revertErr.code,
+            message: revertErr.message,
+          });
+        }
         throw revertErr;
       }
 
@@ -1239,7 +1585,7 @@ export class ReviewController {
         docId: record.docId,
         change: record,
         action: 'rejected',
-        resolvedById: isUuid(userId) ? userId : null,
+        resolvedById,
       });
     }
 
@@ -1260,15 +1606,15 @@ export class ReviewController {
   @Post([
     'pages/:pageId/suggestions/accept-all',
     'docs/:pageId/suggestions/accept-all',
-    'projects/:projectId/docs/:pageId/suggestions/accept-all',
+    'spaces/:spaceId/docs/:pageId/suggestions/accept-all',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async acceptAllSuggestions(
     @Param('pageId') pageId: string,
     @Body() body: { suggestionIds?: string[] },
-    @ResolvedProject() authorizedProjectId: string | { id: string } | null,
-    @Param('projectId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
     @Req() req?: AuthenticatedRequest,
   ) {
     const resolvedCount = await this.batchResolvePageSuggestions(
@@ -1289,15 +1635,15 @@ export class ReviewController {
   @Post([
     'pages/:pageId/suggestions/reject-all',
     'docs/:pageId/suggestions/reject-all',
-    'projects/:projectId/docs/:pageId/suggestions/reject-all',
+    'spaces/:spaceId/docs/:pageId/suggestions/reject-all',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async rejectAllSuggestions(
     @Param('pageId') pageId: string,
     @Body() body: { suggestionIds?: string[] },
-    @ResolvedProject() authorizedProjectId: string | { id: string } | null,
-    @Param('projectId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
     @Req() req?: AuthenticatedRequest,
   ) {
     const resolvedCount = await this.batchResolvePageSuggestions(
@@ -1318,7 +1664,7 @@ export class ReviewController {
   @Post([
     'pages/:pageId/suggestions/batch-resolve',
     'docs/:pageId/suggestions/batch-resolve',
-    'projects/:projectId/docs/:pageId/suggestions/batch-resolve',
+    'spaces/:spaceId/docs/:pageId/suggestions/batch-resolve',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
@@ -1329,12 +1675,11 @@ export class ReviewController {
       action: 'accept' | 'reject' | 'accept_all' | 'reject_all';
       suggestionIds?: string[];
     },
-    @ResolvedProject() authorizedProjectId: string | { id: string } | null,
-    @Param('projectId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
     @Req() req?: AuthenticatedRequest,
   ) {
-    const isAccept =
-      body?.action === 'accept' || body?.action === 'accept_all';
+    const isAccept = body?.action === 'accept' || body?.action === 'accept_all';
     const resolvedCount = await this.batchResolvePageSuggestions(
       pageId,
       routeProjectId || authorizedProjectId,
@@ -1357,14 +1702,15 @@ export class ReviewController {
    * GET /api/v1/manuscripts/docs/:projectId/review-overview
    */
   @Get([
-    'projects/:projectId/review-overview',
+    'spaces/:spaceId/review-overview',
     'pages/:projectId/review-overview',
     'docs/:projectId/review-overview',
   ])
   @RequireRole(Role.REVIEWER)
   async getProjectReviewOverview(
-    @Param('projectId') routeProjectId: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId: string,
+    @Req() req?: AuthenticatedRequest,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     const resolvedActive = this.resolveActiveProjectId(authorizedProjectId);
     const targetProjectId =
@@ -1390,9 +1736,20 @@ export class ReviewController {
       };
     }
 
+    const reqPageId = (req as { resolvedPageId?: string } | undefined)
+      ?.resolvedPageId;
+    const explicitPageId =
+      reqPageId ??
+      (isUuid(routeProjectId) &&
+      resolvedActive &&
+      routeProjectId !== resolvedActive
+        ? routeProjectId
+        : undefined);
+
     return buildProjectReviewOverview({
       pageScopeRepo: this.pageScopeRepo,
       projectId: targetProjectId,
+      pageId: explicitPageId,
       resolveUserNames: (userIds) => this.resolveUserNames(userIds),
     });
   }
@@ -1439,7 +1796,29 @@ export class ReviewController {
       return 0;
     }
 
-    const normalizedChanges = filtered.map((c) =>
+    const resolvedStatus = isAccept ? 'accepted' : 'rejected';
+    const resolvedById = isUuid(userId) ? userId : null;
+    const useAtomicClaim =
+      typeof this.pageScopeRepo.claimTrackChangesPending === 'function';
+
+    let targetChanges = filtered;
+    let claimedIds: string[] = [];
+    if (useAtomicClaim) {
+      claimedIds = await this.pageScopeRepo.claimTrackChangesPending(
+        targetProjectId,
+        filtered.map((c) => c.id),
+        resolvedStatus,
+        resolvedById,
+        docId,
+      );
+      if (claimedIds.length === 0) {
+        return 0;
+      }
+      const claimedSet = new Set(claimedIds);
+      targetChanges = filtered.filter((c) => claimedSet.has(c.id));
+    }
+
+    const normalizedChanges = targetChanges.map((c) =>
       TrackChange.create({
         id: c.id,
         projectId: c.projectId,
@@ -1447,65 +1826,88 @@ export class ReviewController {
         type: c.type,
         text: c.text,
         range: TextRangeVo.create({
-          startLine: Math.max(0, c.range.startLine > 0 ? c.range.startLine - 1 : 0),
+          startLine: Math.max(0, c.range.startLine),
           startCol: Math.max(0, c.range.startCol),
-          endLine: Math.max(0, c.range.endLine > 0 ? c.range.endLine - 1 : 0),
+          endLine: Math.max(0, c.range.endLine),
           endCol: Math.max(0, c.range.endCol),
         }),
         createdById: c.createdById,
       }),
     );
 
-    const { LinePatcher } = await import(
-      '@/modules/pages/track-changes/domain'
-    );
+    const { LinePatcher } =
+      await import('@/modules/pages/track-changes/domain');
     const sorted = LinePatcher.sortChangesBottomUp(normalizedChanges);
 
-    const live = this.getLiveCollaboration();
-    if (live) {
-      await live.flushDocs(targetProjectId, [docId]).catch(() => []);
-    }
+    try {
+      const live = this.getLiveCollaboration();
+      if (live) {
+        await live.flushDocs(targetProjectId, [docId]).catch(() => []);
+      }
 
-    const doc = await this.pageScopeRepo.findDocInProject(
-      targetProjectId,
-      docId,
-    );
-    if (doc) {
-      let currentLines = await this.pageService.getHydratedDocLines(doc);
-      let anyMutated = false;
+      const doc = await this.pageScopeRepo.findDocInProject(
+        targetProjectId,
+        docId,
+      );
+      if (doc) {
+        let currentLines = await this.pageService.getHydratedDocLines(doc);
+        let anyMutated = false;
 
-      for (const change of sorted) {
-        const computed = isAccept
-          ? LinePatcher.computeAcceptedPatch(currentLines, change)
-          : LinePatcher.computeRejectedPatch(currentLines, change);
-        currentLines = computed.lines;
-        if (computed.mutated) {
-          anyMutated = true;
+        for (const change of sorted) {
+          const computed = isAccept
+            ? LinePatcher.computeAcceptedPatch(currentLines, change)
+            : LinePatcher.computeRejectedPatch(currentLines, change);
+          currentLines = computed.lines;
+          if (computed.mutated) {
+            anyMutated = true;
+          }
+        }
+
+        if (anyMutated) {
+          const docProjectId = this.getRecordSpaceId(doc) || targetProjectId;
+          await this.docstoreService.updateDoc(docProjectId, doc.id, {
+            lines: currentLines,
+            version: doc.version + 1,
+            expectedRev: doc.rev,
+          });
+          await this.syncLiveDoc(docProjectId, doc.id, currentLines);
         }
       }
 
-      if (anyMutated) {
-        const docProjectId = this.getRecordSpaceId(doc) || targetProjectId;
-        await this.docstoreService.updateDoc(docProjectId, doc.id, {
-          lines: currentLines,
-          version: doc.version + 1,
-          expectedRev: doc.rev,
-        });
-        await this.syncLiveDoc(docProjectId, doc.id, currentLines);
+      if (!useAtomicClaim) {
+        const now = new Date();
+        await this.trackChangesRepo.batchUpdateChangesStatus(
+          sorted.map((c) => c.id),
+          resolvedStatus,
+          resolvedById,
+          now,
+          targetProjectId,
+          docId,
+        );
       }
+    } catch (batchErr) {
+      if (
+        useAtomicClaim &&
+        claimedIds.length > 0 &&
+        typeof this.pageScopeRepo.revertClaimedTrackChanges === 'function'
+      ) {
+        await this.pageScopeRepo
+          .revertClaimedTrackChanges(
+            targetProjectId,
+            claimedIds,
+            resolvedStatus,
+          )
+          .catch(() => undefined);
+      }
+      if (batchErr instanceof StaleTrackChangeAnchorException) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: batchErr.code,
+          message: batchErr.message,
+        });
+      }
+      throw batchErr;
     }
-
-    const resolvedStatus = isAccept ? 'accepted' : 'rejected';
-    const now = new Date();
-    const resolvedById = isUuid(userId) ? userId : null;
-    await this.trackChangesRepo.batchUpdateChangesStatus(
-      sorted.map((c) => c.id),
-      resolvedStatus,
-      resolvedById,
-      now,
-      targetProjectId,
-      docId,
-    );
 
     for (const change of sorted) {
       this.broadcastEvent(targetProjectId, 'track-changes:resolved', {
@@ -1527,13 +1929,13 @@ export class ReviewController {
   @Get([
     'pages/:pageId/review-status',
     'docs/:pageId/review-status',
-    'projects/:projectId/docs/:pageId/review-status',
+    'spaces/:spaceId/docs/:pageId/review-status',
   ])
   @RequireRole(Role.REVIEWER)
   async getReviewStatus(
     @Param('pageId') pageId: string,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeProjectId?: string,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     const { docId, projectId } = await this.resolveDocAndProject(
       pageId,
@@ -1561,16 +1963,16 @@ export class ReviewController {
   @Post([
     'pages/:pageId/review-status',
     'docs/:pageId/review-status',
-    'projects/:projectId/docs/:pageId/review-status',
+    'spaces/:spaceId/docs/:pageId/review-status',
   ])
   @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
   async updateReviewStatus(
     @Param('pageId') pageId: string,
     @Body() body: UpdateReviewStatusDto,
-    @ResolvedProject() authorizedProjectId: string | { id: string } | null,
+    @ResolvedSpace() authorizedProjectId: string | { id: string } | null,
     @CurrentRole() currentRole: Role,
-    @Param('projectId') routeProjectId?: string,
+    @Param('spaceId') routeProjectId?: string,
     @CurrentUser('id') userId?: string,
   ) {
     const { docId, projectId } = await this.resolveDocAndProject(

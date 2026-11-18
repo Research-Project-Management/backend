@@ -31,9 +31,7 @@ export class ClsiCompileProcessor extends WorkerHost {
     job: Job<ClsiCompileJobData>,
   ): Promise<ClsiCompileResult> {
     const projectId =
-      job.data.authorizedProjectId ||
-      job.data.dto.projectId ||
-      'unknown';
+      job.data.authorizedProjectId || job.data.dto.spaceId || 'unknown';
 
     this.logger.log(
       `[ClsiCompileProcessor] Processing job ${job.id} for project ${projectId}`,

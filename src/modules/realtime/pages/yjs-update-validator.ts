@@ -88,8 +88,9 @@ export class YjsUpdateValidator {
   public validatePostApplySize(
     doc: Y.Doc,
     maxDocumentSizeBytes: number = 20 * 1024 * 1024,
+    approxEncodedBytes: number = 0,
   ): void {
-    // Fast path: for production threshold (e.g. 20MB), skip full serialization if all shared types are well under bound
+    // Fast path: skip full serialization only if both visible text AND cumulative CRDT bytes are well below cap
     if (maxDocumentSizeBytes > 1024) {
       let approxChars = 0;
       for (const item of doc.share.values()) {
@@ -98,7 +99,10 @@ export class YjsUpdateValidator {
           approxChars += anyItem.length;
         }
       }
-      if (approxChars * 4 <= maxDocumentSizeBytes - 64 * 1024) {
+      if (
+        approxChars * 4 + approxEncodedBytes <=
+        maxDocumentSizeBytes - 64 * 1024
+      ) {
         return;
       }
     }

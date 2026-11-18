@@ -83,7 +83,7 @@ export class ClsiService {
   }
 
   public async compile(dto: CompileManuscriptDto) {
-    const projectId = dto.projectId || 'default';
+    const projectId = dto.spaceId || 'default';
     const mainFile = dto.mainFile || 'main.tex';
     const source = dto.source || '';
     const files = dto.files || {};
@@ -153,7 +153,7 @@ export class ClsiService {
   }
 
   public async forwardSync(dto: ForwardSyncDto) {
-    const projectId = dto.projectId || dto.pageId || 'default';
+    const projectId = dto.spaceId || dto.pageId || 'default';
     const synctexContent = await this.loadSynctexContent(
       projectId,
       dto.synctex,
@@ -184,7 +184,7 @@ export class ClsiService {
   }
 
   public async reverseSync(dto: ReverseSyncDto) {
-    const projectId = dto.projectId || dto.pageId || 'default';
+    const projectId = dto.spaceId || dto.pageId || 'default';
     const synctexContent = await this.loadSynctexContent(
       projectId,
       dto.synctex,
@@ -281,10 +281,7 @@ export class ClsiService {
     return res.send(buffer);
   }
 
-  public async downloadAllArtifactsZip(
-    projectId: string,
-    res: FastifyReply,
-  ) {
+  public async downloadAllArtifactsZip(projectId: string, res: FastifyReply) {
     const scratchDir = this.workspace.getScratchDir(projectId);
     const diskEntries: ZipDiskEntry[] = [];
 
@@ -397,7 +394,8 @@ export class ClsiController {
   @Post('synctex/reverse')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Reverse SyncTeX: map clicked PDF coordinates to LaTeX line/column',
+    summary:
+      'Reverse SyncTeX: map clicked PDF coordinates to LaTeX line/column',
   })
   public async reverseSync(@Body() dto: ReverseSyncDto) {
     return this.clsiService.reverseSync(dto);

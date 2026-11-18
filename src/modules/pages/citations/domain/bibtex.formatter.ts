@@ -98,7 +98,10 @@ export function toBibtexValue(
     return balanceBraces(str);
   }
 
-  const normalizedStr = str.replace(/([A-Za-z0-9])\s*[–—]\s*([A-Za-z0-9])/g, '$1--$2');
+  const normalizedStr = str.replace(
+    /([A-Za-z0-9])\s*[–—]\s*([A-Za-z0-9])/g,
+    '$1--$2',
+  );
 
   if (field === 'pages' || field === 'page') {
     const normalizedPages = normalizedStr.replace(/\s*[–—]\s*/g, '--');

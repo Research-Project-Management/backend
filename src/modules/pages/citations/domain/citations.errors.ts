@@ -4,6 +4,8 @@
  */
 
 export class IdentifierNotFoundException extends Error {
+  public readonly statusCode = 404;
+
   constructor(public readonly identifier: string) {
     super(
       `Academic identifier '${identifier}' could not be resolved from CrossRef or arXiv`,
@@ -19,6 +21,8 @@ export class IdentifierNotFoundException extends Error {
  */
 
 export class InvalidBibtexException extends Error {
+  public readonly statusCode = 400;
+
   constructor(
     message = 'The provided BibTeX content contains syntax errors or unclosed delimiters',
   ) {

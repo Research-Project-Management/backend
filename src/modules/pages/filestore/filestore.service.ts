@@ -1,6 +1,6 @@
 /**
- * filestore/filestore.service.ts
- * Deep Module Service for Manuscripts Filestore.
+ * modules/pages/filestore/filestore.service.ts
+ * Deep Module Service for Pages Binary Filestore.
  * Consolidates Content-Addressable Storage (CAS) upload, byte-range streaming,
  * metadata queries, signed URLs, and reference-counted deletion.
  */
@@ -133,11 +133,7 @@ export class FilestoreService {
 
     const candidatePageId = options?.pageId?.trim() || undefined;
     let effectivePageId =
-      candidatePageId &&
-      isUuid(candidatePageId) &&
-      candidatePageId !== projectId
-        ? candidatePageId
-        : undefined;
+      candidatePageId && isUuid(candidatePageId) ? candidatePageId : undefined;
     if (
       effectivePageId &&
       typeof this.repository.resolvePageId === 'function'
@@ -151,102 +147,189 @@ export class FilestoreService {
     const { contentHash, sha256Hex, sizeBytes, dataStream } =
       await this.repository.hashStream(stream);
 
-    if (sizeBytes > MAX_FILE_SIZE_BYTES) {
-      dataStream.destroy();
-      throw new StorageQuotaExceededException(sizeBytes, MAX_FILE_SIZE_BYTES);
-    }
+    let quotaDeltaApplied = 0n;
+    let existing: ManuscriptFile | null = null;
+    let acquiredNewBlobId: string | null = null;
+    let saved!: ManuscriptFile;
 
-    const existing = await this.repository.findByProjectAndName(
-      projectId,
-      sanitizedName,
-      effectivePageId,
-    );
+    try {
+      if (sizeBytes > MAX_FILE_SIZE_BYTES) {
+        throw new StorageQuotaExceededException(sizeBytes, MAX_FILE_SIZE_BYTES);
+      }
 
-    // Enforce unified platform Space StorageQuota before writing physical object
-    const netBytesDelta = BigInt(sizeBytes) - BigInt(existing?.sizeBytes ?? 0);
-    if (this.quotaRepo && netBytesDelta > 0n) {
-      await this.quotaRepo.incrementUsage(null, projectId, netBytesDelta);
-    } else if (this.quotaRepo && netBytesDelta < 0n) {
-      await this.quotaRepo.decrementUsage(null, projectId, -netBytesDelta);
-    }
-
-    let storageKey = this.repository.buildStorageKey(contentHash);
-
-    const blobExists = await this.repository.checkObjectExists(
-      bucketName,
-      storageKey.getValue(),
-    );
-
-    if (blobExists) {
-      dataStream.destroy();
-      this.logger.log(
-        `[CAS Deduplication] Reusing existing blob '${storageKey.getValue()}' for file '${sanitizedName}' in project '${projectId}'. (0 bytes written to storage)`,
-      );
-    } else {
-      await this.repository.sendStream(
-        bucketName,
-        storageKey.getValue(),
-        dataStream,
-        {
-          contentType: mimeType || 'application/octet-stream',
-        },
-      );
-      this.logger.log(
-        `[CAS Write] Stored new blob '${storageKey.getValue()}' (${sizeBytes} bytes) for project '${projectId}'.`,
-      );
-    }
-
-    // Register or increment reference count in platform StorageBlob CAS ledger
-    if (this.blobService && sha256Hex && /^[a-f0-9]{64}$/i.test(sha256Hex)) {
-      try {
-        const casResult = await this.blobService.registerUploadedObject({
-          storageKey: storageKey.getValue(),
-          sizeBytes: BigInt(sizeBytes),
-          contentHashHex: sha256Hex,
-        });
-        if (casResult?.blob?.s3Key) {
-          storageKey = StorageKey.fromRawKey(casResult.blob.s3Key.value());
-        }
-      } catch (err) {
-        this.logger.warn(
-          `[CAS Ledger] Failed to register StorageBlob for '${sanitizedName}': ${(err as Error).message}`,
+      if (
+        options?.syncStructureNode !== false &&
+        typeof this.repository.assertUploadPathAvailable === 'function'
+      ) {
+        await this.repository.assertUploadPathAvailable(
+          projectId,
+          sanitizedName,
+          effectivePageId,
         );
       }
-    }
 
-    const targetPageId = effectivePageId ?? existing?.pageId ?? null;
-    const fileEntity = ManuscriptFile.reconstitute({
-      id: existing?.id ?? ManuscriptFile.create({
+      existing = await this.repository.findByProjectAndName(
+        projectId,
+        sanitizedName,
+        effectivePageId,
+      );
+
+      // Enforce unified platform Space StorageQuota before writing physical object
+      const netBytesDelta =
+        BigInt(sizeBytes) - BigInt(existing?.sizeBytes ?? 0);
+      if (this.quotaRepo && netBytesDelta > 0n) {
+        await this.quotaRepo.incrementUsage(null, projectId, netBytesDelta);
+        quotaDeltaApplied = netBytesDelta;
+      } else if (this.quotaRepo && netBytesDelta < 0n) {
+        await this.quotaRepo.decrementUsage(null, projectId, -netBytesDelta);
+        quotaDeltaApplied = netBytesDelta;
+      }
+
+      let storageKey = this.repository.buildStorageKey(contentHash);
+      let blobExists = await this.repository.checkObjectExists(
+        bucketName,
+        storageKey.getValue(),
+      );
+
+      if (
+        !blobExists &&
+        this.blobService &&
+        sha256Hex &&
+        /^[a-f0-9]{64}$/i.test(sha256Hex) &&
+        typeof this.blobService.findBlobByHash === 'function'
+      ) {
+        const casHit = await this.blobService
+          .findBlobByHash(PlatformContentHash.fromHex(sha256Hex))
+          .catch(() => null);
+        if (casHit?.isReady()) {
+          storageKey = StorageKey.fromRawKey(casHit.s3Key.value());
+          blobExists = true;
+        }
+      }
+
+      if (blobExists) {
+        dataStream.destroy();
+        this.logger.log(
+          `[CAS Deduplication] Reusing existing blob '${storageKey.getValue()}' for file '${sanitizedName}' in space '${projectId}'. (0 bytes written to storage)`,
+        );
+      } else {
+        await this.repository.sendStream(
+          bucketName,
+          storageKey.getValue(),
+          dataStream,
+          {
+            contentType: mimeType || 'application/octet-stream',
+          },
+        );
+        this.logger.log(
+          `[CAS Write] Stored new blob '${storageKey.getValue()}' (${sizeBytes} bytes) for space '${projectId}'.`,
+        );
+      }
+
+      // Register or increment reference count in platform StorageBlob CAS ledger
+      let resolvedBlobId: string | null = existing?.blobId ?? null;
+      const isIdenticalOverwrite = Boolean(
+        existing?.blobId && existing.hash.getValue() === contentHash.getValue(),
+      );
+      if (
+        !isIdenticalOverwrite &&
+        this.blobService &&
+        sha256Hex &&
+        /^[a-f0-9]{64}$/i.test(sha256Hex)
+      ) {
+        try {
+          const casResult = await this.blobService.registerUploadedObject({
+            storageKey: storageKey.getValue(),
+            sizeBytes: BigInt(sizeBytes),
+            contentHashHex: sha256Hex,
+          });
+          if (casResult?.blob?.id) {
+            resolvedBlobId = casResult.blob.id;
+            acquiredNewBlobId = casResult.blob.id;
+          }
+          if (casResult?.blob?.s3Key) {
+            storageKey = StorageKey.fromRawKey(casResult.blob.s3Key.value());
+          }
+        } catch (err) {
+          this.logger.warn(
+            `[CAS Ledger] Failed to register StorageBlob for '${sanitizedName}': ${(err as Error).message}`,
+          );
+        }
+      }
+
+      const targetPageId = effectivePageId ?? existing?.pageId ?? null;
+      const fileEntity = ManuscriptFile.reconstitute({
+        id:
+          existing?.id ??
+          ManuscriptFile.create({
+            projectId,
+            pageId: targetPageId,
+            blobId: resolvedBlobId,
+            name: sanitizedName,
+            mimeType: mimeType || 'application/octet-stream',
+            sizeBytes,
+            hash: contentHash,
+            storageKey,
+            bucketName,
+          }).id,
         projectId,
         pageId: targetPageId,
+        blobId: resolvedBlobId,
         name: sanitizedName,
         mimeType: mimeType || 'application/octet-stream',
         sizeBytes,
         hash: contentHash,
         storageKey,
         bucketName,
-      }).id,
-      projectId,
-      pageId: targetPageId,
-      name: sanitizedName,
-      mimeType: mimeType || 'application/octet-stream',
-      sizeBytes,
-      hash: contentHash,
-      storageKey,
-      bucketName,
-      rev: existing ? existing.rev + 1 : 0,
-      deleted: false,
-      deletedAt: null,
-      createdAt: existing?.createdAt ?? new Date(),
-      updatedAt: new Date(),
-    });
+        rev: existing ? existing.rev + 1 : 0,
+        deleted: false,
+        deletedAt: null,
+        createdAt: existing?.createdAt ?? new Date(),
+        updatedAt: new Date(),
+      });
 
-    const saved = await (
-      this.repository.save as (
-        f: ManuscriptFile,
-        opts?: { syncStructureNode?: boolean; pageId?: string | null },
-      ) => Promise<ManuscriptFile>
-    )(fileEntity, options);
+      saved = await this.repository.save(fileEntity, options);
+
+      // Release superseded StorageBlob reference when an existing asset is overwritten with new content
+      if (
+        existing?.blobId &&
+        resolvedBlobId &&
+        existing.blobId !== resolvedBlobId &&
+        this.blobService
+      ) {
+        await this.blobService
+          .releaseBlob(existing.blobId)
+          .catch((err: unknown) => {
+            this.logger.warn(
+              `[CAS Ledger] Failed to release overwritten blob '${existing?.blobId}': ${(err as Error).message}`,
+            );
+          });
+      }
+
+      return saved;
+    } catch (err) {
+      if (this.quotaRepo && quotaDeltaApplied > 0n) {
+        await this.quotaRepo
+          .decrementUsage(null, projectId, quotaDeltaApplied)
+          .catch(() => undefined);
+      } else if (this.quotaRepo && quotaDeltaApplied < 0n) {
+        await this.quotaRepo
+          .incrementUsage(null, projectId, -quotaDeltaApplied)
+          .catch(() => undefined);
+      }
+      if (
+        acquiredNewBlobId &&
+        acquiredNewBlobId !== existing?.blobId &&
+        this.blobService
+      ) {
+        await this.blobService
+          .releaseBlob(acquiredNewBlobId)
+          .catch(() => undefined);
+      }
+      throw err;
+    } finally {
+      dataStream.destroy();
+    }
 
     if (options?.syncStructureNode !== false) {
       const parsedPath = NodePathVo.parse(
@@ -377,19 +460,29 @@ export class FilestoreService {
 
     // Release reference in unified platform StorageBlob CAS ledger
     if (this.blobService) {
-      const rawHash = file.hash.getValue();
-      if (/^[a-f0-9]{64}$/i.test(rawHash)) {
+      if (file.blobId) {
         try {
-          const blob = await this.blobService.findBlobByHash(
-            PlatformContentHash.fromHex(rawHash),
-          );
-          if (blob) {
-            await this.blobService.releaseBlob(blob.id);
-          }
+          await this.blobService.releaseBlob(file.blobId);
         } catch (err) {
           this.logger.warn(
-            `[CAS Ledger] Failed to release StorageBlob for '${file.id}': ${(err as Error).message}`,
+            `[CAS Ledger] Failed to release StorageBlob '${file.blobId}' for '${file.id}': ${(err as Error).message}`,
           );
+        }
+      } else {
+        const rawHash = file.hash.getValue();
+        if (/^[a-f0-9]{64}$/i.test(rawHash)) {
+          try {
+            const blob = await this.blobService.findBlobByHash(
+              PlatformContentHash.fromHex(rawHash),
+            );
+            if (blob) {
+              await this.blobService.releaseBlob(blob.id);
+            }
+          } catch (err) {
+            this.logger.warn(
+              `[CAS Ledger] Failed to release StorageBlob for '${file.id}': ${(err as Error).message}`,
+            );
+          }
         }
       }
     }
@@ -434,11 +527,17 @@ export class FilestoreService {
   public async reclaimDeletedFilesQuotaAndBlobs(
     projectId: string,
     fileIds: string[],
-    deletedNodes?: Array<{ fileId?: string | null; sizeBytes?: number; hash?: string | null }>,
+    deletedNodes?: Array<{
+      fileId?: string | null;
+      blobId?: string | null;
+      sizeBytes?: number;
+      hash?: string | null;
+    }>,
   ): Promise<void> {
     if (!fileIds || fileIds.length === 0) return;
 
     let totalReclaimedBytes = 0n;
+    const blobIdsToRelease = new Set<string>();
     const hashesToRelease: string[] = [];
 
     if (deletedNodes && deletedNodes.length > 0) {
@@ -449,7 +548,24 @@ export class FilestoreService {
         if (typeof n.sizeBytes === 'number' && n.sizeBytes > 0) {
           totalReclaimedBytes += BigInt(n.sizeBytes);
         }
-        if (typeof n.hash === 'string' && /^[a-f0-9]{64}$/i.test(n.hash)) {
+        if (n.blobId) {
+          blobIdsToRelease.add(n.blobId);
+        } else if (typeof this.repository.findByProjectAndId === 'function') {
+          const f = await this.repository
+            .findByProjectAndId(projectId, n.fileId)
+            .catch(() => null);
+          if (f?.blobId) {
+            blobIdsToRelease.add(f.blobId);
+          } else if (
+            typeof n.hash === 'string' &&
+            /^[a-f0-9]{64}$/i.test(n.hash)
+          ) {
+            hashesToRelease.push(n.hash);
+          }
+        } else if (
+          typeof n.hash === 'string' &&
+          /^[a-f0-9]{64}$/i.test(n.hash)
+        ) {
           hashesToRelease.push(n.hash);
         }
       }
@@ -461,9 +577,13 @@ export class FilestoreService {
         if (f && f.sizeBytes > 0) {
           totalReclaimedBytes += BigInt(f.sizeBytes);
         }
-        const rawHash = f?.hash?.getValue?.();
-        if (rawHash && /^[a-f0-9]{64}$/i.test(rawHash)) {
-          hashesToRelease.push(rawHash);
+        if (f?.blobId) {
+          blobIdsToRelease.add(f.blobId);
+        } else {
+          const rawHash = f?.hash?.getValue?.();
+          if (rawHash && /^[a-f0-9]{64}$/i.test(rawHash)) {
+            hashesToRelease.push(rawHash);
+          }
         }
       }
     }
@@ -478,7 +598,14 @@ export class FilestoreService {
         });
     }
 
-    if (this.blobService && hashesToRelease.length > 0) {
+    if (this.blobService) {
+      for (const blobId of blobIdsToRelease) {
+        try {
+          await this.blobService.releaseBlob(blobId);
+        } catch {
+          // Non-blocking CAS release
+        }
+      }
       for (const hex of hashesToRelease) {
         try {
           const blob = await this.blobService.findBlobByHash(
@@ -497,16 +624,50 @@ export class FilestoreService {
   /**
    * Restores a soft-deleted file record in the project (used for Memento/Saga rollback).
    */
-  public async restoreFile(projectId: string, fileId: string): Promise<boolean> {
+  public async restoreFile(
+    projectId: string,
+    fileId: string,
+  ): Promise<boolean> {
     const file = await this.repository.findByProjectAndId(projectId, fileId);
     if (!file) return false;
-    if (file.deleted) {
+    if (!file.deleted) {
+      return true;
+    }
+
+    let wonAtomicRestore = true;
+    if (typeof this.repository.markRestoredIfDeleted === 'function') {
+      wonAtomicRestore = await this.repository.markRestoredIfDeleted(
+        projectId,
+        fileId,
+      );
+      if (!wonAtomicRestore) {
+        return true;
+      }
+      file.restore();
+    } else {
       file.restore();
       await this.repository.save(file);
-      if (this.quotaRepo && file.sizeBytes > 0) {
-        await this.quotaRepo
-          .incrementUsage(null, projectId, BigInt(file.sizeBytes))
-          .catch(() => {});
+    }
+
+    if (this.quotaRepo && file.sizeBytes > 0) {
+      await this.quotaRepo
+        .incrementUsage(null, projectId, BigInt(file.sizeBytes))
+        .catch(() => {});
+    }
+    if (
+      this.blobService &&
+      typeof (this.blobService as { acquireBlob?: unknown }).acquireBlob ===
+        'function'
+    ) {
+      let targetBlobId = file.blobId;
+      if (!targetBlobId && file.hash && this.blobService.findBlobByHash) {
+        const blob = await this.blobService
+          .findBlobByHash(PlatformContentHash.fromHex(file.hash.getValue()))
+          .catch(() => null);
+        targetBlobId = blob?.id ?? null;
+      }
+      if (targetBlobId) {
+        await this.blobService.acquireBlob(targetBlobId).catch(() => null);
       }
     }
     return true;
@@ -535,7 +696,7 @@ export class FilestoreService {
       !signedUrl ||
       signedUrl.startsWith('/api/manuscripts/filestore/download/')
     ) {
-      return `/api/v1/manuscripts/projects/${projectId}/files/${file.id}`;
+      return `/api/v1/pages/spaces/${projectId}/files/${file.id}`;
     }
 
     return signedUrl;

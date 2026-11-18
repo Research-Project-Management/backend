@@ -141,9 +141,7 @@ export class LatexmkEngine extends BaseLatexEngine {
     runner: ISandboxRunner,
     binaryPath: string = 'latexmk',
     private readonly defaultCompiler:
-      | 'pdflatex'
-      | 'xelatex'
-      | 'lualatex' = 'pdflatex',
+      'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex',
   ) {
     super(runner, binaryPath);
   }
@@ -501,7 +499,10 @@ export class CompilePipeline {
     dto: CompilePipelineRequest,
   ): Promise<CompilePipelineResult> {
     const startTime = Date.now();
-    const projectId = dto.projectId || 'default-project';
+    const projectId =
+      (dto as { spaceId?: string }).spaceId ||
+      dto.projectId ||
+      'default-project';
     const cleanRelPath = (p: string) =>
       p
         .trim()
@@ -720,9 +721,8 @@ export class CompilePipeline {
               : undefined,
           );
 
-          const resolvedRunner = await this.resolveAvailableEngine(
-            resolvedEngine,
-          );
+          const resolvedRunner =
+            await this.resolveAvailableEngine(resolvedEngine);
           if (!resolvedRunner) {
             const errorMsg =
               'No supported TeX engine (latexmk/pdflatex) was found in PATH or sandbox runner. Please install TeX Live (latexmk), or configure CLSI_URL / Docker runner.';
@@ -748,7 +748,7 @@ export class CompilePipeline {
           const timeoutMs = dto.timeoutMs || 240000;
           const stopOnFirstError = dto.stopOnFirstError ?? false;
 
-          let engineResult = await engineToUse.compile(
+          const engineResult = await engineToUse.compile(
             {
               cwd: scratchDir,
               mainFile,

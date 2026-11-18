@@ -12,6 +12,7 @@ import {
   FileTreeBuilder,
   StructureError,
   DuplicateNodePathError,
+  InvalidNodeNameError,
   NodeNotFoundError,
   RootDocNotFoundError,
   LatexOutlineExtractor,
@@ -199,8 +200,9 @@ export class StructureService {
   public async getNodeByPath(
     projectId: string,
     path: string,
+    pageId?: string,
   ): Promise<ManuscriptNodeEntity | null> {
-    return await this.repository.findByPath(projectId, path);
+    return await this.repository.findByPath(projectId, path, pageId);
   }
 
   private async resolveOrMaterializeParentFolder(
@@ -224,6 +226,16 @@ export class StructureService {
       );
       if (!parentNode) {
         throw new NodeNotFoundError(options.parentId);
+      }
+      if (
+        options.pageId &&
+        parentNode.pageId &&
+        parentNode.pageId !== options.pageId
+      ) {
+        throw new InvalidNodeNameError(
+          options.parentId,
+          'Parent folder belongs to a different page',
+        );
       }
       parentNode.assertCanContainChildren(roleLabel);
       return {
@@ -277,11 +289,8 @@ export class StructureService {
       parsedTarget.leafName || NodePathVo.parse(dto.name).leafName;
     NodePathVo.validateFilename(leafName);
 
-    const candidatePageId = pageId || dto.pageId || undefined;
-    const resolvedInputPageId =
-      candidatePageId && candidatePageId !== projectId
-        ? candidatePageId
-        : undefined;
+    const candidatePageId = (pageId || dto.pageId || '').trim() || undefined;
+    const resolvedInputPageId = candidatePageId;
 
     const currentCount = await this.repository.countNodes(
       projectId,
@@ -305,10 +314,7 @@ export class StructureService {
         pageId: resolvedInputPageId,
       });
 
-    const parentScopedPageId =
-      parentNode?.pageId && parentNode.pageId !== projectId
-        ? parentNode.pageId
-        : undefined;
+    const parentScopedPageId = parentNode?.pageId || undefined;
     const effectivePageId = resolvedInputPageId || parentScopedPageId;
 
     const existing = await this.repository.findByPath(
@@ -331,6 +337,7 @@ export class StructureService {
       const preSyncedNode = await this.repository.findByFileId(
         projectId,
         dto.fileId,
+        effectivePageId,
       );
       if (preSyncedNode) {
         await this.repository.moveSubtree(
@@ -359,12 +366,13 @@ export class StructureService {
       const exists = await this.repository.docExistsInProject(
         projectId,
         resolvedDocId,
+        effectivePageId,
       );
       if (!exists) {
         throw new NotFoundException({
           statusCode: 404,
           code: 'RESOURCE_NOT_FOUND',
-          message: 'Document not found in project',
+          message: 'Document not found in page',
         });
       }
     } else if (dto.type === 'DOC' && !resolvedDocId && this.docstoreService) {
@@ -386,18 +394,31 @@ export class StructureService {
       const exists = await this.repository.fileExistsInProject(
         projectId,
         dto.fileId,
+        effectivePageId,
       );
       if (!exists) {
         throw new NotFoundException({
           statusCode: 404,
           code: 'RESOURCE_NOT_FOUND',
-          message: 'File asset not found in project',
+          message: 'File asset not found in page',
         });
       }
     }
 
     try {
-      const shouldSetRootDoc = Boolean(dto.isRootDoc && dto.type === 'DOC');
+      let shouldSetRootDoc = Boolean(dto.isRootDoc && dto.type === 'DOC');
+      if (
+        !shouldSetRootDoc &&
+        dto.type === 'DOC' &&
+        /\.(tex|rtex|rnw)$/i.test(leafName)
+      ) {
+        const existingRoot = await this.repository
+          .getRootDoc(projectId, effectivePageId)
+          .catch(() => null);
+        if (!existingRoot) {
+          shouldSetRootDoc = true;
+        }
+      }
       const node = await this.repository.createNode({
         projectId,
         ...(effectivePageId ? { pageId: effectivePageId } : {}),
@@ -532,8 +553,9 @@ export class StructureService {
   public async mkdirp(
     projectId: string,
     dirPath: string,
+    pageId?: string,
   ): Promise<ManuscriptNodeEntity> {
-    const node = await this.mkdirpInternal(projectId, dirPath);
+    const node = await this.mkdirpInternal(projectId, dirPath, pageId);
     this.realtimeService?.broadcastFileTreeChange(projectId, {
       action: 'mkdirp',
       node,
@@ -552,13 +574,22 @@ export class StructureService {
     }
     targetNode.assertMutableTarget();
 
-    const nodePageId =
-      targetNode.pageId && targetNode.pageId !== projectId
-        ? targetNode.pageId
-        : undefined;
+    const nodePageId = targetNode.pageId || undefined;
 
     const targetParentId =
       dto.destParentId !== undefined ? dto.destParentId : dto.parentId;
+    if (!targetParentId && dto.destPath) {
+      const parsedCandidate = NodePathVo.parse(dto.destPath);
+      targetNode.validateMoveTo(parsedCandidate.normalizedPath);
+      const preConflict = await this.repository.findByPath(
+        projectId,
+        parsedCandidate.normalizedPath,
+        nodePageId,
+      );
+      if (preConflict && preConflict.id !== targetNode.id) {
+        throw new DuplicateNodePathError(parsedCandidate.normalizedPath);
+      }
+    }
     const { parentNode: destParent, computedPath: destPath } =
       await this.resolveOrMaterializeParentFolder(projectId, {
         parentId: targetParentId,
@@ -609,10 +640,7 @@ export class StructureService {
     }
     existingNode.assertMutableTarget();
 
-    const nodePageId =
-      existingNode.pageId && existingNode.pageId !== projectId
-        ? existingNode.pageId
-        : undefined;
+    const nodePageId = existingNode.pageId || undefined;
 
     // If caller passes a relative or absolute path (e.g. "sections/new_name.tex" or "/new_name.tex"),
     // extract the leaf name when the parent folder is unchanged, or delegate to move+rename when the parent folder changes.
@@ -621,6 +649,15 @@ export class StructureService {
       const parsed = NodePathVo.parse(rawInput);
       const currentParentPath = NodePathVo.dirname(existingNode.path);
       if (parsed.parentPath !== currentParentPath) {
+        existingNode.validateMoveTo(parsed.normalizedPath);
+        const preConflict = await this.repository.findByPath(
+          projectId,
+          parsed.normalizedPath,
+          nodePageId,
+        );
+        if (preConflict && preConflict.id !== existingNode.id) {
+          throw new DuplicateNodePathError(parsed.normalizedPath);
+        }
         const { parentNode: destParent, computedPath: destPath } =
           await this.resolveOrMaterializeParentFolder(projectId, {
             explicitPath: parsed.normalizedPath,
@@ -711,8 +748,7 @@ export class StructureService {
     }
     node.assertMutableTarget();
 
-    const nodePageId =
-      node.pageId && node.pageId !== projectId ? node.pageId : undefined;
+    const nodePageId = node.pageId || undefined;
 
     const deletedNodes = await this.repository.deleteSubtree(
       projectId,
@@ -859,8 +895,9 @@ export class StructureService {
   public async buildCompilerPayload(
     projectId: string,
     docContentsMap: Map<string, { lines: string[]; hash?: string | null }>,
+    pageId?: string,
   ): Promise<CompilationPayload> {
-    const nodes = await this.repository.getAllNodes(projectId);
+    const nodes = await this.repository.getAllNodes(projectId, pageId);
 
     let rootNode = nodes.find((n) => n.isRootDoc) ?? null;
     if (!rootNode) {
@@ -868,7 +905,12 @@ export class StructureService {
       for (const [id, val] of docContentsMap.entries()) {
         linesMap.set(id, val.lines);
       }
-      rootNode = await this.autoDetectRootDoc(projectId, linesMap, nodes);
+      rootNode = await this.autoDetectRootDoc(
+        projectId,
+        linesMap,
+        nodes,
+        pageId,
+      );
     }
 
     if (!rootNode) {

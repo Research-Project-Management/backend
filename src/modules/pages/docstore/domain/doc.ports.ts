@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/domain/doc.ports.ts
+ * modules/pages/docstore/domain/doc.ports.ts
  * Repository and Cold Tier Object Storage contracts plus Prometheus metrics for Docstore.
  */
 
@@ -9,6 +9,7 @@ import { TextDoc } from './text-doc.entity';
 import { DocRanges } from './doc-range';
 
 export interface CreateDocData {
+  id?: string;
   projectId: string;
   pageId?: string | null;
   path: string;
@@ -44,7 +45,10 @@ export abstract class IDocRepository {
     path: string,
   ): Promise<TextDoc | null>;
   abstract getAllDocs(projectId: string, pageId?: string): Promise<TextDoc[]>;
-  abstract getAllDeletedDocs(projectId: string): Promise<TextDoc[]>;
+  abstract getAllDeletedDocs(
+    projectId: string,
+    pageId?: string,
+  ): Promise<TextDoc[]>;
   abstract createDoc(data: CreateDocData): Promise<TextDoc>;
   abstract updateDoc(
     projectId: string,

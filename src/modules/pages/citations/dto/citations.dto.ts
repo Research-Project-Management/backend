@@ -29,6 +29,11 @@ export class CitationQueryDto {
   @IsNumber()
   @IsOptional()
   limit?: number;
+
+  @ApiPropertyOptional({ description: 'Optional page scope ID' })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 }
 
 export class ResolveIdentifierDto {
@@ -47,6 +52,11 @@ export class ResolveIdentifierDto {
   @IsString()
   @IsOptional()
   targetBibFile?: string;
+
+  @ApiPropertyOptional({ description: 'Optional page scope ID' })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 }
 
 export class SyncLibraryDto {
@@ -84,6 +94,11 @@ export class SyncLibraryDto {
   @IsString()
   @IsOptional()
   targetBibFile?: string;
+
+  @ApiPropertyOptional({ description: 'Optional page scope ID' })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 }
 
 export class ParseRawBibtexDto {
@@ -184,6 +199,11 @@ export class RefactorCitationKeyDto {
   @IsString()
   @IsNotEmpty({ message: 'newKey is required' })
   newKey!: string;
+
+  @ApiPropertyOptional({ description: 'Optional page scope ID' })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 }
 
 export class RefactorCitationKeyResultDto {
@@ -221,7 +241,8 @@ export class UpsertCitationEntriesDto {
   entries?: StructuredCitationEntryInput[];
 
   @ApiPropertyOptional({
-    description: 'Raw BibTeX string to parse and upsert into the target .bib file',
+    description:
+      'Raw BibTeX string to parse and upsert into the target .bib file',
   })
   @IsString()
   @IsOptional()
@@ -242,6 +263,11 @@ export class UpsertCitationEntriesDto {
   @IsString()
   @IsOptional()
   targetFilename?: string;
+
+  @ApiPropertyOptional({ description: 'Optional page scope ID' })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 }
 
 export class UpsertCitationEntriesResultDto {
@@ -315,7 +341,8 @@ export class InjectBibliographyDto {
   bibliographyText?: string;
 
   @ApiPropertyOptional({
-    description: 'Structured list of citations with keys and formatted bibliography strings',
+    description:
+      'Structured list of citations with keys and formatted bibliography strings',
   })
   @IsArray()
   @IsOptional()
@@ -324,5 +351,9 @@ export class InjectBibliographyDto {
     inText?: string;
     bibliography?: string;
   }>;
-}
 
+  @ApiPropertyOptional({ description: 'Optional page scope ID' })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
+}

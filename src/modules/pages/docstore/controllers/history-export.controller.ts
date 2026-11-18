@@ -30,7 +30,7 @@ import {
   ProjectAccessGuard,
   RequireRole,
   Role,
-  ResolvedProject,
+  ResolvedSpace,
 } from '@/modules/project/access';
 import { AuthenticatedRequest, isUuid } from '@/core';
 import { createHash } from 'crypto';
@@ -58,7 +58,7 @@ import {
 
 @ApiTags('Manuscripts - Pages History & Export')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/pages', 'api/v1/manuscripts'])
+@Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class HistoryExportController {
@@ -149,6 +149,16 @@ export class HistoryExportController {
     return record?.spaceId ?? record?.projectId ?? '';
   }
 
+  private getDocPath(
+    doc?: {
+      lastKnownPath?: string;
+      path?: string;
+      node?: { path?: string | null } | null;
+    } | null,
+  ): string | undefined {
+    return doc?.node?.path || doc?.lastKnownPath || doc?.path;
+  }
+
   private isRecordDeleted(
     record?: { deletedAt?: Date | null; deleted?: boolean } | null,
   ): boolean {
@@ -174,7 +184,7 @@ export class HistoryExportController {
   @Get(['pages/:pageId/versions', 'docs/:pageId/versions'])
   async getVersions(
     @Param('pageId') pageId: string,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) return { versions: [] };
     try {
@@ -193,8 +203,10 @@ export class HistoryExportController {
         (await this.pageService.resolveProjectId(pageId));
       if (!projectId || !isUuid(projectId)) return { versions: [] };
 
+      const targetPageId =
+        (doc as { pageId?: string | null } | null)?.pageId || pageId;
       const snapshots = this.historyRepo
-        ? await this.historyRepo.listVersions(projectId)
+        ? await this.historyRepo.listVersions(projectId, targetPageId)
         : [];
 
       const userMap = await this.resolveUserNames(
@@ -239,7 +251,7 @@ export class HistoryExportController {
     @Param('pageId') pageId: string,
     @Query('from') from: string,
     @Query('to') to: string,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string } | null,
   ) {
     const activeProjectId = this.resolveActiveProjectId(project);
     const doc = isUuid(pageId)
@@ -293,8 +305,10 @@ export class HistoryExportController {
 
     const freshDoc =
       (!snapFrom || !snapTo) && isUuid(pageId)
-        ? (await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)) ||
-          doc
+        ? (await this.pageScopeRepo.findDocInProject(
+            targetProjectId,
+            pageId,
+          )) || doc
         : doc;
 
     const currentLines = freshDoc
@@ -302,7 +316,7 @@ export class HistoryExportController {
       : [];
     const currentText = currentLines.join('\n');
     const pick = (files: Record<string, unknown> | undefined | null) =>
-      this.pickSnapshotText(files || {}, doc?.path);
+      this.pickSnapshotText(files || {}, this.getDocPath(doc));
 
     // A missing side means "current document content".
     const textFrom = snapFrom
@@ -355,7 +369,7 @@ export class HistoryExportController {
   async getVersionById(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string } | null,
   ) {
     if (!isUuid(versionId)) return { version: null };
     try {
@@ -383,8 +397,9 @@ export class HistoryExportController {
         s.files && typeof s.files === 'object'
           ? (s.files as Record<string, unknown>)
           : {};
-      const fileName = doc?.path
-        ? doc.path.replace(/^\//, '') || 'main.tex'
+      const initialDocPath = this.getDocPath(doc);
+      const fileName = initialDocPath
+        ? initialDocPath.replace(/^\//, '') || 'main.tex'
         : 'main.tex';
 
       return {
@@ -398,7 +413,10 @@ export class HistoryExportController {
             name: savedByUser?.name || 'Collaborator',
           },
           createdAt: s.createdAt.toISOString(),
-          content: this.pickSnapshotText(filesObj, doc?.path || 'main.tex'),
+          content: this.pickSnapshotText(
+            filesObj,
+            initialDocPath || 'main.tex',
+          ),
         },
       };
     } catch {
@@ -417,12 +435,15 @@ export class HistoryExportController {
     @Param('pageId') pageId: string,
     @Body() body: { label?: string; content?: string },
     @Req() req: AuthenticatedRequest,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
     let projectId: string | undefined = this.resolveActiveProjectId(project);
     let docPath = 'main.tex';
     let currentContent = '';
+    let resolvedPageId: string | undefined = isUuid(pageId)
+      ? pageId
+      : undefined;
     if (isUuid(pageId)) {
       const initialDoc = projectId
         ? await this.pageScopeRepo.findDocInProject(projectId, pageId)
@@ -432,8 +453,11 @@ export class HistoryExportController {
         projectId ||
         (await this.pageService.resolveProjectId(pageId)) ||
         undefined;
-      if (initialDoc?.path) {
-        docPath = initialDoc.path.replace(/^\//, '') || docPath;
+      resolvedPageId =
+        (initialDoc as { pageId?: string | null } | null)?.pageId || pageId;
+      const initialPath = this.getDocPath(initialDoc);
+      if (initialPath) {
+        docPath = initialPath.replace(/^\//, '') || docPath;
       }
     }
 
@@ -452,6 +476,8 @@ export class HistoryExportController {
         pageId,
       );
       if (freshDoc) {
+        resolvedPageId =
+          (freshDoc as { pageId?: string | null })?.pageId || resolvedPageId;
         const docLines = await this.getHydratedDocLines(freshDoc);
         currentContent = docLines.join('\n');
       }
@@ -463,9 +489,9 @@ export class HistoryExportController {
     try {
       const [latestVersion, allDocs, userMap] = await Promise.all([
         this.historyRepo
-          ? this.historyRepo.getLatestVersion(projectId)
+          ? this.historyRepo.getLatestVersion(projectId, resolvedPageId)
           : Promise.resolve(0),
-        this.docstoreService.getAllDocs(projectId),
+        this.docstoreService.getAllDocs(projectId, resolvedPageId),
         this.resolveUserNames([userId]),
       ]);
       const nextVersion = latestVersion + 1;
@@ -517,6 +543,8 @@ export class HistoryExportController {
 
       const snapshot = Snapshot.create({
         projectId,
+        spaceId: projectId,
+        pageId: resolvedPageId,
         version: nextVersion,
         summary: body.label || 'Manual Snapshot',
         createdById: isUuid(userId) ? userId : null,
@@ -533,6 +561,8 @@ export class HistoryExportController {
       if (body.label && body.label.trim()) {
         const vLabel = VersionLabel.create({
           projectId,
+          spaceId: projectId,
+          pageId: snap.pageId ?? resolvedPageId,
           snapshotId: snap.id,
           version: snap.version,
           label: body.label.trim(),
@@ -552,7 +582,17 @@ export class HistoryExportController {
           content,
         },
       };
-    } catch {
+    } catch (err: unknown) {
+      const status = (err as { status?: number; statusCode?: number })?.status;
+      const statusCode = (err as { statusCode?: number })?.statusCode;
+      if (
+        (typeof status === 'number' && status >= 400 && status < 500) ||
+        (typeof statusCode === 'number' &&
+          statusCode >= 400 &&
+          statusCode < 500)
+      ) {
+        throw err;
+      }
       throw new InternalServerErrorException(
         'Failed to create snapshot version',
       );
@@ -572,7 +612,7 @@ export class HistoryExportController {
   async restoreVersion(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string } | null,
     @CurrentUser('id') userId?: string,
   ) {
     if (!isUuid(versionId)) throw new BadRequestException('Invalid version ID');
@@ -605,13 +645,12 @@ export class HistoryExportController {
       }
 
       // Pre-restore auto-snapshot to guarantee non-destructive recovery (hydrating cold-storage if needed)
+      const docPageId = (doc as { pageId?: string | null }).pageId ?? undefined;
       if (this.historyRepo) {
         try {
           const [latestVersion, hydratedDoc] = await Promise.all([
-            this.historyRepo.getLatestVersion(docProjectId),
-            this.docstoreService
-              .getDoc(docProjectId, doc.id)
-              .catch(() => null),
+            this.historyRepo.getLatestVersion(docProjectId, docPageId),
+            this.docstoreService.getDoc(docProjectId, doc.id).catch(() => null),
           ]);
           const nextVersion = latestVersion + 1;
           const currentLines = Array.isArray(hydratedDoc?.lines)
@@ -620,18 +659,24 @@ export class HistoryExportController {
               ? (doc.lines as string[])
               : [];
           const currentContent = currentLines.join('\n');
+          const currentDocPath = this.getDocPath(doc) || 'main.tex';
+          const normalizedDocPath = currentDocPath.startsWith('/')
+            ? currentDocPath
+            : `/${currentDocPath}`;
           const autoMap = new Map<string, FileSnapshotVo>();
           const vo = FileSnapshotVo.createDoc(
-            doc.path,
+            normalizedDocPath,
             doc.id,
             currentLines,
             createHash('sha256').update(currentContent).digest('hex'),
-            doc.path === '/main.tex',
+            normalizedDocPath === '/main.tex',
           );
           autoMap.set(vo.path, vo);
           await this.historyRepo.saveSnapshot(
             Snapshot.create({
               projectId: docProjectId,
+              spaceId: docProjectId,
+              pageId: docPageId,
               version: nextVersion,
               summary: `Auto-snapshot before restoring version ${snap.version}`,
               createdById: isUuid(userId) ? userId : null,
@@ -652,7 +697,7 @@ export class HistoryExportController {
       const targetRev = freshDoc?.rev ?? doc.rev;
       const targetVer = (freshDoc?.version ?? doc.version) + 1;
 
-      const restoredText = this.pickSnapshotText(files, doc.path);
+      const restoredText = this.pickSnapshotText(files, this.getDocPath(doc));
       const lines = restoredText.split('\n');
       await this.docstoreService.updateDoc(docProjectId, doc.id, {
         lines,
@@ -699,7 +744,7 @@ export class HistoryExportController {
     @Param('versionId') versionId: string,
     @Body() body: { label: string; title?: string },
     @Req() req: AuthenticatedRequest,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string } | null,
   ) {
     const labelName = body?.label?.trim();
     if (!labelName) throw new BadRequestException('Label cannot be empty');
@@ -745,9 +790,10 @@ export class HistoryExportController {
   @Get(['pages/:pageId/timeline', 'docs/:pageId/timeline'])
   async getTimeline(
     @Param('pageId') pageId: string,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string } | null,
   ) {
     let projectId: string | undefined = this.resolveActiveProjectId(project);
+    let targetPageId: string | undefined = isUuid(pageId) ? pageId : undefined;
     if (isUuid(pageId)) {
       const doc = projectId
         ? await this.pageScopeRepo.findDocInProject(projectId, pageId)
@@ -757,6 +803,8 @@ export class HistoryExportController {
         projectId ||
         (await this.pageService.resolveProjectId(pageId)) ||
         undefined;
+      targetPageId =
+        (doc as { pageId?: string | null } | null)?.pageId || pageId;
     }
 
     if (!projectId || !isUuid(projectId)) {
@@ -768,7 +816,7 @@ export class HistoryExportController {
     }
 
     const snapshots = this.historyRepo
-      ? await this.historyRepo.listVersions(projectId)
+      ? await this.historyRepo.listVersions(projectId, targetPageId)
       : [];
 
     const userMap = await this.resolveUserNames(
@@ -776,9 +824,7 @@ export class HistoryExportController {
     );
 
     const entries = snapshots.slice(0, 50).map((s) => {
-      const authorUser = s.createdById
-        ? userMap.get(s.createdById)
-        : undefined;
+      const authorUser = s.createdById ? userMap.get(s.createdById) : undefined;
       return {
         id: s.id,
         version: s.version,
@@ -810,7 +856,7 @@ export class HistoryExportController {
   async getAt(
     @Param('pageId') pageId: string,
     @Query('timestamp') timestamp?: string,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string } | null,
   ) {
     let targetTime = timestamp
       ? new Date(Number(timestamp) || timestamp)
@@ -818,14 +864,16 @@ export class HistoryExportController {
     if (isNaN(targetTime.getTime())) targetTime = new Date();
 
     const activeProjectId = this.resolveActiveProjectId(project);
-    const doc = isUuid(pageId) && activeProjectId
-      ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
-      : null;
+    const doc =
+      isUuid(pageId) && activeProjectId
+        ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
+        : null;
     if (!doc) {
       throw new NotFoundException(`Document ${pageId} not found`);
     }
 
-    const normalizedPath = `/${(doc.path || '').replace(/^\//, '')}`;
+    const docPath = this.getDocPath(doc) || '';
+    const normalizedPath = `/${docPath.replace(/^\//, '')}`;
     const matchesTargetDoc = (s: Snapshot) => {
       const filesMap = s.files;
       return (
@@ -835,7 +883,10 @@ export class HistoryExportController {
     };
 
     const allSnaps = this.historyRepo
-      ? await this.historyRepo.listVersions(this.getRecordSpaceId(doc))
+      ? await this.historyRepo.listVersions(
+          this.getRecordSpaceId(doc),
+          (doc as { pageId?: string | null }).pageId ?? undefined,
+        )
       : [];
     const filtered = allSnaps
       .filter((s) => s.createdAt.getTime() <= targetTime.getTime())
@@ -847,10 +898,7 @@ export class HistoryExportController {
       return { content: '', timestamp: targetTime.getTime(), found: false };
     }
     return {
-      content: this.pickSnapshotText(
-        snap.toFilesJson() as Record<string, unknown>,
-        doc.path,
-      ),
+      content: this.pickSnapshotText(snap.toFilesJson(), docPath),
       timestamp: snap.createdAt.getTime(),
       versionId: snap.id,
       version: snap.version,
@@ -869,35 +917,51 @@ export class HistoryExportController {
   @Post([
     'pages/:rootPageId/sync-incremental',
     'docs/:rootPageId/sync-incremental',
-    'projects/:projectId/sync-incremental',
-    'projects/:projectId/docs/:rootPageId/sync-incremental',
+    'spaces/:spaceId/sync-incremental',
+    'spaces/:spaceId/docs/:rootPageId/sync-incremental',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async syncIncremental(
     @Param('rootPageId') rootPageId: string,
     @Body() body: { dirtyFileIds?: string[]; forceAll?: boolean },
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @Param('spaceId') routeSpaceId?: string,
+    @ResolvedSpace() project?: string | { id: string } | null,
   ) {
-    const effectiveTargetId = rootPageId || routeProjectId;
+    const effectiveTargetId = rootPageId || routeSpaceId;
     if (!effectiveTargetId || !isUuid(effectiveTargetId)) {
-      throw new BadRequestException('A valid UUID is required for sync-incremental');
+      throw new BadRequestException(
+        'A valid UUID is required for sync-incremental',
+      );
     }
-    const activeProjectId = this.resolveActiveProjectId(project) || routeProjectId;
+    const activeProjectId =
+      this.resolveActiveProjectId(project) || routeSpaceId;
     const doc = activeProjectId
-      ? await this.pageScopeRepo.findDocInProject(activeProjectId, effectiveTargetId)
+      ? await this.pageScopeRepo.findDocInProject(
+          activeProjectId,
+          effectiveTargetId,
+        )
       : null;
     const projectId =
       this.getRecordSpaceId(doc) ||
       activeProjectId ||
       (await this.pageService.resolveProjectId(effectiveTargetId));
     if (!projectId) {
-      throw new NotFoundException(`Document/project ${effectiveTargetId} not found`);
+      throw new NotFoundException(
+        `Document/project ${effectiveTargetId} not found`,
+      );
     }
 
+    const targetPageId =
+      (doc as { pageId?: string | null } | null)?.pageId ||
+      (rootPageId && isUuid(rootPageId) && rootPageId !== projectId
+        ? rootPageId
+        : undefined);
     const requested = (body?.dirtyFileIds || []).filter((id) => isUuid(id));
-    const allDocs = await this.docstoreService.getAllDocs(projectId);
+    const allDocs = await this.docstoreService.getAllDocs(
+      projectId,
+      targetPageId,
+    );
     const docs = body?.forceAll
       ? allDocs
       : allDocs.filter((d) => requested.includes(d.id || d._id));
@@ -940,7 +1004,7 @@ export class HistoryExportController {
     @Param('pageId') pageId: string,
     @Query('format') format?: string,
     @Query('includeChildren') includeChildren?: string,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string } | null,
   ) {
     return this.exportDocument(
       pageId,
@@ -969,7 +1033,7 @@ export class HistoryExportController {
     body?: { format?: string; includeChildren?: boolean | string },
     @Query('format') queryFormat?: string,
     @Query('includeChildren') queryIncludeChildren?: string,
-    @ResolvedProject() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) {
       throw new BadRequestException('A valid UUID is required for pageId');
@@ -984,6 +1048,8 @@ export class HistoryExportController {
     }
 
     const docProjectId = this.getRecordSpaceId(doc);
+    const docPageId =
+      (doc as { pageId?: string | null } | null)?.pageId ?? undefined;
     const live = this.getLiveCollaboration();
     if (live && docProjectId) {
       const flushed = await live.flushDocs(docProjectId, []).catch(() => []);
@@ -995,7 +1061,8 @@ export class HistoryExportController {
     }
 
     const format = (body?.format || queryFormat || 'tex').toLowerCase();
-    const rawFilename = doc.path?.replace(/^\//, '') || 'document.tex';
+    const rawFilename =
+      this.getDocPath(doc)?.replace(/^\//, '') || 'document.tex';
     const hydratedLines = await this.getHydratedDocLines(doc);
     let content = hydratedLines.join('\n');
 
@@ -1018,7 +1085,10 @@ export class HistoryExportController {
       (explicitInclude || hasIncludeMacros)
     ) {
       try {
-        const projectDocs = await this.docstoreService.getAllDocs(docProjectId);
+        const projectDocs = await this.docstoreService.getAllDocs(
+          docProjectId,
+          docPageId,
+        );
         if (projectDocs.length > 0) {
           const hydratedProjectDocs = await Promise.all(
             projectDocs.map(async (pd) => ({
@@ -1061,15 +1131,15 @@ export class HistoryExportController {
    * POST /api/v1/manuscripts/projects/:projectId/updater/flush
    * Lightweight Yjs flush barrier endpoint for compatibility with pre-compile flush callers.
    */
-  @Post('projects/:projectId/updater/flush')
+  @Post('spaces/:spaceId/updater/flush')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
-  async flushProject(@Param('projectId') projectId: string) {
+  async flushProject(@Param('spaceId') spaceId: string) {
     const startedAt = Date.now();
     const live = this.getLiveCollaboration();
-    const flushed = live ? await live.flushDocs(projectId, []) : [];
+    const flushed = live ? await live.flushDocs(spaceId, []) : [];
     return {
-      projectId,
+      spaceId,
       flushedDocs: flushed.length,
       flushedDocsCount: flushed.length,
       flushedDocIds: flushed,

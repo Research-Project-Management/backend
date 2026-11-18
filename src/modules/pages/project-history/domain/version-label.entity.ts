@@ -8,6 +8,8 @@ import * as crypto from 'node:crypto';
 export interface CreateVersionLabelProps {
   id?: string;
   projectId: string;
+  spaceId?: string;
+  pageId?: string;
   snapshotId: string;
   version: number;
   label: string;
@@ -17,6 +19,9 @@ export interface CreateVersionLabelProps {
 }
 
 export class InvalidVersionLabelException extends Error {
+  public readonly statusCode = 400;
+  public readonly code = 'INVALID_VERSION_LABEL';
+
   constructor(message: string = 'Version label cannot be empty.') {
     super(message);
     this.name = 'InvalidVersionLabelException';
@@ -26,6 +31,8 @@ export class InvalidVersionLabelException extends Error {
 export class VersionLabel {
   private readonly _id: string;
   private readonly _projectId: string;
+  private readonly _spaceId: string;
+  private readonly _pageId: string | undefined;
   private readonly _snapshotId: string;
   private readonly _version: number;
   private _label: string;
@@ -38,7 +45,10 @@ export class VersionLabel {
       throw new InvalidVersionLabelException('Version label cannot be empty.');
     }
     this._id = props.id ?? crypto.randomUUID();
-    this._projectId = props.projectId;
+    const resolvedSpaceId = props.spaceId ?? props.projectId;
+    this._projectId = resolvedSpaceId;
+    this._spaceId = resolvedSpaceId;
+    this._pageId = props.pageId;
     this._snapshotId = props.snapshotId;
     this._version = props.version;
     this._label = props.label.trim();
@@ -56,6 +66,12 @@ export class VersionLabel {
   }
   public get projectId(): string {
     return this._projectId;
+  }
+  public get spaceId(): string {
+    return this._spaceId;
+  }
+  public get pageId(): string | undefined {
+    return this._pageId;
   }
   public get snapshotId(): string {
     return this._snapshotId;

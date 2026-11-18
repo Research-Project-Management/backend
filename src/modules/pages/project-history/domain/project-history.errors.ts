@@ -4,6 +4,9 @@
  */
 
 export class DuplicateLabelException extends Error {
+  public readonly statusCode = 409;
+  public readonly code = 'DUPLICATE_VERSION_LABEL';
+
   constructor(
     public readonly projectId: string,
     public readonly label: string,
@@ -19,6 +22,9 @@ export class DuplicateLabelException extends Error {
  */
 
 export class EmptyProjectException extends Error {
+  public readonly statusCode = 400;
+  public readonly code = 'EMPTY_PAGE_SNAPSHOT';
+
   constructor(public readonly projectId: string) {
     super(
       `Cannot create history snapshot for project '${projectId}' because it contains no files.`,
@@ -33,6 +39,9 @@ export class EmptyProjectException extends Error {
  */
 
 export class VersionNotFoundException extends Error {
+  public readonly statusCode = 404;
+  public readonly code = 'VERSION_NOT_FOUND';
+
   constructor(
     public readonly projectId: string,
     public readonly version: number,

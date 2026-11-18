@@ -148,6 +148,7 @@ export class TemplatesService {
     ) {
       const projectFiles = await this.repository.collectProjectTemplateFiles(
         dto.projectId,
+        dto.pageId,
       );
       files = { ...projectFiles, ...files };
     }

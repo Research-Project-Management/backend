@@ -4,6 +4,8 @@
  */
 
 export class ExplanationNotFoundException extends Error {
+  public readonly statusCode = 404;
+
   constructor(public readonly errorCode: string) {
     super(
       `No explanation found in knowledge base for error code: '${errorCode}'`,
@@ -19,6 +21,8 @@ export class ExplanationNotFoundException extends Error {
  */
 
 export class InvalidLogFormatException extends Error {
+  public readonly statusCode = 400;
+
   constructor(message = 'The provided compilation log is empty or invalid') {
     super(message);
     this.name = 'InvalidLogFormatException';

@@ -30,6 +30,8 @@ import { TEXT_EXTENSIONS, isTextPath } from '@/modules/pages/core';
 export { TEXT_EXTENSIONS, isTextPath };
 
 export class GitBridgeDomainError extends Error {
+  public readonly statusCode = 400;
+
   constructor(message: string) {
     super(message);
     this.name = 'GitBridgeDomainError';

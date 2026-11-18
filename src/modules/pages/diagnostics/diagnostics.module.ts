@@ -6,11 +6,7 @@
 import { Module } from '@nestjs/common';
 import { DiagnosticsController } from './diagnostics.controller';
 import { DiagnosticsService } from './diagnostics.service';
-import {
-  ErrorKnowledgeBase,
-  CompileLogAnalyzer,
-  SyntaxLinter,
-} from './domain';
+import { ErrorKnowledgeBase, CompileLogAnalyzer, SyntaxLinter } from './domain';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 
 @Module({

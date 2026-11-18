@@ -68,16 +68,21 @@ export function validateSuggestionRange(body: {
   startCol: number;
   endCol: number;
 } {
-  const startLine = body.fromLine ?? 1;
-  const endLine = body.toLine ?? startLine;
+  const fromLine = body.fromLine ?? 1;
+  const toLine = body.toLine ?? fromLine;
   const startCol = body.fromColumn ?? 0;
   const endCol = body.toColumn ?? 0;
-  if (startLine < 1 || endLine < startLine || startCol < 0 || endCol < 0) {
+  if (fromLine < 1 || toLine < fromLine || startCol < 0 || endCol < 0) {
     throw new BadRequestException(
       'Invalid suggestion range: startLine >= 1, endLine >= startLine, and columns >= 0 are required',
     );
   }
-  return { startLine, endLine, startCol, endCol };
+  return {
+    startLine: fromLine - 1,
+    endLine: toLine - 1,
+    startCol,
+    endCol,
+  };
 }
 
 export function assertCanModifyReviewItem(
@@ -156,9 +161,9 @@ export function formatSuggestionItemDto(
     type: s.type,
     originalText: s.type === 'delete' ? s.text : '',
     suggestedText: s.type === 'insert' ? s.text : '',
-    fromLine: s.startLine,
+    fromLine: (s.startLine ?? 0) + 1,
     fromColumn: s.startCol,
-    toLine: s.endLine,
+    toLine: (s.endLine ?? s.startLine ?? 0) + 1,
     toColumn: s.endCol,
     description: null,
     status: s.status,
@@ -188,7 +193,9 @@ export async function getDocReviewStatusWithFallback(
         status: row.status,
         roundNumber: row.roundNumber,
         requestedById: row.requestedById ?? undefined,
-        requestedAt: row.requestedAt ? row.requestedAt.toISOString() : undefined,
+        requestedAt: row.requestedAt
+          ? row.requestedAt.toISOString()
+          : undefined,
         verdictById: row.verdictById ?? undefined,
         verdictAt: row.verdictAt ? row.verdictAt.toISOString() : undefined,
         notes: row.notes ?? undefined,
@@ -198,7 +205,7 @@ export async function getDocReviewStatusWithFallback(
   }
 
   const doc = await docstoreService.getDoc(projectId, docId);
-  const ranges = (doc.ranges as DocRanges) || {};
+  const ranges = doc.ranges || {};
   return (
     ranges.review || {
       status: 'draft',
@@ -215,12 +222,22 @@ export async function updateDocReviewStatusWithCas(params: {
   body: UpdateReviewStatusDto;
   currentRole: Role;
   userId?: string;
-}): Promise<{ review: ReviewRoundInfo; previousStatus: ReviewRoundInfo['status'] }> {
-  const { prisma, docstoreService, projectId, docId, body, currentRole, userId } =
-    params;
+}): Promise<{
+  review: ReviewRoundInfo;
+  previousStatus: ReviewRoundInfo['status'];
+}> {
+  const {
+    prisma,
+    docstoreService,
+    projectId,
+    docId,
+    body,
+    currentRole,
+    userId,
+  } = params;
 
   const doc = await docstoreService.getDoc(projectId, docId);
-  const ranges = (doc.ranges as DocRanges) || {};
+  const ranges = doc.ranges || {};
 
   const MAX_CAS_ATTEMPTS = 3;
   let prevReview: ReviewRoundInfo = ranges.review || {
@@ -308,7 +325,7 @@ export async function updateDocReviewStatusWithCas(params: {
             version: existingRow.version,
           },
           data: {
-            status: updatedReview.status as PageReviewStatus,
+            status: updatedReview.status,
             roundNumber: updatedReview.roundNumber,
             version: { increment: 1 },
             requestedById: isUuid(updatedReview.requestedById)
@@ -341,7 +358,7 @@ export async function updateDocReviewStatusWithCas(params: {
             data: {
               docId,
               spaceId: projectId,
-              status: updatedReview.status as PageReviewStatus,
+              status: updatedReview.status,
               roundNumber: updatedReview.roundNumber,
               version: 1,
               requestedById: isUuid(updatedReview.requestedById)
@@ -381,7 +398,7 @@ export async function updateDocReviewStatusWithCas(params: {
             create: {
               docId,
               spaceId: projectId,
-              status: updatedReview.status as PageReviewStatus,
+              status: updatedReview.status,
               roundNumber: updatedReview.roundNumber,
               version: 1,
               requestedById: isUuid(updatedReview.requestedById)
@@ -402,7 +419,7 @@ export async function updateDocReviewStatusWithCas(params: {
                 : null,
             },
             update: {
-              status: updatedReview.status as PageReviewStatus,
+              status: updatedReview.status,
               roundNumber: updatedReview.roundNumber,
               version: { increment: 1 },
               requestedById: isUuid(updatedReview.requestedById)
@@ -458,37 +475,39 @@ export async function updateDocReviewStatusWithCas(params: {
 export async function buildProjectReviewOverview(params: {
   pageScopeRepo: ScopeRepository;
   projectId: string;
+  pageId?: string;
   resolveUserNames: (
     userIds: (string | null | undefined)[],
   ) => Promise<ResolvedUserMap>;
 }) {
-  const { pageScopeRepo, projectId, resolveUserNames } = params;
+  const { pageScopeRepo, projectId, pageId, resolveUserNames } = params;
 
   const { docs, nodes, allThreads, allChanges } =
     typeof pageScopeRepo.getProjectReviewOverviewData === 'function'
-      ? await pageScopeRepo.getProjectReviewOverviewData(projectId)
+      ? await pageScopeRepo.getProjectReviewOverviewData(projectId, pageId)
       : await (async () => {
           const prisma = pageScopeRepo.getPrisma();
+          const pageFilter = pageId ? { pageId } : {};
           const [d, n, t, c] = await Promise.all([
             prisma.pageDoc.findMany({
-              where: { spaceId: projectId, deletedAt: null },
-              select: { id: true, path: true },
+              where: { spaceId: projectId, ...pageFilter, deletedAt: null },
+              select: { id: true, lastKnownPath: true },
               orderBy: { createdAt: 'asc' },
             }),
             prisma.pageNode.findMany({
-              where: { spaceId: projectId, type: 'DOC' },
+              where: { spaceId: projectId, ...pageFilter, type: 'DOC' },
               select: {
                 id: true,
                 docId: true,
                 name: true,
                 path: true,
-                isRootDoc: true,
                 sortOrder: true,
+                page: { select: { rootDocId: true } },
               },
-              orderBy: [{ isRootDoc: 'desc' }, { sortOrder: 'asc' }],
+              orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
             }),
             prisma.pageCommentThread.findMany({
-              where: { spaceId: projectId },
+              where: { spaceId: projectId, ...pageFilter },
               include: {
                 replies: {
                   orderBy: { createdAt: 'asc' },
@@ -497,7 +516,7 @@ export async function buildProjectReviewOverview(params: {
               orderBy: [{ startLine: 'asc' }, { createdAt: 'asc' }],
             }),
             prisma.pageTrackChange.findMany({
-              where: { spaceId: projectId },
+              where: { spaceId: projectId, ...pageFilter },
               orderBy: [
                 { startLine: 'asc' },
                 { startCol: 'asc' },
@@ -530,20 +549,33 @@ export async function buildProjectReviewOverview(params: {
       /^\/+/,
       '',
     );
+    const nodeCompat = node as {
+      page?: { rootDocId?: string | null } | null;
+      isRootDoc?: boolean;
+    };
+    const isRootDoc = Boolean(
+      nodeCompat.page?.rootDocId !== undefined
+        ? node.docId && node.docId === nodeCompat.page.rootDocId
+        : nodeCompat.isRootDoc,
+    );
     docMetaMap.set(dId, {
       docId: dId,
       title: cleanTitle,
       path: node.path || `/${cleanTitle}`,
-      isRootDoc: Boolean(node.isRootDoc),
+      isRootDoc,
     });
   }
   for (const doc of docs) {
     if (!docMetaMap.has(doc.id)) {
-      const cleanTitle = (doc.path || 'document.tex').replace(/^\/+/, '');
+      const docPath =
+        (doc as { lastKnownPath?: string; path?: string }).lastKnownPath ??
+        (doc as { path?: string }).path ??
+        'document.tex';
+      const cleanTitle = docPath.replace(/^\/+/, '');
       docMetaMap.set(doc.id, {
         docId: doc.id,
         title: cleanTitle,
-        path: doc.path || `/${cleanTitle}`,
+        path: docPath.startsWith('/') ? docPath : `/${cleanTitle}`,
         isRootDoc: cleanTitle === 'main.tex',
       });
     }

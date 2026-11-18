@@ -36,9 +36,9 @@ import {
   CreateTemplateDto,
 } from './dto/template.dto';
 
-@ApiTags('Manuscripts - Templates')
+@ApiTags('Pages - Templates')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/pages/templates', 'api/v1/manuscripts/templates'])
+@Controller('api/v1/pages/templates')
 @UseGuards(JwtAuthGuard)
 @NoProjectContext()
 export class TemplatesController {

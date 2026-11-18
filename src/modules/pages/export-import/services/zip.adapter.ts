@@ -6,10 +6,7 @@
 import * as zlib from 'node:zlib';
 import { Readable } from 'node:stream';
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  buildZipBuffer,
-  createZipStream,
-} from '@/modules/pages/core';
+import { buildZipBuffer, createZipStream } from '@/modules/pages/core';
 import {
   IZipEnginePort,
   RawZipEntryInput,
@@ -62,9 +59,7 @@ export class ZipAdapter extends IZipEnginePort {
     const cdOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
 
     if (cdTotalEntries === 0xffff || cdOffset === 0xffffffff) {
-      throw new InvalidZipArchiveException(
-        'ZIP64 archives are not supported.',
-      );
+      throw new InvalidZipArchiveException('ZIP64 archives are not supported.');
     }
 
     if (cdTotalEntries > MAX_PROJECT_ENTRY_COUNT) {
@@ -94,6 +89,8 @@ export class ZipAdapter extends IZipEnginePort {
       const fileNameLength = zipBuffer.readUInt16LE(offset + 28);
       const extraFieldLength = zipBuffer.readUInt16LE(offset + 30);
       const commentLength = zipBuffer.readUInt16LE(offset + 32);
+      const externalAttr = zipBuffer.readUInt32LE(offset + 38);
+      const isDosDir = (externalAttr & 0x10) !== 0;
       const localHeaderOffset = zipBuffer.readUInt32LE(offset + 42);
 
       const fileName = zipBuffer.toString(
@@ -121,15 +118,16 @@ export class ZipAdapter extends IZipEnginePort {
       const dataOffset =
         localHeaderOffset + 30 + localFileNameLength + localExtraFieldLength;
       const isDirectory =
-        fileName.endsWith('/') ||
-        fileName.endsWith('\\') ||
-        (compressedSize === 0 &&
-          uncompressedSize === 0 &&
-          fileName.includes('/'));
+        fileName.endsWith('/') || fileName.endsWith('\\') || isDosDir;
 
       let uncompressedData: Buffer = Buffer.alloc(0);
 
       if (!isDirectory && compressedSize > 0) {
+        if (dataOffset + compressedSize > zipBuffer.length) {
+          throw new InvalidZipArchiveException(
+            `Truncated ZIP entry data for '${fileName}'.`,
+          );
+        }
         const compressedSlice = zipBuffer.subarray(
           dataOffset,
           dataOffset + compressedSize,
@@ -157,7 +155,19 @@ export class ZipAdapter extends IZipEnginePort {
             uncompressedData = zlib.inflateRawSync(compressedSlice, {
               maxOutputLength: MAX_SINGLE_FILE_BYTES,
             });
+            if (
+              compressedSize > 0 &&
+              uncompressedData.length > 10 * 1024 * 1024 &&
+              uncompressedData.length / compressedSize > 100
+            ) {
+              throw new InvalidZipArchiveException(
+                `Suspicious compression ratio detected in entry '${fileName}' (zip bomb protection).`,
+              );
+            }
           } catch (inflateErr: unknown) {
+            if (inflateErr instanceof InvalidZipArchiveException) {
+              throw inflateErr;
+            }
             const errCode = (inflateErr as { code?: string })?.code;
             if (errCode === 'ERR_BUFFER_TOO_LARGE') {
               throw new ArchiveQuotaExceededException(

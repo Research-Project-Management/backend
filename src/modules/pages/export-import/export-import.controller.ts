@@ -28,8 +28,10 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import {
   ProjectAccessGuard,
   RequireRole,
+  ResolvedSpace,
   Role,
 } from '@/modules/project/access';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { ExportImportService } from './export-import.service';
@@ -46,12 +48,9 @@ import {
 } from './domain';
 import { TemplateNotFoundException } from '@/modules/pages/templates/domain';
 
-@ApiTags('Manuscripts - Project Archive & Templates')
+@ApiTags('Pages - Project Archive & Templates')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/pages/projects/:projectId',
-  'api/v1/manuscripts/projects/:projectId',
-])
+@Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ExportImportController {
   constructor(private readonly service: ExportImportService) {}
@@ -75,20 +74,35 @@ export class ExportImportController {
     throw error;
   }
 
-  @Get(['export/zip', 'export'])
+  @Get([
+    'spaces/:spaceId/export/zip',
+    'spaces/:spaceId/export',
+    'pages/:pageId/export/zip',
+  ])
   @RequireRole(Role.REVIEWER)
   @ApiOperation({
     summary: 'Export complete manuscript project as a PKZIP archive',
   })
   public async exportProjectZip(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Query() query: ExportZipQueryDto,
     @Res() res: FastifyReply,
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() authorizedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ): Promise<void> {
     try {
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        authorizedSpace,
+        queryPageId ?? query?.pageId,
+        req,
+      );
+      const effectiveQuery = pageId ? { ...query, pageId } : query;
       const result = await this.service.exportProjectZipStream(
-        projectId,
-        query,
+        spaceId,
+        effectiveQuery,
       );
       const filename = `${result.projectName}.zip`;
 
@@ -170,7 +184,12 @@ export class ExportImportController {
     throw new BadRequestException(errorMessage);
   }
 
-  @Post(['import/zip', 'extract-zip'])
+  @Post([
+    'spaces/:spaceId/import/zip',
+    'spaces/:spaceId/extract-zip',
+    'pages/:pageId/import/zip',
+    'pages/:pageId/extract-zip',
+  ])
   @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('import')
@@ -179,11 +198,20 @@ export class ExportImportController {
   })
   @ApiResponse({ status: 201, type: ImportSummaryResponseDto })
   public async importProjectZip(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Req() req: FastifyRequest,
     @Query('preferredRootDoc') preferredRootDoc?: string,
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() authorizedSpace?: string | { id?: string },
   ): Promise<ImportSummaryResponseDto> {
     try {
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        authorizedSpace,
+        queryPageId,
+        req,
+      );
       const { buffer: zipBuffer } = await this.extractUploadPayload(
         req,
         'archive.zip',
@@ -191,36 +219,55 @@ export class ExportImportController {
       );
 
       return await this.service.importProjectZip(
-        projectId,
+        spaceId,
         zipBuffer,
         undefined,
         preferredRootDoc,
+        pageId,
       );
     } catch (err) {
       this.handleError(err);
     }
   }
 
-  @Post('templates/:templateId/scaffold')
+  @Post([
+    'spaces/:spaceId/templates/:templateId/scaffold',
+    'pages/:pageId/templates/:templateId/scaffold',
+  ])
   @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Initialize project structure and files from an academic template',
   })
   @ApiResponse({ status: 201, type: ImportSummaryResponseDto })
   public async scaffoldFromTemplate(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Param('templateId') templateId: string,
     @Body() dto?: ScaffoldTemplateDto,
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() authorizedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
   ): Promise<ImportSummaryResponseDto> {
     try {
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        authorizedSpace,
+        queryPageId ?? dto?.pageId,
+        req,
+      );
       const targetTemplateId = templateId || dto?.templateId || '';
-      return await this.service.scaffoldTemplate(projectId, targetTemplateId);
+      return await this.service.scaffoldTemplate(
+        spaceId,
+        targetTemplateId,
+        undefined,
+        pageId,
+      );
     } catch (err) {
       this.handleError(err);
     }
   }
 
-  @Post('import/convert')
+  @Post(['spaces/:spaceId/import/convert', 'pages/:pageId/import/convert'])
   @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('import')
@@ -230,11 +277,20 @@ export class ExportImportController {
   })
   @ApiResponse({ status: 201, type: ImportSummaryResponseDto })
   public async convertDocument(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Req() req: FastifyRequest,
     @Query('format') format?: 'docx' | 'md',
+    @Param('pageId') routePageId?: string,
+    @Query('pageId') queryPageId?: string,
+    @ResolvedSpace() authorizedSpace?: string | { id?: string },
   ): Promise<ImportSummaryResponseDto> {
     try {
+      const { spaceId, pageId } = resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId, pageId: routePageId },
+        authorizedSpace,
+        queryPageId,
+        req,
+      );
       const { buffer: fileBuffer, filename: fileName } =
         await this.extractUploadPayload(
           req,
@@ -243,10 +299,11 @@ export class ExportImportController {
         );
 
       return await this.service.convertDocument({
-        projectId,
+        projectId: spaceId,
         fileBuffer,
         fileName,
         format,
+        pageId,
       });
     } catch (err) {
       this.handleError(err);

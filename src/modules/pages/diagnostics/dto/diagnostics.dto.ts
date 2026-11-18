@@ -30,7 +30,9 @@ export class ParseLogDto {
 }
 
 export class LintDocumentDto {
-  @ApiPropertyOptional({ description: 'LaTeX source content to statically lint' })
+  @ApiPropertyOptional({
+    description: 'LaTeX source content to statically lint',
+  })
   @IsString()
   @IsOptional()
   source?: string;
@@ -51,11 +53,12 @@ export class LintDocumentDto {
   filename?: string;
 
   @ApiPropertyOptional({
-    description: 'Optional project ID to cross-check citations and labels against',
+    description:
+      'Optional space ID to cross-check citations and labels against',
   })
   @IsString()
   @IsOptional()
-  projectId?: string;
+  spaceId?: string;
 
   @ApiPropertyOptional({
     description: 'Optional document ID in DocstoreService',
@@ -63,6 +66,14 @@ export class LintDocumentDto {
   @IsString()
   @IsOptional()
   docId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional Page UUID to scope project symbols strictly to one Page',
+  })
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 
   @ApiPropertyOptional({
     description: 'Optional known bibliography keys override',

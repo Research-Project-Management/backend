@@ -15,6 +15,9 @@ export interface CreateCommentReplyProps {
 }
 
 export class InvalidCommentReplyException extends Error {
+  public readonly statusCode = 400;
+  public readonly code = 'INVALID_COMMENT_REPLY';
+
   constructor(message: string = 'Reply content cannot be empty.') {
     super(message);
     this.name = 'InvalidCommentReplyException';

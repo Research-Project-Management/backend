@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/repositories/archive.repository.ts
+ * modules/pages/docstore/repositories/archive.repository.ts
  * Cold Tier document archive repository seam supporting both in-memory test stand-in
  * and S3/disk persistence (2 adapters = a real seam!).
  */
@@ -294,7 +294,10 @@ export class StoragePortDocArchiveAdapter implements IDocPersistor {
         return;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (this.isDurableStorageConfigured() && !this.diskFallback.isDurableStorageConfigured()) {
+        if (
+          this.isDurableStorageConfigured() &&
+          !this.diskFallback.isDurableStorageConfigured()
+        ) {
           throw new Error(
             `Durable cold-tier archive write failed for "${key}": ${msg}`,
           );

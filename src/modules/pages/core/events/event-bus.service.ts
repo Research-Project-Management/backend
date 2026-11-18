@@ -49,6 +49,7 @@ export interface ManuscriptNodesDeletedEvent {
 export interface ManuscriptHistoryRestoredEvent {
   type: 'manuscript.history.restored';
   projectId: string;
+  pageId?: string;
   version?: number;
   snapshotId?: string;
   userId?: string;
@@ -92,27 +93,33 @@ export class ManuscriptDomainEventBus {
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollabOrResolver?:
       | LiveCollaborationPort
-      | { get?: (token: unknown, opts?: unknown) => LiveCollaborationPort | null },
+      | {
+          get?: (
+            token: unknown,
+            opts?: unknown,
+          ) => LiveCollaborationPort | null;
+        },
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     secondLiveCollab?: LiveCollaborationPort,
   ) {
     let resolved: LiveCollaborationPort | null | undefined = secondLiveCollab;
     if (!ManuscriptDomainEventBus.isLiveCollabCandidate(resolved)) {
-      if (ManuscriptDomainEventBus.isLiveCollabCandidate(liveCollabOrResolver)) {
+      if (
+        ManuscriptDomainEventBus.isLiveCollabCandidate(liveCollabOrResolver)
+      ) {
         resolved = liveCollabOrResolver;
       } else if (
         liveCollabOrResolver &&
-        typeof (
-          liveCollabOrResolver as {
-            get?: (token: unknown, opts?: unknown) => LiveCollaborationPort | null;
-          }
-        ).get === 'function'
+        typeof liveCollabOrResolver.get === 'function'
       ) {
         try {
           resolved = (
             liveCollabOrResolver as {
-              get: (token: unknown, opts?: unknown) => LiveCollaborationPort | null;
+              get: (
+                token: unknown,
+                opts?: unknown,
+              ) => LiveCollaborationPort | null;
             }
           ).get(LiveCollaborationPort, { strict: false });
         } catch {
@@ -195,9 +202,9 @@ export class ManuscriptDomainEventBus {
       set = new Set();
       this.handlers.set(eventType, set);
     }
-    const wrappedHandler: ManuscriptDomainEventHandler<ManuscriptDomainEvent> = (
-      event,
-    ) => handler(event as T);
+    const wrappedHandler: ManuscriptDomainEventHandler<
+      ManuscriptDomainEvent
+    > = (event) => handler(event as T);
     set.add(wrappedHandler);
     return () => {
       set?.delete(wrappedHandler);

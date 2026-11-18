@@ -41,27 +41,26 @@ export interface TemplateDefinition {
 /** @deprecated Use `TemplateDefinition` */
 export type OfficialTemplateDefinition = TemplateDefinition;
 
-export const TEMPLATE_CATALOG: readonly TemplateDefinition[] =
-  [
-    {
-      id: '10000000-0000-0000-0000-000000000001',
-      slug: 'ieee-transactions',
-      versionId: 'tmpl-ieee-tran-v1',
-      aliases: ['ieee', 'ieee-tran', 'ieee-conference', 'bare_jrnl'],
-      name: 'IEEE Transactions Article',
-      title: 'IEEE Transactions Journal Template',
-      category: 'journal',
-      description:
-        'Standard IEEE Transactions template for journal publications and archival papers.',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'bare_jrnl.tex',
-      author: 'IEEE',
-      tags: ['ieee', 'journal', 'engineering', 'transactions'],
-      isOfficial: true,
-      downloadCount: 1420,
-      files: {
-        'bare_jrnl.tex': `\\documentclass[journal]{IEEEtran}
+export const TEMPLATE_CATALOG: readonly TemplateDefinition[] = [
+  {
+    id: '10000000-0000-0000-0000-000000000001',
+    slug: 'ieee-transactions',
+    versionId: 'tmpl-ieee-tran-v1',
+    aliases: ['ieee', 'ieee-tran', 'ieee-conference', 'bare_jrnl'],
+    name: 'IEEE Transactions Article',
+    title: 'IEEE Transactions Journal Template',
+    category: 'journal',
+    description:
+      'Standard IEEE Transactions template for journal publications and archival papers.',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'bare_jrnl.tex',
+    author: 'IEEE',
+    tags: ['ieee', 'journal', 'engineering', 'transactions'],
+    isOfficial: true,
+    downloadCount: 1420,
+    files: {
+      'bare_jrnl.tex': `\\documentclass[journal]{IEEEtran}
 \\usepackage{amsmath,amsfonts}
 \\usepackage{algorithmic}
 \\usepackage{algorithm}
@@ -96,7 +95,7 @@ IEEEtran, journal, LaTeX, template.
 
 \\end{document}
 `,
-        'references.bib': `@article{example2026,
+      'references.bib': `@article{example2026,
   author = {Doe, John and Smith, Jane},
   title = {Modern Collaborative Manuscript Engineering},
   journal = {IEEE Transactions on Software Engineering},
@@ -106,27 +105,27 @@ IEEEtran, journal, LaTeX, template.
   pages = {100--115}
 }
 `,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000002',
-      slug: 'acm-sigconf',
-      versionId: 'tmpl-acm-sigconf-v1',
-      aliases: ['acm', 'sigconf', 'sample-sigconf'],
-      name: 'ACM Conference Proceedings (SIGCONF)',
-      title: 'ACM Conference Proceedings (SIGCONF)',
-      category: 'conference',
-      description:
-        'Official ACM Primary Article Template for computer science conferences (SIGCONF layout).',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'sample-sigconf.tex',
-      author: 'Association for Computing Machinery',
-      tags: ['acm', 'conference', 'cs', 'proceedings', 'sigconf'],
-      isOfficial: true,
-      downloadCount: 1150,
-      files: {
-        'sample-sigconf.tex': `\\documentclass[sigconf]{acmart}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000002',
+    slug: 'acm-sigconf',
+    versionId: 'tmpl-acm-sigconf-v1',
+    aliases: ['acm', 'sigconf', 'sample-sigconf'],
+    name: 'ACM Conference Proceedings (SIGCONF)',
+    title: 'ACM Conference Proceedings (SIGCONF)',
+    category: 'conference',
+    description:
+      'Official ACM Primary Article Template for computer science conferences (SIGCONF layout).',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'sample-sigconf.tex',
+    author: 'Association for Computing Machinery',
+    tags: ['acm', 'conference', 'cs', 'proceedings', 'sigconf'],
+    isOfficial: true,
+    downloadCount: 1150,
+    files: {
+      'sample-sigconf.tex': `\\documentclass[sigconf]{acmart}
 
 \\AtBeginDocument{%
   \\providecommand\\BibTeX{{%
@@ -162,7 +161,7 @@ ACM conferences require papers to adhere to the standardized acmart class.
 
 \\end{document}
 `,
-        'sample.bib': `@inproceedings{flux2026,
+      'sample.bib': `@inproceedings{flux2026,
   author = {Flux Team},
   title = {Distributed Realtime Overleaf-Compatible Architecture},
   booktitle = {Proceedings of the ACM Conference on Computer Supported Cooperative Work},
@@ -170,27 +169,27 @@ ACM conferences require papers to adhere to the standardized acmart class.
   pages = {1--12}
 }
 `,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000003',
-      slug: 'springer-lncs',
-      versionId: 'tmpl-springer-lncs-v1',
-      aliases: ['springer', 'lncs', 'llncs'],
-      name: 'Springer LNCS Conference Template',
-      title: 'Springer LNCS Conference Template',
-      category: 'conference',
-      description:
-        'Springer Lecture Notes in Computer Science (LNCS) proceedings and proceedings books.',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'llncs.tex',
-      author: 'Springer Nature',
-      tags: ['springer', 'lncs', 'conference', 'book-series', 'ai'],
-      isOfficial: true,
-      downloadCount: 890,
-      files: {
-        'llncs.tex': `\\documentclass[runningheads]{llncs}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000003',
+    slug: 'springer-lncs',
+    versionId: 'tmpl-springer-lncs-v1',
+    aliases: ['springer', 'lncs', 'llncs'],
+    name: 'Springer LNCS Conference Template',
+    title: 'Springer LNCS Conference Template',
+    category: 'conference',
+    description:
+      'Springer Lecture Notes in Computer Science (LNCS) proceedings and proceedings books.',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'llncs.tex',
+    author: 'Springer Nature',
+    tags: ['springer', 'lncs', 'conference', 'book-series', 'ai'],
+    isOfficial: true,
+    downloadCount: 890,
+    files: {
+      'llncs.tex': `\\documentclass[runningheads]{llncs}
 \\usepackage{graphicx}
 \\usepackage{amsmath}
 
@@ -218,27 +217,27 @@ Author, F.: Article title. Journal \\textbf{2}(5), 99--110 (2026)
 
 \\end{document}
 `,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000004',
-      slug: 'arxiv-preprint',
-      versionId: 'tmpl-arxiv-minimal-v1',
-      aliases: ['arxiv', 'arxiv-minimal', 'preprint'],
-      name: 'arXiv Minimal Preprint Template',
-      title: 'arXiv Minimal Clean Preprint',
-      category: 'journal',
-      description:
-        'Clean, clean-cut preprint template perfectly tuned for fast compilation and instant arXiv submission.',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'main.tex',
-      author: 'Flux Community',
-      tags: ['arxiv', 'preprint', 'minimal', 'math', 'physics'],
-      isOfficial: true,
-      downloadCount: 2300,
-      files: {
-        'main.tex': `\\documentclass[11pt]{article}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000004',
+    slug: 'arxiv-preprint',
+    versionId: 'tmpl-arxiv-minimal-v1',
+    aliases: ['arxiv', 'arxiv-minimal', 'preprint'],
+    name: 'arXiv Minimal Preprint Template',
+    title: 'arXiv Minimal Clean Preprint',
+    category: 'journal',
+    description:
+      'Clean, clean-cut preprint template perfectly tuned for fast compilation and instant arXiv submission.',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'main.tex',
+    author: 'Flux Community',
+    tags: ['arxiv', 'preprint', 'minimal', 'math', 'physics'],
+    isOfficial: true,
+    downloadCount: 2300,
+    files: {
+      'main.tex': `\\documentclass[11pt]{article}
 \\usepackage[margin=1in]{geometry}
 \\usepackage{amsmath,amssymb,amsfonts}
 \\usepackage{hyperref}
@@ -259,27 +258,27 @@ Welcome to your new manuscript project. Edit this file to begin authoring.
 
 \\end{document}
 `,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000005',
-      slug: 'masters-thesis',
-      versionId: 'tmpl-thesis-v1',
-      aliases: ['thesis', 'phd-thesis', 'dissertation', 'thesis-dissertation'],
-      name: 'Master & PhD Dissertation',
-      title: 'Master / PhD Thesis & Dissertation',
-      category: 'thesis',
-      description:
-        'Multi-chapter university thesis & dissertation template with front matter, bibliography, and chapters.',
-      compiler: 'xelatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'thesis.tex',
-      author: 'Academic Press',
-      tags: ['thesis', 'dissertation', 'phd', 'master', 'university'],
-      isOfficial: true,
-      downloadCount: 760,
-      files: {
-        'thesis.tex': `\\documentclass[12pt,oneside]{book}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000005',
+    slug: 'masters-thesis',
+    versionId: 'tmpl-thesis-v1',
+    aliases: ['thesis', 'phd-thesis', 'dissertation', 'thesis-dissertation'],
+    name: 'Master & PhD Dissertation',
+    title: 'Master / PhD Thesis & Dissertation',
+    category: 'thesis',
+    description:
+      'Multi-chapter university thesis & dissertation template with front matter, bibliography, and chapters.',
+    compiler: 'xelatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'thesis.tex',
+    author: 'Academic Press',
+    tags: ['thesis', 'dissertation', 'phd', 'master', 'university'],
+    isOfficial: true,
+    downloadCount: 760,
+    files: {
+      'thesis.tex': `\\documentclass[12pt,oneside]{book}
 \\usepackage[utf8]{inputenc}
 \\usepackage[margin=1.2in]{geometry}
 \\usepackage{setspace}
@@ -307,33 +306,33 @@ This dissertation investigates cutting-edge advances in computational collaborat
 
 \\end{document}
 `,
-        'chapters/intro.tex': `\\section{Background}
+      'chapters/intro.tex': `\\section{Background}
 Background and problem motivation for this dissertation.
 `,
-        'chapters/conclusion.tex': `\\section{Future Outlook}
+      'chapters/conclusion.tex': `\\section{Future Outlook}
 Summary of contributions and recommendations for further research.
 `,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000006',
-      slug: 'academic-cv',
-      versionId: 'tmpl-academic-cv-v1',
-      aliases: ['cv', 'resume'],
-      name: 'Academic Curriculum Vitae (CV)',
-      title: 'Academic Curriculum Vitae',
-      category: 'cv',
-      description:
-        'Modern, elegant academic curriculum vitae template for researchers, postdocs, and professors.',
-      compiler: 'xelatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'cv.tex',
-      author: 'Flux Community',
-      tags: ['cv', 'resume', 'academic', 'career'],
-      isOfficial: true,
-      downloadCount: 940,
-      files: {
-        'cv.tex': `\\documentclass[11pt,a4paper]{article}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000006',
+    slug: 'academic-cv',
+    versionId: 'tmpl-academic-cv-v1',
+    aliases: ['cv', 'resume'],
+    name: 'Academic Curriculum Vitae (CV)',
+    title: 'Academic Curriculum Vitae',
+    category: 'cv',
+    description:
+      'Modern, elegant academic curriculum vitae template for researchers, postdocs, and professors.',
+    compiler: 'xelatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'cv.tex',
+    author: 'Flux Community',
+    tags: ['cv', 'resume', 'academic', 'career'],
+    isOfficial: true,
+    downloadCount: 940,
+    files: {
+      'cv.tex': `\\documentclass[11pt,a4paper]{article}
 \\usepackage[margin=0.75in]{geometry}
 \\usepackage{hyperref}
 
@@ -354,27 +353,27 @@ Summary of contributions and recommendations for further research.
 
 \\end{document}
 `,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000007',
-      slug: 'beamer-presentation',
-      versionId: 'tmpl-beamer-slides-v1',
-      aliases: ['beamer', 'beamer-slides', 'presentation', 'slides'],
-      name: 'Beamer Presentation Slides',
-      title: 'Academic Presentation Slides (Beamer)',
-      category: 'presentation',
-      description:
-        'Professional academic slide presentation using the LaTeX Beamer theme.',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'presentation.tex',
-      author: 'Flux Community',
-      tags: ['slides', 'presentation', 'beamer', 'talk'],
-      isOfficial: true,
-      downloadCount: 680,
-      files: {
-        'presentation.tex': `\\documentclass{beamer}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000007',
+    slug: 'beamer-presentation',
+    versionId: 'tmpl-beamer-slides-v1',
+    aliases: ['beamer', 'beamer-slides', 'presentation', 'slides'],
+    name: 'Beamer Presentation Slides',
+    title: 'Academic Presentation Slides (Beamer)',
+    category: 'presentation',
+    description:
+      'Professional academic slide presentation using the LaTeX Beamer theme.',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'presentation.tex',
+    author: 'Flux Community',
+    tags: ['slides', 'presentation', 'beamer', 'talk'],
+    isOfficial: true,
+    downloadCount: 680,
+    files: {
+      'presentation.tex': `\\documentclass{beamer}
 \\usetheme{Madrid}
 \\usecolortheme{default}
 
@@ -405,27 +404,27 @@ Summary of contributions and recommendations for further research.
 
 \\end{document}
 `,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000008',
-      slug: 'academic-book',
-      versionId: 'tmpl-academic-book-v1',
-      aliases: ['book', 'monograph'],
-      name: 'Academic Book / Monograph',
-      title: 'Academic Book / Monograph',
-      category: 'book',
-      description:
-        'Comprehensive multi-chapter book template with front matter, index, and bibliography.',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'main.tex',
-      author: 'Flux Academic Team',
-      tags: ['book', 'monograph', 'academic', 'chapters'],
-      isOfficial: true,
-      downloadCount: 540,
-      files: {
-        'main.tex': `\\documentclass[11pt,a4paper,openany]{book}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000008',
+    slug: 'academic-book',
+    versionId: 'tmpl-academic-book-v1',
+    aliases: ['book', 'monograph'],
+    name: 'Academic Book / Monograph',
+    title: 'Academic Book / Monograph',
+    category: 'book',
+    description:
+      'Comprehensive multi-chapter book template with front matter, index, and bibliography.',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'main.tex',
+    author: 'Flux Academic Team',
+    tags: ['book', 'monograph', 'academic', 'chapters'],
+    isOfficial: true,
+    downloadCount: 540,
+    files: {
+      'main.tex': `\\documentclass[11pt,a4paper,openany]{book}
 \\usepackage[margin=1.2in]{geometry}
 \\usepackage{amsmath,amsfonts,amssymb}
 \\usepackage{graphicx}
@@ -464,33 +463,33 @@ Detailed architectural breakdown of the system components.
 \\bibliography{references}
 
 \\end{document}`,
-        'references.bib': `@book{tanenbaum2007,
+      'references.bib': `@book{tanenbaum2007,
   title={Distributed Systems: Principles and Paradigms},
   author={Tanenbaum, Andrew S and Van Steen, Maarten},
   year={2007},
   publisher={Prentice-Hall}
 }`,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000009',
-      slug: 'formal-letter',
-      versionId: 'tmpl-formal-letter-v1',
-      aliases: ['letter', 'recommendation-letter'],
-      name: 'Formal Academic & Institutional Letter',
-      title: 'Formal Academic & Institutional Letter',
-      category: 'letter',
-      description:
-        'Professional letter template for recommendation, institutional correspondence, and inquiries.',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'main.tex',
-      author: 'Flux Academic Team',
-      tags: ['letter', 'formal', 'recommendation', 'correspondence'],
-      isOfficial: true,
-      downloadCount: 490,
-      files: {
-        'main.tex': `\\documentclass[11pt]{letter}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000009',
+    slug: 'formal-letter',
+    versionId: 'tmpl-formal-letter-v1',
+    aliases: ['letter', 'recommendation-letter'],
+    name: 'Formal Academic & Institutional Letter',
+    title: 'Formal Academic & Institutional Letter',
+    category: 'letter',
+    description:
+      'Professional letter template for recommendation, institutional correspondence, and inquiries.',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'main.tex',
+    author: 'Flux Academic Team',
+    tags: ['letter', 'formal', 'recommendation', 'correspondence'],
+    isOfficial: true,
+    downloadCount: 490,
+    files: {
+      'main.tex': `\\documentclass[11pt]{letter}
 \\usepackage[margin=1in]{geometry}
 \\usepackage{hyperref}
 
@@ -513,27 +512,27 @@ I recommend them without reservation for admission to your graduate program. Sho
 
 \\end{letter}
 \\end{document}`,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000010',
-      slug: 'course-assignment',
-      versionId: 'tmpl-course-assignment-v1',
-      aliases: ['assignment', 'homework', 'problem-set'],
-      name: 'Coursework & Problem Set Assignment',
-      title: 'Coursework & Problem Set Assignment',
-      category: 'assignment',
-      description:
-        'Structured assignment and homework template with formatted problem statements and solutions.',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'main.tex',
-      author: 'Flux Academic Team',
-      tags: ['assignment', 'homework', 'coursework', 'problem-set'],
-      isOfficial: true,
-      downloadCount: 820,
-      files: {
-        'main.tex': `\\documentclass[11pt,a4paper]{article}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000010',
+    slug: 'course-assignment',
+    versionId: 'tmpl-course-assignment-v1',
+    aliases: ['assignment', 'homework', 'problem-set'],
+    name: 'Coursework & Problem Set Assignment',
+    title: 'Coursework & Problem Set Assignment',
+    category: 'assignment',
+    description:
+      'Structured assignment and homework template with formatted problem statements and solutions.',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'main.tex',
+    author: 'Flux Academic Team',
+    tags: ['assignment', 'homework', 'coursework', 'problem-set'],
+    isOfficial: true,
+    downloadCount: 820,
+    files: {
+      'main.tex': `\\documentclass[11pt,a4paper]{article}
 \\usepackage[margin=1in]{geometry}
 \\usepackage{amsmath,amssymb,amsthm}
 \\usepackage{fancyhdr}
@@ -577,27 +576,27 @@ Let $L[i,j]$ denote the length of the longest common subsequence of $X[1..i]$ an
 \\end{equation}
 
 \\end{document}`,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000011',
-      slug: 'scientific-poster',
-      versionId: 'tmpl-scientific-poster-v1',
-      aliases: ['poster', 'conference-poster'],
-      name: 'Scientific Conference Poster',
-      title: 'Scientific Conference Poster',
-      category: 'poster',
-      description:
-        'Single-page landscape poster layout for conferences and research symposiums.',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'main.tex',
-      author: 'Flux Academic Team',
-      tags: ['poster', 'conference', 'symposium', 'landscape'],
-      isOfficial: true,
-      downloadCount: 610,
-      files: {
-        'main.tex': `\\documentclass[20pt,landscape]{article}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000011',
+    slug: 'scientific-poster',
+    versionId: 'tmpl-scientific-poster-v1',
+    aliases: ['poster', 'conference-poster'],
+    name: 'Scientific Conference Poster',
+    title: 'Scientific Conference Poster',
+    category: 'poster',
+    description:
+      'Single-page landscape poster layout for conferences and research symposiums.',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'main.tex',
+    author: 'Flux Academic Team',
+    tags: ['poster', 'conference', 'symposium', 'landscape'],
+    isOfficial: true,
+    downloadCount: 610,
+    files: {
+      'main.tex': `\\documentclass[20pt,landscape]{article}
 \\usepackage[a1paper,margin=1.5cm]{geometry}
 \\usepackage{multicol}
 \\usepackage{xcolor}
@@ -640,27 +639,27 @@ Flux provides Overleaf parity while advancing distributed document consistency.
 \\end{multicols}
 
 \\end{document}`,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000012',
-      slug: 'technical-report',
-      versionId: 'tmpl-technical-report-v1',
-      aliases: ['report', 'engineering-report', 'tech-report'],
-      name: 'Technical & Engineering Report',
-      title: 'Technical & Engineering Report',
-      category: 'report',
-      description:
-        'Clean technical report with executive summary, metadata banner, and structured appendices.',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'main.tex',
-      author: 'Flux Academic Team',
-      tags: ['report', 'technical', 'engineering', 'whitepaper'],
-      isOfficial: true,
-      downloadCount: 710,
-      files: {
-        'main.tex': `\\documentclass[11pt,a4paper]{article}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000012',
+    slug: 'technical-report',
+    versionId: 'tmpl-technical-report-v1',
+    aliases: ['report', 'engineering-report', 'tech-report'],
+    name: 'Technical & Engineering Report',
+    title: 'Technical & Engineering Report',
+    category: 'report',
+    description:
+      'Clean technical report with executive summary, metadata banner, and structured appendices.',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'main.tex',
+    author: 'Flux Academic Team',
+    tags: ['report', 'technical', 'engineering', 'whitepaper'],
+    isOfficial: true,
+    downloadCount: 710,
+    files: {
+      'main.tex': `\\documentclass[11pt,a4paper]{article}
 \\usepackage[margin=1in]{geometry}
 \\usepackage{amsmath,graphicx,hyperref}
 \\usepackage{fancyhdr}
@@ -690,27 +689,27 @@ All tests were conducted on standard multi-core container nodes with strict cgro
 Worker node sandboxing provides robust tenant isolation without throughput degradation.
 
 \\end{document}`,
-      },
     },
-    {
-      id: '10000000-0000-0000-0000-000000000013',
-      slug: 'ieee-conference',
-      versionId: 'tmpl-ieee-conf-v1',
-      aliases: ['ieee-conf', 'ieee-symposium'],
-      name: 'IEEE Conference Paper (2-Column)',
-      title: 'IEEE Conference Paper (2-Column)',
-      category: 'conference',
-      description:
-        'Standard IEEE 2-column format for conference proceedings, symposiums, and technical workshops.',
-      compiler: 'pdflatex',
-      imageName: 'texlive/texlive:latest',
-      mainFile: 'main.tex',
-      author: 'IEEE',
-      tags: ['ieee', 'conference', '2-column', 'IEEEtran'],
-      isOfficial: true,
-      downloadCount: 1680,
-      files: {
-        'main.tex': `\\documentclass[conference]{IEEEtran}
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000013',
+    slug: 'ieee-conference',
+    versionId: 'tmpl-ieee-conf-v1',
+    aliases: ['ieee-conf', 'ieee-symposium'],
+    name: 'IEEE Conference Paper (2-Column)',
+    title: 'IEEE Conference Paper (2-Column)',
+    category: 'conference',
+    description:
+      'Standard IEEE 2-column format for conference proceedings, symposiums, and technical workshops.',
+    compiler: 'pdflatex',
+    imageName: 'texlive/texlive:latest',
+    mainFile: 'main.tex',
+    author: 'IEEE',
+    tags: ['ieee', 'conference', '2-column', 'IEEEtran'],
+    isOfficial: true,
+    downloadCount: 1680,
+    files: {
+      'main.tex': `\\documentclass[conference]{IEEEtran}
 \\usepackage{cite}
 \\usepackage{amsmath,amssymb,amsfonts}
 \\usepackage{algorithmic}
@@ -759,16 +758,16 @@ Summarize the primary contributions and future outlook of this work.
 \\bibliography{references}
 
 \\end{document}`,
-        'references.bib': `@article{vaswani2017attention,
+      'references.bib': `@article{vaswani2017attention,
   title={Attention is all you need},
   author={Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N and Kaiser, {\\L}ukasz and Polosukhin, Illia},
   journal={Advances in neural information processing systems},
   volume={30},
   year={2017}
 }`,
-      },
     },
-  ];
+  },
+];
 
 /** @deprecated Use `TEMPLATE_CATALOG` */
 export const OFFICIAL_TEMPLATE_CATALOG = TEMPLATE_CATALOG;

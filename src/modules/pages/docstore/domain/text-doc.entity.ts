@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/domain/text-doc.entity.ts
+ * modules/pages/docstore/domain/text-doc.entity.ts
  * Rich Domain Entity representing a LaTeX/TeX text document in the Manuscripts subsystem.
  */
 
@@ -8,7 +8,8 @@ import { WorkspaceFile } from '@/modules/pages/core/domain/workspace-file.interf
 
 export interface TextDocProps {
   id: string;
-  projectId: string;
+  projectId?: string;
+  spaceId?: string;
   pageId?: string | null;
   path: string;
   lines: string[];
@@ -45,8 +46,8 @@ export class TextDoc {
 
   constructor(props: TextDocProps) {
     this._id = props.id;
-    this._projectId = props.projectId;
-    this._pageId = props.pageId ?? props.projectId;
+    this._projectId = props.spaceId ?? props.projectId ?? '';
+    this._pageId = props.pageId ?? props.spaceId ?? props.projectId ?? null;
     this._path = props.path.replace(/\\/g, '/').replace(/^\/+/, '');
     this._lines = props.lines || [];
     this._rev = props.rev ?? 0;
@@ -66,6 +67,10 @@ export class TextDoc {
     return this._id;
   }
   public get projectId(): string {
+    return this._projectId;
+  }
+
+  public get spaceId(): string {
     return this._projectId;
   }
   public get pageId(): string | null {

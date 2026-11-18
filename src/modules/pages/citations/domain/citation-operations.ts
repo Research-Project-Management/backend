@@ -96,7 +96,8 @@ export function validateCitationKey(
   if (trimmed.startsWith('@')) {
     return {
       isValid: false,
-      error: 'Citation key should not start with @ (it is detected automatically).',
+      error:
+        'Citation key should not start with @ (it is detected automatically).',
     };
   }
 
@@ -107,7 +108,8 @@ export function validateCitationKey(
   if (/[\\{},~"%\$\^]/.test(trimmed)) {
     return {
       isValid: false,
-      error: 'Citation key cannot contain special characters ({ }, \\, ~, ", %, $, ^).',
+      error:
+        'Citation key cannot contain special characters ({ }, \\, ~, ", %, $, ^).',
     };
   }
 
@@ -258,7 +260,7 @@ export function refactorCitationKeyInLatex(
 
   // 3. Inline Pandoc citations: @oldKey in prose
   const INLINE_CITE_REGEX = new RegExp(
-    `(^|[\\s(])(@)(${escapeRegex(oldKey)})(?=[\\s.,;:?!)\\]]|$)`,
+    `(^|[\\s(])(@)(${escapeRegex(oldKey)})(?=(?:[.,;:?!](?![a-zA-Z0-9_/#-]))|[\\s)\\]]|$)`,
     'gi',
   );
   updated = updated.replace(
@@ -441,11 +443,14 @@ export function injectBibliographyIntoDocument({
   }
 
   const mdBibRegex =
-    /(?:^|\n)(#{1,3}\s*(?:Tài liệu tham khảo|TÀI LIỆU THAM KHẢO|References|REFERENCES|Bibliography|BIBLIOGRAPHY)[\s\S]*?$)/i;
+    /(^|\n+)(#{1,3})[ \t]+(?:Tài liệu tham khảo|TÀI LIỆU THAM KHẢO|References|REFERENCES|Bibliography|BIBLIOGRAPHY|Works Cited)[ \t]*(?:\r?\n[\s\S]*?)?(?=\r?\n#{1,3}[ \t]+|$)/i;
 
   if (mdBibRegex.test(content)) {
     return {
-      nextContent: content.replace(mdBibRegex, `\n\n${trimmedSection}\n`),
+      nextContent: content.replace(
+        mdBibRegex,
+        (_full, lead: string) => `${lead ? '\n\n' : ''}${trimmedSection}\n`,
+      ),
       action: 'replaced',
       section: trimmedSection,
       format,
@@ -480,18 +485,17 @@ export function buildBibEntryFromInput(
       : 'reference');
   const cleanKey = sanitizeCitationKey(String(rawKey)) || 'reference';
 
-  const rawType = (
-    input.entryType ||
-    input.type ||
-    input.itemType ||
-    'article'
-  )
+  const rawType = (input.entryType || input.type || input.itemType || 'article')
     .toString()
     .toLowerCase();
   let entryType = 'article';
   if (rawType.includes('book') && !rawType.includes('inbook')) {
     entryType = 'book';
-  } else if (rawType.includes('conf') || rawType.includes('proc') || rawType === 'inproceedings') {
+  } else if (
+    rawType.includes('conf') ||
+    rawType.includes('proc') ||
+    rawType === 'inproceedings'
+  ) {
     entryType = 'inproceedings';
   } else if (rawType.includes('thesis')) {
     entryType = 'phdthesis';
@@ -510,7 +514,10 @@ export function buildBibEntryFromInput(
       fields.author = input.authors.filter(Boolean).join(' and ');
     } else if (typeof input.author === 'string' && input.author.trim()) {
       fields.author = input.author.trim();
-    } else if (Array.isArray(input.contributors) && input.contributors.length > 0) {
+    } else if (
+      Array.isArray(input.contributors) &&
+      input.contributors.length > 0
+    ) {
       const names = input.contributors
         .map((c) => {
           if (c.literal) return `{${c.literal}}`;
@@ -548,7 +555,12 @@ export function buildBibEntryFromInput(
     (typeof input.date === 'string' && input.date.length >= 4
       ? input.date.slice(0, 4)
       : undefined);
-  if (yearVal !== undefined && yearVal !== null && String(yearVal).trim() && !fields.year) {
+  if (
+    yearVal !== undefined &&
+    yearVal !== null &&
+    String(yearVal).trim() &&
+    !fields.year
+  ) {
     fields.year = String(yearVal).trim();
   }
 

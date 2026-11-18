@@ -6,6 +6,7 @@
 
 import { TrackChange } from './track-change.entity';
 import { TextRangeVo, TextRangeProps } from './text-range';
+import { StaleTrackChangeAnchorException } from './track-changes.errors';
 
 export interface LinePatchComputation {
   lines: string[];
@@ -34,7 +35,7 @@ export class LinePatcher {
   > = Object.freeze({
     insert: {
       accept: (sourceLines, change) =>
-        LinePatcher.insertIfAbsent(sourceLines, change.range, change.text, true),
+        LinePatcher.insertIfAbsent(sourceLines, change.range, change.text),
       reject: (sourceLines, change) =>
         LinePatcher.removeIfNonEmptyRange(
           sourceLines,
@@ -43,19 +44,185 @@ export class LinePatcher {
         ),
     },
     delete: {
-      accept: (sourceLines, change) => ({
-        lines: LinePatcher.removeRange(sourceLines, change.range),
-        mutated: true,
-      }),
-      reject: (sourceLines, change) =>
-        LinePatcher.insertIfAbsent(
+      accept: (sourceLines, change) =>
+        LinePatcher.acceptDeleteAnchored(
           sourceLines,
           change.range,
           change.text,
-          false,
+          change.id,
         ),
+      reject: (sourceLines, change) =>
+        LinePatcher.insertIfAbsent(sourceLines, change.range, change.text),
     },
   });
+
+  private static extractRangeText(
+    sourceLines: readonly string[],
+    startLine: number,
+    startCol: number,
+    endLine: number,
+    endCol: number,
+  ): string {
+    if (
+      sourceLines.length === 0 ||
+      startLine < 0 ||
+      startLine >= sourceLines.length
+    ) {
+      return '';
+    }
+    const clampedEndLine = Math.max(
+      startLine,
+      Math.min(endLine, sourceLines.length - 1),
+    );
+    if (startLine === clampedEndLine) {
+      const line = sourceLines[startLine] ?? '';
+      const sc = Math.max(0, Math.min(startCol, line.length));
+      const ec = Math.max(sc, Math.min(endCol, line.length));
+      return line.slice(sc, ec);
+    }
+    const parts: string[] = [];
+    const first = sourceLines[startLine] ?? '';
+    parts.push(first.slice(Math.max(0, Math.min(startCol, first.length))));
+    for (let i = startLine + 1; i < clampedEndLine; i++) {
+      parts.push(sourceLines[i] ?? '');
+    }
+    const last = sourceLines[clampedEndLine] ?? '';
+    parts.push(last.slice(0, Math.max(0, Math.min(endCol, last.length))));
+    return parts.join('\n');
+  }
+
+  private static findUniqueAnchoredRange(
+    sourceLines: readonly string[],
+    range: TextRangeVo | TextRangeProps,
+    expectedText: string,
+  ): TextRangeProps | null {
+    const startLine = Math.max(
+      0,
+      Math.min(range.startLine, sourceLines.length - 1),
+    );
+    const lineDelta = Math.max(0, range.endLine - range.startLine);
+    const startCol = Math.max(0, range.startCol);
+
+    if (
+      LinePatcher.extractRangeText(
+        sourceLines,
+        startLine,
+        startCol,
+        startLine + lineDelta,
+        range.endCol,
+      ) === expectedText
+    ) {
+      return {
+        startLine,
+        startCol,
+        endLine: Math.min(sourceLines.length - 1, startLine + lineDelta),
+        endCol: range.endCol,
+      };
+    }
+
+    const parts = expectedText.split('\n');
+    const inferredLineDelta = Math.max(0, parts.length - 1);
+    if (
+      LinePatcher.isTextPresentAt(
+        sourceLines,
+        startLine,
+        startCol,
+        expectedText,
+      )
+    ) {
+      return parts.length === 1
+        ? {
+            startLine,
+            startCol,
+            endLine: startLine,
+            endCol: startCol + expectedText.length,
+          }
+        : {
+            startLine,
+            startCol,
+            endLine: startLine + inferredLineDelta,
+            endCol: parts[parts.length - 1].length,
+          };
+    }
+
+    const matches: TextRangeProps[] = [];
+    for (let delta = -5; delta <= 5; delta++) {
+      if (delta === 0) continue;
+      const candLine = startLine + delta;
+      if (candLine < 0 || candLine + inferredLineDelta >= sourceLines.length) {
+        continue;
+      }
+      if (
+        LinePatcher.isTextPresentAt(
+          sourceLines,
+          candLine,
+          startCol,
+          expectedText,
+        )
+      ) {
+        matches.push(
+          parts.length === 1
+            ? {
+                startLine: candLine,
+                startCol,
+                endLine: candLine,
+                endCol: startCol + expectedText.length,
+              }
+            : {
+                startLine: candLine,
+                startCol,
+                endLine: candLine + inferredLineDelta,
+                endCol: parts[parts.length - 1].length,
+              },
+        );
+      } else if (parts.length === 1) {
+        const idx = (sourceLines[candLine] ?? '').indexOf(expectedText);
+        if (idx >= 0) {
+          const secondIdx = (sourceLines[candLine] ?? '').indexOf(
+            expectedText,
+            idx + 1,
+          );
+          if (secondIdx >= 0) {
+            return null;
+          }
+          matches.push({
+            startLine: candLine,
+            startCol: idx,
+            endLine: candLine,
+            endCol: idx + expectedText.length,
+          });
+        }
+      }
+    }
+
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  private static acceptDeleteAnchored(
+    sourceLines: readonly string[],
+    range: TextRangeVo | TextRangeProps,
+    expectedText: string,
+    changeId: string,
+  ): LinePatchComputation {
+    if (!expectedText) {
+      return {
+        lines: LinePatcher.removeRange(sourceLines, range),
+        mutated: true,
+      };
+    }
+    const matched = LinePatcher.findUniqueAnchoredRange(
+      sourceLines,
+      range,
+      expectedText,
+    );
+    if (!matched) {
+      throw new StaleTrackChangeAnchorException(changeId);
+    }
+    return {
+      lines: LinePatcher.removeRange(sourceLines, matched),
+      mutated: true,
+    };
+  }
 
   /**
    * Checks whether `text` is already present in `sourceLines` starting at `(lineIdx, startCol)`.
@@ -102,36 +269,21 @@ export class LinePatcher {
     sourceLines: readonly string[],
     range: TextRangeVo | TextRangeProps,
     text: string,
-    adjustOneBasedRange: boolean,
   ): LinePatchComputation {
     if (!text) {
       return { lines: [...sourceLines], mutated: false };
     }
-    const useOneBased =
-      range.startLine > 0 &&
-      range.startLine === sourceLines.length &&
-      (!adjustOneBasedRange || range.endLine >= range.startLine);
     const lineIdx = LinePatcher.clampLineIndex(
       range.startLine,
       sourceLines.length,
-      useOneBased,
     );
     if (
       LinePatcher.isTextPresentAt(sourceLines, lineIdx, range.startCol, text)
     ) {
       return { lines: [...sourceLines], mutated: false };
     }
-    const targetRange =
-      adjustOneBasedRange && useOneBased
-        ? {
-            startLine: range.startLine - 1,
-            startCol: range.startCol,
-            endLine: Math.max(0, range.endLine - 1),
-            endCol: range.endCol,
-          }
-        : range;
     return {
-      lines: LinePatcher.insertRange(sourceLines, targetRange, text),
+      lines: LinePatcher.insertRange(sourceLines, range, text),
       mutated: true,
     };
   }
@@ -141,49 +293,22 @@ export class LinePatcher {
     range: TextRangeVo | TextRangeProps,
     fallbackText?: string,
   ): LinePatchComputation {
-    if (
-      range.startLine === range.endLine &&
-      range.startCol === range.endCol
-    ) {
-      if (!fallbackText) {
-        return { lines: [...sourceLines], mutated: false };
-      }
-      const useOneBased =
-        range.startLine > 0 && range.startLine === sourceLines.length;
-      const lineIdx = LinePatcher.clampLineIndex(
-        range.startLine,
-        sourceLines.length,
-        useOneBased,
+    if (fallbackText) {
+      const matched = LinePatcher.findUniqueAnchoredRange(
+        sourceLines,
+        range,
+        fallbackText,
       );
-      if (
-        !LinePatcher.isTextPresentAt(
-          sourceLines,
-          lineIdx,
-          range.startCol,
-          fallbackText,
-        )
-      ) {
+      if (!matched) {
         return { lines: [...sourceLines], mutated: false };
       }
-      const parts = fallbackText.split('\n');
-      const inferredRange: TextRangeProps =
-        parts.length === 1
-          ? {
-              startLine: lineIdx,
-              startCol: range.startCol,
-              endLine: lineIdx,
-              endCol: range.startCol + fallbackText.length,
-            }
-          : {
-              startLine: lineIdx,
-              startCol: range.startCol,
-              endLine: lineIdx + parts.length - 1,
-              endCol: parts[parts.length - 1].length,
-            };
       return {
-        lines: LinePatcher.removeRange(sourceLines, inferredRange),
+        lines: LinePatcher.removeRange(sourceLines, matched),
         mutated: true,
       };
+    }
+    if (range.startLine === range.endLine && range.startCol === range.endCol) {
+      return { lines: [...sourceLines], mutated: false };
     }
     return {
       lines: LinePatcher.removeRange(sourceLines, range),
@@ -191,8 +316,7 @@ export class LinePatcher {
     };
   }
   /**
-   * Resolves a raw line coordinate (supporting both 0-based and 1-based conventions)
-   * and clamps it safely to `[0, linesLength - 1]`.
+   * Resolves a 0-based line coordinate and clamps it safely to `[0, linesLength - 1]`.
    */
   public static clampLineIndex(
     rawLine: number,
@@ -205,7 +329,7 @@ export class LinePatcher {
   }
 
   /**
-   * Pure function removing a character/line range from an array of document lines.
+   * Pure function removing a character/line range from an array of document lines (0-based lines).
    */
   public static removeRange(
     sourceLines: readonly string[],
@@ -224,20 +348,12 @@ export class LinePatcher {
     const startCol = Math.max(0, range.startCol);
     const endCol = Math.max(0, range.endCol);
 
-    if (rawStartLine > lines.length) return lines;
-    if (rawStartLine === lines.length && rawEndLine > lines.length) {
-      return lines;
-    }
+    if (rawStartLine >= lines.length || rawStartLine < 0) return lines;
 
-    const useOneBased = rawStartLine === lines.length && rawStartLine > 0;
-    const startLine = LinePatcher.clampLineIndex(
-      rawStartLine,
-      lines.length,
-      useOneBased,
-    );
+    const startLine = LinePatcher.clampLineIndex(rawStartLine, lines.length);
     const endLine = Math.max(
       startLine,
-      LinePatcher.clampLineIndex(rawEndLine, lines.length, useOneBased),
+      LinePatcher.clampLineIndex(rawEndLine, lines.length),
     );
 
     if (startLine === endLine) {

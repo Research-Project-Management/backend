@@ -94,7 +94,7 @@ export class GitBridgeRepository implements IGitAccessRepositoryPort {
         .getMemberAccessContext(projectId, userId)
         .catch(() => null);
       if (context?.role) {
-        return context.role as ProjectRole;
+        return context.role;
       }
     }
     if (!this.prisma) return null;
@@ -138,8 +138,32 @@ export class GitBridgeRepository implements IGitAccessRepositoryPort {
       if (page?.spaceId === userId || page?.createdById === userId) {
         return 'owner';
       }
+      if (page?.spaceId && page.spaceId !== projectId) {
+        return this.resolveProjectRole(page.spaceId, userId);
+      }
     }
 
     return null;
+  }
+
+  async resolveRepositoryContext(
+    repoId: string,
+  ): Promise<{ spaceId: string; pageId?: string }> {
+    if (!this.prisma?.page?.findUnique || !isUuid(repoId)) {
+      return { spaceId: repoId };
+    }
+    const page = await Promise.resolve(
+      this.prisma.page.findUnique({
+        where: { id: repoId },
+        select: { id: true, spaceId: true, deletedAt: true },
+      }),
+    ).catch(() => null);
+    if (page?.id && !page.deletedAt) {
+      return {
+        spaceId: page.spaceId || repoId,
+        pageId: page.id,
+      };
+    }
+    return { spaceId: repoId };
   }
 }

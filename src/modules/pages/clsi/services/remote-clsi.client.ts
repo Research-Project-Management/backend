@@ -12,7 +12,10 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisCacheService } from '@/core';
-import { CompilePipelineResult, ClsiHealthReport } from './compile-pipeline.service';
+import {
+  CompilePipelineResult,
+  ClsiHealthReport,
+} from './compile-pipeline.service';
 import { CompileManuscriptDto } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import { SyncPoint, ReverseSyncPoint } from '../domain/clsi.ports';
@@ -90,30 +93,31 @@ export class RemoteClsiClientAdapter {
   private async postRemoteJson<TResponse>(
     endpoint: string,
     payload: Record<string, unknown>,
-    options: { timeoutMs?: number; bypassBackoff?: boolean; signal?: AbortSignal } = {},
+    options: {
+      timeoutMs?: number;
+      bypassBackoff?: boolean;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<TResponse | null> {
-    return this.runWithRemoteCircuitBreaker(
-      async (baseUrl) => {
-        const timeoutMs = options.timeoutMs ?? 8000;
-        const timeoutSignal = AbortSignal.timeout(timeoutMs);
-        const combinedSignal = options.signal
-          ? AbortSignal.any([options.signal, timeoutSignal])
-          : timeoutSignal;
+    return this.runWithRemoteCircuitBreaker(async (baseUrl) => {
+      const timeoutMs = options.timeoutMs ?? 8000;
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      const combinedSignal = options.signal
+        ? AbortSignal.any([options.signal, timeoutSignal])
+        : timeoutSignal;
 
-        const res = await fetch(`${baseUrl}${endpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: combinedSignal,
-        });
+      const res = await fetch(`${baseUrl}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: combinedSignal,
+      });
 
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        return (await res.json()) as TResponse;
-      },
-      options,
-    );
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      return (await res.json()) as TResponse;
+    }, options);
   }
 
   public async tryRemoteHealthCheck(): Promise<ClsiHealthReport | null> {
@@ -137,15 +141,8 @@ export class RemoteClsiClientAdapter {
   public async tryRemoteClsiCompile(
     request: RemoteCompileRequest,
   ): Promise<CompilePipelineResult | null> {
-    const {
-      projectId,
-      mainFile,
-      source,
-      mergedFiles,
-      dto,
-      engine,
-      signal,
-    } = request;
+    const { projectId, mainFile, source, mergedFiles, dto, engine, signal } =
+      request;
 
     const effectiveTimeoutMs = Math.min(
       Math.max(dto.timeoutMs ?? 240000, 5000),
@@ -193,7 +190,7 @@ export class RemoteClsiClientAdapter {
       result?: SyncPoint;
       error?: string;
     }>('/synctex/forward', {
-      projectId: dto.projectId,
+      spaceId: dto.spaceId,
       pageId: dto.pageId,
       file: dto.file,
       line: dto.line,
@@ -221,7 +218,7 @@ export class RemoteClsiClientAdapter {
       result?: ReverseSyncPoint;
       error?: string;
     }>('/synctex/reverse', {
-      projectId: dto.projectId,
+      spaceId: dto.spaceId,
       pageId: dto.pageId,
       page: dto.page,
       x: dto.x,

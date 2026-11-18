@@ -16,6 +16,7 @@ export * from './adapters';
 export * from './services/workspace-collector.service';
 export * from './services/cleanup.listener';
 export * from './services/page.service';
+export * from './page-scope.helper';
 export * from './events/event-bus.service';
 export * from './utils/zip-builder';
 export * from './utils/saga-runner';

@@ -20,17 +20,10 @@ model Space {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // Pages Domain Relations
-  pages              Page[]
-  pageDocs           PageDoc[]
-  pageNodes          PageNode[]
-  pageFiles          PageFile[]
-  pageSnapshots      PageSnapshot[]
-  pageSnapshotLabels PageSnapshotLabel[]
-  pageTrackChanges   PageTrackChange[]
-  pageComments       PageCommentThread[]
-  customWords        CustomDictionaryWord[]
-  pageNotifications  PageNotification[]
-  pageDocReviews     PageDocReview[]
+  pages             Page[]
+  customWords       CustomDictionaryWord[]
+  pageNotifications PageNotification[]
+  pageDocReviews    PageDocReview[]
 
   // Library Domain Relations
   libraryItems         LibraryItem[]

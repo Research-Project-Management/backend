@@ -118,22 +118,16 @@ export interface IIdentifierHandler {
   handle(identifier: IdentifierVo): Promise<BibEntry | null>;
 }
 
-export abstract class BaseIdentifierHandler
-  implements IIdentifierHandler
-{
+export abstract class BaseIdentifierHandler implements IIdentifierHandler {
   public abstract readonly name: string;
   private nextHandler?: IIdentifierHandler;
 
-  public setNext(
-    handler: IIdentifierHandler,
-  ): IIdentifierHandler {
+  public setNext(handler: IIdentifierHandler): IIdentifierHandler {
     this.nextHandler = handler;
     return handler;
   }
 
-  public async handle(
-    identifier: IdentifierVo,
-  ): Promise<BibEntry | null> {
+  public async handle(identifier: IdentifierVo): Promise<BibEntry | null> {
     if (this.canHandle(identifier)) {
       const resolved = await this.tryResolve(identifier);
       if (resolved) {
@@ -454,7 +448,9 @@ export class OpenLibraryIsbnHandler extends BaseIdentifierHandler {
         const book = data?.[bibKey];
         if (book) {
           const title = book.title?.trim() || 'Untitled Book';
-          const yearMatch = book.publish_date?.match(/\b(1[5-9]\d{2}|20\d{2})\b/);
+          const yearMatch = book.publish_date?.match(
+            /\b(1[5-9]\d{2}|20\d{2})\b/,
+          );
           const year = yearMatch ? yearMatch[1] : undefined;
           const authors = (book.authors || [])
             .map((a) => (a.name ? toFamilyGiven(a.name.trim()) : ''))
@@ -515,9 +511,7 @@ export class IdentifierResolver implements IIdentifierResolverPort {
     }
   }
 
-  public async resolve(
-    identifier: IdentifierVo,
-  ): Promise<BibEntry | null> {
+  public async resolve(identifier: IdentifierVo): Promise<BibEntry | null> {
     return this.headHandler.handle(identifier);
   }
 }

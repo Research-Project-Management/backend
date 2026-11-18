@@ -5,6 +5,7 @@
  */
 
 export class SandboxUnavailableException extends Error {
+  public readonly statusCode = 503;
   public readonly code = 'SANDBOX_UNAVAILABLE';
   public readonly httpStatus = 503;
 
@@ -18,6 +19,7 @@ export class SandboxUnavailableException extends Error {
 }
 
 export class SandboxConfigurationException extends Error {
+  public readonly statusCode = 500;
   public readonly code = 'SANDBOX_CONFIG_INVALID';
 
   constructor(
@@ -30,6 +32,7 @@ export class SandboxConfigurationException extends Error {
 }
 
 export class SandboxPolicyViolationException extends Error {
+  public readonly statusCode = 500;
   public readonly code = 'SANDBOX_POLICY_VIOLATION';
   public readonly httpStatus = 500;
 
@@ -43,6 +46,7 @@ export class SandboxPolicyViolationException extends Error {
 }
 
 export class UnsafePathException extends Error {
+  public readonly statusCode = 400;
   public readonly code = 'UNSAFE_PATH';
   public readonly httpStatus = 400;
 

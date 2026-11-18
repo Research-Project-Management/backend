@@ -32,10 +32,17 @@ import {
   type EditorBootstrapResponseDto,
 } from './bootstrap';
 
-import { CreateNodeDto, MoveNodeDto, RenameNodeDto } from './structure/dto/node.dto';
+import {
+  CreateNodeDto,
+  MoveNodeDto,
+  RenameNodeDto,
+} from './structure/dto/node.dto';
 import { CompileManuscriptDto, ClsiWordCountDto } from './clsi/dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './clsi/dto/synctex.dto';
-import { CitationQueryDto, ResolveIdentifierDto } from './citations/dto/citations.dto';
+import {
+  CitationQueryDto,
+  ResolveIdentifierDto,
+} from './citations/dto/citations.dto';
 import { CreateSnapshotDto } from './project-history/dto/history.dto';
 import { ExportZipQueryDto } from './export-import/dto/export-import.dto';
 
@@ -99,11 +106,7 @@ export class PagesFacade {
     return this.structure.renameNode(projectId, nodeId, dto);
   }
 
-  public async moveNode(
-    projectId: string,
-    nodeId: string,
-    dto: MoveNodeDto,
-  ) {
+  public async moveNode(projectId: string, nodeId: string, dto: MoveNodeDto) {
     return this.structure.moveNode(projectId, nodeId, dto);
   }
 
@@ -192,17 +195,18 @@ export class PagesFacade {
     baseVersion: number,
     targetVersion: number,
   ) {
-    return this.projectHistory.compareVersions(projectId, baseVersion, targetVersion);
+    return this.projectHistory.compareVersions(
+      projectId,
+      baseVersion,
+      targetVersion,
+    );
   }
 
   // ==========================================================================
   // Pillar 5: Packaging & Export/Import
   // ==========================================================================
 
-  public async exportProjectZip(
-    projectId: string,
-    query?: ExportZipQueryDto,
-  ) {
+  public async exportProjectZip(projectId: string, query?: ExportZipQueryDto) {
     return this.exportImport.exportProjectZip(projectId, query);
   }
 }

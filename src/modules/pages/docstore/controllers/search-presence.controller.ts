@@ -23,7 +23,7 @@ import {
   ProjectAccessGuard,
   RequireRole,
   Role,
-  ResolvedProject,
+  ResolvedSpace,
 } from '@/modules/project/access';
 import {
   AuthenticatedRequest,
@@ -31,15 +31,12 @@ import {
   UserRateLimitGuard,
 } from '@/core';
 import type { FastifyReply } from 'fastify';
-import {
-  PresenceService,
-  HeartbeatBody,
-} from '../services/presence.service';
+import { PresenceService, HeartbeatBody } from '../services/presence.service';
 import { SearchReplaceService } from '../services/search-replace.service';
 
 @ApiTags('Manuscripts - Pages Search & Presence')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/pages', 'api/v1/manuscripts'])
+@Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class SearchPresenceController {
@@ -48,36 +45,36 @@ export class SearchPresenceController {
     private readonly searchReplaceService: SearchReplaceService,
   ) {}
 
-  private resolveProjectId(
-    project?: string | { id: string; projectId?: string } | null,
-    routeProjectId?: string,
+  private resolveSpaceId(
+    space?: string | { id: string; spaceId?: string } | null,
+    routeSpaceId?: string,
   ): string | undefined {
-    if (!project) return routeProjectId || undefined;
-    if (typeof project === 'string') return project;
-    return project.projectId ?? project.id ?? routeProjectId ?? undefined;
+    if (!space) return routeSpaceId || undefined;
+    if (typeof space === 'string') return space;
+    return space.spaceId ?? space.id ?? routeSpaceId ?? undefined;
   }
 
   // ─── 1. REAL-TIME COLLABORATION HTTP FALLBACKS & SSE STREAM ──────────────────
 
   /**
-   * GET /api/v1/manuscripts/docs/:pageId/collaboration/presence
-   * GET /api/v1/manuscripts/docs/:pageId/presence
+   * GET /api/v1/pages/docs/:pageId/collaboration/presence
+   * GET /api/v1/pages/docs/:pageId/presence
    */
   @Get(['docs/:pageId/collaboration/presence', 'docs/:pageId/presence'])
   async getPresence(
     @Param('pageId') pageId: string,
-    @ResolvedProject()
-    project?: string | { id: string; projectId?: string } | null,
+    @ResolvedSpace()
+    space?: string | { id: string; spaceId?: string } | null,
   ) {
-    const resolvedProjectId = this.resolveProjectId(project);
+    const resolvedSpaceId = this.resolveSpaceId(space);
     const { users, realtimeAvailable } =
-      await this.presenceService.collectPresence(pageId, resolvedProjectId);
+      await this.presenceService.collectPresence(pageId, resolvedSpaceId);
     return { activeUsers: users, presence: users, realtimeAvailable };
   }
 
   /**
-   * POST /api/v1/manuscripts/docs/:pageId/collaboration/heartbeat
-   * POST /api/v1/manuscripts/docs/:pageId/presence/heartbeat
+   * POST /api/v1/pages/docs/:pageId/collaboration/heartbeat
+   * POST /api/v1/pages/docs/:pageId/presence/heartbeat
    */
   @Post([
     'docs/:pageId/collaboration/heartbeat',
@@ -88,37 +85,37 @@ export class SearchPresenceController {
     @Param('pageId') pageId: string,
     @Body() body: HeartbeatBody,
     @Req() req: AuthenticatedRequest,
-    @ResolvedProject()
-    project?: string | { id: string; projectId?: string } | null,
+    @ResolvedSpace()
+    space?: string | { id: string; spaceId?: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub;
     const userName =
       req?.user?.name || req?.user?.email || body?.name || 'Collaborator';
-    const resolvedProjectId = this.resolveProjectId(project);
+    const resolvedSpaceId = this.resolveSpaceId(space);
     return this.presenceService.recordHeartbeat(
       pageId,
       userId,
       userName,
       body,
-      resolvedProjectId,
+      resolvedSpaceId,
     );
   }
 
   /**
-   * POST /api/v1/manuscripts/docs/:pageId/collaboration/leave
-   * POST /api/v1/manuscripts/docs/:pageId/presence/leave
+   * POST /api/v1/pages/docs/:pageId/collaboration/leave
+   * POST /api/v1/pages/docs/:pageId/presence/leave
    */
   @Post(['docs/:pageId/collaboration/leave', 'docs/:pageId/presence/leave'])
   @HttpCode(HttpStatus.OK)
   async leaveRoom(
     @Param('pageId') pageId: string,
     @Req() req: AuthenticatedRequest,
-    @ResolvedProject()
-    project?: string | { id: string; projectId?: string } | null,
+    @ResolvedSpace()
+    space?: string | { id: string; spaceId?: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub;
-    const resolvedProjectId = this.resolveProjectId(project);
-    return this.presenceService.leaveRoom(pageId, userId, resolvedProjectId);
+    const resolvedSpaceId = this.resolveSpaceId(space);
+    return this.presenceService.leaveRoom(pageId, userId, resolvedSpaceId);
   }
 
   /**
@@ -126,22 +123,22 @@ export class SearchPresenceController {
    * Emits `presence` events when the merged collaborator set changes and
    * `content-updated` events when the persisted doc version advances.
    *
-   * GET /api/v1/manuscripts/docs/:pageId/collaboration/stream
-   * GET /api/v1/manuscripts/projects/:projectId/docs/:pageId/collaboration/stream
-   * GET /api/v1/manuscripts/docs/:pageId/stream
+   * GET /api/v1/pages/docs/:pageId/collaboration/stream
+   * GET /api/v1/pages/spaces/:spaceId/docs/:pageId/collaboration/stream
+   * GET /api/v1/pages/docs/:pageId/stream
    */
   @Get([
     'docs/:pageId/collaboration/stream',
-    'projects/:projectId/docs/:pageId/collaboration/stream',
+    'spaces/:spaceId/docs/:pageId/collaboration/stream',
     'docs/:pageId/stream',
   ])
   async getStream(
     @Param('pageId') pageId: string,
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject()
-    project?: string | { id: string; projectId?: string } | null,
+    @Param('spaceId') routeSpaceId?: string,
+    @ResolvedSpace()
+    space?: string | { id: string; spaceId?: string } | null,
   ) {
     const origin =
       (Array.isArray(req.headers?.origin)
@@ -151,31 +148,34 @@ export class SearchPresenceController {
         ? req.headers.Origin[0]
         : req.headers?.Origin) ||
       undefined;
-    const resolvedProjectId = this.resolveProjectId(project, routeProjectId);
+    const resolvedSpaceId = this.resolveSpaceId(space, routeSpaceId);
     await this.presenceService.streamPresenceAndUpdates(
       pageId,
       origin,
       req.raw,
       reply,
-      resolvedProjectId,
+      resolvedSpaceId,
     );
   }
 
   // ─── 2. PROJECT DOCUMENT SEARCH & REPLACE ────────────────────────────────────
 
   /**
-   * POST /api/v1/manuscripts/projects/:projectId/search
-   * POST /api/v1/manuscripts/docs/search
+   * POST /api/v1/pages/spaces/:spaceId/search
+   * POST /api/v1/pages/pages/:pageId/search
+   * POST /api/v1/pages/docs/search
    */
-  @Post(['projects/:projectId/search', 'docs/search'])
+  @Post(['spaces/:spaceId/search', 'pages/:pageId/search', 'docs/search'])
   @UseGuards(UserRateLimitGuard)
   @UserRateLimit('search-replace')
   @HttpCode(HttpStatus.OK)
   async searchDocuments(
-    @Param('projectId') routeProjectId: string | undefined,
+    @Param('spaceId') routeSpaceId: string | undefined,
+    @Param('pageId') routePageId: string | undefined,
     @Body()
     body: {
-      projectId?: string;
+      spaceId?: string;
+      pageId?: string;
       query: string;
       caseSensitive?: boolean;
       wholeWord?: boolean;
@@ -183,32 +183,42 @@ export class SearchPresenceController {
       fileIds?: string[];
       maxResults?: number;
     },
-    @ResolvedProject() project?: string | { id: string } | null,
+    @Req() req?: AuthenticatedRequest,
+    @ResolvedSpace() space?: string | { id: string } | null,
   ) {
-    const resolvedProjectId =
-      typeof project === 'string' ? project : project?.id;
-    const targetProjectId =
-      resolvedProjectId || routeProjectId || body?.projectId || '';
-    if (!targetProjectId) {
-      throw new BadRequestException('Project context required');
+    const resolvedSpaceId = typeof space === 'string' ? space : space?.id;
+    const targetSpaceId =
+      resolvedSpaceId || routeSpaceId || routePageId || body?.spaceId || '';
+    if (!targetSpaceId) {
+      throw new BadRequestException('Space context required');
     }
-    return this.searchReplaceService.searchDocuments(targetProjectId, body);
+    const resolvedPageId =
+      routePageId ||
+      (req as { resolvedPageId?: string } | undefined)?.resolvedPageId ||
+      body?.pageId;
+    return this.searchReplaceService.searchDocuments(targetSpaceId, {
+      ...body,
+      ...(resolvedPageId ? { pageId: resolvedPageId } : {}),
+    });
   }
 
   /**
-   * POST /api/v1/manuscripts/projects/:projectId/replace
-   * POST /api/v1/manuscripts/docs/replace
+   * POST /api/v1/pages/spaces/:spaceId/replace
+   * POST /api/v1/pages/pages/:pageId/replace
+   * POST /api/v1/pages/docs/replace
    */
-  @Post(['projects/:projectId/replace', 'docs/replace'])
+  @Post(['spaces/:spaceId/replace', 'pages/:pageId/replace', 'docs/replace'])
   @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('search-replace')
   @HttpCode(HttpStatus.OK)
   async replaceDocuments(
-    @Param('projectId') routeProjectId: string | undefined,
+    @Param('spaceId') routeSpaceId: string | undefined,
+    @Param('pageId') routePageId: string | undefined,
     @Body()
     body: {
-      projectId?: string;
+      spaceId?: string;
+      pageId?: string;
       query: string;
       replaceWith: string;
       fileIds?: string[];
@@ -216,16 +226,23 @@ export class SearchPresenceController {
       wholeWord?: boolean;
       useRegex?: boolean;
     },
-    @ResolvedProject() project?: string | { id: string } | null,
+    @Req() req?: AuthenticatedRequest,
+    @ResolvedSpace() space?: string | { id: string } | null,
   ) {
-    const resolvedProjectId =
-      typeof project === 'string' ? project : project?.id;
-    const targetProjectId =
-      resolvedProjectId || routeProjectId || body?.projectId || '';
-    if (!targetProjectId) {
-      throw new BadRequestException('Project context required');
+    const resolvedSpaceId = typeof space === 'string' ? space : space?.id;
+    const targetSpaceId =
+      resolvedSpaceId || routeSpaceId || routePageId || body?.spaceId || '';
+    if (!targetSpaceId) {
+      throw new BadRequestException('Space context required');
     }
-    return this.searchReplaceService.replaceDocuments(targetProjectId, body);
+    const resolvedPageId =
+      routePageId ||
+      (req as { resolvedPageId?: string } | undefined)?.resolvedPageId ||
+      body?.pageId;
+    return this.searchReplaceService.replaceDocuments(targetSpaceId, {
+      ...body,
+      ...(resolvedPageId ? { pageId: resolvedPageId } : {}),
+    });
   }
 }
 

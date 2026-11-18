@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/docstore.service.ts
+ * modules/pages/docstore/docstore.service.ts
  * Deep Module Service orchestrating document store persistence, SHA-256 hashing,
  * cold-tier S3 archive/unarchive, track-change line mutations, and LaTeX export transpilation.
  */
@@ -139,7 +139,9 @@ export class DocstoreService {
     return {
       _id: doc.id,
       id: doc.id,
+      spaceId: doc.projectId,
       projectId: doc.projectId,
+      pageId: doc.pageId,
       path: doc.path,
       lines: doc.lines,
       rev: doc.rev,
@@ -333,8 +335,11 @@ export class DocstoreService {
     return docs.map((d) => this.mapToDto(d));
   }
 
-  public async getAllDeletedDocs(projectId: string): Promise<DocResponseDto[]> {
-    const docs = await this.docRepository.getAllDeletedDocs(projectId);
+  public async getAllDeletedDocs(
+    projectId: string,
+    pageId?: string,
+  ): Promise<DocResponseDto[]> {
+    const docs = await this.docRepository.getAllDeletedDocs(projectId, pageId);
     return docs.map((d) => this.mapToDto(d));
   }
 
@@ -350,6 +355,7 @@ export class DocstoreService {
       ? this.docHasher.computeHash(lines)
       : computeDocSha256(lines);
     const doc = await this.docRepository.createDoc({
+      ...(dto.id ? { id: dto.id } : {}),
       projectId,
       ...(dto.pageId ? { pageId: dto.pageId } : {}),
       path: dto.path,
@@ -376,7 +382,7 @@ export class DocstoreService {
     LineArray.validateLinesSize(lines);
 
     let currentDoc = await this.docRepository.getDoc(projectId, docId);
-    if (!currentDoc) {
+    if (!currentDoc || currentDoc.deleted) {
       throw new DocNotFoundError(
         `Document ${docId} not found in project ${projectId}`,
       );

@@ -1,5 +1,5 @@
 import { resolvePageFilesList } from '@/modules/pages/docstore/controllers/doc.helpers';
-import { PrismaService } from '@/core/prisma/prisma.service';
+import { PrismaService } from '@/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 
 describe('Page Files Bootstrap Contract Suite', () => {
@@ -10,17 +10,36 @@ describe('Page Files Bootstrap Contract Suite', () => {
     mockDocstoreService = {
       getDoc: jest.fn().mockResolvedValue({
         _id: 'doc-1',
-        lines: ['\\documentclass{article}', '\\begin{document}', 'Hello World', '\\end{document}'],
+        lines: [
+          '\\documentclass{article}',
+          '\\begin{document}',
+          'Hello World',
+          '\\end{document}',
+        ],
       }),
     };
 
     mockPrisma = {
+      page: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'proj-1',
+          spaceId: 'proj-1',
+          rootDocId: 'doc-1',
+        }),
+        findMany: jest.fn().mockResolvedValue([{ rootDocId: 'doc-1' }]),
+      },
       pageDoc: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'doc-1',
           spaceId: 'proj-1',
-          path: '/main.tex',
-          lines: ['\\documentclass{article}', '\\begin{document}', 'Hello World', '\\end{document}'],
+          pageId: 'proj-1',
+          lastKnownPath: 'main.tex',
+          lines: [
+            '\\documentclass{article}',
+            '\\begin{document}',
+            'Hello World',
+            '\\end{document}',
+          ],
           inStorage: false,
           sizeBytes: 120,
           createdAt: new Date('2026-01-01T00:00:00Z'),
@@ -33,25 +52,39 @@ describe('Page Files Bootstrap Contract Suite', () => {
             {
               id: 'doc-1',
               spaceId: 'proj-1',
-              path: '/main.tex',
+              pageId: 'proj-1',
+              lastKnownPath: 'main.tex',
               inStorage: false,
               sizeBytes: 120,
               createdAt: new Date('2026-01-01T00:00:00Z'),
               updatedAt: new Date('2026-01-01T00:00:00Z'),
               ...(hasLinesInSelect
-                ? { lines: ['\\documentclass{article}', '\\begin{document}', 'Hello World', '\\end{document}'] }
+                ? {
+                    lines: [
+                      '\\documentclass{article}',
+                      '\\begin{document}',
+                      'Hello World',
+                      '\\end{document}',
+                    ],
+                  }
                 : {}),
             },
             {
               id: 'doc-2',
               spaceId: 'proj-1',
-              path: '/chapters/intro.tex',
+              pageId: 'proj-1',
+              lastKnownPath: 'chapters/intro.tex',
               inStorage: false,
               sizeBytes: 250,
               createdAt: new Date('2026-01-01T00:00:00Z'),
               updatedAt: new Date('2026-01-01T00:00:00Z'),
               ...(hasLinesInSelect
-                ? { lines: ['\\section{Introduction}', 'This is a large chapter...'] }
+                ? {
+                    lines: [
+                      '\\section{Introduction}',
+                      'This is a large chapter...',
+                    ],
+                  }
                 : {}),
             },
           ]);
@@ -63,12 +96,12 @@ describe('Page Files Bootstrap Contract Suite', () => {
           {
             id: 'node-1',
             spaceId: 'proj-1',
+            pageId: 'proj-1',
             docId: 'doc-1',
             type: 'DOC',
             name: 'main.tex',
             path: '/main.tex',
-            isRootDoc: true,
-            sizeBytes: 120,
+            depth: 1,
             sortOrder: 0,
             createdAt: new Date('2026-01-01T00:00:00Z'),
             updatedAt: new Date('2026-01-01T00:00:00Z'),
@@ -76,12 +109,12 @@ describe('Page Files Bootstrap Contract Suite', () => {
           {
             id: 'node-2',
             spaceId: 'proj-1',
+            pageId: 'proj-1',
             docId: 'doc-2',
             type: 'DOC',
             name: 'intro.tex',
             path: '/chapters/intro.tex',
-            isRootDoc: false,
-            sizeBytes: 250,
+            depth: 2,
             sortOrder: 1,
             createdAt: new Date('2026-01-01T00:00:00Z'),
             updatedAt: new Date('2026-01-01T00:00:00Z'),
@@ -96,8 +129,8 @@ describe('Page Files Bootstrap Contract Suite', () => {
 
   it('Default (Bootstrap): should return Metadata-Only files without hydrating text content', async () => {
     const result = await resolvePageFilesList(
-      mockPrisma as unknown as PrismaService,
-      mockDocstoreService as unknown as DocstoreService,
+      mockPrisma,
+      mockDocstoreService,
       'doc-1',
       'proj-1',
       // includeContent omitted / false
@@ -117,7 +150,9 @@ describe('Page Files Bootstrap Contract Suite', () => {
     // Crucial: content should be empty in metadata mode!
     expect(mainFile?.content).toBe('');
 
-    const introFile = result.files.find((f) => f.path === '/chapters/intro.tex');
+    const introFile = result.files.find(
+      (f) => f.path === '/chapters/intro.tex',
+    );
     expect(introFile).toBeDefined();
     expect(introFile?.id).toBe('doc-2');
     expect(introFile?.content).toBe('');
@@ -132,8 +167,8 @@ describe('Page Files Bootstrap Contract Suite', () => {
 
   it('When includeContent=true: should hydrate text content for all files', async () => {
     const result = await resolvePageFilesList(
-      mockPrisma as unknown as PrismaService,
-      mockDocstoreService as unknown as DocstoreService,
+      mockPrisma,
+      mockDocstoreService,
       'doc-1',
       'proj-1',
       { includeContent: true },
@@ -144,7 +179,9 @@ describe('Page Files Bootstrap Contract Suite', () => {
     const mainFile = result.files.find((f) => f.path === '/main.tex');
     expect(mainFile?.content).toContain('\\documentclass{article}');
 
-    const introFile = result.files.find((f) => f.path === '/chapters/intro.tex');
+    const introFile = result.files.find(
+      (f) => f.path === '/chapters/intro.tex',
+    );
     expect(introFile?.content).toContain('\\section{Introduction}');
 
     // Prisma select should have requested lines

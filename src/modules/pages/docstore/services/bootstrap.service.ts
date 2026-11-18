@@ -4,8 +4,14 @@
  * blank and example LaTeX templates, and companion references.bib initialization.
  */
 
+import * as crypto from 'crypto';
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
+import {
+  ensureCanonicalPageId,
+  resolveSpaceRootDocIds,
+  type PageScopeDbClient,
+} from '@/modules/pages/core/page-scope.helper';
 import { escapeLatex } from '@/modules/pages/core/domain/latex-escape';
 import { DocstoreService } from '../docstore.service';
 import { resolveProjectLabels } from '../controllers/doc.helpers';
@@ -212,10 +218,15 @@ export class BootstrapService {
   ): Promise<void> {
     const bibPath = '/references.bib';
     try {
+      const canonicalPageId = await ensureCanonicalPageId(
+        this.prisma,
+        projectId,
+        pageId,
+      );
       const existing = await this.prisma.pageNode.findFirst({
         where: {
           spaceId: projectId,
-          ...(pageId && this.prisma.page ? { pageId } : {}),
+          pageId: canonicalPageId,
           path: bibPath,
         },
       });
@@ -243,20 +254,18 @@ export class BootstrapService {
           path: bibPath,
           text: bibContent,
           version: 1,
-          ...(pageId && this.prisma.page ? { pageId } : {}),
+          pageId: canonicalPageId,
         });
 
         await this.prisma.pageNode.create({
           data: {
             spaceId: projectId,
-            ...(pageId && this.prisma.page ? { pageId } : {}),
+            pageId: canonicalPageId,
             name: 'references.bib',
             path: bibPath,
             depth: 1,
             type: 'DOC',
             docId: createdDoc._id,
-            isRootDoc: false,
-            sizeBytes: Buffer.byteLength(bibContent, 'utf8'),
           },
         });
       }
@@ -314,7 +323,7 @@ export class BootstrapService {
     // Ensure project settings are configured with Overleaf standard defaults and
     // determine whether a root document already exists for this project in parallel
     const hasPageAggregateModel = Boolean(this.prisma.page);
-    const [proj, fetchedExistingNodes] = await Promise.all([
+    const [proj, fetchedExistingNodes, existingRootDocIds] = await Promise.all([
       Promise.resolve(
         this.prisma.project?.findUnique?.({
           where: { id: projectId },
@@ -326,9 +335,13 @@ export class BootstrapService {
         : Promise.resolve(
             this.prisma.pageNode?.findMany?.({
               where: { spaceId: projectId, type: 'DOC' },
-              select: { path: true, isRootDoc: true },
+              select: { path: true, docId: true },
             }),
           ).catch(() => []),
+      resolveSpaceRootDocIds(
+        this.prisma as unknown as PageScopeDbClient,
+        projectId,
+      ),
     ]);
 
     try {
@@ -358,7 +371,9 @@ export class BootstrapService {
       : [];
     const hasExistingRoot = hasPageAggregateModel
       ? false
-      : existingNodes.some((n) => n.isRootDoc);
+      : existingNodes.some((n) =>
+          Boolean(n.docId && existingRootDocIds.has(n.docId)),
+        );
     const existingPaths = new Set(
       hasPageAggregateModel
         ? []
@@ -382,19 +397,13 @@ export class BootstrapService {
     const targetPath = `/${targetName}`;
     const isRootDoc = !hasExistingRoot;
 
-    const doc = await this.docstoreService.createDoc(projectId, {
-      path: targetPath,
-      text: content,
-      version: 1,
-      ranges: { title: pageTitle, labelIds, labels: attachedLabels },
-    });
-
-    // Persist Page Aggregate Root BEFORE creating pageNode or linking pageDoc so FK constraints are satisfied
+    // Persist Page Aggregate Root (rootDocId: null) BEFORE creating PageDoc so fk_page_docs_page_space is satisfied
+    const newPageId = crypto.randomUUID();
     if (this.prisma.page?.upsert || this.prisma.page?.create) {
       const pagePayload = {
-        id: doc._id,
+        id: newPageId,
         spaceId: projectId,
-        rootDocId: doc._id,
+        rootDocId: null,
         title: pageTitle,
         description: body?.description ?? null,
         status: body?.status || 'draft',
@@ -406,10 +415,9 @@ export class BootstrapService {
       await Promise.resolve(
         this.prisma.page.upsert
           ? this.prisma.page.upsert({
-              where: { id: doc._id },
+              where: { id: newPageId },
               create: pagePayload,
               update: {
-                rootDocId: doc._id,
                 title: pageTitle,
                 ...(body?.description !== undefined
                   ? { description: body.description }
@@ -421,47 +429,48 @@ export class BootstrapService {
               data: pagePayload,
             }),
       ).catch(() => null);
-
-      if (this.prisma.pageDoc?.update) {
-        await Promise.resolve(
-          this.prisma.pageDoc.update({
-            where: { id: doc._id },
-            data: { pageId: doc._id },
-          }),
-        ).catch(() => null);
-      }
     }
 
-    const createdNode = await this.prisma.pageNode.create({
+    const doc = await this.docstoreService.createDoc(projectId, {
+      id: newPageId,
+      pageId: newPageId,
+      path: targetPath,
+      text: content,
+      version: 1,
+      ranges: { title: pageTitle, labelIds, labels: attachedLabels },
+    });
+
+    if (
+      isRootDoc &&
+      (this.prisma.page?.updateMany || this.prisma.page?.update)
+    ) {
+      await Promise.resolve(
+        this.prisma.page.updateMany
+          ? this.prisma.page.updateMany({
+              where: { id: newPageId, spaceId: projectId },
+              data: { rootDocId: doc._id },
+            })
+          : this.prisma.page.update({
+              where: { id: newPageId },
+              data: { rootDocId: doc._id },
+            }),
+      ).catch(() => null);
+    }
+
+    await this.prisma.pageNode.create({
       data: {
         spaceId: projectId,
-        ...(hasPageAggregateModel ? { pageId: doc._id } : {}),
+        pageId: doc._id || newPageId,
         name: targetName,
         path: targetPath,
         depth: 1,
         type: 'DOC',
         docId: doc._id,
-        isRootDoc,
-        sizeBytes: Buffer.byteLength(content, 'utf8'),
       },
     });
 
     if (isExampleTemplate) {
-      await this.ensureExampleReferencesBib(projectId, doc._id);
-    }
-
-    if (isRootDoc && createdNode?.id && this.prisma.pageNode?.updateMany) {
-      await Promise.resolve(
-        this.prisma.pageNode.updateMany({
-          where: {
-            spaceId: projectId,
-            ...(hasPageAggregateModel ? { pageId: doc._id } : {}),
-            isRootDoc: true,
-            id: { not: createdNode.id },
-          },
-          data: { isRootDoc: false },
-        }),
-      ).catch(() => null);
+      await this.ensureExampleReferencesBib(projectId, doc._id || newPageId);
     }
 
     return {

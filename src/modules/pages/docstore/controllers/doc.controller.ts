@@ -26,7 +26,7 @@ import {
   ProjectAccessGuard,
   RequireRole,
   Role,
-  ResolvedProject,
+  ResolvedSpace,
 } from '@/modules/project/access';
 import { AuthenticatedRequest } from '@/core';
 import { DocstoreService } from '../docstore.service';
@@ -43,7 +43,7 @@ export type { PageDocRanges };
 
 @ApiTags('Manuscripts - Pages Compatibility Bridge')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/pages', 'api/v1/manuscripts'])
+@Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class DocController {
@@ -62,7 +62,7 @@ export class DocController {
   @ApiOperation({ summary: 'Get document by pageId from database' })
   async getPageById(
     @Param('pageId') pageId: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     return this.pageService.getPageById(pageId, authorizedProjectId);
   }
@@ -76,39 +76,41 @@ export class DocController {
   @Put([
     'pages/:pageId',
     'docs/:pageId',
-    'projects/:projectId/docs/:pageId',
-    'projects/:projectId/docs/doc/:pageId',
+    'spaces/:spaceId/docs/:pageId',
+    'spaces/:spaceId/docs/doc/:pageId',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({ summary: 'Update document content by pageId' })
   async updatePageContent(
     @Param('pageId') pageId: string,
     @Body() body: UpdatePageContentParams,
-    @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Param('spaceId') routeSpaceId?: string,
+    @ResolvedSpace() authorizedSpaceId?: string | { id: string } | null,
   ) {
     return this.pageService.updatePageContent(
       pageId,
       body,
-      authorizedProjectId || routeProjectId,
+      authorizedSpaceId || routeSpaceId,
     );
   }
 
   /**
-   * POST /api/v1/manuscripts/projects/:projectId/docs/:pageId
-   * POST /api/v1/manuscripts/projects/:projectId/docs/doc/:pageId
-   * POST /api/v1/manuscripts/projects/:projectId/updater/doc/:pageId/update
+   * POST /api/v1/pages/spaces/:spaceId/docs/:pageId
+   * POST /api/v1/pages/spaces/:spaceId/docs/doc/:pageId
+   * POST /api/v1/pages/spaces/:spaceId/updater/doc/:pageId/update
    */
   @Post([
-    'projects/:projectId/docs/:pageId',
-    'projects/:projectId/docs/doc/:pageId',
-    'projects/:projectId/updater/doc/:pageId/update',
+    'spaces/:spaceId/docs/:pageId',
+    'spaces/:spaceId/docs/doc/:pageId',
+    'spaces/:spaceId/updater/doc/:pageId/update',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Update or queue document lines with OCC enforcement' })
+  @ApiOperation({
+    summary: 'Update or queue document lines with OCC enforcement',
+  })
   async updateOrQueueDocLines(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Param('pageId') pageId: string,
     @Body()
     body: UpdatePageContentParams & {
@@ -116,7 +118,7 @@ export class DocController {
       rev?: number;
       clientRev?: number;
     },
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedSpaceId?: string | { id: string } | null,
   ) {
     const normalizedBody: UpdatePageContentParams = {
       ...body,
@@ -126,23 +128,20 @@ export class DocController {
     return this.pageService.updatePageContent(
       pageId,
       normalizedBody,
-      authorizedProjectId || projectId,
+      authorizedSpaceId || spaceId,
     );
   }
 
   /**
-   * PATCH /api/v1/manuscripts/projects/:projectId/docs/:pageId
-   * PATCH /api/v1/manuscripts/projects/:projectId/docs/doc/:pageId
+   * PATCH /api/v1/pages/spaces/:spaceId/docs/:pageId
+   * PATCH /api/v1/pages/spaces/:spaceId/docs/doc/:pageId
    */
-  @Patch([
-    'projects/:projectId/docs/:pageId',
-    'projects/:projectId/docs/doc/:pageId',
-  ])
+  @Patch(['spaces/:spaceId/docs/:pageId', 'spaces/:spaceId/docs/doc/:pageId'])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Patch document path or soft-delete metadata' })
   async patchProjectDoc(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Param('pageId') pageId: string,
     @Body()
     body: {
@@ -151,13 +150,13 @@ export class DocController {
       deleted?: boolean;
       deletedAt?: string;
     },
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedSpaceId?: string | { id: string } | null,
   ) {
-    const resolvedProjectId =
-      (typeof authorizedProjectId === 'string'
-        ? authorizedProjectId
-        : authorizedProjectId?.id) || projectId;
-    return this.docstoreService.patchDoc(resolvedProjectId, pageId, body);
+    const resolvedSpaceId =
+      (typeof authorizedSpaceId === 'string'
+        ? authorizedSpaceId
+        : authorizedSpaceId?.id) || spaceId;
+    return this.docstoreService.patchDoc(resolvedSpaceId, pageId, body);
   }
 
   /**
@@ -170,7 +169,7 @@ export class DocController {
   async updateThumbnail(
     @Param('pageId') pageId: string,
     @Body() body: { pdfThumbnail?: string },
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     return this.pageService.updateThumbnail(
       pageId,
@@ -183,11 +182,11 @@ export class DocController {
    * GET /api/v1/manuscripts/pages/:pageId/files
    * GET /api/v1/manuscripts/docs/:pageId/files
    */
-  @Get(['pages/:pageId/files', 'docs/:pageId/files'])
+  @Get('docs/:pageId/files')
   async getPageFiles(
     @Param('pageId') pageId: string,
     @Query('includeContent') includeContent?: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     const shouldInclude = includeContent === 'true' || includeContent === '1';
     return this.pageService.getPageFiles(pageId, authorizedProjectId, {
@@ -199,19 +198,15 @@ export class DocController {
    * POST /api/v1/manuscripts/pages/:pageId/files
    * POST /api/v1/manuscripts/docs/:pageId/files
    */
-  @Post(['pages/:pageId/files', 'docs/:pageId/files'])
+  @Post('docs/:pageId/files')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   async createPageFile(
     @Param('pageId') pageId: string,
     @Body() body: CreatePageFileParams,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
-    return this.pageService.createPageFile(
-      pageId,
-      body,
-      authorizedProjectId,
-    );
+    return this.pageService.createPageFile(pageId, body, authorizedProjectId);
   }
 
   /**
@@ -220,9 +215,9 @@ export class DocController {
    * POST /api/v1/manuscripts/docs/:projectId/files/import-from-project
    */
   @Post([
-    'projects/:projectId/files/import-from-project',
-    'pages/:projectId/files/import-from-project',
-    'docs/:projectId/files/import-from-project',
+    'spaces/:spaceId/files/import-from-project',
+    'pages/:spaceId/files/import-from-project',
+    'docs/:spaceId/files/import-from-project',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
@@ -231,16 +226,16 @@ export class DocController {
       'Import/copy a document or binary file from another project on the server',
   })
   async importFileFromProject(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Body() body: ImportFromProjectParams,
     @Req() req: AuthenticatedRequest,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedSpaceId?: string | { id: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
     return this.pageService.importFileFromProject(
-      projectId,
+      spaceId,
       body,
-      authorizedProjectId,
+      authorizedSpaceId,
       userId,
     );
   }
@@ -248,32 +243,32 @@ export class DocController {
   // ─── 2. PROJECT PAGES CRUD & LABELS ──────────────────────────────────────────
 
   /**
-   * POST /api/v1/manuscripts/projects/:projectId/pages
-   * POST /api/v1/manuscripts/projects/:projectId/docs
+   * POST /api/v1/pages/spaces/:spaceId/pages
+   * POST /api/v1/pages/spaces/:spaceId/docs
    */
-  @Post(['projects/:projectId/pages', 'projects/:projectId/docs'])
+  @Post(['spaces/:spaceId/pages', 'spaces/:spaceId/docs'])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   async createProjectPage(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Body() body: CreateProjectPageParams,
     @Req() req: AuthenticatedRequest,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
-    return this.pageService.createProjectPage(projectId, body, userId);
+    return this.pageService.createProjectPage(spaceId, body, userId);
   }
 
   /**
-   * GET /api/v1/manuscripts/projects/:projectId/pages
-   * GET /api/v1/manuscripts/projects/:projectId/docs
+   * GET /api/v1/pages/spaces/:spaceId/pages
+   * GET /api/v1/pages/spaces/:spaceId/docs
    */
-  @Get(['projects/:projectId/pages', 'projects/:projectId/docs'])
+  @Get(['spaces/:spaceId/pages', 'spaces/:spaceId/docs'])
   async getProjectPages(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
   ) {
-    return this.pageService.getProjectPages(projectId, { status, search });
+    return this.pageService.getProjectPages(spaceId, { status, search });
   }
 
   /**
@@ -285,7 +280,7 @@ export class DocController {
   @HttpCode(HttpStatus.OK)
   async deletePage(
     @Param('pageId') pageId: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     return this.pageService.deletePage(pageId, authorizedProjectId);
   }
@@ -298,7 +293,7 @@ export class DocController {
   @ApiOperation({ summary: 'Get list of deleted/trashed files in project' })
   async getDeletedFiles(
     @Param('pageId') pageId: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     return this.pageService.getDeletedFiles(pageId, authorizedProjectId);
   }
@@ -313,7 +308,7 @@ export class DocController {
   @ApiOperation({ summary: 'Restore a soft-deleted document or file' })
   async restorePage(
     @Param('pageId') pageId: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
     return this.pageService.restorePage(pageId, authorizedProjectId);
   }
@@ -337,66 +332,64 @@ export class DocController {
   })
   async duplicatePage(
     @Param('pageId') pageId: string,
-    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @Req() req: AuthenticatedRequest,
+    @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
   ) {
-    return this.pageService.duplicatePage(pageId, authorizedProjectId);
+    const userId = req?.user?.id || req?.user?.sub || null;
+    return this.pageService.duplicatePage(pageId, authorizedProjectId, userId);
   }
 
   /**
    * Label management routes
    */
   @Get([
-    'projects/:projectId/pages/:pageId/labels',
-    'projects/:projectId/docs/:pageId/labels',
+    'spaces/:spaceId/pages/:pageId/labels',
+    'spaces/:spaceId/docs/:pageId/labels',
   ])
   async getPageLabels(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Param('pageId') pageId: string,
   ) {
-    return this.pageService.getPageLabels(projectId, pageId);
+    return this.pageService.getPageLabels(spaceId, pageId);
   }
 
   @Post([
-    'projects/:projectId/pages/:pageId/labels',
-    'projects/:projectId/docs/:pageId/labels',
+    'spaces/:spaceId/pages/:pageId/labels',
+    'spaces/:spaceId/docs/:pageId/labels',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   async assignPageLabels(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Param('pageId') pageId: string,
     @Body() body: { labelIds?: string[] },
   ) {
-    return this.pageService.assignPageLabels(
-      projectId,
-      pageId,
-      body?.labelIds,
-    );
+    return this.pageService.assignPageLabels(spaceId, pageId, body?.labelIds);
   }
 
   @Put([
-    'projects/:projectId/pages/:pageId/labels',
-    'projects/:projectId/docs/:pageId/labels',
+    'spaces/:spaceId/pages/:pageId/labels',
+    'spaces/:spaceId/docs/:pageId/labels',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   async replacePageLabels(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Param('pageId') pageId: string,
     @Body() body: { labelIds?: string[] },
   ) {
-    return this.assignPageLabels(projectId, pageId, body);
+    return this.assignPageLabels(spaceId, pageId, body);
   }
 
   @Delete([
-    'projects/:projectId/pages/:pageId/labels/:labelId',
-    'projects/:projectId/docs/:pageId/labels/:labelId',
+    'spaces/:spaceId/pages/:pageId/labels/:labelId',
+    'spaces/:spaceId/docs/:pageId/labels/:labelId',
   ])
   @RequireRole(Role.CONTRIBUTOR)
   async removePageLabel(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Param('pageId') pageId: string,
     @Param('labelId') labelId: string,
   ) {
-    return this.pageService.removePageLabel(projectId, pageId, labelId);
+    return this.pageService.removePageLabel(spaceId, pageId, labelId);
   }
 }
 

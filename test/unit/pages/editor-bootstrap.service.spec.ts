@@ -101,7 +101,8 @@ function makeDocRecord(
   return {
     id,
     spaceId: PROJECT_ID,
-    path: docPath,
+    pageId: PROJECT_ID,
+    lastKnownPath: docPath,
     lines,
     inStorage,
     version: 3,
@@ -222,7 +223,8 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
                 (c) =>
                   c.id === CHILD_DOC_ID ||
                   c.node?.id === CHILD_DOC_ID ||
-                  c.path === '/chapters/intro.tex',
+                  c.node?.path === '/chapters/intro.tex' ||
+                  c.lastKnownPath === '/chapters/intro.tex',
               )
             ) {
               return childDocRecord;
@@ -232,7 +234,8 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
                 (c) =>
                   c.id === ROOT_DOC_ID ||
                   c.node?.id === ROOT_DOC_ID ||
-                  c.path === '/main.tex',
+                  c.node?.path === '/main.tex' ||
+                  c.lastKnownPath === '/main.tex',
               )
             ) {
               return rootDocRecord;
@@ -289,8 +292,8 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
           async (spaceId: string, _mainFile?: string, pageId?: string) => ({
             status: 'ready',
             pdfArtifactUrl: pageId
-              ? `/api/v1/manuscripts/pages/${encodeURIComponent(pageId)}/artifacts/output.pdf`
-              : `/api/v1/manuscripts/projects/${encodeURIComponent(spaceId)}/artifacts/output.pdf`,
+              ? `/api/v1/pages/pages/${encodeURIComponent(pageId)}/artifacts/output.pdf`
+              : `/api/v1/pages/spaces/${encodeURIComponent(spaceId)}/artifacts/output.pdf`,
             synctexAvailable: true,
             lastCompiledAt: '2026-01-02T12:00:00.000Z',
             diagnostics: [
@@ -326,9 +329,9 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
     // Block 2: Pure (spaceId, pageId, rootDocId) Workspace & active doc — no `scope` field
     expect(result.workspace).toEqual({
       spaceId: PROJECT_ID,
+      spaceType: 'project',
       pageId: ROOT_DOC_ID,
       rootDocId: ROOT_DOC_ID,
-      projectId: PROJECT_ID,
       projectName: 'Deep Research Paper',
       title: 'Deep Flux Paper',
       mainFilePath: 'main.tex',
@@ -374,7 +377,7 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
     // Block 3: Page-isolated Metadata-only lastBuild (no PDF binary in JSON)
     expect(result.lastBuild).toEqual({
       status: 'ready',
-      pdfArtifactUrl: `/api/v1/manuscripts/pages/${ROOT_DOC_ID}/artifacts/output.pdf`,
+      pdfArtifactUrl: `/api/v1/pages/pages/${ROOT_DOC_ID}/artifacts/output.pdf`,
       synctexAvailable: true,
       lastCompiledAt: '2026-01-02T12:00:00.000Z',
       diagnostics: [
@@ -605,9 +608,9 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
     // Coordinates strictly use (spaceId=USER_ID, pageId=page2Id, projectId=null) with no `scope`
     expect(result.workspace).toEqual({
       spaceId: USER_ID,
+      spaceType: 'personal',
       pageId: page2Id,
       rootDocId: page2Id,
-      projectId: null,
       projectName: null,
       title: 'Paper Two (ICML)',
       mainFilePath: 'main.tex',
@@ -641,7 +644,7 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
       page2Id,
     );
     expect(result.lastBuild.pdfArtifactUrl).toBe(
-      `/api/v1/manuscripts/pages/${page2Id}/artifacts/output.pdf`,
+      `/api/v1/pages/pages/${page2Id}/artifacts/output.pdf`,
     );
   });
 
@@ -694,7 +697,7 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
       );
       expect(ready.status).toBe('ready');
       expect(ready.pdfArtifactUrl).toBe(
-        `/api/v1/manuscripts/pages/${PAGE_TWO_ID}/artifacts/output.pdf`,
+        `/api/v1/pages/pages/${PAGE_TWO_ID}/artifacts/output.pdf`,
       );
       expect(ready.synctexAvailable).toBe(true);
       expect(ready.lastCompiledAt).toBeTruthy();

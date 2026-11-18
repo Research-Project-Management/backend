@@ -87,12 +87,16 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
         });
         break;
       } catch (err: unknown) {
-        const status = (err as { status?: number })?.status;
+        const status = (err as { status?: number; statusCode?: number })
+          ?.status;
+        const statusCode = (err as { statusCode?: number })?.statusCode;
         const name = (err as { name?: string })?.name;
         const isConflict =
           status === 409 ||
+          statusCode === 409 ||
           name === 'ConflictException' ||
-          name === 'DocRevisionConflictException';
+          name === 'DocRevisionConflictException' ||
+          name === 'DocModifiedError';
         if (isConflict && attempt < maxAttempts - 1) {
           continue;
         }

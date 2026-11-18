@@ -1,6 +1,6 @@
 /**
- * filestore/filestore.types.ts
- * Types, Models, Value Objects, Exceptions, and Port contracts for Manuscripts Filestore.
+ * modules/pages/filestore/filestore.types.ts
+ * Types, Models, Value Objects, Exceptions, and Port contracts for Pages Filestore.
  */
 
 import { Readable } from 'node:stream';
@@ -12,18 +12,24 @@ export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB (Overleaf Parity)
 // ============================================================================
 
 export class FileNotFoundException extends Error {
+  public readonly statusCode = 404;
+  public readonly code = 'FILE_NOT_FOUND';
+
   constructor(
     public readonly fileId: string,
     public readonly projectId?: string,
   ) {
     super(
-      `Manuscript file '${fileId}' was not found in project '${projectId ?? 'unknown'}'.`,
+      `Binary asset '${fileId}' was not found in space '${projectId ?? 'unknown'}'.`,
     );
     this.name = 'FileNotFoundException';
   }
 }
 
 export class InvalidByteRangeException extends Error {
+  public readonly statusCode = 416;
+  public readonly code = 'INVALID_BYTE_RANGE';
+
   constructor(
     public readonly rangeHeader: string,
     public readonly totalSizeBytes: number,
@@ -38,18 +44,24 @@ export class InvalidByteRangeException extends Error {
 }
 
 export class DuplicateFileException extends Error {
+  public readonly statusCode = 409;
+  public readonly code = 'DUPLICATE_FILE';
+
   constructor(
     public readonly filename: string,
     public readonly projectId: string,
   ) {
     super(
-      `A file with name '${filename}' already exists in project '${projectId}'.`,
+      `A binary asset or node at '${filename}' already exists in space '${projectId}'.`,
     );
     this.name = 'DuplicateFileException';
   }
 }
 
 export class StorageQuotaExceededException extends Error {
+  public readonly statusCode = 413;
+  public readonly code = 'STORAGE_QUOTA_EXCEEDED';
+
   constructor(
     public readonly attemptedSizeBytes: number,
     public readonly maxAllowedSizeBytes: number,
@@ -62,6 +74,9 @@ export class StorageQuotaExceededException extends Error {
 }
 
 export class FilestoreValidationException extends Error {
+  public readonly statusCode = 400;
+  public readonly code = 'FILESTORE_VALIDATION_ERROR';
+
   constructor(message: string) {
     super(message);
     this.name = 'FilestoreValidationException';
@@ -281,6 +296,7 @@ export interface CreateManuscriptFileProps {
   id?: string;
   projectId: string;
   pageId?: string | null;
+  blobId?: string | null;
   name: string;
   mimeType: string;
   sizeBytes: number;
@@ -298,6 +314,7 @@ export class ManuscriptFile {
   private readonly _id: string;
   private readonly _projectId: string;
   private readonly _pageId: string | null;
+  private readonly _blobId: string | null;
   private _name: string;
   private _mimeType: string;
   private readonly _sizeBytes: number;
@@ -321,6 +338,7 @@ export class ManuscriptFile {
     this._id = props.id ?? crypto.randomUUID();
     this._projectId = props.projectId;
     this._pageId = props.pageId ?? null;
+    this._blobId = props.blobId ?? null;
     this._name = ManuscriptFile.sanitizeFilename(props.name);
     this._mimeType = props.mimeType || 'application/octet-stream';
     this._sizeBytes = props.sizeBytes;
@@ -353,7 +371,18 @@ export class ManuscriptFile {
         'Filename cannot contain null bytes.',
       );
     }
-    const trimmed = raw.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    for (let i = 0; i < raw.length; i += 1) {
+      const code = raw.charCodeAt(i);
+      if ((code >= 1 && code <= 31) || code === 127) {
+        throw new FilestoreValidationException(
+          'Filename cannot contain control characters.',
+        );
+      }
+    }
+    const trimmed = raw
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\/+|\/+$/g, '');
     if (trimmed.length === 0 || trimmed === '.' || trimmed === '..') {
       throw new FilestoreValidationException(`Invalid filename: '${raw}'`);
     }
@@ -380,6 +409,9 @@ export class ManuscriptFile {
   }
   public get pageId(): string | null {
     return this._pageId;
+  }
+  public get blobId(): string | null {
+    return this._blobId;
   }
   public get name(): string {
     return this._name;
@@ -530,6 +562,12 @@ export abstract class IManuscriptFileRepository {
   ): Promise<ManuscriptFile[]>;
   abstract delete(id: string): Promise<void>;
   abstract countReferencesByHash(hash: string): Promise<number>;
+  assertUploadPathAvailable?(
+    projectId: string,
+    relativePath: string,
+    pageId?: string | null,
+  ): Promise<void>;
+  markRestoredIfDeleted?(projectId: string, fileId: string): Promise<boolean>;
 }
 
 export abstract class IContentHasherPort {
@@ -537,3 +575,8 @@ export abstract class IContentHasherPort {
   abstract hashBuffer(buffer: Buffer): StreamHashResult;
   abstract buildStorageKey(hash: ContentHash, prefix?: string): StorageKey;
 }
+
+export {
+  ManuscriptFile as PageBinaryAsset,
+  IManuscriptFileRepository as IPageBinaryAssetRepository,
+};

@@ -358,7 +358,10 @@ export class WorkspaceRepository implements IWorkspaceManager {
         filename,
       );
       const ext = path.extname(filename).toLowerCase();
-      if (!AUX_EXTENSIONS.has(ext) && !filename.toLowerCase().endsWith('.synctex.gz')) {
+      if (
+        !AUX_EXTENSIONS.has(ext) &&
+        !filename.toLowerCase().endsWith('.synctex.gz')
+      ) {
         return null;
       }
       const stat = await fs.lstat(safePath);

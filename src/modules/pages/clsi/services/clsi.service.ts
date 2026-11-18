@@ -270,7 +270,7 @@ export class ClsiService implements OnModuleDestroy {
       throw new Error('CLSI compile queue is not initialized');
     }
 
-    const spaceId = authorizedProjectId || dto.projectId || 'default';
+    const spaceId = authorizedProjectId || dto.spaceId || 'default';
     const queueScopeId = dto.pageId || spaceId;
     const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
 
@@ -360,12 +360,13 @@ export class ClsiService implements OnModuleDestroy {
     if (!this.compileQueue) {
       throw new Error('CLSI compile queue is not initialized');
     }
-    const projectId = authorizedProjectId || dto.projectId || 'default';
+    const projectId = authorizedProjectId || dto.spaceId || 'default';
+    const queueScopeId = dto.pageId || projectId;
     const job = await this.compileQueue.add(
       'clsi-compile',
       { dto, userId, authorizedProjectId },
       {
-        jobId: `clsi-${projectId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+        jobId: `clsi-${queueScopeId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
         removeOnComplete: { age: 60, count: 10 },
         removeOnFail: { age: 300, count: 25 },
       },
@@ -638,6 +639,7 @@ export class ClsiService implements OnModuleDestroy {
           metricEngine,
           _userId,
           plan,
+          scratchWorkspaceId !== projectId ? scratchWorkspaceId : dto.pageId,
         );
       }
     }
@@ -810,19 +812,17 @@ export class ClsiService implements OnModuleDestroy {
     stats?: WordCountStats;
     error?: string;
   }> {
-    const explicitDtoProjectId = dto.projectId;
-    if (
-      authorizedProjectId &&
-      explicitDtoProjectId &&
-      explicitDtoProjectId !== authorizedProjectId
-    ) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'PROJECT_CONTEXT_MISMATCH',
-        message: 'Authorized project context does not match word count payload',
-      });
-    }
-    const projectId = authorizedProjectId || explicitDtoProjectId;
+    const { spaceId: resolvedSpaceId, pageId: resolvedPageId } =
+      await this.workspacePlanner.resolveManuscriptContext(
+        dto,
+        authorizedProjectId,
+      );
+    const projectId =
+      resolvedSpaceId && resolvedSpaceId !== 'default'
+        ? resolvedSpaceId
+        : undefined;
+    const manuscriptPageId = resolvedPageId ?? dto.pageId;
+    const scratchScopeId = manuscriptPageId || projectId || 'default';
 
     // Multi-file project word count if files map is provided or projectId is provided without explicit single-file source
     if (
@@ -834,14 +834,20 @@ export class ClsiService implements OnModuleDestroy {
 
       if (projectId && projectId !== 'default') {
         try {
-          const plan = await this.workspacePlanner.planFiles(projectId, {
+          const plan = await this.workspacePlanner.planFiles(
             projectId,
-            files: dto.files,
-          });
+            {
+              spaceId: projectId,
+              pageId: manuscriptPageId,
+              files: dto.files,
+            },
+            manuscriptPageId,
+          );
           rootFile = plan.mainFile || rootFile;
           const hydrated = await this.workspacePlanner.hydrateFiles(
             projectId,
             plan,
+            scratchScopeId,
           );
           for (const [filePath, val] of Object.entries(hydrated)) {
             if (typeof val === 'string') {
@@ -915,13 +921,19 @@ export class ClsiService implements OnModuleDestroy {
 
     if (projectId && projectId !== 'default') {
       try {
-        const plan = await this.workspacePlanner.planFiles(projectId, {
+        const plan = await this.workspacePlanner.planFiles(
           projectId,
-          files: dto.files,
-        });
+          {
+            spaceId: projectId,
+            pageId: manuscriptPageId,
+            files: dto.files,
+          },
+          manuscriptPageId,
+        );
         const hydrated = await this.workspacePlanner.hydrateFiles(
           projectId,
           plan,
+          scratchScopeId,
         );
         const stringFiles: Record<string, string> = {};
         for (const [filePath, val] of Object.entries(hydrated)) {
@@ -1063,8 +1075,8 @@ export class ClsiService implements OnModuleDestroy {
 
     const pdfArtifactUrl = hasPdf
       ? pageId
-        ? `/api/v1/manuscripts/pages/${encodeURIComponent(pageId)}/artifacts/output.pdf`
-        : `/api/v1/manuscripts/projects/${encodeURIComponent(projectId)}/artifacts/output.pdf`
+        ? `/api/v1/pages/pages/${encodeURIComponent(pageId)}/artifacts/output.pdf`
+        : `/api/v1/pages/spaces/${encodeURIComponent(projectId)}/artifacts/output.pdf`
       : null;
 
     return {
