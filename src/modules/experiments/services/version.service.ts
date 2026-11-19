@@ -7,13 +7,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'stream';
 import * as crypto from 'crypto';
-import {
-  BlobService,
-  sanitizeFilename,
-  STORAGE_QUOTA_REPOSITORY,
-  validateMagicBytes,
-  type IQuotaRepository,
-} from '@/modules/files';
+import { FILES_PORT, sanitizeFilename, type IFilesPort } from '@/modules/files';
 import {
   EXPERIMENT_NODE_REPOSITORY,
   EXPERIMENT_VERSION_REPOSITORY,
@@ -87,11 +81,10 @@ export interface RevertFileVersionOutput {
 @Injectable()
 export class VersionService {
   constructor(
-    private readonly blobService: BlobService,
+    @Inject(FILES_PORT)
+    private readonly filesPort: IFilesPort,
     @Inject(EXPERIMENT_NODE_REPOSITORY)
     private readonly nodeRepo: INodeRepository,
-    @Inject(STORAGE_QUOTA_REPOSITORY)
-    private readonly quotaRepo: IQuotaRepository,
     @Inject(EXPERIMENT_VERSION_REPOSITORY)
     private readonly versionRepo: IVersionRepository,
     private readonly accessPolicy: ExperimentsAccessPolicy,
@@ -173,21 +166,14 @@ export class VersionService {
     );
 
     const cleanFilename = sanitizeFilename(input.filename);
-    validateMagicBytes(input.buffer, input.mimeType, cleanFilename);
-
-    const sizeBytes = BigInt(input.buffer.length);
-    const { blob, isDeduplicated } = await this.blobService.storeBuffer(
-      input.buffer,
-      input.mimeType,
-      async (bytes) => {
-        await this.quotaRepo.incrementUsage(
-          node.authorId,
-          node.projectId,
-          bytes,
-        );
-      },
-    );
-    const s3Key = blob.s3Key;
+    const uploaded = await this.filesPort.uploadFile({
+      userId: node.authorId,
+      spaceId: node.projectId ?? node.authorId,
+      filename: cleanFilename,
+      buffer: input.buffer,
+      mimeType: input.mimeType,
+    });
+    const sizeBytes = BigInt(uploaded.size);
 
     const latestVersion = await this.versionRepo.getLatestVersionNumber(
       node.id,
@@ -215,7 +201,7 @@ export class VersionService {
       id: crypto.randomUUID(),
       fileId: node.id,
       versionNumber: nextVersionNumber,
-      blobId: blob.id,
+      blobId: uploaded.blobId,
       sizeBytes,
       createdById: input.userId,
       changeComment: input.changeComment ?? null,
@@ -223,7 +209,7 @@ export class VersionService {
     });
     await this.versionRepo.create(storageVersion);
 
-    node.updateBlob(blob.id, sizeBytes);
+    node.updateBlob(uploaded.blobId, sizeBytes);
     await this.nodeRepo.update(node);
 
     const scopeKey = node.projectId ?? node.authorId;
@@ -236,12 +222,12 @@ export class VersionService {
       'file.uploaded',
       new FileUploadedEvent(
         node.id,
-        blob.id,
+        uploaded.blobId,
         input.userId,
-        cleanFilename,
-        input.mimeType,
+        uploaded.filename,
+        uploaded.mimeType,
         sizeBytes,
-        s3Key.value(),
+        uploaded.path,
         node.projectId,
       ),
     );
@@ -249,12 +235,12 @@ export class VersionService {
     return {
       fileId: node.id,
       versionNumber: nextVersionNumber,
-      blobId: blob.id,
-      size: Number(sizeBytes),
-      filename: cleanFilename,
+      blobId: uploaded.blobId,
+      size: uploaded.size,
+      filename: uploaded.filename,
       changeComment: storageVersion.changeComment,
       createdAt: storageVersion.createdAt,
-      isDeduplicated,
+      isDeduplicated: uploaded.isDeduplicated,
     };
   }
 
@@ -292,7 +278,7 @@ export class VersionService {
     await this.accessPolicy.assertCanAccess(actorId, fileId, 'read');
 
     const { blobId } = await this.resolveVersionBlob(node, versionNumber);
-    const { blob, stream } = await this.blobService.openStream(blobId);
+    const { blob, stream } = await this.filesPort.openBlobStream(blobId);
 
     const lastDotIndex = node.name.lastIndexOf('.');
     const versionedFilename =
@@ -324,13 +310,16 @@ export class VersionService {
     const { blobId: targetBlobId, sizeBytes: targetSize } =
       await this.resolveVersionBlob(node, targetVersionNumber);
 
-    await this.quotaRepo.incrementUsage(
-      node.authorId,
-      node.projectId,
-      targetSize,
-    );
+    const targetSpaceId = node.projectId ?? node.authorId;
+    await this.filesPort.reserveQuota(targetSpaceId, targetSize);
 
-    const blob = await this.blobService.incrementBlobRef(targetBlobId);
+    const blob = await this.filesPort.acquireBlob(targetBlobId);
+    if (!blob) {
+      await this.filesPort
+        .releaseQuota(targetSpaceId, targetSize)
+        .catch(() => {});
+      throw new NotFoundException('Physical data blob not found in storage');
+    }
 
     const latestVersion = await this.versionRepo.getLatestVersionNumber(
       node.id,

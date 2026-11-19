@@ -8,9 +8,54 @@ export interface ThumbnailOptions {
   quality?: number;
 }
 
+export interface ImageThumbnailResult {
+  buffer: Buffer;
+  mimeType: 'image/webp';
+  width?: number;
+  height?: number;
+  format?: string;
+}
+
 @Injectable()
 export class ThumbnailService {
   private readonly logger = new Logger(ThumbnailService.name);
+
+  async generateImageThumbnail(
+    imageBuffer: Buffer,
+    options: ThumbnailOptions = {},
+  ): Promise<ImageThumbnailResult | null> {
+    if (!imageBuffer || imageBuffer.length === 0) {
+      return null;
+    }
+
+    const targetWidth = options.width ?? 250;
+    const targetHeight = options.height ?? 250;
+    const quality = options.quality ?? 80;
+
+    try {
+      const metadata = await sharp(imageBuffer).metadata();
+      const buffer = await sharp(imageBuffer)
+        .resize(targetWidth, targetHeight, {
+          fit: 'cover',
+          withoutEnlargement: true,
+        })
+        .webp({ quality })
+        .toBuffer();
+
+      return {
+        buffer,
+        mimeType: 'image/webp',
+        width: metadata.width,
+        height: metadata.height,
+        format: metadata.format,
+      };
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Failed to generate in-process image thumbnail: ${(err as Error)?.message}`,
+      );
+      return null;
+    }
+  }
 
   async generateThumbnail(
     pdfBuffer: Buffer,
@@ -68,4 +113,3 @@ export class ThumbnailService {
     }
   }
 }
-

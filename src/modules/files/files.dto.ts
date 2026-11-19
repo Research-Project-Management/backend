@@ -41,10 +41,6 @@ export class FilesPresignDto {
   @IsString()
   @IsOptional()
   spaceId?: string;
-
-  @IsString()
-  @IsOptional()
-  projectId?: string;
 }
 
 export class FilesCompletePresignDto {
@@ -77,10 +73,6 @@ export class FilesCompletePresignDto {
   @IsString()
   @IsOptional()
   spaceId?: string;
-
-  @IsString()
-  @IsOptional()
-  projectId?: string;
 }
 
 export class FilesInitiateMultipartDto {
@@ -114,10 +106,6 @@ export class FilesInitiateMultipartDto {
   @IsString()
   @IsOptional()
   spaceId?: string;
-
-  @IsString()
-  @IsOptional()
-  projectId?: string;
 }
 
 export class FilesMultipartPartUrlDto {

@@ -283,6 +283,10 @@ export class BlobService {
     return this.driver.exists(key);
   }
 
+  async copy(sourceKey: string, destinationKey: string): Promise<void> {
+    return this.driver.copy(sourceKey, destinationKey);
+  }
+
   async getPresignedUploadUrl(
     key: string,
     options: {

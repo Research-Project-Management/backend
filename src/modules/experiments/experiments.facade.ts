@@ -1,15 +1,10 @@
 import {
   Injectable,
   Inject,
-  Optional,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import {
-  BlobService,
-  streamToBuffer,
-  ThumbnailService,
-} from '@/modules/files';
+import { FILES_PORT, streamToBuffer, type IFilesPort } from '@/modules/files';
 import { EXPERIMENT_NODE_REPOSITORY } from './experiments.constant';
 import {
   getFileContentPath,
@@ -32,7 +27,8 @@ import { StreamService } from './services/stream.service';
 @Injectable()
 export class ExperimentsFacade implements IExperimentsPort {
   constructor(
-    private readonly blobService: BlobService,
+    @Inject(FILES_PORT)
+    private readonly filesPort: IFilesPort,
     @Inject(EXPERIMENT_NODE_REPOSITORY)
     private readonly nodeRepo: INodeRepository,
     private readonly uploadService: UploadService,
@@ -41,8 +37,6 @@ export class ExperimentsFacade implements IExperimentsPort {
     private readonly streamService: StreamService,
     private readonly experimentsService: ExperimentsService,
     private readonly accessPolicy: ExperimentsAccessPolicy,
-    @Optional()
-    private readonly thumbnailService?: ThumbnailService,
   ) {}
 
   private async verifyNodeAccess(
@@ -74,7 +68,7 @@ export class ExperimentsFacade implements IExperimentsPort {
         `File has no physical binary payload: ${fileId}`,
       );
     }
-    const blob = await this.blobService.findBlobById(node.blobId);
+    const blob = await this.filesPort.findBlobById(node.blobId);
     if (!blob) {
       throw new NotFoundException(
         `Physical storage blob not found for node: ${fileId}`,
@@ -102,7 +96,7 @@ export class ExperimentsFacade implements IExperimentsPort {
       input.projectId,
     );
 
-    const { stream } = await this.blobService.getStream(blob.s3Key.value());
+    const { stream } = await this.filesPort.getObjectStream(blob.s3Key.value());
     const buffer = await streamToBuffer(stream);
 
     return {
@@ -132,7 +126,7 @@ export class ExperimentsFacade implements IExperimentsPort {
     );
 
     const { stream, contentLength, contentRange } =
-      await this.blobService.getStream(blob.s3Key.value(), input.range);
+      await this.filesPort.getObjectStream(blob.s3Key.value(), input.range);
 
     return {
       stream,
@@ -154,41 +148,26 @@ export class ExperimentsFacade implements IExperimentsPort {
       input.projectId,
     );
 
-    const thumbKey = `thumbnails/${blob.id}.webp`;
-    try {
-      const exists = await this.blobService.exists(thumbKey);
-      if (exists) {
-        const { stream } = await this.blobService.getStream(thumbKey);
-        return streamToBuffer(stream);
-      }
-    } catch {
-      // Fall through to generate thumbnail from PDF binary
-    }
-
-    if (!this.thumbnailService) {
-      return null;
-    }
-
-    const { stream } = await this.blobService.getStream(blob.s3Key.value());
-    const pdfBuffer = await streamToBuffer(stream);
-    const thumbBuffer =
-      await this.thumbnailService.generateThumbnail(pdfBuffer);
+    const thumbBuffer = await this.filesPort.ensurePdfThumbnail({
+      fileId: blob.id,
+      userId: input.userId,
+      spaceId: input.projectId ?? input.userId,
+    });
     if (!thumbBuffer) {
       return null;
     }
 
     try {
-      await this.blobService.put(thumbKey, thumbBuffer, {
-        mimeType: 'image/webp',
-        size: thumbBuffer.length,
-      });
-      node.updateMetadata({
-        ...(node.metadata || {}),
-        thumbnail: `/api/v1/experiments/files/r2/${encodeURIComponent(thumbKey)}`,
-      });
-      await this.nodeRepo.update(node);
+      const thumbnailUrl = this.filesPort.getThumbnailUrl(blob.id);
+      if (node.metadata?.thumbnail !== thumbnailUrl) {
+        node.updateMetadata({
+          ...(node.metadata || {}),
+          thumbnail: thumbnailUrl,
+        });
+        await this.nodeRepo.update(node);
+      }
     } catch {
-      // Non-fatal if persisting cached thumbnail fails
+      // Non-fatal if persisting cached thumbnail URL fails
     }
 
     return thumbBuffer;
@@ -210,10 +189,7 @@ export class ExperimentsFacade implements IExperimentsPort {
       mimeType: input.mimeType,
       projectId: input.projectId,
       parentId: input.parentId,
-      scope:
-        input.source === 'library' || input.source === 'paper'
-          ? FileScope.Library
-          : undefined,
+      scope: input.projectId ? FileScope.Project : FileScope.Personal,
       source: input.source,
     });
 
@@ -227,27 +203,8 @@ export class ExperimentsFacade implements IExperimentsPort {
     };
   }
 
-  async uploadBuffer(
-    key: string,
-    buffer: Buffer,
-    contentType = 'application/octet-stream',
-  ): Promise<{ path: string; url: string }> {
-    await this.blobService.put(key, buffer, {
-      mimeType: contentType,
-      size: buffer.length,
-    });
-    return {
-      path: key,
-      url: `/api/v1/experiments/files/r2/${encodeURIComponent(key)}`,
-    };
-  }
-
   async deleteFile(fileId: string): Promise<void> {
     await this.trashService.softDelete(fileId);
-  }
-
-  async deleteObject(key: string): Promise<void> {
-    await this.blobService.delete(key);
   }
 
   async getPresignedDownloadUrl(

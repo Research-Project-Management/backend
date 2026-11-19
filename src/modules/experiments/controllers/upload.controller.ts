@@ -33,14 +33,6 @@ import {
   PresignDto,
 } from '../dto/upload.dto';
 
-interface PageUploadBody {
-  filename?: string;
-  mimeType?: string;
-  fileBase64?: string;
-  parentId?: string;
-  spaceId?: string;
-}
-
 interface UploadUser {
   id?: string;
   sub?: string;
@@ -149,7 +141,10 @@ export class UploadController {
     const requestedSize = dto.size ?? dto.sizeBytes ?? 10 * 1024 * 1024;
     this.assertVerifiedUploadLimit(user, requestedSize);
 
-    const normalizedProjectId = normalizeExperimentProjectId(dto.spaceId, userId);
+    const normalizedProjectId = normalizeExperimentProjectId(
+      dto.spaceId,
+      userId,
+    );
 
     await this.accessPolicy.assertCanWriteScope(userId, {
       projectId: normalizedProjectId || null,
@@ -162,7 +157,6 @@ export class UploadController {
       mimeType: dto.mimeType || dto.contentType || 'application/octet-stream',
       sizeBytes: requestedSize,
       projectId: normalizedProjectId,
-      pageId: dto.pageId,
       parentId: dto.parentId,
       scope: dto.scope as FileScope | undefined,
       contentHash: dto.contentHash,
@@ -185,7 +179,10 @@ export class UploadController {
     const reportedSize = dto.size ?? dto.sizeBytes ?? 0;
     this.assertVerifiedUploadLimit(user, reportedSize);
 
-    const normalizedProjectId = normalizeExperimentProjectId(dto.spaceId, userId);
+    const normalizedProjectId = normalizeExperimentProjectId(
+      dto.spaceId,
+      userId,
+    );
 
     await this.accessPolicy.assertCanWriteScope(userId, {
       projectId: normalizedProjectId || null,
@@ -199,7 +196,6 @@ export class UploadController {
       sizeBytes: dto.size ?? dto.sizeBytes,
       mimeType: dto.mimeType,
       projectId: normalizedProjectId,
-      pageId: dto.pageId,
       parentId: dto.parentId,
       scope: dto.scope as FileScope | undefined,
       contentHash: dto.contentHash,
@@ -280,7 +276,6 @@ export class UploadController {
       fields.spaceId?.value,
       userId,
     );
-    const pageId = cleanUuid(fields.pageId?.value) ?? undefined;
     const parentId = cleanUuid(fields.parentId?.value) ?? undefined;
 
     if (userId) {
@@ -297,101 +292,10 @@ export class UploadController {
       buffer,
       mimeType,
       projectId,
-      pageId,
       parentId,
     });
 
     return this.formatUploadResponse(result);
-  }
-
-  @Post('pages/:pageId/upload')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({
-    summary: 'Upload file attached to a page',
-  })
-  async uploadPageFile(
-    @Param('pageId') pageId: string,
-    @CurrentUser('id') userId: string,
-    @Req() req: FastifyRequest,
-    @Body() body?: PageUploadBody,
-  ) {
-    const uploadReq = req as UploadRequest;
-    const isMultipart =
-      typeof uploadReq.isMultipart === 'function'
-        ? uploadReq.isMultipart()
-        : false;
-
-    if (isMultipart) {
-      const { buffer, filename, mimeType, fields } =
-        await this.extractMultipartPayload(uploadReq);
-      this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
-      const rawProjectId =
-        normalizeExperimentProjectId(fields.spaceId?.value, userId) ??
-        (await this.accessPolicy.resolvePageSpaceId?.(pageId, userId));
-      const parentId = cleanUuid(fields.parentId?.value) ?? null;
-
-      if (userId) {
-        await this.accessPolicy.assertCanWriteScope(userId, {
-          projectId: rawProjectId ?? null,
-          parentId,
-        });
-      }
-      const projectId = cleanUuid(rawProjectId) ?? null;
-
-      const res = await this.uploadService.upload({
-        userId,
-        projectId,
-        pageId,
-        linkedToId: pageId,
-        linkedToType: 'Page',
-        scope: FileScope.Page,
-        filename,
-        buffer,
-        mimeType,
-        parentId,
-      });
-
-      return this.formatUploadResponse(res);
-    }
-
-    const filename = body?.filename || 'untitled-file';
-    const mimeType = body?.mimeType || 'application/octet-stream';
-    const buffer = body?.fileBase64
-      ? Buffer.from(
-          body.fileBase64.replace(/^data:[^;]+;base64,/, ''),
-          'base64',
-        )
-      : Buffer.alloc(0);
-
-    this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
-
-    const rawProjectId =
-      normalizeExperimentProjectId(body?.spaceId, userId) ??
-      (await this.accessPolicy.resolvePageSpaceId?.(pageId, userId));
-    const parentId = cleanUuid(body?.parentId) ?? null;
-
-    if (userId) {
-      await this.accessPolicy.assertCanWriteScope(userId, {
-        projectId: rawProjectId ?? null,
-        parentId,
-      });
-    }
-    const projectId = cleanUuid(rawProjectId) ?? null;
-
-    const res = await this.uploadService.upload({
-      userId,
-      projectId,
-      pageId,
-      linkedToId: pageId,
-      linkedToType: 'Page',
-      scope: FileScope.Page,
-      filename,
-      buffer,
-      mimeType,
-      parentId,
-    });
-
-    return this.formatUploadResponse(res);
   }
 
   @Post('multipart/initiate')
@@ -412,7 +316,10 @@ export class UploadController {
       );
     }
     this.assertVerifiedUploadLimit(user, totalSize);
-    const normalizedProjectId = normalizeExperimentProjectId(dto.spaceId, userId);
+    const normalizedProjectId = normalizeExperimentProjectId(
+      dto.spaceId,
+      userId,
+    );
     await this.accessPolicy.assertCanWriteScope(userId, {
       projectId: normalizedProjectId || null,
       parentId: dto.parentId || null,

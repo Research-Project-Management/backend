@@ -18,7 +18,6 @@ export interface IVersionRepository {
   deleteByFileId(fileId: string): Promise<void>;
 }
 
-
 @Injectable()
 export class VersionRepository implements IVersionRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -109,4 +108,3 @@ export class VersionRepository implements IVersionRepository {
     });
   }
 }
-

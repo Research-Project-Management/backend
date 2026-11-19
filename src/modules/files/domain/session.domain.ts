@@ -8,7 +8,7 @@ export enum UploadSessionStatus {
 
 export interface UploadSessionProps {
   id: string;
-  projectId?: string | null;
+  spaceId?: string | null;
   userId: string;
   s3UploadId: string;
   s3Key: string;
@@ -31,7 +31,7 @@ export interface UploadSessionProps {
  */
 export class UploadSession {
   public readonly id: string;
-  public readonly projectId: string | null;
+  public readonly spaceId: string;
   public readonly userId: string;
   public readonly s3UploadId: string;
   public readonly s3Key: string;
@@ -51,7 +51,7 @@ export class UploadSession {
 
   constructor(props: UploadSessionProps) {
     this.id = props.id;
-    this.projectId = props.projectId ?? null;
+    this.spaceId = props.spaceId ?? props.userId;
     this.userId = props.userId;
     this.s3UploadId = props.s3UploadId;
     this.s3Key = props.s3Key;
@@ -62,7 +62,8 @@ export class UploadSession {
     this.totalParts = props.totalParts;
     this.expectedHash = props.expectedHash ?? null;
     this.parentId = props.parentId ?? null;
-    this.scope = props.scope ?? 'Personal';
+    this.scope =
+      props.scope ?? (this.spaceId !== props.userId ? 'Project' : 'Personal');
     this.expiresAt = props.expiresAt;
     this.createdAt = props.createdAt ?? new Date();
 

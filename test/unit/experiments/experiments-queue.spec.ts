@@ -1,7 +1,16 @@
 import {
   BlobService,
+  BlobStatus,
+  ContentHash,
+  FilesFacade,
+  FileStreamService,
   IStorageAdapter,
   IBlobRepository,
+  PresignService,
+  QuotaService,
+  StorageBlob,
+  StorageKey,
+  ThumbnailService,
 } from '@/modules/files';
 import {
   ExperimentsQueueProducer,
@@ -135,7 +144,20 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
       };
 
       mockBlobRepo = {
-        findById: jest.fn(),
+        findById: jest.fn().mockImplementation(async (id: string) => {
+          const isPdf = id.includes('pdf');
+          return new StorageBlob({
+            id,
+            contentHash: ContentHash.fromHex((isPdf ? 'b' : 'a').repeat(64)),
+            sizeBytes: 1024n,
+            s3Key: StorageKey.fromString(
+              isPdf ? 'blobs/pdf-456' : 'blobs/img-123',
+            ),
+            s3Bucket: 'flux',
+            status: BlobStatus.READY,
+            refCount: 1,
+          });
+        }),
         findByHash: jest.fn(),
         create: jest.fn(),
         delete: jest.fn(),
@@ -144,10 +166,16 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
         decrementRefCount: jest.fn(),
       };
 
-      consumer = new ExperimentsQueueConsumer(
-        new BlobService(mockDriver, mockBlobRepo),
-        mockNodeRepo,
+      const blobService = new BlobService(mockDriver, mockBlobRepo);
+      const quotaService = new QuotaService({} as any);
+      const filesPort = new FilesFacade(
+        blobService,
+        quotaService,
+        new PresignService(blobService, quotaService, {} as any),
+        new FileStreamService(blobService),
+        new ThumbnailService(),
       );
+      consumer = new ExperimentsQueueConsumer(filesPort, mockNodeRepo);
     });
 
     it('should skip processing if storage node does not exist or is trashed', async () => {
@@ -226,7 +254,7 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
       // Verify node metadata updated
       expect(mockNodeRepo.update).toHaveBeenCalledTimes(1);
       expect(node.metadata?.thumbnail).toBe(
-        '/api/v1/experiments/files/r2/thumbnails%2Fblob-img-123.webp',
+        '/api/v1/files/objects/thumbnails%2Fblob-img-123.webp',
       );
       expect(node.metadata?.dimensions).toEqual({
         width: 100,

@@ -9,6 +9,3 @@ export const EXPERIMENTS_PROCESSING_QUEUE = 'experiments-processing';
 
 export const EXPERIMENTS_JOB_PROCESS_FILE = 'process-file';
 export const EXPERIMENTS_JOB_MAINTENANCE_TRASH = 'maintenance-trash-retention';
-export const EXPERIMENTS_JOB_MAINTENANCE_MULTIPART =
-  'maintenance-multipart-cleanup';
-export const EXPERIMENTS_JOB_MAINTENANCE_ORPHAN = 'maintenance-orphan-blob';

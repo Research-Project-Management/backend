@@ -2,20 +2,18 @@ export { DEFAULT_STORAGE_QUOTA_BYTES } from '../files.constant';
 
 export interface StorageQuotaProps {
   id: string;
-  userId?: string | null;
-  projectId?: string | null;
+  spaceId: string;
   usedBytes: bigint;
   maxBytes: bigint;
   updatedAt?: Date;
 }
 
 /**
- * Enforces per-user and per-project storage limits.
+ * Enforces per-space (personal or project) storage limits.
  */
 export class StorageQuota {
   public readonly id: string;
-  public readonly userId: string | null;
-  public readonly projectId: string | null;
+  public readonly spaceId: string;
 
   private _usedBytes: bigint;
   private _maxBytes: bigint;
@@ -23,8 +21,7 @@ export class StorageQuota {
 
   constructor(props: StorageQuotaProps) {
     this.id = props.id;
-    this.userId = props.userId ?? null;
-    this.projectId = props.projectId ?? null;
+    this.spaceId = props.spaceId;
     this._usedBytes = props.usedBytes;
     this._maxBytes = props.maxBytes;
     this._updatedAt = props.updatedAt ?? new Date();

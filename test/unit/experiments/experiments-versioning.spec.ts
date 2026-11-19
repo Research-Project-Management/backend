@@ -4,6 +4,10 @@ import {
   BlobStatus,
   ContentHash,
   StorageKey,
+  FilesFacade,
+  FileStreamService,
+  PresignService,
+  QuotaService,
 } from '@/modules/files';
 import {
   VersionService,
@@ -106,6 +110,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
     };
 
     mockQuotaRepo = {
+      findBySpaceId: jest.fn().mockResolvedValue(null),
       incrementUsage: jest.fn().mockResolvedValue(1000n),
       decrementUsage: jest.fn().mockResolvedValue(0n),
     };
@@ -157,10 +162,17 @@ describe('Storage File & Dataset Versioning Suite', () => {
       emit: jest.fn(),
     };
 
+    const blobService = new BlobService(mockDriver, mockBlobRepo);
+    const quotaService = new QuotaService(mockQuotaRepo);
+    const filesPort = new FilesFacade(
+      blobService,
+      quotaService,
+      new PresignService(blobService, quotaService, {} as any),
+      new FileStreamService(blobService),
+    );
     versionService = new VersionService(
-      new BlobService(mockDriver, mockBlobRepo),
+      filesPort,
       mockNodeRepo,
-      mockQuotaRepo,
       mockVersionRepo,
       mockAccessPolicy,
       mockCache,

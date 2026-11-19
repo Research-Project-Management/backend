@@ -6,12 +6,6 @@ import {
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { PrismaService, shouldRunWorkerConsumers } from '@/core';
-import {
-  BlobService,
-  StorageLifecycleConfiguration,
-  UPLOAD_SESSION_REPOSITORY,
-  type ISessionRepository,
-} from '@/modules/files';
 import { EXPERIMENT_NODE_REPOSITORY } from '../experiments.constant';
 import { INodeRepository } from '../repositories/node.repository';
 import { ExperimentsQueueProducer } from '../processors/experiments.producer';
@@ -68,46 +62,6 @@ export class TrashRetentionJob {
       );
     }
     return { purgedCount, reclaimedBytes, errors };
-  }
-}
-
-@Injectable()
-export class MultipartCleanupJob {
-  private readonly logger = new Logger(MultipartCleanupJob.name);
-
-  constructor(
-    private readonly blobService: BlobService,
-    @Inject(UPLOAD_SESSION_REPOSITORY)
-    private readonly sessionRepo: ISessionRepository,
-  ) {}
-
-  async processExpiredSessions(): Promise<number> {
-    const now = new Date();
-    const expired = await this.sessionRepo.findExpiredSessions(now, 100);
-    let abortedCount = 0;
-
-    for (const session of expired) {
-      try {
-        await this.blobService.abortMultipartUpload(
-          session.s3Key,
-          session.s3UploadId,
-        );
-        session.markAborted();
-        await this.sessionRepo.update(session);
-        abortedCount++;
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Failed to abort expired multipart session ${session.id}: ${(err as Error)?.message}`,
-        );
-      }
-    }
-
-    if (abortedCount > 0) {
-      this.logger.log(
-        `MultipartCleanupJob aborted ${abortedCount} abandoned multipart upload sessions`,
-      );
-    }
-    return abortedCount;
   }
 }
 
@@ -169,7 +123,6 @@ export class ExperimentsLifecycleService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ExperimentsLifecycleService.name);
 
   constructor(
-    private readonly blobService: BlobService,
     private readonly queueProducer: ExperimentsQueueProducer,
     @Optional() private readonly prisma?: PrismaService,
   ) {}
@@ -190,7 +143,6 @@ export class ExperimentsLifecycleService implements OnApplicationBootstrap {
     );
 
     await this.backfillLegacyUrls();
-    await this.initializeBucketLifecycle();
     await this.queueProducer.scheduleMaintenanceJobs();
   }
 
@@ -206,20 +158,4 @@ export class ExperimentsLifecycleService implements OnApplicationBootstrap {
       );
     }
   }
-
-  async initializeBucketLifecycle(
-    config?: StorageLifecycleConfiguration,
-  ): Promise<void> {
-    try {
-      await this.blobService.applyLifecycleRules(config);
-      this.logger.log(
-        'Bucket lifecycle configuration initialized successfully',
-      );
-    } catch (err: unknown) {
-      this.logger.warn(
-        `Failed to initialize bucket lifecycle rules: ${(err as Error)?.message}`,
-      );
-    }
-  }
 }
-

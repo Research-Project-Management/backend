@@ -18,8 +18,8 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
   DEFAULT_STORAGE_QUOTA_BYTES,
-  STORAGE_QUOTA_REPOSITORY,
-  type IQuotaRepository,
+  FILES_PORT,
+  type IFilesPort,
 } from '@/modules/files';
 import { ExperimentsService } from '../services/experiments.service';
 import { TrashService } from '../services/trash.service';
@@ -45,7 +45,6 @@ import {
   ShareFileDto,
 } from '../dto/experiments.dto';
 
-
 @ApiTags('Experiments')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/experiments/files')
@@ -56,8 +55,8 @@ export class ExperimentsController {
     private readonly trashService: TrashService,
     private readonly accessPolicy: ExperimentsAccessPolicy,
     @Optional()
-    @Inject(STORAGE_QUOTA_REPOSITORY)
-    private readonly quotaRepo?: IQuotaRepository,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {}
 
   private mapNodeToDto(node: ExperimentNode) {
@@ -184,38 +183,6 @@ export class ExperimentsController {
     return { path };
   }
 
-  @Get('pages/:pageId')
-  @ApiOperation({ summary: 'List files associated with a page' })
-  async getPageFiles(
-    @Param('pageId') pageId: string,
-    @CurrentUser('id') userId?: string,
-    @Query('spaceId') spaceId?: string,
-    @Query('parentId') parentId?: string,
-    @Query('limit') limit?: number,
-    @Query('offset') offset?: number,
-    @Query('page') page?: number,
-  ) {
-    const normalizedProjectId = normalizeExperimentProjectId(spaceId, userId);
-    if (normalizedProjectId && userId) {
-      await this.accessPolicy.assertCanAccessProject(
-        userId,
-        normalizedProjectId,
-        'read',
-      );
-    }
-    const pagination = parsePagination(limit, offset, page);
-    const result = await this.experimentsService.list({
-      userId: normalizedProjectId ? undefined : userId,
-      projectId: normalizedProjectId,
-      scope: FileScope.Page,
-      linkedToId: pageId,
-      parentId: parentId || null,
-      limit: pagination.take,
-      offset: pagination.skip,
-    });
-    return buildPaginatedExperimentsResponse(result, pagination);
-  }
-
   @Get('starred')
   @ApiOperation({ summary: 'Get starred files' })
   async getStarredFiles(
@@ -266,8 +233,9 @@ export class ExperimentsController {
     @Query('spaceId') spaceId?: string,
   ) {
     const normalizedProjectId = normalizeExperimentProjectId(spaceId, userId);
-    const quota = this.quotaRepo
-      ? await this.quotaRepo.findByScope(userId, normalizedProjectId)
+    const targetSpaceId = normalizedProjectId ?? userId;
+    const quota = this.filesPort
+      ? await this.filesPort.getQuota(targetSpaceId)
       : null;
     const usedBigInt = quota ? quota.usedBytes : 0n;
     const maxBigInt = quota ? quota.maxBytes : DEFAULT_STORAGE_QUOTA_BYTES;
@@ -343,7 +311,10 @@ export class ExperimentsController {
     @CurrentUser('id') userId: string,
     @Body() dto: CreateFolderDto,
   ) {
-    const normalizedProjectId = normalizeExperimentProjectId(dto.spaceId, userId);
+    const normalizedProjectId = normalizeExperimentProjectId(
+      dto.spaceId,
+      userId,
+    );
     if (userId) {
       await this.accessPolicy.assertCanWriteScope(userId, {
         projectId: normalizedProjectId || null,
@@ -361,13 +332,12 @@ export class ExperimentsController {
     return this.mapNodeToDto(created);
   }
 
-  @Post(['pages/:pageId/folder', 'spaces/:spaceId/folder'])
+  @Post('spaces/:spaceId/folder')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a new folder in page or space scope' })
+  @ApiOperation({ summary: 'Create a new folder in space scope' })
   async createScopedFolder(
     @CurrentUser('id') userId: string,
     @Body() dto: CreateFolderDto,
-    @Param('pageId') pageId?: string,
     @Param('spaceId') spaceId?: string,
   ) {
     const normalizedProjectId = normalizeExperimentProjectId(
@@ -381,19 +351,14 @@ export class ExperimentsController {
       });
     }
     const folderName = dto.name || dto.filename || 'New Folder';
-    const scope = normalizedProjectId
-      ? FileScope.Project
-      : pageId
-        ? FileScope.Page
-        : FileScope.Personal;
+    const scope = normalizedProjectId ? FileScope.Project : FileScope.Personal;
     const created = await this.experimentsService.createFolder({
       userId,
       name: folderName,
       projectId: normalizedProjectId || null,
-      linkedToId: normalizedProjectId || pageId || null,
+      linkedToId: normalizedProjectId || null,
       scope,
       parentId: dto.parentId || null,
-      metadata: pageId ? { pageId } : {},
     });
     return this.mapNodeToDto(created);
   }
@@ -515,4 +480,3 @@ export class ExperimentsController {
     return { success: true, count };
   }
 }
-

@@ -3,6 +3,10 @@ import {
   StorageBlob,
   ContentHash,
   StorageKey,
+  FilesFacade,
+  FileStreamService,
+  PresignService,
+  QuotaService,
 } from '@/modules/files';
 import {
   ExperimentsEventListener,
@@ -123,10 +127,15 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
         findById: jest.fn(),
       };
 
-      backupService = new ExperimentsBackupService(
-        new BlobService(mockDriver, mockBlobRepo),
-        mockNodeRepo,
+      const blobService = new BlobService(mockDriver, mockBlobRepo);
+      const quotaService = new QuotaService({} as any);
+      const filesPort = new FilesFacade(
+        blobService,
+        quotaService,
+        new PresignService(blobService, quotaService, {} as any),
+        new FileStreamService(blobService),
       );
+      backupService = new ExperimentsBackupService(filesPort, mockNodeRepo);
     });
 
     it('should export project files into a zipped archive and upload to S3 backup path', async () => {

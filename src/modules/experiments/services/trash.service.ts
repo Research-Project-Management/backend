@@ -1,10 +1,6 @@
 import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import {
-  BlobService,
-  STORAGE_QUOTA_REPOSITORY,
-  type IQuotaRepository,
-} from '@/modules/files';
+import { FILES_PORT, type IFilesPort } from '@/modules/files';
 import {
   EXPERIMENT_NODE_REPOSITORY,
   EXPERIMENT_VERSION_REPOSITORY,
@@ -22,9 +18,8 @@ export class TrashService {
   constructor(
     @Inject(EXPERIMENT_NODE_REPOSITORY)
     private readonly nodeRepo: INodeRepository,
-    private readonly blobService: BlobService,
-    @Inject(STORAGE_QUOTA_REPOSITORY)
-    private readonly quotaRepo: IQuotaRepository,
+    @Inject(FILES_PORT)
+    private readonly filesPort: IFilesPort,
     private readonly cache: ExperimentsCacheService,
     private readonly eventEmitter: EventEmitter2,
     @Inject(EXPERIMENT_VERSION_REPOSITORY)
@@ -43,9 +38,9 @@ export class TrashService {
     if (typeof this.cache.invalidateScopeTree === 'function') {
       await this.cache.invalidateScopeTree(scopeKey);
     }
-    await Promise.resolve(
-      this.cache?.invalidateStreamNodeMeta?.(nodeId),
-    ).catch(() => {});
+    await Promise.resolve(this.cache?.invalidateStreamNodeMeta?.(nodeId)).catch(
+      () => {},
+    );
 
     this.eventEmitter.emit(
       'file.trashed',
@@ -87,16 +82,13 @@ export class TrashService {
 
     const purgeSingle = async (target: ExperimentNode): Promise<bigint> => {
       let reclaimed = 0n;
+      const targetSpaceId = target.projectId ?? target.authorId;
       if (this.versionRepo && !target.isFolder) {
         const versions = await this.versionRepo.findByFileId(target.id);
         if (versions.length > 0) {
           for (const v of versions) {
-            await this.blobService.releaseBlob(v.blobId);
-            await this.quotaRepo.decrementUsage(
-              target.authorId,
-              target.projectId,
-              v.sizeBytes,
-            );
+            await this.filesPort.releaseBlob(v.blobId);
+            await this.filesPort.releaseQuota(targetSpaceId, v.sizeBytes);
             reclaimed += BigInt(v.sizeBytes);
           }
           await this.versionRepo.deleteByFileId(target.id);
@@ -108,12 +100,8 @@ export class TrashService {
         }
       }
       if (target.blobId) {
-        await this.blobService.releaseBlob(target.blobId);
-        await this.quotaRepo.decrementUsage(
-          target.authorId,
-          target.projectId,
-          target.size,
-        );
+        await this.filesPort.releaseBlob(target.blobId);
+        await this.filesPort.releaseQuota(targetSpaceId, target.size);
         reclaimed += BigInt(target.size);
       }
       await this.nodeRepo.delete(target.id);

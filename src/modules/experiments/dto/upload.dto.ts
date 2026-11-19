@@ -28,10 +28,6 @@ export class PresignDto {
 
   @IsString()
   @IsOptional()
-  pageId?: string;
-
-  @IsString()
-  @IsOptional()
   parentId?: string;
 
   @IsString()
@@ -82,10 +78,6 @@ export class CompletePresignedDto {
 
   @IsString()
   @IsOptional()
-  pageId?: string;
-
-  @IsString()
-  @IsOptional()
   parentId?: string;
 
   @IsString()
@@ -125,10 +117,6 @@ export class InitiateMultipartDto {
   @IsString()
   @IsOptional()
   spaceId?: string;
-
-  @IsString()
-  @IsOptional()
-  pageId?: string;
 
   @IsString()
   @IsOptional()

@@ -6,19 +6,17 @@ import {
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { Job } from 'bullmq';
-import sharp from 'sharp';
 import { createInterface } from 'readline';
 import { PDFDocument } from 'pdf-lib';
 import {
-  BlobService,
+  FILES_PORT,
+  MAX_PDF_THUMBNAIL_BYTES,
   streamToBuffer,
-  ThumbnailService,
+  type IFilesPort,
 } from '@/modules/files';
 import {
   EXPERIMENT_NODE_REPOSITORY,
   EXPERIMENTS_PROCESSING_QUEUE,
-  EXPERIMENTS_JOB_MAINTENANCE_MULTIPART,
-  EXPERIMENTS_JOB_MAINTENANCE_ORPHAN,
   EXPERIMENTS_JOB_MAINTENANCE_TRASH,
   EXPERIMENTS_JOB_PROCESS_FILE,
 } from '../experiments.constant';
@@ -26,10 +24,7 @@ import { ExperimentsProcessingJobData } from '../experiments.type';
 import { INodeRepository } from '../repositories/node.repository';
 import { ExperimentNode } from '../domain/node.domain';
 import { ExperimentsCacheService } from '../services/cache.service';
-import {
-  MultipartCleanupJob,
-  TrashRetentionJob,
-} from '../services/lifecycle.service';
+import { TrashRetentionJob } from '../services/lifecycle.service';
 
 @Processor(EXPERIMENTS_PROCESSING_QUEUE, { concurrency: 3 })
 export class ExperimentsQueueConsumer
@@ -39,15 +34,12 @@ export class ExperimentsQueueConsumer
   private readonly logger = new Logger(ExperimentsQueueConsumer.name);
 
   constructor(
-    private readonly blobService: BlobService,
+    @Inject(FILES_PORT)
+    private readonly filesPort: IFilesPort,
     @Inject(EXPERIMENT_NODE_REPOSITORY)
     private readonly nodeRepo: INodeRepository,
     @Optional()
     private readonly trashRetentionJob?: TrashRetentionJob,
-    @Optional()
-    private readonly multipartCleanupJob?: MultipartCleanupJob,
-    @Optional()
-    private readonly pdfThumbnailService?: ThumbnailService,
     @Optional()
     private readonly cacheService?: ExperimentsCacheService,
   ) {
@@ -57,7 +49,9 @@ export class ExperimentsQueueConsumer
   onApplicationBootstrap() {
     try {
       this.worker?.on('error', (err) => {
-        this.logger.warn(`Experiments Worker connection notice: ${err.message}`);
+        this.logger.warn(
+          `Experiments Worker connection notice: ${err.message}`,
+        );
       });
     } catch (err: unknown) {
       this.logger.debug(
@@ -73,18 +67,6 @@ export class ExperimentsQueueConsumer
           `Starting scheduled maintenance: Trash Retention [${job.id}]`,
         );
         return this.trashRetentionJob?.processExpiredTrash();
-      }
-      case EXPERIMENTS_JOB_MAINTENANCE_MULTIPART: {
-        this.logger.log(
-          `Starting scheduled maintenance: Multipart Cleanup [${job.id}]`,
-        );
-        return this.multipartCleanupJob?.processExpiredSessions();
-      }
-      case EXPERIMENTS_JOB_MAINTENANCE_ORPHAN: {
-        this.logger.log(
-          `Starting scheduled maintenance: Orphan Blob GC [${job.id}]`,
-        );
-        return this.blobService.reclaimOrphanBlobs(100);
       }
       case EXPERIMENTS_JOB_PROCESS_FILE:
       default: {
@@ -163,31 +145,21 @@ export class ExperimentsQueueConsumer
     data: ExperimentsProcessingJobData,
     node: ExperimentNode,
   ): Promise<void> {
-    const { stream } = await this.blobService.getStream(data.s3Key);
-    const buffer = await streamToBuffer(stream);
-
-    const image = sharp(buffer);
-    const metadata = await image.metadata();
-
-    const thumbBuffer = await sharp(buffer)
-      .resize(250, 250, { fit: 'cover', withoutEnlargement: true })
-      .webp({ quality: 80 })
-      .toBuffer();
-
-    const thumbKey = `thumbnails/${data.blobId}.webp`;
-    await this.blobService.put(thumbKey, thumbBuffer, {
-      mimeType: 'image/webp',
-      size: thumbBuffer.length,
+    const thumbResult = await this.filesPort.ensureImageThumbnail({
+      fileId: data.blobId,
     });
+    if (!thumbResult) {
+      return;
+    }
 
     const currentMeta = node.metadata || {};
     node.updateMetadata({
       ...currentMeta,
-      thumbnail: `/api/v1/experiments/files/r2/${encodeURIComponent(thumbKey)}`,
+      thumbnail: thumbResult.thumbnailUrl,
       dimensions: {
-        width: metadata.width,
-        height: metadata.height,
-        format: metadata.format,
+        width: thumbResult.width,
+        height: thumbResult.height,
+        format: thumbResult.format,
       },
     });
   }
@@ -197,12 +169,12 @@ export class ExperimentsQueueConsumer
     node: ExperimentNode,
   ): Promise<void> {
     const stat =
-      typeof this.blobService.stat === 'function'
-        ? await Promise.resolve(this.blobService.stat(data.s3Key)).catch(
+      typeof this.filesPort.statObject === 'function'
+        ? await Promise.resolve(this.filesPort.statObject(data.s3Key)).catch(
             () => null,
           )
         : null;
-    if (stat && stat.size > 25 * 1024 * 1024) {
+    if (stat && stat.size > Number(MAX_PDF_THUMBNAIL_BYTES)) {
       this.logger.warn(
         `Skipping in-memory PDF parse for ${data.s3Key} (${stat.size} bytes > 25 MB limit)`,
       );
@@ -213,7 +185,7 @@ export class ExperimentsQueueConsumer
       return;
     }
 
-    const { stream } = await this.blobService.getStream(data.s3Key);
+    const { stream } = await this.filesPort.getObjectStream(data.s3Key);
     const buffer = await streamToBuffer(stream);
 
     try {
@@ -224,17 +196,13 @@ export class ExperimentsQueueConsumer
       let thumbnailPath: string | null =
         (currentMeta.thumbnail as string) || null;
 
-      if (this.pdfThumbnailService && data.blobId) {
+      if (data.blobId) {
         try {
-          const thumbBuffer =
-            await this.pdfThumbnailService.generateThumbnail(buffer);
+          const thumbBuffer = await this.filesPort.ensurePdfThumbnail({
+            fileId: data.blobId,
+          });
           if (thumbBuffer) {
-            const thumbKey = `thumbnails/${data.blobId}.webp`;
-            await this.blobService.put(thumbKey, thumbBuffer, {
-              mimeType: 'image/webp',
-              size: thumbBuffer.length,
-            });
-            thumbnailPath = `/api/v1/experiments/files/r2/${encodeURIComponent(thumbKey)}`;
+            thumbnailPath = this.filesPort.getThumbnailUrl(data.blobId);
             this.logger.log(
               `Generated and stored WebP thumbnail for PDF ${data.fileId}`,
             );
@@ -262,7 +230,7 @@ export class ExperimentsQueueConsumer
     data: ExperimentsProcessingJobData,
     node: ExperimentNode,
   ): Promise<void> {
-    const { stream } = await this.blobService.getStream(data.s3Key);
+    const { stream } = await this.filesPort.getObjectStream(data.s3Key);
     const rl = createInterface({
       input: stream,
       crlfDelay: Infinity,
@@ -297,4 +265,3 @@ export class ExperimentsQueueConsumer
     });
   }
 }
-

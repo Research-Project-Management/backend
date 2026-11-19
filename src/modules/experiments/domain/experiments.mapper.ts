@@ -194,7 +194,7 @@ export class NodeMapper {
       (typeof metadata.projectId === 'string' ? metadata.projectId : null) ??
       (isProjectSpace
         ? record.spaceId
-        : scope === FileScope.Project || scope === FileScope.Library
+        : scope === FileScope.Project
           ? record.linkedToId
           : null);
     const isStarred =
@@ -254,7 +254,6 @@ export class NodeMapper {
     };
   }
 }
-
 
 export const VERSION_AUTHOR_SELECT = {
   id: true,
@@ -411,12 +410,13 @@ export function mapExperimentNodeToDto(node: ExperimentNode) {
   };
 }
 
-
 export function buildPaginatedExperimentsResponse(
   result: { nodes: ExperimentNode[]; total: number },
   pagination: PaginationParams,
 ) {
-  const files = (result.nodes || []).map((node) => mapExperimentNodeToDto(node));
+  const files = (result.nodes || []).map((node) =>
+    mapExperimentNodeToDto(node),
+  );
   return {
     files,
     total: result.total,

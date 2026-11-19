@@ -2,10 +2,10 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import {
-  BlobService,
+  FILES_PORT,
   sanitizeFilename,
-  StorageBlob,
   streamToBuffer,
+  type IFilesPort,
 } from '@/modules/files';
 import { EXPERIMENT_NODE_REPOSITORY } from '../experiments.constant';
 import { INodeRepository } from '../repositories/node.repository';
@@ -32,7 +32,8 @@ export class ExperimentsBackupService {
   private readonly logger = new Logger(ExperimentsBackupService.name);
 
   constructor(
-    private readonly blobService: BlobService,
+    @Inject(FILES_PORT)
+    private readonly filesPort: IFilesPort,
     @Inject(EXPERIMENT_NODE_REPOSITORY)
     private readonly nodeRepo: INodeRepository,
   ) {}
@@ -58,7 +59,10 @@ export class ExperimentsBackupService {
 
     const childrenByParent = new Map<string, ExperimentNode[]>();
     const rootNodes: ExperimentNode[] = [];
-    const blobCache = new Map<string, StorageBlob | null>();
+    const blobCache = new Map<
+      string,
+      Awaited<ReturnType<IFilesPort['findBlobById']>>
+    >();
 
     for (const node of result.nodes) {
       if (node.isTrashed()) continue;
@@ -96,13 +100,13 @@ export class ExperimentsBackupService {
       } else if (node.blobId) {
         let blob = blobCache.get(node.blobId);
         if (blob === undefined) {
-          const fetchedBlob = await this.blobService.findBlobById(node.blobId);
+          const fetchedBlob = await this.filesPort.findBlobById(node.blobId);
           blobCache.set(node.blobId, fetchedBlob ?? null);
           blob = fetchedBlob ?? null;
         }
         if (blob) {
           try {
-            const { stream } = await this.blobService.getStream(
+            const { stream } = await this.filesPort.getObjectStream(
               blob.s3Key.value(),
             );
             const buf = await streamToBuffer(stream);
@@ -159,7 +163,7 @@ export class ExperimentsBackupService {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupKey = `backups/projects/${projectId}/backup-${timestamp}.zip`;
 
-    await this.blobService.put(backupKey, archiveBuffer, {
+    await this.filesPort.putObject(backupKey, archiveBuffer, {
       mimeType: 'application/zip',
       size: archiveBuffer.length,
     });
@@ -211,7 +215,7 @@ export class ExperimentsBackupService {
     const sha256 = crypto.createHash('sha256').update(gzipped).digest('hex');
     const backupKey = `backups/metadata/snapshot-${timestamp}.json.gz`;
 
-    await this.blobService.put(backupKey, gzipped, {
+    await this.filesPort.putObject(backupKey, gzipped, {
       mimeType: 'application/gzip',
       size: gzipped.length,
     });
@@ -228,4 +232,3 @@ export class ExperimentsBackupService {
     };
   }
 }
-

@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import {
   BlobService,
   BlobStatus,
@@ -58,19 +58,19 @@ function createInMemoryRepos() {
   let usedBytes = 0n;
   const maxBytes = 100 * 1024 * 1024;
   const quotaRepo: jest.Mocked<IQuotaRepository> = {
-    findByScope: jest.fn(async (userId) => {
+    findBySpaceId: jest.fn(async (spaceId) => {
       return new StorageQuota({
         id: 'quota-1',
-        userId: userId ?? 'user-1',
+        spaceId: spaceId ?? 'user-1',
         usedBytes,
         maxBytes: BigInt(maxBytes),
       });
     }),
-    incrementUsage: jest.fn(async (_u, _p, bytes) => {
+    incrementUsage: jest.fn(async (_spaceId, bytes) => {
       usedBytes += bytes;
       return usedBytes;
     }),
-    decrementUsage: jest.fn(async (_u, _p, bytes) => {
+    decrementUsage: jest.fn(async (_spaceId, bytes) => {
       usedBytes = usedBytes > bytes ? usedBytes - bytes : 0n;
       return usedBytes;
     }),
@@ -228,11 +228,11 @@ describe('FilesController Multipart Endpoints', () => {
 
     await expect(
       controller.getMultipartPartUrl('other-user', initRes.sessionId, '1'),
-    ).rejects.toThrow(ForbiddenException);
+    ).rejects.toThrow(NotFoundException);
 
     await expect(
       controller.abortMultipart('other-user', initRes.sessionId),
-    ).rejects.toThrow(ForbiddenException);
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('aborts session on DELETE multipart/:sessionId and cleans up temporary chunk files', async () => {

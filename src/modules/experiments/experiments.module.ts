@@ -26,7 +26,6 @@ import { StreamService } from './services/stream.service';
 import { ExperimentsBackupService } from './services/backup.service';
 import {
   ExperimentsLifecycleService,
-  MultipartCleanupJob,
   TrashRetentionJob,
 } from './services/lifecycle.service';
 import { ExperimentsQueueProducer } from './processors/experiments.producer';
@@ -84,7 +83,6 @@ const workerProviders = shouldRunWorkerConsumers()
     ExperimentsLifecycleService,
     ExperimentsEventListener,
     TrashRetentionJob,
-    MultipartCleanupJob,
     ExperimentsFacade,
     {
       provide: EXPERIMENTS_PORT,

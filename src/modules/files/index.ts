@@ -18,6 +18,8 @@ export * from './services/quota.service';
 export * from './services/presign.service';
 export * from './services/stream.service';
 export * from './services/thumbnail.service';
+export * from './processors/files-lifecycle.service';
+export * from './processors/files-maintenance.processor';
 export * from './controllers/files.controller';
 export * from './controllers/local.controller';
 export * from './files.facade';

@@ -6,13 +6,10 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import {
-  BlobService,
-  BlobStatus,
-  ByteRange,
-  ContentHash,
+  FILES_PORT,
   sanitizeFilename,
-  StorageBlob,
-  StorageKey,
+  type IFilesPort,
+  type StreamBlobTarget,
 } from '@/modules/files';
 import { EXPERIMENT_NODE_REPOSITORY } from '../experiments.constant';
 import { StreamBinaryOutput } from '../experiments.type';
@@ -32,7 +29,6 @@ interface CachedStreamNodeMeta {
     s3Bucket?: string;
     sizeBytes: string;
     contentHashHex?: string;
-    status?: BlobStatus;
   };
 }
 
@@ -41,7 +37,8 @@ export class StreamService {
   private readonly logger = new Logger(StreamService.name);
 
   constructor(
-    private readonly blobService: BlobService,
+    @Inject(FILES_PORT)
+    private readonly filesPort: IFilesPort,
     @Inject(EXPERIMENT_NODE_REPOSITORY)
     private readonly nodeRepo: INodeRepository,
     private readonly cache: ExperimentsCacheService,
@@ -75,34 +72,9 @@ export class StreamService {
     }
   }
 
-  async streamR2Object(
-    key: string,
-    rangeHeader?: string,
-  ): Promise<{
-    Body?: NodeJS.ReadableStream;
-    ContentType?: string;
-    ContentLength?: number;
-    ContentRange?: string;
-    ETag?: string;
-  }> {
-    let range: { start: number; end: number } | undefined;
-    if (rangeHeader) {
-      const stat = await this.blobService.stat(key);
-      const parsed = ByteRange.parse(rangeHeader, stat.size);
-      if (parsed) {
-        range = { start: parsed.start, end: parsed.end };
-      }
-    }
-    const res = await this.blobService.getStream(key, range);
-    return {
-      Body: res.stream,
-      ContentType: 'application/octet-stream',
-      ContentLength: res.contentLength,
-      ContentRange: res.contentRange,
-    };
-  }
-
-  private async resolveNodeAndBlob(nodeId: string) {
+  private async resolveNodeAndBlob(
+    nodeId: string,
+  ): Promise<{ node: ExperimentNode; blob: StreamBlobTarget }> {
     const cached = await Promise.resolve(
       this.cache?.getStreamNodeMeta?.<CachedStreamNodeMeta>(nodeId),
     ).catch(() => null);
@@ -113,25 +85,15 @@ export class StreamService {
         throw new NotFoundException('File not found or has been trashed');
       }
 
-      const blob =
-        cached.blob.contentHashHex &&
-        /^[a-f0-9]{64}$/i.test(cached.blob.contentHashHex)
-          ? new StorageBlob({
-              id: cached.blob.id,
-              contentHash: ContentHash.fromHex(cached.blob.contentHashHex),
-              sizeBytes: BigInt(cached.blob.sizeBytes || '0'),
-              s3Key: StorageKey.fromString(cached.blob.s3Key),
-              s3Bucket: cached.blob.s3Bucket || 'local-storage',
-              status: cached.blob.status ?? BlobStatus.READY,
-            })
-          : {
-              id: cached.blob.id,
-              s3Key: StorageKey.fromString(cached.blob.s3Key),
-              sizeBytes: BigInt(cached.blob.sizeBytes || '0'),
-              contentHash: undefined,
-              s3Bucket: cached.blob.s3Bucket || 'local-storage',
-              status: cached.blob.status ?? BlobStatus.READY,
-            };
+      const blob: StreamBlobTarget = {
+        s3Key: cached.blob.s3Key,
+        sizeBytes: BigInt(cached.blob.sizeBytes || '0'),
+        contentHashHex:
+          cached.blob.contentHashHex &&
+          /^[a-f0-9]{64}$/i.test(cached.blob.contentHashHex)
+            ? cached.blob.contentHashHex
+            : undefined,
+      };
 
       return { node, blob };
     }
@@ -147,7 +109,7 @@ export class StreamService {
       );
     }
 
-    const blob = await this.blobService.findBlobById(node.blobId);
+    const blob = await this.filesPort.findBlobById(node.blobId);
     if (!blob) {
       throw new NotFoundException('Physical blob not found');
     }
@@ -160,7 +122,6 @@ export class StreamService {
       s3Bucket?: string;
       sizeBytes?: bigint | number | string;
       contentHash?: { toHex?: () => string };
-      status?: BlobStatus;
     };
     const s3Key =
       typeof rawBlob.s3Key === 'object' &&
@@ -185,12 +146,11 @@ export class StreamService {
         s3Bucket: rawBlob.s3Bucket || 'local-storage',
         sizeBytes: sizeBytesStr,
         contentHashHex,
-        status: rawBlob.status ?? BlobStatus.READY,
       },
     };
-    Promise.resolve(
-      this.cache?.setStreamNodeMeta?.(nodeId, payload, 60),
-    ).catch(() => {});
+    Promise.resolve(this.cache?.setStreamNodeMeta?.(nodeId, payload, 60)).catch(
+      () => {},
+    );
 
     return { node, blob };
   }
@@ -202,50 +162,12 @@ export class StreamService {
   ): Promise<StreamBinaryOutput> {
     const { node, blob } = await this.resolveNodeAndBlob(nodeId);
 
-    const totalSize = Number(blob.sizeBytes);
-    const etag = blob.contentHash?.toHex
-      ? `"${blob.contentHash.toHex()}"`
-      : undefined;
-
-    if (etag && ifNoneMatch && ifNoneMatch === etag && !rangeHeader) {
-      return {
-        stream: null,
-        statusCode: 304,
-        mimeType: node.mimeType,
-        contentLength: 0,
-        filename: node.name,
-        etag,
-      };
-    }
-
-    const byteRange = ByteRange.parse(rangeHeader, totalSize);
-
-    if (byteRange) {
-      const { stream } = await this.blobService.getStream(blob.s3Key.value(), {
-        start: byteRange.start,
-        end: byteRange.end,
-      });
-
-      return {
-        stream,
-        statusCode: 206,
-        mimeType: node.mimeType,
-        contentLength: byteRange.length,
-        contentRange: byteRange.getContentRangeHeader(),
-        filename: node.name,
-        etag,
-      };
-    }
-
-    const { stream } = await this.blobService.getStream(blob.s3Key.value());
-    return {
-      stream,
-      statusCode: 200,
+    return this.filesPort.streamBlob(blob, {
+      rangeHeader,
+      ifNoneMatch,
       mimeType: node.mimeType,
-      contentLength: totalSize,
       filename: node.name,
-      etag,
-    };
+    });
   }
 
   async getPresignedDownloadUrl(
@@ -257,6 +179,8 @@ export class StreamService {
       await this.verifyReadAccess(fileId, userId);
     }
     const { node, blob } = await this.resolveNodeAndBlob(fileId);
+    const s3Key =
+      typeof blob.s3Key === 'string' ? blob.s3Key : blob.s3Key.value();
 
     const cacheKey = `${node.id}:${node.name}`;
     const cachedUrl = await this.cache.getPresignedUrl(cacheKey);
@@ -264,13 +188,10 @@ export class StreamService {
       return cachedUrl;
     }
 
-    const signedUrl = await this.blobService.getPresignedDownloadUrl(
-      blob.s3Key.value(),
-      {
-        expiresInSeconds,
-        filename: node.name,
-      },
-    );
+    const signedUrl = await this.filesPort.getPresignedDownloadUrl(s3Key, {
+      expiresInSeconds,
+      filename: node.name,
+    });
 
     if (expiresInSeconds > 300) {
       const ttl = Math.min(expiresInSeconds - 300, 3300);
@@ -318,7 +239,7 @@ export class StreamService {
         }
       } else if (node.blobId) {
         try {
-          const { stream } = await this.blobService.openStream(node.blobId);
+          const { stream } = await this.filesPort.openBlobStream(node.blobId);
           const chunks: Buffer[] = [];
           for await (const chunk of stream) {
             const bufChunk = Buffer.isBuffer(chunk)

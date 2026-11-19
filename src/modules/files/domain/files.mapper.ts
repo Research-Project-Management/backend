@@ -47,14 +47,10 @@ export class BlobMapper {
 }
 
 export class QuotaMapper {
-  public static toDomain(
-    record: PrismaQuota,
-    scope?: { userId: string | null; projectId: string | null },
-  ): StorageQuota {
+  public static toDomain(record: PrismaQuota): StorageQuota {
     return new StorageQuota({
       id: record.id,
-      userId: scope ? scope.userId : record.spaceId,
-      projectId: scope ? scope.projectId : null,
+      spaceId: record.spaceId,
       usedBytes: record.usedBytes,
       maxBytes: record.maxBytes,
       updatedAt: record.updatedAt,
@@ -64,13 +60,12 @@ export class QuotaMapper {
 
 export class SessionMapper {
   public static toDomain(record: PrismaSession): UploadSession {
-    const projectId =
-      record.spaceId && record.spaceId !== record.createdById
-        ? record.spaceId
-        : null;
+    const isSharedSpace = Boolean(
+      record.spaceId && record.spaceId !== record.createdById,
+    );
     return new UploadSession({
       id: record.id,
-      projectId,
+      spaceId: record.spaceId,
       userId: record.createdById,
       s3UploadId: record.s3UploadId,
       s3Key: record.s3Key,
@@ -83,7 +78,7 @@ export class SessionMapper {
         ? Buffer.from(record.expectedHash)
         : null,
       parentId: record.parentId,
-      scope: projectId ? 'Project' : 'Personal',
+      scope: isSharedSpace ? 'Project' : 'Personal',
       status: record.status as UploadSessionStatus,
       expiresAt: record.expiresAt,
       createdAt: record.createdAt,
@@ -94,7 +89,7 @@ export class SessionMapper {
   public static toPrismaCreate(session: UploadSession) {
     return {
       id: session.id,
-      spaceId: session.projectId || session.userId,
+      spaceId: session.spaceId || session.userId,
       createdById: session.userId,
       s3UploadId: session.s3UploadId,
       s3Key: session.s3Key,

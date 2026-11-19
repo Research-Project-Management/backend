@@ -5,8 +5,6 @@ import {
   EXPERIMENTS_PROCESSING_QUEUE,
   EXPERIMENTS_JOB_PROCESS_FILE,
   EXPERIMENTS_JOB_MAINTENANCE_TRASH,
-  EXPERIMENTS_JOB_MAINTENANCE_MULTIPART,
-  EXPERIMENTS_JOB_MAINTENANCE_ORPHAN,
 } from './experiments.constant';
 import { FileScope, ExperimentNode } from './domain/node.domain';
 
@@ -15,8 +13,6 @@ export {
   EXPERIMENTS_PROCESSING_QUEUE,
   EXPERIMENTS_JOB_PROCESS_FILE,
   EXPERIMENTS_JOB_MAINTENANCE_TRASH,
-  EXPERIMENTS_JOB_MAINTENANCE_MULTIPART,
-  EXPERIMENTS_JOB_MAINTENANCE_ORPHAN,
 };
 
 export function getFileContentPath(fileId: string): string {
@@ -108,12 +104,6 @@ export interface IExperimentsPort {
   linkFile(input: LinkFileInput): Promise<void>;
   uploadFile(input: UploadFileInput): Promise<UploadFileOutput>;
   deleteFile(fileId: string): Promise<void>;
-  deleteObject(key: string): Promise<void>;
-  uploadBuffer(
-    key: string,
-    buffer: Buffer,
-    contentType?: string,
-  ): Promise<{ path: string; url: string }>;
   ensurePdfThumbnail(input: {
     fileId: string;
     userId?: string;
@@ -211,7 +201,6 @@ export interface UploadDirectInput {
   buffer: Buffer;
   mimeType: string;
   projectId?: string | null;
-  pageId?: string | null;
   linkedToId?: string | null;
   linkedToType?: string;
   parentId?: string | null;
@@ -237,7 +226,6 @@ export interface PresignUploadInput {
   sizeBytes: number;
   contentHash?: string;
   projectId?: string | null;
-  pageId?: string | null;
   parentId?: string | null;
   scope?: FileScope;
   metaData?: Record<string, unknown> | null;
@@ -263,7 +251,6 @@ export interface CompletePresignInput {
   sizeBytes?: number;
   mimeType?: string;
   projectId?: string | null;
-  pageId?: string | null;
   parentId?: string | null;
   scope?: FileScope;
   contentHash?: string;
@@ -301,7 +288,6 @@ export interface InitiateMultipartInput {
   mimeType: string;
   totalSize: number;
   projectId?: string | null;
-  pageId?: string | null;
   parentId?: string | null;
   scope?: FileScope;
   expectedHash?: string;

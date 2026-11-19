@@ -93,7 +93,11 @@ export class ExperimentsCacheService {
     meta: unknown,
     ttlSeconds = 60,
   ): Promise<void> {
-    await this.redis.set(`flux:experiments:node-meta:${nodeId}`, meta, ttlSeconds);
+    await this.redis.set(
+      `flux:experiments:node-meta:${nodeId}`,
+      meta,
+      ttlSeconds,
+    );
   }
 
   async invalidateStreamNodeMeta(nodeId: string): Promise<void> {

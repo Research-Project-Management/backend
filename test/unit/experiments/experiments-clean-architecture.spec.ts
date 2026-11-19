@@ -8,10 +8,7 @@ import {
   BlobStatus,
   StorageQuota,
 } from '@/modules/files';
-import {
-  ExperimentNode,
-  FileScope,
-} from '@/modules/experiments';
+import { ExperimentNode, FileScope } from '@/modules/experiments';
 describe('Storage Clean Architecture & DDD Domain Suite', () => {
   describe('ContentHash Value Object', () => {
     it('should compute consistent SHA-256 hash from buffer', () => {
@@ -136,14 +133,15 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
   });
 
   describe('StorageQuota Entity', () => {
-    it('should expose usedBytes and maxBytes for scope', () => {
+    it('should expose spaceId, usedBytes, and maxBytes for scope', () => {
       const quota = new StorageQuota({
         id: 'quota-1',
-        userId: 'user-1',
+        spaceId: 'user-1',
         usedBytes: 1000n,
         maxBytes: 2000n,
       });
 
+      expect(quota.spaceId).toBe('user-1');
       expect(quota.usedBytes).toBe(1000n);
       expect(quota.maxBytes).toBe(2000n);
     });
@@ -175,7 +173,9 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
       expect(allFiles.length).toBeGreaterThan(0);
 
       for (const filePath of allFiles) {
-        const lineCount = fs.readFileSync(filePath, 'utf8').split(/\r?\n/).length;
+        const lineCount = fs
+          .readFileSync(filePath, 'utf8')
+          .split(/\r?\n/).length;
         expect(lineCount).toBeLessThan(750);
       }
     });
@@ -192,9 +192,7 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
         if (!isController) {
           expect(content).not.toMatch(/@\/modules\//);
         } else {
-          expect(content).not.toMatch(
-            /@\/modules\/(?!identity\/auth)/,
-          );
+          expect(content).not.toMatch(/@\/modules\/(?!identity\/auth)/);
         }
       }
     });
@@ -223,6 +221,50 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
           '',
         );
         expect(withoutMigrationSql).not.toContain('/api/v1/storage/files');
+      }
+    });
+
+    it('modules/experiments has 0 foreign-domain leaks and 0 direct FilesModule internals', () => {
+      const foreignDomainRegex =
+        /\b(FileScope\.(?:Page|Library|Paper)|resolvePageSpaceId|streamR2File|pageId)\b|prisma\.page|pages\/:pageId|\/api\/v1\/experiments\/files\/r2|\bimport\s+sharp\b|from\s+['"]sharp['"]/;
+      const filesInternalsRegex =
+        /\b(BlobService|QuotaService|PresignService|FileStreamService|ThumbnailService|STORAGE_ADAPTER|STORAGE_BLOB_REPOSITORY|STORAGE_QUOTA_REPOSITORY|UPLOAD_SESSION_REPOSITORY|validateMagicBytes|isBlockedExtension|ByteRange|StorageKey|StorageBlob|ContentHash|UploadSession|UploadSessionStatus)\b/;
+
+      for (const filePath of collectTsFiles(experimentsDir)) {
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).not.toMatch(foreignDomainRegex);
+        expect(content).not.toMatch(filesInternalsRegex);
+      }
+    });
+
+    it('no module outside modules/files uses scattered FilesModule internals or raw storage_blobs/storage_quotas access', () => {
+      const scatteredInternalsRegex =
+        /\b(BlobService|QuotaService|PresignService|FileStreamService|ThumbnailService|FilesLifecycleService|STORAGE_ADAPTER|STORAGE_BLOB_REPOSITORY|STORAGE_QUOTA_REPOSITORY|UPLOAD_SESSION_REPOSITORY|validateMagicBytes|isBlockedExtension)\b/;
+      const rawStorageDbAccessRegex =
+        /storage_blobs|storage_quotas|\.storageBlob\b|\.storageQuota\b/;
+
+      for (const filePath of collectTsFiles(srcRoot)) {
+        if (filePath.startsWith(filesDir + path.sep)) continue;
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).not.toMatch(scatteredInternalsRegex);
+        expect(content).not.toMatch(rawStorageDbAccessRegex);
+      }
+
+      const filesModulePath = path.join(filesDir, 'files.module.ts');
+      const filesModuleContent = fs.readFileSync(filesModulePath, 'utf8');
+      expect(filesModuleContent).toContain(
+        'exports: [FilesFacade, FILES_PORT]',
+      );
+    });
+
+    it('modules/files enforces pure spaceId-only internal and HTTP edge contract (0 legacy quota shims or projectId)', () => {
+      const legacyQuotaShimRegex =
+        /\b(resolveQuotaArgs|resolveCanonicalScope|findByScope|scopeId)\b/;
+
+      for (const filePath of collectTsFiles(filesDir)) {
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).not.toMatch(legacyQuotaShimRegex);
+        expect(content).not.toMatch(/\bprojectId\b/);
       }
     });
   });

@@ -124,7 +124,9 @@ export class ExperimentsEventListener {
       }
     }
 
-    this.logger.debug(`Dispatched experiment event [${type}]: ${eventRecord.id}`);
+    this.logger.debug(
+      `Dispatched experiment event [${type}]: ${eventRecord.id}`,
+    );
     return eventRecord;
   }
 
@@ -132,4 +134,3 @@ export class ExperimentsEventListener {
     return this.recentEvents.slice(0, limit);
   }
 }
-

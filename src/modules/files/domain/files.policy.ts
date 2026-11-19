@@ -321,3 +321,13 @@ export function inferMimeType(options: {
 
   return 'application/octet-stream';
 }
+
+export function resolveTargetSpaceId(
+  spaceId?: string | null,
+  fallbackUserId?: string | null,
+): string | null {
+  const explicit = spaceId?.trim();
+  if (explicit) return explicit;
+  const fallback = fallbackUserId?.trim();
+  return fallback || null;
+}

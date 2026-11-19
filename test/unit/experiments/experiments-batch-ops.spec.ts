@@ -1,5 +1,9 @@
 import {
   BlobService,
+  FilesFacade,
+  FileStreamService,
+  PresignService,
+  QuotaService,
 } from '@/modules/files';
 import {
   ZipPackager,
@@ -151,6 +155,13 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
       };
 
       const blobService = new BlobService(mockDriver, mockBlobRepo);
+      const quotaService = new QuotaService({} as any);
+      const filesPort = new FilesFacade(
+        blobService,
+        quotaService,
+        new PresignService(blobService, quotaService, {} as any),
+        new FileStreamService(blobService),
+      );
       const mockCache = {
         getPresignedUrl: jest.fn().mockResolvedValue(null),
         setPresignedUrl: jest.fn().mockResolvedValue(undefined),
@@ -160,7 +171,7 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
       } as any;
 
       streamService = new StreamService(
-        blobService,
+        filesPort,
         mockNodeRepo,
         mockCache,
         mockAccessPolicy,

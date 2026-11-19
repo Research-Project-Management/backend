@@ -5,6 +5,10 @@ import {
   ISessionRepository,
   IQuotaRepository,
   UploadSession,
+  FilesFacade,
+  FileStreamService,
+  PresignService,
+  QuotaService,
 } from '@/modules/files';
 import {
   UploadService,
@@ -15,6 +19,7 @@ import {
 } from '@/modules/experiments';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Readable } from 'node:stream';
 
 describe('Presigned & Resumable Multipart Upload Suite', () => {
   let mockDriver: jest.Mocked<IStorageAdapter>;
@@ -29,7 +34,10 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
   beforeEach(() => {
     mockDriver = {
       put: jest.fn(),
-      getStream: jest.fn(),
+      getStream: jest.fn().mockImplementation(async () => ({
+        stream: Readable.from(['%PDF-1.7 mock-multipart-bytes']),
+        contentLength: 29,
+      })),
       stat: jest.fn().mockResolvedValue({
         key: 'uploads/user-1/file.pdf',
         size: 5 * 1024 * 1024,
@@ -94,7 +102,7 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     };
 
     mockQuotaRepo = {
-      findByScope: jest.fn(),
+      findBySpaceId: jest.fn(),
       incrementUsage: jest.fn().mockResolvedValue(0n),
       decrementUsage: jest.fn().mockResolvedValue(0n),
     };
@@ -119,10 +127,22 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     let service: UploadService;
 
     beforeEach(() => {
+      const blobService = new BlobService(mockDriver, mockBlobRepo);
+      const quotaService = new QuotaService(mockQuotaRepo);
+      const presignService = new PresignService(
+        blobService,
+        quotaService,
+        mockSessionRepo,
+      );
+      const filesPort = new FilesFacade(
+        blobService,
+        quotaService,
+        presignService,
+        new FileStreamService(blobService),
+      );
       service = new UploadService(
-        new BlobService(mockDriver, mockBlobRepo),
+        filesPort,
         mockNodeRepo,
-        mockQuotaRepo,
         mockCache,
         mockEvents,
       );
@@ -141,7 +161,6 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
         'uploads/user-100/paper.pdf',
       );
       expect(mockQuotaRepo.incrementUsage).toHaveBeenCalledWith(
-        'user-100',
         'proj-1',
         BigInt(5 * 1024 * 1024),
       );
@@ -186,11 +205,22 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     let service: MultipartService;
 
     beforeEach(() => {
-      service = new MultipartService(
-        new BlobService(mockDriver, mockBlobRepo),
-        mockNodeRepo,
+      const blobService = new BlobService(mockDriver, mockBlobRepo);
+      const quotaService = new QuotaService(mockQuotaRepo);
+      const presignService = new PresignService(
+        blobService,
+        quotaService,
         mockSessionRepo,
-        mockQuotaRepo,
+      );
+      const filesPort = new FilesFacade(
+        blobService,
+        quotaService,
+        presignService,
+        new FileStreamService(blobService),
+      );
+      service = new MultipartService(
+        filesPort,
+        mockNodeRepo,
         mockCache,
         mockEvents,
       );
@@ -208,15 +238,15 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       expect(mockDriver.initiateMultipartUpload).toHaveBeenCalledTimes(1);
       expect(mockSessionRepo.create).toHaveBeenCalledTimes(1);
       expect(result.sessionId).toBeDefined();
-      expect(result.partSize).toBe(10 * 1024 * 1024); // 10MB base chunk size
-      expect(result.totalParts).toBe(5);
+      expect(result.partSize).toBe(5 * 1024 * 1024); // 5MB R2 minimum base chunk size
+      expect(result.totalParts).toBe(10);
     });
 
     it('should complete multipart upload, normalize parts, consume quota, and trigger BullMQ processing', async () => {
       const session = new UploadSession({
         id: 'session-123',
         userId: 'user-200',
-        projectId: 'proj-2',
+        spaceId: 'proj-2',
         s3UploadId: 's3-upload-123',
         s3Key: 'uploads/multipart/session-123/payload.csv',
         filename: 'dataset.csv',
@@ -245,7 +275,6 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
         ],
       );
       expect(mockQuotaRepo.incrementUsage).toHaveBeenCalledWith(
-        'user-200',
         'proj-2',
         BigInt(20 * 1024 * 1024),
       );

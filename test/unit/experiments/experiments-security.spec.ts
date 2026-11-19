@@ -485,52 +485,6 @@ describe('Storage & File Security Suite', () => {
       expect(mockRes.send).toHaveBeenCalledWith();
     });
 
-    it('should block path traversal attempts in streamR2File (SEC-002)', async () => {
-      const mockReq: any = {
-        url: '/api/v1/experiments/files/r2/..%2F..%2Fetc%2Fpasswd',
-        headers: {},
-        params: { '*': '../../etc/passwd' },
-      };
-      const mockRes: any = {
-        status: jest.fn().mockReturnThis(),
-        header: jest.fn().mockReturnThis(),
-        send: jest.fn(),
-      };
-
-      await controller.streamR2File(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(403);
-      expect(mockRes.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 403,
-          message: 'Access to restricted storage path is forbidden',
-        }),
-      );
-    });
-
-    it('should block access to sensitive prefixes like backups/ or private/ in streamR2File (SEC-002)', async () => {
-      const mockReq: any = {
-        url: '/api/v1/experiments/files/r2/backups%2Fproject-backup.zip',
-        headers: {},
-        params: { '*': 'backups/project-backup.zip' },
-      };
-      const mockRes: any = {
-        status: jest.fn().mockReturnThis(),
-        header: jest.fn().mockReturnThis(),
-        send: jest.fn(),
-      };
-
-      await controller.streamR2File(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(403);
-      expect(mockRes.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 403,
-          message: 'Access to restricted storage path is forbidden',
-        }),
-      );
-    });
-
     it('should block unauthenticated requests to private research files in streamFile (SEC-004)', async () => {
       mockStreamService.verifyReadAccess.mockRejectedValue(
         new ForbiddenException(

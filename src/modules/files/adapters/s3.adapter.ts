@@ -317,10 +317,7 @@ export class S3StorageAdapter implements IStorageAdapter {
         id: 'archive-cold-storage',
         prefix: 'archives/',
         status: 'Enabled',
-        transitions: [
-          { days: 90, storageClass: 'STANDARD_IA' },
-          { days: 180, storageClass: 'GLACIER' },
-        ],
+        transitions: [{ days: 90, storageClass: 'STANDARD_IA' }],
       },
       {
         id: 'expire-old-backups',

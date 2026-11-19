@@ -21,6 +21,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { BypassEnvelope } from '@/core';
 import { CurrentUser, JwtAuthGuard, Public } from '@/modules/identity/auth';
+import { DEFAULT_STORAGE_QUOTA_BYTES } from '../files.constant';
 import {
   cleanUuid,
   inferMimeType,
@@ -201,15 +202,14 @@ export class FilesController {
       filename && filename !== 'blob'
         ? filename
         : fields.fileName || fields.filename || fields.name || 'uploaded-file';
-    const projectId =
-      cleanUuid(fields.spaceId) ?? cleanUuid(fields.projectId) ?? undefined;
+    const resolvedSpaceId = cleanUuid(fields.spaceId) ?? undefined;
 
     const res = await this.filesFacade.uploadFile({
       userId,
       filename: chosenName,
       buffer,
       mimeType,
-      projectId,
+      spaceId: resolvedSpaceId,
     });
 
     return {
@@ -241,12 +241,11 @@ export class FilesController {
     }
 
     const sizeBytes = dto.sizeBytes ?? dto.size ?? 10 * 1024 * 1024;
-    const projectId =
-      cleanUuid(dto.spaceId) ?? cleanUuid(dto.projectId) ?? undefined;
+    const resolvedSpaceId = cleanUuid(dto.spaceId) ?? undefined;
 
     return this.filesFacade.getPresignedUploadUrl({
       userId,
-      projectId,
+      spaceId: resolvedSpaceId,
       filename: dto.filename,
       mimeType: dto.mimeType || dto.contentType || 'application/octet-stream',
       sizeBytes,
@@ -265,11 +264,10 @@ export class FilesController {
       throw new UnauthorizedException('User is not authenticated');
     }
 
-    const projectId =
-      cleanUuid(dto.spaceId) ?? cleanUuid(dto.projectId) ?? undefined;
+    const resolvedSpaceId = cleanUuid(dto.spaceId) ?? undefined;
     const result = await this.filesFacade.completePresignedUpload({
       userId,
-      projectId,
+      spaceId: resolvedSpaceId,
       storageKey: dto.storageKey,
       filename: dto.filename,
       sizeBytes: dto.sizeBytes ?? dto.size,
@@ -329,12 +327,11 @@ export class FilesController {
         'Total file size is required and must be greater than 0',
       );
     }
-    const projectId =
-      cleanUuid(dto.spaceId) ?? cleanUuid(dto.projectId) ?? undefined;
+    const resolvedSpaceId = cleanUuid(dto.spaceId) ?? undefined;
 
     return this.filesFacade.initiateMultipartUpload({
       userId,
-      projectId,
+      spaceId: resolvedSpaceId,
       filename: dto.filename,
       mimeType: dto.mimeType || 'application/octet-stream',
       totalSize,
@@ -402,6 +399,37 @@ export class FilesController {
     }
     await this.filesFacade.abortMultipartUpload(sessionId, { userId });
     return { aborted: true, success: true };
+  }
+
+  @Get('quota')
+  @ApiOperation({
+    summary: 'Get storage quota usage metrics for personal or project space',
+  })
+  async getQuota(
+    @CurrentUser('id') userId: string,
+    @Query('spaceId') spaceId?: string,
+  ) {
+    if (!userId) {
+      throw new UnauthorizedException('User is not authenticated');
+    }
+    const explicitSpaceId = cleanUuid(spaceId) ?? null;
+    const targetSpaceId = explicitSpaceId ?? userId;
+    const isProject = Boolean(explicitSpaceId && explicitSpaceId !== userId);
+    const quota = await this.filesFacade.getQuota(targetSpaceId);
+    const usedBytes = Number(quota?.usedBytes ?? 0n);
+    const maxBytes = Number(quota?.maxBytes ?? DEFAULT_STORAGE_QUOTA_BYTES);
+    const remainingBytes = Math.max(0, maxBytes - usedBytes);
+    const usagePercent =
+      maxBytes > 0 ? Number(((usedBytes / maxBytes) * 100).toFixed(2)) : 0;
+
+    return {
+      usedBytes,
+      maxBytes,
+      remainingBytes,
+      usagePercent,
+      scope: isProject ? 'project' : 'personal',
+      spaceId: targetSpaceId,
+    };
   }
 
   @Get('objects/*')

@@ -6,6 +6,10 @@ import {
   IQuotaRepository,
   UploadSession,
   UploadSessionStatus,
+  FilesFacade,
+  FileStreamService,
+  PresignService,
+  QuotaService,
 } from '@/modules/files';
 import {
   MultipartService,
@@ -14,6 +18,7 @@ import {
 } from '@/modules/experiments';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Readable } from 'node:stream';
 
 describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
   let service: MultipartService;
@@ -35,7 +40,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
     return new UploadSession({
       id: 'session-valid-1',
       userId: ownerId,
-      projectId: projectId,
+      spaceId: projectId,
       s3UploadId: 's3-upload-test-id',
       s3Key: 'uploads/multipart/session-valid-1/payload.bin',
       filename: 'large_dataset.bin',
@@ -52,7 +57,10 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
   beforeEach(() => {
     mockDriver = {
       put: jest.fn(),
-      getStream: jest.fn(),
+      getStream: jest.fn().mockImplementation(async () => ({
+        stream: Readable.from(['mock-binary-payload']),
+        contentLength: 19,
+      })),
       stat: jest.fn(),
       delete: jest.fn(),
       deleteMany: jest.fn(),
@@ -108,7 +116,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
     };
 
     mockQuotaRepo = {
-      findByScope: jest.fn().mockResolvedValue(null),
+      findBySpaceId: jest.fn().mockResolvedValue(null),
       incrementUsage: jest.fn().mockResolvedValue(0n),
       decrementUsage: jest.fn().mockResolvedValue(0n),
     };
@@ -121,11 +129,22 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       emit: jest.fn(),
     } as any;
 
-    service = new MultipartService(
-      new BlobService(mockDriver, mockBlobRepo),
-      mockNodeRepo,
+    const blobService = new BlobService(mockDriver, mockBlobRepo);
+    const quotaService = new QuotaService(mockQuotaRepo);
+    const presignService = new PresignService(
+      blobService,
+      quotaService,
       mockSessionRepo,
-      mockQuotaRepo,
+    );
+    const filesPort = new FilesFacade(
+      blobService,
+      quotaService,
+      presignService,
+      new FileStreamService(blobService),
+    );
+    service = new MultipartService(
+      filesPort,
+      mockNodeRepo,
       mockCache,
       mockEvents,
     );
@@ -151,7 +170,10 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
     });
 
     it('should allow project member with matching projectId to get part URL', async () => {
-      const session = createTestSession({ userId: ownerId, projectId });
+      const session = createTestSession({
+        userId: ownerId,
+        spaceId: projectId,
+      });
       mockSessionRepo.findById.mockResolvedValue(session);
 
       const url = await service.getPartUrl('session-valid-1', 2, {
@@ -243,7 +265,6 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       expect(result.blobId).toBeDefined();
       expect(mockDriver.completeMultipartUpload).toHaveBeenCalledTimes(1);
       expect(mockQuotaRepo.incrementUsage).toHaveBeenCalledWith(
-        ownerId,
         projectId,
         session.totalSize,
       );

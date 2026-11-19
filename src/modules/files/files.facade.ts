@@ -1,13 +1,18 @@
 import {
+  BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { StorageBlob } from './domain/blob.domain';
+import { Readable } from 'node:stream';
+import { MAX_PDF_THUMBNAIL_BYTES } from './files.constant';
+import { ContentHash, StorageBlob } from './domain/blob.domain';
 import {
   inferMimeType,
   isBlockedExtension,
   isValidUuid,
+  resolveTargetSpaceId,
   sanitizeFilename,
   streamToBuffer,
   validateMagicBytes,
@@ -19,10 +24,13 @@ import {
   CompleteFileMultipartOutput,
   CompletePresignedFileInput,
   CompletePresignedFileOutput,
+  DeleteFileTarget,
+  EnsureImageThumbnailOutput,
   FileActorContext,
   FilesStreamOptions,
   FilesStreamOutput,
   getFileContentPath,
+  getFileObjectPath,
   IFilesPort,
   InitiateFileMultipartInput,
   InitiateFileMultipartOutput,
@@ -32,6 +40,7 @@ import {
   ReadFilesOutput,
   RegisterUploadedObjectInput,
   StoreBufferCasResult,
+  StreamBlobTarget,
   StreamKeyOutput,
   UploadFilesInput,
   UploadFilesOutput,
@@ -44,6 +53,8 @@ import { ThumbnailService } from './services/thumbnail.service';
 
 @Injectable()
 export class FilesFacade implements IFilesPort {
+  private readonly logger = new Logger(FilesFacade.name);
+
   constructor(
     private readonly blobService: BlobService,
     private readonly quotaService: QuotaService,
@@ -53,9 +64,14 @@ export class FilesFacade implements IFilesPort {
   ) {}
 
   async uploadFile(input: UploadFilesInput): Promise<UploadFilesOutput> {
+    if (!input.buffer || input.buffer.length === 0) {
+      throw new BadRequestException('File buffer cannot be empty');
+    }
     const cleanFilename = sanitizeFilename(input.filename);
     if (isBlockedExtension(cleanFilename)) {
-      throw new Error('File extension is prohibited for security reasons');
+      throw new BadRequestException(
+        'File extension is prohibited for security reasons',
+      );
     }
 
     const mimeType =
@@ -65,11 +81,8 @@ export class FilesFacade implements IFilesPort {
 
     validateMagicBytes(input.buffer, mimeType, cleanFilename);
 
-    await this.assertQuotaAvailable(
-      input.userId,
-      input.projectId ?? null,
-      BigInt(input.buffer.length),
-    );
+    const targetSpaceId = resolveTargetSpaceId(input.spaceId, input.userId);
+    await this.assertQuotaAvailable(targetSpaceId, BigInt(input.buffer.length));
 
     const { blob, isDeduplicated } = await this.storeBuffer(
       input.buffer,
@@ -77,11 +90,7 @@ export class FilesFacade implements IFilesPort {
     );
 
     try {
-      await this.reserveQuota(
-        input.userId,
-        input.projectId ?? null,
-        blob.sizeBytes,
-      );
+      await this.reserveQuota(targetSpaceId, blob.sizeBytes);
     } catch (err) {
       await this.releaseBlob(blob.id).catch(() => {});
       throw err;
@@ -110,7 +119,7 @@ export class FilesFacade implements IFilesPort {
     });
     return {
       path: key,
-      url: `/api/v1/files/objects/${encodeURIComponent(key)}`,
+      url: getFileObjectPath(key),
     };
   }
 
@@ -167,18 +176,12 @@ export class FilesFacade implements IFilesPort {
     };
   }
 
-  async deleteFile(
-    fileId: string,
-    scope?: { userId?: string | null; projectId?: string | null },
-  ): Promise<void> {
-    if (scope?.userId || scope?.projectId) {
+  async deleteFile(fileId: string, target?: DeleteFileTarget): Promise<void> {
+    const targetSpaceId = target?.spaceId?.trim() || null;
+    if (targetSpaceId) {
       const blob = await this.blobService.findBlobById(fileId);
       if (blob) {
-        await this.releaseQuota(
-          scope.userId,
-          scope.projectId,
-          blob.sizeBytes,
-        ).catch(() => {});
+        await this.releaseQuota(targetSpaceId, blob.sizeBytes).catch(() => {});
       }
     }
     await this.blobService.releaseBlob(fileId);
@@ -191,7 +194,7 @@ export class FilesFacade implements IFilesPort {
   async ensurePdfThumbnail(input: {
     fileId: string;
     userId?: string;
-    projectId?: string | null;
+    spaceId?: string | null;
   }): Promise<Buffer | null> {
     const thumbKey = `thumbnails/${input.fileId}.webp`;
     try {
@@ -205,6 +208,17 @@ export class FilesFacade implements IFilesPort {
     }
 
     if (!this.thumbnailService) {
+      return null;
+    }
+
+    const blob =
+      typeof this.blobService.findBlobById === 'function'
+        ? await this.blobService.findBlobById(input.fileId)
+        : null;
+    if (blob && blob.sizeBytes > MAX_PDF_THUMBNAIL_BYTES) {
+      this.logger.warn(
+        `Skipping PDF thumbnail generation for ${input.fileId} (${blob.sizeBytes} bytes > ${MAX_PDF_THUMBNAIL_BYTES} bytes limit)`,
+      );
       return null;
     }
 
@@ -352,9 +366,7 @@ export class FilesFacade implements IFilesPort {
   }
 
   streamBlob(
-    blob: Pick<StorageBlob, 's3Key' | 'sizeBytes'> & {
-      contentHash?: StorageBlob['contentHash'];
-    },
+    blob: StreamBlobTarget,
     options?: FilesStreamOptions,
   ): Promise<FilesStreamOutput> {
     return this.streamService.streamBlob(blob, options);
@@ -367,8 +379,7 @@ export class FilesFacade implements IFilesPort {
   async getPresignedDownloadUrl(
     fileIdOrKey: string,
     optionsOrExpires?:
-      | number
-      | { expiresInSeconds?: number; filename?: string },
+      number | { expiresInSeconds?: number; filename?: string },
     _userId?: string,
   ): Promise<string> {
     const options =
@@ -398,8 +409,94 @@ export class FilesFacade implements IFilesPort {
     return this.blobService.stat(key);
   }
 
+  findBlobById(blobId: string): Promise<StorageBlob | null> {
+    return this.blobService.findBlobById(blobId);
+  }
+
+  findBlobByHash(contentHashHex: string): Promise<StorageBlob | null> {
+    return this.blobService.findBlobByHash(ContentHash.fromHex(contentHashHex));
+  }
+
+  acquireBlob(blobId: string): Promise<StorageBlob | null> {
+    return this.blobService.acquireBlob(blobId);
+  }
+
   releaseBlob(blobId: string): Promise<void> {
     return this.blobService.releaseBlob(blobId);
+  }
+
+  getThumbnailUrl(blobId: string): string {
+    return getFileObjectPath(`thumbnails/${blobId}.webp`);
+  }
+
+  async ensureImageThumbnail(input: {
+    fileId: string;
+    width?: number;
+    height?: number;
+    quality?: number;
+  }): Promise<EnsureImageThumbnailOutput | null> {
+    if (!this.thumbnailService) {
+      return null;
+    }
+
+    const { stream } = await this.blobService.openStream(input.fileId);
+    const buffer = await streamToBuffer(stream as AsyncIterable<Buffer>);
+    const result = await this.thumbnailService.generateImageThumbnail(buffer, {
+      width: input.width,
+      height: input.height,
+      quality: input.quality,
+    });
+    if (!result) {
+      return null;
+    }
+
+    const thumbKey = `thumbnails/${input.fileId}.webp`;
+    try {
+      await this.blobService.put(thumbKey, result.buffer, {
+        mimeType: result.mimeType,
+        size: result.buffer.length,
+      });
+    } catch {
+      // Non-fatal if caching generated thumbnail fails
+    }
+
+    return {
+      thumbnailUrl: this.getThumbnailUrl(input.fileId),
+      width: result.width,
+      height: result.height,
+      format: result.format,
+    };
+  }
+
+  putObject(
+    key: string,
+    data: Buffer | Readable,
+    options?: { mimeType?: string; size?: number },
+  ): Promise<void> {
+    return this.blobService.put(key, data, options);
+  }
+
+  getObjectStream(
+    key: string,
+    range?: { start: number; end: number },
+  ): Promise<{
+    stream: Readable;
+    contentLength: number;
+    contentRange?: string;
+  }> {
+    return this.blobService.getStream(key, range);
+  }
+
+  objectExists(key: string): Promise<boolean> {
+    return this.blobService.exists(key);
+  }
+
+  copyObject(sourceKey: string, destinationKey: string): Promise<void> {
+    return this.blobService.copy(sourceKey, destinationKey);
+  }
+
+  deleteObjects(keys: string[]): Promise<void> {
+    return this.blobService.deleteMany(keys);
   }
 
   reclaimOrphanBlobs(limit = 100): Promise<number> {
@@ -414,34 +511,28 @@ export class FilesFacade implements IFilesPort {
     return this.blobService.applyLifecycleRules(config);
   }
 
-  getQuota(
-    userId?: string | null,
-    projectId?: string | null,
-  ): Promise<StorageQuota | null> {
-    return this.quotaService.getQuota(userId, projectId);
+  getQuota(spaceId?: string | null): Promise<StorageQuota | null> {
+    return this.quotaService.getQuota(spaceId);
   }
 
   assertQuotaAvailable(
-    userId: string,
-    projectId: string | null | undefined,
+    spaceId: string | null | undefined,
     requiredBytes: bigint,
   ): Promise<void> {
-    return this.quotaService.assertAvailable(userId, projectId, requiredBytes);
+    return this.quotaService.assertAvailable(spaceId, requiredBytes);
   }
 
   reserveQuota(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
+    spaceId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint> {
-    return this.quotaService.reserve(userId, projectId, bytes);
+    return this.quotaService.reserve(spaceId, bytes);
   }
 
   releaseQuota(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
+    spaceId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint> {
-    return this.quotaService.release(userId, projectId, bytes);
+    return this.quotaService.release(spaceId, bytes);
   }
 }

@@ -13,19 +13,18 @@ export class QuotaService {
     private readonly quotaRepo: IQuotaRepository,
   ) {}
 
-  async getQuota(
-    userId?: string | null,
-    projectId?: string | null,
-  ): Promise<StorageQuota | null> {
-    return this.quotaRepo.findByScope(userId, projectId);
+  async getQuota(spaceId?: string | null): Promise<StorageQuota | null> {
+    if (!spaceId) {
+      return null;
+    }
+    return this.quotaRepo.findBySpaceId(spaceId);
   }
 
   async assertAvailable(
-    userId: string,
-    projectId: string | null | undefined,
+    spaceId: string | null | undefined,
     requiredBytes: bigint,
   ): Promise<void> {
-    const quota = await this.quotaRepo.findByScope(userId, projectId ?? null);
+    const quota = spaceId ? await this.quotaRepo.findBySpaceId(spaceId) : null;
     const maxBytes = quota ? quota.maxBytes : DEFAULT_STORAGE_QUOTA_BYTES;
     const usedBytes = quota ? quota.usedBytes : 0n;
     if (usedBytes + requiredBytes > maxBytes) {
@@ -34,18 +33,22 @@ export class QuotaService {
   }
 
   async reserve(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
+    spaceId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint> {
-    return this.quotaRepo.incrementUsage(userId, projectId ?? null, bytes);
+    if (!spaceId) {
+      return 0n;
+    }
+    return this.quotaRepo.incrementUsage(spaceId, bytes);
   }
 
   async release(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
+    spaceId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint> {
-    return this.quotaRepo.decrementUsage(userId, projectId ?? null, bytes);
+    if (!spaceId) {
+      return 0n;
+    }
+    return this.quotaRepo.decrementUsage(spaceId, bytes);
   }
 }

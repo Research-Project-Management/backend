@@ -1,93 +1,104 @@
-import { AiService } from '@/modules/ai/ai.service';
-import { EngineService } from '@/modules/ai/engine/engine.service';
-import { ChatService } from '@/modules/ai/chat/chat.service';
-import { PrismaService } from '@/core';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { FastifyReply } from 'fastify';
+import { fromPartial } from '@total-typescript/shoehorn';
+import type { FastifyReply } from 'fastify';
+import type { PrismaService } from '@/core';
+import { AccessRepository } from '@/modules/ai/access/access.repository';
+import { AccessService } from '@/modules/ai/access/services/access.service';
+import { DocumentAccessService } from '@/modules/ai/access/services/document.service';
+import { SpaceAccessService } from '@/modules/ai/access/services/space.service';
+import { PaperChatService } from '@/modules/ai/chat/services/paper.service';
+import type { IAiEnginePort } from '@/modules/ai/engine/engine.port';
 
-describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
-  let aiService: AiService;
-  let mockEngineService: jest.Mocked<EngineService>;
-  let mockThreadService: jest.Mocked<ChatService>;
-  let mockPrisma: any;
-  let mockReply: Partial<FastifyReply>;
+describe('PaperChatService & AccessService RAG Q&A Suite', () => {
+  let paperService: PaperChatService;
+  let mockEngine: jest.Mocked<IAiEnginePort>;
+  let mockPrisma: {
+    space: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
+    project: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
+    projectMember: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
+    aiChat: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
+    libraryItem: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
+    storageFile: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
+    attachment: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
+  };
+  let mockReply: FastifyReply;
 
   beforeEach(() => {
-    mockEngineService = {
+    mockEngine = {
       health: jest.fn(),
-      streamChat: jest.fn().mockResolvedValue(undefined),
-      syncChat: jest.fn().mockResolvedValue({
-        role: 'assistant',
+      listAgents: jest.fn(),
+      chatSync: jest.fn().mockResolvedValue({
         content: 'Grounding answer based on the uploaded paper.',
-        sources: [{ title: 'Quantum ML', page: 1 }],
-        widgets: [],
+        route: 'rag_agent',
+        status: 'completed',
+        citations: [
+          { source_id: 'vec-doc-sync-789', title: 'Quantum ML', page: 1 },
+        ],
+        sources: [
+          { source: 'vec-doc-sync-789 (p.1)', title: 'Quantum ML', page: 1 },
+        ],
+        interrupts: [],
+        usage: {},
+        trace_id: 'trace-paper',
       }),
-      uploadDocument: jest.fn(),
-      getDocumentsBulk: jest.fn(),
-      getDocument: jest.fn(),
-    } as any;
-
-    mockThreadService = {
-      createChat: jest.fn(),
-      getOrCreatePageChat: jest.fn(),
-      appendMessages: jest.fn(),
-      getChatMessages: jest.fn(),
-      getChatDetail: jest.fn(),
-      listUserChats: jest.fn(),
-      deleteChat: jest.fn(),
-      updateChatTitle: jest.fn(),
-      cleanupExpiredMemory: jest.fn(),
-    } as any;
-
-    const itemMock = {
-      findFirst: jest.fn(),
-    };
-
-    const fileMock = {
-      findFirst: jest.fn(),
-      findMany: jest.fn(),
+      chatStream: jest.fn().mockResolvedValue(undefined),
+      resumeSync: jest.fn(),
+      resumeStream: jest.fn(),
+      cancelThread: jest.fn(),
+      deleteThread: jest.fn(),
+      deleteSpaceThreads: jest.fn(),
+      ingestDocument: jest.fn(),
+      searchKnowledge: jest.fn(),
+      deleteKnowledgeSource: jest.fn(),
+      deleteSpaceKnowledge: jest.fn(),
     };
 
     mockPrisma = {
-      item: itemMock,
-      libraryItem: itemMock,
-      file: fileMock,
-      storageFile: fileMock,
+      space: {
+        findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
+      },
+      project: {
+        findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
+      },
       projectMember: {
-        findFirst: jest.fn(),
+        findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
       },
       aiChat: {
-        findFirst: jest.fn(),
+        findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
+      },
+      libraryItem: {
+        findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
+      },
+      storageFile: {
+        findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
       },
       attachment: {
-        findFirst: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
       },
     };
 
-    mockReply = {
-      raw: {} as any,
-      hijack: jest.fn(),
-    };
+    const prismaService = fromPartial<PrismaService>(mockPrisma);
+    const accessRepo = new AccessRepository(prismaService);
+    const spaceAccess = new SpaceAccessService(accessRepo);
+    const docAccess = new DocumentAccessService(accessRepo, spaceAccess);
+    const accessService = new AccessService(spaceAccess, docAccess);
 
-    aiService = new AiService(
-      mockEngineService,
-      mockThreadService,
-      mockPrisma as PrismaService,
-    );
+    paperService = new PaperChatService(mockEngine, accessService);
+
+    mockReply = fromPartial<FastifyReply>({
+      raw: {},
+      hijack: jest.fn(),
+    });
   });
 
-  it('should stream Q&A for an uploaded Storage File using its extracted metadata and ragDocId', async () => {
-    // 1. Library item returns null
-    mockPrisma.item.findFirst.mockResolvedValue(null);
-
-    // 2. Storage file found
+  it('streams Q&A for an uploaded StorageFile with rag_agent intent and paper context', async () => {
     const fileId = 'file-storage-pdf-001';
     const userId = 'user-researcher-1';
-    mockPrisma.file.findFirst.mockResolvedValue({
+    mockPrisma.storageFile.findFirst.mockResolvedValue({
       id: fileId,
       filename: 'quantum_computing.pdf',
-      authorId: userId,
       createdById: userId,
+      spaceId: 'space-qml',
       linkedToType: 'project',
       linkedToId: 'project-qml',
       sharedWith: [],
@@ -99,41 +110,26 @@ describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
         abstract:
           'This paper introduces hybrid quantum-classical algorithms for deep neural networks.',
         ragDocId: 'vec-doc-quantum-456',
-        ragStatus: 'indexed',
-        chunkCount: 16,
-      },
-      metaData: {
-        title: 'Quantum Computing and Machine Learning Synergy',
-        authors: ['Dr. Alice Walker', 'Prof. Bob Smith'],
-        year: 2026,
-        doi: '10.1016/j.qcml.2026.001',
-        abstract:
-          'This paper introduces hybrid quantum-classical algorithms for deep neural networks.',
-        ragDocId: 'vec-doc-quantum-456',
-        ragStatus: 'indexed',
-        chunkCount: 16,
       },
     });
 
-    await aiService.streamPaper(
+    await paperService.stream(
       userId,
       fileId,
       {
         query: 'What is the main advantage of the proposed quantum algorithm?',
       },
-      mockReply as FastifyReply,
+      mockReply,
     );
 
-    expect(mockEngineService.streamChat).toHaveBeenCalledTimes(1);
-    const [payload] = mockEngineService.streamChat.mock.calls[0];
+    expect(mockEngine.chatStream).toHaveBeenCalledTimes(1);
+    const [request] = mockEngine.chatStream.mock.calls[0];
 
-    // Verify document scope is restricted strictly to the paper's vector document ID
-    expect(payload.document_ids).toEqual(['vec-doc-quantum-456']);
-    expect(payload.intent_hint).toBe('paper_rag_qa');
+    expect(request.space_id).toBe('space-qml');
+    expect(request.document_ids).toEqual(['vec-doc-quantum-456']);
+    expect(request.intent_hint).toBe('rag_agent');
 
-    // Verify paper grounding system prompt is injected
-    const systemMsg = payload.messages.find((m: any) => m.role === 'system');
-    expect(systemMsg).toBeDefined();
+    const systemMsg = request.messages.find((m) => m.role === 'system');
     expect(systemMsg?.content).toContain(
       'Quantum Computing and Machine Learning Synergy',
     );
@@ -141,36 +137,34 @@ describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
     expect(systemMsg?.content).toContain('hybrid quantum-classical algorithms');
   });
 
-  it('should reject Q&A access if user has no permission on the Storage File', async () => {
-    mockPrisma.item.findFirst.mockResolvedValue(null);
-    mockPrisma.file.findFirst.mockResolvedValue({
+  it('rejects Q&A access when user has no permission on StorageFile', async () => {
+    mockPrisma.storageFile.findFirst.mockResolvedValue({
       id: 'file-private-123',
       filename: 'confidential_research.pdf',
-      authorId: 'other-user',
       createdById: 'other-user',
-      linkedToType: 'personal',
+      spaceId: 'other-space',
+      linkedToType: null,
       linkedToId: null,
       sharedWith: [],
-      metaData: {},
+      metadata: {},
     });
 
     await expect(
-      aiService.streamPaper(
+      paperService.stream(
         'unauthorized-user',
         'file-private-123',
         { query: 'Tell me the secret' },
-        mockReply as FastifyReply,
+        mockReply,
       ),
     ).rejects.toThrow(ForbiddenException);
   });
 
-  it('should execute synchronous Q&A for an uploaded Storage File', async () => {
-    mockPrisma.item.findFirst.mockResolvedValue(null);
-    mockPrisma.file.findFirst.mockResolvedValue({
+  it('executes synchronous Q&A for an uploaded StorageFile', async () => {
+    mockPrisma.storageFile.findFirst.mockResolvedValue({
       id: 'file-sync-456',
       filename: 'benchmark_results.pdf',
-      authorId: 'user-researcher-1',
       createdById: 'user-researcher-1',
+      spaceId: 'user-researcher-1',
       linkedToType: null,
       linkedToId: null,
       sharedWith: [],
@@ -178,65 +172,58 @@ describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
         title: 'Benchmark Results on Transformer Models',
         ragDocId: 'vec-doc-sync-789',
       },
-      metaData: {
-        title: 'Benchmark Results on Transformer Models',
-        ragDocId: 'vec-doc-sync-789',
-      },
     });
 
-    const response = await aiService.executePaper(
+    const response = await paperService.execute(
       'user-researcher-1',
       'file-sync-456',
-      {
-        query: 'Summarize the benchmark metrics',
-      },
+      { query: 'Summarize the benchmark metrics' },
     );
 
     expect(response.content).toBe(
       'Grounding answer based on the uploaded paper.',
     );
-    expect(mockEngineService.syncChat).toHaveBeenCalledTimes(1);
-    const [payload] = mockEngineService.syncChat.mock.calls[0];
-    expect(payload.document_ids).toEqual(['vec-doc-sync-789']);
+    expect(response.sources).toEqual([
+      { source: 'vec-doc-sync-789 (p.1)', title: 'Quantum ML', page: 1 },
+    ]);
+    expect(mockEngine.chatSync).toHaveBeenCalledTimes(1);
+    expect(mockEngine.chatSync.mock.calls[0][0].document_ids).toEqual([
+      'vec-doc-sync-789',
+    ]);
   });
 
-  it('should fall back transparently to Library Item when ID belongs to library item', async () => {
-    mockPrisma.item.findFirst.mockResolvedValue({
+  it('falls back transparently to LibraryItem when ID belongs to library catalog', async () => {
+    mockPrisma.libraryItem.findFirst.mockResolvedValue({
       id: 'library-item-999',
       title: 'Attention Is All You Need',
       createdById: 'user-researcher-1',
-      userId: 'user-researcher-1',
-      uploadedById: 'user-researcher-1',
-      projectId: null,
+      spaceId: 'user-researcher-1',
       contributors: [{ fullName: 'Vaswani et al.' }],
       attachments: [],
       year: 2017,
       metadata: { ragDocId: 'vec-doc-vaswani' },
-      ragDocId: 'vec-doc-vaswani',
     });
 
-    await aiService.streamPaper(
+    await paperService.stream(
       'user-researcher-1',
       'library-item-999',
       { query: 'Explain multi-head attention' },
-      mockReply as FastifyReply,
+      mockReply,
     );
 
-    expect(mockEngineService.streamChat).toHaveBeenCalledTimes(1);
-    const [payload] = mockEngineService.streamChat.mock.calls[0];
-    expect(payload.document_ids).toEqual(['vec-doc-vaswani']);
+    expect(mockEngine.chatStream).toHaveBeenCalledTimes(1);
+    expect(mockEngine.chatStream.mock.calls[0][0].document_ids).toEqual([
+      'vec-doc-vaswani',
+    ]);
   });
 
-  it('should throw NotFoundException if ID matches neither Library Item nor Storage File', async () => {
-    mockPrisma.item.findFirst.mockResolvedValue(null);
-    mockPrisma.file.findFirst.mockResolvedValue(null);
-
+  it('throws NotFoundException when ID matches neither LibraryItem, StorageFile, nor Attachment', async () => {
     await expect(
-      aiService.streamPaper(
+      paperService.stream(
         'user-1',
         'non-existent-id',
         { query: 'Hello?' },
-        mockReply as FastifyReply,
+        mockReply,
       ),
     ).rejects.toThrow(NotFoundException);
   });

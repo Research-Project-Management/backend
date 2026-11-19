@@ -16,10 +16,6 @@ export class CreateFolderDto {
   @IsString()
   @IsOptional()
   spaceId?: string;
-
-  @IsString()
-  @IsOptional()
-  pageId?: string;
 }
 
 export class RenameFileDto {

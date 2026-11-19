@@ -3,8 +3,6 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
   EXPERIMENTS_PROCESSING_QUEUE,
-  EXPERIMENTS_JOB_MAINTENANCE_MULTIPART,
-  EXPERIMENTS_JOB_MAINTENANCE_ORPHAN,
   EXPERIMENTS_JOB_MAINTENANCE_TRASH,
   EXPERIMENTS_JOB_PROCESS_FILE,
 } from '../experiments.constant';
@@ -77,16 +75,6 @@ export class ExperimentsQueueProducer {
         pattern: '0 3 * * *',
         name: EXPERIMENTS_JOB_MAINTENANCE_TRASH,
       },
-      {
-        id: 'repeat-multipart-cleanup',
-        pattern: '0 */6 * * *',
-        name: EXPERIMENTS_JOB_MAINTENANCE_MULTIPART,
-      },
-      {
-        id: 'repeat-orphan-blob',
-        pattern: '0 4 * * *',
-        name: EXPERIMENTS_JOB_MAINTENANCE_ORPHAN,
-      },
     ];
 
     try {
@@ -105,7 +93,7 @@ export class ExperimentsQueueProducer {
       }
 
       this.logger.log(
-        'Experiments maintenance repeatable jobs registered in BullMQ (Trash Retention, Multipart Cleanup, Orphan Blob GC)',
+        'Experiments trash retention repeatable job registered in BullMQ',
       );
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -115,4 +103,3 @@ export class ExperimentsQueueProducer {
     }
   }
 }
-

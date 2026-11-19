@@ -6,7 +6,13 @@ export const STORAGE_BLOB_REPOSITORY = Symbol('STORAGE_BLOB_REPOSITORY');
 export const STORAGE_QUOTA_REPOSITORY = Symbol('STORAGE_QUOTA_REPOSITORY');
 export const UPLOAD_SESSION_REPOSITORY = Symbol('UPLOAD_SESSION_REPOSITORY');
 
+export const FILES_MAINTENANCE_QUEUE = 'files-maintenance';
+export const FILES_JOB_CLEANUP_EXPIRED_SESSIONS =
+  'files-cleanup-expired-sessions';
+export const FILES_JOB_RECLAIM_ORPHAN_BLOBS = 'files-reclaim-orphan-blobs';
+
 export const DEFAULT_STORAGE_QUOTA_BYTES = 5n * 1024n * 1024n * 1024n; // 5 GB
+export const MAX_PDF_THUMBNAIL_BYTES = 25n * 1024n * 1024n; // 25 MB
 
 export const MIN_MULTIPART_PART_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB S3 minimum
 export const MAX_MULTIPART_PARTS = 8000;

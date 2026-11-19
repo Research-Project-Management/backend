@@ -19,6 +19,7 @@ import { ContentHash, StorageKey } from '../domain/blob.domain';
 import { UploadSession, UploadSessionStatus } from '../domain/session.domain';
 import {
   isBlockedExtension,
+  resolveTargetSpaceId,
   sanitizeFilename,
   streamToBuffer,
   validateMagicBytes,
@@ -60,9 +61,9 @@ export class PresignService {
       );
     }
 
+    const targetSpaceId = resolveTargetSpaceId(input.spaceId, input.userId);
     await this.quotaService.assertAvailable(
-      input.userId,
-      input.projectId ?? null,
+      targetSpaceId,
       BigInt(input.sizeBytes),
     );
 
@@ -70,20 +71,12 @@ export class PresignService {
       const hashVo = ContentHash.fromHex(input.contentHash);
       const existingBlob = await this.blobService.findBlobByHash(hashVo);
       if (existingBlob && existingBlob.isReady()) {
-        await this.quotaService.reserve(
-          input.userId,
-          input.projectId ?? null,
-          existingBlob.sizeBytes,
-        );
+        await this.quotaService.reserve(targetSpaceId, existingBlob.sizeBytes);
         try {
           await this.blobService.incrementBlobRef(existingBlob.id);
         } catch (err) {
           await this.quotaService
-            .release(
-              input.userId,
-              input.projectId ?? null,
-              existingBlob.sizeBytes,
-            )
+            .release(targetSpaceId, existingBlob.sizeBytes)
             .catch(() => {});
           throw err;
         }
@@ -189,12 +182,9 @@ export class PresignService {
       }
     }
 
+    const targetSpaceId = resolveTargetSpaceId(input.spaceId, input.userId);
     try {
-      await this.quotaService.reserve(
-        input.userId,
-        input.projectId ?? null,
-        actualSize,
-      );
+      await this.quotaService.reserve(targetSpaceId, actualSize);
     } catch (quotaErr) {
       Promise.resolve(this.blobService.delete(input.storageKey)).catch(
         (delErr: unknown) => {
@@ -218,7 +208,7 @@ export class PresignService {
       });
     } catch (err) {
       await this.quotaService
-        .release(input.userId, input.projectId ?? null, actualSize)
+        .release(targetSpaceId, actualSize)
         .catch(() => {});
       throw err;
     }
@@ -248,11 +238,8 @@ export class PresignService {
     }
 
     const totalSizeBytes = BigInt(input.totalSize);
-    await this.quotaService.assertAvailable(
-      input.userId,
-      input.projectId ?? null,
-      totalSizeBytes,
-    );
+    const targetSpaceId = resolveTargetSpaceId(input.spaceId, input.userId);
+    await this.quotaService.assertAvailable(targetSpaceId, totalSizeBytes);
 
     if (input.expectedHash && /^[a-f0-9]{64}$/i.test(input.expectedHash)) {
       try {
@@ -260,19 +247,14 @@ export class PresignService {
         const existingBlob = await this.blobService.findBlobByHash(hashVo);
         if (existingBlob && existingBlob.isReady()) {
           await this.quotaService.reserve(
-            input.userId,
-            input.projectId ?? null,
+            targetSpaceId,
             existingBlob.sizeBytes,
           );
           try {
             await this.blobService.incrementBlobRef(existingBlob.id);
           } catch (refErr) {
             await this.quotaService
-              .release(
-                input.userId,
-                input.projectId ?? null,
-                existingBlob.sizeBytes,
-              )
+              .release(targetSpaceId, existingBlob.sizeBytes)
               .catch(() => {});
             throw refErr;
           }
@@ -311,9 +293,11 @@ export class PresignService {
       { mimeType: input.mimeType },
     );
 
+    const sessionSpaceId = targetSpaceId ?? input.userId;
+
     const session = new UploadSession({
       id: sessionId,
-      projectId: input.projectId ?? null,
+      spaceId: sessionSpaceId,
       userId: input.userId,
       s3UploadId: uploadId,
       s3Key: storageKey,
@@ -326,7 +310,9 @@ export class PresignService {
         ? Buffer.from(input.expectedHash, 'hex')
         : null,
       parentId: input.parentId ?? null,
-      scope: input.scope ?? (input.projectId ? 'Project' : 'Personal'),
+      scope:
+        input.scope ??
+        (sessionSpaceId !== input.userId ? 'Project' : 'Personal'),
       expiresAt: new Date(
         Date.now() + DEFAULT_MULTIPART_TTL_HOURS * 3600 * 1000,
       ),
@@ -345,34 +331,58 @@ export class PresignService {
     };
   }
 
-  async presignMultipartPart(
-    sessionId: string,
-    partNumber: number,
+  private verifySessionAccess(
+    session: UploadSession,
     actor?: FileActorContext,
-  ): Promise<{ url: string; partNumber: number }> {
+  ): void {
+    if (!actor) return;
+    if (session.userId === actor.userId) return;
+    if (
+      session.spaceId !== session.userId &&
+      actor.spaceId &&
+      session.spaceId === actor.spaceId
+    ) {
+      return;
+    }
+    throw new NotFoundException('Upload session not found');
+  }
+
+  private async getValidActiveSession(
+    sessionId: string,
+    actor?: FileActorContext,
+  ): Promise<UploadSession> {
     const session = await this.sessionRepo.findById(sessionId);
-    if (!session) {
-      throw new NotFoundException('Upload session not found');
+    if (!session || session.isExpired()) {
+      throw new NotFoundException('Upload session not found or expired');
     }
-    if (actor && session.userId !== actor.userId) {
-      throw new ForbiddenException(
-        'You do not have permission to sign parts for this upload session',
-      );
-    }
+
+    this.verifySessionAccess(session, actor);
+
     if (
       session.status === UploadSessionStatus.ABORTED ||
       session.status === UploadSessionStatus.COMPLETED
     ) {
       throw new BadRequestException(
-        `Cannot upload part: Session is ${session.status}`,
+        `Upload session has already been ${session.status}`,
       );
     }
-    if (session.isExpired()) {
-      throw new BadRequestException('Upload session has expired');
-    }
-    if (partNumber < 1 || partNumber > session.totalParts) {
+
+    return session;
+  }
+
+  async presignMultipartPart(
+    sessionId: string,
+    partNumber: number,
+    actor?: FileActorContext,
+  ): Promise<{ url: string; partNumber: number }> {
+    const session = await this.getValidActiveSession(sessionId, actor);
+    if (
+      !Number.isInteger(partNumber) ||
+      partNumber < 1 ||
+      partNumber > session.totalParts
+    ) {
       throw new BadRequestException(
-        `Invalid part number ${partNumber}. Expected 1..${session.totalParts}`,
+        `Invalid part number ${partNumber}. Expected an integer between 1 and ${session.totalParts}`,
       );
     }
 
@@ -392,28 +402,35 @@ export class PresignService {
   async completeMultipart(
     input: CompleteFileMultipartInput,
   ): Promise<CompleteFileMultipartOutput> {
-    const session = await this.sessionRepo.findById(input.sessionId);
-    if (!session) {
-      throw new NotFoundException('Upload session not found');
-    }
-    if (input.actor && session.userId !== input.actor.userId) {
-      throw new ForbiddenException(
-        'You do not have permission to complete this upload session',
-      );
-    }
-    if (
-      session.status === UploadSessionStatus.ABORTED ||
-      session.status === UploadSessionStatus.COMPLETED
-    ) {
+    const session = await this.getValidActiveSession(
+      input.sessionId,
+      input.actor,
+    );
+
+    const cleanFilename = sanitizeFilename(session.filename);
+    if (isBlockedExtension(cleanFilename)) {
       throw new BadRequestException(
-        `Upload session already ${session.status}`,
+        'File extension is prohibited for security reasons',
       );
     }
+
+    if (
+      !input.parts ||
+      !Array.isArray(input.parts) ||
+      input.parts.length === 0
+    ) {
+      throw new BadRequestException('Parts array cannot be empty');
+    }
+
+    const normalizedParts = input.parts.map((p) => ({
+      partNumber: p.partNumber,
+      eTag: p.eTag,
+    }));
 
     await this.blobService.completeMultipartUpload(
       session.s3Key,
       session.s3UploadId,
-      input.parts,
+      normalizedParts,
     );
 
     try {
@@ -434,12 +451,9 @@ export class PresignService {
       }
     }
 
+    const targetSpaceId = resolveTargetSpaceId(session.spaceId, session.userId);
     try {
-      await this.quotaService.reserve(
-        session.userId,
-        session.projectId,
-        session.totalSize,
-      );
+      await this.quotaService.reserve(targetSpaceId, session.totalSize);
     } catch (quotaErr) {
       Promise.resolve(this.blobService.delete(session.s3Key)).catch(() => {});
       throw quotaErr;
@@ -461,7 +475,7 @@ export class PresignService {
       });
     } catch (err) {
       await this.quotaService
-        .release(session.userId, session.projectId, session.totalSize)
+        .release(targetSpaceId, session.totalSize)
         .catch(() => {});
       throw err;
     }
@@ -481,21 +495,26 @@ export class PresignService {
     actor?: FileActorContext,
   ): Promise<void> {
     const session = await this.sessionRepo.findById(sessionId);
-    if (!session) return;
+    if (!session) {
+      throw new NotFoundException('Upload session not found');
+    }
 
-    if (actor && session.userId !== actor.userId) {
-      throw new ForbiddenException(
-        'You do not have permission to abort this upload session',
+    this.verifySessionAccess(session, actor);
+
+    if (session.status === UploadSessionStatus.COMPLETED) {
+      throw new BadRequestException(
+        'Cannot abort an already completed upload session',
       );
     }
-
-    if (session.status !== UploadSessionStatus.COMPLETED) {
-      await this.blobService
-        .abortMultipartUpload(session.s3Key, session.s3UploadId)
-        .catch(() => {});
-      session.markAborted();
-      await this.sessionRepo.update(session);
+    if (session.status === UploadSessionStatus.ABORTED) {
+      return;
     }
+
+    await this.blobService
+      .abortMultipartUpload(session.s3Key, session.s3UploadId)
+      .catch(() => {});
+    session.markAborted();
+    await this.sessionRepo.update(session);
   }
 
   async cleanupExpiredSessions(limit = 50): Promise<number> {

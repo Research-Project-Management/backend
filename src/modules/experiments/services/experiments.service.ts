@@ -59,14 +59,11 @@ export class ExperimentsService {
       const cached = await this.cache.wrapFolderListing<{
         nodes: ExperimentNode[];
         total: number;
-      }>(
-        scopeKey,
-        filter.parentId,
-        () => this.nodeRepo.list(filter),
-        120,
-      );
+      }>(scopeKey, filter.parentId, () => this.nodeRepo.list(filter), 120);
       return {
-        nodes: cached.nodes.map((n: unknown) => ExperimentNode.fromSerialized(n)),
+        nodes: cached.nodes.map((n: unknown) =>
+          ExperimentNode.fromSerialized(n),
+        ),
         total: cached.total,
       };
     }
@@ -236,7 +233,10 @@ export class ExperimentsService {
     );
   }
 
-  async move(nodeId: string, newParentId: string | null): Promise<ExperimentNode> {
+  async move(
+    nodeId: string,
+    newParentId: string | null,
+  ): Promise<ExperimentNode> {
     const node = await this.getActiveNodeOrThrow(nodeId);
 
     if (newParentId) {
@@ -317,4 +317,3 @@ export class ExperimentsService {
     return count;
   }
 }
-

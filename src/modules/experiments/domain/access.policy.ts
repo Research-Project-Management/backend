@@ -157,29 +157,15 @@ export class ExperimentsAccessPolicy {
       },
     });
     if (!membership) {
-      const [space, page] = await Promise.all([
-        this.prisma.space?.findUnique
-          ? Promise.resolve(
-              this.prisma.space.findUnique({
-                where: { id: trimmedProjectId },
-                select: { ownerUserId: true },
-              }),
-            ).catch(() => null)
-          : Promise.resolve(null),
-        this.prisma.page?.findUnique
-          ? Promise.resolve(
-              this.prisma.page.findUnique({
-                where: { id: trimmedProjectId },
-                select: { spaceId: true, createdById: true },
-              }),
-            ).catch(() => null)
-          : Promise.resolve(null),
-      ]);
-      if (
-        space?.ownerUserId === userId ||
-        page?.spaceId === userId ||
-        page?.createdById === userId
-      ) {
+      const space = this.prisma.space?.findUnique
+        ? await Promise.resolve(
+            this.prisma.space.findUnique({
+              where: { id: trimmedProjectId },
+              select: { ownerUserId: true },
+            }),
+          ).catch(() => null)
+        : null;
+      if (space?.ownerUserId === userId) {
         return;
       }
       throw new ForbiddenException(
@@ -227,36 +213,4 @@ export class ExperimentsAccessPolicy {
       await this.assertCanAccessProject(userId, normalizedProjectId, 'write');
     }
   }
-
-  async resolvePageSpaceId(
-    pageId?: string | null,
-    userId?: string,
-  ): Promise<string | undefined> {
-    const cleanId = typeof pageId === 'string' ? pageId.trim() : '';
-    if (!cleanId || !isUuid(cleanId)) return undefined;
-
-    const [page, pageDoc] = await Promise.all([
-      this.prisma.page?.findUnique
-        ? Promise.resolve(
-            this.prisma.page.findUnique({
-              where: { id: cleanId },
-              select: { spaceId: true },
-            }),
-          ).catch(() => null)
-        : Promise.resolve(null),
-      this.prisma.pageDoc?.findUnique
-        ? Promise.resolve(
-            this.prisma.pageDoc.findUnique({
-              where: { id: cleanId },
-              select: { spaceId: true },
-            }),
-          ).catch(() => null)
-        : Promise.resolve(null),
-    ]);
-
-    const resolvedSpaceId = page?.spaceId || pageDoc?.spaceId;
-    if (!resolvedSpaceId) return undefined;
-    return normalizeExperimentProjectId(resolvedSpaceId, userId);
-  }
 }
-

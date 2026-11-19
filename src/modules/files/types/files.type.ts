@@ -12,6 +12,17 @@ export function getFileContentPath(blobId: string): string {
   return `/api/v1/files/${encodeURIComponent(blobId)}/content`;
 }
 
+export function getFileObjectPath(key: string): string {
+  return `/api/v1/files/objects/${encodeURIComponent(key)}`;
+}
+
+export interface EnsureImageThumbnailOutput {
+  thumbnailUrl: string;
+  width?: number;
+  height?: number;
+  format?: string;
+}
+
 export interface StoreBufferCasResult {
   blob: StorageBlob;
   isDeduplicated: boolean;
@@ -25,12 +36,16 @@ export interface RegisterUploadedObjectInput {
 
 export interface FileActorContext {
   userId: string;
-  projectId?: string | null;
+  spaceId?: string | null;
+}
+
+export interface DeleteFileTarget {
+  spaceId: string;
 }
 
 export interface PresignFileUploadInput {
   userId: string;
-  projectId?: string | null;
+  spaceId?: string | null;
   filename: string;
   mimeType: string;
   sizeBytes: number;
@@ -49,7 +64,7 @@ export interface PresignFileUploadOutput {
 
 export interface CompletePresignedFileInput {
   userId: string;
-  projectId?: string | null;
+  spaceId?: string | null;
   storageKey: string;
   filename: string;
   sizeBytes?: number;
@@ -72,7 +87,7 @@ export interface CompletePresignedFileOutput {
 
 export interface InitiateFileMultipartInput {
   userId: string;
-  projectId?: string | null;
+  spaceId?: string | null;
   parentId?: string | null;
   scope?: string;
   filename: string;
@@ -111,6 +126,13 @@ export interface FilesStreamOptions {
   filename?: string;
 }
 
+export interface StreamBlobTarget {
+  s3Key: StorageBlob['s3Key'] | string;
+  sizeBytes: bigint | number;
+  contentHash?: StorageBlob['contentHash'];
+  contentHashHex?: string | null;
+}
+
 export interface FilesStreamOutput {
   stream: Readable | null;
   statusCode: number;
@@ -133,7 +155,7 @@ export interface UploadFilesInput {
   filename: string;
   buffer: Buffer;
   mimeType: string;
-  projectId?: string | null;
+  spaceId?: string | null;
   source?: string;
 }
 
@@ -151,7 +173,7 @@ export interface UploadFilesOutput {
 export interface ReadFilesInput {
   fileId: string;
   userId?: string;
-  projectId?: string;
+  spaceId?: string;
 }
 
 export interface ReadFilesOutput {
@@ -181,15 +203,12 @@ export interface IFilesPort {
     filename: string;
     contentRange?: string;
   }>;
-  deleteFile(
-    fileId: string,
-    scope?: { userId?: string | null; projectId?: string | null },
-  ): Promise<void>;
+  deleteFile(fileId: string, target?: DeleteFileTarget): Promise<void>;
   deleteObject(key: string): Promise<void>;
   ensurePdfThumbnail(input: {
     fileId: string;
     userId?: string;
-    projectId?: string | null;
+    spaceId?: string | null;
   }): Promise<Buffer | null>;
   storeBuffer(
     buffer: Buffer,
@@ -222,9 +241,7 @@ export interface IFilesPort {
   initiateMultipart(
     input: InitiateFileMultipartInput,
   ): Promise<InitiateFileMultipartOutput>;
-  initiateMultipartUpload(
-    input: InitiateFileMultipartInput,
-  ): Promise<{
+  initiateMultipartUpload(input: InitiateFileMultipartInput): Promise<{
     sessionId: string;
     uploadId: string;
     partSize: number;
@@ -262,17 +279,14 @@ export interface IFilesPort {
     actor?: FileActorContext,
   ): Promise<void>;
   streamBlob(
-    blob: Pick<StorageBlob, 's3Key' | 'sizeBytes'> & {
-      contentHash?: StorageBlob['contentHash'];
-    },
+    blob: StreamBlobTarget,
     options?: FilesStreamOptions,
   ): Promise<FilesStreamOutput>;
   streamByKey(key: string, rangeHeader?: string): Promise<StreamKeyOutput>;
   getPresignedDownloadUrl(
     fileIdOrKey: string,
     optionsOrExpires?:
-      | number
-      | { expiresInSeconds?: number; filename?: string },
+      number | { expiresInSeconds?: number; filename?: string },
     userId?: string,
   ): Promise<string>;
   openBlobStream(
@@ -285,27 +299,47 @@ export interface IFilesPort {
     contentRange?: string;
   }>;
   statObject(key: string): Promise<StorageObjectMetadata>;
+  findBlobById(blobId: string): Promise<StorageBlob | null>;
+  findBlobByHash(contentHashHex: string): Promise<StorageBlob | null>;
+  acquireBlob(blobId: string): Promise<StorageBlob | null>;
   releaseBlob(blobId: string): Promise<void>;
+  getThumbnailUrl(blobId: string): string;
+  ensureImageThumbnail(input: {
+    fileId: string;
+    width?: number;
+    height?: number;
+    quality?: number;
+  }): Promise<EnsureImageThumbnailOutput | null>;
+  putObject(
+    key: string,
+    data: Buffer | Readable,
+    options?: { mimeType?: string; size?: number },
+  ): Promise<void>;
+  getObjectStream(
+    key: string,
+    range?: { start: number; end: number },
+  ): Promise<{
+    stream: Readable;
+    contentLength: number;
+    contentRange?: string;
+  }>;
+  objectExists(key: string): Promise<boolean>;
+  copyObject(sourceKey: string, destinationKey: string): Promise<void>;
+  deleteObjects(keys: string[]): Promise<void>;
   reclaimOrphanBlobs(limit?: number): Promise<number>;
   cleanupExpiredSessions(limit?: number): Promise<number>;
   applyLifecycleRules(config?: StorageLifecycleConfiguration): Promise<void>;
-  getQuota(
-    userId?: string | null,
-    projectId?: string | null,
-  ): Promise<StorageQuota | null>;
+  getQuota(spaceId?: string | null): Promise<StorageQuota | null>;
   assertQuotaAvailable(
-    userId: string,
-    projectId: string | null | undefined,
+    spaceId: string | null | undefined,
     requiredBytes: bigint,
   ): Promise<void>;
   reserveQuota(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
+    spaceId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint>;
   releaseQuota(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
+    spaceId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint>;
 }

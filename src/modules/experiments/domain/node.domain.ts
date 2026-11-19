@@ -4,9 +4,6 @@
 export enum FileScope {
   Personal = 'Personal',
   Project = 'Project',
-  Page = 'Page',
-  Library = 'Library',
-  Paper = 'Paper',
 }
 
 export function normalizeFileScope(
@@ -20,15 +17,10 @@ export function normalizeFileScope(
   switch (lower) {
     case 'project':
       return FileScope.Project;
-    case 'page':
-      return FileScope.Page;
-    case 'library':
-      return FileScope.Library;
-    case 'paper':
-      return FileScope.Paper;
     case 'personal':
-    default:
       return FileScope.Personal;
+    default:
+      return hasProjectId ? FileScope.Project : FileScope.Personal;
   }
 }
 
@@ -283,4 +275,3 @@ export class ExperimentNode {
     });
   }
 }
-

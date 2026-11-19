@@ -3,24 +3,11 @@ import {
   Inject,
   Logger,
   BadRequestException,
-  ForbiddenException,
-  NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
-import {
-  BlobService,
-  ContentHash,
-  DEFAULT_STORAGE_QUOTA_BYTES,
-  isBlockedExtension,
-  sanitizeFilename,
-  StorageKey,
-  STORAGE_QUOTA_REPOSITORY,
-  streamToBuffer,
-  validateMagicBytes,
-  type IQuotaRepository,
-} from '@/modules/files';
+import { FILES_PORT, type IFilesPort } from '@/modules/files';
 import { EXPERIMENT_NODE_REPOSITORY } from '../experiments.constant';
 import {
   CompletePresignInput,
@@ -50,11 +37,10 @@ export class UploadService {
   private readonly logger = new Logger(UploadService.name);
 
   constructor(
-    private readonly blobService: BlobService,
+    @Inject(FILES_PORT)
+    private readonly filesPort: IFilesPort,
     @Inject(EXPERIMENT_NODE_REPOSITORY)
     private readonly nodeRepo: INodeRepository,
-    @Inject(STORAGE_QUOTA_REPOSITORY)
-    private readonly quotaRepo: IQuotaRepository,
     @Optional()
     private readonly cache?: ExperimentsCacheService,
     @Optional()
@@ -66,52 +52,68 @@ export class UploadService {
     linkedToType?: string;
     linkedToId?: string | null;
     projectId?: string | null;
-    pageId?: string | null;
     source?: string;
     metaData?: Record<string, unknown> | null;
   }) {
     const resolvedScope =
       input.scope ??
       (input.linkedToType as FileScope | undefined) ??
-      (input.pageId
-        ? FileScope.Page
-        : input.projectId
-          ? FileScope.Project
-          : FileScope.Personal);
-    const resolvedLinkedId =
-      input.linkedToId ?? input.pageId ?? input.projectId ?? null;
+      (input.projectId ? FileScope.Project : FileScope.Personal);
+    const resolvedLinkedId = input.linkedToId ?? input.projectId ?? null;
     const metadata: Record<string, unknown> = {
       ...(input.metaData || {}),
       ...(input.source ? { source: input.source } : {}),
-      ...(input.pageId ? { pageId: input.pageId } : {}),
     };
     return { resolvedScope, resolvedLinkedId, metadata };
   }
 
-  async upload(input: UploadDirectInput): Promise<UploadDirectOutput> {
-    const scopeKey = input.projectId ?? input.userId;
-    const sizeBytes = BigInt(input.buffer.length);
+  private async invalidateAndEmitUpload(params: {
+    fileId: string;
+    blobId: string;
+    userId: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes: bigint;
+    storageKey: string;
+    projectId?: string | null;
+    parentId?: string | null;
+  }): Promise<void> {
+    const scopeKey = params.projectId ?? params.userId;
+    if (this.cache) {
+      await this.cache.invalidateFolder(scopeKey, params.parentId ?? null);
+      await this.cache.invalidateScopeTree(scopeKey);
+    }
 
-    if (sizeBytes <= 0n) {
+    this.eventEmitter?.emit(
+      'file.uploaded',
+      new FileUploadedEvent(
+        params.fileId,
+        params.blobId,
+        params.userId,
+        params.filename,
+        params.mimeType,
+        params.sizeBytes,
+        params.storageKey,
+        params.projectId,
+      ),
+    );
+  }
+
+  async upload(input: UploadDirectInput): Promise<UploadDirectOutput> {
+    if (input.buffer.length <= 0) {
       throw new BadRequestException('Cannot upload an empty file');
     }
 
-    const cleanFilename = sanitizeFilename(input.filename);
-    validateMagicBytes(input.buffer, input.mimeType, cleanFilename);
+    const uploaded = await this.filesPort.uploadFile({
+      userId: input.userId,
+      spaceId: input.projectId ?? input.userId,
+      filename: input.filename,
+      buffer: input.buffer,
+      mimeType: input.mimeType,
+      source: input.source,
+    });
 
-    const { blob, isDeduplicated } = await this.blobService.storeBuffer(
-      input.buffer,
-      input.mimeType,
-      async (bytes) => {
-        await this.quotaRepo.incrementUsage(
-          input.userId,
-          input.projectId ?? null,
-          bytes,
-        );
-      },
-    );
-    const blobId = blob.id;
-
+    const sizeBytes = BigInt(uploaded.size);
     const fileId = crypto.randomUUID();
     const { resolvedScope, resolvedLinkedId, metadata } =
       this.resolveScopeAndMetadata(input);
@@ -120,290 +122,115 @@ export class UploadService {
       projectId: input.projectId ?? null,
       linkedToId: resolvedLinkedId,
       parentId: input.parentId ?? null,
-      name: cleanFilename,
+      name: uploaded.filename,
       isFolder: false,
       size: sizeBytes,
-      mimeType: input.mimeType,
-      blobId,
+      mimeType: uploaded.mimeType,
+      blobId: uploaded.blobId,
       scope: resolvedScope,
       metadata,
       authorId: input.userId,
     });
     await this.nodeRepo.create(node);
 
-    if (this.cache) {
-      await this.cache.invalidateFolder(scopeKey, input.parentId ?? null);
-      await this.cache.invalidateScopeTree(scopeKey);
-    }
-
-    this.eventEmitter?.emit(
-      'file.uploaded',
-      new FileUploadedEvent(
-        fileId,
-        blobId,
-        input.userId,
-        cleanFilename,
-        input.mimeType,
-        sizeBytes,
-        blob.s3Key.value(),
-        input.projectId,
-      ),
-    );
+    await this.invalidateAndEmitUpload({
+      fileId,
+      blobId: uploaded.blobId,
+      userId: input.userId,
+      filename: uploaded.filename,
+      mimeType: uploaded.mimeType,
+      sizeBytes,
+      storageKey: uploaded.path,
+      projectId: input.projectId,
+      parentId: input.parentId,
+    });
 
     return {
       fileId,
-      blobId,
+      blobId: uploaded.blobId,
       url: getFileContentPath(fileId),
-      filename: cleanFilename,
-      size: Number(sizeBytes),
-      mimeType: input.mimeType,
-      isDeduplicated,
+      filename: uploaded.filename,
+      size: uploaded.size,
+      mimeType: uploaded.mimeType,
+      isDeduplicated: uploaded.isDeduplicated,
     };
   }
 
   async presign(input: PresignUploadInput): Promise<PresignUploadOutput> {
-    const cleanFilename = sanitizeFilename(input.filename);
-    if (isBlockedExtension(cleanFilename)) {
-      throw new BadRequestException(
-        'File extension is prohibited for security reasons',
-      );
-    }
-
-    const requestedBytes = BigInt(input.sizeBytes);
-    const quota = await this.quotaRepo.findByScope(
-      input.userId,
-      input.projectId ?? null,
-    );
-    const maxBytes = quota ? quota.maxBytes : DEFAULT_STORAGE_QUOTA_BYTES;
-    const usedBytes = quota ? quota.usedBytes : 0n;
-    if (usedBytes + requestedBytes > maxBytes) {
-      throw new BadRequestException('Storage quota exceeded');
-    }
-
-    if (input.contentHash) {
-      try {
-        const hashVo = ContentHash.fromHex(input.contentHash);
-        const existingBlob = await this.blobService.findBlobByHash(hashVo);
-
-        if (existingBlob && existingBlob.isReady()) {
-          await this.quotaRepo.incrementUsage(
-            input.userId,
-            input.projectId ?? null,
-            existingBlob.sizeBytes,
-          );
-
-          try {
-            await this.blobService.incrementBlobRef(existingBlob.id);
-          } catch (refErr) {
-            await this.quotaRepo
-              .decrementUsage(
-                input.userId,
-                input.projectId ?? null,
-                existingBlob.sizeBytes,
-              )
-              .catch(() => {});
-            throw refErr;
-          }
-
-          const fileId = crypto.randomUUID();
-          const { resolvedScope, resolvedLinkedId, metadata } =
-            this.resolveScopeAndMetadata(input);
-          const node = new ExperimentNode({
-            id: fileId,
-            projectId: input.projectId ?? null,
-            linkedToId: resolvedLinkedId,
-            parentId: input.parentId ?? null,
-            name: cleanFilename,
-            isFolder: false,
-            size: existingBlob.sizeBytes,
-            mimeType: input.mimeType,
-            blobId: existingBlob.id,
-            scope: resolvedScope,
-            metadata,
-            authorId: input.userId,
-          });
-          await this.nodeRepo.create(node);
-
-          const scopeKey = input.projectId ?? input.userId;
-          if (this.cache) {
-            await this.cache.invalidateFolder(scopeKey, input.parentId ?? null);
-            await this.cache.invalidateScopeTree(scopeKey);
-          }
-
-          this.eventEmitter?.emit(
-            'file.uploaded',
-            new FileUploadedEvent(
-              fileId,
-              existingBlob.id,
-              input.userId,
-              cleanFilename,
-              input.mimeType,
-              existingBlob.sizeBytes,
-              existingBlob.s3Key.value(),
-              input.projectId,
-            ),
-          );
-
-          return {
-            deduplicated: true,
-            uploadUrl: '',
-            storageKey: existingBlob.s3Key.value(),
-            fileUuid: existingBlob.id,
-            expiresIn: 0,
-            fileId,
-            url: getFileContentPath(fileId),
-            filename: cleanFilename,
-            size: Number(existingBlob.sizeBytes),
-            mimeType: input.mimeType,
-          };
-        }
-      } catch (err: unknown) {
-        if (err instanceof BadRequestException) {
-          throw err;
-        }
-        this.logger.debug(
-          `CAS pre-lookup skipped or failed for hash ${input.contentHash}: ${(err as Error)?.message}`,
-        );
-      }
-    }
-
-    const MAX_SINGLE_UPLOAD = 100 * 1024 * 1024;
-    if (input.sizeBytes > MAX_SINGLE_UPLOAD) {
-      throw new BadRequestException(
-        'Files larger than 100MB must use multipart upload',
-      );
-    }
-
-    const fileUuid = crypto.randomUUID();
-    const cleanExt = (cleanFilename.split('.').pop() || 'bin').replace(
-      /[^a-zA-Z0-9]/g,
-      '',
-    );
-    const storageKey = StorageKey.forStaging(
-      input.userId,
-      fileUuid,
-      cleanExt,
-    ).value();
-
-    const uploadUrl = await this.blobService.getPresignedUploadUrl(storageKey, {
+    const res = await this.filesPort.presignUpload({
+      userId: input.userId,
+      spaceId: input.projectId ?? input.userId,
+      filename: input.filename,
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes,
-      expiresInSeconds: 300,
+      contentHash: input.contentHash,
     });
+
+    if (res.deduplicated && res.blob) {
+      const fileId = crypto.randomUUID();
+      const { resolvedScope, resolvedLinkedId, metadata } =
+        this.resolveScopeAndMetadata(input);
+      const node = new ExperimentNode({
+        id: fileId,
+        projectId: input.projectId ?? null,
+        linkedToId: resolvedLinkedId,
+        parentId: input.parentId ?? null,
+        name: res.cleanFilename,
+        isFolder: false,
+        size: res.blob.sizeBytes,
+        mimeType: input.mimeType,
+        blobId: res.blob.id,
+        scope: resolvedScope,
+        metadata,
+        authorId: input.userId,
+      });
+      await this.nodeRepo.create(node);
+
+      await this.invalidateAndEmitUpload({
+        fileId,
+        blobId: res.blob.id,
+        userId: input.userId,
+        filename: res.cleanFilename,
+        mimeType: input.mimeType,
+        sizeBytes: res.blob.sizeBytes,
+        storageKey: res.storageKey,
+        projectId: input.projectId,
+        parentId: input.parentId,
+      });
+
+      return {
+        deduplicated: true,
+        uploadUrl: '',
+        storageKey: res.storageKey,
+        fileUuid: res.blob.id,
+        expiresIn: 0,
+        fileId,
+        url: getFileContentPath(fileId),
+        filename: res.cleanFilename,
+        size: Number(res.blob.sizeBytes),
+        mimeType: input.mimeType,
+      };
+    }
 
     return {
       deduplicated: false,
-      uploadUrl,
-      storageKey,
-      fileUuid,
-      expiresIn: 300,
+      uploadUrl: res.uploadUrl || '',
+      storageKey: res.storageKey,
+      fileUuid: res.fileUuid || '',
+      expiresIn: res.expiresIn,
     };
   }
 
   async complete(input: CompletePresignInput): Promise<CompletePresignOutput> {
-    const hasValidPrefix =
-      input.storageKey.startsWith(`uploads/staging/${input.userId}/`) ||
-      input.storageKey.startsWith(`uploads/${input.userId}/`);
-    if (!hasValidPrefix) {
-      throw new ForbiddenException('Invalid storage key ownership');
-    }
-
-    const cleanFilename = sanitizeFilename(input.filename);
-    if (isBlockedExtension(cleanFilename)) {
-      throw new BadRequestException(
-        'File extension is prohibited for security reasons',
-      );
-    }
-
-    let actualSize = input.sizeBytes ? BigInt(input.sizeBytes) : 0n;
-    let actualMime = input.mimeType || 'application/octet-stream';
-
-    try {
-      const stat = await this.blobService.stat(input.storageKey);
-      if (stat && stat.size > 0) {
-        actualSize = BigInt(stat.size);
-        if (stat.mimeType && stat.mimeType !== 'application/octet-stream') {
-          actualMime = stat.mimeType;
-        }
-      } else if (actualSize <= 0n) {
-        throw new NotFoundException(
-          'Uploaded object is empty or not found in storage backend',
-        );
-      }
-    } catch (err: unknown) {
-      if (err instanceof NotFoundException) {
-        throw new NotFoundException(
-          'Uploaded object not found or verified in storage backend',
-        );
-      }
-      this.logger.debug(
-        `Physical object stat check deferred for ${input.storageKey}: ${(err as Error)?.message}`,
-      );
-      if (actualSize <= 0n) {
-        throw new NotFoundException(
-          'Uploaded object not found or verified in storage backend',
-        );
-      }
-    }
-
-    try {
-      const streamRes = await this.blobService.getStream(input.storageKey, {
-        start: 0,
-        end: 511,
-      });
-      if (streamRes?.stream) {
-        const headerBuffer = await streamToBuffer(streamRes.stream);
-        if (headerBuffer.length > 0) {
-          validateMagicBytes(headerBuffer, actualMime, cleanFilename);
-        }
-      }
-    } catch (err: unknown) {
-      if (err instanceof BadRequestException) {
-        Promise.resolve(this.blobService.delete(input.storageKey)).catch(
-          (delErr: unknown) => {
-            this.logger.warn(
-              `Failed to clean up rejected malicious upload ${input.storageKey}: ${delErr instanceof Error ? delErr.message : String(delErr)}`,
-            );
-          },
-        );
-        throw err;
-      }
-    }
-
-    const scopeKey = input.projectId ?? input.userId;
-
-    try {
-      await this.quotaRepo.incrementUsage(
-        input.userId,
-        input.projectId ?? null,
-        actualSize,
-      );
-    } catch (quotaErr: unknown) {
-      Promise.resolve(this.blobService.delete(input.storageKey)).catch(
-        (delErr: unknown) => {
-          this.logger.warn(
-            `Failed to clean up staging object ${input.storageKey} after quota rejection: ${delErr instanceof Error ? delErr.message : String(delErr)}`,
-          );
-        },
-      );
-      throw quotaErr;
-    }
-
-    let blob;
-    try {
-      const registered = await this.blobService.registerUploadedObject({
-        storageKey: input.storageKey,
-        sizeBytes: actualSize,
-        contentHashHex: input.contentHash,
-      });
-      blob = registered.blob;
-    } catch (err: unknown) {
-      await this.quotaRepo
-        .decrementUsage(input.userId, input.projectId ?? null, actualSize)
-        .catch(() => {});
-      throw err;
-    }
-    const blobId = blob.id;
+    const completed = await this.filesPort.completePresignedUpload({
+      userId: input.userId,
+      spaceId: input.projectId ?? input.userId,
+      storageKey: input.storageKey,
+      filename: input.filename,
+      sizeBytes: input.sizeBytes,
+      mimeType: input.mimeType,
+      contentHash: input.contentHash,
+    });
 
     const fileId = crypto.randomUUID();
     const { resolvedScope, resolvedLinkedId, metadata } =
@@ -413,43 +240,36 @@ export class UploadService {
       projectId: input.projectId ?? null,
       linkedToId: resolvedLinkedId,
       parentId: input.parentId ?? null,
-      name: cleanFilename,
+      name: completed.cleanFilename,
       isFolder: false,
-      size: actualSize,
-      mimeType: actualMime,
-      blobId,
+      size: completed.sizeBytes,
+      mimeType: completed.mimeType,
+      blobId: completed.blobId,
       scope: resolvedScope,
       metadata,
       authorId: input.userId,
     });
     await this.nodeRepo.create(node);
 
-    if (this.cache) {
-      await this.cache.invalidateFolder(scopeKey, input.parentId ?? null);
-      await this.cache.invalidateScopeTree(scopeKey);
-    }
-
-    this.eventEmitter?.emit(
-      'file.uploaded',
-      new FileUploadedEvent(
-        fileId,
-        blobId,
-        input.userId,
-        cleanFilename,
-        actualMime,
-        actualSize,
-        blob.s3Key.value(),
-        input.projectId,
-      ),
-    );
+    await this.invalidateAndEmitUpload({
+      fileId,
+      blobId: completed.blobId,
+      userId: input.userId,
+      filename: completed.cleanFilename,
+      mimeType: completed.mimeType,
+      sizeBytes: completed.sizeBytes,
+      storageKey: completed.blob.s3Key.value(),
+      projectId: input.projectId,
+      parentId: input.parentId,
+    });
 
     return {
       fileId,
-      blobId,
+      blobId: completed.blobId,
       url: getFileContentPath(fileId),
-      filename: cleanFilename,
-      size: Number(actualSize),
-      mimeType: actualMime,
+      filename: completed.cleanFilename,
+      size: completed.size,
+      mimeType: completed.mimeType,
     };
   }
 }

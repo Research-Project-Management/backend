@@ -2,11 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { StorageFile as PrismaFile, Prisma } from '@prisma/client';
 import { isValidUuid } from '@/modules/files';
+import { ListExperimentsFilter, SharedNodeItem } from '../experiments.type';
 import {
-  ListExperimentsFilter,
-  SharedNodeItem,
-} from '../experiments.type';
-import { FileScope, normalizeFileScope, ExperimentNode } from '../domain/node.domain';
+  FileScope,
+  normalizeFileScope,
+  ExperimentNode,
+} from '../domain/node.domain';
 import {
   applyFileTypeFilter,
   FILE_AUTHOR_SELECT,
@@ -59,7 +60,6 @@ export interface INodeRepository {
     createdAt: string;
   }>;
 }
-
 
 @Injectable()
 export class NodeRepository implements INodeRepository {
@@ -228,14 +228,7 @@ export class NodeRepository implements INodeRepository {
           { linkedToType: { equals: FileScope.Personal, mode: 'insensitive' } },
           {
             linkedToType: {
-              notIn: [
-                FileScope.Project,
-                FileScope.Library,
-                FileScope.Paper,
-                'project',
-                'library',
-                'paper',
-              ],
+              notIn: [FileScope.Project, 'project'],
             },
           },
         ],
@@ -482,4 +475,3 @@ export class NodeRepository implements INodeRepository {
     };
   }
 }
-

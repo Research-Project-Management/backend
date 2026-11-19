@@ -238,10 +238,10 @@ describe('FilesModule Standalone Capabilities & Hardening', () => {
   describe('QuotaService & StorageNode-Free PresignService / FilesFacade', () => {
     it('enforces quota limit on assertAvailable and delegates reserve/release', async () => {
       const quotaRepo: jest.Mocked<IQuotaRepository> = {
-        findByScope: jest.fn().mockResolvedValue(
+        findBySpaceId: jest.fn().mockResolvedValue(
           new StorageQuota({
             id: 'q1',
-            userId: 'user-1',
+            spaceId: 'user-1',
             usedBytes: 900n,
             maxBytes: 1000n,
           }),
@@ -253,14 +253,14 @@ describe('FilesModule Standalone Capabilities & Hardening', () => {
       const quotaService = new QuotaService(quotaRepo);
 
       await expect(
-        quotaService.assertAvailable('user-1', null, 50n),
+        quotaService.assertAvailable('user-1', 50n),
       ).resolves.toBeUndefined();
       await expect(
-        quotaService.assertAvailable('user-1', null, 200n),
+        quotaService.assertAvailable('user-1', 200n),
       ).rejects.toThrow('Storage quota exceeded');
 
-      expect(await quotaService.reserve('user-1', null, 50n)).toBe(950n);
-      expect(await quotaService.release('user-1', null, 50n)).toBe(900n);
+      expect(await quotaService.reserve('user-1', 50n)).toBe(950n);
+      expect(await quotaService.release('user-1', 50n)).toBe(900n);
     });
 
     it('short-circuits initiateMultipart via Instant CAS Deduplication without creating session', async () => {
@@ -300,10 +300,10 @@ describe('FilesModule Standalone Capabilities & Hardening', () => {
       } as jest.Mocked<ISessionRepository>;
 
       const quotaRepo: jest.Mocked<IQuotaRepository> = {
-        findByScope: jest.fn().mockResolvedValue(
+        findBySpaceId: jest.fn().mockResolvedValue(
           new StorageQuota({
             id: 'q1',
-            userId: 'user-1',
+            spaceId: 'user-1',
             usedBytes: 0n,
             maxBytes: 500_000_000n,
           }),
@@ -341,7 +341,6 @@ describe('FilesModule Standalone Capabilities & Hardening', () => {
       expect(blobRepo.incrementRefCount).toHaveBeenCalledWith(existingBlob.id);
       expect(quotaRepo.incrementUsage).toHaveBeenCalledWith(
         'user-1',
-        null,
         existingBlob.sizeBytes,
       );
     });
@@ -364,12 +363,10 @@ describe('FilesModule Standalone Capabilities & Hardening', () => {
       });
 
       const quotaRepo: jest.Mocked<IQuotaRepository> = {
-        findByScope: jest.fn(),
+        findBySpaceId: jest.fn(),
         incrementUsage: jest
           .fn()
-          .mockRejectedValue(
-            new BadRequestException('Storage quota exceeded'),
-          ),
+          .mockRejectedValue(new BadRequestException('Storage quota exceeded')),
         decrementUsage: jest.fn(),
       };
 
@@ -448,10 +445,10 @@ describe('FilesModule Standalone Capabilities & Hardening', () => {
 
       const blobService = new BlobService(adapter, blobRepo);
       const quotaRepo: jest.Mocked<IQuotaRepository> = {
-        findByScope: jest.fn().mockResolvedValue(
+        findBySpaceId: jest.fn().mockResolvedValue(
           new StorageQuota({
             id: 'q1',
-            userId: 'user-1',
+            spaceId: 'user-1',
             usedBytes: 0n,
             maxBytes: 1_000_000n,
           }),
@@ -528,6 +525,119 @@ describe('FilesModule Standalone Capabilities & Hardening', () => {
       expect(headers.get('content-type')).toBe('image/png');
       expect(headers.get('content-disposition')).toContain('inline');
       expect(sentBody).toBeDefined();
+    });
+
+    it('uses spaceId-first quota attribution for uploadFile and releases space quota on deleteFile', async () => {
+      const targetSpaceId = '22222222-2222-4222-8222-222222222222';
+      const adapter = createMockAdapter();
+      const blobRepo = createMockBlobRepo();
+      const storedBlobs = new Map<string, StorageBlob>();
+      blobRepo.create.mockImplementation(async (blob) => {
+        storedBlobs.set(blob.id, blob);
+        return blob;
+      });
+      blobRepo.findById.mockImplementation(
+        async (id) => storedBlobs.get(id) ?? null,
+      );
+      const blobService = new BlobService(adapter, blobRepo);
+
+      const quotaRepo: jest.Mocked<IQuotaRepository> = {
+        findBySpaceId: jest.fn().mockResolvedValue(
+          new StorageQuota({
+            id: 'q-space',
+            spaceId: targetSpaceId,
+            usedBytes: 0n,
+            maxBytes: 1_000_000n,
+          }),
+        ),
+        incrementUsage: jest.fn().mockResolvedValue(22n),
+        decrementUsage: jest.fn().mockResolvedValue(0n),
+      };
+
+      const sessionRepo = {
+        create: jest.fn(),
+        findById: jest.fn(),
+        update: jest.fn(),
+        findExpiredSessions: jest.fn(),
+      } as jest.Mocked<ISessionRepository>;
+
+      const quotaService = new QuotaService(quotaRepo);
+      const presignService = new PresignService(
+        blobService,
+        quotaService,
+        sessionRepo,
+      );
+      const streamService = new FileStreamService(blobService);
+      const facade = new FilesFacade(
+        blobService,
+        quotaService,
+        presignService,
+        streamService,
+      );
+
+      const pdfBytes = Buffer.from('%PDF-1.7\nhello space!');
+      const uploaded = await facade.uploadFile({
+        userId: 'system',
+        spaceId: targetSpaceId,
+        filename: 'fulltext.json.gz',
+        buffer: pdfBytes,
+        mimeType: 'application/gzip',
+      });
+
+      expect(quotaRepo.findBySpaceId).toHaveBeenCalledWith(targetSpaceId);
+      expect(quotaRepo.incrementUsage).toHaveBeenCalledWith(
+        targetSpaceId,
+        BigInt(pdfBytes.length),
+      );
+
+      await facade.deleteFile(uploaded.fileId, { spaceId: targetSpaceId });
+
+      expect(quotaRepo.decrementUsage).toHaveBeenCalledWith(
+        targetSpaceId,
+        BigInt(pdfBytes.length),
+      );
+      expect(blobRepo.decrementRefCount).toHaveBeenCalledWith(uploaded.fileId);
+    });
+
+    it('blocks path traversal and restricted prefixes on FilesController.streamObjectByKey', async () => {
+      const facade = {
+        streamByKey: jest.fn(),
+      } as unknown as FilesFacade;
+      const controller = new FilesController(facade, {} as any);
+
+      for (const blockedUrl of [
+        '/api/v1/files/objects/..%2F..%2Fetc%2Fpasswd',
+        '/api/v1/files/objects/backups%2Fproject-backup.zip',
+        '/api/v1/files/objects/uploads%2Fstaging%2Fsecret.bin',
+      ]) {
+        let statusCode = 0;
+        let payload: unknown;
+        const mockRes = {
+          status: jest.fn((code: number) => {
+            statusCode = code;
+            return mockRes;
+          }),
+          header: jest.fn().mockReturnThis(),
+          send: jest.fn((body: unknown) => {
+            payload = body;
+            return mockRes;
+          }),
+        } as any;
+
+        await controller.streamObjectByKey(
+          { url: blockedUrl, headers: {} } as any,
+          mockRes,
+        );
+
+        expect(statusCode).toBe(403);
+        expect(payload).toEqual(
+          expect.objectContaining({
+            statusCode: 403,
+            message: 'Access to restricted storage path is forbidden',
+          }),
+        );
+      }
+      expect(facade.streamByKey).not.toHaveBeenCalled();
     });
   });
 });

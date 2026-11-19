@@ -6,89 +6,46 @@ import { cleanUuid } from '../domain/files.policy';
 import { QuotaMapper } from '../domain/files.mapper';
 
 export interface IQuotaRepository {
-  findByScope(
-    userId?: string | null,
-    projectId?: string | null,
-  ): Promise<StorageQuota | null>;
-  incrementUsage(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
-    bytes: bigint,
-  ): Promise<bigint>;
-  decrementUsage(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
-    bytes: bigint,
-  ): Promise<bigint>;
+  findBySpaceId(spaceId: string): Promise<StorageQuota | null>;
+  incrementUsage(spaceId: string, bytes: bigint): Promise<bigint>;
+  decrementUsage(spaceId: string, bytes: bigint): Promise<bigint>;
 }
 
 @Injectable()
 export class QuotaRepository implements IQuotaRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  private resolveCanonicalScope(
-    userId?: string | null,
-    projectId?: string | null,
-  ): {
-    spaceId: string | null;
-    userId: string | null;
-    projectId: string | null;
-  } {
-    const validProjectId = cleanUuid(projectId);
-    if (validProjectId) {
-      return {
-        spaceId: validProjectId,
-        userId: null,
-        projectId: validProjectId,
-      };
-    }
-    const validUserId = cleanUuid(userId);
-    return {
-      spaceId: validUserId,
-      userId: validUserId,
-      projectId: null,
-    };
-  }
-
-  async findByScope(
-    userId?: string | null,
-    projectId?: string | null,
-  ): Promise<StorageQuota | null> {
-    const scope = this.resolveCanonicalScope(userId, projectId);
-    if (!scope.spaceId) {
+  async findBySpaceId(spaceId: string): Promise<StorageQuota | null> {
+    const validSpaceId = cleanUuid(spaceId);
+    if (!validSpaceId) {
       return null;
     }
 
     const record = await this.prisma.storageQuota.findUnique({
       where: {
-        spaceId: scope.spaceId,
+        spaceId: validSpaceId,
       },
     });
-    return record ? QuotaMapper.toDomain(record, scope) : null;
+    return record ? QuotaMapper.toDomain(record) : null;
   }
 
-  async incrementUsage(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
-    bytes: bigint,
-  ): Promise<bigint> {
+  async incrementUsage(spaceId: string, bytes: bigint): Promise<bigint> {
     if (bytes <= 0n) {
-      const current = await this.findByScope(userId, projectId);
+      const current = await this.findBySpaceId(spaceId);
       return current?.usedBytes ?? 0n;
     }
 
-    const scope = this.resolveCanonicalScope(userId, projectId);
-    if (!scope.spaceId) {
+    const validSpaceId = cleanUuid(spaceId);
+    if (!validSpaceId) {
       return 0n;
     }
-    const spaceId = scope.spaceId;
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${spaceId}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${validSpaceId}))`;
 
       const existing = await tx.storageQuota.findUnique({
         where: {
-          spaceId,
+          spaceId: validSpaceId,
         },
       });
 
@@ -109,7 +66,7 @@ export class QuotaRepository implements IQuotaRepository {
 
       const created = await tx.storageQuota.create({
         data: {
-          spaceId,
+          spaceId: validSpaceId,
           usedBytes: bytes,
           maxBytes: DEFAULT_STORAGE_QUOTA_BYTES,
         },
@@ -118,28 +75,23 @@ export class QuotaRepository implements IQuotaRepository {
     });
   }
 
-  async decrementUsage(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
-    bytes: bigint,
-  ): Promise<bigint> {
+  async decrementUsage(spaceId: string, bytes: bigint): Promise<bigint> {
     if (bytes <= 0n) {
-      const current = await this.findByScope(userId, projectId);
+      const current = await this.findBySpaceId(spaceId);
       return current?.usedBytes ?? 0n;
     }
 
-    const scope = this.resolveCanonicalScope(userId, projectId);
-    if (!scope.spaceId) {
+    const validSpaceId = cleanUuid(spaceId);
+    if (!validSpaceId) {
       return 0n;
     }
-    const spaceId = scope.spaceId;
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${spaceId}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${validSpaceId}))`;
 
       const quota = await tx.storageQuota.findUnique({
         where: {
-          spaceId,
+          spaceId: validSpaceId,
         },
       });
       if (!quota) return 0n;

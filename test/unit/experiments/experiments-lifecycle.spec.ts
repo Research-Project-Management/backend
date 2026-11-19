@@ -6,16 +6,16 @@ import {
   BlobStatus,
   ContentHash,
   StorageKey,
-  UploadSession,
+  FilesFacade,
+  FileStreamService,
+  PresignService,
+  QuotaService,
 } from '@/modules/files';
 import {
   TrashRetentionJob,
-  MultipartCleanupJob,
   ExperimentsLifecycleService,
   ExperimentsQueueConsumer,
   EXPERIMENTS_JOB_MAINTENANCE_TRASH,
-  EXPERIMENTS_JOB_MAINTENANCE_MULTIPART,
-  EXPERIMENTS_JOB_MAINTENANCE_ORPHAN,
   ExperimentNode,
   TrashService,
 } from '@/modules/experiments';
@@ -151,13 +151,23 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
         invalidateFolder: jest.fn(),
       };
 
+      const blobService = new BlobService({} as any, mockBlobRepo);
+      const quotaService = new QuotaService(mockQuotaRepo);
+      const filesPort = new FilesFacade(
+        blobService,
+        quotaService,
+        new PresignService(blobService, quotaService, {} as any),
+        new FileStreamService(blobService),
+      );
       const trashService = new TrashService(
         mockNodeRepo,
-        new BlobService({} as any, mockBlobRepo),
-        mockQuotaRepo,
+        filesPort,
         mockCache,
         { emit: jest.fn() } as any,
-        { findByFileId: jest.fn().mockResolvedValue([]), deleteByFileId: jest.fn() } as any,
+        {
+          findByFileId: jest.fn().mockResolvedValue([]),
+          deleteByFileId: jest.fn(),
+        } as any,
       );
 
       job = new TrashRetentionJob(mockNodeRepo, trashService);
@@ -196,7 +206,6 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
 
       // Verify quota decremented
       expect(mockQuotaRepo.decrementUsage).toHaveBeenCalledWith(
-        'user-001',
         'project-001',
         1048576n,
       );
@@ -253,53 +262,8 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       expect(mockNodeRepo.delete).toHaveBeenCalledWith('folder-root');
       expect(mockQuotaRepo.decrementUsage).toHaveBeenCalledWith(
         'user-001',
-        null,
         2048n,
       );
-    });
-  });
-
-  describe('MultipartCleanupJob - Abandoned Upload Sessions Abort', () => {
-    let job: MultipartCleanupJob;
-    let mockDriver: any;
-    let mockSessionRepo: any;
-
-    beforeEach(() => {
-      mockDriver = {
-        abortMultipartUpload: jest.fn(),
-      };
-      mockSessionRepo = {
-        findExpiredSessions: jest.fn(),
-        update: jest.fn(),
-      };
-      job = new MultipartCleanupJob(mockDriver, mockSessionRepo);
-    });
-
-    it('should abort abandoned multipart sessions in storage and mark aborted in DB', async () => {
-      const expiredSession = new UploadSession({
-        id: 'session-001',
-        s3Key: 'multipart/test-large.bin',
-        s3UploadId: 's3-upload-id-123',
-        partSize: 5242880,
-        totalParts: 4,
-        filename: 'large.bin',
-        totalSize: 20971520n,
-        mimeType: 'application/octet-stream',
-        userId: 'user-001',
-        expiresAt: new Date(Date.now() - 3600000), // 1 hour ago
-      });
-
-      mockSessionRepo.findExpiredSessions.mockResolvedValue([expiredSession]);
-
-      const count = await job.processExpiredSessions();
-
-      expect(count).toBe(1);
-      expect(mockDriver.abortMultipartUpload).toHaveBeenCalledWith(
-        'multipart/test-large.bin',
-        's3-upload-id-123',
-      );
-      expect(expiredSession.status).toBe('ABORTED');
-      expect(mockSessionRepo.update).toHaveBeenCalledWith(expiredSession);
     });
   });
 
@@ -346,7 +310,6 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
     let mockNodeRepo: any;
     let mockBlobRepo: any;
     let mockTrashJob: any;
-    let mockMultipartJob: any;
 
     beforeEach(() => {
       mockDriver = { getStream: jest.fn(), delete: jest.fn() };
@@ -358,15 +321,19 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       mockTrashJob = {
         processExpiredTrash: jest.fn().mockResolvedValue({ purgedCount: 3 }),
       };
-      mockMultipartJob = {
-        processExpiredSessions: jest.fn().mockResolvedValue(2),
-      };
 
+      const blobService = new BlobService(mockDriver, mockBlobRepo);
+      const quotaService = new QuotaService({} as any);
+      const filesPort = new FilesFacade(
+        blobService,
+        quotaService,
+        new PresignService(blobService, quotaService, {} as any),
+        new FileStreamService(blobService),
+      );
       consumer = new ExperimentsQueueConsumer(
-        new BlobService(mockDriver, mockBlobRepo),
+        filesPort,
         mockNodeRepo,
         mockTrashJob,
-        mockMultipartJob,
       );
     });
 
@@ -380,41 +347,14 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       expect(mockTrashJob.processExpiredTrash).toHaveBeenCalled();
       expect(res).toEqual({ purgedCount: 3 });
     });
-
-    it('should dispatch to MultipartCleanupJob when job name is maintenance-multipart-cleanup', async () => {
-      const res = await consumer.process({
-        id: 'job-2',
-        name: EXPERIMENTS_JOB_MAINTENANCE_MULTIPART,
-        data: {},
-      } as any);
-
-      expect(mockMultipartJob.processExpiredSessions).toHaveBeenCalled();
-      expect(res).toBe(2);
-    });
-
-    it('should dispatch to BlobService.reclaimOrphanBlobs when job name is maintenance-orphan-blob', async () => {
-      const res = await consumer.process({
-        id: 'job-3',
-        name: EXPERIMENTS_JOB_MAINTENANCE_ORPHAN,
-        data: {},
-      } as any);
-
-      expect(mockBlobRepo.findTombstonedBlobs).toHaveBeenCalled();
-      expect(res).toBe(0);
-    });
   });
 
   describe('ExperimentsLifecycleService - Bootstrap & Coordination', () => {
     let service: ExperimentsLifecycleService;
-    let mockDriver: any;
     let mockProducer: any;
     let mockPrisma: any;
 
     beforeEach(() => {
-      mockDriver = {
-        applyLifecycleRules: jest.fn().mockResolvedValue(undefined),
-        getLifecycleRules: jest.fn().mockResolvedValue({ rules: [] }),
-      };
       mockProducer = {
         scheduleMaintenanceJobs: jest.fn().mockResolvedValue(undefined),
       };
@@ -422,21 +362,16 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
         $executeRawUnsafe: jest.fn().mockResolvedValue(0),
       };
 
-      service = new ExperimentsLifecycleService(
-        mockDriver,
-        mockProducer,
-        mockPrisma,
-      );
+      service = new ExperimentsLifecycleService(mockProducer, mockPrisma);
     });
 
-    it('onApplicationBootstrap should run legacy URL backfill, initialize bucket rules, and schedule maintenance in BullMQ', async () => {
+    it('onApplicationBootstrap should run legacy URL backfill and schedule trash retention in BullMQ', async () => {
       await service.onApplicationBootstrap();
 
       expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(1);
       const executedSql = String(mockPrisma.$executeRawUnsafe.mock.calls[0][0]);
       expect(executedSql).toContain('/api/v1/experiments/files/');
       expect(executedSql).toContain('/api/v1/files/local-');
-      expect(mockDriver.applyLifecycleRules).toHaveBeenCalled();
       expect(mockProducer.scheduleMaintenanceJobs).toHaveBeenCalled();
     });
   });

@@ -7,6 +7,10 @@ import {
   BlobStatus,
   ContentHash,
   StorageKey,
+  FilesFacade,
+  FileStreamService,
+  PresignService,
+  QuotaService,
 } from '@/modules/files';
 import {
   ExperimentsFacade,
@@ -144,7 +148,7 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
     };
 
     mockQuotaRepo = {
-      findByScope: jest.fn(),
+      findBySpaceId: jest.fn(),
       incrementUsage: jest.fn().mockResolvedValue(1000n),
       decrementUsage: jest.fn().mockResolvedValue(0n),
     };
@@ -163,10 +167,17 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
     } as any;
 
     const blobService = new BlobService(mockDriver, mockBlobRepo);
-    uploadService = new UploadService(
+    const quotaService = new QuotaService(mockQuotaRepo);
+    const filesFacade = new FilesFacade(
       blobService,
+      quotaService,
+      new PresignService(blobService, quotaService, {} as any),
+      new FileStreamService(blobService),
+    );
+
+    uploadService = new UploadService(
+      filesFacade,
       mockNodeRepo,
-      mockQuotaRepo,
       mockCache,
       mockEventEmitter,
     );
@@ -176,12 +187,12 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
     } as any;
 
     facade = new ExperimentsFacade(
-      blobService,
+      filesFacade,
       mockNodeRepo,
       uploadService,
       {} as any,
       {} as any,
-      new StreamService(blobService, mockNodeRepo, mockCache, mockAccessPolicy),
+      new StreamService(filesFacade, mockNodeRepo, mockCache, mockAccessPolicy),
       {} as any,
       mockAccessPolicy,
     );
@@ -196,7 +207,7 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
       filename: 'qml_paper.pdf',
       buffer: pdfContent,
       mimeType: 'application/pdf',
-      source: 'library',
+      source: 'experiments',
     });
 
     expect(result.fileId).toBeDefined();
@@ -211,9 +222,9 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
     expect(blobsInDb.size).toBe(1);
     expect(nodesInDb.size).toBe(1);
 
-    // Verify node has scope Library
+    // Verify node has Personal scope
     const storedNode = nodesInDb.get(result.fileId);
-    expect(storedNode?.scope).toBe('Library');
+    expect(storedNode?.scope).toBe('Personal');
   });
 
   it('should perform Content-Addressable Deduplication (CAS) for identical files', async () => {
