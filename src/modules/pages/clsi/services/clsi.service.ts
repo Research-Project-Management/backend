@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/services/clsi.service.ts
+ * modules/pages/clsi/services/clsi.service.ts
  * Deep module orchestrating CLSI compile operations, caching, SyncTeX coordinate
  * resolution, and academic word counts.
  */
@@ -7,8 +7,6 @@
 import {
   Injectable,
   Logger,
-  NotFoundException,
-  ForbiddenException,
   HttpException,
   Optional,
   OnModuleDestroy,
@@ -19,13 +17,11 @@ import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config
 import { ConfigService } from '@nestjs/config';
 import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import { PrismaService, RedisCacheService, isUuid } from '@/core';
+import { PrismaService, RedisCacheService } from '@/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import {
-  CompileManuscriptDto,
+  CompilePageDto,
   ClsiWordCountDto,
   ClsiAiTransformDto,
   ClsiAiFixErrorDto,
@@ -33,7 +29,6 @@ import {
 } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import {
-  CompilerDiagnostic,
   SyncPoint,
   ReverseSyncPoint,
   WordCountStats,
@@ -42,22 +37,12 @@ import {
   WorkspaceRepository,
   DiskUsageCleaner,
   DiskUsageOptions,
-  createZipStreamFromDisk,
-  ZipDiskEntry,
 } from '../repositories/workspace.repository';
 import {
   CompileLogAnalyzer,
   SyntaxLinter,
 } from '@/modules/pages/diagnostics/domain';
-import {
-  maskLatexEntities,
-  getAiSystemPrompt,
-  applyFallbackTransform,
-  fixLatexError,
-  AiActionResult,
-  AiErrorFixResult,
-} from '../domain/ai-assistant';
-import { EngineService } from '@/modules/ai/engine/engine.service';
+import { AiActionResult, AiErrorFixResult } from '../domain/ai-assistant';
 import { SyncTexProcessor } from '../domain/synctex.parser';
 import { TexWordCounter } from '../domain/tex-word.counter';
 import { PlannedFileSet } from '../domain/fileset.planner';
@@ -78,16 +63,28 @@ import {
   parseSandboxConfig,
   buildSandboxProfileFromConfig,
 } from './sandbox/sandbox-config';
+import {
+  type SynctexDiskCacheEntry,
+  forwardSyncHelper,
+  getWordCountHelper,
+  reverseSyncHelper,
+} from './clsi-synctex-wordcount.helper';
+import {
+  type EditorLastBuildSummary,
+  downloadAllArtifactsZipHelper,
+  downloadAuxFileHelper,
+  getLastBuildSummaryHelper,
+  syncCachedArtifactsToScratchHelper,
+} from './clsi-artifacts.helper';
+import {
+  type ClsiAiEngine,
+  fixLatexErrorHelper,
+  generateLatexTableHelper,
+  transformAcademicTextHelper,
+} from './clsi-ai.helper';
 
 export type ClsiCompileResult = CompilePipelineResult;
-
-export interface EditorLastBuildSummary {
-  status: 'ready' | 'error' | 'uncompiled';
-  pdfArtifactUrl: string | null;
-  synctexAvailable: boolean;
-  lastCompiledAt: string | null;
-  diagnostics: CompilerDiagnostic[];
-}
+export type { EditorLastBuildSummary };
 
 @Injectable()
 export class ClsiService implements OnModuleDestroy {
@@ -99,10 +96,7 @@ export class ClsiService implements OnModuleDestroy {
   private readonly synctexParser: SyncTexProcessor;
   private readonly wordCounter: TexWordCounter;
   private readonly fairQueue: CompileQueueService;
-  private readonly synctexDiskCache = new Map<
-    string,
-    { mtimeMs: number; size: number; content: string }
-  >();
+  private readonly synctexDiskCache = new Map<string, SynctexDiskCacheEntry>();
   private readonly activeQueueJobIds = new Map<string, string>();
   private readonly diskUsageCleaner: DiskUsageCleaner;
   private readonly healthCheck: ClsiHealthCheck;
@@ -129,16 +123,7 @@ export class ClsiService implements OnModuleDestroy {
     @Optional() pipeline?: CompilePipeline,
     @Optional() fairQueue?: CompileQueueService,
     @Optional()
-    private readonly aiEngine?: EngineService & {
-      generate?: (params: {
-        prompt: string;
-        systemInstruction?: string;
-        temperature?: number;
-        userId?: string;
-        spaceId?: string;
-        projectId?: string | null;
-      }) => Promise<{ text?: string } | null | undefined>;
-    },
+    private readonly aiEngine?: ClsiAiEngine,
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly filestoreService?: FilestoreService,
@@ -265,7 +250,7 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   private async queueCompileJob(
-    dto: CompileManuscriptDto,
+    dto: CompilePageDto,
     userId?: string,
     authorizedProjectId?: string,
   ): Promise<ClsiCompileResult> {
@@ -356,7 +341,7 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public async enqueueCompile(
-    dto: CompileManuscriptDto,
+    dto: CompilePageDto,
     userId?: string,
     authorizedProjectId?: string,
   ): Promise<{ jobId: string }> {
@@ -378,7 +363,7 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public async compile(
-    dto: CompileManuscriptDto,
+    dto: CompilePageDto,
     userId?: string,
     authorizedProjectId?: string,
   ): Promise<ClsiCompileResult> {
@@ -403,14 +388,14 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public async compileInline(
-    dto: CompileManuscriptDto,
+    dto: CompilePageDto,
     _userId?: string,
     authorizedProjectId?: string,
   ): Promise<ClsiCompileResult> {
     const requestedEngine = dto.engine;
     const texLiveVersion = dto.texLiveVersion || '2025';
     const { spaceId: resolvedSpaceId, pageId: manuscriptPageId } =
-      await this.workspacePlanner.resolveManuscriptContext(
+      await this.workspacePlanner.resolvePageCompileContext(
         dto,
         authorizedProjectId,
       );
@@ -470,7 +455,11 @@ export class ClsiService implements OnModuleDestroy {
           const cacheLookupStart = Date.now();
           const cached = await this.cache.get<ClsiCompileResult>(cacheKey);
           if (cached && cached.success) {
-            await this.syncCachedArtifactsToScratch(scratchWorkspaceId, cached);
+            await syncCachedArtifactsToScratchHelper(
+              this.workspace,
+              scratchWorkspaceId,
+              cached,
+            );
             this.metrics.record({
               engine: metricEngine,
               durationMs: Math.max(1, Date.now() - cacheLookupStart),
@@ -503,50 +492,10 @@ export class ClsiService implements OnModuleDestroy {
     );
   }
 
-  private async syncCachedArtifactsToScratch(
-    projectId: string,
-    result: ClsiCompileResult,
-  ): Promise<void> {
-    try {
-      const scratchDir = await this.workspace.ensureScratch(projectId);
-      const writes: Promise<void>[] = [];
-      if (result.pdf) {
-        writes.push(
-          fs.writeFile(
-            path.join(scratchDir, 'output.pdf'),
-            Buffer.from(result.pdf, 'base64'),
-          ),
-        );
-      }
-      if (result.synctex) {
-        writes.push(
-          fs.writeFile(
-            path.join(scratchDir, 'output.synctex.gz'),
-            Buffer.from(result.synctex, 'base64'),
-          ),
-        );
-      }
-      if (result.logs) {
-        writes.push(
-          fs.writeFile(
-            path.join(scratchDir, 'output.log'),
-            result.logs,
-            'utf8',
-          ),
-        );
-      }
-      if (writes.length > 0) {
-        await Promise.allSettled(writes);
-      }
-    } catch {
-      // Non-blocking artifact sync to local workspace scratch
-    }
-  }
-
   private async runScheduledCompile(
     projectId: string,
     plan: PlannedFileSet,
-    dto: CompileManuscriptDto,
+    dto: CompilePageDto,
     engine: string | undefined,
     cacheKey: string,
     effectiveTimeoutMs: number,
@@ -589,7 +538,11 @@ export class ClsiService implements OnModuleDestroy {
     });
 
     if (remoteResult) {
-      await this.syncCachedArtifactsToScratch(scratchWorkspaceId, remoteResult);
+      await syncCachedArtifactsToScratchHelper(
+        this.workspace,
+        scratchWorkspaceId,
+        remoteResult,
+      );
     }
 
     const pipelineResult: CompilePipelineResult =
@@ -662,57 +615,6 @@ export class ClsiService implements OnModuleDestroy {
     return this.fairQueue.cancel(projectId) || Boolean(existingJobId);
   }
 
-  private async loadSynctexContent(
-    projectId: string,
-    inlineSynctexBase64?: string,
-  ): Promise<string | null> {
-    if (inlineSynctexBase64) {
-      const buffer = Buffer.from(inlineSynctexBase64, 'base64');
-      return await this.synctexParser.decompress(buffer);
-    }
-
-    const scratchDir = this.workspace.getScratchDir(projectId);
-    for (const filename of ['output.synctex.gz', 'output.synctex']) {
-      try {
-        const safePath = path.join(scratchDir, filename);
-        const stat = await fs.lstat(safePath);
-        if (stat.isSymbolicLink() || !stat.isFile()) continue;
-
-        const cacheKey = `${projectId}:${filename}`;
-        const cached = this.synctexDiskCache.get(cacheKey);
-        if (
-          cached &&
-          cached.mtimeMs === stat.mtimeMs &&
-          cached.size === stat.size
-        ) {
-          return cached.content;
-        }
-
-        const buf = await this.workspace.readAuxFile(projectId, filename);
-        if (!buf) continue;
-        const content = filename.endsWith('.gz')
-          ? await this.synctexParser.decompress(buf)
-          : buf.toString('utf8');
-        if (content) {
-          if (this.synctexDiskCache.size >= 16) {
-            const oldestKey = this.synctexDiskCache.keys().next().value;
-            if (oldestKey) this.synctexDiskCache.delete(oldestKey);
-          }
-          this.synctexDiskCache.set(cacheKey, {
-            mtimeMs: stat.mtimeMs,
-            size: stat.size,
-            content,
-          });
-          return content;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    return null;
-  }
-
   public async forwardSync(
     dto: ForwardSyncDto,
     authorizedProjectId?: string,
@@ -721,43 +623,18 @@ export class ClsiService implements OnModuleDestroy {
     result?: SyncPoint;
     error?: string;
   }> {
-    const { spaceId, pageId } =
-      await this.workspacePlanner.resolveManuscriptContext(
-        dto,
-        authorizedProjectId,
-      );
-    const scratchId = pageId || spaceId;
-
-    const remoteRes = await this.remoteClient.tryRemoteForwardSync(dto);
-    if (remoteRes) return remoteRes;
-
-    let synctexContent = await this.loadSynctexContent(scratchId, dto.synctex);
-    if (!synctexContent && pageId && spaceId && pageId !== spaceId) {
-      synctexContent = await this.loadSynctexContent(spaceId);
-    }
-    if (!synctexContent) {
-      return {
-        success: false,
-        error:
-          'SyncTeX data not available. Compile the manuscript first to generate SyncTeX mapping.',
-      };
-    }
-
-    const point = this.synctexParser.forwardLookup(
-      synctexContent,
-      dto.file || 'main.tex',
-      dto.line,
-      dto.column,
+    return await forwardSyncHelper(
+      {
+        workspace: this.workspace,
+        synctexParser: this.synctexParser,
+        wordCounter: this.wordCounter,
+        synctexDiskCache: this.synctexDiskCache,
+        remoteClient: this.remoteClient,
+        workspacePlanner: this.workspacePlanner,
+      },
+      dto,
+      authorizedProjectId,
     );
-
-    if (!point) {
-      return {
-        success: false,
-        error: `No PDF coordinate match found for ${dto.file || 'main.tex'}:${dto.line}`,
-      };
-    }
-
-    return { success: true, result: point };
   }
 
   public async reverseSync(
@@ -768,43 +645,18 @@ export class ClsiService implements OnModuleDestroy {
     result?: ReverseSyncPoint;
     error?: string;
   }> {
-    const { spaceId, pageId } =
-      await this.workspacePlanner.resolveManuscriptContext(
-        dto,
-        authorizedProjectId,
-      );
-    const scratchId = pageId || spaceId;
-
-    const remoteRes = await this.remoteClient.tryRemoteReverseSync(dto);
-    if (remoteRes) return remoteRes;
-
-    let synctexContent = await this.loadSynctexContent(scratchId, dto.synctex);
-    if (!synctexContent && pageId && spaceId && pageId !== spaceId) {
-      synctexContent = await this.loadSynctexContent(spaceId);
-    }
-    if (!synctexContent) {
-      return {
-        success: false,
-        error:
-          'SyncTeX data not available. Compile the manuscript first to generate SyncTeX mapping.',
-      };
-    }
-
-    const point = this.synctexParser.reverseLookup(
-      synctexContent,
-      dto.page,
-      dto.x,
-      dto.y,
+    return await reverseSyncHelper(
+      {
+        workspace: this.workspace,
+        synctexParser: this.synctexParser,
+        wordCounter: this.wordCounter,
+        synctexDiskCache: this.synctexDiskCache,
+        remoteClient: this.remoteClient,
+        workspacePlanner: this.workspacePlanner,
+      },
+      dto,
+      authorizedProjectId,
     );
-
-    if (!point) {
-      return {
-        success: false,
-        error: `No source line match found at Page ${dto.page} (${dto.x}, ${dto.y})`,
-      };
-    }
-
-    return { success: true, result: point };
   }
 
   public async getWordCount(
@@ -815,151 +667,14 @@ export class ClsiService implements OnModuleDestroy {
     stats?: WordCountStats;
     error?: string;
   }> {
-    const { spaceId: resolvedSpaceId, pageId: resolvedPageId } =
-      await this.workspacePlanner.resolveManuscriptContext(
-        dto,
-        authorizedProjectId,
-      );
-    const projectId =
-      resolvedSpaceId && resolvedSpaceId !== 'default'
-        ? resolvedSpaceId
-        : undefined;
-    const manuscriptPageId = resolvedPageId ?? dto.pageId;
-    const scratchScopeId = manuscriptPageId || projectId || 'default';
-
-    // Multi-file project word count if files map is provided or projectId is provided without explicit single-file source
-    if (
-      (dto.files && Object.keys(dto.files).length > 0) ||
-      (projectId && projectId !== 'default' && dto.source === undefined)
-    ) {
-      let stringFiles: Record<string, string> = {};
-      let rootFile = dto.filename || 'main.tex';
-
-      if (projectId && projectId !== 'default') {
-        try {
-          const plan = await this.workspacePlanner.planFiles(
-            projectId,
-            {
-              spaceId: projectId,
-              pageId: manuscriptPageId,
-              files: dto.files,
-            },
-            manuscriptPageId,
-          );
-          rootFile = plan.mainFile || rootFile;
-          const hydrated = await this.workspacePlanner.hydrateFiles(
-            projectId,
-            plan,
-            scratchScopeId,
-          );
-          for (const [filePath, val] of Object.entries(hydrated)) {
-            if (typeof val === 'string') {
-              stringFiles[filePath] = val;
-            }
-          }
-        } catch {
-          if (dto.files) {
-            stringFiles = { ...dto.files };
-          }
-        }
-      } else if (dto.files) {
-        stringFiles = { ...dto.files };
-      }
-
-      const stats = this.wordCounter.countProject(stringFiles, {
-        rootFile,
-        includeBib: dto.includeBib,
-      });
-
-      // If single source was also passed along with files, compute single-file stats for `stats` while attaching `perFileStats`
-      if (dto.source !== undefined) {
-        const singleStats = this.wordCounter.count(
-          dto.source,
-          dto.filename || rootFile,
-          { includeBib: dto.includeBib },
-        );
-        return {
-          success: true,
-          stats: {
-            ...singleStats,
-            perFileStats: stats.perFileStats,
-          },
-        };
-      }
-
-      return {
-        success: true,
-        stats,
-      };
-    }
-
-    if (!dto.source || !dto.source.trim()) {
-      return {
-        success: true,
-        stats: {
-          wordsInText: 0,
-          wordsInHeaders: 0,
-          wordsInCaptions: 0,
-          wordsInBibliography: 0,
-          headers: 0,
-          floats: 0,
-          mathInlines: 0,
-          mathDisplayed: 0,
-          totalWords: 0,
-          charactersWithSpaces: 0,
-          charactersNoSpaces: 0,
-          cjkCharacters: 0,
-          readingTimeMinutes: 0,
-          sections: [],
-          rawOutput: 'Empty document (0 words)',
-        },
-      };
-    }
-
-    const stats = this.wordCounter.count(
-      dto.source,
-      dto.filename || 'document.tex',
-      { includeBib: dto.includeBib },
+    return await getWordCountHelper(
+      {
+        workspacePlanner: this.workspacePlanner,
+        wordCounter: this.wordCounter,
+      },
+      dto,
+      authorizedProjectId,
     );
-
-    if (projectId && projectId !== 'default') {
-      try {
-        const plan = await this.workspacePlanner.planFiles(
-          projectId,
-          {
-            spaceId: projectId,
-            pageId: manuscriptPageId,
-            files: dto.files,
-          },
-          manuscriptPageId,
-        );
-        const hydrated = await this.workspacePlanner.hydrateFiles(
-          projectId,
-          plan,
-          scratchScopeId,
-        );
-        const stringFiles: Record<string, string> = {};
-        for (const [filePath, val] of Object.entries(hydrated)) {
-          if (typeof val === 'string') {
-            stringFiles[filePath] = val;
-          }
-        }
-        if (Object.keys(stringFiles).length > 0) {
-          const projectStats = this.wordCounter.countProject(stringFiles, {
-            rootFile: plan.mainFile,
-            includeBib: dto.includeBib,
-          });
-          stats.perFileStats = projectStats.perFileStats;
-        }
-      } catch {
-        // Ignore project hydration failure when counting single source
-      }
-    }
-
-    return {
-      success: true,
-      stats,
-    };
   }
 
   public async listAuxFiles(projectId: string, pageId?: string) {
@@ -974,39 +689,13 @@ export class ClsiService implements OnModuleDestroy {
     res: FastifyReply,
     pageId?: string,
   ) {
-    const scratchId = pageId || projectId;
-    const buffer = await this.workspace.readAuxFile(scratchId, filename);
-    if (!buffer) {
-      throw new NotFoundException(`Artifact file ${filename} not found`);
-    }
-
-    const ext = path.extname(filename).toLowerCase();
-    const mimeTypes: Record<string, string> = {
-      '.pdf': 'application/pdf',
-      '.log': 'text/plain; charset=utf-8',
-      '.aux': 'text/plain; charset=utf-8',
-      '.bbl': 'text/plain; charset=utf-8',
-      '.blg': 'text/plain; charset=utf-8',
-      '.toc': 'text/plain; charset=utf-8',
-      '.lof': 'text/plain; charset=utf-8',
-      '.lot': 'text/plain; charset=utf-8',
-      '.fls': 'text/plain; charset=utf-8',
-      '.fdb_latexmk': 'text/plain; charset=utf-8',
-      '.synctex.gz': 'application/gzip',
-      '.synctex': 'text/plain; charset=utf-8',
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.svg': 'image/svg+xml',
-    };
-    const contentType = mimeTypes[ext] || 'application/octet-stream';
-
-    res.header(
-      'Content-Disposition',
-      `attachment; filename="${encodeURIComponent(filename)}"`,
+    return await downloadAuxFileHelper(
+      this.workspace,
+      projectId,
+      filename,
+      res,
+      pageId,
     );
-    res.header('Content-Type', contentType);
-    return res.send(buffer);
   }
 
   public async readAuxFileBuffer(
@@ -1023,72 +712,13 @@ export class ClsiService implements OnModuleDestroy {
     defaultMainFile = 'main.tex',
     pageId?: string,
   ): Promise<EditorLastBuildSummary> {
-    const scratchId = pageId || projectId;
-    const scratchDir = this.workspace.getScratchDir(scratchId);
-    const statSafe = (filename: string) =>
-      fs.lstat(path.join(scratchDir, filename)).catch(() => null);
-
-    const [pdfStat, logStat, synctexGzStat, synctexStat] = await Promise.all([
-      statSafe('output.pdf'),
-      statSafe('output.log'),
-      statSafe('output.synctex.gz'),
-      statSafe('output.synctex'),
-    ]);
-
-    const isRegularNonEmptyFile = (
-      stat: Awaited<ReturnType<typeof fs.lstat>> | null,
-    ): boolean =>
-      Boolean(stat && !stat.isSymbolicLink() && stat.isFile() && stat.size > 0);
-
-    const hasPdf = isRegularNonEmptyFile(pdfStat);
-    const hasLog = isRegularNonEmptyFile(logStat);
-
-    if (!hasPdf && !hasLog) {
-      return {
-        status: 'uncompiled',
-        pdfArtifactUrl: null,
-        synctexAvailable: false,
-        lastCompiledAt: null,
-        diagnostics: [],
-      };
-    }
-
-    const synctexAvailable =
-      isRegularNonEmptyFile(synctexGzStat) ||
-      isRegularNonEmptyFile(synctexStat);
-    const lastCompiledAt =
-      (pdfStat?.mtime ?? logStat?.mtime)?.toISOString() ?? null;
-
-    let diagnostics: CompilerDiagnostic[] = [];
-    if (hasLog) {
-      const logBuffer = await this.workspace
-        .readAuxFile(scratchId, 'output.log')
-        .catch(() => null);
-      if (logBuffer && logBuffer.length > 0) {
-        const maxBytes = 512 * 1024;
-        const bounded =
-          logBuffer.length > maxBytes
-            ? logBuffer.subarray(logBuffer.length - maxBytes)
-            : logBuffer;
-        diagnostics = this.logParser
-          .parse(bounded.toString('utf8'), defaultMainFile)
-          .slice(0, 50);
-      }
-    }
-
-    const pdfArtifactUrl = hasPdf
-      ? pageId
-        ? `/api/v1/pages/pages/${encodeURIComponent(pageId)}/artifacts/output.pdf`
-        : `/api/v1/pages/spaces/${encodeURIComponent(projectId)}/artifacts/output.pdf`
-      : null;
-
-    return {
-      status: hasPdf ? 'ready' : 'error',
-      pdfArtifactUrl,
-      synctexAvailable,
-      lastCompiledAt,
-      diagnostics,
-    };
+    return await getLastBuildSummaryHelper(
+      this.workspace,
+      this.logParser,
+      projectId,
+      defaultMainFile,
+      pageId,
+    );
   }
 
   public async getHealthReport() {
@@ -1133,163 +763,12 @@ export class ClsiService implements OnModuleDestroy {
     res: FastifyReply,
     pageId?: string,
   ): Promise<void> {
-    const scratchId = pageId || projectId;
-    const scratchDir = this.workspace.getScratchDir(scratchId);
-    const diskEntries: ZipDiskEntry[] = [];
-
-    const walk = async (currentDir: string, relDir: string) => {
-      try {
-        const dirEntries = await fs.readdir(currentDir, {
-          withFileTypes: true,
-        });
-        for (const entry of dirEntries) {
-          if (
-            entry.name === '.project-lock' ||
-            entry.name === '.clsi-manifest.json' ||
-            entry.name === '.clsi-build-state.json' ||
-            entry.name === '.latexmkrc' ||
-            entry.isSymbolicLink()
-          ) {
-            continue;
-          }
-          const fullPath = path.join(currentDir, entry.name);
-          const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
-          if (entry.isDirectory()) {
-            await walk(fullPath, relPath);
-          } else if (entry.isFile()) {
-            const stat = await fs.lstat(fullPath);
-            if (!stat.isSymbolicLink() && stat.isFile()) {
-              diskEntries.push({ fullPath, relPath, date: stat.mtime });
-            }
-          }
-        }
-      } catch {
-        // Ignored
-      }
-    };
-
-    await walk(scratchDir, '');
-
-    if (diskEntries.length === 0) {
-      throw new NotFoundException(
-        `No output artifacts found for project ${projectId}`,
-      );
-    }
-
-    const zipStream = createZipStreamFromDisk(diskEntries);
-    res.header(
-      'Content-Disposition',
-      `attachment; filename="project-${encodeURIComponent(projectId)}-artifacts.zip"`,
+    return await downloadAllArtifactsZipHelper(
+      this.workspace,
+      projectId,
+      res,
+      pageId,
     );
-    res.header('Content-Type', 'application/zip');
-    return res.send(zipStream);
-  }
-
-  private async verifyOptionalAiScopeAccess(
-    userId?: string,
-    rawSpaceId?: string,
-    rawPageId?: string,
-  ): Promise<{ spaceId?: string; projectId?: string | null; pageId?: string }> {
-    if (!userId || !this.prisma) {
-      return { spaceId: rawSpaceId, pageId: rawPageId };
-    }
-
-    let resolvedSpaceId = rawSpaceId?.trim() || undefined;
-    let resolvedPageId = rawPageId?.trim() || undefined;
-    let resolvedProjectId: string | null = null;
-
-    if (resolvedPageId && isUuid(resolvedPageId)) {
-      const page = await Promise.resolve(
-        this.prisma.page?.findFirst?.({
-          where: { id: resolvedPageId, deletedAt: null },
-          select: { id: true, spaceId: true },
-        }),
-      ).catch(() => null);
-
-      if (page) {
-        resolvedPageId = page.id;
-        resolvedSpaceId = resolvedSpaceId || page.spaceId;
-      } else {
-        const doc = await Promise.resolve(
-          this.prisma.pageDoc?.findFirst?.({
-            where: { id: resolvedPageId, deletedAt: null },
-            select: { id: true, pageId: true, spaceId: true },
-          }),
-        ).catch(() => null);
-        if (doc) {
-          resolvedPageId = doc.pageId || doc.id;
-          resolvedSpaceId = resolvedSpaceId || doc.spaceId;
-        }
-      }
-    }
-
-    if (resolvedSpaceId && isUuid(resolvedSpaceId)) {
-      const space = await Promise.resolve(
-        this.prisma.space?.findFirst?.({
-          where: { id: resolvedSpaceId },
-          select: { id: true, type: true, ownerUserId: true, projectId: true },
-        }),
-      ).catch(() => null);
-
-      if (space) {
-        if (space.type === 'personal') {
-          if (space.ownerUserId && space.ownerUserId !== userId) {
-            throw new ForbiddenException(
-              'You do not have access to this workspace',
-            );
-          }
-          resolvedProjectId = null;
-        } else if (space.projectId) {
-          resolvedProjectId = space.projectId;
-          const project = await Promise.resolve(
-            this.prisma.project?.findFirst?.({
-              where: {
-                id: space.projectId,
-                deletedAt: null,
-                OR: [
-                  { createdById: userId },
-                  { members: { some: { userId } } },
-                ],
-              },
-              select: { id: true },
-            }),
-          ).catch(() => null);
-          if (
-            typeof this.prisma.project?.findFirst === 'function' &&
-            !project
-          ) {
-            throw new ForbiddenException(
-              'You do not have access to this workspace',
-            );
-          }
-        }
-      } else if (resolvedSpaceId !== userId) {
-        const project = await Promise.resolve(
-          this.prisma.project?.findFirst?.({
-            where: {
-              id: resolvedSpaceId,
-              deletedAt: null,
-              OR: [{ createdById: userId }, { members: { some: { userId } } }],
-            },
-            select: { id: true },
-          }),
-        ).catch(() => null);
-        if (typeof this.prisma.project?.findFirst === 'function' && !project) {
-          throw new ForbiddenException(
-            'You do not have access to this workspace',
-          );
-        }
-        if (project) {
-          resolvedProjectId = project.id;
-        }
-      }
-    }
-
-    return {
-      spaceId: resolvedSpaceId,
-      projectId: resolvedProjectId,
-      pageId: resolvedPageId,
-    };
   }
 
   /**
@@ -1301,108 +780,12 @@ export class ClsiService implements OnModuleDestroy {
     dto: ClsiAiTransformDto,
     userId?: string,
   ): Promise<AiActionResult> {
-    const {
-      action,
-      selectedText,
-      customPrompt,
-      contextBefore,
-      contextAfter,
-      documentTitle,
-    } = dto;
-
-    const scope = await this.verifyOptionalAiScopeAccess(
+    return await transformAcademicTextHelper(
+      this.prisma,
+      this.aiEngine,
+      dto,
       userId,
-      dto.spaceId,
-      dto.pageId,
     );
-
-    const rawText = selectedText || '';
-    const trimmed = rawText.trim();
-    const leadingWs = rawText.match(/^\s*/)?.[0] ?? '';
-    const trailingWs = rawText.match(/\s*$/)?.[0] ?? '';
-
-    if (!trimmed) {
-      return {
-        success: false,
-        originalText: selectedText,
-        suggestedText: selectedText,
-        explanation: 'No text selected.',
-        action,
-        diffSummary: {
-          charsOriginal: 0,
-          charsSuggested: 0,
-          wordsOriginal: 0,
-          wordsSuggested: 0,
-        },
-      };
-    }
-
-    const { maskedText, unmask } = maskLatexEntities(trimmed);
-    let suggestedCore = '';
-    let explanation = '';
-
-    if (this.aiEngine && typeof this.aiEngine.generate === 'function') {
-      try {
-        const systemPrompt = getAiSystemPrompt(action, customPrompt);
-        const promptParts: string[] = [];
-        if (documentTitle) {
-          promptParts.push(`Document Title: ${documentTitle}`);
-        }
-        if (contextBefore) {
-          promptParts.push(
-            `Context before selection:\n"""\n${contextBefore.slice(-1500)}\n"""`,
-          );
-        }
-        promptParts.push(`Text to edit:\n"""\n${maskedText}\n"""`);
-        if (contextAfter) {
-          promptParts.push(
-            `Context after selection:\n"""\n${contextAfter.slice(0, 1500)}\n"""`,
-          );
-        }
-        const promptText = promptParts.join('\n\n');
-        const aiRes = await this.aiEngine.generate({
-          prompt: promptText,
-          systemInstruction: systemPrompt,
-          temperature: 0.3,
-          userId,
-          spaceId: scope.spaceId,
-          projectId: scope.projectId ?? null,
-        });
-        const rawAiText = (aiRes?.text || '')
-          .replace(/^"""\s*|\s*"""$/g, '')
-          .trim();
-        if (rawAiText.length > 0) {
-          suggestedCore = unmask(rawAiText).trim();
-          explanation = `Applied ${action.replace(/-/g, ' ')} via AI Copilot.`;
-        }
-      } catch {
-        // Fallback to server-side heuristic transformation
-      }
-    }
-
-    if (!suggestedCore) {
-      const fallbackMasked = applyFallbackTransform(maskedText, action);
-      suggestedCore = unmask(fallbackMasked).trim();
-      explanation = `Enhanced ${action.replace(/-/g, ' ')} using Academic Heuristic Rules.`;
-    }
-
-    const suggestedResult = `${leadingWs}${suggestedCore}${trailingWs}`;
-    const wordsOriginal = trimmed.split(/\s+/).filter(Boolean).length;
-    const wordsSuggested = suggestedCore.split(/\s+/).filter(Boolean).length;
-
-    return {
-      success: true,
-      originalText: selectedText,
-      suggestedText: suggestedResult,
-      explanation,
-      action,
-      diffSummary: {
-        charsOriginal: selectedText.length,
-        charsSuggested: suggestedResult.length,
-        wordsOriginal,
-        wordsSuggested,
-      },
-    };
   }
 
   /**
@@ -1414,106 +797,13 @@ export class ClsiService implements OnModuleDestroy {
     dto: ClsiAiFixErrorDto,
     userId?: string,
   ): Promise<AiErrorFixResult> {
-    const scope = await this.verifyOptionalAiScopeAccess(
+    return await fixLatexErrorHelper(
+      this.prisma,
+      this.aiEngine,
+      this.syntaxLinter,
+      dto,
       userId,
-      dto.spaceId,
-      dto.pageId,
     );
-
-    if (this.aiEngine && typeof this.aiEngine.generate === 'function') {
-      const prompt = [
-        'You are an expert LaTeX debugging assistant (Overleaf Error Assist).',
-        'Analyze the following LaTeX compiler error and suggest an immediate, surgical fix.',
-        `File: ${dto.errorFile || 'main.tex'}`,
-        `Line: ${dto.errorLine || 'unknown'}`,
-        `Error Message: ${dto.errorMessage}`,
-        dto.detail ? `Detail: ${dto.detail}` : '',
-        dto.surroundingCode
-          ? `\nSurrounding Code:\n\`\`\`latex\n${dto.surroundingCode}\n\`\`\``
-          : '',
-        '',
-        'Reply ONLY with a valid JSON object in this exact schema (no markdown fences, pure JSON):',
-        '{',
-        '  "explanation": "Brief 1-2 sentence description of what caused the error and how to fix it",',
-        '  "originalSnippet": "Exact code line(s) that should be replaced",',
-        '  "fixedSnippet": "The corrected code line(s)",',
-        `  "startLine": ${dto.errorLine || 1},`,
-        `  "endLine": ${dto.errorLine || 1},`,
-        '  "confidence": "high"',
-        '}',
-      ]
-        .filter(Boolean)
-        .join('\n');
-
-      try {
-        const aiRes = await this.aiEngine.generate({
-          prompt,
-          temperature: 0.2,
-          userId,
-          spaceId: scope.spaceId,
-          projectId: scope.projectId ?? null,
-        });
-        const jsonText = (aiRes?.text || '')
-          .replace(/^```json\s*/i, '')
-          .replace(/^```\s*/, '')
-          .replace(/\s*```$/, '')
-          .trim();
-
-        if (jsonText) {
-          const parsed = JSON.parse(jsonText) as Record<string, unknown>;
-          if (
-            parsed &&
-            typeof parsed === 'object' &&
-            parsed.explanation &&
-            parsed.fixedSnippet !== undefined
-          ) {
-            const explanation = String(parsed.explanation)
-              .trim()
-              .replace(/^Error on line \d+:\s*/i, '')
-              .replace(/^LaTeX Error:\s*/i, '')
-              .trim();
-
-            return {
-              explanation: explanation || String(parsed.explanation),
-              originalSnippet: String(parsed.originalSnippet || ''),
-              fixedSnippet: String(parsed.fixedSnippet || ''),
-              startLine: Number(parsed.startLine) || dto.errorLine || 1,
-              endLine: Number(parsed.endLine) || dto.errorLine || 1,
-              confidence:
-                parsed.confidence === 'high' ||
-                parsed.confidence === 'medium' ||
-                parsed.confidence === 'low'
-                  ? parsed.confidence
-                  : 'high',
-            };
-          }
-        }
-      } catch {
-        // Fall through to autoFix & heuristic
-      }
-    }
-
-    if (dto.surroundingCode) {
-      const autoFixRes = this.syntaxLinter.autoFix(dto.surroundingCode);
-      if (
-        autoFixRes.isFixed &&
-        autoFixRes.fixedSource !== dto.surroundingCode
-      ) {
-        return {
-          explanation:
-            autoFixRes.appliedFixes.length > 0
-              ? autoFixRes.appliedFixes.map((f) => f.description).join('; ')
-              : 'Applied automated LaTeX syntax repair via Manuscript Diagnostics.',
-          originalSnippet: dto.surroundingCode,
-          fixedSnippet: autoFixRes.fixedSource,
-          startLine: dto.errorLine || 1,
-          endLine: dto.errorLine || 1,
-          confidence: 'medium',
-        };
-      }
-    }
-
-    return fixLatexError(dto);
   }
 
   /**
@@ -1523,38 +813,11 @@ export class ClsiService implements OnModuleDestroy {
     dto: ClsiAiGenerateTableDto,
     userId?: string,
   ): Promise<{ table: string }> {
-    const scope = await this.verifyOptionalAiScopeAccess(
+    return await generateLatexTableHelper(
+      this.prisma,
+      this.aiEngine,
+      dto,
       userId,
-      dto.spaceId,
-      dto.pageId,
     );
-
-    const systemPrompt = `You are an expert academic LaTeX assistant. Generate a clean LaTeX tabular or TSV table according to the user request.
-Output ONLY the clean LaTeX tabular code starting with \\begin{tabular} and ending with \\end{tabular} or TSV data with tabs and newlines. Do not wrap in markdown quotes or add conversational preamble.`;
-
-    if (this.aiEngine && typeof this.aiEngine.generate === 'function') {
-      try {
-        const aiRes = await this.aiEngine.generate({
-          prompt: dto.prompt,
-          systemInstruction: systemPrompt,
-          temperature: 0.3,
-          userId,
-          spaceId: scope.spaceId,
-          projectId: scope.projectId ?? null,
-        });
-        const table = (aiRes?.text || '')
-          .replace(/```latex\n?|```tsv\n?|```\n?/g, '')
-          .trim();
-        if (table) {
-          return { table };
-        }
-      } catch {
-        // Fallback below
-      }
-    }
-
-    return {
-      table: `\\begin{tabular}{lll}\n\\hline\nColumn 1 & Column 2 & Column 3 \\\\\n\\hline\nValue 1 & Value 2 & Value 3 \\\\\n\\hline\n\\end{tabular}`,
-    };
   }
 }

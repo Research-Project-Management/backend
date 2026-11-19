@@ -747,5 +747,3 @@ export class PagesGateway
     }
   }
 }
-
-export { PagesGateway as ManuscriptsGateway };

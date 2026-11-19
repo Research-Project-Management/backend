@@ -11,9 +11,9 @@ import { PrismaModule } from '@/core';
 import { IdentityModule } from '@/modules/identity/identity.module';
 import { NotificationsModule } from '@/modules/notifications/notifications.module';
 import { RealtimeModule } from '@/modules/realtime/realtime.module';
-import { ManuscriptsConfigService } from './config/pages.config';
+import { PagesConfigService } from './config/pages.config';
 import { WorkspaceCollectorService } from './services/workspace-collector.service';
-import { ManuscriptDomainEventBus } from './events/event-bus.service';
+import { PageDomainEventBus } from './events/event-bus.service';
 import { UserResolverService } from './services/user-resolver.service';
 import {
   IDistributedLockPort,
@@ -27,9 +27,9 @@ import { CleanupListener } from './services/cleanup.listener';
 @Module({
   imports: [PrismaModule, IdentityModule, NotificationsModule, RealtimeModule],
   providers: [
-    ManuscriptsConfigService,
+    PagesConfigService,
     WorkspaceCollectorService,
-    ManuscriptDomainEventBus,
+    PageDomainEventBus,
     UserResolverService,
     CleanupListener,
     RedisLockAdapter,
@@ -39,9 +39,9 @@ import { CleanupListener } from './services/cleanup.listener';
     },
   ],
   exports: [
-    ManuscriptsConfigService,
+    PagesConfigService,
     WorkspaceCollectorService,
-    ManuscriptDomainEventBus,
+    PageDomainEventBus,
     UserResolverService,
     IDistributedLockPort,
     RedisLockAdapter,
@@ -49,7 +49,4 @@ import { CleanupListener } from './services/cleanup.listener';
     RealtimeModule,
   ],
 })
-export class ManuscriptsCoreModule {}
-
-/** @deprecated Use ManuscriptsCoreModule */
-export { ManuscriptsCoreModule as CoreModule };
+export class PagesCoreModule {}

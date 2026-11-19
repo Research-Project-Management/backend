@@ -14,7 +14,7 @@ import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { ResourceAccessPolicy, Role } from '@/modules/project/access';
 import {
   LiveCollaborationPort,
-  ManuscriptDomainEventBus,
+  PageDomainEventBus,
 } from '@/modules/pages/core';
 import {
   LinePatcher,
@@ -55,7 +55,7 @@ export class TrackChangesService {
     @Optional() docstorePatcher?: DocstorePatcherAdapter,
     @Optional() private readonly realtimeNotifier?: RealtimeNotifierAdapter,
     @Optional() private readonly liveCollab?: LiveCollaborationPort,
-    @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
+    @Optional() private readonly domainEventBus?: PageDomainEventBus,
   ) {
     this.docstorePatcher =
       docstorePatcher ??

@@ -21,7 +21,7 @@ import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-  ManuscriptDomainEventBus,
+  PageDomainEventBus,
   SagaRunner,
 } from '@/modules/pages/core';
 import { GitBridgeRepository, GitCliAdapter } from './git-bridge.repository';
@@ -81,7 +81,7 @@ export class GitBridgeService {
   private readonly locks = new Map<string, Promise<unknown>>();
   private readonly gitCli: GitCliAdapter;
   private readonly liveCollab: LiveCollaborationPort;
-  private readonly domainEventBus: ManuscriptDomainEventBus | null;
+  private readonly domainEventBus: PageDomainEventBus | null;
 
   constructor(
     private readonly repository: GitBridgeRepository,
@@ -92,7 +92,7 @@ export class GitBridgeService {
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
     @Optional() gitCli?: GitCliAdapter,
-    @Optional() domainEventBus?: ManuscriptDomainEventBus,
+    @Optional() domainEventBus?: PageDomainEventBus,
   ) {
     this.gitCli = gitCli ?? new GitCliAdapter();
     this.liveCollab =
@@ -273,7 +273,7 @@ export class GitBridgeService {
     return this.liveCollab;
   }
 
-  private domainBus(): ManuscriptDomainEventBus | null {
+  private domainBus(): PageDomainEventBus | null {
     return this.domainEventBus;
   }
 

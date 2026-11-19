@@ -5,7 +5,7 @@
 
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
-import { ManuscriptsCoreModule } from '@/modules/pages/core/core.module';
+import { PagesCoreModule } from '@/modules/pages/core/core.module';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { StructureModule } from '@/modules/pages/structure/structure.module';
 import { ClsiModule } from '@/modules/pages/clsi/clsi.module';
@@ -15,7 +15,7 @@ import { EditorBootstrapService } from './editor-bootstrap.service';
 @Module({
   imports: [
     PrismaModule,
-    ManuscriptsCoreModule,
+    PagesCoreModule,
     DocstoreModule,
     StructureModule,
     ClsiModule,

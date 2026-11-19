@@ -4,6 +4,7 @@
  */
 
 import { Injectable, ConflictException } from '@nestjs/common';
+import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
 import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
 import {
@@ -26,7 +27,7 @@ export type PrismaSnapshotWithLabels = PrismaSnapshot & {
   labels?: PrismaLabel[];
 };
 
-export class ManuscriptHistoryMapper {
+export class PageHistoryMapper {
   public static toDomainLabel(
     prisma: PrismaLabel & { projectId?: string },
   ): VersionLabel {
@@ -132,7 +133,7 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
   }
 
   public toDomain(record: PrismaSnapshotWithLabels): Snapshot {
-    return ManuscriptHistoryMapper.toDomain(record);
+    return PageHistoryMapper.toDomain(record);
   }
 
   private async resolveTargetPageId(
@@ -184,7 +185,7 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
             labels: true,
           },
         });
-        return ManuscriptHistoryMapper.toDomain(created);
+        return PageHistoryMapper.toDomain(created);
       } catch (err: unknown) {
         const code = (err as { code?: string })?.code;
         if (code === 'P2002' && attempt < maxAttempts - 1) {
@@ -222,7 +223,7 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
     });
 
     if (!found) return null;
-    return ManuscriptHistoryMapper.toDomain(found);
+    return PageHistoryMapper.toDomain(found);
   }
 
   public async getLatestVersion(
@@ -270,9 +271,7 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
       },
     });
 
-    return records
-      .reverse()
-      .map((r) => ManuscriptHistoryMapper.toDomainHeader(r));
+    return records.reverse().map((r) => PageHistoryMapper.toDomainHeader(r));
   }
 
   public async saveLabel(label: VersionLabel): Promise<VersionLabel> {
@@ -320,7 +319,7 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
           },
         });
 
-    return ManuscriptHistoryMapper.toDomainLabel(saved);
+    return PageHistoryMapper.toDomainLabel(saved);
   }
 
   public async deleteLabel(
@@ -355,6 +354,44 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
     });
 
     if (!found) return null;
-    return ManuscriptHistoryMapper.toDomainLabel(found);
+    return PageHistoryMapper.toDomainLabel(found);
+  }
+
+  /**
+   * Finds a snapshot version conditioned strictly on projectId.
+   */
+  public async findSnapshotInProject(
+    projectId: string,
+    versionOrId: string | number,
+  ): Promise<PrismaSnapshotWithLabels | null> {
+    if (typeof versionOrId === 'number' || !isNaN(Number(versionOrId))) {
+      const snap = await this.prisma.pageSnapshot.findFirst({
+        where: { spaceId: projectId, version: Number(versionOrId) },
+        include: { labels: true },
+      });
+      if (snap) return snap;
+      return this.prisma.pageSnapshot
+        .findFirst({
+          where: { pageId: projectId, version: Number(versionOrId) },
+          include: { labels: true },
+        })
+        .catch(() => null);
+    }
+
+    if (isUUID(String(versionOrId))) {
+      const snap = await this.prisma.pageSnapshot.findFirst({
+        where: { id: String(versionOrId), spaceId: projectId },
+        include: { labels: true },
+      });
+      if (snap) return snap;
+      return this.prisma.pageSnapshot
+        .findFirst({
+          where: { id: String(versionOrId), pageId: projectId },
+          include: { labels: true },
+        })
+        .catch(() => null);
+    }
+
+    return null;
   }
 }

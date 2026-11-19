@@ -16,7 +16,7 @@ import {
   CompilePipelineResult,
   ClsiHealthReport,
 } from './compile-pipeline.service';
-import { CompileManuscriptDto } from '../dto/clsi.dto';
+import { CompilePageDto } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import { SyncPoint, ReverseSyncPoint } from '../domain/clsi.ports';
 
@@ -25,7 +25,7 @@ export interface RemoteCompileRequest {
   mainFile: string;
   source: string;
   mergedFiles: Record<string, string | Buffer>;
-  dto: CompileManuscriptDto;
+  dto: CompilePageDto;
   engine?: string;
   cacheKey: string;
   signal?: AbortSignal;

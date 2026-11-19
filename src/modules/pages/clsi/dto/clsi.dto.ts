@@ -16,7 +16,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class CompileManuscriptDto {
+export class CompilePageDto {
   @ApiPropertyOptional({
     description: 'Workspace Space UUID (Personal or Project)',
     example: 'space-uuid-123',

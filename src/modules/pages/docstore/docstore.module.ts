@@ -8,13 +8,16 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '@/core';
 import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
 import { DocController } from './controllers/doc.controller';
-import { SearchPresenceController } from './controllers/search-presence.controller';
+import { PageController } from './controllers/page.controller';
+import { DocSyncController } from './controllers/doc-sync.controller';
+import { SearchReplaceController } from './controllers/search-replace.controller';
+import { PresenceController } from './controllers/presence.controller';
 import { DocstoreService } from './docstore.service';
 import { PageService } from '../core/services/page.service';
 import { UserResolverService } from '../core/services/user-resolver.service';
 import { PresenceService } from './services/presence.service';
 import { SearchReplaceService } from './services/search-replace.service';
-import { BootstrapService } from './services/bootstrap.service';
+import { PageScaffoldService } from './services/page-scaffold.service';
 
 // Repositories & Adapters
 import { DocstoreRepository } from './repositories/docstore.repository';
@@ -32,7 +35,13 @@ import { ScopeRepository } from './repositories/scope.repository';
 
 @Module({
   imports: [ConfigModule, PrismaModule, FilestoreModule],
-  controllers: [DocController, SearchPresenceController],
+  controllers: [
+    DocController,
+    PageController,
+    DocSyncController,
+    SearchReplaceController,
+    PresenceController,
+  ],
   providers: [
     // Domain Services
     PageService,
@@ -40,7 +49,7 @@ import { ScopeRepository } from './repositories/scope.repository';
     UserResolverService,
     PresenceService,
     SearchReplaceService,
-    BootstrapService,
+    PageScaffoldService,
 
     // Repositories & Adapters
     DocstoreRepository,
@@ -58,7 +67,7 @@ import { ScopeRepository } from './repositories/scope.repository';
     UserResolverService,
     PresenceService,
     SearchReplaceService,
-    BootstrapService,
+    PageScaffoldService,
     DocstoreRepository,
     IDocRepository,
     DocArchiveRepository,

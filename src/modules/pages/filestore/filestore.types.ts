@@ -292,7 +292,7 @@ export class ByteRange {
   }
 }
 
-export interface CreateManuscriptFileProps {
+export interface CreatePageBinaryAssetProps {
   id?: string;
   projectId: string;
   pageId?: string | null;
@@ -310,7 +310,7 @@ export interface CreateManuscriptFileProps {
   updatedAt?: Date;
 }
 
-export class ManuscriptFile {
+export class PageBinaryAsset {
   private readonly _id: string;
   private readonly _projectId: string;
   private readonly _pageId: string | null;
@@ -327,7 +327,7 @@ export class ManuscriptFile {
   private readonly _createdAt: Date;
   private _updatedAt: Date;
 
-  private constructor(props: CreateManuscriptFileProps) {
+  private constructor(props: CreatePageBinaryAssetProps) {
     if (props.sizeBytes > MAX_FILE_SIZE_BYTES) {
       throw new StorageQuotaExceededException(
         props.sizeBytes,
@@ -339,7 +339,7 @@ export class ManuscriptFile {
     this._projectId = props.projectId;
     this._pageId = props.pageId ?? null;
     this._blobId = props.blobId ?? null;
-    this._name = ManuscriptFile.sanitizeFilename(props.name);
+    this._name = PageBinaryAsset.sanitizeFilename(props.name);
     this._mimeType = props.mimeType || 'application/octet-stream';
     this._sizeBytes = props.sizeBytes;
     this._hash = props.hash;
@@ -352,12 +352,14 @@ export class ManuscriptFile {
     this._updatedAt = props.updatedAt ?? new Date();
   }
 
-  public static create(props: CreateManuscriptFileProps): ManuscriptFile {
-    return new ManuscriptFile(props);
+  public static create(props: CreatePageBinaryAssetProps): PageBinaryAsset {
+    return new PageBinaryAsset(props);
   }
 
-  public static reconstitute(props: CreateManuscriptFileProps): ManuscriptFile {
-    return new ManuscriptFile(props);
+  public static reconstitute(
+    props: CreatePageBinaryAssetProps,
+  ): PageBinaryAsset {
+    return new PageBinaryAsset(props);
   }
 
   public static sanitizeFilename(raw: string): string {
@@ -448,7 +450,7 @@ export class ManuscriptFile {
   }
 
   public rename(newName: string): void {
-    this._name = ManuscriptFile.sanitizeFilename(newName);
+    this._name = PageBinaryAsset.sanitizeFilename(newName);
     this._rev += 1;
     this._updatedAt = new Date();
   }
@@ -496,8 +498,8 @@ export interface StreamHashResult {
   dataStream: Readable;
 }
 
-export interface StreamManuscriptFileOutput {
-  file: ManuscriptFile;
+export interface StreamPageBinaryAssetOutput {
+  file: PageBinaryAsset;
   stream: Readable;
   byteRange: ByteRange | null;
   isPartialContent: boolean;
@@ -505,7 +507,7 @@ export interface StreamManuscriptFileOutput {
 }
 
 export interface GetFileHeadOutput {
-  file: ManuscriptFile;
+  file: PageBinaryAsset;
   storageMetadata?: StorageObjectMetadata;
 }
 
@@ -539,27 +541,27 @@ export abstract class IBinaryStoragePort {
   abstract deleteObject(bucket: string, key: string): Promise<void>;
 }
 
-export abstract class IManuscriptFileRepository {
+export abstract class IPageBinaryAssetRepository {
   abstract save(
-    file: ManuscriptFile,
+    file: PageBinaryAsset,
     options?: { syncStructureNode?: boolean },
-  ): Promise<ManuscriptFile>;
-  abstract findById(id: string): Promise<ManuscriptFile | null>;
+  ): Promise<PageBinaryAsset>;
+  abstract findById(id: string): Promise<PageBinaryAsset | null>;
   abstract findByProjectAndId(
     projectId: string,
     id: string,
-  ): Promise<ManuscriptFile | null>;
+  ): Promise<PageBinaryAsset | null>;
   abstract findByProjectAndName(
     projectId: string,
     name: string,
     pageId?: string | null,
-  ): Promise<ManuscriptFile | null>;
-  abstract findByHash(hash: string): Promise<ManuscriptFile[]>;
+  ): Promise<PageBinaryAsset | null>;
+  abstract findByHash(hash: string): Promise<PageBinaryAsset[]>;
   abstract listByProject(
     projectId: string,
     includeDeleted?: boolean,
     pageId?: string | null,
-  ): Promise<ManuscriptFile[]>;
+  ): Promise<PageBinaryAsset[]>;
   abstract delete(id: string): Promise<void>;
   abstract countReferencesByHash(hash: string): Promise<number>;
   assertUploadPathAvailable?(
@@ -575,8 +577,3 @@ export abstract class IContentHasherPort {
   abstract hashBuffer(buffer: Buffer): StreamHashResult;
   abstract buildStorageKey(hash: ContentHash, prefix?: string): StorageKey;
 }
-
-export {
-  ManuscriptFile as PageBinaryAsset,
-  IManuscriptFileRepository as IPageBinaryAssetRepository,
-};

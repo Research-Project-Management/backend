@@ -18,12 +18,12 @@ import {
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { FilestoreRepository } from './filestore.repository';
 import {
-  ManuscriptFile,
+  PageBinaryAsset,
   StorageKey,
   ByteRange,
   FileNotFoundException,
   StorageObjectMetadata,
-  StreamManuscriptFileOutput,
+  StreamPageBinaryAssetOutput,
   GetFileHeadOutput,
   MAX_FILE_SIZE_BYTES,
   StorageQuotaExceededException,
@@ -49,7 +49,7 @@ export class FilestoreService {
   public async openReadStream(
     projectId: string,
     fileId: string,
-  ): Promise<{ file: ManuscriptFile; stream: Readable }> {
+  ): Promise<{ file: PageBinaryAsset; stream: Readable }> {
     const result = await this.streamFile(projectId, fileId);
     return {
       file: result.file,
@@ -64,7 +64,7 @@ export class FilestoreService {
     projectId: string,
     fileId: string,
     rangeHeader?: string,
-  ): Promise<StreamManuscriptFileOutput> {
+  ): Promise<StreamPageBinaryAssetOutput> {
     const file = await this.repository.findByProjectAndId(projectId, fileId);
     if (!file || file.deleted) {
       throw new FileNotFoundException(fileId, projectId);
@@ -102,7 +102,7 @@ export class FilestoreService {
     buffer: Buffer,
     mimeType?: string,
     options?: { syncStructureNode?: boolean; pageId?: string | null },
-  ): Promise<ManuscriptFile> {
+  ): Promise<PageBinaryAsset> {
     const stream = Readable.from(buffer);
     return await this.uploadFileFromStream(
       projectId,
@@ -127,9 +127,9 @@ export class FilestoreService {
     mimeType?: string,
     bucketName = 'manuscript-files',
     options?: { syncStructureNode?: boolean; pageId?: string | null },
-  ): Promise<ManuscriptFile> {
+  ): Promise<PageBinaryAsset> {
     // Validate filename BEFORE spooling stream or writing to S3/disk storage
-    const sanitizedName = ManuscriptFile.sanitizeFilename(name);
+    const sanitizedName = PageBinaryAsset.sanitizeFilename(name);
 
     const candidatePageId = options?.pageId?.trim() || undefined;
     let effectivePageId =
@@ -148,9 +148,9 @@ export class FilestoreService {
       await this.repository.hashStream(stream);
 
     let quotaDeltaApplied = 0n;
-    let existing: ManuscriptFile | null = null;
+    let existing: PageBinaryAsset | null = null;
     let acquiredNewBlobId: string | null = null;
-    let saved!: ManuscriptFile;
+    let saved!: PageBinaryAsset;
 
     try {
       if (sizeBytes > MAX_FILE_SIZE_BYTES) {
@@ -258,10 +258,10 @@ export class FilestoreService {
       }
 
       const targetPageId = effectivePageId ?? existing?.pageId ?? null;
-      const fileEntity = ManuscriptFile.reconstitute({
+      const fileEntity = PageBinaryAsset.reconstitute({
         id:
           existing?.id ??
-          ManuscriptFile.create({
+          PageBinaryAsset.create({
             projectId,
             pageId: targetPageId,
             blobId: resolvedBlobId,
@@ -385,7 +385,7 @@ export class FilestoreService {
   public async getFileMetadata(
     projectId: string,
     fileId: string,
-  ): Promise<ManuscriptFile> {
+  ): Promise<PageBinaryAsset> {
     const result = await this.getFileHead(projectId, fileId);
     return result.file;
   }
@@ -397,7 +397,7 @@ export class FilestoreService {
     projectId: string,
     includeDeleted = false,
     pageId?: string | null,
-  ): Promise<ManuscriptFile[]> {
+  ): Promise<PageBinaryAsset[]> {
     return await this.repository.listByProject(
       projectId,
       includeDeleted,
@@ -412,7 +412,7 @@ export class FilestoreService {
     projectId: string,
     name: string,
     pageId?: string | null,
-  ): Promise<ManuscriptFile | null> {
+  ): Promise<PageBinaryAsset | null> {
     return await this.repository.findByProjectAndName(projectId, name, pageId);
   }
 
@@ -423,7 +423,7 @@ export class FilestoreService {
     projectId: string,
     rawPath: string,
     pageId?: string | null,
-  ): Promise<ManuscriptFile | null> {
+  ): Promise<PageBinaryAsset | null> {
     return await this.repository.findFileByPathFlexible(
       projectId,
       rawPath,

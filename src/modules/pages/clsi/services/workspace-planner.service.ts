@@ -18,14 +18,14 @@ import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid, mapWithConcurrency } from '@/core';
 import {
   ensureCanonicalPageId,
+  filterRecordsByPageScope,
   resolveSpaceRootDocIds,
   type PageScopeDbClient,
 } from '@/modules/pages/core/page-scope.helper';
-import { filterRecordsByPageScope } from '@/modules/pages/docstore/controllers/doc.helpers';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
-import { CompileManuscriptDto } from '../dto/clsi.dto';
+import { CompilePageDto } from '../dto/clsi.dto';
 import {
   planDbFileSet,
   planInlineFileSet,
@@ -56,7 +56,7 @@ export class WorkspacePlannerService {
    * Resolve the owning space and canonical manuscript pageId when compiling or syncing.
    * Rejects cross-tenant payload tampering if `authorizedSpaceId` does not own the resource.
    */
-  public async resolveManuscriptContext(
+  public async resolvePageCompileContext(
     dto: {
       spaceId?: string;
       pageId?: string;
@@ -187,7 +187,7 @@ export class WorkspacePlannerService {
     spaceId?: string;
     pageId?: string;
   }): Promise<string> {
-    const { spaceId } = await this.resolveManuscriptContext(dto);
+    const { spaceId } = await this.resolvePageCompileContext(dto);
     return spaceId;
   }
 
@@ -197,7 +197,7 @@ export class WorkspacePlannerService {
    */
   public async planFiles(
     projectId: string,
-    dto: CompileManuscriptDto,
+    dto: CompilePageDto,
     manuscriptPageId?: string,
   ): Promise<PlannedFileSet> {
     const incomingFiles = { ...(dto.files || {}) };

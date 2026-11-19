@@ -3,13 +3,13 @@
  * Port interfaces for Page Virtual Tree nodes, root doc detection, and tree mutation broadcasts.
  */
 
-import { ManuscriptNodeEntity, ManuscriptNodeType } from './node.entity';
+import { PageNodeEntity, PageNodeType } from './node.entity';
 
 export interface CreateNodeParams {
   projectId: string;
   pageId?: string | null;
   parentId?: string | null;
-  type: ManuscriptNodeType;
+  type: PageNodeType;
   name: string;
   path: string;
   docId?: string | null;
@@ -21,29 +21,29 @@ export interface CreateNodeParams {
 }
 
 export abstract class IStructureRepository {
-  abstract createNode(params: CreateNodeParams): Promise<ManuscriptNodeEntity>;
+  abstract createNode(params: CreateNodeParams): Promise<PageNodeEntity>;
   abstract findById(
     projectId: string,
     nodeId: string,
-  ): Promise<ManuscriptNodeEntity | null>;
+  ): Promise<PageNodeEntity | null>;
   abstract findByPath(
     projectId: string,
     path: string,
     pageId?: string | null,
-  ): Promise<ManuscriptNodeEntity | null>;
+  ): Promise<PageNodeEntity | null>;
   abstract findByFileId?(
     projectId: string,
     fileId: string,
     pageId?: string | null,
-  ): Promise<ManuscriptNodeEntity | null>;
+  ): Promise<PageNodeEntity | null>;
   abstract getAllNodes(
     projectId: string,
     pageId?: string | null,
-  ): Promise<ManuscriptNodeEntity[]>;
+  ): Promise<PageNodeEntity[]>;
   abstract getRootDoc(
     projectId: string,
     pageId?: string | null,
-  ): Promise<ManuscriptNodeEntity | null>;
+  ): Promise<PageNodeEntity | null>;
   abstract setRootDoc(projectId: string, nodeId: string): Promise<void>;
   abstract unsetRootDoc(
     projectId: string,
@@ -61,12 +61,12 @@ export abstract class IStructureRepository {
     nodeId: string,
     newName: string,
     newPath: string,
-  ): Promise<ManuscriptNodeEntity>;
+  ): Promise<PageNodeEntity>;
   abstract deleteSubtree(
     projectId: string,
     path: string,
     pageId?: string | null,
-  ): Promise<ManuscriptNodeEntity[]>;
+  ): Promise<PageNodeEntity[]>;
   abstract updateSortOrder(
     projectId: string,
     nodeId: string,
@@ -78,7 +78,7 @@ export abstract class IStructureRepository {
     fileId: string,
     sizeBytes?: number,
     hash?: string | null,
-  ): Promise<ManuscriptNodeEntity>;
+  ): Promise<PageNodeEntity>;
   abstract countNodes(
     projectId: string,
     pageId?: string | null,

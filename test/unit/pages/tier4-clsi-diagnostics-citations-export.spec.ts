@@ -24,7 +24,7 @@ import {
 import { SpellingService } from '@/modules/pages/spelling/spelling.service';
 import type { SpellingRepository } from '@/modules/pages/spelling/spelling.repository';
 import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
-import { formatPageByIdResponse } from '@/modules/pages/docstore/controllers/doc.helpers';
+import { formatPageByIdResponse } from '@/modules/pages/docstore/services/doc-occ.helper';
 import {
   IdentifierNotFoundException,
   InvalidBibtexException,
@@ -42,8 +42,8 @@ import {
   ArchiveSizeExceededException,
   ArchiveEntryVo,
   ImportSummaryVo,
-  type IManuscriptAggregatorPort,
-  type IManuscriptHydratorPort,
+  type IPageArchiveAggregatorPort,
+  type IPageArchiveHydratorPort,
 } from '@/modules/pages/export-import/domain/archive-validator';
 import { ZipAdapter } from '@/modules/pages/export-import/services/zip.adapter';
 import { ExportImportService } from '@/modules/pages/export-import/export-import.service';
@@ -57,7 +57,7 @@ import { GitBridgeDomainError } from '@/modules/pages/git-bridge/domain/git-brid
 import { GitBridgeRepository } from '@/modules/pages/git-bridge/git-bridge.repository';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import {
-  ManuscriptNodeEntity,
+  PageNodeEntity,
   type IStructureRepository,
 } from '@/modules/pages/structure/domain';
 import type { DocstoreService } from '@/modules/pages/docstore/docstore.service';
@@ -275,7 +275,7 @@ describe('Khối 2 / Tầng 4 — Compiler, SyncTeX, Diagnostics, Spelling, Cita
         'main.tex': '\\begin{document}Three clean words.\\end{document}',
       });
       const planner = {
-        resolveManuscriptContext: jest
+        resolvePageCompileContext: jest
           .fn()
           .mockResolvedValue({ spaceId: SPACE_ID, pageId: PAGE_A_ID }),
         planFiles,
@@ -417,7 +417,7 @@ describe('Khối 2 / Tầng 4 — Compiler, SyncTeX, Diagnostics, Spelling, Cita
 
     it('forwards pageId to structureService.getAllNodes in CitationsRepository.collectBibFiles', async () => {
       const getAllNodes = jest.fn().mockResolvedValue([
-        new ManuscriptNodeEntity({
+        new PageNodeEntity({
           id: 'bib-node',
           projectId: SPACE_ID,
           spaceId: SPACE_ID,
@@ -526,10 +526,10 @@ describe('Khối 2 / Tầng 4 — Compiler, SyncTeX, Diagnostics, Spelling, Cita
       const aggregator = {
         collectProjectEntries,
         collectLazyProjectEntries: jest.fn(),
-      } as unknown as IManuscriptAggregatorPort;
+      } as unknown as IPageArchiveAggregatorPort;
       const hydrator = {
         hydrateProjectEntries,
-      } as unknown as IManuscriptHydratorPort;
+      } as unknown as IPageArchiveHydratorPort;
 
       const svc = new ExportImportService(
         aggregator,

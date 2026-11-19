@@ -16,7 +16,7 @@ import {
   NOOP_LIVE_COLLABORATION,
 } from '../ports/live-collaboration.port';
 
-export type ManuscriptMutationSource =
+export type PageMutationSource =
   | 'rest-docstore'
   | 'track-changes'
   | 'history-restore'
@@ -26,18 +26,18 @@ export type ManuscriptMutationSource =
   | 'template-hydration'
   | 'yjs-flush';
 
-export interface ManuscriptDocumentMutatedEvent {
+export interface PageDocumentMutatedEvent {
   type: 'manuscript.document.mutated';
   projectId: string;
   docId: string;
   lines: string[];
   rev?: number;
   version?: number;
-  source: ManuscriptMutationSource;
+  source: PageMutationSource;
   occurredAt: number;
 }
 
-export interface ManuscriptNodesDeletedEvent {
+export interface PageNodesDeletedEvent {
   type: 'manuscript.nodes.deleted';
   projectId: string;
   deletedDocIds: string[];
@@ -46,7 +46,7 @@ export interface ManuscriptNodesDeletedEvent {
   occurredAt: number;
 }
 
-export interface ManuscriptHistoryRestoredEvent {
+export interface PageHistoryRestoredEvent {
   type: 'manuscript.history.restored';
   projectId: string;
   pageId?: string;
@@ -58,21 +58,19 @@ export interface ManuscriptHistoryRestoredEvent {
   occurredAt: number;
 }
 
-export type ManuscriptDomainEvent =
-  | ManuscriptDocumentMutatedEvent
-  | ManuscriptNodesDeletedEvent
-  | ManuscriptHistoryRestoredEvent;
+export type PageDomainEvent =
+  PageDocumentMutatedEvent | PageNodesDeletedEvent | PageHistoryRestoredEvent;
 
-export type ManuscriptDomainEventHandler<
-  T extends ManuscriptDomainEvent = ManuscriptDomainEvent,
+export type PageDomainEventHandler<
+  T extends PageDomainEvent = PageDomainEvent,
 > = (event: T) => Promise<void> | void;
 
 @Injectable()
-export class ManuscriptDomainEventBus {
-  private readonly logger = new Logger(ManuscriptDomainEventBus.name);
+export class PageDomainEventBus {
+  private readonly logger = new Logger(PageDomainEventBus.name);
   private readonly handlers = new Map<
-    ManuscriptDomainEvent['type'],
-    Set<ManuscriptDomainEventHandler<ManuscriptDomainEvent>>
+    PageDomainEvent['type'],
+    Set<PageDomainEventHandler<PageDomainEvent>>
   >();
   private readonly liveCollab: LiveCollaborationPort;
 
@@ -104,10 +102,8 @@ export class ManuscriptDomainEventBus {
     secondLiveCollab?: LiveCollaborationPort,
   ) {
     let resolved: LiveCollaborationPort | null | undefined = secondLiveCollab;
-    if (!ManuscriptDomainEventBus.isLiveCollabCandidate(resolved)) {
-      if (
-        ManuscriptDomainEventBus.isLiveCollabCandidate(liveCollabOrResolver)
-      ) {
+    if (!PageDomainEventBus.isLiveCollabCandidate(resolved)) {
+      if (PageDomainEventBus.isLiveCollabCandidate(liveCollabOrResolver)) {
         resolved = liveCollabOrResolver;
       } else if (
         liveCollabOrResolver &&
@@ -127,7 +123,7 @@ export class ManuscriptDomainEventBus {
         }
       }
     }
-    this.liveCollab = ManuscriptDomainEventBus.isLiveCollabCandidate(resolved)
+    this.liveCollab = PageDomainEventBus.isLiveCollabCandidate(resolved)
       ? resolved
       : NOOP_LIVE_COLLABORATION;
     this.registerDefaultCrossContextHandlers();
@@ -143,7 +139,7 @@ export class ManuscriptDomainEventBus {
    * and Redis binary snapshots consistent.
    */
   private registerDefaultCrossContextHandlers(): void {
-    this.subscribe<ManuscriptDocumentMutatedEvent>(
+    this.subscribe<PageDocumentMutatedEvent>(
       'manuscript.document.mutated',
       async (event) => {
         if (event.source === 'yjs-flush') return;
@@ -158,7 +154,7 @@ export class ManuscriptDomainEventBus {
       },
     );
 
-    this.subscribe<ManuscriptNodesDeletedEvent>(
+    this.subscribe<PageNodesDeletedEvent>(
       'manuscript.nodes.deleted',
       async (event) => {
         if (event.deletedDocIds.length === 0) return;
@@ -173,7 +169,7 @@ export class ManuscriptDomainEventBus {
       },
     );
 
-    this.subscribe<ManuscriptHistoryRestoredEvent>(
+    this.subscribe<PageHistoryRestoredEvent>(
       'manuscript.history.restored',
       async (event) => {
         this.logger.debug(
@@ -193,25 +189,24 @@ export class ManuscriptDomainEventBus {
     );
   }
 
-  public subscribe<T extends ManuscriptDomainEvent>(
+  public subscribe<T extends PageDomainEvent>(
     eventType: T['type'],
-    handler: ManuscriptDomainEventHandler<T>,
+    handler: PageDomainEventHandler<T>,
   ): () => void {
     let set = this.handlers.get(eventType);
     if (!set) {
       set = new Set();
       this.handlers.set(eventType, set);
     }
-    const wrappedHandler: ManuscriptDomainEventHandler<
-      ManuscriptDomainEvent
-    > = (event) => handler(event as T);
+    const wrappedHandler: PageDomainEventHandler<PageDomainEvent> = (event) =>
+      handler(event as T);
     set.add(wrappedHandler);
     return () => {
       set?.delete(wrappedHandler);
     };
   }
 
-  public async publish(event: ManuscriptDomainEvent): Promise<void> {
+  public async publish(event: PageDomainEvent): Promise<void> {
     const subscribers = this.handlers.get(event.type);
     if (!subscribers || subscribers.size === 0) return;
 

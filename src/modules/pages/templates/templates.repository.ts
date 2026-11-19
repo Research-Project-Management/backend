@@ -25,7 +25,7 @@ import {
   IProjectInstantiatorPort,
   InstantiateProjectInput,
   InstantiatedProjectResult,
-  ManuscriptTemplateEntity,
+  PageTemplateEntity,
   TemplateCategoryString,
   TemplateCategoryVo,
   CompilerType,
@@ -37,10 +37,7 @@ export class TemplatesRepository
   implements ITemplateRepositoryPort, IProjectInstantiatorPort
 {
   private readonly logger = new Logger(TemplatesRepository.name);
-  private readonly officialCatalog = new Map<
-    string,
-    ManuscriptTemplateEntity
-  >();
+  private readonly officialCatalog = new Map<string, PageTemplateEntity>();
   private readonly aliasIndex = new Map<string, string>();
 
   constructor(
@@ -55,7 +52,7 @@ export class TemplatesRepository
 
   private seedOfficialCatalog(): void {
     for (const d of TEMPLATE_CATALOG) {
-      const entity = ManuscriptTemplateEntity.create({
+      const entity = PageTemplateEntity.create({
         id: d.id,
         versionId: d.versionId,
         name: d.name,
@@ -82,7 +79,7 @@ export class TemplatesRepository
 
   private resolveOfficialCatalogTemplate(
     idOrAlias: string,
-  ): ManuscriptTemplateEntity | null {
+  ): PageTemplateEntity | null {
     if (!idOrAlias) return null;
     const direct = this.officialCatalog.get(idOrAlias);
     if (direct) return direct;
@@ -92,7 +89,7 @@ export class TemplatesRepository
     return resolvedId ? this.officialCatalog.get(resolvedId) || null : null;
   }
 
-  async findById(id: string): Promise<ManuscriptTemplateEntity | null> {
+  async findById(id: string): Promise<PageTemplateEntity | null> {
     if (!id) return null;
     if (this.prisma) {
       if (isUuid(id)) {
@@ -114,9 +111,7 @@ export class TemplatesRepository
     return this.resolveOfficialCatalogTemplate(id);
   }
 
-  async findByVersionId(
-    versionId: string,
-  ): Promise<ManuscriptTemplateEntity | null> {
+  async findByVersionId(versionId: string): Promise<PageTemplateEntity | null> {
     if (!versionId) return null;
     if (this.prisma) {
       const record = await this.prisma.pageTemplate.findUnique({
@@ -302,9 +297,7 @@ export class TemplatesRepository
     };
   }
 
-  async save(
-    template: ManuscriptTemplateEntity,
-  ): Promise<ManuscriptTemplateEntity> {
+  async save(template: PageTemplateEntity): Promise<PageTemplateEntity> {
     const data: Prisma.PageTemplateCreateInput = {
       id: template.id,
       versionId: template.versionId,
@@ -592,8 +585,8 @@ export class TemplatesRepository
     };
   }
 
-  private mapToEntity(record: PageTemplate): ManuscriptTemplateEntity {
-    return new ManuscriptTemplateEntity({
+  private mapToEntity(record: PageTemplate): PageTemplateEntity {
+    return new PageTemplateEntity({
       id: record.id,
       versionId: record.versionId,
       name: record.name,

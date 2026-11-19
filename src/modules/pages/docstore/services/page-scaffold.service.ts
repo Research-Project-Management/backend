@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/services/bootstrap.service.ts
+ * modules/pages/docstore/services/page-scaffold.service.ts
  * Domain/Application service encapsulating project page bootstrap, Overleaf-compatible
  * blank and example LaTeX templates, and companion references.bib initialization.
  */
@@ -14,7 +14,7 @@ import {
 } from '@/modules/pages/core/page-scope.helper';
 import { escapeLatex } from '@/modules/pages/core/domain/latex-escape';
 import { DocstoreService } from '../docstore.service';
-import { resolveProjectLabels } from '../controllers/doc.helpers';
+import { resolveProjectLabels } from '@/modules/pages/core/services/page-query-metadata.helper';
 
 export interface CreateProjectPageParams {
   title?: string;
@@ -27,7 +27,7 @@ export interface CreateProjectPageParams {
 }
 
 @Injectable()
-export class BootstrapService {
+export class PageScaffoldService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly docstoreService: DocstoreService,
@@ -493,6 +493,3 @@ export class BootstrapService {
     };
   }
 }
-
-/** @deprecated Use BootstrapService */
-export { BootstrapService as ManuscriptProjectBootstrapService };

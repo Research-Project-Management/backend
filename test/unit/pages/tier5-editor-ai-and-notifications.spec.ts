@@ -21,7 +21,13 @@ import { EventRealtimeNotifierAdapter } from '@/modules/notifications/core/adapt
 import { NotificationEntity } from '@/modules/notifications/core/domain/entities/notification.entity';
 import { ReviewNotificationBundlingUseCase } from '@/modules/notifications/core/use-cases/review-notification-bundling.use-case';
 import { ReviewDigest } from '@/modules/notifications/core/domain/value-objects/review-bundle';
-import { ReviewController } from '@/modules/pages/docstore/controllers/review.controller';
+import {
+  ReviewCommentsController,
+  ReviewSuggestionsController,
+  ReviewCommentsService,
+  ReviewSuggestionsService,
+  ReviewNotificationDispatcher,
+} from '@/modules/pages/track-changes';
 
 describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant, Inline Diff & Notifications', () => {
   describe('1. EngineService.generate & ClsiService AI Writing / Error Assist', () => {
@@ -427,7 +433,7 @@ describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant, Inline Diff & No
     });
   });
 
-  describe('3. Notifications Routes, Query Transform, Realtime Payload, Multi-Page Bundling & ReviewController Dispatch', () => {
+  describe('3. Notifications Routes, Query Transform, Realtime Payload, Multi-Page Bundling & Review Controllers Dispatch', () => {
     it('NotificationsController exposes api/v1/pages/notifications, enforces currentUserId on parseMentions, and QueryNotificationsDto parses isRead="false"', async () => {
       const controllerPaths = Reflect.getMetadata(
         PATH_METADATA,
@@ -590,7 +596,7 @@ describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant, Inline Diff & No
       expect(repo.markManyAsRead).toHaveBeenCalledWith(['n-p1'], 'u1');
     });
 
-    it('ReviewController dispatches mention, reply, resolve, and suggestion notifications via PagesNotificationsService', async () => {
+    it('ReviewCommentsController & ReviewSuggestionsController dispatch mention, reply, resolve, and suggestion notifications via PagesNotificationsService', async () => {
       const spaceId = '11111111-1111-1111-1111-111111111111';
       const pageId = '22222222-2222-2222-2222-222222222222';
       const docId = '33333333-3333-3333-3333-333333333333';
@@ -675,23 +681,40 @@ describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant, Inline Diff & No
         resolveProjectId: jest.fn().mockResolvedValue(spaceId),
       };
 
-      const controller = new ReviewController(
-        {} as any,
+      const dispatcher = new ReviewNotificationDispatcher(
+        userResolverMock as any,
         scopeRepoMock as any,
-        userResolverMock,
-        pageServiceMock as any,
-        undefined,
-        trackRepoMock as any,
-        undefined,
-        undefined,
+        scopeRepoMock as any,
         pagesNotifMock as any,
+      );
+      const commentsController = new ReviewCommentsController(
+        new ReviewCommentsService(
+          scopeRepoMock as any,
+          scopeRepoMock as any,
+          userResolverMock as any,
+          pageServiceMock as any,
+          dispatcher,
+          trackRepoMock as any,
+        ),
+      );
+      const suggestionsController = new ReviewSuggestionsController(
+        new ReviewSuggestionsService(
+          {} as any,
+          scopeRepoMock as any,
+          scopeRepoMock as any,
+          userResolverMock as any,
+          pageServiceMock as any,
+          dispatcher,
+          undefined,
+          trackRepoMock as any,
+        ),
       );
 
       const req = {
         user: { id: actorId, email: 'reviewer@example.com' },
       } as any;
 
-      await controller.createComment(
+      await commentsController.createComment(
         docId,
         { content: 'Please check @owner', line: 1, spaceId },
         req,
@@ -707,7 +730,7 @@ describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant, Inline Diff & No
         }),
       );
 
-      await controller.addCommentReply(
+      await commentsController.addCommentReply(
         docId,
         threadId,
         { content: 'Reply to @owner' },
@@ -724,7 +747,7 @@ describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant, Inline Diff & No
         }),
       );
 
-      await controller.resolveComment(
+      await commentsController.resolveComment(
         docId,
         threadId,
         { resolved: true },
@@ -741,7 +764,7 @@ describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant, Inline Diff & No
         }),
       );
 
-      await controller.createSuggestion(
+      await suggestionsController.createSuggestion(
         docId,
         {
           type: 'insert',

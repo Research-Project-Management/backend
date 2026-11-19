@@ -8,7 +8,7 @@ import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { Readable } from 'stream';
-import { readManuscriptsConfig } from '../../core/config/pages.config';
+import { readPagesConfig } from '../../core/config/pages.config';
 import {
   GIT_DEFAULT_BRANCH,
   GitService,
@@ -28,7 +28,7 @@ export class GitCliAdapter implements IGitCliPort {
   private readonly gitBin: string;
 
   constructor() {
-    const { gitBridge } = readManuscriptsConfig();
+    const { gitBridge } = readPagesConfig();
     this.root = gitBridge.root;
     this.gitBin = gitBridge.gitBinary;
   }
@@ -44,7 +44,7 @@ export class GitCliAdapter implements IGitCliPort {
   }
 
   private baseEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-    const { gitBridge } = readManuscriptsConfig();
+    const { gitBridge } = readPagesConfig();
     return {
       ...gitBridge.safeParentEnv,
       GIT_TERMINAL_PROMPT: '0',

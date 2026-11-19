@@ -3,7 +3,7 @@ import * as path from 'path';
 import { Readable } from 'node:stream';
 import { PrismaService } from '@/core';
 import {
-  ManuscriptFile,
+  PageBinaryAsset,
   ContentHash,
   StorageKey,
 } from '@/modules/pages/filestore/filestore.types';
@@ -12,7 +12,7 @@ import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { StructureRepository } from '@/modules/pages/structure/structure.repository';
 import { PageService } from '@/modules/pages/core/services/page.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { BootstrapService } from '@/modules/pages/docstore/services/bootstrap.service';
+import { PageScaffoldService } from '@/modules/pages/docstore/services/page-scaffold.service';
 
 const SPACE_ID = '11111111-1111-4111-8111-111111111111';
 const PAGE_ID = '22222222-2222-4222-8222-222222222222';
@@ -369,7 +369,7 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
       expect(nodeCreateCall?.data).not.toHaveProperty('isRootDoc');
 
       // Delete prefers direct releaseBlob(file.blobId)
-      const entityForDelete = ManuscriptFile.reconstitute({
+      const entityForDelete = PageBinaryAsset.reconstitute({
         id: FILE_ID,
         projectId: SPACE_ID,
         pageId: PAGE_ID,
@@ -658,7 +658,7 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
       const pageService = new PageService(
         mockPrisma,
         {} as DocstoreService,
-        {} as BootstrapService,
+        {} as PageScaffoldService,
         undefined,
         {
           applyExternalText: jest.fn(),
@@ -774,7 +774,7 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
       const pageService = new PageService(
         mockPrisma,
         {} as DocstoreService,
-        {} as BootstrapService,
+        {} as PageScaffoldService,
       );
 
       const res = await pageService.duplicatePage(PAGE_ID, SPACE_ID);

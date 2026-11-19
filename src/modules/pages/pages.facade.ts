@@ -25,7 +25,7 @@ import { ProjectHistoryService } from './project-history/project-history.service
 import { CitationsService } from './citations/citations.service';
 import { ExportImportService } from './export-import/export-import.service';
 import { WorkspaceCollectorService } from './core/services/workspace-collector.service';
-import { ManuscriptDomainEventBus } from './core/events/event-bus.service';
+import { PageDomainEventBus } from './core/events/event-bus.service';
 import {
   EditorBootstrapService,
   type BootstrapEditorParams,
@@ -37,7 +37,7 @@ import {
   MoveNodeDto,
   RenameNodeDto,
 } from './structure/dto/node.dto';
-import { CompileManuscriptDto, ClsiWordCountDto } from './clsi/dto/clsi.dto';
+import { CompilePageDto, ClsiWordCountDto } from './clsi/dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './clsi/dto/synctex.dto';
 import {
   CitationQueryDto,
@@ -57,7 +57,7 @@ export class PagesFacade {
     public readonly citations: CitationsService,
     public readonly exportImport: ExportImportService,
     public readonly workspaceCollector: WorkspaceCollectorService,
-    public readonly domainEvents: ManuscriptDomainEventBus,
+    public readonly domainEvents: PageDomainEventBus,
     @Optional() public readonly editorBootstrap?: EditorBootstrapService,
   ) {}
 
@@ -119,7 +119,7 @@ export class PagesFacade {
   // ==========================================================================
 
   public async compile(
-    dto: CompileManuscriptDto,
+    dto: CompilePageDto,
     userId: string,
     projectId?: string,
   ) {
@@ -210,5 +210,3 @@ export class PagesFacade {
     return this.exportImport.exportProjectZip(projectId, query);
   }
 }
-
-export { PagesFacade as ManuscriptsFacade };

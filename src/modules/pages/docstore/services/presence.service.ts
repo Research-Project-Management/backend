@@ -459,6 +459,3 @@ export class PresenceService implements OnModuleDestroy {
     rawRequest.on('close', cleanup);
   }
 }
-
-/** @deprecated Use PresenceService */
-export { PresenceService as ManuscriptPresenceService };

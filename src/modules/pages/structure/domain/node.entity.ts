@@ -10,7 +10,7 @@ import {
   StructureError,
 } from './structure.errors';
 
-export type ManuscriptNodeType = 'FOLDER' | 'DOC' | 'FILE';
+export type PageNodeType = 'FOLDER' | 'DOC' | 'FILE';
 
 export interface SerializedTreeNode {
   id: string;
@@ -19,7 +19,7 @@ export interface SerializedTreeNode {
   pageId?: string | null;
   name: string;
   path: string;
-  type: ManuscriptNodeType;
+  type: PageNodeType;
   depth: number;
   isRootDoc: boolean;
   docId?: string | null;
@@ -31,13 +31,13 @@ export interface SerializedTreeNode {
   children: SerializedTreeNode[];
 }
 
-export interface ManuscriptNodeProps {
+export interface PageNodeProps {
   id: string;
   projectId: string;
   spaceId?: string;
   pageId?: string | null;
   parentId?: string | null;
-  type: ManuscriptNodeType;
+  type: PageNodeType;
   name: string;
   path: string;
   depth?: number;
@@ -51,13 +51,13 @@ export interface ManuscriptNodeProps {
   sortOrder?: number;
   createdAt?: Date;
   updatedAt?: Date;
-  children?: ManuscriptNodeEntity[];
+  children?: PageNodeEntity[];
 }
 
-export class ManuscriptNodeEntity {
+export class PageNodeEntity {
   private props: Required<
     Pick<
-      ManuscriptNodeProps,
+      PageNodeProps,
       | 'id'
       | 'projectId'
       | 'type'
@@ -71,9 +71,9 @@ export class ManuscriptNodeEntity {
       | 'updatedAt'
     >
   > &
-    ManuscriptNodeProps;
+    PageNodeProps;
 
-  constructor(props: ManuscriptNodeProps) {
+  constructor(props: PageNodeProps) {
     NodePathVo.validateFilename(props.name);
 
     if (props.type === 'FOLDER') {
@@ -134,7 +134,7 @@ export class ManuscriptNodeEntity {
     return this.props.parentId ?? null;
   }
 
-  public get type(): ManuscriptNodeType {
+  public get type(): PageNodeType {
     return this.props.type;
   }
 
@@ -190,7 +190,7 @@ export class ManuscriptNodeEntity {
     return this.props.updatedAt;
   }
 
-  public get children(): ManuscriptNodeEntity[] {
+  public get children(): PageNodeEntity[] {
     return this.props.children || [];
   }
 
@@ -235,7 +235,7 @@ export class ManuscriptNodeEntity {
   public canBeRootDoc(): boolean {
     if (!this.isDoc()) return false;
     const lowerName = this.props.name.toLowerCase();
-    return ManuscriptNodeEntity.VALID_ROOT_EXTENSIONS.some((ext) =>
+    return PageNodeEntity.VALID_ROOT_EXTENSIONS.some((ext) =>
       lowerName.endsWith(ext),
     );
   }
@@ -248,7 +248,7 @@ export class ManuscriptNodeEntity {
     }
   }
 
-  public setChildren(children: ManuscriptNodeEntity[]): void {
+  public setChildren(children: PageNodeEntity[]): void {
     this.props.children = children;
   }
 
@@ -349,9 +349,3 @@ export class ManuscriptNodeEntity {
     };
   }
 }
-
-export {
-  ManuscriptNodeEntity as PageNodeEntity,
-  type ManuscriptNodeProps as PageNodeProps,
-  type ManuscriptNodeType as PageNodeType,
-};

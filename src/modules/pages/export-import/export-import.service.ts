@@ -6,16 +6,32 @@
 
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
+  NotFoundException,
   Optional,
 } from '@nestjs/common';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
+import { isUuid } from '@/core';
 import {
-  IManuscriptAggregatorPort,
+  LIVE_COLLABORATION_PORT,
+  LiveCollaborationPort,
+  NOOP_LIVE_COLLABORATION,
+} from '@/modules/pages/core';
+import {
+  getRecordSpaceId,
+  isRecordDeleted,
+  resolveActiveProjectId,
+} from '@/modules/pages/core/page-scope.helper';
+import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
+import { hydratePageDocLines } from '@/modules/pages/docstore/services/doc-occ.helper';
+import {
+  IPageArchiveAggregatorPort,
   IZipEnginePort,
-  IManuscriptHydratorPort,
+  IPageArchiveHydratorPort,
   IDocumentTranspilerPort,
   ArchiveEntryVo,
   ArchiveManifest,
@@ -23,13 +39,14 @@ import {
   validateExtractedArchiveEntries,
   IncludedProjectDoc,
   ExportFormattedDocResult,
+  resolveIncludedLatexContent,
   transpileLatexDocument,
 } from './domain';
 import { ZipAdapter } from './services/zip.adapter';
 import { TranspilerAdapter } from './services/transpiler.adapter';
 import {
-  ManuscriptAggregatorAdapter,
-  ManuscriptHydratorAdapter,
+  PageArchiveAggregatorAdapter,
+  PageArchiveHydratorAdapter,
 } from './repositories/aggregator.repository';
 import { TemplatesService } from '@/modules/pages/templates/templates.service';
 import { TemplateNotFoundException } from '@/modules/pages/templates/domain';
@@ -83,20 +100,28 @@ export interface ConvertDocumentInput {
 @Injectable()
 export class ExportImportService {
   private readonly logger = new Logger(ExportImportService.name);
-  private readonly aggregator: IManuscriptAggregatorPort;
+  private readonly aggregator: IPageArchiveAggregatorPort;
   private readonly zipEngine: IZipEnginePort;
-  private readonly hydrator: IManuscriptHydratorPort;
+  private readonly hydrator: IPageArchiveHydratorPort;
   private readonly templatesService?: TemplatesService;
   private readonly transpiler: IDocumentTranspilerPort;
   private readonly projectHistoryService?: ProjectHistoryService;
+  private readonly docstoreService?: DocstoreService;
+  private readonly pageScopeRepo?: ScopeRepository;
+  private readonly liveCollab: LiveCollaborationPort;
 
   constructor(
-    aggregator: ManuscriptAggregatorAdapter,
+    aggregator: PageArchiveAggregatorAdapter,
     zipEngine: ZipAdapter = new ZipAdapter(),
-    hydrator: ManuscriptHydratorAdapter,
+    hydrator: PageArchiveHydratorAdapter,
     @Optional() templatesService?: TemplatesService,
     @Optional() transpiler?: TranspilerAdapter,
     @Optional() projectHistoryService?: ProjectHistoryService,
+    @Optional() docstoreService?: DocstoreService,
+    @Optional() pageScopeRepo?: ScopeRepository,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
   ) {
     this.aggregator = aggregator;
     this.zipEngine = zipEngine;
@@ -105,6 +130,14 @@ export class ExportImportService {
     this.transpiler =
       transpiler ?? new TranspilerAdapter(this.zipEngine as ZipAdapter);
     this.projectHistoryService = projectHistoryService;
+    this.docstoreService = docstoreService;
+    this.pageScopeRepo = pageScopeRepo;
+    this.liveCollab =
+      liveCollabOrLegacyRef &&
+      typeof (liveCollabOrLegacyRef as LiveCollaborationPort)
+        .applyExternalText === 'function'
+        ? (liveCollabOrLegacyRef as LiveCollaborationPort)
+        : NOOP_LIVE_COLLABORATION;
   }
 
   public async collectProjectEntries(
@@ -368,5 +401,105 @@ export class ExportImportService {
     projectDocs?: IncludedProjectDoc[];
   }): ExportFormattedDocResult {
     return transpileLatexDocument(params);
+  }
+
+  public async exportSingleDocument(params: {
+    pageId: string;
+    format?: string;
+    includeChildren?: boolean | string;
+    project?: string | { id: string } | null;
+  }): Promise<ExportFormattedDocResult> {
+    const { pageId } = params;
+    if (!isUuid(pageId)) {
+      throw new BadRequestException('A valid UUID is required for pageId');
+    }
+    if (!this.docstoreService || !this.pageScopeRepo) {
+      throw new BadRequestException(
+        'Docstore dependencies are not configured for single document export',
+      );
+    }
+
+    const activeProjectId = resolveActiveProjectId(params.project);
+    let doc = activeProjectId
+      ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
+      : null;
+    if (!doc || isRecordDeleted(doc)) {
+      throw new NotFoundException(`Document ${pageId} not found`);
+    }
+
+    const docProjectId = getRecordSpaceId(doc);
+    const docPageId =
+      (doc as { pageId?: string | null } | null)?.pageId ?? undefined;
+    if (docProjectId) {
+      const flushed = await this.liveCollab
+        .flushDocs(docProjectId, [])
+        .catch(() => []);
+      if (flushed.length > 0) {
+        doc =
+          (await this.pageScopeRepo.findDocInProject(docProjectId, pageId)) ||
+          doc;
+      }
+    }
+
+    const format = (params.format || 'tex').toLowerCase();
+    const docWithNode = doc as typeof doc & {
+      path?: string;
+      node?: { path?: string | null } | null;
+    };
+    const rawPath =
+      docWithNode.node?.path || docWithNode.lastKnownPath || docWithNode.path;
+    const rawFilename = rawPath?.replace(/^\//, '') || 'document.tex';
+    const hydratedLines = await hydratePageDocLines(this.docstoreService, doc);
+    let content = hydratedLines.join('\n');
+
+    const rawIncludeFlag = params.includeChildren;
+    const explicitExclude =
+      rawIncludeFlag === false ||
+      rawIncludeFlag === 'false' ||
+      rawIncludeFlag === '0';
+    const explicitInclude =
+      rawIncludeFlag === true ||
+      rawIncludeFlag === 'true' ||
+      rawIncludeFlag === '1';
+    const hasIncludeMacros = /\\(input|include|subfile)\s*\{[^}]+\}/.test(
+      content,
+    );
+
+    if (
+      docProjectId &&
+      !explicitExclude &&
+      (explicitInclude || hasIncludeMacros)
+    ) {
+      try {
+        const projectDocs = await this.docstoreService.getAllDocs(
+          docProjectId,
+          docPageId,
+        );
+        if (projectDocs.length > 0) {
+          const hydratedProjectDocs = await Promise.all(
+            projectDocs.map(async (pd) => ({
+              id: pd.id || pd._id,
+              path: pd.path,
+              lines: await hydratePageDocLines(this.docstoreService!, {
+                id: pd.id || pd._id,
+                projectId: pd.projectId || docProjectId,
+                lines: pd.lines,
+                inStorage: pd.inStorage,
+              }),
+            })),
+          );
+          const rootKey = rawFilename.toLowerCase();
+          content = resolveIncludedLatexContent(
+            content,
+            hydratedProjectDocs,
+            new Set([rootKey, rootKey.replace(/\.tex$/i, '')]),
+          );
+        }
+      } catch {
+        // Fallback to unexpanded content if child doc query fails
+      }
+    }
+
+    return this.exportDocumentFormat({ rawFilename, content, format });
   }
 }

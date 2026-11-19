@@ -12,7 +12,7 @@ import {
   LiveCollaborationPort,
   LIVE_COLLABORATION_PORT,
   NOOP_LIVE_COLLABORATION,
-  ManuscriptDomainEventBus,
+  PageDomainEventBus,
 } from '@/modules/pages/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
@@ -36,7 +36,7 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
-    @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
+    @Optional() private readonly domainEventBus?: PageDomainEventBus,
     @Optional()
     liveCollab?: LiveCollaborationPort,
   ) {
@@ -313,15 +313,15 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     });
 
     if (
-      this.notificationsService?.manuscripts &&
+      this.notificationsService?.pages &&
       thread.replies &&
       thread.replies.length > 0
     ) {
       const firstReply = thread.replies[0];
-      const manuscriptsNotifications = this.notificationsService.manuscripts;
+      const pagesNotifications = this.notificationsService.pages;
       this.getCollaboratorContext(projectId, thread.createdById)
         .then(async (ctx) => {
-          await manuscriptsNotifications.parseAndNotifyMentions({
+          await pagesNotifications.parseAndNotifyMentions({
             text: firstReply.content,
             actorId: thread.createdById || 'anonymous',
             actorName: ctx.actorName,
@@ -354,12 +354,12 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
       reply: reply.toJSON(),
     });
 
-    if (this.notificationsService?.manuscripts) {
-      const manuscriptsNotifications = this.notificationsService.manuscripts;
+    if (this.notificationsService?.pages) {
+      const pagesNotifications = this.notificationsService.pages;
       this.getCollaboratorContext(projectId, reply.createdById)
         .then(async (ctx) => {
           if (threadOwnerId && threadOwnerId !== reply.createdById) {
-            await manuscriptsNotifications.notifyCommentReply({
+            await pagesNotifications.notifyCommentReply({
               recipientUserId: threadOwnerId,
               actorId: reply.createdById || 'anonymous',
               actorName: ctx.actorName,
@@ -384,7 +384,7 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
             mentionCollaborators[k] = userId;
           }
 
-          await manuscriptsNotifications.parseAndNotifyMentions({
+          await pagesNotifications.parseAndNotifyMentions({
             text: reply.content,
             actorId: reply.createdById || 'anonymous',
             actorName: ctx.actorName,
@@ -418,17 +418,17 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
       return;
     }
 
-    if (this.notificationsService?.manuscripts) {
-      const manuscriptsNotifications = this.notificationsService.manuscripts;
+    if (this.notificationsService?.pages) {
+      const pagesNotifications = this.notificationsService.pages;
       this.getCollaboratorContext(projectId, thread.resolvedById)
         .then(async (ctx) => {
-          await manuscriptsNotifications.dismissThreadNotifications(thread.id);
+          await pagesNotifications.dismissThreadNotifications(thread.id);
 
           if (
             thread.createdById &&
             thread.createdById !== thread.resolvedById
           ) {
-            await manuscriptsNotifications.notifyThreadResolved({
+            await pagesNotifications.notifyThreadResolved({
               recipientUserId: thread.createdById,
               actorId: thread.resolvedById || 'anonymous',
               actorName: ctx.actorName,

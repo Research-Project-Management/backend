@@ -14,8 +14,8 @@ import {
 import { Readable } from 'node:stream';
 import { ProjectHistoryRepository } from './project-history.repository';
 import {
-  ManuscriptCollectorAdapter,
-  ManuscriptRestorerAdapter,
+  PageSnapshotCollectorAdapter,
+  PageSnapshotRestorerAdapter,
 } from './adapters/project-history.adapters';
 import {
   Snapshot,
@@ -43,8 +43,8 @@ export class ProjectHistoryService {
 
   constructor(
     private readonly repository: ProjectHistoryRepository,
-    private readonly collector: ManuscriptCollectorAdapter,
-    private readonly restorer: ManuscriptRestorerAdapter,
+    private readonly collector: PageSnapshotCollectorAdapter,
+    private readonly restorer: PageSnapshotRestorerAdapter,
     @Optional() private readonly realtimeService?: RealtimeFacade,
     @Optional() private readonly userResolver?: UserResolverService,
     @Optional() diffEngine?: DiffEngine,

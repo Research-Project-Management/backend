@@ -12,8 +12,8 @@ import {
   SandboxProfile,
 } from '../../domain/sandbox-profile';
 import {
-  getRawManuscriptsEnv,
-  readManuscriptsConfig,
+  getRawPagesEnv,
+  readPagesConfig,
 } from '../../../core/config/pages.config';
 
 export type SandboxMode = 'container' | 'local-unsafe' | 'remote';
@@ -46,8 +46,8 @@ const DIGEST_REGEX = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 export function parseSandboxConfig(
   options: ParseSandboxConfigOptions = {},
 ): ClsiSandboxConfig {
-  const defaultConfig = readManuscriptsConfig();
-  const env = options.env ?? getRawManuscriptsEnv();
+  const defaultConfig = readPagesConfig();
+  const env = options.env ?? getRawPagesEnv();
   const isProduction =
     options.isProduction ??
     (env.NODE_ENV === 'production' || defaultConfig.isProduction);

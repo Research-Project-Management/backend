@@ -32,7 +32,7 @@ import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { ManuscriptFileResponseDto } from './dto/file-response.dto';
+import { PageBinaryAssetResponseDto } from './dto/file-response.dto';
 import {
   FileNotFoundException,
   InvalidByteRangeException,
@@ -78,7 +78,7 @@ export class FilestoreController {
     @Query('name') queryName?: string,
     @Query('pageId') queryPageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
-  ): Promise<ManuscriptFileResponseDto> {
+  ): Promise<PageBinaryAssetResponseDto> {
     let filename = queryName || 'unnamed.bin';
     let mimeType = 'application/octet-stream';
     let dataStream: Readable;
@@ -129,7 +129,7 @@ export class FilestoreController {
       { pageId },
     );
 
-    return ManuscriptFileResponseDto.fromEntity(savedFile);
+    return PageBinaryAssetResponseDto.fromEntity(savedFile);
   }
 
   @Head(':fileId')
@@ -174,7 +174,7 @@ export class FilestoreController {
     @Query('pageId') queryPageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
-  ): Promise<ManuscriptFileResponseDto[]> {
+  ): Promise<PageBinaryAssetResponseDto[]> {
     const { spaceId, pageId } = this.resolveCoordinates(
       { spaceId: routeSpaceId, pageId: paramPageId },
       resolvedSpace,
@@ -182,7 +182,7 @@ export class FilestoreController {
       req,
     );
     const files = await this.filestoreService.listFiles(spaceId, false, pageId);
-    return files.map((f) => ManuscriptFileResponseDto.fromEntity(f));
+    return files.map((f) => PageBinaryAssetResponseDto.fromEntity(f));
   }
 
   @Get('raw')

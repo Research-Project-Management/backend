@@ -1,7 +1,7 @@
 /**
- * modules/manuscripts/core/config/pages.config.ts
- * Centralized environment variable configuration for Manuscripts module (SC-001).
- * All process.env access within src/modules/manuscripts MUST go through this file.
+ * modules/pages/core/config/pages.config.ts
+ * Centralized environment variable configuration for Pages module (SC-001).
+ * All process.env access within src/modules/pages MUST go through this file.
  */
 
 import * as os from 'os';
@@ -9,7 +9,7 @@ import * as path from 'path';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService, registerAs } from '@nestjs/config';
 
-export interface ManuscriptsEnvConfig {
+export interface PagesEnvConfig {
   readonly nodeEnv: string;
   readonly isProduction: boolean;
   readonly isTest: boolean;
@@ -54,11 +54,11 @@ export function getSafeHostEnv(): Record<string, string> {
   return result;
 }
 
-export function getRawManuscriptsEnv(): Record<string, string | undefined> {
+export function getRawPagesEnv(): Record<string, string | undefined> {
   return { ...process.env };
 }
 
-export function readManuscriptsConfig(): ManuscriptsEnvConfig {
+export function readPagesConfig(): PagesEnvConfig {
   const nodeEnv = process.env.NODE_ENV || 'development';
   const isProduction = nodeEnv === 'production';
   const isTest = nodeEnv === 'test';
@@ -82,33 +82,24 @@ export function readManuscriptsConfig(): ManuscriptsEnvConfig {
       safeParentEnv: getSafeHostEnv(),
     },
     sandbox: {
-      rawEnv: getRawManuscriptsEnv(),
+      rawEnv: getRawPagesEnv(),
       safeHostEnv: getSafeHostEnv(),
     },
   };
 }
 
-export const manuscriptsConfig = registerAs(
-  'manuscripts',
-  (): ManuscriptsEnvConfig => readManuscriptsConfig(),
+export const pagesConfig = registerAs('manuscripts', (): PagesEnvConfig =>
+  readPagesConfig(),
 );
 
 @Injectable()
-export class ManuscriptsConfigService {
+export class PagesConfigService {
   constructor(@Optional() private readonly configService?: ConfigService) {}
 
-  public getConfig(): ManuscriptsEnvConfig {
+  public getConfig(): PagesEnvConfig {
     return (
-      this.configService?.get<ManuscriptsEnvConfig>('manuscripts') ??
-      readManuscriptsConfig()
+      this.configService?.get<PagesEnvConfig>('manuscripts') ??
+      readPagesConfig()
     );
   }
 }
-
-export const pagesConfig = manuscriptsConfig;
-export {
-  ManuscriptsConfigService as PagesConfigService,
-  type ManuscriptsEnvConfig as PagesEnvConfig,
-  readManuscriptsConfig as readPagesConfig,
-  getRawManuscriptsEnv as getRawPagesEnv,
-};

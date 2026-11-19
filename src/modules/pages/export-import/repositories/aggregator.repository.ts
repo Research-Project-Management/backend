@@ -12,13 +12,13 @@ import { mapWithConcurrency } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-  ManuscriptDomainEventBus,
+  PageDomainEventBus,
   WorkspaceCollectorService,
 } from '@/modules/pages/core';
 import {
-  IManuscriptAggregatorPort,
+  IPageArchiveAggregatorPort,
   ExportableFileEntry,
-  IManuscriptHydratorPort,
+  IPageArchiveHydratorPort,
   ArchiveEntryVo,
   ImportSummaryVo,
   isArxivAllowed,
@@ -27,7 +27,7 @@ import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { ClsiService } from '@/modules/pages/clsi';
-import type { ManuscriptNodeEntity } from '@/modules/pages/structure/domain';
+import type { PageNodeEntity } from '@/modules/pages/structure/domain';
 
 const COLLECT_CONCURRENCY = 6;
 
@@ -53,8 +53,8 @@ function inferMimeType(filePath: string): string {
 }
 
 @Injectable()
-export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
-  private readonly logger = new Logger(ManuscriptAggregatorAdapter.name);
+export class PageArchiveAggregatorAdapter extends IPageArchiveAggregatorPort {
+  private readonly logger = new Logger(PageArchiveAggregatorAdapter.name);
 
   constructor(
     private readonly structureService: StructureService,
@@ -76,8 +76,8 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     cleanArxiv: boolean,
     pageId?: string,
   ): Promise<{
-    nodes: ManuscriptNodeEntity[];
-    candidates: Array<{ node: ManuscriptNodeEntity; relPath: string }>;
+    nodes: PageNodeEntity[];
+    candidates: Array<{ node: PageNodeEntity; relPath: string }>;
   }> {
     const nodes = pageId
       ? await this.structureService.getAllNodes(projectId, undefined, pageId)
@@ -124,7 +124,7 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     const results: ExportableFileEntry[] = [];
 
     const collected = await mapWithConcurrency<
-      { node: ManuscriptNodeEntity; relPath: string },
+      { node: PageNodeEntity; relPath: string },
       ExportableFileEntry | null
     >(
       candidates,
@@ -133,7 +133,7 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
         node,
         relPath,
       }: {
-        node: ManuscriptNodeEntity;
+        node: PageNodeEntity;
         relPath: string;
       }): Promise<ExportableFileEntry | null> => {
         try {
@@ -306,8 +306,8 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
 }
 
 @Injectable()
-export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
-  private readonly logger = new Logger(ManuscriptHydratorAdapter.name);
+export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
+  private readonly logger = new Logger(PageArchiveHydratorAdapter.name);
 
   constructor(
     private readonly structureService: StructureService,
@@ -317,7 +317,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly liveCollab?: LiveCollaborationPort,
     @Optional()
-    private readonly domainEventBus?: ManuscriptDomainEventBus,
+    private readonly domainEventBus?: PageDomainEventBus,
   ) {
     super();
   }
@@ -343,7 +343,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     const wrapperPrefix = this.detectSingleWrapperFolder(entries);
     const createdDirs = new Set<string>(['/']);
 
-    let preFetchedNodesByPath: Map<string, ManuscriptNodeEntity> | null = null;
+    let preFetchedNodesByPath: Map<string, PageNodeEntity> | null = null;
     if (typeof this.structureService.getAllNodes === 'function') {
       try {
         const allNodes = pageId
@@ -371,7 +371,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
 
     const resolveExistingNodeByPath = async (
       normalizedPath: string,
-    ): Promise<ManuscriptNodeEntity | null> => {
+    ): Promise<PageNodeEntity | null> => {
       if (preFetchedNodesByPath && preFetchedNodesByPath.has(normalizedPath)) {
         return preFetchedNodesByPath.get(normalizedPath) ?? null;
       }

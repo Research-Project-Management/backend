@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/services/compile-pipeline.service.ts
+ * modules/pages/clsi/services/compile-pipeline.service.ts
  * Coordinates the 5-step LaTeX compilation pipeline across the real engine seam
  * (LatexmkEngine), sandbox runners (LocalProcessRunner vs DockerSandboxRunner),
  * health check probes, and workspace repository, using pure in-process domain logic.
@@ -12,15 +12,10 @@ import {
   IWorkspaceManager,
   WorkspaceFile,
   ILatexEngine,
-  EngineRunOptions,
-  EngineRunResult,
   ILogParser,
   CompilerDiagnostic,
   DiscoveredOutputFile,
   IOutputFileFinder,
-  ISandboxRunner,
-  ProcessExecutionOptions,
-  ProcessExecutionResult,
 } from '../domain/clsi.ports';
 import {
   ProjectLockManager,
@@ -30,405 +25,23 @@ import { TexEngineDetector } from '../domain/tex-engine.detector';
 import { CompileLogAnalyzer } from '@/modules/pages/diagnostics/domain';
 import { BibBackendDetector } from '../domain/bib-backend.detector';
 import { DraftModeManager } from '../domain/draft-mode.manager';
-import { SandboxPolicyViolationException } from '../domain/sandbox.errors';
 import { SafePath } from '../domain/safe-path';
-
-function hasControlChar(str: string): boolean {
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    if ((code >= 0 && code <= 31) || code === 127) return true;
-  }
-  return false;
-}
-
-function assertSafeMainFile(mainFile: string): string {
-  const clean = (mainFile || '')
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/^(\.\/)+/, '')
-    .replace(/^\/+/, '');
-  if (
-    !clean ||
-    clean.startsWith('-') ||
-    clean.includes('..') ||
-    hasControlChar(clean)
-  ) {
-    throw new BadRequestException(
-      `Invalid or unsafe mainFile path: "${mainFile}"`,
-    );
-  }
-  return clean;
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Process Watchdog & Sandbox Runners (re-exported from ./sandbox/*)
-// ─────────────────────────────────────────────────────────────────
+import {
+  BaseLatexEngine,
+  LatexmkEngine,
+  hasControlChar,
+} from './latexmk.engine';
+import {
+  ClsiHealthCheck,
+  type BinaryStatus,
+  type ClsiHealthReport,
+} from './clsi-health.check';
 
 export { killProcessGroup, Watchdog } from './sandbox/process-watchdog';
 export { LocalProcessRunner } from './sandbox/local-process.runner';
 export { DockerSandboxRunner } from './sandbox/docker-sandbox.runner';
-
-// ─────────────────────────────────────────────────────────────────
-// LaTeX Engines (Template Method: BaseLatexEngine -> LatexmkEngine)
-// ─────────────────────────────────────────────────────────────────
-
-/**
- * Template Method base class for LaTeX compilation engines (`ILatexEngine`).
- * Centralizes shell-escape sandbox enforcement, mainFile path sanitization,
- * binary availability probing, and filesystem existence helpers so concrete
- * engine (`LatexmkEngine`) satisfies Liskov Substitution.
- */
-export abstract class BaseLatexEngine implements ILatexEngine {
-  abstract readonly name: string;
-  protected abstract readonly versionArgs: string[];
-
-  constructor(
-    protected readonly runner: ISandboxRunner,
-    protected readonly binaryPath: string,
-  ) {}
-
-  public async isAvailable(): Promise<boolean> {
-    try {
-      const result = await this.runner.run(this.binaryPath, this.versionArgs, {
-        cwd: process.cwd(),
-        timeoutMs: 5000,
-      });
-      return result.exitCode === 0;
-    } catch {
-      return false;
-    }
-  }
-
-  public async compile(
-    options: EngineRunOptions,
-    compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex',
-  ): Promise<EngineRunResult> {
-    if (options.shellEscape) {
-      throw new SandboxPolicyViolationException(
-        'Shell escape is strictly disabled in compilation sandbox.',
-      );
-    }
-
-    const safeMainFile = assertSafeMainFile(options.mainFile);
-    const normalizedOptions: EngineRunOptions = {
-      ...options,
-      compilerOverride: compilerOverride ?? options.compilerOverride,
-    };
-
-    return this.executeEngineCompile(normalizedOptions, safeMainFile);
-  }
-
-  protected abstract executeEngineCompile(
-    options: EngineRunOptions,
-    safeMainFile: string,
-  ): Promise<EngineRunResult>;
-
-  protected async fileExists(filePath: string): Promise<boolean> {
-    try {
-      await fs.access(filePath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
-export class LatexmkEngine extends BaseLatexEngine {
-  readonly name = 'latexmk';
-  protected readonly versionArgs = ['-v'];
-
-  constructor(
-    runner: ISandboxRunner,
-    binaryPath: string = 'latexmk',
-    private readonly defaultCompiler:
-      'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex',
-  ) {
-    super(runner, binaryPath);
-  }
-
-  protected async executeEngineCompile(
-    options: EngineRunOptions,
-    safeMainFile: string,
-  ): Promise<EngineRunResult> {
-    const startTime = Date.now();
-    const compiler = options.compilerOverride || this.defaultCompiler;
-
-    let compilerFlag = '-pdf';
-    if (compiler === 'xelatex') {
-      compilerFlag = '-pdfxe';
-    } else if (compiler === 'lualatex') {
-      compilerFlag = '-pdflua';
-    }
-
-    const args: string[] = [
-      compilerFlag,
-      '-cd',
-      '-jobname=output',
-      '-synctex=1',
-      '-file-line-error',
-      '-no-shell-escape',
-      options.stopOnFirstError ? '-halt-on-error' : '-interaction=batchmode',
-      ...(options.stopOnFirstError ? [] : ['-f']),
-      ...(options.syntaxOnly ? ['-draftmode'] : []),
-      safeMainFile,
-    ];
-
-    const isLinuxContainer = this.runner.name === 'docker-sandbox';
-    const cwdPath = path.resolve(options.cwd);
-    const texInputs = isLinuxContainer
-      ? `.:/compile//:${options.env?.TEXINPUTS || ''}`
-      : process.platform === 'win32'
-        ? `.;${cwdPath}\\//;${options.env?.TEXINPUTS || ''}`
-        : `.:${cwdPath}//:${options.env?.TEXINPUTS || ''}`;
-    const bibInputs = isLinuxContainer
-      ? `.:/compile//:${options.env?.BIBINPUTS || ''}`
-      : process.platform === 'win32'
-        ? `.;${cwdPath}\\//;${options.env?.BIBINPUTS || ''}`
-        : `.:${cwdPath}//:${options.env?.BIBINPUTS || ''}`;
-
-    const envWithInputs = {
-      ...(options.env || {}),
-      TEXINPUTS: texInputs,
-      BIBINPUTS: bibInputs,
-      BSTINPUTS: bibInputs,
-    };
-
-    const execResult = await this.runner.run(this.binaryPath, args, {
-      cwd: options.cwd,
-      timeoutMs: options.timeoutMs ?? 240000,
-      signal: options.signal,
-      onLogChunk: options.onLogChunk,
-      env: envWithInputs,
-    });
-
-    const durationMs = Date.now() - startTime;
-
-    const mainRelDir = path.posix.dirname(safeMainFile);
-    if (mainRelDir && mainRelDir !== '.') {
-      const mainDir = path.join(options.cwd, mainRelDir);
-      const artifactsToPromote = [
-        'output.pdf',
-        'output.log',
-        'output.synctex.gz',
-        'output.synctex',
-        'output.bbl',
-        'output.fls',
-        'output.aux',
-        'output.out',
-        'output.toc',
-      ];
-      await Promise.all(
-        artifactsToPromote.map(async (artifactName) => {
-          const rootTarget = path.join(options.cwd, artifactName);
-          const nestedSource = path.join(mainDir, artifactName);
-          if (
-            !(await this.fileExists(rootTarget)) &&
-            (await this.fileExists(nestedSource))
-          ) {
-            await fs.copyFile(nestedSource, rootTarget).catch(() => {});
-          }
-        }),
-      );
-    }
-
-    const pdfPath = path.join(options.cwd, 'output.pdf');
-    const mainBase = path.parse(safeMainFile).name;
-    const altPdfPath = path.join(options.cwd, `${mainBase}.pdf`);
-    const synctexGzPath = path.join(options.cwd, 'output.synctex.gz');
-    const synctexPlainPath = path.join(options.cwd, 'output.synctex');
-
-    const [initialPdfGenerated, altPdfGenerated] = await Promise.all([
-      this.fileExists(pdfPath),
-      this.fileExists(altPdfPath),
-    ]);
-    const [synctexGzExists, synctexPlainExists] = await Promise.all([
-      this.fileExists(synctexGzPath),
-      this.fileExists(synctexPlainPath),
-    ]);
-    let pdfGenerated = initialPdfGenerated;
-
-    if (!pdfGenerated && altPdfGenerated) {
-      try {
-        await fs.copyFile(altPdfPath, pdfPath);
-        pdfGenerated = true;
-      } catch {}
-    }
-
-    return {
-      exitCode: execResult.exitCode,
-      stdout: execResult.stdout,
-      stderr: execResult.stderr,
-      durationMs,
-      pdfGenerated,
-      synctexGenerated: synctexGzExists || synctexPlainExists,
-      timedOut: execResult.timedOut,
-    };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────
-// CLSI Health Check
-// ─────────────────────────────────────────────────────────────────
-
-export interface BinaryStatus {
-  available: boolean;
-  version?: string;
-  error?: string;
-}
-
-export interface ClsiHealthReport {
-  status: 'healthy' | 'degraded' | 'unhealthy';
-  uptimeSeconds: number;
-  timestamp: string;
-  scratchDirectory: {
-    path: string;
-    writable: boolean;
-  };
-  sandbox: {
-    runner: string;
-    mode: 'container' | 'local-unsafe';
-  };
-  compilers: {
-    latexmk: BinaryStatus;
-    pdflatex: BinaryStatus;
-    xelatex: BinaryStatus;
-    lualatex: BinaryStatus;
-    biber: BinaryStatus;
-    bibtex: BinaryStatus;
-  };
-}
-
-export class ClsiHealthCheck {
-  private readonly startTime = Date.now();
-  private cachedReport: { report: ClsiHealthReport; expiresAt: number } | null =
-    null;
-  private inFlightCheck: Promise<ClsiHealthReport> | null = null;
-  private static readonly CACHE_TTL_MS = 30000;
-
-  constructor(
-    private readonly runner: ISandboxRunner,
-    private readonly scratchDir: string = '/tmp/clsi-scratch',
-  ) {}
-
-  public async checkHealth(): Promise<ClsiHealthReport> {
-    if (this.cachedReport && Date.now() < this.cachedReport.expiresAt) {
-      return {
-        ...this.cachedReport.report,
-        uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1000),
-      };
-    }
-
-    if (this.inFlightCheck) {
-      return this.inFlightCheck;
-    }
-
-    this.inFlightCheck = this.performHealthCheck().finally(() => {
-      this.inFlightCheck = null;
-    });
-    return this.inFlightCheck;
-  }
-
-  private async performHealthCheck(): Promise<ClsiHealthReport> {
-    const [
-      latexmk,
-      pdflatex,
-      xelatex,
-      lualatex,
-      biber,
-      bibtex,
-      scratchWritable,
-    ] = await Promise.all([
-      this.probeBinary('latexmk', ['-v']),
-      this.probeBinary('pdflatex', ['-version']),
-      this.probeBinary('xelatex', ['-version']),
-      this.probeBinary('lualatex', ['-version']),
-      this.probeBinary('biber', ['--version']),
-      this.probeBinary('bibtex', ['--version']),
-      this.probeScratchDir(),
-    ]);
-
-    const hasAnyEngine = latexmk.available || pdflatex.available;
-    const hasStandardLatex = latexmk.available && pdflatex.available;
-
-    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
-    if (!scratchWritable || !hasAnyEngine) {
-      status = 'unhealthy';
-    } else if (!hasStandardLatex) {
-      status = 'degraded';
-    }
-
-    const sandboxMode =
-      this.runner.name === 'docker-sandbox' ? 'container' : 'local-unsafe';
-
-    const report: ClsiHealthReport = {
-      status,
-      uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1000),
-      timestamp: new Date().toISOString(),
-      scratchDirectory: {
-        path: this.scratchDir,
-        writable: scratchWritable,
-      },
-      sandbox: {
-        runner: this.runner.name,
-        mode: sandboxMode,
-      },
-      compilers: {
-        latexmk,
-        pdflatex,
-        xelatex,
-        lualatex,
-        biber,
-        bibtex,
-      },
-    };
-
-    this.cachedReport = {
-      report,
-      expiresAt: Date.now() + ClsiHealthCheck.CACHE_TTL_MS,
-    };
-
-    return report;
-  }
-
-  private async probeBinary(
-    binary: string,
-    versionArgs: string[],
-  ): Promise<BinaryStatus> {
-    try {
-      const result = await this.runner.run(binary, versionArgs, {
-        cwd: process.cwd(),
-        timeoutMs: 3000,
-      });
-
-      if (result.exitCode === 0) {
-        const firstLine = (result.stdout || result.stderr || '')
-          .split('\n')[0]
-          .trim();
-        return { available: true, version: firstLine };
-      }
-
-      return { available: false, error: `Exited with code ${result.exitCode}` };
-    } catch (err: unknown) {
-      return { available: false, error: (err as Error)?.message };
-    }
-  }
-
-  private async probeScratchDir(): Promise<boolean> {
-    try {
-      await fs.mkdir(this.scratchDir, { recursive: true });
-      const testFile = path.join(this.scratchDir, `.probe-${Date.now()}`);
-      await fs.writeFile(testFile, 'probe');
-      await fs.unlink(testFile);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Compile Pipeline Orchestrator
-// ─────────────────────────────────────────────────────────────────
+export { BaseLatexEngine, LatexmkEngine, ClsiHealthCheck };
+export type { BinaryStatus, ClsiHealthReport };
 
 export interface CompilePipelineRequest {
   projectId?: string;
@@ -636,7 +249,6 @@ export class CompilePipeline {
           );
 
           const pdfPath = path.join(scratchDir, 'output.pdf');
-          const logPath = path.join(scratchDir, 'output.log');
           const buildStatePath = path.join(
             scratchDir,
             '.clsi-build-state.json',

@@ -19,11 +19,11 @@ import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { PageService } from '@/modules/pages/core/services/page.service';
 import {
   FilestoreValidationException,
-  ManuscriptFile,
+  PageBinaryAsset,
 } from '@/modules/pages/filestore/filestore.types';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import {
-  ManuscriptNodeEntity,
+  PageNodeEntity,
   IStructureRepository,
 } from '@/modules/pages/structure/domain';
 import {
@@ -53,8 +53,8 @@ function makeNode(
     fileId: string | null;
     isRootDoc: boolean;
   }>,
-): ManuscriptNodeEntity {
-  return new ManuscriptNodeEntity({
+): PageNodeEntity {
+  return new PageNodeEntity({
     id: overrides.id ?? 'node-1',
     projectId: overrides.projectId ?? SPACE_ID,
     pageId: overrides.pageId ?? null,
@@ -800,13 +800,13 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
   });
 
   describe('5. Filestore, LatexmkEngine nested promotion, and WorkspacePlanner cache', () => {
-    it('ManuscriptFile.sanitizeFilename rejects null bytes and caps flattened filenames to 255 chars', () => {
+    it('PageBinaryAsset.sanitizeFilename rejects null bytes and caps flattened filenames to 255 chars', () => {
       expect(() =>
-        ManuscriptFile.sanitizeFilename('bad\u0000name.png'),
+        PageBinaryAsset.sanitizeFilename('bad\u0000name.png'),
       ).toThrow(FilestoreValidationException);
 
       const longTraversal = `../${'a'.repeat(300)}.png`;
-      const sanitized = ManuscriptFile.sanitizeFilename(longTraversal);
+      const sanitized = PageBinaryAsset.sanitizeFilename(longTraversal);
       expect(sanitized.length).toBeLessThanOrEqual(255);
     });
 
@@ -824,7 +824,7 @@ describe('Virtual Tree Multi-Page Isolation & CLSI Hardening', () => {
           getValue: () => 'blobs/aa/aa/rest',
         })),
         checkObjectExists: jest.fn().mockResolvedValue(true),
-        save: jest.fn(async (file: ManuscriptFile) => file),
+        save: jest.fn(async (file: PageBinaryAsset) => file),
       };
       const service = new FilestoreService(mockRepo as never);
       const saved = await service.uploadFileFromStream(

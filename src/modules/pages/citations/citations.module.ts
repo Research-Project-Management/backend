@@ -7,7 +7,7 @@ import { Module } from '@nestjs/common';
 import { StructureModule } from '@/modules/pages/structure/structure.module';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { PrismaModule } from '@/core';
-import { ManuscriptsCoreModule } from '@/modules/pages/core';
+import { PagesCoreModule } from '@/modules/pages/core';
 import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 import { LibraryModule } from '@/modules/library';
 
@@ -21,7 +21,7 @@ import { BibtexParser, IdentifierResolver } from './domain';
 
 @Module({
   imports: [
-    ManuscriptsCoreModule,
+    PagesCoreModule,
     StructureModule,
     DocstoreModule,
     PrismaModule,

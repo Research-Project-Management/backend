@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/dto/review-status.dto.ts
+ * modules/pages/track-changes/dto/review-status.dto.ts
  * Request DTO and transition table for the manuscript review lifecycle.
  */
 
@@ -11,7 +11,7 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-import type { ReviewRoundInfo } from '../domain';
+import type { ReviewRoundInfo } from '@/modules/pages/docstore/domain';
 
 export const REVIEW_STATUSES = [
   'draft',

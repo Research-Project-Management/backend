@@ -241,5 +241,3 @@ export class PagesService {
     return this.roomStore.getDocSessions(projectId, docId);
   }
 }
-
-export { PagesService as ManuscriptsService };

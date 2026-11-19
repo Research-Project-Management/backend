@@ -13,11 +13,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import {
-  STORAGE_ADAPTER,
-  BlobService,
-  IStorageAdapter,
-} from '@/modules/files';
+import { STORAGE_ADAPTER, BlobService, IStorageAdapter } from '@/modules/files';
 import {
   IBinaryStoragePort,
   IContentHasherPort,

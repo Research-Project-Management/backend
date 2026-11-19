@@ -250,6 +250,3 @@ export class CleanupListener {
     }
   }
 }
-
-/** @deprecated Use CleanupListener */
-export { CleanupListener as ManuscriptCleanupListener };

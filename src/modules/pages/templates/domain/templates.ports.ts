@@ -1,4 +1,4 @@
-import { ManuscriptTemplateEntity } from './template.entity';
+import { PageTemplateEntity } from './template.entity';
 
 export interface FindTemplatesFilter {
   category?: string;
@@ -16,24 +16,24 @@ export interface SearchTemplatesFilter {
 }
 
 export interface FindTemplatesResult {
-  templates: ManuscriptTemplateEntity[];
+  templates: PageTemplateEntity[];
   total: number;
 }
 
 export const TEMPLATE_REPOSITORY_PORT = Symbol('TEMPLATE_REPOSITORY_PORT');
 
 export interface ITemplateRepositoryPort {
-  findById(id: string): Promise<ManuscriptTemplateEntity | null>;
-  findByVersionId(versionId: string): Promise<ManuscriptTemplateEntity | null>;
+  findById(id: string): Promise<PageTemplateEntity | null>;
+  findByVersionId(versionId: string): Promise<PageTemplateEntity | null>;
   findAll(filter?: FindTemplatesFilter): Promise<FindTemplatesResult>;
   search(filter: SearchTemplatesFilter): Promise<FindTemplatesResult>;
-  save(template: ManuscriptTemplateEntity): Promise<ManuscriptTemplateEntity>;
+  save(template: PageTemplateEntity): Promise<PageTemplateEntity>;
   delete(id: string): Promise<boolean>;
   incrementDownloadCount(id: string): Promise<void>;
 }
 
 export interface InstantiateProjectInput {
-  template: ManuscriptTemplateEntity;
+  template: PageTemplateEntity;
   projectName: string;
   userId: string;
 }

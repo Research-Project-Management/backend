@@ -6,7 +6,7 @@ import { DocModifiedError } from '@/modules/pages/docstore/domain/doc.errors';
 import {
   validateSuggestionRange,
   formatSuggestionItemDto,
-} from '@/modules/pages/docstore/controllers/review.helpers';
+} from '@/modules/pages/track-changes/services/review.helpers';
 import { YjsUpdateValidator } from '@/modules/realtime/pages/yjs-update-validator';
 import { YjsService } from '@/modules/realtime/pages/yjs.service';
 import { RealtimeValidationFailedException } from '@/modules/realtime/core/ws-errors';
@@ -22,13 +22,13 @@ import {
   DiffEngine,
 } from '@/modules/pages/project-history/domain';
 import {
-  ManuscriptHistoryMapper,
+  PageHistoryMapper,
   ProjectHistoryRepository,
 } from '@/modules/pages/project-history/project-history.repository';
 import { ProjectHistoryService } from '@/modules/pages/project-history/project-history.service';
 import type {
-  ManuscriptCollectorAdapter,
-  ManuscriptRestorerAdapter,
+  PageSnapshotCollectorAdapter,
+  PageSnapshotRestorerAdapter,
 } from '@/modules/pages/project-history/adapters/project-history.adapters';
 import {
   LinePatcher,
@@ -178,9 +178,9 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
   });
 
   describe('3. Project History Multi-Page Isolation & Non-Destructive Restore', () => {
-    it('preserves canonical spaceId and pageId across ManuscriptHistoryMapper and Snapshot/VersionLabel entities', () => {
+    it('preserves canonical spaceId and pageId across PageHistoryMapper and Snapshot/VersionLabel entities', () => {
       const now = new Date('2026-10-01T12:00:00Z');
-      const snap = ManuscriptHistoryMapper.toDomainHeader({
+      const snap = PageHistoryMapper.toDomainHeader({
         id: 'snap-1',
         spaceId: SPACE_ID,
         pageId: PAGE_A_ID,
@@ -253,7 +253,7 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
               ],
             ]),
           ),
-      } as unknown as ManuscriptCollectorAdapter;
+      } as unknown as PageSnapshotCollectorAdapter;
 
       const mockRestorer = {
         restoreSingleFileToState: jest.fn().mockResolvedValue({
@@ -263,7 +263,7 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
           content: 'Restored line',
           rev: 12,
         }),
-      } as unknown as ManuscriptRestorerAdapter;
+      } as unknown as PageSnapshotRestorerAdapter;
 
       const service = new ProjectHistoryService(
         mockRepo,

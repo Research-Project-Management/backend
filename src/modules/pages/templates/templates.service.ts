@@ -7,7 +7,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TemplatesRepository } from './templates.repository';
 import {
-  ManuscriptTemplateEntity,
+  PageTemplateEntity,
   TemplateNotFoundException,
   InvalidTemplateException,
 } from './domain';
@@ -48,9 +48,7 @@ export class TemplatesService {
     };
   }
 
-  async getTemplateEntity(
-    idOrVersionId: string,
-  ): Promise<ManuscriptTemplateEntity> {
+  async getTemplateEntity(idOrVersionId: string): Promise<PageTemplateEntity> {
     if (!idOrVersionId || !idOrVersionId.trim()) {
       throw new TemplateNotFoundException('empty-id');
     }
@@ -174,7 +172,7 @@ export class TemplatesService {
       );
     }
 
-    const template = ManuscriptTemplateEntity.create({
+    const template = PageTemplateEntity.create({
       name: dto.name,
       category: dto.category,
       description: dto.description,

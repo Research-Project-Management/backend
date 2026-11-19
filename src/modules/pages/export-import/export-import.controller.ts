@@ -12,6 +12,8 @@ import {
   Body,
   Req,
   Res,
+  HttpStatus,
+  HttpCode,
   BadRequestException,
   ForbiddenException,
   NotFoundException,
@@ -308,5 +310,43 @@ export class ExportImportController {
     } catch (err) {
       this.handleError(err);
     }
+  }
+
+  @Get(['pages/:pageId/export', 'docs/:pageId/export'])
+  @RequireRole(Role.REVIEWER)
+  async exportPage(
+    @Param('pageId') pageId: string,
+    @Query('format') format?: string,
+    @Query('includeChildren') includeChildren?: string,
+    @ResolvedSpace() project?: string | { id: string } | null,
+  ) {
+    return this.service.exportSingleDocument({
+      pageId,
+      format,
+      includeChildren:
+        includeChildren !== undefined
+          ? includeChildren === 'true' || includeChildren === '1'
+          : undefined,
+      project,
+    });
+  }
+
+  @Post(['pages/:pageId/export', 'docs/:pageId/export'])
+  @RequireRole(Role.REVIEWER)
+  @HttpCode(HttpStatus.OK)
+  async exportDocument(
+    @Param('pageId') pageId: string,
+    @Body()
+    body?: { format?: string; includeChildren?: boolean | string },
+    @Query('format') queryFormat?: string,
+    @Query('includeChildren') queryIncludeChildren?: string,
+    @ResolvedSpace() project?: string | { id: string } | null,
+  ) {
+    return this.service.exportSingleDocument({
+      pageId,
+      format: body?.format || queryFormat,
+      includeChildren: body?.includeChildren ?? queryIncludeChildren,
+      project,
+    });
   }
 }

@@ -313,7 +313,7 @@ export interface ExportableFileEntry {
   date?: Date;
 }
 
-export abstract class IManuscriptAggregatorPort {
+export abstract class IPageArchiveAggregatorPort {
   abstract collectProjectEntries(
     projectId: string,
     includePdf?: boolean,
@@ -329,7 +329,7 @@ export abstract class IManuscriptAggregatorPort {
   ): Promise<ExportableFileEntry[]>;
 }
 
-export abstract class IManuscriptHydratorPort {
+export abstract class IPageArchiveHydratorPort {
   abstract hydrateProjectEntries(
     projectId: string,
     entries: ArchiveEntryVo[],

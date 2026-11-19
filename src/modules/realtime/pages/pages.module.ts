@@ -53,8 +53,4 @@ import { AccessRevocationListener } from './access-revocation.listener';
   ],
 })
 export class RealtimePagesModule {}
-export {
-  RealtimePagesModule as RealtimeManuscriptsModule,
-  RealtimePagesModule as PagesModule,
-  RealtimePagesModule as ManuscriptsModule,
-};
+export { RealtimePagesModule as PagesModule };

@@ -24,7 +24,7 @@ import { FastifyReply } from 'fastify';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
-  CompileManuscriptDto,
+  CompilePageDto,
   ClsiWordCountDto,
 } from './modules/pages/clsi/dto/clsi.dto';
 import {
@@ -82,7 +82,7 @@ export class ClsiService {
     );
   }
 
-  public async compile(dto: CompileManuscriptDto) {
+  public async compile(dto: CompilePageDto) {
     const projectId = dto.spaceId || 'default';
     const mainFile = dto.mainFile || 'main.tex';
     const source = dto.source || '';
@@ -369,7 +369,7 @@ export class ClsiController {
     status: 200,
     description: 'Compilation finished (success or compiler error with logs)',
   })
-  public async compile(@Body() dto: CompileManuscriptDto) {
+  public async compile(@Body() dto: CompilePageDto) {
     return this.clsiService.compile(dto);
   }
 

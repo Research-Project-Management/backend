@@ -8,10 +8,12 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Prisma, PageDoc } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
+import {
+  ensureCanonicalPageId,
+  filterRecordsByPageScope,
+} from '@/modules/pages/core/page-scope.helper';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
-import { filterRecordsByPageScope } from '../controllers/doc.helpers';
 import {
   TextDoc,
   DocModifiedError,

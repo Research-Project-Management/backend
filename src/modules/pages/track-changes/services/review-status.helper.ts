@@ -1,178 +1,29 @@
 /**
- * modules/manuscripts/docstore/controllers/review.helpers.ts
- * Co-located formatting, validation, resolution, and docstore-patching helpers
- * for ReviewController.
+ * modules/pages/track-changes/services/review-status.helper.ts
+ * Review lifecycle status CAS persistence and project-wide review overview aggregation.
  */
 
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  NotFoundException,
 } from '@nestjs/common';
-import {
-  PageCommentReply,
-  PageCommentThread,
-  PageReviewStatus,
-  PageTrackChange,
-} from '@prisma/client';
-import { PrismaService, AuthenticatedRequest, isUuid } from '@/core';
+import { PageReviewStatus } from '@prisma/client';
+import { PrismaService, isUuid } from '@/core';
+import { isPrismaUniqueConstraintError } from '@/modules/pages/core/page-scope.helper';
 import { Role } from '@/modules/project/access';
-import { DocstoreService } from '../docstore.service';
-import { DocRanges, ReviewRoundInfo } from '../domain';
+import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+import { DocRanges, ReviewRoundInfo } from '@/modules/pages/docstore/domain';
 import {
   UpdateReviewStatusDto,
-  isReviewTransitionAllowed,
   defaultReviewTransitionPolicy,
 } from '../dto/review-status.dto';
-import { ScopeRepository } from '../repositories/scope.repository';
-
-export type ResolvedUserMap = Map<
-  string,
-  { id: string; name: string; avatar?: string }
->;
-
-export type ThreadWithReplies = PageCommentThread & {
-  replies?: PageCommentReply[];
-};
-
-export function resolveActiveProjectId(
-  project?: string | { id: string } | null,
-): string | undefined {
-  if (!project) return undefined;
-  return typeof project === 'string' ? project : project.id;
-}
-
-export function validateCommentRange(
-  line?: number,
-  lineEnd?: number,
-): { startLine: number; endLine: number } {
-  const startLine = line ?? 1;
-  const endLine = lineEnd ?? startLine;
-  if (startLine < 1 || endLine < startLine) {
-    throw new BadRequestException(
-      'Invalid comment range: startLine must be >= 1 and endLine >= startLine',
-    );
-  }
-  return { startLine, endLine };
-}
-
-export function validateSuggestionRange(body: {
-  fromLine?: number;
-  toLine?: number;
-  fromColumn?: number;
-  toColumn?: number;
-}): {
-  startLine: number;
-  endLine: number;
-  startCol: number;
-  endCol: number;
-} {
-  const fromLine = body.fromLine ?? 1;
-  const toLine = body.toLine ?? fromLine;
-  const startCol = body.fromColumn ?? 0;
-  const endCol = body.toColumn ?? 0;
-  if (fromLine < 1 || toLine < fromLine || startCol < 0 || endCol < 0) {
-    throw new BadRequestException(
-      'Invalid suggestion range: startLine >= 1, endLine >= startLine, and columns >= 0 are required',
-    );
-  }
-  return {
-    startLine: fromLine - 1,
-    endLine: toLine - 1,
-    startCol,
-    endCol,
-  };
-}
-
-export function assertCanModifyReviewItem(
-  authorId: string | null | undefined,
-  userId: string | null | undefined,
-  role: Role | undefined,
-  message: string,
-): void {
-  const isAuthor = authorId === userId;
-  const isPrivileged = role === Role.COORDINATOR || role === Role.OWNER;
-  if (!isAuthor && !isPrivileged) {
-    throw new ForbiddenException({
-      statusCode: 403,
-      code: 'ROLE_INSUFFICIENT',
-      message,
-    });
-  }
-}
-
-export function formatCommentThreadDto(
-  t: ThreadWithReplies,
-  userMap: ResolvedUserMap,
-  options?: { includeAvatar?: boolean; includeDocId?: boolean },
-) {
-  const threadUser = t.createdById ? userMap.get(t.createdById) : undefined;
-  const includeAvatar = options?.includeAvatar ?? false;
-  const includeDocId = options?.includeDocId ?? true;
-
-  return {
-    id: t.id,
-    page: t.docId,
-    projectPageId: t.docId,
-    ...(includeDocId ? { docId: t.docId } : {}),
-    author: {
-      id: t.createdById || 'anonymous',
-      name: threadUser?.name || 'Collaborator',
-      ...(includeAvatar ? { avatar: threadUser?.avatar || '' } : {}),
-    },
-    content: t.quote || '',
-    line: t.startLine,
-    lineEnd: t.endLine,
-    status: t.isResolved ? 'resolved' : 'open',
-    replies: (t.replies || []).map((r) => {
-      const replyUser = r.createdById ? userMap.get(r.createdById) : undefined;
-      return {
-        id: r.id,
-        author: {
-          id: r.createdById || 'anonymous',
-          name: replyUser?.name || 'Collaborator',
-          ...(includeAvatar ? { avatar: replyUser?.avatar || '' } : {}),
-        },
-        content: r.content,
-        createdAt: r.createdAt.toISOString(),
-      };
-    }),
-    createdAt: t.createdAt.toISOString(),
-    updatedAt: t.updatedAt.toISOString(),
-  };
-}
-
-export function formatSuggestionItemDto(
-  s: PageTrackChange,
-  userMap: ResolvedUserMap,
-) {
-  const authorUser = s.createdById ? userMap.get(s.createdById) : undefined;
-  return {
-    id: s.id,
-    pageId: s.docId,
-    projectPageId: s.docId,
-    authorId: s.createdById || 'anonymous',
-    author: {
-      id: s.createdById || 'anonymous',
-      name: authorUser?.name || 'Collaborator',
-      email: '',
-    },
-    type: s.type,
-    originalText: s.type === 'delete' ? s.text : '',
-    suggestedText: s.type === 'insert' ? s.text : '',
-    fromLine: (s.startLine ?? 0) + 1,
-    fromColumn: s.startCol,
-    toLine: (s.endLine ?? s.startLine ?? 0) + 1,
-    toColumn: s.endCol,
-    description: null,
-    status: s.status,
-    resolvedById: s.resolvedById,
-    resolvedAt: s.resolvedAt ? s.resolvedAt.toISOString() : null,
-    createdAt: s.createdAt.toISOString(),
-    updatedAt: s.updatedAt.toISOString(),
-  };
-}
+import { ReviewScopeRepository } from '../repositories/review-scope.repository';
+import {
+  type ResolvedUserMap,
+  formatCommentThreadDto,
+  formatSuggestionItemDto,
+} from './review.helpers';
 
 export async function getDocReviewStatusWithFallback(
   prisma: PrismaService,
@@ -182,9 +33,7 @@ export async function getDocReviewStatusWithFallback(
 ): Promise<ReviewRoundInfo> {
   if (prisma?.pageDocReview?.findUnique) {
     const row = await prisma.pageDocReview
-      .findUnique({
-        where: { docId },
-      })
+      .findUnique({ where: { docId } })
       .catch(() => null);
     const rowSpaceId =
       row?.spaceId ?? (row as { projectId?: string } | null)?.projectId;
@@ -212,6 +61,27 @@ export async function getDocReviewStatusWithFallback(
       roundNumber: 1,
     }
   );
+}
+
+function buildReviewPersistencePayload(updatedReview: ReviewRoundInfo) {
+  return {
+    status: updatedReview.status,
+    roundNumber: updatedReview.roundNumber,
+    requestedById: isUuid(updatedReview.requestedById)
+      ? updatedReview.requestedById
+      : null,
+    requestedAt: updatedReview.requestedAt
+      ? new Date(updatedReview.requestedAt)
+      : null,
+    verdictById: isUuid(updatedReview.verdictById)
+      ? updatedReview.verdictById
+      : null,
+    verdictAt: updatedReview.verdictAt
+      ? new Date(updatedReview.verdictAt)
+      : null,
+    notes: updatedReview.notes ?? null,
+    deadline: updatedReview.deadline ? new Date(updatedReview.deadline) : null,
+  };
 }
 
 export async function updateDocReviewStatusWithCas(params: {
@@ -316,177 +186,70 @@ export async function updateDocReviewStatusWithCas(params: {
       deadline: body.deadline ?? prevReview.deadline,
     };
 
-    if (prisma?.pageDocReview) {
-      if (existingRow) {
-        const cas = await prisma.pageDocReview.updateMany({
-          where: {
-            docId,
-            spaceId: projectId,
-            version: existingRow.version,
-          },
-          data: {
-            status: updatedReview.status,
-            roundNumber: updatedReview.roundNumber,
-            version: { increment: 1 },
-            requestedById: isUuid(updatedReview.requestedById)
-              ? updatedReview.requestedById
-              : null,
-            requestedAt: updatedReview.requestedAt
-              ? new Date(updatedReview.requestedAt)
-              : null,
-            verdictById: isUuid(updatedReview.verdictById)
-              ? updatedReview.verdictById
-              : null,
-            verdictAt: updatedReview.verdictAt
-              ? new Date(updatedReview.verdictAt)
-              : null,
-            notes: updatedReview.notes ?? null,
-            deadline: updatedReview.deadline
-              ? new Date(updatedReview.deadline)
-              : null,
-          },
-        });
-        if (cas.count === 0) {
-          throw new ConflictException(
-            `Concurrent review status update conflict for document ${docId}`,
-          );
-        }
-        break;
-      } else if (prisma.pageDocReview.create) {
-        try {
-          await prisma.pageDocReview.create({
-            data: {
-              docId,
-              spaceId: projectId,
-              status: updatedReview.status,
-              roundNumber: updatedReview.roundNumber,
-              version: 1,
-              requestedById: isUuid(updatedReview.requestedById)
-                ? updatedReview.requestedById
-                : null,
-              requestedAt: updatedReview.requestedAt
-                ? new Date(updatedReview.requestedAt)
-                : null,
-              verdictById: isUuid(updatedReview.verdictById)
-                ? updatedReview.verdictById
-                : null,
-              verdictAt: updatedReview.verdictAt
-                ? new Date(updatedReview.verdictAt)
-                : null,
-              notes: updatedReview.notes ?? null,
-              deadline: updatedReview.deadline
-                ? new Date(updatedReview.deadline)
-                : null,
-            },
-          });
-          break;
-        } catch (err: unknown) {
-          const code = (err as { code?: string })?.code;
-          const msg = err instanceof Error ? err.message : String(err);
-          if (
-            (code === 'P2002' || msg.includes('P2002')) &&
-            attempt < MAX_CAS_ATTEMPTS
-          ) {
-            continue;
-          }
-          throw err;
-        }
-      } else if (prisma.pageDocReview.upsert) {
-        try {
-          await prisma.pageDocReview.upsert({
-            where: { docId },
-            create: {
-              docId,
-              spaceId: projectId,
-              status: updatedReview.status,
-              roundNumber: updatedReview.roundNumber,
-              version: 1,
-              requestedById: isUuid(updatedReview.requestedById)
-                ? updatedReview.requestedById
-                : null,
-              requestedAt: updatedReview.requestedAt
-                ? new Date(updatedReview.requestedAt)
-                : null,
-              verdictById: isUuid(updatedReview.verdictById)
-                ? updatedReview.verdictById
-                : null,
-              verdictAt: updatedReview.verdictAt
-                ? new Date(updatedReview.verdictAt)
-                : null,
-              notes: updatedReview.notes ?? null,
-              deadline: updatedReview.deadline
-                ? new Date(updatedReview.deadline)
-                : null,
-            },
-            update: {
-              status: updatedReview.status,
-              roundNumber: updatedReview.roundNumber,
-              version: { increment: 1 },
-              requestedById: isUuid(updatedReview.requestedById)
-                ? updatedReview.requestedById
-                : null,
-              requestedAt: updatedReview.requestedAt
-                ? new Date(updatedReview.requestedAt)
-                : null,
-              verdictById: isUuid(updatedReview.verdictById)
-                ? updatedReview.verdictById
-                : null,
-              verdictAt: updatedReview.verdictAt
-                ? new Date(updatedReview.verdictAt)
-                : null,
-              notes: updatedReview.notes ?? null,
-              deadline: updatedReview.deadline
-                ? new Date(updatedReview.deadline)
-                : null,
-            },
-          });
-          break;
-        } catch (err: unknown) {
-          const code = (err as { code?: string })?.code;
-          const msg = err instanceof Error ? err.message : String(err);
-          if (
-            (code === 'P2002' || msg.includes('P2002')) &&
-            attempt < MAX_CAS_ATTEMPTS
-          ) {
-            continue;
-          }
-          throw err;
-        }
-      } else {
-        break;
-      }
-    } else {
+    if (!prisma?.pageDocReview) {
       break;
+    }
+
+    const basePayload = buildReviewPersistencePayload(updatedReview);
+    if (existingRow) {
+      const cas = await prisma.pageDocReview.updateMany({
+        where: { docId, spaceId: projectId, version: existingRow.version },
+        data: { ...basePayload, version: { increment: 1 } },
+      });
+      if (cas.count === 0) {
+        throw new ConflictException(
+          `Concurrent review status update conflict for document ${docId}`,
+        );
+      }
+      break;
+    }
+
+    if (!prisma.pageDocReview.create && !prisma.pageDocReview.upsert) {
+      break;
+    }
+
+    try {
+      if (prisma.pageDocReview.create) {
+        await prisma.pageDocReview.create({
+          data: { docId, spaceId: projectId, version: 1, ...basePayload },
+        });
+      } else if (prisma.pageDocReview.upsert) {
+        await prisma.pageDocReview.upsert({
+          where: { docId },
+          create: { docId, spaceId: projectId, version: 1, ...basePayload },
+          update: { ...basePayload, version: { increment: 1 } },
+        });
+      }
+      break;
+    } catch (err: unknown) {
+      if (isPrismaUniqueConstraintError(err) && attempt < MAX_CAS_ATTEMPTS) {
+        continue;
+      }
+      throw err;
     }
   }
 
-  const nextRanges: DocRanges = {
-    ...ranges,
-    review: updatedReview,
-  };
-
-  await docstoreService.patchDoc(projectId, docId, {
-    ranges: nextRanges,
-  });
+  const nextRanges: DocRanges = { ...ranges, review: updatedReview };
+  await docstoreService.patchDoc(projectId, docId, { ranges: nextRanges });
 
   return { review: updatedReview, previousStatus: prevReview.status };
 }
 
 export async function buildProjectReviewOverview(params: {
-  pageScopeRepo: ScopeRepository;
+  reviewScopeRepo: ReviewScopeRepository;
   projectId: string;
   pageId?: string;
   resolveUserNames: (
     userIds: (string | null | undefined)[],
   ) => Promise<ResolvedUserMap>;
 }) {
-  const { pageScopeRepo, projectId, pageId, resolveUserNames } = params;
+  const { reviewScopeRepo, projectId, pageId, resolveUserNames } = params;
 
   const { docs, nodes, allThreads, allChanges } =
-    typeof pageScopeRepo.getProjectReviewOverviewData === 'function'
-      ? await pageScopeRepo.getProjectReviewOverviewData(projectId, pageId)
+    typeof reviewScopeRepo.getProjectReviewOverviewData === 'function'
+      ? await reviewScopeRepo.getProjectReviewOverviewData(projectId, pageId)
       : await (async () => {
-          const prisma = pageScopeRepo.getPrisma();
+          const prisma = reviewScopeRepo.getPrisma();
           const pageFilter = pageId ? { pageId } : {};
           const [d, n, t, c] = await Promise.all([
             prisma.pageDoc.findMany({
@@ -508,11 +271,7 @@ export async function buildProjectReviewOverview(params: {
             }),
             prisma.pageCommentThread.findMany({
               where: { spaceId: projectId, ...pageFilter },
-              include: {
-                replies: {
-                  orderBy: { createdAt: 'asc' },
-                },
-              },
+              include: { replies: { orderBy: { createdAt: 'asc' } } },
               orderBy: [{ startLine: 'asc' }, { createdAt: 'asc' }],
             }),
             prisma.pageTrackChange.findMany({
@@ -530,9 +289,7 @@ export async function buildProjectReviewOverview(params: {
   const userIds: (string | null | undefined)[] = [];
   for (const t of allThreads) {
     userIds.push(t.createdById);
-    for (const r of t.replies || []) {
-      userIds.push(r.createdById);
-    }
+    for (const r of t.replies || []) userIds.push(r.createdById);
   }
   for (const c of allChanges) {
     userIds.push(c.createdById, c.resolvedById);
@@ -626,13 +383,10 @@ export async function buildProjectReviewOverview(params: {
   const files = Array.from(docMetaMap.values()).map((meta) => {
     const comments = threadsByDoc.get(meta.docId) || [];
     const suggestions = changesByDoc.get(meta.docId) || [];
-
     const openCommentsCount = comments.filter(
       (c) => c.status !== 'resolved',
     ).length;
-    const resolvedCommentsCount = comments.filter(
-      (c) => c.status === 'resolved',
-    ).length;
+    const resolvedCommentsCount = comments.length - openCommentsCount;
     const pendingSuggestionsCount = suggestions.filter(
       (s) => s.status === 'pending',
     ).length;

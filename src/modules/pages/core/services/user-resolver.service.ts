@@ -7,7 +7,7 @@ import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { IdentityFacade } from '@/modules/identity/identity.facade';
 
-export interface ResolvedManuscriptUser {
+export interface ResolvedPageUser {
   id: string;
   name: string;
   avatar?: string;
@@ -23,8 +23,8 @@ export class UserResolverService {
   /** Resolves user display names and avatars via IdentityFacade (Modular Monolith) or Prisma fallback. */
   public async resolveUserNames(
     userIds: (string | null | undefined)[],
-  ): Promise<Map<string, ResolvedManuscriptUser>> {
-    const result = new Map<string, ResolvedManuscriptUser>();
+  ): Promise<Map<string, ResolvedPageUser>> {
+    const result = new Map<string, ResolvedPageUser>();
     const validIds = Array.from(
       new Set(userIds.filter((id): id is string => isUuid(id))),
     );
@@ -84,6 +84,3 @@ export class UserResolverService {
     return result;
   }
 }
-
-/** @deprecated Use UserResolverService */
-export { UserResolverService as ManuscriptUserResolverService };

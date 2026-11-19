@@ -4,7 +4,7 @@
  * detecting root compilation documents (Overleaf _rootDocSort), and validating path rules.
  */
 
-import { ManuscriptNodeEntity, SerializedTreeNode } from './node.entity';
+import { PageNodeEntity, SerializedTreeNode } from './node.entity';
 import { NodePathVo } from './node-path';
 import { MaxProjectFilesExceededError } from './structure.errors';
 
@@ -14,11 +14,11 @@ export const DEFAULT_MAX_PROJECT_FILES = 2000;
 
 export class FileTreeBuilder {
   /**
-   * Transforms flat ManuscriptNodeEntity[] into a sorted recursive TreeNode[] hierarchy.
+   * Transforms flat PageNodeEntity[] into a sorted recursive TreeNode[] hierarchy.
    * Folders are sorted before files; root docs prioritized; then sortOrder, then alphabetical.
    */
   public static buildTreeHierarchy(
-    nodes: readonly ManuscriptNodeEntity[],
+    nodes: readonly PageNodeEntity[],
   ): TreeNode[] {
     const nodeMap = new Map<string, TreeNode>();
     const pathToNodeMap = new Map<string, TreeNode>();
@@ -102,9 +102,9 @@ export class FileTreeBuilder {
    * the main LaTeX compilation document.
    */
   public static detectRootDoc(
-    nodes: readonly ManuscriptNodeEntity[],
+    nodes: readonly PageNodeEntity[],
     docContents: Map<string, string[]>,
-  ): ManuscriptNodeEntity | null {
+  ): PageNodeEntity | null {
     const candidates = nodes.filter((n) => n.canBeRootDoc());
 
     if (candidates.length === 0) {
@@ -115,7 +115,7 @@ export class FileTreeBuilder {
       FileTreeBuilder.rootDocSort(a, b),
     );
 
-    let subfileFallback: ManuscriptNodeEntity | null = null;
+    let subfileFallback: PageNodeEntity | null = null;
     for (const candidate of sorted) {
       const lines =
         docContents.get(candidate.id) ||
@@ -147,10 +147,7 @@ export class FileTreeBuilder {
    * 3. Size: Smaller files are prioritized
    * 4. Lexicographical: Alphabetical order
    */
-  public static rootDocSort(
-    a: ManuscriptNodeEntity,
-    b: ManuscriptNodeEntity,
-  ): number {
+  public static rootDocSort(a: PageNodeEntity, b: PageNodeEntity): number {
     if (a.depth !== b.depth) {
       return a.depth - b.depth;
     }
@@ -202,7 +199,7 @@ export class FileTreeBuilder {
    * Validates that moving `node` to `destPath` does not move root `/` or create a folder cycle.
    */
   public static validateMoveTarget(
-    node: ManuscriptNodeEntity,
+    node: PageNodeEntity,
     destPath: string,
   ): void {
     node.validateMoveTo(destPath);
@@ -211,9 +208,9 @@ export class FileTreeBuilder {
 
 export class RootDocDetector {
   public detectRootDoc(
-    nodes: readonly ManuscriptNodeEntity[],
+    nodes: readonly PageNodeEntity[],
     docContents: Map<string, string[]>,
-  ): ManuscriptNodeEntity | null {
+  ): PageNodeEntity | null {
     return FileTreeBuilder.detectRootDoc(nodes, docContents);
   }
 }

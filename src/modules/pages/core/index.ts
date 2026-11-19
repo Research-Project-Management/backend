@@ -22,7 +22,6 @@ export * from './utils/zip-builder';
 export * from './utils/saga-runner';
 export {
   UserResolverService,
-  ManuscriptUserResolverService,
-  type ResolvedManuscriptUser,
+  type ResolvedPageUser,
 } from './services/user-resolver.service';
 export * from './core.module';

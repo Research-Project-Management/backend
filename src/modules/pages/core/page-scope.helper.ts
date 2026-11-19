@@ -5,7 +5,7 @@
  * persists a valid non-null `pageId` scoped to `spaceId`.
  */
 
-import { isUuid } from '@/core';
+import { isUuid, type PrismaService } from '@/core';
 
 export interface PageScopeDbClient {
   page?: {
@@ -297,4 +297,145 @@ export function resolvePageControllerCoordinates(
       ? params.projectId
       : undefined);
   return { spaceId, pageId };
+}
+
+export function resolveActiveProjectId(
+  project?: string | { id: string } | null,
+): string | undefined {
+  if (!project) return undefined;
+  return typeof project === 'string' ? project : project.id;
+}
+
+export function getRecordSpaceId(
+  record?: { spaceId?: string; projectId?: string } | null,
+): string {
+  return record?.spaceId ?? record?.projectId ?? '';
+}
+
+export function isRecordDeleted(
+  record?: { deletedAt?: Date | null; deleted?: boolean } | null,
+): boolean {
+  return Boolean(record?.deletedAt ?? record?.deleted);
+}
+
+/**
+ * Isolates VFS nodes, docs, and binary files to a specific Manuscript Page inside a Space
+ * while preserving 100% backward compatibility for legacy single-page spaces where `pageId` is null.
+ */
+export function filterRecordsByPageScope<
+  T extends { pageId?: string | null; id?: string; docId?: string | null },
+>(
+  records: readonly T[],
+  pageId?: string | null,
+  _spaceId?: string | null,
+): T[] {
+  if (!pageId) {
+    return [...records];
+  }
+  const hasAnyScopedRecord = records.some((r) => Boolean(r.pageId));
+  if (!hasAnyScopedRecord) {
+    return [...records];
+  }
+  const exactMatches = records.filter(
+    (r) => r.pageId === pageId || r.id === pageId || r.docId === pageId,
+  );
+  if (exactMatches.length > 0) {
+    return records.filter(
+      (r) =>
+        r.pageId === pageId ||
+        (r.pageId == null && (r.id === pageId || r.docId === pageId)),
+    );
+  }
+  return records.filter((r) => r.pageId == null);
+}
+
+export async function resolveCanonicalPageId(
+  prisma: PrismaService,
+  spaceId: string,
+  candidateId?: string | null,
+): Promise<string | undefined> {
+  if (!candidateId || !isUuid(candidateId) || candidateId === spaceId) {
+    return undefined;
+  }
+  const page = await Promise.resolve(
+    prisma.page?.findUnique?.({
+      where: { id: candidateId },
+      select: { id: true, spaceId: true },
+    }),
+  ).catch(() => null);
+  if (page?.id && page.spaceId === spaceId) {
+    return page.id;
+  }
+  const doc = await Promise.resolve(
+    prisma.pageDoc?.findFirst?.({
+      where: { id: candidateId, spaceId },
+      select: { id: true, pageId: true },
+    }),
+  ).catch(() => null);
+  if (doc) {
+    return (doc as { pageId?: string | null }).pageId || doc.id;
+  }
+  const node = await Promise.resolve(
+    prisma.pageNode?.findFirst?.({
+      where: { id: candidateId, spaceId },
+      select: { pageId: true, docId: true },
+    }),
+  ).catch(() => null);
+  if (node) {
+    return (
+      (node as { pageId?: string | null }).pageId || node.docId || undefined
+    );
+  }
+  return undefined;
+}
+
+export async function resolveProjectIdByEntityId(
+  prisma: PrismaService,
+  id: string,
+): Promise<string | null> {
+  if (!isUuid(id)) return null;
+  const page = await Promise.resolve(
+    prisma.page?.findUnique?.({
+      where: { id },
+      select: { spaceId: true },
+    }),
+  ).catch(() => null);
+  const pageSpaceId = getRecordSpaceId(page);
+  if (pageSpaceId) return pageSpaceId;
+  const doc = await prisma.pageDoc.findUnique({
+    where: { id },
+    select: { spaceId: true },
+  });
+  const docSpaceId = getRecordSpaceId(doc);
+  if (docSpaceId) return docSpaceId;
+  const node = await prisma.pageNode.findFirst({
+    where: { OR: [{ id }, { docId: id }, { spaceId: id }] },
+    select: { spaceId: true },
+  });
+  const nodeSpaceId = getRecordSpaceId(node);
+  if (nodeSpaceId) return nodeSpaceId;
+  if (prisma.space?.findUnique) {
+    const space = await Promise.resolve(
+      prisma.space.findUnique({
+        where: { id },
+        select: { id: true },
+      }),
+    ).catch(() => null);
+    if (space?.id) return space.id;
+  }
+  const project = await prisma.project.findUnique({
+    where: { id },
+    select: { id: true },
+  });
+  return project?.id ?? null;
+}
+
+export function isPrismaUniqueConstraintError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const candidate = err as { code?: unknown; message?: unknown };
+  return (
+    candidate.code === 'P2002' ||
+    (typeof candidate.message === 'string' &&
+      candidate.message.includes('P2002'))
+  );
 }

@@ -42,7 +42,7 @@ import {
   Role,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
-import { readManuscriptsConfig } from '../core/config/pages.config';
+import { readPagesConfig } from '../core/config/pages.config';
 import { GitBridgeService } from './git-bridge.service';
 import { CreateGitTokenDto } from './dto/git-bridge.dto';
 import {
@@ -250,7 +250,7 @@ export class GitBridgeController {
   // ─── Management API (JWT) ───────────────────────────────────────────────────
 
   private cloneUrl(req: FastifyRequest, projectId: string): string {
-    const { gitBridge } = readManuscriptsConfig();
+    const { gitBridge } = readPagesConfig();
     const base =
       gitBridge.publicUrl ||
       `${req.headers?.['x-forwarded-proto'] || req.protocol || 'http'}://${

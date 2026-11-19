@@ -2,9 +2,9 @@
  * modules/pages/filestore/dto/file-response.dto.ts
  */
 
-import { ManuscriptFile } from '../filestore.types';
+import { PageBinaryAsset } from '../filestore.types';
 
-export class ManuscriptFileResponseDto {
+export class PageBinaryAssetResponseDto {
   id!: string;
   projectId!: string;
   spaceId!: string;
@@ -20,8 +20,10 @@ export class ManuscriptFileResponseDto {
   createdAt!: string;
   updatedAt!: string;
 
-  public static fromEntity(entity: ManuscriptFile): ManuscriptFileResponseDto {
-    const dto = new ManuscriptFileResponseDto();
+  public static fromEntity(
+    entity: PageBinaryAsset,
+  ): PageBinaryAssetResponseDto {
+    const dto = new PageBinaryAssetResponseDto();
     dto.id = entity.id;
     dto.projectId = entity.projectId;
     dto.spaceId = entity.projectId;
@@ -39,5 +41,3 @@ export class ManuscriptFileResponseDto {
     return dto;
   }
 }
-
-export { ManuscriptFileResponseDto as PageBinaryAssetResponseDto };

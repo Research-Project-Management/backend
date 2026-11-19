@@ -7,8 +7,8 @@ import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import {
   assertExpectedVersionAndRev,
   executeDocstoreUpdateWithOcc,
-} from '@/modules/pages/docstore/controllers/doc.helpers';
-import { BootstrapService } from '@/modules/pages/docstore/services/bootstrap.service';
+} from '@/modules/pages/docstore/services/doc-occ.helper';
+import { PageScaffoldService } from '@/modules/pages/docstore/services/page-scaffold.service';
 import { PageService } from '@/modules/pages/core/services/page.service';
 
 const SPACE_ID = '11111111-1111-4111-8111-111111111111';
@@ -276,7 +276,7 @@ describe('Khối 2 / Tầng 1 — Docstore, OCC, Range Preservation & Deleted Sc
       const service = new PageService(
         mockPrisma,
         docstoreService,
-        {} as BootstrapService,
+        {} as PageScaffoldService,
       );
       return { service, updateDocMock };
     }

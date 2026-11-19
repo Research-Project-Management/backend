@@ -6,13 +6,13 @@ import {
   CyclicMoveError,
   NodeNotFoundError,
   NodePathVo,
-  ManuscriptNodeEntity,
+  PageNodeEntity,
   IStructureRepository,
 } from '@/modules/pages/structure/domain';
 import { StructureRepository } from '@/modules/pages/structure/structure.repository';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import {
-  ManuscriptFile,
+  PageBinaryAsset,
   ContentHash,
   StorageKey,
   DuplicateFileException,
@@ -21,14 +21,12 @@ import {
   FileNotFoundException,
   InvalidByteRangeException,
 } from '@/modules/pages/filestore/filestore.types';
-import { ManuscriptFileResponseDto } from '@/modules/pages/filestore/dto/file-response.dto';
+import { PageBinaryAssetResponseDto } from '@/modules/pages/filestore/dto/file-response.dto';
 import { FilestoreRepository } from '@/modules/pages/filestore/filestore.repository';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import {
-  filterRecordsByPageScope,
-  findPageRecordWithNode,
-  applyPageMetadataAndTitleUpdates,
-} from '@/modules/pages/docstore/controllers/doc.helpers';
+import { filterRecordsByPageScope } from '@/modules/pages/core/page-scope.helper';
+import { findPageRecordWithNode } from '@/modules/pages/docstore/services/doc-occ.helper';
+import { applyPageMetadataAndTitleUpdates } from '@/modules/pages/core/services/page-query-metadata.helper';
 import {
   BlobService,
   StorageBlob,
@@ -69,13 +67,13 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
       expect(() => NodePathVo.validateFilename('bad\nname.tex')).toThrow(
         InvalidNodeNameError,
       );
-      expect(() => ManuscriptFile.sanitizeFilename('bad\x1bfile.png')).toThrow(
+      expect(() => PageBinaryAsset.sanitizeFilename('bad\x1bfile.png')).toThrow(
         FilestoreValidationException,
       );
     });
 
-    it('populates spaceId and pageId on ManuscriptFileResponseDto and ManuscriptNodeEntity', () => {
-      const file = ManuscriptFile.reconstitute({
+    it('populates spaceId and pageId on PageBinaryAssetResponseDto and PageNodeEntity', () => {
+      const file = PageBinaryAsset.reconstitute({
         id: FILE_ID,
         projectId: SPACE_ID,
         pageId: PAGE_B_ID,
@@ -86,12 +84,12 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
         hash: ContentHash.create(SHA1_HEX),
         storageKey: StorageKey.fromRawKey('blobs/plot'),
       });
-      const dto = ManuscriptFileResponseDto.fromEntity(file);
+      const dto = PageBinaryAssetResponseDto.fromEntity(file);
       expect(dto.spaceId).toBe(SPACE_ID);
       expect(dto.projectId).toBe(SPACE_ID);
       expect(dto.pageId).toBe(PAGE_B_ID);
 
-      const node = new ManuscriptNodeEntity({
+      const node = new PageNodeEntity({
         id: 'node-1',
         projectId: SPACE_ID,
         spaceId: SPACE_ID,
@@ -180,7 +178,7 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
 
   describe('3. StructureService Guards & Subtree Move Limits', () => {
     it('rejects cross-page parentId and validates CyclicMoveError BEFORE creating folders with mkdirpInternal', async () => {
-      const folderInPageA = new ManuscriptNodeEntity({
+      const folderInPageA = new PageNodeEntity({
         id: 'folder-a',
         projectId: SPACE_ID,
         pageId: SPACE_ID,
@@ -188,7 +186,7 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
         name: 'chapters',
         path: '/chapters',
       });
-      const folderInPageB = new ManuscriptNodeEntity({
+      const folderInPageB = new PageNodeEntity({
         id: 'folder-b',
         projectId: SPACE_ID,
         pageId: PAGE_B_ID,
@@ -287,9 +285,9 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
     it('releases blobId on subtree delete even with 40-char SHA-1 PageFile.hash, and acquires blob on restoreFile', async () => {
       const releaseBlob = jest.fn().mockResolvedValue(undefined);
       const acquireBlob = jest.fn().mockResolvedValue(null);
-      const saveMock = jest.fn(async (f: ManuscriptFile) => f);
+      const saveMock = jest.fn(async (f: PageBinaryAsset) => f);
       const findByProjectAndId = jest.fn().mockResolvedValue(
-        ManuscriptFile.reconstitute({
+        PageBinaryAsset.reconstitute({
           id: FILE_ID,
           projectId: SPACE_ID,
           pageId: PAGE_B_ID,
@@ -375,7 +373,7 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
       expect(destroySpy).toHaveBeenCalled();
 
       // Overwrite with different content releases superseded blobId
-      const existingFile = ManuscriptFile.reconstitute({
+      const existingFile = PageBinaryAsset.reconstitute({
         id: FILE_ID,
         projectId: SPACE_ID,
         pageId: PAGE_B_ID,
@@ -400,7 +398,7 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
           findByProjectAndName: jest.fn().mockResolvedValue(existingFile),
           buildStorageKey: jest.fn(() => StorageKey.fromRawKey('blobs/new')),
           checkObjectExists: jest.fn().mockResolvedValue(true),
-          save: jest.fn(async (f: ManuscriptFile) => f),
+          save: jest.fn(async (f: PageBinaryAsset) => f),
         } as unknown as FilestoreRepository,
         undefined,
         {

@@ -7,22 +7,22 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { PageFile as PrismaPageFile } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
 import {
+  ensureCanonicalPageId,
   filterRecordsByPageScope,
-  resolveCanonicalManuscriptPageId,
-} from '@/modules/pages/docstore/controllers/doc.helpers';
+  resolveCanonicalPageId,
+} from '@/modules/pages/core/page-scope.helper';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
 import {
-  IManuscriptFileRepository,
+  IPageBinaryAssetRepository,
   IBinaryStoragePort,
   IContentHasherPort,
   StorageObjectMetadata,
   StorageRangeOptions,
   StorageUploadOptions,
   StreamHashResult,
-  ManuscriptFile,
+  PageBinaryAsset,
   ContentHash,
   StorageKey,
   DuplicateFileException,
@@ -41,13 +41,13 @@ export {
   LocalDiskBinaryStorageAdapter,
 };
 
-export class ManuscriptFileMapper {
+export class PageBinaryAssetMapper {
   public static toDomain(
     row: PrismaPageFile & { name?: string },
-  ): ManuscriptFile {
+  ): PageBinaryAsset {
     const projectId =
       row.spaceId ?? (row as { projectId?: string }).projectId ?? '';
-    return ManuscriptFile.reconstitute({
+    return PageBinaryAsset.reconstitute({
       id: row.id,
       projectId,
       pageId: row.pageId ?? null,
@@ -66,7 +66,7 @@ export class ManuscriptFileMapper {
     });
   }
 
-  public static toPersistence(entity: ManuscriptFile): {
+  public static toPersistence(entity: PageBinaryAsset): {
     id: string;
     spaceId: string;
     projectId: string;
@@ -102,7 +102,7 @@ export class ManuscriptFileMapper {
 }
 
 @Injectable()
-export class FilestoreRepository extends IManuscriptFileRepository {
+export class FilestoreRepository extends IPageBinaryAssetRepository {
   private readonly logger = new Logger(FilestoreRepository.name);
   private readonly storage: IBinaryStoragePort;
   private readonly hasher: ContentHasherAdapter;
@@ -173,10 +173,10 @@ export class FilestoreRepository extends IManuscriptFileRepository {
   }
 
   public async save(
-    file: ManuscriptFile,
+    file: PageBinaryAsset,
     options?: { syncStructureNode?: boolean },
-  ): Promise<ManuscriptFile> {
-    const data = ManuscriptFileMapper.toPersistence(file);
+  ): Promise<PageBinaryAsset> {
+    const data = PageBinaryAssetMapper.toPersistence(file);
     const effectivePageId = await ensureCanonicalPageId(
       this.prisma,
       data.spaceId,
@@ -220,7 +220,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       });
     }
 
-    return ManuscriptFileMapper.toDomain(upserted);
+    return PageBinaryAssetMapper.toDomain(upserted);
   }
 
   private async syncFileNode(data: {
@@ -431,7 +431,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       }
     }
 
-    const canonical = await resolveCanonicalManuscriptPageId(
+    const canonical = await resolveCanonicalPageId(
       this.prisma,
       projectId,
       candidatePageId,
@@ -439,31 +439,31 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     return canonical || candidatePageId;
   }
 
-  public async findById(id: string): Promise<ManuscriptFile | null> {
+  public async findById(id: string): Promise<PageBinaryAsset | null> {
     const record = await this.prisma.pageFile.findUnique({
       where: { id },
     });
-    return record ? ManuscriptFileMapper.toDomain(record) : null;
+    return record ? PageBinaryAssetMapper.toDomain(record) : null;
   }
 
   public async findByProjectAndId(
     projectId: string,
     id: string,
-  ): Promise<ManuscriptFile | null> {
+  ): Promise<PageBinaryAsset | null> {
     const record = await this.prisma.pageFile.findFirst({
       where: {
         id,
         spaceId: projectId,
       },
     });
-    return record ? ManuscriptFileMapper.toDomain(record) : null;
+    return record ? PageBinaryAssetMapper.toDomain(record) : null;
   }
 
   public async findByProjectAndName(
     projectId: string,
     name: string,
     pageId?: string | null,
-  ): Promise<ManuscriptFile | null> {
+  ): Promise<PageBinaryAsset | null> {
     const trimmedPageId = pageId?.trim() || undefined;
     const record = await this.prisma.pageFile.findFirst({
       where: {
@@ -473,14 +473,14 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         deletedAt: null,
       },
     });
-    return record ? ManuscriptFileMapper.toDomain(record) : null;
+    return record ? PageBinaryAssetMapper.toDomain(record) : null;
   }
 
   public async findFileByPathFlexible(
     projectId: string,
     rawPath: string,
     pageId?: string | null,
-  ): Promise<ManuscriptFile | null> {
+  ): Promise<PageBinaryAsset | null> {
     const cleanPath = rawPath.replace(/^\//, '').trim();
     const leafName = cleanPath.split('/').pop() || cleanPath;
     const extensions = ['.png', '.jpg', '.jpeg', '.pdf', '.svg', '.eps'];
@@ -517,11 +517,11 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         (r) => (r.lastKnownPath ?? (r as { name?: string }).name) === candidate,
       );
       if (match) {
-        return ManuscriptFileMapper.toDomain(match);
+        return PageBinaryAssetMapper.toDomain(match);
       }
     }
 
-    return ManuscriptFileMapper.toDomain(scopedRecords[0]);
+    return PageBinaryAssetMapper.toDomain(scopedRecords[0]);
   }
 
   public async markRestoredIfDeleted(
@@ -540,21 +540,21 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     return result.count > 0;
   }
 
-  public async findByHash(hash: string): Promise<ManuscriptFile[]> {
+  public async findByHash(hash: string): Promise<PageBinaryAsset[]> {
     const records = await this.prisma.pageFile.findMany({
       where: {
         hash,
         deletedAt: null,
       },
     });
-    return records.map(ManuscriptFileMapper.toDomain);
+    return records.map(PageBinaryAssetMapper.toDomain);
   }
 
   public async listByProject(
     projectId: string,
     includeDeleted = false,
     pageId?: string | null,
-  ): Promise<ManuscriptFile[]> {
+  ): Promise<PageBinaryAsset[]> {
     const records = await this.prisma.pageFile.findMany({
       where: {
         spaceId: projectId,
@@ -565,7 +565,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     const scopedRecords = pageId
       ? filterRecordsByPageScope(records, pageId, projectId)
       : records;
-    return scopedRecords.map(ManuscriptFileMapper.toDomain);
+    return scopedRecords.map(PageBinaryAssetMapper.toDomain);
   }
 
   public async delete(id: string): Promise<void> {

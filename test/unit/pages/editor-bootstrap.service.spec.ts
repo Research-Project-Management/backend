@@ -13,7 +13,7 @@ import { ClsiService } from '@/modules/pages/clsi/services/clsi.service';
 import { WorkspaceRepository } from '@/modules/pages/clsi/repositories/workspace.repository';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { PageService } from '@/modules/pages/core/services/page.service';
-import { ManuscriptNodeEntity } from '@/modules/pages/structure/domain';
+import { PageNodeEntity } from '@/modules/pages/structure/domain';
 import {
   StructureService,
   type ProjectSymbolsResponseDto,
@@ -74,7 +74,7 @@ function makeNodeEntity(
     sortOrder: number;
   }>,
 ) {
-  return new ManuscriptNodeEntity({
+  return new PageNodeEntity({
     id: overrides.id ?? 'node-1',
     projectId: PROJECT_ID,
     pageId: PROJECT_ID,
@@ -525,7 +525,7 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
     const page2Id = '66666666-6666-4666-8666-666666666662';
     const page2ChildId = '66666666-6666-4666-8666-666666666663';
 
-    const page1MainNode = new ManuscriptNodeEntity({
+    const page1MainNode = new PageNodeEntity({
       id: 'node-p1-main',
       projectId: USER_ID,
       pageId: page1Id,
@@ -537,7 +537,7 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
       isRootDoc: true,
       sizeBytes: 100,
     });
-    const page2MainNode = new ManuscriptNodeEntity({
+    const page2MainNode = new PageNodeEntity({
       id: 'node-p2-main',
       projectId: USER_ID,
       pageId: page2Id,
@@ -549,7 +549,7 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
       isRootDoc: true,
       sizeBytes: 150,
     });
-    const page2MethodNode = new ManuscriptNodeEntity({
+    const page2MethodNode = new PageNodeEntity({
       id: 'node-p2-method',
       projectId: USER_ID,
       pageId: page2Id,

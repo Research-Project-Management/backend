@@ -10,29 +10,33 @@ import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
 
 import { ProjectHistoryController } from './project-history.controller';
+import { PageVersionsController } from './controllers/page-versions.controller';
 import { ProjectHistoryService } from './project-history.service';
+import { PageVersionsService } from './services/page-versions.service';
 import { ProjectHistoryRepository } from './project-history.repository';
 import {
-  ManuscriptCollectorAdapter,
-  ManuscriptRestorerAdapter,
+  PageSnapshotCollectorAdapter,
+  PageSnapshotRestorerAdapter,
 } from './adapters/project-history.adapters';
 import { DiffEngine } from './domain';
 
 @Module({
   imports: [PrismaModule, StructureModule, DocstoreModule, FilestoreModule],
-  controllers: [ProjectHistoryController],
+  controllers: [ProjectHistoryController, PageVersionsController],
   providers: [
     ProjectHistoryService,
+    PageVersionsService,
     ProjectHistoryRepository,
     DiffEngine,
-    ManuscriptCollectorAdapter,
-    ManuscriptRestorerAdapter,
+    PageSnapshotCollectorAdapter,
+    PageSnapshotRestorerAdapter,
   ],
   exports: [
     ProjectHistoryService,
+    PageVersionsService,
     ProjectHistoryRepository,
-    ManuscriptCollectorAdapter,
-    ManuscriptRestorerAdapter,
+    PageSnapshotCollectorAdapter,
+    PageSnapshotRestorerAdapter,
   ],
 })
 export class ProjectHistoryModule {}

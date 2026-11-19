@@ -20,7 +20,7 @@ import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import {
   findPageRecordWithNode,
   formatPageByIdResponse,
-} from '@/modules/pages/docstore/controllers/doc.helpers';
+} from '@/modules/pages/docstore/services/doc-occ.helper';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import {

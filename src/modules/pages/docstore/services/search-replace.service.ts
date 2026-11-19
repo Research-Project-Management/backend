@@ -22,7 +22,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-  ManuscriptDomainEventBus,
+  PageDomainEventBus,
   NOOP_LIVE_COLLABORATION,
 } from '@/modules/pages/core';
 import { buildSearchRegex, replaceInText } from '../domain';
@@ -67,7 +67,7 @@ export class SearchReplaceService {
           ) => LiveCollaborationPort | null;
         }
       | unknown,
-    @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
+    @Optional() private readonly domainEventBus?: PageDomainEventBus,
     @Optional()
     injectedLiveCollab?: LiveCollaborationPort,
   ) {
@@ -470,6 +470,3 @@ export class SearchReplaceService {
     };
   }
 }
-
-/** @deprecated Use SearchReplaceService */
-export { SearchReplaceService as ManuscriptSearchReplaceService };

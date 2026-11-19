@@ -20,16 +20,13 @@ import {
 } from '@nestjs/common';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import {
-  ManuscriptNodeEntity,
-  NodePathVo,
-} from '@/modules/pages/structure/domain';
+import { PageNodeEntity, NodePathVo } from '@/modules/pages/structure/domain';
 import { IntegrationsService } from '@/modules/integrations/integrations.service';
 import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-  ManuscriptDomainEventBus,
+  PageDomainEventBus,
 } from '@/modules/pages/core';
 
 import {
@@ -51,7 +48,7 @@ export class CitationsRepository
   private readonly logger = new Logger(CitationsRepository.name);
   protected bibParser: IBibtexParserPort;
   private readonly liveCollab?: LiveCollaborationPort;
-  private readonly domainEventBus?: ManuscriptDomainEventBus;
+  private readonly domainEventBus?: PageDomainEventBus;
 
   constructor(
     @Optional()
@@ -69,11 +66,11 @@ export class CitationsRepository
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollabOrLegacy?: LiveCollaborationPort,
     @Optional()
-    domainEventBusOrParser?: ManuscriptDomainEventBus | BibtexParser,
+    domainEventBusOrParser?: PageDomainEventBus | BibtexParser,
     @Optional()
     legacyLiveCollab?: LiveCollaborationPort,
     @Optional()
-    legacyDomainEventBus?: ManuscriptDomainEventBus,
+    legacyDomainEventBus?: PageDomainEventBus,
   ) {
     const isParser = (obj: unknown): obj is IBibtexParserPort =>
       Boolean(
@@ -81,10 +78,8 @@ export class CitationsRepository
         typeof (obj as IBibtexParserPort).parse === 'function' &&
         typeof (obj as IBibtexParserPort).format === 'function',
       );
-    const isEventBus = (obj: unknown): obj is ManuscriptDomainEventBus =>
-      Boolean(
-        obj && typeof (obj as ManuscriptDomainEventBus).publish === 'function',
-      );
+    const isEventBus = (obj: unknown): obj is PageDomainEventBus =>
+      Boolean(obj && typeof (obj as PageDomainEventBus).publish === 'function');
     const isLiveCollab = (obj: unknown): obj is LiveCollaborationPort =>
       Boolean(
         obj &&
@@ -153,12 +148,12 @@ export class CitationsRepository
         pageId,
       );
       const bibNodes = nodes.filter(
-        (n: ManuscriptNodeEntity) =>
+        (n: PageNodeEntity) =>
           n.isDoc() && n.name.toLowerCase().endsWith('.bib'),
       );
 
       const validBibNodes = bibNodes.filter(
-        (node): node is ManuscriptNodeEntity & { docId: string } =>
+        (node): node is PageNodeEntity & { docId: string } =>
           Boolean(node.docId),
       );
 
@@ -243,8 +238,7 @@ export class CitationsRepository
       pageId,
     );
     const targetNode = nodes.find(
-      (n: ManuscriptNodeEntity) =>
-        n.path === cleanPath || n.name === cleanFilename,
+      (n: PageNodeEntity) => n.path === cleanPath || n.name === cleanFilename,
     );
 
     if (targetNode && targetNode.docId) {
@@ -315,7 +309,7 @@ export class CitationsRepository
       (createdDoc as { _id?: string; id?: string })._id ||
       (createdDoc as { _id?: string; id?: string }).id;
 
-    let newNode: ManuscriptNodeEntity;
+    let newNode: PageNodeEntity;
     try {
       newNode = await this.structureService.createNode(
         projectId,

@@ -70,7 +70,7 @@ export interface TemplateFileBlueprint {
   isBinary?: boolean;
 }
 
-export interface CreateManuscriptTemplateProps {
+export interface CreatePageTemplateProps {
   id?: string;
   versionId?: string;
   name: string;
@@ -89,7 +89,7 @@ export interface CreateManuscriptTemplateProps {
   updatedAt?: Date;
 }
 
-export class ManuscriptTemplateEntity {
+export class PageTemplateEntity {
   private readonly _id: string;
   private readonly _versionId: string;
   private _name: string;
@@ -143,9 +143,7 @@ export class ManuscriptTemplateEntity {
     this._updatedAt = props.updatedAt;
   }
 
-  static create(
-    props: CreateManuscriptTemplateProps,
-  ): ManuscriptTemplateEntity {
+  static create(props: CreatePageTemplateProps): PageTemplateEntity {
     const id = props.id || crypto.randomUUID();
     const versionId = props.versionId || `v-${id.slice(0, 8)}`;
     const category = TemplateCategoryVo.fromString(props.category);
@@ -158,7 +156,7 @@ export class ManuscriptTemplateEntity {
             '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}',
         };
 
-    return new ManuscriptTemplateEntity({
+    return new PageTemplateEntity({
       id,
       versionId,
       name: props.name.trim(),

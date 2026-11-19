@@ -31,7 +31,7 @@ import { FastifyReply } from 'fastify';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { ClsiService } from './services/clsi.service';
 import {
-  CompileManuscriptDto,
+  CompilePageDto,
   ClsiWordCountDto,
   ClsiAiTransformDto,
   ClsiAiFixErrorDto,
@@ -55,7 +55,7 @@ export class ClsiController {
     summary: 'Compile LaTeX manuscript source to PDF via CLSI',
   })
   async compile(
-    @Body() dto: CompileManuscriptDto,
+    @Body() dto: CompilePageDto,
     @CurrentUser('id') userId: string,
     @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,

@@ -14,7 +14,7 @@
 import { Module } from '@nestjs/common';
 
 // Subsystem 0: Shared Kernel
-import { ManuscriptsCoreModule } from './core/core.module';
+import { PagesCoreModule } from './core/core.module';
 
 // Subsystem 1: Virtual File System & Storage (Unified with @/modules/files)
 import { FilestoreModule } from './filestore/filestore.module';
@@ -42,7 +42,7 @@ import { PagesFacade } from './pages.facade';
 @Module({
   imports: [
     // Tier 0: Shared Kernel
-    ManuscriptsCoreModule,
+    PagesCoreModule,
 
     // Tier 1 (Subsystem 1): VFS & Storage
     FilestoreModule,
@@ -70,7 +70,7 @@ import { PagesFacade } from './pages.facade';
   providers: [PagesFacade],
   exports: [
     PagesFacade,
-    ManuscriptsCoreModule,
+    PagesCoreModule,
     EditorBootstrapModule,
 
     // Subsystem 1: VFS & Storage
@@ -95,4 +95,3 @@ import { PagesFacade } from './pages.facade';
   ],
 })
 export class PagesModule {}
-export { PagesModule as ManuscriptsModule };

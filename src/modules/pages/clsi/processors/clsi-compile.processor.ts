@@ -11,10 +11,10 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config';
 import { ClsiService, ClsiCompileResult } from '../services/clsi.service';
-import { CompileManuscriptDto } from '../dto/clsi.dto';
+import { CompilePageDto } from '../dto/clsi.dto';
 
 export interface ClsiCompileJobData {
-  dto: CompileManuscriptDto;
+  dto: CompilePageDto;
   userId?: string;
   authorizedProjectId?: string;
 }

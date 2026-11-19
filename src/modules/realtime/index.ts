@@ -9,9 +9,7 @@ export { RealtimeFacade } from './realtime.facade';
 export { RealtimeCoreModule, CoreModule } from './core/core.module';
 export {
   RealtimePagesModule,
-  RealtimeManuscriptsModule,
   PagesModule,
-  ManuscriptsModule,
 } from './pages/pages.module';
 export {
   RealtimeNotificationsModule,
