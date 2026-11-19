@@ -140,9 +140,8 @@ describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', ()
         cleanSingleIdentifier,
         normalizeItemIdentifiers,
         syncMetadataIdentifierAliases,
-      } = await import(
-        '@/modules/library/catalog/domain/identifier-change.domain'
-      );
+      } =
+        await import('@/modules/library/catalog/domain/identifier-change.domain');
       const { normalizeDoi } = await import('@/modules/library/core');
 
       expect(cleanSingleIdentifier('not-a-valid-doi', normalizeDoi)).toBe('');
@@ -174,9 +173,7 @@ describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', ()
         resolveCanonicalCommandFields,
         buildMetadataPartial,
         normalizeItemIdentifiers,
-      } = await import(
-        '@/modules/library/catalog/domain/item-command.mapper'
-      );
+      } = await import('@/modules/library/catalog/domain/item-command.mapper');
 
       const updateData = {
         itemType: 'bookSection',
@@ -189,14 +186,17 @@ describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', ()
         },
         volume: '2',
       };
-      const canonical = resolveCanonicalCommandFields(updateData as any, 'bookSection');
+      const canonical = resolveCanonicalCommandFields(
+        updateData,
+        'bookSection',
+      );
       expect(canonical.rawPubTitle).toBe('Updated Handbook of AI');
 
       const ids = normalizeItemIdentifiers(updateData as any);
       const builtMeta = buildMetadataPartial({
         mode: 'update',
         baseMeta: { publicationTitle: 'Stale Book Title', volume: '1' },
-        data: updateData as any,
+        data: updateData,
         canonical,
         ids,
       });

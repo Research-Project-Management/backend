@@ -10,7 +10,7 @@ import {
   ICatalogFacade,
   ITEM_CACHE_INVALIDATOR,
   IItemCacheInvalidator,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   gzipAsync,
   UNIT_OF_WORK,
   IUnitOfWork,
@@ -139,6 +139,17 @@ export class ExtractionMetadataSynchronizer {
         // Claim Check Pattern: Offload heavy full-text tree to Object Storage
         let uploadedFileId: string | undefined;
         let uploadedByteSize: number | undefined;
+        const resolvedOwnerSpaceId =
+          attachment.item?.spaceId ??
+          attachment.item?.projectId ??
+          attachment.item?.createdById ??
+          attachment.item?.userId ??
+          undefined;
+        const resolvedOwnerUserId =
+          attachment.item?.createdById ??
+          attachment.item?.userId ??
+          resolvedOwnerSpaceId ??
+          'system';
         if (this.filesPort?.uploadFile) {
           try {
             const jsonBuffer = Buffer.from(
@@ -146,12 +157,10 @@ export class ExtractionMetadataSynchronizer {
               'utf-8',
             );
             const compressed = await gzipAsync(jsonBuffer);
-            const ownerUserId = attachment.item?.userId || 'system';
-            const ownerProjectId = attachment.item?.projectId || undefined;
 
             const uploadResult = await this.filesPort.uploadFile({
-              userId: ownerUserId,
-              projectId: ownerProjectId,
+              userId: resolvedOwnerUserId,
+              spaceId: resolvedOwnerSpaceId,
               filename: `pdf_fulltext_${attachment.itemId}_${attachment.id}.json.gz`,
               buffer: compressed,
               mimeType: 'application/gzip',
@@ -259,14 +268,15 @@ export class ExtractionMetadataSynchronizer {
           Array.isArray(savedFulltextRecord.supersededFileIds) &&
           this.filesPort?.deleteFile
         ) {
-          const deleteFileFn = this.filesPort.deleteFile.bind(
-            this.filesPort,
-          );
+          const deleteFileFn = this.filesPort.deleteFile.bind(this.filesPort);
+          const deleteTarget = resolvedOwnerSpaceId
+            ? { spaceId: resolvedOwnerSpaceId }
+            : undefined;
           await Promise.all(
             savedFulltextRecord.supersededFileIds.map(
               async (oldFileId: string) => {
                 try {
-                  await deleteFileFn(oldFileId);
+                  await deleteFileFn(oldFileId, deleteTarget);
                 } catch (delErr: unknown) {
                   const msg =
                     delErr instanceof Error ? delErr.message : String(delErr);
@@ -417,12 +427,15 @@ export class ExtractionMetadataSynchronizer {
           tagsToSync.length > 0 ||
           notesToSync.length > 0;
 
-        const ownerUserId = attachment.item?.userId || 'system';
-        const ownerProjectId = normalizeProjectScopeId(
-          attachment.item?.projectId,
+        const ownerProjectId = normalizeProjectSpaceId(
+          attachment.item?.projectId ??
+            (resolvedOwnerSpaceId &&
+            resolvedOwnerSpaceId !== resolvedOwnerUserId
+              ? resolvedOwnerSpaceId
+              : undefined),
         );
         const eventScope = {
-          userId: ownerUserId,
+          userId: resolvedOwnerUserId,
           projectId: ownerProjectId,
         };
 
@@ -433,9 +446,9 @@ export class ExtractionMetadataSynchronizer {
             : this.catalogGateway?.invalidateForWrite
               ? this.catalogGateway
               : undefined;
-          if (invalidator?.invalidateForWrite && ownerUserId) {
+          if (invalidator?.invalidateForWrite && resolvedOwnerUserId) {
             await invalidator.invalidateForWrite({
-              userId: ownerUserId,
+              userId: resolvedOwnerUserId,
               projectId: ownerProjectId,
               itemIds: [attachment.itemId],
             });
@@ -445,7 +458,7 @@ export class ExtractionMetadataSynchronizer {
 
         if (hasAnyMutation) {
           itemMutated = true;
-          if (this.libraryTx && ownerUserId) {
+          if (this.libraryTx && resolvedOwnerUserId) {
             await executeWithPostCommit(
               this.libraryTx,
               async (tx, helpers) => {
@@ -477,7 +490,7 @@ export class ExtractionMetadataSynchronizer {
                     LIBRARY_EVENT_TYPES.ITEM_UPDATED,
                     {
                       itemId: updatedItem.id,
-                      userId: ownerUserId,
+                      userId: resolvedOwnerUserId,
                       projectId: ownerProjectId,
                       attachmentId: attachment.id,
                       updatedFields: Object.keys(itemPatch),

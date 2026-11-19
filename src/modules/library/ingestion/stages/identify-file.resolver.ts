@@ -250,26 +250,26 @@ export class IdentifyFileResolver {
   async resolve(
     payload: SubmissionPayload & { kind: 'FILE' },
     scopeOrContext?:
-      string | { userId?: string; projectId?: string; scopeId?: string },
+      string | { userId?: string; projectId?: string; spaceId?: string },
   ): Promise<MetadataCandidate> {
     const context =
       typeof scopeOrContext === 'string'
         ? {
-            scopeId: scopeOrContext,
+            spaceId: scopeOrContext,
             projectId:
               scopeOrContext && scopeOrContext !== 'user'
                 ? scopeOrContext
                 : undefined,
           }
         : {
-            scopeId: scopeOrContext?.scopeId,
+            spaceId: scopeOrContext?.spaceId,
             userId: scopeOrContext?.userId,
             projectId:
               scopeOrContext?.projectId ??
-              (scopeOrContext?.scopeId &&
-              scopeOrContext.scopeId !== 'user' &&
-              scopeOrContext.scopeId !== scopeOrContext?.userId
-                ? scopeOrContext.scopeId
+              (scopeOrContext?.spaceId &&
+              scopeOrContext.spaceId !== 'user' &&
+              scopeOrContext.spaceId !== scopeOrContext?.userId
+                ? scopeOrContext.spaceId
                 : undefined),
           };
     let extractedMetadata: ExtractedPdfMetadata = {};
@@ -317,7 +317,7 @@ export class IdentifyFileResolver {
         const fileRecord = await this.filesPort.readOwnedFile({
           fileId: payload.fileId,
           userId: context.userId,
-          projectId: context.projectId,
+          spaceId: context.spaceId ?? context.projectId,
         });
         if (fileRecord?.buffer) {
           fileBuffer = fileRecord.buffer;

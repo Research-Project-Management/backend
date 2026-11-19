@@ -20,11 +20,13 @@ describe('High-Scale Ingestion Architecture Optimizations', () => {
         'utf-8',
       );
 
-      const readOwnedFileMock = jest.fn().mockImplementation(async ({ fileId }) => ({
-        fileId,
-        buffer: sharedPdfBuffer,
-        mimeType: 'application/pdf',
-      }));
+      const readOwnedFileMock = jest
+        .fn()
+        .mockImplementation(async ({ fileId }) => ({
+          fileId,
+          buffer: sharedPdfBuffer,
+          mimeType: 'application/pdf',
+        }));
 
       const extractTrustedMetadataMock = jest.fn().mockResolvedValue({
         metadata: {
@@ -85,7 +87,9 @@ describe('High-Scale Ingestion Architecture Optimizations', () => {
       );
 
       expect(extractTrustedMetadataMock).toHaveBeenCalledTimes(1);
-      expect(lateUpload.normalizedMetadata.doi).toBe('10.1038/s41586-021-03819-2');
+      expect(lateUpload.normalizedMetadata.doi).toBe(
+        '10.1038/s41586-021-03819-2',
+      );
       expect(lateUpload.normalizedMetadata.title).toBe(
         'Highly accurate protein structure prediction with AlphaFold',
       );
@@ -107,7 +111,7 @@ describe('High-Scale Ingestion Architecture Optimizations', () => {
           const urlStr = String(url);
           const idListMatch = urlStr.match(/id_list=([^&]+)/);
           const ids = idListMatch
-            ? decodeURIComponent(idListMatch[1]!).split(',')
+            ? decodeURIComponent(idListMatch[1]).split(',')
             : [];
           const entriesXml = ids
             .map(
@@ -218,15 +222,12 @@ describe('High-Scale Ingestion Architecture Optimizations', () => {
 
   describe('Pillar 4: Deep-Edge Client-Resolved PDF Overrides & Citation-Trap Guard', () => {
     it('accepts matching _clientResolved edge overrides on FILE candidates and rejects conflicting page-1 citation traps', async () => {
-      const { applyUserOverridesToCandidate } = await import(
-        '../../../../src/modules/library/ingestion/domain/metadata-validation.policy'
-      );
-      const { NormalizationPolicy } = await import(
-        '../../../../src/modules/library/ingestion/domain/normalization.policy'
-      );
-      const { evaluateCandidateEnrichmentReadiness } = await import(
-        '../../../../src/modules/library/ingestion/stages/resolve.stage'
-      );
+      const { applyUserOverridesToCandidate } =
+        await import('../../../../src/modules/library/ingestion/domain/metadata-validation.policy');
+      const { NormalizationPolicy } =
+        await import('../../../../src/modules/library/ingestion/domain/normalization.policy');
+      const { evaluateCandidateEnrichmentReadiness } =
+        await import('../../../../src/modules/library/ingestion/stages/resolve.stage');
       const normalizer = new NormalizationPolicy();
 
       // Case A: Browser edge sniffed the true DOI of the PDF (titles match)
@@ -341,4 +342,3 @@ describe('High-Scale Ingestion Architecture Optimizations', () => {
     });
   });
 });
-

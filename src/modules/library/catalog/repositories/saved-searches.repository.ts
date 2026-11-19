@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, ReadStatus } from '@prisma/client';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
   VersionMismatchException,
   collectDescendantCollectionIds,
@@ -56,7 +56,7 @@ export class SavedSearchesRepository {
   }
 
   private normalizeProjectId(projectId?: string | null): string | undefined {
-    return normalizeProjectScopeId(projectId);
+    return normalizeProjectSpaceId(projectId);
   }
 
   async create(
@@ -446,7 +446,7 @@ export class StateRepository {
     projectId?: string,
   ): Promise<StateEntity[]> {
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     return client.libraryItemState.findMany({
       where: {
         userId,

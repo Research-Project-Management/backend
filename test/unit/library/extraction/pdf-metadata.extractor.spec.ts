@@ -145,9 +145,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
 
       expect(parsed).not.toBeNull();
       expect(parsed?.doi).toBe('10.1103/PhysRevLett.132.040001');
-      expect(parsed?.title).toBe(
-        'Quantum Computing – A — Survey &amp; Review',
-      );
+      expect(parsed?.title).toBe('Quantum Computing – A — Survey &amp; Review');
       expect(parsed?.journal).toBe('Physical Review Letters');
       expect(parsed?.volume).toBe('132');
       expect(parsed?.issue).toBe('4');
@@ -299,7 +297,11 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
     it('rejects preprint boilerplate titles, comma-containing institutions as authors, placeholder usernames, and invalid ISBN checksums', () => {
       const badRecord = {
         title: 'Journal Pre-proof',
-        authors: ['University of California, Berkeley', 'Administrator', 'unknown'],
+        authors: [
+          'University of California, Berkeley',
+          'Administrator',
+          'unknown',
+        ],
         isbn: '9780262033849',
         year: 2024,
         journal: 'Nature',
@@ -485,9 +487,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
 
       expect(result.metadata.arxivId).toBe('2303.08774v2');
       expect(result.metadata.doi).toBe('10.48550/arXiv.2303.08774v2');
-      expect(['REGEX', 'HYBRID']).toContain(
-        result.provenance.engineUsed,
-      );
+      expect(['REGEX', 'HYBRID']).toContain(result.provenance.engineUsed);
     });
 
     it('cascades to Tier 3 (LayoutHeuristic plain-text fallback) for preprints without persistent identifiers or XMP', async () => {
@@ -628,9 +628,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
       // TrustedPaper effective score: 0.95 * 92 = 87.4
       // CrossRef effective score: 0.90 * 90 = 81.0
       // Winner must be TrustedPaper!
-      expect(decision.proposedItem.title).toBe(
-        'Deep Learning CrossRef Guess',
-      );
+      expect(decision.proposedItem.title).toBe('Deep Learning CrossRef Guess');
       expect(decision.selectedFields.title.sourceProvider).toBe('CrossRef');
       expect(decision.proposedItem.year).toBe(2022);
     });
@@ -640,7 +638,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
         resolve: jest.fn().mockResolvedValue(null),
       };
 
-      const resolveStage = new ResolveStage(mockMetadataService as never);
+      const resolveStage = new ResolveStage(mockMetadataService);
 
       const candidates: MetadataCandidate[] = [
         {
@@ -664,7 +662,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
       ];
 
       const result = await resolveStage.execute({
-        scopeId: 'test-scope',
+        spaceId: 'test-scope',
         candidates,
       });
 
@@ -672,7 +670,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
       expect(mockMetadataService.resolve).toHaveBeenCalledWith(
         expect.objectContaining({
           query: 'Attention Is All You Need',
-          scopeId: 'test-scope',
+          spaceId: 'test-scope',
         }),
       );
       expect(result).toHaveLength(1);

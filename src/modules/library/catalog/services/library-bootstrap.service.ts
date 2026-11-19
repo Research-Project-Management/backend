@@ -2,7 +2,7 @@ import { Injectable, Inject, Optional, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { RedisCacheService } from '@/core';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   libraryConfig,
   LIBRARY_REDIS_KEYS,
   UNIT_OF_WORK,
@@ -156,7 +156,7 @@ export class LibraryBootstrapService {
       effectivePermissions?: readonly string[];
     },
   ) {
-    const validProjectId = normalizeProjectScopeId(
+    const validProjectId = normalizeProjectSpaceId(
       (options as { spaceId?: string }).spaceId ?? options.projectId,
       userId,
     );
@@ -234,7 +234,6 @@ export class LibraryBootstrapService {
 
       return {
         scope: validProjectId ? 'project' : 'user',
-        scopeId: validProjectId ?? userId,
         spaceId: validProjectId ?? userId,
         projectId: validProjectId ?? null,
         ...(degradedBranches.length > 0
@@ -251,7 +250,7 @@ export class LibraryBootstrapService {
               syncVersion: {
                 version: latestSeq.toString(),
                 scope: validProjectId ? 'project' : 'user',
-                scopeId: validProjectId ?? userId,
+                spaceId: validProjectId ?? userId,
               },
             }
           : {}),

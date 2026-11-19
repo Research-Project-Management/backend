@@ -18,7 +18,7 @@ import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectSpaceId } from '@/modules/library/core';
 import { NotesService } from '@/modules/library/catalog/services/notes.service';
 import {
   CreateNoteDto,
@@ -51,7 +51,7 @@ export class NoteController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId,
     );
     return this.notesService.listNotes(
@@ -73,7 +73,7 @@ export class NoteController {
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
     }
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId,
     );
     const note = await this.notesService.getNote(
@@ -96,7 +96,7 @@ export class NoteController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || dto.spaceId,
     );
     return this.notesService.createNote(currentUserId, {
@@ -119,7 +119,7 @@ export class NoteController {
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
     }
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId,
     );
     return this.notesService.updateNote(
@@ -143,7 +143,7 @@ export class NoteController {
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
     }
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId,
     );
     const parsedVersion =
@@ -177,7 +177,7 @@ export class NoteController {
     if (!isUUID(itemId)) {
       throw new BadRequestException(`Invalid item UUID: ${itemId}`);
     }
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || body?.spaceId,
     );
     const hasOptions =
@@ -229,7 +229,7 @@ export class TagController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const tags = await this.tagsService.getTags(userId, {
       includeInactive: includeInactive === 'true',
       projectId,
@@ -247,7 +247,7 @@ export class TagController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(
+    const projectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || dto?.spaceId,
     );
     const tag = await this.tagsService.createOrGetTag(
@@ -271,7 +271,7 @@ export class TagController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const tag = await this.tagsService.updateTag(
       userId,
       tagId,
@@ -314,7 +314,7 @@ export class TagController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(
+    const projectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || dto?.spaceId,
     );
     const res = await this.tagsService.splitTag(
@@ -334,7 +334,7 @@ export class TagController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const res = await this.tagsService.deleteAutomaticTags(userId, projectId);
     return { success: true, ...res };
   }
@@ -348,7 +348,7 @@ export class TagController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     await this.tagsService.deleteTag(userId, tagId, projectId);
     return { success: true };
   }
@@ -364,7 +364,7 @@ export class TagController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     await this.tagsService.assignTag(userId, tagId, itemId, projectId);
     return { success: true };
   }
@@ -379,7 +379,7 @@ export class TagController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     await this.tagsService.removeTag(userId, tagId, itemId, projectId);
     return { success: true };
   }
@@ -403,7 +403,7 @@ export class SavedSearchesController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.savedSearchesService.findAll(userId, projectId);
   }
 
@@ -416,7 +416,7 @@ export class SavedSearchesController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(
+    const projectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || dto?.spaceId,
     );
     return this.savedSearchesService.preview(userId, dto, projectId);
@@ -431,7 +431,7 @@ export class SavedSearchesController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(
+    const projectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || dto?.spaceId,
     );
     return this.savedSearchesService.create(userId, dto, projectId);
@@ -446,7 +446,7 @@ export class SavedSearchesController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.savedSearchesService.findById(userId, id, projectId);
   }
 
@@ -460,7 +460,7 @@ export class SavedSearchesController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.savedSearchesService.update(userId, id, dto, projectId);
   }
 
@@ -486,7 +486,7 @@ export class SavedSearchesController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.savedSearchesService.delete(userId, id, projectId);
   }
 
@@ -501,7 +501,7 @@ export class SavedSearchesController {
     @Param('spaceId') paramProjectId?: string,
   ) {
     const dto = query || {};
-    const projectId = normalizeProjectScopeId(
+    const projectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || dto?.spaceId,
     );
     return this.savedSearchesService.execute(userId, id, dto, projectId);

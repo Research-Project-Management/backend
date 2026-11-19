@@ -4,7 +4,7 @@ import { PrismaService, isUuid as isValidId } from '@/core';
 
 type Item = LibraryItem;
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
   UNIT_OF_WORK,
@@ -83,7 +83,7 @@ export class RetractionRepository {
   ) {}
 
   private getScopeWhere(userId: string, projectId?: string) {
-    const normalizedProjectId = normalizeProjectScopeId(projectId);
+    const normalizedProjectId = normalizeProjectSpaceId(projectId);
     if (normalizedProjectId) {
       return { spaceId: normalizedProjectId, deletedAt: null };
     }
@@ -309,7 +309,7 @@ export class RetractionRepository {
           : updatedRec?.spaceId && updatedRec.spaceId !== updatedRec.createdById
             ? updatedRec.spaceId
             : undefined);
-      const effectiveProjectId = normalizeProjectScopeId(rawProjectId);
+      const effectiveProjectId = normalizeProjectSpaceId(rawProjectId);
       const rawDomainUpdated =
         statusChanged && updated
           ? ItemsMapper.mapFlattenedState(updated, effectiveUserId)

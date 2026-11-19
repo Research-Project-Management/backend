@@ -79,12 +79,12 @@ export class CslRepositoryService implements OnModuleInit {
   public async searchStyles(
     query: string = '',
     limit: number = 30,
-    scopeId?: string,
+    spaceId?: string,
   ): Promise<CslStyleMetadata[]> {
     const q = query.trim().toLowerCase();
 
     // 1. Get custom user styles from cache if any
-    const customStyles = await this.getCustomStyles(scopeId);
+    const customStyles = await this.getCustomStyles(spaceId);
 
     // 2. If query is empty, return popular presets + any custom styles
     if (!q) {
@@ -159,7 +159,7 @@ export class CslRepositoryService implements OnModuleInit {
    */
   public async fetchCslXml(
     styleId: string,
-    scopeId?: string,
+    spaceId?: string,
     depth: number = 0,
   ): Promise<string | null> {
     if (depth > 2) return null;
@@ -184,14 +184,14 @@ export class CslRepositoryService implements OnModuleInit {
       return MLA_CSL;
 
     // 2. Cache & DB lookup (scoped custom style lookup first, then global official cache)
-    const scopeKey = scopeId?.trim() || 'global';
+    const scopeKey = spaceId?.trim() || 'global';
     if (this.redisCache) {
       const scoped = await this.redisCache.get<string>(
         LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey),
       );
       if (scoped && typeof scoped === 'string' && scoped.includes('<style'))
         return scoped;
-      if (!scopeId) {
+      if (!spaceId) {
         const legacyCustom = await this.redisCache.get<string>(
           LIBRARY_REDIS_KEYS.cslStyleXml(normalized, 'custom'),
         );
@@ -244,7 +244,7 @@ export class CslRepositoryService implements OnModuleInit {
       if (parentSlug && parentSlug !== normalized) {
         const parentXml = await this.fetchCslXml(
           parentSlug,
-          scopeId,
+          spaceId,
           depth + 1,
         );
         if (parentXml && this.isValidCslXml(parentXml)) {
@@ -331,7 +331,7 @@ export class CslRepositoryService implements OnModuleInit {
   public async registerCustomStyle(
     cslXml: string,
     customTitle?: string,
-    scopeId?: string,
+    spaceId?: string,
     actorUserId?: string,
   ): Promise<CslStyleMetadata> {
     if (!cslXml || typeof cslXml !== 'string' || cslXml.length > 512 * 1024) {
@@ -414,12 +414,14 @@ export class CslRepositoryService implements OnModuleInit {
       isCustom: true,
       updated: new Date().toISOString(),
     };
-    const scopeKey = scopeId?.trim() || 'global';
+    const resolvedSpaceId = spaceId?.trim() || undefined;
+    const scopeKey = resolvedSpaceId || 'global';
     const sha256 = createHash('sha256').update(cslXml).digest('hex');
 
     if (this.exportsRepo) {
       try {
         await this.exportsRepo.upsertCustomStyle({
+          spaceId: resolvedSpaceId,
           scopeKey,
           slug,
           title,
@@ -457,8 +459,8 @@ export class CslRepositoryService implements OnModuleInit {
   /**
    * Retrieves user-defined custom styles.
    */
-  public async getCustomStyles(scopeId?: string): Promise<CslStyleMetadata[]> {
-    const scopeKey = scopeId?.trim() || 'global';
+  public async getCustomStyles(spaceId?: string): Promise<CslStyleMetadata[]> {
+    const scopeKey = spaceId?.trim() || 'global';
     if (this.redisCache) {
       try {
         const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey);
@@ -787,7 +789,7 @@ export class CslLocaleLoaderService {
     }
   }
 
-  public getScopedStyleId(styleId: string, scopeId?: string): string {
+  public getScopedStyleId(styleId: string, spaceId?: string): string {
     const normalized = this.normalizeStyle(styleId);
     if (
       this.staticTemplateIds.has(normalized) ||
@@ -795,16 +797,16 @@ export class CslLocaleLoaderService {
     ) {
       return normalized;
     }
-    const scopeKey = scopeId?.trim() || 'global';
+    const scopeKey = spaceId?.trim() || 'global';
     return `${scopeKey}::${normalized}`;
   }
 
-  public isStyleSupported(styleId: string, scopeId?: string): boolean {
+  public isStyleSupported(styleId: string, spaceId?: string): boolean {
     if (!styleId) return false;
     this.initTemplates();
     const normalized = this.normalizeStyle(styleId);
     if (BUILTIN_SPECIAL_STYLES.has(normalized)) return true;
-    const scopedId = this.getScopedStyleId(normalized, scopeId);
+    const scopedId = this.getScopedStyleId(normalized, spaceId);
     try {
       const csl = plugins.config.get('@csl');
       return Boolean(csl?.templates?.has(scopedId));
@@ -815,7 +817,7 @@ export class CslLocaleLoaderService {
 
   public async ensureTemplate(
     styleId: string,
-    scopeId?: string,
+    spaceId?: string,
     rawXml?: string,
   ): Promise<boolean> {
     this.initTemplates();
@@ -825,7 +827,7 @@ export class CslLocaleLoaderService {
       this.staticTemplateIds.has(normalized)
     )
       return true;
-    const scopedId = this.getScopedStyleId(normalized, scopeId);
+    const scopedId = this.getScopedStyleId(normalized, spaceId);
     try {
       const csl = plugins.config.get('@csl');
       if (csl?.templates?.has(scopedId) && !rawXml) {
@@ -836,7 +838,7 @@ export class CslLocaleLoaderService {
       const xml =
         rawXml ||
         (this.cslRepo
-          ? await this.cslRepo.fetchCslXml(normalized, scopeId)
+          ? await this.cslRepo.fetchCslXml(normalized, spaceId)
           : null);
       if (!xml) return false;
       if (csl?.templates) {
@@ -871,9 +873,9 @@ export class CslLocaleLoaderService {
     return normalizeEngineStyleId(styleId);
   }
 
-  public getStyleDefaultLocale(styleId: string, scopeId?: string): string {
+  public getStyleDefaultLocale(styleId: string, spaceId?: string): string {
     this.initTemplates();
-    const scopedId = this.getScopedStyleId(styleId, scopeId);
+    const scopedId = this.getScopedStyleId(styleId, spaceId);
     try {
       const csl = plugins.config.get('@csl');
       const xml =

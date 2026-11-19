@@ -241,7 +241,8 @@ describe('RetractionScannerProvider', () => {
             publication_date: '2024-02-15',
           }),
         },
-        finalUrl: 'https://api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1038%2Fretracted-via-httpclient',
+        finalUrl:
+          'https://api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1038%2Fretracted-via-httpclient',
       }),
     };
 
@@ -265,9 +266,13 @@ describe('RetractionScannerProvider', () => {
   it('should skip external HTTP lookups when localOnly: true is passed during bulk batch ingestion', async () => {
     const fetchSpy = jest.spyOn(globalThis, 'fetch');
 
-    const result = await provider.lookup('10.1007/unindexed-batch-paper', undefined, {
-      localOnly: true,
-    });
+    const result = await provider.lookup(
+      '10.1007/unindexed-batch-paper',
+      undefined,
+      {
+        localOnly: true,
+      },
+    );
 
     expect(result.status).toBe('unknown');
     expect(mockDbService.checkRetraction).toHaveBeenCalledWith(

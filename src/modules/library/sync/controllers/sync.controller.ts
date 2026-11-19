@@ -23,7 +23,7 @@ import { ResilienceRegistryService } from '@/modules/library/core/resilience/res
 import { OutboxWorker } from '@/modules/library/sync/services/outbox.worker';
 import { OutboxMetrics } from '@/modules/library/sync/services/outbox-metrics.service';
 import { SyncQueryDto } from '@/modules/library/sync/dto/sync.dto';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectSpaceId } from '@/modules/library/core';
 
 export { SyncQueryDto };
 
@@ -95,7 +95,7 @@ export class SyncController {
     routeProjectId?: string,
     queryProjectId?: string,
   ): string | undefined {
-    return normalizeProjectScopeId(routeProjectId ?? queryProjectId);
+    return normalizeProjectSpaceId(routeProjectId ?? queryProjectId);
   }
 
   @Get('version')
@@ -117,7 +117,7 @@ export class SyncController {
     return {
       version: latestSeq.toString(),
       scope: projectId ? 'project' : 'user',
-      scopeId: projectId ?? userId,
+      spaceId: projectId ?? userId,
     };
   }
 

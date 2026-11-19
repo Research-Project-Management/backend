@@ -15,7 +15,7 @@ import {
   ICatalogFacade,
   IItemCacheInvalidator,
   ITEM_CACHE_INVALIDATOR,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   extractFileIdFromUrl,
   executeStandardLibraryCacheInvalidation,
   UNIT_OF_WORK,
@@ -98,29 +98,40 @@ export class AttachmentsService {
     }
 
     const userId = input.userId || 'system';
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       projectId || input.projectId,
     );
     await this.assertItemExists(userId, targetItemId, effectiveProjectId);
 
     let resolvedFileId = input.fileId || extractFileIdFromUrl(input.url);
+    const targetSpaceId = effectiveProjectId || userId;
 
     // Content-Addressable Storage (CAS) Deduplication:
-    // If incoming upload has a valid fileHash, reuse existing storage blob if available within the same user/project scope
+    // If incoming upload has a valid fileHash without an existing fileId, reuse storage blob within the same space and acquire CAS ref + quota
     let storageKey = input.storageKey;
     let deduplicated = false;
-    if (input.fileHash && isValidFileHash(input.fileHash)) {
+    if (!resolvedFileId && input.fileHash && isValidFileHash(input.fileHash)) {
       const existingWithHash = await this.repo.findFirst({
         fileHash: input.fileHash.trim(),
         storageKey: { not: null },
         deletedAt: null,
-        item: { spaceId: effectiveProjectId || userId, deletedAt: null },
+        item: { spaceId: targetSpaceId, deletedAt: null },
       });
       if (existingWithHash?.storageKey) {
         storageKey = existingWithHash.storageKey;
         deduplicated = true;
         if (existingWithHash.fileId) {
           resolvedFileId = existingWithHash.fileId;
+          if (this.filesPort?.acquireBlob) {
+            const acquired = await this.filesPort.acquireBlob(
+              existingWithHash.fileId,
+            );
+            if (acquired && this.filesPort.reserveQuota) {
+              await this.filesPort
+                .reserveQuota(targetSpaceId, acquired.sizeBytes)
+                .catch(() => {});
+            }
+          }
         }
       }
     }
@@ -130,7 +141,7 @@ export class AttachmentsService {
         ? input.url
         : resolvedFileId
           ? effectiveProjectId
-            ? `/api/v1/projects/${effectiveProjectId}/library/files/${resolvedFileId}/content`
+            ? `/api/v1/spaces/${effectiveProjectId}/library/files/${resolvedFileId}/content`
             : `/api/v1/library/files/${resolvedFileId}/content`
           : '';
 
@@ -358,7 +369,7 @@ export class AttachmentsService {
     attachmentId: AttachmentId | string,
     projectId?: ProjectId | string,
   ) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeItemWhere = {
       spaceId: validProjectId || userId,
       deletedAt: null,
@@ -397,7 +408,7 @@ export class AttachmentsService {
   ) {
     if (!attachmentId)
       throw new BadRequestException('Attachment ID is required');
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeItemWhere = {
       spaceId: validProjectId || userId,
       deletedAt: null,
@@ -419,7 +430,11 @@ export class AttachmentsService {
       }
     }
     const itemRec = attachment.item as
-      | { projectId?: string | null; spaceId?: string; createdById?: string }
+      | {
+          spaceId?: string;
+          projectId?: string | null;
+          createdById?: string;
+        }
       | null
       | undefined;
     const itemProjectId =
@@ -428,7 +443,11 @@ export class AttachmentsService {
         ? itemRec.spaceId
         : undefined);
     const effectiveProjectId =
-      validProjectId || normalizeProjectScopeId(itemProjectId) || undefined;
+      validProjectId || normalizeProjectSpaceId(itemProjectId) || undefined;
+    const targetSpaceId =
+      itemRec?.spaceId ??
+      effectiveProjectId ??
+      (typeof userId === 'string' ? userId : undefined);
     let postCommitRegistered = false;
     const result = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
@@ -479,17 +498,13 @@ export class AttachmentsService {
 
     if (fileIdsToDelete.size > 0 && this.filesPort?.deleteFile) {
       const candidateFileIds = Array.from(fileIdsToDelete);
+      const deleteTarget = targetSpaceId
+        ? { spaceId: targetSpaceId }
+        : undefined;
       await Promise.all(
         candidateFileIds.map(async (fid) => {
           try {
-            const remainingRefs = await this.repo.countFileIdReferences?.(
-              fid,
-              attachment.id,
-            );
-            if (typeof remainingRefs === 'number' && remainingRefs > 0) {
-              return;
-            }
-            await this.filesPort!.deleteFile(fid);
+            await this.filesPort!.deleteFile(fid, deleteTarget);
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             this.logger.warn(
@@ -521,7 +536,10 @@ export class AttachmentsService {
     return Array.isArray(orphanedFileIds) ? orphanedFileIds : [];
   }
 
-  async cleanupOrphanedFiles(orphanedFileIds?: string[]): Promise<void> {
+  async cleanupOrphanedFiles(
+    orphanedFileIds?: string[],
+    target?: { spaceId?: string },
+  ): Promise<void> {
     if (
       !Array.isArray(orphanedFileIds) ||
       orphanedFileIds.length === 0 ||
@@ -530,16 +548,13 @@ export class AttachmentsService {
       return;
     }
     const candidateFileIds = Array.from(new Set(orphanedFileIds));
+    const deleteTarget = target?.spaceId
+      ? { spaceId: target.spaceId }
+      : undefined;
     await Promise.all(
       candidateFileIds.map(async (fid) => {
         try {
-          if (this.repo.countFileIdReferences) {
-            const remainingRefs = await this.repo.countFileIdReferences(fid);
-            if (typeof remainingRefs === 'number' && remainingRefs > 0) {
-              return;
-            }
-          }
-          await this.filesPort!.deleteFile(fid);
+          await this.filesPort!.deleteFile(fid, deleteTarget);
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
           this.logger.warn(
@@ -576,7 +591,7 @@ export class AttachmentsService {
         projectId?: string | null;
         userId?: string;
       };
-      const validProjectId = normalizeProjectScopeId(projectId);
+      const validProjectId = normalizeProjectSpaceId(projectId);
       if (item.spaceId) {
         const expectedSpaceId = validProjectId || userId;
         if (expectedSpaceId && item.spaceId !== expectedSpaceId) {
@@ -602,7 +617,7 @@ export class AttachmentsService {
     attachmentId: AttachmentId | string,
     projectId?: ProjectId | string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const scopeItemWhere = {
       spaceId: effectiveProjectId || userId,
       deletedAt: null,
@@ -688,8 +703,8 @@ export class AttachmentsService {
     }
     const thumbBuffer = await this.filesPort.ensurePdfThumbnail({
       fileId: attachment.fileId,
+      spaceId: projectId || userId,
       userId,
-      projectId,
     });
     if (!thumbBuffer) {
       throw new NotFoundException(
@@ -785,7 +800,7 @@ export class AttachmentsService {
     attachmentId: string,
     projectId?: string,
   ): Promise<{ status: string; attachmentId: string; message: string }> {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const attachment = await this.repo.findUnique(attachmentId, { item: true });
     const itemRec = attachment?.item as
       | {

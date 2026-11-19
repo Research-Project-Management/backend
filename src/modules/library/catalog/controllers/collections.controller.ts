@@ -33,7 +33,7 @@ import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/catalo
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   INGESTION_FACADE,
   IIngestionFacade,
 } from '@/modules/library/core';
@@ -73,7 +73,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.collectionsService.getCollections(userId, projectId);
   }
 
@@ -85,7 +85,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.collectionsService.getCollectionTree(userId, projectId);
   }
 
@@ -99,7 +99,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.collectionsService.reorderCollections(
       userId,
       dto.collections,
@@ -117,7 +117,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(
+    const projectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || dto?.spaceId,
     );
     return this.collectionsService.createCollection(userId, dto, projectId);
@@ -132,7 +132,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.collectionsService.getCollectionById(
       userId,
       collectionId,
@@ -150,7 +150,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.collectionsService.updateCollection(
       userId,
       collectionId,
@@ -173,7 +173,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.collectionsService.deleteCollection(
       userId,
       collectionId,
@@ -193,7 +193,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.collectionsService.moveItems(
       userId,
       collectionId,
@@ -214,7 +214,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.collectionsService.assignItemsToCollection(
       userId,
       collectionId,
@@ -233,7 +233,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.collectionsService.detachItemFromCollection(
       userId,
       collectionId,
@@ -252,7 +252,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.collectionsService.detachItemsFromCollection(
       userId,
       collectionId,
@@ -274,7 +274,7 @@ export class CollectionsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(
+    const projectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || dto?.spaceId,
     );
     return this.collectionsService.copyCollection(
@@ -320,7 +320,7 @@ export class ItemCurationController {
         'Ingestion service is not available for metadata re-resolution',
       );
     }
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || body?.spaceId,
     );
     return this.ingestionFacade.reResolveMetadata(
@@ -358,7 +358,7 @@ export class ItemCurationController {
     @Param('spaceId') paramProjectId?: string,
     @Query('attachmentId') attachmentId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const fulltext = attachmentId
       ? await this.fulltextService.getFulltext(
           userId,
@@ -388,7 +388,7 @@ export class ItemCurationController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.itemService.reindexItem(userId, id, projectId);
   }
 
@@ -402,7 +402,7 @@ export class ItemCurationController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const item = await this.itemService.getItem(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in library`);
@@ -439,7 +439,7 @@ export class ItemCurationController {
 
     const resolvedTargetType =
       body?.targetType || body?.targetItemType || 'journalArticle';
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const result = await this.typeConversionService.convertItemType(
       userId,
       id,
@@ -468,7 +468,7 @@ export class ItemCurationController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.relationsService.getRelatedItems(userId, id, projectId);
   }
 
@@ -482,7 +482,7 @@ export class ItemCurationController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.relationsService.linkItems(userId, id, body, projectId);
   }
 
@@ -496,7 +496,7 @@ export class ItemCurationController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.relationsService.unlinkItems(
       userId,
       id,
@@ -515,7 +515,7 @@ export class ItemCurationController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(
+    const projectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || body?.spaceId,
     );
     const options = {
@@ -538,7 +538,7 @@ export class ItemCurationController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const item = projectId
       ? await this.itemService.setMyPublication(userId, id, false, {
           projectId,

@@ -18,7 +18,7 @@ import {
   IIdempotentConsumer,
   UNIT_OF_WORK,
   IUnitOfWork,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   extractFileIdFromUrl,
   ExtractionProcessException,
   AttachmentStorageException,
@@ -58,7 +58,7 @@ interface PostExtractionPipelineContext {
   extractionResult: ExtractionResultWithPages;
   effectiveUserId: string;
   effectiveProjectId?: string;
-  scopeId: string;
+  spaceId: string;
   signal?: AbortSignal;
   syncRes?: {
     outboxPublished?: boolean;
@@ -309,7 +309,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         this.filesPort.readOwnedFile({
           fileId,
           userId: resolvedItemUserId,
-          projectId: resolvedItemProjectId ?? undefined,
+          spaceId: itemRec?.spaceId ?? resolvedItemProjectId ?? undefined,
         }),
       ]);
       const rawBuffer =
@@ -347,13 +347,13 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         resolvedItemUserId ||
         (typeof payload.userId === 'string' ? payload.userId : undefined) ||
         'system';
-      const effectiveProjectId = normalizeProjectScopeId(
+      const effectiveProjectId = normalizeProjectSpaceId(
         resolvedItemProjectId ||
           (typeof payload.projectId === 'string'
             ? payload.projectId
             : undefined),
       );
-      const scopeId = effectiveProjectId || effectiveUserId;
+      const spaceId = effectiveProjectId || effectiveUserId;
 
       await this.runPostExtractionPipeline({
         event,
@@ -363,7 +363,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         extractionResult,
         effectiveUserId,
         effectiveProjectId,
-        scopeId,
+        spaceId,
         signal,
       });
 
@@ -441,7 +441,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           ? { userId: scope, projectId: null }
           : {
               userId: scope.userId || 'system',
-              projectId: normalizeProjectScopeId(scope.projectId),
+              projectId: normalizeProjectSpaceId(scope.projectId),
             };
       try {
         await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
@@ -591,7 +591,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       doc,
       effectiveUserId,
       effectiveProjectId,
-      scopeId,
+      spaceId,
       signal,
     } = ctx;
     if (signal?.aborted) {
@@ -606,7 +606,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     if (
       doc?.references &&
       doc.references.length > 0 &&
-      scopeId &&
+      spaceId &&
       hasValidScope
     ) {
       try {
@@ -673,7 +673,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       doc,
       effectiveUserId,
       effectiveProjectId,
-      scopeId,
+      spaceId,
       syncRes,
     } = ctx;
     const itemUpdatedPayload = {
@@ -729,7 +729,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         eventId: event.id,
         userId: effectiveUserId,
         projectId: effectiveProjectId,
-        scopeId,
+        spaceId,
         aggregateId: attachment.itemId,
         eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
         payload: itemUpdatedPayload,

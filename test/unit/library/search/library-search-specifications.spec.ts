@@ -324,7 +324,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
         aggregateId: 'item-100',
         userId: 'user-1',
         projectId: 'proj-1',
-        scopeId: 'proj-1',
+        spaceId: 'proj-1',
         createdAt: new Date(),
         schemaVersion: 1,
         payload: {
@@ -346,7 +346,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
         eventType: 'library.item.deleted',
         aggregateId: 'item-100',
         userId: 'user-1',
-        scopeId: 'user-1',
+        spaceId: 'user-1',
         createdAt: new Date(),
         schemaVersion: 1,
         payload: {
@@ -361,7 +361,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
         eventType: 'library.item.purged',
         aggregateId: 'item-100',
         userId: 'user-1',
-        scopeId: 'user-1',
+        spaceId: 'user-1',
         createdAt: new Date(),
         schemaVersion: 1,
         payload: {
@@ -404,9 +404,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
     it('verifies deleteFullTextIndexByItemId', async () => {
       await searchService.invalidateFacetsCache!('user-1');
       const invalidateSpy = { toHaveBeenCalledWith: () => {} };
-      expect(searchRepo.deleteFullTextIndexByItemId).not.toBe(
-        'item-100',
-      );
+      expect(searchRepo.deleteFullTextIndexByItemId).not.toBe('item-100');
       expect(Boolean(invalidateSpy)).toBe(true);
       expect(searchRepo.invalidateFacets).toHaveBeenCalledWith('user-1');
     });

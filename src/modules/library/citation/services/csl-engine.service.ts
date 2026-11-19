@@ -287,10 +287,10 @@ export class CslEngineService implements OnModuleInit {
 
   public async ensureTemplate(
     styleId: string,
-    scopeId?: string,
+    spaceId?: string,
     rawXml?: string,
   ): Promise<boolean> {
-    return this.loader.ensureTemplate(styleId, scopeId, rawXml);
+    return this.loader.ensureTemplate(styleId, spaceId, rawXml);
   }
 
   public initTemplates(): void {
@@ -304,9 +304,9 @@ export class CslEngineService implements OnModuleInit {
   public async formatBatchAsync(
     cslItems: CslItemData[],
     styleId: string = 'apa',
-    scopeId?: string,
+    spaceId?: string,
   ) {
-    await this.ensureTemplate(styleId, scopeId);
+    await this.ensureTemplate(styleId, spaceId);
     const normalizedStyle = this.normalizeStyle(styleId);
     if (
       cslItems.length === 0 ||
@@ -321,14 +321,14 @@ export class CslEngineService implements OnModuleInit {
     }
 
     // Yield to the event loop once before multi-item CSL rendering for large batches,
-    // then delegate directly to formatBatch(cslItems, styleId, undefined, scopeId) so
+    // then delegate directly to formatBatch(cslItems, styleId, undefined, spaceId) so
     // `new Cite(cslItems)` runs as a true multi-item CSL processor (preserving CSL
     // bibliography `<sort>`, numeric range collapsing `[1]-[3]`, and native disambiguation).
     if (cslItems.length >= CslEngineService.EVENT_LOOP_YIELD_BATCH_SIZE) {
       await new Promise((resolve) => setImmediate(resolve));
     }
 
-    return this.formatBatch(cslItems, styleId, undefined, scopeId);
+    return this.formatBatch(cslItems, styleId, undefined, spaceId);
   }
 
   private buildCiteEntryParam(
@@ -364,11 +364,11 @@ export class CslEngineService implements OnModuleInit {
     cslItem: CslItemData,
     styleId: string = 'apa',
     index: number = 1,
-    scopeId?: string,
+    spaceId?: string,
     context?: CitationContextOptions,
   ): EngineCitationResult {
     this.initTemplates();
-    const normalizedStyle = this.loader.getScopedStyleId(styleId, scopeId);
+    const normalizedStyle = this.loader.getScopedStyleId(styleId, spaceId);
 
     const cacheKey = this.getCacheKey(cslItem, normalizedStyle, index, context);
     const cached = this.getCached(cacheKey);
@@ -386,7 +386,7 @@ export class CslEngineService implements OnModuleInit {
           : isVn
             ? 'tcvn'
             : 'apa';
-      const result = this.format(cslItem, targetStyle, index, scopeId, context);
+      const result = this.format(cslItem, targetStyle, index, spaceId, context);
       return this.setCache(cacheKey, { ...result, styleId: normalizedStyle });
     }
 
@@ -425,10 +425,10 @@ export class CslEngineService implements OnModuleInit {
 
     const effectiveLang =
       context?.locale?.trim() ||
-      this.loader.getStyleDefaultLocale(styleId, scopeId);
+      this.loader.getStyleDefaultLocale(styleId, spaceId);
 
     const cite = new Cite(cslItem);
-    const activeTemplate = this.loader.isStyleSupported(styleId, scopeId)
+    const activeTemplate = this.loader.isStyleSupported(styleId, spaceId)
       ? normalizedStyle
       : 'apa';
     let bibliography = cite
@@ -485,7 +485,7 @@ export class CslEngineService implements OnModuleInit {
     cslItems: CslItemData[],
     styleId: string = 'apa',
     _unused?: undefined,
-    scopeId?: string,
+    spaceId?: string,
   ): {
     styleId: string;
     combinedInText: string;
@@ -500,7 +500,7 @@ export class CslEngineService implements OnModuleInit {
   } {
     this.initTemplates();
     const baseStyle = this.normalizeStyle(styleId);
-    const normalizedStyle = this.loader.getScopedStyleId(styleId, scopeId);
+    const normalizedStyle = this.loader.getScopedStyleId(styleId, spaceId);
 
     if (cslItems.length === 0) {
       return {
@@ -549,7 +549,7 @@ export class CslEngineService implements OnModuleInit {
             ? 'tcvn'
             : 'apa';
       return {
-        ...this.formatBatch(cslItems, targetStyle, undefined, scopeId),
+        ...this.formatBatch(cslItems, targetStyle, undefined, spaceId),
         styleId: baseStyle,
       };
     }
@@ -645,8 +645,8 @@ export class CslEngineService implements OnModuleInit {
       return cloned;
     };
 
-    const effectiveLang = this.loader.getStyleDefaultLocale(styleId, scopeId);
-    const activeTemplate = this.loader.isStyleSupported(styleId, scopeId)
+    const effectiveLang = this.loader.getStyleDefaultLocale(styleId, spaceId);
+    const activeTemplate = this.loader.isStyleSupported(styleId, spaceId)
       ? normalizedStyle
       : 'apa';
     const cite = new Cite(cslItems);

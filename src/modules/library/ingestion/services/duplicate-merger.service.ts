@@ -17,7 +17,8 @@ import {
   IItemCacheInvalidator,
   EXTRACTION_FACADE,
   IExtractionFacade,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
+  resolveSpaceId,
   deriveFirstAuthor,
   UNIT_OF_WORK,
   IUnitOfWork,
@@ -127,7 +128,7 @@ export class DuplicateMergerService {
       }
     }
 
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       projectId || dto.spaceId,
     );
     const allItemIds = [dto.primaryItemId, ...uniqueDupIds];
@@ -147,7 +148,7 @@ export class DuplicateMergerService {
 
     for (const item of items) {
       if ('projectId' in item) {
-        const itemProjectId = normalizeProjectScopeId(
+        const itemProjectId = normalizeProjectSpaceId(
           (item as { projectId?: string | null }).projectId,
         );
         if (itemProjectId !== effectiveProjectId) {
@@ -541,12 +542,18 @@ export class DuplicateMergerService {
       new Set([...reassignedOrphanFileIds, ...offloadedFileIdsToDelete]),
     );
     if (filesToCleanup.length > 0) {
+      const targetSpaceId = resolveSpaceId({
+        userId: String(userId),
+        projectId: effectiveProjectId,
+      });
       if (this.extractionGateway?.cleanupOrphanedFiles) {
-        await this.extractionGateway.cleanupOrphanedFiles(filesToCleanup);
+        await this.extractionGateway.cleanupOrphanedFiles(filesToCleanup, {
+          spaceId: targetSpaceId,
+        });
       } else if (this.filesPort?.deleteFile) {
         for (const fid of filesToCleanup) {
           try {
-            await this.filesPort.deleteFile(fid);
+            await this.filesPort.deleteFile(fid, { spaceId: targetSpaceId });
           } catch (delErr: unknown) {
             const msg =
               delErr instanceof Error ? delErr.message : String(delErr);

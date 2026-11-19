@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
 import { asMetaObject } from '@/modules/library/ingestion/domain/duplicate-clustering.domain';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   ItemProvenancePolicy,
   deriveFirstAuthor,
   executeStandardLibraryCacheInvalidation,
@@ -69,7 +69,7 @@ export async function invalidateIngestionItemCache(
     contextLabel,
   } = params;
   if (!itemIds || itemIds.length === 0) return;
-  const validProjectId = normalizeProjectScopeId(projectId);
+  const validProjectId = normalizeProjectSpaceId(projectId);
   const invalidator = cacheCoordinator?.invalidateForWrite
     ? cacheCoordinator
     : catalogGateway?.invalidateForWrite
@@ -81,8 +81,8 @@ export async function invalidateIngestionItemCache(
     !(invalidator?.invalidateForWrite && userId)
   ) {
     const scopeKeys = new Set<string>();
-    const scopeId = validProjectId || userId || undefined;
-    if (scopeId) scopeKeys.add(scopeId);
+    const spaceId = validProjectId || userId || undefined;
+    if (spaceId) scopeKeys.add(spaceId);
     if (validProjectId) scopeKeys.add(`proj:${validProjectId}`);
     if (userId) scopeKeys.add(userId);
     for (const key of scopeKeys)

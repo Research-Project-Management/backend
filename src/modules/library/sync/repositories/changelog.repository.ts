@@ -6,7 +6,7 @@ import {
   AppendChangeInput,
   RecordTombstoneEntry,
   RecordTombstoneInput,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
 } from '@/modules/library/core';
 
 export type { AppendChangeInput, RecordTombstoneInput };
@@ -59,7 +59,7 @@ export class ChangeLogRepository {
         scopeKey: `user:${trimmed}`,
       };
     }
-    const projectId = normalizeProjectScopeId(scope.projectId);
+    const projectId = normalizeProjectSpaceId(scope.projectId);
     const userId = scope.userId?.trim() || undefined;
     if (projectId)
       return {

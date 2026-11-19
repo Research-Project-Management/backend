@@ -27,8 +27,8 @@ import {
 import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 import { RedisCacheService } from '@/core';
 import {
-  normalizeProjectScopeId,
-  isProjectScopeId,
+  normalizeProjectSpaceId,
+  isProjectSpaceId,
   libraryConfig,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
@@ -65,16 +65,16 @@ export class CollectionsService {
     @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
   private resolveValidProjectId(projectId?: string | null): string | undefined {
-    const normalized = normalizeProjectScopeId(projectId);
-    return isProjectScopeId(normalized) && isUUID(normalized)
+    const normalized = normalizeProjectSpaceId(projectId);
+    return isProjectSpaceId(normalized) && isUUID(normalized)
       ? normalized
       : undefined;
   }
-  private async getScopeVersion(scopeId: string): Promise<number> {
+  private async getScopeVersion(spaceKey: string): Promise<number> {
     if (!this.cache) return 0;
     try {
       const ver = await this.cache.get<number | string>(
-        LIBRARY_REDIS_KEYS.scopeVersion(scopeId),
+        LIBRARY_REDIS_KEYS.scopeVersion(spaceKey),
       );
       return ver !== null && ver !== undefined ? Number(ver) : 0;
     } catch {
@@ -137,9 +137,11 @@ export class CollectionsService {
         total: collections.length,
       };
     };
-    const scopeId = effectiveProjectId ? effectiveProjectId : `u:${userId}`;
-    const version = await this.getScopeVersion(scopeId);
-    const cacheKey = LIBRARY_REDIS_KEYS.collections(scopeId, version);
+    const spaceCacheKey = effectiveProjectId
+      ? effectiveProjectId
+      : `u:${userId}`;
+    const version = await this.getScopeVersion(spaceCacheKey);
+    const cacheKey = LIBRARY_REDIS_KEYS.collections(spaceCacheKey, version);
     return this.singleFlight.execute(cacheKey, () =>
       this.cache
         ? this.cache.wrap(cacheKey, fetchCollections, this.applyJitter(300))
@@ -155,9 +157,11 @@ export class CollectionsService {
       const collections = await this.repo.findAll(userId, effectiveProjectId);
       return { tree: this.tree.buildTree(collections) };
     };
-    const scopeId = effectiveProjectId ? effectiveProjectId : `u:${userId}`;
-    const version = await this.getScopeVersion(scopeId);
-    const cacheKey = LIBRARY_REDIS_KEYS.collectionTree(scopeId, version);
+    const spaceCacheKey = effectiveProjectId
+      ? effectiveProjectId
+      : `u:${userId}`;
+    const version = await this.getScopeVersion(spaceCacheKey);
+    const cacheKey = LIBRARY_REDIS_KEYS.collectionTree(spaceCacheKey, version);
     return this.singleFlight.execute(cacheKey, () =>
       this.cache
         ? this.cache.wrap(cacheKey, fetchTree, this.applyJitter(300))
@@ -195,7 +199,7 @@ export class CollectionsService {
     projectId?: string,
   ) {
     const effectiveProjectId =
-      normalizeProjectScopeId(projectId || dto.spaceId) ?? null;
+      normalizeProjectSpaceId(projectId || dto.spaceId) ?? null;
     const rawParentId = normalizeParentId(dto.parentId);
     if (rawParentId) {
       const parent = await this.repo.findById(
@@ -331,7 +335,7 @@ export class CollectionsService {
       ...(hasParentIdChange ? { parentId: rawParentId } : {}),
     };
     const expectedVersion = dto.expectedVersion ?? dto.version;
-    let effectiveProjectId = normalizeProjectScopeId(projectId) ?? undefined;
+    let effectiveProjectId = normalizeProjectSpaceId(projectId) ?? undefined;
     let ranPostCommitHook = false;
     const collection = this.libraryTx
       ? await this.libraryTx.executeInTransaction(
@@ -354,7 +358,7 @@ export class CollectionsService {
                 ? existing.spaceId
                 : null);
             effectiveProjectId =
-              normalizeProjectScopeId(projectId ?? existingProjId) ?? undefined;
+              normalizeProjectSpaceId(projectId ?? existingProjId) ?? undefined;
             if (hasParentIdChange && rawParentId) {
               if (tx && typeof tx.$queryRaw === 'function') {
                 const [firstLock, secondLock] = [
@@ -420,7 +424,7 @@ export class CollectionsService {
               ? existing.spaceId
               : null);
           effectiveProjectId =
-            normalizeProjectScopeId(projectId ?? existingProjId) ?? undefined;
+            normalizeProjectSpaceId(projectId ?? existingProjId) ?? undefined;
           if (hasParentIdChange && rawParentId) {
             await this.validateParentNoCycle(
               userId,
@@ -482,7 +486,7 @@ export class CollectionsService {
   ) {
     const destinationCollectionId =
       collectionId === 'unfiled' ? null : collectionId;
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: validProjectId || userId,
       deletedAt: null,
@@ -659,7 +663,7 @@ export class CollectionsService {
     }>,
     projectId?: string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(projectId) ?? undefined;
+    const effectiveProjectId = normalizeProjectSpaceId(projectId) ?? undefined;
     let updated:
       Awaited<ReturnType<CollectionsRepository['findAll']>> | undefined;
     let ranPostCommitHook = false;
@@ -767,7 +771,7 @@ export class CollectionsService {
     itemId: string,
     projectId?: string,
   ) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: validProjectId || userId,
     };
@@ -843,7 +847,7 @@ export class CollectionsService {
     projectId?: string,
   ) {
     if (!itemIds || itemIds.length === 0) return { success: true, count: 0 };
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     let ranPostCommitHook = false;
     let removedIds: string[] = [];
     if (this.libraryTx?.executeInTransaction) {

@@ -8,7 +8,7 @@ import {
 import { Prisma, TagType } from '@prisma/client';
 import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repository';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   libraryConfig,
   LIBRARY_EVENT_TYPES,
   UNIT_OF_WORK,
@@ -43,11 +43,11 @@ export class TagsService {
     @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 
-  private async getScopeVersion(scopeId: string): Promise<number> {
+  private async getScopeVersion(spaceKey: string): Promise<number> {
     if (!this.cache) return 0;
     try {
       const ver = await this.cache.get<number | string>(
-        LIBRARY_REDIS_KEYS.scopeVersion(scopeId),
+        LIBRARY_REDIS_KEYS.scopeVersion(spaceKey),
       );
       return ver !== null && ver !== undefined ? Number(ver) : 0;
     } catch {
@@ -80,7 +80,7 @@ export class TagsService {
     userId: UserId | string,
     options?: { includeInactive?: boolean; projectId?: ProjectId | string },
   ) {
-    const validProjectId = normalizeProjectScopeId(options?.projectId);
+    const validProjectId = normalizeProjectSpaceId(options?.projectId);
     const scopeKey = validProjectId ? `proj:${validProjectId}` : String(userId);
     const version = await this.getScopeVersion(scopeKey);
     const baseKey = LIBRARY_REDIS_KEYS.tags(scopeKey, version);
@@ -112,7 +112,7 @@ export class TagsService {
         `Invalid or disallowed tag name: "${name}"`,
       );
     }
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     let ranPostCommitHook = false;
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
@@ -186,7 +186,7 @@ export class TagsService {
       data.name = cleanName;
     }
 
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const eventScope = { userId, projectId: effectiveProjectId };
 
     let affectedItemIds: string[] = [];
@@ -266,7 +266,7 @@ export class TagsService {
     tagId: TagId | string,
     projectId?: ProjectId | string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const eventScope = { userId, projectId: effectiveProjectId };
 
     let affectedItemIds: string[] = [];
@@ -326,7 +326,7 @@ export class TagsService {
     userId: UserId | string,
     projectId?: ProjectId | string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const eventScope = { userId, projectId: effectiveProjectId };
 
     let ranPostCommitHook = false;
@@ -410,7 +410,7 @@ export class TagsService {
     itemId: ItemId | string,
     projectId?: ProjectId | string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
 
     let ranPostCommitHook = false;
     await this.libraryTx.executeInTransaction(async (tx, helpers) => {
@@ -488,7 +488,7 @@ export class TagsService {
     itemId: ItemId | string,
     projectId?: ProjectId | string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
 
     let ranPostCommitHook = false;
     await this.libraryTx.executeInTransaction(async (tx, helpers) => {
@@ -619,7 +619,7 @@ export class TagsService {
       );
     }
 
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const eventScope = { userId, projectId: effectiveProjectId };
     let affectedItemIds: string[] = [];
     let ranPostCommitHook = false;

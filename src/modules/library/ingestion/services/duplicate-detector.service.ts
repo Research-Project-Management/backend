@@ -13,7 +13,7 @@ import {
   IItemCacheInvalidator,
   ITEM_CACHE_INVALIDATOR,
   DuplicateCandidateItem,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
   UNIT_OF_WORK,
@@ -90,7 +90,7 @@ export class DuplicateDetectorService {
   normalizeScopeProjectId(
     rawProjectId?: ProjectId | string | null,
   ): string | undefined {
-    return normalizeProjectScopeId(rawProjectId);
+    return normalizeProjectSpaceId(rawProjectId);
   }
 
   getDismissedPeerIds(item: {

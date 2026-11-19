@@ -18,7 +18,15 @@ function walkSync(dir: string, fileList: string[] = []): string[] {
 describe('Library Architecture & Design Compliance Guardrails', () => {
   const libraryRoot = path.resolve(__dirname, '../../../src/modules/library');
   const allFiles = walkSync(libraryRoot);
-  const fileCache = new Map<string, { content: string; lines: string[]; normalizedPath: string; relPath: string }>();
+  const fileCache = new Map<
+    string,
+    {
+      content: string;
+      lines: string[];
+      normalizedPath: string;
+      relPath: string;
+    }
+  >();
   for (const file of allFiles) {
     const content = fs.readFileSync(file, 'utf-8');
     fileCache.set(file, {
@@ -51,7 +59,10 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     return list;
   }
   const feFiles = walkFrontend(feRoot);
-  const feFileCache = new Map<string, { content: string; lines: string[]; relPath: string }>();
+  const feFileCache = new Map<
+    string,
+    { content: string; lines: string[]; relPath: string }
+  >();
   for (const file of feFiles) {
     const content = fs.readFileSync(file, 'utf-8');
     feFileCache.set(file, {
@@ -224,8 +235,12 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         normalized.endsWith('/catalog/services/items.service.ts') ||
         normalized.endsWith('/catalog/services/item-query.service.ts') ||
         normalized.endsWith('/catalog/services/collections.service.ts') ||
-        normalized.endsWith('/extraction/services/pdf-annotation-importer.service.ts') ||
-        normalized.endsWith('/extraction/services/attachment-renamer.service.ts') ||
+        normalized.endsWith(
+          '/extraction/services/pdf-annotation-importer.service.ts',
+        ) ||
+        normalized.endsWith(
+          '/extraction/services/attachment-renamer.service.ts',
+        ) ||
         normalized.endsWith('/library.module.ts')
       );
     });
@@ -234,7 +249,9 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       const { lines } = fileCache.get(file)!;
       lines.forEach((line, index) => {
         if (
-          /typeof\s+(this\.\w+|helpers)\.\w+\s*===\s*['"]function['"]/.test(line) &&
+          /typeof\s+(this\.\w+|helpers)\.\w+\s*===\s*['"]function['"]/.test(
+            line,
+          ) &&
           !line.trim().startsWith('//')
         ) {
           violations.push({
@@ -333,7 +350,8 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     if (!fs.existsSync(feRoot)) return;
 
     const sizeViolations: Array<{ file: string; lines: number }> = [];
-    const anyViolations: Array<{ file: string; line: number; match: string }> = [];
+    const anyViolations: Array<{ file: string; line: number; match: string }> =
+      [];
 
     for (const [, { relPath, lines }] of feFileCache) {
       if (
@@ -364,9 +382,21 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   it('SC-009: Centralization of Data, State, Cache & Business Logic (Backend Repositories & Frontend Coordinators/SDK)', () => {
     // 1. Backend: Zero direct this.prisma calls in domain services (excluding infrastructure transaction.service.ts)
     // AND zero PrismaService / RedisCacheService / Repository imports inside /domain/ across all bounded contexts
-    const beDirectPrismaInServices: Array<{ file: string; line: number; match: string }> = [];
-    const beInfraInDomainViolations: Array<{ file: string; line: number; match: string }> = [];
-    const beUpwardLayerViolations: Array<{ file: string; line: number; match: string }> = [];
+    const beDirectPrismaInServices: Array<{
+      file: string;
+      line: number;
+      match: string;
+    }> = [];
+    const beInfraInDomainViolations: Array<{
+      file: string;
+      line: number;
+      match: string;
+    }> = [];
+    const beUpwardLayerViolations: Array<{
+      file: string;
+      line: number;
+      match: string;
+    }> = [];
     for (const [, { relPath, lines }] of fileCache) {
       const isControllerLayer = relPath.includes('/controllers/');
       const isInnerModelLayer =
@@ -390,17 +420,16 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
 
         if (
           isControllerLayer &&
-          /from\s+['"][^'"]*\/(repositories|domain|policies|parsers|providers|stages|extractors)\//.test(line)
+          /from\s+['"][^'"]*\/(repositories|domain|policies|parsers|providers|stages|extractors)\//.test(
+            line,
+          )
         ) {
           beUpwardLayerViolations.push({
             file: relPath,
             line: index + 1,
             match: trimmed,
           });
-        } else if (
-          isPureDomainLayer &&
-          /from\s+['"][^'"]*\/dto\//.test(line)
-        ) {
+        } else if (isPureDomainLayer && /from\s+['"][^'"]*\/dto\//.test(line)) {
           beUpwardLayerViolations.push({
             file: relPath,
             line: index + 1,
@@ -435,7 +464,9 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
           });
         } else if (
           isInnerModelLayer &&
-          /from\s+['"][^'"]*\/(controllers|services|repositories|stages|providers)\//.test(line)
+          /from\s+['"][^'"]*\/(controllers|services|repositories|stages|providers)\//.test(
+            line,
+          )
         ) {
           beUpwardLayerViolations.push({
             file: relPath,
@@ -444,7 +475,9 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
           });
         } else if (
           isRepositoryLayer &&
-          /from\s+['"][^'"]*\/(controllers|services|stages|dto|parsers)\//.test(line)
+          /from\s+['"][^'"]*\/(controllers|services|stages|dto|parsers)\//.test(
+            line,
+          )
         ) {
           beUpwardLayerViolations.push({
             file: relPath,
@@ -462,7 +495,9 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
           });
         } else if (
           (relPath.includes('/providers/') || relPath.includes('/stages/')) &&
-          (/from\s+['"](?!@\/modules\/library\/core\/)[^'"]*\/services\//.test(line) ||
+          (/from\s+['"](?!@\/modules\/library\/core\/)[^'"]*\/services\//.test(
+            line,
+          ) ||
             /from\s+['"][^'"]*\/repositories\//.test(line))
         ) {
           beUpwardLayerViolations.push({
@@ -503,7 +538,10 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         });
       }
 
-      if (!relPath.includes('/services/') || relPath.endsWith('sync/services/transaction.service.ts')) {
+      if (
+        !relPath.includes('/services/') ||
+        relPath.endsWith('sync/services/transaction.service.ts')
+      ) {
         continue;
       }
       lines.forEach((line, index) => {
@@ -527,9 +565,18 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     // 2. Frontend: Zero scattered useQueryClient, useQuery, useMutation, localStorage, or direct *Service.* in UI components
     if (!fs.existsSync(feRoot)) return;
 
-    const feUiViolations: Array<{ file: string; line: number; match: string }> = [];
-    const feDomainStorageViolations: Array<{ file: string; line: number; match: string }> = [];
-    const feLayerDirectionViolations: Array<{ file: string; line: number; match: string }> = [];
+    const feUiViolations: Array<{ file: string; line: number; match: string }> =
+      [];
+    const feDomainStorageViolations: Array<{
+      file: string;
+      line: number;
+      match: string;
+    }> = [];
+    const feLayerDirectionViolations: Array<{
+      file: string;
+      line: number;
+      match: string;
+    }> = [];
 
     for (const [, { relPath, lines }] of feFileCache) {
       if (relPath.startsWith('ui/')) {
@@ -567,7 +614,9 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
             });
           }
           if (
-            /from\s+['"]@\/features\/library\/(domain|core|sdk|ui)\//.test(line) ||
+            /from\s+['"]@\/features\/library\/(domain|core|sdk|ui)\//.test(
+              line,
+            ) ||
             /from\s+['"]\.\.\/(domain|core|sdk|ui)\//.test(line) ||
             /from\s+['"]\.\.\/[^'"]+['"]/.test(line)
           ) {
@@ -630,11 +679,17 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
             /from\s+['"]@\/features\/library\/sdk(?:\/index)?['"]/.test(line) ||
             /from\s+['"]@\/features\/library\/sdk\/clients\//.test(line) ||
             (relPath.startsWith('core/store/') &&
-              (/from\s+['"]@\/features\/library\/(core\/(coordinator|manager)|sdk)\//.test(line) ||
-                /import\s*\(\s*['"]@\/features\/library\/(core\/(coordinator|manager)|sdk)\//.test(line) ||
+              (/from\s+['"]@\/features\/library\/(core\/(coordinator|manager)|sdk)\//.test(
+                line,
+              ) ||
+                /import\s*\(\s*['"]@\/features\/library\/(core\/(coordinator|manager)|sdk)\//.test(
+                  line,
+                ) ||
                 /from\s+['"]\.\.\/(coordinator|manager)\//.test(line))) ||
             (relPath.startsWith('core/adapters/') &&
-              (/from\s+['"]@\/features\/library\/(core\/(coordinator|store|manager)|sdk)\//.test(line) ||
+              (/from\s+['"]@\/features\/library\/(core\/(coordinator|store|manager)|sdk)\//.test(
+                line,
+              ) ||
                 /from\s+['"]\.\.\/(coordinator|store|manager)\//.test(line)))
           ) {
             feLayerDirectionViolations.push({
@@ -656,9 +711,14 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
             /from\s+['"]\.\.\/(core|ui)\//.test(line) ||
             /from\s+['"]\.\.\/\.\.\/(core|ui)\//.test(line) ||
             (relPath.startsWith('sdk/queries/') &&
-              (/from\s+['"]@\/features\/library\/sdk(?:\/index)?['"]/.test(line) ||
-                /export\s+\{[^}]*\b(?:ItemsService|CollectionsService|TagsService|NotesService|LinksService|StateService|SavedSearchesService|CitationService|ExportsService|AttachmentsService|UploadService|AnnotationService|IngestionService|CurationService|RetractionService|FeedsService|SearchService|SyncService|fetchPdfBlob|resolveLibraryUrl|resolveLibraryRawPath)\b[^}]*\}/.test(line))) ||
-            ((relPath.startsWith('sdk/clients/') || relPath === 'sdk/query-keys.ts') &&
+              (/from\s+['"]@\/features\/library\/sdk(?:\/index)?['"]/.test(
+                line,
+              ) ||
+                /export\s+\{[^}]*\b(?:ItemsService|CollectionsService|TagsService|NotesService|LinksService|StateService|SavedSearchesService|CitationService|ExportsService|AttachmentsService|UploadService|AnnotationService|IngestionService|CurationService|RetractionService|FeedsService|SearchService|SyncService|fetchPdfBlob|resolveLibraryUrl|resolveLibraryRawPath)\b[^}]*\}/.test(
+                  line,
+                ))) ||
+            ((relPath.startsWith('sdk/clients/') ||
+              relPath === 'sdk/query-keys.ts') &&
               (/from\s+['"]@\/features\/library\/sdk\/queries\//.test(line) ||
                 /from\s+['"]\.\.?\/queries\//.test(line)))
           ) {
@@ -770,10 +830,18 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     // 4. Zero `utils` folders or `*util*` files in Backend or Frontend Library (strict Domain-only taxonomy)
     const beUtilsViolations = Array.from(fileCache.values())
       .map((f) => f.relPath)
-      .filter((relPath) => /(?:^|\/)utils\//i.test(relPath) || /util/i.test(path.basename(relPath)));
+      .filter(
+        (relPath) =>
+          /(?:^|\/)utils\//i.test(relPath) ||
+          /util/i.test(path.basename(relPath)),
+      );
     const feUtilsViolations = Array.from(feFileCache.values())
       .map((f) => f.relPath)
-      .filter((relPath) => /(?:^|\/)utils\//i.test(relPath) || /util/i.test(path.basename(relPath)));
+      .filter(
+        (relPath) =>
+          /(?:^|\/)utils\//i.test(relPath) ||
+          /util/i.test(path.basename(relPath)),
+      );
     expect(beUtilsViolations).toEqual([]);
     expect(feUtilsViolations).toEqual([]);
 
@@ -803,25 +871,34 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       .map((f) => f.relPath)
       .filter(
         (relPath) =>
-          relPath.startsWith('sdk/queries/') &&
-          !/\.queries\.ts$/.test(relPath),
+          relPath.startsWith('sdk/queries/') && !/\.queries\.ts$/.test(relPath),
       );
     const feSdkClientsNamingViolations = Array.from(feFileCache.values())
       .map((f) => f.relPath)
       .filter(
         (relPath) =>
-          relPath.startsWith('sdk/clients/') &&
-          !/\.client\.ts$/.test(relPath),
+          relPath.startsWith('sdk/clients/') && !/\.client\.ts$/.test(relPath),
       );
     const beRepoHelperViolations = Array.from(fileCache.values())
       .map((f) => f.relPath)
-      .filter((relPath) => relPath.includes('/repositories/') && /\.helper\.ts$/.test(relPath));
+      .filter(
+        (relPath) =>
+          relPath.includes('/repositories/') && /\.helper\.ts$/.test(relPath),
+      );
     const beDataFolderOrZoteroFileViolations = Array.from(fileCache.values())
       .map((f) => f.relPath)
-      .filter((relPath) => /(?:^|\/)data\//i.test(relPath) || /zotero/i.test(path.basename(relPath)));
+      .filter(
+        (relPath) =>
+          /(?:^|\/)data\//i.test(relPath) ||
+          /zotero/i.test(path.basename(relPath)),
+      );
     const feDataFolderOrZoteroFileViolations = Array.from(feFileCache.values())
       .map((f) => f.relPath)
-      .filter((relPath) => /(?:^|\/)data\//i.test(relPath) || /zotero/i.test(path.basename(relPath)));
+      .filter(
+        (relPath) =>
+          /(?:^|\/)data\//i.test(relPath) ||
+          /zotero/i.test(path.basename(relPath)),
+      );
     expect(beDomainNamingViolations).toEqual([]);
     expect(feDomainNamingViolations).toEqual([]);
     expect(feTypesNamingViolations).toEqual([]);
@@ -833,10 +910,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   });
 
   it('SC-010: Schema & Query Integrity (soft-delete columns, table names, zero ghost delegates or TransactionClient casts)', () => {
-    const schemaDir = path.resolve(
-      __dirname,
-      '../../../prisma/schema/library',
-    );
+    const schemaDir = path.resolve(__dirname, '../../../prisma/schema/library');
     const schemaFiles = fs.existsSync(schemaDir)
       ? fs
           .readdirSync(schemaDir)
@@ -942,9 +1016,15 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
   it('SC-012: Anti-Patchwork, Anti-Split-Brain & Workflow Order Guardrails (no dead pass-through shims, no multi-user metadata split-brain, no duplicate changelog writes, no double ingestion dispatch)', () => {
     const deletedPassThroughShims = [
       path.join(libraryRoot, 'extraction/domain/snapshot-template.helper.ts'),
-      path.join(libraryRoot, 'extraction/extractors/snapshot-template.helper.ts'),
+      path.join(
+        libraryRoot,
+        'extraction/extractors/snapshot-template.helper.ts',
+      ),
       path.join(libraryRoot, 'extraction/extractors/metadata-quality.gate.ts'),
-      path.join(libraryRoot, 'extraction/providers/pdf-bibliography.extractor.ts'),
+      path.join(
+        libraryRoot,
+        'extraction/providers/pdf-bibliography.extractor.ts',
+      ),
       path.join(libraryRoot, 'extraction/domain/extraction-tag-key.helper.ts'),
       path.join(libraryRoot, 'ingestion/dto/index.ts'),
       path.join(libraryRoot, 'ingestion/stages/identify-url.resolver.ts'),
@@ -987,7 +1067,10 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         __dirname,
         '../../../../frontend/src/features/library/core/coordinator/inspector-collections.coordinator.ts',
       ),
-      path.join(libraryRoot, 'catalog/services/collection-membership.helper.ts'),
+      path.join(
+        libraryRoot,
+        'catalog/services/collection-membership.helper.ts',
+      ),
       path.resolve(
         __dirname,
         '../../../../frontend/src/features/library/sdk/queries/catalog-placeholder.helper.ts',
@@ -1017,7 +1100,10 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       path.join(libraryRoot, 'catalog/controllers/types.controller.ts'),
       path.join(libraryRoot, 'catalog/controllers/state.controller.ts'),
       path.join(libraryRoot, 'catalog/controllers/tags.controller.ts'),
-      path.join(libraryRoot, 'catalog/controllers/saved-searches.controller.ts'),
+      path.join(
+        libraryRoot,
+        'catalog/controllers/saved-searches.controller.ts',
+      ),
       path.join(libraryRoot, 'catalog/domain/tree.engine.ts'),
       path.join(libraryRoot, 'catalog/services/types.service.ts'),
       path.join(libraryRoot, 'catalog/services/item-cache.coordinator.ts'),
@@ -1027,20 +1113,32 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       path.join(libraryRoot, 'citation/services/csl-locale-loader.service.ts'),
       path.join(libraryRoot, 'extraction/dto/attachments.dto.ts'),
       path.join(libraryRoot, 'extraction/dto/multipart-upload.dto.ts'),
-      path.join(libraryRoot, 'extraction/controllers/extraction-telemetry.controller.ts'),
+      path.join(
+        libraryRoot,
+        'extraction/controllers/extraction-telemetry.controller.ts',
+      ),
       path.join(libraryRoot, 'ingestion/controllers/retraction.controller.ts'),
       path.join(libraryRoot, 'ingestion/controllers/feeds.controller.ts'),
       path.join(libraryRoot, 'ingestion/dto/submission.dto.ts'),
       path.join(libraryRoot, 'ingestion/dto/capture-url.dto.ts'),
       path.join(libraryRoot, 'ingestion/types/ingestion.errors.ts'),
       path.join(libraryRoot, 'ingestion/domain/candidate-builder.helper.ts'),
-      path.join(libraryRoot, 'ingestion/domain/retraction-bloom-filter.domain.ts'),
+      path.join(
+        libraryRoot,
+        'ingestion/domain/retraction-bloom-filter.domain.ts',
+      ),
       path.join(libraryRoot, 'ingestion/parsers/medline-csv-formats.parser.ts'),
       path.join(libraryRoot, 'ingestion/services/retraction-sync.service.ts'),
       path.join(libraryRoot, 'ingestion/services/feeds.engine.ts'),
-      path.join(libraryRoot, 'ingestion/services/domain-rate-limiter.service.ts'),
+      path.join(
+        libraryRoot,
+        'ingestion/services/domain-rate-limiter.service.ts',
+      ),
       path.join(libraryRoot, 'ingestion/services/quality.service.ts'),
-      path.join(libraryRoot, 'ingestion/services/ingestion-run-reporter.service.ts'),
+      path.join(
+        libraryRoot,
+        'ingestion/services/ingestion-run-reporter.service.ts',
+      ),
       path.join(libraryRoot, 'ingestion/providers/dblp.provider.ts'),
       path.join(libraryRoot, 'ingestion/providers/openlibrary.provider.ts'),
       path.join(libraryRoot, 'ingestion/providers/unpaywall.provider.ts'),
@@ -1141,16 +1239,28 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
       path.join(libraryRoot, 'catalog/controllers/item-curation.controller.ts'),
       path.join(libraryRoot, 'catalog/dto/saved-search.dto.ts'),
       path.join(libraryRoot, 'catalog/repositories/state.repository.ts'),
-      path.join(libraryRoot, 'catalog/repositories/item-filter-where.builder.ts'),
+      path.join(
+        libraryRoot,
+        'catalog/repositories/item-filter-where.builder.ts',
+      ),
       path.join(libraryRoot, 'catalog/catalog.facade.ts'),
       path.join(libraryRoot, 'citation/citation.facade.ts'),
       path.join(libraryRoot, 'extraction/extractors/xmp.parser.ts'),
       path.join(libraryRoot, 'extraction/extraction.facade.ts'),
-      path.join(libraryRoot, 'extraction/subscribers/item-lifecycle.subscriber.ts'),
+      path.join(
+        libraryRoot,
+        'extraction/subscribers/item-lifecycle.subscriber.ts',
+      ),
       path.join(libraryRoot, 'ingestion/ingestion.facade.ts'),
-      path.join(libraryRoot, 'ingestion/providers/retraction-scanner.provider.ts'),
+      path.join(
+        libraryRoot,
+        'ingestion/providers/retraction-scanner.provider.ts',
+      ),
       path.join(libraryRoot, 'ingestion/commands/seed-retractions.command.ts'),
-      path.join(libraryRoot, 'ingestion/subscribers/retraction-item-events.subscriber.ts'),
+      path.join(
+        libraryRoot,
+        'ingestion/subscribers/retraction-item-events.subscriber.ts',
+      ),
       path.join(libraryRoot, 'ingestion/repositories/metadata.cache.ts'),
       path.join(libraryRoot, 'search/dto/search.dto.ts'),
       path.join(libraryRoot, 'search/search.facade.ts'),
@@ -1275,13 +1385,24 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
 
   it('SC-013: Hollywood Principle & Zero Shadow Backend Guardrails (Backend port inversion & Frontend server authority)', () => {
     // 1. Backend: Zero concrete ItemCacheCoordinator imports outside catalog/ & Zero legacy architecture vestiges
-    const cacheCoordinatorViolations: Array<{ file: string; line: number; match: string }> = [];
-    const backendLegacyVestigeViolations: Array<{ file: string; line: number; match: string }> = [];
+    const cacheCoordinatorViolations: Array<{
+      file: string;
+      line: number;
+      match: string;
+    }> = [];
+    const backendLegacyVestigeViolations: Array<{
+      file: string;
+      line: number;
+      match: string;
+    }> = [];
     for (const [, { relPath, lines }] of fileCache) {
       lines.forEach((line, index) => {
         const trimmed = line.trim();
         if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
-        if (!relPath.startsWith('catalog/') && /\bItemCacheCoordinator\b/.test(line)) {
+        if (
+          !relPath.startsWith('catalog/') &&
+          /\bItemCacheCoordinator\b/.test(line)
+        ) {
           cacheCoordinatorViolations.push({
             file: relPath,
             line: index + 1,
@@ -1313,10 +1434,16 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     );
     expect(fs.existsSync(deletedShadowBackendFile)).toBe(false);
     expect(
-      fs.existsSync(path.join(feRoot, 'domain/saved-search-evaluator.domain.ts')),
+      fs.existsSync(
+        path.join(feRoot, 'domain/saved-search-evaluator.domain.ts'),
+      ),
     ).toBe(false);
 
-    const forbiddenShadowBackendSymbols: Array<{ file: string; line: number; match: string }> = [];
+    const forbiddenShadowBackendSymbols: Array<{
+      file: string;
+      line: number;
+      match: string;
+    }> = [];
     for (const [, { relPath, lines }] of feFileCache) {
       lines.forEach((line, index) => {
         const trimmed = line.trim();
@@ -1349,5 +1476,67 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         collectionCoordinatorContent.includes('copyLibraryCollection('),
     ).toBe(true);
     expect(collectionCoordinatorContent).not.toContain('copySubtree');
+  });
+
+  it('SC-014: Zero legacy scopeId identifiers across entire backend/src/** and frontend/src/**', () => {
+    const violations: Array<{ file: string; line: number; match: string }> = [];
+    const feViolations: Array<{ file: string; line: number; match: string }> =
+      [];
+    const forbiddenScopeIdPattern = /\bscopeId\b|\bscope_id\b|ScopeId\b/;
+
+    const collectAllSourceFiles = (dir: string): string[] => {
+      if (!fs.existsSync(dir)) return [];
+      const results: string[] = [];
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+          results.push(...collectAllSourceFiles(fullPath));
+        } else if (
+          entry.isFile() &&
+          (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))
+        ) {
+          results.push(fullPath);
+        }
+      }
+      return results;
+    };
+
+    const backendSrcRoot = path.resolve(__dirname, '../../../src');
+    for (const fullPath of collectAllSourceFiles(backendSrcRoot)) {
+      const relPath = path.relative(backendSrcRoot, fullPath);
+      const lines = fs.readFileSync(fullPath, 'utf8').split(/\r?\n/);
+      lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+        if (forbiddenScopeIdPattern.test(line)) {
+          violations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        }
+      });
+    }
+
+    const frontendSrcRoot = path.resolve(__dirname, '../../../../frontend/src');
+    for (const fullPath of collectAllSourceFiles(frontendSrcRoot)) {
+      const relPath = path.relative(frontendSrcRoot, fullPath);
+      const lines = fs.readFileSync(fullPath, 'utf8').split(/\r?\n/);
+      lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+        if (forbiddenScopeIdPattern.test(line)) {
+          feViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        }
+      });
+    }
+
+    expect(violations).toEqual([]);
+    expect(feViolations).toEqual([]);
   });
 });

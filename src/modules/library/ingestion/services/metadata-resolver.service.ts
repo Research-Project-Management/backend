@@ -244,7 +244,7 @@ export class MetadataResolverService {
       query,
       queryType,
       forceRefresh: options?.forceRefresh ?? options?.aggressive ?? true,
-      scopeId: projectId || 'user',
+      spaceId: projectId || userId,
       ...(authorHint ? { authorHint } : {}),
       ...(yearHint !== undefined ? { yearHint } : {}),
     });
@@ -362,7 +362,7 @@ export class MetadataResolverService {
     ) {
       try {
         const scraped = await this.urlScraper.scrape(candidateOaPdfUrl, {
-          scopeId: projectId || userId,
+          spaceId: projectId || userId,
           userId,
         });
         if (scraped?.isPdf && scraped.fileId) {
@@ -575,7 +575,7 @@ export class MetadataResolverService {
         query,
         queryType,
         forceRefresh: false,
-        scopeId: projectId || 'user',
+        spaceId: projectId || userId,
       })
       .catch(() => null);
     if (!resolved?.metadata) return { updated: false, updatedFields: [] };

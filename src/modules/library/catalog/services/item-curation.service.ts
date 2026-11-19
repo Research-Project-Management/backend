@@ -21,7 +21,8 @@ import {
   UNIT_OF_WORK,
   IUnitOfWork,
   buildItemCreatedOutboxPayload,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
+  resolveSpaceId,
   ItemsMapper,
 } from '@/modules/library/core';
 import {
@@ -528,7 +529,7 @@ export class ItemCurationService {
       (existing as { userId?: string }).userId ??
       existing.createdById ??
       existing.spaceId;
-    const validProjectId = normalizeProjectScopeId(existingProjectId);
+    const validProjectId = normalizeProjectSpaceId(existingProjectId);
     const mergedMetadata = {
       ...currentMeta,
       ...aiMetadataPatch,
@@ -603,7 +604,7 @@ export class ItemCurationService {
   }
 
   async emptyTrash(userId: string, projectId?: string) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     let ranPostCommitHook = false;
     const { succeededIds, failedIds, fileIdsToDelete } =
       await this.libraryTx.executeInTransaction(async (tx, helpers) => {
@@ -634,7 +635,9 @@ export class ItemCurationService {
       );
     }
     if (fileIdsToDelete.length > 0) {
-      await this.command.deleteStorageFilesBatch(fileIdsToDelete);
+      await this.command.deleteStorageFilesBatch(fileIdsToDelete, {
+        spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+      });
     }
     return {
       success: true,

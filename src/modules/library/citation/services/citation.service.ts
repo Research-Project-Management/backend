@@ -26,7 +26,7 @@ import {
   METADATA_PORT,
   ICatalogFacade,
   HttpClient,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
 } from '@/modules/library/core';
 import { DoiContentNegotiationService } from './doi-content-negotiation.service';
 import { CslEngineService } from './csl-engine.service';
@@ -77,9 +77,9 @@ export class CitationService {
   /**
    * Search across 10,000+ CSL styles from official repository.
    */
-  async searchStyles(query: string = '', limit: number = 30, scopeId?: string) {
+  async searchStyles(query: string = '', limit: number = 30, spaceId?: string) {
     if (!this.cslRepo) return [];
-    return this.cslRepo.searchStyles(query, limit, scopeId);
+    return this.cslRepo.searchStyles(query, limit, spaceId);
   }
 
   /**
@@ -88,7 +88,7 @@ export class CitationService {
   async registerCustomStyle(
     cslXml: string,
     title?: string,
-    scopeId?: string,
+    spaceId?: string,
     actorUserId?: string,
   ) {
     if (!this.cslRepo) {
@@ -105,10 +105,10 @@ export class CitationService {
     const meta = await this.cslRepo.registerCustomStyle(
       cslXml,
       sanitizedTitle || undefined,
-      scopeId,
+      spaceId,
       actorUserId,
     );
-    await this.cslEngine.ensureTemplate(meta.id, scopeId, cslXml);
+    await this.cslEngine.ensureTemplate(meta.id, spaceId, cslXml);
     const validCategory = (
       meta.category &&
       ['author-date', 'numeric', 'label', 'raw'].includes(meta.category)
@@ -126,8 +126,8 @@ export class CitationService {
   /**
    * Alias for registering a custom CSL XML stylesheet.
    */
-  async uploadCustomStyle(cslXml: string, title?: string, scopeId?: string) {
-    return this.registerCustomStyle(cslXml, title, scopeId);
+  async uploadCustomStyle(cslXml: string, title?: string, spaceId?: string) {
+    return this.registerCustomStyle(cslXml, title, spaceId);
   }
 
   /**
@@ -285,8 +285,8 @@ export class CitationService {
     context?: CitationContextOptions,
   ): Promise<FormattedCitationResult> {
     const normalizedStyleId = normalizeCitationStyleId(styleId);
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const scopeId = effectiveProjectId || userId;
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
+    const spaceId = effectiveProjectId || userId;
     const [item, styleLoaded] = await Promise.all([
       this.catalogGateway
         ? this.catalogGateway.getItem<CatalogItemRecord>(
@@ -295,7 +295,7 @@ export class CitationService {
             effectiveProjectId,
           )
         : Promise.resolve(null),
-      this.cslEngine.ensureTemplate(normalizedStyleId, scopeId),
+      this.cslEngine.ensureTemplate(normalizedStyleId, spaceId),
     ]);
 
     if (!item) {
@@ -317,7 +317,7 @@ export class CitationService {
       cslItem,
       normalizedStyleId,
       index,
-      scopeId,
+      spaceId,
       context,
     );
     return {
@@ -339,8 +339,8 @@ export class CitationService {
     projectId?: string,
   ) {
     const normalizedStyleId = normalizeCitationStyleId(styleId);
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const scopeId = effectiveProjectId || userId;
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
+    const spaceId = effectiveProjectId || userId;
     const [rawItems] = await Promise.all([
       this.catalogGateway
         ? this.catalogGateway.findByIds<CatalogItemRecord>(
@@ -350,7 +350,7 @@ export class CitationService {
           )
         : Promise.resolve([]),
       itemIds.length > 0
-        ? this.cslEngine.ensureTemplate(normalizedStyleId, scopeId)
+        ? this.cslEngine.ensureTemplate(normalizedStyleId, spaceId)
         : Promise.resolve(false),
     ]);
     const itemMap = new Map<string, CatalogItemRecord>();
@@ -383,7 +383,7 @@ export class CitationService {
     const batchRes = await this.cslEngine.formatBatchAsync(
       cslItems,
       normalizedStyleId,
-      scopeId,
+      spaceId,
     );
 
     const citationMap = new Map<string, FormattedCitationResult>();

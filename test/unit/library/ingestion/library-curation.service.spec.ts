@@ -154,7 +154,9 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         ],
       }).compile();
 
-      const detector = module.get<DuplicateDetectorService>(DuplicateDetectorService);
+      const detector = module.get<DuplicateDetectorService>(
+        DuplicateDetectorService,
+      );
       const merger = module.get<DuplicateMergerService>(DuplicateMergerService);
       service = {
         detectDuplicates: detector.detectDuplicates.bind(detector),

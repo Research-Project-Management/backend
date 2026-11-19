@@ -125,11 +125,7 @@ describe('Multi-Tier Metadata Cache & Local Database Resolution', () => {
         },
       };
 
-      service = new MetadataService(
-        [],
-        mockCache,
-        mockExecutor,
-      );
+      service = new MetadataService([], mockCache, mockExecutor);
     });
 
     it('should isolate tenant data and not resolve from unscoped local database into shared cache', async () => {

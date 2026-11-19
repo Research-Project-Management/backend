@@ -103,7 +103,9 @@ describe('TrashMaintenanceService (Zotero Parity Auto-Purge)', () => {
 
   describe('Lifecycle & Scheduling', () => {
     it('should skip bootstrap scheduling if shouldRunWorkerConsumers returns false', async () => {
-      jest.spyOn(workerModeUtil, 'shouldRunWorkerConsumers').mockReturnValue(false);
+      jest
+        .spyOn(workerModeUtil, 'shouldRunWorkerConsumers')
+        .mockReturnValue(false);
 
       await service.onApplicationBootstrap();
 
@@ -112,7 +114,9 @@ describe('TrashMaintenanceService (Zotero Parity Auto-Purge)', () => {
     });
 
     it('should schedule initial run after 60s delay when shouldRunWorkerConsumers returns true', async () => {
-      jest.spyOn(workerModeUtil, 'shouldRunWorkerConsumers').mockReturnValue(true);
+      jest
+        .spyOn(workerModeUtil, 'shouldRunWorkerConsumers')
+        .mockReturnValue(true);
 
       await service.onApplicationBootstrap();
 
@@ -125,7 +129,9 @@ describe('TrashMaintenanceService (Zotero Parity Auto-Purge)', () => {
     });
 
     it('should clear timer on application shutdown or module destroy', async () => {
-      jest.spyOn(workerModeUtil, 'shouldRunWorkerConsumers').mockReturnValue(true);
+      jest
+        .spyOn(workerModeUtil, 'shouldRunWorkerConsumers')
+        .mockReturnValue(true);
 
       await service.onApplicationBootstrap();
       service.onApplicationShutdown();

@@ -200,7 +200,7 @@ export interface MetadataRequest {
   query: string;
   queryType?: QueryType;
   userId?: string;
-  scopeId?: string;
+  spaceId?: string;
   forceRefresh?: boolean;
   signal?: AbortSignal;
   authorHint?: string;
@@ -231,7 +231,7 @@ export interface MetadataProvider {
 // Web Fetch Ladder Contracts
 
 export interface WebFetchOptions {
-  scopeId?: string;
+  spaceId?: string;
   userId?: string;
   preferredFilename?: string;
   timeoutMs?: number;
@@ -578,7 +578,7 @@ export interface IUrlMetadataScraperPort {
   scrape(
     rawUrl: string,
     options?: {
-      scopeId?: string;
+      spaceId?: string;
       userId?: string;
       preferredFilename?: string;
     },

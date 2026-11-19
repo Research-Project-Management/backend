@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
   sortLockKeys,
 } from '@/modules/library/core';
@@ -40,8 +40,8 @@ export class CollectionsRepository {
     return tx ?? this.prisma;
   }
 
-  private resolveProjectScopeId(projectId?: string | null): string | undefined {
-    const normalized = normalizeProjectScopeId(projectId);
+  private resolveProjectSpaceId(projectId?: string | null): string | undefined {
+    const normalized = normalizeProjectSpaceId(projectId);
     return normalized && isUuid(normalized) ? normalized : undefined;
   }
 
@@ -49,7 +49,7 @@ export class CollectionsRepository {
     userId: string,
     projectId?: string | null,
   ): Prisma.LibraryCollectionWhereInput {
-    const validProjectId = this.resolveProjectScopeId(projectId);
+    const validProjectId = this.resolveProjectSpaceId(projectId);
     return { spaceId: resolveSpaceId({ userId, projectId: validProjectId }) };
   }
 
@@ -112,7 +112,7 @@ export class CollectionsRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const effectiveProjectId =
-      this.resolveProjectScopeId(input.projectId) ?? null;
+      this.resolveProjectSpaceId(input.projectId) ?? null;
     const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
     const client = this.getClient(tx);
     if (
@@ -294,7 +294,7 @@ export class CollectionsRepository {
         itemIds = Array.from(new Set(links.map((l) => l.itemId)));
       }
       if (itemIds.length > 0) {
-        const validProjectId = normalizeProjectScopeId(projectId);
+        const validProjectId = normalizeProjectSpaceId(projectId);
         const itemScopeWhere: Prisma.LibraryItemWhereInput = {
           spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
         };
@@ -442,7 +442,7 @@ export class CollectionsRepository {
 
     let validItemIds = orderedInputIds;
     if (client.libraryItem?.findMany) {
-      const validProjectId = normalizeProjectScopeId(projectId);
+      const validProjectId = normalizeProjectSpaceId(projectId);
       const scopeWhere: Prisma.LibraryItemWhereInput = {
         spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
       };
@@ -535,7 +535,7 @@ export class CollectionsRepository {
   ): Promise<{ detached: Array<{ collectionId: string; itemId: string }> }> {
     const client = this.getClient(tx);
 
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const collectionScope: Prisma.LibraryCollectionWhereInput = {
       spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
     };
@@ -652,7 +652,7 @@ export class CollectionsRepository {
     projectId?: string,
   ): Promise<string[]> {
     const client = this.getClient(tx);
-    const validProjectId = this.resolveProjectScopeId(projectId);
+    const validProjectId = this.resolveProjectSpaceId(projectId);
 
     const items = await client.libraryCollectionItem.findMany({
       where: {
@@ -682,7 +682,7 @@ export class CollectionsRepository {
   ): Promise<string[]> {
     if (!collectionIds || collectionIds.length === 0) return [];
     const client = this.getClient(tx);
-    const validProjectId = this.resolveProjectScopeId(projectId);
+    const validProjectId = this.resolveProjectSpaceId(projectId);
 
     const items = await client.libraryCollectionItem.findMany({
       where: {
@@ -714,7 +714,7 @@ export class CollectionsRepository {
     if (!candidateItemIds || candidateItemIds.length === 0) return [];
     const client = this.getClient(tx);
     if (typeof client.libraryItem?.findMany !== 'function') return [];
-    const validProjectId = this.resolveProjectScopeId(projectId);
+    const validProjectId = this.resolveProjectSpaceId(projectId);
 
     const items = await client.libraryItem.findMany({
       where: {

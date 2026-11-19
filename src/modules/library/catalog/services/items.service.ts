@@ -17,7 +17,8 @@ import {
 } from '@/modules/library/core/types/bibliographic.types';
 import {
   sanitizeItemTitle,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
+  resolveSpaceId,
   TransactionHelpers,
   executeWithPostCommit,
   UNIT_OF_WORK,
@@ -179,7 +180,7 @@ export class ItemService {
         configurable: true,
       });
     }
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       projectId || context?.projectId || itemPayload.projectId,
     );
     const execute = async (
@@ -309,7 +310,7 @@ export class ItemService {
       }
       data.title = cleanTitle;
     }
-    let resolvedProjectId = normalizeProjectScopeId(projectId);
+    let resolvedProjectId = normalizeProjectSpaceId(projectId);
     const effectiveExpectedVersion =
       expectedVersion ??
       (typeof (data as { expectedVersion?: unknown }).expectedVersion ===
@@ -430,7 +431,7 @@ export class ItemService {
           createdById?: string;
         };
         const effectiveProjectId =
-          normalizeProjectScopeId(options?.projectId) ||
+          normalizeProjectSpaceId(options?.projectId) ||
           updatedRec.projectId ||
           (updatedRec.spaceId && updatedRec.spaceId !== userId
             ? updatedRec.spaceId
@@ -474,7 +475,7 @@ export class ItemService {
       throw new NotFoundException(`Item ${id} not found in user library`);
     }
     const effectiveProjectId =
-      normalizeProjectScopeId(projectId) ?? item.projectId ?? undefined;
+      normalizeProjectSpaceId(projectId) ?? item.projectId ?? undefined;
     const eventScope = { userId, projectId: effectiveProjectId };
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
       await helpers.publishOutbox(
@@ -511,7 +512,7 @@ export class ItemService {
     projectId?: string,
     skipScopeInvalidation?: boolean,
   ): Promise<boolean> {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const executeDelete = async (
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
@@ -580,7 +581,7 @@ export class ItemService {
     projectId?: string,
     skipScopeInvalidation?: boolean,
   ) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     return executeWithPostCommit(
       this.libraryTx,
       async (tx, helpers) => {
@@ -647,7 +648,7 @@ export class ItemService {
     projectId?: string,
     skipScopeInvalidation?: boolean,
   ): Promise<boolean> {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     let storagePathsToDelete: string[] = [];
     const purged = await executeWithPostCommit(
       this.libraryTx,
@@ -704,7 +705,9 @@ export class ItemService {
       },
     );
     if (storagePathsToDelete.length > 0) {
-      await this.command.deleteStorageFilesBatch(storagePathsToDelete);
+      await this.command.deleteStorageFilesBatch(storagePathsToDelete, {
+        spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+      });
     }
     return purged;
   }
@@ -718,7 +721,7 @@ export class ItemService {
         failedIds: [] as string[],
       };
     }
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const { succeededIds, failedIds } = await executeWithPostCommit(
       this.libraryTx,
       (tx, helpers) =>
@@ -756,7 +759,7 @@ export class ItemService {
         failedIds: [] as string[],
       };
     }
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const { succeededIds, failedIds } = await executeWithPostCommit(
       this.libraryTx,
       (tx, helpers) =>
@@ -796,7 +799,7 @@ export class ItemService {
         failedIds: [] as string[],
       };
     }
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const { succeededIds, failedIds, fileIdsToDelete } =
       await executeWithPostCommit(
         this.libraryTx,
@@ -820,7 +823,9 @@ export class ItemService {
         },
       );
     if (fileIdsToDelete.length > 0) {
-      await this.command.deleteStorageFilesBatch(fileIdsToDelete);
+      await this.command.deleteStorageFilesBatch(fileIdsToDelete, {
+        spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+      });
     }
     return {
       success: true,
@@ -830,7 +835,7 @@ export class ItemService {
     };
   }
   async emptyTrash(userId: string, projectId?: string) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const { succeededIds, failedIds, fileIdsToDelete } =
       await executeWithPostCommit(
         this.libraryTx,
@@ -852,7 +857,9 @@ export class ItemService {
         },
       );
     if (fileIdsToDelete.length > 0)
-      await this.command.deleteStorageFilesBatch(fileIdsToDelete);
+      await this.command.deleteStorageFilesBatch(fileIdsToDelete, {
+        spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
+      });
     return {
       success: true,
       purgedCount: succeededIds.length,
@@ -862,6 +869,8 @@ export class ItemService {
   }
   async purgeExpiredTrash(retentionDays: number = 30, limit: number = 200) {
     let storagePathsToDelete: string[] = [];
+    let storageDeletesToDelete: Array<{ fileId: string; spaceId?: string }> =
+      [];
     let purgedItemsList: Array<{
       id: string;
       userId: string;
@@ -900,12 +909,15 @@ export class ItemService {
           helpers,
         });
         storagePathsToDelete = res.storagePaths;
+        storageDeletesToDelete = res.storageDeletes ?? [];
         purgedItemsList = res.expiredItems ?? [];
         return res;
       },
       () => invalidatePurgedItems(),
     );
-    if (storagePathsToDelete.length > 0) {
+    if (storageDeletesToDelete.length > 0) {
+      await this.command.deleteStorageFileEntries(storageDeletesToDelete);
+    } else if (storagePathsToDelete.length > 0) {
       await this.command.deleteStorageFilesBatch(storagePathsToDelete);
     }
     return result;

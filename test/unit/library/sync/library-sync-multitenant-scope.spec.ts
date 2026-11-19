@@ -340,8 +340,12 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should propagate projectId on assignTag and removeTag', async () => {
-      const tagMock = { findFirst: jest.fn().mockResolvedValue({ id: mockTagId }) };
-      const itemMock = { findFirst: jest.fn().mockResolvedValue({ id: mockItemId }) };
+      const tagMock = {
+        findFirst: jest.fn().mockResolvedValue({ id: mockTagId }),
+      };
+      const itemMock = {
+        findFirst: jest.fn().mockResolvedValue({ id: mockItemId }),
+      };
       const mockTx = {
         tag: tagMock,
         libraryTag: tagMock,

@@ -206,23 +206,23 @@ export const LIBRARY_REDIS_KEYS = {
   scopeVersion: (scopeKey: string) => `library:ver:scope:${scopeKey}`,
 
   // Collections (supports versioned key)
-  collections: (scopeId: string, version: number | string = 0) =>
-    `library:${scopeId}:collections:v${version}`,
-  collectionTree: (scopeId: string, version: number | string = 0) =>
-    `library:${scopeId}:collections:tree:v${version}`,
+  collections: (spaceId: string, version: number | string = 0) =>
+    `library:${spaceId}:collections:v${version}`,
+  collectionTree: (spaceId: string, version: number | string = 0) =>
+    `library:${spaceId}:collections:tree:v${version}`,
   collectionsPattern: (projectId: string) =>
     `library:${escapeRedisGlob(projectId)}:collections*`,
 
   // Tags (supports versioned key)
-  tags: (scopeId: string, version: number | string = 0) =>
-    `library:${scopeId}:tags:v${version}`,
+  tags: (spaceId: string, version: number | string = 0) =>
+    `library:${spaceId}:tags:v${version}`,
   tagsPattern: (projectId: string) =>
     `library:${escapeRedisGlob(projectId)}:tags*`,
 
   // Saved Searches
-  savedSearches: (scopeId: string) => `library:${scopeId}:saved-searches`,
-  savedSearchesPattern: (scopeId: string) =>
-    `library:${escapeRedisGlob(scopeId)}:saved-searches*`,
+  savedSearches: (spaceId: string) => `library:${spaceId}:saved-searches`,
+  savedSearchesPattern: (spaceId: string) =>
+    `library:${escapeRedisGlob(spaceId)}:saved-searches*`,
 
   // Feed Subscriptions
   feedSubscriptions: (userId: string) =>
@@ -256,18 +256,18 @@ export const LIBRARY_REDIS_KEYS = {
       : userId.startsWith('proj:') || userId.startsWith('user:')
         ? `library:counts:${userId}`
         : `library:counts:user:${userId}`,
-  countsPattern: (scopeId: string) =>
-    `library:counts:*${escapeRedisGlob(scopeId)}*`,
+  countsPattern: (spaceId: string) =>
+    `library:counts:*${escapeRedisGlob(spaceId)}*`,
 
   // Search & Facets Cache
   searchItems: (scopeKey: string, version: string, filterHash: string) =>
     `library:search:items:${scopeKey}:v${version}:${filterHash}`,
   searchFacets: (scopeKey: string, version: string, filterHash: string) =>
     `library:search:facets:${scopeKey}:v${version}:${filterHash}`,
-  searchFacetsPattern: (scopeId: string) =>
-    `library:search:facets:*${escapeRedisGlob(scopeId)}*`,
-  searchItemsPattern: (scopeId: string) =>
-    `library:search:items:*${escapeRedisGlob(scopeId)}*`,
+  searchFacetsPattern: (spaceId: string) =>
+    `library:search:facets:*${escapeRedisGlob(spaceId)}*`,
+  searchItemsPattern: (spaceId: string) =>
+    `library:search:items:*${escapeRedisGlob(spaceId)}*`,
   searchVersion: (scopeKey: string) => `library:search:version:${scopeKey}`,
 
   // Reader Write-Behind Buffer (High-Frequency Coalescing)
@@ -283,10 +283,10 @@ export const LIBRARY_REDIS_KEYS = {
     format === 'meta'
       ? `library:doi-cn:meta:${doi}`
       : `library:doi-cn:cite:${format}:${doi}`,
-  cslStyleXml: (styleName: string, scopeId?: string) =>
-    scopeId ? `csl:xml:${scopeId}:${styleName}` : `csl:xml:${styleName}`,
-  cslCustomStylesList: (scopeId?: string) =>
-    scopeId ? `csl:${scopeId}:custom-styles-list` : 'csl:custom-styles-list',
+  cslStyleXml: (styleName: string, spaceId?: string) =>
+    spaceId ? `csl:xml:${spaceId}:${styleName}` : `csl:xml:${styleName}`,
+  cslCustomStylesList: (spaceId?: string) =>
+    spaceId ? `csl:${spaceId}:custom-styles-list` : 'csl:custom-styles-list',
   cslStylesCatalogIndex: () => 'csl:catalog:styles-index',
 };
 

@@ -318,7 +318,7 @@ export class PipelineSideEffectsService {
       if (candidateOaUrl && /^https?:\/\//i.test(candidateOaUrl)) {
         try {
           const scraped = await this.urlScraper.scrape(candidateOaUrl, {
-            scopeId: projectId || userId,
+            spaceId: projectId || userId,
             userId,
           });
           if (scraped?.isPdf && scraped.fileId) {
@@ -546,21 +546,21 @@ export class PipelineSideEffectsService {
   }
 
   async handleBlockedSubmission(params: {
-    scopeId: string;
+    spaceId: string;
     runId: string;
     envelope: IngestionSubmissionEnvelope;
     decision: ReconciliationDecision;
     aggregate: IngestionRunAggregate;
     sourceLabel?: string;
   }): Promise<void> {
-    const { scopeId, runId, decision, aggregate, sourceLabel } = params;
+    const { spaceId, runId, decision, aggregate, sourceLabel } = params;
     const wafKind =
       (decision.proposedItem?.extraFields?.wafKind as string) ||
       'WAF_CLOUDFLARE_TURNSTILE';
     const blockedSourceLabel =
       sourceLabel || decision.proposedItem?.url || 'Document';
 
-    await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.COMPLETED, {
+    await this.repo.updateRunStatus(spaceId, runId, IngestionStatus.COMPLETED, {
       completedAt: new Date(),
       executionLog: {
         total: 1,

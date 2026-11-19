@@ -8,7 +8,7 @@ import {
 import { normalizeParentId } from '@/modules/library/catalog/domain/state.domain';
 import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
@@ -80,7 +80,7 @@ export async function executeAssignItemsToCollection(
   onAfterCommit?: (ids: string[]) => Promise<void> | void,
 ): Promise<{ ids: string[]; count: number; ranPostCommitHook?: boolean }> {
   const ids = dto.itemIds || [];
-  const validProjectId = normalizeProjectScopeId(projectId);
+  const validProjectId = normalizeProjectSpaceId(projectId);
   const scopeWhere: Prisma.LibraryItemWhereInput = {
     spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
   };
@@ -225,7 +225,7 @@ export async function executeDeleteCollectionWithCascade(
     }
     const existingRec = existing as Record<string, unknown>;
     const effectiveProjectId =
-      normalizeProjectScopeId(
+      normalizeProjectSpaceId(
         projectId ??
           (typeof existingRec.projectId === 'string'
             ? existingRec.projectId
@@ -553,7 +553,7 @@ export async function executeCopyCollectionSubtree(
 
     const rootRec = root as Record<string, unknown>;
     const effectiveProjectId =
-      normalizeProjectScopeId(
+      normalizeProjectSpaceId(
         projectId ??
           (typeof rootRec.projectId === 'string'
             ? rootRec.projectId

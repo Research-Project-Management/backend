@@ -14,7 +14,7 @@ import {
   ITEM_CACHE_INVALIDATOR,
   IItemCacheInvalidator,
   LIBRARY_EVENT_TYPES,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   formatAttachmentFilename,
   resolveFileExtension,
   sanitizeFilenameStem,
@@ -89,7 +89,7 @@ export class AttachmentRenamerService {
     dto: RenameAttachmentDto,
     projectId?: ProjectId | string,
   ) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const attachment = await this.repo.findFirst(
       {
         id: attachmentId,
@@ -232,7 +232,7 @@ export class AttachmentRenamerService {
     }>;
   }> {
     const pattern = dto.pattern || DEFAULT_RENAME_PATTERN;
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const whereClause: Prisma.AttachmentWhereInput = {
       deletedAt: null,
       item: { spaceId: validProjectId || userId, deletedAt: null },

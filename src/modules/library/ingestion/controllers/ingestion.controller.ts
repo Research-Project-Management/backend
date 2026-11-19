@@ -240,14 +240,14 @@ export class IngestionController {
     @Param('spaceId') paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    const effectiveScopeId =
+    const effectiveSpaceId =
       this.validateProjectId(paramProjectId) ||
       this.validateProjectId(queryProjectId) ||
       this.validateProjectId(dto.spaceId) ||
       undefined;
 
     return this.urlCaptureService.confirmCapturedUrl(
-      effectiveScopeId,
+      effectiveSpaceId,
       userId,
       dto,
     );

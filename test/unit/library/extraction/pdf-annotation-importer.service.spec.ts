@@ -39,7 +39,10 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
         .fn()
         .mockImplementation((_userId, _attId, data) =>
           Promise.resolve({
-            created: (data.upserts || []).map((u: any, idx: number) => ({ id: 'anno-' + idx, ...u })),
+            created: (data.upserts || []).map((u: any, idx: number) => ({
+              id: 'anno-' + idx,
+              ...u,
+            })),
             updated: [],
             deleted: [],
           }),
@@ -101,7 +104,9 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
       totalFound: 0,
       pagesScanned: 1,
     });
-    expect(mockAnnotationsService.batchUpsertAnnotations).not.toHaveBeenCalled();
+    expect(
+      mockAnnotationsService.batchUpsertAnnotations,
+    ).not.toHaveBeenCalled();
   });
 
   it('should convert standard PDF Annots (Highlight, Underline, StrikeOut, FreeText) and persist them', async () => {
@@ -190,7 +195,6 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
       },
       undefined,
     );
-
   });
 
   it('should skip annotations that already exist (deduplication)', async () => {
@@ -231,6 +235,8 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
 
     expect(result.totalFound).toBe(1);
     expect(result.imported).toBe(0); // Deduplicated!
-    expect(mockAnnotationsService.batchUpsertAnnotations).not.toHaveBeenCalled();
+    expect(
+      mockAnnotationsService.batchUpsertAnnotations,
+    ).not.toHaveBeenCalled();
   });
 });

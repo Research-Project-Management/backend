@@ -1,7 +1,7 @@
 import { Prisma, ReadStatus, Annotation } from '@prisma/client';
 import { isUuid, PrismaService } from '@/core';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
   SearchQueryEngine,
   ScopeSpecification,
@@ -149,7 +149,7 @@ export function buildItemWhereClause(
   options: ItemFilterOptions,
 ): Prisma.LibraryItemWhereInput {
   const view = options.view ?? 'all';
-  const validProjectId = normalizeProjectScopeId(options.projectId);
+  const validProjectId = normalizeProjectSpaceId(options.projectId);
   const scopeSpec = new ScopeSpecification(
     userId,
     validProjectId && isUuid(validProjectId) ? validProjectId : null,
@@ -380,7 +380,7 @@ export class NotesRepository {
   }
 
   private buildScopeWhere(userId: string, projectId?: string) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     return {
       spaceId: resolveSpaceId({
         userId,
@@ -440,7 +440,7 @@ export class NotesRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    const effectiveProjectId = normalizeProjectScopeId(data.projectId) ?? null;
+    const effectiveProjectId = normalizeProjectSpaceId(data.projectId) ?? null;
     let resolvedSpaceId = resolveSpaceId({
       userId,
       projectId: effectiveProjectId,
@@ -661,7 +661,7 @@ export class NotesRepository {
     if (!trimmed) return;
     const client = this.getClient(tx);
 
-    const effectiveProjectId = normalizeProjectScopeId(projectId) ?? null;
+    const effectiveProjectId = normalizeProjectSpaceId(projectId) ?? null;
     let resolvedSpaceId = resolveSpaceId({
       userId,
       projectId: effectiveProjectId,

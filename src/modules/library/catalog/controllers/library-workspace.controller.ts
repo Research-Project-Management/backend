@@ -22,7 +22,7 @@ import {
   ProjectRoles,
   ProjectAccessGuard,
 } from '@/modules/project/access';
-import { normalizeProjectScopeId, isUuid } from '@/modules/library/core';
+import { normalizeProjectSpaceId, isUuid } from '@/modules/library/core';
 import { CursorPaginationQueryDto } from '@/modules/library/catalog/dto/items.dto';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { LibraryBootstrapService } from '@/modules/library/catalog/services/library-bootstrap.service';
@@ -67,7 +67,7 @@ export function buildGetItemsOptions(
   query?: ItemsListQuery,
   projectId?: string | null,
 ) {
-  const effectiveProjectId = normalizeProjectScopeId(
+  const effectiveProjectId = normalizeProjectSpaceId(
     projectId ?? query?.spaceId,
   );
   const effectiveOrderBy = query?.orderBy ?? query?.sortBy;
@@ -132,7 +132,7 @@ export function buildGetItemsOptions(
     ...(query?.recursive !== undefined ? { recursive: query.recursive } : {}),
     ...(query?.fields !== undefined ? { fields: query.fields } : {}),
     ...(query?.checkInProjectId
-      ? { checkInProjectId: normalizeProjectScopeId(query.checkInProjectId) }
+      ? { checkInProjectId: normalizeProjectSpaceId(query.checkInProjectId) }
       : {}),
   };
 }
@@ -166,7 +166,7 @@ export class LibraryWorkspaceController {
     @Query('spaceId') queryProjectId?: string,
     @Req() req?: RequestWithAccessHint,
   ) {
-    const projectId = normalizeProjectScopeId(
+    const projectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || query?.spaceId,
     );
     const includeItems =
@@ -200,7 +200,7 @@ export class LibraryWorkspaceController {
     if (!isUuid(id)) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const result = await this.readerBootstrapService?.getReaderBootstrap(
       userId,
       id,
@@ -225,7 +225,7 @@ export class LibraryWorkspaceController {
     @Query('spaceId') queryProjectId?: string,
     @Req() req?: RequestWithAccessHint,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.queryService.getPermissions(
       userId,
       projectId,
@@ -331,7 +331,7 @@ export class StateController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.stateService.getState(userId, itemId, projectId);
   }
 
@@ -345,7 +345,7 @@ export class StateController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.stateService.updateState(userId, itemId, dto, projectId);
   }
 
@@ -378,7 +378,7 @@ export class StateController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.stateService.markAsRead(userId, itemId, projectId);
   }
 }
@@ -405,7 +405,7 @@ export class StateBatchController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.stateService.getBatchStates(
       userId,
       dto?.itemIds || [],

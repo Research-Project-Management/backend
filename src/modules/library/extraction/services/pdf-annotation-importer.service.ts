@@ -17,7 +17,7 @@ import {
 } from '@/modules/library/extraction/domain/annotations.domain';
 import {
   extractFileIdFromUrl,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
 } from '@/modules/library/core';
 import { getDocumentProxy } from 'unpdf';
 import type { ImportAnnotationsResult } from '../types/pdf-extraction.types';
@@ -55,7 +55,7 @@ export class PdfAnnotationImporterService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const itemRec = attachment.item as
       | {
           spaceId?: string;
@@ -95,13 +95,13 @@ export class PdfAnnotationImporterService {
         ? itemRec.spaceId
         : undefined);
     const resolvedProjectId =
-      effectiveProjectId || normalizeProjectScopeId(itemProjectId ?? undefined);
+      effectiveProjectId || normalizeProjectSpaceId(itemProjectId ?? undefined);
     const existingAnnotationsPromise =
       this.annotationsRepo.findExistingForImport(attachmentId);
     const storageFile = await this.filesPort.readOwnedFile({
       fileId,
       userId,
-      ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
+      ...(resolvedProjectId ? { spaceId: resolvedProjectId } : {}),
     });
     const buffer = storageFile.buffer;
 

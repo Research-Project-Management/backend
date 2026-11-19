@@ -99,33 +99,33 @@ export class UrlCaptureService {
    */
   async captureUrl(
     url: string,
-    contextOrScopeId:
+    contextOrSpaceId:
       | string
       | {
-          scopeId?: string;
+          spaceId?: string;
           projectId?: string;
           userId?: string;
         },
   ): Promise<CapturedItemMetadata> {
-    const scopeId =
-      typeof contextOrScopeId === 'string'
-        ? contextOrScopeId
-        : contextOrScopeId.scopeId || contextOrScopeId.projectId || '';
+    const spaceId =
+      typeof contextOrSpaceId === 'string'
+        ? contextOrSpaceId
+        : contextOrSpaceId.spaceId || contextOrSpaceId.projectId || '';
     const userId =
-      typeof contextOrScopeId === 'object'
-        ? contextOrScopeId.userId
+      typeof contextOrSpaceId === 'object'
+        ? contextOrSpaceId.userId
         : undefined;
     const projectId =
-      typeof contextOrScopeId === 'object'
-        ? contextOrScopeId.projectId ||
-          (contextOrScopeId.scopeId &&
-          contextOrScopeId.scopeId !== contextOrScopeId.userId
-            ? contextOrScopeId.scopeId
+      typeof contextOrSpaceId === 'object'
+        ? contextOrSpaceId.projectId ||
+          (contextOrSpaceId.spaceId &&
+          contextOrSpaceId.spaceId !== contextOrSpaceId.userId
+            ? contextOrSpaceId.spaceId
             : undefined)
-        : scopeId && scopeId !== userId
-          ? scopeId
+        : spaceId && spaceId !== userId
+          ? spaceId
           : undefined;
-    const effectiveScopeId = projectId || scopeId || userId || 'unassigned';
+    const effectiveSpaceId = projectId || spaceId || userId || 'unassigned';
 
     if (!this.urlCaptureProvider?.captureFromUrl) {
       throw new SubsystemUnavailableException(
@@ -135,7 +135,7 @@ export class UrlCaptureService {
     }
 
     const result = await this.urlCaptureProvider.captureFromUrl(url, {
-      scopeId: effectiveScopeId,
+      spaceId: effectiveSpaceId,
       projectId,
       userId,
     });
@@ -149,15 +149,15 @@ export class UrlCaptureService {
 
     const boundCanonicalMetadata = {
       ...metaWithoutToken,
-      userId: userId || effectiveScopeId,
+      userId: userId || effectiveSpaceId,
       ...(projectId ? { projectId } : {}),
-      scopeId: effectiveScopeId,
+      spaceId: effectiveSpaceId,
     };
 
     await this.repo.createCapturePreview({
       sourceUrl: result.url || url,
-      spaceId: projectId || userId || effectiveScopeId,
-      createdById: userId || effectiveScopeId,
+      spaceId: projectId || userId || effectiveSpaceId,
+      createdById: userId || effectiveSpaceId,
       canonicalMetadata:
         boundCanonicalMetadata as unknown as Prisma.InputJsonValue,
       metadataDigest,
@@ -176,12 +176,12 @@ export class UrlCaptureService {
    * and committing an Item to the library.
    */
   async confirmCapturedUrl(
-    scopeId: string | undefined,
+    spaceId: string | undefined,
     userId: string,
     dto: ConfirmCapturedUrlDto,
   ): Promise<ItemDetail> {
-    const targetUserId = userId || scopeId || '';
-    const projectId = scopeId && scopeId !== targetUserId ? scopeId : undefined;
+    const targetUserId = userId || spaceId || '';
+    const projectId = spaceId && spaceId !== targetUserId ? spaceId : undefined;
     if (!dto?.previewToken) {
       throw new BadRequestException('previewToken is required');
     }
@@ -260,12 +260,12 @@ export class UrlCaptureService {
         canonicalMeta,
         dto.previewToken,
         {
-          scopeId:
+          spaceId:
             boundProjectId ||
             projectId ||
-            (typeof rawCanonical.scopeId === 'string' &&
-              rawCanonical.scopeId) ||
-            scopeId ||
+            (typeof rawCanonical.spaceId === 'string' &&
+              rawCanonical.spaceId) ||
+            spaceId ||
             targetUserId ||
             'unassigned',
           userId: targetUserId,
@@ -328,7 +328,7 @@ export class UrlCaptureService {
 
       const reservedPreviewKeys = new Set([
         'previewToken',
-        'scopeId',
+        'spaceId',
         'userId',
         'projectId',
         'collectionId',
@@ -664,17 +664,19 @@ export class UrlCaptureService {
           );
 
         if (this.filesPort?.deleteFile) {
-          const deleteFileFn = this.filesPort.deleteFile.bind(
-            this.filesPort,
-          );
+          const deleteFileFn = this.filesPort.deleteFile.bind(this.filesPort);
           await Promise.all(
             expiredList.map((p) => {
               if (p.claimedAt) return Promise.resolve();
               const pdfFileId = this.extractPreviewPdfFileId(
                 p.canonicalMetadata,
               );
+              const spaceId = (p as { spaceId?: string }).spaceId;
               return pdfFileId
-                ? deleteFileFn(pdfFileId).catch(() => undefined)
+                ? deleteFileFn(
+                    pdfFileId,
+                    spaceId ? { spaceId } : undefined,
+                  ).catch(() => undefined)
                 : Promise.resolve();
             }),
           );

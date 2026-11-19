@@ -32,6 +32,7 @@ import { AttachmentStorageController } from '@/modules/library/extraction/contro
 import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
 import { IdentifyFileResolver } from '@/modules/library/ingestion/stages/identify-file.resolver';
 import { ExtractionHandler } from '@/modules/library/extraction/services/extraction.handler';
+import { ExtractionMetadataSynchronizer } from '@/modules/library/extraction/services/extraction-metadata.synchronizer';
 import { IFilesPort } from '@/modules/files';
 
 describe('Library Attachments & Storage Integration Suite', () => {
@@ -227,18 +228,40 @@ describe('Library Attachments & Storage Integration Suite', () => {
         id: 'att-1',
         fileId: 'storage-file-123',
         url: '/api/v1/files/storage-file-123/content',
-        item: { id: 'item-1', userId: 'user-1' },
+        item: { id: 'item-1', spaceId: 'user-1', createdById: 'user-1' },
       });
 
       const result = await service.deleteAttachment('user-1', 'att-1');
 
       expect(result).toEqual({ success: true });
-      expect(mockRepo.delete).toHaveBeenCalledWith(
-        'att-1',
-        expect.anything(),
-      );
+      expect(mockRepo.delete).toHaveBeenCalledWith('att-1', expect.anything());
       expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(
         'storage-file-123',
+        { spaceId: 'user-1' },
+      );
+    });
+
+    it('should still release CAS blob & space quota even when countFileIdReferences reports cross-space references', async () => {
+      const spaceA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      mockRepo.countFileIdReferences = jest.fn().mockResolvedValue(2);
+      mockRepo.findFirst.mockResolvedValue({
+        id: 'att-cross-1',
+        fileId: 'cas-shared-blob',
+        url: '/api/v1/files/cas-shared-blob/content',
+        item: { id: 'item-1', spaceId: spaceA, createdById: 'user-1' },
+      });
+
+      const result = await service.deleteAttachment(
+        'user-1',
+        'att-cross-1',
+        spaceA,
+      );
+
+      expect(result).toEqual({ success: true });
+      expect(mockRepo.countFileIdReferences).not.toHaveBeenCalled();
+      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(
+        'cas-shared-blob',
+        { spaceId: spaceA },
       );
     });
 
@@ -247,7 +270,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         id: 'att-2',
         fileId: null,
         url: '/api/v1/library/files/storage-file-456/content',
-        item: { id: 'item-1', userId: 'user-1' },
+        item: { id: 'item-1', spaceId: 'user-1', createdById: 'user-1' },
       });
 
       const result = await service.deleteAttachment('user-1', 'att-2');
@@ -255,6 +278,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(result).toEqual({ success: true });
       expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(
         'storage-file-456',
+        { spaceId: 'user-1' },
       );
     });
 
@@ -318,8 +342,8 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(result.buffer.toString()).toBe('CACHED_WEBP_THUMBNAIL');
       expect(mockStoragePort.ensurePdfThumbnail).toHaveBeenCalledWith({
         fileId: 'file-1',
+        spaceId: 'user-1',
         userId: 'user-1',
-        projectId: undefined,
       });
     });
 
@@ -347,8 +371,8 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(result.buffer.toString()).toBe('GENERATED_WEBP');
       expect(mockStoragePort.ensurePdfThumbnail).toHaveBeenCalledWith({
         fileId: 'file-1',
+        spaceId: 'user-1',
         userId: 'user-1',
-        projectId: undefined,
       });
     });
   });
@@ -408,7 +432,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(mockStoragePort.uploadFile).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-1',
-          projectId: projId,
+          spaceId: projId,
           filename: 'thesis.pdf',
           mimeType: 'application/pdf',
           source: 'library',
@@ -432,12 +456,84 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(res.fileUuid).toBe('file-uuid-777');
       expect(mockStoragePort.getPresignedUploadUrl).toHaveBeenCalledWith({
         userId: 'user-1',
-        projectId: projId,
+        spaceId: projId,
         filename: 'big_dataset.pdf',
         mimeType: 'application/pdf',
         sizeBytes: 50000000,
         contentHash: undefined,
         scope: 'library',
+      });
+    });
+
+    it('should complete presigned upload with JSON-safe fields (no BigInt/blob instance) and spaceId', async () => {
+      const spaceId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+      mockStoragePort.completePresignedUpload = jest.fn().mockResolvedValue({
+        blob: { id: 'blob-99', sizeBytes: 4096n },
+        fileId: 'blob-99',
+        blobId: 'blob-99',
+        url: '/api/v1/files/blob-99/content',
+        filename: 'paper.pdf',
+        size: 4096,
+        sizeBytes: 4096n,
+        mimeType: 'application/pdf',
+        cleanFilename: 'paper.pdf',
+        isDeduplicated: false,
+      });
+
+      const res = await storageController.completePresignedUpload(
+        'user-1',
+        {
+          storageKey: 'uploads/staging/user-1/paper.pdf',
+          filename: 'paper.pdf',
+          mimeType: 'application/pdf',
+          size: 4096,
+        },
+        spaceId,
+      );
+
+      expect(mockStoragePort.completePresignedUpload).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          spaceId,
+          sizeBytes: 4096,
+        }),
+      );
+      expect(res).toEqual({
+        success: true,
+        id: 'blob-99',
+        fileId: 'blob-99',
+        blobId: 'blob-99',
+        url: '/api/v1/files/blob-99/content',
+        filename: 'paper.pdf',
+        size: 4096,
+        mimeType: 'application/pdf',
+        isDeduplicated: false,
+      });
+      expect(() => JSON.stringify(res)).not.toThrow();
+    });
+
+    it('should return both partUrl and uploadUrl on getMultipartPartUrl', async () => {
+      mockStoragePort.getMultipartPartUrl = jest
+        .fn()
+        .mockResolvedValue('https://r2.example.com/part-1');
+
+      const spaceId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+      const res = await storageController.getMultipartPartUrl(
+        'user-1',
+        'sess-1',
+        '1',
+        spaceId,
+      );
+
+      expect(mockStoragePort.getMultipartPartUrl).toHaveBeenCalledWith(
+        'sess-1',
+        1,
+        { userId: 'user-1', spaceId },
+      );
+      expect(res).toEqual({
+        partNumber: 1,
+        partUrl: 'https://r2.example.com/part-1',
+        uploadUrl: 'https://r2.example.com/part-1',
       });
     });
 
@@ -539,6 +635,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(res.attachment).toBeDefined();
       expect(mockStoragePort.uploadFile).toHaveBeenCalledWith({
         userId: 'user-1',
+        spaceId: 'user-1',
         filename: expect.stringMatching(/Snapshot_arxiv-paper-snapshot/),
         buffer: expect.any(Buffer),
         mimeType: 'text/html; charset=utf-8',
@@ -593,7 +690,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       );
     });
 
-    it('should extract PDF metadata even when scopeId is undefined (personal library)', async () => {
+    it('should extract PDF metadata even when spaceId is undefined (personal library)', async () => {
       const candidates = await stage.execute({
         runId: 'run-1',
         payload: {
@@ -601,13 +698,13 @@ describe('Library Attachments & Storage Integration Suite', () => {
           fileId: 'storage-file-123',
           filename: 'transformer.pdf',
         },
-        scopeId: undefined, // scopeId is undefined for personal library!
+        spaceId: undefined, // spaceId is undefined for personal library!
       });
 
       expect(candidates).toHaveLength(1);
       expect(mockStoragePort.readOwnedFile).toHaveBeenCalledWith({
         fileId: 'storage-file-123',
-        projectId: undefined,
+        spaceId: undefined,
       });
       expect(mockPdf.extractDocumentFromBuffer).toHaveBeenCalled();
       expect(candidates[0].normalizedMetadata.title).toBe(
@@ -682,6 +779,60 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(mockExtractionRepo.updateAttachmentFileId).toHaveBeenCalledWith(
         'att-1',
         'storage-file-123',
+      );
+    });
+  });
+
+  describe('ExtractionMetadataSynchronizer (Space Quota Offload & Supersede Delete)', () => {
+    it('offloads pdf_fulltext under LibraryItem.spaceId + createdById and deletes superseded blobs under spaceId', async () => {
+      const spaceId = '33333333-3333-4333-8333-333333333333';
+      const creatorId = '44444444-4444-4444-8444-444444444444';
+      const mockSyncExtractionRepo: any = {
+        saveMetadataSourceRecord: jest.fn().mockResolvedValue({
+          id: 'meta-1',
+          supersededFileIds: ['old-fulltext-file-id'],
+        }),
+        upsertAttachmentStructure: jest.fn().mockResolvedValue(undefined),
+        countContributors: jest.fn().mockResolvedValue(0),
+        updateItem: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const synchronizer = new ExtractionMetadataSynchronizer(
+        mockSyncExtractionRepo,
+        mockTx,
+        mockStoragePort,
+      );
+
+      await synchronizer.offloadFullTextAndSyncMetadata(
+        {
+          id: 'att-sync-1',
+          itemId: 'item-sync-1',
+          item: {
+            id: 'item-sync-1',
+            spaceId,
+            createdById: creatorId,
+          },
+        },
+        {
+          metadata: { title: 'Canonical Paper' },
+          pages: [{ pageNumber: 1, text: 'Page one body text' }],
+          sections: [],
+          references: [],
+        },
+        { pageCount: 1 },
+      );
+
+      expect(mockStoragePort.uploadFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: creatorId,
+          spaceId,
+          mimeType: 'application/gzip',
+          source: 'reader.pdf_fulltext',
+        }),
+      );
+      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(
+        'old-fulltext-file-id',
+        { spaceId },
       );
     });
   });

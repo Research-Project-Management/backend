@@ -7,7 +7,7 @@ import {
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   libraryConfig,
   ItemsMapper,
   SingleFlightCoalescer,
@@ -130,7 +130,7 @@ export class ItemQueryService {
       effectivePermissions?: readonly string[];
     },
   ): Promise<LibraryScopeAccessContract> {
-    const validProjectId = normalizeProjectScopeId(projectId, userId);
+    const validProjectId = normalizeProjectSpaceId(projectId, userId);
 
     if (!validProjectId) {
       return {
@@ -287,7 +287,7 @@ export class ItemQueryService {
     role: 'owner' | 'coordinator' | 'contributor' | 'reviewer';
     permissions: LibraryPermissionsContract;
   }> {
-    const validProjectId = normalizeProjectScopeId(projectId, userId);
+    const validProjectId = normalizeProjectSpaceId(projectId, userId);
     const cacheKey = LIBRARY_REDIS_KEYS.counts(userId, projectId);
 
     const fetchProjectSharedCounts = async () => {
@@ -353,7 +353,7 @@ export class ItemQueryService {
   }
 
   async getItem(userId: string, id: string, projectId?: string) {
-    const validProjectId = normalizeProjectScopeId(projectId, userId);
+    const validProjectId = normalizeProjectSpaceId(projectId, userId);
     const cacheKey = validProjectId
       ? `${LIBRARY_REDIS_KEYS.item(id)}:u:${userId}`
       : LIBRARY_REDIS_KEYS.item(id);
@@ -478,8 +478,8 @@ export class ItemQueryService {
     },
   ): Promise<CursorPaginatedResult<ItemDetail | Record<string, unknown>>> {
     const limit = Math.min(options.limit ?? 50, 1000);
-    const validProjectId = normalizeProjectScopeId(options.projectId);
-    const validCheckInProjectId = normalizeProjectScopeId(
+    const validProjectId = normalizeProjectSpaceId(options.projectId);
+    const validCheckInProjectId = normalizeProjectSpaceId(
       options.checkInProjectId,
     );
     const scopeKey = validProjectId ? `proj:${validProjectId}` : userId;

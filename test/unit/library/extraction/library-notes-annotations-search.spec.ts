@@ -159,11 +159,16 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
         notes: ['Note A', 'Note A', 'Note B'],
       });
       expect(normalized.notes).toHaveLength(2);
-      expect(normalized.notes?.map((n) => n.content)).toEqual(['Note A', 'Note B']);
+      expect(normalized.notes?.map((n) => n.content)).toEqual([
+        'Note A',
+        'Note B',
+      ]);
     });
 
     it('should strip HTML tags from raw note content', () => {
-      const cleaned = stripNoteHtml('<div><p>Paragraph inside HTML tags</p></div>');
+      const cleaned = stripNoteHtml(
+        '<div><p>Paragraph inside HTML tags</p></div>',
+      );
       expect(cleaned).toBe('Paragraph inside HTML tags');
     });
   });
@@ -191,7 +196,7 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
         ],
       };
 
-      const mapped = ItemsMapper.toDomain(rawItem as any) as any;
+      const mapped = ItemsMapper.toDomain(rawItem as any);
       expect(mapped.attachments).toHaveLength(2);
       expect(mapped.attachments[0].title).toBe('Author Manuscript PDF');
       expect(mapped.attachments[1].title).toBe('Publisher Webpage Snapshot');
@@ -255,7 +260,9 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
         quoteText: '',
         comment: 'Initial comment',
         tags: [],
-        rectCoords: [{ x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.5, width: 0.4, height: 0.4 }],
+        rectCoords: [
+          { x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.5, width: 0.4, height: 0.4 },
+        ],
         authorId: 'user-1',
         version: 1,
         deletedAt: null,

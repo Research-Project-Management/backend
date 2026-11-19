@@ -24,7 +24,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { AnnotationType } from '@/modules/library/core/types/extraction.types';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectSpaceId } from '@/modules/library/core';
 import { PdfAnnotationImporterService } from '@/modules/library/extraction/services/pdf-annotation-importer.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
@@ -96,7 +96,7 @@ export class AnnotationsController {
       );
     }
 
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
 
     if (projectId !== undefined) {
       return this.annotationsService.getAnnotationsByAttachment(
@@ -160,7 +160,7 @@ export class AnnotationsController {
       authorId: userId,
     };
 
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
 
     if (projectId !== undefined) {
       return this.annotationsService.createAnnotation(
@@ -226,7 +226,7 @@ export class AnnotationsController {
         : {}),
     };
 
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
 
     return this.annotationsService.updateAnnotation(
       userId,
@@ -275,7 +275,7 @@ export class AnnotationsController {
       }
     }
 
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
 
     const deleted = await this.annotationsService.deleteAnnotation(
       userId,
@@ -311,7 +311,7 @@ export class AnnotationsController {
       throw new UnauthorizedException('Authentication required');
     }
 
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
 
     const normalizedUpserts = (body.upserts ?? []).map((u) => ({
       ...u,
@@ -387,7 +387,7 @@ export class AnnotationsController {
       throw new UnauthorizedException('Authentication required');
     }
 
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
 
     if (projectId !== undefined) {
       return this.pdfAnnotationImporterService.importFromAttachment(

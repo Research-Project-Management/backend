@@ -16,7 +16,7 @@ import {
   ConvertTypeOptions,
 } from '@/modules/library/core/types/bibliographic.types';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
   UNIT_OF_WORK,
@@ -107,7 +107,7 @@ export class ItemTypeConversionService {
     );
 
     const effectiveProjectId =
-      normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
+      normalizeProjectSpaceId(projectId ?? existing.projectId) ?? undefined;
     const eventScope = {
       userId,
       projectId: effectiveProjectId,

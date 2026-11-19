@@ -423,11 +423,12 @@ export class WebSnapshotService {
     let lastUploadError: unknown;
     const buffer = Buffer.from(snapshot.htmlContent, 'utf-8');
 
+    const targetSpaceId = options?.projectId || userId;
     if (this.filesPort?.uploadFile) {
       try {
         const uploadResult = await this.filesPort.uploadFile({
           userId,
-          ...(options?.projectId ? { projectId: options.projectId } : {}),
+          spaceId: targetSpaceId,
           filename,
           buffer,
           mimeType: 'text/html; charset=utf-8',
@@ -499,7 +500,9 @@ export class WebSnapshotService {
         : await this.attachmentsService.createAttachment(createPayload);
     } catch (attachErr) {
       if (resolvedFileId && this.filesPort?.deleteFile) {
-        await this.filesPort.deleteFile(resolvedFileId).catch(() => {});
+        await this.filesPort
+          .deleteFile(resolvedFileId, { spaceId: targetSpaceId })
+          .catch(() => {});
       }
       throw attachErr;
     }

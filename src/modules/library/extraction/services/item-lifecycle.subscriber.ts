@@ -32,6 +32,9 @@ export class ItemLifecycleSubscriber {
       | {
           id?: string;
           aggregateId?: string;
+          spaceId?: string;
+          projectId?: string;
+          userId?: string;
           filePaths?: string[];
           cascadedInTx?: boolean;
           storageDeletedInTx?: boolean;
@@ -39,6 +42,9 @@ export class ItemLifecycleSubscriber {
             id?: string;
             itemId?: string;
             itemIds?: string[];
+            spaceId?: string;
+            projectId?: string;
+            userId?: string;
             filePaths?: string[];
             cascadedInTx?: boolean;
             storageDeletedInTx?: boolean;
@@ -73,15 +79,24 @@ export class ItemLifecycleSubscriber {
 
     try {
       const candidateFileIdsToDelete = new Set<string>(payloadFilePaths);
-      if (
-        this.filesPort?.deleteFile &&
-        this.attachmentsRepository?.findMany
-      ) {
+      let resolvedSpaceId =
+        payload?.spaceId ??
+        payload?.payload?.spaceId ??
+        payload?.projectId ??
+        payload?.payload?.projectId ??
+        payload?.userId ??
+        payload?.payload?.userId;
+      if (this.filesPort?.deleteFile && this.attachmentsRepository?.findMany) {
         const attachments = await this.attachmentsRepository.findMany(
           { itemId },
-          { revisions: true },
+          { revisions: true, item: { select: { spaceId: true } } },
         );
         for (const att of attachments || []) {
+          const attItemSpaceId = (att as { item?: { spaceId?: string } | null })
+            ?.item?.spaceId;
+          if (!resolvedSpaceId && attItemSpaceId) {
+            resolvedSpaceId = attItemSpaceId;
+          }
           const attFileId = att.fileId || extractFileIdFromUrl(att.url);
           if (attFileId) candidateFileIdsToDelete.add(attFileId);
           const revisions = (
@@ -111,25 +126,13 @@ export class ItemLifecycleSubscriber {
 
       if (this.filesPort?.deleteFile && candidateFileIdsToDelete.size > 0) {
         const candidateFileIds = Array.from(candidateFileIdsToDelete);
+        const deleteTarget = resolvedSpaceId
+          ? { spaceId: resolvedSpaceId }
+          : undefined;
         await Promise.all(
           candidateFileIds.map(async (fid) => {
             try {
-              if (
-                typeof this.attachmentsRepository?.countFileIdReferences ===
-                'function'
-              ) {
-                const remainingRefs =
-                  await this.attachmentsRepository.countFileIdReferences(
-                    fid,
-                    undefined,
-                    undefined,
-                    itemId,
-                  );
-                if (typeof remainingRefs === 'number' && remainingRefs > 0) {
-                  return;
-                }
-              }
-              await this.filesPort!.deleteFile(fid);
+              await this.filesPort!.deleteFile(fid, deleteTarget);
             } catch (delErr: unknown) {
               const msg =
                 delErr instanceof Error ? delErr.message : String(delErr);

@@ -2,7 +2,7 @@ import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
 } from '@/modules/library/core';
 import {
@@ -52,7 +52,7 @@ export class ItemListQueryRepository {
       return [options.collectionId];
     }
 
-    const validProjectId = normalizeProjectScopeId(options.projectId);
+    const validProjectId = normalizeProjectSpaceId(options.projectId);
     const hasValidProject = Boolean(validProjectId && isUuid(validProjectId));
 
     const scopeWhere: Prisma.LibraryCollectionWhereInput = {
@@ -375,7 +375,7 @@ export class ItemListQueryRepository {
   ): Promise<Record<string, number>> {
     if (!isUuid(userId)) return {};
 
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const where: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,
@@ -427,7 +427,7 @@ export class ItemListQueryRepository {
     projectId?: string,
   ): Promise<ItemSummary | null> {
     if (!isUuid(itemId)) return null;
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere =
       validProjectId && isUuid(validProjectId)
         ? { spaceId: validProjectId }
@@ -488,7 +488,7 @@ export class ItemListQueryRepository {
     const validIds = itemIds.filter(isUuid);
     if (validIds.length === 0) return [];
 
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,

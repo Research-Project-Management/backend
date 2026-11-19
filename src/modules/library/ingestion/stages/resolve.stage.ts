@@ -343,7 +343,7 @@ export class ResolveStage implements IWorkflowStage<
   }
 
   async execute(input: ResolveStageInput): Promise<MetadataCandidate[]> {
-    const { scopeId, candidates } = input;
+    const { spaceId, candidates } = input;
     if (!this.metadataService) {
       this.logger.debug(
         'MetadataService not available, skipping resolve stage',
@@ -426,7 +426,7 @@ export class ResolveStage implements IWorkflowStage<
               : undefined;
           const resolved = await metadataService.resolve({
             query,
-            scopeId,
+            spaceId,
             ...(authorHint ? { authorHint } : {}),
             ...(yearHint !== undefined ? { yearHint } : {}),
           });

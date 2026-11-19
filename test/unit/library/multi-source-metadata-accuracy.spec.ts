@@ -18,7 +18,10 @@ import {
   buildEnrichmentPatch,
   buildReResolvePatch,
 } from '../../../src/modules/library/ingestion/domain/enrichment-patch.mapper';
-import type { ICatalogFacade, ItemDetail } from '../../../src/modules/library/core';
+import type {
+  ICatalogFacade,
+  ItemDetail,
+} from '../../../src/modules/library/core';
 import type {
   ItemMetadata,
   MetadataPort,
@@ -28,7 +31,13 @@ function makeCandidate(
   sourceProvider: string,
   confidenceScore: number,
   normalizedMetadata: ItemMetadata,
-  sourceKind: 'IDENTIFIER' | 'RECORD' | 'URL' | 'FILE' | 'PROVIDER' | 'CONNECTOR' = 'PROVIDER',
+  sourceKind:
+    | 'IDENTIFIER'
+    | 'RECORD'
+    | 'URL'
+    | 'FILE'
+    | 'PROVIDER'
+    | 'CONNECTOR' = 'PROVIDER',
 ) {
   return {
     candidateId: `cand-${sourceProvider.toLowerCase()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -104,7 +113,8 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
       expect(coalesced.proposedItem.creators).toHaveLength(8);
       expect(
         coalesced.proposedItem.creators?.every(
-          (c) => c.creatorType === 'author' && !/^[A-Z]\.$/.test(c.firstName || ''),
+          (c) =>
+            c.creatorType === 'author' && !/^[A-Z]\.$/.test(c.firstName || ''),
         ),
       ).toBe(true);
     });
@@ -141,14 +151,20 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
         'Marcus Vance',
         'Tariq Al-Mansoor',
       ]);
-      expect(coalesced.proposedItem.editors).toEqual(['Alan Turing', 'Claude Shannon']);
+      expect(coalesced.proposedItem.editors).toEqual([
+        'Alan Turing',
+        'Claude Shannon',
+      ]);
 
       const creators = coalesced.proposedItem.creators || [];
       const authorCreators = creators.filter((c) => c.creatorType === 'author');
       const editorCreators = creators.filter((c) => c.creatorType === 'editor');
       expect(authorCreators).toHaveLength(3);
       expect(editorCreators).toHaveLength(2);
-      expect(editorCreators.map((c) => c.lastName)).toEqual(['Turing', 'Shannon']);
+      expect(editorCreators.map((c) => c.lastName)).toEqual([
+        'Turing',
+        'Shannon',
+      ]);
     });
   });
 
@@ -158,7 +174,8 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
   describe('2. Wrong-Paper / Citation-Poisoning Guard (Zero Baseline DOI Hijacking)', () => {
     it('evaluates citation trap and blocks a cited 2016 ResNet DOI from poisoning a 2024 Medical Vision PDF', () => {
       const localPdfMeta = {
-        title: 'Self-Supervised Volumetric Transformer for 3D Brain MRI Segmentation',
+        title:
+          'Self-Supervised Volumetric Transformer for 3D Brain MRI Segmentation',
         authors: ['Minh Nguyen', 'Sarah Jenkins'],
         year: 2024,
         doi: '10.1109/cvpr.2016.90',
@@ -170,7 +187,11 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
         doi: '10.1109/cvpr.2016.90',
       };
 
-      const trapCheck = evaluateCitationTrap(localPdfMeta, resolvedCitedBaselineMeta, false);
+      const trapCheck = evaluateCitationTrap(
+        localPdfMeta,
+        resolvedCitedBaselineMeta,
+        false,
+      );
       expect(trapCheck.isTrap).toBe(true);
       expect(trapCheck.similarity).toBeLessThan(0.25);
       expect(trapCheck.rejectedDoi).toBe('10.1109/cvpr.2016.90');
@@ -192,13 +213,19 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
     it('rejects a cited baseline DOI in MetadataResolverService.reconcileExtractedCandidate and records rejectedCitedDoi', async () => {
       const existingItem: Record<string, unknown> = {
         id: 'item-mri-2024',
-        title: 'Self-Supervised Volumetric Transformer for 3D Brain MRI Segmentation',
+        title:
+          'Self-Supervised Volumetric Transformer for 3D Brain MRI Segmentation',
         itemType: 'journalArticle',
         year: 2024,
         doi: '10.1109/cvpr.2016.90',
         version: 1,
         creators: [
-          { creatorType: 'author', firstName: 'Minh', lastName: 'Nguyen', fullName: 'Minh Nguyen' },
+          {
+            creatorType: 'author',
+            firstName: 'Minh',
+            lastName: 'Nguyen',
+            fullName: 'Minh Nguyen',
+          },
           {
             creatorType: 'author',
             firstName: 'Sarah',
@@ -209,26 +236,33 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
         extraFields: {},
       };
 
-      const updateItemMock = jest.fn().mockImplementation(
-        async (_u: string, _id: string, patch: Record<string, unknown>) =>
-          ({
+      const updateItemMock = jest
+        .fn()
+        .mockImplementation(
+          async (_u: string, _id: string, patch: Record<string, unknown>) => ({
             ...existingItem,
             ...patch,
-          }) as unknown as ItemDetail,
-      );
+          }),
+        );
 
       const mockCatalog: Partial<ICatalogFacade> = {
-        getItem: jest.fn().mockResolvedValue(existingItem as unknown as ItemDetail),
+        getItem: jest.fn().mockResolvedValue(existingItem),
         updateItem: updateItemMock,
       };
       const mockMetadataPort: Partial<MetadataPort> = {
         resolve: jest.fn().mockResolvedValue({
           metadata: {
             title: 'Deep Residual Learning for Image Recognition',
-            authors: ['Kaiming He', 'Xiangyu Zhang', 'Shaoqing Ren', 'Jian Sun'],
+            authors: [
+              'Kaiming He',
+              'Xiangyu Zhang',
+              'Shaoqing Ren',
+              'Jian Sun',
+            ],
             year: 2016,
             doi: '10.1109/cvpr.2016.90',
-            journal: '2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)',
+            journal:
+              '2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)',
           },
           provenance: {},
         }),
@@ -243,7 +277,8 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
         userId: 'user-1',
         itemId: 'item-mri-2024',
         extractedMetadata: {
-          title: 'Self-Supervised Volumetric Transformer for 3D Brain MRI Segmentation',
+          title:
+            'Self-Supervised Volumetric Transformer for 3D Brain MRI Segmentation',
           authors: ['Minh Nguyen', 'Sarah Jenkins'],
           year: 2024,
           doi: '10.1109/cvpr.2016.90',
@@ -253,11 +288,14 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
       expect(res.updated).toBe(false);
       expect(res.rejectedCitedDoi).toBe('10.1109/cvpr.2016.90');
       expect(updateItemMock).toHaveBeenCalledTimes(1);
-      const patchPassed = updateItemMock.mock.calls[0][2] as Record<string, unknown>;
+      const patchPassed = updateItemMock.mock.calls[0][2] as Record<
+        string,
+        unknown
+      >;
       expect(patchPassed.doi).toBeNull();
-      expect((patchPassed.extraFields as Record<string, unknown>).rejectedCitedDoi).toBe(
-        '10.1109/cvpr.2016.90',
-      );
+      expect(
+        (patchPassed.extraFields as Record<string, unknown>).rejectedCitedDoi,
+      ).toBe('10.1109/cvpr.2016.90');
     });
   });
 
@@ -346,7 +384,8 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
           'LocalPDFExtraction',
           0.65,
           {
-            title: 'Deterministic Consensus in Byzantine Fault-Tolerant Ledgers',
+            title:
+              'Deterministic Consensus in Byzantine Fault-Tolerant Ledgers',
             authors: ['Hao Chen', 'Priya Patel'],
             year: 2026,
             publicationDate: '2026-01-10',
@@ -403,12 +442,18 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
       expect(item.issn).toBe('0028-4793');
       expect(item.arxivId).toBe('2111.05432');
       expect(item.isbn).toBeUndefined();
-      expect(isSameCanonicalIdentifier('10.48550/arXiv.2111.05432v2', 'arXiv:2111.05432')).toBe(
-        true,
-      );
-      expect(isSameCanonicalIdentifier('10.1056/NEJMoa2109876', '10.48550/arXiv.2111.05432')).toBe(
-        false,
-      );
+      expect(
+        isSameCanonicalIdentifier(
+          '10.48550/arXiv.2111.05432v2',
+          'arXiv:2111.05432',
+        ),
+      ).toBe(true);
+      expect(
+        isSameCanonicalIdentifier(
+          '10.1056/NEJMoa2109876',
+          '10.48550/arXiv.2111.05432',
+        ),
+      ).toBe(false);
     });
   });
 
@@ -551,7 +596,10 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
       expect(records).toHaveLength(4);
 
       expect(records[0].itemType).toBe('journalArticle');
-      expect(records[0].authors).toEqual(['Pierre-Louis Curien', 'Hugo Herbelin']);
+      expect(records[0].authors).toEqual([
+        'Pierre-Louis Curien',
+        'Hugo Herbelin',
+      ]);
       expect(records[0].doi).toBe('10.1017/s0956796820000015');
       expect(records[0].abstract).toBe(
         'This study investigates the duality of computation in lambda calculi.',
@@ -610,11 +658,13 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
       expect(nbibRecords[0].pmid).toBe('31000001');
       expect(nbibRecords[0].pmcid).toBe('PMC7000001');
       expect(nbibRecords[0].doi).toBe('10.1038/s41591-021-00001-1');
-      expect(nbibRecords[0].authors).toEqual(['Kariko, Katalin', 'Weissman, Drew']);
-      expect(nbibRecords[0].creators?.map((c) => `${c.firstName} ${c.lastName}`)).toEqual([
-        'Katalin Kariko',
-        'Drew Weissman',
+      expect(nbibRecords[0].authors).toEqual([
+        'Kariko, Katalin',
+        'Weissman, Drew',
       ]);
+      expect(
+        nbibRecords[0].creators?.map((c) => `${c.firstName} ${c.lastName}`),
+      ).toEqual(['Katalin Kariko', 'Drew Weissman']);
       expect(nbibRecords[0].abstract).toBe(
         'Nucleoside-modified mRNA vaccine clinical trial results.',
       );
@@ -667,10 +717,11 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
       expect(xmlRecords[1].itemType).toBe('bookSection');
       expect(xmlRecords[1].authors).toEqual(['Zhang, Feng']);
       expect(xmlRecords[1].editors).toEqual(['Church, George M.']);
-      expect(xmlRecords[1].creators?.map((c) => `${c.creatorType}:${c.firstName} ${c.lastName}`)).toEqual([
-        'author:Feng Zhang',
-        'editor:George M. Church',
-      ]);
+      expect(
+        xmlRecords[1].creators?.map(
+          (c) => `${c.creatorType}:${c.firstName} ${c.lastName}`,
+        ),
+      ).toEqual(['author:Feng Zhang', 'editor:George M. Church']);
       expect(xmlRecords[1].doi).toBeUndefined();
       expect(xmlRecords[1].abstract).toBeUndefined();
       expect(xmlRecords[1].journal).toBeUndefined();
@@ -731,17 +782,45 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
         metadata: {
           lockedFields: ['title', 'year'],
           fieldProvenance: {
-            title: { source: 'manual', sourceProvider: 'manual', confidence: 1.0, isUserOverride: true },
-            year: { source: 'manual', sourceProvider: 'manual', confidence: 1.0, isUserOverride: true },
-            authors: { source: 'arXiv', sourceProvider: 'arXiv', confidence: 0.92 },
+            title: {
+              source: 'manual',
+              sourceProvider: 'manual',
+              confidence: 1.0,
+              isUserOverride: true,
+            },
+            year: {
+              source: 'manual',
+              sourceProvider: 'manual',
+              confidence: 1.0,
+              isUserOverride: true,
+            },
+            authors: {
+              source: 'arXiv',
+              sourceProvider: 'arXiv',
+              confidence: 0.92,
+            },
           },
         },
         extraFields: {
           lockedFields: ['title', 'year'],
           fieldProvenance: {
-            title: { source: 'manual', sourceProvider: 'manual', confidence: 1.0, isUserOverride: true },
-            year: { source: 'manual', sourceProvider: 'manual', confidence: 1.0, isUserOverride: true },
-            authors: { source: 'arXiv', sourceProvider: 'arXiv', confidence: 0.92 },
+            title: {
+              source: 'manual',
+              sourceProvider: 'manual',
+              confidence: 1.0,
+              isUserOverride: true,
+            },
+            year: {
+              source: 'manual',
+              sourceProvider: 'manual',
+              confidence: 1.0,
+              isUserOverride: true,
+            },
+            authors: {
+              source: 'arXiv',
+              sourceProvider: 'arXiv',
+              confidence: 0.92,
+            },
           },
         },
       };
@@ -758,7 +837,8 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
             title: 'downloaded_paper_v3_final.pdf',
             authors: ['A. Zhang'],
             year: 2019,
-            abstract: 'Newly extracted high-precision abstract from the PDF body.',
+            abstract:
+              'Newly extracted high-precision abstract from the PDF body.',
             volume: '625',
             pages: '112-120',
           },
@@ -793,7 +873,9 @@ describe('Multi-Source Metadata Extraction & Cross-Source Coalescing Accuracy Au
         title: 'CrossRef Variant Title',
         year: 2023,
         authors: ['Alice Zhang'], // Truncated 1-author record in upstream feed
-        creators: [{ creatorType: 'author', fullName: 'Alice Zhang', orderIndex: 0 }],
+        creators: [
+          { creatorType: 'author', fullName: 'Alice Zhang', orderIndex: 0 },
+        ],
         issue: '7995',
         sourceProvider: 'CrossRef',
       });

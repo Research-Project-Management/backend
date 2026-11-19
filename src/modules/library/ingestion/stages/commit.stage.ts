@@ -22,7 +22,7 @@ import {
   generateCitationKey,
   isPlaceholderItemTitle,
   CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
 } from '@/modules/library/core';
 import { calculateTitleSimilarity } from '@/modules/library/ingestion/domain/deduplication.domain';
 import {
@@ -334,7 +334,7 @@ interface CommitMatchedSideEffectsPort {
   syncRelationsForCommittedItem?: (
     itemId: string,
     candidateMeta: Record<string, unknown>,
-    scopeId?: string | { userId?: string; projectId?: string },
+    spaceId?: string | { userId?: string; projectId?: string },
   ) => Promise<unknown>;
   materializeNotes?: (
     userId: string,
@@ -378,7 +378,7 @@ export class CommitStage implements IWorkflowStage<
 
   async execute(input: CommitStageInput): Promise<CommittedItemDetail> {
     const {
-      scopeId: scope,
+      spaceId: scope,
       item: actualMetadata,
       options: actualOptions,
     } = input;
@@ -394,9 +394,9 @@ export class CommitStage implements IWorkflowStage<
 
     if (typeof scope === 'object' && scope !== null) {
       effectiveUserId = scope.userId || actualOptions?.userId || '';
-      effectiveProjectId = normalizeProjectScopeId(scope.projectId);
+      effectiveProjectId = normalizeProjectSpaceId(scope.projectId);
     } else {
-      const normalizedScopeProj = normalizeProjectScopeId(scope);
+      const normalizedScopeProj = normalizeProjectSpaceId(scope);
       const isProject =
         Boolean(normalizedScopeProj) &&
         normalizedScopeProj !== actualOptions?.userId;

@@ -29,7 +29,7 @@ import {
   ReconcileExtractedCandidatePayload,
   SingleFlightCoalescer,
   BulkheadSemaphore,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
 } from '@/modules/library/core';
 import {
   BOT_CHALLENGE_TITLE_RE,
@@ -478,7 +478,7 @@ export class QualityService {
   ) {}
 
   async getQualityAudit(userId: string, projectId?: string) {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const flightKey = `audit:${userId}:${effectiveProjectId ?? 'personal'}`;
     return this.auditSingleFlight.execute(flightKey, () =>
       this.auditBulkhead.run(() =>

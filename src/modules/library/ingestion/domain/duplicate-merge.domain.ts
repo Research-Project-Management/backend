@@ -22,7 +22,7 @@ import {
   parseCreatorString,
   countFullGivenNames,
   isBetterAuthorListCandidate,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
 } from '@/modules/library/core';
 import {
   ALLOWED_MERGE_METADATA_FIELDS,
@@ -91,7 +91,7 @@ export function parseRunScope(
   fallbackUserId?: string,
 ): { userId: string; projectId: string | null } {
   if (typeof scope === 'object' && scope !== null) {
-    const rawProject = normalizeProjectScopeId(scope.projectId);
+    const rawProject = normalizeProjectSpaceId(scope.projectId);
     const resolvedUserId = scope.userId || fallbackUserId;
     if (!resolvedUserId)
       throw new BadRequestException(
@@ -103,7 +103,7 @@ export function parseRunScope(
     };
   }
   const str = typeof scope === 'string' ? scope : '';
-  const normalizedProj = normalizeProjectScopeId(str);
+  const normalizedProj = normalizeProjectSpaceId(str);
   const isProject = Boolean(
     normalizedProj &&
     normalizedProj !== fallbackUserId &&

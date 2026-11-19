@@ -107,9 +107,7 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
           .mockResolvedValue([{ id: 'col-1', name: 'Project Collection' }]),
       };
 
-      controller = new CollectionsController(
-        mockCollectionsService as any,
-      );
+      controller = new CollectionsController(mockCollectionsService as any);
     });
 
     it('should list project collections with strict projectId', async () => {
@@ -146,9 +144,7 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
       };
 
       stateController = new StateController(mockStateService as any);
-      batchController = new StateBatchController(
-        mockStateService as any,
-      );
+      batchController = new StateBatchController(mockStateService as any);
     });
 
     it('should query state scoped strictly to projectId', async () => {
@@ -196,9 +192,7 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
         }),
       };
 
-      controller = new AttachmentController(
-        mockAttachmentsService as any,
-      );
+      controller = new AttachmentController(mockAttachmentsService as any);
     });
 
     it('should fetch item attachments within project scope', async () => {

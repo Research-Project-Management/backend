@@ -93,7 +93,9 @@ describe('ExtractionTelemetryController', () => {
     });
 
     it('extracts metadata from JSON base64Pdf payload and formats benchmark metrics', async () => {
-      trustedExtractor.extractTrustedMetadata.mockResolvedValueOnce(mockExtractionResult);
+      trustedExtractor.extractTrustedMetadata.mockResolvedValueOnce(
+        mockExtractionResult,
+      );
 
       const fakePdfBytes = Buffer.from('%PDF-1.4 test content');
       const base64Pdf = `data:application/pdf;base64,${fakePdfBytes.toString('base64')}`;
@@ -119,7 +121,9 @@ describe('ExtractionTelemetryController', () => {
     });
 
     it('handles raw base64 string without data: prefix', async () => {
-      trustedExtractor.extractTrustedMetadata.mockResolvedValueOnce(mockExtractionResult);
+      trustedExtractor.extractTrustedMetadata.mockResolvedValueOnce(
+        mockExtractionResult,
+      );
 
       const fakePdfBytes = Buffer.from('%PDF-1.5 test raw');
       const rawBase64 = fakePdfBytes.toString('base64');
@@ -138,7 +142,9 @@ describe('ExtractionTelemetryController', () => {
     });
 
     it('handles multipart/form-data upload when req.parts() is available', async () => {
-      trustedExtractor.extractTrustedMetadata.mockResolvedValueOnce(mockExtractionResult);
+      trustedExtractor.extractTrustedMetadata.mockResolvedValueOnce(
+        mockExtractionResult,
+      );
 
       const fakePdfBytes = Buffer.from('%PDF-1.7 multipart stream');
       const mockParts = async function* () {

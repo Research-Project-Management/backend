@@ -47,7 +47,9 @@ describe('OS-Level Resource Management & Stream Buffer Safety', () => {
 
       const mockResponse = {
         headers: {
-          get: jest.fn().mockReturnValue(String(MAX_SAFE_HTTP_PAYLOAD_BYTES + 1024)),
+          get: jest
+            .fn()
+            .mockReturnValue(String(MAX_SAFE_HTTP_PAYLOAD_BYTES + 1024)),
         },
         body: {
           getReader: jest.fn().mockReturnValue(mockReader),
@@ -82,9 +84,9 @@ describe('OS-Level Resource Management & Stream Buffer Safety', () => {
       } as unknown as Response;
 
       // Limit to 1024 bytes (1 KB)
-      await expect(
-        readSafeResponseBuffer(mockResponse, 1024),
-      ).rejects.toThrow(PayloadTooLargeException);
+      await expect(readSafeResponseBuffer(mockResponse, 1024)).rejects.toThrow(
+        PayloadTooLargeException,
+      );
 
       expect(mockReader.cancel).toHaveBeenCalled();
       expect(mockReader.releaseLock).toHaveBeenCalled();

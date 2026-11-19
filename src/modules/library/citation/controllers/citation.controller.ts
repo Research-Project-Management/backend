@@ -19,7 +19,7 @@ import {
   ExportByKeysDto,
 } from '@/modules/library/citation/dto/citation.dto';
 import { ExportFormatType } from '@/modules/library/citation/types/citation.types';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectSpaceId } from '@/modules/library/core';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   ProjectAccessGuard,
@@ -71,12 +71,12 @@ export class CitationController {
       Number.isFinite(parsedLimit) && parsedLimit > 0
         ? Math.min(parsedLimit, 200)
         : 30;
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const scopeId = effectiveProjectId ? `proj:${effectiveProjectId}` : userId;
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
+    const spaceId = effectiveProjectId || userId;
     const styles = await this.citationService.searchStyles(
       query || '',
       numLimit,
-      scopeId,
+      spaceId,
     );
     return {
       total: styles.length,
@@ -99,12 +99,12 @@ export class CitationController {
     @Body('title') title?: string,
     @Param('spaceId') projectId?: string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
-    const scopeId = effectiveProjectId ? `proj:${effectiveProjectId}` : userId;
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
+    const spaceId = effectiveProjectId || userId;
     return this.citationService.registerCustomStyle(
       xml,
       title,
-      scopeId,
+      spaceId,
       userId,
     );
   }
@@ -272,8 +272,8 @@ export class CitationController {
     const numIndex =
       Number.isFinite(parsedIndex) && parsedIndex > 0 ? parsedIndex : 1;
     const projectId =
-      normalizeProjectScopeId(queryProjectId) ||
-      normalizeProjectScopeId(routeProjectId);
+      normalizeProjectSpaceId(queryProjectId) ||
+      normalizeProjectSpaceId(routeProjectId);
     const isSuppressAuthor =
       suppressAuthor === 'true' || suppressAuthor === '1';
     const hasContext = Boolean(
@@ -325,9 +325,9 @@ export class CitationController {
     // Safety guard: Deduplicate and cap batch at 100 items to protect Node.js event loop
     const ids = Array.from(new Set(rawIds)).slice(0, 100);
     const projectId =
-      normalizeProjectScopeId(bodyProjectId) ||
-      normalizeProjectScopeId(queryProjectId) ||
-      normalizeProjectScopeId(routeProjectId);
+      normalizeProjectSpaceId(bodyProjectId) ||
+      normalizeProjectSpaceId(queryProjectId) ||
+      normalizeProjectSpaceId(routeProjectId);
     return this.citationService.formatItemBatch(userId, ids, style, projectId);
   }
 }
@@ -351,7 +351,7 @@ export class ExportsController {
     @Query('spaceId') queryProjectId?: string,
     @Query('attachmentId') attachmentId?: string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       routeProjectId || queryProjectId,
     );
     return this.exportsService.exportAnnotatedItemPdf(
@@ -384,7 +384,7 @@ export class ExportsController {
     @Param('spaceId') routeProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       routeProjectId || body.spaceId || queryProjectId,
     );
     const result = await this.exportsService.exportByCitationKeys(
@@ -411,7 +411,7 @@ export class ExportsController {
     @Query('tagId') tagId?: string,
     @Query('spaceId') projectIdQuery?: string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       routeProjectId || projectIdQuery,
     );
     const effectiveFormat = format || 'bibtex';
@@ -443,7 +443,7 @@ export class ExportsController {
     return this.exportsService.exportBundle(
       userId,
       collectionId,
-      normalizeProjectScopeId(routeProjectId || queryProjectId),
+      normalizeProjectSpaceId(routeProjectId || queryProjectId),
     );
   }
 }

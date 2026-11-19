@@ -25,7 +25,7 @@ describe('SyncController (Library Distributed Sync API)', () => {
       expect(result).toEqual({
         version: '42',
         scope: 'user',
-        scopeId: 'user-123',
+        spaceId: 'user-123',
       });
       expect(transactionServiceMock.getLatestSequence).toHaveBeenCalledWith({
         userId: 'user-123',
@@ -44,7 +44,7 @@ describe('SyncController (Library Distributed Sync API)', () => {
       expect(result).toEqual({
         version: '105',
         scope: 'project',
-        scopeId: 'proj-456',
+        spaceId: 'proj-456',
       });
       expect(transactionServiceMock.getLatestSequence).toHaveBeenCalledWith({
         projectId: 'proj-456',
@@ -81,7 +81,9 @@ describe('SyncController (Library Distributed Sync API)', () => {
         },
       ];
 
-      transactionServiceMock.getChangesSince.mockResolvedValue(mockChanges as never);
+      transactionServiceMock.getChangesSince.mockResolvedValue(
+        mockChanges as never,
+      );
 
       const query: SyncQueryDto = { since: '4', limit: 50 };
       const result = await controller.getChanges('user-123', query);
@@ -131,7 +133,9 @@ describe('SyncController (Library Distributed Sync API)', () => {
         createdAt: new Date(),
       }));
 
-      transactionServiceMock.getChangesSince.mockResolvedValue(mockItems as never);
+      transactionServiceMock.getChangesSince.mockResolvedValue(
+        mockItems as never,
+      );
 
       const result = await controller.getChanges('user-123', { limit: 2 });
       expect(result.count).toBe(2);
@@ -167,7 +171,9 @@ describe('SyncController (Library Distributed Sync API)', () => {
         },
       ];
 
-      transactionServiceMock.getChangesSince.mockResolvedValue(mockChanges as never);
+      transactionServiceMock.getChangesSince.mockResolvedValue(
+        mockChanges as never,
+      );
 
       const result = await controller.getChanges('user-123', { since: '9' });
       expect(result.count).toBe(1);
@@ -257,17 +263,21 @@ describe('SyncController (Library Distributed Sync API)', () => {
     });
   });
 
-    it('signals fullSyncRequired/SYNC_RESET_REQUIRED when client since cursor is older than earliest retained sequence', async () => {
-      (transactionServiceMock as any).getMinRetainedSequence = jest.fn().mockResolvedValue(50n);
-      (transactionServiceMock as any).getLatestSequence = jest.fn().mockResolvedValue(100n);
+  it('signals fullSyncRequired/SYNC_RESET_REQUIRED when client since cursor is older than earliest retained sequence', async () => {
+    (transactionServiceMock as any).getMinRetainedSequence = jest
+      .fn()
+      .mockResolvedValue(50n);
+    (transactionServiceMock as any).getLatestSequence = jest
+      .fn()
+      .mockResolvedValue(100n);
 
-      await expect(
-        controller.getChanges('user-1', { since: '10', limit: 100 } as any)
-      ).rejects.toMatchObject({
-        status: 410,
-        response: expect.objectContaining({
-          code: 'SYNC_RESET_REQUIRED',
-        }),
-      });
+    await expect(
+      controller.getChanges('user-1', { since: '10', limit: 100 } as any),
+    ).rejects.toMatchObject({
+      status: 410,
+      response: expect.objectContaining({
+        code: 'SYNC_RESET_REQUIRED',
+      }),
     });
+  });
 });

@@ -106,7 +106,9 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
         mockCache as never,
       );
 
-      const projectScope = { projectId: '11111111-1111-4111-8111-111111111111' };
+      const projectScope = {
+        projectId: '11111111-1111-4111-8111-111111111111',
+      };
 
       // 1. 500 concurrent collaborators poll /sync/version on cold Redis cache
       const coldPolls = await Promise.all(
@@ -127,7 +129,9 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
       expect(mockChangeLogRepo.getLatestSequence).toHaveBeenCalledTimes(1);
 
       // 3. A write transaction appends a change -> invalidates sync sequence cache post-commit
-      mockChangeLogRepo.getLatestSequence.mockImplementationOnce(async () => 89n);
+      mockChangeLogRepo.getLatestSequence.mockImplementationOnce(
+        async () => 89n,
+      );
       await txService.executeInTransaction(async (_tx, helpers) => {
         await helpers.appendChange(projectScope, {
           entityType: 'Item',
@@ -139,9 +143,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
       });
 
       expect(mockCache.del).toHaveBeenCalledWith(
-        LIBRARY_REDIS_KEYS.syncSequence(
-          `proj:${projectScope.projectId}`,
-        ),
+        LIBRARY_REDIS_KEYS.syncSequence(`proj:${projectScope.projectId}`),
       );
 
       // 4. Next poll observes fresh sequence 89n
@@ -271,7 +273,10 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
           () =>
             new Promise<Array<{ id: string; name: string; parentId: null }>>(
               (r) =>
-                setTimeout(() => r([{ id: 'c1', name: 'Root', parentId: null }]), 1),
+                setTimeout(
+                  () => r([{ id: 'c1', name: 'Root', parentId: null }]),
+                  1,
+                ),
             ),
         ),
       };
@@ -294,10 +299,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
             ),
         ),
       };
-      const tagsService = new TagsService(
-        mockTagsRepo as never,
-        {} as never,
-      );
+      const tagsService = new TagsService(mockTagsRepo as never, {} as never);
       await Promise.all(
         Array.from({ length: 100 }, () =>
           tagsService.getTags(userId, { projectId }),
@@ -362,7 +364,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
       });
 
       expect(mockFindMany).toHaveBeenCalledTimes(1);
-      const callArg = mockFindMany.mock.calls[0]?.[0] as unknown as {
+      const callArg = mockFindMany.mock.calls[0]?.[0] as {
         include?: Record<string, unknown>;
       };
       expect(callArg.include?.itemTags).toEqual({
@@ -481,7 +483,7 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
 
       await repo.update(userId, itemId, 1, { title: 'New Title' });
 
-      const findFirstArg = mockFindFirst.mock.calls[0]?.[0] as unknown as {
+      const findFirstArg = mockFindFirst.mock.calls[0]?.[0] as {
         include?: Record<string, unknown>;
       };
       expect(findFirstArg.include?.notesList).toBeUndefined();
@@ -511,12 +513,14 @@ describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {
       const mockRepo = {
         findById: jest.fn(async () => rootNode),
         findAll: jest.fn(async () => [rootNode, childNode]),
-        create: jest.fn(async (_u: string, data: { name: string; parentId?: string }) => ({
-          id: `cloned-${++seq}`,
-          name: data.name,
-          parentId: data.parentId ?? null,
-          version: 1,
-        })),
+        create: jest.fn(
+          async (_u: string, data: { name: string; parentId?: string }) => ({
+            id: `cloned-${++seq}`,
+            name: data.name,
+            parentId: data.parentId ?? null,
+            version: 1,
+          }),
+        ),
         findItemIdsByCollection: mockFindItemIdsByCollection,
         addItemsToCollection: mockAddItemsToCollection,
       };

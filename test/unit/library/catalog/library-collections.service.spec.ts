@@ -282,8 +282,12 @@ describe('Library Collections — Tree Invariants & Sanitization', () => {
     });
 
     it('should batch descendant item queries and record tombstones/changes for all cascaded subcollections on deleteCollection', async () => {
-      const mockFindItemIdsByCollections = jest.fn().mockResolvedValue(['item-sub-1', 'item-sub-2']);
-      const mockFindItemIdsByCollection = jest.fn().mockResolvedValue(['item-root-1']);
+      const mockFindItemIdsByCollections = jest
+        .fn()
+        .mockResolvedValue(['item-sub-1', 'item-sub-2']);
+      const mockFindItemIdsByCollection = jest
+        .fn()
+        .mockResolvedValue(['item-root-1']);
       const mockRecordTombstonesBatch = jest.fn().mockResolvedValue(3);
       const mockAppendChangesBatch = jest.fn().mockResolvedValue(3);
       const mockPublishOutbox = jest.fn().mockResolvedValue({});
@@ -304,7 +308,9 @@ describe('Library Collections — Tree Invariants & Sanitization', () => {
       };
 
       const cascadeRepo = {
-        findById: jest.fn().mockResolvedValue({ id: 'col-root', name: 'Root', parentId: null }),
+        findById: jest
+          .fn()
+          .mockResolvedValue({ id: 'col-root', name: 'Root', parentId: null }),
         findAll: jest.fn().mockResolvedValue([
           { id: 'col-root', name: 'Root', parentId: null },
           { id: 'col-sub-1', name: 'Sub 1', parentId: 'col-root' },
@@ -319,7 +325,7 @@ describe('Library Collections — Tree Invariants & Sanitization', () => {
         cascadeRepo as unknown as CollectionsRepository,
         new TreeEngine(),
         undefined,
-        txMock as never,
+        txMock,
       );
 
       await cascadeService.deleteCollection(mockUserId, 'col-root', 'cascade');
@@ -361,7 +367,8 @@ describe('Library Collections — Tree Invariants & Sanitization', () => {
         },
       );
     });
-    it('placeholder', () => { expect(true).toBe(true);
+    it('placeholder', () => {
+      expect(true).toBe(true);
     });
   });
 });

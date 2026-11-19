@@ -341,7 +341,11 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         payload: { kind: 'IDENTIFIER', value: '10.1038/nature123' } as any,
       };
 
-      await pipelineService.executePipeline('run-dup-fasttrack', 'user-42', envelope);
+      await pipelineService.executePipeline(
+        'run-dup-fasttrack',
+        'user-42',
+        envelope,
+      );
 
       expect(mockIdentify.execute).toHaveBeenCalled();
       expect(mockMatch.execute).toHaveBeenCalled();
@@ -423,7 +427,7 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       expect(mockScanner.lookup).toHaveBeenCalled();
       expect(mockCommit.execute).toHaveBeenCalledWith(
         expect.objectContaining({
-          scopeId: 'user-42',
+          spaceId: 'user-42',
           item: expect.objectContaining({
             isRetracted: true,
             retractionNature: 'retraction',
@@ -434,4 +438,3 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
     });
   });
 });
-

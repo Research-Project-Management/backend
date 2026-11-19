@@ -117,8 +117,11 @@ export class ExtractionFacade implements IExtractionFacade {
     );
   }
 
-  async cleanupOrphanedFiles(fileIds: string[]): Promise<void> {
-    await this.attachmentsService.cleanupOrphanedFiles(fileIds);
+  async cleanupOrphanedFiles(
+    fileIds: string[],
+    target?: { spaceId?: string },
+  ): Promise<void> {
+    await this.attachmentsService.cleanupOrphanedFiles(fileIds, target);
   }
 
   async getAnnotationsByAttachment(

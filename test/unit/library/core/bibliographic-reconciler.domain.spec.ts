@@ -90,7 +90,8 @@ describe('BibliographicReconciler & TypeConversion Domain Suite', () => {
             doi: '10.5555/3295222.3295349',
             year: 2017,
             authors: ['A. Vaswani', 'N. Shazeer'],
-            publicationTitle: 'Advances in Neural Information Processing Systems',
+            publicationTitle:
+              'Advances in Neural Information Processing Systems',
           },
         },
         {
@@ -301,7 +302,7 @@ describe('BibliographicReconciler & TypeConversion Domain Suite', () => {
 
       // Step 1: Convert journalArticle -> book
       const toBookPreview = previewItemTypeConversion(
-        originalJournalArticle as unknown as Record<string, unknown>,
+        originalJournalArticle,
         'book',
       );
       const toBookPayload = buildTypeConversionUpdatePayload(
@@ -325,7 +326,7 @@ describe('BibliographicReconciler & TypeConversion Domain Suite', () => {
       } as unknown as ItemDetail;
 
       const previewBackToJournal = previewItemTypeConversion(
-        intermediateBookItem as unknown as Record<string, unknown>,
+        intermediateBookItem,
         'journalArticle',
       );
       expect(previewBackToJournal.preservedFields).toEqual(

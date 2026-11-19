@@ -36,7 +36,7 @@ import {
 interface QueuedIngestionJob {
   runId: string;
   projectId: string;
-  scopeId?: string;
+  spaceId?: string;
   envelope: IngestionSubmissionEnvelope;
   enqueuedAt?: number;
 }
@@ -495,7 +495,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         : IngestionStatus.FAILED_FINAL;
       await transitionRunToFailedIfActive({
         repo: this.repo,
-        scopeId: projectId,
+        spaceId: projectId,
         runId,
         status: targetStatus,
         lastError: msg || 'Ingestion pipeline execution failed',
@@ -603,7 +603,7 @@ export class IngestionQueueConsumer
 
       await transitionRunToFailedIfActive({
         repo: this.repo,
-        scopeId: projectId,
+        spaceId: projectId,
         runId,
         status: isTerminalFailure
           ? IngestionStatus.FAILED_FINAL

@@ -16,7 +16,7 @@ import {
   AppendChangeInput,
   RecordTombstoneEntry,
   RecordTombstoneInput,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   LIBRARY_REDIS_KEYS,
   SingleFlightCoalescer,
   LIBRARY_OUTBOX_QUEUE,
@@ -62,7 +62,7 @@ export class TransactionService implements IUnitOfWork {
     userId?: string;
     projectId?: string | null;
   }): string | null {
-    const validProjectId = normalizeProjectScopeId(scope.projectId);
+    const validProjectId = normalizeProjectSpaceId(scope.projectId);
     if (validProjectId) return `proj:${validProjectId}`;
     const trimmedUser = scope.userId?.trim();
     if (trimmedUser) return `user:${trimmedUser}`;

@@ -33,7 +33,7 @@ import {
   resolveEmittedCitationEntries,
 } from '@/modules/library/citation/domain/citation.domain';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   CITATION_FACADE,
   ICitationFacade as ICoreCitationFacade,
 } from '@/modules/library/core';
@@ -70,7 +70,7 @@ export class ExportsService {
       deletedAt: null,
     };
 
-    const effectiveProjectId = normalizeProjectScopeId(dto.spaceId);
+    const effectiveProjectId = normalizeProjectSpaceId(dto.spaceId);
     if (effectiveProjectId) {
       const member = await this.exportsRepo.findProjectMember(
         effectiveProjectId,
@@ -201,7 +201,7 @@ export class ExportsService {
       throw new NotFoundException(`Collection ${collectionId} not found`);
     }
 
-    const normalizedProjectId = normalizeProjectScopeId(projectId);
+    const normalizedProjectId = normalizeProjectSpaceId(projectId);
     let scopeWhere: Prisma.LibraryItemWhereInput;
 
     const colProjectId =
@@ -329,7 +329,7 @@ export class ExportsService {
     buffer: Buffer;
     base64: string;
   }> {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const needMemberCheck = Boolean(
       effectiveProjectId && userId && this.exportsRepo.findProjectMember,
     );
@@ -378,7 +378,7 @@ export class ExportsService {
         const fileOutput = await this.filesPort.readOwnedFile({
           fileId: pdfAttachment.fileId,
           userId,
-          projectId: effectiveProjectId,
+          ...(effectiveProjectId ? { spaceId: effectiveProjectId } : {}),
         });
         if (fileOutput?.buffer) {
           bufferToUse = fileOutput.buffer;
@@ -474,7 +474,7 @@ export class ExportsService {
     ).slice(0, 500);
     const normalizedKeys = trimmedKeys.map((k) => k.toLowerCase());
 
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
 
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: effectiveProjectId || userId,

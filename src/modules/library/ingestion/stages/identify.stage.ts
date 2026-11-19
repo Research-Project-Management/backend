@@ -71,7 +71,7 @@ export class IdentifyUrlResolver {
 
   async resolve(
     payload: SubmissionPayload & { kind: 'URL' },
-    scopeId?: string,
+    spaceId?: string,
     options?: { forceScrape?: boolean },
   ): Promise<MetadataCandidate> {
     const classified = QueryClassifier.classify(payload.url);
@@ -95,7 +95,7 @@ export class IdentifyUrlResolver {
     if ((!hasDirectIdentifier || options?.forceScrape) && this.urlScraper) {
       try {
         const scraped = await this.urlScraper.scrape(payload.url, {
-          scopeId,
+          spaceId,
           preferredFilename: payload.filename,
         });
 
@@ -220,7 +220,7 @@ const IDENTIFIER_CANDIDATE_APPLIERS: Readonly<
 };
 
 interface IdentifyExecutionContext {
-  scopeId?: string;
+  spaceId?: string;
   userId?: string;
   projectId?: string;
 }
@@ -244,13 +244,13 @@ const IDENTIFY_PAYLOAD_STRATEGIES: {
   RECORD: async (stage, payload, context) =>
     stage.identifyRecordPayload(payload, context),
   URL: async (stage, payload, context) => {
-    const candidate = await stage.resolveUrlCandidate(payload, context.scopeId);
+    const candidate = await stage.resolveUrlCandidate(payload, context.spaceId);
     return candidate ? [candidate] : [];
   },
   FILE: async (stage, payload, context) => {
     const candidate = await stage.resolveFileCandidate(
       payload,
-      context.scopeId,
+      context.spaceId,
       context,
     );
     return candidate ? [candidate] : [];
@@ -309,14 +309,14 @@ export class IdentifyStage implements IWorkflowStage<
   }
 
   async execute(input: IdentifyStageInput): Promise<MetadataCandidate[]> {
-    const { runId: _runId, payload, scopeId, userId, projectId } = input;
+    const { runId: _runId, payload, spaceId, userId, projectId } = input;
     const context: IdentifyExecutionContext = {
-      scopeId,
+      spaceId,
       userId,
       projectId:
         projectId ??
-        (scopeId && scopeId !== 'user' && scopeId !== userId
-          ? scopeId
+        (spaceId && spaceId !== 'user' && spaceId !== userId
+          ? spaceId
           : undefined),
     };
 
@@ -426,7 +426,7 @@ export class IdentifyStage implements IWorkflowStage<
 
   private async resolveRecordContent(
     payload: SubmissionPayload & { kind: 'RECORD' },
-    context?: { userId?: string; projectId?: string; scopeId?: string },
+    context?: { userId?: string; projectId?: string; spaceId?: string },
   ): Promise<string> {
     let content = payload.content || '';
     if (
@@ -435,12 +435,11 @@ export class IdentifyStage implements IWorkflowStage<
       this.filesPort?.readOwnedFile
     ) {
       try {
+        const effectiveSpaceId = context?.spaceId ?? context?.projectId;
         const file = await this.filesPort.readOwnedFile({
           fileId: payload.fileId,
           ...(context?.userId ? { userId: context.userId } : {}),
-          ...(context?.userId && context?.projectId
-            ? { projectId: context.projectId }
-            : {}),
+          ...(effectiveSpaceId ? { spaceId: effectiveSpaceId } : {}),
         });
         if (file?.buffer) {
           const decompressed = await gunzipAsync(file.buffer, {
@@ -463,27 +462,27 @@ export class IdentifyStage implements IWorkflowStage<
 
   async resolveUrlCandidate(
     payload: SubmissionPayload & { kind: 'URL' },
-    scopeId?: string,
+    spaceId?: string,
   ): Promise<MetadataCandidate | null> {
     if (!this.urlResolver) return null;
-    return this.urlResolver.resolve(payload, scopeId);
+    return this.urlResolver.resolve(payload, spaceId);
   }
 
   async resolveUrlFallback(
     payload: SubmissionPayload & { kind: 'URL' },
-    scopeId?: string,
+    spaceId?: string,
   ): Promise<MetadataCandidate | null> {
     if (!this.urlResolver) return null;
-    return this.urlResolver.resolve(payload, scopeId, { forceScrape: true });
+    return this.urlResolver.resolve(payload, spaceId, { forceScrape: true });
   }
 
   async resolveFileCandidate(
     payload: SubmissionPayload & { kind: 'FILE' },
-    scopeId?: string,
-    context?: { userId?: string; projectId?: string; scopeId?: string },
+    spaceId?: string,
+    context?: { userId?: string; projectId?: string; spaceId?: string },
   ): Promise<MetadataCandidate | null> {
     if (!this.fileResolver) return null;
-    return this.fileResolver.resolve(payload, context ?? scopeId);
+    return this.fileResolver.resolve(payload, context ?? spaceId);
   }
 
   cleanPdfTitle(

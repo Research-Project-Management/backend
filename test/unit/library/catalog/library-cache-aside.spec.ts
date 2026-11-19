@@ -475,7 +475,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       expect(cache.delPattern).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjUuid}`),
       );
-    expect(Boolean(validProjUuid)).toBe(true);
+      expect(Boolean(validProjUuid)).toBe(true);
     });
   });
 });

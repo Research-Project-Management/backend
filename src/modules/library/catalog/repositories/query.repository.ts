@@ -7,7 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
   gunzipAsync,
 } from '@/modules/library/core';
@@ -56,14 +56,14 @@ export async function hydrateOffloadedMetadataPayload(
       const effectiveUserId =
         scope?.userId ??
         (typeof raw.userId === 'string' ? raw.userId : undefined);
-      const effectiveProjectId = normalizeProjectScopeId(
+      const effectiveProjectId = normalizeProjectSpaceId(
         scope?.projectId ??
           (typeof raw.projectId === 'string' ? raw.projectId : undefined),
       );
       const rawDownloaded = await filesPort.readOwnedFile({
         fileId: raw.fileId,
         ...(effectiveUserId ? { userId: effectiveUserId } : {}),
-        ...(effectiveProjectId ? { projectId: effectiveProjectId } : {}),
+        ...(effectiveProjectId ? { spaceId: effectiveProjectId } : {}),
       });
       const compressedBuffer = Buffer.isBuffer(rawDownloaded)
         ? rawDownloaded
@@ -180,7 +180,7 @@ export class QueryRepository {
     seen.add(id);
     const client = this.getClient(tx);
 
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,
@@ -245,7 +245,7 @@ export class QueryRepository {
     if (validIds.length === 0) return [];
     const client = this.getClient(tx);
 
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,
@@ -288,7 +288,7 @@ export class QueryRepository {
   ) {
     if (!isUuid(itemId) || !isUuid(userId)) return null;
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const expectedSpaceId = resolveSpaceId({
       userId,
       projectId:
@@ -372,7 +372,7 @@ export class QueryRepository {
     if (validIds.length === 0) return [];
 
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,
@@ -404,7 +404,7 @@ export class QueryRepository {
   ) {
     if (!isUuid(userId)) return null;
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,
@@ -647,7 +647,7 @@ export class QueryRepository {
     projectId?: string,
   ): Promise<boolean> {
     if (!isUuid(itemId)) return false;
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const hasValidProject = Boolean(validProjectId && isUuid(validProjectId));
     if (userId !== 'system' && !isUuid(userId) && !hasValidProject) {
       return false;
@@ -696,7 +696,7 @@ export class QueryRepository {
   ): Promise<Map<string, boolean>> {
     const result = new Map<string, boolean>();
     if (!itemIds || itemIds.length === 0) return result;
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere =
       validProjectId && isUuid(validProjectId)
         ? { spaceId: validProjectId }
@@ -741,7 +741,7 @@ export class QueryRepository {
     projectId?: string,
     tx?: Prisma.TransactionClient,
   ): Promise<ItemSummary[]> {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     return this.listRepo.findSummariesByIds(
       this.getClient(tx),
       userId,
@@ -763,7 +763,7 @@ export class QueryRepository {
     projectId?: string,
     tx?: Prisma.TransactionClient,
   ) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     return this.matchRepo.findQualityAuditItems(
       this.getClient(tx),
       userId,
@@ -778,7 +778,7 @@ export class QueryRepository {
     projectId?: string,
     tx?: Prisma.TransactionClient,
   ) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     return this.matchRepo.findDuplicateCandidateItems(
       this.getClient(tx),
       userId,
@@ -877,7 +877,7 @@ export class QueryRepository {
     if (!fileId) return null;
     const client = this.getClient(tx);
     if (!client?.attachment?.findFirst) return null;
-    const validProjectId = normalizeProjectScopeId(scope?.projectId);
+    const validProjectId = normalizeProjectSpaceId(scope?.projectId);
     const itemScopeFilter: Prisma.LibraryItemWhereInput = validProjectId
       ? { deletedAt: null, spaceId: validProjectId }
       : scope?.userId

@@ -114,7 +114,9 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
       expect(where.AND[1].OR).toContainEqual({
         itemTags: {
           some: {
-            tag: { name: { contains: 'quantum computing', mode: 'insensitive' } },
+            tag: {
+              name: { contains: 'quantum computing', mode: 'insensitive' },
+            },
           },
         },
       });
@@ -176,7 +178,10 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
 
       expect(mockPrisma.item.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderBy: [{ firstAuthor: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }],
+          orderBy: [
+            { firstAuthor: { sort: 'asc', nulls: 'last' } },
+            { id: 'asc' },
+          ],
         }),
       );
     });
@@ -190,7 +195,10 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
 
       expect(mockPrisma.item.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderBy: [{ publicationTitle: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
+          orderBy: [
+            { publicationTitle: { sort: 'desc', nulls: 'last' } },
+            { id: 'desc' },
+          ],
         }),
       );
     });
@@ -204,7 +212,10 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
 
       expect(mockPrisma.item.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderBy: [{ publicationTitle: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }],
+          orderBy: [
+            { publicationTitle: { sort: 'asc', nulls: 'last' } },
+            { id: 'asc' },
+          ],
         }),
       );
     });

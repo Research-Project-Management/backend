@@ -9,7 +9,7 @@ import {
   sanitizeSearchQuery,
 } from '@/modules/library/search/domain/item-search.policy';
 import {
-  isProjectScopeId,
+  isProjectSpaceId,
   LIBRARY_REDIS_KEYS,
   SingleFlightCoalescer,
   SearchQueryEngine,
@@ -54,24 +54,27 @@ export class SearchRepository implements OnModuleInit {
     return tx || this.prisma;
   }
 
-  private resolveScopeId(userId: string, options?: SearchOptions): string {
-    return isProjectScopeId(options?.projectId)
+  private resolveSearchSpaceId(
+    userId: string,
+    options?: SearchOptions,
+  ): string {
+    return isProjectSpaceId(options?.projectId)
       ? options.projectId.trim()
       : userId;
   }
 
-  private setLocalScopeVersion(scopeId: string, version: string): void {
-    if (this.scopeVersions.has(scopeId)) {
-      this.scopeVersions.delete(scopeId);
+  private setLocalScopeVersion(spaceId: string, version: string): void {
+    if (this.scopeVersions.has(spaceId)) {
+      this.scopeVersions.delete(spaceId);
     } else if (this.scopeVersions.size >= SearchRepository.MAX_SCOPE_VERSIONS) {
       const oldestKey = this.scopeVersions.keys().next().value;
       if (oldestKey !== undefined) this.scopeVersions.delete(oldestKey);
     }
-    this.scopeVersions.set(scopeId, version);
+    this.scopeVersions.set(spaceId, version);
   }
 
-  async resolveScopeVersion(scopeId: string): Promise<string> {
-    const normalizedScope = (scopeId || '').trim();
+  async resolveScopeVersion(spaceId: string): Promise<string> {
+    const normalizedScope = (spaceId || '').trim();
     if (!normalizedScope) return '1';
 
     if (this.cache?.get) {
@@ -141,7 +144,7 @@ export class SearchRepository implements OnModuleInit {
     return Boolean(
       (options.collectionId && !isValidUuid(options.collectionId)) ||
       (options.tagId && !isValidUuid(options.tagId)) ||
-      (isProjectScopeId(options.projectId) &&
+      (isProjectSpaceId(options.projectId) &&
         !isValidUuid(options.projectId.trim())) ||
       (checkCursor && options.cursor && !isValidUuid(options.cursor)),
     );
@@ -235,8 +238,8 @@ export class SearchRepository implements OnModuleInit {
     const queryText = options.q?.trim();
 
     if (!tx && this.cache) {
-      const scopeId = this.resolveScopeId(userId, options);
-      const version = await this.resolveScopeVersion(scopeId);
+      const spaceId = this.resolveSearchSpaceId(userId, options);
+      const version = await this.resolveScopeVersion(spaceId);
       const cacheKey = buildSearchItemsCacheKey(
         userId,
         options,
@@ -490,8 +493,8 @@ export class SearchRepository implements OnModuleInit {
     options: SearchOptions,
     tx?: Prisma.TransactionClient,
   ): Promise<FacetResult> {
-    const scopeId = this.resolveScopeId(userId, options);
-    const version = await this.resolveScopeVersion(scopeId);
+    const spaceId = this.resolveSearchSpaceId(userId, options);
+    const version = await this.resolveScopeVersion(spaceId);
     const cacheKey = buildSearchFacetCacheKey(userId, options, version);
 
     const computeFreshFacets = async (): Promise<FacetResult> => {
@@ -558,8 +561,8 @@ export class SearchRepository implements OnModuleInit {
       : this.singleFlight.execute(cacheKey, computeFreshFacets);
   }
 
-  async invalidateFacets(scopeId: string): Promise<void> {
-    const normalizedScope = (scopeId || '').trim();
+  async invalidateFacets(spaceId: string): Promise<void> {
+    const normalizedScope = (spaceId || '').trim();
     if (!normalizedScope) return;
     let baseVer = Number(this.scopeVersions.get(normalizedScope) || '1') || 1;
     if (this.cache?.get) {
@@ -673,9 +676,9 @@ export class SearchRepository implements OnModuleInit {
   // EventHandler Index Cleanup Operations
   async refreshItemSearchIndex(
     itemId: string,
-    scopeId?: string,
-  ): Promise<{ indexed: boolean; scopeId?: string }> {
-    let resolvedScope = scopeId;
+    spaceId?: string,
+  ): Promise<{ indexed: boolean; spaceId?: string }> {
+    let resolvedScope = spaceId;
     if (itemId && this.prisma?.libraryItem?.findUnique) {
       const item = await this.prisma.libraryItem.findUnique({
         where: { id: itemId },
@@ -695,7 +698,7 @@ export class SearchRepository implements OnModuleInit {
         if (resolvedScope) {
           await this.invalidateFacets(resolvedScope);
         }
-        return { indexed: false, scopeId: resolvedScope };
+        return { indexed: false, spaceId: resolvedScope };
       }
       const rawItem = item as {
         spaceId?: string;
@@ -780,7 +783,7 @@ export class SearchRepository implements OnModuleInit {
       await this.invalidateFacets(resolvedScope);
     }
 
-    return { indexed: Boolean(itemId), scopeId: resolvedScope };
+    return { indexed: Boolean(itemId), spaceId: resolvedScope };
   }
 
   async deleteFullTextIndexByItemId(itemId: string): Promise<void> {

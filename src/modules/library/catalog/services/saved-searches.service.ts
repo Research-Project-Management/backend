@@ -26,7 +26,7 @@ import {
   TransactionHelpers,
   UNIT_OF_WORK,
   IUnitOfWork,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   libraryConfig,
   SingleFlightCoalescer,
 } from '@/modules/library/core';
@@ -52,7 +52,7 @@ export class SavedSearchesService {
 
   private async invalidateCache(userId: string, projectId?: string | null) {
     if (!this.cache) return;
-    const validProjectId = normalizeProjectScopeId(projectId || undefined);
+    const validProjectId = normalizeProjectSpaceId(projectId || undefined);
     const scopeKey = validProjectId || userId;
     await this.cache
       .del(LIBRARY_REDIS_KEYS.savedSearches(scopeKey))
@@ -80,7 +80,7 @@ export class SavedSearchesService {
   }
 
   async create(userId: string, dto: CreateSavedSearchDto, projectId?: string) {
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       projectId || dto.spaceId,
     );
     if (
@@ -213,7 +213,7 @@ export class SavedSearchesService {
         }
       }
     }
-    const sharedEffectiveProj = normalizeProjectScopeId(
+    const sharedEffectiveProj = normalizeProjectSpaceId(
       fallbackProjectId || uninitializedSearches[0]?.projectId || undefined,
     );
     const sharedDescendantMap =
@@ -235,7 +235,7 @@ export class SavedSearchesService {
           return;
         }
         try {
-          const effectiveProj = normalizeProjectScopeId(
+          const effectiveProj = normalizeProjectSpaceId(
             fallbackProjectId || saved.projectId || undefined,
           );
           const where = await this.compileConditions(
@@ -261,7 +261,7 @@ export class SavedSearchesService {
   }
 
   async findAll(userId: string, projectId?: string) {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeKey = validProjectId || userId;
     const cacheKey = LIBRARY_REDIS_KEYS.savedSearches(scopeKey);
     const loadSavedSearches = async () => {
@@ -294,7 +294,7 @@ export class SavedSearchesService {
       (existing.spaceId !== existing.createdById
         ? existing.spaceId
         : undefined);
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       projectId || existingProjectId,
     );
 
@@ -406,7 +406,7 @@ export class SavedSearchesService {
       (existing.spaceId !== existing.createdById
         ? existing.spaceId
         : undefined);
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       projectId || existingProjectId,
     );
 
@@ -473,7 +473,7 @@ export class SavedSearchesService {
         dto.conditions.scopeOptions || dto.scopeOptions;
     }
 
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       projectId || dto.spaceId,
     );
     const where = await this.compileConditions(
@@ -513,7 +513,7 @@ export class SavedSearchesService {
     dto: ExecuteSavedSearchQueryDto,
     projectId?: string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       projectId || dto.spaceId,
     );
     const savedSearch = await this.findById(userId, id, effectiveProjectId);
@@ -525,7 +525,7 @@ export class SavedSearchesService {
       (savedSearch.spaceId !== savedSearch.createdById
         ? savedSearch.spaceId
         : undefined);
-    const queryProjectId = normalizeProjectScopeId(
+    const queryProjectId = normalizeProjectSpaceId(
       effectiveProjectId || savedSearchProjectId,
     );
     const where = await this.compileConditions(

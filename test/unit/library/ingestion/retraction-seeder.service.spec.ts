@@ -49,7 +49,8 @@ cleanly"`;
 
   describe('cleanRetractionReason', () => {
     it('should strip leading plus signs and format semicolon list', () => {
-      const raw = '+Falsification/Fabrication of Data;+Plagiarism; +Fake Peer Review';
+      const raw =
+        '+Falsification/Fabrication of Data;+Plagiarism; +Fake Peer Review';
       expect(cleanRetractionReason(raw)).toBe(
         'Falsification/Fabrication of Data; Plagiarism; Fake Peer Review',
       );
@@ -102,7 +103,9 @@ cleanly"`;
 
     beforeEach(() => {
       mockRepo = {
-        bulkCreateRetractions: jest.fn().mockImplementation(async (batch) => batch.length),
+        bulkCreateRetractions: jest
+          .fn()
+          .mockImplementation(async (batch) => batch.length),
       };
       mockDb = {
         warmMemoryIndex: jest.fn().mockResolvedValue(undefined),
@@ -128,7 +131,8 @@ cleanly"`;
       expect(result.inserted).toBe(2);
       expect(mockRepo.bulkCreateRetractions).toHaveBeenCalledTimes(1);
 
-      const insertedBatch = (mockRepo.bulkCreateRetractions as jest.Mock).mock.calls[0][0];
+      const insertedBatch = (mockRepo.bulkCreateRetractions as jest.Mock).mock
+        .calls[0][0];
       expect(insertedBatch).toHaveLength(2);
 
       expect(insertedBatch[0]).toEqual(

@@ -129,7 +129,7 @@ describe('ReaderBootstrapService (Document-Scoped BFF Bootstrap)', () => {
 
     expect(res).not.toBeNull();
     expect(res?.scope).toBe('project');
-    expect(res?.scopeId).toBe(PROJECT_ID);
+    expect(res?.spaceId).toBe(PROJECT_ID);
     expect(res?.degraded).toBeUndefined();
     expect(res?.activeAttachmentId).toBe(ATT_PRIMARY_ID);
 
@@ -181,7 +181,7 @@ describe('ReaderBootstrapService (Document-Scoped BFF Bootstrap)', () => {
     });
 
     expect(res?.scope).toBe('user');
-    expect(res?.scopeId).toBe(USER_ID);
+    expect(res?.spaceId).toBe(USER_ID);
     expect(res?.activeAttachmentId).toBe(ATT_SECONDARY_ID);
     expect(res?.annotations).toHaveLength(1);
     expect(res?.annotations[0]).toMatchObject({

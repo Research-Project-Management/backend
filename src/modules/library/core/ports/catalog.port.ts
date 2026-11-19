@@ -469,7 +469,10 @@ export interface IExtractionFacade {
     primaryItemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<string[]>;
-  cleanupOrphanedFiles?(fileIds: string[]): Promise<void>;
+  cleanupOrphanedFiles?(
+    ids: string[],
+    target?: { spaceId?: string },
+  ): Promise<void>;
   getAnnotationsByAttachment(
     userId: string,
     attachmentId: string,
@@ -649,7 +652,7 @@ export interface ISearchFacade {
   ): Promise<void>;
   removeItemIndex?(itemId: string): Promise<void>;
   removeAttachmentIndex?(attachmentId: string): Promise<void>;
-  invalidateScopeCache?(scopeId: string): Promise<void>;
+  invalidateScopeCache?(spaceId: string): Promise<void>;
 }
 
 // ============================================================================

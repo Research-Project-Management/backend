@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectSpaceId } from '@/modules/library/core';
 import {
   EXPORT_CHUNK_SIZE,
   EXPORT_MAX_ITEMS,
@@ -23,17 +23,21 @@ export class ExportsRepository {
     scopeKey: string,
     userId?: string,
     projectId?: string,
+    explicitSpaceId?: string,
   ): string {
+    if (explicitSpaceId && isUuid(explicitSpaceId)) return explicitSpaceId;
     const rawProjectId =
       projectId || (scopeKey.startsWith('proj:') ? scopeKey.slice(5) : null);
     if (rawProjectId && isUuid(rawProjectId)) return rawProjectId;
+    if (
+      !scopeKey.startsWith('user:') &&
+      !scopeKey.startsWith('proj:') &&
+      isUuid(scopeKey)
+    ) {
+      return scopeKey;
+    }
     const rawUserId =
-      userId ||
-      (scopeKey.startsWith('user:')
-        ? scopeKey.slice(5)
-        : !scopeKey.startsWith('proj:') && isUuid(scopeKey)
-          ? scopeKey
-          : null);
+      userId || (scopeKey.startsWith('user:') ? scopeKey.slice(5) : null);
     if (rawUserId && isUuid(rawUserId)) return rawUserId;
     return scopeKey;
   }
@@ -47,6 +51,7 @@ export class ExportsRepository {
   }
 
   async upsertCustomStyle(params: {
+    spaceId?: string;
     scopeKey: string;
     slug: string;
     title: string;
@@ -61,6 +66,7 @@ export class ExportsRepository {
       scopeKey,
       params.userId,
       params.projectId,
+      params.spaceId,
     );
     const rawUserId =
       params.userId ||
@@ -193,7 +199,7 @@ export class ExportsRepository {
   }
 
   async findItemById(userId: string, itemId: string, projectId?: string) {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: effectiveProjectId || userId,
     };

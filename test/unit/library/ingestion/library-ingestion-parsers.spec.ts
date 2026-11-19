@@ -167,7 +167,10 @@ describe('Library Ingestion Parsers (DoiParser, BibtexParser & XmlLegacyFormatsP
         {
           type: 'article-journal',
           title: 'CSL Object Keywords Test',
-          keyword: [{ name: 'Graph Neural Networks' }, { keyword: 'Message Passing' }],
+          keyword: [
+            { name: 'Graph Neural Networks' },
+            { keyword: 'Message Passing' },
+          ],
         },
       ]);
       expect(cslEntries[0].keywords).toEqual([

@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/renamer.domain';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
   ItemProvenancePolicy,
   deriveFirstAuthor,
@@ -41,7 +41,7 @@ export class ExtractionRepository {
       : (scopeOrTx as Prisma.TransactionClient | undefined);
     const client = this.getClient(effectiveTx);
     if (typeof client.attachment?.groupBy !== 'function') return {};
-    const validProjectId = normalizeProjectScopeId(scope?.projectId);
+    const validProjectId = normalizeProjectSpaceId(scope?.projectId);
     const itemScopeWhere: Prisma.LibraryItemWhereInput | undefined =
       validProjectId
         ? { spaceId: validProjectId, deletedAt: null }
@@ -517,7 +517,7 @@ export class ExtractionRepository {
     const client = this.getClient(effectiveTx);
     let scopeWhere: Prisma.LibraryItemWhereInput;
     if (typeof scope === 'object' && scope !== null) {
-      const normalizedProjectId = normalizeProjectScopeId(scope.projectId);
+      const normalizedProjectId = normalizeProjectSpaceId(scope.projectId);
       const validUserId =
         typeof scope.userId === 'string' &&
         scope.userId.trim().length > 0 &&

@@ -5,6 +5,8 @@ import {
   SUPPORTED_CITATION_STYLES,
 } from '@/modules/library/citation/domain/citation.domain';
 import { CitationItemInput } from '@/modules/library/citation/types/citation.types';
+import { CslRepositoryService } from '@/modules/library/citation/services/csl-repository.service';
+import { ExportsRepository } from '@/modules/library/citation/repositories/exports.repository';
 
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
 
@@ -132,6 +134,72 @@ describe('Library Citation Service & CSL Style Registry', () => {
       expect(batch.citations).toHaveLength(2);
       expect(batch.bibliographyText).toContain('Attention Is All You Need');
       expect(batch.bibliographyText).toContain('Deep Learning');
+    });
+  });
+
+  describe('Custom CSL style spaceId attribution (Project & Personal)', () => {
+    const PROJECT_SPACE_ID = '11111111-1111-4111-8111-111111111111';
+    const ACTOR_USER_ID = '22222222-2222-4222-8222-222222222222';
+    const SAMPLE_CSL_XML = `<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info>
+    <title>Custom Lab Journal Style</title>
+    <id>http://www.zotero.org/styles/custom-lab-journal-style</id>
+  </info>
+  <citation><layout><text variable="title"/></layout></citation>
+  <bibliography><layout><text variable="title"/></layout></bibliography>
+</style>`;
+
+    it('persists project custom CSL style under canonical project spaceId (not actorUserId)', async () => {
+      const mockPrisma = {
+        citationStyle: {
+          upsert: jest.fn().mockResolvedValue({ id: 'style-1' }),
+          findUnique: jest.fn().mockResolvedValue(null),
+        },
+      };
+      const exportsRepo = new ExportsRepository(mockPrisma as never);
+      const cslRepo = new CslRepositoryService(
+        undefined,
+        undefined,
+        exportsRepo,
+      );
+
+      const meta = await cslRepo.registerCustomStyle(
+        SAMPLE_CSL_XML,
+        'Custom Lab Journal Style',
+        PROJECT_SPACE_ID,
+        ACTOR_USER_ID,
+      );
+
+      expect(meta.id).toBe('custom-lab-journal-style');
+      expect(mockPrisma.citationStyle.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            spaceId_slug: {
+              spaceId: PROJECT_SPACE_ID,
+              slug: 'custom-lab-journal-style',
+            },
+          },
+          create: expect.objectContaining({
+            spaceId: PROJECT_SPACE_ID,
+            createdById: ACTOR_USER_ID,
+            slug: 'custom-lab-journal-style',
+          }),
+        }),
+      );
+
+      await exportsRepo.findCustomStyle(
+        PROJECT_SPACE_ID,
+        'custom-lab-journal-style',
+      );
+      expect(mockPrisma.citationStyle.findUnique).toHaveBeenCalledWith({
+        where: {
+          spaceId_slug: {
+            spaceId: PROJECT_SPACE_ID,
+            slug: 'custom-lab-journal-style',
+          },
+        },
+      });
     });
   });
 });

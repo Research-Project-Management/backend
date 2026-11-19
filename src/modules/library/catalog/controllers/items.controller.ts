@@ -18,7 +18,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectSpaceId } from '@/modules/library/core';
 import {
   CreateItemDto,
   UpdateItemDto,
@@ -70,7 +70,7 @@ export class ItemsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(
+    const projectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || query?.spaceId,
     );
 
@@ -89,7 +89,7 @@ export class ItemsController {
     @Req() req?: RequestWithAccessHint,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.queryService.getCounts(
       userId,
       projectId,
@@ -106,7 +106,7 @@ export class ItemsController {
     @Body() body: ImportItemIdsDto,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     if (!projectId) {
       throw new BadRequestException(
         'Project ID is required in URL parameter to import items',
@@ -140,7 +140,7 @@ export class ItemsController {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const item = await this.queryService.getItem(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in library`);
@@ -157,7 +157,7 @@ export class ItemsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const item = await this.itemService.getItem(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(`Item with ID ${id} not found`);
@@ -189,7 +189,7 @@ export class ItemsController {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.curationService.getMetadataSources(userId, id, projectId);
   }
 
@@ -204,7 +204,7 @@ export class ItemsController {
     @Headers('x-correlation-id') correlationId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       paramProjectId || queryProjectId || body?.spaceId,
     );
     return this.itemService.createItem(
@@ -231,7 +231,7 @@ export class ItemsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
 
     const parsedHeaderVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
@@ -288,7 +288,7 @@ export class ItemsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.itemService.emptyTrash(userId, projectId);
   }
 
@@ -314,7 +314,7 @@ export class ItemsController {
     ) {
       throw new BadRequestException('Invalid expectedVersion');
     }
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
 
     const deleted = await this.itemService.deleteItem(
       userId,
@@ -352,7 +352,7 @@ export class ItemsController {
     ) {
       throw new BadRequestException('Invalid expectedVersion');
     }
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
 
     const restored = await this.itemService.restoreItem(
       userId,
@@ -375,7 +375,7 @@ export class ItemsController {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found`);
     }
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     const purged = await this.itemService.purgeItem(userId, id, projectId);
     return { success: true, purged, id };
   }
@@ -391,7 +391,7 @@ export class ItemsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.itemService.bulkPurge(userId, body?.itemIds || [], projectId);
   }
 
@@ -404,7 +404,7 @@ export class ItemsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.itemService.bulkTrash(userId, body?.itemIds || [], projectId);
   }
 
@@ -419,7 +419,7 @@ export class ItemsController {
     @Query('spaceId') queryProjectId?: string,
     @Param('spaceId') paramProjectId?: string,
   ) {
-    const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
+    const projectId = normalizeProjectSpaceId(paramProjectId || queryProjectId);
     return this.itemService.bulkRestore(userId, body?.itemIds || [], projectId);
   }
 }

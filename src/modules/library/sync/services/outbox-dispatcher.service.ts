@@ -19,7 +19,7 @@ export class OutboxDispatcher implements OutboxDispatchHandler {
 
   async publish<T = unknown>(envelope: DomainEventEnvelope<T>): Promise<void> {
     this.logger.debug(
-      `[DomainEventHandler] Dispatched ${envelope.eventType} for aggregate ${envelope.aggregateId} (scope: ${envelope.scopeId || envelope.projectId || envelope.userId})`,
+      `[DomainEventHandler] Dispatched ${envelope.eventType} for aggregate ${envelope.aggregateId} (scope: ${envelope.spaceId || envelope.projectId || envelope.userId})`,
     );
     if (this.eventEmitter)
       await this.eventEmitter.emitAsync(envelope.eventType, envelope);
@@ -53,7 +53,7 @@ export class OutboxDispatcher implements OutboxDispatchHandler {
       eventId: event.id,
       userId: effectiveUserId,
       projectId: effectiveProjectId,
-      scopeId: evRec.spaceId || effectiveProjectId || effectiveUserId,
+      spaceId: evRec.spaceId || effectiveProjectId || effectiveUserId,
       aggregateId: event.aggregateId,
       eventType: event.eventType,
       payload: event.payload,

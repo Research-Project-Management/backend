@@ -391,7 +391,7 @@ export type SubmissionPayload =
 
 export interface IngestionSubmissionEnvelope {
   projectId?: string;
-  scopeId?: string;
+  spaceId?: string;
   userId?: string;
   idempotencyKey?: string;
   payload: SubmissionPayload;
@@ -485,7 +485,7 @@ export interface IngestionReviewCaseSnapshot {
 export interface IngestionRunSnapshot {
   id: string;
   projectId: string;
-  scopeId?: string;
+  spaceId?: string;
   sourceType: string;
   status: IngestionStatus;
   currentStage?: string | null;

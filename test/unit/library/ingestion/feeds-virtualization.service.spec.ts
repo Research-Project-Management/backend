@@ -1,5 +1,8 @@
 import { FeedsService } from '@/modules/library/ingestion/services/feeds.service';
-import { FeedsRepository, type FeedSubscriptionRecord } from '@/modules/library/ingestion/repositories/feeds.repository';
+import {
+  FeedsRepository,
+  type FeedSubscriptionRecord,
+} from '@/modules/library/ingestion/repositories/feeds.repository';
 import { FeedRetrievalService } from '@/modules/library/ingestion/services/feed-retrieval.service';
 
 describe('FeedsService (Client-Side Protocol Virtualization Fast-Path)', () => {
@@ -21,20 +24,27 @@ describe('FeedsService (Client-Side Protocol Virtualization Fast-Path)', () => {
   beforeEach(() => {
     mockFeedsRepo = {
       findFeedByUrl: jest.fn().mockResolvedValue(null),
-      createFeed: jest.fn().mockImplementation(async (data: { url: string; title: string }) => ({
-        id: FEED_ID,
-        url: data.url,
-        title: data.title,
-      })),
-      upsertSubscription: jest.fn().mockImplementation(
-        async (data: { userId: string; feedId: string; customTitle?: string }) =>
-          ({
+      createFeed: jest
+        .fn()
+        .mockImplementation(async (data: { url: string; title: string }) => ({
+          id: FEED_ID,
+          url: data.url,
+          title: data.title,
+        })),
+      upsertSubscription: jest
+        .fn()
+        .mockImplementation(
+          async (data: {
+            userId: string;
+            feedId: string;
+            customTitle?: string;
+          }) => ({
             id: 'sub-1',
             userId: data.userId,
             feedId: data.feedId,
             customTitle: data.customTitle ?? null,
-          }) as unknown as FeedSubscriptionRecord,
-      ),
+          }),
+        ),
       findSubscription: jest.fn().mockResolvedValue({
         id: 'sub-1',
         userId: USER_ID,
@@ -45,15 +55,19 @@ describe('FeedsService (Client-Side Protocol Virtualization Fast-Path)', () => {
           url: 'https://rss.arxiv.org/rss/cs.AI',
         },
       }),
-      updateSubscriptionById: jest.fn().mockImplementation(
-        async (id: string, data: { customTitle?: string; feedId?: string }) =>
-          ({
+      updateSubscriptionById: jest
+        .fn()
+        .mockImplementation(
+          async (
+            id: string,
+            data: { customTitle?: string; feedId?: string },
+          ) => ({
             id,
             userId: USER_ID,
             feedId: data.feedId || FEED_ID,
             customTitle: data.customTitle ?? null,
-          }) as unknown as FeedSubscriptionRecord,
-      ),
+          }),
+        ),
     };
 
     mockFeedRetrieval = {

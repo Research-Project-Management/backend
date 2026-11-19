@@ -20,7 +20,7 @@ import {
   TransactionHelpers,
   UNIT_OF_WORK,
   IUnitOfWork,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   executeStandardLibraryCacheInvalidation,
   libraryConfig,
   SingleFlightCoalescer,
@@ -195,7 +195,7 @@ export class ItemRelationsService {
     }
 
     const effectiveProjectId =
-      normalizeProjectScopeId(projectId ?? sourceItem.projectId) ?? undefined;
+      normalizeProjectSpaceId(projectId ?? sourceItem.projectId) ?? undefined;
     const eventScope = { userId, projectId: effectiveProjectId };
 
     let ranPostCommitHook = false;
@@ -306,7 +306,7 @@ export class ItemRelationsService {
     }
 
     const effectiveProjectId =
-      normalizeProjectScopeId(projectId ?? sourceItem.projectId) ?? undefined;
+      normalizeProjectSpaceId(projectId ?? sourceItem.projectId) ?? undefined;
     const eventScope = { userId, projectId: effectiveProjectId };
 
     let ranPostCommitHook = false;
@@ -395,7 +395,7 @@ export class ItemFulltextService {
     attachmentId?: string,
   ): Promise<DocumentFulltextResponse> {
     const trimmedAttachmentId = attachmentId?.trim() || undefined;
-    const normalizedProj = normalizeProjectScopeId(projectId);
+    const normalizedProj = normalizeProjectSpaceId(projectId);
     const baseCacheKey = LIBRARY_REDIS_KEYS.itemFulltext(id);
     const cacheKey = trimmedAttachmentId
       ? `${baseCacheKey}:att:${trimmedAttachmentId}`
@@ -434,7 +434,7 @@ export class ItemFulltextService {
     }
 
     const effectiveProjectId =
-      normalizedProj ?? normalizeProjectScopeId(item.projectId) ?? null;
+      normalizedProj ?? normalizeProjectSpaceId(item.projectId) ?? null;
     const coalescingKey = `${cacheKey}:${effectiveProjectId || `user:${item.userId}`}`;
 
     return this.singleFlight.execute(coalescingKey, async () => {

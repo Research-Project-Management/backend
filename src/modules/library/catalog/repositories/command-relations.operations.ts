@@ -2,7 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma, RelationType, TagType } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
   disambiguateCitationKey,
   normalizeTags,
@@ -476,7 +476,7 @@ export async function setMyPublicationInClient(
   if (!isUuid(id) || !isUuid(userId)) {
     throw new NotFoundException(`CatalogItem ${id} not found`);
   }
-  const validProjectId = normalizeProjectScopeId(options?.projectId);
+  const validProjectId = normalizeProjectSpaceId(options?.projectId);
   const scopeWhere = {
     spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
   };

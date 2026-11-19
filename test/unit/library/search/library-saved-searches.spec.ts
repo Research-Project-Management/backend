@@ -181,7 +181,9 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
       expect(clauses[2]).toEqual({
         OR: [
           { contributors: { some: {} } },
-          { AND: [{ firstAuthor: { not: null } }, { firstAuthor: { not: '' } }] },
+          {
+            AND: [{ firstAuthor: { not: null } }, { firstAuthor: { not: '' } }],
+          },
         ],
       });
       expect(clauses[3]).toEqual({
@@ -555,7 +557,13 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
       };
 
       const result = await service.create(mockUserId, dto);
-      expect(mockRepo.create).toHaveBeenCalledWith(mockUserId, dto, undefined, undefined, 5);
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        mockUserId,
+        dto,
+        undefined,
+        undefined,
+        5,
+      );
       expect(mockRepo.countMatchingItems).toHaveBeenCalled();
       expect(result.cachedCount).toBe(5);
     });

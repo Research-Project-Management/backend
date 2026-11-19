@@ -16,7 +16,7 @@ import type {
   PageAnchorMatch,
 } from '@/modules/library/search/types/search.types';
 import {
-  isProjectScopeId,
+  isProjectSpaceId,
   isSafeSearchRegex,
   parseSafeSearchRegex,
   SearchQueryEngine,
@@ -342,7 +342,7 @@ export class SearchService {
       | undefined;
     const isAuthorized = Boolean(
       ownerItem &&
-      (isProjectScopeId(projectId)
+      (isProjectSpaceId(projectId)
         ? (ownerItem.projectId ?? ownerItem.spaceId) === projectId.trim()
         : ownerItem.spaceId
           ? ownerItem.spaceId === userId
@@ -373,9 +373,9 @@ export class SearchService {
     await this.repo.deleteFullTextIndexByAttachmentId(attachmentId);
   }
 
-  async invalidateFacetsCache(scopeId: string): Promise<void> {
-    if (!scopeId) return;
-    await this.repo.invalidateFacets(scopeId);
+  async invalidateFacetsCache(spaceId: string): Promise<void> {
+    if (!spaceId) return;
+    await this.repo.invalidateFacets(spaceId);
   }
 
   async indexItem(item: {
@@ -383,12 +383,12 @@ export class SearchService {
     userId?: string;
     projectId?: string;
   }): Promise<{ indexed: boolean }> {
-    const scopeId = item.projectId || item.userId;
+    const spaceId = item.projectId || item.userId;
     if (typeof this.repo.refreshItemSearchIndex === 'function') {
-      return this.repo.refreshItemSearchIndex(item.id, scopeId);
+      return this.repo.refreshItemSearchIndex(item.id, spaceId);
     }
-    if (scopeId) {
-      await this.invalidateFacetsCache(scopeId);
+    if (spaceId) {
+      await this.invalidateFacetsCache(spaceId);
     }
     return { indexed: Boolean(item.id) };
   }
@@ -461,14 +461,14 @@ export class SearchEventsSubscriber {
     }
 
     const resolvedItemId = payload?.itemId || payload?.id || event?.aggregateId;
-    const scopeId = this.resolveScopeId(event);
+    const spaceId = this.resolveEventSpaceId(event);
     let cacheAlreadyInvalidated = false;
 
     if (resolvedItemId && typeof this.searchService?.indexItem === 'function') {
       try {
         await this.searchService.indexItem({
           id: resolvedItemId,
-          projectId: scopeId,
+          projectId: spaceId,
         });
         cacheAlreadyInvalidated = true;
       } catch (err: unknown) {
@@ -478,10 +478,10 @@ export class SearchEventsSubscriber {
       }
     }
 
-    if (!scopeId || cacheAlreadyInvalidated) return;
+    if (!spaceId || cacheAlreadyInvalidated) return;
 
     try {
-      await this.searchService?.invalidateFacetsCache?.(scopeId);
+      await this.searchService?.invalidateFacetsCache?.(spaceId);
     } catch (err: unknown) {
       this.logger.warn(
         `[SearchEvents] Failed to invalidate facet cache on ${event.eventType}: ${err instanceof Error ? err.message : String(err)}`,
@@ -538,11 +538,11 @@ export class SearchEventsSubscriber {
 
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_DELETED, { async: true })
   async handleItemDeleted(event: DomainEventEnvelope): Promise<void> {
-    const scopeId = this.resolveScopeId(event);
-    if (!scopeId || !this.searchService?.invalidateFacetsCache) return;
+    const spaceId = this.resolveEventSpaceId(event);
+    if (!spaceId || !this.searchService?.invalidateFacetsCache) return;
 
     try {
-      await this.searchService.invalidateFacetsCache(scopeId);
+      await this.searchService.invalidateFacetsCache(spaceId);
     } catch (err: unknown) {
       this.logger.warn(
         `[SearchEvents] Facet cache invalidation error on ITEM_DELETED: ${err instanceof Error ? err.message : String(err)}`,
@@ -595,11 +595,11 @@ export class SearchEventsSubscriber {
       }
     }
 
-    const scopeId = this.resolveScopeId(event);
-    if (scopeId && this.searchService?.invalidateFacetsCache) {
+    const spaceId = this.resolveEventSpaceId(event);
+    if (spaceId && this.searchService?.invalidateFacetsCache) {
       cleanupTasks.push(
         this.searchService
-          .invalidateFacetsCache(scopeId)
+          .invalidateFacetsCache(spaceId)
           .catch((err: unknown) =>
             this.logger.warn(
               `[SearchEvents] Facet cache invalidation error: ${err instanceof Error ? err.message : String(err)}`,
@@ -636,11 +636,11 @@ export class SearchEventsSubscriber {
     }
   }
 
-  private resolveScopeId(event: DomainEventEnvelope): string | undefined {
+  private resolveEventSpaceId(event: DomainEventEnvelope): string | undefined {
     const payload = event?.payload as
       { projectId?: string | null; userId?: string } | undefined;
     return (
-      event?.scopeId ||
+      event?.spaceId ||
       event?.projectId ||
       payload?.projectId ||
       event?.userId ||
@@ -730,7 +730,7 @@ export class SearchFacade implements ISearchFacade {
     await this.searchService.deleteAttachmentSearchIndex(attachmentId);
   }
 
-  async invalidateScopeCache(scopeId: string): Promise<void> {
-    await this.searchService.invalidateFacetsCache(scopeId);
+  async invalidateScopeCache(spaceId: string): Promise<void> {
+    await this.searchService.invalidateFacetsCache(spaceId);
   }
 }

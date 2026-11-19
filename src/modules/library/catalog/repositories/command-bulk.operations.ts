@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
 import {
   extractFileIdFromUrl,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
@@ -61,6 +61,7 @@ export interface ICommandBulkRepositoryPort {
     purgedNotes: number;
     purgedCollections: number;
     storagePaths: string[];
+    storageDeletes?: Array<{ fileId: string; spaceId?: string }>;
     expiredItems: Array<{
       id: string;
       userId: string;
@@ -90,79 +91,105 @@ export interface IQueryBulkRepositoryPort {
 }
 
 export class CommandBulkOperations {
-  public static async collectStoragePathsForItems(
+  public static async collectStorageDeletesForItems(
     client: Prisma.TransactionClient | PrismaService,
     itemIds: string[],
-  ): Promise<string[]> {
+    fallbackSpaceByItemId?: ReadonlyMap<string, string>,
+  ): Promise<Array<{ fileId: string; spaceId?: string }>> {
     if (itemIds.length === 0) return [];
-    const paths = new Set<string>();
+    const seen = new Map<string, { fileId: string; spaceId?: string }>();
+    const addEntry = (fileId: string, spaceId?: string) => {
+      if (!fileId) return;
+      const key = `${spaceId ?? ''}:${fileId}`;
+      if (!seen.has(key)) {
+        seen.set(key, spaceId ? { fileId, spaceId } : { fileId });
+      }
+    };
 
     const [attachments, metadataRecords] = await Promise.all([
       client.attachment.findMany({
         where: { itemId: { in: itemIds } },
-        select: { id: true, fileId: true, url: true },
+        select: {
+          id: true,
+          itemId: true,
+          fileId: true,
+          url: true,
+          item: { select: { spaceId: true } },
+        },
       }),
       client.itemMetadata
         ? client.itemMetadata.findMany({
             where: { itemId: { in: itemIds } },
-            select: { rawPayload: true },
+            select: {
+              itemId: true,
+              rawPayload: true,
+              item: { select: { spaceId: true } },
+            },
           })
         : Promise.resolve([]),
     ]);
     const attachmentIds: string[] = [];
+    const attachmentSpaceById = new Map<string, string | undefined>();
     for (const att of attachments) {
-      if (att.id) attachmentIds.push(att.id);
-      const fileId = att.fileId || extractFileIdFromUrl(att.url);
-      if (fileId) paths.add(fileId);
+      const attRec = att as {
+        id?: string;
+        itemId?: string;
+        fileId?: string | null;
+        url?: string;
+        item?: { spaceId?: string } | null;
+      };
+      const resolvedSpaceId =
+        attRec.item?.spaceId ??
+        (attRec.itemId ? fallbackSpaceByItemId?.get(attRec.itemId) : undefined);
+      if (attRec.id) {
+        attachmentIds.push(attRec.id);
+        attachmentSpaceById.set(attRec.id, resolvedSpaceId);
+      }
+      const fileId = attRec.fileId || extractFileIdFromUrl(attRec.url);
+      if (fileId) addEntry(fileId, resolvedSpaceId);
     }
 
     if (attachmentIds.length > 0 && client.attachmentRevision) {
       const revisions = await client.attachmentRevision.findMany({
         where: { attachmentId: { in: attachmentIds } },
-        select: { fileId: true, url: true },
+        select: { attachmentId: true, fileId: true, url: true },
       });
       for (const rev of revisions) {
         const fileId = rev.fileId || extractFileIdFromUrl(rev.url);
-        if (fileId) paths.add(fileId);
+        if (fileId) {
+          addEntry(fileId, attachmentSpaceById.get(rev.attachmentId));
+        }
       }
     }
 
     for (const rec of metadataRecords) {
-      const raw = rec.rawPayload as
+      const metaRec = rec as {
+        itemId?: string;
+        rawPayload: unknown;
+        item?: { spaceId?: string } | null;
+      };
+      const raw = metaRec.rawPayload as
         | (Record<string, unknown> & { isOffloaded?: boolean; fileId?: string })
         | null;
-      if (raw?.isOffloaded && typeof raw.fileId === 'string' && raw.fileId)
-        paths.add(raw.fileId);
+      if (raw?.isOffloaded && typeof raw.fileId === 'string' && raw.fileId) {
+        const resolvedSpaceId =
+          metaRec.item?.spaceId ??
+          (metaRec.itemId
+            ? fallbackSpaceByItemId?.get(metaRec.itemId)
+            : undefined);
+        addEntry(raw.fileId, resolvedSpaceId);
+      }
     }
 
-    const candidateFileIds = Array.from(paths);
-    if (candidateFileIds.length === 0) return [];
+    return Array.from(seen.values());
+  }
 
-    if (typeof client.attachment.findMany === 'function') {
-      const activeRefs = await client.attachment.findMany({
-        where: {
-          fileId: { in: candidateFileIds },
-          itemId: { notIn: itemIds },
-          deletedAt: null,
-        },
-        select: { fileId: true },
-      });
-      const referencedSet = new Set(
-        (activeRefs || [])
-          .map((r) => r.fileId)
-          .filter((f): f is string => Boolean(f)),
-      );
-      return candidateFileIds.filter((fid) => !referencedSet.has(fid));
-    }
-
-    const safePaths: string[] = [];
-    for (const fileId of candidateFileIds) {
-      const remainingRefs = await client.attachment.count({
-        where: { fileId, itemId: { notIn: itemIds }, deletedAt: null },
-      });
-      if (remainingRefs === 0) safePaths.push(fileId);
-    }
-    return safePaths;
+  public static async collectStoragePathsForItems(
+    client: Prisma.TransactionClient | PrismaService,
+    itemIds: string[],
+  ): Promise<string[]> {
+    const entries = await this.collectStorageDeletesForItems(client, itemIds);
+    return Array.from(new Set(entries.map((entry) => entry.fileId)));
   }
 
   public static async softDeleteMany(
@@ -176,7 +203,7 @@ export class CommandBulkOperations {
     if (!validUserId || validIds.length === 0)
       return { succeededIds: [], failedIds: [...itemIds] };
 
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeFilter: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,
@@ -254,7 +281,7 @@ export class CommandBulkOperations {
       return { restoredItems: [], succeededIds: [], failedIds: [...itemIds] };
     }
 
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeFilter: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
     };
@@ -469,7 +496,7 @@ export class CommandBulkOperations {
       };
     }
 
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeFilter: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
     };
@@ -523,6 +550,7 @@ export class CommandBulkOperations {
     purgedNotes: number;
     purgedCollections: number;
     storagePaths: string[];
+    storageDeletes: Array<{ fileId: string; spaceId?: string }>;
     expiredItems: Array<{
       id: string;
       userId: string;
@@ -578,6 +606,12 @@ export class CommandBulkOperations {
             : null;
       return { id: row.id, userId, projectId };
     };
+    const expiredItemSpaceMap = new Map<string, string>();
+    for (const row of rawExpiredItems) {
+      if (row.spaceId) {
+        expiredItemSpaceMap.set(row.id, row.spaceId);
+      }
+    }
     const expiredItems = rawExpiredItems.map(mapExpiredScope);
     const expiredNotes = rawExpiredNotes.map(mapExpiredScope);
     const expiredCollections = rawExpiredCollections.map(mapExpiredScope);
@@ -586,16 +620,20 @@ export class CommandBulkOperations {
     const [itemPurgeRes, delNotes, delCollections] = await Promise.all([
       expiredItemIds.length > 0
         ? (async () => {
-            const paths = await this.collectStoragePathsForItems(
+            const deletes = await this.collectStorageDeletesForItems(
               client,
               expiredItemIds,
+              expiredItemSpaceMap,
             );
             const delItems = await client.libraryItem.deleteMany({
               where: { id: { in: expiredItemIds } },
             });
-            return { paths, count: delItems.count };
+            return { deletes, count: delItems.count };
           })()
-        : Promise.resolve({ paths: [] as string[], count: 0 }),
+        : Promise.resolve({
+            deletes: [] as Array<{ fileId: string; spaceId?: string }>,
+            count: 0,
+          }),
       expiredNotes.length > 0
         ? client.libraryNote.deleteMany({
             where: { id: { in: expiredNotes.map((n) => n.id) } },
@@ -607,7 +645,10 @@ export class CommandBulkOperations {
           })
         : Promise.resolve({ count: 0 }),
     ]);
-    const storagePaths = itemPurgeRes.paths;
+    const storageDeletes = itemPurgeRes.deletes;
+    const storagePaths = Array.from(
+      new Set(storageDeletes.map((d) => d.fileId)),
+    );
     const purgedItems = itemPurgeRes.count;
     const purgedNotes = delNotes.count;
     const purgedCollections = delCollections.count;
@@ -617,6 +658,7 @@ export class CommandBulkOperations {
       purgedNotes,
       purgedCollections,
       storagePaths,
+      storageDeletes,
       expiredItems,
       expiredNotes,
       expiredCollections,
@@ -641,7 +683,7 @@ export class CommandBulkOperations {
         storagePaths: [],
       };
     }
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeFilter: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
     };

@@ -528,6 +528,14 @@ export class PresignUploadDto {
   sizeBytes?: number;
 
   @IsOptional()
+  @IsNumber()
+  size?: number;
+
+  @IsOptional()
+  @IsUUID()
+  spaceId?: string;
+
+  @IsOptional()
   @IsString()
   contentHash?: string;
 }
@@ -548,6 +556,14 @@ export class CompletePresignDto {
   sizeBytes?: number;
 
   @IsOptional()
+  @IsNumber()
+  size?: number;
+
+  @IsOptional()
+  @IsUUID()
+  spaceId?: string;
+
+  @IsOptional()
   @IsString()
   contentHash?: string;
 }
@@ -562,6 +578,14 @@ export class InitiateMultipartDto {
 
   @IsNumber()
   totalSize!: number;
+
+  @IsOptional()
+  @IsNumber()
+  sizeBytes?: number;
+
+  @IsOptional()
+  @IsUUID()
+  spaceId?: string;
 
   @IsOptional()
   @IsString()

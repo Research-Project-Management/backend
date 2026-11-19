@@ -13,7 +13,7 @@ import {
   ICatalogFacade,
   ITEM_CACHE_INVALIDATOR,
   IItemCacheInvalidator,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
 } from '@/modules/library/core';
 import { invalidateIngestionItemCache } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
@@ -267,7 +267,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
         { userId?: string | null; projectId?: string | null; itemIds: string[] }
       >();
       for (const item of updatedDeltaItems) {
-        const validProjectId = normalizeProjectScopeId(item.projectId);
+        const validProjectId = normalizeProjectSpaceId(item.projectId);
         const scopeKey = `${item.userId || ''}:${validProjectId || ''}`;
         const existingGroup = groupedByScope.get(scopeKey);
         if (existingGroup) {
@@ -436,7 +436,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
         { userId?: string | null; projectId?: string | null; itemIds: string[] }
       >();
       for (const item of updatedItems) {
-        const validProjectId = normalizeProjectScopeId(item.projectId);
+        const validProjectId = normalizeProjectSpaceId(item.projectId);
         const scopeKey = `${item.userId || ''}:${validProjectId || ''}`;
         const existingGroup = groupedByScope.get(scopeKey);
         if (existingGroup) {

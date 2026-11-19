@@ -469,7 +469,7 @@ export class IngestionRepository {
   async findOrphanedRuns(
     olderThan: Date,
     options?: {
-      scopeId?: string;
+      spaceId?: string;
       userId?: string;
       projectId?: string;
       limit?: number;
@@ -479,8 +479,8 @@ export class IngestionRepository {
     const client = this.getClient(tx);
     let projectId = options?.projectId;
     let userId = options?.userId;
-    if (options?.scopeId && !projectId && !userId) {
-      const parsed = parseRunScope(options.scopeId);
+    if (options?.spaceId && !projectId && !userId) {
+      const parsed = parseRunScope(options.spaceId);
       projectId = parsed.projectId || undefined;
       userId = parsed.userId !== 'system' ? parsed.userId : undefined;
     }
@@ -934,7 +934,12 @@ export class IngestionRepository {
     return client.capturePreview.findMany({
       where: { expiresAt: { lt: olderThan } },
       take: 200,
-      select: { id: true, claimedAt: true, canonicalMetadata: true },
+      select: {
+        id: true,
+        spaceId: true,
+        claimedAt: true,
+        canonicalMetadata: true,
+      },
     });
   }
 

@@ -269,7 +269,7 @@ export interface DomainEventEnvelope<T = unknown> {
   eventId: string;
   userId?: string;
   projectId?: string;
-  scopeId?: string;
+  spaceId?: string;
   aggregateId: string;
   eventType: string;
   payload: T;

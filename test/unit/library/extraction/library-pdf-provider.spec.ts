@@ -65,7 +65,9 @@ describe('PdfProvider', () => {
   });
 
   it('skips duplicate trustedExtractor.extract when skipTrustedExtraction is true', async () => {
-    mockedGetMeta.mockResolvedValue({ info: { Title: 'Header Extracted Paper Title' } });
+    mockedGetMeta.mockResolvedValue({
+      info: { Title: 'Header Extracted Paper Title' },
+    });
     mockedGetDocumentProxy.mockResolvedValue({
       numPages: 2,
       getPage: jest.fn(async () => ({
@@ -378,11 +380,10 @@ describe('PdfProvider', () => {
         'Copyright 2025 ACM — Page 2 of 18',
       ].join('\n');
 
-      const stripped =
-        LayoutExtractor.stripRunningHeadersAndFootersFromText([
-          page1,
-          page2,
-        ]);
+      const stripped = LayoutExtractor.stripRunningHeadersAndFootersFromText([
+        page1,
+        page2,
+      ]);
 
       expect(stripped.signatures.size).toBeGreaterThanOrEqual(2);
       expect(stripped.cleanedText).not.toContain(

@@ -131,7 +131,7 @@ export class PipelineService {
    */
   async executePipeline(
     runId: string,
-    scopeId: string,
+    spaceId: string,
     envelope: IngestionSubmissionEnvelope,
     options?: { isFinalAttempt?: boolean },
   ): Promise<void> {
@@ -140,7 +140,7 @@ export class PipelineService {
     let succeeded = false;
     let preserveBlobForRetry = false;
     try {
-      await this.executePipelineStages(runId, scopeId, envelope, {
+      await this.executePipelineStages(runId, spaceId, envelope, {
         isFinalAttempt: explicitFinalAttempt ?? true,
       });
       succeeded = true;
@@ -153,7 +153,7 @@ export class PipelineService {
       }
       if (explicitFinalAttempt === false && nonRetryable) {
         await this.repo
-          .updateRunStatus(scopeId, runId, IngestionStatus.FAILED_FINAL, {
+          .updateRunStatus(spaceId, runId, IngestionStatus.FAILED_FINAL, {
             lastError: errMsg,
             completedAt: new Date(),
           })
@@ -165,7 +165,7 @@ export class PipelineService {
           );
       } else if (explicitFinalAttempt === undefined && retryable) {
         await this.repo
-          .updateRunStatus(scopeId, runId, IngestionStatus.FAILED_RETRYABLE, {
+          .updateRunStatus(spaceId, runId, IngestionStatus.FAILED_RETRYABLE, {
             lastError: errMsg,
           })
           .then(() => markRunStatusTransitioned(runId))
@@ -202,8 +202,12 @@ export class PipelineService {
         : undefined;
 
     if (claimCheckFileId && this.filesPort?.deleteFile) {
+      const targetSpaceId = envelope?.projectId || envelope?.userId;
       try {
-        await this.filesPort.deleteFile(claimCheckFileId);
+        await this.filesPort.deleteFile(
+          claimCheckFileId,
+          targetSpaceId ? { spaceId: targetSpaceId } : undefined,
+        );
         return true;
       } catch (err: unknown) {
         this.logger.warn(
@@ -253,14 +257,14 @@ export class PipelineService {
 
   private async executePipelineStages(
     runId: string,
-    scopeId: string,
+    spaceId: string,
     envelope: IngestionSubmissionEnvelope,
     options?: { isFinalAttempt?: boolean },
   ): Promise<void> {
-    const resolvedScope = resolveScope(scopeId, envelope);
+    const resolvedScope = resolveScope(spaceId, envelope);
 
     const existingRun = await this.repo
-      .findRunById(scopeId, runId)
+      .findRunById(spaceId, runId)
       .catch(() => null);
 
     const existingInputParams = existingRun?.inputParams as
@@ -311,7 +315,7 @@ export class PipelineService {
           totalItems: 1,
         });
 
-    const session = this.orchestrator.createSession(runId, scopeId, aggregate, {
+    const session = this.orchestrator.createSession(runId, spaceId, aggregate, {
       isFinalAttempt: options?.isFinalAttempt,
     });
 
@@ -323,7 +327,7 @@ export class PipelineService {
           const identifiedCandidates = await this.identify.execute({
             runId,
             payload: envelope.payload,
-            scopeId,
+            spaceId,
             userId: resolvedScope.userId,
             projectId: resolvedScope.projectId,
           });
@@ -420,7 +424,7 @@ export class PipelineService {
 
         // 2. Authoritative Single-Hit Enrichment (Only for NEW items)
         const enriched = await this.resolve.execute({
-          scopeId,
+          spaceId,
           candidates: normalizedCandidates,
         });
 
@@ -436,7 +440,7 @@ export class PipelineService {
           try {
             const scrapedFallback = await this.identify.resolveUrlFallback(
               envelope.payload,
-              scopeId,
+              spaceId,
             );
             if (scrapedFallback) {
               const fallbackCandidate = applyUserOverridesToCandidate(
@@ -457,7 +461,7 @@ export class PipelineService {
               );
               if (foundNewId && !fbExtra.alreadyResolvedByMirror) {
                 const fbEnriched = await this.resolve.execute({
-                  scopeId,
+                  spaceId,
                   candidates: [fallbackCandidate],
                 });
                 for (const ec of fbEnriched) {
@@ -543,7 +547,7 @@ export class PipelineService {
     // Multi-Record Batch Processing
     if (resolution.isBatch && resolution.enrichedCandidates) {
       await this.batchExecutor.processRecordBatch({
-        scopeId,
+        spaceId,
         runId,
         envelope,
         resolvedScope,
@@ -565,7 +569,7 @@ export class PipelineService {
         resolution.decision.proposedItem?.url ||
         'Document';
       await this.sideEffects.handleBlockedSubmission({
-        scopeId,
+        spaceId,
         runId,
         envelope,
         decision: resolution.decision,
@@ -612,7 +616,7 @@ export class PipelineService {
             'Document';
 
           await this.repo.updateRunStatus(
-            scopeId,
+            spaceId,
             runId,
             IngestionStatus.COMPLETED,
             {
@@ -660,7 +664,7 @@ export class PipelineService {
       'COMMIT',
       async () =>
         this.commit.execute({
-          scopeId: resolvedScope.projectId || resolvedScope.userId,
+          spaceId: resolvedScope.projectId || resolvedScope.userId,
           item: itemToCommit,
           options: {
             collectionIds: envelope.collectionIds,
@@ -737,7 +741,7 @@ export class PipelineService {
         'Document';
 
       await this.repo.updateRunStatus(
-        scopeId,
+        spaceId,
         runId,
         IngestionStatus.COMPLETED,
         {

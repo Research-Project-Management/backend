@@ -41,7 +41,7 @@ export class IngestionSagaSession {
 
   constructor(
     public readonly runId: string,
-    public readonly scopeId: string,
+    public readonly spaceId: string,
     public readonly aggregate: IngestionRunAggregate,
     private readonly repo: IngestionRepository,
     private readonly logger: Logger,
@@ -63,7 +63,7 @@ export class IngestionSagaSession {
           : stageName === 'RESOLVE'
             ? IngestionStage.RECONCILE
             : IngestionStage[stageName];
-      await this.repo.updateRunStage(this.scopeId, this.runId, dbStage);
+      await this.repo.updateRunStage(this.spaceId, this.runId, dbStage);
     } catch (stageUpdateErr: unknown) {
       const msg =
         stageUpdateErr instanceof Error
@@ -163,7 +163,7 @@ export class IngestionSagaSession {
 
     try {
       await this.repo.updateRunStatus(
-        this.scopeId,
+        this.spaceId,
         this.runId,
         this.isFinalAttempt
           ? IngestionStatus.FAILED_FINAL
@@ -255,13 +255,13 @@ export class IngestionSagaOrchestrator {
 
   createSession(
     runId: string,
-    scopeId: string,
+    spaceId: string,
     aggregate: IngestionRunAggregate,
     options?: { isFinalAttempt?: boolean },
   ): IngestionSagaSession {
     return new IngestionSagaSession(
       runId,
-      scopeId,
+      spaceId,
       aggregate,
       this.repo,
       this.logger,
@@ -271,17 +271,17 @@ export class IngestionSagaOrchestrator {
 }
 
 export function resolveScope(
-  scopeId: string,
+  spaceId: string,
   envelope: IngestionSubmissionEnvelope,
 ): { userId: string; projectId?: string } {
   const isProject =
-    Boolean(scopeId) &&
-    scopeId !== 'user' &&
-    scopeId !== 'me' &&
-    scopeId !== envelope.userId &&
-    isUUID(scopeId);
-  const userId = envelope.userId || (scopeId !== 'user' ? scopeId : 'system');
-  const projectId = envelope.projectId || (isProject ? scopeId : undefined);
+    Boolean(spaceId) &&
+    spaceId !== 'user' &&
+    spaceId !== 'me' &&
+    spaceId !== envelope.userId &&
+    isUUID(spaceId);
+  const userId = envelope.userId || (spaceId !== 'user' ? spaceId : 'system');
+  const projectId = envelope.projectId || (isProject ? spaceId : undefined);
   return { userId, projectId };
 }
 
@@ -316,14 +316,14 @@ function consumeRunStatusTransition(runId: string): boolean {
 
 export async function transitionRunToFailedIfActive(params: {
   repo: IngestionRepository;
-  scopeId: string;
+  spaceId: string;
   runId: string;
   status: IngestionStatus;
   lastError: string;
   completedAt?: Date;
   logger?: Logger;
 }): Promise<boolean> {
-  const { repo, scopeId, runId, status, lastError, completedAt, logger } =
+  const { repo, spaceId, runId, status, lastError, completedAt, logger } =
     params;
   if (consumeRunStatusTransition(runId)) {
     return false;
@@ -332,7 +332,7 @@ export async function transitionRunToFailedIfActive(params: {
     completedAt ??
     (status === IngestionStatus.FAILED_FINAL ? new Date() : undefined);
   await repo
-    .updateRunStatus(scopeId, runId, status, {
+    .updateRunStatus(spaceId, runId, status, {
       lastError,
       ...(effectiveCompletedAt ? { completedAt: effectiveCompletedAt } : {}),
     })
@@ -448,7 +448,7 @@ export class IngestionRunReporterService {
   }
 
   async transitionRunToFailedIfActive(
-    scopeId: string,
+    spaceId: string,
     runId: string,
     status: IngestionStatus,
     lastError: string,
@@ -456,7 +456,7 @@ export class IngestionRunReporterService {
   ): Promise<boolean> {
     return transitionRunToFailedIfActive({
       repo: this.repo,
-      scopeId,
+      spaceId,
       runId,
       status,
       lastError,
@@ -466,13 +466,13 @@ export class IngestionRunReporterService {
   }
 
   async getRunStatus(
-    userIdOrScopeId: string,
+    userIdOrSpaceId: string,
     runId: string,
     projectId?: string,
   ): Promise<IngestionRunSnapshot> {
     const scope = projectId
-      ? { userId: userIdOrScopeId, projectId }
-      : userIdOrScopeId;
+      ? { userId: userIdOrSpaceId, projectId }
+      : userIdOrSpaceId;
     const run = await this.repo.findRunById(scope, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
@@ -533,14 +533,14 @@ export class IngestionRunReporterService {
   }
 
   async getRunProgress(
-    userIdOrScopeId: string,
+    userIdOrSpaceId: string,
     runId: string,
     projectId?: string,
   ): Promise<IngestionRunProgressResult> {
     const scope = projectId
-      ? { userId: userIdOrScopeId, projectId }
-      : userIdOrScopeId;
-    const effectiveScopeId = projectId || userIdOrScopeId;
+      ? { userId: userIdOrSpaceId, projectId }
+      : userIdOrSpaceId;
+    const effectiveSpaceId = projectId || userIdOrSpaceId;
     const run = await this.repo.findRunById(scope, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
@@ -624,7 +624,7 @@ export class IngestionRunReporterService {
 
     return {
       runId: run.id,
-      projectId: effectiveScopeId,
+      projectId: effectiveSpaceId,
       status: isBlocked ? 'BLOCKED' : String(run.status),
       currentStage: run.currentStage || undefined,
       total,
@@ -641,7 +641,7 @@ export class IngestionRunReporterService {
   }
 
   async retryRun(
-    userIdOrScopeId: string,
+    userIdOrSpaceId: string,
     runId: string,
     projectId?: string,
   ): Promise<{
@@ -650,9 +650,9 @@ export class IngestionRunReporterService {
     message: string;
   }> {
     const scope = projectId
-      ? { userId: userIdOrScopeId, projectId }
-      : userIdOrScopeId;
-    const effectiveScopeId = projectId || userIdOrScopeId;
+      ? { userId: userIdOrSpaceId, projectId }
+      : userIdOrSpaceId;
+    const effectiveSpaceId = projectId || userIdOrSpaceId;
     const run = await this.repo.findRunById(scope, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
@@ -700,13 +700,13 @@ export class IngestionRunReporterService {
         ? runRec.spaceId
         : undefined);
     const resolvedProjectId =
-      projectId && projectId !== 'user' && projectId !== userIdOrScopeId
+      projectId && projectId !== 'user' && projectId !== userIdOrSpaceId
         ? projectId
         : (runProjectId ?? undefined);
     const resolvedUserId =
-      runRec.userId || runRec.createdById || userIdOrScopeId;
+      runRec.userId || runRec.createdById || userIdOrSpaceId;
     const queueTargetScope =
-      resolvedProjectId || resolvedUserId || effectiveScopeId;
+      resolvedProjectId || resolvedUserId || effectiveSpaceId;
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
     let finalStatus: IngestionStatus = IngestionStatus.PENDING;

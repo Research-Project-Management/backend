@@ -118,7 +118,7 @@ export class UrlMetadataScraperService {
   async scrape(
     url: string,
     options?: {
-      scopeId?: string;
+      spaceId?: string;
       userId?: string;
       preferredFilename?: string;
     },
@@ -138,7 +138,7 @@ export class UrlMetadataScraperService {
 
     if (this.webFetch) {
       const ladderRes = await this.webFetch.fetch(canonicalUrl, {
-        scopeId: options?.scopeId,
+        spaceId: options?.spaceId,
         userId: options?.userId,
         preferredFilename: options?.preferredFilename,
       });
@@ -300,7 +300,7 @@ export class UrlMetadataScraperService {
     canonicalUrl: string,
     slugHint: { title?: string; filename: string },
     options?: {
-      scopeId?: string;
+      spaceId?: string;
       userId?: string;
       preferredFilename?: string;
     },
@@ -322,15 +322,16 @@ export class UrlMetadataScraperService {
       (async () => {
         if (!this.filesPort) return;
         try {
+          const targetSpaceId =
+            options?.spaceId && options.spaceId !== 'user'
+              ? options.spaceId
+              : options?.userId;
           const uploadRes = await this.filesPort.uploadFile({
             userId: options?.userId || SYSTEM_INGESTION_USER_ID,
+            spaceId: targetSpaceId,
             filename: effectiveFilename,
             buffer,
             mimeType: 'application/pdf',
-            projectId:
-              options?.scopeId && options.scopeId !== 'user'
-                ? options.scopeId
-                : undefined,
             source: 'url_pdf_download',
           });
           fileId = uploadRes?.fileId;

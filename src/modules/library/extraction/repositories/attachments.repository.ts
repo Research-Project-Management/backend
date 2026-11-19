@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { syncItemDenormalizedCountsInClient } from '@/modules/library/core';
@@ -233,14 +232,21 @@ export class AttachmentsRepository {
     excludeAttachmentId?: string,
     tx?: Prisma.TransactionClient,
     excludeItemId?: string,
+    spaceId?: string,
   ): Promise<number> {
     if (!fileId) return 0;
     const client = this.getClient(tx);
+    const activeItemFilter = {
+      deletedAt: null,
+      ...(spaceId ? { spaceId } : {}),
+    };
     const [attCount, revCount] = await Promise.all([
       client.attachment?.count
         ? client.attachment.count({
             where: {
               fileId,
+              deletedAt: null,
+              item: activeItemFilter,
               ...(excludeAttachmentId
                 ? { id: { not: excludeAttachmentId } }
                 : {}),
@@ -255,9 +261,11 @@ export class AttachmentsRepository {
               ...(excludeAttachmentId
                 ? { attachmentId: { not: excludeAttachmentId } }
                 : {}),
-              ...(excludeItemId
-                ? { attachment: { itemId: { not: excludeItemId } } }
-                : {}),
+              attachment: {
+                deletedAt: null,
+                item: activeItemFilter,
+                ...(excludeItemId ? { itemId: { not: excludeItemId } } : {}),
+              },
             },
           })
         : Promise.resolve(0),
@@ -615,110 +623,16 @@ export class AttachmentsRepository {
     }
   }
 
-  private async syncRenamedFileRecord(
-    attachmentId: string,
-    newFilename: string,
-    fileId: string,
-    updated: { itemId?: string | null; url?: string | null } | null,
-    client: Prisma.TransactionClient,
-  ): Promise<{ clonedFileId: string; nextUrl?: string | null } | null> {
-    try {
-      const otherRefs = await this.countFileIdReferences(
-        fileId,
-        attachmentId,
-        client,
-      );
-      if (
-        otherRefs > 0 &&
-        client.storageFile?.findUnique &&
-        client.storageFile?.create
-      ) {
-        const existingFile = await client.storageFile.findUnique({
-          where: { id: fileId },
-        });
-        if (existingFile) {
-          const clonedFileId = randomUUID();
-          await client.storageFile.create({
-            data: {
-              id: clonedFileId,
-              spaceId: existingFile.spaceId,
-              createdById: existingFile.createdById,
-              filename: newFilename,
-              size: existingFile.size,
-              mimeType: existingFile.mimeType,
-              isFolder: existingFile.isFolder,
-              metadata:
-                (existingFile.metadata as Prisma.InputJsonValue) ?? undefined,
-              parentId: existingFile.parentId,
-              linkedToType: 'Paper',
-              linkedToId: updated?.itemId ?? existingFile.linkedToId,
-              blobId: existingFile.blobId,
-            },
-          });
-          if (existingFile.blobId && client.storageBlob?.update) {
-            await client.storageBlob.update({
-              where: { id: existingFile.blobId },
-              data: { refCount: { increment: 1 } },
-            });
-          }
-          const nextUrl =
-            typeof updated?.url === 'string' && updated.url.includes(fileId)
-              ? updated.url.replace(fileId, clonedFileId)
-              : updated?.url;
-          if (client.attachmentRevision?.updateMany) {
-            await client.attachmentRevision.updateMany({
-              where: { attachmentId, fileId },
-              data: {
-                fileId: clonedFileId,
-                ...(typeof nextUrl === 'string' ? { url: nextUrl } : {}),
-              },
-            });
-          }
-          return { clonedFileId, nextUrl };
-        }
-      }
-      await client.storageFile.update({
-        where: { id: fileId },
-        data: { filename: newFilename },
-      });
-    } catch (err: unknown) {
-      this.logger.debug(
-        `Could not sync filename on file record ${fileId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    return null;
-  }
-
   private async applyAttachmentFilenameAndFileRename(
     attachmentId: string,
     newFilename: string,
-    fileId: string | undefined,
+    _fileId: string | undefined,
     client: Prisma.TransactionClient,
   ) {
-    let updated = await client.attachment.update({
+    const updated = await client.attachment.update({
       where: { id: attachmentId },
       data: { filename: newFilename },
     });
-    if (fileId) {
-      const cloned = await this.syncRenamedFileRecord(
-        attachmentId,
-        newFilename,
-        fileId,
-        updated,
-        client,
-      );
-      if (cloned) {
-        updated = await client.attachment.update({
-          where: { id: attachmentId },
-          data: {
-            fileId: cloned.clonedFileId,
-            ...(typeof cloned.nextUrl === 'string'
-              ? { url: cloned.nextUrl }
-              : {}),
-          },
-        });
-      }
-    }
     if (updated?.itemId && client.libraryItem?.updateMany) {
       await client.libraryItem.updateMany({
         where: { id: updated.itemId },

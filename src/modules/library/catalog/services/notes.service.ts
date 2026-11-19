@@ -28,7 +28,7 @@ import {
   TransactionHelpers,
   UNIT_OF_WORK,
   IUnitOfWork,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   ConfigurationException,
   LIBRARY_EVENT_TYPES,
 } from '@/modules/library/core';
@@ -62,7 +62,7 @@ export class NotesService {
     projectId?: string | null,
     itemId?: string | null,
   ): Promise<void> {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     if (itemId) {
       await this.cacheCoordinator.invalidateItemCache(
         itemId,
@@ -125,7 +125,7 @@ export class NotesService {
               : '',
         };
         const note = await this.repo.create(userId, sanitizedData, tx);
-        const effectiveProjectId = normalizeProjectScopeId(
+        const effectiveProjectId = normalizeProjectSpaceId(
           sanitizedData.projectId,
         );
         const eventScope = { userId, projectId: effectiveProjectId };
@@ -202,7 +202,7 @@ export class NotesService {
       }
     }
     const resolvedVersion = data?.expectedVersion;
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
 
     let ranPostCommitHook = false;
     const updatedNote = await this.libraryTx.executeInTransaction(
@@ -282,7 +282,7 @@ export class NotesService {
     expectedVersion?: number,
     projectId?: string,
   ): Promise<boolean> {
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     let deletedItemId: string | null | undefined;
     let deletedProjectId: string | undefined = validProjectId;
     let ranPostCommitHook = false;
@@ -411,7 +411,7 @@ export class NotesService {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
-    const effectiveProjectId = normalizeProjectScopeId(
+    const effectiveProjectId = normalizeProjectSpaceId(
       opts.projectId ||
         ('projectId' in item && typeof item.projectId === 'string'
           ? item.projectId

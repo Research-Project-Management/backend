@@ -246,6 +246,7 @@ export class IngestionService {
     }
 
     // Claim Check Pattern: If record payload exceeds 32KB, offload compressed payload to Storage
+    const targetSpaceId = envelope.projectId || userId;
     let effectivePayload = envelope.payload;
     if (
       envelope.payload.kind === 'RECORD' &&
@@ -258,7 +259,7 @@ export class IngestionService {
         const compressed = await gzipAsync(rawBuffer);
         const uploadResult = await this.filesPort.uploadFile({
           userId,
-          projectId: envelope.projectId || undefined,
+          spaceId: targetSpaceId,
           filename: `ingest_${envelope.payload.format.toLowerCase()}_${randomUUID().slice(0, 8)}.json.gz`,
           buffer: compressed,
           mimeType: 'application/gzip',
@@ -320,7 +321,9 @@ export class IngestionService {
       // If a concurrent request inserted with the exact same (userId, projectId, idempotencyKey), Prisma throws P2002
       if (idempotencyKey && isP2002) {
         if (offloadedFileId && this.filesPort?.deleteFile) {
-          this.filesPort.deleteFile(offloadedFileId).catch(() => {});
+          this.filesPort
+            .deleteFile(offloadedFileId, { spaceId: targetSpaceId })
+            .catch(() => {});
         }
         const raceRun = await this.repo.findRunByIdempotencyKey(
           { userId: envelope.userId, projectId: envelope.projectId ?? null },
@@ -331,7 +334,9 @@ export class IngestionService {
         }
       }
       if (offloadedFileId && this.filesPort?.deleteFile) {
-        this.filesPort.deleteFile(offloadedFileId).catch(() => {});
+        this.filesPort
+          .deleteFile(offloadedFileId, { spaceId: targetSpaceId })
+          .catch(() => {});
       }
       throw err;
     }
@@ -397,23 +402,23 @@ export class IngestionService {
   }
 
   async getRunStatus(
-    userIdOrScopeId: string,
+    userIdOrSpaceId: string,
     runId: string,
     projectId?: string,
   ): Promise<IngestionRunSnapshot> {
-    return this.runReporter.getRunStatus(userIdOrScopeId, runId, projectId);
+    return this.runReporter.getRunStatus(userIdOrSpaceId, runId, projectId);
   }
 
   async getRunProgress(
-    userIdOrScopeId: string,
+    userIdOrSpaceId: string,
     runId: string,
     projectId?: string,
   ): Promise<IngestionRunProgressResult> {
-    return this.runReporter.getRunProgress(userIdOrScopeId, runId, projectId);
+    return this.runReporter.getRunProgress(userIdOrSpaceId, runId, projectId);
   }
 
   async retryRun(
-    userIdOrScopeId: string,
+    userIdOrSpaceId: string,
     runId: string,
     projectId?: string,
   ): Promise<{
@@ -421,7 +426,7 @@ export class IngestionService {
     status: IngestionStatus;
     message: string;
   }> {
-    return this.runReporter.retryRun(userIdOrScopeId, runId, projectId);
+    return this.runReporter.retryRun(userIdOrSpaceId, runId, projectId);
   }
 
   /**

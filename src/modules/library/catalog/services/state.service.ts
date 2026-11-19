@@ -18,7 +18,7 @@ import {
   UNIT_OF_WORK,
   IUnitOfWork,
   LIBRARY_EVENT_TYPES,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
 } from '@/modules/library/core';
 import { ItemQueryService } from './item-query.service';
 import {
@@ -479,7 +479,7 @@ export class StateService {
   ): Promise<Record<string, StateData>> {
     if (!itemIds.length) return {};
 
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     if (validProjectId && this.accessService) {
       if (typeof this.accessService.verifyProjectAccess === 'function') {
         await this.accessService.verifyProjectAccess(userId, validProjectId);

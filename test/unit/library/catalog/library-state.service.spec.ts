@@ -140,11 +140,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
               upsertState: jest.fn(),
               deleteState: jest.fn(),
               transferItemStates: jest.fn(
-                (
-                  sourceItemIds: string[],
-                  targetItemId: string,
-                  tx?: unknown,
-                ) =>
+                (sourceItemIds: string[], targetItemId: string, tx?: unknown) =>
                   new StateRepository({} as never).transferItemStates(
                     sourceItemIds,
                     targetItemId,

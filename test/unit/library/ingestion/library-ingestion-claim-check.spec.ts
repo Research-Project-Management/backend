@@ -221,10 +221,13 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
       const candidates = await identifyStage.execute({
         runId: 'run-test',
         payload: offloadedPayload,
-        scopeId: 'user-uuid-1',
+        spaceId: 'user-uuid-1',
       });
 
-      expect(mockStoragePort.readOwnedFile).toHaveBeenCalledWith({ fileId });
+      expect(mockStoragePort.readOwnedFile).toHaveBeenCalledWith({
+        fileId,
+        spaceId: 'user-uuid-1',
+      });
       expect(candidates.length).toBe(20);
       expect(candidates[0].normalizedMetadata.title).toContain(
         'Scalable Distributed Computing in Scientific Architecture Paper 0',
@@ -244,7 +247,7 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
       const candidates = await identifyStage.execute({
         runId: 'run-test',
         payload: inlinePayload,
-        scopeId: 'user-uuid-1',
+        spaceId: 'user-uuid-1',
       });
 
       expect(mockStoragePort.readOwnedFile).not.toHaveBeenCalled();

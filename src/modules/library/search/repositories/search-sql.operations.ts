@@ -6,7 +6,7 @@ import {
   extractSearchQueryIdentifiers,
 } from '@/modules/library/search/domain/item-search.policy';
 import {
-  isProjectScopeId,
+  isProjectSpaceId,
   LIBRARY_REDIS_KEYS,
   SearchQueryEngine,
   collectDescendantCollectionIds,
@@ -23,7 +23,7 @@ export function sanitizeUuidSearchOptions(
     ...(options.projectId !== undefined
       ? {
           projectId:
-            isProjectScopeId(options.projectId) &&
+            isProjectSpaceId(options.projectId) &&
             isValidUuid(options.projectId.trim())
               ? options.projectId.trim()
               : undefined,
@@ -95,7 +95,7 @@ export async function resolveSearchCollectionOptions(
 
   try {
     const hasProject =
-      isProjectScopeId(options.projectId) &&
+      isProjectSpaceId(options.projectId) &&
       isValidUuid(options.projectId.trim());
     const collections = await collectionDelegate.findMany({
       where: {
@@ -136,7 +136,7 @@ export function buildSearchItemsCacheKey(
   limit: number,
   version: string = '1',
 ): string {
-  const scopeKey = isProjectScopeId(options.projectId)
+  const scopeKey = isProjectSpaceId(options.projectId)
     ? `proj:${options.projectId}:u:${userId}`
     : `user:${userId}`;
   const effectiveType = options.itemType || options.type || '';
@@ -182,7 +182,7 @@ export function buildSearchFacetCacheKey(
   version: string = '1',
 ): string {
   const sanitized = sanitizeUuidSearchOptions(options);
-  const scopeKey = isProjectScopeId(sanitized.projectId)
+  const scopeKey = isProjectSpaceId(sanitized.projectId)
     ? `proj:${sanitized.projectId}`
     : `user:${userId}`;
   const hasPerUserFilter = Boolean(
@@ -198,7 +198,7 @@ export function buildSearchFacetCacheKey(
         searchMode: sanitized.searchMode || '',
         view: sanitized.view || '',
         projectId: sanitized.projectId,
-        ...(isProjectScopeId(sanitized.projectId) && hasPerUserFilter
+        ...(isProjectSpaceId(sanitized.projectId) && hasPerUserFilter
           ? { userId }
           : {}),
         collectionId: sanitized.collectionId,
@@ -586,7 +586,7 @@ export function buildSearchFtsMatchingIdsSql(params: {
   limit?: number;
 }): { sql: string; params: unknown[] } | null {
   const { userId, options, queryText, limit = 50000 } = params;
-  const hasProject = isProjectScopeId(options.projectId);
+  const hasProject = isProjectSpaceId(options.projectId);
   const scopeParamVal = hasProject ? options.projectId!.trim() : userId;
   if (!isValidUuid(scopeParamVal)) {
     return null;
@@ -611,7 +611,7 @@ export function buildSearchFtsSqlQuery(params: {
   limit: number;
 }): { sql: string; params: unknown[] } | null {
   const { userId, options, queryText, limit } = params;
-  const hasProject = isProjectScopeId(options.projectId);
+  const hasProject = isProjectSpaceId(options.projectId);
   const scopeParamVal = hasProject ? options.projectId!.trim() : userId;
   if (!isValidUuid(scopeParamVal)) {
     return null;
@@ -714,7 +714,7 @@ export function buildSearchTrgmFallbackSqlQuery(params: {
   const { userId, options, queryText, limit, threshold = 0.3 } = params;
   const trimmed = queryText.trim();
   if (trimmed.length < 3) return null;
-  const hasProject = isProjectScopeId(options.projectId);
+  const hasProject = isProjectSpaceId(options.projectId);
   const scopeParamVal = hasProject ? options.projectId!.trim() : userId;
   if (!isValidUuid(scopeParamVal)) return null;
 

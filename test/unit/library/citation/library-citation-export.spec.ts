@@ -286,9 +286,8 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
   describe('PdfBakerService (W3C Top-Left to PDF Bottom-Left Coordinate Transformation)', () => {
     it('should convert normalized [0, 1] top-left rects and single rect objects to PDF bottom-left coordinates', async () => {
       const { PDFDocument } = await import('pdf-lib');
-      const { PdfBakerService } = await import(
-        '@/modules/library/citation/services/pdf-baker.service'
-      );
+      const { PdfBakerService } =
+        await import('@/modules/library/citation/services/pdf-baker.service');
       const baker = new PdfBakerService();
 
       const doc = await PDFDocument.create();
@@ -352,7 +351,9 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
           rectCoords: { x: 0.1, y: 0.2, width: 0.5, height: 0.05 },
         },
       ]);
-      expect(bakedOneBasedBytes.byteLength).toBeGreaterThan(rawBytes.byteLength);
+      expect(bakedOneBasedBytes.byteLength).toBeGreaterThan(
+        rawBytes.byteLength,
+      );
     });
   });
 });

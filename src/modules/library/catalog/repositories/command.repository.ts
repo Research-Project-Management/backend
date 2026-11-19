@@ -15,7 +15,7 @@ import {
 import { PrismaService } from '@/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
   syncItemDenormalizedCountsInClient,
 } from '@/modules/library/core';
@@ -102,7 +102,7 @@ export class CommandRepository {
         client,
         userId,
         data,
-        normalizeProjectScopeId(projectId),
+        normalizeProjectSpaceId(projectId),
       );
     const item = await client.libraryItem.create({
       data: createData,
@@ -115,7 +115,7 @@ export class CommandRepository {
       await syncCreatedIdentifiers(client, item.id, identifiersToCreate);
       (item as Record<string, unknown>).identifiers = identifiersToCreate;
     }
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,
@@ -184,7 +184,7 @@ export class CommandRepository {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({
         userId,
@@ -489,7 +489,7 @@ export class CommandRepository {
   ): Promise<boolean> {
     if (!isUuid(id) || !isUuid(userId)) return false;
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryItemWhereInput = {
       id,
       deletedAt: null,
@@ -555,7 +555,7 @@ export class CommandRepository {
     if (!isUuid(id) || !isUuid(userId))
       throw new NotFoundException(`Trashed item ${id} not found`);
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeFilter: Prisma.LibraryItemWhereInput = {
       spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
     };
@@ -703,7 +703,7 @@ export class CommandRepository {
     if (!isUuid(id) || !isUuid(userId))
       throw new NotFoundException(`Item ${id} not found`);
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const existing = await client.libraryItem.findFirst({
       where: {
         id,
@@ -719,7 +719,9 @@ export class CommandRepository {
     const storagePaths = await this.collectStoragePathsForItems(client, [id]);
     await client.libraryItem.delete({ where: { id } });
     if (storagePaths.length > 0 && !options?.skipStorageDelete) {
-      await this.deleteStorageFilesBatch(storagePaths);
+      await this.deleteStorageFilesBatch(storagePaths, {
+        spaceId: existing.spaceId,
+      });
     }
     return { purged: true, storagePaths };
   }
@@ -783,15 +785,62 @@ export class CommandRepository {
       retentionDays,
       limit,
     );
-    if (!tx && res.storagePaths.length > 0)
-      await this.deleteStorageFilesBatch(res.storagePaths);
+    if (!tx) {
+      if (res.storageDeletes?.length > 0) {
+        await this.deleteStorageFileEntries(res.storageDeletes);
+      } else if (res.storagePaths.length > 0) {
+        await this.deleteStorageFilesBatch(res.storagePaths);
+      }
+    }
     return res;
   }
-  async deleteStorageFilesBatch(fileIds: string[]): Promise<void> {
+  async deleteStorageFileEntries(
+    entries: Array<{ fileId: string; spaceId?: string }>,
+  ): Promise<void> {
+    if (!this.filesPort?.deleteFile || entries.length === 0) return;
+    const uniqueEntries = new Map<
+      string,
+      { fileId: string; spaceId?: string }
+    >();
+    for (const entry of entries) {
+      if (!entry?.fileId) continue;
+      const key = `${entry.spaceId ?? ''}:${entry.fileId}`;
+      if (!uniqueEntries.has(key)) {
+        uniqueEntries.set(key, entry);
+      }
+    }
+    const items = Array.from(uniqueEntries.values());
+    const results = await Promise.allSettled(
+      items.map((entry) =>
+        this.filesPort!.deleteFile(
+          entry.fileId,
+          entry.spaceId ? { spaceId: entry.spaceId } : undefined,
+        ),
+      ),
+    );
+    results.forEach((res, idx) => {
+      if (res.status === 'rejected') {
+        const err = res.reason;
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Failed to delete storage file ${items[idx].fileId} during item purge: ${message}`,
+        );
+      }
+    });
+  }
+  async deleteStorageFilesBatch(
+    fileIds: string[],
+    target?: { spaceId?: string },
+  ): Promise<void> {
     if (!this.filesPort?.deleteFile || fileIds.length === 0) return;
     const uniqueFileIds = Array.from(new Set(fileIds.filter(Boolean)));
+    const deleteTarget = target?.spaceId
+      ? { spaceId: target.spaceId }
+      : undefined;
     const results = await Promise.allSettled(
-      uniqueFileIds.map((fileId) => this.filesPort!.deleteFile(fileId)),
+      uniqueFileIds.map((fileId) =>
+        this.filesPort!.deleteFile(fileId, deleteTarget),
+      ),
     );
     results.forEach((res, idx) => {
       if (res.status === 'rejected') {

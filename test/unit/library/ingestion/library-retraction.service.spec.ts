@@ -401,7 +401,6 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       expect(result.newlyRetracted).toBe(0);
     });
 
-
     it('should sync all stale items globally across users', async () => {
       const globalStale = [
         {

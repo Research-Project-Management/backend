@@ -171,7 +171,7 @@ export class UrlCaptureProvider {
   async captureFromUrl(
     targetUrl: string,
     context?: {
-      scopeId?: string;
+      spaceId?: string;
       projectId?: string;
       userId?: string;
     },
@@ -196,7 +196,7 @@ export class UrlCaptureProvider {
     if (this.urlScraper) {
       try {
         scrapedResult = await this.urlScraper.scrape(canonicalUrl, {
-          scopeId: context?.scopeId,
+          spaceId: context?.spaceId,
           userId: context?.userId,
         });
       } catch (err: unknown) {
@@ -459,12 +459,12 @@ export class UrlCaptureProvider {
   attachPreviewToken(
     meta: CapturedItemMetadata,
     context?: {
-      scopeId?: string;
+      spaceId?: string;
       projectId?: string;
       userId?: string;
     },
   ): CapturedItemMetadata {
-    const ws = context?.scopeId || context?.projectId || 'unassigned';
+    const ws = context?.spaceId || context?.projectId || 'unassigned';
     const user = context?.userId || 'unassigned';
     const issuedAt = Date.now();
     const expiresAt = issuedAt + this.tokenTtlMs;
@@ -499,7 +499,7 @@ export class UrlCaptureProvider {
     },
     token?: string,
     context?: {
-      scopeId?: string;
+      spaceId?: string;
       projectId?: string;
       userId?: string;
     },
@@ -523,7 +523,7 @@ export class UrlCaptureProvider {
       return { valid: false, reason: 'token_expired' };
     }
 
-    const ws = context?.scopeId || context?.projectId || 'unassigned';
+    const ws = context?.spaceId || context?.projectId || 'unassigned';
     const user = context?.userId || 'unassigned';
 
     const metadataDigest = this.calculateMetadataDigest(canonicalMeta);

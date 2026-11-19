@@ -1,6 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   SingleFlightCoalescer,
 } from '@/modules/library/core';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
@@ -132,7 +132,7 @@ export class ReaderBootstrapService {
       effectivePermissions?: readonly string[];
     },
   ) {
-    const validProjectId = normalizeProjectScopeId(options.projectId);
+    const validProjectId = normalizeProjectSpaceId(options.projectId);
     const requestedAttachmentId = options.attachmentId?.trim() || undefined;
     const flightKey = [
       'reader-bootstrap',
@@ -277,7 +277,7 @@ export class ReaderBootstrapService {
 
       return {
         scope: validProjectId ? ('project' as const) : ('user' as const),
-        scopeId: validProjectId ?? userId,
+        spaceId: validProjectId ?? userId,
         ...(degradedBranches.length > 0
           ? { degraded: true, degradedBranches }
           : {}),

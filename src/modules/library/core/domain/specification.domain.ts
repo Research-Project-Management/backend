@@ -191,7 +191,7 @@ const PERSONAL_SCOPE_ALIASES = new Set([
   'null',
 ]);
 
-export function isProjectScopeId(
+export function isProjectSpaceId(
   projectId?: string | null,
   userId?: string | null,
 ): projectId is string {
@@ -210,18 +210,18 @@ export function isProjectScopeId(
   return true;
 }
 
-export function normalizeProjectScopeId(
+export function normalizeProjectSpaceId(
   projectId?: string | null,
   userId?: string | null,
 ): string | undefined {
-  return isProjectScopeId(projectId, userId) ? projectId.trim() : undefined;
+  return isProjectSpaceId(projectId, userId) ? projectId.trim() : undefined;
 }
 
 export function resolveCanonicalScopeKey(scope: {
   userId?: string | null;
   projectId?: string | null;
 }): string {
-  const validProjectId = normalizeProjectScopeId(scope.projectId, scope.userId);
+  const validProjectId = normalizeProjectSpaceId(scope.projectId, scope.userId);
   if (validProjectId) return `proj:${validProjectId}`;
   const cleanUserId =
     typeof scope.userId === 'string' ? scope.userId.trim() : '';
@@ -239,7 +239,7 @@ export function resolveSpaceId(scope: {
   spaceId?: string | null;
 }): string {
   if (scope.spaceId && scope.spaceId.trim()) return scope.spaceId.trim();
-  const validProjectId = normalizeProjectScopeId(scope.projectId, scope.userId);
+  const validProjectId = normalizeProjectSpaceId(scope.projectId, scope.userId);
   if (validProjectId) return validProjectId;
   const cleanUserId =
     typeof scope.userId === 'string' ? scope.userId.trim() : '';
@@ -337,7 +337,7 @@ export class ScopeSpecification extends CompositeSpecification<
     if (typeof rec.spaceId === 'string') {
       return rec.spaceId === expectedSpaceId;
     }
-    if (isProjectScopeId(this.projectId)) {
+    if (isProjectSpaceId(this.projectId)) {
       return rec.projectId === this.projectId.trim();
     }
     return (

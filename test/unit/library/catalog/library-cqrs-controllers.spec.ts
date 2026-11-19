@@ -443,10 +443,7 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
     });
 
     it('should extract notes from annotations by delegating to NotesService', async () => {
-      const res = await controller.extractNotes(
-        'user-1',
-        sampleItemId,
-      );
+      const res = await controller.extractNotes('user-1', sampleItemId);
       expect(mockNotesService.extractNotesFromAnnotations).toHaveBeenCalledWith(
         'user-1',
         sampleItemId,

@@ -24,7 +24,7 @@ import {
   getEffectiveReverseBaseFieldMap,
   getValidCreatorMapForType,
   normalizeCanonicalItemType,
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   libraryConfig,
   invalidateLibraryScopeCaches,
 } from '@/modules/library/core';
@@ -717,7 +717,7 @@ export class ItemCacheCoordinator {
     onlyUserStateOverlay?: boolean;
     preserveContentCaches?: boolean;
   }): Promise<void> {
-    const validProjectId = normalizeProjectScopeId(
+    const validProjectId = normalizeProjectSpaceId(
       params.projectId ?? undefined,
     );
     if (params.itemIds && params.itemIds.length > 0) {

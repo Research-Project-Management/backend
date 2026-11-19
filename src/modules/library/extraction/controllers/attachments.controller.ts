@@ -36,7 +36,7 @@ import {
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { WebSnapshotService } from '@/modules/library/extraction/services/web-snapshot.service';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   EXTRACTION_FACADE,
   IExtractionFacade,
 } from '@/modules/library/core';
@@ -332,7 +332,7 @@ export class ExtractionTelemetryController {
     @CurrentUser('id') userId?: string,
     @Param('spaceId') projectId?: string,
   ) {
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const attachmentStatusCounts = this.attachmentsService
       ? await this.attachmentsService.getExtractionStatusBreakdown(
           userId || effectiveProjectId

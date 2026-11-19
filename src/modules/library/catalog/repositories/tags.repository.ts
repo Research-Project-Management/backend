@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { LibraryTag, Prisma, TagType } from '@prisma/client';
 import {
-  normalizeProjectScopeId,
+  normalizeProjectSpaceId,
   resolveSpaceId,
 } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/domain.exception';
@@ -26,7 +26,7 @@ export class TagsRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(options?.projectId);
+    const validProjectId = normalizeProjectSpaceId(options?.projectId);
     const spaceId = resolveSpaceId({ userId, projectId: validProjectId });
 
     await syncSpaceLabelsToLibraryTags(client, spaceId, userId);
@@ -77,7 +77,7 @@ export class TagsRepository {
     shortcut?: number | null,
   ) {
     const client = this.getClient(tx);
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
     const normalizedName = name.trim().toLowerCase();
     const resolvedType = type || TagType.manual;
@@ -173,7 +173,7 @@ export class TagsRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const spaceId = resolveSpaceId({ userId, projectId: validProjectId });
     const scopeWhere: Prisma.LibraryTagWhereInput = { id, spaceId };
 
@@ -353,7 +353,7 @@ export class TagsRepository {
     projectId?: string,
   ): Promise<boolean> {
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const where: Prisma.LibraryTagWhereInput = {
       id,
       spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
@@ -370,7 +370,7 @@ export class TagsRepository {
     projectId?: string,
   ): Promise<string[]> {
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryTagWhereInput = {
       spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
     };
@@ -393,7 +393,7 @@ export class TagsRepository {
     projectId?: string,
   ): Promise<string[]> {
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const scopeWhere: Prisma.LibraryTagWhereInput = {
       spaceId: resolveSpaceId({ userId, projectId: validProjectId }),
     };
@@ -505,7 +505,7 @@ export class TagsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<{ tagFound: boolean; itemFound: boolean }> {
     const client = this.getClient(tx);
-    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const spaceId = resolveSpaceId({ userId, projectId: effectiveProjectId });
     const tagWhere: Prisma.LibraryTagWhereInput = { id: tagId, spaceId };
     const itemWhere: Prisma.LibraryItemWhereInput = {
@@ -589,7 +589,7 @@ export class TagsRepository {
       userId,
       tagNames,
       defaultTagType,
-      normalizeProjectScopeId(projectId),
+      normalizeProjectSpaceId(projectId),
     );
     if (resolvedTags.length === 0) return false;
 
@@ -694,7 +694,7 @@ export class TagsRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
+    const validProjectId = normalizeProjectSpaceId(projectId);
     const spaceId = resolveSpaceId({ userId, projectId: validProjectId });
     const scopeWhere: Prisma.LibraryTagWhereInput = { id: tagId, spaceId };
 

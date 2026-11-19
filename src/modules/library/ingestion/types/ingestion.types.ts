@@ -128,7 +128,7 @@ export type IngestionCommand =
   | {
       source: 'doi';
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       doi: string;
       userId?: string;
       collectionId?: string;
@@ -138,7 +138,7 @@ export type IngestionCommand =
   | {
       source: 'arxiv';
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       arxivId: string;
       userId?: string;
       collectionId?: string;
@@ -148,7 +148,7 @@ export type IngestionCommand =
   | {
       source: 'pmid';
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       pmid: string;
       userId?: string;
       collectionId?: string;
@@ -158,7 +158,7 @@ export type IngestionCommand =
   | {
       source: 'isbn';
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       isbn: string;
       userId?: string;
       collectionId?: string;
@@ -168,7 +168,7 @@ export type IngestionCommand =
   | {
       source: 'url';
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       url: string;
       previewToken?: string;
       userId?: string;
@@ -189,7 +189,7 @@ export type IngestionCommand =
   | {
       source: 'bibtex';
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       content: string;
       userId?: string;
       collectionId?: string;
@@ -199,7 +199,7 @@ export type IngestionCommand =
   | {
       source: 'ris';
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       content: string;
       userId?: string;
       collectionId?: string;
@@ -209,7 +209,7 @@ export type IngestionCommand =
   | {
       source: 'csl_json';
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       content: string;
       userId?: string;
       collectionId?: string;
@@ -219,7 +219,7 @@ export type IngestionCommand =
   | {
       source: 'pdf';
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       fileId?: string;
       filename?: string;
       userId?: string;
@@ -230,7 +230,7 @@ export type IngestionCommand =
   | {
       source: 'zotero';
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       connectionId?: string;
       externalItemKey?: string;
       userId?: string;
@@ -240,7 +240,7 @@ export type IngestionCommand =
   | {
       source: string;
       projectId?: string;
-      scopeId?: string;
+      spaceId?: string;
       content?: string;
       doi?: string;
       arxivId?: string;
@@ -271,7 +271,7 @@ export interface IngestionResult {
 export interface IngestionRunSnapshot {
   id: string;
   projectId: string;
-  scopeId?: string;
+  spaceId?: string;
   sourceType: string;
   status: IngestionStatus;
   currentStage?: string | null;
@@ -356,7 +356,7 @@ export type SubmissionPayload =
 
 export interface IngestionSubmissionEnvelope {
   projectId?: string;
-  scopeId?: string;
+  spaceId?: string;
   userId?: string;
   idempotencyKey?: string;
   payload: SubmissionPayload;
@@ -395,13 +395,13 @@ export interface IWorkflowStage<TInput, TOutput> {
 export interface IdentifyStageInput {
   runId: string;
   payload: IngestionSubmissionEnvelope['payload'];
-  scopeId?: string;
+  spaceId?: string;
   userId?: string;
   projectId?: string;
 }
 
 export interface ResolveStageInput {
-  scopeId: string;
+  spaceId: string;
   candidates: MetadataCandidate[];
 }
 
@@ -411,7 +411,7 @@ export interface ResolveMatchInput {
 }
 
 export interface CommitStageInput {
-  scopeId: string | { userId?: string; projectId?: string | null };
+  spaceId: string | { userId?: string; projectId?: string | null };
   item: ItemMetadata;
   options?: CommitStageOptions;
 }

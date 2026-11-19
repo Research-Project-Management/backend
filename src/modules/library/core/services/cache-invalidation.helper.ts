@@ -1,6 +1,6 @@
 import { LIBRARY_REDIS_KEYS } from '../config/library.config';
 import { IItemCacheInvalidator } from '../ports/catalog.port';
-import { normalizeProjectScopeId } from '../domain/specification.domain';
+import { normalizeProjectSpaceId } from '../domain/specification.domain';
 
 export interface IRawLibraryCache {
   del(key: string): Promise<unknown>;
@@ -143,11 +143,11 @@ export async function invalidateLibraryScopeCaches(
     }
 
     const projectScopes = new Set<string>();
-    const validBaseProject = normalizeProjectScopeId(projectId ?? undefined);
+    const validBaseProject = normalizeProjectSpaceId(projectId ?? undefined);
     if (validBaseProject) projectScopes.add(validBaseProject);
     if (additionalProjectIds) {
       for (const pid of additionalProjectIds) {
-        const norm = normalizeProjectScopeId(pid ?? undefined);
+        const norm = normalizeProjectSpaceId(pid ?? undefined);
         if (norm) projectScopes.add(norm);
       }
     }

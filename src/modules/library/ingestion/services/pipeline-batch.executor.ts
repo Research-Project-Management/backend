@@ -81,7 +81,7 @@ export class PipelineBatchExecutor {
   ) {}
 
   async processRecordBatch(params: {
-    scopeId: string;
+    spaceId: string;
     runId: string;
     envelope: IngestionSubmissionEnvelope;
     resolvedScope: { userId: string; projectId?: string };
@@ -91,7 +91,7 @@ export class PipelineBatchExecutor {
     enrichedCandidates: MetadataCandidate[];
   }): Promise<void> {
     const {
-      scopeId,
+      spaceId,
       runId,
       envelope,
       resolvedScope,
@@ -122,7 +122,7 @@ export class PipelineBatchExecutor {
       { itemId: string; status: 'SUCCEEDED' | 'DUPLICATE' }
     >();
     try {
-      const existingRun = await this.repo.findRunById(scopeId, runId);
+      const existingRun = await this.repo.findRunById(spaceId, runId);
       const existingLog = existingRun?.executionLog as
         | {
             committedKeys?: Record<
@@ -223,7 +223,7 @@ export class PipelineBatchExecutor {
     }
 
     try {
-      await this.repo.updateRunProgress(scopeId, runId, {
+      await this.repo.updateRunProgress(spaceId, runId, {
         total,
         processed: 0,
         succeeded: 0,
@@ -442,7 +442,7 @@ export class PipelineBatchExecutor {
           });
 
           const created = await this.commit.execute({
-            scopeId: resolvedScope.projectId || resolvedScope.userId,
+            spaceId: resolvedScope.projectId || resolvedScope.userId,
             item: itemDecision.proposedItem,
             options: {
               collectionIds: envelope.collectionIds,
@@ -530,7 +530,7 @@ export class PipelineBatchExecutor {
         if (shouldCheckpoint) {
           lastCheckpointAt = now;
           try {
-            await this.repo.updateRunProgress(scopeId, runId, {
+            await this.repo.updateRunProgress(spaceId, runId, {
               total,
               processed,
               succeeded,
@@ -576,7 +576,7 @@ export class PipelineBatchExecutor {
         const finalStatus = isAllFailed
           ? IngestionStatus.FAILED_FINAL
           : IngestionStatus.COMPLETED;
-        await this.repo.updateRunStatus(scopeId, runId, finalStatus, {
+        await this.repo.updateRunStatus(spaceId, runId, finalStatus, {
           itemId: createdItemIds[0],
           completedAt: new Date(),
           ...(isAllFailed
