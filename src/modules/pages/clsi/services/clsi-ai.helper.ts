@@ -3,8 +3,6 @@
  * Server-side LaTeX AI academic text transformation, error remediation, and table generation helpers.
  */
 
-import { ForbiddenException } from '@nestjs/common';
-import { PrismaService, isUuid } from '@/core';
 import {
   ClsiAiFixErrorDto,
   ClsiAiGenerateTableDto,
@@ -19,128 +17,18 @@ import {
   getAiSystemPrompt,
   maskLatexEntities,
 } from '../domain/ai-assistant';
-import { EngineService } from '@/modules/ai/engine/engine.service';
+import type { IAiFacade } from '@/modules/ai';
 
-export type ClsiAiEngine = EngineService & {
-  generate?: (params: {
-    prompt: string;
-    systemInstruction?: string;
-    temperature?: number;
-    userId?: string;
-    spaceId?: string;
-    projectId?: string | null;
-  }) => Promise<{ text?: string } | null | undefined>;
-};
-
-export async function verifyOptionalAiScopeAccessHelper(
-  prisma: PrismaService | undefined,
-  userId?: string,
-  rawSpaceId?: string,
-  rawPageId?: string,
-): Promise<{ spaceId?: string; projectId?: string | null; pageId?: string }> {
-  if (!userId || !prisma) {
-    return { spaceId: rawSpaceId, pageId: rawPageId };
-  }
-
-  let resolvedSpaceId = rawSpaceId?.trim() || undefined;
-  let resolvedPageId = rawPageId?.trim() || undefined;
-  let resolvedProjectId: string | null = null;
-
-  if (resolvedPageId && isUuid(resolvedPageId)) {
-    const page = await Promise.resolve(
-      prisma.page?.findFirst?.({
-        where: { id: resolvedPageId, deletedAt: null },
-        select: { id: true, spaceId: true },
-      }),
-    ).catch(() => null);
-
-    if (page) {
-      resolvedPageId = page.id;
-      resolvedSpaceId = resolvedSpaceId || page.spaceId;
-    } else {
-      const doc = await Promise.resolve(
-        prisma.pageDoc?.findFirst?.({
-          where: { id: resolvedPageId, deletedAt: null },
-          select: { id: true, pageId: true, spaceId: true },
-        }),
-      ).catch(() => null);
-      if (doc) {
-        resolvedPageId = doc.pageId || doc.id;
-        resolvedSpaceId = resolvedSpaceId || doc.spaceId;
-      }
-    }
-  }
-
-  if (resolvedSpaceId && isUuid(resolvedSpaceId)) {
-    const space = await Promise.resolve(
-      prisma.space?.findFirst?.({
-        where: { id: resolvedSpaceId },
-        select: { id: true, type: true, ownerUserId: true, projectId: true },
-      }),
-    ).catch(() => null);
-
-    if (space) {
-      if (space.type === 'personal') {
-        if (space.ownerUserId && space.ownerUserId !== userId) {
-          throw new ForbiddenException(
-            'You do not have access to this workspace',
-          );
-        }
-        resolvedProjectId = null;
-      } else if (space.projectId) {
-        resolvedProjectId = space.projectId;
-        const project = await Promise.resolve(
-          prisma.project?.findFirst?.({
-            where: {
-              id: space.projectId,
-              deletedAt: null,
-              OR: [{ createdById: userId }, { members: { some: { userId } } }],
-            },
-            select: { id: true },
-          }),
-        ).catch(() => null);
-        if (typeof prisma.project?.findFirst === 'function' && !project) {
-          throw new ForbiddenException(
-            'You do not have access to this workspace',
-          );
-        }
-      }
-    } else if (resolvedSpaceId !== userId) {
-      const project = await Promise.resolve(
-        prisma.project?.findFirst?.({
-          where: {
-            id: resolvedSpaceId,
-            deletedAt: null,
-            OR: [{ createdById: userId }, { members: { some: { userId } } }],
-          },
-          select: { id: true },
-        }),
-      ).catch(() => null);
-      if (typeof prisma.project?.findFirst === 'function' && !project) {
-        throw new ForbiddenException(
-          'You do not have access to this workspace',
-        );
-      }
-      if (project) {
-        resolvedProjectId = project.id;
-      }
-    }
-  }
-
-  return {
-    spaceId: resolvedSpaceId,
-    projectId: resolvedProjectId,
-    pageId: resolvedPageId,
-  };
-}
+export type ClsiAiEngine = Partial<
+  Pick<IAiFacade, 'generate' | 'authorizeScope'>
+>;
 
 /**
  * Server-side LaTeX AI academic writing transformation:
- * Masks LaTeX math, citations, and references, applies academic strategy via EngineService
+ * Masks LaTeX math, citations, and references, applies academic strategy via IAiFacade
  * (with heuristic fallback), and unmasks all LaTeX entities verbatim.
  */
 export async function transformAcademicTextHelper(
-  prisma: PrismaService | undefined,
   aiEngine: ClsiAiEngine | undefined,
   dto: ClsiAiTransformDto,
   userId?: string,
@@ -154,12 +42,13 @@ export async function transformAcademicTextHelper(
     documentTitle,
   } = dto;
 
-  const scope = await verifyOptionalAiScopeAccessHelper(
-    prisma,
-    userId,
-    dto.spaceId,
-    dto.pageId,
-  );
+  const scope = aiEngine?.authorizeScope
+    ? await aiEngine.authorizeScope({
+        userId,
+        spaceId: dto.spaceId,
+        pageId: dto.pageId,
+      })
+    : { spaceId: dto.spaceId, pageId: dto.pageId };
 
   const rawText = selectedText || '';
   const trimmed = rawText.trim();
@@ -211,14 +100,14 @@ export async function transformAcademicTextHelper(
         temperature: 0.3,
         userId,
         spaceId: scope.spaceId,
-        projectId: scope.projectId ?? null,
+        pageId: scope.pageId,
       });
       const rawAiText = (aiRes?.text || '')
         .replace(/^"""\s*|\s*"""$/g, '')
         .trim();
       if (rawAiText.length > 0) {
         suggestedCore = unmask(rawAiText).trim();
-        explanation = `Applied ${action.replace(/-/g, ' ')} via AI Copilot.`;
+        explanation = `Applied ${action.replace(/-/g, ' ')} via AI Assistant.`;
       }
     } catch {
       // Fallback to server-side heuristic transformation
@@ -252,22 +141,22 @@ export async function transformAcademicTextHelper(
 
 /**
  * Server-side LaTeX compiler error remediation:
- * Queries EngineService for structured JSON fix, falls back to FastSyntaxLinter.autoFix
+ * Queries IAiFacade for structured JSON fix, falls back to FastSyntaxLinter.autoFix
  * and expert heuristic rules.
  */
 export async function fixLatexErrorHelper(
-  prisma: PrismaService | undefined,
   aiEngine: ClsiAiEngine | undefined,
   syntaxLinter: SyntaxLinter,
   dto: ClsiAiFixErrorDto,
   userId?: string,
 ): Promise<AiErrorFixResult> {
-  const scope = await verifyOptionalAiScopeAccessHelper(
-    prisma,
-    userId,
-    dto.spaceId,
-    dto.pageId,
-  );
+  const scope = aiEngine?.authorizeScope
+    ? await aiEngine.authorizeScope({
+        userId,
+        spaceId: dto.spaceId,
+        pageId: dto.pageId,
+      })
+    : { spaceId: dto.spaceId, pageId: dto.pageId };
 
   if (aiEngine && typeof aiEngine.generate === 'function') {
     const prompt = [
@@ -300,7 +189,7 @@ export async function fixLatexErrorHelper(
         temperature: 0.2,
         userId,
         spaceId: scope.spaceId,
-        projectId: scope.projectId ?? null,
+        pageId: scope.pageId,
       });
       const jsonText = (aiRes?.text || '')
         .replace(/^```json\s*/i, '')
@@ -313,19 +202,24 @@ export async function fixLatexErrorHelper(
         if (
           parsed &&
           typeof parsed === 'object' &&
-          parsed.explanation &&
-          parsed.fixedSnippet !== undefined
+          typeof parsed.explanation === 'string' &&
+          parsed.explanation.trim().length > 0 &&
+          typeof parsed.fixedSnippet === 'string'
         ) {
-          const explanation = String(parsed.explanation)
+          const explanation = parsed.explanation
             .trim()
             .replace(/^Error on line \d+:\s*/i, '')
             .replace(/^LaTeX Error:\s*/i, '')
             .trim();
+          const originalSnippet =
+            typeof parsed.originalSnippet === 'string'
+              ? parsed.originalSnippet
+              : '';
 
           return {
-            explanation: explanation || String(parsed.explanation),
-            originalSnippet: String(parsed.originalSnippet || ''),
-            fixedSnippet: String(parsed.fixedSnippet || ''),
+            explanation: explanation || parsed.explanation,
+            originalSnippet,
+            fixedSnippet: parsed.fixedSnippet,
             startLine: Number(parsed.startLine) || dto.errorLine || 1,
             endLine: Number(parsed.endLine) || dto.errorLine || 1,
             confidence:
@@ -366,17 +260,17 @@ export async function fixLatexErrorHelper(
  * Server-side LaTeX table generator from a natural language prompt.
  */
 export async function generateLatexTableHelper(
-  prisma: PrismaService | undefined,
   aiEngine: ClsiAiEngine | undefined,
   dto: ClsiAiGenerateTableDto,
   userId?: string,
 ): Promise<{ table: string }> {
-  const scope = await verifyOptionalAiScopeAccessHelper(
-    prisma,
-    userId,
-    dto.spaceId,
-    dto.pageId,
-  );
+  const scope = aiEngine?.authorizeScope
+    ? await aiEngine.authorizeScope({
+        userId,
+        spaceId: dto.spaceId,
+        pageId: dto.pageId,
+      })
+    : { spaceId: dto.spaceId, pageId: dto.pageId };
 
   const systemPrompt = `You are an expert academic LaTeX assistant. Generate a clean LaTeX tabular or TSV table according to the user request.
 Output ONLY the clean LaTeX tabular code starting with \\begin{tabular} and ending with \\end{tabular} or TSV data with tabs and newlines. Do not wrap in markdown quotes or add conversational preamble.`;
@@ -389,7 +283,7 @@ Output ONLY the clean LaTeX tabular code starting with \\begin{tabular} and endi
         temperature: 0.3,
         userId,
         spaceId: scope.spaceId,
-        projectId: scope.projectId ?? null,
+        pageId: scope.pageId,
       });
       const table = (aiRes?.text || '')
         .replace(/```latex\n?|```tsv\n?|```\n?/g, '')

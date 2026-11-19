@@ -13,7 +13,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { STORAGE_ADAPTER, BlobService, IStorageAdapter } from '@/modules/files';
+import { FILES_PORT, type IFilesPort } from '@/modules/files';
 import {
   IBinaryStoragePort,
   IContentHasherPort,
@@ -130,7 +130,7 @@ export { ContentHasherAdapter as CryptoGitBlobHasherAdapter };
 /**
  * Unified Platform Binary Storage Adapter (Overleaf Filestore -> Flux FilesModule bridge).
  * Delegates all physical object I/O for manuscript binary assets and cold-tier doc archives
- * to FilesModule (`BlobService` / `IStorageAdapter`),
+ * to FilesModule (`FILES_PORT` / `IFilesPort`),
  * eliminating duplicate S3Client instances and fragmented disk storage.
  */
 @Injectable()
@@ -138,22 +138,20 @@ export class PlatformBinaryStorageAdapter extends IBinaryStoragePort {
   private readonly logger = new Logger(PlatformBinaryStorageAdapter.name);
 
   constructor(
-    @Optional() private readonly blobService?: BlobService,
     @Optional()
-    @Inject(STORAGE_ADAPTER)
-    private readonly storageAdapter?: IStorageAdapter,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {
     super();
   }
 
-  private get target(): BlobService | IStorageAdapter {
-    const resolved = this.blobService ?? this.storageAdapter;
-    if (!resolved) {
+  private get port(): IFilesPort {
+    if (!this.filesPort) {
       throw new FilestoreValidationException(
-        'PlatformBinaryStorageAdapter requires either BlobService or STORAGE_ADAPTER from FilesModule',
+        'PlatformBinaryStorageAdapter requires FILES_PORT from FilesModule',
       );
     }
-    return resolved;
+    return this.filesPort;
   }
 
   /**
@@ -214,7 +212,7 @@ export class PlatformBinaryStorageAdapter extends IBinaryStoragePort {
       }
     }
 
-    await this.target.put(physicalKey, stream, {
+    await this.port.putObject(physicalKey, stream, {
       mimeType: options?.contentType || 'application/octet-stream',
       size: contentLength,
     });
@@ -232,7 +230,10 @@ export class PlatformBinaryStorageAdapter extends IBinaryStoragePort {
         : undefined;
 
     try {
-      const result = await this.target.getStream(physicalKey, normalizedRange);
+      const result = await this.port.getObjectStream(
+        physicalKey,
+        normalizedRange,
+      );
       if (!result?.stream) {
         throw new FilestoreValidationException(
           `Empty stream returned from platform storage for key '${physicalKey}'`,
@@ -254,7 +255,7 @@ export class PlatformBinaryStorageAdapter extends IBinaryStoragePort {
     key: string,
   ): Promise<StorageObjectMetadata> {
     const physicalKey = this.resolveStorageKey(bucket, key);
-    const meta = await this.target.stat(physicalKey);
+    const meta = await this.port.statObject(physicalKey);
     return {
       sizeBytes: Number(meta.size ?? 0),
       contentType: meta.mimeType ?? 'application/octet-stream',
@@ -270,7 +271,7 @@ export class PlatformBinaryStorageAdapter extends IBinaryStoragePort {
   ): Promise<string | null> {
     const physicalKey = this.resolveStorageKey(bucket, key);
     try {
-      const url = await this.target.getPresignedDownloadUrl(physicalKey, {
+      const url = await this.port.getPresignedDownloadUrl(physicalKey, {
         expiresInSeconds,
       });
       if (!url || url.startsWith('/api/v1/files/local-download')) {
@@ -290,12 +291,12 @@ export class PlatformBinaryStorageAdapter extends IBinaryStoragePort {
     key: string,
   ): Promise<boolean> {
     const physicalKey = this.resolveStorageKey(bucket, key);
-    return await this.target.exists(physicalKey);
+    return await this.port.objectExists(physicalKey);
   }
 
   public async deleteObject(bucket: string, key: string): Promise<void> {
     const physicalKey = this.resolveStorageKey(bucket, key);
-    await this.target.delete(physicalKey);
+    await this.port.deleteObject(physicalKey);
   }
 }
 

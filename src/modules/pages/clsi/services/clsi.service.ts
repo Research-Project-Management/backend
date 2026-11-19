@@ -8,9 +8,11 @@ import {
   Injectable,
   Logger,
   HttpException,
+  Inject,
   Optional,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { AI_FACADE } from '@/modules/ai';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config';
@@ -28,11 +30,7 @@ import {
   ClsiAiGenerateTableDto,
 } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
-import {
-  SyncPoint,
-  ReverseSyncPoint,
-  WordCountStats,
-} from '../domain/clsi.ports';
+import { WordCountStats } from '../domain/clsi.ports';
 import {
   WorkspaceRepository,
   DiskUsageCleaner,
@@ -45,7 +43,10 @@ import {
 import { AiActionResult, AiErrorFixResult } from '../domain/ai-assistant';
 import { SyncTexProcessor } from '../domain/synctex.parser';
 import { TexWordCounter } from '../domain/tex-word.counter';
-import { PlannedFileSet } from '../domain/fileset.planner';
+import {
+  PlannedFileSet,
+  validatePlannedFileSet,
+} from '../domain/fileset.planner';
 import {
   CompilePipeline,
   CompilePipelineResult,
@@ -62,6 +63,7 @@ import { WorkspacePlannerService } from './workspace-planner.service';
 import {
   parseSandboxConfig,
   buildSandboxProfileFromConfig,
+  extractSandboxEnvFromConfigService,
 } from './sandbox/sandbox-config';
 import {
   type SynctexDiskCacheEntry,
@@ -71,8 +73,11 @@ import {
 } from './clsi-synctex-wordcount.helper';
 import {
   type EditorLastBuildSummary,
+  dispatchAndAwaitQueueCompileHelper,
   downloadAllArtifactsZipHelper,
   downloadAuxFileHelper,
+  enrichUnreachableRemoteFailure,
+  formatCompileResultForClient,
   getLastBuildSummaryHelper,
   syncCachedArtifactsToScratchHelper,
 } from './clsi-artifacts.helper';
@@ -123,48 +128,15 @@ export class ClsiService implements OnModuleDestroy {
     @Optional() pipeline?: CompilePipeline,
     @Optional() fairQueue?: CompileQueueService,
     @Optional()
+    @Inject(AI_FACADE)
     private readonly aiEngine?: ClsiAiEngine,
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly filestoreService?: FilestoreService,
   ) {
     this.fairQueue = fairQueue ?? new CompileQueueService();
-    const rawMode = this.configService
-      .get<string>('CLSI_SANDBOX_MODE')
-      ?.toLowerCase();
     const sandboxConfig = parseSandboxConfig({
-      env: {
-        CLSI_SANDBOX_MODE: rawMode || undefined,
-        CLSI_SANDBOX_IMAGE:
-          this.configService.get<string>('CLSI_SANDBOX_IMAGE') ||
-          this.configService.get<string>('CLSI_DOCKER_IMAGE') ||
-          undefined,
-        CLSI_URL: this.configService.get<string>('CLSI_URL') || undefined,
-        CLSI_SANDBOX_USER:
-          this.configService.get<string>('CLSI_SANDBOX_USER') || undefined,
-        CLSI_SANDBOX_MEMORY_MB:
-          this.configService.get<string>('CLSI_SANDBOX_MEMORY_MB') || undefined,
-        CLSI_SANDBOX_CPUS:
-          this.configService.get<string>('CLSI_SANDBOX_CPUS') || undefined,
-        CLSI_SANDBOX_PIDS:
-          this.configService.get<string>('CLSI_SANDBOX_PIDS') || undefined,
-        CLSI_SANDBOX_FSIZE_MB:
-          this.configService.get<string>('CLSI_SANDBOX_FSIZE_MB') || undefined,
-        CLSI_SANDBOX_NOFILE:
-          this.configService.get<string>('CLSI_SANDBOX_NOFILE') || undefined,
-        CLSI_SANDBOX_TMPFS_MB:
-          this.configService.get<string>('CLSI_SANDBOX_TMPFS_MB') || undefined,
-        CLSI_SANDBOX_TIMEOUT_MS:
-          this.configService.get<string>('CLSI_SANDBOX_TIMEOUT_MS') ||
-          undefined,
-        CLSI_SANDBOX_RUNTIME:
-          this.configService.get<string>('CLSI_SANDBOX_RUNTIME') || undefined,
-        CLSI_SCRATCH_DIR:
-          this.configService.get<string>('CLSI_SCRATCH_DIR') ||
-          this.configService.get<string>('SCRATCH_DIR') ||
-          undefined,
-        NODE_ENV: this.configService.get<string>('NODE_ENV') || undefined,
-      },
+      env: extractSandboxEnvFromConfigService(this.configService),
       isProduction: this.configService.get<string>('NODE_ENV') === 'production',
     });
 
@@ -257,87 +229,15 @@ export class ClsiService implements OnModuleDestroy {
     if (!this.compileQueue) {
       throw new Error('CLSI compile queue is not initialized');
     }
-
-    const spaceId = authorizedProjectId || dto.spaceId || 'default';
-    const queueScopeId = dto.pageId || spaceId;
-    const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
-
-    // Pre-compile Yjs flush in the API process before dispatching to external BullMQ worker
-    if (this.realtimeService && spaceId && spaceId !== 'default') {
-      try {
-        await this.realtimeService.flushProjectBeforeCompile(spaceId);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `Pre-queue Yjs flush encountered an error for project ${spaceId}: ${msg}`,
-        );
-      }
-    }
-
-    // Cancel any previous queued BullMQ job for this manuscript page/space
-    const existingJobId = this.activeQueueJobIds.get(queueScopeId);
-    if (existingJobId) {
-      try {
-        const oldJob = await this.compileQueue.getJob(existingJobId);
-        if (oldJob) {
-          await oldJob.remove().catch(() => {});
-        }
-      } catch {
-        /* ignore stale job removal */
-      }
-    }
-
-    const jobId = `clsi-${queueScopeId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-    const job = await this.compileQueue.add(
-      'clsi-compile',
-      {
-        dto,
-        userId,
-        authorizedProjectId,
-      },
-      {
-        jobId,
-        removeOnComplete: { age: 60, count: 10 },
-        removeOnFail: { age: 300, count: 25 },
-      },
-    );
-    this.activeQueueJobIds.set(queueScopeId, jobId);
-
-    const startTime = Date.now();
-    const pollIntervalMs = 200;
-    try {
-      while (Date.now() - startTime < effectiveTimeoutMs) {
-        if (this.activeQueueJobIds.get(queueScopeId) !== jobId) {
-          throw new HttpException('Compilation superseded or cancelled', 409);
-        }
-        const state = await job.getState();
-        if (state === 'completed') {
-          const freshJob = await this.compileQueue.getJob(job.id!);
-          return freshJob?.returnvalue as ClsiCompileResult;
-        }
-        if (state === 'failed') {
-          const freshJob = await this.compileQueue.getJob(job.id!);
-          const reason =
-            freshJob?.failedReason || 'Job execution failed in CLSI worker';
-          const workerErr = new Error(reason) as Error & {
-            isWorkerExecutionError?: boolean;
-          };
-          workerErr.isWorkerExecutionError = true;
-          throw workerErr;
-        }
-        await new Promise((r) => setTimeout(r, pollIntervalMs));
-      }
-
-      const timeoutErr = new Error(
-        `CLSI compile job ${job.id} timed out after ${effectiveTimeoutMs}ms in queue`,
-      ) as Error & { isWorkerExecutionError?: boolean };
-      timeoutErr.isWorkerExecutionError = true;
-      throw timeoutErr;
-    } finally {
-      if (this.activeQueueJobIds.get(queueScopeId) === jobId) {
-        this.activeQueueJobIds.delete(queueScopeId);
-      }
-    }
+    return await dispatchAndAwaitQueueCompileHelper({
+      compileQueue: this.compileQueue,
+      activeQueueJobIds: this.activeQueueJobIds,
+      dto,
+      userId,
+      authorizedProjectId,
+      realtimeService: this.realtimeService,
+      logger: this.logger,
+    });
   }
 
   public async enqueueCompile(
@@ -349,12 +249,12 @@ export class ClsiService implements OnModuleDestroy {
       throw new Error('CLSI compile queue is not initialized');
     }
     const projectId = authorizedProjectId || dto.spaceId || 'default';
-    const queueScopeId = dto.pageId || projectId;
+    const compileTargetId = dto.pageId || projectId;
     const job = await this.compileQueue.add(
       'clsi-compile',
       { dto, userId, authorizedProjectId },
       {
-        jobId: `clsi-${queueScopeId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+        jobId: `clsi-${compileTargetId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
         removeOnComplete: { age: 60, count: 10 },
         removeOnFail: { age: 300, count: 25 },
       },
@@ -436,6 +336,21 @@ export class ClsiService implements OnModuleDestroy {
           dto,
           manuscriptPageId,
         );
+        if (!effectiveSpaceId.startsWith('adhoc-') || plan.files.size > 0) {
+          const validationIssues = validatePlannedFileSet(plan);
+          if (validationIssues.length > 0) {
+            return {
+              success: false,
+              status: 'failure',
+              outcome: 'validation-problems',
+              error: validationIssues[0].message,
+              logs: '',
+              diagnostics: [],
+              validationIssues,
+              durationMs: 0,
+            };
+          }
+        }
         const cacheKey = `flux:clsi:compile:${this.hashSource(
           [
             effectiveSpaceId,
@@ -454,7 +369,11 @@ export class ClsiService implements OnModuleDestroy {
         if (cacheable && this.cache) {
           const cacheLookupStart = Date.now();
           const cached = await this.cache.get<ClsiCompileResult>(cacheKey);
-          if (cached && cached.success) {
+          if (
+            cached &&
+            cached.success &&
+            (cached.diagnosticsSummary?.totalErrors ?? 0) === 0
+          ) {
             await syncCachedArtifactsToScratchHelper(
               this.workspace,
               scratchWorkspaceId,
@@ -468,9 +387,16 @@ export class ClsiService implements OnModuleDestroy {
               isTimeout: false,
               pdfSizeBytes: cached.pdf
                 ? Buffer.byteLength(cached.pdf, 'base64')
-                : 0,
+                : (cached.pdfSizeBytes ?? 0),
             });
-            return cached;
+            return await formatCompileResultForClient({
+              result: cached,
+              responseMode: dto.responseMode,
+              projectId: effectiveSpaceId,
+              pageId: manuscriptPageId,
+              scratchWorkspaceId,
+              workspace: this.workspace,
+            });
           }
         }
 
@@ -487,6 +413,7 @@ export class ClsiService implements OnModuleDestroy {
           onLogChunk,
           _userId,
           scratchWorkspaceId,
+          manuscriptPageId,
         );
       },
     );
@@ -505,6 +432,7 @@ export class ClsiService implements OnModuleDestroy {
     onLogChunk: (chunk: string) => void,
     _userId?: string,
     scratchWorkspaceId: string = projectId,
+    manuscriptPageId?: string,
   ): Promise<ClsiCompileResult> {
     const mainFile = plan.mainFile;
     const dbProjectId = projectId.startsWith('adhoc-') ? 'default' : projectId;
@@ -528,6 +456,8 @@ export class ClsiService implements OnModuleDestroy {
 
     const remoteResult = await this.remoteClient.tryRemoteClsiCompile({
       projectId: scratchWorkspaceId,
+      spaceId: projectId,
+      pageId: manuscriptPageId ?? scratchWorkspaceId,
       mainFile,
       source,
       mergedFiles,
@@ -562,33 +492,43 @@ export class ClsiService implements OnModuleDestroy {
         onLogChunk,
       }));
 
+    let finalResult = pipelineResult;
+    if (!remoteResult && this.remoteClient.isEnabled()) {
+      finalResult = enrichUnreachableRemoteFailure({
+        pipelineResult,
+        mainFile,
+        remoteUrl: this.remoteClient.getBaseUrl(),
+      });
+    }
+
     this.metrics.record({
       engine: metricEngine,
-      durationMs: pipelineResult.durationMs,
-      success: pipelineResult.success,
+      durationMs: finalResult.durationMs,
+      success: finalResult.success,
       isCached: false,
-      isTimeout: Boolean(pipelineResult.timedOut),
-      pdfSizeBytes: pipelineResult.pdf
-        ? Buffer.byteLength(pipelineResult.pdf, 'base64')
+      isTimeout: Boolean(finalResult.timedOut),
+      pdfSizeBytes: finalResult.pdf
+        ? Buffer.byteLength(finalResult.pdf, 'base64')
         : 0,
     });
 
     if (
-      pipelineResult.success &&
+      finalResult.success &&
+      (finalResult.diagnosticsSummary?.totalErrors ?? 0) === 0 &&
       this.cache &&
-      pipelineResult.pdf &&
-      pipelineResult.pdf.length <= 2 * 1024 * 1024
+      finalResult.pdf &&
+      finalResult.pdf.length <= 2 * 1024 * 1024
     ) {
-      await this.cache.set(cacheKey, pipelineResult, 300);
+      await this.cache.set(cacheKey, finalResult, 300);
     }
 
     if (!projectId.startsWith('adhoc-')) {
       this.realtimeService?.broadcastCompileProgress(projectId, {
-        status: pipelineResult.success ? 'success' : 'failed',
-        logs: pipelineResult.logs ? [pipelineResult.logs] : [],
+        status: finalResult.success ? 'success' : 'failed',
+        logs: finalResult.logs ? [finalResult.logs] : [],
       });
 
-      if (pipelineResult.success) {
+      if (finalResult.success) {
         await this.workspacePlanner.recordCompileSnapshotIfEligible(
           projectId,
           mergedFiles,
@@ -600,7 +540,14 @@ export class ClsiService implements OnModuleDestroy {
       }
     }
 
-    return pipelineResult;
+    return await formatCompileResultForClient({
+      result: finalResult,
+      responseMode: dto.responseMode,
+      projectId,
+      pageId: manuscriptPageId,
+      scratchWorkspaceId,
+      workspace: this.workspace,
+    });
   }
 
   public cancelCompile(projectId: string): boolean {
@@ -615,48 +562,31 @@ export class ClsiService implements OnModuleDestroy {
     return this.fairQueue.cancel(projectId) || Boolean(existingJobId);
   }
 
-  public async forwardSync(
-    dto: ForwardSyncDto,
-    authorizedProjectId?: string,
-  ): Promise<{
-    success: boolean;
-    result?: SyncPoint;
-    error?: string;
-  }> {
+  public async forwardSync(dto: ForwardSyncDto, authorizedProjectId?: string) {
     return await forwardSyncHelper(
-      {
-        workspace: this.workspace,
-        synctexParser: this.synctexParser,
-        wordCounter: this.wordCounter,
-        synctexDiskCache: this.synctexDiskCache,
-        remoteClient: this.remoteClient,
-        workspacePlanner: this.workspacePlanner,
-      },
+      this.buildSynctexContext(),
       dto,
       authorizedProjectId,
     );
   }
 
-  public async reverseSync(
-    dto: ReverseSyncDto,
-    authorizedProjectId?: string,
-  ): Promise<{
-    success: boolean;
-    result?: ReverseSyncPoint;
-    error?: string;
-  }> {
+  public async reverseSync(dto: ReverseSyncDto, authorizedProjectId?: string) {
     return await reverseSyncHelper(
-      {
-        workspace: this.workspace,
-        synctexParser: this.synctexParser,
-        wordCounter: this.wordCounter,
-        synctexDiskCache: this.synctexDiskCache,
-        remoteClient: this.remoteClient,
-        workspacePlanner: this.workspacePlanner,
-      },
+      this.buildSynctexContext(),
       dto,
       authorizedProjectId,
     );
+  }
+
+  private buildSynctexContext() {
+    return {
+      workspace: this.workspace,
+      synctexParser: this.synctexParser,
+      wordCounter: this.wordCounter,
+      synctexDiskCache: this.synctexDiskCache,
+      remoteClient: this.remoteClient,
+      workspacePlanner: this.workspacePlanner,
+    };
   }
 
   public async getWordCount(
@@ -679,7 +609,10 @@ export class ClsiService implements OnModuleDestroy {
 
   public async listAuxFiles(projectId: string, pageId?: string) {
     const scratchId = pageId || projectId;
-    const files = await this.workspace.listAuxFiles(scratchId);
+    let files = await this.workspace.listAuxFiles(scratchId);
+    if (files.length === 0 && this.remoteClient.isEnabled()) {
+      files = (await this.remoteClient.tryRemoteListAuxFiles(scratchId)) ?? [];
+    }
     return { files };
   }
 
@@ -695,6 +628,7 @@ export class ClsiService implements OnModuleDestroy {
       filename,
       res,
       pageId,
+      this.remoteClient,
     );
   }
 
@@ -724,9 +658,23 @@ export class ClsiService implements OnModuleDestroy {
   public async getHealthReport() {
     if (this.remoteClient.isEnabled()) {
       const remoteHealth = await this.remoteClient.tryRemoteHealthCheck();
-      if (remoteHealth && remoteHealth.status === 'healthy') {
-        return remoteHealth;
+      if (remoteHealth !== null) {
+        return {
+          ...remoteHealth,
+          remote: {
+            url: this.remoteClient.getBaseUrl(),
+            reachable: true,
+          },
+        };
       }
+      const localReport = await this.healthCheck.checkHealth();
+      return {
+        ...localReport,
+        remote: {
+          url: this.remoteClient.getBaseUrl(),
+          reachable: false,
+        },
+      };
     }
     return this.healthCheck.checkHealth();
   }
@@ -752,9 +700,14 @@ export class ClsiService implements OnModuleDestroy {
     pageId?: string,
   ): Promise<{ success: boolean; projectId: string }> {
     const scratchId = pageId || projectId;
-    await this.pipeline.runWithProjectLock(scratchId, () =>
-      this.workspace.cleanScratch(scratchId),
-    );
+    await Promise.all([
+      this.pipeline.runWithProjectLock(scratchId, () =>
+        this.workspace.cleanScratch(scratchId),
+      ),
+      this.remoteClient.isEnabled()
+        ? this.remoteClient.tryRemoteCleanScratch(scratchId).catch(() => false)
+        : Promise.resolve(false),
+    ]);
     return { success: true, projectId: scratchId };
   }
 
@@ -780,12 +733,7 @@ export class ClsiService implements OnModuleDestroy {
     dto: ClsiAiTransformDto,
     userId?: string,
   ): Promise<AiActionResult> {
-    return await transformAcademicTextHelper(
-      this.prisma,
-      this.aiEngine,
-      dto,
-      userId,
-    );
+    return await transformAcademicTextHelper(this.aiEngine, dto, userId);
   }
 
   /**
@@ -798,7 +746,6 @@ export class ClsiService implements OnModuleDestroy {
     userId?: string,
   ): Promise<AiErrorFixResult> {
     return await fixLatexErrorHelper(
-      this.prisma,
       this.aiEngine,
       this.syntaxLinter,
       dto,
@@ -813,11 +760,6 @@ export class ClsiService implements OnModuleDestroy {
     dto: ClsiAiGenerateTableDto,
     userId?: string,
   ): Promise<{ table: string }> {
-    return await generateLatexTableHelper(
-      this.prisma,
-      this.aiEngine,
-      dto,
-      userId,
-    );
+    return await generateLatexTableHelper(this.aiEngine, dto, userId);
   }
 }

@@ -168,6 +168,7 @@ export class LatexmkEngine extends BaseLatexEngine {
       signal: options.signal,
       onLogChunk: options.onLogChunk,
       env: envWithInputs,
+      openinAny: compiler === 'lualatex' ? 'r' : 'p',
     });
 
     const durationMs = Date.now() - startTime;
@@ -178,6 +179,7 @@ export class LatexmkEngine extends BaseLatexEngine {
       const artifactsToPromote = [
         'output.pdf',
         'output.log',
+        'output.blg',
         'output.synctex.gz',
         'output.synctex',
         'output.bbl',
@@ -186,6 +188,19 @@ export class LatexmkEngine extends BaseLatexEngine {
         'output.out',
         'output.toc',
       ];
+      try {
+        const mainEntries = await fs.readdir(mainDir);
+        for (const entryName of mainEntries) {
+          if (
+            entryName.toLowerCase().endsWith('.blg') &&
+            !artifactsToPromote.includes(entryName)
+          ) {
+            artifactsToPromote.push(entryName);
+          }
+        }
+      } catch {
+        // mainDir may not exist
+      }
       await Promise.all(
         artifactsToPromote.map(async (artifactName) => {
           const rootTarget = path.join(options.cwd, artifactName);

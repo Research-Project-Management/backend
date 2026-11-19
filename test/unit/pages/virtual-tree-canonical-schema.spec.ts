@@ -582,7 +582,7 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
       const createdFiles: Array<Record<string, unknown>> = [];
       const createdNodes: Array<Record<string, unknown>> = [];
       const updatedPages: Array<Record<string, unknown>> = [];
-      const storageBlobUpdate = jest.fn().mockResolvedValue({});
+      const acquireBlob = jest.fn().mockResolvedValue({});
 
       const mockPrisma = {
         page: {
@@ -639,9 +639,6 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
                   },
                 ),
               },
-              storageBlob: {
-                update: storageBlobUpdate,
-              },
               pageNode: {
                 create: jest.fn(
                   async ({ data }: { data: Record<string, unknown> }) => {
@@ -664,6 +661,9 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
           applyExternalText: jest.fn(),
           flushDocs,
         },
+        undefined,
+        undefined,
+        { acquireBlob } as any,
       );
 
       const res = await pageService.duplicatePage(PAGE_ID, SPACE_ID);
@@ -693,14 +693,11 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
         'chapters/intro.tex',
       ]);
 
-      // All PageFiles cloned into newPageId and StorageBlob refCount incremented
+      // All PageFiles cloned into newPageId and StorageBlob refCount incremented via FILES_PORT
       expect(createdFiles).toHaveLength(1);
       expect(createdFiles[0].pageId).toBe(res.page.id);
       expect(createdFiles[0].blobId).toBe(BLOB_ID);
-      expect(storageBlobUpdate).toHaveBeenCalledWith({
-        where: { id: BLOB_ID },
-        data: { refCount: { increment: 1 }, tombstoneAt: null },
-      });
+      expect(acquireBlob).toHaveBeenCalledWith(BLOB_ID);
 
       // Full Virtual Tree hierarchy cloned with mapped parentIds under newPageId
       expect(createdNodes).toHaveLength(5);

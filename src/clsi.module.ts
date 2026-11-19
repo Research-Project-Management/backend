@@ -8,6 +8,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -83,7 +84,7 @@ export class ClsiService {
   }
 
   public async compile(dto: CompilePageDto) {
-    const projectId = dto.spaceId || 'default';
+    const projectId = dto.pageId || dto.spaceId || 'default';
     const mainFile = dto.mainFile || 'main.tex';
     const source = dto.source || '';
     const files = dto.files || {};
@@ -153,7 +154,7 @@ export class ClsiService {
   }
 
   public async forwardSync(dto: ForwardSyncDto) {
-    const projectId = dto.spaceId || dto.pageId || 'default';
+    const projectId = dto.pageId || dto.spaceId || 'default';
     const synctexContent = await this.loadSynctexContent(
       projectId,
       dto.synctex,
@@ -184,7 +185,7 @@ export class ClsiService {
   }
 
   public async reverseSync(dto: ReverseSyncDto) {
-    const projectId = dto.spaceId || dto.pageId || 'default';
+    const projectId = dto.pageId || dto.spaceId || 'default';
     const synctexContent = await this.loadSynctexContent(
       projectId,
       dto.synctex,
@@ -273,12 +274,45 @@ export class ClsiService {
       throw new NotFoundException(`Artifact file ${filename} not found`);
     }
 
+    const lower = filename.toLowerCase();
+    const ext = path.extname(lower);
+    let contentType = 'application/octet-stream';
+    if (lower.endsWith('.synctex.gz')) {
+      contentType = 'application/gzip';
+    } else if (ext === '.pdf') {
+      contentType = 'application/pdf';
+    } else if (
+      [
+        '.log',
+        '.aux',
+        '.bbl',
+        '.blg',
+        '.toc',
+        '.lof',
+        '.lot',
+        '.fls',
+        '.fdb_latexmk',
+        '.synctex',
+      ].includes(ext)
+    ) {
+      contentType = 'text/plain; charset=utf-8';
+    }
+
     res.header(
       'Content-Disposition',
       `attachment; filename="${encodeURIComponent(filename)}"`,
     );
-    res.header('Content-Type', 'application/octet-stream');
+    res.header('Content-Type', contentType);
     return res.send(buffer);
+  }
+
+  public async cleanProjectScratch(
+    projectId: string,
+  ): Promise<{ success: boolean; projectId: string }> {
+    await this.pipeline.runWithProjectLock(projectId, () =>
+      this.workspace.cleanScratch(projectId),
+    );
+    return { success: true, projectId };
   }
 
   public async downloadAllArtifactsZip(projectId: string, res: FastifyReply) {
@@ -417,6 +451,12 @@ export class ClsiController {
     @Res() res: FastifyReply,
   ) {
     return this.clsiService.downloadAuxFile(projectId, filename, res);
+  }
+
+  @Delete('artifacts/:projectId')
+  @ApiOperation({ summary: 'Clean scratch workspace for a project or page' })
+  public async cleanProjectScratch(@Param('projectId') projectId: string) {
+    return this.clsiService.cleanProjectScratch(projectId);
   }
 
   @Get('artifacts-zip/:projectId')

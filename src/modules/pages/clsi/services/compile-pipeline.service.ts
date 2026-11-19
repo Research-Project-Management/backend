@@ -9,6 +9,11 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { BadRequestException, Logger } from '@nestjs/common';
 import {
+  BibLogInput,
+  CompileLogMeta,
+  CompileOutcome,
+  CompileValidationIssue,
+  DiagnosticsSummary,
   IWorkspaceManager,
   WorkspaceFile,
   ILatexEngine,
@@ -43,6 +48,20 @@ export { DockerSandboxRunner } from './sandbox/docker-sandbox.runner';
 export { BaseLatexEngine, LatexmkEngine, ClsiHealthCheck };
 export type { BinaryStatus, ClsiHealthReport };
 
+export {
+  MAX_PARSE_LOG_BYTES,
+  MAX_BIB_LOG_BYTES,
+  MAX_INLINE_LOG_BYTES,
+  readBoundedLogFile,
+  boundInlineLogText,
+} from './clsi-log.helper';
+import {
+  MAX_PARSE_LOG_BYTES,
+  MAX_BIB_LOG_BYTES,
+  readBoundedLogFile,
+  boundInlineLogText,
+} from './clsi-log.helper';
+
 export interface CompilePipelineRequest {
   projectId?: string;
   mainFile?: string;
@@ -64,23 +83,35 @@ export type CompilePipelineResult =
   | {
       success: true;
       status: 'success';
+      outcome?: CompileOutcome;
       pdf: string;
+      pdfArtifactUrl?: string;
       synctex?: string;
+      synctexArtifactUrl?: string;
+      synctexAvailable?: boolean;
+      pdfSizeBytes?: number;
       logs: string;
+      logMeta?: CompileLogMeta;
       diagnostics?: CompilerDiagnostic[];
+      diagnosticsSummary?: DiagnosticsSummary;
       outputFiles?: DiscoveredOutputFile[];
+      validationIssues?: CompileValidationIssue[];
       durationMs: number;
       timedOut?: boolean;
     }
   | {
       success: false;
       status: 'failure';
+      outcome?: CompileOutcome;
       error: string;
       pdf?: string;
       synctex?: string;
       logs: string;
+      logMeta?: CompileLogMeta;
       diagnostics?: CompilerDiagnostic[];
+      diagnosticsSummary?: DiagnosticsSummary;
       outputFiles?: DiscoveredOutputFile[];
+      validationIssues?: CompileValidationIssue[];
       durationMs: number;
       timedOut?: boolean;
     };
@@ -228,11 +259,36 @@ export class CompilePipeline {
       }
     }
 
+    if (dto.signal?.aborted) {
+      return {
+        success: false,
+        status: 'failure',
+        outcome: 'terminated',
+        error: 'Compilation superseded or cancelled',
+        logs: '',
+        durationMs: 0,
+      };
+    }
+
     if (workspaceFiles.length === 0) {
-      workspaceFiles.push({
-        path: mainFile,
-        content: '\\documentclass{article}\n\\begin{document}\n\\end{document}',
-      });
+      const msg = `Main TeX document "${mainFile}" is missing or empty.`;
+      return {
+        success: false,
+        status: 'failure',
+        outcome: 'validation-problems',
+        error: msg,
+        logs: '',
+        diagnostics: [],
+        validationIssues: [
+          {
+            code: 'mainFile',
+            mainFile,
+            availableTexFiles: [],
+            message: msg,
+          },
+        ],
+        durationMs: Date.now() - startTime,
+      };
     }
 
     const scratchDir = this.workspace.getScratchDir(projectId);
@@ -271,36 +327,38 @@ export class CompilePipeline {
               ) {
                 const pdfStat = await fs.stat(pdfPath);
                 if (pdfStat.size > 0) {
-                  await this.workspace.purgeExtraneousFiles(
-                    projectId,
-                    inputFiles,
-                  );
                   const harvested = await this.harvestCompileArtifacts({
                     scratchDir,
                     projectId,
                     mainFile,
                     inputFiles,
+                    stopOnFirstError: dto.stopOnFirstError ?? false,
                     fallbackLogs:
                       '[CLSI Cache] Build up to date: workspace unchanged.',
                   });
 
-                  dto.onLogChunk?.(
-                    '[CLSI Cache] Build up to date: 0 source files modified. Returning cached output.',
-                  );
+                  if (harvested.pdfBase64) {
+                    dto.onLogChunk?.(
+                      '[CLSI Cache] Build up to date: 0 source files modified. Returning cached output.',
+                    );
 
-                  return {
-                    success: true,
-                    status: 'success',
-                    pdf: harvested.pdfBase64,
-                    synctex: harvested.synctexBase64 || undefined,
-                    logs: harvested.logs,
-                    diagnostics:
-                      harvested.diagnostics.length > 0
-                        ? harvested.diagnostics
-                        : undefined,
-                    outputFiles: harvested.discoveredFiles,
-                    durationMs: Date.now() - startTime,
-                  };
+                    return {
+                      success: true,
+                      status: 'success',
+                      outcome: 'success',
+                      pdf: harvested.pdfBase64,
+                      synctex: harvested.synctexBase64 || undefined,
+                      logs: harvested.logs,
+                      logMeta: harvested.logMeta,
+                      diagnostics:
+                        harvested.diagnostics.length > 0
+                          ? harvested.diagnostics
+                          : undefined,
+                      diagnosticsSummary: harvested.summary,
+                      outputFiles: harvested.discoveredFiles,
+                      durationMs: Date.now() - startTime,
+                    };
+                  }
                 }
               }
             } catch {
@@ -341,17 +399,10 @@ export class CompilePipeline {
             return {
               success: false,
               status: 'failure',
+              outcome: 'clsi-unavailable',
               error: errorMsg,
               logs: errorMsg,
-              diagnostics: [
-                {
-                  file: mainFile,
-                  line: 1,
-                  message: errorMsg,
-                  severity: 'error',
-                  context: 'System Environment',
-                },
-              ],
+              diagnostics: [],
               durationMs: Date.now() - startTime,
             };
           }
@@ -375,6 +426,17 @@ export class CompilePipeline {
             compilerFlag,
           );
 
+          if (dto.signal?.aborted) {
+            return {
+              success: false,
+              status: 'failure',
+              outcome: 'terminated',
+              error: 'Compilation superseded or cancelled',
+              logs: '',
+              durationMs: Date.now() - startTime,
+            };
+          }
+
           const durationMs = Date.now() - startTime;
           let fallbackLogs = engineResult.stdout || '';
           if (engineResult.stderr) {
@@ -386,35 +448,68 @@ export class CompilePipeline {
             projectId,
             mainFile,
             inputFiles,
+            stopOnFirstError,
             fallbackLogs,
             shellEscapeAdvisories,
           });
 
           if (engineResult.pdfGenerated && harvested.pdfBase64) {
-            try {
-              await fs.writeFile(
-                buildStatePath,
-                JSON.stringify({
-                  success: true,
-                  mainFile,
-                  engine: resolvedEngine,
-                  draft: dto.draft ?? false,
-                  timestamp: Date.now(),
-                }),
-                'utf8',
-              );
-            } catch {}
+            const hasErrors = harvested.summary.totalErrors > 0;
+            if (!hasErrors) {
+              try {
+                await fs.writeFile(
+                  buildStatePath,
+                  JSON.stringify({
+                    success: true,
+                    mainFile,
+                    engine: resolvedEngine,
+                    draft: dto.draft ?? false,
+                    timestamp: Date.now(),
+                  }),
+                  'utf8',
+                );
+              } catch {}
+            } else {
+              try {
+                await fs.unlink(buildStatePath);
+              } catch {}
+            }
+
+            if (hasErrors) {
+              return {
+                success: false,
+                status: 'failure',
+                outcome:
+                  stopOnFirstError && engineResult.exitCode !== 0
+                    ? 'stopped-on-first-error'
+                    : 'failure',
+                error:
+                  harvested.diagnostics.find((d) => d.severity === 'error')
+                    ?.message || 'LaTeX compilation completed with errors',
+                pdf: harvested.pdfBase64,
+                synctex: harvested.synctexBase64 || undefined,
+                logs: harvested.logs,
+                logMeta: harvested.logMeta,
+                diagnostics: harvested.diagnostics,
+                diagnosticsSummary: harvested.summary,
+                outputFiles: harvested.discoveredFiles,
+                durationMs,
+              };
+            }
 
             return {
               success: true,
               status: 'success',
+              outcome: 'success',
               pdf: harvested.pdfBase64,
               synctex: harvested.synctexBase64 || undefined,
               logs: harvested.logs,
+              logMeta: harvested.logMeta,
               diagnostics:
                 harvested.diagnostics.length > 0
                   ? harvested.diagnostics
                   : undefined,
+              diagnosticsSummary: harvested.summary,
               outputFiles: harvested.discoveredFiles,
               durationMs,
             };
@@ -424,19 +519,34 @@ export class CompilePipeline {
             await fs.unlink(buildStatePath);
           } catch {}
 
+          const outcome: CompileOutcome = engineResult.timedOut
+            ? 'timedout'
+            : (engineResult as { aborted?: boolean }).aborted ||
+                dto.signal?.aborted
+              ? 'terminated'
+              : stopOnFirstError && engineResult.exitCode !== 0
+                ? 'stopped-on-first-error'
+                : 'failure';
+
           return {
             success: false,
             status: 'failure',
+            outcome,
             error:
               harvested.diagnostics.find((d) => d.severity === 'error')
-                ?.message || 'LaTeX compilation failed to produce a PDF',
+                ?.message ||
+              (outcome === 'timedout'
+                ? `Compilation timed out after ${timeoutMs}ms`
+                : 'LaTeX compilation failed to produce a PDF'),
             pdf: harvested.pdfBase64 || undefined,
             synctex: harvested.synctexBase64 || undefined,
             logs: harvested.logs,
+            logMeta: harvested.logMeta,
             diagnostics:
               harvested.diagnostics.length > 0
                 ? harvested.diagnostics
                 : undefined,
+            diagnosticsSummary: harvested.summary,
             outputFiles: harvested.discoveredFiles,
             durationMs,
             timedOut: engineResult.timedOut,
@@ -445,7 +555,20 @@ export class CompilePipeline {
         { signal: dto.signal },
       );
     } catch (err: unknown) {
+      const isAborted =
+        Boolean(dto.signal?.aborted) ||
+        (err as { name?: string })?.name === 'AbortError';
       const message = err instanceof Error ? err.message : String(err);
+      if (isAborted) {
+        return {
+          success: false,
+          status: 'failure',
+          outcome: 'terminated',
+          error: 'Compilation superseded or cancelled',
+          logs: '',
+          durationMs: Date.now() - startTime,
+        };
+      }
       const stack = err instanceof Error ? err.stack : undefined;
       this.logger.error(
         `CompilePipeline execution error for project ${projectId}: ${message}`,
@@ -454,6 +577,7 @@ export class CompilePipeline {
       return {
         success: false,
         status: 'failure',
+        outcome: 'failure',
         error: message || 'Compilation execution failed',
         logs: message || 'Compilation execution failed',
         durationMs: Date.now() - startTime,
@@ -495,19 +619,23 @@ export class CompilePipeline {
     projectId: string;
     mainFile: string;
     inputFiles: string[];
+    stopOnFirstError?: boolean;
     fallbackLogs?: string;
     shellEscapeAdvisories?: string[];
   }): Promise<{
     pdfBase64: string;
     synctexBase64: string;
     logs: string;
+    logMeta: CompileLogMeta;
     diagnostics: CompilerDiagnostic[];
+    summary: DiagnosticsSummary;
     discoveredFiles: DiscoveredOutputFile[];
   }> {
     const {
       scratchDir,
       mainFile,
       inputFiles,
+      stopOnFirstError = false,
       fallbackLogs = '',
       shellEscapeAdvisories = [],
     } = params;
@@ -537,10 +665,50 @@ export class CompilePipeline {
       pdfBase64 = pdfBuffer.toString('base64');
     }
 
-    let logs = fallbackLogs;
-    const logBuffer = await readSafeFile('output.log');
-    if (logBuffer && logBuffer.length > 0) {
-      logs = logBuffer.toString('utf8');
+    let parseTexLog = fallbackLogs;
+    let rawLogSizeBytes = Buffer.byteLength(fallbackLogs || '', 'utf8');
+    try {
+      const safeLogPath = await SafePath.assertSafeWorkspacePath(
+        scratchDir,
+        'output.log',
+      );
+      const boundedTex = await readBoundedLogFile(
+        safeLogPath,
+        MAX_PARSE_LOG_BYTES,
+        256 * 1024,
+      );
+      if (boundedTex && boundedTex.sizeBytes > 0) {
+        parseTexLog = boundedTex.content;
+        rawLogSizeBytes = boundedTex.sizeBytes;
+      }
+    } catch {
+      // keep fallbackLogs
+    }
+
+    const blgNames = new Set<string>(['output.blg']);
+    for (const file of discoveredFiles) {
+      if (file.path.toLowerCase().endsWith('.blg')) {
+        blgNames.add(file.path);
+      }
+    }
+    const bibLogs: BibLogInput[] = [];
+    for (const blgName of blgNames) {
+      try {
+        const safeBlgPath = await SafePath.assertSafeWorkspacePath(
+          scratchDir,
+          blgName,
+        );
+        const boundedBib = await readBoundedLogFile(
+          safeBlgPath,
+          MAX_BIB_LOG_BYTES,
+          64 * 1024,
+        );
+        if (boundedBib && boundedBib.content) {
+          bibLogs.push({ filename: blgName, content: boundedBib.content });
+        }
+      } catch {
+        // skip unreadable/missing blg
+      }
     }
 
     let synctexBase64 = '';
@@ -554,8 +722,32 @@ export class CompilePipeline {
       }
     }
 
-    const diagnostics = this.logParser.parse(logs, mainFile);
+    const parseResult = this.logParser.parseWithSummary
+      ? this.logParser.parseWithSummary(parseTexLog, mainFile, {
+          bibLogs,
+          stopOnFirstError,
+        })
+      : (() => {
+          const parsed = this.logParser.parse(parseTexLog, mainFile, {
+            bibLogs,
+            stopOnFirstError,
+          });
+          return {
+            diagnostics: parsed,
+            summary: {
+              totalErrors: parsed.filter((d) => d.severity === 'error').length,
+              totalWarnings: parsed.filter((d) => d.severity === 'warning')
+                .length,
+              totalBadboxes: parsed.filter(
+                (d) => d.severity === 'badbox' || d.category === 'badbox',
+              ).length,
+              suppressedCascadeCount: 0,
+              truncated: false,
+            },
+          };
+        })();
 
+    const diagnostics = [...parseResult.diagnostics];
     if (shellEscapeAdvisories.length > 0) {
       for (const adv of shellEscapeAdvisories) {
         diagnostics.push({
@@ -563,16 +755,28 @@ export class CompilePipeline {
           line: null,
           message: `Document references '${adv}' which historically required shell-escape. Shell-escape is strictly disabled in the Flux isolated compile sandbox for security. If compiling fails, consider native LaTeX alternatives (e.g. listings package instead of minted).`,
           severity: 'info',
+          source: 'system',
           code: 'SHELL_ESCAPE_ADVISORY',
         });
       }
     }
 
+    const inlineBounded = boundInlineLogText(parseTexLog, rawLogSizeBytes);
+    const logMeta: CompileLogMeta = {
+      sizeBytes: inlineBounded.sizeBytes,
+      truncated: inlineBounded.truncated,
+      ...(bibLogs.length > 0
+        ? { bibLogFiles: bibLogs.map((b) => b.filename) }
+        : {}),
+    };
+
     return {
       pdfBase64,
       synctexBase64,
-      logs,
+      logs: inlineBounded.text,
+      logMeta,
       diagnostics,
+      summary: parseResult.summary,
       discoveredFiles,
     };
   }

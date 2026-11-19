@@ -160,6 +160,44 @@ export function parseSandboxConfig(
   };
 }
 
+export function extractSandboxEnvFromConfigService(configService?: {
+  get<T = string>(key: string): T | undefined;
+}): Record<string, string | undefined> {
+  if (!configService) return {};
+  const rawMode = configService.get<string>('CLSI_SANDBOX_MODE');
+  return {
+    CLSI_SANDBOX_MODE: rawMode ? rawMode.toLowerCase() : undefined,
+    CLSI_SANDBOX_IMAGE:
+      configService.get<string>('CLSI_SANDBOX_IMAGE') ||
+      configService.get<string>('CLSI_DOCKER_IMAGE') ||
+      undefined,
+    CLSI_URL: configService.get<string>('CLSI_URL') || undefined,
+    CLSI_SANDBOX_USER:
+      configService.get<string>('CLSI_SANDBOX_USER') || undefined,
+    CLSI_SANDBOX_MEMORY_MB:
+      configService.get<string>('CLSI_SANDBOX_MEMORY_MB') || undefined,
+    CLSI_SANDBOX_CPUS:
+      configService.get<string>('CLSI_SANDBOX_CPUS') || undefined,
+    CLSI_SANDBOX_PIDS:
+      configService.get<string>('CLSI_SANDBOX_PIDS') || undefined,
+    CLSI_SANDBOX_FSIZE_MB:
+      configService.get<string>('CLSI_SANDBOX_FSIZE_MB') || undefined,
+    CLSI_SANDBOX_NOFILE:
+      configService.get<string>('CLSI_SANDBOX_NOFILE') || undefined,
+    CLSI_SANDBOX_TMPFS_MB:
+      configService.get<string>('CLSI_SANDBOX_TMPFS_MB') || undefined,
+    CLSI_SANDBOX_TIMEOUT_MS:
+      configService.get<string>('CLSI_SANDBOX_TIMEOUT_MS') || undefined,
+    CLSI_SANDBOX_RUNTIME:
+      configService.get<string>('CLSI_SANDBOX_RUNTIME') || undefined,
+    CLSI_SCRATCH_DIR:
+      configService.get<string>('CLSI_SCRATCH_DIR') ||
+      configService.get<string>('SCRATCH_DIR') ||
+      undefined,
+    NODE_ENV: configService.get<string>('NODE_ENV') || undefined,
+  };
+}
+
 export function buildSandboxProfileFromConfig(
   config: ClsiSandboxConfig,
 ): SandboxProfile {

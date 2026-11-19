@@ -159,14 +159,13 @@ export class DiagnosticsService {
 
     let sourceText = dto.source ?? dto.content;
     let filename = dto.filename || 'main.tex';
+    const hasCallerSymbols =
+      dto.knownBibKeys !== undefined || dto.knownLabels !== undefined;
 
-    if (this.workspaceCollector) {
-      await this.workspaceCollector
-        .flushProjectWorkspace(projectId)
-        .catch(() => []);
-    }
-
-    if (this.docstoreService) {
+    if (
+      this.docstoreService &&
+      (sourceText === undefined || !hasCallerSymbols)
+    ) {
       try {
         const docs = await this.docstoreService.getAllDocs(
           projectId,

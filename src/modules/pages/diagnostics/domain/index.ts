@@ -4,6 +4,8 @@
  */
 
 export * from './compile-log.analyzer';
+export * from './bib-log.parser';
+export * from './diagnostics.processor';
 export * from './syntax.linter';
 export * from './diagnostic-item.entity';
 export * from './diagnostic-report.entity';

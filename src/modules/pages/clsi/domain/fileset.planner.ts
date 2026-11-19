@@ -6,6 +6,7 @@
 
 import * as crypto from 'crypto';
 import { TexEngineDetector } from './tex-engine.detector';
+import type { CompileValidationIssue } from './clsi.ports';
 
 export type FileSource =
   | {
@@ -60,11 +61,16 @@ export interface PlannedFileSet {
   fingerprint: string;
   /** True when the entry file is known to have content. */
   hasMainContent: boolean;
+  /** Duplicate normalized virtual tree paths detected during planning. */
+  conflictedPaths?: string[];
   /** Cached metadata from DB planning to avoid redundant DB queries during hydration/snapshots. */
   nodes?: ManifestNode[];
   docs?: ManifestDoc[];
   binaryFiles?: ManifestFile[];
 }
+
+export const DEFAULT_MAX_PROJECT_BYTES = 100 * 1024 * 1024;
+export const DEFAULT_MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 const sha256 = (s: string) =>
   crypto.createHash('sha256').update(s, 'utf8').digest('hex');
@@ -132,12 +138,19 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
   const idToPath = new Map<string, string>();
   const fileIdToPath = new Map<string, string>();
   const files = new Map<string, FileSource>();
+  const seenNodePaths = new Set<string>();
+  const conflictedPaths = new Set<string>();
   let detectedRootPath: string | null = null;
 
   for (const node of nodes) {
     if (node.type === 'FOLDER') continue;
     const cleanPath =
       sanitizeRelativePath(node.path || '') || node.name || 'untitled.tex';
+    if (seenNodePaths.has(cleanPath)) {
+      conflictedPaths.add(cleanPath);
+    } else {
+      seenNodePaths.add(cleanPath);
+    }
     if (node.docId) idToPath.set(node.docId, cleanPath);
     if (node.fileId) fileIdToPath.set(node.fileId, cleanPath);
     idToPath.set(node.id, cleanPath);
@@ -189,9 +202,12 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
       (cleanPageId && files.has(cleanPageId) ? cleanPageId : undefined))
     : undefined;
 
+  const sourceHasDocClass = Boolean(source && /\\documentclass\b/.test(source));
   if (pagePath && pagePath !== mainFile) {
-    if (source) files.set(pagePath, inlineSource(source));
-  } else if (source && (source.includes('\\documentclass') || mainWasEmpty)) {
+    if (source && !sourceHasDocClass && !(pagePath in incomingFiles)) {
+      files.set(pagePath, inlineSource(source));
+    }
+  } else if (source && (sourceHasDocClass || mainWasEmpty)) {
     files.set(mainFile, inlineSource(source));
   }
 
@@ -212,10 +228,88 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
     files,
     fingerprint: fingerprintFileSet(files, binaryTokens),
     hasMainContent: !isEmpty(files.get(mainFile)),
+    ...(conflictedPaths.size > 0
+      ? { conflictedPaths: Array.from(conflictedPaths) }
+      : {}),
     nodes,
     docs,
     binaryFiles: input.binaryFiles,
   };
+}
+
+/**
+ * Pure pre-compile structural validator executed before queuing or calling `flux_clsi`.
+ * Detects missing/empty Main file, conflicting duplicate tree paths, and size quota breaches.
+ */
+export function validatePlannedFileSet(
+  plan: PlannedFileSet,
+  options: { maxProjectBytes?: number; maxFileBytes?: number } = {},
+): CompileValidationIssue[] {
+  const issues: CompileValidationIssue[] = [];
+  const maxProjectBytes = options.maxProjectBytes ?? DEFAULT_MAX_PROJECT_BYTES;
+  const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+
+  if (!plan.hasMainContent) {
+    const availableTexFiles = Array.from(plan.files.keys()).filter((p) =>
+      p.toLowerCase().endsWith('.tex'),
+    );
+    issues.push({
+      code: 'mainFile',
+      mainFile: plan.mainFile,
+      availableTexFiles,
+      message: `Main TeX document "${plan.mainFile}" is missing or empty.`,
+    });
+  }
+
+  if (plan.conflictedPaths && plan.conflictedPaths.length > 0) {
+    issues.push({
+      code: 'conflictedPaths',
+      paths: [...plan.conflictedPaths],
+      message: `Conflicting duplicate file path(s): ${plan.conflictedPaths.join(', ')}`,
+    });
+  }
+
+  let totalBytes = 0;
+  const offendingFiles: Array<{ path: string; sizeBytes: number }> = [];
+
+  for (const [filePath, src] of plan.files.entries()) {
+    const sizeBytes =
+      src.kind === 'db'
+        ? Math.max(0, src.sizeBytes || 0)
+        : Buffer.byteLength(src.content || '', 'utf8');
+    totalBytes += sizeBytes;
+    if (sizeBytes > maxFileBytes) {
+      offendingFiles.push({ path: filePath, sizeBytes });
+    }
+  }
+
+  for (const bf of plan.binaryFiles || []) {
+    const sizeBytes = Math.max(0, bf.sizeBytes || 0);
+    totalBytes += sizeBytes;
+    if (sizeBytes > maxFileBytes) {
+      offendingFiles.push({
+        path: sanitizeRelativePath(bf.name || bf.id),
+        sizeBytes,
+      });
+    }
+  }
+
+  if (totalBytes > maxProjectBytes || offendingFiles.length > 0) {
+    offendingFiles.sort((a, b) => b.sizeBytes - a.sizeBytes);
+    issues.push({
+      code: 'sizeCheck',
+      totalBytes,
+      limitBytes: maxProjectBytes,
+      fileLimitBytes: maxFileBytes,
+      offendingFiles,
+      message:
+        totalBytes > maxProjectBytes
+          ? `Project size (${(totalBytes / (1024 * 1024)).toFixed(1)} MB) exceeds ${(maxProjectBytes / (1024 * 1024)).toFixed(0)} MB limit.`
+          : `One or more files exceed the ${(maxFileBytes / (1024 * 1024)).toFixed(0)} MB per-file limit.`,
+    });
+  }
+
+  return issues;
 }
 
 /** Plan for ad-hoc compiles with no persisted project (everything inline). */

@@ -319,7 +319,7 @@ export class WorkspacePlannerService {
           incomingFiles,
           source,
           mainFile,
-          pageId: dto.pageId,
+          pageId: effectiveScopePageId,
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

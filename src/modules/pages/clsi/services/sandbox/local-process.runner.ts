@@ -53,6 +53,7 @@ export class LocalProcessRunner implements ISandboxRunner {
       extraEnv: options.env,
       clientAllowList: ['DOCKER_HOST', 'DOCKER_CONTEXT'],
       isTexProcess: isTexCommand,
+      openinAny: options.openinAny,
     });
 
     return new Promise((resolve) => {

@@ -144,6 +144,24 @@ export const ENV_PKG_LOOKUP: Record<string, string> = {
   comment: 'verbatim',
 };
 
+export const CASCADE_SUPPRESSION_MAP: Record<string, string[]> = {
+  RUNAWAY_ARGUMENT: ['EMERGENCY_STOP'],
+  UNBALANCED_BRACES: ['EMERGENCY_STOP'],
+  FILE_NOT_FOUND: ['EMERGENCY_STOP'],
+  MISSING_BEGIN_DOCUMENT: ['EMERGENCY_STOP'],
+  UNDEFINED_CONTROL_SEQUENCE: ['EMERGENCY_STOP'],
+  ENVIRONMENT_MISMATCH: ['EMERGENCY_STOP', 'UNBALANCED_BRACES'],
+  ENVIRONMENT_UNDEFINED: ['EMERGENCY_STOP'],
+  EXTRA_ALIGNMENT_TAB: ['EMERGENCY_STOP'],
+};
+
+export const FATAL_CASCADE_PATTERNS: RegExp[] = [
+  /fatal error occurred, no output pdf/i,
+  /^==> fatal error occurred/i,
+  /^no pages of output\.?$/i,
+  /latex error:\s*too many errors/i,
+];
+
 export interface RuleDefinition extends ErrorExplanationProps {
   patterns: RegExp[];
 }
@@ -326,6 +344,21 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       ],
     },
     {
+      code: 'RUNAWAY_ARGUMENT',
+      title: 'Runaway Argument',
+      explanation:
+        'A macro argument or group reached the end of a paragraph or file without a matching closing brace "}".',
+      commonCauses: [
+        'Missing closing curly brace "}" on a command (e.g. \\textbf{hello or \\caption{...).',
+        'A blank line accidentally placed inside a non-long macro argument.',
+      ],
+      suggestedFix:
+        'Check the line and preceding paragraph for an unclosed "{" and add the matching "}".',
+      exampleSnippet: '\\textbf{bold text}',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Runaway_argument`,
+      patterns: [/runaway argument/i],
+    },
+    {
       code: 'CORRUPTED_AUX_FILE',
       title: 'Corrupted Auxiliary File',
       explanation:
@@ -339,7 +372,65 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       exampleSnippet:
         'Clear cached .aux, .bbl, and .out files, then recompile.',
       documentationUrl: `${LATEX_KB_BASE_URL}#File_ended_while_scanning_use_of`,
-      patterns: [/file ended while scanning use of/i, /runaway argument/i],
+      patterns: [
+        /\.aux[\s\S]*file ended while scanning use of/i,
+        /file ended while scanning use of/i,
+      ],
+    },
+    {
+      code: 'MISSING_BEGIN_DOCUMENT',
+      title: 'Missing \\begin{document}',
+      explanation:
+        'Text or printable content was encountered before \\begin{document}, or the main file does not contain a \\begin{document} declaration.',
+      commonCauses: [
+        'Plain text accidentally typed in the preamble before \\begin{document}.',
+        'Wrong file set as the Main document (compiling a chapter subfile instead of main.tex).',
+      ],
+      suggestedFix:
+        'Ensure printable text appears after \\begin{document}, or select your root .tex file as Main document.',
+      exampleSnippet:
+        '\\documentclass{article}\n\\begin{document}\nContent here\n\\end{document}',
+      documentationUrl: `${LATEX_KB_BASE_URL}#Missing_\\begin{document}`,
+      patterns: [/missing \\begin\{document\}/i],
+    },
+    {
+      code: 'BIB_SYNTAX_ERROR',
+      title: 'Bibliography Entry Syntax Error',
+      explanation:
+        'BibTeX or Biber encountered malformed syntax in a .bib entry (missing comma, unclosed brace/quote, or broken crossref).',
+      commonCauses: [
+        'Missing trailing comma at the end of a field line inside @article{...}.',
+        'Unbalanced "{" / "}" or unescaped quote in a BibTeX field.',
+      ],
+      suggestedFix:
+        'Inspect the reported .bib line for missing commas between fields and balanced braces.',
+      exampleSnippet:
+        '@article{key2025,\n  author = {Doe, Jane},\n  title  = {Sample Paper},\n  year   = {2025}\n}',
+      documentationUrl: `${LATEX_KB_BASE_URL}`,
+      patterns: [
+        /i was expecting a [`',]/i,
+        /illegal, another entry/i,
+        /you're missing a field name/i,
+        /a bad cross reference/i,
+      ],
+    },
+    {
+      code: 'BIB_DUPLICATE_KEY',
+      title: 'Duplicate Bibliography Key',
+      explanation:
+        'Two entries in your .bib file(s) share the exact same citation key.',
+      commonCauses: [
+        'Importing or pasting the same BibTeX entry twice.',
+        'Two references across different .bib files sharing one cite key.',
+      ],
+      suggestedFix:
+        'Remove the duplicate entry or rename one of the keys so every citation key is unique.',
+      exampleSnippet: '@article{doe2025a, ...}',
+      documentationUrl: `${LATEX_KB_BASE_URL}`,
+      patterns: [
+        /repeated(?:\s+bib(?:tex)?)?\s+entry/i,
+        /duplicate entry key/i,
+      ],
     },
     {
       code: 'EMERGENCY_STOP',
@@ -442,6 +533,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
     DEPRECATED_COMMAND: 'UNDEFINED_CONTROL_SEQUENCE',
     EMPTY_REFERENCE: 'UNDEFINED_REFERENCE',
     RETRACTED_CITATION: 'UNDEFINED_CITATION',
+    UNDEFINED_MACRO: 'UNDEFINED_CONTROL_SEQUENCE',
   };
 
   public explain(message: string, context?: string): ErrorExplanationVo | null {

@@ -6,6 +6,62 @@
 import { WorkspaceFile } from '@/modules/pages/core';
 import { SandboxProfile } from './sandbox-profile';
 
+export type CompileOutcome =
+  | 'success'
+  | 'stopped-on-first-error'
+  | 'failure'
+  | 'timedout'
+  | 'terminated'
+  | 'validation-problems'
+  | 'clsi-unavailable';
+
+export interface CompileLogMeta {
+  sizeBytes: number;
+  truncated: boolean;
+  logArtifactUrl?: string;
+  bibLogFiles?: string[];
+}
+
+export interface DiagnosticsSummary {
+  totalErrors: number;
+  totalWarnings: number;
+  totalBadboxes: number;
+  suppressedCascadeCount: number;
+  truncated: boolean;
+}
+
+export type CompileValidationIssue =
+  | {
+      code: 'mainFile';
+      mainFile: string;
+      availableTexFiles: string[];
+      message: string;
+    }
+  | {
+      code: 'conflictedPaths';
+      paths: string[];
+      message: string;
+    }
+  | {
+      code: 'sizeCheck';
+      totalBytes: number;
+      limitBytes: number;
+      fileLimitBytes: number;
+      offendingFiles: Array<{ path: string; sizeBytes: number }>;
+      message: string;
+    };
+
+export interface BibLogInput {
+  filename: string;
+  content: string;
+}
+
+export interface LogParseOptions {
+  bibLogs?: BibLogInput[];
+  stopOnFirstError?: boolean;
+  maxDiagnostics?: number;
+}
+
 export interface CompilerDiagnostic {
   file?: string;
   line: number | null;
@@ -15,6 +71,8 @@ export interface CompilerDiagnostic {
   severity: 'error' | 'warning' | 'badbox' | 'info';
   category?: 'error' | 'warning' | 'badbox' | 'info';
   warningSubtype?: 'font' | 'package' | 'citation' | 'reference' | 'badbox';
+  source?: 'tex' | 'bibtex' | 'biber' | 'system';
+  highlightCommand?: string;
   code?: string;
   suggestion?: string;
   quickFix?: {
@@ -29,7 +87,19 @@ export interface CompilerDiagnostic {
 }
 
 export interface ILogParser {
-  parse(logText: string, defaultFile?: string): CompilerDiagnostic[];
+  parse(
+    logText: string,
+    defaultFile?: string,
+    options?: LogParseOptions,
+  ): CompilerDiagnostic[];
+  parseWithSummary?(
+    logText: string,
+    defaultFile?: string,
+    options?: LogParseOptions,
+  ): {
+    diagnostics: CompilerDiagnostic[];
+    summary: DiagnosticsSummary;
+  };
 }
 
 export interface SyncPoint {
@@ -173,6 +243,7 @@ export interface ProcessExecutionOptions {
   maxOutputBytes?: number;
   profile?: SandboxProfile;
   runId?: string;
+  openinAny?: 'p' | 'r';
 }
 
 export interface ProcessExecutionResult {

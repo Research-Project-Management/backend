@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
+import { FILES_PORT, type IFilesPort } from '@/modules/files';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
@@ -86,6 +87,9 @@ export class PageService {
     liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
     @Optional() pageScopeRepo?: ScopeRepository,
     @Optional() domainEventBus?: PageDomainEventBus,
+    @Optional()
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {
     this.pageScopeRepo = pageScopeRepo || new ScopeRepository(prisma);
     this.liveCollab =
@@ -107,6 +111,7 @@ export class PageService {
       domainEventBus: this.domainEventBus,
       logger: this.logger,
       eventEmitter: this.eventEmitter,
+      filesPort: this.filesPort,
     };
   }
 
@@ -116,6 +121,7 @@ export class PageService {
       docstoreService: this.docstoreService,
       liveCollab: this.liveCollab,
       eventEmitter: this.eventEmitter,
+      filesPort: this.filesPort,
     };
   }
 
@@ -400,6 +406,7 @@ export class PageService {
       this.eventEmitter,
       pageId,
       targetProjectId,
+      this.filesPort,
     );
   }
 

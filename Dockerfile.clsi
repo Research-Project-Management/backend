@@ -2,6 +2,8 @@
 # Multi-stage Dockerfile for Flux CLSI Microservice (TeX Live Compilation Engine)
 # ==============================================================================
 
+ARG TEXLIVE_BASE=texlive-full-base
+
 FROM node:22-alpine AS base
 RUN apk add --no-cache libc6-compat dumb-init curl && \
     npm install -g pnpm@10
@@ -13,18 +15,20 @@ COPY package.json pnpm-lock.yaml prisma.config.ts ./
 COPY prisma ./prisma
 RUN pnpm install
 
+FROM base AS clsi-deps
+WORKDIR /app
+COPY package.json ./package.root.json
+RUN node -e 'const fs=require("fs"),r=require("./package.root.json"),keep=["@nestjs/common","@nestjs/config","@nestjs/core","@nestjs/platform-fastify","@nestjs/swagger","@fastify/swagger","@fastify/swagger-ui","fastify","class-validator","class-transformer","reflect-metadata","rxjs"],deps={};for(const k of keep){if(!r.dependencies?.[k])throw new Error("Missing CLSI dep: "+k);deps[k]=r.dependencies[k];}fs.writeFileSync("package.json",JSON.stringify({name:"flux-clsi-runtime",version:r.version||"0.0.1",private:true,dependencies:deps,pnpm:r.pnpm?.overrides?{overrides:r.pnpm.overrides}:undefined},null,2)+"\n");fs.unlinkSync("package.root.json");' && \
+    pnpm install --prod --ignore-scripts --no-frozen-lockfile && \
+    rm -rf /root/.local/share/pnpm/store /tmp/*
+
 FROM base AS builder
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN pnpm run build:clsi
-RUN pnpm prune --prod || pnpm install --prod --ignore-scripts
 
-FROM node:22-alpine AS runner
-WORKDIR /app
-
-# Install TeX Live engines (pdflatex, xelatex, lualatex, latexmk, synctex),
-# bibliography processors (bibtex, biber), and comprehensive academic macro packages
+FROM node:22-alpine AS texlive-full-base
 RUN apk add --no-cache \
     libc6-compat \
     dumb-init \
@@ -32,35 +36,56 @@ RUN apk add --no-cache \
     perl \
     ghostscript \
     biber \
-    texlive \
-    texlive-luatex \
-    texlive-xetex \
-    texlive-dvi \
-    texmf-dist-latexrecommended \
-    texmf-dist-latexextra \
-    texmf-dist-mathscience \
-    texmf-dist-pictures \
-    texmf-dist-bibtexextra \
-    texmf-dist-publishers \
-    texmf-dist-plaingeneric \
-    texmf-dist-fontsrecommended \
-    texmf-dist-langenglish \
-    texmf-dist-langother
+    fontconfig \
+    font-dejavu \
+    font-liberation \
+    texlive-full \
+    texmf-dist-full
+
+FROM ${TEXLIVE_BASE} AS runner
+USER root
+WORKDIR /app
+
+# Ensure runtime utilities, fonts, fontconfig registration, and pre-warmed LuaLaTeX cache
+RUN apk add --no-cache \
+    libc6-compat \
+    dumb-init \
+    curl \
+    fontconfig \
+    font-dejavu \
+    font-liberation && \
+    mkdir -p /etc/fonts && \
+    printf '%s\n' \
+      '<?xml version="1.0"?>' \
+      '<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">' \
+      '<fontconfig>' \
+      '  <dir>/usr/share/texmf-dist/fonts/opentype</dir>' \
+      '  <dir>/usr/share/texmf-dist/fonts/truetype</dir>' \
+      '</fontconfig>' > /etc/fonts/local.conf && \
+    fc-cache -f
+
+ENV TEXMFVAR=/var/cache/texmf-var
+ENV TEXMFCACHE=/var/cache/texmf-var
+RUN mkdir -p /var/cache/texmf-var && \
+    TEXMFVAR=/var/cache/texmf-var TEXMFCACHE=/var/cache/texmf-var luaotfload-tool --update && \
+    chmod -R 777 /var/cache/texmf-var
 
 ENV NODE_ENV=production
 ENV PORT=3013
 ENV CLSI_PORT=3013
 ENV HOST=0.0.0.0
 ENV CLSI_SCRATCH_DIR=/tmp/clsi-scratch
+ENV HOME=/home/nestjs
 
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 -G nodejs -h /home/nestjs -D nestjs && \
-    mkdir -p /tmp/clsi-scratch && \
-    chown -R nestjs:nodejs /tmp/clsi-scratch && \
-    chmod 1777 /tmp/clsi-scratch
+RUN (getent group nodejs >/dev/null 2>&1 || addgroup --system --gid 1001 nodejs) && \
+    (id -u nestjs >/dev/null 2>&1 || adduser --system --uid 1001 -G nodejs -h /home/nestjs -D nestjs) && \
+    mkdir -p /home/nestjs /tmp/clsi-scratch && \
+    chown -R nestjs:nodejs /home/nestjs /tmp/clsi-scratch && \
+    chmod 1777 /tmp/clsi-scratch && \
+    rm -rf /app/dist /app/node_modules
 
-COPY --chown=nestjs:nodejs package.json ./
-COPY --chown=nestjs:nodejs --from=builder /app/node_modules ./node_modules
+COPY --chown=nestjs:nodejs --from=clsi-deps /app/package.json ./package.json
+COPY --chown=nestjs:nodejs --from=clsi-deps /app/node_modules ./node_modules
 COPY --chown=nestjs:nodejs --from=builder /app/dist ./dist
 
 USER nestjs

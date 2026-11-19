@@ -104,7 +104,10 @@ export async function forwardSyncHelper(
     );
   const scratchId = pageId || spaceId;
 
-  const remoteRes = await ctx.remoteClient.tryRemoteForwardSync(dto);
+  const remoteRes = await ctx.remoteClient.tryRemoteForwardSync(dto, {
+    spaceId,
+    pageId,
+  });
   if (remoteRes) return remoteRes;
 
   let synctexContent = await loadSynctexContentHelper(
@@ -156,7 +159,10 @@ export async function reverseSyncHelper(
     );
   const scratchId = pageId || spaceId;
 
-  const remoteRes = await ctx.remoteClient.tryRemoteReverseSync(dto);
+  const remoteRes = await ctx.remoteClient.tryRemoteReverseSync(dto, {
+    spaceId,
+    pageId,
+  });
   if (remoteRes) return remoteRes;
 
   let synctexContent = await loadSynctexContentHelper(
@@ -211,7 +217,7 @@ export async function getWordCountHelper(
       ? resolvedSpaceId
       : undefined;
   const manuscriptPageId = resolvedPageId ?? dto.pageId;
-  const scratchScopeId = manuscriptPageId || projectId || 'default';
+  const scratchTargetId = manuscriptPageId || projectId || 'default';
 
   // Multi-file project word count if files map is provided or projectId is provided without explicit single-file source
   if (
@@ -236,7 +242,7 @@ export async function getWordCountHelper(
         const hydrated = await ctx.workspacePlanner.hydrateFiles(
           projectId,
           plan,
-          scratchScopeId,
+          scratchTargetId,
         );
         for (const [filePath, val] of Object.entries(hydrated)) {
           if (typeof val === 'string') {
@@ -322,7 +328,7 @@ export async function getWordCountHelper(
       const hydrated = await ctx.workspacePlanner.hydrateFiles(
         projectId,
         plan,
-        scratchScopeId,
+        scratchTargetId,
       );
       const stringFiles: Record<string, string> = {};
       for (const [filePath, val] of Object.entries(hydrated)) {

@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
+import { type IFilesPort } from '@/modules/files';
 import { LiveCollaborationPort } from '../ports/live-collaboration.port';
 import {
   ensureCanonicalPageId,
@@ -45,6 +46,7 @@ export interface PageFilesTransferContext {
   readonly docstoreService: DocstoreService;
   readonly liveCollab: LiveCollaborationPort;
   readonly eventEmitter?: EventEmitter2;
+  readonly filesPort?: IFilesPort;
 }
 
 export async function createPageFileHelper(
@@ -433,41 +435,20 @@ export async function importFileFromProjectHelper(
       },
     });
 
-    if (bin.blobId) {
-      if (typeof tx.$executeRaw === 'function') {
-        await tx.$executeRaw`
-          UPDATE storage_blobs
-          SET ref_count = ref_count + 1,
-              status = 'READY'::"BlobStatus",
-              tombstone_at = NULL
-          WHERE id = ${bin.blobId}::uuid
-        `.catch(() => undefined);
-      } else if (tx.storageBlob?.updateMany) {
-        await tx.storageBlob
-          .updateMany({
-            where: { id: bin.blobId },
-            data: {
-              refCount: { increment: 1 },
-              status: 'READY',
-              tombstoneAt: null,
-            },
-          })
-          .catch(() => undefined);
-      }
-    }
-
-    const importedBytes = Number(bin.sizeBytes ?? 0);
-    if (importedBytes > 0 && tx.storageQuota?.updateMany) {
-      await tx.storageQuota
-        .updateMany({
-          where: { spaceId: targetProjectId },
-          data: { usedBytes: { increment: BigInt(importedBytes) } },
-        })
-        .catch(() => undefined);
-    }
-
     return { newFile, node };
   });
+
+  if (createdRecord) {
+    if (bin.blobId && ctx.filesPort?.acquireBlob) {
+      await ctx.filesPort.acquireBlob(bin.blobId).catch(() => undefined);
+    }
+    const importedBytes = Number(bin.sizeBytes ?? 0);
+    if (importedBytes > 0 && ctx.filesPort?.reserveQuota) {
+      await ctx.filesPort
+        .reserveQuota(targetProjectId, BigInt(importedBytes))
+        .catch(() => undefined);
+    }
+  }
 
   ctx.eventEmitter?.emit('manuscripts.file-tree.change', {
     projectId: targetProjectId,

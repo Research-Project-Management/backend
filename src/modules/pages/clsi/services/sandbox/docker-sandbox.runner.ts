@@ -67,10 +67,19 @@ export class DockerSandboxRunner implements ISandboxRunner {
     const runId = options.runId || randomUUID();
     const containerName = `flux-clsi-${runId}`;
 
+    const containerExtraEnv: Record<string, string | undefined> = {
+      HOME: '/tmp',
+      TEXMFVAR: '/tmp/texmf-var',
+      TEXMFCACHE: '/tmp/texmf-cache',
+      XDG_CACHE_HOME: '/tmp',
+      ...(options.env || {}),
+    };
+
     const filteredEnv = buildSandboxEnv({
       parentEnv: getSafeHostEnv(),
-      extraEnv: options.env,
+      extraEnv: containerExtraEnv,
       isTexProcess: true,
+      openinAny: options.openinAny,
     });
 
     const envArgs: string[] = [];

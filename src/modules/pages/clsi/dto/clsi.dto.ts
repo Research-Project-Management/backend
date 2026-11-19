@@ -128,6 +128,16 @@ export class CompilePageDto {
   @IsOptional()
   @IsObject()
   files?: Record<string, string>;
+
+  @ApiPropertyOptional({
+    description:
+      'Response delivery mode: "inline" embeds Base64 PDF in JSON (default), "artifact" returns binary artifact URLs',
+    enum: ['inline', 'artifact'],
+    default: 'inline',
+  })
+  @IsOptional()
+  @IsIn(['inline', 'artifact'])
+  responseMode?: 'inline' | 'artifact';
 }
 
 export class ClsiWordCountDto {

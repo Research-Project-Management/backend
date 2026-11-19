@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
+import { type IFilesPort } from '@/modules/files';
 import { LiveCollaborationPort } from '../ports/live-collaboration.port';
 import { PageDomainEventBus } from '../events/event-bus.service';
 import {
@@ -57,6 +58,7 @@ export interface PageLifecycleContext {
   readonly domainEventBus: PageDomainEventBus;
   readonly logger: Logger;
   readonly eventEmitter?: EventEmitter2;
+  readonly filesPort?: IFilesPort;
 }
 
 export async function getProjectPagesHelper(
@@ -547,6 +549,7 @@ export async function duplicatePageHelper(
     | 'pageScopeRepo'
     | 'liveCollab'
     | 'eventEmitter'
+    | 'filesPort'
   >,
   pageId: string,
   authorizedProjectId?: string | { id: string } | null,
@@ -663,5 +666,6 @@ export async function duplicatePageHelper(
       fallbackDoc: validEntryDoc,
       actorId: userId,
     },
+    ctx.filesPort,
   );
 }

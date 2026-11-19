@@ -107,6 +107,8 @@ export interface QuickFixVo {
 export type DiagnosticWarningSubtype =
   'font' | 'package' | 'citation' | 'reference' | 'badbox';
 
+export type DiagnosticSourceType = 'tex' | 'bibtex' | 'biber' | 'system';
+
 export interface DiagnosticItemProps {
   id?: string;
   file: string;
@@ -115,6 +117,8 @@ export interface DiagnosticItemProps {
   severity: DiagnosticSeverityType | DiagnosticSeverityVo;
   category?: DiagnosticSeverityType;
   warningSubtype?: DiagnosticWarningSubtype;
+  source?: DiagnosticSourceType;
+  highlightCommand?: string;
   message: string;
   context?: string;
   code?: string;
@@ -130,6 +134,8 @@ export class DiagnosticItem {
   public readonly severity: DiagnosticSeverityVo;
   public readonly category: DiagnosticSeverityType;
   public readonly warningSubtype?: DiagnosticWarningSubtype;
+  public readonly source?: DiagnosticSourceType;
+  public readonly highlightCommand?: string;
   public readonly message: string;
   public readonly context?: string;
   public readonly code?: string;
@@ -151,6 +157,8 @@ export class DiagnosticItem {
         : DiagnosticSeverityVo.fromString(props.severity);
     this.category = props.category || this.severity.value;
     this.warningSubtype = props.warningSubtype;
+    this.source = props.source;
+    this.highlightCommand = props.highlightCommand;
     this.message = (props.message || '').trim();
     this.context = props.context;
     this.code = props.code;
@@ -167,6 +175,10 @@ export class DiagnosticItem {
       severity: this.severity.value,
       category: this.category,
       warningSubtype: this.warningSubtype,
+      ...(this.source ? { source: this.source } : {}),
+      ...(this.highlightCommand
+        ? { highlightCommand: this.highlightCommand }
+        : {}),
       message: this.message,
       context: this.context,
       code: this.code,

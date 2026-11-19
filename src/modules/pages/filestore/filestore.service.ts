@@ -9,12 +9,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
 import { isUuid } from '@/core';
-import {
-  STORAGE_QUOTA_REPOSITORY,
-  BlobService,
-  ContentHash as PlatformContentHash,
-  IQuotaRepository,
-} from '@/modules/files';
+import { FILES_PORT, type IFilesPort } from '@/modules/files';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { FilestoreRepository } from './filestore.repository';
 import {
@@ -36,10 +31,9 @@ export class FilestoreService {
   constructor(
     private readonly repository: FilestoreRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
-    @Optional() private readonly blobService?: BlobService,
     @Optional()
-    @Inject(STORAGE_QUOTA_REPOSITORY)
-    private readonly quotaRepo?: IQuotaRepository,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {}
 
   /**
@@ -177,11 +171,17 @@ export class FilestoreService {
       // Enforce unified platform Space StorageQuota before writing physical object
       const netBytesDelta =
         BigInt(sizeBytes) - BigInt(existing?.sizeBytes ?? 0);
-      if (this.quotaRepo && netBytesDelta > 0n) {
-        await this.quotaRepo.incrementUsage(null, projectId, netBytesDelta);
+      if (
+        netBytesDelta > 0n &&
+        typeof this.filesPort?.reserveQuota === 'function'
+      ) {
+        await this.filesPort.reserveQuota(projectId, netBytesDelta);
         quotaDeltaApplied = netBytesDelta;
-      } else if (this.quotaRepo && netBytesDelta < 0n) {
-        await this.quotaRepo.decrementUsage(null, projectId, -netBytesDelta);
+      } else if (
+        netBytesDelta < 0n &&
+        typeof this.filesPort?.releaseQuota === 'function'
+      ) {
+        await this.filesPort.releaseQuota(projectId, -netBytesDelta);
         quotaDeltaApplied = netBytesDelta;
       }
 
@@ -193,13 +193,12 @@ export class FilestoreService {
 
       if (
         !blobExists &&
-        this.blobService &&
+        typeof this.filesPort?.findBlobByHash === 'function' &&
         sha256Hex &&
-        /^[a-f0-9]{64}$/i.test(sha256Hex) &&
-        typeof this.blobService.findBlobByHash === 'function'
+        /^[a-f0-9]{64}$/i.test(sha256Hex)
       ) {
-        const casHit = await this.blobService
-          .findBlobByHash(PlatformContentHash.fromHex(sha256Hex))
+        const casHit = await this.filesPort
+          .findBlobByHash(sha256Hex)
           .catch(() => null);
         if (casHit?.isReady()) {
           storageKey = StorageKey.fromRawKey(casHit.s3Key.value());
@@ -233,12 +232,12 @@ export class FilestoreService {
       );
       if (
         !isIdenticalOverwrite &&
-        this.blobService &&
+        typeof this.filesPort?.registerUploadedObject === 'function' &&
         sha256Hex &&
         /^[a-f0-9]{64}$/i.test(sha256Hex)
       ) {
         try {
-          const casResult = await this.blobService.registerUploadedObject({
+          const casResult = await this.filesPort.registerUploadedObject({
             storageKey: storageKey.getValue(),
             sizeBytes: BigInt(sizeBytes),
             contentHashHex: sha256Hex,
@@ -295,9 +294,9 @@ export class FilestoreService {
         existing?.blobId &&
         resolvedBlobId &&
         existing.blobId !== resolvedBlobId &&
-        this.blobService
+        typeof this.filesPort?.releaseBlob === 'function'
       ) {
-        await this.blobService
+        await this.filesPort
           .releaseBlob(existing.blobId)
           .catch((err: unknown) => {
             this.logger.warn(
@@ -308,21 +307,27 @@ export class FilestoreService {
 
       return saved;
     } catch (err) {
-      if (this.quotaRepo && quotaDeltaApplied > 0n) {
-        await this.quotaRepo
-          .decrementUsage(null, projectId, quotaDeltaApplied)
+      if (
+        quotaDeltaApplied > 0n &&
+        typeof this.filesPort?.releaseQuota === 'function'
+      ) {
+        await this.filesPort
+          .releaseQuota(projectId, quotaDeltaApplied)
           .catch(() => undefined);
-      } else if (this.quotaRepo && quotaDeltaApplied < 0n) {
-        await this.quotaRepo
-          .incrementUsage(null, projectId, -quotaDeltaApplied)
+      } else if (
+        quotaDeltaApplied < 0n &&
+        typeof this.filesPort?.reserveQuota === 'function'
+      ) {
+        await this.filesPort
+          .reserveQuota(projectId, -quotaDeltaApplied)
           .catch(() => undefined);
       }
       if (
         acquiredNewBlobId &&
         acquiredNewBlobId !== existing?.blobId &&
-        this.blobService
+        typeof this.filesPort?.releaseBlob === 'function'
       ) {
-        await this.blobService
+        await this.filesPort
           .releaseBlob(acquiredNewBlobId)
           .catch(() => undefined);
       }
@@ -448,9 +453,12 @@ export class FilestoreService {
     await this.repository.save(file);
 
     // Reclaim unified platform Space StorageQuota upon deletion
-    if (this.quotaRepo && file.sizeBytes > 0) {
-      await this.quotaRepo
-        .decrementUsage(null, projectId, BigInt(file.sizeBytes))
+    if (
+      file.sizeBytes > 0 &&
+      typeof this.filesPort?.releaseQuota === 'function'
+    ) {
+      await this.filesPort
+        .releaseQuota(projectId, BigInt(file.sizeBytes))
         .catch((err: unknown) => {
           this.logger.warn(
             `[Quota] Failed to decrement Space quota for project '${projectId}': ${(err as Error).message}`,
@@ -459,24 +467,22 @@ export class FilestoreService {
     }
 
     // Release reference in unified platform StorageBlob CAS ledger
-    if (this.blobService) {
+    if (typeof this.filesPort?.releaseBlob === 'function') {
       if (file.blobId) {
         try {
-          await this.blobService.releaseBlob(file.blobId);
+          await this.filesPort.releaseBlob(file.blobId);
         } catch (err) {
           this.logger.warn(
             `[CAS Ledger] Failed to release StorageBlob '${file.blobId}' for '${file.id}': ${(err as Error).message}`,
           );
         }
-      } else {
+      } else if (typeof this.filesPort?.findBlobByHash === 'function') {
         const rawHash = file.hash.getValue();
         if (/^[a-f0-9]{64}$/i.test(rawHash)) {
           try {
-            const blob = await this.blobService.findBlobByHash(
-              PlatformContentHash.fromHex(rawHash),
-            );
+            const blob = await this.filesPort.findBlobByHash(rawHash);
             if (blob) {
-              await this.blobService.releaseBlob(blob.id);
+              await this.filesPort.releaseBlob(blob.id);
             }
           } catch (err) {
             this.logger.warn(
@@ -588,9 +594,12 @@ export class FilestoreService {
       }
     }
 
-    if (this.quotaRepo && totalReclaimedBytes > 0n) {
-      await this.quotaRepo
-        .decrementUsage(null, projectId, totalReclaimedBytes)
+    if (
+      totalReclaimedBytes > 0n &&
+      typeof this.filesPort?.releaseQuota === 'function'
+    ) {
+      await this.filesPort
+        .releaseQuota(projectId, totalReclaimedBytes)
         .catch((err: unknown) => {
           this.logger.warn(
             `[Quota] Failed to decrement bulk Space quota for project '${projectId}': ${(err as Error).message}`,
@@ -598,24 +607,24 @@ export class FilestoreService {
         });
     }
 
-    if (this.blobService) {
+    if (typeof this.filesPort?.releaseBlob === 'function') {
       for (const blobId of blobIdsToRelease) {
         try {
-          await this.blobService.releaseBlob(blobId);
+          await this.filesPort.releaseBlob(blobId);
         } catch {
           // Non-blocking CAS release
         }
       }
-      for (const hex of hashesToRelease) {
-        try {
-          const blob = await this.blobService.findBlobByHash(
-            PlatformContentHash.fromHex(hex),
-          );
-          if (blob) {
-            await this.blobService.releaseBlob(blob.id);
+      if (typeof this.filesPort?.findBlobByHash === 'function') {
+        for (const hex of hashesToRelease) {
+          try {
+            const blob = await this.filesPort.findBlobByHash(hex);
+            if (blob) {
+              await this.filesPort.releaseBlob(blob.id);
+            }
+          } catch {
+            // Non-blocking CAS release
           }
-        } catch {
-          // Non-blocking CAS release
         }
       }
     }
@@ -649,25 +658,28 @@ export class FilestoreService {
       await this.repository.save(file);
     }
 
-    if (this.quotaRepo && file.sizeBytes > 0) {
-      await this.quotaRepo
-        .incrementUsage(null, projectId, BigInt(file.sizeBytes))
+    if (
+      file.sizeBytes > 0 &&
+      typeof this.filesPort?.reserveQuota === 'function'
+    ) {
+      await this.filesPort
+        .reserveQuota(projectId, BigInt(file.sizeBytes))
         .catch(() => {});
     }
-    if (
-      this.blobService &&
-      typeof (this.blobService as { acquireBlob?: unknown }).acquireBlob ===
-        'function'
-    ) {
+    if (typeof this.filesPort?.acquireBlob === 'function') {
       let targetBlobId = file.blobId;
-      if (!targetBlobId && file.hash && this.blobService.findBlobByHash) {
-        const blob = await this.blobService
-          .findBlobByHash(PlatformContentHash.fromHex(file.hash.getValue()))
+      if (
+        !targetBlobId &&
+        file.hash &&
+        typeof this.filesPort?.findBlobByHash === 'function'
+      ) {
+        const blob = await this.filesPort
+          .findBlobByHash(file.hash.getValue())
           .catch(() => null);
         targetBlobId = blob?.id ?? null;
       }
       if (targetBlobId) {
-        await this.blobService.acquireBlob(targetBlobId).catch(() => null);
+        await this.filesPort.acquireBlob(targetBlobId).catch(() => null);
       }
     }
     return true;

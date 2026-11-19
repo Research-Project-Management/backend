@@ -12,7 +12,7 @@ import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config
 import { CoreModule as AppCoreModule } from '@/core';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
-import { EngineModule } from '@/modules/ai/engine/engine.module';
+import { AiModule } from '@/modules/ai';
 import { ClsiController } from './clsi.controller';
 import { ClsiService } from './services/clsi.service';
 import { RemoteClsiClientAdapter } from './services/remote-clsi.client';
@@ -33,6 +33,7 @@ import { ISandboxRunner } from './domain/clsi.ports';
 import {
   parseSandboxConfig,
   buildSandboxProfileFromConfig,
+  extractSandboxEnvFromConfigService,
   ClsiSandboxConfig,
 } from './services/sandbox/sandbox-config';
 import { CompileQueueService } from './services/compile-queue.service';
@@ -50,7 +51,7 @@ const inProcessClsiWorkers =
     AppCoreModule,
     DocstoreModule,
     FilestoreModule,
-    EngineModule,
+    AiModule,
     BullModule.registerQueue({
       name: MANUSCRIPT_CLSI_QUEUE,
     }),
@@ -63,38 +64,7 @@ const inProcessClsiWorkers =
       provide: CLSI_SANDBOX_CONFIG,
       useFactory: (configService: ConfigService): ClsiSandboxConfig => {
         return parseSandboxConfig({
-          env: {
-            CLSI_SANDBOX_MODE: configService.get<string>('CLSI_SANDBOX_MODE'),
-            CLSI_SANDBOX_IMAGE:
-              configService.get<string>('CLSI_SANDBOX_IMAGE') ||
-              configService.get<string>('CLSI_DOCKER_IMAGE'),
-            CLSI_URL: configService.get<string>('CLSI_URL'),
-            CLSI_SANDBOX_USER: configService.get<string>('CLSI_SANDBOX_USER'),
-            CLSI_SANDBOX_MEMORY_MB: configService.get<string>(
-              'CLSI_SANDBOX_MEMORY_MB',
-            ),
-            CLSI_SANDBOX_CPUS: configService.get<string>('CLSI_SANDBOX_CPUS'),
-            CLSI_SANDBOX_PIDS: configService.get<string>('CLSI_SANDBOX_PIDS'),
-            CLSI_SANDBOX_FSIZE_MB: configService.get<string>(
-              'CLSI_SANDBOX_FSIZE_MB',
-            ),
-            CLSI_SANDBOX_NOFILE: configService.get<string>(
-              'CLSI_SANDBOX_NOFILE',
-            ),
-            CLSI_SANDBOX_TMPFS_MB: configService.get<string>(
-              'CLSI_SANDBOX_TMPFS_MB',
-            ),
-            CLSI_SANDBOX_TIMEOUT_MS: configService.get<string>(
-              'CLSI_SANDBOX_TIMEOUT_MS',
-            ),
-            CLSI_SANDBOX_RUNTIME: configService.get<string>(
-              'CLSI_SANDBOX_RUNTIME',
-            ),
-            CLSI_SCRATCH_DIR:
-              configService.get<string>('CLSI_SCRATCH_DIR') ||
-              configService.get<string>('SCRATCH_DIR'),
-            NODE_ENV: configService.get<string>('NODE_ENV'),
-          },
+          env: extractSandboxEnvFromConfigService(configService),
           isProduction: configService.get<string>('NODE_ENV') === 'production',
         });
       },

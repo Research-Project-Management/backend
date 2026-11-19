@@ -33,6 +33,10 @@ export interface ClsiHealthReport {
     biber: BinaryStatus;
     bibtex: BinaryStatus;
   };
+  remote?: {
+    url: string | null;
+    reachable: boolean;
+  };
 }
 
 export class ClsiHealthCheck {
@@ -134,7 +138,7 @@ export class ClsiHealthCheck {
     try {
       const result = await this.runner.run(binary, versionArgs, {
         cwd: process.cwd(),
-        timeoutMs: 3000,
+        timeoutMs: 8000,
       });
 
       if (result.exitCode === 0) {

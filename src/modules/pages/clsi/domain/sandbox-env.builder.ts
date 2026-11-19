@@ -11,9 +11,20 @@ export interface SandboxEnvOptions {
   clientAllowList?: string[];
   platform?: NodeJS.Platform;
   isTexProcess?: boolean;
+  openinAny?: 'p' | 'r';
 }
 
-const BASE_ALLOW_LIST = ['PATH', 'LANG', 'LC_ALL', 'TZ'];
+const BASE_ALLOW_LIST = [
+  'PATH',
+  'LANG',
+  'LC_ALL',
+  'TZ',
+  'HOME',
+  'TMPDIR',
+  'TEXMFVAR',
+  'TEXMFCACHE',
+  'XDG_CACHE_HOME',
+];
 const WINDOWS_ALLOW_LIST = ['SystemRoot', 'TEMP', 'TMP'];
 const PIPELINE_TEX_ALLOW_LIST = [
   'TEXINPUTS',
@@ -22,6 +33,7 @@ const PIPELINE_TEX_ALLOW_LIST = [
   'HOME',
   'TEXMFVAR',
   'TEXMFCACHE',
+  'XDG_CACHE_HOME',
 ];
 
 export function buildSandboxEnv(
@@ -75,7 +87,7 @@ export function buildSandboxEnv(
 
   // 5. Injected paranoid TeX I/O restrictions for TeX compilation processes
   if (isTexProcess) {
-    result.openin_any = 'p';
+    result.openin_any = options.openinAny === 'r' ? 'r' : 'p';
     result.openout_any = 'p';
     result.shell_escape = 'f';
   }

@@ -8,6 +8,7 @@ import { NotFoundException } from '@nestjs/common';
 import { Prisma, PageDoc, PageNode } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
+import { type IFilesPort } from '@/modules/files';
 import {
   ensureCanonicalPageId,
   getRecordSpaceId,
@@ -134,6 +135,7 @@ export async function restoreDeletedDocOrFile(
   eventEmitter: EventEmitter2 | undefined,
   pageId: string,
   targetProjectId?: string,
+  filesPort?: IFilesPort,
 ) {
   const doc = targetProjectId
     ? await prisma.pageDoc.findFirst({
@@ -216,39 +218,17 @@ export async function restoreDeletedDocOrFile(
       data: { deletedAt: null },
     });
 
-    if (wasDeleted) {
+    if (wasDeleted && filesPort) {
       const fileBlobId = (file as { blobId?: string | null }).blobId;
       if (fileBlobId) {
-        if (typeof prisma.$executeRaw === 'function') {
-          await Promise.resolve(
-            prisma.$executeRaw`
-              UPDATE storage_blobs
-              SET ref_count = ref_count + 1,
-                  status = 'READY'::"BlobStatus",
-                  tombstone_at = NULL
-              WHERE id = ${fileBlobId}::uuid
-            `,
-          ).catch(() => undefined);
-        } else if (prisma.storageBlob?.updateMany) {
-          await Promise.resolve(
-            prisma.storageBlob.updateMany({
-              where: { id: fileBlobId },
-              data: {
-                refCount: { increment: 1 },
-                status: 'READY',
-                tombstoneAt: null,
-              },
-            }),
-          ).catch(() => undefined);
-        }
+        await Promise.resolve(filesPort.acquireBlob(fileBlobId)).catch(
+          () => undefined,
+        );
       }
       const restoredSize = Number(file.sizeBytes ?? 0);
-      if (restoredSize > 0 && prisma.storageQuota?.updateMany) {
+      if (restoredSize > 0) {
         await Promise.resolve(
-          prisma.storageQuota.updateMany({
-            where: { spaceId: fileProjectId },
-            data: { usedBytes: { increment: BigInt(restoredSize) } },
-          }),
+          filesPort.reserveQuota(fileProjectId, BigInt(restoredSize)),
         ).catch(() => undefined);
       }
     }
@@ -313,6 +293,7 @@ export async function duplicateSourcePageAndNode(
   docstoreService: DocstoreService,
   eventEmitter: EventEmitter2 | undefined,
   input: DuplicatePageSourceInput,
+  filesPort?: IFilesPort,
 ) {
   const { spaceId, sourcePageId, sourcePageRow, fallbackDoc, actorId } = input;
   const validActorId = actorId && isUuid(actorId) ? actorId : null;
@@ -429,8 +410,10 @@ export async function duplicateSourcePageAndNode(
     'main.tex';
   const rootFileName = NodePathVo.toRelative(rootFilePath) || 'main.tex';
   const nowIso = new Date().toISOString();
+  const blobIncrements = new Map<string, number>();
 
   await prisma.$transaction(async (tx) => {
+    blobIncrements.clear();
     const txRaw = tx as unknown as {
       $queryRaw?: (
         strings: TemplateStringsArray,
@@ -548,7 +531,6 @@ export async function duplicateSourcePageAndNode(
     }
 
     const fileIdMap = new Map<string, string>();
-    const blobIncrements = new Map<string, number>();
     if (tx.pageFile?.create) {
       for (const file of sourceFiles) {
         const newFileId = crypto.randomUUID();
@@ -574,17 +556,6 @@ export async function duplicateSourcePageAndNode(
             (blobIncrements.get(file.blobId) ?? 0) + 1,
           );
         }
-      }
-    }
-
-    if (tx.storageBlob?.update && blobIncrements.size > 0) {
-      for (const [blobId, incrementBy] of blobIncrements.entries()) {
-        await Promise.resolve(
-          tx.storageBlob.update({
-            where: { id: blobId },
-            data: { refCount: { increment: incrementBy }, tombstoneAt: null },
-          }),
-        ).catch(() => null);
       }
     }
 
@@ -629,6 +600,14 @@ export async function duplicateSourcePageAndNode(
       }
     }
   });
+
+  if (filesPort && blobIncrements.size > 0) {
+    for (const [blobId, incrementBy] of blobIncrements.entries()) {
+      for (let i = 0; i < incrementBy; i++) {
+        await Promise.resolve(filesPort.acquireBlob(blobId)).catch(() => null);
+      }
+    }
+  }
 
   const rootLines = sourceRootDoc
     ? (hydratedDocLinesById.get(sourceRootDoc.id) ?? [])

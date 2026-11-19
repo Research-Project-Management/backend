@@ -15,7 +15,9 @@ import { LogLineVo } from './log-line';
 import { InvalidLogFormatException } from './diagnostics.errors';
 import {
   CompilerDiagnostic,
+  DiagnosticsSummary,
   ILogParser,
+  LogParseOptions,
 } from '@/modules/pages/clsi/domain/clsi.ports';
 import {
   ENV_PKG_LOOKUP,
@@ -24,6 +26,13 @@ import {
   type ErrorExplainerLike,
   type RuleDefinition,
 } from './error-knowledge-base';
+import { BibLogParser } from './bib-log.parser';
+import { postProcessDiagnostics } from './diagnostics.processor';
+import {
+  cleanNonFileParens,
+  LOG_FILE_EXTENSION_REGEX,
+  normalizeLogFilePath,
+} from './log-path.helper';
 
 export { ErrorKnowledgeBase, PKG_LOOKUP, ENV_PKG_LOOKUP };
 export type { ErrorExplainerLike, RuleDefinition };
@@ -38,74 +47,167 @@ export class CompileLogAnalyzer implements ILogParser {
   private static readonly FILE_LINE_ERROR_REGEX =
     /^((?:[a-zA-Z]:[\\/])?(?:\.{0,2}[\\/])?[^\s:!()]+\.(?:tex|bib|sty|cls|dtx|ins)):(\d+):\s*(.+)/i;
 
-  private static readonly FILE_EXTENSION_REGEX =
-    /\.(tex|sty|cls|bib|bbl|aux|toc|lof|lot|out|def|ldf|fd|cfg|dtx|ins)\b/i;
+  private static readonly RUNAWAY_ARG_REGEX = /^Runaway argument\??/i;
+
+  private static readonly FILE_EXTENSION_REGEX = LOG_FILE_EXTENSION_REGEX;
 
   private readonly explainer: ErrorExplainerLike;
+  private readonly bibLogParser: BibLogParser;
 
   constructor(explainer?: ErrorExplainerLike) {
     this.explainer = explainer ?? new ErrorKnowledgeBase();
+    this.bibLogParser = new BibLogParser({ explainer: this.explainer });
   }
 
   /**
    * Implements `ILogParser.parse()` for CLSI compile pipeline diagnostics.
-   * Delegates to the unified TeX paren-tree state machine (`parseTexParenTreeLog`)
-   * so there is a single source of truth for LaTeX log parsing.
+   * Delegates to `parseWithSummary()` so TeX + BibTeX/Biber parsing, deduplication,
+   * cascade suppression, and summary counting share one single source of truth.
    */
   public parse(
     logText: string,
     defaultFile = 'main.tex',
+    options?: LogParseOptions,
   ): CompilerDiagnostic[] {
-    if (!logText || typeof logText !== 'string') return [];
+    return this.parseWithSummary(logText, defaultFile, options).diagnostics;
+  }
 
-    const items = this.parseTexParenTreeLog(logText, defaultFile);
-    return items.map((item) => {
-      const context = item.context || item.message;
-      let message = item.message;
-      if (item.severity.isWarning()) {
-        message = message
-          .replace(/\s*on input line\s+\d+\.?$/i, '')
-          .replace(/\.$/, '')
-          .trim();
-      }
-      const { code, suggestion } = this.generateSuggestion(message, context);
-      const severity: 'error' | 'warning' | 'badbox' | 'info' =
-        item.severity.isError()
-          ? 'error'
-          : item.severity.isWarning()
-            ? 'warning'
-            : item.severity.isBadbox()
-              ? 'badbox'
-              : 'info';
-      const resolvedCode = code || item.code;
-      const resolvedSuggestion = suggestion || item.explanation?.suggestedFix;
-
+  /**
+   * Unified entrypoint returning both post-processed diagnostics and summary metrics
+   * across TeX output logs (`output.log`) and BibTeX/Biber logs (`*.blg`).
+   */
+  public parseWithSummary(
+    logText: string,
+    defaultFile = 'main.tex',
+    options?: LogParseOptions,
+  ): {
+    diagnostics: CompilerDiagnostic[];
+    summary: DiagnosticsSummary;
+  } {
+    const hasTexLog = typeof logText === 'string' && logText.length > 0;
+    const bibLogs = options?.bibLogs ?? [];
+    if (!hasTexLog && bibLogs.length === 0) {
       return {
-        file: item.file,
-        line: item.line,
-        ...(item.column ? { column: item.column } : {}),
-        message,
-        context,
-        severity,
-        category: item.category || severity,
-        ...(item.warningSubtype ? { warningSubtype: item.warningSubtype } : {}),
-        ...(resolvedCode ? { code: resolvedCode } : {}),
-        ...(resolvedSuggestion ? { suggestion: resolvedSuggestion } : {}),
-        ...(item.quickFix ? { quickFix: item.quickFix } : {}),
-        ...(item.explanation
-          ? {
-              explanation: {
-                title: item.explanation.title,
-                whyItHappened: item.explanation.explanation,
-                howToFix:
-                  item.explanation.suggestedFix ||
-                  item.explanation.commonCauses[0] ||
-                  '',
-              },
-            }
-          : {}),
+        diagnostics: [],
+        summary: {
+          totalErrors: 0,
+          totalWarnings: 0,
+          totalBadboxes: 0,
+          suppressedCascadeCount: 0,
+          truncated: false,
+        },
       };
+    }
+
+    const items: DiagnosticItem[] = hasTexLog
+      ? this.parseTexParenTreeLog(logText, defaultFile)
+      : [];
+
+    for (const bib of bibLogs) {
+      if (bib?.content) {
+        items.push(...this.bibLogParser.parse(bib.content));
+      }
+    }
+
+    const rawDiagnostics = items.map((item) => this.mapDiagnosticItem(item));
+    return postProcessDiagnostics(rawDiagnostics, {
+      stopOnFirstError: options?.stopOnFirstError,
+      maxDiagnostics: options?.maxDiagnostics,
     });
+  }
+
+  private mapDiagnosticItem(item: DiagnosticItem): CompilerDiagnostic {
+    const context = item.context || item.message;
+    let message = item.message;
+    if (item.severity.isWarning()) {
+      message = message
+        .replace(/\s*(?:on input line|at lines?)\s+\d+(?:--\d+)?\.?$/i, '')
+        .replace(/\.$/, '')
+        .trim();
+    }
+    const { code, suggestion } = this.generateSuggestion(message, context);
+    const severity: 'error' | 'warning' | 'badbox' | 'info' =
+      item.severity.isError()
+        ? 'error'
+        : item.severity.isWarning()
+          ? 'warning'
+          : item.severity.isBadbox()
+            ? 'badbox'
+            : 'info';
+    const resolvedCode = item.code || code;
+    const resolvedSuggestion = suggestion || item.explanation?.suggestedFix;
+    const highlightCommand =
+      item.highlightCommand ||
+      CompileLogAnalyzer.extractHighlightCommand(message, context);
+
+    return {
+      file: item.file,
+      line: item.line,
+      ...(item.column ? { column: item.column } : {}),
+      message,
+      context,
+      severity,
+      category: item.category || severity,
+      ...(item.warningSubtype ? { warningSubtype: item.warningSubtype } : {}),
+      ...(item.source ? { source: item.source } : { source: 'tex' }),
+      ...(highlightCommand ? { highlightCommand } : {}),
+      ...(resolvedCode ? { code: resolvedCode } : {}),
+      ...(resolvedSuggestion ? { suggestion: resolvedSuggestion } : {}),
+      ...(item.quickFix ? { quickFix: item.quickFix } : {}),
+      ...(item.explanation
+        ? {
+            explanation: {
+              title: item.explanation.title,
+              whyItHappened: item.explanation.explanation,
+              howToFix:
+                item.explanation.suggestedFix ||
+                item.explanation.commonCauses[0] ||
+                '',
+            },
+          }
+        : {}),
+    };
+  }
+
+  private static extractHighlightCommand(
+    rawMessage: string,
+    context: string,
+  ): string | undefined {
+    const msgLower = rawMessage.toLowerCase();
+    const combined = `${rawMessage}\n${context}`;
+
+    if (msgLower.includes('undefined control sequence')) {
+      const lineSnippet = context.match(/l\.\d+\s+([^\n]+)/)?.[1] ?? '';
+      const lineCmds = Array.from(lineSnippet.matchAll(/\\([a-zA-Z@]+)/g));
+      if (lineCmds.length > 0) {
+        return `\\${lineCmds[lineCmds.length - 1][1]}`;
+      }
+      const ctxCmds = Array.from(combined.matchAll(/\\([a-zA-Z@]+)/g));
+      if (ctxCmds.length > 0) {
+        return `\\${ctxCmds[ctxCmds.length - 1][1]}`;
+      }
+    }
+
+    const envMismatch = combined.match(
+      /\\begin\{([^}]+)\}\s*(?:on input line \d+\s*)?ended by \\end\{([^}]+)\}/i,
+    );
+    if (envMismatch?.[2]) {
+      return `\\end{${envMismatch[2].trim()}}`;
+    }
+
+    const envUndef = combined.match(
+      /environment\s+[`']?([^`'\s}]+)[`']?\s+undefined/i,
+    );
+    if (envUndef?.[1]) {
+      return `\\begin{${envUndef[1].trim()}}`;
+    }
+
+    const fileNotFound = combined.match(/file\s+[`']([^`']+)'\s+not found/i);
+    if (fileNotFound?.[1]) {
+      return fileNotFound[1].trim();
+    }
+
+    return undefined;
   }
 
   private static classifyWarningSubtype(
@@ -199,7 +301,7 @@ export class CompileLogAnalyzer implements ILogParser {
       const match = context.match(/\\([a-zA-Z]+)/);
       const command = match ? `\\${match[1]}` : 'this command';
       return {
-        code: 'UNDEFINED_MACRO',
+        code: 'UNDEFINED_CONTROL_SEQUENCE',
         suggestion: `Command "${command}" is undefined. Check spelling or add the required \\usepackage{...}.`,
       };
     }
@@ -282,10 +384,7 @@ export class CompileLogAnalyzer implements ILogParser {
             );
           if (m) {
             const candidatePath = (m[1] || m[0]).trim().replace(/^"+|"+$/g, '');
-            const cleanPath = this.normalizeFilePath(
-              candidatePath,
-              defaultFile,
-            );
+            const cleanPath = normalizeLogFilePath(candidatePath, defaultFile);
             const isSystem =
               cleanPath.includes('texmf') ||
               cleanPath.includes('texlive') ||
@@ -310,10 +409,11 @@ export class CompileLogAnalyzer implements ILogParser {
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] || '';
-      const cleanedLine = CompileLogAnalyzer.cleanNonFileParens(line);
+      const cleanedLine = cleanNonFileParens(line);
 
       const isDiagnosticLine =
         CompileLogAnalyzer.FILE_LINE_ERROR_REGEX.test(line) ||
+        CompileLogAnalyzer.RUNAWAY_ARG_REGEX.test(line) ||
         line.startsWith('!') ||
         CompileLogAnalyzer.LATEX_WARNING_REGEX.test(line) ||
         CompileLogAnalyzer.BADBOX_REGEX.test(line);
@@ -326,15 +426,35 @@ export class CompileLogAnalyzer implements ILogParser {
 
       const fleMatch = line.match(CompileLogAnalyzer.FILE_LINE_ERROR_REGEX);
       if (fleMatch && fleMatch[1] && fleMatch[2] && fleMatch[3]) {
-        const errorFile = this.normalizeFilePath(
-          fleMatch[1].trim(),
-          defaultFile,
-        );
+        const errorFile = normalizeLogFilePath(fleMatch[1].trim(), defaultFile);
         const errorLine = parseInt(fleMatch[2], 10);
         const rawMessage = fleMatch[3].trim();
-        const context = lines
-          .slice(i, Math.min(i + 3, lines.length))
-          .join('\n');
+        const contextLines: string[] = [line];
+
+        let consumedTo = i;
+        let sawCodeLine = false;
+        for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+          const nextLine = lines[j] ?? '';
+          if (
+            !nextLine.trim() ||
+            nextLine.startsWith('!') ||
+            CompileLogAnalyzer.FILE_LINE_ERROR_REGEX.test(nextLine) ||
+            CompileLogAnalyzer.RUNAWAY_ARG_REGEX.test(nextLine)
+          ) {
+            break;
+          }
+          contextLines.push(nextLine);
+          scanParensLeftToRight(cleanNonFileParens(nextLine));
+          consumedTo = j;
+          if (/^l\.\d+/.test(nextLine)) {
+            sawCodeLine = true;
+          } else if (sawCodeLine && !/^\s{4,}/.test(nextLine)) {
+            break;
+          }
+        }
+        i = consumedTo;
+
+        const context = contextLines.join('\n');
         const explanation =
           this.explainer?.explain(rawMessage, context) || undefined;
         const quickFix = CompileLogAnalyzer.generateQuickFix(
@@ -348,6 +468,11 @@ export class CompileLogAnalyzer implements ILogParser {
             line: errorLine,
             severity: DiagnosticSeverityVo.error(),
             category: 'error',
+            source: 'tex',
+            highlightCommand: CompileLogAnalyzer.extractHighlightCommand(
+              rawMessage,
+              context,
+            ),
             message: rawMessage,
             context,
             code: explanation?.code,
@@ -359,14 +484,94 @@ export class CompileLogAnalyzer implements ILogParser {
         continue;
       }
 
+      if (CompileLogAnalyzer.RUNAWAY_ARG_REGEX.test(line)) {
+        let errorLine: number | null = null;
+        const contextLines: string[] = [line];
+        let blankStreak = 0;
+
+        for (let j = i + 1; j < Math.min(i + 20, lines.length); j++) {
+          const nextLine = lines[j] ?? '';
+          const isRunawayFollowupError =
+            /^!\s*(?:Paragraph ended before|File ended while scanning)/i.test(
+              nextLine,
+            );
+          if (
+            (nextLine.startsWith('!') && !isRunawayFollowupError) ||
+            CompileLogAnalyzer.FILE_LINE_ERROR_REGEX.test(nextLine) ||
+            CompileLogAnalyzer.RUNAWAY_ARG_REGEX.test(nextLine)
+          ) {
+            break;
+          }
+          if (!nextLine.trim()) {
+            blankStreak++;
+            if (blankStreak >= 2 || errorLine !== null) {
+              break;
+            }
+            contextLines.push(nextLine);
+            i = j;
+            continue;
+          }
+          blankStreak = 0;
+          contextLines.push(nextLine);
+          scanParensLeftToRight(cleanNonFileParens(nextLine));
+          i = j;
+
+          const lineMatch = nextLine.match(/^l\.(\d+)(.*)/);
+          if (lineMatch?.[1]) {
+            errorLine = parseInt(lineMatch[1], 10);
+            break;
+          }
+        }
+
+        const context = contextLines.join('\n');
+        const explanation =
+          this.explainer?.getByCode('RUNAWAY_ARGUMENT') ||
+          this.explainer?.explain(line, context) ||
+          undefined;
+
+        diagnostics.push(
+          new DiagnosticItem({
+            file: currentFile,
+            line: errorLine,
+            severity: DiagnosticSeverityVo.error(),
+            category: 'error',
+            source: 'tex',
+            message: line.trim(),
+            context,
+            code: 'RUNAWAY_ARGUMENT',
+            explanation,
+          }),
+        );
+        continue;
+      }
+
       if (line.startsWith('!')) {
         const rawMessage = line.slice(1).trim();
         let errorLine: number | null = null;
         const contextLines: string[] = [line];
+        let blankStreak = 0;
 
-        for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
-          const nextLine = lines[j] || '';
+        for (let j = i + 1; j < Math.min(i + 20, lines.length); j++) {
+          const nextLine = lines[j] ?? '';
+          if (
+            nextLine.startsWith('!') ||
+            CompileLogAnalyzer.FILE_LINE_ERROR_REGEX.test(nextLine) ||
+            CompileLogAnalyzer.RUNAWAY_ARG_REGEX.test(nextLine)
+          ) {
+            break;
+          }
+          if (!nextLine.trim()) {
+            blankStreak++;
+            if (blankStreak >= 2) {
+              break;
+            }
+            contextLines.push(nextLine);
+            i = j;
+            continue;
+          }
+          blankStreak = 0;
           contextLines.push(nextLine);
+          scanParensLeftToRight(cleanNonFileParens(nextLine));
 
           const lineMatch = nextLine.match(/^l\.(\d+)(.*)/);
           if (lineMatch && lineMatch[1]) {
@@ -374,10 +579,7 @@ export class CompileLogAnalyzer implements ILogParser {
             i = j;
             break;
           }
-
-          if (nextLine.startsWith('!')) {
-            break;
-          }
+          i = j;
         }
 
         const context = contextLines.join('\n');
@@ -394,6 +596,11 @@ export class CompileLogAnalyzer implements ILogParser {
             line: errorLine,
             severity: DiagnosticSeverityVo.error(),
             category: 'error',
+            source: 'tex',
+            highlightCommand: CompileLogAnalyzer.extractHighlightCommand(
+              rawMessage,
+              context,
+            ),
             message: rawMessage,
             context,
             code: explanation?.code,
@@ -405,13 +612,16 @@ export class CompileLogAnalyzer implements ILogParser {
         continue;
       }
 
+      const warnLineRegex =
+        /(?:on input line\s+(\d+)\.?|at lines?\s+(\d+)(?:--\d+)?)/i;
       const warningMatch = line.match(CompileLogAnalyzer.LATEX_WARNING_REGEX);
       if (warningMatch && warningMatch[1]) {
         let warnMsg = warningMatch[1].trim();
         let warnLine: number | null = null;
-        const initialLineMatch = line.match(/on input line\s+(\d+)\./i);
-        if (initialLineMatch && initialLineMatch[1]) {
-          warnLine = parseInt(initialLineMatch[1], 10);
+        const initialLineMatch = line.match(warnLineRegex);
+        const initialNum = initialLineMatch?.[1] ?? initialLineMatch?.[2];
+        if (initialNum) {
+          warnLine = parseInt(initialNum, 10);
         }
         let context = line;
 
@@ -427,15 +637,14 @@ export class CompileLogAnalyzer implements ILogParser {
           !(lines[j].startsWith('(') && lines[j].includes('/'))
         ) {
           const nextL = lines[j].trim();
-          const extraLineMatch = nextL.match(/on input line\s+(\d+)\./i);
-          if (extraLineMatch && extraLineMatch[1]) {
-            warnLine = parseInt(extraLineMatch[1], 10);
+          const extraLineMatch = nextL.match(warnLineRegex);
+          const extraNum = extraLineMatch?.[1] ?? extraLineMatch?.[2];
+          if (extraNum) {
+            warnLine = parseInt(extraNum, 10);
           }
           warnMsg += ' ' + nextL;
           context += '\n' + lines[j];
-          scanParensLeftToRight(
-            CompileLogAnalyzer.cleanNonFileParens(lines[j]),
-          );
+          scanParensLeftToRight(cleanNonFileParens(lines[j]));
           j++;
           i = j - 1;
         }
@@ -453,6 +662,7 @@ export class CompileLogAnalyzer implements ILogParser {
             severity: DiagnosticSeverityVo.warning(),
             category: 'warning',
             warningSubtype,
+            source: 'tex',
             message: `LaTeX Warning: ${warnMsg}`,
             context,
             code: explanation?.code,
@@ -463,7 +673,7 @@ export class CompileLogAnalyzer implements ILogParser {
         continue;
       }
 
-      // BibTeX / Biber warnings and errors
+      // BibTeX / Biber warnings and errors (inline fallback if piped to stdout)
       const bibErrorMatch = line.match(
         /^(?:ERROR - BibTeX subsystem:\s*(.+)|I found no \\(?:citation|bibdata|bibstyle) commands---while reading file\s+(.+)|.*---line\s+(\d+)\s+of file\s+([^\s]+))/i,
       );
@@ -472,7 +682,7 @@ export class CompileLogAnalyzer implements ILogParser {
           ? parseInt(bibErrorMatch[3], 10)
           : null;
         const bibFile = bibErrorMatch[4]
-          ? this.normalizeFilePath(bibErrorMatch[4], defaultFile)
+          ? normalizeLogFilePath(bibErrorMatch[4], defaultFile)
           : currentFile;
         diagnostics.push(
           new DiagnosticItem({
@@ -480,6 +690,7 @@ export class CompileLogAnalyzer implements ILogParser {
             line: bibLine,
             severity: DiagnosticSeverityVo.error(),
             category: 'error',
+            source: bibErrorMatch[1] ? 'biber' : 'bibtex',
             message: line.trim(),
             context: line,
           }),
@@ -497,6 +708,7 @@ export class CompileLogAnalyzer implements ILogParser {
             severity: DiagnosticSeverityVo.warning(),
             category: 'warning',
             warningSubtype: 'citation',
+            source: 'biber',
             message: `Biber Warning: ${biberWarnMatch[1].trim()}`,
             context: line,
           }),
@@ -516,6 +728,7 @@ export class CompileLogAnalyzer implements ILogParser {
             severity: DiagnosticSeverityVo.badbox(),
             category: 'badbox',
             warningSubtype: 'badbox',
+            source: 'tex',
             message: line.trim(),
             context: line,
             code: explanation?.code,
@@ -531,36 +744,6 @@ export class CompileLogAnalyzer implements ILogParser {
 
     return diagnostics;
   }
-
-  private static cleanNonFileParens(line: string): string {
-    if (line.length > 8192) {
-      return line.slice(0, 8192);
-    }
-    let result = line;
-    let prev = '';
-    let iterations = 0;
-    while (result !== prev && iterations < 8) {
-      prev = result;
-      iterations++;
-      result = result.replace(/\(([^()]*)\)/g, (fullMatch, content) => {
-        if (CompileLogAnalyzer.FILE_EXTENSION_REGEX.test(content)) {
-          return fullMatch;
-        }
-        return ' ';
-      });
-    }
-    return result;
-  }
-
-  private normalizeFilePath(raw: string, defaultFile: string): string {
-    let clean = raw.replace(/\\/g, '/');
-    clean = clean.replace(/^(\.\/)+/, '').replace(/^\/+/, '');
-    if (clean.includes('texmf') || clean.includes('texlive')) {
-      const parts = clean.split('/');
-      return parts[parts.length - 1] || defaultFile;
-    }
-    return clean;
-  }
 }
 
 const defaultLogParser = new CompileLogAnalyzer();
@@ -568,6 +751,7 @@ const defaultLogParser = new CompileLogAnalyzer();
 export function parseLatexLog(
   logText: string,
   defaultFile = 'main.tex',
+  options?: LogParseOptions,
 ): CompilerDiagnostic[] {
-  return defaultLogParser.parse(logText, defaultFile);
+  return defaultLogParser.parse(logText, defaultFile, options);
 }

@@ -28,6 +28,7 @@ import { filterRecordsByPageScope } from '@/modules/pages/core/page-scope.helper
 import { findPageRecordWithNode } from '@/modules/pages/docstore/services/doc-occ.helper';
 import { applyPageMetadataAndTitleUpdates } from '@/modules/pages/core/services/page-query-metadata.helper';
 import {
+  type IFilesPort,
   BlobService,
   StorageBlob,
   BlobStatus,
@@ -312,7 +313,7 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
           releaseBlob,
           acquireBlob,
           findBlobByHash: jest.fn(),
-        } as unknown as BlobService,
+        } as unknown as IFilesPort,
       );
 
       await service.reclaimDeletedFilesQuotaAndBlobs(
@@ -352,12 +353,10 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
         findByProjectAndName: jest.fn(),
       } as unknown as FilestoreRepository;
 
-      const collidingService = new FilestoreService(
-        collidingRepo,
-        undefined,
-        undefined,
-        { incrementUsage, decrementUsage: jest.fn() } as never,
-      );
+      const collidingService = new FilestoreService(collidingRepo, undefined, {
+        reserveQuota: incrementUsage,
+        releaseQuota: jest.fn(),
+      } as unknown as IFilesPort);
 
       await expect(
         collidingService.uploadFileFromStream(
@@ -410,7 +409,7 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
             },
           }),
           releaseBlob,
-        } as unknown as BlobService,
+        } as unknown as IFilesPort,
       );
 
       const overwritten = await overwriteService.uploadFileFromStream(
