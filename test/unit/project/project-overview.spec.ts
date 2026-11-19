@@ -16,7 +16,11 @@ describe('Project Overview Module', () => {
         getOverdueCount: jest.fn(),
         getRecentActivities: jest.fn(),
         getLatestStatusUpdate: jest.fn(),
-        getProjectAssets: jest.fn().mockResolvedValue({ pagesCount: 3, libraryCount: 7, filesCount: 12 }),
+        getProjectAssets: jest.fn().mockResolvedValue({
+          pagesCount: 3,
+          libraryCount: 7,
+          filesCount: 12,
+        }),
       };
 
       const module: TestingModule = await Test.createTestingModule({

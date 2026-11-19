@@ -332,7 +332,9 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     try {
       return await this.redisClient.ttl(key);
     } catch (err: unknown) {
-      this.logger.warn(`TTL check failed for key "${key}": ${getErrorMessage(err)}`);
+      this.logger.warn(
+        `TTL check failed for key "${key}": ${getErrorMessage(err)}`,
+      );
       return -1;
     }
   }
@@ -452,11 +454,11 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Invalidate all keys matching an arbitrary entity/scope ID
+   * Invalidate all keys matching an arbitrary space/entity ID
    */
-  async invalidateScope(scopeId: string): Promise<void> {
-    if (!scopeId) return;
-    await this.delPattern(`*${scopeId}*`);
+  async invalidateSpace(spaceId: string): Promise<void> {
+    if (!spaceId) return;
+    await this.delPattern(`*${spaceId}*`);
   }
 
   /**
@@ -618,20 +620,34 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     end
   `;
 
-  private inMemoryLocks = new Map<string, { token: string; expiresAt: number }>();
+  private inMemoryLocks = new Map<
+    string,
+    { token: string; expiresAt: number }
+  >();
 
   /**
    * Acquires a distributed mutex lock using atomic Redis SET NX PX.
    * Returns a unique lock token (UUID) if acquired, or null if lock is currently held.
    * Falls back to in-memory lock store if Redis is unavailable.
    */
-  async acquireLock(resource: string, ttlMs: number = 30000): Promise<string | null> {
+  async acquireLock(
+    resource: string,
+    ttlMs: number = 30000,
+  ): Promise<string | null> {
     const token = crypto.randomUUID();
-    const lockKey = resource.startsWith('lock:') ? resource : `lock:${resource}`;
+    const lockKey = resource.startsWith('lock:')
+      ? resource
+      : `lock:${resource}`;
 
     if (this.isReady() && this.redisClient) {
       try {
-        const result = await this.redisClient.set(lockKey, token, 'PX', ttlMs, 'NX');
+        const result = await this.redisClient.set(
+          lockKey,
+          token,
+          'PX',
+          ttlMs,
+          'NX',
+        );
         return result === 'OK' ? token : null;
       } catch (err: unknown) {
         this.logger.warn(
@@ -655,7 +671,9 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
    * only the token holder can release the lock (prevents accidental release of expired locks).
    */
   async releaseLock(resource: string, token: string): Promise<boolean> {
-    const lockKey = resource.startsWith('lock:') ? resource : `lock:${resource}`;
+    const lockKey = resource.startsWith('lock:')
+      ? resource
+      : `lock:${resource}`;
 
     if (this.isReady() && this.redisClient) {
       try {
@@ -690,7 +708,9 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     token: string,
     ttlMs: number = 30000,
   ): Promise<boolean> {
-    const lockKey = resource.startsWith('lock:') ? resource : `lock:${resource}`;
+    const lockKey = resource.startsWith('lock:')
+      ? resource
+      : `lock:${resource}`;
 
     if (this.isReady() && this.redisClient) {
       try {
@@ -743,4 +763,3 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 }
-

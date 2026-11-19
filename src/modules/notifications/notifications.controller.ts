@@ -55,16 +55,16 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Flush pending review notifications into a digest' })
   async flushBundle(
     @CurrentUser('id') userId: string,
-    @Body() body: { scopeId?: string; spaceId?: string; pageId?: string },
+    @Body() body: { bundleKey?: string; spaceId?: string; pageId?: string },
   ) {
     const target =
-      body?.pageId || (body?.spaceId && body?.scopeId)
+      body?.pageId || (body?.spaceId && body?.bundleKey)
         ? {
-            scopeId: body?.scopeId,
+            bundleKey: body?.bundleKey,
             spaceId: body?.spaceId,
             pageId: body?.pageId,
           }
-        : body?.spaceId || body?.scopeId || undefined;
+        : body?.spaceId || body?.bundleKey || undefined;
     const digest = await this.bundling.flush(userId, target);
     return { digest };
   }

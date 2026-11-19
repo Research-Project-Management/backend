@@ -1,4 +1,8 @@
-import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ProjectChannelService } from '@/modules/chat/services/project-channel.service';
 import { ConversationType, ConversationMemberRole } from '@prisma/client';
 
@@ -54,7 +58,10 @@ describe('ProjectChannelService Unit Tests', () => {
         members: [],
       });
 
-      const hasAccess = await service.checkProjectAccess('proj-1', 'user-owner');
+      const hasAccess = await service.checkProjectAccess(
+        'proj-1',
+        'user-owner',
+      );
       expect(hasAccess).toBe(true);
     });
 
@@ -65,7 +72,10 @@ describe('ProjectChannelService Unit Tests', () => {
         members: [{ userId: 'user-member', role: 'contributor' }],
       });
 
-      const hasAccess = await service.checkProjectAccess('proj-1', 'user-member');
+      const hasAccess = await service.checkProjectAccess(
+        'proj-1',
+        'user-member',
+      );
       expect(hasAccess).toBe(true);
     });
   });
@@ -206,7 +216,9 @@ describe('ProjectChannelService Unit Tests', () => {
       });
 
       mockPrisma.conversation.findFirst.mockResolvedValue(null);
-      mockPrisma.conversation.create.mockImplementation(({ data }) => Promise.resolve({ id: 'c-new', ...data }));
+      mockPrisma.conversation.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: 'c-new', ...data }),
+      );
 
       const res = await service.createChannel('proj-1', 'user-owner', {
         name: ' #Experiment Results 2026 ',
@@ -269,9 +281,15 @@ describe('ProjectChannelService Unit Tests', () => {
 
       mockPrisma.conversation.delete.mockResolvedValue({ id: 'c-custom' });
 
-      const res = await service.deleteChannel('proj-1', 'c-custom', 'user-owner');
+      const res = await service.deleteChannel(
+        'proj-1',
+        'c-custom',
+        'user-owner',
+      );
       expect(res).toEqual({ success: true });
-      expect(mockPrisma.conversation.delete).toHaveBeenCalledWith({ where: { id: 'c-custom' } });
+      expect(mockPrisma.conversation.delete).toHaveBeenCalledWith({
+        where: { id: 'c-custom' },
+      });
     });
   });
 });

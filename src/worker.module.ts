@@ -13,6 +13,7 @@ import { LibraryModule } from './modules/library/library.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { ProjectModule } from './modules/project/project.module';
 import { PagesModule } from './modules/pages/pages.module';
+import { AiModule } from './modules/ai/ai.module';
 import { ClsiCompileProcessor } from './modules/pages/clsi/processors/clsi-compile.processor';
 
 /**
@@ -45,6 +46,7 @@ import { ClsiCompileProcessor } from './modules/pages/clsi/processors/clsi-compi
     ExperimentsModule,
     LibraryModule,
     PagesModule,
+    AiModule,
   ],
   providers: [ClsiCompileProcessor],
 })

@@ -17,9 +17,9 @@ export const WORK_ITEM_REDIS_KEYS = {
   workItem: (workItemId: string) => `flux:wi:work-item:${workItemId}`,
 
   /**
-   * User / Scope labels list (JSON array, TTL 1h)
+   * User / Space labels list (JSON array, TTL 1h)
    */
-  labels: (scopeId: string) => `flux:wi:labels:${scopeId}`,
+  labels: (spaceId: string) => `flux:wi:labels:${spaceId}`,
 
   /**
    * Project labels list (JSON array, TTL 1h)

@@ -1,4 +1,8 @@
-import { HttpException, HttpStatus, UnauthorizedException } from '@nestjs/common';
+import {
+  HttpException,
+  HttpStatus,
+  UnauthorizedException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from '../../../src/modules/identity/auth/auth.service';
 import { AuthRepository } from '../../../src/modules/identity/auth/auth.repository';
@@ -48,7 +52,11 @@ describe('AuthService - Anti-Brute-Force & Timing Attack Protections', () => {
     } as any;
 
     mockRedis = {
-      get: jest.fn().mockImplementation((k: string) => Promise.resolve(memoryStore.get(k)?.value ?? null)),
+      get: jest
+        .fn()
+        .mockImplementation((k: string) =>
+          Promise.resolve(memoryStore.get(k)?.value ?? null),
+        ),
       set: jest.fn().mockImplementation((k: string, v: any, ttl?: number) => {
         memoryStore.set(k, { value: v, ttl });
         return Promise.resolve();
@@ -91,7 +99,10 @@ describe('AuthService - Anti-Brute-Force & Timing Attack Protections', () => {
       mockedBcrypt.compare.mockResolvedValue(false as never);
 
       await expect(
-        authService.login({ email: 'ghost@flux.ai', password: 'WrongPassword123' }),
+        authService.login({
+          email: 'ghost@flux.ai',
+          password: 'WrongPassword123',
+        }),
       ).rejects.toThrow(UnauthorizedException);
 
       // Verify bcrypt was invoked with the precomputed dummy hash
@@ -167,7 +178,10 @@ describe('AuthService - Anti-Brute-Force & Timing Attack Protections', () => {
 
       let error: any;
       try {
-        await authService.login({ email: targetEmail, password: 'AnyPassword' });
+        await authService.login({
+          email: targetEmail,
+          password: 'AnyPassword',
+        });
       } catch (err) {
         error = err;
       }
@@ -203,7 +217,10 @@ describe('AuthService - Anti-Brute-Force & Timing Attack Protections', () => {
       mockedBcrypt.compare.mockResolvedValue(true as never);
       mockRepo.createSession.mockResolvedValue({ id: 'sess-1' } as any);
 
-      const result = await authService.login({ email: targetEmail, password: 'CorrectPassword' });
+      const result = await authService.login({
+        email: targetEmail,
+        password: 'CorrectPassword',
+      });
       expect(result).toBeDefined();
 
       // Verify failed counter was wiped out

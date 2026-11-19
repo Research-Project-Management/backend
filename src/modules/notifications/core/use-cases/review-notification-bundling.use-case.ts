@@ -27,7 +27,7 @@ import { NotificationEntity } from '../domain/entities/notification.entity';
 const SCAN_LIMIT = 500;
 
 export type FlushBundleTarget =
-  string | { scopeId?: string; spaceId?: string; pageId?: string };
+  string | { bundleKey?: string; spaceId?: string; pageId?: string };
 
 @Injectable()
 export class ReviewNotificationBundlingUseCase {
@@ -46,7 +46,7 @@ export class ReviewNotificationBundlingUseCase {
 
     if (typeof target === 'string') {
       return (
-        info.scopeId === target ||
+        info.bundleKey === target ||
         info.spaceId === target ||
         n.projectId === target ||
         info.explicitPageId === target ||
@@ -54,7 +54,7 @@ export class ReviewNotificationBundlingUseCase {
       );
     }
 
-    const { scopeId, spaceId, pageId } = target;
+    const { bundleKey, spaceId, pageId } = target;
     if (pageId) {
       const pageMatch =
         info.explicitPageId === pageId ||
@@ -68,12 +68,12 @@ export class ReviewNotificationBundlingUseCase {
       return true;
     }
 
-    if (scopeId) {
+    if (bundleKey) {
       if (
-        info.scopeId === scopeId ||
-        info.spaceId === scopeId ||
-        n.projectId === scopeId ||
-        info.explicitPageId === scopeId
+        info.bundleKey === bundleKey ||
+        info.spaceId === bundleKey ||
+        n.projectId === bundleKey ||
+        info.explicitPageId === bundleKey
       ) {
         return true;
       }
@@ -107,7 +107,7 @@ export class ReviewNotificationBundlingUseCase {
   }
 
   /**
-   * Collapses pending review notifications (optionally scoped by space/page/scopeId)
+   * Collapses pending review notifications (optionally scoped by space/page/bundleKey)
    * into a digest, persists it, and marks the bundled notifications as read.
    * Returns null when nothing is pending.
    */
@@ -120,10 +120,10 @@ export class ReviewNotificationBundlingUseCase {
     if (pending.length === 0) return null;
 
     const firstInfo = getBundleScopeInfo(pending[0]);
-    const scopeId =
+    const bundleKey =
       typeof target === 'string'
         ? target
-        : target?.scopeId || firstInfo.scopeId || undefined;
+        : target?.bundleKey || firstInfo.bundleKey || undefined;
     const spaceId =
       typeof target === 'object'
         ? (target.spaceId ?? firstInfo.spaceId)
@@ -143,7 +143,7 @@ export class ReviewNotificationBundlingUseCase {
       settings.windowMinutes,
       legacyProjectId,
       new Date(),
-      { scopeId, spaceId, pageId },
+      { bundleKey, spaceId, pageId },
     );
     await this.store.appendDigest(userId, digest);
 
@@ -164,9 +164,9 @@ export class ReviewNotificationBundlingUseCase {
     const out: ReviewDigest[] = [];
     for (const b of due) {
       const target: FlushBundleTarget | undefined =
-        b.bundle.scopeId || b.bundle.spaceId || b.bundle.pageId
+        b.bundle.bundleKey || b.bundle.spaceId || b.bundle.pageId
           ? {
-              scopeId: b.bundle.scopeId,
+              bundleKey: b.bundle.bundleKey,
               spaceId: b.bundle.spaceId ?? undefined,
               pageId: b.bundle.pageId ?? undefined,
             }

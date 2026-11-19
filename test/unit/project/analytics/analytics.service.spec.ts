@@ -22,17 +22,32 @@ describe('Project Analytics Module (Service & Domain)', () => {
     mockCache = {
       wrap: jest.fn((_key, fn) => fn()),
     };
-    service = new AnalyticsService(
-      mockRepo as AnalyticsRepository,
-      mockCache,
-    );
+    service = new AnalyticsService(mockRepo as AnalyticsRepository, mockCache);
   });
 
   it('should aggregate project distributions across states, stateGroups, priority, assignees, and labels', async () => {
     mockRepo.findProjectStates.mockResolvedValue([
-      { id: 'st-todo', name: 'To Do', group: 'unstarted', color: '#3B82F6', sequence: 1 },
-      { id: 'st-prog', name: 'In Progress', group: 'started', color: '#F59E0B', sequence: 2 },
-      { id: 'st-done', name: 'Done', group: 'completed', color: '#10B981', sequence: 3 },
+      {
+        id: 'st-todo',
+        name: 'To Do',
+        group: 'unstarted',
+        color: '#3B82F6',
+        sequence: 1,
+      },
+      {
+        id: 'st-prog',
+        name: 'In Progress',
+        group: 'started',
+        color: '#F59E0B',
+        sequence: 2,
+      },
+      {
+        id: 'st-done',
+        name: 'Done',
+        group: 'completed',
+        color: '#10B981',
+        sequence: 3,
+      },
     ]);
 
     const pastDate = new Date(Date.now() - 86400 * 1000 * 3);
@@ -46,7 +61,9 @@ describe('Project Analytics Module (Service & Domain)', () => {
         dueDate: pastDate, // overdue
         assigneeId: 'u-1',
         assignee: { id: 'u-1', name: 'Alice', avatar: null },
-        labelAssignments: [{ label: { id: 'lbl-1', name: 'NLP', color: '#8B5CF6' } }],
+        labelAssignments: [
+          { label: { id: 'lbl-1', name: 'NLP', color: '#8B5CF6' } },
+        ],
       },
       {
         id: 'wi-2',
@@ -57,7 +74,9 @@ describe('Project Analytics Module (Service & Domain)', () => {
         dueDate: null,
         assigneeId: 'u-1',
         assignee: { id: 'u-1', name: 'Alice', avatar: null },
-        labelAssignments: [{ label: { id: 'lbl-1', name: 'NLP', color: '#8B5CF6' } }],
+        labelAssignments: [
+          { label: { id: 'lbl-1', name: 'NLP', color: '#8B5CF6' } },
+        ],
       },
       {
         id: 'wi-3',

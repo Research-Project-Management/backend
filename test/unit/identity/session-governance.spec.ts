@@ -156,7 +156,10 @@ describe('Enterprise Session Governance & Multi-Device Token Invalidation', () =
 
       mockAuthnRepo.findActiveSessionsByUser.mockResolvedValue(mockSessions);
 
-      const result = await authService.getActiveSessions(userId, currentSessionId);
+      const result = await authService.getActiveSessions(
+        userId,
+        currentSessionId,
+      );
 
       expect(result.length).toBe(2);
       const current = result.find((s) => s.id === currentSessionId);
@@ -247,7 +250,9 @@ describe('Enterprise Session Governance & Multi-Device Token Invalidation', () =
       });
 
       expect(mockUserRepo.updateUser).toHaveBeenCalled();
-      expect(mockUserRepo.revokeAllUserRefreshTokens).toHaveBeenCalledWith(userId);
+      expect(mockUserRepo.revokeAllUserRefreshTokens).toHaveBeenCalledWith(
+        userId,
+      );
 
       // Nuclear Redis Invalidation: Rejects all access tokens issued before now
       expect(mockRedis.set).toHaveBeenCalledWith(

@@ -60,7 +60,7 @@ export interface BundledItem {
 
 export interface PendingBundle {
   bundle: {
-    scopeId?: string;
+    bundleKey?: string;
     recipientId: string;
     spaceId?: string | null;
     projectId?: string;
@@ -76,7 +76,7 @@ export interface PendingBundle {
 export interface ReviewDigest {
   id: string;
   recipientId: string;
-  scopeId?: string;
+  bundleKey?: string;
   spaceId?: string | null;
   projectId?: string;
   pageId?: string | null;
@@ -127,7 +127,7 @@ function getOptString(n: NotificationEntity, key: string): string | undefined {
 }
 
 export function getBundleScopeInfo(n: NotificationEntity): {
-  scopeId: string;
+  bundleKey: string;
   spaceId: string | null;
   projectId: string | undefined;
   explicitPageId: string | null;
@@ -142,19 +142,19 @@ export function getBundleScopeInfo(n: NotificationEntity): {
 
   if (!spaceId && !projectId && !explicitPageId) {
     return {
-      scopeId: '',
+      bundleKey: '',
       spaceId: null,
       projectId: undefined,
       explicitPageId: null,
     };
   }
 
-  const scopeId = explicitPageId
+  const bundleKey = explicitPageId
     ? `${spaceId || projectId || 'personal'}:${explicitPageId}`
     : spaceId || projectId || '';
 
   return {
-    scopeId,
+    bundleKey,
     spaceId,
     projectId: projectId || undefined,
     explicitPageId,
@@ -217,7 +217,7 @@ export function buildPendingBundles(
 
   for (const n of notifications.filter(isReviewNotification)) {
     const info = getBundleScopeInfo(n);
-    const key = info.scopeId;
+    const key = info.bundleKey;
     const existing = groups.get(key) || {
       spaceId: info.spaceId,
       projectId: info.projectId,
@@ -229,14 +229,14 @@ export function buildPendingBundles(
   }
 
   const bundles: PendingBundle[] = [];
-  for (const [scopeId, group] of groups) {
+  for (const [bundleKey, group] of groups) {
     const list = group.items;
     list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     const createdAt = list[0].createdAt;
     const flushAt = new Date(createdAt.getTime() + windowMs);
     bundles.push({
       bundle: {
-        scopeId: scopeId || undefined,
+        bundleKey: bundleKey || undefined,
         recipientId,
         spaceId: group.spaceId,
         projectId: group.projectId,
@@ -261,8 +261,8 @@ export function buildDigest(
   windowMinutes: number,
   projectId?: string,
   now: Date = new Date(),
-  scopeMeta?: {
-    scopeId?: string;
+  bundleMeta?: {
+    bundleKey?: string;
     spaceId?: string | null;
     pageId?: string | null;
   },
@@ -298,10 +298,10 @@ export function buildDigest(
   return {
     id: `digest-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     recipientId,
-    scopeId: scopeMeta?.scopeId,
-    spaceId: scopeMeta?.spaceId ?? first?.spaceId ?? null,
+    bundleKey: bundleMeta?.bundleKey,
+    spaceId: bundleMeta?.spaceId ?? first?.spaceId ?? null,
     projectId: projectId ?? first?.projectId,
-    pageId: scopeMeta?.pageId ?? first?.pageId ?? null,
+    pageId: bundleMeta?.pageId ?? first?.pageId ?? null,
     summary: parts.length
       ? `${parts.join(', ')} from ${authors.size} collaborator${authors.size > 1 ? 's' : ''}`
       : 'No new review activity',

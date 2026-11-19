@@ -29,7 +29,7 @@ describe('Project Access Bitmask Engine & RBAC Optimization', () => {
         expect(bit).toBeDefined();
         expect(bit > 0n).toBe(true);
         // Bit must be a power of 2: (bit & (bit - 1n)) === 0n
-        expect((bit & (bit - 1n))).toBe(0n);
+        expect(bit & (bit - 1n)).toBe(0n);
         expect(seenBits.has(bit)).toBe(false);
         seenBits.add(bit);
       }
@@ -64,7 +64,9 @@ describe('Project Access Bitmask Engine & RBAC Optimization', () => {
     it('should decode ALL_PERMISSIONS_MASK into all 54 canonical permissions', () => {
       const decoded = decodeBitmaskToPermissions(ALL_PERMISSIONS_MASK);
       expect(decoded.length).toBe(54);
-      expect(decoded).toEqual(expect.arrayContaining(Object.values(Permission)));
+      expect(decoded).toEqual(
+        expect.arrayContaining(Object.values(Permission)),
+      );
     });
 
     it('should decode 0n into an empty array', () => {
@@ -108,7 +110,10 @@ describe('Project Access Bitmask Engine & RBAC Optimization', () => {
     it('should respect member-level grant override for non-owner', () => {
       // REVIEWER by default lacks LIBRARY_UPLOAD
       expect(
-        PermissionBitmaskUtil.evaluate(Role.REVIEWER, Permission.LIBRARY_UPLOAD),
+        PermissionBitmaskUtil.evaluate(
+          Role.REVIEWER,
+          Permission.LIBRARY_UPLOAD,
+        ),
       ).toBe(false);
 
       // Explicit grant

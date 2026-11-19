@@ -306,7 +306,13 @@ describe('Identity Security Suite (BOLA Prevention & Real-time Revocation)', () 
       const cachedResponse = {
         accessToken: 'cached-access-token',
         refreshToken: 'cached-refresh-token',
-        user: { id: 'u1', email: 'test@flux.study', name: 'Tester', avatar: null, status: 'active' },
+        user: {
+          id: 'u1',
+          email: 'test@flux.study',
+          name: 'Tester',
+          avatar: null,
+          status: 'active',
+        },
       };
       mockRedis.get.mockResolvedValue(cachedResponse);
 
@@ -325,7 +331,12 @@ describe('Identity Security Suite (BOLA Prevention & Real-time Revocation)', () 
         isRevoked: true,
         revokedAt: new Date(Date.now() - 5000),
         expiresAt: new Date(Date.now() + 86400000),
-        user: { id: 'u1', email: 'test@flux.study', status: 'active', profile: { name: 'Tester', avatar: null } },
+        user: {
+          id: 'u1',
+          email: 'test@flux.study',
+          status: 'active',
+          profile: { name: 'Tester', avatar: null },
+        },
       };
       mockAuthRepo.findRefreshToken.mockResolvedValue(revokedTokenRecord);
       mockPrisma.refreshToken.findFirst.mockResolvedValue({
@@ -378,16 +389,25 @@ describe('Identity Security Suite (BOLA Prevention & Real-time Revocation)', () 
         familyId: 'family-1',
         isRevoked: false,
         expiresAt: new Date(Date.now() + 86400000),
-        user: { id: 'u1', email: 'test@flux.study', status: 'active', profile: { name: 'Tester', avatar: null } },
+        user: {
+          id: 'u1',
+          email: 'test@flux.study',
+          status: 'active',
+          profile: { name: 'Tester', avatar: null },
+        },
       };
       mockAuthRepo.findRefreshToken.mockResolvedValue(activeToken);
-      mockAuthRepo.rotateToken.mockRejectedValue(new Error('Refresh token already used'));
+      mockAuthRepo.rotateToken.mockRejectedValue(
+        new Error('Refresh token already used'),
+      );
 
-      mockAuthRepo.findRefreshToken.mockResolvedValueOnce(activeToken).mockResolvedValueOnce({
-        ...activeToken,
-        revokedAt: new Date(),
-        isRevoked: true,
-      });
+      mockAuthRepo.findRefreshToken
+        .mockResolvedValueOnce(activeToken)
+        .mockResolvedValueOnce({
+          ...activeToken,
+          revokedAt: new Date(),
+          isRevoked: true,
+        });
       mockPrisma.refreshToken.findFirst.mockResolvedValue({
         id: 'winner-child-id',
         userId: 'u1',

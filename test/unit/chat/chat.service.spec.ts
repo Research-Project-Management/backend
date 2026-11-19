@@ -1,6 +1,14 @@
-import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ChatService } from '@/modules/chat/services/chat.service';
-import { ConversationType, ConversationMemberRole, MessageType } from '@prisma/client';
+import {
+  ConversationType,
+  ConversationMemberRole,
+  MessageType,
+} from '@prisma/client';
 
 describe('ChatService Unit Tests', () => {
   let service: ChatService;
@@ -81,7 +89,10 @@ describe('ChatService Unit Tests', () => {
       };
       mockPrisma.conversation.findUnique.mockResolvedValue(conv);
 
-      const res = await service.verifyConversationAccess('conv-direct', 'user-1');
+      const res = await service.verifyConversationAccess(
+        'conv-direct',
+        'user-1',
+      );
       expect(res.id).toBe('conv-direct');
     });
 
@@ -117,7 +128,10 @@ describe('ChatService Unit Tests', () => {
         userId: 'user-researcher',
       });
 
-      const res = await service.verifyConversationAccess('conv-chan', 'user-researcher');
+      const res = await service.verifyConversationAccess(
+        'conv-chan',
+        'user-researcher',
+      );
       expect(res.id).toBe('conv-chan');
       expect(mockPrisma.conversationMember.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -199,7 +213,11 @@ describe('ChatService Unit Tests', () => {
         attachments: [],
         createdAt: new Date(),
         updatedAt: new Date(),
-        sender: { id: 'user-1', email: 'alice@flux.dev', profile: { name: 'Alice', avatar: null } },
+        sender: {
+          id: 'user-1',
+          email: 'alice@flux.dev',
+          profile: { name: 'Alice', avatar: null },
+        },
         reactions: [],
       };
       mockPrisma.message.create.mockResolvedValue(fakeSavedMessage);

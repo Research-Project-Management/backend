@@ -2,7 +2,10 @@ import { ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { UserRateLimitGuard } from '../../../src/core/http/rate-limit/user-rate-limit.guard';
 import { RateLimitConfigService } from '../../../src/core/http/rate-limit/rate-limit.config';
-import { USER_RATE_LIMIT_KEY, UserRateLimitRule } from '../../../src/core/http/rate-limit/user-rate-limit.decorator';
+import {
+  USER_RATE_LIMIT_KEY,
+  UserRateLimitRule,
+} from '../../../src/core/http/rate-limit/user-rate-limit.decorator';
 
 describe('UserRateLimitGuard - Sliding Window Counter Engine', () => {
   let guard: UserRateLimitGuard;
@@ -25,7 +28,7 @@ describe('UserRateLimitGuard - Sliding Window Counter Engine', () => {
         }
         return { limit: 10, windowSeconds: 60 };
       }),
-    } as any;
+    };
 
     guard = new UserRateLimitGuard(reflector, configService);
     guard.resetMemoryBuckets();
@@ -68,7 +71,12 @@ describe('UserRateLimitGuard - Sliding Window Counter Engine', () => {
 
   it('allows requests within budget and sets proper X-RateLimit headers', async () => {
     const rules: UserRateLimitRule[] = [
-      { bucket: 'auth-login-target', limit: 3, windowSeconds: 60, keyType: 'email' },
+      {
+        bucket: 'auth-login-target',
+        limit: 3,
+        windowSeconds: 60,
+        keyType: 'email',
+      },
     ];
     reflector.getAllAndOverride.mockReturnValue(rules);
 
@@ -92,7 +100,12 @@ describe('UserRateLimitGuard - Sliding Window Counter Engine', () => {
 
   it('throws 429 Too Many Requests when budget is exceeded and provides Retry-After', async () => {
     const rules: UserRateLimitRule[] = [
-      { bucket: 'auth-login-target', limit: 2, windowSeconds: 60, keyType: 'email' },
+      {
+        bucket: 'auth-login-target',
+        limit: 2,
+        windowSeconds: 60,
+        keyType: 'email',
+      },
     ];
     reflector.getAllAndOverride.mockReturnValue(rules);
 
@@ -122,7 +135,12 @@ describe('UserRateLimitGuard - Sliding Window Counter Engine', () => {
   it('enforces Dual-Key throttling: blocks if either IP or Target Email exceeds limit', async () => {
     const rules: UserRateLimitRule[] = [
       { bucket: 'auth-login-ip', limit: 10, windowSeconds: 60, keyType: 'ip' },
-      { bucket: 'auth-login-target', limit: 2, windowSeconds: 60, keyType: 'email' },
+      {
+        bucket: 'auth-login-target',
+        limit: 2,
+        windowSeconds: 60,
+        keyType: 'email',
+      },
     ];
     reflector.getAllAndOverride.mockReturnValue(rules);
 
@@ -139,7 +157,10 @@ describe('UserRateLimitGuard - Sliding Window Counter Engine', () => {
     await expect(guard.canActivate(ctx)).rejects.toThrow(HttpException);
 
     // 4th request from same IP to DIFFERENT email: passes because email limit is fresh!
-    const reqDifferentUser = { body: { email: 'other@flux.ai' }, ip: '123.45.67.89' };
+    const reqDifferentUser = {
+      body: { email: 'other@flux.ai' },
+      ip: '123.45.67.89',
+    };
     const ctxDifferentUser = createMockContext(reqDifferentUser, res);
     await expect(guard.canActivate(ctxDifferentUser)).resolves.toBe(true);
   });
@@ -154,12 +175,22 @@ describe('UserRateLimitGuard - Sliding Window Counter Engine', () => {
     // Fill up 5 requests in Window 0 (t = 10,000ms)
     jest.spyOn(Date, 'now').mockReturnValue(10_000);
     for (let i = 0; i < 5; i++) {
-      const res = await guard.evaluateLimit(bucket, actorKey, limit, windowSeconds);
+      const res = await guard.evaluateLimit(
+        bucket,
+        actorKey,
+        limit,
+        windowSeconds,
+      );
       expect(res.allowed).toBe(true);
     }
 
     // 6th request at t = 10,000ms: rejected
-    const blockedRes = await guard.evaluateLimit(bucket, actorKey, limit, windowSeconds);
+    const blockedRes = await guard.evaluateLimit(
+      bucket,
+      actorKey,
+      limit,
+      windowSeconds,
+    );
     expect(blockedRes.allowed).toBe(false);
 
     // Advance to Window 1, t = 90,000ms (halfway through window 1: 30s elapsed of 60s)
@@ -169,17 +200,37 @@ describe('UserRateLimitGuard - Sliding Window Counter Engine', () => {
     // 3 slots available!
     jest.spyOn(Date, 'now').mockReturnValue(90_000);
 
-    const midWindowRes1 = await guard.evaluateLimit(bucket, actorKey, limit, windowSeconds);
+    const midWindowRes1 = await guard.evaluateLimit(
+      bucket,
+      actorKey,
+      limit,
+      windowSeconds,
+    );
     expect(midWindowRes1.allowed).toBe(true); // 2 + 1 = 3 <= 5
 
-    const midWindowRes2 = await guard.evaluateLimit(bucket, actorKey, limit, windowSeconds);
+    const midWindowRes2 = await guard.evaluateLimit(
+      bucket,
+      actorKey,
+      limit,
+      windowSeconds,
+    );
     expect(midWindowRes2.allowed).toBe(true); // 3 + 1 = 4 <= 5
 
-    const midWindowRes3 = await guard.evaluateLimit(bucket, actorKey, limit, windowSeconds);
+    const midWindowRes3 = await guard.evaluateLimit(
+      bucket,
+      actorKey,
+      limit,
+      windowSeconds,
+    );
     expect(midWindowRes3.allowed).toBe(true); // 4 + 1 = 5 <= 5
 
     // 4th request in mid-window: hits limit (5 + 1 > 5)
-    const midWindowRes4 = await guard.evaluateLimit(bucket, actorKey, limit, windowSeconds);
+    const midWindowRes4 = await guard.evaluateLimit(
+      bucket,
+      actorKey,
+      limit,
+      windowSeconds,
+    );
     expect(midWindowRes4.allowed).toBe(false);
 
     jest.restoreAllMocks();

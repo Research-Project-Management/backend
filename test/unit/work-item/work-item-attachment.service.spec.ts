@@ -91,7 +91,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
         filename: 'research_proposal.pdf',
         buffer: mockBuffer,
         mimeType: 'application/pdf',
-        projectId: 'proj-uuid-1',
+        spaceId: 'proj-uuid-1',
         source: 'work-item',
       });
 
@@ -166,6 +166,23 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
       expect(mockRepo.delete).toHaveBeenCalledWith('att-123');
     });
 
+    it('should pass spaceId when deleting an attachment with projectId', async () => {
+      mockRepo.findById!.mockResolvedValueOnce({
+        id: 'att-proj-1',
+        entityType: EntityType.work_item,
+        entityId: 'item-uuid-1',
+        projectId: 'proj-space-1',
+        metadata: { fileId: 'cas-file-proj-1' },
+      } as any);
+
+      await service.deleteAttachment('att-proj-1', 'user-1');
+
+      expect(mockFilesPort.deleteFile).toHaveBeenCalledWith('cas-file-proj-1', {
+        spaceId: 'proj-space-1',
+      });
+      expect(mockRepo.delete).toHaveBeenCalledWith('att-proj-1');
+    });
+
     it('should delete from storagePort when fileId is extracted from URL', async () => {
       mockRepo.findById!.mockResolvedValueOnce({
         id: 'att-789',
@@ -177,9 +194,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       await service.deleteAttachment('att-789');
 
-      expect(mockFilesPort.deleteFile).toHaveBeenCalledWith(
-        'cas-url-uuid-555',
-      );
+      expect(mockFilesPort.deleteFile).toHaveBeenCalledWith('cas-url-uuid-555');
       expect(mockRepo.delete).toHaveBeenCalledWith('att-789');
     });
 
@@ -311,7 +326,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       expect(mockFilesPort.uploadFile).toHaveBeenCalledWith(
         expect.objectContaining({
-          projectId: 'proj-resolved-1',
+          spaceId: 'proj-resolved-1',
           filename: 'figure.png',
         }),
       );

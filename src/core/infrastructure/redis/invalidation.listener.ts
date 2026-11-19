@@ -8,7 +8,7 @@ export interface EntityChangeEvent {
   verb?: string;
   userId?: string;
   projectId?: string;
-  scopeId?: string;
+  spaceId?: string;
 }
 
 @Injectable()
@@ -22,7 +22,7 @@ export class CacheInvalidationListener {
     pattern?: string;
     key?: string;
     userId?: string;
-    scopeId?: string;
+    spaceId?: string;
     projectId?: string;
   }) {
     if (payload.key) {
@@ -37,8 +37,8 @@ export class CacheInvalidationListener {
     if (payload.projectId) {
       await this.redisCache.invalidateProject(payload.projectId);
     }
-    if (payload.scopeId) {
-      await this.redisCache.invalidateScope(payload.scopeId);
+    if (payload.spaceId) {
+      await this.redisCache.invalidateSpace(payload.spaceId);
     }
   }
 
@@ -63,8 +63,8 @@ export class CacheInvalidationListener {
       await this.redisCache.del(`work_item:${event.entityId}`);
       await this.redisCache.del(`WorkItem:${event.entityId}`);
     }
-    if (event.scopeId) {
-      await this.redisCache.delPattern(`flux:wi:labels:${event.scopeId}*`);
+    if (event.spaceId) {
+      await this.redisCache.delPattern(`flux:wi:labels:${event.spaceId}*`);
     }
   }
 

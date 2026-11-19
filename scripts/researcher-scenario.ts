@@ -349,18 +349,28 @@ async function runResearcherJourney() {
   // STEP 8: AI COPILOT ACADEMIC CONSULTATION
   // --------------------------------------------------------------------------
   await logStep(
-    'AI-COPILOT',
+    'AI-ASSISTANT',
     'Consult AI Assistant on Section 4 Comparative Discussion',
     async () => {
+      const projectSpace = await prisma.space.findFirst({
+        where: { OR: [{ id: projectFluxId }, { projectId: projectFluxId }] },
+        select: { id: true },
+      });
+      const spaceId = projectSpace?.id || projectFluxId;
+
       // Find existing chat on FlashAttention or create new
       let chat = await prisma.aiChat.findFirst({
-        where: { userId, title: { contains: 'FlashAttention' } },
+        where: {
+          createdById: userId,
+          spaceId,
+          title: { contains: 'FlashAttention' },
+        },
       });
       if (!chat) {
         chat = await prisma.aiChat.create({
           data: {
-            userId,
-            projectId: projectFluxId,
+            createdById: userId,
+            spaceId,
             title:
               'Tổng hợp so sánh MHA, GQA và FlashAttention-2 cho Section 4',
             summary:

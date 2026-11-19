@@ -115,6 +115,9 @@ services:
       TRUSTED_EXTRACTION_ENABLED: "true"
       TRUSTED_EXTRACTION_SHADOW_MODE: "${TRUSTED_SHADOW_MODE:-false}"
       TRUSTED_EXTRACTION_CANARY_PERCENT: "100"
+      FLUX_AI_ENABLED: "${FLUX_AI_ENABLED:-true}"
+      FLUX_AI_URL: "${FLUX_AI_URL:-http://host.docker.internal:18420}"
+      AI_INTERNAL_API_KEY: "${AI_INTERNAL_API_KEY:-}"
     volumes:
       - flux_clsi_scratch:/tmp/clsi-scratch
     depends_on:
@@ -169,6 +172,9 @@ services:
       TRUSTED_EXTRACTION_ENABLED: "true"
       TRUSTED_EXTRACTION_SHADOW_MODE: "${TRUSTED_SHADOW_MODE:-false}"
       TRUSTED_EXTRACTION_CANARY_PERCENT: "100"
+      FLUX_AI_ENABLED: "${FLUX_AI_ENABLED:-true}"
+      FLUX_AI_URL: "${FLUX_AI_URL:-http://host.docker.internal:18420}"
+      AI_INTERNAL_API_KEY: "${AI_INTERNAL_API_KEY:-}"
     depends_on:
       db:
         condition: service_healthy
@@ -205,6 +211,8 @@ services:
       context: .
       dockerfile: Dockerfile.clsi
       target: runner
+      args:
+        TEXLIVE_BASE: ${CLSI_TEXLIVE_BASE:-texlive-full-base}
     image: ghcr.io/research-project-management/clsi:latest
     container_name: flux_clsi
     restart: "no"
@@ -218,9 +226,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: 2048M
         reservations:
-          memory: 128M
+          memory: 256M
     logging:
       driver: json-file
       options:

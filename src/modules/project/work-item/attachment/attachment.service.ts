@@ -44,7 +44,10 @@ export class AttachmentService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateCache(projectId?: string | null, workItemId?: string) {
+  private async invalidateCache(
+    projectId?: string | null,
+    workItemId?: string,
+  ) {
     await invalidateWorkItemCache(this.cache, { projectId, workItemId });
   }
 
@@ -186,7 +189,7 @@ export class AttachmentService {
       filename,
       buffer,
       mimeType,
-      projectId: resolvedProjectId,
+      spaceId: resolvedProjectId ?? authorId,
       source: 'work-item',
     });
     const url = uploadRes.url;
@@ -692,9 +695,14 @@ export class AttachmentService {
     );
     const fileId = metaFileId || urlMatch?.[1];
 
+    const targetSpaceId = attachment.projectId ?? authorId;
     if (fileId && this.filesPort?.deleteFile) {
       try {
-        await this.filesPort.deleteFile(fileId);
+        if (targetSpaceId) {
+          await this.filesPort.deleteFile(fileId, { spaceId: targetSpaceId });
+        } else {
+          await this.filesPort.deleteFile(fileId);
+        }
       } catch (err: unknown) {
         this.logger.warn(
           `Failed to delete storage file ${fileId}: ${(err as Error).message}`,
@@ -731,7 +739,10 @@ export class AttachmentService {
    */
   async getWorkItemsByLinkedEntity(entityType: EntityType, entityId: string) {
     const links = this.attachmentRepository.findLinkedWorkItems
-      ? await this.attachmentRepository.findLinkedWorkItems(entityType, entityId)
+      ? await this.attachmentRepository.findLinkedWorkItems(
+          entityType,
+          entityId,
+        )
       : this.prismaService?.workItemEntityLink
         ? await this.prismaService.workItemEntityLink.findMany({
             where: { entityType, entityId },

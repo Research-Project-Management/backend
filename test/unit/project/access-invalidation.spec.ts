@@ -15,7 +15,7 @@ describe('Zero-Latency Access Revocation & Cache Invalidation', () => {
       delPattern: jest.fn().mockResolvedValue(1),
       invalidateUser: jest.fn().mockResolvedValue(undefined),
       invalidateProject: jest.fn().mockResolvedValue(undefined),
-      invalidateScope: jest.fn().mockResolvedValue(undefined),
+      invalidateSpace: jest.fn().mockResolvedValue(undefined),
     };
     listener = new CacheInvalidationListener(mockRedis as RedisCacheService);
   });
@@ -28,9 +28,15 @@ describe('Zero-Latency Access Revocation & Cache Invalidation', () => {
       oldValue: targetUserId,
     });
 
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:${projectId}:${targetUserId}`);
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:role:${projectId}:${targetUserId}`);
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:perms:${projectId}:${targetUserId}`);
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:${projectId}:${targetUserId}`,
+    );
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:role:${projectId}:${targetUserId}`,
+    );
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:perms:${projectId}:${targetUserId}`,
+    );
   });
 
   it('should immediately evict access cache on project.member_updated (role change / demotion)', async () => {
@@ -41,9 +47,15 @@ describe('Zero-Latency Access Revocation & Cache Invalidation', () => {
       userId: targetUserId,
     });
 
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:${projectId}:${targetUserId}`);
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:role:${projectId}:${targetUserId}`);
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:perms:${projectId}:${targetUserId}`);
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:${projectId}:${targetUserId}`,
+    );
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:role:${projectId}:${targetUserId}`,
+    );
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:perms:${projectId}:${targetUserId}`,
+    );
   });
 
   it('should immediately evict access caches for BOTH previous and new owners on project.ownership_transferred', async () => {
@@ -56,13 +68,25 @@ describe('Zero-Latency Access Revocation & Cache Invalidation', () => {
     } as any);
 
     // Evicts previous owner
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:${projectId}:${targetUserId}`);
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:role:${projectId}:${targetUserId}`);
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:perms:${projectId}:${targetUserId}`);
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:${projectId}:${targetUserId}`,
+    );
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:role:${projectId}:${targetUserId}`,
+    );
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:perms:${projectId}:${targetUserId}`,
+    );
 
     // Evicts new owner
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:${projectId}:${newOwnerId}`);
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:role:${projectId}:${newOwnerId}`);
-    expect(mockRedis.del).toHaveBeenCalledWith(`project:access:perms:${projectId}:${newOwnerId}`);
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:${projectId}:${newOwnerId}`,
+    );
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:role:${projectId}:${newOwnerId}`,
+    );
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      `project:access:perms:${projectId}:${newOwnerId}`,
+    );
   });
 });
