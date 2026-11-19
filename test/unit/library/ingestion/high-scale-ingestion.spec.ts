@@ -9,7 +9,7 @@ import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normaliz
 import { ArxivProvider } from '@/modules/library/ingestion/providers/arxiv.provider';
 import { OpenAlexProvider } from '@/modules/library/ingestion/providers/openalex.provider';
 import { MetadataExecutorService } from '@/modules/library/ingestion/services/metadata-executor.service';
-import type { IStoragePort } from '@/modules/storage/storage.port';
+import type { IFilesPort } from '@/modules/files';
 import type { IExtractionFacade } from '@/modules/library/core';
 
 describe('High-Scale Ingestion Architecture Optimizations', () => {
@@ -42,7 +42,7 @@ describe('High-Scale Ingestion Architecture Optimizations', () => {
 
       const storagePort = {
         readOwnedFile: readOwnedFileMock,
-      } as unknown as IStoragePort;
+      } as unknown as IFilesPort;
 
       const extractionGateway = {
         extractTrustedMetadata: extractTrustedMetadataMock,

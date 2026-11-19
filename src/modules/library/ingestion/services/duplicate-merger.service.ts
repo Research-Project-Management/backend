@@ -28,7 +28,7 @@ import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/ingestion.dt
 import { PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/ingestion.types';
 import { UserId, ProjectId } from '@/modules/library/core';
 import { asMetaObject } from '@/modules/library/ingestion/domain/duplicate-clustering.domain';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 
 import {
   ContributorShape,
@@ -75,8 +75,8 @@ export class DuplicateMergerService {
     @Optional()
     private readonly ingestionRepo?: IngestionRepository,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()
@@ -543,10 +543,10 @@ export class DuplicateMergerService {
     if (filesToCleanup.length > 0) {
       if (this.extractionGateway?.cleanupOrphanedFiles) {
         await this.extractionGateway.cleanupOrphanedFiles(filesToCleanup);
-      } else if (this.storagePort?.deleteFile) {
+      } else if (this.filesPort?.deleteFile) {
         for (const fid of filesToCleanup) {
           try {
-            await this.storagePort.deleteFile(fid);
+            await this.filesPort.deleteFile(fid);
           } catch (delErr: unknown) {
             const msg =
               delErr instanceof Error ? delErr.message : String(delErr);

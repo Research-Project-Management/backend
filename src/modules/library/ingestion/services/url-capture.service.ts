@@ -39,7 +39,7 @@ import { toItemData } from '@/modules/library/ingestion/stages/commit.stage';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import { ParsedFeed } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 import { createHash, randomUUID } from 'crypto';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 import { FeedRetrievalService } from './feed-retrieval.service';
 import { FeedsRepository } from '@/modules/library/ingestion/repositories/feeds.repository';
 
@@ -59,8 +59,8 @@ export class UrlCaptureService {
     private readonly extractionGateway?: IExtractionFacade,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional() private readonly feedsRepo?: FeedsRepository,
     @Optional() feedRetrieval?: FeedRetrievalService,
     @Optional() private readonly duplicateDetector?: DuplicateDetectorService,
@@ -663,9 +663,9 @@ export class UrlCaptureService {
             (id): id is string => typeof id === 'string' && id.length > 0,
           );
 
-        if (this.storagePort?.deleteFile) {
-          const deleteFileFn = this.storagePort.deleteFile.bind(
-            this.storagePort,
+        if (this.filesPort?.deleteFile) {
+          const deleteFileFn = this.filesPort.deleteFile.bind(
+            this.filesPort,
           );
           await Promise.all(
             expiredList.map((p) => {

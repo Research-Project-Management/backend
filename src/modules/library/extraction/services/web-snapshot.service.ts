@@ -9,7 +9,7 @@ import {
 import { createHash } from 'crypto';
 import { isUUID } from 'class-validator';
 import { AttachmentsService } from './attachments.service';
-import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import { FILES_PORT, IFilesPort } from '@/modules/files';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 import {
   ExternalProviderException,
@@ -125,8 +125,8 @@ export class WebSnapshotService {
   constructor(
     private readonly attachmentsService: AttachmentsService,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional() ssrfGuard?: SsrfGuardService,
   ) {
     this.ssrfGuard = ssrfGuard || new SsrfGuardService();
@@ -411,7 +411,7 @@ export class WebSnapshotService {
     const fileKey = `${userId}/library/snapshots/${itemId}_snapshot_${timestamp}.html`;
     const filename = `Snapshot_${sanitizedTitle}_${new Date().toISOString().slice(0, 10)}.html`;
 
-    if (!this.storagePort?.uploadFile && !this.storagePort?.uploadBuffer) {
+    if (!this.filesPort?.uploadFile && !this.filesPort?.uploadBuffer) {
       throw new AttachmentStorageException(
         'Failed to store web snapshot in storage: Storage provider is not configured',
       );
@@ -423,9 +423,9 @@ export class WebSnapshotService {
     let lastUploadError: unknown;
     const buffer = Buffer.from(snapshot.htmlContent, 'utf-8');
 
-    if (this.storagePort?.uploadFile) {
+    if (this.filesPort?.uploadFile) {
       try {
-        const uploadResult = await this.storagePort.uploadFile({
+        const uploadResult = await this.filesPort.uploadFile({
           userId,
           ...(options?.projectId ? { projectId: options.projectId } : {}),
           filename,
@@ -445,9 +445,9 @@ export class WebSnapshotService {
       }
     }
 
-    if (!uploaded && this.storagePort?.uploadBuffer) {
+    if (!uploaded && this.filesPort?.uploadBuffer) {
       try {
-        const uploadResult = await this.storagePort.uploadBuffer(
+        const uploadResult = await this.filesPort.uploadBuffer(
           fileKey,
           buffer,
           'text/html; charset=utf-8',
@@ -498,8 +498,8 @@ export class WebSnapshotService {
           )
         : await this.attachmentsService.createAttachment(createPayload);
     } catch (attachErr) {
-      if (resolvedFileId && this.storagePort?.deleteFile) {
-        await this.storagePort.deleteFile(resolvedFileId).catch(() => {});
+      if (resolvedFileId && this.filesPort?.deleteFile) {
+        await this.filesPort.deleteFile(resolvedFileId).catch(() => {});
       }
       throw attachErr;
     }

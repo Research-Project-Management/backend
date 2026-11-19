@@ -33,7 +33,7 @@ import {
   gzipAsync,
 } from '@/modules/library/core';
 import { createHash, randomUUID } from 'crypto';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 import {
   METADATA_PORT,
   MetadataPort,
@@ -65,8 +65,8 @@ export class IngestionService {
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway?: ICatalogFacade,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional()
     @Inject(METADATA_PORT)
     private readonly metadataService?: MetadataPort,
@@ -251,12 +251,12 @@ export class IngestionService {
       envelope.payload.kind === 'RECORD' &&
       envelope.payload.content &&
       envelope.payload.content.length > 32 * 1024 &&
-      this.storagePort?.uploadFile
+      this.filesPort?.uploadFile
     ) {
       try {
         const rawBuffer = Buffer.from(envelope.payload.content, 'utf-8');
         const compressed = await gzipAsync(rawBuffer);
-        const uploadResult = await this.storagePort.uploadFile({
+        const uploadResult = await this.filesPort.uploadFile({
           userId,
           projectId: envelope.projectId || undefined,
           filename: `ingest_${envelope.payload.format.toLowerCase()}_${randomUUID().slice(0, 8)}.json.gz`,
@@ -319,8 +319,8 @@ export class IngestionService {
 
       // If a concurrent request inserted with the exact same (userId, projectId, idempotencyKey), Prisma throws P2002
       if (idempotencyKey && isP2002) {
-        if (offloadedFileId && this.storagePort?.deleteFile) {
-          this.storagePort.deleteFile(offloadedFileId).catch(() => {});
+        if (offloadedFileId && this.filesPort?.deleteFile) {
+          this.filesPort.deleteFile(offloadedFileId).catch(() => {});
         }
         const raceRun = await this.repo.findRunByIdempotencyKey(
           { userId: envelope.userId, projectId: envelope.projectId ?? null },
@@ -330,8 +330,8 @@ export class IngestionService {
           return this.verifyAndMapExistingRun(raceRun, requestHash);
         }
       }
-      if (offloadedFileId && this.storagePort?.deleteFile) {
-        this.storagePort.deleteFile(offloadedFileId).catch(() => {});
+      if (offloadedFileId && this.filesPort?.deleteFile) {
+        this.filesPort.deleteFile(offloadedFileId).catch(() => {});
       }
       throw err;
     }
@@ -593,7 +593,7 @@ export class IngestionService {
   /**
    * Scheduled/triggered maintenance GC that reaps:
    * 1. Offloaded claim-check blobs (`inputParams.payload.fileId`) when an IngestionRun reaches terminal status,
-   * 2. Expired CapturePreview rows and their unconfirmed PDF blobs (`pdfFileId` / `fileId`) from storagePort,
+   * 2. Expired CapturePreview rows and their unconfirmed PDF blobs (`pdfFileId` / `fileId`) from filesPort,
    * 3. Old terminal IngestionRun rows (> 7 days).
    */
   async runMaintenanceGc(options?: {

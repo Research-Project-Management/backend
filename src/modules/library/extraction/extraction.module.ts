@@ -5,6 +5,7 @@ import {
   IOutboxRegistry,
   OUTBOX_REGISTRY_PORT,
 } from '@/modules/library/core';
+import { FilesModule } from '@/modules/files';
 
 // Presentation
 import { AttachmentController } from './controllers/attachments.controller';
@@ -45,7 +46,7 @@ import { AnnotationNormalizer } from './domain/annotations.domain';
 
 @Global()
 @Module({
-  imports: [CoreModule, LibraryCoreModule],
+  imports: [CoreModule, LibraryCoreModule, FilesModule],
   controllers: [
     AttachmentStorageController,
     AttachmentController,

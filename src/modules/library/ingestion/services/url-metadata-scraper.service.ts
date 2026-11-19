@@ -1,5 +1,5 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 import {
   WEB_FETCH_PORT,
   IWebFetchPort,
@@ -55,8 +55,8 @@ export class UrlMetadataScraperService {
 
   constructor(
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional()
     @Inject(EXTRACTION_FACADE)
     private readonly extractionGateway?: IExtractionFacade,
@@ -320,9 +320,9 @@ export class UrlMetadataScraperService {
 
     await Promise.all([
       (async () => {
-        if (!this.storagePort) return;
+        if (!this.filesPort) return;
         try {
-          const uploadRes = await this.storagePort.uploadFile({
+          const uploadRes = await this.filesPort.uploadFile({
             userId: options?.userId || SYSTEM_INGESTION_USER_ID,
             filename: effectiveFilename,
             buffer,

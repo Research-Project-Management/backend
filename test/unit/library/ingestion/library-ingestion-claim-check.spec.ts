@@ -9,7 +9,7 @@ import { DoiParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
-import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import { FILES_PORT, IFilesPort } from '@/modules/files';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
 import { fromPartial } from '@total-typescript/shoehorn';
 import zlib from 'zlib';
@@ -17,7 +17,7 @@ import zlib from 'zlib';
 describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
   let ingestionService: IngestionService;
   let identifyStage: IdentifyStage;
-  let mockStoragePort: jest.Mocked<IStoragePort>;
+  let mockStoragePort: jest.Mocked<IFilesPort>;
   let mockRepo: any;
   let mockQueue: any;
 
@@ -60,7 +60,7 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
         });
         return {
           fileId,
-          url: `/api/v1/storage/files/${fileId}/content`,
+          url: `/api/v1/files/${fileId}/content`,
           path: `storage/${input.filename}`,
           filename: input.filename,
           size: input.buffer.length,
@@ -76,7 +76,7 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
           mimeType: 'application/gzip',
           size: entry.buffer.length,
           storageKey: `storage/${entry.filename}`,
-          contentUrl: `/api/v1/storage/files/${input.fileId}/content`,
+          contentUrl: `/api/v1/files/${input.fileId}/content`,
           buffer: entry.buffer,
         };
       }),
@@ -116,7 +116,7 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
         { provide: QueueService, useValue: mockQueue },
         { provide: PipelineService, useValue: {} },
         { provide: UrlCaptureService, useValue: {} },
-        { provide: STORAGE_PORT, useValue: mockStoragePort },
+        { provide: FILES_PORT, useValue: mockStoragePort },
       ],
     }).compile();
 

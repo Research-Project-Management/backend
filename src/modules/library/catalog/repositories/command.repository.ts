@@ -19,7 +19,7 @@ import {
   resolveSpaceId,
   syncItemDenormalizedCountsInClient,
 } from '@/modules/library/core';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 import {
   CreateItemData,
   UpdateItemData,
@@ -66,8 +66,8 @@ export class CommandRepository {
   constructor(
     private readonly prisma: PrismaService,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {}
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
@@ -788,10 +788,10 @@ export class CommandRepository {
     return res;
   }
   async deleteStorageFilesBatch(fileIds: string[]): Promise<void> {
-    if (!this.storagePort?.deleteFile || fileIds.length === 0) return;
+    if (!this.filesPort?.deleteFile || fileIds.length === 0) return;
     const uniqueFileIds = Array.from(new Set(fileIds.filter(Boolean)));
     const results = await Promise.allSettled(
-      uniqueFileIds.map((fileId) => this.storagePort!.deleteFile(fileId)),
+      uniqueFileIds.map((fileId) => this.filesPort!.deleteFile(fileId)),
     );
     results.forEach((res, idx) => {
       if (res.status === 'rejected') {

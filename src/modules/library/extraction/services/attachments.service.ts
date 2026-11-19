@@ -34,7 +34,7 @@ import {
 } from '@/modules/library/extraction/domain/attachments.domain';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
-import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import { FILES_PORT, IFilesPort } from '@/modules/files';
 import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
@@ -54,8 +54,8 @@ export class AttachmentsService {
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway?: ICatalogFacade,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional() private readonly renamerService?: AttachmentRenamerService,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional()
@@ -104,14 +104,6 @@ export class AttachmentsService {
     await this.assertItemExists(userId, targetItemId, effectiveProjectId);
 
     let resolvedFileId = input.fileId || extractFileIdFromUrl(input.url);
-
-    if (resolvedFileId && this.storagePort?.assertFileAccess) {
-      await this.storagePort.assertFileAccess(
-        resolvedFileId,
-        userId !== 'system' ? userId : undefined,
-        effectiveProjectId,
-      );
-    }
 
     // Content-Addressable Storage (CAS) Deduplication:
     // If incoming upload has a valid fileHash, reuse existing storage blob if available within the same user/project scope
@@ -299,17 +291,12 @@ export class AttachmentsService {
           if (helpers?.onAfterCommit) {
             postCommitRegistered = true;
             helpers.onAfterCommit(async () => {
-              if (resolvedFileId && !deduplicated) {
-                await this.repo.updateLinkedFile(resolvedFileId, targetItemId);
-              }
               await this.invalidateAttachmentItemCache(
                 targetItemId,
                 userId,
                 effectiveProjectId,
               );
             });
-          } else if (resolvedFileId && !deduplicated) {
-            await this.repo.updateLinkedFile(resolvedFileId, targetItemId, tx);
           }
 
           return serializedAttachment;
@@ -490,7 +477,7 @@ export class AttachmentsService {
       );
     }
 
-    if (fileIdsToDelete.size > 0 && this.storagePort?.deleteFile) {
+    if (fileIdsToDelete.size > 0 && this.filesPort?.deleteFile) {
       const candidateFileIds = Array.from(fileIdsToDelete);
       await Promise.all(
         candidateFileIds.map(async (fid) => {
@@ -502,7 +489,7 @@ export class AttachmentsService {
             if (typeof remainingRefs === 'number' && remainingRefs > 0) {
               return;
             }
-            await this.storagePort!.deleteFile(fid);
+            await this.filesPort!.deleteFile(fid);
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             this.logger.warn(
@@ -538,7 +525,7 @@ export class AttachmentsService {
     if (
       !Array.isArray(orphanedFileIds) ||
       orphanedFileIds.length === 0 ||
-      !this.storagePort?.deleteFile
+      !this.filesPort?.deleteFile
     ) {
       return;
     }
@@ -552,7 +539,7 @@ export class AttachmentsService {
               return;
             }
           }
-          await this.storagePort!.deleteFile(fid);
+          await this.filesPort!.deleteFile(fid);
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
           this.logger.warn(
@@ -694,12 +681,12 @@ export class AttachmentsService {
     );
     if (!attachment)
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
-    if (!attachment.fileId || !this.storagePort) {
+    if (!attachment.fileId || !this.filesPort) {
       throw new NotFoundException(
         `No PDF binary available for attachment ${attachmentId}`,
       );
     }
-    const thumbBuffer = await this.storagePort.ensurePdfThumbnail({
+    const thumbBuffer = await this.filesPort.ensurePdfThumbnail({
       fileId: attachment.fileId,
       userId,
       projectId,

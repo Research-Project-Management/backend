@@ -29,7 +29,7 @@ import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
 import { XmlLegacyFormatsParser } from '@/modules/library/ingestion/parsers/xml-legacy-formats.parser';
 import { BibliographyFormatRegistry } from '@/modules/library/ingestion/parsers/bibliography-format.registry';
 import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 import {
   normalizeArxivId,
   normalizePmid,
@@ -276,8 +276,8 @@ export class IdentifyStage implements IWorkflowStage<
     private readonly risParser: RisParser,
     private readonly normalizer: NormalizationPolicy,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional()
     cslParser?: CslParser,
     @Optional()
@@ -432,10 +432,10 @@ export class IdentifyStage implements IWorkflowStage<
     if (
       payload.isOffloaded &&
       payload.fileId &&
-      this.storagePort?.readOwnedFile
+      this.filesPort?.readOwnedFile
     ) {
       try {
-        const file = await this.storagePort.readOwnedFile({
+        const file = await this.filesPort.readOwnedFile({
           fileId: payload.fileId,
           ...(context?.userId ? { userId: context.userId } : {}),
           ...(context?.userId && context?.projectId

@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
-import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import { FILES_PORT, IFilesPort } from '@/modules/files';
 import { AnnotationsService } from './annotations.service';
 import { AnnotationType } from '@/modules/library/core/types/extraction.types';
 import {
@@ -31,7 +31,7 @@ export class PdfAnnotationImporterService {
   constructor(
     private readonly annotationsRepo: AnnotationsRepository,
     private readonly attachmentsRepo: AttachmentsRepository,
-    @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
+    @Inject(FILES_PORT) private readonly filesPort: IFilesPort,
     private readonly annotationsService: AnnotationsService,
     @Optional()
     private readonly normalizer: AnnotationNormalizer = new AnnotationNormalizer(),
@@ -98,7 +98,7 @@ export class PdfAnnotationImporterService {
       effectiveProjectId || normalizeProjectScopeId(itemProjectId ?? undefined);
     const existingAnnotationsPromise =
       this.annotationsRepo.findExistingForImport(attachmentId);
-    const storageFile = await this.storagePort.readOwnedFile({
+    const storageFile = await this.filesPort.readOwnedFile({
       fileId,
       userId,
       ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),

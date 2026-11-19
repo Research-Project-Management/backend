@@ -41,7 +41,7 @@ import {
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import { PipelineBatchExecutor } from './pipeline-batch.executor';
 import { UrlCaptureService } from './url-capture.service';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 
 import {
   resolveScope,
@@ -81,8 +81,8 @@ export class PipelineService {
     @Optional()
     sideEffects?: PipelineSideEffectsService,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional()
     private readonly urlCapture?: UrlCaptureService,
     @Optional()
@@ -201,9 +201,9 @@ export class PipelineService {
         ? payload.fileId
         : undefined;
 
-    if (claimCheckFileId && this.storagePort?.deleteFile) {
+    if (claimCheckFileId && this.filesPort?.deleteFile) {
       try {
-        await this.storagePort.deleteFile(claimCheckFileId);
+        await this.filesPort.deleteFile(claimCheckFileId);
         return true;
       } catch (err: unknown) {
         this.logger.warn(

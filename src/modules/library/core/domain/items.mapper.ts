@@ -1,4 +1,4 @@
-import { getFileContentPath } from '@/modules/storage/storage.port';
+import { getFileContentPath } from '@/modules/files';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
@@ -332,18 +332,20 @@ function mapAttachmentsAndPrimaryFilePartial(
     it.fileUrl = getFileContentPath(primaryPdf.fileId);
   } else if (
     typeof it.fileUrl === 'string' &&
-    it.fileUrl.startsWith('/api/v1/storage/files/') &&
-    !it.fileUrl.includes('/r2/') &&
+    it.fileUrl.startsWith('/api/v1/files/') &&
+    !it.fileUrl.includes('/objects/') &&
     !it.fileUrl.endsWith('/content')
   ) {
-    const match = it.fileUrl.match(/^\/api\/v1\/storage\/files\/([^/?#]+)$/);
+    const match = it.fileUrl.match(
+      /^\/api\/v1\/files\/([^/?#]+)$/,
+    );
     if (match?.[1]) {
       it.fileUrl = getFileContentPath(match[1]);
     }
   } else if (
     typeof it.fileUrl === 'string' &&
     !it.fileUrl.endsWith('/content') &&
-    !it.fileUrl.startsWith('/api/v1/storage/files/')
+    !it.fileUrl.startsWith('/api/v1/files/')
   ) {
     const isPdfLink =
       /\.pdf(?:[?#]|$)/i.test(it.fileUrl) ||

@@ -1,12 +1,12 @@
 import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
-import { IStoragePort } from '@/modules/storage/storage.port';
+import { IFilesPort } from '@/modules/files';
 import { IExtractionFacade } from '@/modules/library/extraction/services/reference-matcher.service';
 
 describe('UrlMetadataScraperService', () => {
   let scraper: UrlMetadataScraperService;
   let ssrfGuard: jest.Mocked<SsrfGuardService>;
-  let storagePort: jest.Mocked<IStoragePort>;
+  let storagePort: jest.Mocked<IFilesPort>;
   let contentFacade: any;
 
   beforeEach(() => {

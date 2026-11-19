@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 import {
   parseCreatorString,
   isNoiseAuthorName,
@@ -38,8 +38,8 @@ export class ExtractionMetadataSynchronizer {
     @Inject(UNIT_OF_WORK)
     private readonly libraryTx?: IUnitOfWork,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional()
     @Inject(ITEM_CACHE_INVALIDATOR)
     private readonly cacheCoordinator?: IItemCacheInvalidator,
@@ -139,7 +139,7 @@ export class ExtractionMetadataSynchronizer {
         // Claim Check Pattern: Offload heavy full-text tree to Object Storage
         let uploadedFileId: string | undefined;
         let uploadedByteSize: number | undefined;
-        if (this.storagePort?.uploadFile) {
+        if (this.filesPort?.uploadFile) {
           try {
             const jsonBuffer = Buffer.from(
               JSON.stringify(fulltextTree),
@@ -149,7 +149,7 @@ export class ExtractionMetadataSynchronizer {
             const ownerUserId = attachment.item?.userId || 'system';
             const ownerProjectId = attachment.item?.projectId || undefined;
 
-            const uploadResult = await this.storagePort.uploadFile({
+            const uploadResult = await this.filesPort.uploadFile({
               userId: ownerUserId,
               projectId: ownerProjectId,
               filename: `pdf_fulltext_${attachment.itemId}_${attachment.id}.json.gz`,
@@ -257,10 +257,10 @@ export class ExtractionMetadataSynchronizer {
           savedFulltextRecord &&
           'supersededFileIds' in savedFulltextRecord &&
           Array.isArray(savedFulltextRecord.supersededFileIds) &&
-          this.storagePort?.deleteFile
+          this.filesPort?.deleteFile
         ) {
-          const deleteFileFn = this.storagePort.deleteFile.bind(
-            this.storagePort,
+          const deleteFileFn = this.filesPort.deleteFile.bind(
+            this.filesPort,
           );
           await Promise.all(
             savedFulltextRecord.supersededFileIds.map(

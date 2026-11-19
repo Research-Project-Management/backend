@@ -16,7 +16,7 @@ import {
   ItemSummary,
   ItemDetail,
 } from '@/modules/library/core/types/bibliographic.types';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 import { ItemFilterOptions } from './notes.repository';
 import {
   ItemMatchQueryRepository,
@@ -35,7 +35,7 @@ export { ItemListQueryRepository } from './item-list-query.repository';
 
 export async function hydrateOffloadedMetadataPayload(
   raw: Record<string, unknown>,
-  storagePort?: IStoragePort,
+  filesPort?: IFilesPort,
   scope?: { userId?: string; projectId?: string | null },
   onWarning?: (message: string) => void,
 ): Promise<Record<string, unknown>> {
@@ -50,7 +50,7 @@ export async function hydrateOffloadedMetadataPayload(
     raw.isOffloaded === true &&
     !hasHydratedContent &&
     typeof raw.fileId === 'string' &&
-    storagePort?.readOwnedFile
+    filesPort?.readOwnedFile
   ) {
     try {
       const effectiveUserId =
@@ -60,7 +60,7 @@ export async function hydrateOffloadedMetadataPayload(
         scope?.projectId ??
           (typeof raw.projectId === 'string' ? raw.projectId : undefined),
       );
-      const rawDownloaded = await storagePort.readOwnedFile({
+      const rawDownloaded = await filesPort.readOwnedFile({
         fileId: raw.fileId,
         ...(effectiveUserId ? { userId: effectiveUserId } : {}),
         ...(effectiveProjectId ? { projectId: effectiveProjectId } : {}),
@@ -114,8 +114,8 @@ export class QueryRepository {
   constructor(
     private readonly prisma: PrismaService,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     private readonly matchRepo: ItemMatchQueryRepository = new ItemMatchQueryRepository(),
     private readonly listRepo: ItemListQueryRepository = new ItemListQueryRepository(),
   ) {}
@@ -455,7 +455,7 @@ export class QueryRepository {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return record;
     const hydrated = await hydrateOffloadedMetadataPayload(
       raw,
-      this.storagePort,
+      this.filesPort,
       scope,
     );
     if (hydrated === raw) return record;

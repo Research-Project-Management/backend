@@ -32,10 +32,10 @@ import { AttachmentStorageController } from '@/modules/library/extraction/contro
 import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
 import { IdentifyFileResolver } from '@/modules/library/ingestion/stages/identify-file.resolver';
 import { ExtractionHandler } from '@/modules/library/extraction/services/extraction.handler';
-import { IStoragePort } from '@/modules/storage/storage.port';
+import { IFilesPort } from '@/modules/files';
 
 describe('Library Attachments & Storage Integration Suite', () => {
-  let mockStoragePort: jest.Mocked<IStoragePort>;
+  let mockStoragePort: jest.Mocked<IFilesPort>;
   let mockPrisma: any;
   let mockRepo: any;
   let mockTx: any;
@@ -45,7 +45,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
     mockStoragePort = fromPartial({
       uploadFile: jest.fn().mockResolvedValue({
         fileId: 'storage-file-123',
-        url: '/api/v1/storage/files/storage-file-123/content',
+        url: '/api/v1/files/storage-file-123/content',
         path: 'cas/blobs/storage-file-123',
         filename: 'nature_paper.pdf',
         size: 2048,
@@ -57,7 +57,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         mimeType: 'application/pdf',
         size: 2048,
         storageKey: 'cas/blobs/storage-file-123',
-        contentUrl: '/api/v1/storage/files/storage-file-123/content',
+        contentUrl: '/api/v1/files/storage-file-123/content',
         buffer: Buffer.from('%PDF-1.4 sample content'),
       }),
       deleteFile: jest.fn().mockResolvedValue(undefined),
@@ -70,7 +70,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       }),
       uploadBuffer: jest.fn().mockResolvedValue({
         path: 'snapshots/web.html',
-        url: '/api/v1/storage/files/snapshots/web.html',
+        url: '/api/v1/files/objects/snapshots/web.html',
       }),
     });
 
@@ -122,13 +122,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
         .mockImplementation((id, data) =>
           mockPrisma.attachment.update({ where: { id }, data }),
         ),
-      updateLinkedFile: jest.fn().mockImplementation((fileId, itemId) => {
-        return mockStoragePort.linkFile({
-          fileId,
-          linkedToType: 'Paper',
-          linkedToId: itemId,
-        });
-      }),
       delete: jest.fn().mockResolvedValue({ id: 'att-1' }),
     };
 
@@ -171,7 +164,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         id: 'att-1',
         itemId: 'item-1',
         filename: 'nature_paper.pdf',
-        url: '/api/v1/storage/files/storage-file-123/content',
+        url: '/api/v1/files/storage-file-123/content',
         fileId: 'storage-file-123',
         revisions: [{ revisionNumber: 1 }],
       });
@@ -180,7 +173,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         userId: 'user-1',
         itemId: 'item-1',
         filename: 'nature_paper.pdf',
-        url: '/api/v1/storage/files/storage-file-123/content',
+        url: '/api/v1/files/storage-file-123/content',
         fileId: 'storage-file-123',
         size: 2048,
         mimeType: 'application/pdf',
@@ -195,16 +188,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
           }),
         }),
       );
-      expect(mockRepo.updateLinkedFile).toHaveBeenCalledWith(
-        'storage-file-123',
-        'item-1',
-        expect.anything(),
-      );
-      expect(mockStoragePort.linkFile).toHaveBeenCalledWith({
-        fileId: 'storage-file-123',
-        linkedToType: 'Paper',
-        linkedToId: 'item-1',
-      });
     });
 
     it('should create a linked_url attachment with dual-axis Zotero specifications', async () => {
@@ -243,7 +226,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       mockRepo.findFirst.mockResolvedValue({
         id: 'att-1',
         fileId: 'storage-file-123',
-        url: '/api/v1/storage/files/storage-file-123/content',
+        url: '/api/v1/files/storage-file-123/content',
         item: { id: 'item-1', userId: 'user-1' },
       });
 
@@ -564,7 +547,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(mockAttachmentsService.createAttachment).toHaveBeenCalledWith(
         expect.objectContaining({
           fileId: 'storage-file-123',
-          url: '/api/v1/storage/files/storage-file-123/content',
+          url: '/api/v1/files/storage-file-123/content',
         }),
       );
     });
@@ -649,7 +632,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
             id: 'att-1',
             itemId: 'item-1',
             fileId: null,
-            url: '/api/v1/storage/files/storage-file-123/content',
+            url: '/api/v1/files/storage-file-123/content',
             file: null,
           }),
         ),

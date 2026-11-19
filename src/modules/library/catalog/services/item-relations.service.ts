@@ -29,7 +29,7 @@ import {
 import { ItemCacheCoordinator } from './schema-validator.service';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
-import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import { FILES_PORT, IFilesPort } from '@/modules/files';
 
 @Injectable()
 export class ItemRelationsService {
@@ -381,8 +381,8 @@ export class ItemFulltextService {
     private readonly query: QueryRepository,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {}
 
   /**
@@ -471,7 +471,7 @@ export class ItemFulltextService {
       ) {
         const payload = await hydrateOffloadedMetadataPayload(
           matchedRecord.rawPayload as Record<string, unknown>,
-          this.storagePort,
+          this.filesPort,
           {
             userId: item.userId,
             projectId: item.projectId ?? undefined,

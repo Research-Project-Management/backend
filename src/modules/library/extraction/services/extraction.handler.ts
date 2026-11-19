@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
-import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import { FILES_PORT, IFilesPort } from '@/modules/files';
 import { OutboxEvent } from '@prisma/client';
 import {
   OutboxDispatchHandler,
@@ -77,7 +77,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
   constructor(
     private readonly extractionRepo: ExtractionRepository,
     private readonly pdf: PdfProvider,
-    @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
+    @Inject(FILES_PORT) private readonly filesPort: IFilesPort,
     @Optional()
     @Inject(IDEMPOTENT_CONSUMER)
     private readonly idempotentConsumer?: IIdempotentConsumer,
@@ -107,7 +107,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       new ExtractionMetadataSynchronizer(
         this.extractionRepo,
         this.libraryTx,
-        this.storagePort,
+        this.filesPort,
         this.cacheCoordinator,
         this.catalogGateway,
       );
@@ -306,7 +306,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
                 );
               })
           : Promise.resolve(),
-        this.storagePort.readOwnedFile({
+        this.filesPort.readOwnedFile({
           fileId,
           userId: resolvedItemUserId,
           projectId: resolvedItemProjectId ?? undefined,

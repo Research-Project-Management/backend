@@ -5,7 +5,7 @@ import {
   DomainEventEnvelope,
   extractFileIdFromUrl,
 } from '@/modules/library/core';
-import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import { FILES_PORT, IFilesPort } from '@/modules/files';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 
@@ -22,8 +22,8 @@ export class ItemLifecycleSubscriber {
     @Optional()
     private readonly annotationsRepository?: AnnotationsRepository,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {}
 
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_PURGED, { async: true })
@@ -74,7 +74,7 @@ export class ItemLifecycleSubscriber {
     try {
       const candidateFileIdsToDelete = new Set<string>(payloadFilePaths);
       if (
-        this.storagePort?.deleteFile &&
+        this.filesPort?.deleteFile &&
         this.attachmentsRepository?.findMany
       ) {
         const attachments = await this.attachmentsRepository.findMany(
@@ -109,7 +109,7 @@ export class ItemLifecycleSubscriber {
         await this.attachmentsRepository.deleteManyByItemId(itemId);
       }
 
-      if (this.storagePort?.deleteFile && candidateFileIdsToDelete.size > 0) {
+      if (this.filesPort?.deleteFile && candidateFileIdsToDelete.size > 0) {
         const candidateFileIds = Array.from(candidateFileIdsToDelete);
         await Promise.all(
           candidateFileIds.map(async (fid) => {
@@ -129,7 +129,7 @@ export class ItemLifecycleSubscriber {
                   return;
                 }
               }
-              await this.storagePort!.deleteFile(fid);
+              await this.filesPort!.deleteFile(fid);
             } catch (delErr: unknown) {
               const msg =
                 delErr instanceof Error ? delErr.message : String(delErr);

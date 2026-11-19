@@ -27,7 +27,7 @@ import {
   resolveExportFormatStrategy,
   formatItemsAsBibtex,
 } from '@/modules/library/citation/domain/export-format.mapper';
-import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import { FILES_PORT, IFilesPort } from '@/modules/files';
 import {
   extractItemCitationAliases,
   resolveEmittedCitationEntries,
@@ -57,8 +57,8 @@ export class ExportsService {
     private readonly citationService: CitationService,
     private readonly pdfBakerService: PdfBakerService,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {}
 
   async exportLibrary(
@@ -373,9 +373,9 @@ export class ExportsService {
       : [];
 
     let bufferToUse = rawPdfBuffer;
-    if (!bufferToUse && pdfAttachment?.fileId && this.storagePort) {
+    if (!bufferToUse && pdfAttachment?.fileId && this.filesPort) {
       try {
-        const fileOutput = await this.storagePort.readOwnedFile({
+        const fileOutput = await this.filesPort.readOwnedFile({
           fileId: pdfAttachment.fileId,
           userId,
           projectId: effectiveProjectId,

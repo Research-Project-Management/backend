@@ -1,20 +1,14 @@
-import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { syncItemDenormalizedCountsInClient } from '@/modules/library/core';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 @Injectable()
 export class AttachmentsRepository {
   private readonly logger = new Logger(AttachmentsRepository.name);
 
-  constructor(
-    private readonly prisma: PrismaService,
-    @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
@@ -585,31 +579,6 @@ export class AttachmentsRepository {
       ),
     );
     return orphanedFileIds;
-  }
-
-  async updateLinkedFile(
-    fileId: string,
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-  ) {
-    if (!fileId) return;
-    const client = this.getClient(tx);
-    if (client.storageFile?.findUnique) {
-      const existingFile = await client.storageFile.findUnique({
-        where: { id: fileId },
-        select: { linkedToId: true },
-      });
-      if (existingFile?.linkedToId && existingFile.linkedToId !== itemId) {
-        return;
-      }
-    }
-    if (this.storagePort?.linkFile) {
-      await this.storagePort.linkFile({
-        fileId,
-        linkedToType: 'Paper',
-        linkedToId: itemId,
-      });
-    }
   }
 
   async findMany(

@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { CoreModule, shouldRunWorkerConsumers } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
+import { FilesModule } from '@/modules/files';
 import { BullModule } from '@nestjs/bullmq';
 import {
   LIBRARY_INGESTION_QUEUE_STANDARD,
@@ -102,6 +103,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
   imports: [
     CoreModule,
     LibraryCoreModule,
+    FilesModule,
     BullModule.registerQueue({ name: LIBRARY_INGESTION_QUEUE_STANDARD }),
   ],
   controllers: [

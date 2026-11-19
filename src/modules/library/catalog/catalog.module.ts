@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
+import { FilesModule } from '@/modules/files';
 
 // Controllers
 import { ItemsController } from './controllers/items.controller';
@@ -64,7 +65,7 @@ import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core';
 
 @Global()
 @Module({
-  imports: [CoreModule, LibraryCoreModule],
+  imports: [CoreModule, LibraryCoreModule, FilesModule],
   controllers: [
     ItemCurationController,
     ItemsController,

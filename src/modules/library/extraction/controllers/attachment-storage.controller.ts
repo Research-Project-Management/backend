@@ -22,7 +22,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import {
   PresignUploadDto,
@@ -43,8 +43,8 @@ import { MAX_SAFE_HTTP_PAYLOAD_BYTES } from '@/modules/library/core';
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class AttachmentStorageController {
   constructor(
-    @Inject(STORAGE_PORT)
-    private readonly storagePort: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort: IFilesPort,
     private readonly attachmentsService: AttachmentsService,
   ) {}
 
@@ -62,7 +62,7 @@ export class AttachmentStorageController {
     @Query('spaceId') queryProjectId?: string,
   ) {
     const projectId = paramProjectId || queryProjectId;
-    if (!this.storagePort?.uploadFile) {
+    if (!this.filesPort?.uploadFile) {
       throw new BadRequestException('Storage service is unavailable');
     }
 
@@ -132,7 +132,7 @@ export class AttachmentStorageController {
       }
     }
 
-    const uploadResult = await this.storagePort.uploadFile({
+    const uploadResult = await this.filesPort.uploadFile({
       userId,
       projectId,
       filename,
@@ -158,11 +158,11 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    if (!this.storagePort?.getPresignedUploadUrl) {
+    if (!this.filesPort?.getPresignedUploadUrl) {
       throw new BadRequestException('Direct presigned upload unavailable');
     }
 
-    return this.storagePort.getPresignedUploadUrl({
+    return this.filesPort.getPresignedUploadUrl({
       userId,
       projectId: paramProjectId || queryProjectId,
       filename: dto.filename,
@@ -184,13 +184,13 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    if (!this.storagePort?.completePresignedUpload) {
+    if (!this.filesPort?.completePresignedUpload) {
       throw new NotImplementedException(
         'Presigned upload completion is not supported by the active storage adapter',
       );
     }
 
-    return this.storagePort.completePresignedUpload({
+    return this.filesPort.completePresignedUpload({
       storageKey: dto.storageKey,
       filename: dto.filename,
       mimeType: dto.mimeType,
@@ -212,11 +212,11 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    if (!this.storagePort?.initiateMultipartUpload) {
+    if (!this.filesPort?.initiateMultipartUpload) {
       throw new BadRequestException('Multipart upload unavailable');
     }
 
-    return this.storagePort.initiateMultipartUpload({
+    return this.filesPort.initiateMultipartUpload({
       userId,
       filename: dto.filename || 'document.bin',
       mimeType: dto.mimeType || 'application/octet-stream',
@@ -240,7 +240,7 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    if (!this.storagePort?.getMultipartPartUrl) {
+    if (!this.filesPort?.getMultipartPartUrl) {
       throw new BadRequestException('Multipart part URL unavailable');
     }
 
@@ -249,7 +249,7 @@ export class AttachmentStorageController {
       throw new BadRequestException('Invalid partNumber query parameter');
     }
 
-    const partUrl = await this.storagePort.getMultipartPartUrl(
+    const partUrl = await this.filesPort.getMultipartPartUrl(
       sessionId,
       partNumber,
       { userId, projectId: paramProjectId || queryProjectId },
@@ -268,11 +268,11 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    if (!this.storagePort?.completeMultipartUpload) {
+    if (!this.filesPort?.completeMultipartUpload) {
       throw new BadRequestException('Multipart completion unavailable');
     }
 
-    return this.storagePort.completeMultipartUpload({
+    return this.filesPort.completeMultipartUpload({
       sessionId: dto.sessionId,
       parts: dto.parts,
       actor: { userId, projectId: paramProjectId || queryProjectId },
@@ -289,12 +289,12 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    if (!this.storagePort?.abortMultipartUpload) {
+    if (!this.filesPort?.abortMultipartUpload) {
       throw new NotImplementedException(
         'Multipart upload abort is not supported by the active storage adapter',
       );
     }
-    await this.storagePort.abortMultipartUpload(sessionId, {
+    await this.filesPort.abortMultipartUpload(sessionId, {
       userId,
       projectId: paramProjectId || queryProjectId,
     });
@@ -335,14 +335,14 @@ export class AttachmentStorageController {
     @Req() req?: FastifyRequest,
   ) {
     const projectId = paramProjectId || queryProjectId;
-    if (!this.storagePort) {
+    if (!this.filesPort) {
       throw new NotFoundException('Storage port unavailable');
     }
 
     const range = this.parseByteRangeHeader(req?.headers?.range);
 
-    if (this.storagePort.getOwnedFileStream) {
-      const fileRecord = (await this.storagePort.getOwnedFileStream({
+    if (this.filesPort.getOwnedFileStream) {
+      const fileRecord = (await this.filesPort.getOwnedFileStream({
         fileId,
         userId,
         projectId,
@@ -366,8 +366,8 @@ export class AttachmentStorageController {
       });
     }
 
-    if (this.storagePort.readOwnedFile) {
-      const fileRecord = await this.storagePort.readOwnedFile({
+    if (this.filesPort.readOwnedFile) {
+      const fileRecord = await this.filesPort.readOwnedFile({
         fileId,
         userId,
         projectId,
@@ -428,8 +428,8 @@ export class AttachmentStorageController {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    if (attachment.fileId && this.storagePort?.getPresignedDownloadUrl) {
-      const presignedUrl = await this.storagePort.getPresignedDownloadUrl(
+    if (attachment.fileId && this.filesPort?.getPresignedDownloadUrl) {
+      const presignedUrl = await this.filesPort.getPresignedDownloadUrl(
         attachment.fileId,
         3600,
       );
@@ -496,14 +496,14 @@ export class AttachmentStorageController {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    if (attachment.fileId && this.storagePort) {
+    if (attachment.fileId && this.filesPort) {
       const defaultFilename = attachment.filename || 'attachment.pdf';
       const defaultMimeType = attachment.mimeType;
 
       const range = this.parseByteRangeHeader(req?.headers?.range);
 
-      if (this.storagePort.getOwnedFileStream) {
-        const fileRecord = (await this.storagePort.getOwnedFileStream({
+      if (this.filesPort.getOwnedFileStream) {
+        const fileRecord = (await this.filesPort.getOwnedFileStream({
           fileId: attachment.fileId,
           userId,
           projectId,
@@ -528,8 +528,8 @@ export class AttachmentStorageController {
         });
       }
 
-      if (this.storagePort.readOwnedFile) {
-        const fileRecord = await this.storagePort.readOwnedFile({
+      if (this.filesPort.readOwnedFile) {
+        const fileRecord = await this.filesPort.readOwnedFile({
           fileId: attachment.fileId,
           userId,
           projectId,

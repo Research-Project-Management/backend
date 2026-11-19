@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
+import { FilesModule } from '@/modules/files';
 import { CitationFacade, CITATION_FACADE } from './services/exports.service';
 
 // Presentation
@@ -40,7 +41,7 @@ import { CslStyleRegistry } from './domain/citation.domain';
  */
 @Global()
 @Module({
-  imports: [CoreModule, LibraryCoreModule],
+  imports: [CoreModule, LibraryCoreModule, FilesModule],
   controllers: [CitationController, ExportsController],
   providers: [
     CitationFacade,

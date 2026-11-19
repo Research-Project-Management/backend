@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { IFilesPort, FILES_PORT } from '@/modules/files';
 import {
   EXTRACTION_FACADE,
   IExtractionFacade,
@@ -120,8 +120,8 @@ export class IdentifyFileResolver {
   constructor(
     private readonly normalizer: NormalizationPolicy,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional()
     @Inject(EXTRACTION_FACADE)
     private readonly extractionGateway?: IExtractionFacade,
@@ -309,12 +309,12 @@ export class IdentifyFileResolver {
     const filenameArxivId = explicitArxivMatch || bareArxivMatch;
 
     if (
-      this.storagePort?.readOwnedFile &&
+      this.filesPort?.readOwnedFile &&
       this.extractionGateway?.extractDocumentFromBuffer &&
       payload.fileId
     ) {
       try {
-        const fileRecord = await this.storagePort.readOwnedFile({
+        const fileRecord = await this.filesPort.readOwnedFile({
           fileId: payload.fileId,
           userId: context.userId,
           projectId: context.projectId,

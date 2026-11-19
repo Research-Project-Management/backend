@@ -29,7 +29,7 @@ import {
   CreateItemData,
   CreatorCreditInput,
 } from '@/modules/library/core/types/bibliographic.types';
-import { getFileContentPath } from '@/modules/storage/storage.port';
+import { getFileContentPath } from '@/modules/files';
 
 export {
   buildTipTapDocFromText,

@@ -327,7 +327,7 @@ describe('IdempotentConsumerService & Inbox Pattern', () => {
         }),
         uploadFile: jest.fn().mockResolvedValue({
           fileId: 'fulltext-storage-id',
-          url: '/api/v1/storage/files/fulltext-storage-id',
+          url: '/api/v1/files/fulltext-storage-id',
           path: 'extractions/item-1/pdf_fulltext.json.gz',
         }),
       };
